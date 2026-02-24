@@ -25,7 +25,7 @@ Build a complete COMSOL MCP Server enabling AI agents (like Claude, opencode) to
 
 ```bash
 # Clone repository
-git clone https://github.com/YOUR_USERNAME/comsol-mcp.git
+git clone https://github.com/wjc9011/comsol-mcp.git
 cd comsol-mcp
 
 # Install dependencies
@@ -34,6 +34,20 @@ python -m pip install -e .
 # Test server
 python -m src.server
 ```
+
+## Building PDF Knowledge Base
+
+```bash
+# Install additional dependencies
+pip install pymupdf chromadb sentence-transformers
+
+# Build knowledge base
+python scripts/build_knowledge_base.py
+
+# Check status
+python scripts/build_knowledge_base.py --status
+```
+
 
 ## Usage
 
@@ -386,18 +400,6 @@ export HF_ENDPOINT=https://hf-mirror.com
 4. **More Examples** - Add electrostatics, solid mechanics cases
 5. **Error Handling** - Improve error messages and recovery
 
-## Building PDF Knowledge Base
-
-```bash
-# Install additional dependencies
-pip install pymupdf chromadb sentence-transformers
-
-# Build knowledge base
-python scripts/build_knowledge_base.py
-
-# Check status
-python scripts/build_knowledge_base.py --status
-```
 
 ## Resources
 

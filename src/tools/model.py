@@ -103,6 +103,83 @@ def register_model_tools(mcp: FastMCP) -> None:
             return {"success": False, "error": f"Failed to create model: {str(e)}"}
     
     @mcp.tool()
+    def model_create_component(
+        component_name: str = "comp1",
+        model_name: Optional[str] = None
+    ) -> dict:
+        """
+        Create a component in the model (required before adding geometry/physics).
+        
+        Components are containers for geometry, physics, materials, and mesh.
+        Must be created before adding geometry or physics.
+        
+        Args:
+            component_name: Name for the component (default: 'comp1')
+            model_name: Model name (default: current model)
+        
+        Returns:
+            Created component info
+        """
+        model = session_manager.get_model(model_name)
+        if model is None:
+            return {
+                "success": False,
+                "error": f"Model not found: {model_name or 'no current model'}"
+            }
+        
+        try:
+            jm = model.java
+            comp = jm.component().create(component_name, True)
+            
+            return {
+                "success": True,
+                "component": component_name,
+                "model": model.name(),
+            }
+        except Exception as e:
+            return {"success": False, "error": f"Failed to create component: {str(e)}"}
+    
+    @mcp.tool()
+    def model_list_components(
+        model_name: Optional[str] = None
+    ) -> dict:
+        """
+        List all components in a model.
+        
+        Args:
+            model_name: Model name (default: current model)
+        
+        Returns:
+            List of component names
+        """
+        model = session_manager.get_model(model_name)
+        if model is None:
+            return {
+                "success": False,
+                "error": f"Model not found: {model_name or 'no current model'}"
+            }
+        
+        try:
+            jm = model.java
+            components = []
+            
+            for i in range(jm.component().size()):
+                comp = jm.component().get(i)
+                if comp is not None:
+                    components.append({
+                        "name": comp.tag(),
+                        "label": comp.label() if hasattr(comp, 'label') else comp.tag()
+                    })
+            
+            return {
+                "success": True,
+                "components": components,
+                "count": len(components),
+            }
+        except Exception as e:
+            return {"success": False, "error": f"Failed to list components: {str(e)}"}
+    
+    @mcp.tool()
     def model_save(
         model_name: Optional[str] = None,
         file_path: Optional[str] = None,

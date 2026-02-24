@@ -6,6 +6,34 @@ from mcp.server.fastmcp import FastMCP
 from .session import session_manager
 
 
+def _get_geometry_node(model, geometry_name: Optional[str], component_name: str = "comp1"):
+    """Helper to get geometry node via Java API.
+    
+    Returns:
+        tuple: (geom_node, error_message) - geom_node is None if error
+    """
+    jm = model.java
+    
+    try:
+        comp = jm.component(component_name)
+        if comp is None:
+            return None, f"Component '{component_name}' not found."
+        
+        if geometry_name:
+            geom = comp.geom(geometry_name)
+            if geom is None:
+                return None, f"Geometry '{geometry_name}' not found in component '{component_name}'."
+        else:
+            geoms = list(comp.geom())
+            if not geoms:
+                return None, "No geometry sequences found. Create one first with geometry_create."
+            geom = geoms[0]
+        
+        return geom, None
+    except Exception as e:
+        return None, f"Failed to get geometry: {str(e)}"
+
+
 def register_geometry_tools(mcp: FastMCP) -> None:
     """Register geometry tools with the MCP server."""
     
@@ -40,13 +68,19 @@ def register_geometry_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     def geometry_create(
         geometry_name: Optional[str] = None,
+        space_dimension: int = 3,
+        component_name: str = "comp1",
         model_name: Optional[str] = None
     ) -> dict:
         """
-        Create a new geometry sequence in the model.
+        Create a new geometry sequence in the model's component.
+        
+        IMPORTANT: A component must exist first. Use model_create_component if needed.
         
         Args:
-            geometry_name: Name for the geometry sequence (auto-generated if None)
+            geometry_name: Name for the geometry sequence (default: 'geom1')
+            space_dimension: Space dimension - 2 for 2D, 3 for 3D (default: 3)
+            component_name: Component name (default: 'comp1')
             model_name: Model name (default: current model)
         
         Returns:
@@ -60,10 +94,24 @@ def register_geometry_tools(mcp: FastMCP) -> None:
             }
         
         try:
-            geom_node = model.create("geometries", geometry_name)
+            jm = model.java
+            
+            geom_name = geometry_name or "geom1"
+            
+            comp = jm.component(component_name)
+            if comp is None:
+                return {
+                    "success": False,
+                    "error": f"Component '{component_name}' not found. Create it first with model_create_component."
+                }
+            
+            geom = comp.geom().create(geom_name, space_dimension)
+            
             return {
                 "success": True,
-                "geometry": geom_node.name() if hasattr(geom_node, 'name') else geometry_name,
+                "geometry": geom_name,
+                "component": component_name,
+                "space_dimension": space_dimension,
             }
         except Exception as e:
             return {"success": False, "error": f"Failed to create geometry: {str(e)}"}
@@ -142,6 +190,8 @@ def register_geometry_tools(mcp: FastMCP) -> None:
         position: Sequence[float] = (0, 0, 0),
         size: Sequence[float] = (1, 1, 1),
         geometry_name: Optional[str] = None,
+        component_name: str = "comp1",
+        feature_name: Optional[str] = None,
         model_name: Optional[str] = None
     ) -> dict:
         """
@@ -150,7 +200,9 @@ def register_geometry_tools(mcp: FastMCP) -> None:
         Args:
             position: Base position [x, y, z] in meters (default: origin)
             size: Dimensions [width, depth, height] in meters (default: 1m cube)
-            geometry_name: Geometry sequence name
+            geometry_name: Geometry sequence name (default: first geometry)
+            component_name: Component name (default: 'comp1')
+            feature_name: Feature name (auto-generated if None)
             model_name: Model name (default: current model)
         
         Returns:
@@ -164,25 +216,21 @@ def register_geometry_tools(mcp: FastMCP) -> None:
             }
         
         try:
-            geometries = model.geometries()
-            if not geometries:
-                return {"success": False, "error": "No geometry sequences found."}
+            geom, error = _get_geometry_node(model, geometry_name, component_name)
+            if error:
+                return {"success": False, "error": error}
             
-            target_geom = geometry_name or geometries[0]
-            geom_node = model / "geometries" / target_geom
-            block_node = geom_node.create("Block")
+            feat_name = feature_name or f"blk{len(geom.feature())+1}"
+            block = geom.feature().create(feat_name, "Block")
             
-            if len(position) == 3:
-                block_node.property("pos", list(position))
-            if len(size) == 3:
-                block_node.property("size", list(size))
+            block.set("pos", [str(p) for p in position])
+            block.set("size", [str(s) for s in size])
             
             return {
                 "success": True,
                 "feature": {
-                    "name": block_node.name() if hasattr(block_node, 'name') else "Block",
+                    "name": feat_name,
                     "type": "Block",
-                    "geometry": target_geom,
                     "position": list(position),
                     "size": list(size),
                 }
@@ -196,6 +244,8 @@ def register_geometry_tools(mcp: FastMCP) -> None:
         radius: float = 0.5,
         height: float = 1.0,
         geometry_name: Optional[str] = None,
+        component_name: str = "comp1",
+        feature_name: Optional[str] = None,
         model_name: Optional[str] = None
     ) -> dict:
         """
@@ -205,7 +255,9 @@ def register_geometry_tools(mcp: FastMCP) -> None:
             position: Center of base [x, y, z] in meters
             radius: Radius in meters (default: 0.5)
             height: Height in meters (default: 1.0)
-            geometry_name: Geometry sequence name
+            geometry_name: Geometry sequence name (default: first geometry)
+            component_name: Component name (default: 'comp1')
+            feature_name: Feature name (auto-generated if None)
             model_name: Model name (default: current model)
         
         Returns:
@@ -219,25 +271,22 @@ def register_geometry_tools(mcp: FastMCP) -> None:
             }
         
         try:
-            geometries = model.geometries()
-            if not geometries:
-                return {"success": False, "error": "No geometry sequences found."}
+            geom, error = _get_geometry_node(model, geometry_name, component_name)
+            if error:
+                return {"success": False, "error": error}
             
-            target_geom = geometry_name or geometries[0]
-            geom_node = model / "geometries" / target_geom
-            cyl_node = geom_node.create("Cylinder")
+            feat_name = feature_name or f"cyl{len(geom.feature())+1}"
+            cyl = geom.feature().create(feat_name, "Cylinder")
             
-            if len(position) == 3:
-                cyl_node.property("pos", list(position))
-            cyl_node.property("r", radius)
-            cyl_node.property("h", height)
+            cyl.set("pos", [str(p) for p in position])
+            cyl.set("r", str(radius))
+            cyl.set("h", str(height))
             
             return {
                 "success": True,
                 "feature": {
-                    "name": cyl_node.name() if hasattr(cyl_node, 'name') else "Cylinder",
+                    "name": feat_name,
                     "type": "Cylinder",
-                    "geometry": target_geom,
                     "position": list(position),
                     "radius": radius,
                     "height": height,
@@ -251,6 +300,8 @@ def register_geometry_tools(mcp: FastMCP) -> None:
         position: Sequence[float] = (0, 0, 0),
         radius: float = 0.5,
         geometry_name: Optional[str] = None,
+        component_name: str = "comp1",
+        feature_name: Optional[str] = None,
         model_name: Optional[str] = None
     ) -> dict:
         """
@@ -259,7 +310,9 @@ def register_geometry_tools(mcp: FastMCP) -> None:
         Args:
             position: Center [x, y, z] in meters
             radius: Radius in meters (default: 0.5)
-            geometry_name: Geometry sequence name
+            geometry_name: Geometry sequence name (default: first geometry)
+            component_name: Component name (default: 'comp1')
+            feature_name: Feature name (auto-generated if None)
             model_name: Model name (default: current model)
         
         Returns:
@@ -273,24 +326,21 @@ def register_geometry_tools(mcp: FastMCP) -> None:
             }
         
         try:
-            geometries = model.geometries()
-            if not geometries:
-                return {"success": False, "error": "No geometry sequences found."}
+            geom, error = _get_geometry_node(model, geometry_name, component_name)
+            if error:
+                return {"success": False, "error": error}
             
-            target_geom = geometry_name or geometries[0]
-            geom_node = model / "geometries" / target_geom
-            sphere_node = geom_node.create("Sphere")
+            feat_name = feature_name or f"sph{len(geom.feature())+1}"
+            sphere = geom.feature().create(feat_name, "Sphere")
             
-            if len(position) == 3:
-                sphere_node.property("pos", list(position))
-            sphere_node.property("r", radius)
+            sphere.set("pos", [str(p) for p in position])
+            sphere.set("r", str(radius))
             
             return {
                 "success": True,
                 "feature": {
-                    "name": sphere_node.name() if hasattr(sphere_node, 'name') else "Sphere",
+                    "name": feat_name,
                     "type": "Sphere",
-                    "geometry": target_geom,
                     "position": list(position),
                     "radius": radius,
                 }
@@ -303,6 +353,8 @@ def register_geometry_tools(mcp: FastMCP) -> None:
         position: Sequence[float] = (0, 0),
         size: Sequence[float] = (1, 1),
         geometry_name: Optional[str] = None,
+        component_name: str = "comp1",
+        feature_name: Optional[str] = None,
         model_name: Optional[str] = None
     ) -> dict:
         """
@@ -311,7 +363,9 @@ def register_geometry_tools(mcp: FastMCP) -> None:
         Args:
             position: Base position [x, y] in meters
             size: Dimensions [width, height] in meters
-            geometry_name: Geometry sequence name
+            geometry_name: Geometry sequence name (default: first geometry)
+            component_name: Component name (default: 'comp1')
+            feature_name: Feature name (auto-generated if None)
             model_name: Model name (default: current model)
         
         Returns:
@@ -325,25 +379,21 @@ def register_geometry_tools(mcp: FastMCP) -> None:
             }
         
         try:
-            geometries = model.geometries()
-            if not geometries:
-                return {"success": False, "error": "No geometry sequences found."}
+            geom, error = _get_geometry_node(model, geometry_name, component_name)
+            if error:
+                return {"success": False, "error": error}
             
-            target_geom = geometry_name or geometries[0]
-            geom_node = model / "geometries" / target_geom
-            rect_node = geom_node.create("Rectangle")
+            feat_name = feature_name or f"r{len(geom.feature())+1}"
+            rect = geom.feature().create(feat_name, "Rectangle")
             
-            if len(position) == 2:
-                rect_node.property("pos", list(position))
-            if len(size) == 2:
-                rect_node.property("size", list(size))
+            rect.set("pos", [str(p) for p in position])
+            rect.set("size", [str(s) for s in size])
             
             return {
                 "success": True,
                 "feature": {
-                    "name": rect_node.name() if hasattr(rect_node, 'name') else "Rectangle",
+                    "name": feat_name,
                     "type": "Rectangle",
-                    "geometry": target_geom,
                     "position": list(position),
                     "size": list(size),
                 }
@@ -454,15 +504,19 @@ def register_geometry_tools(mcp: FastMCP) -> None:
         input_object: str,
         objects_to_subtract: Sequence[str],
         geometry_name: Optional[str] = None,
+        component_name: str = "comp1",
+        feature_name: Optional[str] = None,
         model_name: Optional[str] = None
     ) -> dict:
         """
         Create a boolean difference (subtract objects from another).
         
         Args:
-            input_object: Object to subtract from
-            objects_to_subtract: Objects to remove
-            geometry_name: Geometry sequence name
+            input_object: Object to subtract from (e.g., 'blk1')
+            objects_to_subtract: Objects to remove (e.g., ['cyl1'])
+            geometry_name: Geometry sequence name (default: first geometry)
+            component_name: Component name (default: 'comp1')
+            feature_name: Feature name (auto-generated if None)
             model_name: Model name (default: current model)
         
         Returns:
@@ -476,22 +530,21 @@ def register_geometry_tools(mcp: FastMCP) -> None:
             }
         
         try:
-            geometries = model.geometries()
-            if not geometries:
-                return {"success": False, "error": "No geometry sequences found."}
+            geom, error = _get_geometry_node(model, geometry_name, component_name)
+            if error:
+                return {"success": False, "error": error}
             
-            target_geom = geometry_name or geometries[0]
-            geom_node = model / "geometries" / target_geom
-            diff_node = geom_node.create("Difference")
-            diff_node.property("input", [input_object])
-            diff_node.property("input2", list(objects_to_subtract))
+            feat_name = feature_name or f"dif{len(geom.feature())+1}"
+            diff = geom.feature().create(feat_name, "Difference")
+            
+            diff.selection("input").set([input_object])
+            diff.selection("input2").set(list(objects_to_subtract))
             
             return {
                 "success": True,
                 "feature": {
-                    "name": diff_node.name() if hasattr(diff_node, 'name') else "Difference",
+                    "name": feat_name,
                     "type": "Difference",
-                    "geometry": target_geom,
                     "input_object": input_object,
                     "subtracted": list(objects_to_subtract),
                 }
@@ -554,6 +607,7 @@ def register_geometry_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     def geometry_build(
         geometry_name: Optional[str] = None,
+        component_name: str = "comp1",
         model_name: Optional[str] = None
     ) -> dict:
         """
@@ -563,6 +617,7 @@ def register_geometry_tools(mcp: FastMCP) -> None:
         
         Args:
             geometry_name: Geometry sequence name (default: build all)
+            component_name: Component name (default: 'comp1')
             model_name: Model name (default: current model)
         
         Returns:
@@ -576,10 +631,15 @@ def register_geometry_tools(mcp: FastMCP) -> None:
             }
         
         try:
-            model.build(geometry_name)
+            geom, error = _get_geometry_node(model, geometry_name, component_name)
+            if error:
+                return {"success": False, "error": error}
+            
+            geom.run()
+            
             return {
                 "success": True,
-                "geometry": geometry_name or "all",
+                "geometry": geometry_name or "first",
                 "message": "Geometry built successfully.",
             }
         except Exception as e:
