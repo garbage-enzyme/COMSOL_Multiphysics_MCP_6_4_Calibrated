@@ -1,0 +1,56 @@
+<svg width="920" height="460" viewBox="0 0 920 460" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">COMSOL_Multiphysics_MCP star history</title>
+  <desc id="desc">Cumulative GitHub stars from 2026-02-16 to 2026-05-13, ending at 109 stars.</desc>
+  <defs>
+    <linearGradient id="area" x1="0" y1="92" x2="0" y2="384" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2563eb" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#2563eb" stop-opacity="0.02"/>
+    </linearGradient>
+    <filter id="shadow" x="0" y="0" width="920" height="460" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#0f172a" flood-opacity="0.10"/>
+    </filter>
+  </defs>
+  <rect x="1" y="1" width="918" height="458" rx="18" fill="#ffffff" stroke="#dbe4f0" filter="url(#shadow)"/>
+  <text x="74" y="48" fill="#0f172a" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="25" font-weight="700">COMSOL_Multiphysics_MCP Star History</text>
+  <text x="74" y="75" fill="#64748b" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="14">109 stars as of 2026-05-13 UTC</text>
+  <g font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="12" fill="#64748b">
+    <line x1="74" y1="384.00" x2="882" y2="384.00" stroke="#e2e8f0" stroke-width="1"/>
+    <text x="58" y="388.00" text-anchor="end">0</text>
+    <line x1="74" y1="335.33" x2="882" y2="335.33" stroke="#e2e8f0" stroke-width="1"/>
+    <text x="58" y="339.33" text-anchor="end">20</text>
+    <line x1="74" y1="286.67" x2="882" y2="286.67" stroke="#e2e8f0" stroke-width="1"/>
+    <text x="58" y="290.67" text-anchor="end">40</text>
+    <line x1="74" y1="238.00" x2="882" y2="238.00" stroke="#e2e8f0" stroke-width="1"/>
+    <text x="58" y="242.00" text-anchor="end">60</text>
+    <line x1="74" y1="189.33" x2="882" y2="189.33" stroke="#e2e8f0" stroke-width="1"/>
+    <text x="58" y="193.33" text-anchor="end">80</text>
+    <line x1="74" y1="140.67" x2="882" y2="140.67" stroke="#e2e8f0" stroke-width="1"/>
+    <text x="58" y="144.67" text-anchor="end">100</text>
+    <line x1="74" y1="92.00" x2="882" y2="92.00" stroke="#e2e8f0" stroke-width="1"/>
+    <text x="58" y="96.00" text-anchor="end">120</text>
+    <text x="74.00" y="424" text-anchor="middle">Feb 16</text>
+    <text x="233.72" y="424" text-anchor="middle">Mar 5</text>
+    <text x="393.44" y="424" text-anchor="middle">Mar 22</text>
+    <text x="562.56" y="424" text-anchor="middle">Apr 9</text>
+    <text x="722.28" y="424" text-anchor="middle">Apr 26</text>
+    <text x="882.00" y="424" text-anchor="middle">May 13</text>
+  </g>
+  <path d="M 74.00,384.00 L 74.00,379.13 L 83.40,379.13 L 92.79,379.13 L 102.19,379.13 L 111.58,379.13 L 120.98,379.13 L 130.37,379.13 L 139.77,376.70 L 149.16,371.83 L 158.56,371.83 L 167.95,371.83 L 177.35,371.83 L 186.74,371.83 L 196.14,371.83 L 205.53,366.97 L 214.93,366.97 L 224.33,366.97 L 233.72,364.53 L 243.12,362.10 L 252.51,362.10 L 261.91,362.10 L 271.30,359.67 L 280.70,359.67 L 290.09,359.67 L 299.49,357.23 L 308.88,357.23 L 318.28,357.23 L 327.67,357.23 L 337.07,357.23 L 346.47,357.23 L 355.86,357.23 L 365.26,357.23 L 374.65,357.23 L 384.05,354.80 L 393.44,349.93 L 402.84,349.93 L 412.23,347.50 L 421.63,347.50 L 431.02,345.07 L 440.42,345.07 L 449.81,345.07 L 459.21,345.07 L 468.60,345.07 L 478.00,345.07 L 487.40,345.07 L 496.79,345.07 L 506.19,345.07 L 515.58,345.07 L 524.98,345.07 L 534.37,345.07 L 543.77,345.07 L 553.16,345.07 L 562.56,345.07 L 571.95,345.07 L 581.35,345.07 L 590.74,345.07 L 600.14,340.20 L 609.53,340.20 L 618.93,340.20 L 628.33,337.77 L 637.72,337.77 L 647.12,337.77 L 656.51,335.33 L 665.91,332.90 L 675.30,330.47 L 684.70,330.47 L 694.09,330.47 L 703.49,330.47 L 712.88,330.47 L 722.28,328.03 L 731.67,328.03 L 741.07,328.03 L 750.47,325.60 L 759.86,318.30 L 769.26,296.40 L 778.65,286.67 L 788.05,281.80 L 797.44,279.37 L 806.84,267.20 L 816.23,255.03 L 825.63,228.27 L 835.02,218.53 L 844.42,208.80 L 853.81,201.50 L 863.21,189.33 L 872.60,152.83 L 882.00,118.77 L 882.00,384.00 Z" fill="url(#area)"/>
+  <path d="M74.00,379.13 L83.40,379.13 L92.79,379.13 L102.19,379.13 L111.58,379.13 L120.98,379.13 L130.37,379.13 L139.77,376.70 L149.16,371.83 L158.56,371.83 L167.95,371.83 L177.35,371.83 L186.74,371.83 L196.14,371.83 L205.53,366.97 L214.93,366.97 L224.33,366.97 L233.72,364.53 L243.12,362.10 L252.51,362.10 L261.91,362.10 L271.30,359.67 L280.70,359.67 L290.09,359.67 L299.49,357.23 L308.88,357.23 L318.28,357.23 L327.67,357.23 L337.07,357.23 L346.47,357.23 L355.86,357.23 L365.26,357.23 L374.65,357.23 L384.05,354.80 L393.44,349.93 L402.84,349.93 L412.23,347.50 L421.63,347.50 L431.02,345.07 L440.42,345.07 L449.81,345.07 L459.21,345.07 L468.60,345.07 L478.00,345.07 L487.40,345.07 L496.79,345.07 L506.19,345.07 L515.58,345.07 L524.98,345.07 L534.37,345.07 L543.77,345.07 L553.16,345.07 L562.56,345.07 L571.95,345.07 L581.35,345.07 L590.74,345.07 L600.14,340.20 L609.53,340.20 L618.93,340.20 L628.33,337.77 L637.72,337.77 L647.12,337.77 L656.51,335.33 L665.91,332.90 L675.30,330.47 L684.70,330.47 L694.09,330.47 L703.49,330.47 L712.88,330.47 L722.28,328.03 L731.67,328.03 L741.07,328.03 L750.47,325.60 L759.86,318.30 L769.26,296.40 L778.65,286.67 L788.05,281.80 L797.44,279.37 L806.84,267.20 L816.23,255.03 L825.63,228.27 L835.02,218.53 L844.42,208.80 L853.81,201.50 L863.21,189.33 L872.60,152.83 L882.00,118.77" stroke="#2563eb" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/>
+  <g font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif">
+    <line x1="271.30" y1="359.67" x2="271.30" y2="384.00" stroke="#94a3b8" stroke-width="1" stroke-dasharray="4 5"/>
+    <circle cx="271.30" cy="359.67" r="5" fill="#ffffff" stroke="#2563eb" stroke-width="3"/>
+    <line x1="759.86" y1="318.30" x2="759.86" y2="384.00" stroke="#94a3b8" stroke-width="1" stroke-dasharray="4 5"/>
+    <circle cx="759.86" cy="318.30" r="5" fill="#ffffff" stroke="#2563eb" stroke-width="3"/>
+    <line x1="816.23" y1="255.03" x2="816.23" y2="384.00" stroke="#94a3b8" stroke-width="1" stroke-dasharray="4 5"/>
+    <circle cx="816.23" cy="255.03" r="5" fill="#ffffff" stroke="#2563eb" stroke-width="3"/>
+    <line x1="882.00" y1="118.77" x2="882.00" y2="384.00" stroke="#94a3b8" stroke-width="1" stroke-dasharray="4 5"/>
+    <circle cx="882.00" cy="118.77" r="5" fill="#ffffff" stroke="#2563eb" stroke-width="3"/>
+    <rect x="774.00" y="134.00" width="108" height="28" rx="14" fill="#eff6ff" stroke="#bfdbfe"/>
+    <text x="828.00" y="154.00" text-anchor="middle" fill="#1d4ed8" font-size="13" font-weight="700">100 stars</text>
+    <circle cx="882.00" cy="118.77" r="7" fill="#2563eb" stroke="#ffffff" stroke-width="4"/>
+    <rect x="786.00" y="92.00" width="92" height="32" rx="16" fill="#0f172a"/>
+    <text x="832.00" y="113.00" text-anchor="middle" fill="#ffffff" font-size="13" font-weight="700">109 stars</text>
+  </g>
+  <text x="74" y="425" fill="#94a3b8" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="11">Source: GitHub stargazers API</text>
+</svg>

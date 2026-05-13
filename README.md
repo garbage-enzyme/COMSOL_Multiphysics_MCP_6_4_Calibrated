@@ -4,6 +4,10 @@ MCP Server for COMSOL Multiphysics simulation automation via AI agents.
 
 English | [中文](README_CN.md)
 
+## Star History
+
+![Star History](assets/star-history.svg)
+
 ## Project Goal
 
 Build a complete COMSOL MCP Server enabling AI agents (like Claude, opencode) to perform multiphysics simulations through the MCP protocol:
