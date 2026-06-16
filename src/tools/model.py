@@ -105,18 +105,20 @@ def register_model_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     def model_create_component(
         component_name: str = "comp1",
+        space_dimension: int = 3,
         model_name: Optional[str] = None
     ) -> dict:
         """
         Create a component in the model (required before adding geometry/physics).
-        
+
         Components are containers for geometry, physics, materials, and mesh.
         Must be created before adding geometry or physics.
-        
+
         Args:
             component_name: Name for the component (default: 'comp1')
+            space_dimension: Space dimension - 0=0D, 1=1D, 2=2D, 3=3D, 20=2D axisymmetric, 30=3D axisymmetric (default: 3)
             model_name: Model name (default: current model)
-        
+
         Returns:
             Created component info
         """
@@ -126,14 +128,15 @@ def register_model_tools(mcp: FastMCP) -> None:
                 "success": False,
                 "error": f"Model not found: {model_name or 'no current model'}"
             }
-        
+
         try:
             jm = model.java
-            comp = jm.component().create(component_name, True)
-            
+            comp = jm.component().create(component_name, True, space_dimension)
+
             return {
                 "success": True,
                 "component": component_name,
+                "space_dimension": space_dimension,
                 "model": model.name(),
             }
         except Exception as e:

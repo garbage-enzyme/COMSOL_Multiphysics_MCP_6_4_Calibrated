@@ -14,10 +14,10 @@ def register_study_tools(mcp: FastMCP) -> None:
     def study_list(model_name: Optional[str] = None) -> dict:
         """
         List all studies in a model.
-        
+
         Args:
             model_name: Model name (default: current model)
-        
+
         Returns:
             List of study names with their types
         """
@@ -27,10 +27,10 @@ def register_study_tools(mcp: FastMCP) -> None:
                 "success": False,
                 "error": f"Model not found: {model_name or 'no current model'}"
             }
-        
+
         try:
             studies = model.studies()
-            
+
             study_info = []
             for study_name in studies:
                 info = {"name": study_name}
@@ -41,7 +41,7 @@ def register_study_tools(mcp: FastMCP) -> None:
                 except Exception:
                     pass
                 study_info.append(info)
-            
+
             return {
                 "success": True,
                 "studies": study_info,
@@ -49,6 +49,69 @@ def register_study_tools(mcp: FastMCP) -> None:
             }
         except Exception as e:
             return {"success": False, "error": f"Failed to list studies: {str(e)}"}
+
+    @mcp.tool()
+    def study_create(
+        study_type: str = "Stationary",
+        study_name: Optional[str] = None,
+        model_name: Optional[str] = None
+    ) -> dict:
+        """
+        Create a new study in the model.
+
+        Common study types:
+        - "Stationary": Stationary study (most common for electrostatics, structural)
+        - "TimeDependent": Time-dependent study
+        - "Eigenfrequency": Eigenfrequency analysis
+        - "Frequency": Frequency domain study
+        - "Perturbation": Perturbation study
+
+        Args:
+            study_type: Type of study to create
+            study_name: Optional name/tag for the study
+            model_name: Model name (default: current model)
+
+        Returns:
+            Created study info
+        """
+        model = session_manager.get_model(model_name)
+        if model is None:
+            return {
+                "success": False,
+                "error": f"Model not found: {model_name or 'no current model'}"
+            }
+
+        try:
+            jm = model.java
+            existing_studies = jm.study().size()
+            study_tag = study_name or f"std{existing_studies + 1}"
+
+            TYPE_MAP = {
+                "Stationary": "stat",
+                "TimeDependent": "time",
+                "Eigenfrequency": "eig",
+                "Frequency": "freq",
+                "Perturbation": "pert",
+                "stat": "stat",
+                "time": "time",
+                "eig": "eig",
+                "freq": "freq",
+            }
+
+            step_type = TYPE_MAP.get(study_type, study_type)
+
+            study = jm.study().create(study_tag)
+            study.create("step1", step_type)
+
+            return {
+                "success": True,
+                "study": study_tag,
+                "type": study_type,
+                "step_type": step_type,
+                "model": model.name(),
+            }
+        except Exception as e:
+            return {"success": False, "error": f"Failed to create study: {str(e)}"}
     
     @mcp.tool()
     def study_solve(
