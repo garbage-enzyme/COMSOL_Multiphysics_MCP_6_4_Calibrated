@@ -31,8 +31,8 @@ Build a complete COMSOL MCP Server enabling AI agents (like Claude, opencode) to
 
 ```bash
 # Clone repository
-git clone https://github.com/wjc9011/comsol-mcp.git
-cd comsol-mcp
+git clone https://github.com/wjc9011/COMSOL_Multiphysics_MCP.git
+cd COMSOL_Multiphysics_MCP
 
 # Install dependencies
 python -m pip install -e .
@@ -86,7 +86,7 @@ Create `opencode.json` in project root:
     "comsol": {
       "command": "python",
       "args": ["-m", "src.server"],
-      "cwd": "/path/to/comsol-mcp"
+      "cwd": "/path/to/COMSOL_Multiphysics_MCP"
     }
   }
 }
@@ -289,7 +289,7 @@ comsol_mcp/
 
 **Run**:
 ```bash
-cd /path/to/comsol-mcp
+cd /path/to/COMSOL_Multiphysics_MCP
 python client_script/create_chip_tsv_final.py
 ```
 
@@ -315,7 +315,7 @@ python client_script/create_chip_tsv_final.py
 
 **Run**:
 ```bash
-cd /path/to/comsol-mcp
+cd /path/to/COMSOL_Multiphysics_MCP
 python client_script/create_micromixer_auto.py
 ```
 
