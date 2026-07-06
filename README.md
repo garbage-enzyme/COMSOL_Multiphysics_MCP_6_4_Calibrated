@@ -1,65 +1,90 @@
-# COMSOL MCP Server
+# COMSOL MCP Server — 6.3 ClientAPI Calibrated Fork
 
-MCP Server for COMSOL Multiphysics simulation automation via AI agents.
+[![GitHub stars](https://img.shields.io/github/stars/garbage-enzyme/COMSOL_Multiphysics_MCP_6_3_Calibrated?style=social)](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_3_Calibrated/stargazers)
 
-English | [中文](README_CN.md)
+> **Fork of [wjc9011/COMSOL_Multiphysics_MCP](https://github.com/wjc9011/COMSOL_Multiphysics_MCP).**
+> This branch calibrates the MCP server tools for **COMSOL 6.3 + MPh 1.3.1 standalone mode** (the `clientapi` wrapper layer). The upstream code targets the direct `com.comsol.model.Model` API and breaks on 6.3 standalone.
 
-## Star History
+## Why this fork exists
 
-[![GitHub stars](https://img.shields.io/github/stars/wjc9011/COMSOL_Multiphysics_MCP?style=social)](https://github.com/wjc9011/COMSOL_Multiphysics_MCP/stargazers)
+Under `mph.Client(cores=...)` (MPh 1.3+ standalone), `model.java` returns `com.comsol.clientapi.impl.ModelClient` — a **wrapper** around the real model. Every `component()` / `physics()` / `geom()` call returns a `*Client` class whose method overloads differ from the direct `com.comsol.model.*` API the upstream code was written against. Result: most geometry/physics/study/mesh tools fail at runtime on 6.3.
 
-[![Star History Chart](https://starchart.cc/wjc9011/COMSOL_Multiphysics_MCP.svg)](https://starchart.cc/wjc9011/COMSOL_Multiphysics_MCP)
+This fork fixes all known clientapi mismatches in `src/tools/` and adds two missing tools. End-to-end verified via MCP: a parallel-plate capacitor returns **C = 1.8593794414 pF**, matching theory (1.8593794407 pF, err 4e-10 pF).
 
-## Project Goal
+> ⚠️ **Provenance:** The code changes in this fork were authored by an AI assistant (opencode + glm-5.2) under human direction, then verified end-to-end through the MCP tool interface. See `git log` for the detailed change breakdown.
 
-Build a complete COMSOL MCP Server enabling AI agents (like Claude, opencode) to perform multiphysics simulations through the MCP protocol:
+## What changed
 
-1. **Model Management** - Create, load, save, version control
-2. **Geometry Building** - Blocks, cylinders, spheres, boolean operations
-3. **Physics Configuration** - Heat transfer, fluid flow, electrostatics, solid mechanics
-4. **Meshing & Solving** - Auto mesh, stationary/time-dependent studies
-5. **Results Visualization** - Evaluate expressions, export plots
-6. **Knowledge Integration** - Embedded guides + PDF semantic search
+All fixes live in `src/tools/` and target the `clientapi` wrappers. Summary by file:
+
+### `model.py`
+- `list_components`: iterate components via `tags()` instead of int index — `ModelEntityListClient.get` only accepts a String tag.
+
+### `geometry.py`
+- 5× `len(geom.feature())` → `geom.feature().size()` — clientapi lists don't support `len()`.
+- Affects `add_block`, `add_cylinder`, `add_sphere`, `add_rectangle`, `boolean_difference`.
+
+### `physics.py`
+- New helpers `_first_component(jm)` and `_component_sdim(comp)` — `getSDim()` returns int; physics `create` needs it as a **String**.
+- All `comp.get(int)` → `tags()` iteration.
+- `physics().create(tag, type, sdim_string)` — **three args**, third is a String like `"3"`. Two-arg form fails with "物理场接口不支持空间维度: 0维"; int third arg fails with "No matching overloads".
+- `geometry_get_boundaries`: `getNboundary()` → `getNBoundaries()`, `getNdomain()` → `getNDomains()` (capitalized in clientapi).
+- `physics_add_electrostatics`: new `relpermittivity` + `domain_numbers` params. When given, auto-creates a `ChargeConservation` feature + material node — required because **6.3's default Electrostatics domain feature is `fsp1` (FreeSpace) which uses vacuum ε₀ and ignores material `relpermittivity`**.
+- New generic `physics_add_domain_feature` tool (ChargeConservation / LinearElasticMaterial / Solid, …).
+
+### `study.py`
+- Study step type uses **full names** (`Stationary` / `TimeDependent` / `Eigenfrequency` / `Frequency` / `Perturbation`) via a `SHORT_TO_FULL` map. Short names (`stat` / `time` / `eig` / `freq` / `pert`) work in the direct Model API but fail in clientapi with `Operation_cannot_be_created_in_this_context`.
+
+### `mesh.py`
+- New `mesh_sequence_create` tool. COMSOL does **not** auto-create a mesh sequence — the upstream `mesh_create` only runs an existing sequence. New tool does `comp.mesh().create()` + `feature().create('FreeTet')` + `run()`, and reports element counts via `getNumElem()` / `getNumVertex()` (clientapi; not `getElement().size()`).
+
+### Repo hygiene
+- New `.gitignore` for `__pycache__/`, `*.pyc`, `opencode.json` (machine-specific paths), `knowledge_base/` (regenerable), `*.mph`.
+- Stopped tracking `opencode.json` and `knowledge_base/chroma.sqlite3` — both are local-only / regenerable.
+
+## Verification
+
+`test_e2e_cap.py` and `test_study_mesh.py` are standalone verification scripts (drive `mph.Client` directly, no MCP layer). The same recipe was also re-run end-to-end through the MCP tool interface after restarting opencode to load the new code:
+
+| Step | MCP tool |
+| --- | --- |
+| Create model + 3D component | `model_create` → `model_create_component(3D)` |
+| Geometry: 10mm × 10mm × 1mm block | `geometry_create(3D)` → `geometry_add_block([0.01,0.01,0.001])` → `geometry_build` |
+| Electrostatics, ε_r = 2.1 | `physics_add_electrostatics(relpermittivity=2.1, domain_numbers=[1])` |
+| BCs: Ground @ z=0 (bnd 3), V=1V @ z=1mm (bnd 4) | `physics_configure_boundary(Ground,[3])`, `physics_configure_boundary(ElectricPotential,[4],{V0:'1[V]'})` |
+| Mesh | `mesh_sequence_create(FreeTet, build=True)` → ~1663 elements |
+| Solve | `study_create(Stationary)` → `study_solve` |
+| Capacitance | `results_global_evaluate('2*es.intWe/(1[V])^2','pF')` |
+
+**Result:** `1.8593794414 pF` vs theory `ε₀·ε_r·L²/d = 1.8593794407 pF` — error 4 × 10⁻¹⁰ pF.
+
+### 6.3-specific gotchas (documented in source comments)
+
+1. **Electrostatics `fsp1` FreeSpace trap** — default domain feature uses vacuum ε₀ and ignores material `relpermittivity`. Must add a `ChargeConservation` feature (`materialType='from_mat'`) plus a material node with `propertyGroup('def').set('relpermittivity', ...)`.
+2. **Block boundary numbering is NOT 1–6 ↔ −x/+x/−y/+y/−z/+z.** For `Block size [0.01,0.01,0.001] pos [0,0,0]`: **bnd 3 = z=0 face, bnd 4 = z=0.001 face**; 1/2/5/6 are side faces. Identify by coordinate with a `Box` selection (`condition='inside'`).
+3. **`Terminal` feature `V0` does not pin voltage correctly** (observed ΔV ≈ 0.16 V for V0=1 V). Use `ElectricPotential` boundary condition for capacitance verification.
+4. **Expression syntax:** `1[V]^2` is a parse error in clientapi — must write `(1[V])^2`.
+5. **`m.study().run()` does not exist** on mph 1.3.1 `Model` — use `model.java.study('std1').run()`.
 
 ## Requirements
 
-- **COMSOL Multiphysics** (version 5.x or 6.x)
-- **Python 3.10+** (NOT Windows Store version)
-- **Java runtime** (required by MPh/COMSOL)
+- **COMSOL Multiphysics 6.3** (this fork is calibrated for 6.3 standalone; 5.x should still work via the direct API but is not the focus)
+- **Python 3.10+** (not the Windows Store build)
+- **Java runtime** — 6.3 ships Temurin Java 11, JPype works directly. (5.6 ships Java 8, which needs a Java 9+ shim for JPype — not this fork's concern.)
+- **MPh 1.3.1**, plus `mcp`, `pydantic`. Optional for PDF search: `pymupdf`, `chromadb`, `sentence-transformers`.
 
 ## Installation
 
 ```bash
-# Clone repository
-git clone https://github.com/wjc9011/COMSOL_Multiphysics_MCP.git
-cd COMSOL_Multiphysics_MCP
-
-# Install dependencies
+git clone https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_3_Calibrated.git
+cd COMSOL_Multiphysics_MCP_6_3_Calibrated
 python -m pip install -e .
-
-# Test server
-python -m src.server
-```
-
-## Building PDF Knowledge Base
-
-```bash
-# Install additional dependencies
+# Optional: PDF knowledge base
 pip install pymupdf chromadb sentence-transformers
-
-# Build knowledge base
 python scripts/build_knowledge_base.py
-
-# Check status
-python scripts/build_knowledge_base.py --status
 ```
 
-
-## Usage
-
-### Option 1: With opencode
-
-Create `opencode.json` in project root:
+Start COMSOL Multiphysics first (MCP bridges via MPh/JPype), then point your MCP client (opencode / Claude Desktop) at the server:
 
 ```json
 {
@@ -67,355 +92,22 @@ Create `opencode.json` in project root:
   "mcp": {
     "comsol": {
       "type": "local",
-      "command": ["python", "-m", "src.server"],
-      "enabled": true,
-      "environment": {
-        "HF_ENDPOINT": "https://hf-mirror.com"
-      },
-      "timeout": 30000
+      "command": ["python", "-m", "src.server"]
     }
   }
 }
 ```
 
-### Option 2: With Claude Desktop
+## Relationship to upstream
 
-```json
-{
-  "mcpServers": {
-    "comsol": {
-      "command": "python",
-      "args": ["-m", "src.server"],
-      "cwd": "/path/to/COMSOL_Multiphysics_MCP"
-    }
-  }
-}
-```
+This fork tracks `wjc9011/COMSOL_Multiphysics_MCP` and is intended as a **6.3 compatibility patch**, not a feature fork. The upstream README (`README.md` in the original repo, preserved here as `README_upstream.md` if needed) describes the broader feature set, knowledge base, and 5.x workflows that this fork inherits unchanged.
 
-## Code Structure
+If you're running on **6.3 standalone** and the upstream tools throw `No matching overloads`, `Operation_cannot_be_created_in_this_context`, or `'ComponentGeomListClient' object is not subscriptable` — use this fork.
 
-```
-comsol_mcp/
-├── opencode.json                    # MCP server config for opencode
-├── pyproject.toml                   # Python project config
-├── README.md                        # This file
-│
-├── src/
-│   ├── server.py                    # MCP Server entry point
-│   ├── tools/
-│   │   ├── session.py               # COMSOL session management (start/stop/status)
-│   │   ├── model.py                 # Model CRUD + versioning
-│   │   ├── parameters.py            # Parameter management + sweeps
-│   │   ├── geometry.py              # Geometry creation (block/cylinder/sphere)
-│   │   ├── physics.py               # Physics interfaces + boundary conditions
-│   │   ├── mesh.py                  # Mesh generation
-│   │   ├── study.py                 # Study creation + solving (sync/async)
-│   │   └── results.py               # Results evaluation + export
-│   ├── resources/
-│   │   └── model_resources.py       # MCP resources (model tree, parameters)
-│   ├── knowledge/
-│   │   ├── embedded.py              # Embedded physics guides + troubleshooting
-│   │   ├── retriever.py             # PDF vector search retriever
-│   │   └── pdf_processor.py         # PDF chunking + embedding
-│   ├── async_handler/
-│   │   └── solver.py                # Async solving with progress tracking
-│   └── utils/
-│       └── versioning.py            # Model version path management
-│
-├── scripts/
-│   └── build_knowledge_base.py      # Build PDF vector database
-│
-├── client_script/                   # Standalone modeling scripts (examples)
-│   ├── create_chip_tsv_final.py     # Example: Chip thermal model
-│   ├── create_micromixer_auto.py    # Example: Fluid flow simulation
-│   ├── create_chip_thermal*.py      # Various chip thermal variants
-│   ├── create_micromixer*.py        # Various micromixer variants
-│   ├── visualize_*.py               # Result visualization scripts
-│   ├── add_visualization.py         # Add plot groups to model
-│   └── test_*.py                    # Integration tests
-│
-├── comsol_models/                   # Saved models (structured)
-│   ├── chip_tsv_thermal/
-│   │   ├── chip_tsv_thermal_20260216_*.mph
-│   │   └── chip_tsv_thermal_latest.mph
-│   └── micromixer/
-│       └── micromixer_*.mph
-│
-└── tests/
-    └── test_basic.py                # Unit tests
-```
+## Known gaps
 
-## Available Tools (80+ total)
-
-### Session (4)
-
-| Tool | Description |
-|------|-------------|
-| `comsol_start` | Start local COMSOL client |
-| `comsol_connect` | Connect to remote server |
-| `comsol_disconnect` | Clear session |
-| `comsol_status` | Get session info |
-
-### Model (9)
-
-| Tool | Description |
-|------|-------------|
-| `model_load` | Load .mph file |
-| `model_create` | Create empty model |
-| `model_save` | Save to file |
-| `model_save_version` | Save with timestamp |
-| `model_list` | List loaded models |
-| `model_set_current` | Set active model |
-| `model_clone` | Clone model |
-| `model_remove` | Remove from memory |
-| `model_inspect` | Get model structure |
-
-### Parameters (5)
-
-| Tool | Description |
-|------|-------------|
-| `param_get` | Get parameter value |
-| `param_set` | Set parameter |
-| `param_list` | List all parameters |
-| `param_sweep_setup` | Setup parametric sweep |
-| `param_description` | Get/set description |
-
-### Geometry (14)
-
-| Tool | Description |
-|------|-------------|
-| `geometry_list` | List geometry sequences |
-| `geometry_create` | Create geometry sequence |
-| `geometry_add_feature` | Add generic feature |
-| `geometry_add_block` | Add rectangular block |
-| `geometry_add_cylinder` | Add cylinder |
-| `geometry_add_sphere` | Add sphere |
-| `geometry_add_rectangle` | Add 2D rectangle |
-| `geometry_add_circle` | Add 2D circle |
-| `geometry_boolean_union` | Union objects |
-| `geometry_boolean_difference` | Subtract objects |
-| `geometry_import` | Import CAD file |
-| `geometry_build` | Build geometry |
-| `geometry_list_features` | List features |
-| `geometry_get_boundaries` | Get boundary numbers |
-
-### Physics (16)
-
-| Tool | Description |
-|------|-------------|
-| `physics_list` | List physics interfaces |
-| `physics_get_available` | Available physics types |
-| `physics_add` | Add generic physics |
-| `physics_add_electrostatics` | Add Electrostatics |
-| `physics_add_solid_mechanics` | Add Solid Mechanics |
-| `physics_add_heat_transfer` | Add Heat Transfer |
-| `physics_add_laminar_flow` | Add Laminar Flow |
-| `physics_configure_boundary` | Configure boundary condition |
-| `physics_set_material` | Assign material |
-| `physics_list_features` | List physics features |
-| `physics_remove` | Remove physics |
-| `multiphysics_add` | Add coupling |
-| `physics_interactive_setup_heat` | Interactive heat BC setup |
-| `physics_setup_heat_boundaries` | Configure heat boundaries |
-| `physics_interactive_setup_flow` | Interactive flow BC setup |
-| `physics_boundary_selection` | Generic boundary setup |
-
-### Mesh (3)
-
-| Tool | Description |
-|------|-------------|
-| `mesh_list` | List mesh sequences |
-| `mesh_create` | Generate mesh |
-| `mesh_info` | Get mesh statistics |
-
-### Study & Solving (8)
-
-| Tool | Description |
-|------|-------------|
-| `study_list` | List studies |
-| `study_solve` | Solve synchronously |
-| `study_solve_async` | Solve in background |
-| `study_get_progress` | Get progress |
-| `study_cancel` | Cancel solving |
-| `study_wait` | Wait for completion |
-| `solutions_list` | List solutions |
-| `datasets_list` | List datasets |
-
-### Results (9)
-
-| Tool | Description |
-|------|-------------|
-| `results_evaluate` | Evaluate expression |
-| `results_global_evaluate` | Evaluate scalar |
-| `results_inner_values` | Get time steps |
-| `results_outer_values` | Get sweep values |
-| `results_export_data` | Export data |
-| `results_export_image` | Export plot image |
-| `results_exports_list` | List export nodes |
-| `results_plots_list` | List plot nodes |
-
-### Knowledge (8)
-
-| Tool | Description |
-|------|-------------|
-| `docs_get` | Get documentation |
-| `docs_list` | List available docs |
-| `physics_get_guide` | Physics quick guide |
-| `troubleshoot` | Troubleshooting help |
-| `modeling_best_practices` | Best practices |
-| `pdf_search` | Search PDF docs |
-| `pdf_search_status` | PDF search status |
-| `pdf_list_modules` | List PDF modules |
-
-## Example Cases
-
-### Case 1: Chip Thermal Model with TSV
-
-3D thermal analysis of a silicon chip with Through-Silicon Via (TSV).
-
-**Geometry**: 60×60×5 µm chip, 5 µm diameter TSV hole, 10×10 µm heat source
-
-```python
-# Key steps:
-# 1. Create chip block and TSV cylinder
-# 2. Boolean difference (subtract TSV from chip)
-# 3. Add Silicon material (k=130 W/m·K)
-# 4. Add Heat Transfer physics
-# 5. Set heat flux on top, temperature on bottom
-# 6. Solve and evaluate temperature distribution
-```
-
-**Script**: `client_script/create_chip_tsv_final.py`
-
-**Run**:
-```bash
-cd /path/to/COMSOL_Multiphysics_MCP
-python client_script/create_chip_tsv_final.py
-```
-
-**Results**: Temperature rise from ambient with heat flux of 1 MW/m²
-
-### Case 2: Micromixer Fluid Flow
-
-3D laminar flow simulation in a microfluidic channel.
-
-**Geometry**: 600×100×50 µm rectangular channel
-
-```python
-# Key steps:
-# 1. Create rectangular channel block
-# 2. Add water material (ρ=1000 kg/m³, μ=0.001 Pa·s)
-# 3. Add Laminar Flow physics
-# 4. Set inlet velocity (1 mm/s), outlet pressure
-# 5. Add Transport of Diluted Species for mixing
-# 6. Solve and evaluate velocity profile
-```
-
-**Script**: `client_script/create_micromixer_auto.py`
-
-**Run**:
-```bash
-cd /path/to/COMSOL_Multiphysics_MCP
-python client_script/create_micromixer_auto.py
-```
-
-**Results**: Velocity distribution, concentration mixing profile
-
-## Model Versioning
-
-Models are saved with structured paths:
-
-```
-./comsol_models/{model_name}/{model_name}_{timestamp}.mph
-./comsol_models/{model_name}/{model_name}_latest.mph
-```
-
-Example:
-```
-./comsol_models/chip_tsv_thermal/chip_tsv_thermal_20260216_140514.mph
-./comsol_models/chip_tsv_thermal/chip_tsv_thermal_latest.mph
-```
-
-## Key Technical Discoveries
-
-### 1. mph Library API Patterns
-
-```python
-# Access Java model via property (not callable)
-jm = model.java  # NOT model.java()
-
-# Create component with True flag
-comp = jm.component().create('comp1', True)
-
-# Create 3D geometry
-geom = comp.geom().create('geom1', 3)
-
-# Create physics with geometry reference
-physics = comp.physics().create('spf', 'LaminarFlow', 'geom1')
-
-# Boundary condition with selection
-bc = physics.create('inl1', 'InletBoundary')
-bc.selection().set([1, 2, 3])
-bc.set('U0', '1[mm/s]')
-```
-
-### 2. Boundary Condition Property Names
-
-| Physics | Condition | Property |
-|---------|-----------|----------|
-| Heat Transfer | HeatFluxBoundary | `q0` |
-| Heat Transfer | TemperatureBoundary | `T0` |
-| Heat Transfer | ConvectiveHeatFlux | `h`, `Text` |
-| Laminar Flow | InletBoundary | `U0`, `NormalInflowVelocity` |
-| Laminar Flow | OutletBoundary | `p0` |
-
-### 3. Client Session Limitation
-
-The mph library creates a singleton COMSOL client. Only one Client can exist per Python process:
-
-```python
-# This is handled in session.py - client is kept alive and models are cleared
-client.clear()  # Clear models instead of full disconnect
-```
-
-### 4. Offline Embedding Model
-
-PDF search supports offline operation with local HuggingFace cache:
-
-```bash
-# Set mirror for China
-export HF_ENDPOINT=https://hf-mirror.com
-```
-
-## Development Status
-
-| Phase | Description | Status |
-|-------|-------------|--------|
-| 1 | Basic framework + Session + Model | Done |
-| 2 | Parameters + Solving + Results | Done |
-| 3 | Geometry + Physics + Mesh | Done |
-| 4 | Embedded knowledge + Tool docs | Done |
-| 5 | PDF vector retrieval | Done |
-| 6 | Integration tests | In Progress |
-
-## Next Steps
-
-1. **Complete Phase 6** - Full integration test with proper boundary conditions
-2. **Visualization Export** - Generate PNG images from plot groups
-3. **LSP Warnings** - Fix type hints in physics.py
-4. **More Examples** - Add electrostatics, solid mechanics cases
-5. **Error Handling** - Improve error messages and recovery
-
-
-## Resources
-
-| URI | Description |
-|-----|-------------|
-| `comsol://session/info` | Session information |
-| `comsol://model/{name}/tree` | Model tree structure |
-| `comsol://model/{name}/parameters` | Model parameters |
-| `comsol://model/{name}/physics` | Physics interfaces |
+- `geometry_get_boundaries` returns `nBoundaries` / `nDomains` but **not per-boundary coordinates or normals**, and still throws `'ComponentGeomListClient' object is not subscriptable` (`_get_geometry_node` uses subscript access on `comp.geom()`). Workaround: identify boundary numbers with a `Box` selection by coordinate.
 
 ## License
 
-MIT
+Inherits the upstream license. See original repository for details.
