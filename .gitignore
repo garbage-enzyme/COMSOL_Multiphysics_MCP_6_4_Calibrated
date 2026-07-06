@@ -1,0 +1,12 @@
+# Python
+__pycache__/
+*.pyc
+
+# Local environment / config
+opencode.json
+
+# COMSOL knowledge base (binary, large, regenerable)
+knowledge_base/
+
+# Tests artifacts
+*.mph

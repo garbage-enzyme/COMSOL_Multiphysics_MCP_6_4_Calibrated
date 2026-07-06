@@ -8,12 +8,41 @@ from .session import session_manager
 _tag_counter = {}
 
 
+def _first_component(jm):
+    """Return the first component's Java object.
+
+    COMSOL's ModelEntityList.get() requires a String tag, not an int index,
+    so we iterate via tags() and pick the first one.
+    """
+    tags = list(jm.component().tags())
+    if not tags:
+        return None
+    return jm.component().get(tags[0])
+
+
+def _component_sdim(comp):
+    """Get spatial dimension from a component's first geometry.
+
+    The COMSOL client API's physics `create` requires the spatial dimension
+    passed as a string (e.g. "3"). Component dimension is determined by the
+    geometry sequence created on it via `geom().create(tag, sdim)`. If no
+    geometry exists yet, default to "3" (3D).
+    """
+    try:
+        geom_tags = list(comp.geom().tags())
+        if geom_tags:
+            return str(comp.geom(geom_tags[0]).getSDim())
+    except Exception:
+        pass
+    return "3"
+
+
 def _find_physics_java(jm, physics_name):
     """Look up a physics node by label or tag across all components."""
-    for i in range(jm.component().size()):
-        comp = jm.component().get(i)
-        for j in range(comp.physics().size()):
-            p = comp.physics().get(j)
+    for comp_tag in jm.component().tags():
+        comp = jm.component().get(comp_tag)
+        for p_tag in comp.physics().tags():
+            p = comp.physics().get(p_tag)
             if p.label() == physics_name or p.tag() == physics_name:
                 return p
     return None
@@ -155,13 +184,13 @@ def register_physics_tools(mcp: FastMCP) -> None:
             if component_name:
                 comp = jm.component(component_name)
             else:
-                comp = jm.component().get(0)
+                comp = _first_component(jm)
 
             if comp is None:
                 return {"success": False, "error": f"Component not found: {component_name}"}
 
             tag = physics_type.replace(" ", "_").lower()
-            physics_java = comp.physics().create(tag, physics_type)
+            physics_java = comp.physics().create(tag, physics_type, _component_sdim(comp))
 
             return {
                 "success": True,
@@ -178,13 +207,24 @@ def register_physics_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     def physics_add_electrostatics(
         domain_selection: Optional[str] = None,
+        relpermittivity: Optional[float] = None,
+        domain_numbers: Optional[Sequence[int]] = None,
         model_name: Optional[str] = None
     ) -> dict:
         """
         Add Electrostatics physics interface for electric field analysis.
 
+        In COMSOL 6.3 the Electrostatics interface defaults to a FreeSpace
+        domain feature that uses vacuum permittivity and IGNORES material
+        relpermittivity. To model a dielectric, pass relpermittivity (e.g. 2.1)
+        and this tool will automatically create a ChargeConservation feature
+        plus a material node so the value takes effect.
+
         Args:
             domain_selection: Selection name for domains (default: all domains)
+            relpermittivity: Relative permittivity eps_r (e.g. 2.1). If given,
+                a ChargeConservation feature + material are created automatically.
+            domain_numbers: Domain numbers to assign the dielectric to (default: all)
             model_name: Model name (default: current model)
 
         Returns:
@@ -199,14 +239,47 @@ def register_physics_tools(mcp: FastMCP) -> None:
 
         try:
             jm = model.java
-            comp = jm.component().get(0)
-            physics_java = comp.physics().create("es", "Electrostatics")
+            comp = _first_component(jm)
+            if comp is None:
+                return {"success": False, "error": "No component found in model."}
+            physics_java = comp.physics().create("es", "Electrostatics", _component_sdim(comp))
 
             if domain_selection:
                 try:
                     physics_java.selection().set(domain_selection)
                 except Exception:
                     pass
+
+            ccn_info = None
+            if relpermittivity is not None:
+                # Create material node with relpermittivity under propertyGroup('def')
+                mat_tag = "mat_es"
+                try:
+                    mat = comp.material().create(mat_tag, "Common")
+                    mat.label(f"dielectric_epsr_{relpermittivity}")
+                    mat.propertyGroup("def").set("relpermittivity", str(relpermittivity))
+                    if domain_numbers:
+                        mat.selection().set([int(d) for d in domain_numbers])
+                except Exception as e:
+                    return {"success": False, "error": f"Created Electrostatics but failed to add material: {str(e)}"}
+
+                # Create ChargeConservation domain feature (overrides default FreeSpace fsp1)
+                try:
+                    sdim = _component_sdim(comp)
+                    ccn = physics_java.feature().create("ccn1", "ChargeConservation", int(sdim))
+                    if domain_numbers:
+                        ccn.selection().set([int(d) for d in domain_numbers])
+                    ccn.set("materialType", "from_mat")
+                    ccn_info = {
+                        "tag": "ccn1",
+                        "type": "ChargeConservation",
+                        "materialType": "from_mat",
+                        "relpermittivity": relpermittivity,
+                        "material_tag": mat_tag,
+                        "domain_numbers": list(domain_numbers) if domain_numbers else "all",
+                    }
+                except Exception as e:
+                    return {"success": False, "error": f"Created Electrostatics+material but failed to add ChargeConservation: {str(e)}"}
 
             return {
                 "success": True,
@@ -215,6 +288,10 @@ def register_physics_tools(mcp: FastMCP) -> None:
                     "type": "Electrostatics",
                     "tag": "es",
                     "domain_selection": domain_selection,
+                    "charge_conservation": ccn_info,
+                    "note": ("ChargeConservation+material created (6.3 default FreeSpace would ignore eps_r)."
+                             if ccn_info else
+                             "No relpermittivity given: 6.3 default FreeSpace uses vacuum eps0. Pass relpermittivity to model a dielectric."),
                 }
             }
         except Exception as e:
@@ -244,8 +321,10 @@ def register_physics_tools(mcp: FastMCP) -> None:
 
         try:
             jm = model.java
-            comp = jm.component().get(0)
-            physics_java = comp.physics().create("solid", "SolidMechanics")
+            comp = _first_component(jm)
+            if comp is None:
+                return {"success": False, "error": "No component found in model."}
+            physics_java = comp.physics().create("solid", "SolidMechanics", _component_sdim(comp))
 
             if domain_selection:
                 try:
@@ -289,8 +368,10 @@ def register_physics_tools(mcp: FastMCP) -> None:
 
         try:
             jm = model.java
-            comp = jm.component().get(0)
-            physics_java = comp.physics().create("ht", "HeatTransfer")
+            comp = _first_component(jm)
+            if comp is None:
+                return {"success": False, "error": "No component found in model."}
+            physics_java = comp.physics().create("ht", "HeatTransfer", _component_sdim(comp))
 
             if domain_selection:
                 try:
@@ -334,8 +415,10 @@ def register_physics_tools(mcp: FastMCP) -> None:
 
         try:
             jm = model.java
-            comp = jm.component().get(0)
-            physics_java = comp.physics().create("spf", "LaminarFlow")
+            comp = _first_component(jm)
+            if comp is None:
+                return {"success": False, "error": "No component found in model."}
+            physics_java = comp.physics().create("spf", "LaminarFlow", _component_sdim(comp))
 
             if domain_selection:
                 try:
@@ -354,7 +437,90 @@ def register_physics_tools(mcp: FastMCP) -> None:
             }
         except Exception as e:
             return {"success": False, "error": f"Failed to add Laminar Flow: {str(e)}"}
-    
+
+    @mcp.tool()
+    def physics_add_domain_feature(
+        physics_name: str,
+        feature_type: str,
+        domain_selection: Sequence[int],
+        properties: Optional[dict] = None,
+        feature_tag: Optional[str] = None,
+        model_name: Optional[str] = None
+    ) -> dict:
+        """
+        Add a domain feature (e.g. ChargeConservation) to a physics interface.
+
+        In COMSOL 6.3 several physics interfaces ship with a default domain
+        feature that ignores material properties. For Electrostatics the
+        default is FreeSpace (fsp1, vacuum eps0); to use a dielectric you must
+        add a ChargeConservation feature:
+            feature_type="ChargeConservation", properties={"materialType": "from_mat"}
+        or hardcode the relative permittivity:
+            properties={"epsilonr": "2.1"}  (requires materialType != from_mat)
+
+        Common domain feature types:
+        - Electrostatics: "ChargeConservation"
+        - Heat Transfer: "Solid", "Fluid", "ThinLayer"
+        - Solid Mechanics: "LinearElasticMaterial", "RigidDomain"
+
+        Args:
+            physics_name: Name or label of the physics interface
+            feature_type: Domain feature type (e.g. "ChargeConservation")
+            domain_selection: Domain numbers to apply the feature to
+            properties: Dictionary of property names and values
+            feature_tag: Tag for the feature (auto-generated if None)
+            model_name: Model name (default: current model)
+
+        Returns:
+            Created domain feature info
+        """
+        model = session_manager.get_model(model_name)
+        if model is None:
+            return {"success": False, "error": f"Model not found: {model_name or 'no current model'}"}
+
+        properties = properties or {}
+
+        try:
+            jm = model.java
+            physics_java = _find_physics_java(jm, physics_name)
+            if physics_java is None:
+                return {"success": False, "error": f"Physics interface not found: {physics_name}"}
+
+            # spatial dimension of the physics interface (domain features use int sdim)
+            sdim = 3
+            try:
+                comp = _first_component(jm)
+                if comp is not None:
+                    gtags = list(comp.geom().tags())
+                    if gtags:
+                        sdim = int(comp.geom(gtags[0]).getSDim())
+            except Exception:
+                pass
+
+            tag = feature_tag or _make_tag(feature_type.lower())
+            feat = physics_java.feature().create(tag, feature_type, sdim)
+            feat.selection().set([int(d) for d in domain_selection])
+
+            for prop_name, prop_value in properties.items():
+                try:
+                    feat.set(prop_name, prop_value)
+                except Exception:
+                    pass
+
+            return {
+                "success": True,
+                "domain_feature": {
+                    "tag": tag,
+                    "type": feature_type,
+                    "physics": physics_name,
+                    "selection": list(domain_selection),
+                    "properties": properties,
+                    "sdim": sdim,
+                }
+            }
+        except Exception as e:
+            return {"success": False, "error": f"Failed to add domain feature: {str(e)}"}
+
     @mcp.tool()
     def physics_configure_boundary(
         physics_name: str,
@@ -472,7 +638,9 @@ def register_physics_tools(mcp: FastMCP) -> None:
             tag = material_name.replace(" ", "_").replace("-", "_")
 
             if material_name not in materials:
-                comp = jm.component().get(0)
+                comp = _first_component(jm)
+                if comp is None:
+                    return {"success": False, "error": "No component found in model."}
                 try:
                     mat = comp.material().create(tag, "Common")
                     mat.label(material_name)
@@ -671,8 +839,8 @@ def register_physics_tools(mcp: FastMCP) -> None:
             geom = comp.geom(geom_tag)
             geom.run()
 
-            nboundary = geom.getNboundary()
-            ndomain = geom.getNdomain()
+            nboundary = geom.getNBoundaries()
+            ndomain = geom.getNDomains()
 
             boundaries = []
             for i in range(1, nboundary + 1):

@@ -86,19 +86,18 @@ def register_study_tools(mcp: FastMCP) -> None:
             existing_studies = jm.study().size()
             study_tag = study_name or f"std{existing_studies + 1}"
 
-            TYPE_MAP = {
-                "Stationary": "stat",
-                "TimeDependent": "time",
-                "Eigenfrequency": "eig",
-                "Frequency": "freq",
-                "Perturbation": "pert",
-                "stat": "stat",
-                "time": "time",
-                "eig": "eig",
-                "freq": "freq",
+            # clientapi (mph 1.3+ standalone) requires the FULL step-type name
+            # (e.g. "Stationary", "TimeDependent"), NOT the short tag ("stat").
+            # Direct-Model API used the short form, but clientapi rejects it with
+            # "Operation_cannot_be_created_in_this_context".
+            SHORT_TO_FULL = {
+                "stat": "Stationary",
+                "time": "TimeDependent",
+                "eig": "Eigenfrequency",
+                "freq": "Frequency",
+                "pert": "Perturbation",
             }
-
-            step_type = TYPE_MAP.get(study_type, study_type)
+            step_type = SHORT_TO_FULL.get(study_type, study_type)
 
             study = jm.study().create(study_tag)
             study.create("step1", step_type)

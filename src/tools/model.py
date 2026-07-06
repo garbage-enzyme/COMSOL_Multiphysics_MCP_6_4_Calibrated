@@ -131,7 +131,7 @@ def register_model_tools(mcp: FastMCP) -> None:
 
         try:
             jm = model.java
-            comp = jm.component().create(component_name, True, space_dimension)
+            comp = jm.component().create(component_name, True)
 
             return {
                 "success": True,
@@ -166,8 +166,8 @@ def register_model_tools(mcp: FastMCP) -> None:
             jm = model.java
             components = []
             
-            for i in range(jm.component().size()):
-                comp = jm.component().get(i)
+            for comp_tag in jm.component().tags():
+                comp = jm.component().get(comp_tag)
                 if comp is not None:
                     components.append({
                         "name": comp.tag(),

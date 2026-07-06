@@ -70,6 +70,81 @@ def register_mesh_tools(mcp: FastMCP) -> None:
             }
         except Exception as e:
             return {"success": False, "error": f"Failed to create mesh: {str(e)}"}
+
+    @mcp.tool()
+    def mesh_sequence_create(
+        mesh_name: str = "mesh1",
+        element_type: str = "FreeTet",
+        component_name: Optional[str] = None,
+        build: bool = True,
+        model_name: Optional[str] = None,
+    ) -> dict:
+        """
+        Create a mesh sequence with a single meshing feature and optionally build it.
+        
+        COMSOL does NOT auto-create a mesh sequence; one must be created before
+        solving. This tool creates a mesh sequence on the component, adds one
+        meshing feature (default FreeTet = free tetrahedral), and runs it.
+        
+        Args:
+            mesh_name: Tag/name for the mesh sequence (default 'mesh1')
+            element_type: Meshing operation type, e.g. 'FreeTet' (free tetrahedral,
+                default), 'FreeSweep' (sweep), 'FreeTri' (free triangular),
+                'Map' (mapped), 'BoundaryLayer'.
+            component_name: Component name (default: first component)
+            build: If True (default), immediately build the mesh after creation.
+            model_name: Model name (default: current model)
+        
+        Returns:
+            Created mesh info including element counts if built.
+        """
+        model = session_manager.get_model(model_name)
+        if model is None:
+            return {
+                "success": False,
+                "error": f"Model not found: {model_name or 'no current model'}"
+            }
+        
+        try:
+            from .physics import _first_component
+            jm = model.java
+            comp = jm.component(component_name) if component_name else _first_component(jm)
+            if comp is None:
+                return {"success": False, "error": "No component found in model."}
+            
+            # create mesh sequence
+            mesh_seq = comp.mesh().create(mesh_name)
+            # add a meshing feature
+            feat_tag = "ftr1"
+            feat = mesh_seq.feature().create(feat_tag, element_type)
+            
+            result = {
+                "success": True,
+                "mesh_name": mesh_name,
+                "feature_tag": feat_tag,
+                "element_type": element_type,
+                "built": False,
+            }
+            
+            if build:
+                mesh_seq.run()
+                result["built"] = True
+                try:
+                    # clientapi MeshSequenceClient uses getNumElem/getNumVertex (return int)
+                    if hasattr(mesh_seq, "getNumElem"):
+                        result["num_elements"] = int(mesh_seq.getNumElem())
+                    elif hasattr(mesh_seq, "getElement") and hasattr(mesh_seq.getElement(), "size"):
+                        result["num_elements"] = int(mesh_seq.getElement().size())
+                    if hasattr(mesh_seq, "getNumVertex"):
+                        result["num_vertices"] = int(mesh_seq.getNumVertex())
+                    elif hasattr(mesh_seq, "getVertex") and hasattr(mesh_seq.getVertex(), "size"):
+                        result["num_vertices"] = int(mesh_seq.getVertex().size())
+                except Exception:
+                    pass
+            
+            return result
+        except Exception as e:
+            return {"success": False, "error": f"Failed to create mesh sequence: {str(e)}"}
     
     @mcp.tool()
     def mesh_info(
