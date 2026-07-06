@@ -7,6 +7,36 @@ from .session import session_manager
 from ..async_handler.solver import async_solver
 
 
+def _resolve_study_tag(model, study_name: Optional[str]) -> Optional[str]:
+    """Resolve a study identifier (tag OR label) to its tag.
+
+    mph's high-level ``model.solve(name)`` looks studies up by *label*
+    (e.g. "研究 1"), but ``study_create`` returns and most callers pass the
+    *tag* (e.g. "std1"). This helper accepts either form and returns the
+    canonical tag so we can call the Java API ``jm.study(tag).run()``
+    directly.
+
+    Returns ``None`` when ``study_name`` is ``None`` (meaning "all studies").
+    Raises ``ValueError`` if no matching study is found.
+    """
+    if study_name is None:
+        return None
+    jm = model.java
+    study_list = jm.study()
+    tags = list(study_list.tags())
+    if study_name in tags:
+        return study_name
+    for tag in tags:
+        try:
+            if study_list.get(tag).label() == study_name:
+                return tag
+        except Exception:
+            pass
+    raise ValueError(
+        f"Study '{study_name}' not found. Available tags: {tags}"
+    )
+
+
 def register_study_tools(mcp: FastMCP) -> None:
     """Register study and solving tools with the MCP server."""
     
@@ -145,19 +175,31 @@ def register_study_tools(mcp: FastMCP) -> None:
             }
         
         try:
+            # Resolve tag OR label to a canonical tag, then use the Java
+            # API directly. mph's ``model.solve(name)`` only accepts the
+            # study *label* (e.g. "研究 1"), but callers typically pass the
+            # *tag* returned by ``study_create`` (e.g. "std1").
+            tag = _resolve_study_tag(model, study_name)
+            jm = model.java
             if wait:
-                model.solve(study_name)
+                if tag is None:
+                    for t in jm.study().tags():
+                        jm.study(t).run()
+                else:
+                    jm.study(tag).run()
                 return {
                     "success": True,
                     "study": study_name,
+                    "resolved_tag": tag,
                     "message": "Solving completed.",
                 }
             else:
-                started = async_solver.start_solve(model, study_name)
+                started = async_solver.start_solve(model, tag)
                 if started:
                     return {
                         "success": True,
                         "study": study_name,
+                        "resolved_tag": tag,
                         "message": "Solving started in background. Use study_get_progress to monitor.",
                         "async": True,
                     }
@@ -202,11 +244,13 @@ def register_study_tools(mcp: FastMCP) -> None:
             }
         
         try:
-            started = async_solver.start_solve(model, study_name)
+            tag = _resolve_study_tag(model, study_name)
+            started = async_solver.start_solve(model, tag)
             if started:
                 return {
                     "success": True,
                     "study": study_name,
+                    "resolved_tag": tag,
                     "model": model.name(),
                     "message": "Solving started in background.",
                 }

@@ -120,7 +120,19 @@ class AsyncSolver:
                     self._set_cancelled()
                     return
                 
-                model.solve(study_name)
+                # Use the Java API directly so we can run by *tag* (the
+                # canonical identifier). mph's ``model.solve(name)`` only
+                # accepts the study *label*, but callers now pass a tag
+                # (or None for "all studies").
+                jm = model.java
+                if study_name is None:
+                    for t in jm.study().tags():
+                        if self._cancel_flag:
+                            self._set_cancelled()
+                            return
+                        jm.study(t).run()
+                else:
+                    jm.study(study_name).run()
                 
                 if self._cancel_flag:
                     self._set_cancelled()
