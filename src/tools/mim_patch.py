@@ -78,11 +78,35 @@ def _probe_boundaries(geom):
     return boundaries, n_dom, n_bnd, sdim
 
 
-def _identify_side_pairs(boundaries, P_val):
-    """Identify periodic side face pairs from boundary normals + centers.
+def _identify_side_pairs(boundaries, P_val=None, bbox=None, tol=1e-12):
+    """Identify periodic CELL side face pairs from boundary normals + centers.
 
     Returns dict: {x_src, x_dst, y_src, y_dst, bottom, top} lists of bnd numbers.
+
+    IMPORTANT: This filters by BOTH normal AND center coordinate so that interior
+    patch/air-interface side faces (which share the same ±x/±y normal but are at
+    interior positions, e.g. cx=L/2 inside the cell) are NOT misclassified as the
+    Floquet periodic cell side. Without coordinate filtering, CopyFace source
+    would include patch side faces and break Floquet mesh compatibility.
+
+    Args:
+        boundaries: list of boundary dicts (each must have 'normal' and 'center').
+        P_val: cell period (used as x_max/y_max if bbox not given). Backward compat.
+        bbox: optional (xmin, xmax, ymin, ymax, zmin, zmax) for tighter filtering.
+        tol: absolute tolerance for matching cell-edge coordinate (metres).
     """
+    if bbox is None and P_val is not None:
+        bbox = (0.0, P_val, 0.0, P_val, 0.0, P_val)
+    if bbox is None:
+        # Fall back to pure-normal classification (legacy behaviour, no filtering)
+        bbox = None
+    xmin, xmax, ymin, ymax, zmin, zmax = (list(bbox) if bbox is not None else [None]*6)
+
+    def _on_edge(coord, edge, tol):
+        if edge is None:
+            return True  # no bbox filtering
+        return abs(coord - edge) <= tol
+
     x_src, x_dst, y_src, y_dst = [], [], [], []
     bottom, top = [], []
     for b in boundaries:
@@ -90,17 +114,19 @@ def _identify_side_pairs(boundaries, P_val):
             continue
         nx, ny, nz = b["normal"]
         cx, cy, cz = b["center"]
-        if nz < -0.5:  # bottom face (normal -z)
+        if nz < -0.5 and _on_edge(cz, zmin, tol):  # bottom face (normal -z, z=zmin)
             bottom.append(b["boundary_number"])
-        elif nz > 0.5:  # top face (normal +z)
+        elif nz > 0.5 and _on_edge(cz, zmax, tol) and zmax is not None:  # top, z=zmax
             top.append(b["boundary_number"])
-        elif nx < -0.5:  # x=0 face
+        elif nz > 0.5 and zmax is None:  # top without bbox (legacy)
+            top.append(b["boundary_number"])
+        elif nx < -0.5 and _on_edge(cx, xmin, tol):  # x=xmin cell side
             x_src.append(b["boundary_number"])
-        elif nx > 0.5:  # x=P face
+        elif nx > 0.5 and _on_edge(cx, xmax, tol):  # x=xmax cell side
             x_dst.append(b["boundary_number"])
-        elif ny < -0.5:  # y=0 face
+        elif ny < -0.5 and _on_edge(cy, ymin, tol):  # y=ymin cell side
             y_src.append(b["boundary_number"])
-        elif ny > 0.5:  # y=P face
+        elif ny > 0.5 and _on_edge(cy, ymax, tol):  # y=ymax cell side
             y_dst.append(b["boundary_number"])
     return {
         "x_src": x_src, "x_dst": x_dst,
@@ -176,9 +202,11 @@ def register_mim_patch_tools(mcp: FastMCP) -> None:
                 except Exception:
                     pairs_info.append({"tag": pt})
 
-            # identify side pairs
-            P_val = bbox[1] if bbox else 1.0
-            side_pairs = _identify_side_pairs(boundaries, P_val)
+            # identify side pairs (filter by coordinate so interior faces with
+            # ±x/±y normals — e.g. patch side faces at x=L/2 — are NOT misread as
+            # the Floquet periodic cell sides).
+            bbox6 = (tuple(bbox) if bbox is not None else None)
+            side_pairs = _identify_side_pairs(boundaries, bbox=bbox6)
 
             # identify interior boundaries (up!=0 and down!=0 → FormUnion interior)
             interior_bnds = [b["boundary_number"] for b in boundaries if b.get("interior")]
@@ -312,17 +340,27 @@ def register_mim_patch_tools(mcp: FastMCP) -> None:
             report["n_boundaries"] = n_bnd
 
             # ---- Step 5: identify key boundaries ----
-            # patch footprint interface: interior boundary where up=patch_dom, down=al2_dom
-            # The patch domain is the highest-numbered domain (dom 3 typically)
+            # patch footprint interface: interior boundary where up=patch_dom, down=al2_dom.
+            # Patch domain is the highest-numbered domain (dom 3 typically) and the
+            # Al2O3/air baseline becomes dom 1+2 (al2o3 keeps its domain tag).
             patch_dom = n_dom  # last domain added
             al2_dom = 1
             patch_footprint = [b["boundary_number"] for b in boundaries
                                if b.get("up_domain") == patch_dom and b.get("down_domain") == al2_dom]
-            bottom = [b["boundary_number"] for b in boundaries
-                       if b.get("normal", [0, 0, 1])[2] < -0.5 and abs(b.get("center", [0, 0, 1])[2]) < 1e-15]
-            top = [b["boundary_number"] for b in boundaries
-                    if b.get("normal", [0, 0, -1])[2] > 0.5]
-            side_pairs = _identify_side_pairs(boundaries, 1.0)
+
+            # Filter side/top/bottom by BOTH normal AND coordinate. Without the
+            # coordinate filter, the patch side/top faces (interior interfaces with
+            # ±x/±y/+z normals) would be misclassified as the cell exterior and
+            # break Floquet CopyFace mesh compatibility.
+            try:
+                bbox_vals = [float(x) for x in geom.getBoundingBox()]
+                bbox6 = (bbox_vals[0], bbox_vals[1], bbox_vals[2],
+                         bbox_vals[3], bbox_vals[4], bbox_vals[5])
+            except Exception:
+                bbox6 = None
+            side_pairs = _identify_side_pairs(boundaries, bbox=bbox6)
+            bottom = side_pairs.get("bottom", [])
+            top = side_pairs.get("top", [])
 
             report["patch_footprint_interface"] = patch_footprint
             report["bottom"] = bottom
