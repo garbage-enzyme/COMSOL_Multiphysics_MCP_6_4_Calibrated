@@ -1,6 +1,7 @@
 """Unit tests for physics helpers without a COMSOL client."""
 
 from src.tools.physics import (
+    add_boundary_condition,
     add_physics_interface,
     list_physics_features,
     remove_physics_interface,
@@ -264,3 +265,102 @@ def test_remove_physics_interface_reports_available_nodes():
 
     assert result["success"] is False
     assert result["available"][0]["tag"] == "ewfd"
+
+
+class BoundarySelection:
+    def __init__(self):
+        self.entities = None
+
+    def set(self, entities):
+        self.entities = entities
+
+
+class BoundaryFeature:
+    def __init__(self):
+        self.selection_node = BoundarySelection()
+        self.properties = {}
+        self.feature_label = None
+
+    def selection(self):
+        return self.selection_node
+
+    def set(self, name, value):
+        self.properties[name] = value
+
+    def label(self, value):
+        self.feature_label = value
+
+
+class BoundaryFeatureList:
+    def __init__(self):
+        self.created = []
+
+    def create(self, tag, feature_type, entity_dimension):
+        feature = BoundaryFeature()
+        self.created.append((tag, feature_type, entity_dimension, feature))
+        return feature
+
+
+class BoundaryPhysics:
+    def __init__(self):
+        self.features = BoundaryFeatureList()
+
+    def tag(self):
+        return "ht"
+
+    def label(self):
+        return "Heat Transfer in Solids"
+
+    def feature(self):
+        return self.features
+
+
+class BoundaryPhysicsList:
+    def __init__(self, physics):
+        self.physics = physics
+
+    def tags(self):
+        return ["ht"]
+
+    def get(self, tag):
+        return self.physics
+
+
+class BoundaryComponent(FakeComponent):
+    def __init__(self, physics):
+        super().__init__()
+        self.physics_node = physics
+
+    def physics(self):
+        return BoundaryPhysicsList(self.physics_node)
+
+
+def test_add_boundary_condition_uses_feature_create_and_boundary_dimension():
+    physics = BoundaryPhysics()
+    component = BoundaryComponent(physics)
+
+    result = add_boundary_condition(
+        FakeModel(component),
+        "ht",
+        "Temperature",
+        [3, 4],
+        properties={"T0": "293.15[K]"},
+        feature_tag="temp1",
+    )
+
+    tag, feature_type, dimension, feature = physics.features.created[0]
+    assert (tag, feature_type, dimension) == ("temp1", "TemperatureBoundary", 2)
+    assert feature.selection_node.entities == [3, 4]
+    assert feature.properties == {"T0": "293.15[K]"}
+    assert result["boundary_condition"]["entity_dimension"] == 2
+
+
+def test_add_boundary_condition_validates_selection():
+    result = add_boundary_condition(
+        FakeModel(BoundaryComponent(BoundaryPhysics())),
+        "ht",
+        "Temperature",
+        [],
+    )
+
+    assert result["success"] is False

@@ -22,6 +22,13 @@ PHYSICS_TYPE_ALIASES = {
     "laminarflow": ("spf", "LaminarFlow"),
 }
 
+BOUNDARY_TYPE_ALIASES = {
+    "temperature": "TemperatureBoundary",
+    "temperatureboundary": "TemperatureBoundary",
+    "heatflux": "HeatFluxBoundary",
+    "heatfluxboundary": "HeatFluxBoundary",
+}
+
 
 def _first_component(jm):
     """Return the first component's Java object.
@@ -52,15 +59,78 @@ def _component_sdim(comp):
     return "3"
 
 
-def _find_physics_java(jm, physics_name):
-    """Look up a physics node by label or tag across all components."""
+def _find_physics_context(jm, physics_name):
+    """Return ``(component, physics)`` by label or tag."""
     for comp_tag in jm.component().tags():
         comp = jm.component().get(comp_tag)
         for p_tag in comp.physics().tags():
             p = comp.physics().get(p_tag)
             if p.label() == physics_name or p.tag() == physics_name:
-                return p
-    return None
+                return comp, p
+    return None, None
+
+
+def _find_physics_java(jm, physics_name):
+    """Look up a physics node by label or tag across all components."""
+    _, physics = _find_physics_context(jm, physics_name)
+    return physics
+
+
+def add_boundary_condition(
+    model,
+    physics_name: str,
+    boundary_condition: str,
+    boundary_selection: Sequence[int],
+    *,
+    properties: Optional[dict] = None,
+    feature_tag: Optional[str] = None,
+) -> dict:
+    """Create a boundary feature with the required clientapi entity dimension."""
+    if not boundary_selection:
+        return {"success": False, "error": "boundary_selection must not be empty."}
+
+    comp, physics = _find_physics_context(model.java, physics_name)
+    if physics is None:
+        return {
+            "success": False,
+            "error": f"Physics interface not found: {physics_name}",
+        }
+
+    normalized = boundary_condition.replace(" ", "").casefold()
+    feature_type = BOUNDARY_TYPE_ALIASES.get(normalized, boundary_condition)
+    boundary_dim = max(int(_component_sdim(comp)) - 1, 0)
+    tag = feature_tag or _make_tag(feature_type.lower())
+    feature = physics.feature().create(tag, feature_type, boundary_dim)
+    boundaries = [int(boundary) for boundary in boundary_selection]
+    feature.selection().set(boundaries)
+
+    property_errors = {}
+    for name, value in (properties or {}).items():
+        try:
+            feature.set(name, value)
+        except Exception as exc:
+            property_errors[name] = str(exc)
+    try:
+        feature.label(f"{boundary_condition} (Boundaries {boundaries})")
+    except Exception:
+        pass
+
+    result = {
+        "success": True,
+        "physics": physics_name,
+        "boundary_condition": {
+            "tag": tag,
+            "type": feature_type,
+            "requested_type": boundary_condition,
+            "boundaries": boundaries,
+            "properties": dict(properties or {}),
+            "entity_dimension": boundary_dim,
+        },
+    }
+    if property_errors:
+        result["warning"] = "Boundary created, but some properties could not be set."
+        result["property_errors"] = property_errors
+    return result
 
 
 def _make_tag(prefix="bc"):
@@ -687,34 +757,13 @@ def register_physics_tools(mcp: FastMCP) -> None:
         try:
             jm = model.java
 
-            physics_java = _find_physics_java(jm, physics_name)
-
-            if physics_java is None:
-                return {"success": False, "error": f"Physics interface not found: {physics_name}"}
-
-            tag = _make_tag(boundary_condition.lower())
-            bc = physics_java.create(tag, boundary_condition)
-            bc.selection().set([int(b) for b in boundary_selection])
-
-            if properties:
-                for prop_name, prop_value in properties.items():
-                    try:
-                        bc.set(prop_name, prop_value)
-                    except Exception:
-                        pass
-
-            bc.label(f'{boundary_condition} (Boundaries {list(boundary_selection)})')
-
-            return {
-                "success": True,
-                "boundary_condition": {
-                    "name": tag,
-                    "type": boundary_condition,
-                    "physics": physics_name,
-                    "selection": list(boundary_selection),
-                    "properties": properties,
-                }
-            }
+            return add_boundary_condition(
+                model,
+                physics_name,
+                boundary_condition,
+                boundary_selection,
+                properties=properties,
+            )
         except Exception as e:
             return {"success": False, "error": f"Failed to configure boundary: {str(e)}"}
     
@@ -1390,36 +1439,13 @@ def register_physics_tools(mcp: FastMCP) -> None:
         properties = properties or {}
 
         try:
-            jm = model.java
-
-            physics_java = _find_physics_java(jm, physics_name)
-
-            if physics_java is None:
-                return {"success": False, "error": f"Physics interface not found: {physics_name}"}
-
-            tag = _make_tag("bc")
-            bc = physics_java.create(tag, boundary_condition_type)
-            bc.selection().set([int(b) for b in boundary_numbers])
-
-            for prop_name, prop_value in properties.items():
-                try:
-                    bc.set(prop_name, prop_value)
-                except Exception:
-                    pass
-
-            bc.label(f'{boundary_condition_type} (Boundaries {list(boundary_numbers)})')
-
-            return {
-                "success": True,
-                "physics": physics_name,
-                "boundary_condition": {
-                    "type": boundary_condition_type,
-                    "tag": tag,
-                    "boundaries": list(boundary_numbers),
-                    "properties": properties
-                },
-                "message": f"Created {boundary_condition_type} on boundaries {list(boundary_numbers)}",
-            }
+            return add_boundary_condition(
+                model,
+                physics_name,
+                boundary_condition_type,
+                boundary_numbers,
+                properties=properties,
+            )
         except Exception as e:
             return {"success": False, "error": f"Failed to create boundary condition: {str(e)}"}
 
