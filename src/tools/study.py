@@ -37,6 +37,36 @@ def _resolve_study_tag(model, study_name: Optional[str]) -> Optional[str]:
     )
 
 
+def list_studies(model) -> dict:
+    """List studies and steps through stable clientapi tags and labels."""
+    study_list = model.java.study()
+    studies = []
+    for tag in list(study_list.tags()):
+        study = study_list.get(tag)
+        info = {"tag": tag}
+        try:
+            info["label"] = str(study.label())
+        except Exception:
+            info["label"] = tag
+
+        steps = []
+        try:
+            feature_list = study.feature()
+            for step_tag in list(feature_list.tags()):
+                step = feature_list.get(step_tag)
+                step_info = {"tag": step_tag}
+                try:
+                    step_info["label"] = str(step.label())
+                except Exception:
+                    step_info["label"] = step_tag
+                steps.append(step_info)
+        except Exception:
+            pass
+        info["steps"] = steps
+        studies.append(info)
+    return {"success": True, "studies": studies, "count": len(studies)}
+
+
 def register_study_tools(mcp: FastMCP) -> None:
     """Register study and solving tools with the MCP server."""
     
@@ -59,24 +89,7 @@ def register_study_tools(mcp: FastMCP) -> None:
             }
 
         try:
-            studies = model.studies()
-
-            study_info = []
-            for study_name in studies:
-                info = {"name": study_name}
-                try:
-                    study_node = model / "studies" / study_name
-                    children = [child.name() for child in study_node.children()]
-                    info["steps"] = children
-                except Exception:
-                    pass
-                study_info.append(info)
-
-            return {
-                "success": True,
-                "studies": study_info,
-                "count": len(study_info),
-            }
+            return list_studies(model)
         except Exception as e:
             return {"success": False, "error": f"Failed to list studies: {str(e)}"}
 
