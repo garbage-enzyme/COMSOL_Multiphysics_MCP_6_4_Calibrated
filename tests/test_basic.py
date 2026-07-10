@@ -155,3 +155,37 @@ class TestSessionManager:
         assert sm.client is None
         assert sm.get_status()["connected"] is False
         assert client.calls == ["clear", "disconnect"]
+
+    def test_start_is_idempotent_when_connected(self):
+        from src.tools.session import SessionManager
+
+        class FakeClient:
+            version = "6.4"
+            cores = 4
+            standalone = True
+
+            def __init__(self):
+                self.calls = []
+
+            def clear(self):
+                self.calls.append("clear")
+
+            def disconnect(self):
+                self.calls.append("disconnect")
+
+        sm = SessionManager()
+        client = FakeClient()
+        model = object()
+        sm._client = client
+        sm._models = {"model": model}
+        sm._current_model = "model"
+
+        result = sm.start(cores=8)
+
+        assert result["success"] is True
+        assert result["connected"] is True
+        assert client.calls == []
+        assert sm.models == {"model": model}
+        assert sm.current_model == "model"
+
+        sm.disconnect()
