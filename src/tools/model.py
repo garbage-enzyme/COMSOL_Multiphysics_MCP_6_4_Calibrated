@@ -16,6 +16,26 @@ from ..utils.versioning import (
 )
 
 
+def _save_model_file(
+    model,
+    file_path: Optional[str] = None,
+    format: Optional[str] = None,
+) -> str:
+    """Save a model, using clientapi for reliable Unicode ``.mph`` paths."""
+    normalized_format = format.casefold() if format else "comsol"
+    if normalized_format not in {"comsol", "mph"}:
+        model.save(path=file_path, format=format)
+        return str(file_path or model.file())
+
+    target = file_path or model.file()
+    if not target:
+        raise ValueError("file_path is required for a model that has not been saved.")
+    path = Path(target).expanduser().resolve()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    model.java.save(str(path))
+    return str(path)
+
+
 def register_model_tools(mcp: FastMCP) -> None:
     """Register model management tools with the MCP server."""
     
@@ -207,8 +227,7 @@ def register_model_tools(mcp: FastMCP) -> None:
             }
         
         try:
-            model.save(path=file_path, format=format)
-            saved_path = file_path or model.file()
+            saved_path = _save_model_file(model, file_path=file_path, format=format)
             
             return {
                 "success": True,
@@ -222,7 +241,8 @@ def register_model_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     def model_save_version(
         model_name: Optional[str] = None,
-        description: Optional[str] = None
+        description: Optional[str] = None,
+        base_path: Optional[str] = None,
     ) -> dict:
         """
         Save a model with a timestamp version suffix.
@@ -238,6 +258,7 @@ def register_model_tools(mcp: FastMCP) -> None:
         Args:
             model_name: Name of the model to save (default: current model)
             description: Optional description for this version (stored in metadata)
+            base_path: Optional model-storage root. Defaults to ``comsol_models``.
         
         Returns:
             Save confirmation with versioned file path, or error message
@@ -254,14 +275,14 @@ def register_model_tools(mcp: FastMCP) -> None:
             name = model.name()
             
             # Generate versioned path using new structure
-            versioned_path = generate_version_path(name)
+            versioned_path = generate_version_path(name, base_path=base_path)
             
             # Save versioned copy
-            model.save(path=versioned_path)
+            _save_model_file(model, versioned_path)
             
             # Also save as 'latest'
-            latest_path = generate_latest_path(name)
-            model.save(path=latest_path)
+            latest_path = generate_latest_path(name, base_path=base_path)
+            _save_model_file(model, latest_path)
             
             return {
                 "success": True,
