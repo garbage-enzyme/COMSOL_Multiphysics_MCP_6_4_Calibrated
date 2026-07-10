@@ -1,6 +1,6 @@
 """Unit tests for geometry helpers without a COMSOL client."""
 
-from src.tools.geometry import add_geometry_feature
+from src.tools.geometry import add_geometry_feature, list_geometry_features
 
 
 class FakeFeature:
@@ -12,6 +12,9 @@ class FakeFeature:
         if name == self.failing_property:
             raise ValueError("unsupported property")
         self.properties[name] = value
+
+    def label(self):
+        return "Geometry Feature"
 
 
 class FakeFeatureList:
@@ -26,6 +29,12 @@ class FakeFeatureList:
         feature = FakeFeature(self.failing_property)
         self.features[tag] = (feature_type, feature)
         return feature
+
+    def tags(self):
+        return list(self.features)
+
+    def get(self, tag):
+        return self.features[tag][1]
 
 
 class FakeGeometry:
@@ -115,3 +124,22 @@ def test_add_geometry_feature_validates_type():
     result = add_geometry_feature(FakeModel(FakeGeometry()), "  ")
 
     assert result == {"success": False, "error": "feature_type must not be empty."}
+
+
+def test_list_geometry_features_returns_tags_and_labels():
+    geometry = FakeGeometry()
+    geometry.features.create("blk1", "Block")
+    geometry.features.create("dif1", "Difference")
+
+    result = list_geometry_features(FakeModel(geometry))
+
+    assert result == {
+        "success": True,
+        "geometry": "geom1",
+        "component": "comp1",
+        "features": [
+            {"tag": "blk1", "label": "Geometry Feature"},
+            {"tag": "dif1", "label": "Geometry Feature"},
+        ],
+        "count": 2,
+    }

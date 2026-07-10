@@ -79,6 +79,36 @@ def add_geometry_feature(
     return result
 
 
+def list_geometry_features(
+    model,
+    *,
+    geometry_name: Optional[str] = None,
+    component_name: str = "comp1",
+) -> dict:
+    """List geometry feature tags and labels through clientapi."""
+    geom, error = _get_geometry_node(model, geometry_name, component_name)
+    if error:
+        return {"success": False, "error": error}
+
+    features = []
+    feature_list = geom.feature()
+    for tag in list(feature_list.tags()):
+        feature = feature_list.get(tag)
+        info = {"tag": tag}
+        try:
+            info["label"] = str(feature.label())
+        except Exception:
+            info["label"] = tag
+        features.append(info)
+    return {
+        "success": True,
+        "geometry": geometry_name or str(geom.tag()),
+        "component": component_name,
+        "features": features,
+        "count": len(features),
+    }
+
+
 def register_geometry_tools(mcp: FastMCP) -> None:
     """Register geometry tools with the MCP server."""
     
@@ -678,6 +708,7 @@ def register_geometry_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     def geometry_list_features(
         geometry_name: Optional[str] = None,
+        component_name: str = "comp1",
         model_name: Optional[str] = None
     ) -> dict:
         """
@@ -685,6 +716,7 @@ def register_geometry_tools(mcp: FastMCP) -> None:
         
         Args:
             geometry_name: Geometry sequence name (default: first geometry)
+            component_name: Component containing the geometry (default: comp1)
             model_name: Model name (default: current model)
         
         Returns:
@@ -698,30 +730,10 @@ def register_geometry_tools(mcp: FastMCP) -> None:
             }
         
         try:
-            geometries = model.geometries()
-            if not geometries:
-                return {"success": False, "error": "No geometry sequences found."}
-            
-            target_geom = geometry_name or geometries[0]
-            if target_geom not in geometries:
-                return {"success": False, "error": f"Geometry not found: {target_geom}"}
-            
-            geom_node = model / "geometries" / target_geom
-            features = []
-            
-            for child in geom_node.children():
-                feat_info = {"name": child.name()}
-                try:
-                    feat_info["type"] = child.type() if hasattr(child, 'type') else "unknown"
-                except Exception:
-                    pass
-                features.append(feat_info)
-            
-            return {
-                "success": True,
-                "geometry": target_geom,
-                "features": features,
-                "count": len(features),
-            }
+            return list_geometry_features(
+                model,
+                geometry_name=geometry_name,
+                component_name=component_name,
+            )
         except Exception as e:
             return {"success": False, "error": f"Failed to list features: {str(e)}"}
