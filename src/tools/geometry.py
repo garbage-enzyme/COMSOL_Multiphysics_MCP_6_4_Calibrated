@@ -37,6 +37,48 @@ def _get_geometry_node(model, geometry_name: Optional[str], component_name: str 
         return None, f"Failed to get geometry: {str(e)}"
 
 
+def add_geometry_feature(
+    model,
+    feature_type: str,
+    *,
+    geometry_name: Optional[str] = None,
+    component_name: str = "comp1",
+    feature_name: Optional[str] = None,
+    properties: Optional[dict] = None,
+) -> dict:
+    """Create a generic geometry feature through the 6.4 clientapi."""
+    if not feature_type.strip():
+        return {"success": False, "error": "feature_type must not be empty."}
+
+    geom, error = _get_geometry_node(model, geometry_name, component_name)
+    if error:
+        return {"success": False, "error": error}
+
+    feature_list = geom.feature()
+    tag = feature_name or f"feat{feature_list.size() + 1}"
+    feature = feature_list.create(tag, feature_type)
+    property_errors = {}
+    for name, value in (properties or {}).items():
+        try:
+            feature.set(name, value)
+        except Exception as exc:
+            property_errors[name] = str(exc)
+
+    result = {
+        "success": True,
+        "feature": {
+            "name": tag,
+            "type": feature_type,
+            "geometry": geometry_name or str(geom.tag()),
+            "component": component_name,
+        },
+    }
+    if property_errors:
+        result["warning"] = "Feature created, but some properties could not be set."
+        result["property_errors"] = property_errors
+    return result
+
+
 def register_geometry_tools(mcp: FastMCP) -> None:
     """Register geometry tools with the MCP server."""
     
@@ -123,6 +165,7 @@ def register_geometry_tools(mcp: FastMCP) -> None:
     def geometry_add_feature(
         feature_type: str,
         geometry_name: Optional[str] = None,
+        component_name: str = "comp1",
         feature_name: Optional[str] = None,
         model_name: Optional[str] = None,
         **kwargs
@@ -145,6 +188,7 @@ def register_geometry_tools(mcp: FastMCP) -> None:
         Args:
             feature_type: Type of geometry feature (Block, Cylinder, etc.)
             geometry_name: Geometry sequence name (default: first geometry)
+            component_name: Component containing the geometry (default: comp1)
             feature_name: Name for the feature (auto-generated if None)
             model_name: Model name (default: current model)
             **kwargs: Feature-specific properties (position, size, etc.)
@@ -160,31 +204,14 @@ def register_geometry_tools(mcp: FastMCP) -> None:
             }
         
         try:
-            geometries = model.geometries()
-            if not geometries:
-                return {"success": False, "error": "No geometry sequences found. Create one first."}
-            
-            target_geom = geometry_name or geometries[0]
-            if target_geom not in geometries:
-                return {"success": False, "error": f"Geometry not found: {target_geom}"}
-            
-            geom_node = model / "geometries" / target_geom
-            feature_node = geom_node.create(feature_type, feature_name)
-            
-            for prop_name, prop_value in kwargs.items():
-                try:
-                    feature_node.property(prop_name, prop_value)
-                except Exception:
-                    pass
-            
-            return {
-                "success": True,
-                "feature": {
-                    "name": feature_node.name() if hasattr(feature_node, 'name') else feature_name,
-                    "type": feature_type,
-                    "geometry": target_geom,
-                }
-            }
+            return add_geometry_feature(
+                model,
+                feature_type,
+                geometry_name=geometry_name,
+                component_name=component_name,
+                feature_name=feature_name,
+                properties=kwargs,
+            )
         except Exception as e:
             return {"success": False, "error": f"Failed to add geometry feature: {str(e)}"}
     
