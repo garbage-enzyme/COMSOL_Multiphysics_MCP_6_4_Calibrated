@@ -1,10 +1,77 @@
 """Results evaluation and export tools for COMSOL MCP Server."""
 
-from typing import Optional, Union, Sequence
-from pathlib import Path
+from typing import Any, Optional, Union, Sequence
+
 from mcp.server.fastmcp import FastMCP
+import numpy as np
 
 from .session import session_manager
+
+
+def _json_safe(value: Any) -> Any:
+    """Recursively convert NumPy and complex values to JSON-safe objects."""
+    if isinstance(value, np.ndarray):
+        return _json_safe(value.tolist())
+    if isinstance(value, np.generic):
+        return _json_safe(value.item())
+    if isinstance(value, complex):
+        return {"real": float(value.real), "imag": float(value.imag)}
+    if isinstance(value, tuple):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, list):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    return value
+
+
+def evaluate_result(
+    model,
+    expression: Union[str, Sequence[str]],
+    *,
+    unit: Optional[str] = None,
+    dataset: Optional[str] = None,
+    inner: Optional[Union[int, str, Sequence[int]]] = None,
+    outer: Optional[Union[int, Sequence[int]]] = None,
+) -> dict:
+    """Evaluate model data and normalize the response for MCP transport."""
+    result = model.evaluate(
+        expression,
+        unit=unit,
+        dataset=dataset,
+        inner=inner,
+        outer=outer,
+    )
+    shape = list(result.shape) if isinstance(result, np.ndarray) else None
+    return {
+        "success": True,
+        "expression": expression,
+        "unit": unit,
+        "dataset": dataset,
+        "value": _json_safe(result),
+        "shape": shape,
+    }
+
+
+def evaluate_global_result(
+    model,
+    expression: str,
+    *,
+    unit: Optional[str] = None,
+    dataset: Optional[str] = None,
+) -> dict:
+    """Evaluate a global expression and return its first JSON-safe scalar."""
+    result = model.evaluate(expression, unit=unit, dataset=dataset)
+    array = np.asarray(result)
+    if array.size == 0:
+        raise ValueError("Global evaluation returned no values.")
+    value = _json_safe(array.reshape(-1)[0])
+    return {
+        "success": True,
+        "expression": expression,
+        "unit": unit,
+        "value": value,
+    }
 
 
 def register_results_tools(mcp: FastMCP) -> None:
@@ -41,33 +108,14 @@ def register_results_tools(mcp: FastMCP) -> None:
             }
         
         try:
-            result = model.evaluate(
+            return evaluate_result(
+                model,
                 expression,
                 unit=unit,
                 dataset=dataset,
                 inner=inner,
                 outer=outer,
             )
-            
-            import numpy as np
-            if isinstance(result, np.ndarray):
-                if result.ndim == 0:
-                    value = float(result)
-                else:
-                    value = result.tolist()
-            elif isinstance(result, (list, tuple)):
-                value = [v.tolist() if hasattr(v, 'tolist') else v for v in result]
-            else:
-                value = result
-            
-            return {
-                "success": True,
-                "expression": expression,
-                "unit": unit,
-                "dataset": dataset,
-                "value": value,
-                "shape": getattr(result, 'shape', None),
-            }
         except Exception as e:
             return {"success": False, "error": f"Failed to evaluate: {str(e)}"}
     
@@ -103,20 +151,12 @@ def register_results_tools(mcp: FastMCP) -> None:
             }
         
         try:
-            result = model.evaluate(expression, unit=unit, dataset=dataset)
-            
-            import numpy as np
-            if isinstance(result, np.ndarray):
-                value = float(result.flatten()[0])
-            else:
-                value = float(result)
-            
-            return {
-                "success": True,
-                "expression": expression,
-                "unit": unit,
-                "value": value,
-            }
+            return evaluate_global_result(
+                model,
+                expression,
+                unit=unit,
+                dataset=dataset,
+            )
         except Exception as e:
             return {"success": False, "error": f"Failed to evaluate global expression: {str(e)}"}
     
