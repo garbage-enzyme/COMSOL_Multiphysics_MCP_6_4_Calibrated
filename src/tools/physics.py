@@ -150,6 +150,35 @@ def list_physics_features(model, physics_name: str) -> dict:
     }
 
 
+def remove_physics_interface(model, physics_name: str) -> dict:
+    """Remove a physics interface by tag or label through clientapi."""
+    jm = model.java
+    available = []
+    for component_tag in list(jm.component().tags()):
+        component = jm.component().get(component_tag)
+        physics_list = component.physics()
+        for tag in list(physics_list.tags()):
+            physics = physics_list.get(tag)
+            try:
+                label = str(physics.label())
+            except Exception:
+                label = tag
+            available.append({"component": component_tag, "tag": tag, "label": label})
+            if physics_name in {tag, label}:
+                physics_list.remove(tag)
+                return {
+                    "success": True,
+                    "removed": tag,
+                    "label": label,
+                    "component": component_tag,
+                }
+    return {
+        "success": False,
+        "error": f"Physics interface not found: {physics_name}",
+        "available": available,
+    }
+
+
 PHYSICS_INTERFACES = {
     "AC/DC": {
         "electrostatic": "Electrostatics (es)",
@@ -886,17 +915,7 @@ def register_physics_tools(mcp: FastMCP) -> None:
             }
         
         try:
-            physics_interfaces = model.physics()
-            if physics_name not in physics_interfaces:
-                return {"success": False, "error": f"Physics interface not found: {physics_name}"}
-            
-            physics_node = model / "physics" / physics_name
-            model.remove(physics_node)
-            
-            return {
-                "success": True,
-                "removed": physics_name,
-            }
+            return remove_physics_interface(model, physics_name)
         except Exception as e:
             return {"success": False, "error": f"Failed to remove physics: {str(e)}"}
     

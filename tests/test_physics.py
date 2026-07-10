@@ -1,6 +1,10 @@
 """Unit tests for physics helpers without a COMSOL client."""
 
-from src.tools.physics import add_physics_interface, list_physics_features
+from src.tools.physics import (
+    add_physics_interface,
+    list_physics_features,
+    remove_physics_interface,
+)
 
 
 class FakePhysics:
@@ -170,6 +174,9 @@ class ListingPhysicsList:
     def get(self, tag):
         return self.physics[tag]
 
+    def remove(self, tag):
+        del self.physics[tag]
+
 
 class ListingComponent:
     def __init__(self, physics):
@@ -229,3 +236,31 @@ def test_list_physics_features_accepts_physics_label():
 
     assert result["success"] is True
     assert result["count"] == 2
+
+
+def test_remove_physics_interface_accepts_label():
+    physics = {"ewfd": FakePhysicsNode()}
+    model = ListingModel(physics)
+
+    result = remove_physics_interface(
+        model,
+        "Electromagnetic Waves, Frequency Domain",
+    )
+
+    assert result == {
+        "success": True,
+        "removed": "ewfd",
+        "label": "Electromagnetic Waves, Frequency Domain",
+        "component": "comp1",
+    }
+    assert physics == {}
+
+
+def test_remove_physics_interface_reports_available_nodes():
+    result = remove_physics_interface(
+        ListingModel({"ewfd": FakePhysicsNode()}),
+        "missing",
+    )
+
+    assert result["success"] is False
+    assert result["available"][0]["tag"] == "ewfd"
