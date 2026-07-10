@@ -1,5 +1,6 @@
 """Geometry tools for COMSOL MCP Server."""
 
+from pathlib import Path
 from typing import Optional, Sequence
 from mcp.server.fastmcp import FastMCP
 
@@ -168,6 +169,37 @@ def add_union_feature(
             "geometry": geometry_name or str(geom.tag()),
             "component": component_name,
             "input_objects": objects,
+        },
+    }
+
+
+def add_import_feature(
+    model,
+    file_path: str,
+    *,
+    geometry_name: Optional[str] = None,
+    component_name: str = "comp1",
+    feature_name: Optional[str] = None,
+) -> dict:
+    """Create a geometry Import feature with an absolute source path."""
+    path = Path(file_path).expanduser().resolve()
+    if not path.is_file():
+        return {"success": False, "error": f"Import file not found: {path}"}
+
+    geom, error = _get_geometry_node(model, geometry_name, component_name)
+    if error:
+        return {"success": False, "error": error}
+    tag = feature_name or f"imp{geom.feature().size() + 1}"
+    feature = geom.feature().create(tag, "Import")
+    feature.set("filename", str(path))
+    return {
+        "success": True,
+        "feature": {
+            "name": tag,
+            "type": "Import",
+            "geometry": geometry_name or str(geom.tag()),
+            "component": component_name,
+            "file": str(path),
         },
     }
 
@@ -663,6 +695,8 @@ def register_geometry_tools(mcp: FastMCP) -> None:
         file_path: str,
         geometry_name: Optional[str] = None,
         import_type: str = "CAD",
+        component_name: str = "comp1",
+        feature_name: Optional[str] = None,
         model_name: Optional[str] = None
     ) -> dict:
         """
@@ -674,6 +708,8 @@ def register_geometry_tools(mcp: FastMCP) -> None:
             file_path: Path to the CAD file
             geometry_name: Geometry sequence name
             import_type: Import type (CAD, mesh, etc.)
+            component_name: Component containing the geometry (default: comp1)
+            feature_name: Optional feature tag
             model_name: Model name (default: current model)
         
         Returns:
@@ -687,26 +723,16 @@ def register_geometry_tools(mcp: FastMCP) -> None:
             }
         
         try:
-            geometries = model.geometries()
-            if not geometries:
-                return {"success": False, "error": "No geometry sequences found."}
-            
-            target_geom = geometry_name or geometries[0]
-            geom_node = model / "geometries" / target_geom
-            import_node = geom_node.create("Import")
-            
-            model.import_(import_node, file_path)
-            
-            return {
-                "success": True,
-                "feature": {
-                    "name": import_node.name() if hasattr(import_node, 'name') else "Import",
-                    "type": "Import",
-                    "geometry": target_geom,
-                    "file": file_path,
-                    "import_type": import_type,
-                }
-            }
+            result = add_import_feature(
+                model,
+                file_path,
+                geometry_name=geometry_name,
+                component_name=component_name,
+                feature_name=feature_name,
+            )
+            if result["success"]:
+                result["feature"]["import_type"] = import_type
+            return result
         except Exception as e:
             return {"success": False, "error": f"Failed to import geometry: {str(e)}"}
     

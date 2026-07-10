@@ -3,6 +3,7 @@
 from src.tools.geometry import (
     add_circle_feature,
     add_geometry_feature,
+    add_import_feature,
     add_union_feature,
     list_geometry_features,
 )
@@ -205,5 +206,31 @@ def test_add_union_feature_sets_input_selection():
 
 def test_add_union_feature_requires_inputs():
     result = add_union_feature(FakeModel(FakeGeometry()), [])
+
+    assert result["success"] is False
+
+
+def test_add_import_feature_sets_absolute_filename(tmp_path):
+    source = tmp_path / "part.step"
+    source.write_text("dummy", encoding="utf-8")
+    geometry = FakeGeometry()
+
+    result = add_import_feature(
+        FakeModel(geometry),
+        str(source),
+        feature_name="imp1",
+    )
+
+    feature_type, feature = geometry.features.features["imp1"]
+    assert feature_type == "Import"
+    assert feature.properties["filename"] == str(source.resolve())
+    assert result["feature"]["file"] == str(source.resolve())
+
+
+def test_add_import_feature_requires_existing_file(tmp_path):
+    result = add_import_feature(
+        FakeModel(FakeGeometry()),
+        str(tmp_path / "missing.step"),
+    )
 
     assert result["success"] is False
