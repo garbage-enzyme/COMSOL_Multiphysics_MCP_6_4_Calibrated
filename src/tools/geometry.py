@@ -109,6 +109,38 @@ def list_geometry_features(
     }
 
 
+def add_circle_feature(
+    model,
+    position: Sequence[float],
+    radius: float,
+    *,
+    geometry_name: Optional[str] = None,
+    component_name: str = "comp1",
+    feature_name: Optional[str] = None,
+) -> dict:
+    """Add a validated 2D Circle feature through clientapi."""
+    if len(position) != 2:
+        return {"success": False, "error": "position must contain exactly 2 values."}
+    if radius <= 0:
+        return {"success": False, "error": "radius must be positive."}
+
+    result = add_geometry_feature(
+        model,
+        "Circle",
+        geometry_name=geometry_name,
+        component_name=component_name,
+        feature_name=feature_name,
+        properties={
+            "pos": [str(value) for value in position],
+            "r": str(radius),
+        },
+    )
+    if result["success"]:
+        result["feature"]["position"] = list(position)
+        result["feature"]["radius"] = radius
+    return result
+
+
 def register_geometry_tools(mcp: FastMCP) -> None:
     """Register geometry tools with the MCP server."""
     
@@ -466,6 +498,8 @@ def register_geometry_tools(mcp: FastMCP) -> None:
         position: Sequence[float] = (0, 0),
         radius: float = 0.5,
         geometry_name: Optional[str] = None,
+        component_name: str = "comp1",
+        feature_name: Optional[str] = None,
         model_name: Optional[str] = None
     ) -> dict:
         """
@@ -475,6 +509,8 @@ def register_geometry_tools(mcp: FastMCP) -> None:
             position: Center [x, y] in meters
             radius: Radius in meters (default: 0.5)
             geometry_name: Geometry sequence name
+            component_name: Component containing the geometry (default: comp1)
+            feature_name: Optional feature tag
             model_name: Model name (default: current model)
         
         Returns:
@@ -488,28 +524,14 @@ def register_geometry_tools(mcp: FastMCP) -> None:
             }
         
         try:
-            geometries = model.geometries()
-            if not geometries:
-                return {"success": False, "error": "No geometry sequences found."}
-            
-            target_geom = geometry_name or geometries[0]
-            geom_node = model / "geometries" / target_geom
-            circle_node = geom_node.create("Circle")
-            
-            if len(position) == 2:
-                circle_node.property("pos", list(position))
-            circle_node.property("r", radius)
-            
-            return {
-                "success": True,
-                "feature": {
-                    "name": circle_node.name() if hasattr(circle_node, 'name') else "Circle",
-                    "type": "Circle",
-                    "geometry": target_geom,
-                    "position": list(position),
-                    "radius": radius,
-                }
-            }
+            return add_circle_feature(
+                model,
+                position,
+                radius,
+                geometry_name=geometry_name,
+                component_name=component_name,
+                feature_name=feature_name,
+            )
         except Exception as e:
             return {"success": False, "error": f"Failed to add circle: {str(e)}"}
     

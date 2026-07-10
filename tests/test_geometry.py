@@ -1,6 +1,10 @@
 """Unit tests for geometry helpers without a COMSOL client."""
 
-from src.tools.geometry import add_geometry_feature, list_geometry_features
+from src.tools.geometry import (
+    add_circle_feature,
+    add_geometry_feature,
+    list_geometry_features,
+)
 
 
 class FakeFeature:
@@ -143,3 +147,27 @@ def test_list_geometry_features_returns_tags_and_labels():
         ],
         "count": 2,
     }
+
+
+def test_add_circle_feature_uses_clientapi_properties():
+    geometry = FakeGeometry()
+
+    result = add_circle_feature(
+        FakeModel(geometry),
+        [1.0, 2.0],
+        0.5,
+        feature_name="c1",
+    )
+
+    feature_type, feature = geometry.features.features["c1"]
+    assert feature_type == "Circle"
+    assert feature.properties == {"pos": ["1.0", "2.0"], "r": "0.5"}
+    assert result["feature"]["position"] == [1.0, 2.0]
+    assert result["feature"]["radius"] == 0.5
+
+
+def test_add_circle_feature_validates_geometry_values():
+    model = FakeModel(FakeGeometry())
+
+    assert add_circle_feature(model, [0], 1)["success"] is False
+    assert add_circle_feature(model, [0, 0], 0)["success"] is False
