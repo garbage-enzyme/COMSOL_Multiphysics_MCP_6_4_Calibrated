@@ -141,6 +141,37 @@ def add_circle_feature(
     return result
 
 
+def add_union_feature(
+    model,
+    input_objects: Sequence[str],
+    *,
+    geometry_name: Optional[str] = None,
+    component_name: str = "comp1",
+    feature_name: Optional[str] = None,
+) -> dict:
+    """Add a Boolean Union and its input-object selection through clientapi."""
+    objects = [str(item) for item in input_objects]
+    if not objects:
+        return {"success": False, "error": "input_objects must not be empty."}
+
+    geom, error = _get_geometry_node(model, geometry_name, component_name)
+    if error:
+        return {"success": False, "error": error}
+    tag = feature_name or f"uni{geom.feature().size() + 1}"
+    union = geom.feature().create(tag, "Union")
+    union.selection("input").set(objects)
+    return {
+        "success": True,
+        "feature": {
+            "name": tag,
+            "type": "Union",
+            "geometry": geometry_name or str(geom.tag()),
+            "component": component_name,
+            "input_objects": objects,
+        },
+    }
+
+
 def register_geometry_tools(mcp: FastMCP) -> None:
     """Register geometry tools with the MCP server."""
     
@@ -539,6 +570,8 @@ def register_geometry_tools(mcp: FastMCP) -> None:
     def geometry_boolean_union(
         input_objects: Sequence[str],
         geometry_name: Optional[str] = None,
+        component_name: str = "comp1",
+        feature_name: Optional[str] = None,
         model_name: Optional[str] = None
     ) -> dict:
         """
@@ -547,6 +580,8 @@ def register_geometry_tools(mcp: FastMCP) -> None:
         Args:
             input_objects: Names of objects to unite
             geometry_name: Geometry sequence name
+            component_name: Component containing the geometry (default: comp1)
+            feature_name: Optional feature tag
             model_name: Model name (default: current model)
         
         Returns:
@@ -560,24 +595,13 @@ def register_geometry_tools(mcp: FastMCP) -> None:
             }
         
         try:
-            geometries = model.geometries()
-            if not geometries:
-                return {"success": False, "error": "No geometry sequences found."}
-            
-            target_geom = geometry_name or geometries[0]
-            geom_node = model / "geometries" / target_geom
-            union_node = geom_node.create("Union")
-            union_node.property("input", list(input_objects))
-            
-            return {
-                "success": True,
-                "feature": {
-                    "name": union_node.name() if hasattr(union_node, 'name') else "Union",
-                    "type": "Union",
-                    "geometry": target_geom,
-                    "input_objects": list(input_objects),
-                }
-            }
+            return add_union_feature(
+                model,
+                input_objects,
+                geometry_name=geometry_name,
+                component_name=component_name,
+                feature_name=feature_name,
+            )
         except Exception as e:
             return {"success": False, "error": f"Failed to create union: {str(e)}"}
     

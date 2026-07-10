@@ -3,6 +3,7 @@
 from src.tools.geometry import (
     add_circle_feature,
     add_geometry_feature,
+    add_union_feature,
     list_geometry_features,
 )
 
@@ -11,6 +12,7 @@ class FakeFeature:
     def __init__(self, failing_property=None):
         self.properties = {}
         self.failing_property = failing_property
+        self.selections = {}
 
     def set(self, name, value):
         if name == self.failing_property:
@@ -19,6 +21,19 @@ class FakeFeature:
 
     def label(self):
         return "Geometry Feature"
+
+    def selection(self, name):
+        if name not in self.selections:
+            self.selections[name] = FakeObjectSelection()
+        return self.selections[name]
+
+
+class FakeObjectSelection:
+    def __init__(self):
+        self.objects = None
+
+    def set(self, objects):
+        self.objects = objects
 
 
 class FakeFeatureList:
@@ -171,3 +186,24 @@ def test_add_circle_feature_validates_geometry_values():
 
     assert add_circle_feature(model, [0], 1)["success"] is False
     assert add_circle_feature(model, [0, 0], 0)["success"] is False
+
+
+def test_add_union_feature_sets_input_selection():
+    geometry = FakeGeometry()
+
+    result = add_union_feature(
+        FakeModel(geometry),
+        ["blk1", "blk2"],
+        feature_name="uni1",
+    )
+
+    feature_type, feature = geometry.features.features["uni1"]
+    assert feature_type == "Union"
+    assert feature.selections["input"].objects == ["blk1", "blk2"]
+    assert result["feature"]["input_objects"] == ["blk1", "blk2"]
+
+
+def test_add_union_feature_requires_inputs():
+    result = add_union_feature(FakeModel(FakeGeometry()), [])
+
+    assert result["success"] is False
