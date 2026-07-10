@@ -8,6 +8,20 @@ from .session import session_manager
 
 _tag_counter = {}
 
+PHYSICS_TYPE_ALIASES = {
+    "es": ("es", "Electrostatics"),
+    "electrostatics": ("es", "Electrostatics"),
+    "ec": ("ec", "ConductiveMedia"),
+    "electriccurrents": ("ec", "ConductiveMedia"),
+    "conductivemedia": ("ec", "ConductiveMedia"),
+    "solid": ("solid", "SolidMechanics"),
+    "solidmechanics": ("solid", "SolidMechanics"),
+    "ht": ("ht", "HeatTransfer"),
+    "heattransfer": ("ht", "HeatTransfer"),
+    "spf": ("spf", "LaminarFlow"),
+    "laminarflow": ("spf", "LaminarFlow"),
+}
+
 
 def _first_component(jm):
     """Return the first component's Java object.
@@ -53,6 +67,55 @@ def _make_tag(prefix="bc"):
     """Generate a unique tag using a monotonic counter."""
     _tag_counter[prefix] = _tag_counter.get(prefix, 0) + 1
     return f"{prefix}_{_tag_counter[prefix]}"
+
+
+def _physics_spec(physics_type: str) -> tuple[str, str]:
+    """Return the conventional tag prefix and clientapi interface type."""
+    normalized = physics_type.replace(" ", "").replace("_", "").casefold()
+    if normalized in PHYSICS_TYPE_ALIASES:
+        return PHYSICS_TYPE_ALIASES[normalized]
+    tag = physics_type.replace(" ", "_").lower()
+    return tag, physics_type
+
+
+def add_physics_interface(
+    model,
+    physics_type: str,
+    *,
+    component_name: Optional[str] = None,
+) -> dict:
+    """Add a physics interface with alias normalization for clientapi."""
+    if not physics_type.strip():
+        return {"success": False, "error": "physics_type must not be empty."}
+
+    jm = model.java
+    comp = jm.component(component_name) if component_name else _first_component(jm)
+    if comp is None:
+        return {"success": False, "error": f"Component not found: {component_name}"}
+
+    tag_prefix, interface_type = _physics_spec(physics_type)
+    existing = set(comp.physics().tags())
+    tag = tag_prefix
+    index = 2
+    while tag in existing:
+        tag = f"{tag_prefix}{index}"
+        index += 1
+
+    physics_java = comp.physics().create(tag, interface_type, _component_sdim(comp))
+    return {
+        "success": True,
+        "physics": {
+            "name": (
+                physics_java.label()
+                if hasattr(physics_java, "label")
+                else interface_type
+            ),
+            "type": interface_type,
+            "requested_type": physics_type,
+            "tag": tag,
+            "component": comp.tag(),
+        },
+    }
 
 
 PHYSICS_INTERFACES = {
@@ -180,28 +243,11 @@ def register_physics_tools(mcp: FastMCP) -> None:
             }
 
         try:
-            jm = model.java
-
-            if component_name:
-                comp = jm.component(component_name)
-            else:
-                comp = _first_component(jm)
-
-            if comp is None:
-                return {"success": False, "error": f"Component not found: {component_name}"}
-
-            tag = physics_type.replace(" ", "_").lower()
-            physics_java = comp.physics().create(tag, physics_type, _component_sdim(comp))
-
-            return {
-                "success": True,
-                "physics": {
-                    "name": physics_java.label() if hasattr(physics_java, 'label') else physics_type,
-                    "type": physics_type,
-                    "tag": tag,
-                    "component": comp.tag(),
-                }
-            }
+            return add_physics_interface(
+                model,
+                physics_type,
+                component_name=component_name,
+            )
         except Exception as e:
             return {"success": False, "error": f"Failed to add physics: {str(e)}"}
     
