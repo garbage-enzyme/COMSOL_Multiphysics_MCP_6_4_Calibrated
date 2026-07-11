@@ -5,6 +5,7 @@ import sys
 from mcp.server.fastmcp import FastMCP
 
 from src.knowledge.embedded import register_knowledge_tools
+import src.server as server_module
 from src.server import create_server, register_all_resources, register_all_tools
 from src.tools.capabilities import get_capabilities, startup_capability_summary
 
@@ -85,3 +86,14 @@ def test_startup_capability_summary_is_compact_and_truthful(monkeypatch):
     assert "lexical_manual=enabled" in summary
     assert "durable_jobs=unavailable" in summary
     assert "cancellation=cooperative_only" in summary
+
+
+def test_spawn_child_is_not_a_server_transport_entrypoint(monkeypatch):
+    monkeypatch.setattr(server_module, "__name__", "__main__")
+    monkeypatch.setattr(
+        server_module.mp,
+        "current_process",
+        lambda: type("Process", (), {"name": "SpawnProcess-1"})(),
+    )
+
+    assert server_module._is_transport_entrypoint() is False

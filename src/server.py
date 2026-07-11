@@ -1,6 +1,7 @@
 """COMSOL MCP Server - Main entry point."""
 
 import logging
+import multiprocessing as mp
 from weakref import WeakSet
 
 from mcp.server.fastmcp import FastMCP
@@ -60,5 +61,10 @@ def main() -> None:
     mcp.run()
 
 
-if __name__ == "__main__":
+def _is_transport_entrypoint() -> bool:
+    """Avoid re-running ``main`` when Windows spawn re-imports this module."""
+    return __name__ == "__main__" and mp.current_process().name == "MainProcess"
+
+
+if _is_transport_entrypoint():
     main()

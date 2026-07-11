@@ -14,6 +14,8 @@ import multiprocessing as mp
 import os
 import re
 import sqlite3
+import subprocess
+import sys
 import time
 import math
 from pathlib import Path
@@ -370,56 +372,45 @@ def read_index_pages(
     }
 
 
-def _worker(operation: str, arguments: dict, output) -> None:
-    try:
-        if operation == "search":
-            result = search_index(**arguments)
-        elif operation == "read":
-            result = read_index_pages(**arguments)
-        else:
-            raise ValueError(f"Unknown lexical manual operation: {operation}")
-        output.send(result)
-    except Exception as exc:
-        output.send(
-            {
-                "success": False,
-                "error_type": type(exc).__name__,
-                "error": str(exc),
-            }
-        )
-    finally:
-        output.close()
-
-
 def run_bounded(operation: str, arguments: dict, timeout: float) -> dict:
-    """Run one index operation in a worker that is killed at the deadline."""
-    context = mp.get_context("spawn")
-    receiver, sender = context.Pipe(duplex=False)
-    process = context.Process(target=_worker, args=(operation, arguments, sender))
-    process.start()
-    sender.close()
-    if not receiver.poll(max(0.05, float(timeout))):
-        process.terminate()
-        process.join(1.0)
-        receiver.close()
+    """Run one operation in a lightweight worker and enforce a hard deadline.
+
+    ``multiprocessing.spawn`` re-imports the MCP server on Windows, making a
+    lexical query pay the complete tool-registration startup cost.  Invoke a
+    dedicated module instead so the worker imports only the SQLite search code.
+    """
+    command = [sys.executable, "-m", "src.knowledge.lexical_worker"]
+    try:
+        completed = subprocess.run(
+            command,
+            input=json.dumps({"operation": operation, "arguments": arguments}),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=max(0.05, float(timeout)),
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
         return {
             "success": False,
             "error_type": "TimeoutError",
             "error": f"Manual {operation} exceeded the {timeout:.2f}s deadline",
         }
-    try:
-        result = receiver.recv()
-    except EOFError:
+    if completed.returncode != 0:
         return {
             "success": False,
             "error_type": "WorkerError",
-            "error": f"Manual {operation} worker exited without a response",
+            "error": completed.stderr.strip() or f"worker exited with code {completed.returncode}",
         }
-    else:
-        process.join(1.0)
-        return result
-    finally:
-        receiver.close()
+    try:
+        return json.loads(completed.stdout)
+    except json.JSONDecodeError:
+        return {
+            "success": False,
+            "error_type": "WorkerError",
+            "error": "worker returned invalid JSON",
+        }
 
 
 def register_lexical_manual_tools(mcp) -> None:
