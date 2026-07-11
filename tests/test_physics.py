@@ -4,6 +4,7 @@ from src.tools.physics import (
     add_boundary_condition,
     add_domain_feature,
     add_physics_interface,
+    assign_material,
     list_physics_features,
     remove_physics_interface,
     setup_flow_boundaries,
@@ -469,6 +470,97 @@ def test_add_domain_feature_uses_owning_component_dimension():
     assert result["success"] is True
     assert target_physics.features.created[0][0:3] == ("solid1", "Solid", 2)
     assert result["domain_feature"]["sdim"] == 2
+
+
+class MaterialSelection:
+    def __init__(self):
+        self.domains = None
+
+    def set(self, domains):
+        self.domains = domains
+
+
+class MaterialGroup:
+    def __init__(self):
+        self.properties = {}
+
+    def set(self, name, value):
+        self.properties[name] = value
+
+
+class MaterialNode:
+    def __init__(self, tag, label):
+        self.material_tag = tag
+        self.material_label = label
+        self.selection_node = MaterialSelection()
+        self.group = MaterialGroup()
+
+    def label(self, value=None):
+        if value is not None:
+            self.material_label = value
+        return self.material_label
+
+    def selection(self):
+        return self.selection_node
+
+    def propertyGroup(self, tag):
+        assert tag == "def"
+        return self.group
+
+
+class MaterialList:
+    def __init__(self, nodes=None):
+        self.nodes = nodes or {}
+        self.created = []
+
+    def tags(self):
+        return list(self.nodes)
+
+    def get(self, tag):
+        return self.nodes[tag]
+
+    def create(self, tag, material_type):
+        node = MaterialNode(tag, tag)
+        self.nodes[tag] = node
+        self.created.append((tag, material_type))
+        return node
+
+
+class MaterialComponent(DimensionComponent):
+    def __init__(self, dimension, physics_tag, physics, materials):
+        super().__init__(dimension, physics_tag, physics)
+        self.materials = materials
+
+    def tag(self):
+        return "comp2"
+
+    def material(self):
+        return self.materials
+
+
+def test_assign_material_reuses_existing_material_in_physics_component():
+    existing = MaterialNode("mat1", "Silicon")
+    materials = MaterialList({"mat1": existing})
+    target = MaterialComponent(2, "ht", BoundaryPhysics(), materials)
+    model = FakeModel(FakeComponent())
+    model.java = MultiComponentJava(
+        {"comp1": DimensionComponent(3), "comp2": target}
+    )
+
+    result = assign_material(
+        model,
+        "ht",
+        "Silicon",
+        domain_selection=[1],
+        properties={"density": "2329[kg/m^3]"},
+    )
+
+    assert result["success"] is True
+    assert result["component"] == "comp2"
+    assert result["material_tag"] == "mat1"
+    assert materials.created == []
+    assert existing.selection_node.domains == [1]
+    assert existing.group.properties["density"] == ["2329[kg/m^3]"]
 
 
 def test_setup_flow_boundaries_uses_clientapi_features():

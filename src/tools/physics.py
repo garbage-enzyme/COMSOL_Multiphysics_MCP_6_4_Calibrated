@@ -200,6 +200,86 @@ def add_domain_feature(
     return result
 
 
+def assign_material(
+    model,
+    physics_name: str,
+    material_name: str,
+    *,
+    domain_selection: Optional[Sequence[int]] = None,
+    properties: Optional[dict] = None,
+) -> dict:
+    """Create or reuse a material in the target physics component."""
+    comp, physics = _find_physics_context(model.java, physics_name)
+    if physics is None:
+        return {
+            "success": False,
+            "error": f"Physics interface not found: {physics_name}",
+        }
+
+    material_list = comp.material()
+    material = None
+    material_tag = None
+    for tag in list(material_list.tags()):
+        node = material_list.get(tag)
+        try:
+            label = str(node.label())
+        except Exception:
+            label = str(tag)
+        if str(tag) == material_name or label == material_name:
+            material = node
+            material_tag = str(tag)
+            break
+
+    if material is None:
+        base_tag = material_name.replace(" ", "_").replace("-", "_") or "mat"
+        existing = {str(tag) for tag in material_list.tags()}
+        material_tag = base_tag
+        index = 2
+        while material_tag in existing:
+            material_tag = f"{base_tag}{index}"
+            index += 1
+        material = material_list.create(material_tag, "Common")
+        material.label(material_name)
+
+    if domain_selection:
+        material.selection().set([int(domain) for domain in domain_selection])
+
+    property_errors = {}
+    if properties:
+        try:
+            group = material.propertyGroup("def")
+        except Exception as exc:
+            return {
+                "success": False,
+                "error": (
+                    f"Material '{material_tag}' has no 'def' property group to "
+                    f"write physical properties into: {exc}"
+                ),
+            }
+        for name, value in properties.items():
+            try:
+                group.set(name, [value])
+            except Exception:
+                try:
+                    group.set(name, value)
+                except Exception as exc:
+                    property_errors[name] = str(exc)
+
+    result = {
+        "success": True,
+        "material": material_name,
+        "material_tag": material_tag,
+        "physics": physics_name,
+        "component": str(comp.tag()),
+        "domain_selection": list(domain_selection) if domain_selection else "all",
+        "message": f"Material '{material_name}' assigned to physics '{physics_name}'",
+    }
+    if property_errors:
+        result["warning"] = "Some material properties could not be set."
+        result["property_errors"] = property_errors
+    return result
+
+
 def setup_flow_boundaries(
     model,
     physics_name: str,
@@ -964,65 +1044,13 @@ def register_physics_tools(mcp: FastMCP) -> None:
             }
 
         try:
-            jm = model.java
-            materials = model.materials()
-            tag = material_name.replace(" ", "_").replace("-", "_")
-
-            if material_name not in materials:
-                comp = _first_component(jm)
-                if comp is None:
-                    return {"success": False, "error": "No component found in model."}
-                try:
-                    mat = comp.material().create(tag, "Common")
-                    mat.label(material_name)
-                except Exception as e:
-                    return {"success": False, "error": f"Could not create material node: {str(e)}"}
-
-            physics_java = _find_physics_java(jm, physics_name)
-
-            if physics_java is None:
-                return {"success": False, "error": f"Physics interface not found: {physics_name}"}
-
-            mat_node = comp.material(tag)
-            if domain_selection:
-                mat_node.selection().set([int(d) for d in domain_selection])
-
-            set_warnings = []
-            if properties:
-                try:
-                    grp = mat_node.propertyGroup("def")
-                except Exception as exc:
-                    return {
-                        "success": False,
-                        "error": (
-                            f"Material '{tag}' has no 'def' property group to "
-                            f"write physical properties into: {exc}"
-                        ),
-                    }
-                for prop_name, prop_value in properties.items():
-                    try:
-                        # vector/scalar form: COMSOL accepts a single-element
-                        # string array for scalar-anisotropic prop names.
-                        grp.set(prop_name, [prop_value])
-                    except Exception:
-                        try:
-                            grp.set(prop_name, prop_value)
-                        except Exception as exc:
-                            set_warnings.append(f"{prop_name}: {exc}")
-
-            result = {
-                "success": True,
-                "material": material_name,
-                "physics": physics_name,
-                "domain_selection": list(domain_selection) if domain_selection else "all",
-                "message": f"Material '{material_name}' assigned to physics '{physics_name}'",
-            }
-            if set_warnings:
-                result["warning"] = (
-                    "Some material property sets failed (check property "
-                    f"names): {set_warnings}"
-                )
-            return result
+            return assign_material(
+                model,
+                physics_name,
+                material_name,
+                domain_selection=domain_selection,
+                properties=properties,
+            )
         except Exception as e:
             return {"success": False, "error": f"Failed to set material: {str(e)}"}
     
