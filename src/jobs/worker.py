@@ -11,6 +11,7 @@ import threading
 import time
 from typing import Any
 
+from .process_control import contain_current_process_tree
 from .store import JobStore, cancel_request_targets_attempt, process_identity
 
 
@@ -51,6 +52,7 @@ def _runner_kwargs(spec: dict[str, Any], directory: Path) -> dict[str, Any]:
 
 
 def _run(root: str, job_id: str) -> int:
+    contain_current_process_tree()
     store = JobStore(Path(root))
     directory = store.job_dir(job_id)
     spec = store.read_spec(job_id)

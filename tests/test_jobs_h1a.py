@@ -257,6 +257,24 @@ def test_detached_coordinator_force_stops_exact_test_worker_and_allows_resume(jo
     wait_for(manager, result["job_id"], {"completed"}, timeout=10)
 
 
+def test_startup_reconciliation_relaunches_only_existing_stale_cancel_request(jobs_root, monkeypatch):
+    manager = JobManager(jobs_root, allow_test_jobs=True)
+    job_id = manager.store.create(
+        {"schema_version": "2", "job_type": "test"},
+        {"schema_version": "2", "status": "cancelling", "attempt": 1},
+    )
+    manager.store.write_control(
+        job_id,
+        "cancel_requested",
+        fields={"request_id": "cancel-existing", "target_attempt": 1},
+    )
+    calls = []
+    monkeypatch.setattr(manager, "_launch_cancel_coordinator", lambda jid, rid: calls.append((jid, rid)))
+
+    assert manager.reconcile_cancellations() == 1
+    assert calls == [(job_id, "cancel-existing")]
+
+
 def test_thirty_cancel_status_polling_races_have_no_false_terminal_state(jobs_root):
     manager = JobManager(
         jobs_root,

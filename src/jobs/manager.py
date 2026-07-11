@@ -14,6 +14,7 @@ from typing import Any, Callable
 
 import psutil
 
+from .process_control import inspect_identity
 from .store import (
     ACTIVE_STATES,
     JOB_SCHEMA_VERSION,
@@ -156,6 +157,7 @@ class JobManager:
         self._preflight = preflight
         self.cancel_grace_seconds = float(cancel_grace_seconds)
         self.cancel_terminate_seconds = float(cancel_terminate_seconds)
+        self.reconcile_cancellations()
 
     def submit(self, raw_spec: dict[str, Any]) -> dict[str, Any]:
         job_type = raw_spec.get("job_type") if isinstance(raw_spec, dict) else None
@@ -319,6 +321,33 @@ class JobManager:
                 creationflags=flags,
                 start_new_session=(os.name != "nt"),
             )
+
+    def reconcile_cancellations(self) -> int:
+        """Boundedly relaunch only durable cancellation requests lacking a live coordinator."""
+        relaunched = 0
+        if not self.store.root.is_dir():
+            return 0
+        for directory in self.store.root.iterdir():
+            if not directory.is_dir() or not (directory / "state.json").is_file():
+                continue
+            job_id = directory.name
+            try:
+                with self.store.lock(job_id, timeout=0.1):
+                    state = self.store.read_state(job_id)
+                    control = self.store.read_control(job_id)
+                    if state.get("status") not in {"cancel_requested", "cancelling"}:
+                        continue
+                    if control.get("request") != "cancel_requested" or not control.get("request_id"):
+                        continue
+                    coordinator = (state.get("cancel") or {}).get("coordinator")
+                    if isinstance(coordinator, dict) and inspect_identity(coordinator)["state"] == "active":
+                        continue
+                    request_id = str(control["request_id"])
+                self._launch_cancel_coordinator(job_id, request_id)
+                relaunched += 1
+            except (FileNotFoundError, TimeoutError, ValueError, OSError):
+                continue
+        return relaunched
 
     def resume(self, job_id: str) -> dict[str, Any]:
         with self.store.lock(job_id):

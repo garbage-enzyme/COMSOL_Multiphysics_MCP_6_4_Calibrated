@@ -3,6 +3,8 @@ import subprocess
 import sys
 import time
 
+import psutil
+
 from src.jobs.process_control import capture_owned_descendants, terminate_exact, verify_absent
 from src.jobs.store import process_identity
 
@@ -63,3 +65,22 @@ def test_owned_tree_capture_excludes_unrelated_sentinel():
             if process.poll() is None:
                 process.kill()
                 process.wait(timeout=5)
+
+
+def test_worker_job_object_kills_inherited_child_on_worker_exit_windows_only():
+    if os.name != "nt":
+        return
+    script = (
+        "import subprocess,sys,time; "
+        "from src.jobs.process_control import contain_current_process_tree; "
+        "assert contain_current_process_tree(); "
+        "child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(30)']); "
+        "print(child.pid, flush=True); time.sleep(.1)"
+    )
+    worker = subprocess.Popen([sys.executable, "-c", script], stdout=subprocess.PIPE, text=True)
+    child_pid = int(worker.stdout.readline().strip())
+    worker.wait(timeout=5)
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline and psutil.pid_exists(child_pid):
+        time.sleep(0.05)
+    assert not psutil.pid_exists(child_pid)
