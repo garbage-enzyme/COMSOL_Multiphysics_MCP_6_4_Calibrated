@@ -135,6 +135,41 @@ def _identify_side_pairs(boundaries, P_val=None, bbox=None, tol=1e-12):
     }
 
 
+def _list_pair_metadata(comp) -> list[dict[str, str]]:
+    """Return pair tags and labels with clientapi strings normalized for JSON."""
+    try:
+        raw_tags = list(comp.pair().tags())
+    except Exception:
+        return []
+
+    pairs = []
+    for raw_tag in raw_tags:
+        tag = str(raw_tag)
+        try:
+            pair = comp.pair().get(raw_tag)
+            pairs.append({"tag": tag, "label": str(pair.label())})
+        except Exception:
+            pairs.append({"tag": tag})
+    return pairs
+
+
+def _find_air_block_tag(geom) -> Optional[str]:
+    """Find the first tall Block-like feature and return its Python tag."""
+    for raw_tag in list(geom.feature().tags()):
+        tag = str(raw_tag)
+        if tag == "fin":
+            continue
+        feature = geom.feature().get(raw_tag)
+        try:
+            size_text = str(feature.getString("size"))
+            size = [float(value) for value in size_text.replace(",", " ").split()]
+            if size[2] > 1e-7:
+                return tag
+        except Exception:
+            pass
+    return None
+
+
 # ---------------------------------------------------------------------------
 # tool registration
 # ---------------------------------------------------------------------------
@@ -189,18 +224,7 @@ def register_mim_patch_tools(mcp: FastMCP) -> None:
 
             # pairs
             comp = jm.component(component_name)
-            pair_tags = []
-            try:
-                pair_tags = list(comp.pair().tags())
-            except Exception:
-                pass
-            pairs_info = []
-            for pt in pair_tags:
-                try:
-                    p = comp.pair().get(pt)
-                    pairs_info.append({"tag": pt, "label": str(p.label())})
-                except Exception:
-                    pairs_info.append({"tag": pt})
+            pairs_info = _list_pair_metadata(comp)
 
             # identify side pairs (filter by coordinate so interior faces with
             # ±x/±y normals — e.g. patch side faces at x=L/2 — are NOT misread as
@@ -293,18 +317,7 @@ def register_mim_patch_tools(mcp: FastMCP) -> None:
 
             # ---- Step 1: identify air block (auto-detect if not given) ----
             if not air_block_tag:
-                for t in list(geom.feature().tags()):
-                    if t == "fin":
-                        continue
-                    f = geom.feature().get(t)
-                    try:
-                        sz_str = str(f.getString("size"))
-                        sz = [float(x) for x in sz_str.replace(",", " ").split()]
-                        if sz[2] > 1e-7:
-                            air_block_tag = t
-                            break
-                    except Exception:
-                        pass
+                air_block_tag = _find_air_block_tag(geom)
             if not air_block_tag:
                 return {"success": False, "error": "Could not auto-detect air block tag. Please specify air_block_tag."}
             report["air_block_tag"] = air_block_tag
