@@ -57,3 +57,8 @@ def test_native_cancel_profile_is_data_only_and_pins_all_required_jars():
     assert all(len(item["sha256"]) == 64 for item in profile["jars"].values())
     assert profile["candidate"]["methods"] == ["cancel()", "stop(int)"]
     assert profile["h2a_gate"]["fresh_subprocess_runs"] == 3
+
+
+def test_unknown_environment_never_selects_a_native_profile(monkeypatch):
+    monkeypatch.setattr(probe, "discover_environment", lambda: {"backend": {"major": 6, "minor": 4, "patch": 9, "build": 1}, "jars": {}})
+    assert probe.select_progress_context_profile() is None

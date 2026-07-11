@@ -9,6 +9,7 @@ to call an internal COMSOL cancellation API.
 from __future__ import annotations
 
 from hashlib import sha256
+import json
 from pathlib import Path
 from typing import Any
 
@@ -114,3 +115,40 @@ def reflect_candidate_signatures() -> dict[str, dict[str, Any]]:
                 "error": f"{type(exc).__name__}: {exc}",
             }
     return results
+
+
+def select_progress_context_profile() -> dict[str, Any] | None:
+    """Return the exact allowlisted profile for this installation, if any."""
+    environment = discover_environment()
+    profiles_path = Path(__file__).with_name("native_cancel_profiles.json")
+    profiles = json.loads(profiles_path.read_text(encoding="utf-8")).get("profiles", [])
+    for profile in profiles:
+        backend = profile.get("backend", {})
+        observed = environment["backend"]
+        if any(int(observed[key]) != int(backend.get(key, -1)) for key in ("major", "minor", "patch", "build")):
+            continue
+        if all(
+            environment["jars"].get(role, {}).get("sha256") == expected.get("sha256")
+            and environment["jars"].get(role, {}).get("basename") == expected.get("basename")
+            for role, expected in profile.get("jars", {}).items()
+        ):
+            return profile
+    return None
+
+
+def request_native_cancel_once() -> dict[str, Any]:
+    """Invoke the H2a-approved public candidate only in an exact profile.
+
+    Caller owns attempt binding and process-level verification. This function
+    neither starts a JVM nor claims that the solve has stopped.
+    """
+    profile = select_progress_context_profile()
+    if profile is None:
+        return {"attempted": False, "supported": False, "outcome": "unsupported_for_environment"}
+    if not jpype.isJVMStarted():
+        return {"attempted": False, "supported": True, "outcome": "jvm_not_started"}
+    try:
+        jpype.JClass("com.comsol.model.util.ProgressContext")().cancel()
+        return {"attempted": True, "supported": True, "outcome": "returned", "profile_id": profile["profile_id"]}
+    except Exception as exc:
+        return {"attempted": True, "supported": True, "outcome": f"{type(exc).__name__}: {exc}", "profile_id": profile["profile_id"]}

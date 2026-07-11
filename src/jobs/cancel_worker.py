@@ -87,10 +87,16 @@ def run(root: str, job_id: str, request_id: str, grace_seconds: float = 10.0, te
         _record_blocker(store, job_id, request_id, "target worker identity is missing")
         return 2
 
+    initial_capture = capture_owned_descendants(worker)
+    initial_descendants = initial_capture["descendants"]
+
     deadline = time.monotonic() + max(0.0, float(grace_seconds))
     while time.monotonic() < deadline:
         if inspect_identity(worker)["state"] != "active":
-            _record_blocker(store, job_id, request_id, "worker exited during native/cooperative grace; not a verified process cancellation")
+            verification = verify_absent([worker, *initial_descendants])
+            if verification["absent"]:
+                return 0 if _commit_cancelled(store, job_id, request_id, verification, []) else 0
+            _record_blocker(store, job_id, request_id, "worker exited during grace with uncertain descendants")
             return 0
         time.sleep(0.025)
 

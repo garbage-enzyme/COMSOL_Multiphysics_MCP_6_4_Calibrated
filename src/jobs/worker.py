@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import threading
 import time
 from typing import Any
 
@@ -80,6 +81,8 @@ def _run(root: str, job_id: str) -> int:
     client = None
     ownership = None
     lease_acquired = False
+    native_monitor_stop = threading.Event()
+    native_monitor: threading.Thread | None = None
     try:
         from src.tools.ownership import SolverOwnership
 
@@ -114,6 +117,19 @@ def _run(root: str, job_id: str) -> int:
 
         def should_stop() -> bool:
             return cancel_request_targets_attempt(store.read_control(job_id), attempt)
+
+        def native_cancel_monitor() -> None:
+            while not native_monitor_stop.wait(0.05):
+                if not should_stop():
+                    continue
+                from src.jobs.native_cancel_probe import request_native_cancel_once
+
+                result = request_native_cancel_once()
+                store.append_event(job_id, "native_cancel_attempted", result)
+                return
+
+        native_monitor = threading.Thread(target=native_cancel_monitor, name="comsol-native-cancel", daemon=True)
+        native_monitor.start()
 
         def on_row(row: dict[str, Any]) -> None:
             progress["completed"] = _valid_row_count(
@@ -205,6 +221,11 @@ def _run(root: str, job_id: str) -> int:
                 patch={"last_error": {"type": "CooperativeCancel", "message": "Stopped between blocking operations"}},
                 event="cooperative_cancel_observed",
             )
+        elif current == "cancelling":
+            # The detached coordinator owns the terminal decision once it has
+            # claimed a cancellation request. It will verify process/lease
+            # cleanup after this worker exits.
+            pass
         elif current not in {"completed", "interrupted"}:
             store.update_state(
                 job_id,
@@ -215,6 +236,9 @@ def _run(root: str, job_id: str) -> int:
         print(f"{type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
         return 1
     finally:
+        native_monitor_stop.set()
+        if native_monitor is not None:
+            native_monitor.join(timeout=1.0)
         if client is not None:
             try:
                 client.clear()
