@@ -2,6 +2,7 @@
 
 from src.tools.physics import (
     add_boundary_condition,
+    add_domain_feature,
     add_physics_interface,
     list_physics_features,
     remove_physics_interface,
@@ -384,6 +385,90 @@ def test_add_boundary_condition_validates_selection():
     )
 
     assert result["success"] is False
+
+
+class DimensionGeometry:
+    def __init__(self, dimension):
+        self.dimension = dimension
+
+    def getSDim(self):
+        return self.dimension
+
+
+class DimensionGeometryList:
+    def __init__(self, dimension):
+        self.geometry = DimensionGeometry(dimension)
+
+    def tags(self):
+        return ["geom1"]
+
+
+class NamedPhysicsList:
+    def __init__(self, tag=None, physics=None):
+        self.tag = tag
+        self.physics = physics
+
+    def tags(self):
+        return [self.tag] if self.tag else []
+
+    def get(self, tag):
+        return self.physics
+
+
+class DimensionComponent:
+    def __init__(self, dimension, physics_tag=None, physics=None):
+        self.dimension = dimension
+        self.physics_list = NamedPhysicsList(physics_tag, physics)
+
+    def geom(self, tag=None):
+        if tag is None:
+            return DimensionGeometryList(self.dimension)
+        return DimensionGeometry(self.dimension)
+
+    def physics(self):
+        return self.physics_list
+
+
+class MultiComponentList:
+    def __init__(self, components):
+        self.components = components
+
+    def tags(self):
+        return list(self.components)
+
+    def get(self, tag):
+        return self.components[tag]
+
+
+class MultiComponentJava:
+    def __init__(self, components):
+        self.components = MultiComponentList(components)
+
+    def component(self):
+        return self.components
+
+
+def test_add_domain_feature_uses_owning_component_dimension():
+    target_physics = BoundaryPhysics()
+    model = FakeModel(FakeComponent())
+    model.java = MultiComponentJava(
+        {
+            "comp1": DimensionComponent(3),
+            "comp2": DimensionComponent(2, "ht", target_physics),
+        }
+    )
+
+    result = add_domain_feature(
+        model,
+        "ht",
+        "Solid",
+        [1],
+        feature_tag="solid1",
+    )
+
+    assert result["success"] is True
+    assert target_physics.features.created[0][0:3] == ("solid1", "Solid", 2)
+    assert result["domain_feature"]["sdim"] == 2
 
 
 def test_setup_flow_boundaries_uses_clientapi_features():

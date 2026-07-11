@@ -150,6 +150,56 @@ def add_boundary_condition(
     return result
 
 
+def add_domain_feature(
+    model,
+    physics_name: str,
+    feature_type: str,
+    domain_selection: Sequence[int],
+    *,
+    properties: Optional[dict] = None,
+    feature_tag: Optional[str] = None,
+) -> dict:
+    """Create a domain feature using its owning component's dimension."""
+    if not domain_selection:
+        return {"success": False, "error": "domain_selection must not be empty."}
+
+    comp, physics = _find_physics_context(model.java, physics_name)
+    if physics is None:
+        return {
+            "success": False,
+            "error": f"Physics interface not found: {physics_name}",
+        }
+
+    sdim = int(_component_sdim(comp))
+    tag = feature_tag or _make_tag(feature_type.lower())
+    feature = physics.feature().create(tag, feature_type, sdim)
+    domains = [int(domain) for domain in domain_selection]
+    feature.selection().set(domains)
+
+    property_errors = {}
+    for name, value in (properties or {}).items():
+        try:
+            feature.set(name, value)
+        except Exception as exc:
+            property_errors[name] = str(exc)
+
+    result = {
+        "success": True,
+        "domain_feature": {
+            "tag": tag,
+            "type": feature_type,
+            "physics": physics_name,
+            "selection": domains,
+            "properties": dict(properties or {}),
+            "sdim": sdim,
+        },
+    }
+    if property_errors:
+        result["warning"] = "Domain feature created, but some properties could not be set."
+        result["property_errors"] = property_errors
+    return result
+
+
 def setup_flow_boundaries(
     model,
     physics_name: str,
@@ -800,53 +850,15 @@ def register_physics_tools(mcp: FastMCP) -> None:
         if model is None:
             return {"success": False, "error": f"Model not found: {model_name or 'no current model'}"}
 
-        properties = properties or {}
-
         try:
-            jm = model.java
-            physics_java = _find_physics_java(jm, physics_name)
-            if physics_java is None:
-                return {"success": False, "error": f"Physics interface not found: {physics_name}"}
-
-            # spatial dimension of the physics interface (domain features use int sdim)
-            sdim = 3
-            try:
-                comp = _first_component(jm)
-                if comp is not None:
-                    gtags = list(comp.geom().tags())
-                    if gtags:
-                        sdim = int(comp.geom(gtags[0]).getSDim())
-            except Exception:
-                pass
-
-            tag = feature_tag or _make_tag(feature_type.lower())
-            feat = physics_java.feature().create(tag, feature_type, sdim)
-            feat.selection().set([int(d) for d in domain_selection])
-
-            set_failures = []
-            for prop_name, prop_value in properties.items():
-                try:
-                    feat.set(prop_name, prop_value)
-                except Exception as exc:
-                    set_failures.append(f"{prop_name}: {exc}")
-
-            result = {
-                "success": True,
-                "domain_feature": {
-                    "tag": tag,
-                    "type": feature_type,
-                    "physics": physics_name,
-                    "selection": list(domain_selection),
-                    "properties": properties,
-                    "sdim": sdim,
-                }
-            }
-            if set_failures:
-                result["warning"] = (
-                    "Some property sets failed (property names may be wrong "
-                    f"for this feature type): {set_failures}"
-                )
-            return result
+            return add_domain_feature(
+                model,
+                physics_name,
+                feature_type,
+                domain_selection,
+                properties=properties,
+                feature_tag=feature_tag,
+            )
         except Exception as e:
             return {"success": False, "error": f"Failed to add domain feature: {str(e)}"}
 
