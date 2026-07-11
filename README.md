@@ -96,11 +96,20 @@ are treated as successful rows. Existing columns are preserved.
 ## Verification
 
 Run the isolated unit suite with `python -m pytest -q`. The current refactor gate is
-**82 passing tests**. `python -m pytest --collect-only -q` also leaves the COMSOL
+**84 passing tests**. `python -m pytest --collect-only -q` also leaves the COMSOL
 process set unchanged. Root-level
 `test_*.py` files are manual integration probes that may start COMSOL and are
 explicitly excluded from pytest collection; invoke them individually only when
 a dedicated COMSOL client is available.
+
+Run the two real probes explicitly, one fresh subprocess at a time, with:
+
+```bash
+python -m pytest -q -m integration tests/integration
+```
+
+The integration runner owns and time-bounds its exact Python process tree, invokes
+each probe sequentially, and fails if the COMSOL PID set grows after cleanup.
 
 `test_e2e_cap.py` and `test_study_mesh.py` are standalone verification scripts (drive `mph.Client` directly, no MCP layer). The same recipe was also re-run end-to-end through the MCP tool interface after restarting the MCP host to load the new code:
 
