@@ -292,22 +292,38 @@ class JobManager:
             actual = _fingerprint({key: value for key, value in spec.items() if key != "spec_fingerprint"})
             if expected != actual:
                 raise ValueError("Refusing resume because immutable spec fingerprint changed")
-            if spec["job_type"] == "staged_sweep":
-                if self._preflight is None:
-                    from src.tools.ownership import SolverOwnership
 
-                    ownership = SolverOwnership(self.store.root.parent)
-                    lease = ownership.status()["lease"]
-                    if lease["state"] == "stale":
-                        payload = lease.get("lease") or {}
-                        if payload.get("owner") != f"job:{job_id}":
-                            raise RuntimeError("Refusing to recover a stale lease that does not belong to this job")
-                        recovered = ownership.recover_stale()
-                        if not recovered.get("success"):
-                            raise RuntimeError(f"Cannot recover this job's stale lease: {recovered}")
-                preflight = self._run_preflight(spec)
-                if not preflight.get("ready", preflight.get("success", False)):
-                    raise RuntimeError(f"Resume preflight failed: {preflight.get('blockers') or preflight}")
+        # Ownership status merges durable-job summaries, so preflight must run
+        # outside this job's lock.  The second locked validation below prevents
+        # two concurrent resume callers from both transitioning and launching.
+        if spec["job_type"] == "staged_sweep":
+            if self._preflight is None:
+                from src.tools.ownership import SolverOwnership
+
+                ownership = SolverOwnership(self.store.root.parent)
+                lease = ownership.status()["lease"]
+                if lease["state"] == "stale":
+                    payload = lease.get("lease") or {}
+                    if payload.get("owner") != f"job:{job_id}":
+                        raise RuntimeError("Refusing to recover a stale lease that does not belong to this job")
+                    recovered = ownership.recover_stale()
+                    if not recovered.get("success"):
+                        raise RuntimeError(f"Cannot recover this job's stale lease: {recovered}")
+            preflight = self._run_preflight(spec)
+            if not preflight.get("ready", preflight.get("success", False)):
+                raise RuntimeError(f"Resume preflight failed: {preflight.get('blockers') or preflight}")
+
+        with self.store.lock(job_id):
+            state = self.store.read_state(job_id)
+            if state["status"] not in {"failed", "interrupted"}:
+                raise ValueError("Job state changed while resume preflight was running")
+            current_spec = self.store.read_spec(job_id)
+            current_expected = current_spec.get("spec_fingerprint")
+            current_actual = _fingerprint(
+                {key: value for key, value in current_spec.items() if key != "spec_fingerprint"}
+            )
+            if current_expected != expected or current_actual != expected:
+                raise ValueError("Refusing resume because immutable spec changed during preflight")
             state["status"] = "starting"
             state["attempt"] = int(state.get("attempt", 1)) + 1
             state["worker_pid"] = None
@@ -318,7 +334,7 @@ class JobManager:
             atomic_write_json(self.store.job_dir(job_id) / "state.json", state)
             self.store.write_control(job_id, None)
             self.store._append_event_unlocked(job_id, "resume_requested", {"attempt": state["attempt"]}, "starting")
-        module = "src.jobs.sequence_worker" if spec["job_type"] == "test_sequence" else "src.jobs.worker"
+        module = "src.jobs.sequence_worker" if current_spec["job_type"] == "test_sequence" else "src.jobs.worker"
         try:
             identity = self._launch_worker(job_id, module)
             self.store.update_state(

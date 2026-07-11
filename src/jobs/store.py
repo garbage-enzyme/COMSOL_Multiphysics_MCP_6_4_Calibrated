@@ -78,7 +78,18 @@ def atomic_write_json(path: Path, value: dict[str, Any]) -> None:
             handle.write(_json_bytes(value))
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temporary, path)
+        deadline = time.monotonic() + 1.0
+        while True:
+            try:
+                os.replace(temporary, path)
+                break
+            except PermissionError:
+                # Windows file scanners can briefly hold a just-flushed JSON
+                # file open.  Keep the same complete temp file and retry the
+                # atomic replacement; never fall back to in-place truncation.
+                if time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.02)
         _fsync_directory(path.parent)
     finally:
         temporary.unlink(missing_ok=True)
@@ -150,7 +161,7 @@ class JobLock:
                     existing = json.loads(observed.decode("utf-8"))
                     state, _ = process_identity_state(existing)
                     if state == "stale" and self.path.read_bytes() == observed:
-                        self.path.unlink()
+                        self._unlink_with_retry(expected=observed)
                         continue
                 except (OSError, UnicodeDecodeError, json.JSONDecodeError):
                     pass
@@ -165,14 +176,29 @@ class JobLock:
             self._owned_bytes = payload
             return
 
+    def _unlink_with_retry(self, *, expected: bytes) -> bool:
+        deadline = time.monotonic() + 2.0
+        while True:
+            try:
+                if self.path.read_bytes() != expected:
+                    return False
+                self.path.unlink()
+                return True
+            except FileNotFoundError:
+                return True
+            except PermissionError:
+                # A polling process or file scanner can momentarily hold the
+                # lock file without owning it on Windows.  Revalidate its exact
+                # bytes on every retry so a replaced/foreign lock is never removed.
+                if time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.02)
+
     def release(self) -> None:
         if self._owned_bytes is None:
             return
         try:
-            if self.path.read_bytes() == self._owned_bytes:
-                self.path.unlink()
-        except FileNotFoundError:
-            pass
+            self._unlink_with_retry(expected=self._owned_bytes)
         finally:
             self._owned_bytes = None
 

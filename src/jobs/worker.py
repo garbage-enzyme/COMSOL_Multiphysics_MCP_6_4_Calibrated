@@ -216,9 +216,14 @@ def _run(root: str, job_id: str) -> int:
     finally:
         if client is not None:
             try:
-                client.disconnect()
+                client.clear()
             except Exception as exc:
-                print(f"Client disconnect warning: {exc}", file=sys.stderr, flush=True)
+                print(f"Client clear warning: {exc}", file=sys.stderr, flush=True)
+            if getattr(client, "port", None):
+                try:
+                    client.disconnect()
+                except Exception as exc:
+                    print(f"Client disconnect warning: {exc}", file=sys.stderr, flush=True)
         if ownership is not None and lease_acquired:
             release = ownership.release()
             if not release.get("success"):

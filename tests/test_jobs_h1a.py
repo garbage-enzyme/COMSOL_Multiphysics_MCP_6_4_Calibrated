@@ -18,6 +18,7 @@ import pytest
 
 from src.jobs.manager import JobManager, validate_staged_sweep_spec
 from src.jobs.store import JobLock, JobStore, atomic_write_json, process_identity
+import src.jobs.store as store_module
 from src.jobs import worker as production_worker
 
 
@@ -38,7 +39,10 @@ def wait_for(manager: JobManager, job_id: str, statuses: set[str], timeout: floa
         if state["status"] in statuses:
             return state
         time.sleep(0.025)
-    raise AssertionError(f"Job did not reach {statuses}: {manager.status(job_id)}")
+    raise AssertionError(
+        f"Job did not reach {statuses}: {manager.status(job_id)}; "
+        f"tail={manager.tail(job_id, 50)}"
+    )
 
 
 def test_submit_returns_promptly_and_second_manager_observes_completion(jobs_root):
@@ -152,6 +156,48 @@ def test_lock_removes_only_proven_stale_identity(jobs_root):
     assert not lock_path.exists()
 
 
+def test_atomic_state_replace_retries_transient_windows_file_lock(jobs_root, monkeypatch):
+    path = jobs_root / "state.json"
+    real_replace = store_module.os.replace
+    calls = 0
+
+    def flaky_replace(source, destination):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise PermissionError("simulated transient sharing violation")
+        return real_replace(source, destination)
+
+    monkeypatch.setattr(store_module.os, "replace", flaky_replace)
+
+    atomic_write_json(path, {"status": "completed"})
+
+    assert calls == 2
+    assert json.loads(path.read_text(encoding="utf-8"))["status"] == "completed"
+
+
+def test_job_lock_release_retries_transient_windows_reader(jobs_root, monkeypatch):
+    lock_path = jobs_root / ".state.lock"
+    real_unlink = Path.unlink
+    calls = 0
+
+    def flaky_unlink(path, *args, **kwargs):
+        nonlocal calls
+        if path == lock_path:
+            calls += 1
+            if calls == 1:
+                raise PermissionError("simulated polling reader sharing violation")
+        return real_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", flaky_unlink)
+
+    with JobLock(lock_path, timeout=0.5):
+        assert lock_path.exists()
+
+    assert calls == 2
+    assert not lock_path.exists()
+
+
 def test_tail_is_bounded(jobs_root):
     store = JobStore(jobs_root)
     job_id = store.create(
@@ -222,6 +268,45 @@ def test_production_submit_uses_parameter_count_not_test_delays(jobs_root, monke
     }
 
 
+def test_resume_preflight_can_read_job_summaries_without_self_lock_delay(jobs_root, monkeypatch):
+    source = jobs_root / "baseline.mph"
+    source.write_bytes(b"model")
+    manager = None
+
+    def preflight(**_kwargs):
+        assert manager is not None
+        assert manager.summaries()["available"] is True
+        return {"ready": True}
+
+    manager = JobManager(jobs_root, preflight=preflight)
+    spec = validate_staged_sweep_spec(
+        {
+            "job_type": "staged_sweep",
+            "source_model_path": str(source),
+            "parameter_name": "wl",
+            "parameter_values": [4.25],
+            "expressions": ["A"],
+        }
+    )
+    job_id = manager.store.create(
+        spec,
+        {
+            "schema_version": "1",
+            "status": "interrupted",
+            "attempt": 1,
+            "progress": {"completed": 0, "total": 1},
+        },
+    )
+    identity = process_identity(os.getpid())
+    monkeypatch.setattr(manager, "_launch_worker", lambda *_args: identity)
+
+    started = time.monotonic()
+    result = manager.resume(job_id)
+
+    assert time.monotonic() - started < 1.0
+    assert result["attempt"] == 2
+
+
 def test_test_jobs_require_explicit_injection(jobs_root):
     with pytest.raises(ValueError, match="disabled"):
         JobManager(jobs_root).submit({"job_type": "test_sequence", "delays": [0.01]})
@@ -279,12 +364,17 @@ def test_production_worker_bridges_smoke_broad_and_lease_with_mocks(jobs_root, m
     class FakeClient:
         def __init__(self, **_kwargs):
             self.disconnected = False
+            self.cleared = False
+            self.port = None
 
         def load(self, _path):
             return object()
 
         def disconnect(self):
             self.disconnected = True
+
+        def clear(self):
+            self.cleared = True
 
     def fake_runner(_model, _parameter, values, _expressions, **kwargs):
         output = Path(kwargs["csv_path"])
