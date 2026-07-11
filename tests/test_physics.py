@@ -170,6 +170,27 @@ class FakePhysicsFeatureList:
         return self.features[tag]
 
 
+class JavaStringLike:
+    def __init__(self, value):
+        self.value = value
+
+    def __str__(self):
+        return self.value
+
+
+class JavaTagPhysicsFeatureList(FakePhysicsFeatureList):
+    def tags(self):
+        return [JavaStringLike(tag) for tag in self.features]
+
+
+class JavaTagPhysicsNode(FakePhysicsNode):
+    def tag(self):
+        return JavaStringLike("ewfd")
+
+    def feature(self):
+        return JavaTagPhysicsFeatureList(self.features)
+
+
 class ListingPhysicsList:
     def __init__(self, physics):
         self.physics = physics
@@ -184,12 +205,25 @@ class ListingPhysicsList:
         del self.physics[tag]
 
 
+class JavaTagListingPhysicsList(ListingPhysicsList):
+    def tags(self):
+        return [JavaStringLike(tag) for tag in self.physics]
+
+    def get(self, tag):
+        return self.physics[str(tag)]
+
+
 class ListingComponent:
     def __init__(self, physics):
         self.physics_nodes = physics
 
     def physics(self):
         return ListingPhysicsList(self.physics_nodes)
+
+
+class JavaTagListingComponent(ListingComponent):
+    def physics(self):
+        return JavaTagListingPhysicsList(self.physics_nodes)
 
 
 class ListingComponentList:
@@ -203,6 +237,11 @@ class ListingComponentList:
         return self.component
 
 
+class JavaTagListingComponentList(ListingComponentList):
+    def tags(self):
+        return [JavaStringLike("comp1")]
+
+
 class ListingJava:
     def __init__(self, physics):
         self.component_list = ListingComponentList(ListingComponent(physics))
@@ -214,6 +253,14 @@ class ListingJava:
 class ListingModel:
     def __init__(self, physics):
         self.java = ListingJava(physics)
+
+
+class JavaTagListingModel(ListingModel):
+    def __init__(self, physics):
+        self.java = ListingJava(physics)
+        self.java.component_list = JavaTagListingComponentList(
+            JavaTagListingComponent(physics)
+        )
 
 
 def test_list_physics_features_uses_tags_labels_and_selections():
@@ -270,6 +317,17 @@ def test_remove_physics_interface_reports_available_nodes():
 
     assert result["success"] is False
     assert result["available"][0]["tag"] == "ewfd"
+
+
+def test_physics_helpers_normalize_java_string_tags():
+    model = JavaTagListingModel({"ewfd": JavaTagPhysicsNode()})
+
+    listed = list_physics_features(model, "ewfd")
+    removed = remove_physics_interface(model, "ewfd")
+
+    assert listed["features"][0]["tag"] == "wee1"
+    assert removed["removed"] == "ewfd"
+    assert removed["component"] == "comp1"
 
 
 class BoundarySelection:

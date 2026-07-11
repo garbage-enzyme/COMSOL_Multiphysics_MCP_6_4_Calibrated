@@ -508,14 +508,14 @@ def add_physics_interface(
         "success": True,
         "physics": {
             "name": (
-                physics_java.label()
+                str(physics_java.label())
                 if hasattr(physics_java, "label")
                 else interface_type
             ),
             "type": interface_type,
             "requested_type": physics_type,
             "tag": tag,
-            "component": comp.tag(),
+            "component": str(comp.tag()),
         },
     }
 
@@ -531,7 +531,8 @@ def list_physics_features(model, physics_name: str) -> dict:
 
     features = []
     feature_list = physics.feature()
-    for tag in list(feature_list.tags()):
+    for raw_tag in list(feature_list.tags()):
+        tag = str(raw_tag)
         feature = feature_list.get(tag)
         info = {"tag": tag}
         try:
@@ -556,10 +557,12 @@ def remove_physics_interface(model, physics_name: str) -> dict:
     """Remove a physics interface by tag or label through clientapi."""
     jm = model.java
     available = []
-    for component_tag in list(jm.component().tags()):
+    for raw_component_tag in list(jm.component().tags()):
+        component_tag = str(raw_component_tag)
         component = jm.component().get(component_tag)
         physics_list = component.physics()
-        for tag in list(physics_list.tags()):
+        for raw_tag in list(physics_list.tags()):
+            tag = str(raw_tag)
             physics = physics_list.get(tag)
             try:
                 label = str(physics.label())
@@ -794,7 +797,7 @@ def register_physics_tools(mcp: FastMCP) -> None:
             return {
                 "success": True,
                 "physics": {
-                    "name": physics_java.label() if hasattr(physics_java, 'label') else "Electrostatics",
+                    "name": str(physics_java.label()) if hasattr(physics_java, 'label') else "Electrostatics",
                     "type": "Electrostatics",
                     "tag": "es",
                     "domain_selection": domain_selection,
@@ -845,7 +848,7 @@ def register_physics_tools(mcp: FastMCP) -> None:
             return {
                 "success": True,
                 "physics": {
-                    "name": physics_java.label() if hasattr(physics_java, 'label') else "Solid Mechanics",
+                    "name": str(physics_java.label()) if hasattr(physics_java, 'label') else "Solid Mechanics",
                     "type": "SolidMechanics",
                     "tag": "solid",
                     "domain_selection": domain_selection,
@@ -892,7 +895,7 @@ def register_physics_tools(mcp: FastMCP) -> None:
             return {
                 "success": True,
                 "physics": {
-                    "name": physics_java.label() if hasattr(physics_java, 'label') else "Heat Transfer",
+                    "name": str(physics_java.label()) if hasattr(physics_java, 'label') else "Heat Transfer",
                     "type": "HeatTransfer",
                     "tag": "ht",
                     "domain_selection": domain_selection,
@@ -939,7 +942,7 @@ def register_physics_tools(mcp: FastMCP) -> None:
             return {
                 "success": True,
                 "physics": {
-                    "name": physics_java.label() if hasattr(physics_java, 'label') else "Laminar Flow",
+                    "name": str(physics_java.label()) if hasattr(physics_java, 'label') else "Laminar Flow",
                     "type": "LaminarFlow",
                     "tag": "spf",
                     "domain_selection": domain_selection,
