@@ -28,7 +28,7 @@ ACTIVE_STATES = {
 }
 TERMINAL_STATES = {"completed", "failed", "interrupted"}
 TRANSITIONS = {
-    "submitted": {"starting", "failed", "interrupted"},
+    "submitted": {"starting", "failed", "interrupted", "cancel_requested"},
     "starting": {"smoke_running", "failed", "interrupted", "cancel_requested"},
     "smoke_running": {"smoke_validated", "failed", "interrupted", "cancel_requested"},
     "smoke_validated": {"running", "completed", "failed", "interrupted", "cancel_requested"},
@@ -217,6 +217,14 @@ class JobStore:
 
     def read_state(self, job_id: str) -> dict[str, Any]:
         return read_json(self.job_dir(job_id) / "state.json")
+
+    def read_control(self, job_id: str) -> dict[str, Any]:
+        return read_json(self.job_dir(job_id) / "control.json")
+
+    def write_control(self, job_id: str, request: str | None = None) -> dict[str, Any]:
+        control = {"schema_version": JOB_SCHEMA_VERSION, "request": request, "updated_at_epoch": time.time()}
+        atomic_write_json(self.job_dir(job_id) / "control.json", control)
+        return control
 
     @contextmanager
     def lock(self, job_id: str, timeout: float = 5.0) -> Iterator[None]:

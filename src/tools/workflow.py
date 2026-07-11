@@ -19,7 +19,7 @@ import math
 import os
 import time
 from pathlib import Path
-from typing import Any, Optional, Sequence
+from typing import Any, Callable, Optional, Sequence
 
 import numpy as np
 from mcp.server.fastmcp import FastMCP
@@ -466,6 +466,9 @@ def run_staged_parametric_sweep(
     record_wavelength_controls: Optional[bool] = None,
     physical_bounds: Optional[dict[str, Sequence[float]]] = None,
     response_tail: int = DEFAULT_RESPONSE_TAIL,
+    max_new_points: Optional[int] = None,
+    should_stop: Optional[Callable[[], bool]] = None,
+    on_durable_row: Optional[Callable[[dict[str, Any]], None]] = None,
 ) -> dict[str, Any]:
     """Run a parameter sweep one point at a time and append CSV rows eagerly."""
     if not parameter_values:
@@ -478,6 +481,8 @@ def run_staged_parametric_sweep(
         return {"success": False, "error": "checkpoint_every must be at least 1."}
     if response_tail < 0 or response_tail > 20:
         return {"success": False, "error": "response_tail must be between 0 and 20."}
+    if max_new_points is not None and max_new_points < 0:
+        return {"success": False, "error": "max_new_points must be non-negative."}
     if source_model_path:
         baseline = Path(source_model_path).expanduser().resolve()
         mutation_targets = [
@@ -569,12 +574,23 @@ def run_staged_parametric_sweep(
     skipped = 0
     checkpointed_at = 0
     total_start = time.time()
+    stopped_early = False
+    stop_reason = None
+    processed = 0
 
     for value in parameter_values:
         parameter_value = _format_parameter_value(value, parameter_unit)
         if parameter_value in completed_values:
             skipped += 1
             continue
+        if max_new_points is not None and processed >= max_new_points:
+            stopped_early = True
+            stop_reason = "max_new_points"
+            break
+        if should_stop is not None and should_stop():
+            stopped_early = True
+            stop_reason = "control_request"
+            break
 
         for attempt in range(1, max_retries + 2):
             solve_start = time.time()
@@ -629,6 +645,9 @@ def run_staged_parametric_sweep(
                 if checkpoint_model_path and len(rows) % checkpoint_every == 0:
                     _save_model(model, checkpoint_model_path)
                     checkpointed_at = len(rows)
+                processed += 1
+                if on_durable_row is not None:
+                    on_durable_row(dict(row))
                 break
             except Exception as exc:
                 if attempt <= max_retries:
@@ -650,6 +669,9 @@ def run_staged_parametric_sweep(
                 failed_rows.append(row)
                 journal_tail.append(row)
                 _write_rows_csv(csv_path, fieldnames, [row], append=True)
+                processed += 1
+                if on_durable_row is not None:
+                    on_durable_row(dict(row))
                 if not continue_on_error:
                     raise
 
@@ -668,6 +690,9 @@ def run_staged_parametric_sweep(
         "n_failed": len(failed_rows),
         "n_skipped": skipped,
         "n_invalid_existing": invalid_existing_rows,
+        "n_processed": processed,
+        "stopped_early": stopped_early,
+        "stop_reason": stop_reason,
         "csv_path": csv_path,
         "manifest_path": str(resolved_manifest_path) if resolved_manifest_path else None,
         "config_id": manifest["config_id"],

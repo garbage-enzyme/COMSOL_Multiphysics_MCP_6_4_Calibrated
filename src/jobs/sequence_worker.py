@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import csv
 import sys
 import time
 
 from .store import JobStore, process_identity
 
 
-def run(root: str, job_id: str) -> int:
+def _run(root: str, job_id: str) -> int:
     store = JobStore(Path(root))
     spec = store.read_spec(job_id)
     if spec.get("job_type") != "test_sequence":
@@ -21,20 +22,69 @@ def run(root: str, job_id: str) -> int:
         if time.monotonic() >= deadline:
             raise RuntimeError("Control plane did not durably record the worker identity")
         time.sleep(0.01)
-    store.update_state(
-        job_id,
-        "starting",
-        patch={
-            "worker_pid": identity["pid"],
-            "worker_process_create_time": identity["process_create_time"],
-            "worker_command_signature": identity["command_signature"],
-        },
-        event="worker_started",
-    )
+    current = store.read_state(job_id)["status"]
+    if current == "cancel_requested" or store.read_control(job_id).get("request") == "cancel_requested":
+        store.update_state(
+            job_id,
+            "interrupted",
+            patch={"last_error": {"type": "CooperativeCancel", "message": "Stopped before startup"}},
+            event="cooperative_cancel_observed",
+        )
+        return 0
+    if current == "submitted":
+        store.update_state(job_id, "starting", event="worker_started")
+    elif current != "starting":
+        raise ValueError(f"Sequence worker cannot start from {current}")
+    if store.read_control(job_id).get("request") == "cancel_requested":
+        store.update_state(
+            job_id,
+            "interrupted",
+            patch={"last_error": {"type": "CooperativeCancel", "message": "Stopped before smoke"}},
+            event="cooperative_cancel_observed",
+        )
+        return 0
     store.update_state(job_id, "smoke_running", event="smoke_started")
     delays = spec["delays"]
+    results_path = store.job_dir(job_id) / "results.csv"
+    completed = set()
+    if results_path.is_file() and results_path.stat().st_size:
+        with results_path.open(newline="", encoding="utf-8") as handle:
+            completed = {
+                int(row["index"])
+                for row in csv.DictReader(handle)
+                if row.get("status") == "ok"
+            }
+    if 0 in completed:
+        store.update_state(job_id, "smoke_validated", event="smoke_revalidated")
+        if len(delays) > 1:
+            store.update_state(job_id, "running", event="broad_phase_resumed")
     for index, delay in enumerate(delays):
+        if index in completed:
+            continue
         time.sleep(float(delay))
+        write_header = not results_path.exists() or results_path.stat().st_size == 0
+        with results_path.open("a", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=["index", "status"])
+            if write_header:
+                writer.writeheader()
+            writer.writerow({"index": index, "status": "ok"})
+            handle.flush()
+            os.fsync(handle.fileno())
+        cancel_requested = store.read_control(job_id).get("request") == "cancel_requested"
+        if cancel_requested:
+            store.update_state(
+                job_id,
+                patch={"progress": {"completed": index + 1, "total": len(delays)}},
+                event="sequence_step",
+                event_data={"index": index},
+            )
+            store.update_state(
+                job_id,
+                "interrupted",
+                patch={"last_error": {"type": "CooperativeCancel", "message": "Stopped between points"}},
+                event="cooperative_cancel_observed",
+            )
+            return 0
         next_status = None
         if index == 0:
             next_status = "smoke_validated"
@@ -49,6 +99,22 @@ def run(root: str, job_id: str) -> int:
             store.update_state(job_id, "running", event="broad_phase_started")
     store.update_state(job_id, "completed", event="completed")
     return 0
+
+
+def run(root: str, job_id: str) -> int:
+    try:
+        return _run(root, job_id)
+    except ValueError:
+        store = JobStore(Path(root))
+        if store.read_state(job_id).get("status") == "cancel_requested":
+            store.update_state(
+                job_id,
+                "interrupted",
+                patch={"last_error": {"type": "CooperativeCancel", "message": "Stopped between state transitions"}},
+                event="cooperative_cancel_observed",
+            )
+            return 0
+        raise
 
 
 if __name__ == "__main__":

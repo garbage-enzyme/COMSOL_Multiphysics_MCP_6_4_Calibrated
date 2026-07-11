@@ -257,6 +257,64 @@ def test_staged_sweep_manifest_rejects_changed_spec(tmp_path):
     assert model.java.study_node.run_count == 2
 
 
+def test_staged_sweep_smoke_limit_keeps_full_manifest_and_resumes(tmp_path):
+    csv_path = tmp_path / "smoke.csv"
+    durable_rows = []
+    first_model = FakeModel()
+    smoke = run_staged_parametric_sweep(
+        first_model,
+        "wl",
+        [1, 2, 3],
+        ["A"],
+        parameter_unit="m",
+        csv_path=str(csv_path),
+        max_new_points=1,
+        on_durable_row=durable_rows.append,
+    )
+    resumed_model = FakeModel()
+    broad = run_staged_parametric_sweep(
+        resumed_model,
+        "wl",
+        [1, 2, 3],
+        ["A"],
+        parameter_unit="m",
+        csv_path=str(csv_path),
+        resume_csv=True,
+    )
+
+    manifest = json.loads(Path(smoke["manifest_path"]).read_text(encoding="utf-8"))
+    assert manifest["spec"]["requested_values"] == ["1[m]", "2[m]", "3[m]"]
+    assert smoke["stopped_early"] is True
+    assert smoke["stop_reason"] == "max_new_points"
+    assert smoke["n_processed"] == 1
+    assert len(durable_rows) == 1
+    assert broad["n_skipped"] == 1
+    assert broad["n_points"] == 2
+    assert [row["parameter_value"] for row in read_csv(csv_path)] == ["1[m]", "2[m]", "3[m]"]
+
+
+def test_staged_sweep_cooperative_stop_is_checked_between_points(tmp_path):
+    csv_path = tmp_path / "control.csv"
+    model = FakeModel()
+    durable_rows = []
+
+    result = run_staged_parametric_sweep(
+        model,
+        "wl",
+        [1, 2, 3],
+        ["A"],
+        parameter_unit="m",
+        csv_path=str(csv_path),
+        should_stop=lambda: bool(durable_rows),
+        on_durable_row=durable_rows.append,
+    )
+
+    assert result["stopped_early"] is True
+    assert result["stop_reason"] == "control_request"
+    assert result["n_processed"] == 1
+    assert model.java.study_node.run_count == 1
+
+
 def test_error_row_is_retried_but_valid_row_is_skipped(tmp_path):
     csv_path = tmp_path / "resume.csv"
     first_model = FakeModel(failures={"2[m]": 1})
