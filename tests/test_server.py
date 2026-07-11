@@ -14,6 +14,8 @@ def test_server_registration_is_idempotent():
 
     assert "comsol_start" in tool_names
     assert "capabilities" in tool_names
+    assert "session_clear_models" in tool_names
+    assert "session_reset" in tool_names
     assert "model_create" in tool_names
     assert "study_solve" in tool_names
     assert "docs_get" in tool_names

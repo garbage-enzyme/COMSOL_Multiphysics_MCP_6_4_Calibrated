@@ -272,6 +272,47 @@ class SessionManager:
             "models": model_list,
             "current_model": self._current_model,
         }
+
+    def clear_models(self) -> dict:
+        """Remove every tracked model while preserving the connected client."""
+        with self._start_lock:
+            if self._starting:
+                return {
+                    "success": False,
+                    "error": "Cannot clear models while COMSOL is starting.",
+                }
+
+        names = list(self._models)
+        failed = []
+        for name in names:
+            if not self.remove_model(name):
+                failed.append(name)
+
+        if failed:
+            return {
+                "success": False,
+                "removed": len(names) - len(failed),
+                "failed_models": failed,
+                "message": "Some tracked models could not be removed.",
+            }
+        return {
+            "success": True,
+            "removed": len(names),
+            "connected": self._client is not None,
+            "message": "All tracked models were removed; the client was preserved.",
+        }
+
+    def reset(self) -> dict:
+        """Explicitly destroy or cancel the current client lifecycle."""
+        result = self.disconnect()
+        return {
+            **result,
+            "reset": True,
+            "message": (
+                "Session reset requested. All tracked models are cleared and the "
+                "owned client is disconnected or discarded after startup returns."
+            ),
+        }
     
     def add_model(self, model: mph.Model, cleanup_path: Optional[str] = None) -> str:
         """Add a model to tracking."""
@@ -392,3 +433,24 @@ def register_session_tools(mcp: FastMCP) -> None:
             Session information including connection status, version, and loaded models
         """
         return session_manager.get_status()
+
+    @mcp.tool()
+    def session_clear_models() -> dict:
+        """
+        Destructively remove all models tracked by this MCP session.
+
+        The COMSOL client remains connected. Use this only when loss of all
+        unsaved tracked models is intended.
+        """
+        return session_manager.clear_models()
+
+    @mcp.tool()
+    def session_reset() -> dict:
+        """
+        Destructively reset the MCP-owned COMSOL session.
+
+        This clears all tracked models and disconnects the owned client. If a
+        local client is still starting, it is marked for disposal when startup
+        returns.
+        """
+        return session_manager.reset()

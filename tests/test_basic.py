@@ -168,6 +168,62 @@ class TestSessionManager:
         assert not clone_dir.exists()
         sm._client = None
 
+    def test_clear_models_preserves_connected_client(self):
+        from src.tools.session import SessionManager
+
+        class FakeClient:
+            def __init__(self):
+                self.removed = []
+
+            def remove(self, model):
+                self.removed.append(model)
+
+        sm = SessionManager()
+        client = FakeClient()
+        first = object()
+        second = object()
+        sm._client = client
+        sm._models = {"first": first, "second": second}
+        sm._model_cleanup_paths = {}
+        sm._current_model = "first"
+
+        result = sm.clear_models()
+
+        assert result["success"] is True
+        assert result["removed"] == 2
+        assert client.removed == [first, second]
+        assert sm.client is client
+        assert sm.models == {}
+        assert sm.current_model is None
+        sm._client = None
+
+    def test_reset_disconnects_client_and_marks_destructive_action(self):
+        from src.tools.session import SessionManager
+
+        class FakeClient:
+            def __init__(self):
+                self.calls = []
+
+            def clear(self):
+                self.calls.append("clear")
+
+            def disconnect(self):
+                self.calls.append("disconnect")
+
+        sm = SessionManager()
+        client = FakeClient()
+        sm._client = client
+        sm._models = {"model": object()}
+        sm._model_cleanup_paths = {}
+        sm._current_model = "model"
+
+        result = sm.reset()
+
+        assert result["success"] is True
+        assert result["reset"] is True
+        assert client.calls == ["clear", "disconnect"]
+        assert sm.client is None
+
     def test_disconnect_cancels_background_start(self, monkeypatch):
         import src.tools.session as session_module
 

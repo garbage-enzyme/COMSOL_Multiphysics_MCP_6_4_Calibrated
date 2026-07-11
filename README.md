@@ -73,7 +73,8 @@ The refactor covers the following stable paths:
   COMSOL control process. Their source remains available for an explicit isolated
   profile.
 - Startup logs print a compact capability summary. The current default profile
-  exposes 84 tools.
+  exposes 86 tools, including explicit `session_clear_models` and
+  `session_reset` lifecycle operations.
 
 ### Repo hygiene
 
@@ -96,7 +97,7 @@ are treated as successful rows. Existing columns are preserved.
 ## Verification
 
 Run the isolated unit suite with `python -m pytest -q`. The current refactor gate is
-**84 passing tests**. `python -m pytest --collect-only -q` also leaves the COMSOL
+**86 passing tests**. `python -m pytest --collect-only -q` also leaves the COMSOL
 process set unchanged. Root-level
 `test_*.py` files are manual integration probes that may start COMSOL and are
 explicitly excluded from pytest collection; invoke them individually only when
