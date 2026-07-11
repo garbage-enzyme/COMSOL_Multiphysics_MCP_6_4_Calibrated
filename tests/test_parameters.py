@@ -79,19 +79,26 @@ class FakeStudyList:
         return self.studies[tag]
 
 
+class JavaTagStudyList(FakeStudyList):
+    def tags(self):
+        return [JavaStringLike(tag) for tag in self.studies]
+
+
 class FakeJava:
-    def __init__(self, studies):
+    def __init__(self, studies, java_study_tags=False):
         self.studies = studies
+        self.java_study_tags = java_study_tags
 
     def study(self, tag=None):
         if tag is None:
-            return FakeStudyList(self.studies)
+            list_type = JavaTagStudyList if self.java_study_tags else FakeStudyList
+            return list_type(self.studies)
         return self.studies[tag]
 
 
 class FakeModel:
-    def __init__(self, studies):
-        self.java = FakeJava(studies)
+    def __init__(self, studies, java_study_tags=False):
+        self.java = FakeJava(studies, java_study_tags)
 
 
 def test_setup_parametric_sweep_uses_clientapi_properties(monkeypatch):
@@ -142,6 +149,17 @@ def test_setup_parametric_sweep_accepts_java_string_tags(monkeypatch):
     assert result["success"] is True
     assert result["sweep_tag"] == "parametric1"
     assert existing.properties["plistarr"] == ["1 2"]
+
+
+def test_setup_parametric_sweep_normalizes_default_java_study_tag(monkeypatch):
+    study = FakeStudy()
+    model = FakeModel({"std1": study}, java_study_tags=True)
+    monkeypatch.setattr(parameters, "_java_string_array", list)
+
+    result = parameters.setup_parametric_sweep(model, "wl", [1, 2])
+
+    assert result["study"] == "std1"
+    assert type(result["study"]) is str
 
 
 def test_setup_parametric_sweep_validates_inputs():

@@ -32,7 +32,11 @@ def setup_parametric_sweep(
     study_tags = list(jm.study().tags())
     if not study_tags:
         return {"success": False, "error": "No studies found in model."}
-    study_tag = _resolve_study_tag(model, study_name) if study_name else study_tags[0]
+    study_tag = (
+        _resolve_study_tag(model, study_name)
+        if study_name
+        else str(study_tags[0])
+    )
     study = jm.study(study_tag)
 
     feature_list = study.feature()
