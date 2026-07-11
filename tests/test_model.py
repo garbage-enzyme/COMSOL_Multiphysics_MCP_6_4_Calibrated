@@ -1,6 +1,6 @@
 """Unit tests for model management helpers without a COMSOL client."""
 
-from src.tools.model import _save_model_file
+from src.tools.model import _clone_model, _save_model_file
 
 
 class FakeJavaModel:
@@ -55,3 +55,47 @@ def test_save_source_export_keeps_mph_format_api(tmp_path):
     assert saved == str(requested)
     assert model.high_level_saves == [(str(requested), "Java")]
     assert model.java.saved == []
+
+
+class CloneJava:
+    def __init__(self):
+        self.saved = []
+        self.model_label = None
+
+    def save(self, path, copy):
+        self.saved.append((path, copy))
+
+    def label(self, value):
+        self.model_label = value
+
+
+class CloneModel:
+    def __init__(self, name="Source"):
+        self._name = name
+        self.java = CloneJava()
+
+    def name(self):
+        return self._name
+
+
+class CloneClient:
+    def __init__(self, cloned):
+        self.cloned = cloned
+        self.loaded = []
+
+    def load(self, path):
+        self.loaded.append(path)
+        return self.cloned
+
+
+def test_clone_model_uses_clientapi_save_copy_and_load():
+    source = CloneModel()
+    cloned = CloneModel("Loaded")
+    client = CloneClient(cloned)
+
+    result = _clone_model(client, source, "Independent Copy")
+
+    assert result is cloned
+    assert source.java.saved[0][1] is True
+    assert client.loaded == [source.java.saved[0][0]]
+    assert cloned.java.model_label == "Independent Copy"
