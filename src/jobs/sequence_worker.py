@@ -8,7 +8,7 @@ import csv
 import sys
 import time
 
-from .store import JobStore, process_identity
+from .store import JobStore, cancel_request_targets_attempt, process_identity
 
 
 def _run(root: str, job_id: str) -> int:
@@ -22,8 +22,10 @@ def _run(root: str, job_id: str) -> int:
         if time.monotonic() >= deadline:
             raise RuntimeError("Control plane did not durably record the worker identity")
         time.sleep(0.01)
-    current = store.read_state(job_id)["status"]
-    if current == "cancel_requested" or store.read_control(job_id).get("request") == "cancel_requested":
+    initial_state = store.read_state(job_id)
+    attempt = int(initial_state.get("attempt", 1))
+    current = initial_state["status"]
+    if current == "cancel_requested" or cancel_request_targets_attempt(store.read_control(job_id), attempt):
         store.update_state(
             job_id,
             "interrupted",
@@ -35,7 +37,7 @@ def _run(root: str, job_id: str) -> int:
         store.update_state(job_id, "starting", event="worker_started")
     elif current != "starting":
         raise ValueError(f"Sequence worker cannot start from {current}")
-    if store.read_control(job_id).get("request") == "cancel_requested":
+    if cancel_request_targets_attempt(store.read_control(job_id), attempt):
         store.update_state(
             job_id,
             "interrupted",
@@ -70,7 +72,7 @@ def _run(root: str, job_id: str) -> int:
             writer.writerow({"index": index, "status": "ok"})
             handle.flush()
             os.fsync(handle.fileno())
-        cancel_requested = store.read_control(job_id).get("request") == "cancel_requested"
+        cancel_requested = cancel_request_targets_attempt(store.read_control(job_id), attempt)
         if cancel_requested:
             store.update_state(
                 job_id,

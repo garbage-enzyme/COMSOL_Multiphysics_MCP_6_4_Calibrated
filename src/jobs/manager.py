@@ -253,38 +253,39 @@ class JobManager:
                 time.sleep(0.01)
 
     def cancel(self, job_id: str) -> dict[str, Any]:
-        state = self.store.read_state(job_id)
-        if state["status"] not in ACTIVE_STATES:
+        request = self.store.request_cancel(
+            job_id,
+            requester_identity=process_identity(os.getpid()),
+        )
+        state = request["state"]
+        control = request["control"]
+        if not request["accepted"]:
+            if request["reason"] == "terminal":
+                error = "Job was terminal before the cancellation request acquired the job lock"
+            elif request["reason"] == "stale_control_attempt":
+                error = "Existing cancellation request belongs to a different attempt"
+            else:
+                error = f"Cancellation request refused: {request['reason']}"
             return {
                 "success": False,
                 "job_id": job_id,
                 "status": state["status"],
-                "error": "Only an active H1 job accepts cooperative cancellation",
+                "error": error,
             }
-        self.store.write_control(job_id, "cancel_requested")
-        try:
-            updated = self.store.update_state(
-                job_id,
-                "cancel_requested",
-                event="cancel_requested",
-                event_data={"semantics": "cooperative_between_points"},
-            )
-        except ValueError:
-            latest = self.store.read_state(job_id)
-            self.store.write_control(job_id, None)
-            return {
-                "success": False,
-                "job_id": job_id,
-                "status": latest["status"],
-                "error": "Job became terminal before the cooperative request was recorded",
-            }
-        return {"success": True, "job_id": job_id, "status": updated["status"]}
+        return {
+            "success": True,
+            "job_id": job_id,
+            "status": state["status"],
+            "request_id": control["request_id"],
+            "target_attempt": control["target_attempt"],
+            "idempotent": bool(request["idempotent"]),
+        }
 
     def resume(self, job_id: str) -> dict[str, Any]:
         with self.store.lock(job_id):
             state = self.store.read_state(job_id)
-            if state["status"] not in {"failed", "interrupted"}:
-                raise ValueError("Only failed or interrupted jobs may be resumed")
+            if state["status"] not in {"failed", "interrupted", "cancelled"}:
+                raise ValueError("Only failed, interrupted, or cancelled jobs may be resumed")
             spec = self.store.read_spec(job_id)
             if spec["job_type"] == "test_sequence" and not self.allow_test_jobs:
                 raise ValueError("test_sequence jobs are disabled")
@@ -315,7 +316,7 @@ class JobManager:
 
         with self.store.lock(job_id):
             state = self.store.read_state(job_id)
-            if state["status"] not in {"failed", "interrupted"}:
+            if state["status"] not in {"failed", "interrupted", "cancelled"}:
                 raise ValueError("Job state changed while resume preflight was running")
             current_spec = self.store.read_spec(job_id)
             current_expected = current_spec.get("spec_fingerprint")
@@ -330,9 +331,18 @@ class JobManager:
             state["worker_process_create_time"] = None
             state["worker_command_signature"] = None
             state["last_error"] = None
+            if isinstance(state.get("cancel"), dict):
+                state["cancel"] = {
+                    **state["cancel"],
+                    "superseded_by_attempt": state["attempt"],
+                }
             state["updated_at_epoch"] = time.time()
             atomic_write_json(self.store.job_dir(job_id) / "state.json", state)
-            self.store.write_control(job_id, None)
+            self.store.write_control(
+                job_id,
+                None,
+                fields={"cleared_for_attempt": state["attempt"]},
+            )
             self.store._append_event_unlocked(job_id, "resume_requested", {"attempt": state["attempt"]}, "starting")
         module = "src.jobs.sequence_worker" if current_spec["job_type"] == "test_sequence" else "src.jobs.worker"
         try:

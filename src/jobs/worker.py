@@ -10,7 +10,7 @@ import sys
 import time
 from typing import Any
 
-from .store import JobStore, process_identity
+from .store import JobStore, cancel_request_targets_attempt, process_identity
 
 
 def _valid_row_count(csv_path: Path, config_id: str) -> int:
@@ -63,7 +63,8 @@ def _run(root: str, job_id: str) -> int:
         time.sleep(0.01)
 
     state = store.read_state(job_id)
-    if state["status"] == "cancel_requested" or store.read_control(job_id).get("request") == "cancel_requested":
+    attempt = int(state.get("attempt", 1))
+    if state["status"] == "cancel_requested" or cancel_request_targets_attempt(store.read_control(job_id), attempt):
         store.update_state(
             job_id,
             "interrupted",
@@ -112,7 +113,7 @@ def _run(root: str, job_id: str) -> int:
         }
 
         def should_stop() -> bool:
-            return store.read_control(job_id).get("request") == "cancel_requested"
+            return cancel_request_targets_attempt(store.read_control(job_id), attempt)
 
         def on_row(row: dict[str, Any]) -> None:
             progress["completed"] = _valid_row_count(

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import csv
+from concurrent.futures import ThreadPoolExecutor
 import os
 import shutil
 import subprocess
@@ -127,6 +128,107 @@ def test_cooperative_cancel_is_truthful_and_resumable(jobs_root):
     assert interrupted["last_error"]["type"] == "CooperativeCancel"
     manager.resume(result["job_id"])
     wait_for(manager, result["job_id"], {"completed"})
+
+
+def test_repeated_and_concurrent_cancel_calls_share_one_attempt_bound_request(jobs_root):
+    manager = JobManager(jobs_root, allow_test_jobs=True)
+    result = manager.submit({"job_type": "test_sequence", "delays": [0.05, 1.0]})
+    wait_for(manager, result["job_id"], {"running"})
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first, second = list(pool.map(lambda _value: manager.cancel(result["job_id"]), range(2)))
+
+    assert first["success"] is True
+    assert second["success"] is True
+    assert first["request_id"] == second["request_id"]
+    assert {first["idempotent"], second["idempotent"]} == {False, True}
+    control = manager.store.read_control(result["job_id"])
+    assert control["target_attempt"] == 1
+    assert control["target_worker"]["pid"] is not None
+    assert manager.store.read_state(result["job_id"])["cancel"]["request_id"] == first["request_id"]
+    wait_for(manager, result["job_id"], {"interrupted"})
+
+
+def test_completed_before_cancel_acquires_lock_has_no_control_side_effect(jobs_root):
+    manager = JobManager(jobs_root, allow_test_jobs=True)
+    result = manager.submit({"job_type": "test_sequence", "delays": [0.01]})
+    wait_for(manager, result["job_id"], {"completed"})
+
+    cancelled = manager.cancel(result["job_id"])
+
+    assert cancelled["success"] is False
+    assert manager.store.read_control(result["job_id"])["request"] is None
+    assert manager.store.read_state(result["job_id"])["status"] == "completed"
+
+
+def test_cancel_requested_state_cannot_be_overwritten_by_completed(jobs_root):
+    manager = JobManager(jobs_root, allow_test_jobs=True)
+    result = manager.submit({"job_type": "test_sequence", "delays": [0.05, 1.0]})
+    wait_for(manager, result["job_id"], {"running"})
+    manager.cancel(result["job_id"])
+
+    with pytest.raises(ValueError, match="Invalid job state transition"):
+        manager.store.update_state(result["job_id"], "completed")
+
+    wait_for(manager, result["job_id"], {"interrupted"})
+
+
+def test_stale_attempt_control_is_ignored_after_resume(jobs_root):
+    manager = JobManager(jobs_root, allow_test_jobs=True)
+    result = manager.submit({"job_type": "test_sequence", "delays": [0.05, 0.4]})
+    wait_for(manager, result["job_id"], {"running"})
+    first = manager.cancel(result["job_id"])
+    wait_for(manager, result["job_id"], {"interrupted"})
+
+    resumed = manager.resume(result["job_id"])
+    manager.store.write_control(
+        result["job_id"],
+        "cancel_requested",
+        fields={"request_id": first["request_id"], "target_attempt": 1},
+    )
+    completed = wait_for(manager, result["job_id"], {"completed"}, timeout=10)
+
+    assert resumed["attempt"] == 2
+    assert completed["progress"] == {"completed": 2, "total": 2}
+
+
+def test_legacy_h1_cancel_control_migrates_to_an_idempotent_request(jobs_root):
+    store = JobStore(jobs_root)
+    identity = process_identity(os.getpid())
+    job_id = store.create(
+        {"schema_version": "1", "job_type": "test"},
+        {
+            "schema_version": "1",
+            "status": "running",
+            "attempt": 1,
+            "worker_pid": identity["pid"],
+            "worker_process_create_time": identity["process_create_time"],
+            "worker_command_signature": identity["command_signature"],
+        },
+    )
+    store.write_control(job_id, "cancel_requested")
+
+    migrated = store.request_cancel(job_id, requester_identity=identity)
+
+    assert migrated["accepted"] is True
+    assert migrated["idempotent"] is True
+    assert migrated["control"]["target_attempt"] == 1
+    assert migrated["control"]["request_id"].startswith("cancel-")
+
+
+def test_unknown_control_request_fails_closed(jobs_root):
+    store = JobStore(jobs_root)
+    job_id = store.create(
+        {"schema_version": "1", "job_type": "test"},
+        {"schema_version": "1", "status": "running", "attempt": 1},
+    )
+    store.write_control(job_id, "unexpected")
+
+    refused = store.request_cancel(job_id, requester_identity=process_identity(os.getpid()))
+
+    assert refused["accepted"] is False
+    assert refused["reason"] == "unknown_control_request"
+    assert store.read_state(job_id)["status"] == "running"
 
 
 def test_completed_state_is_immutable(jobs_root):

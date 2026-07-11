@@ -17,7 +17,7 @@ import psutil
 from src.utils.runtime_paths import default_jobs_root as _shared_default_jobs_root
 
 
-JOB_SCHEMA_VERSION = "1"
+JOB_SCHEMA_VERSION = "2"
 CREATE_TIME_TOLERANCE_SECONDS = 0.05
 ACTIVE_STATES = {
     "submitted",
@@ -26,17 +26,20 @@ ACTIVE_STATES = {
     "smoke_validated",
     "running",
     "cancel_requested",
+    "cancelling",
 }
-TERMINAL_STATES = {"completed", "failed", "interrupted"}
+TERMINAL_STATES = {"completed", "failed", "interrupted", "cancelled"}
 TRANSITIONS = {
     "submitted": {"starting", "failed", "interrupted", "cancel_requested"},
     "starting": {"smoke_running", "failed", "interrupted", "cancel_requested"},
     "smoke_running": {"smoke_validated", "failed", "interrupted", "cancel_requested"},
     "smoke_validated": {"running", "completed", "failed", "interrupted", "cancel_requested"},
     "running": {"completed", "failed", "interrupted", "cancel_requested"},
-    "cancel_requested": {"interrupted", "failed"},
+    "cancel_requested": {"cancelling", "interrupted", "failed"},
+    "cancelling": {"cancelled", "interrupted", "failed"},
     "failed": {"starting"},
     "interrupted": {"starting"},
+    "cancelled": {"starting"},
     "completed": set(),
 }
 
@@ -134,6 +137,19 @@ def process_identity_state(identity: dict[str, Any]) -> tuple[str, str]:
     return "active", "worker PID, creation time, and command line match"
 
 
+def cancel_request_targets_attempt(control: dict[str, Any], attempt: int) -> bool:
+    """Return whether a durable cancel request belongs to this worker attempt.
+
+    Schema-v1 controls have no target attempt, so they retain their H1 meaning
+    for the attempt that reads them. H2 controls are strict: an old request
+    must never stop a resumed worker.
+    """
+    if control.get("request") != "cancel_requested":
+        return False
+    target = control.get("target_attempt")
+    return target is None or int(target) == int(attempt)
+
+
 class JobLock:
     """Exclusive file lock that removes only locks proven stale by process identity."""
 
@@ -228,7 +244,10 @@ class JobStore:
         directory.mkdir(parents=False, exist_ok=False)
         atomic_write_json(directory / "spec.json", spec)
         atomic_write_json(directory / "state.json", state)
-        atomic_write_json(directory / "control.json", {"schema_version": JOB_SCHEMA_VERSION})
+        atomic_write_json(
+            directory / "control.json",
+            {"schema_version": JOB_SCHEMA_VERSION, "request": None, "updated_at_epoch": time.time()},
+        )
         (directory / "events.jsonl").touch(exist_ok=False)
         (directory / "worker.log").touch(exist_ok=False)
         _fsync_directory(directory)
@@ -243,10 +262,139 @@ class JobStore:
     def read_control(self, job_id: str) -> dict[str, Any]:
         return read_json(self.job_dir(job_id) / "control.json")
 
-    def write_control(self, job_id: str, request: str | None = None) -> dict[str, Any]:
-        control = {"schema_version": JOB_SCHEMA_VERSION, "request": request, "updated_at_epoch": time.time()}
+    def write_control(
+        self,
+        job_id: str,
+        request: str | None = None,
+        *,
+        fields: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        control = {
+            "schema_version": JOB_SCHEMA_VERSION,
+            "request": request,
+            "updated_at_epoch": time.time(),
+        }
+        control.update(fields or {})
         atomic_write_json(self.job_dir(job_id) / "control.json", control)
         return control
+
+    def request_cancel(self, job_id: str, *, requester_identity: dict[str, Any]) -> dict[str, Any]:
+        """Durably linearize one attempt-bound cancellation request.
+
+        The control artifact is the durable authorization and is written before
+        the state transition/event. Repeated callers observe the same request
+        ID. A completed job wins if it was already terminal under this lock.
+        """
+        with self.lock(job_id):
+            state = self.read_state(job_id)
+            status = str(state.get("status"))
+            control = self.read_control(job_id)
+            if status in TERMINAL_STATES:
+                return {
+                    "accepted": False,
+                    "reason": "terminal",
+                    "state": state,
+                    "control": control,
+                }
+            attempt = int(state.get("attempt", 1))
+            existing_request = control.get("request")
+            if existing_request == "cancel_requested":
+                existing_attempt = control.get("target_attempt")
+                if existing_attempt not in (None, attempt):
+                    return {
+                        "accepted": False,
+                        "reason": "stale_control_attempt",
+                        "state": state,
+                        "control": control,
+                    }
+                request_id = control.get("request_id") or f"cancel-{uuid.uuid4().hex}"
+                if not control.get("request_id"):
+                    control = {
+                        **control,
+                        "schema_version": JOB_SCHEMA_VERSION,
+                        "request_id": request_id,
+                        "target_attempt": attempt,
+                        "updated_at_epoch": time.time(),
+                    }
+                    atomic_write_json(self.job_dir(job_id) / "control.json", control)
+                if status != "cancel_requested":
+                    if "cancel_requested" not in TRANSITIONS.get(status, set()):
+                        return {
+                            "accepted": False,
+                            "reason": "state_cannot_accept_cancel",
+                            "state": state,
+                            "control": control,
+                        }
+                    state["status"] = "cancel_requested"
+                    state["cancel"] = {
+                        "request_id": request_id,
+                        "target_attempt": attempt,
+                        "phase": "requested",
+                        "requested_at_epoch": control.get("requested_at_epoch"),
+                    }
+                    state["updated_at_epoch"] = time.time()
+                    atomic_write_json(self.job_dir(job_id) / "state.json", state)
+                    self._append_event_unlocked(
+                        job_id,
+                        "cancel_request_reconciled",
+                        {"request_id": request_id, "target_attempt": attempt},
+                        "cancel_requested",
+                    )
+                return {"accepted": True, "idempotent": True, "state": state, "control": control}
+            if existing_request not in (None, ""):
+                return {
+                    "accepted": False,
+                    "reason": "unknown_control_request",
+                    "state": state,
+                    "control": control,
+                }
+            if "cancel_requested" not in TRANSITIONS.get(status, set()):
+                return {
+                    "accepted": False,
+                    "reason": "state_cannot_accept_cancel",
+                    "state": state,
+                    "control": control,
+                }
+            request_id = f"cancel-{uuid.uuid4().hex}"
+            target_worker = {
+                "pid": state.get("worker_pid"),
+                "process_create_time": state.get("worker_process_create_time"),
+                "command_signature": state.get("worker_command_signature"),
+            }
+            now = time.time()
+            control = {
+                "schema_version": JOB_SCHEMA_VERSION,
+                "request": "cancel_requested",
+                "request_id": request_id,
+                "request_type": "cancel",
+                "target_attempt": attempt,
+                "target_worker": target_worker,
+                "requested_at_epoch": now,
+                "requester_identity": requester_identity,
+                "updated_at_epoch": now,
+            }
+            # Intent is durable before the state transition or any future
+            # coordinator side effect.
+            atomic_write_json(self.job_dir(job_id) / "control.json", control)
+            state["status"] = "cancel_requested"
+            state["cancel"] = {
+                "request_id": request_id,
+                "target_attempt": attempt,
+                "requested_at_epoch": now,
+                "requester_identity": requester_identity,
+                "phase": "requested",
+                "native": {"candidate": None, "supported": None, "attempted": False},
+                "worker": {"exact_identity": target_worker},
+            }
+            state["updated_at_epoch"] = time.time()
+            atomic_write_json(self.job_dir(job_id) / "state.json", state)
+            self._append_event_unlocked(
+                job_id,
+                "cancel_requested",
+                {"request_id": request_id, "target_attempt": attempt},
+                "cancel_requested",
+            )
+            return {"accepted": True, "idempotent": False, "state": state, "control": control}
 
     @contextmanager
     def lock(self, job_id: str, timeout: float = 5.0) -> Iterator[None]:
