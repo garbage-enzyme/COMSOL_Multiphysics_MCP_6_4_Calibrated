@@ -243,6 +243,35 @@ class TestSessionManager:
 
         sm.disconnect()
 
+    def test_start_does_not_forward_unsupported_products(self, monkeypatch):
+        import src.tools.session as session_module
+
+        captured = {}
+
+        class FakeClient:
+            def clear(self):
+                return None
+
+            def disconnect(self):
+                return None
+
+        def create_client(**kwargs):
+            captured.update(kwargs)
+            return FakeClient()
+
+        sm = session_module.SessionManager()
+        sm._client = None
+        monkeypatch.setattr(session_module.mph, "Client", create_client)
+        monkeypatch.setattr(session_module.mph_session, "client", None)
+
+        result = sm.start(cores=2, version="6.4", products=["ACDC"])
+        sm._start_thread.join(timeout=2)
+
+        assert result["success"] is True
+        assert "warning" in result
+        assert captured == {"cores": 2, "version": "6.4"}
+        sm.disconnect()
+
     def test_connect_rejects_in_flight_local_start(self, monkeypatch):
         import src.tools.session as session_module
 

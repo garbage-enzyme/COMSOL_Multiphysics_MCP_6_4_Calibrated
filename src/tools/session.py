@@ -81,9 +81,9 @@ class SessionManager:
         # If a previous start attempt failed, the thread is done; just spawn
         # a fresh one. If a previous attempt succeeded, _client would be set
         # and we'd have returned above.
+        # MPh 1.3.1 Client accepts cores/version/port/host only. COMSOL checks
+        # out licensed products on demand when a physics interface is created.
         kwargs = {"cores": cores, "version": version}
-        if products:
-            kwargs["products"] = products
         kwargs = {k: v for k, v in kwargs.items() if v is not None}
 
         self._start_thread = threading.Thread(
@@ -94,7 +94,7 @@ class SessionManager:
         )
         self._start_thread.start()
 
-        return {
+        result = {
             "success": True,
             "starting": True,
             "message": (
@@ -103,6 +103,12 @@ class SessionManager:
                 "do NOT retry comsol_start."
             )
         }
+        if products:
+            result["warning"] = (
+                "MPh 1.3.1 does not accept a products argument; COMSOL will "
+                "load and license requested physics products on demand."
+            )
+        return result
 
     def _start_worker(self, kwargs: dict) -> None:
         """Runs mph.Client() in a daemon thread. Sets _client on success."""
@@ -345,8 +351,8 @@ def register_session_tools(mcp: FastMCP) -> None:
         Args:
             cores: Number of processor cores to use (default: all available)
             version: COMSOL version to use, e.g., '6.0' (default: latest installed)
-            products: List of COMSOL products to load, e.g., ["ACDC"], ["ACDC", "CADImport"]
-                     (default: all available products)
+            products: Compatibility hint only. MPh 1.3.1 cannot preload a
+                     product list; COMSOL checks out licensed products on demand.
         
         Returns:
             Session info including version and core count, or error message
