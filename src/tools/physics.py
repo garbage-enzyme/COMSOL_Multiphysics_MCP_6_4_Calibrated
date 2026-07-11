@@ -60,12 +60,29 @@ def _component_sdim(comp):
 
 
 def _find_physics_context(jm, physics_name):
-    """Return ``(component, physics)`` by label or tag."""
+    """Return ``(component, physics)`` by canonical type, label, or tag.
+
+    COMSOL localizes default interface labels, so an English canonical name such
+    as ``Electrostatics`` cannot be resolved reliably by comparing labels alone.
+    Known interface aliases are therefore mapped to their stable clientapi tags.
+    """
+    requested = str(physics_name).strip()
+    normalized = requested.replace(" ", "").replace("_", "").casefold()
+    alias = PHYSICS_TYPE_ALIASES.get(normalized)
+    candidate_tags = {requested}
+    candidate_names = {normalized}
+    if alias is not None:
+        candidate_tags.add(alias[0])
+        candidate_names.add(alias[1].replace(" ", "").replace("_", "").casefold())
+
     for comp_tag in jm.component().tags():
         comp = jm.component().get(comp_tag)
         for p_tag in comp.physics().tags():
             p = comp.physics().get(p_tag)
-            if p.label() == physics_name or p.tag() == physics_name:
+            tag = str(p.tag())
+            label = str(p.label())
+            normalized_label = label.replace(" ", "").replace("_", "").casefold()
+            if tag in candidate_tags or label == requested or normalized_label in candidate_names:
                 return comp, p
     return None, None
 

@@ -357,6 +357,24 @@ def test_add_boundary_condition_uses_feature_create_and_boundary_dimension():
     assert result["boundary_condition"]["entity_dimension"] == 2
 
 
+def test_add_boundary_condition_resolves_canonical_name_with_localized_label():
+    physics = BoundaryPhysics()
+    physics.label = lambda: "静电"
+    physics.tag = lambda: "es"
+    component = BoundaryComponent(physics)
+
+    result = add_boundary_condition(
+        FakeModel(component),
+        "Electrostatics",
+        "Ground",
+        [3],
+        feature_tag="gnd1",
+    )
+
+    assert result["success"] is True
+    assert physics.features.created[0][0:3] == ("gnd1", "Ground", 2)
+
+
 def test_add_boundary_condition_validates_selection():
     result = add_boundary_condition(
         FakeModel(BoundaryComponent(BoundaryPhysics())),
