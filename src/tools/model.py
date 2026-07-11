@@ -52,6 +52,20 @@ def _clone_model(client, model, new_name: Optional[str] = None):
     return cloned_model, str(copy_path)
 
 
+def _list_model_components(model) -> list[dict[str, str]]:
+    """Return component metadata with clientapi strings normalized for JSON."""
+    jm = model.java
+    components = []
+    for comp_tag in jm.component().tags():
+        comp = jm.component().get(comp_tag)
+        if comp is None:
+            continue
+        tag = str(comp.tag())
+        label = str(comp.label()) if hasattr(comp, "label") else tag
+        components.append({"name": tag, "label": label})
+    return components
+
+
 def register_model_tools(mcp: FastMCP) -> None:
     """Register model management tools with the MCP server."""
     
@@ -199,16 +213,7 @@ def register_model_tools(mcp: FastMCP) -> None:
             }
         
         try:
-            jm = model.java
-            components = []
-            
-            for comp_tag in jm.component().tags():
-                comp = jm.component().get(comp_tag)
-                if comp is not None:
-                    components.append({
-                        "name": comp.tag(),
-                        "label": comp.label() if hasattr(comp, 'label') else comp.tag()
-                    })
+            components = _list_model_components(model)
             
             return {
                 "success": True,

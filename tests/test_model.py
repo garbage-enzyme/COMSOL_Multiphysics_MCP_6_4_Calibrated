@@ -1,6 +1,8 @@
 """Unit tests for model management helpers without a COMSOL client."""
 
-from src.tools.model import _clone_model, _save_model_file
+import json
+
+from src.tools.model import _clone_model, _list_model_components, _save_model_file
 
 
 class FakeJavaModel:
@@ -100,3 +102,51 @@ def test_clone_model_uses_clientapi_save_copy_and_load():
     assert client.loaded == [source.java.saved[0][0]]
     assert cleanup_path == source.java.saved[0][0]
     assert cloned.java.model_label == "Independent Copy"
+
+
+class JavaStringLike:
+    def __init__(self, value):
+        self.value = value
+
+    def __str__(self):
+        return self.value
+
+
+class ComponentNode:
+    def __init__(self, tag, label):
+        self._tag = JavaStringLike(tag)
+        self._label = JavaStringLike(label)
+
+    def tag(self):
+        return self._tag
+
+    def label(self):
+        return self._label
+
+
+class ComponentCollection:
+    def __init__(self):
+        self.nodes = {"comp1": ComponentNode("comp1", "Component 1")}
+
+    def tags(self):
+        return [JavaStringLike("comp1")]
+
+    def get(self, tag):
+        return self.nodes[str(tag)]
+
+
+class ComponentJavaModel:
+    def __init__(self):
+        self.components = ComponentCollection()
+
+    def component(self):
+        return self.components
+
+
+def test_list_components_normalizes_clientapi_strings_for_json():
+    model = type("Model", (), {"java": ComponentJavaModel()})()
+
+    components = _list_model_components(model)
+
+    assert components == [{"name": "comp1", "label": "Component 1"}]
+    assert json.loads(json.dumps(components)) == components
