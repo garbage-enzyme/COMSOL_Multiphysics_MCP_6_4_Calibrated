@@ -9,6 +9,7 @@ from pathlib import Path
 import numpy as np
 
 from src.tools.workflow import (
+    _model_identity,
     _csv_value,
     _scalarize,
     run_mesh_convergence,
@@ -314,6 +315,19 @@ def test_manifest_fingerprints_source_and_rows_record_wavelength_controls(tmp_pa
     assert row["evaluated_wl"] == "2.0"
     assert row["evaluated_c_const_over_ewfd_freq"] == "3.0"
     assert result["last_point"] == result["tail_rows"][-1]
+
+
+def test_source_identity_ignores_mutable_runtime_model_name(tmp_path):
+    source = tmp_path / "baseline.mph"
+    source.write_bytes(b"immutable fake model")
+    model = FakeModel()
+
+    first = _model_identity(model, str(source))
+    model._name = "checkpoint_copy"
+    resumed = _model_identity(model, str(source))
+
+    assert first == resumed
+    assert first["model_name"] is None
 
 
 def test_resume_retries_nonfinite_row_instead_of_skipping(tmp_path):

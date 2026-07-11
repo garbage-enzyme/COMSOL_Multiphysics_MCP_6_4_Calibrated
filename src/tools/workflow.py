@@ -191,6 +191,10 @@ def _model_identity(model, source_model_path: Optional[str]) -> dict[str, Any]:
         raise FileNotFoundError(f"source_model_path does not exist: {path}")
     stat = path.stat()
     identity.update(
+        # Checkpoint saves can rename the in-memory model.  When an immutable
+        # source is supplied, its path/hash—not that mutable runtime label—is
+        # the provenance identity used for resume compatibility.
+        model_name=None,
         source_path=str(path),
         source_sha256=_sha256_file(path),
         source_size=stat.st_size,
