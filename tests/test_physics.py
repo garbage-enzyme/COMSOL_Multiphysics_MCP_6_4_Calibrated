@@ -35,6 +35,11 @@ class FakePhysicsList:
         return FakePhysics(interface_type)
 
 
+class JavaTagPhysicsList(FakePhysicsList):
+    def tags(self):
+        return [JavaStringLike(tag) for tag in self.existing]
+
+
 class FakeGeometry:
     def getSDim(self):
         return 3
@@ -98,6 +103,16 @@ def test_add_physics_interface_normalizes_electrostatics_alias():
 
 def test_add_physics_interface_avoids_existing_tag():
     component = FakeComponent(existing=["ht", "ht2"])
+
+    result = add_physics_interface(FakeModel(component), "Heat Transfer")
+
+    assert result["physics"]["tag"] == "ht3"
+    assert component.physics_list.created == [("ht3", "HeatTransfer", "3")]
+
+
+def test_add_physics_interface_avoids_existing_java_string_tags():
+    component = FakeComponent()
+    component.physics_list = JavaTagPhysicsList(existing=["ht", "ht2"])
 
     result = add_physics_interface(FakeModel(component), "Heat Transfer")
 

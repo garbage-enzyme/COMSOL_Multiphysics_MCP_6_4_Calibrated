@@ -496,7 +496,7 @@ def add_physics_interface(
         return {"success": False, "error": f"Component not found: {component_name}"}
 
     tag_prefix, interface_type = _physics_spec(physics_type)
-    existing = set(comp.physics().tags())
+    existing = {str(tag) for tag in comp.physics().tags()}
     tag = tag_prefix
     index = 2
     while tag in existing:
