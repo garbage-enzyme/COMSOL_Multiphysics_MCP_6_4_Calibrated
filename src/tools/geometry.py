@@ -93,7 +93,8 @@ def list_geometry_features(
 
     features = []
     feature_list = geom.feature()
-    for tag in list(feature_list.tags()):
+    for raw_tag in list(feature_list.tags()):
+        tag = str(raw_tag)
         feature = feature_list.get(tag)
         info = {"tag": tag}
         try:

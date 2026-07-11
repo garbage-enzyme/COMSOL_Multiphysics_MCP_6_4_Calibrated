@@ -57,6 +57,19 @@ class FakeFeatureList:
         return self.features[tag][1]
 
 
+class JavaStringLike:
+    def __init__(self, value):
+        self.value = value
+
+    def __str__(self):
+        return self.value
+
+
+class JavaTagFeatureList(FakeFeatureList):
+    def tags(self):
+        return [JavaStringLike(tag) for tag in self.features]
+
+
 class FakeGeometry:
     def __init__(self, tag="geom1", failing_property=None):
         self._tag = tag
@@ -163,6 +176,18 @@ def test_list_geometry_features_returns_tags_and_labels():
         ],
         "count": 2,
     }
+
+
+def test_list_geometry_features_normalizes_java_string_tags():
+    geometry = FakeGeometry()
+    geometry.features = JavaTagFeatureList()
+    geometry.features.create("blk1", "Block")
+
+    result = list_geometry_features(FakeModel(geometry))
+
+    assert result["features"] == [
+        {"tag": "blk1", "label": "Geometry Feature"}
+    ]
 
 
 def test_add_circle_feature_uses_clientapi_properties():
