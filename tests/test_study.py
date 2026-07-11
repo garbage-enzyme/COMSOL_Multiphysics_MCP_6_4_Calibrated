@@ -28,6 +28,24 @@ class FakeEntityList:
         return self.entities[tag]
 
 
+class JavaStringLike:
+    def __init__(self, value):
+        self.value = value
+
+    def __str__(self):
+        return self.value
+
+
+class JavaEntityList(FakeEntityList):
+    def tags(self):
+        return [JavaStringLike(tag) for tag in self.entities]
+
+
+class JavaEntity(FakeEntity):
+    def feature(self):
+        return JavaEntityList(self.features)
+
+
 class FakeJava:
     def __init__(self, studies):
         self.studies = studies
@@ -39,6 +57,11 @@ class FakeJava:
 class FakeModel:
     def __init__(self, studies):
         self.java = FakeJava(studies)
+
+
+class JavaTagJava(FakeJava):
+    def study(self):
+        return JavaEntityList(self.studies)
 
 
 def make_model():
@@ -90,3 +113,16 @@ def test_resolve_study_tag_accepts_tag_or_unicode_label():
 def test_resolve_study_tag_reports_available_tags():
     with pytest.raises(ValueError, match="std1"):
         _resolve_study_tag(make_model(), "missing")
+
+
+def test_study_helpers_normalize_java_string_tags():
+    model = FakeModel(
+        {"std1": JavaEntity("研究 1", {"step1": FakeEntity("稳态 1")})}
+    )
+    model.java = JavaTagJava(model.java.studies)
+
+    result = list_studies(model)
+
+    assert result["studies"][0]["tag"] == "std1"
+    assert result["studies"][0]["steps"][0]["tag"] == "step1"
+    assert _resolve_study_tag(model, "研究 1") == "std1"

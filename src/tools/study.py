@@ -23,7 +23,7 @@ def _resolve_study_tag(model, study_name: Optional[str]) -> Optional[str]:
         return None
     jm = model.java
     study_list = jm.study()
-    tags = list(study_list.tags())
+    tags = [str(tag) for tag in study_list.tags()]
     if study_name in tags:
         return study_name
     for tag in tags:
@@ -41,7 +41,8 @@ def list_studies(model) -> dict:
     """List studies and steps through stable clientapi tags and labels."""
     study_list = model.java.study()
     studies = []
-    for tag in list(study_list.tags()):
+    for raw_tag in list(study_list.tags()):
+        tag = str(raw_tag)
         study = study_list.get(tag)
         info = {"tag": tag}
         try:
@@ -52,7 +53,8 @@ def list_studies(model) -> dict:
         steps = []
         try:
             feature_list = study.feature()
-            for step_tag in list(feature_list.tags()):
+            for raw_step_tag in list(feature_list.tags()):
+                step_tag = str(raw_step_tag)
                 step = feature_list.get(step_tag)
                 step_info = {"tag": step_tag}
                 try:
