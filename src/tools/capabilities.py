@@ -1,16 +1,56 @@
-"""Machine-readable capability reporting for the default MCP profile."""
+"""Machine-readable capability reporting for a static MCP profile."""
 
 from mcp.server.fastmcp import FastMCP
 
+from .catalog import PROFILE_NAMES, TOOL_METADATA
+from .profiles import (
+    PROFILE_DESCRIPTIONS,
+    PROFILE_MATURITY,
+    ProfileSelection,
+    resolve_profile,
+    tool_names_for_profile,
+)
 from .session import session_manager
 
 
-def get_capabilities() -> dict:
-    """Describe supported, experimental, and disabled behavior without startup."""
-    status = session_manager.get_status()
+def _profile_inventory(selection: ProfileSelection) -> dict:
+    enabled_names = tool_names_for_profile(selection.name)
+    all_groups = {metadata.group for metadata in TOOL_METADATA.values()}
+    enabled_groups = {
+        TOOL_METADATA[name].group for name in enabled_names
+    }
+    available_profiles = []
+    for profile in PROFILE_NAMES:
+        names = tool_names_for_profile(profile)
+        available_profiles.append({
+            "name": profile,
+            "maturity": PROFILE_MATURITY[profile],
+            "tool_count": len(names),
+            "starts_solver": any(TOOL_METADATA[name].starts_solver for name in names),
+            "description": PROFILE_DESCRIPTIONS[profile],
+        })
     return {
+        "active_profile": selection.name,
+        "available_profiles": available_profiles,
+        "enabled_tool_groups": sorted(enabled_groups),
+        "disabled_tool_groups": sorted(all_groups - enabled_groups),
+        "tool_count": len(enabled_names),
+        "profile_source": {
+            "environment_variable": selection.environment_variable,
+            "default_used": selection.default_used,
+            "source": selection.source,
+        },
+        "profile_restart_required": True,
+    }
+
+
+def get_capabilities(selection: ProfileSelection | None = None) -> dict:
+    """Describe supported, experimental, and disabled behavior without startup."""
+    active_selection = selection or resolve_profile()
+    status = session_manager.get_status()
+    result = {
         "success": True,
-        "profile": "default",
+        "profile": active_selection.name,
         "targets": {
             "comsol": "6.4+",
             "mph": "1.3.1 standalone clientapi",
@@ -73,14 +113,17 @@ def get_capabilities() -> dict:
         },
         "restart_required_after_source_changes": True,
     }
+    result.update(_profile_inventory(active_selection))
+    return result
 
 
-def startup_capability_summary() -> str:
+def startup_capability_summary(selection: ProfileSelection | None = None) -> str:
     """Return a compact startup summary without initializing external services."""
-    capabilities = get_capabilities()
+    capabilities = get_capabilities(selection)
     targets = capabilities["targets"]
     return (
         f"profile={capabilities['profile']}; "
+        f"tools={capabilities['tool_count']}; "
         f"target=COMSOL {targets['comsol']} / MPh {targets['mph']}; "
         "lexical_manual=enabled; semantic_pdf=disabled; durable_jobs=staged_sweep; "
         "solver_ownership=enforced; durable_job_cancellation=verified"
@@ -89,12 +132,13 @@ def startup_capability_summary() -> str:
 
 def register_capability_tools(mcp: FastMCP) -> None:
     """Register dependency-free server capability tools."""
+    selection = getattr(mcp, "profile_selection", None) or resolve_profile()
 
     @mcp.tool()
     def capabilities() -> dict:
         """
-        Report the default tool profile and the maturity of risky operations.
+        Report the active static tool profile and the maturity of risky operations.
 
         This read-only call does not start COMSOL or initialize PDF/ML services.
         """
-        return get_capabilities()
+        return get_capabilities(selection)

@@ -63,6 +63,7 @@ def test_semantic_pdf_tools_require_explicit_opt_in():
 def test_capabilities_report_risky_operations_without_starting_comsol(monkeypatch):
     import src.tools.capabilities as capability_module
 
+    monkeypatch.delenv("COMSOL_MCP_PROFILE", raising=False)
     monkeypatch.setattr(
         capability_module.session_manager,
         "get_status",
@@ -71,7 +72,13 @@ def test_capabilities_report_risky_operations_without_starting_comsol(monkeypatc
 
     result = get_capabilities()
 
-    assert result["profile"] == "default"
+    assert result["profile"] == "full"
+    assert result["active_profile"] == "full"
+    assert result["tool_count"] == 96
+    assert result["profile_source"]["default_used"] is True
+    assert [item["name"] for item in result["available_profiles"]] == [
+        "core", "basic_fem", "wave_optics", "experimental", "full"
+    ]
     assert result["session"] == {"connected": False, "starting": False}
     assert result["long_jobs"]["real_cancellation"] is True
     assert result["long_jobs"]["durable_background_jobs"] is True
@@ -83,6 +90,7 @@ def test_capabilities_report_risky_operations_without_starting_comsol(monkeypatc
 def test_startup_capability_summary_is_compact_and_truthful(monkeypatch):
     import src.tools.capabilities as capability_module
 
+    monkeypatch.delenv("COMSOL_MCP_PROFILE", raising=False)
     monkeypatch.setattr(
         capability_module.session_manager,
         "get_status",
@@ -91,7 +99,8 @@ def test_startup_capability_summary_is_compact_and_truthful(monkeypatch):
 
     summary = startup_capability_summary()
 
-    assert "profile=default" in summary
+    assert "profile=full" in summary
+    assert "tools=96" in summary
     assert "semantic_pdf=disabled" in summary
     assert "lexical_manual=enabled" in summary
     assert "durable_jobs=staged_sweep" in summary

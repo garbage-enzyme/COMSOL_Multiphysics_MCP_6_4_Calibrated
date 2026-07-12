@@ -13,6 +13,7 @@ from .study import register_study_tools
 from .results import register_results_tools
 from .mim_patch import register_mim_patch_tools
 from .workflow import register_workflow_tools
+from .profiles import ProfileSelection, register_profiled, resolve_profile, tool_names_for_profile
 
 TOOL_REGISTRARS = (
     register_capability_tools,
@@ -31,10 +32,12 @@ TOOL_REGISTRARS = (
 )
 
 
-def register_tool_modules(mcp) -> None:
-    """Register every COMSOL tool module on a FastMCP server."""
+def register_tool_modules(mcp, profile: str | ProfileSelection = "full") -> None:
+    """Register the selected COMSOL tool surface on a FastMCP server."""
+    selection = profile if isinstance(profile, ProfileSelection) else resolve_profile(profile)
+    enabled_names = tool_names_for_profile(selection.name)
     for register in TOOL_REGISTRARS:
-        register(mcp)
+        register_profiled(mcp, register, enabled_names, selection)
 
 __all__ = [
     "register_capability_tools",
