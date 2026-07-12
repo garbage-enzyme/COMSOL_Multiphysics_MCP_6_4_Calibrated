@@ -29,11 +29,11 @@ PRE_H3_SNAPSHOT_PATH = (
 
 
 def test_full_tool_schema_snapshot_is_stable():
-    server = create_server("full-schema-snapshot-test")
+    server = create_server("full-schema-snapshot-test", profile="full")
     actual = asyncio.run(snapshot_tool_schemas(server))
     expected = json.loads(SNAPSHOT_PATH.read_text(encoding="utf-8"))
 
-    assert len(actual) == 99
+    assert len(actual) == 100
     assert actual == expected
 
 
@@ -49,7 +49,7 @@ def test_pre_h3_compatibility_snapshot_is_preserved():
 
 
 def test_registered_tool_names_are_unique():
-    server = create_server("unique-tool-name-test")
+    server = create_server("unique-tool-name-test", profile="full")
     tools = asyncio.run(server.list_tools())
     names = [tool.name for tool in tools]
 
@@ -60,7 +60,7 @@ def test_every_registered_tool_has_complete_canonical_metadata():
     expected_names = set(json.loads(SNAPSHOT_PATH.read_text(encoding="utf-8")))
 
     assert set(TOOL_METADATA) == expected_names
-    assert len(TOOL_METADATA) == 99
+    assert len(TOOL_METADATA) == 100
     for name, metadata in TOOL_METADATA.items():
         assert metadata.name == name
         assert metadata.registrar.startswith("src.")
@@ -101,7 +101,7 @@ def test_catalog_import_cannot_start_comsol():
 import mph
 mph.Client = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError('Client called'))
 from src.tools.catalog import TOOL_METADATA
-assert len(TOOL_METADATA) == 99
+assert len(TOOL_METADATA) == 100
 """
     completed = subprocess.run(
         [sys.executable, "-c", code],

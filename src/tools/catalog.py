@@ -92,6 +92,9 @@ _TOOLS_BY_REGISTRAR = {
     "src.tools.wave_optics_preflight.register_wave_optics_preflight_tools": (
         "wave_optics_preflight",
     ),
+    "src.tools.wave_optics_audit.register_wave_optics_audit_tools": (
+        "wave_optics_point_audit",
+    ),
     "src.knowledge.embedded.register_knowledge_tools": (
         "docs_get", "docs_list", "physics_get_guide", "troubleshoot",
         "modeling_best_practices",
@@ -117,6 +120,7 @@ _GROUP_BY_REGISTRAR = {
     "register_workflow_tools": "workflow",
     "register_property_tools": "clientapi_properties",
     "register_wave_optics_preflight_tools": "wave_optics_audit",
+    "register_wave_optics_audit_tools": "wave_optics_audit",
     "register_knowledge_tools": "embedded_docs",
     "register_lexical_manual_tools": "manuals",
 }
@@ -143,6 +147,7 @@ _EXPERIMENTAL_TOOLS = frozenset({
     "clientapi_property_get",
     "clientapi_property_set",
     "wave_optics_preflight",
+    "wave_optics_point_audit",
 })
 
 _SIDE_EFFECTS = {
@@ -207,6 +212,7 @@ _SIDE_EFFECTS = {
     "study_staged_parametric_sweep": "solver_execution",
     "mesh_convergence_study": "solver_execution",
     "clientapi_property_set": "model_mutation",
+    "wave_optics_point_audit": "solver_execution",
     "manual_search": "read_only_subprocess",
     "manual_read_pages": "read_only_subprocess",
 }
@@ -214,6 +220,7 @@ _SIDE_EFFECTS = {
 _STARTS_SOLVER = frozenset({
     "job_submit", "job_resume", "comsol_start", "study_solve",
     "study_solve_async", "study_staged_parametric_sweep", "mesh_convergence_study",
+    "wave_optics_point_audit",
 })
 
 _CORE_TOOLS = frozenset({
@@ -252,6 +259,7 @@ _WAVE_OPTICS_ADDITIONS = frozenset({
     "results_outer_values", "mim_evaluate_spectral",
     "study_staged_parametric_sweep",
     "wave_optics_preflight",
+    "wave_optics_point_audit",
 })
 
 _EXPERIMENTAL_ADDITIONS = frozenset({

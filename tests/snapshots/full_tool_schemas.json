@@ -3753,6 +3753,438 @@
     "title": "troubleshootArguments",
     "type": "object"
   },
+  "wave_optics_point_audit": {
+    "$defs": {
+      "CoordinateLimits": {
+        "properties": {
+          "x": {
+            "items": {
+              "type": "number"
+            },
+            "title": "X",
+            "type": "array"
+          },
+          "y": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Y",
+            "type": "array"
+          },
+          "z": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Z",
+            "type": "array"
+          }
+        },
+        "required": [
+          "x",
+          "y",
+          "z"
+        ],
+        "title": "CoordinateLimits",
+        "type": "object"
+      },
+      "LossSpecification": {
+        "properties": {
+          "domains": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Domains",
+            "type": "array"
+          },
+          "expression": {
+            "title": "Expression",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "normalization_expression": {
+            "title": "Normalization Expression",
+            "type": "string"
+          },
+          "unit": {
+            "title": "Unit",
+            "type": "string"
+          }
+        },
+        "title": "LossSpecification",
+        "type": "object"
+      },
+      "MeshPolicy": {
+        "properties": {
+          "convergence_artifact": {
+            "title": "Convergence Artifact",
+            "type": "string"
+          },
+          "minimum_elements": {
+            "title": "Minimum Elements",
+            "type": "integer"
+          },
+          "require_unchanged": {
+            "title": "Require Unchanged",
+            "type": "boolean"
+          }
+        },
+        "title": "MeshPolicy",
+        "type": "object"
+      },
+      "PolarizationPolicy": {
+        "properties": {
+          "basis": {
+            "title": "Basis",
+            "type": "string"
+          },
+          "max_cross_power_fraction": {
+            "title": "Max Cross Power Fraction",
+            "type": "number"
+          },
+          "max_ellipticity": {
+            "title": "Max Ellipticity",
+            "type": "number"
+          },
+          "reference_config_id": {
+            "title": "Reference Config Id",
+            "type": "string"
+          },
+          "target_vector": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Target Vector",
+            "type": "array"
+          }
+        },
+        "title": "PolarizationPolicy",
+        "type": "object"
+      },
+      "PolicyAssumptions": {
+        "properties": {
+          "linear": {
+            "title": "Linear",
+            "type": "boolean"
+          },
+          "passive": {
+            "title": "Passive",
+            "type": "boolean"
+          },
+          "port_power_normalized": {
+            "title": "Port Power Normalized",
+            "type": "boolean"
+          },
+          "reciprocal": {
+            "title": "Reciprocal",
+            "type": "boolean"
+          },
+          "target_basis": {
+            "title": "Target Basis",
+            "type": "string"
+          }
+        },
+        "title": "PolicyAssumptions",
+        "type": "object"
+      },
+      "PolicyTolerances": {
+        "properties": {
+          "closure_abs": {
+            "title": "Closure Abs",
+            "type": "number"
+          },
+          "loss_match_abs": {
+            "title": "Loss Match Abs",
+            "type": "number"
+          },
+          "loss_match_rel": {
+            "title": "Loss Match Rel",
+            "type": "number"
+          },
+          "quantity_bounds_margin": {
+            "title": "Quantity Bounds Margin",
+            "type": "number"
+          },
+          "wavelength_abs_m": {
+            "title": "Wavelength Abs M",
+            "type": "number"
+          },
+          "wavelength_rel": {
+            "title": "Wavelength Rel",
+            "type": "number"
+          }
+        },
+        "title": "PolicyTolerances",
+        "type": "object"
+      },
+      "PowerProvenance": {
+        "properties": {
+          "A_definition": {
+            "title": "A Definition",
+            "type": "string"
+          },
+          "R_direction": {
+            "title": "R Direction",
+            "type": "string"
+          },
+          "T_direction": {
+            "title": "T Direction",
+            "type": "string"
+          },
+          "normalization": {
+            "title": "Normalization",
+            "type": "string"
+          }
+        },
+        "title": "PowerProvenance",
+        "type": "object"
+      },
+      "ValidationPolicy": {
+        "properties": {
+          "assumptions": {
+            "$ref": "#/$defs/PolicyAssumptions"
+          },
+          "mesh": {
+            "$ref": "#/$defs/MeshPolicy"
+          },
+          "polarization": {
+            "$ref": "#/$defs/PolarizationPolicy"
+          },
+          "required_evidence": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Required Evidence",
+            "type": "array"
+          },
+          "tolerances": {
+            "$ref": "#/$defs/PolicyTolerances"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "title": "ValidationPolicy",
+        "type": "object"
+      }
+    },
+    "properties": {
+      "a_expression": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "A Expression"
+      },
+      "air_reference_artifact_path": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Air Reference Artifact Path"
+      },
+      "air_reference_config_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Air Reference Config Id"
+      },
+      "artifact_dir": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Artifact Dir"
+      },
+      "component_tag": {
+        "title": "Component Tag",
+        "type": "string"
+      },
+      "config_id": {
+        "title": "Config Id",
+        "type": "string"
+      },
+      "expected_source_sha256": {
+        "title": "Expected Source Sha256",
+        "type": "string"
+      },
+      "loss_map": {
+        "anyOf": [
+          {
+            "items": {
+              "$ref": "#/$defs/LossSpecification"
+            },
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Loss Map"
+      },
+      "model_name": {
+        "title": "Model Name",
+        "type": "string"
+      },
+      "physics_tag": {
+        "title": "Physics Tag",
+        "type": "string"
+      },
+      "power_provenance": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/PowerProvenance"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "r_expression": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "R Expression"
+      },
+      "study_step_property": {
+        "default": "plist",
+        "title": "Study Step Property",
+        "type": "string"
+      },
+      "study_step_tag": {
+        "title": "Study Step Tag",
+        "type": "string"
+      },
+      "study_tag": {
+        "title": "Study Tag",
+        "type": "string"
+      },
+      "t_expression": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "T Expression"
+      },
+      "top_air_coordinate_range": {
+        "$ref": "#/$defs/CoordinateLimits"
+      },
+      "top_air_domain_ids": {
+        "anyOf": [
+          {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Top Air Domain Ids"
+      },
+      "top_air_selection": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Top Air Selection"
+      },
+      "validation_policy": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ValidationPolicy"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "validation_policy_path": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Validation Policy Path"
+      },
+      "wavelength_parameter": {
+        "title": "Wavelength Parameter",
+        "type": "string"
+      },
+      "wavelength_unit": {
+        "title": "Wavelength Unit",
+        "type": "string"
+      },
+      "wavelength_value": {
+        "title": "Wavelength Value",
+        "type": "number"
+      }
+    },
+    "required": [
+      "model_name",
+      "component_tag",
+      "physics_tag",
+      "study_tag",
+      "wavelength_value",
+      "wavelength_unit",
+      "wavelength_parameter",
+      "study_step_tag",
+      "expected_source_sha256",
+      "config_id",
+      "top_air_coordinate_range"
+    ],
+    "title": "wave_optics_point_auditArguments",
+    "type": "object"
+  },
   "wave_optics_preflight": {
     "properties": {
       "expected_component_tag": {
