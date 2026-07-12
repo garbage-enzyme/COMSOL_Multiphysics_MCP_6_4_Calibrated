@@ -74,7 +74,7 @@ def test_capabilities_report_risky_operations_without_starting_comsol(monkeypatc
 
     assert result["profile"] == "full"
     assert result["active_profile"] == "full"
-    assert result["tool_count"] == 96
+    assert result["tool_count"] == 98
     assert result["profile_source"]["default_used"] is True
     assert [item["name"] for item in result["available_profiles"]] == [
         "core", "basic_fem", "wave_optics", "experimental", "full"
@@ -100,7 +100,7 @@ def test_startup_capability_summary_is_compact_and_truthful(monkeypatch):
     summary = startup_capability_summary()
 
     assert "profile=full" in summary
-    assert "tools=96" in summary
+    assert "tools=98" in summary
     assert "semantic_pdf=disabled" in summary
     assert "lexical_manual=enabled" in summary
     assert "durable_jobs=staged_sweep" in summary

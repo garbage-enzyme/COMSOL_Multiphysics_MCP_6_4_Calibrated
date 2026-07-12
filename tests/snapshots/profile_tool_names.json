@@ -160,6 +160,8 @@
   ],
   "experimental": [
     "capabilities",
+    "clientapi_property_get",
+    "clientapi_property_set",
     "comsol_connect",
     "comsol_disconnect",
     "comsol_start",
@@ -224,6 +226,8 @@
   ],
   "full": [
     "capabilities",
+    "clientapi_property_get",
+    "clientapi_property_set",
     "comsol_connect",
     "comsol_disconnect",
     "comsol_start",

@@ -4,6 +4,154 @@
     "title": "capabilitiesArguments",
     "type": "object"
   },
+  "clientapi_property_get": {
+    "properties": {
+      "component_name": {
+        "title": "Component Name",
+        "type": "string"
+      },
+      "container": {
+        "enum": [
+          "geometry_feature",
+          "physics_feature",
+          "mesh_feature",
+          "study_step",
+          "result_feature"
+        ],
+        "title": "Container",
+        "type": "string"
+      },
+      "feature_tag": {
+        "title": "Feature Tag",
+        "type": "string"
+      },
+      "model_name": {
+        "title": "Model Name",
+        "type": "string"
+      },
+      "property_name": {
+        "title": "Property Name",
+        "type": "string"
+      }
+    },
+    "required": [
+      "model_name",
+      "component_name",
+      "container",
+      "feature_tag",
+      "property_name"
+    ],
+    "title": "clientapi_property_getArguments",
+    "type": "object"
+  },
+  "clientapi_property_set": {
+    "properties": {
+      "component_name": {
+        "title": "Component Name",
+        "type": "string"
+      },
+      "container": {
+        "enum": [
+          "geometry_feature",
+          "physics_feature",
+          "mesh_feature",
+          "study_step",
+          "result_feature"
+        ],
+        "title": "Container",
+        "type": "string"
+      },
+      "feature_tag": {
+        "title": "Feature Tag",
+        "type": "string"
+      },
+      "model_name": {
+        "title": "Model Name",
+        "type": "string"
+      },
+      "property_name": {
+        "title": "Property Name",
+        "type": "string"
+      },
+      "value": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "integer"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "boolean"
+          },
+          {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": "array"
+          },
+          {
+            "items": {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Value"
+      }
+    },
+    "required": [
+      "model_name",
+      "component_name",
+      "container",
+      "feature_tag",
+      "property_name",
+      "value"
+    ],
+    "title": "clientapi_property_setArguments",
+    "type": "object"
+  },
   "comsol_connect": {
     "properties": {
       "host": {

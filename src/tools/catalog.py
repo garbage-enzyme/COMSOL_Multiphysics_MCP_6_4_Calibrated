@@ -86,6 +86,9 @@ _TOOLS_BY_REGISTRAR = {
     "src.tools.workflow.register_workflow_tools": (
         "study_staged_parametric_sweep", "mesh_convergence_study",
     ),
+    "src.tools.properties.register_property_tools": (
+        "clientapi_property_get", "clientapi_property_set",
+    ),
     "src.knowledge.embedded.register_knowledge_tools": (
         "docs_get", "docs_list", "physics_get_guide", "troubleshoot",
         "modeling_best_practices",
@@ -109,6 +112,7 @@ _GROUP_BY_REGISTRAR = {
     "register_results_tools": "results",
     "register_mim_patch_tools": "mim_patch",
     "register_workflow_tools": "workflow",
+    "register_property_tools": "clientapi_properties",
     "register_knowledge_tools": "embedded_docs",
     "register_lexical_manual_tools": "manuals",
 }
@@ -132,6 +136,8 @@ _EXPERIMENTAL_TOOLS = frozenset({
     "mim_evaluate_spectral",
     "study_staged_parametric_sweep",
     "mesh_convergence_study",
+    "clientapi_property_get",
+    "clientapi_property_set",
 })
 
 _SIDE_EFFECTS = {
@@ -195,6 +201,7 @@ _SIDE_EFFECTS = {
     "geometry_probe_domains": "model_mutation",
     "study_staged_parametric_sweep": "solver_execution",
     "mesh_convergence_study": "solver_execution",
+    "clientapi_property_set": "model_mutation",
     "manual_search": "read_only_subprocess",
     "manual_read_pages": "read_only_subprocess",
 }
@@ -251,6 +258,7 @@ _EXPERIMENTAL_ADDITIONS = frozenset({
     "mim_patch_build", "mim_evaluate_spectral", "study_staged_parametric_sweep",
     "mesh_convergence_study", "docs_get", "docs_list", "physics_get_guide",
     "troubleshoot", "modeling_best_practices",
+    "clientapi_property_get", "clientapi_property_set",
 })
 
 

@@ -25,7 +25,7 @@ def test_default_profile_remains_full(monkeypatch):
     server = create_server("default-full-profile-test")
 
     assert DEFAULT_PROFILE == "full"
-    assert len(_tool_names(server)) == 96
+    assert len(_tool_names(server)) == 98
 
 
 def test_invalid_profile_fails_without_fallback():
@@ -69,8 +69,8 @@ def test_profile_registration_has_no_cross_server_leakage():
     experimental = create_server("isolated-experimental", profile="experimental")
 
     assert len(_tool_names(core)) == 38
-    assert len(_tool_names(full)) == 96
-    assert len(_tool_names(experimental)) == 62
+    assert len(_tool_names(full)) == 98
+    assert len(_tool_names(experimental)) == 64
     assert _tool_names(core) != _tool_names(experimental)
 
 

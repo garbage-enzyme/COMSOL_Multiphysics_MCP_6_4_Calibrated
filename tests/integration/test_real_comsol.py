@@ -14,6 +14,7 @@ PROBES = (
     "test_e2e_cap.py",
     "test_unicode_save.py",
     "tests/integration/h2a_native_cancel_probe.py",
+    "tests/integration/h3c_real_properties.py",
 )
 
 
