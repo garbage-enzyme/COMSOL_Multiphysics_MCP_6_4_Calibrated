@@ -95,6 +95,9 @@ _TOOLS_BY_REGISTRAR = {
     "src.tools.wave_optics_audit.register_wave_optics_audit_tools": (
         "wave_optics_point_audit",
     ),
+    "src.tools.material_expressions.register_material_expression_tools": (
+        "wave_optics_material_expression_preview",
+    ),
     "src.tools.semantic_docs.register_semantic_doc_tools": (
         "semantic_search", "semantic_status", "semantic_worker_reset",
     ),
@@ -124,6 +127,7 @@ _GROUP_BY_REGISTRAR = {
     "register_property_tools": "clientapi_properties",
     "register_wave_optics_preflight_tools": "wave_optics_audit",
     "register_wave_optics_audit_tools": "wave_optics_audit",
+    "register_material_expression_tools": "wave_optics_materials",
     "register_semantic_doc_tools": "semantic_docs",
     "register_knowledge_tools": "embedded_docs",
     "register_lexical_manual_tools": "manuals",
@@ -268,6 +272,7 @@ _WAVE_OPTICS_ADDITIONS = frozenset({
     "study_staged_parametric_sweep",
     "wave_optics_preflight",
     "wave_optics_point_audit",
+    "wave_optics_material_expression_preview",
 })
 
 _EXPERIMENTAL_ADDITIONS = frozenset({

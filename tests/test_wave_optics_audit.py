@@ -7,6 +7,7 @@ import json
 
 import numpy as np
 
+from src.evidence.contracts import example_validation_policies
 from src.tools.wave_optics_audit import (
     _load_air_reference,
     evaluate_validation_policy,
@@ -297,6 +298,7 @@ class AuditModel:
 
 
 def _run(tmp_path, monkeypatch, **model_options):
+    validation_policy = model_options.pop("validation_policy", None)
     source = tmp_path / "source.mph"
     source.write_bytes(b"immutable")
     model = AuditModel(source, **model_options)
@@ -332,6 +334,7 @@ def _run(tmp_path, monkeypatch, **model_options):
         top_air_selection="topair",
         top_air_coordinate_range={"x": [0, 1], "y": [0, 1], "z": [0.7, 1]},
         loss_map=[{"label": "Au", "domains": [2], "expression": "intAu(ewfd.Qh)"}],
+        validation_policy=validation_policy,
         session_state={"connected": True},
         active_profile="wave_optics",
         ownership_preflight={"ready": True},
@@ -351,6 +354,29 @@ def test_evidence_only_a_above_one_is_preserved_without_project_verdict(tmp_path
     assert manifest["audit_status"] == "measurement_complete"
     assert manifest["config_sha256"] == result["measurement"]["provenance"]["config_sha256"]
     assert manifest["preflight"]["inspection_status"] == "complete"
+    assert manifest["physical_evidence"] == result["physical_evidence"]
+    assert "migration" not in result["physical_evidence"]
+    assert result["physical_evidence"]["producer"]["tool_schema_version"] == "physical-evidence-1"
+    assert result["physical_evidence"]["evidence"]["polarization.physical_incident"]["state"] == "label_only"
+    assert result["physical_evidence"]["evidence"]["polarization.structure_total_field"]["selection_ids"] == ["topair", 3]
+    assert result["physical_evidence"]["evidence"]["flux.closure_abs"]["state"] == "not_requested"
+
+
+def test_strict_policy_uses_physical_evidence_and_cannot_promote_structure_total_field(tmp_path, monkeypatch):
+    policy = example_validation_policies()["reference_air_polarization_ratio"]
+    result, _source = _run(
+        tmp_path,
+        monkeypatch,
+        validation_policy=policy,
+    )
+
+    assert result["audit_status"] == "policy_evaluated"
+    assert result["assessment"]["mode"] == "strict_physical_evidence_policy"
+    assert result["assessment"]["project_verdict"] == "missing"
+    rule = result["assessment"]["policy_evaluation"]["rules"][0]
+    assert rule["required_measurement_states"] == {
+        "polarization.target_to_transverse_ratio": "unknown"
+    }
 
 
 def test_nonfinite_power_is_an_integrity_blocker_and_is_journaled(tmp_path, monkeypatch):

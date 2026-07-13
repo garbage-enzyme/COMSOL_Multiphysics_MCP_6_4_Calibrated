@@ -49,7 +49,8 @@ def test_environment_profile_is_normalized(monkeypatch):
     assert selection.default_used is False
 
     server = create_server("environment-wave-profile-test")
-    assert len(_tool_names(server)) == 46
+    assert len(_tool_names(server)) == 47
+    assert "wave_optics_material_expression_preview" in _tool_names(server)
 
 
 def test_profile_name_and_schema_snapshots_are_exact():
@@ -77,7 +78,7 @@ def test_profile_registration_has_no_cross_server_leakage():
     experimental = create_server("isolated-experimental", profile="experimental")
 
     assert len(_tool_names(core)) == 38
-    assert len(_tool_names(full)) == 103
+    assert len(_tool_names(full)) == 104
     assert len(_tool_names(semantic)) == 41
     assert len(_tool_names(experimental)) == 64
     assert _tool_names(core) != _tool_names(experimental)
@@ -105,4 +106,4 @@ def test_capabilities_are_bound_to_each_server_profile(monkeypatch):
     assert core_result["tool_count"] == 38
     assert core_result["profile_source"]["source"] == "explicit_argument"
     assert wave_result["active_profile"] == "wave_optics"
-    assert wave_result["tool_count"] == 46
+    assert wave_result["tool_count"] == 47

@@ -157,6 +157,7 @@
     "study_list",
     "study_solve",
     "study_staged_parametric_sweep",
+    "wave_optics_material_expression_preview",
     "wave_optics_point_audit",
     "wave_optics_preflight"
   ],
@@ -371,6 +372,7 @@
     "study_staged_parametric_sweep",
     "study_wait",
     "troubleshoot",
+    "wave_optics_material_expression_preview",
     "wave_optics_point_audit",
     "wave_optics_preflight"
   ]

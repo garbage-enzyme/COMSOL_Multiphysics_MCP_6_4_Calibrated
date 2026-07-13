@@ -2,6 +2,14 @@
 
 from mcp.server.fastmcp import FastMCP
 
+from src.evidence.contracts import (
+    EVIDENCE_STATES,
+    PHYSICAL_EVIDENCE_SCHEMA_NAME,
+    PHYSICAL_EVIDENCE_SCHEMA_VERSION,
+    VALIDATION_POLICY_SCHEMA_NAME,
+    VALIDATION_POLICY_SCHEMA_VERSION,
+    example_validation_policies,
+)
 from .catalog import PROFILE_NAMES, TOOL_METADATA
 from .profiles import (
     DEFAULT_PROFILE,
@@ -79,6 +87,8 @@ def get_capabilities(selection: ProfileSelection | None = None) -> dict:
             "durable_job_real_cancellation_and_resume",
             "wave_optics_read_only_preflight",
             "wave_optics_one_point_policy_separated_audit",
+            "versioned_physical_evidence_contract",
+            "solver_free_material_expression_preview",
         ],
         "experimental": {
             "async_solver": {
@@ -109,11 +119,21 @@ def get_capabilities(selection: ProfileSelection | None = None) -> dict:
         "wave_optics_audit": {
             "preflight_tool": "wave_optics_preflight",
             "point_tool": "wave_optics_point_audit",
+            "material_expression_tool": "wave_optics_material_expression_preview",
             "profiles": ["wave_optics", "full"],
             "default_assessment": "evidence_only",
             "explicit_policy_supported": True,
             "source_immutability": True,
             "durable_one_row_artifacts": True,
+        },
+        "physical_evidence_contract": {
+            "schema_name": PHYSICAL_EVIDENCE_SCHEMA_NAME,
+            "schema_version": PHYSICAL_EVIDENCE_SCHEMA_VERSION,
+            "evidence_states": sorted(EVIDENCE_STATES),
+            "policy_schema_name": VALIDATION_POLICY_SCHEMA_NAME,
+            "policy_schema_version": VALIDATION_POLICY_SCHEMA_VERSION,
+            "portable_example_policies": sorted(example_validation_policies()),
+            "legacy_point_audit_semantics": "preserved_without_reinterpretation",
         },
         "manual_search": {
             "backend": "sqlite_fts5_bm25",

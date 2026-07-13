@@ -94,6 +94,28 @@ def test_capabilities_report_risky_operations_without_starting_comsol(monkeypatc
     assert result["semantic_search"]["profile_active"] is False
     assert result["semantic_search"]["available"] is False
     assert result["wave_optics_audit"]["default_assessment"] == "evidence_only"
+    assert result["physical_evidence_contract"] == {
+        "schema_name": "comsol_mcp.physical_evidence",
+        "schema_version": "1.0.0",
+        "evidence_states": [
+            "derived_from_declared_convention",
+            "label_only",
+            "measured",
+            "not_applicable",
+            "not_requested",
+            "unknown",
+        ],
+        "policy_schema_name": "comsol_mcp.validation_policy",
+        "policy_schema_version": "1.0.0",
+        "portable_example_policies": [
+            "declared_flux_closure",
+            "mesh_evidence_presence",
+            "passive_rta_bounds",
+            "reference_air_polarization_ratio",
+            "wavelength_synchronization",
+        ],
+        "legacy_point_audit_semantics": "preserved_without_reinterpretation",
+    }
 
 
 def test_startup_capability_summary_is_compact_and_truthful(monkeypatch):

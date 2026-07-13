@@ -3835,6 +3835,147 @@
     "title": "troubleshootArguments",
     "type": "object"
   },
+  "wave_optics_material_expression_preview": {
+    "properties": {
+      "fixed_angular_frequency": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Fixed Angular Frequency"
+      },
+      "fixed_angular_frequency_unit": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Fixed Angular Frequency Unit"
+      },
+      "formulation": {
+        "enum": [
+          "volumetric_material",
+          "layered_boundary_documented"
+        ],
+        "title": "Formulation",
+        "type": "string"
+      },
+      "frequency_source": {
+        "default": "wavelength_parameter",
+        "enum": [
+          "wavelength_parameter",
+          "physics_frequency",
+          "fixed_angular_frequency"
+        ],
+        "title": "Frequency Source",
+        "type": "string"
+      },
+      "harmonic_convention": {
+        "enum": [
+          "exp(+i*omega*t)",
+          "exp(-i*omega*t)"
+        ],
+        "title": "Harmonic Convention",
+        "type": "string"
+      },
+      "imaginary_sign": {
+        "enum": [
+          "positive",
+          "negative"
+        ],
+        "title": "Imaginary Sign",
+        "type": "string"
+      },
+      "model_kind": {
+        "enum": [
+          "constant",
+          "drude",
+          "lorentz",
+          "n_k"
+        ],
+        "title": "Model Kind",
+        "type": "string"
+      },
+      "parameter_names": {
+        "anyOf": [
+          {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Parameter Names"
+      },
+      "parameter_units": {
+        "anyOf": [
+          {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Parameter Units"
+      },
+      "parameters": {
+        "additionalProperties": {
+          "type": "number"
+        },
+        "title": "Parameters",
+        "type": "object"
+      },
+      "physics_frequency_expression": {
+        "default": "ewfd.freq",
+        "title": "Physics Frequency Expression",
+        "type": "string"
+      },
+      "test_wavelengths": {
+        "items": {
+          "type": "number"
+        },
+        "title": "Test Wavelengths",
+        "type": "array"
+      },
+      "wavelength_parameter": {
+        "default": "wl",
+        "title": "Wavelength Parameter",
+        "type": "string"
+      },
+      "wavelength_unit": {
+        "title": "Wavelength Unit",
+        "type": "string"
+      }
+    },
+    "required": [
+      "model_kind",
+      "parameters",
+      "test_wavelengths",
+      "wavelength_unit",
+      "harmonic_convention",
+      "imaginary_sign",
+      "formulation"
+    ],
+    "title": "wave_optics_material_expression_previewArguments",
+    "type": "object"
+  },
   "wave_optics_point_audit": {
     "$defs": {
       "CoordinateLimits": {
@@ -4021,6 +4162,84 @@
           }
         },
         "title": "PowerProvenance",
+        "type": "object"
+      },
+      "StrictPolicyRule": {
+        "properties": {
+          "assumptions": {
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "title": "Assumptions",
+            "type": "object"
+          },
+          "required_measurements": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Required Measurements",
+            "type": "array"
+          },
+          "rule_id": {
+            "title": "Rule Id",
+            "type": "string"
+          },
+          "rule_type": {
+            "title": "Rule Type",
+            "type": "string"
+          },
+          "tolerances": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Tolerances",
+            "type": "object"
+          }
+        },
+        "required": [
+          "rule_id",
+          "rule_type",
+          "required_measurements",
+          "tolerances",
+          "assumptions"
+        ],
+        "title": "StrictPolicyRule",
+        "type": "object"
+      },
+      "StrictValidationPolicy": {
+        "properties": {
+          "policy_id": {
+            "title": "Policy Id",
+            "type": "string"
+          },
+          "policy_sha256": {
+            "title": "Policy Sha256",
+            "type": "string"
+          },
+          "rules": {
+            "items": {
+              "$ref": "#/$defs/StrictPolicyRule"
+            },
+            "title": "Rules",
+            "type": "array"
+          },
+          "schema_name": {
+            "title": "Schema Name",
+            "type": "string"
+          },
+          "schema_version": {
+            "title": "Schema Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_name",
+          "schema_version",
+          "policy_id",
+          "rules",
+          "policy_sha256"
+        ],
+        "title": "StrictValidationPolicy",
         "type": "object"
       },
       "ValidationPolicy": {
@@ -4221,10 +4440,14 @@
             "$ref": "#/$defs/ValidationPolicy"
           },
           {
+            "$ref": "#/$defs/StrictValidationPolicy"
+          },
+          {
             "type": "null"
           }
         ],
-        "default": null
+        "default": null,
+        "title": "Validation Policy"
       },
       "validation_policy_path": {
         "anyOf": [

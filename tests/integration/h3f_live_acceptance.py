@@ -23,7 +23,7 @@ ARTIFACT_DIR = RUNTIME / "H3f"
 PROFILE_COUNTS = {
     "core": 38,
     "basic_fem": 71,
-    "wave_optics": 46,
+    "wave_optics": 47,
     "experimental": 64,
     "full": 100,
 }

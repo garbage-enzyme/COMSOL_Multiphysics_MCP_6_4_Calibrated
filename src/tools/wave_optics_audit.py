@@ -17,6 +17,13 @@ import numpy as np
 from mcp.server.fastmcp import FastMCP
 from typing_extensions import TypedDict
 
+from src.evidence.contracts import (
+    VALIDATION_POLICY_SCHEMA_NAME,
+    build_point_audit_physical_evidence,
+    canonical_json_bytes,
+    evaluate_physical_evidence_policy,
+    validate_validation_policy,
+)
 from src.utils.runtime_paths import default_runtime_dir
 from .ownership import ownership_manager
 from .session import session_manager
@@ -91,6 +98,22 @@ class ValidationPolicy(TypedDict, total=False):
     tolerances: PolicyTolerances
     polarization: PolarizationPolicy
     mesh: MeshPolicy
+
+
+class StrictPolicyRule(TypedDict):
+    rule_id: str
+    rule_type: str
+    required_measurements: list[str]
+    tolerances: dict[str, float]
+    assumptions: dict[str, bool]
+
+
+class StrictValidationPolicy(TypedDict):
+    schema_name: str
+    schema_version: str
+    policy_id: str
+    rules: list[StrictPolicyRule]
+    policy_sha256: str
 
 
 def _sha256_file(path: Path) -> str:
@@ -208,9 +231,19 @@ def _load_policy(
         return None, None
     if not isinstance(policy, dict):
         raise ValueError("validation_policy must be a JSON object")
-    encoded = json.dumps(policy, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    encoded = canonical_json_bytes(policy)
     if len(encoded) > MAX_POLICY_BYTES:
         raise ValueError(f"validation_policy exceeds {MAX_POLICY_BYTES} bytes")
+    if "schema_name" in policy:
+        if policy.get("schema_name") != VALIDATION_POLICY_SCHEMA_NAME:
+            raise ValueError("validation_policy.schema_name is unsupported")
+        normalized = validate_validation_policy(policy)
+        provenance = {
+            **(provenance or {}),
+            "policy_sha256": normalized["policy_sha256"],
+            "policy_format": "strict_physical_evidence_v1",
+        }
+        return normalized, provenance
     allowed = {"version", "assumptions", "required_evidence", "tolerances", "polarization", "mesh"}
     unknown = sorted(set(policy) - allowed)
     if unknown:
@@ -218,10 +251,28 @@ def _load_policy(
     for mapping_name in ("assumptions", "tolerances", "polarization", "mesh"):
         if mapping_name in policy and not isinstance(policy[mapping_name], dict):
             raise ValueError(f"validation_policy.{mapping_name} must be an object")
+    nested_allowed = {
+        "assumptions": {"passive", "linear", "port_power_normalized", "reciprocal", "target_basis"},
+        "tolerances": {"closure_abs", "quantity_bounds_margin", "wavelength_abs_m", "wavelength_rel", "loss_match_abs", "loss_match_rel"},
+        "polarization": {"basis", "target_vector", "max_cross_power_fraction", "max_ellipticity", "reference_config_id"},
+        "mesh": {"minimum_elements", "require_unchanged", "convergence_artifact"},
+    }
+    for mapping_name, allowed_fields in nested_allowed.items():
+        nested = policy.get(mapping_name, {})
+        unknown_nested = sorted(set(nested) - allowed_fields)
+        if unknown_nested:
+            raise ValueError(
+                f"validation_policy.{mapping_name} contains unknown fields: {unknown_nested}"
+            )
     required = policy.get("required_evidence", [])
     if not isinstance(required, list) or not all(isinstance(item, str) for item in required):
         raise ValueError("validation_policy.required_evidence must be a string list")
-    provenance = {**(provenance or {}), "policy_sha256": _canonical_hash(policy)}
+    provenance = {
+        **(provenance or {}),
+        "policy_sha256": _canonical_hash(policy),
+        "policy_format": "legacy_point_audit_v1",
+        "migration_semantics": "preserved_without_reinterpretation",
+    }
     return policy, provenance
 
 
@@ -911,6 +962,15 @@ def run_wave_optics_point_audit(
         "measurement_errors": measurement_errors,
         "integrity_errors": integrity_errors,
     }
+    physical_evidence = build_point_audit_physical_evidence(
+        {
+            "schema_version": AUDIT_SCHEMA_VERSION,
+            "config_id": config_id,
+            "config_sha256": config_sha256,
+            "source_sha256": source_hash_before,
+            "measurement": measurement,
+        }
+    )
     if integrity_errors:
         audit_status = "integrity_blocked"
     elif measurement_errors:
@@ -919,9 +979,23 @@ def run_wave_optics_point_audit(
         audit_status = "measurement_complete"
     if policy is None:
         assessment = {"mode": "evidence_only", "project_verdict": None, "long_sweep_recommendation": None}
+    elif policy.get("schema_name") == VALIDATION_POLICY_SCHEMA_NAME:
+        policy_evaluation = evaluate_physical_evidence_policy(physical_evidence, policy)
+        assessment = {
+            "mode": "strict_physical_evidence_policy",
+            "project_verdict": policy_evaluation["overall"],
+            "policy_evaluation": policy_evaluation,
+        }
+        audit_status = "policy_evaluated" if not integrity_errors else "integrity_blocked"
     else:
         policy_evaluation = evaluate_validation_policy(measurement, policy)
-        assessment = {"mode": "explicit_policy", "project_verdict": policy_evaluation["overall"], "policy_evaluation": policy_evaluation}
+        assessment = {
+            "mode": "explicit_policy",
+            "project_verdict": policy_evaluation["overall"],
+            "policy_evaluation": policy_evaluation,
+            "policy_format": "legacy_point_audit_v1",
+            "migration_semantics": "preserved_without_reinterpretation",
+        }
         audit_status = "policy_evaluated" if not integrity_errors else "integrity_blocked"
 
     row = {
@@ -941,6 +1015,7 @@ def run_wave_optics_point_audit(
         "solve_seconds": solve_seconds,
         "error_count": len(measurement_errors),
         "integrity_error_count": len(integrity_errors),
+        "physical_evidence_sha256": physical_evidence["contract_sha256"],
     }
     _write_rows_csv(str(csv_path), list(row), [row], append=False)
     manifest = {
@@ -950,6 +1025,7 @@ def run_wave_optics_point_audit(
         "audit_status": audit_status,
         "created_at_epoch": time.time(),
         "measurement": measurement,
+        "physical_evidence": physical_evidence,
         "assessment": assessment,
         "validation_policy": policy,
         "validation_policy_provenance": policy_provenance,
@@ -971,6 +1047,7 @@ def run_wave_optics_point_audit(
         "audit_status": audit_status,
         "assessment": assessment,
         "measurement": measurement,
+        "physical_evidence": physical_evidence,
         "artifacts": {"directory": str(directory), "csv": str(csv_path), "manifest": str(manifest_path)},
     }
 
@@ -1002,7 +1079,7 @@ def register_wave_optics_audit_tools(mcp: FastMCP) -> None:
         power_provenance: Optional[PowerProvenance] = None,
         air_reference_artifact_path: Optional[str] = None,
         air_reference_config_id: Optional[str] = None,
-        validation_policy: Optional[ValidationPolicy] = None,
+        validation_policy: Optional[ValidationPolicy | StrictValidationPolicy] = None,
         validation_policy_path: Optional[str] = None,
     ) -> dict[str, Any]:
         """Solve one wavelength, journal raw evidence, then optionally evaluate a declared policy."""
