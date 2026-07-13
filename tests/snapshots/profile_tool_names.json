@@ -157,6 +157,10 @@
     "study_list",
     "study_solve",
     "study_staged_parametric_sweep",
+    "visual_review_capability_normalize",
+    "visual_review_dual_evaluate",
+    "visual_review_receipt_create",
+    "visual_review_request_create",
     "wave_optics_material_expression_preview",
     "wave_optics_point_audit",
     "wave_optics_preflight"
@@ -372,6 +376,10 @@
     "study_staged_parametric_sweep",
     "study_wait",
     "troubleshoot",
+    "visual_review_capability_normalize",
+    "visual_review_dual_evaluate",
+    "visual_review_receipt_create",
+    "visual_review_request_create",
     "wave_optics_material_expression_preview",
     "wave_optics_point_audit",
     "wave_optics_preflight"

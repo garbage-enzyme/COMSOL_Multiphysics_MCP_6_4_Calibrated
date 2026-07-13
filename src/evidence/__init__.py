@@ -16,6 +16,16 @@ from .contracts import (
     validate_physical_evidence,
     validate_validation_policy,
 )
+from .visual_review import (
+    build_visual_review_receipt,
+    build_visual_review_request,
+    evaluate_dual_visual_review,
+    normalize_codex_capability,
+    normalize_opencode_capability,
+    validate_reviewer_capability,
+    validate_visual_review_receipt,
+    validate_visual_review_request,
+)
 
 __all__ = [
     "EVIDENCE_STATES",
@@ -32,4 +42,12 @@ __all__ = [
     "read_physical_evidence",
     "validate_physical_evidence",
     "validate_validation_policy",
+    "build_visual_review_receipt",
+    "build_visual_review_request",
+    "evaluate_dual_visual_review",
+    "normalize_codex_capability",
+    "normalize_opencode_capability",
+    "validate_reviewer_capability",
+    "validate_visual_review_receipt",
+    "validate_visual_review_request",
 ]

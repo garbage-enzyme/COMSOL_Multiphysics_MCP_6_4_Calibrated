@@ -10,6 +10,12 @@ from src.evidence.contracts import (
     VALIDATION_POLICY_SCHEMA_VERSION,
     example_validation_policies,
 )
+from src.evidence.visual_review import (
+    VISUAL_CAPABILITY_SCHEMA,
+    VISUAL_RECEIPT_SCHEMA,
+    VISUAL_REQUEST_SCHEMA,
+    VISUAL_REVIEW_SCHEMA_VERSION,
+)
 from .catalog import PROFILE_NAMES, TOOL_METADATA
 from .profiles import (
     DEFAULT_PROFILE,
@@ -89,6 +95,7 @@ def get_capabilities(selection: ProfileSelection | None = None) -> dict:
             "wave_optics_one_point_policy_separated_audit",
             "versioned_physical_evidence_contract",
             "solver_free_material_expression_preview",
+            "solver_free_visual_review_contracts",
         ],
         "experimental": {
             "async_solver": {
@@ -134,6 +141,21 @@ def get_capabilities(selection: ProfileSelection | None = None) -> dict:
             "policy_schema_version": VALIDATION_POLICY_SCHEMA_VERSION,
             "portable_example_policies": sorted(example_validation_policies()),
             "legacy_point_audit_semantics": "preserved_without_reinterpretation",
+        },
+        "visual_review_contract": {
+            "schema_version": VISUAL_REVIEW_SCHEMA_VERSION,
+            "capability_schema": VISUAL_CAPABILITY_SCHEMA,
+            "request_schema": VISUAL_REQUEST_SCHEMA,
+            "receipt_schema": VISUAL_RECEIPT_SCHEMA,
+            "tools": [
+                "visual_review_capability_normalize",
+                "visual_review_request_create",
+                "visual_review_receipt_create",
+                "visual_review_dual_evaluate",
+            ],
+            "host_delivery_required": True,
+            "known_answer_calibration_required": True,
+            "numerical_policy_authority": False,
         },
         "manual_search": {
             "backend": "sqlite_fts5_bm25",

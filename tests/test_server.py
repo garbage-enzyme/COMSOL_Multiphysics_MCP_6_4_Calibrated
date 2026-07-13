@@ -116,6 +116,21 @@ def test_capabilities_report_risky_operations_without_starting_comsol(monkeypatc
         ],
         "legacy_point_audit_semantics": "preserved_without_reinterpretation",
     }
+    assert result["visual_review_contract"] == {
+        "schema_version": "1.0.0",
+        "capability_schema": "comsol_mcp.visual_reviewer_capability",
+        "request_schema": "comsol_mcp.visual_review_request",
+        "receipt_schema": "comsol_mcp.visual_review_receipt",
+        "tools": [
+            "visual_review_capability_normalize",
+            "visual_review_request_create",
+            "visual_review_receipt_create",
+            "visual_review_dual_evaluate",
+        ],
+        "host_delivery_required": True,
+        "known_answer_calibration_required": True,
+        "numerical_policy_authority": False,
+    }
 
 
 def test_startup_capability_summary_is_compact_and_truthful(monkeypatch):

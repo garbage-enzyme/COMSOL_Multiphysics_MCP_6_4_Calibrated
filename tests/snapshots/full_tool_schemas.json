@@ -3835,6 +3835,321 @@
     "title": "troubleshootArguments",
     "type": "object"
   },
+  "visual_review_capability_normalize": {
+    "properties": {
+      "adapter": {
+        "enum": [
+          "codex",
+          "opencode"
+        ],
+        "title": "Adapter",
+        "type": "string"
+      },
+      "attachment_part_confirmed": {
+        "default": false,
+        "title": "Attachment Part Confirmed",
+        "type": "boolean"
+      },
+      "calibration": {
+        "anyOf": [
+          {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Calibration"
+      },
+      "cli_attachment_supported": {
+        "default": false,
+        "title": "Cli Attachment Supported",
+        "type": "boolean"
+      },
+      "delivered_artifacts": {
+        "anyOf": [
+          {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Delivered Artifacts"
+      },
+      "max_images": {
+        "default": 16,
+        "title": "Max Images",
+        "type": "integer"
+      },
+      "max_total_bytes": {
+        "default": 268435456,
+        "title": "Max Total Bytes",
+        "type": "integer"
+      },
+      "model": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Model"
+      },
+      "original_resolution_support": {
+        "default": false,
+        "title": "Original Resolution Support",
+        "type": "boolean"
+      },
+      "provider": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Provider"
+      },
+      "provider_metadata": {
+        "anyOf": [
+          {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Provider Metadata"
+      },
+      "self_reported_image_input": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Self Reported Image Input"
+      },
+      "view_image_available": {
+        "default": false,
+        "title": "View Image Available",
+        "type": "boolean"
+      },
+      "view_image_results": {
+        "anyOf": [
+          {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "View Image Results"
+      }
+    },
+    "required": [
+      "adapter"
+    ],
+    "title": "visual_review_capability_normalizeArguments",
+    "type": "object"
+  },
+  "visual_review_dual_evaluate": {
+    "properties": {
+      "comparison": {
+        "enum": [
+          "agreement",
+          "disagreement",
+          "not_compared"
+        ],
+        "title": "Comparison",
+        "type": "string"
+      },
+      "first_receipt": {
+        "additionalProperties": true,
+        "title": "First Receipt",
+        "type": "object"
+      },
+      "request": {
+        "additionalProperties": true,
+        "title": "Request",
+        "type": "object"
+      },
+      "second_receipt": {
+        "additionalProperties": true,
+        "title": "Second Receipt",
+        "type": "object"
+      }
+    },
+    "required": [
+      "request",
+      "first_receipt",
+      "second_receipt",
+      "comparison"
+    ],
+    "title": "visual_review_dual_evaluateArguments",
+    "type": "object"
+  },
+  "visual_review_receipt_create": {
+    "properties": {
+      "capability": {
+        "additionalProperties": true,
+        "title": "Capability",
+        "type": "object"
+      },
+      "findings": {
+        "items": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "title": "Findings",
+        "type": "array"
+      },
+      "prior_review_exposure": {
+        "title": "Prior Review Exposure",
+        "type": "boolean"
+      },
+      "received_artifacts": {
+        "items": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "title": "Received Artifacts",
+        "type": "array"
+      },
+      "rejected_claims": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Rejected Claims",
+        "type": "array"
+      },
+      "request": {
+        "additionalProperties": true,
+        "title": "Request",
+        "type": "object"
+      },
+      "review_id": {
+        "title": "Review Id",
+        "type": "string"
+      },
+      "session_id": {
+        "title": "Session Id",
+        "type": "string"
+      },
+      "timestamp": {
+        "title": "Timestamp",
+        "type": "string"
+      },
+      "uncertainties": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Uncertainties",
+        "type": "array"
+      },
+      "visual_inspection_performed": {
+        "title": "Visual Inspection Performed",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "review_id",
+      "request",
+      "capability",
+      "session_id",
+      "received_artifacts",
+      "visual_inspection_performed",
+      "findings",
+      "uncertainties",
+      "rejected_claims",
+      "prior_review_exposure",
+      "timestamp"
+    ],
+    "title": "visual_review_receipt_createArguments",
+    "type": "object"
+  },
+  "visual_review_request_create": {
+    "properties": {
+      "artifacts": {
+        "items": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "title": "Artifacts",
+        "type": "array"
+      },
+      "configuration_sha256": {
+        "title": "Configuration Sha256",
+        "type": "string"
+      },
+      "numerical_summary": {
+        "additionalProperties": true,
+        "title": "Numerical Summary",
+        "type": "object"
+      },
+      "questions": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Questions",
+        "type": "array"
+      },
+      "request_id": {
+        "title": "Request Id",
+        "type": "string"
+      },
+      "review_mode": {
+        "default": "single",
+        "enum": [
+          "single",
+          "dual_blind"
+        ],
+        "title": "Review Mode",
+        "type": "string"
+      },
+      "views": {
+        "items": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "title": "Views",
+        "type": "array"
+      }
+    },
+    "required": [
+      "request_id",
+      "configuration_sha256",
+      "artifacts",
+      "views",
+      "numerical_summary",
+      "questions"
+    ],
+    "title": "visual_review_request_createArguments",
+    "type": "object"
+  },
   "wave_optics_material_expression_preview": {
     "properties": {
       "fixed_angular_frequency": {

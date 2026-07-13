@@ -23,10 +23,10 @@ MODEL = Path("D:/comsol_semantic/models/all-MiniLM-L6-v2/1110a243fdf4706b3f48f1d
 PROFILE_COUNTS = {
     "core": 38,
     "basic_fem": 71,
-    "wave_optics": 47,
+    "wave_optics": 51,
     "semantic_docs": 41,
     "experimental": 64,
-    "full": 104,
+    "full": 108,
 }
 
 

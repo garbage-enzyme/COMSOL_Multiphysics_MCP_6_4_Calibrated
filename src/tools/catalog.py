@@ -98,6 +98,10 @@ _TOOLS_BY_REGISTRAR = {
     "src.tools.material_expressions.register_material_expression_tools": (
         "wave_optics_material_expression_preview",
     ),
+    "src.tools.visual_review.register_visual_review_tools": (
+        "visual_review_capability_normalize", "visual_review_request_create",
+        "visual_review_receipt_create", "visual_review_dual_evaluate",
+    ),
     "src.tools.semantic_docs.register_semantic_doc_tools": (
         "semantic_search", "semantic_status", "semantic_worker_reset",
     ),
@@ -128,6 +132,7 @@ _GROUP_BY_REGISTRAR = {
     "register_wave_optics_preflight_tools": "wave_optics_audit",
     "register_wave_optics_audit_tools": "wave_optics_audit",
     "register_material_expression_tools": "wave_optics_materials",
+    "register_visual_review_tools": "visual_review",
     "register_semantic_doc_tools": "semantic_docs",
     "register_knowledge_tools": "embedded_docs",
     "register_lexical_manual_tools": "manuals",
@@ -273,6 +278,8 @@ _WAVE_OPTICS_ADDITIONS = frozenset({
     "wave_optics_preflight",
     "wave_optics_point_audit",
     "wave_optics_material_expression_preview",
+    "visual_review_capability_normalize", "visual_review_request_create",
+    "visual_review_receipt_create", "visual_review_dual_evaluate",
 })
 
 _EXPERIMENTAL_ADDITIONS = frozenset({
