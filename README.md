@@ -186,6 +186,15 @@ Chinese questions into explicit English technical queries, but promotion still
 requires the frozen cross-language benchmark; otherwise keep lexical-only search
 or deploy a separately benchmarked multilingual model.
 
+The frozen H4f benchmark rejected promotion of this MiniLM build. Exact Recall@5
+improved from `0.867` to `0.933`, but paraphrase-plus-multi-concept Recall@5 fell
+from `0.240` to `0.160`, direct-Chinese Recall@5 remained `0`, and all six
+out-of-corpus queries returned results instead of abstaining. The 500-query soak
+had no query failures and preserved the index, but worker RSS grew from about
+`540 MiB` to `1.91 GiB`. Therefore `semantic_docs` remains an experimental opt-in
+diagnostic profile; `core` plus `manual_search` is the recommended production
+default. Do not present semantic availability as retrieval-quality verification.
+
 ### Repo hygiene
 
 - New `.gitignore` for `__pycache__/`, `*.pyc`, `opencode.json` (machine-specific paths), `knowledge_base/` (regenerable), `*.mph`.

@@ -148,6 +148,14 @@ class SemanticService:
                 "last_error": self._last_error,
                 "solver_free": True,
                 "device": "cpu",
+                "maturity": "experimental",
+                "promotion_status": "rejected_by_h4f_minilm_benchmark",
+                "known_limitations": [
+                    "paraphrase_multi_recall_regressed",
+                    "direct_chinese_recall_at_5_is_zero",
+                    "negative_query_abstention_failed",
+                    "500_query_worker_rss_growth_requires_a_better_backend_or_model",
+                ],
             }
 
     def search(
@@ -217,6 +225,9 @@ def semantic_capability_status(*, profile_active: bool) -> dict[str, Any]:
         "available": bool(profile_active and status["available"]),
         "worker_state": status["worker"]["state"],
         "device": status["device"],
+        "maturity": status["maturity"],
+        "promotion_status": status["promotion_status"],
+        "known_limitations": status["known_limitations"],
         "starts_comsol": False,
         "acquires_solver_lease": False,
         "fallback_tool": "manual_search",

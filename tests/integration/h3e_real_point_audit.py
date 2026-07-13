@@ -215,7 +215,8 @@ def _add_scattered_flux_operators(component, top_boundary, bottom_boundary):
 
 
 def main() -> None:
-    artifact_dir = Path(os.environ.get("COMSOL_MCP_RUNTIME_DIR", "D:/comsol_runtime")) / "H3e"
+    default_artifact_dir = Path(os.environ.get("COMSOL_MCP_RUNTIME_DIR", "D:/comsol_runtime")) / "H3e"
+    artifact_dir = Path(os.environ.get("H3E_ARTIFACT_DIR", str(default_artifact_dir)))
     artifact_dir.mkdir(parents=True, exist_ok=True)
     result_path = artifact_dir / "point_audit_gate_result.json"
     air_reference_path = _derived_air_reference(artifact_dir)
