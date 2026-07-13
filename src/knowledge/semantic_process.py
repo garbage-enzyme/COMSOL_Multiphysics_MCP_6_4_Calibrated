@@ -84,7 +84,7 @@ class _KillOnCloseJob:
 class SemanticWorkerManager:
     """Own exactly one localhost semantic worker and never retries a query."""
 
-    def __init__(self, *, python_executable: str | None = None, startup_deadline: float = 5.0, query_deadline: float = PUBLIC_LIMITS["query_deadline_seconds"], idle_ttl: float = 300.0, fault: str | None = None, query_delay: float = 0.0, forced_port: int = 0):
+    def __init__(self, *, python_executable: str | None = None, startup_deadline: float = 5.0, query_deadline: float = PUBLIC_LIMITS["query_deadline_seconds"], idle_ttl: float = 300.0, fault: str | None = None, query_delay: float = 0.0, forced_port: int = 0, backend: str = "fake", deployment_root: str | None = None, lexical_index: str | None = None, model_path: str | None = None):
         self.python_executable = python_executable or sys.executable
         self.startup_deadline = float(startup_deadline)
         self.query_deadline = float(query_deadline)
@@ -92,6 +92,14 @@ class SemanticWorkerManager:
         self.fault = fault
         self.query_delay = float(query_delay)
         self.forced_port = int(forced_port)
+        if backend not in {"fake", "hybrid"}:
+            raise ValueError("backend must be fake or hybrid")
+        if backend == "hybrid" and not all((deployment_root, lexical_index, model_path)):
+            raise ValueError("hybrid backend requires deployment_root, lexical_index, and model_path")
+        self.backend = backend
+        self.deployment_root = deployment_root
+        self.lexical_index = lexical_index
+        self.model_path = model_path
         self._lock = threading.RLock()
         self._process: subprocess.Popen[bytes] | None = None
         self._identity: dict[str, Any] | None = None
@@ -103,6 +111,13 @@ class SemanticWorkerManager:
 
     def _command(self) -> list[str]:
         command = [self.python_executable, "-m", "src.knowledge.semantic_worker", "--serve", "--port", str(self.forced_port)]
+        command.extend(["--backend", self.backend])
+        if self.backend == "hybrid":
+            command.extend([
+                "--deployment-root", str(self.deployment_root),
+                "--lexical-index", str(self.lexical_index),
+                "--model-path", str(self.model_path),
+            ])
         if self.fault:
             command.extend(["--fault", self.fault])
         if self.query_delay:
@@ -243,13 +258,17 @@ class SemanticWorkerManager:
             cleanup = self._terminate_owned("protocol_failure")
             return {"success": False, "error": error, "cleanup": cleanup, "request_id": request_id, "retried": False}
 
-    def query(self, query: str, *, limit: int = 5) -> dict[str, Any]:
+    def query(self, query: str, *, limit: int = 5, filters: dict[str, Any] | None = None, retrieval_mode: str = "hybrid") -> dict[str, Any]:
         if not isinstance(query, str) or not query.strip() or len(query) > PUBLIC_LIMITS["maximum_query_characters"]:
             return {"success": False, "error": {"code": "invalid_query", "message": "query violates public limits"}}
         if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= PUBLIC_LIMITS["maximum_results"]:
             return {"success": False, "error": {"code": "invalid_limit", "message": "limit violates public limits"}}
+        if filters is not None and not isinstance(filters, dict):
+            return {"success": False, "error": {"code": "invalid_filters", "message": "filters must be an object"}}
+        if retrieval_mode not in {"hybrid", "vector", "lexical"}:
+            return {"success": False, "error": {"code": "invalid_retrieval_mode", "message": "retrieval_mode is unsupported"}}
         with self._lock:
-            return self._request("query", {"query": query.strip(), "limit": limit}, self.query_deadline)
+            return self._request("query", {"query": query.strip(), "limit": limit, "filters": filters, "retrieval_mode": retrieval_mode}, self.query_deadline)
 
     def health(self) -> dict[str, Any]:
         with self._lock:

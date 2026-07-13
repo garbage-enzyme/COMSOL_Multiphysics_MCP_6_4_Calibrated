@@ -1,4 +1,4 @@
-"""Isolated H4 semantic worker protocol with a dependency-free fake backend."""
+"""Isolated H4 semantic worker protocol with fake and hybrid backends."""
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ def _response(request_id: str | None, *, success: bool, **fields: Any) -> dict[s
 
 
 class _WorkerState:
-    def __init__(self, token: str, fault: str | None, query_delay: float):
+    def __init__(self, token: str, fault: str | None, query_delay: float, backend: Any | None = None):
         self.token = token
         self.fault = fault
         self.query_delay = query_delay
@@ -37,36 +37,46 @@ class _WorkerState:
         self.query_count = 0
         self.load_count = 0
         self.last_error: str | None = None
+        self.backend = backend
         self.active = threading.Lock()
         self.capacity = threading.BoundedSemaphore(PUBLIC_LIMITS["maximum_queue_depth"] + 1)
 
     def status(self) -> dict[str, Any]:
-        return {
+        backend_status = self.backend.status() if self.backend is not None else {
             "backend": "fake",
-            "pid": os.getpid(),
             "load_count": self.load_count,
             "query_count": self.query_count,
-            "started_at_epoch": self.started_at,
             "last_error": self.last_error,
         }
+        return {
+            "pid": os.getpid(),
+            "started_at_epoch": self.started_at,
+            **backend_status,
+        }
 
-    def query(self, query: str, limit: int) -> list[dict[str, Any]]:
+    def query(self, query: str, limit: int, *, filters: dict[str, Any] | None, retrieval_mode: str) -> dict[str, Any]:
         if self.fault == "query_hang":
             time.sleep(3600)
         if self.fault == "crash_before_response":
             os._exit(73)
         if self.query_delay:
             time.sleep(self.query_delay)
+        if self.backend is not None:
+            return self.backend.query(
+                query, limit=limit, filters=filters, retrieval_mode=retrieval_mode
+            )
         self.query_count += 1
-        return [
-            {
-                "source": "fake/COMSOL_ReferenceManual.pdf",
-                "page": index + 1,
-                "snippet": query[: PUBLIC_LIMITS["maximum_snippet_characters"]],
-                "distance": float(index),
-            }
-            for index in range(limit)
-        ]
+        return {
+            "results": [
+                {
+                    "source": "fake/COMSOL_ReferenceManual.pdf",
+                    "page": index + 1,
+                    "snippet": query[: PUBLIC_LIMITS["maximum_snippet_characters"]],
+                    "distance": float(index),
+                }
+                for index in range(limit)
+            ]
+        }
 
 
 class _RequestHandler(socketserver.StreamRequestHandler):
@@ -110,13 +120,24 @@ class _RequestHandler(socketserver.StreamRequestHandler):
         elif operation == "query":
             query = request.get("query")
             limit = request.get("limit", 5)
+            filters = request.get("filters")
+            retrieval_mode = request.get("retrieval_mode", "hybrid")
             if not isinstance(query, str) or not query.strip() or len(query) > PUBLIC_LIMITS["maximum_query_characters"]:
                 response = _response(request_id, success=False, error={"code": "invalid_query", "message": "query violates public limits"})
             elif not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= PUBLIC_LIMITS["maximum_results"]:
                 response = _response(request_id, success=False, error={"code": "invalid_limit", "message": "limit violates public limits"})
+            elif filters is not None and not isinstance(filters, dict):
+                response = _response(request_id, success=False, error={"code": "invalid_filters", "message": "filters must be an object"})
+            elif retrieval_mode not in {"hybrid", "vector", "lexical"}:
+                response = _response(request_id, success=False, error={"code": "invalid_retrieval_mode", "message": "retrieval_mode is unsupported"})
             else:
-                results = self.server.state.query(query.strip(), limit)
-                response = _response(request_id, success=True, results=results, status=self.server.state.status())
+                try:
+                    payload = self.server.state.query(
+                        query.strip(), limit, filters=filters, retrieval_mode=retrieval_mode
+                    )
+                    response = _response(request_id, success=True, **payload, status=self.server.state.status())
+                except ValueError as exc:
+                    response = _response(request_id, success=False, error={"code": "invalid_arguments", "message": str(exc)})
         else:
             response = _response(request_id, success=False, error={"code": "unknown_operation", "message": "operation is unsupported"})
 
@@ -161,13 +182,28 @@ def main() -> None:
         "wrong_request_id", "crash_before_response", "crash_after_response",
     ])
     parser.add_argument("--query-delay", type=float, default=0.0)
+    parser.add_argument("--backend", choices=["fake", "hybrid"], default="fake")
+    parser.add_argument("--deployment-root")
+    parser.add_argument("--lexical-index")
+    parser.add_argument("--model-path")
     args = parser.parse_args()
     token = os.environ.get(TOKEN_ENVIRONMENT_VARIABLE, "")
     if len(token) != 64 or any(character not in "0123456789abcdef" for character in token):
         raise SystemExit("missing or invalid semantic worker session token")
     if args.fault == "startup_hang":
         time.sleep(3600)
-    state = _WorkerState(token, args.fault, max(0.0, args.query_delay))
+    backend = None
+    if args.backend == "hybrid":
+        if not args.deployment_root or not args.lexical_index or not args.model_path:
+            raise SystemExit("hybrid backend requires deployment, lexical, and model paths")
+        from .semantic_retrieval import HybridRetriever
+
+        backend = HybridRetriever(
+            deployment_root=args.deployment_root,
+            lexical_index=args.lexical_index,
+            model_path=args.model_path,
+        )
+    state = _WorkerState(token, args.fault, max(0.0, args.query_delay), backend=backend)
     with _WorkerServer(("127.0.0.1", args.port), state) as server:
         handshake = {
             "schema_version": WORKER_PROTOCOL_SCHEMA_VERSION,
