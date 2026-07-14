@@ -17,13 +17,7 @@ if str(ROOT) not in sys.path:
 
 from src.tools.ownership import SolverOwnership
 from src.tools.wave_optics_preflight import collect_wave_optics_preflight
-
-
-MODELS = (
-    Path(r"C:\Users\陆星\Desktop\iterations\Chen2023_MIM\chen2023_c1_smoke_check.mph"),
-    Path(r"C:\Users\陆星\Desktop\iterations\Zhou2025_QBIC\stage2_localmesh.mph"),
-    Path(r"C:\Users\陆星\Desktop\iterations\Sun2025_SciAdv_Chiral\sun2025_p1_oblique.mph"),
-)
+from src.evidence.real_fixture import controlled_fixture_from_environment
 
 
 def _sha256(path: Path) -> str:
@@ -64,14 +58,15 @@ def main() -> None:
     result = {"success": False, "solve_ran": False, "models": []}
     exit_code = 1
     try:
-        for source in MODELS:
+        models = (controlled_fixture_from_environment()["source"],)
+        for source in models:
             if not source.is_file():
                 raise FileNotFoundError(source)
-        claim = owner.acquire(mode="h3d_read_only", model_path=str(MODELS[0]))
+        claim = owner.acquire(mode="h3d_read_only", model_path=str(models[0]))
         if not claim.get("acquired"):
             raise RuntimeError(f"solver lease unavailable: {claim}")
         client = mph.Client(cores=1)
-        for source in MODELS:
+        for source in models:
             source_hash = _sha256(source)
             source_stat = source.stat()
             model = client.load(str(source))

@@ -20,14 +20,7 @@ from src.tools.periodic_mesh_audit import (
     collect_periodic_mesh_audit,
     run_clone_mesh_smoke,
 )
-
-
-SOURCE = Path(
-    os.environ.get(
-        "M1_PERIODIC_MODEL",
-        r"C:\Users\陆星\Desktop\iterations\Sun2025_SciAdv_Chiral\sun2025_p2_delta_215nm.mph",
-    )
-)
+from src.evidence.real_fixture import controlled_fixture_from_environment
 
 
 def _sha256(path: Path) -> str:
@@ -75,15 +68,14 @@ def main() -> None:
     result = {"success": False, "solve_ran": False}
     exit_code = 1
     try:
-        if not SOURCE.is_file():
-            raise FileNotFoundError(SOURCE)
-        source_hash = _sha256(SOURCE)
-        source_stat = SOURCE.stat()
-        claim = owner.acquire(mode="m1_mesh_audit", model_path=str(SOURCE))
+        source_path = controlled_fixture_from_environment()["source"]
+        source_hash = _sha256(source_path)
+        source_stat = source_path.stat()
+        claim = owner.acquire(mode="m1_mesh_audit", model_path=str(source_path))
         if not claim.get("acquired"):
             raise RuntimeError(f"solver lease unavailable: {claim}")
         client = mph.Client(cores=1)
-        source_model = client.load(str(SOURCE))
+        source_model = client.load(str(source_path))
         component_tag = _first_tag(source_model.java.component().tags(), "comp1")
         if component_tag is None:
             raise AssertionError("real model exposes no component")
@@ -106,7 +98,7 @@ def main() -> None:
         audit = collect_periodic_mesh_audit(
             source_model,
             model_name=source_model.name(),
-            expected_source_path=str(SOURCE),
+            expected_source_path=str(source_path),
             expected_source_sha256=source_hash,
             **common,
         )
@@ -161,9 +153,9 @@ def main() -> None:
         if "add_matching_copyface_source_destination" not in mismatches:
             raise AssertionError(f"smallest mismatch was not reported: {mismatches}")
 
-        final_stat = SOURCE.stat()
+        final_stat = source_path.stat()
         source_unchanged = (
-            _sha256(SOURCE) == source_hash
+            _sha256(source_path) == source_hash
             and final_stat.st_mtime_ns == source_stat.st_mtime_ns
             and final_stat.st_size == source_stat.st_size
         )

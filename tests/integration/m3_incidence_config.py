@@ -18,14 +18,7 @@ if str(ROOT) not in sys.path:
 from src.tools.derived_geometry import create_derived_geometry_clone
 from src.tools.incidence_config import apply_incidence, preview_incidence
 from src.tools.ownership import SolverOwnership
-
-
-SOURCE = Path(
-    os.environ.get(
-        "M3_PERIODIC_MODEL",
-        r"C:\Users\陆星\Desktop\iterations\Sun2025_SciAdv_Chiral\sun2025_p2_delta_215nm.mph",
-    )
-)
+from src.evidence.real_fixture import controlled_fixture_from_environment
 
 
 def _sha256(path: Path) -> str:
@@ -56,15 +49,14 @@ def main() -> None:
     result = {"success": False, "solve_ran": False}
     exit_code = 1
     try:
-        if not SOURCE.is_file():
-            raise FileNotFoundError(SOURCE)
-        source_hash = _sha256(SOURCE)
-        source_stat = SOURCE.stat()
-        claim = owner.acquire(mode="m3_incidence", model_path=str(SOURCE))
+        source_path = controlled_fixture_from_environment()["source"]
+        source_hash = _sha256(source_path)
+        source_stat = source_path.stat()
+        claim = owner.acquire(mode="m3_incidence", model_path=str(source_path))
         if not claim.get("acquired"):
             raise RuntimeError(f"solver lease unavailable: {claim}")
         client = mph.Client(cores=1, version="6.4")
-        source = client.load(str(SOURCE))
+        source = client.load(str(source_path))
         component_tag = _first_tag(source.java.component().tags(), "comp1")
         if component_tag is None:
             raise AssertionError("real model exposes no component")
@@ -118,9 +110,9 @@ def main() -> None:
         ):
             raise AssertionError(f"PeriodicPort angle readback mismatch: {ports}")
 
-        final_stat = SOURCE.stat()
+        final_stat = source_path.stat()
         source_unchanged = (
-            _sha256(SOURCE) == source_hash
+            _sha256(source_path) == source_hash
             and final_stat.st_mtime_ns == source_stat.st_mtime_ns
             and final_stat.st_size == source_stat.st_size
         )

@@ -1,22 +1,64 @@
-import json, time, sys
+"""Manual real-COMSOL cancellation probe using an explicit local fixture."""
+
+from __future__ import annotations
+
+import json
+import os
 from pathlib import Path
-ROOT=Path(__file__).parents[2]; sys.path.insert(0,str(ROOT))
+import sys
+import time
+
+
+ROOT = Path(__file__).parents[2]
+sys.path.insert(0, str(ROOT))
+
+from src.evidence.real_fixture import controlled_fixture_from_environment
 from src.jobs.manager import JobManager
 
-root = Path(r"D:\comsol_runtime\h2d_real\jobs")
-m = JobManager(root, cancel_grace_seconds=10, cancel_terminate_seconds=2)
-r = m.submit({"job_type":"staged_sweep","source_model_path":r"C:\Users\陆星\Desktop\iterations\Zhou2025_QBIC\stage2_localmesh.mph","parameter_name":"wl","parameter_unit":"um","parameter_values":[4.252,4.254],"expressions":["ewfd.Rtotal","ewfd.Ttotal","ewfd.Atotal","ewfd.Rtotal+ewfd.Ttotal+ewfd.Atotal"],"study_name":"std1","version":"6.4","cores":14,"smoke_points":1,"record_wavelength_controls":True,"physical_bounds":{"ewfd.Rtotal":[0,1.001],"ewfd.Ttotal":[0,1.001],"ewfd.Atotal":[0,1.001],"ewfd.Rtotal+ewfd.Ttotal+ewfd.Atotal":[0.999,1.001]}})
-job=r["job_id"]
-deadline=time.time()+150
-while time.time()<deadline:
-    s=m.status(job)
-    if s["status"]=="running":
-        print(json.dumps(m.cancel(job)), flush=True)
+
+fixture = controlled_fixture_from_environment()
+runtime = Path(os.environ.get("COMSOL_MCP_RUNTIME_DIR", "D:/comsol_runtime"))
+manager = JobManager(runtime / "h2d_real" / "jobs", cancel_grace_seconds=10, cancel_terminate_seconds=2)
+wavelength = fixture["wavelength_um"]
+submitted = manager.submit(
+    {
+        "job_type": "staged_sweep",
+        "source_model_path": str(fixture["source"]),
+        "parameter_name": "wl",
+        "parameter_unit": "um",
+        "parameter_values": [wavelength, wavelength + 0.002],
+        "expressions": [
+            "ewfd.Rtotal",
+            "ewfd.Ttotal",
+            "ewfd.Atotal",
+            "ewfd.Rtotal+ewfd.Ttotal+ewfd.Atotal",
+        ],
+        "study_name": "std1",
+        "version": "6.4",
+        "cores": 14,
+        "smoke_points": 1,
+        "record_wavelength_controls": True,
+        "physical_bounds": {
+            "ewfd.Rtotal": [0, 1.001],
+            "ewfd.Ttotal": [0, 1.001],
+            "ewfd.Atotal": [0, 1.001],
+            "ewfd.Rtotal+ewfd.Ttotal+ewfd.Atotal": [0.999, 1.001],
+        },
+    }
+)
+job_id = submitted["job_id"]
+deadline = time.time() + 150
+while time.time() < deadline:
+    status = manager.status(job_id)
+    if status["status"] == "running":
+        print(json.dumps(manager.cancel(job_id)), flush=True)
         break
-    time.sleep(.2)
-while time.time()<deadline:
-    s=m.status(job)
-    if s["status"] in {"cancelled","failed","interrupted","completed"}:
-        print(json.dumps(s), flush=True); break
-    time.sleep(.2)
-else: raise SystemExit("timeout")
+    time.sleep(0.2)
+while time.time() < deadline:
+    status = manager.status(job_id)
+    if status["status"] in {"cancelled", "failed", "interrupted", "completed"}:
+        print(json.dumps(status), flush=True)
+        break
+    time.sleep(0.2)
+else:
+    raise SystemExit("timeout")

@@ -10,13 +10,33 @@ from types import SimpleNamespace
 import pytest
 
 from scripts.run_real_release_gate import run_release_gate
+from src.evidence.real_fixture import MODEL_ENV
 
 
 def _args(tmp_path, **overrides):
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    source = tmp_path / "controlled.mph"
+    source.write_bytes(b"fixture")
+    spec = tmp_path / "spec.json"
+    spec.write_text(
+        json.dumps(
+            {
+                "source_model_path": str(source),
+                "wavelength": {"value": 5.292, "unit": "um"},
+                "reference_air": {
+                    "top_air_domain_ids": [6],
+                    "top_air_coordinate_range": {
+                        "x": [0.0, 1.0], "y": [0.0, 1.0], "z": [0.5, 1.0]
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
     values = {
         "output": tmp_path / "release.json",
         "require_h1": True,
-        "h1_spec": tmp_path / "spec.json",
+        "h1_spec": spec,
         "h1_cores": 8,
         "h1_timeout_seconds": 300.0,
     }
@@ -33,9 +53,11 @@ class FakeRunner:
         self.h1_success = h1_success
         self.suite_success = suite_success
         self.commands = []
+        self.kwargs = []
 
-    def __call__(self, command, **_kwargs):
+    def __call__(self, command, **kwargs):
         self.commands.append(list(command))
+        self.kwargs.append(kwargs)
         if "h1_real_physical_evidence.py" in " ".join(command):
             output = Path(command[command.index("--output") + 1])
             output.write_text(
@@ -65,6 +87,7 @@ def test_h1_runs_before_regression_and_both_receipts_are_required(tmp_path):
     assert len(runner.commands) == 2
     assert "h1_real_physical_evidence.py" in " ".join(runner.commands[0])
     assert "tests/integration/test_real_comsol.py" in runner.commands[1]
+    assert Path(runner.kwargs[1]["env"][MODEL_ENV]).name == "controlled.mph"
     assert receipt["phases"]["h1"]["passed"] is True
     assert len(receipt["phases"]["h1"]["receipt_sha256"]) == 64
     assert receipt["phases"]["licensed_regression"]["passed"] is True

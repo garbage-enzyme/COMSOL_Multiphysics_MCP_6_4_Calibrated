@@ -15,8 +15,13 @@ import anyio
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 
-
 ROOT = Path(__file__).parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from src.evidence.real_fixture import controlled_fixture_from_environment
+
+
 PYTHON = Path(sys.executable)
 RUNTIME = Path(os.environ.get("COMSOL_MCP_RUNTIME_DIR", "D:/comsol_runtime"))
 ARTIFACT_DIR = RUNTIME / "H3f"
@@ -28,58 +33,22 @@ PROFILE_COUNTS = {
     "experimental": 64,
     "full": 118,
 }
-ITERATIONS = Path(r"C:\Users\陆星\Desktop\iterations")
-CASES = (
-    {
-        "name": "chen_mim_port",
-        "source": ITERATIONS / "Chen2023_MIM" / "chen2023_c1_smoke_check.mph",
-        "wavelength_um": 4.37,
-        "top_air_domain_ids": [3],
-        "top_air_coordinate_range": {
-            "x": [0.0, 1.35e-6],
-            "y": [0.0, 1.35e-6],
-            "z": [1.092e-6, 1.39e-6],
+
+
+def _controlled_cases() -> tuple[dict[str, Any], ...]:
+    fixture = controlled_fixture_from_environment()
+    fixture["validation_policy"] = {
+        "assumptions": {"passive": True, "port_power_normalized": True},
+        "required_evidence": [
+            "wavelength_controls", "flux_RTA", "top_air_region", "source_integrity"
+        ],
+        "tolerances": {
+            "closure_abs": 1e-3,
+            "quantity_bounds_margin": 1e-3,
+            "wavelength_abs_m": 1e-12,
         },
-        "validation_policy": {
-            "assumptions": {"passive": True, "port_power_normalized": True},
-            "required_evidence": ["wavelength_controls", "flux_RTA", "top_air_region", "source_integrity"],
-            "tolerances": {"closure_abs": 1e-3, "quantity_bounds_margin": 1e-3, "wavelength_abs_m": 1e-12},
-        },
-    },
-    {
-        "name": "zhou_qbic_port",
-        "source": ITERATIONS / "Zhou2025_QBIC" / "stage2_localmesh.mph",
-        "wavelength_um": 4.254,
-        "top_air_domain_ids": [3],
-        "top_air_coordinate_range": {
-            "x": [0.0, 2.771281292110203e-6],
-            "y": [0.0, 9.6e-6],
-            "z": [1.984e-6, 2.48e-6],
-        },
-        "validation_policy": {
-            "assumptions": {"passive": True, "port_power_normalized": True},
-            "required_evidence": ["wavelength_controls", "flux_RTA", "top_air_region", "source_integrity"],
-            "tolerances": {"closure_abs": 1e-3, "quantity_bounds_margin": 1e-3, "wavelength_abs_m": 1e-12},
-        },
-    },
-    {
-        "name": "sun_flatband_port",
-        "source": ITERATIONS / "Sun2024_NatComm_FlatBand" / "stage2_DDS_smoke.mph",
-        "wavelength_um": 5.998,
-        "top_air_domain_ids": [4],
-        "top_air_coordinate_range": {
-            "x": [0.0, 4.0e-6],
-            "y": [0.0, 2.0e-6],
-            "z": [1.66e-6, 2.15e-6],
-        },
-        "validation_policy": {
-            "assumptions": {"passive": True, "port_power_normalized": True},
-            "required_evidence": ["wavelength_controls", "flux_RTA", "incident_polarization", "source_integrity"],
-            "tolerances": {"closure_abs": 1e-3, "quantity_bounds_margin": 1e-3, "wavelength_abs_m": 1e-12},
-            "polarization": {"target_vector": [0, 1, 0], "max_cross_power_fraction": 0.05},
-        },
-    },
-)
+    }
+    return (fixture,)
 
 
 def _decode(result: Any) -> dict[str, Any]:
@@ -197,6 +166,7 @@ def _agent_reasoning(case: dict[str, Any], audit: dict[str, Any]) -> dict[str, A
 
 async def _live_three_call_matrix() -> dict[str, Any]:
     started = time.perf_counter()
+    cases = _controlled_cases()
     output: dict[str, Any] = {"profile": "wave_optics", "setup": {}, "cases": []}
     async with stdio_client(_server("wave_optics")) as (read, write):
         async with ClientSession(read, write, read_timeout_seconds=timedelta(minutes=5)) as session:
@@ -207,7 +177,7 @@ async def _live_three_call_matrix() -> dict[str, Any]:
             output["setup"]["status_polls"] = await _wait_for_comsol(session)
 
             try:
-                for case in CASES:
+                for case in cases:
                     source = case["source"]
                     if not source.is_file():
                         raise FileNotFoundError(source)
@@ -293,7 +263,7 @@ async def _live_three_call_matrix() -> dict[str, Any]:
                 disconnected, disconnect_timing = await _call(session, "comsol_disconnect", {})
                 output["cleanup"] = {"comsol_disconnect": disconnected, **disconnect_timing}
     output["elapsed_seconds"] = time.perf_counter() - started
-    assert len(output["cases"]) == len(CASES)
+    assert len(output["cases"]) == len(cases)
     return output
 
 

@@ -14,11 +14,11 @@ import time
 
 import psutil
 
+from src.evidence.real_fixture import controlled_fixture_environment_from_h1_spec
 from src.tools.ownership import SolverOwnership
 
 
 ROOT = Path(__file__).resolve().parents[1]
-
 
 def _comsol_pids() -> set[int]:
     names = {"comsol", "comsolmphserver", "comsolbatch"}
@@ -136,6 +136,11 @@ def run_release_gate(
 
     suite_completed = None
     if h1_passed:
+        fixture_environment = (
+            controlled_fixture_environment_from_h1_spec(args.h1_spec)
+            if args.require_h1
+            else os.environ.copy()
+        )
         suite_completed = command_runner(
             [
                 sys.executable,
@@ -150,6 +155,7 @@ def run_release_gate(
             text=True,
             capture_output=True,
             check=False,
+            env=fixture_environment,
         )
 
     after_status = wait_clean(owner)
