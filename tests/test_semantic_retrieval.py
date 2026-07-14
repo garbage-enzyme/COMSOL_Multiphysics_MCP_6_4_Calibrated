@@ -115,6 +115,7 @@ def _retriever(assets, encoder=ControlledEncoder):
         lexical_index=assets["lexical"],
         model_path=assets["model"],
         encoder_factory=lambda _path, _dimension: encoder(),
+        lexical_timeout_seconds=5.0,
     )
 
 

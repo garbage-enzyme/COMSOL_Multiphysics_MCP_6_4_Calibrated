@@ -103,12 +103,24 @@ class HybridRetriever:
         lexical_index: str | Path,
         model_path: str | Path,
         encoder_factory: Callable[[str | Path, int], Any] | None = None,
+        lexical_timeout_seconds: float = 2.0,
     ):
         import numpy as np
+
+        if (
+            isinstance(lexical_timeout_seconds, bool)
+            or not isinstance(lexical_timeout_seconds, (int, float))
+            or not math.isfinite(float(lexical_timeout_seconds))
+            or not 0.05 <= float(lexical_timeout_seconds) <= PUBLIC_LIMITS["query_deadline_seconds"]
+        ):
+            raise ValueError(
+                "lexical_timeout_seconds must be finite and between 0.05 and the public query deadline"
+            )
 
         self.deployment_root = Path(deployment_root).resolve()
         self.lexical_index = Path(lexical_index).resolve()
         self.model_path = Path(model_path).resolve()
+        self.lexical_timeout_seconds = float(lexical_timeout_seconds)
         current = read_current(self.deployment_root)
         self.pointer = current["pointer"]
         self.index = current["index"]
@@ -168,6 +180,7 @@ class HybridRetriever:
             "ranker_sha256": RANKER_SHA256,
             "device": self.device,
             "runtime_dependencies": self.runtime_dependencies,
+            "lexical_timeout_seconds": self.lexical_timeout_seconds,
             "last_error": self.last_error,
         }
 
@@ -218,7 +231,11 @@ class HybridRetriever:
             "index_path": str(self.lexical_index),
             "mode": "auto",
         }
-        result = run_bounded("search", arguments, timeout=2.0)
+        result = run_bounded(
+            "search",
+            arguments,
+            timeout=self.lexical_timeout_seconds,
+        )
         if not result.get("success"):
             raise RuntimeError(f"bounded lexical retrieval failed: {result}")
         return list(result["results"]), {
