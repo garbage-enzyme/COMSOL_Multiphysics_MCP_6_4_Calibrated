@@ -259,6 +259,7 @@ class JobStore:
             {"schema_version": JOB_SCHEMA_VERSION, "request": None, "updated_at_epoch": time.time()},
         )
         (directory / "events.jsonl").touch(exist_ok=False)
+        (directory / "resource.jsonl").touch(exist_ok=False)
         (directory / "worker.log").touch(exist_ok=False)
         _fsync_directory(directory)
         return job_id
@@ -499,6 +500,65 @@ class JobStore:
         with self.lock(job_id):
             state = self.read_state(job_id)
             self._append_event_unlocked(job_id, event, data or {}, str(state["status"]))
+
+    def _read_resource_journal_unlocked(self, job_id: str) -> list[dict[str, Any]]:
+        from .resource_admission import RESOURCE_JOURNAL_MAX_ENTRIES
+
+        path = self.job_dir(job_id) / "resource.jsonl"
+        entries: list[dict[str, Any]] = []
+        if not path.exists():
+            return entries
+        with path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                if not line.strip():
+                    raise ValueError("resource journal contains a blank record")
+                entries.append(json.loads(line))
+                if len(entries) > RESOURCE_JOURNAL_MAX_ENTRIES:
+                    raise ValueError("resource journal exceeds the entry limit")
+        return entries
+
+    def read_resource_journal(self, job_id: str) -> list[dict[str, Any]]:
+        """Read and validate the bounded append-only resource journal."""
+        from .resource_admission import replay_resource_journal
+
+        with self.lock(job_id):
+            entries = self._read_resource_journal_unlocked(job_id)
+            if entries:
+                replay_resource_journal(
+                    entries,
+                    attempt=max(int(item.get("attempt", 0)) for item in entries),
+                )
+            return entries
+
+    def append_resource_journal(
+        self,
+        job_id: str,
+        entries: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Durably append validated resource transitions for the active attempt."""
+        from .resource_admission import replay_resource_journal
+
+        if not isinstance(entries, list) or not entries:
+            raise ValueError("resource journal append requires a non-empty entry list")
+        with self.lock(job_id):
+            current = self._read_resource_journal_unlocked(job_id)
+            state = self.read_state(job_id)
+            attempt = int(state.get("attempt", 1))
+            replay = replay_resource_journal(current + entries, attempt=attempt)
+            path = self.job_dir(job_id) / "resource.jsonl"
+            with path.open("ab") as handle:
+                for entry in entries:
+                    payload = json.dumps(
+                        entry,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                        allow_nan=False,
+                    ).encode("utf-8")
+                    handle.write(payload + b"\n")
+                    handle.flush()
+                    os.fsync(handle.fileno())
+            return replay
 
     def _append_event_unlocked(
         self, job_id: str, event: str, data: dict[str, Any], status: str

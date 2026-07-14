@@ -2,16 +2,24 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+import shutil
+import uuid
+
 import pytest
 
 from src.jobs.manager import validate_staged_sweep_spec
 from src.jobs.resource_admission import (
+    build_resource_admission_entries,
     build_resource_calibration_report,
+    build_resource_warning_continuation_entry,
     collect_resource_telemetry,
     evaluate_resource_admission,
     normalize_resource_policy,
     normalize_telemetry_sample,
+    replay_resource_journal,
 )
+from src.jobs.store import JobStore
 
 
 POLICY = {
@@ -26,6 +34,16 @@ POLICY = {
     "wall_time_budget_seconds": 3600.0,
     "minimum_next_point_seconds": 600.0,
 }
+
+
+@pytest.fixture
+def ascii_jobs_root():
+    root = Path("D:/comsol_runtime_test/m4_resource_journal") / uuid.uuid4().hex
+    root.mkdir(parents=True)
+    try:
+        yield root
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
 
 
 def sample(**overrides):
@@ -348,3 +366,190 @@ def test_invalid_calibration_contract_fails_closed(changes, match):
     }
     with pytest.raises(ValueError, match=match):
         build_resource_calibration_report(**arguments)
+
+
+def test_normalized_policy_and_telemetry_are_idempotent_and_integrity_checked():
+    policy = normalize_resource_policy(POLICY)
+    telemetry = normalize_telemetry_sample(sample())
+
+    assert normalize_resource_policy(policy) == policy
+    assert normalize_telemetry_sample(telemetry) == telemetry
+    with pytest.raises(ValueError, match="integrity"):
+        normalize_resource_policy({**policy, "policy_sha256": "0" * 64})
+    with pytest.raises(ValueError, match="integrity"):
+        normalize_telemetry_sample({**telemetry, "sample_sha256": "0" * 64})
+
+
+def test_green_resource_transition_authorizes_only_after_telemetry_and_decision():
+    entries = build_resource_admission_entries(
+        attempt=1,
+        point_id="wl:4.25",
+        attempt_sequence=0,
+        policy=normalize_resource_policy(POLICY),
+        sample=normalize_telemetry_sample(sample()),
+    )
+    telemetry_only = replay_resource_journal(entries[:1], attempt=1)
+    replay = replay_resource_journal(entries, attempt=1)
+
+    assert telemetry_only["points"]["wl:4.25"]["action"] == "admission_required"
+    assert telemetry_only["points"]["wl:4.25"]["start_authorized"] is False
+    assert replay["points"]["wl:4.25"]["action"] == "start_point"
+    assert replay["next_attempt_sequence"] == 2
+
+
+def test_warning_requires_separate_exact_caller_confirmation_transition():
+    entries = build_resource_admission_entries(
+        attempt=1,
+        point_id="wl:4.25",
+        attempt_sequence=0,
+        policy=POLICY,
+        sample=sample(available_memory_bytes=20),
+    )
+    blocked = replay_resource_journal(entries, attempt=1)
+    continuation = build_resource_warning_continuation_entry(
+        warning_admission=entries[1],
+        attempt_sequence=2,
+        confirmation_id="operator-confirm-001",
+    )
+    continued = replay_resource_journal(entries + [continuation], attempt=1)
+
+    assert blocked["points"]["wl:4.25"]["action"] == "await_confirmation"
+    assert continued["points"]["wl:4.25"]["decision"] == "allow_with_warning"
+    assert continued["points"]["wl:4.25"]["action"] == "start_point"
+
+
+def test_refuse_checkpoints_then_recovery_rechecks_same_point_without_losing_history():
+    refused = build_resource_admission_entries(
+        attempt=1,
+        point_id="wl:4.25",
+        attempt_sequence=0,
+        policy=POLICY,
+        sample=sample(available_memory_bytes=12),
+    )
+    blocked = replay_resource_journal(refused, attempt=1)
+    recovered = build_resource_admission_entries(
+        attempt=1,
+        point_id="wl:4.25",
+        attempt_sequence=2,
+        policy=POLICY,
+        sample=sample(stage="recovery", observed_at_epoch=1100.0),
+    )
+    resumed = replay_resource_journal(refused + recovered, attempt=1)
+
+    assert blocked["points"]["wl:4.25"]["action"] == "checkpoint_no_start"
+    assert resumed["entry_count"] == 4
+    assert resumed["points"]["wl:4.25"]["stage"] == "recovery"
+    assert resumed["points"]["wl:4.25"]["action"] == "start_point"
+
+
+def test_completed_point_is_never_authorized_for_a_duplicate_valid_row():
+    entries = build_resource_admission_entries(
+        attempt=2,
+        point_id="wl:4.25",
+        attempt_sequence=0,
+        policy=POLICY,
+        sample=sample(),
+    )
+    replay = replay_resource_journal(
+        entries,
+        attempt=2,
+        completed_point_ids=["wl:4.25"],
+    )
+
+    assert replay["points"]["wl:4.25"]["action"] == "skip_completed"
+    assert replay["points"]["wl:4.25"]["start_authorized"] is False
+    assert replay["duplicate_valid_rows_authorized"] is False
+
+
+def test_stale_attempt_and_stale_warning_confirmation_fail_closed():
+    warning = build_resource_admission_entries(
+        attempt=1,
+        point_id="wl:4.25",
+        attempt_sequence=0,
+        policy=POLICY,
+        sample=sample(available_memory_bytes=20),
+    )
+    recovered = build_resource_admission_entries(
+        attempt=1,
+        point_id="wl:4.25",
+        attempt_sequence=2,
+        policy=POLICY,
+        sample=sample(stage="recovery"),
+    )
+    stale_confirmation = build_resource_warning_continuation_entry(
+        warning_admission=warning[1],
+        attempt_sequence=4,
+        confirmation_id="late-confirmation",
+    )
+
+    with pytest.raises(ValueError, match="latest journal attempt"):
+        replay_resource_journal(warning, attempt=2)
+    with pytest.raises(ValueError, match="stale or mismatched"):
+        replay_resource_journal(warning + recovered + [stale_confirmation], attempt=1)
+
+
+def test_journal_cannot_return_to_an_older_attempt_after_resume():
+    first = build_resource_admission_entries(
+        attempt=1,
+        point_id="wl:4.25",
+        attempt_sequence=0,
+        policy=POLICY,
+        sample=sample(),
+    )
+    resumed = build_resource_admission_entries(
+        attempt=2,
+        point_id="wl:4.30",
+        attempt_sequence=0,
+        policy=POLICY,
+        sample=sample(stage="recovery"),
+    )
+    stale = build_resource_admission_entries(
+        attempt=1,
+        point_id="wl:4.35",
+        attempt_sequence=2,
+        policy=POLICY,
+        sample=sample(),
+    )
+
+    with pytest.raises(ValueError, match="attempts are not monotonic"):
+        replay_resource_journal(first + resumed + stale, attempt=2)
+
+
+def test_job_store_persists_validated_resource_journal_with_fsync_contract(ascii_jobs_root):
+    store = JobStore(ascii_jobs_root / "jobs")
+    job_id = store.create({}, {"attempt": 1, "status": "submitted"}, job_id="job-resource")
+    warning = build_resource_admission_entries(
+        attempt=1,
+        point_id="wl:4.25",
+        attempt_sequence=0,
+        policy=POLICY,
+        sample=sample(available_memory_bytes=20),
+    )
+    first = store.append_resource_journal(job_id, warning)
+    continuation = build_resource_warning_continuation_entry(
+        warning_admission=warning[1],
+        attempt_sequence=2,
+        confirmation_id="operator-confirm-001",
+    )
+    final = store.append_resource_journal(job_id, [continuation])
+
+    assert first["points"]["wl:4.25"]["action"] == "await_confirmation"
+    assert final["points"]["wl:4.25"]["action"] == "start_point"
+    assert store.read_resource_journal(job_id) == warning + [continuation]
+    assert (store.job_dir(job_id) / "resource.jsonl").read_bytes().endswith(b"\n")
+
+
+def test_job_store_rejects_wrong_attempt_before_appending(ascii_jobs_root):
+    store = JobStore(ascii_jobs_root / "jobs")
+    job_id = store.create({}, {"attempt": 2, "status": "starting"}, job_id="job-resource")
+    stale = build_resource_admission_entries(
+        attempt=1,
+        point_id="wl:4.25",
+        attempt_sequence=0,
+        policy=POLICY,
+        sample=sample(),
+    )
+
+    with pytest.raises(ValueError, match="latest journal attempt"):
+        store.append_resource_journal(job_id, stale)
+    assert store.read_resource_journal(job_id) == []

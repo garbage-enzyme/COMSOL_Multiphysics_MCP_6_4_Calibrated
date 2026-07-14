@@ -7,6 +7,7 @@ import json
 import math
 import os
 from pathlib import Path
+import re
 import shutil
 import time
 from typing import Any, Mapping
@@ -53,6 +54,9 @@ _SAMPLE_FIELDS = frozenset(
     }
 )
 _STAGES = frozenset({"pre_mesh", "post_mesh", "pre_solve", "post_solve", "recovery"})
+RESOURCE_JOURNAL_MAX_ENTRIES = 4096
+RESOURCE_JOURNAL_MAX_ENTRY_BYTES = 64 * 1024
+_IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 
 
 def _sha256(value: object) -> str:
@@ -90,6 +94,28 @@ def normalize_resource_policy(policy: object | None) -> dict[str, Any] | None:
     if policy is None:
         return None
     raw = _mapping(policy, "resource_policy")
+    if raw.get("schema_name") == "comsol_mcp.resource_policy":
+        expected_fields = {
+            "schema_name",
+            "schema_version",
+            "rules",
+            "host_defaults_applied",
+            "temporary_scavenging",
+            "policy_sha256",
+        }
+        if set(raw) != expected_fields:
+            raise ValueError("normalized resource_policy has invalid fields")
+        if raw.get("schema_version") != "1.0.0":
+            raise ValueError("unsupported normalized resource_policy schema_version")
+        normalized = normalize_resource_policy(raw.get("rules"))
+        if (
+            normalized is None
+            or raw.get("host_defaults_applied") is not False
+            or raw.get("temporary_scavenging") != "disabled"
+            or raw.get("policy_sha256") != normalized["policy_sha256"]
+        ):
+            raise ValueError("normalized resource_policy integrity check failed")
+        return normalized
     unknown = sorted(set(raw) - _POLICY_FIELDS)
     if unknown:
         raise ValueError(f"unknown resource_policy fields: {', '.join(unknown)}")
@@ -149,6 +175,25 @@ def normalize_resource_policy(policy: object | None) -> dict[str, Any] | None:
 def normalize_telemetry_sample(sample: object) -> dict[str, Any]:
     """Normalize one bounded telemetry observation without inventing missing metrics."""
     raw = _mapping(sample, "telemetry_sample")
+    if raw.get("schema_name") == "comsol_mcp.resource_telemetry_sample":
+        expected_fields = {
+            "schema_name",
+            "schema_version",
+            "values",
+            "unavailable",
+            "sample_sha256",
+        }
+        if set(raw) != expected_fields:
+            raise ValueError("normalized telemetry_sample has invalid fields")
+        if raw.get("schema_version") != "1.0.0":
+            raise ValueError("unsupported normalized telemetry_sample schema_version")
+        normalized = normalize_telemetry_sample(raw.get("values"))
+        if (
+            raw.get("unavailable") != normalized["unavailable"]
+            or raw.get("sample_sha256") != normalized["sample_sha256"]
+        ):
+            raise ValueError("normalized telemetry_sample integrity check failed")
+        return normalized
     unknown = sorted(set(raw) - _SAMPLE_FIELDS)
     if unknown:
         raise ValueError(f"unknown telemetry_sample fields: {', '.join(unknown)}")
@@ -564,10 +609,349 @@ def evaluate_resource_admission(
     }
 
 
+def _identifier(value: object, name: str) -> str:
+    if not isinstance(value, str) or not _IDENTIFIER.fullmatch(value):
+        raise ValueError(
+            f"{name} must be 1-128 ASCII identifier characters (letters, digits, . _ : -)"
+        )
+    return value
+
+
+def _attempt(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ValueError("attempt must be a positive integer")
+    return value
+
+
+def _attempt_sequence(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError("attempt_sequence must be a nonnegative integer")
+    return value
+
+
+def _journal_entry(payload: dict[str, Any]) -> dict[str, Any]:
+    entry = {
+        "schema_name": "comsol_mcp.resource_journal_entry",
+        "schema_version": "1.0.0",
+        **payload,
+    }
+    entry["entry_sha256"] = _sha256(entry)
+    encoded = json.dumps(
+        entry, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+    ).encode("utf-8")
+    if len(encoded) > RESOURCE_JOURNAL_MAX_ENTRY_BYTES:
+        raise ValueError("resource journal entry exceeds the size limit")
+    return entry
+
+
+def build_resource_admission_entries(
+    *,
+    attempt: int,
+    point_id: str,
+    attempt_sequence: int,
+    policy: object | None,
+    sample: object,
+) -> list[dict[str, Any]]:
+    """Build the telemetry-then-decision pair that must precede a stage transition."""
+    attempt = _attempt(attempt)
+    point_id = _identifier(point_id, "point_id")
+    attempt_sequence = _attempt_sequence(attempt_sequence)
+    telemetry = normalize_telemetry_sample(sample)
+    decision = evaluate_resource_admission(policy, telemetry)
+    normalized_policy = decision["policy"]
+    common = {
+        "attempt": attempt,
+        "point_id": point_id,
+        "stage": telemetry["values"]["stage"],
+    }
+    telemetry_entry = _journal_entry(
+        {
+            **common,
+            "attempt_sequence": attempt_sequence,
+            "entry_type": "telemetry",
+            "telemetry": telemetry,
+        }
+    )
+    admission_entry = _journal_entry(
+        {
+            **common,
+            "attempt_sequence": attempt_sequence + 1,
+            "entry_type": "admission",
+            "telemetry_entry_sha256": telemetry_entry["entry_sha256"],
+            "sample_sha256": telemetry["sample_sha256"],
+            "policy_sha256": (
+                normalized_policy["policy_sha256"] if normalized_policy is not None else None
+            ),
+            "state": decision["state"],
+            "decision": decision["decision"],
+            "evidence_codes": [item["code"] for item in decision["evidence"]],
+            "start_authorized": decision["decision"] == "allow",
+            "checkpoint_required": decision["decision"] in {"refuse", "require_confirmation"},
+        }
+    )
+    return [telemetry_entry, admission_entry]
+
+
+def build_resource_warning_continuation_entry(
+    *,
+    warning_admission: object,
+    attempt_sequence: int,
+    confirmation_id: str,
+) -> dict[str, Any]:
+    """Authorize one exact warning decision through a separate caller-confirmed transition."""
+    warning = _validate_resource_journal_entry(warning_admission)
+    if warning["entry_type"] != "admission":
+        raise ValueError("warning_admission must be an admission entry")
+    if warning["state"] != "warning" or warning["decision"] != "require_confirmation":
+        raise ValueError("warning_admission must require confirmation")
+    attempt_sequence = _attempt_sequence(attempt_sequence)
+    if attempt_sequence <= warning["attempt_sequence"]:
+        raise ValueError("warning continuation must follow its admission entry")
+    confirmation_id = _identifier(confirmation_id, "confirmation_id")
+    return _journal_entry(
+        {
+            "attempt": warning["attempt"],
+            "point_id": warning["point_id"],
+            "stage": warning["stage"],
+            "attempt_sequence": attempt_sequence,
+            "entry_type": "warning_continuation",
+            "warning_admission_sha256": warning["entry_sha256"],
+            "sample_sha256": warning["sample_sha256"],
+            "policy_sha256": warning["policy_sha256"],
+            "confirmation_id": confirmation_id,
+            "state": "warning",
+            "decision": "allow_with_warning",
+            "start_authorized": True,
+            "checkpoint_required": False,
+        }
+    )
+
+
+def _validate_resource_journal_entry(entry: object) -> dict[str, Any]:
+    raw = _mapping(entry, "resource_journal_entry")
+    common = {
+        "schema_name",
+        "schema_version",
+        "attempt",
+        "point_id",
+        "stage",
+        "attempt_sequence",
+        "entry_type",
+        "entry_sha256",
+    }
+    fields = {
+        "telemetry": common | {"telemetry"},
+        "admission": common
+        | {
+            "telemetry_entry_sha256",
+            "sample_sha256",
+            "policy_sha256",
+            "state",
+            "decision",
+            "evidence_codes",
+            "start_authorized",
+            "checkpoint_required",
+        },
+        "warning_continuation": common
+        | {
+            "warning_admission_sha256",
+            "sample_sha256",
+            "policy_sha256",
+            "confirmation_id",
+            "state",
+            "decision",
+            "start_authorized",
+            "checkpoint_required",
+        },
+    }
+    entry_type = raw.get("entry_type")
+    if entry_type not in fields or set(raw) != fields[entry_type]:
+        raise ValueError("resource journal entry has invalid fields or entry_type")
+    if raw.get("schema_name") != "comsol_mcp.resource_journal_entry":
+        raise ValueError("invalid resource journal schema_name")
+    if raw.get("schema_version") != "1.0.0":
+        raise ValueError("unsupported resource journal schema_version")
+    raw["attempt"] = _attempt(raw.get("attempt"))
+    raw["point_id"] = _identifier(raw.get("point_id"), "point_id")
+    raw["attempt_sequence"] = _attempt_sequence(raw.get("attempt_sequence"))
+    if raw.get("stage") not in _STAGES:
+        raise ValueError("resource journal entry has an invalid stage")
+    supplied_hash = raw.pop("entry_sha256")
+    if not isinstance(supplied_hash, str) or supplied_hash != _sha256(raw):
+        raise ValueError("resource journal entry hash mismatch")
+    raw["entry_sha256"] = supplied_hash
+    encoded = json.dumps(
+        raw, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+    ).encode("utf-8")
+    if len(encoded) > RESOURCE_JOURNAL_MAX_ENTRY_BYTES:
+        raise ValueError("resource journal entry exceeds the size limit")
+    if entry_type == "telemetry":
+        raw["telemetry"] = normalize_telemetry_sample(raw["telemetry"])
+        if raw["telemetry"]["values"]["stage"] != raw["stage"]:
+            raise ValueError("resource telemetry entry stage mismatch")
+    elif entry_type == "admission":
+        if raw.get("state") not in {"disabled", "green", "warning", "red"}:
+            raise ValueError("resource admission entry has an invalid state")
+        expected_decision = {
+            "disabled": "allow",
+            "green": "allow",
+            "warning": "require_confirmation",
+            "red": "refuse",
+        }[raw["state"]]
+        if raw.get("decision") != expected_decision:
+            raise ValueError("resource admission state and decision are inconsistent")
+        if (
+            raw["state"] == "disabled" and raw.get("policy_sha256") is not None
+        ) or (
+            raw["state"] != "disabled" and raw.get("policy_sha256") is None
+        ):
+            raise ValueError("resource admission policy identity is inconsistent")
+        if not isinstance(raw.get("evidence_codes"), list) or not all(
+            isinstance(item, str) and item for item in raw["evidence_codes"]
+        ):
+            raise ValueError("resource admission evidence_codes must be a string list")
+        expected_authorized = raw["decision"] == "allow"
+        expected_checkpoint = raw["decision"] in {"require_confirmation", "refuse"}
+        if (
+            raw.get("start_authorized") is not expected_authorized
+            or raw.get("checkpoint_required") is not expected_checkpoint
+        ):
+            raise ValueError("resource admission transition flags are inconsistent")
+    else:
+        _identifier(raw.get("confirmation_id"), "confirmation_id")
+        if (
+            raw.get("state") != "warning"
+            or raw.get("decision") != "allow_with_warning"
+            or raw.get("start_authorized") is not True
+            or raw.get("checkpoint_required") is not False
+        ):
+            raise ValueError("warning continuation flags are inconsistent")
+    for name in (
+        "telemetry_entry_sha256",
+        "warning_admission_sha256",
+        "sample_sha256",
+        "policy_sha256",
+    ):
+        if name in raw and raw[name] is not None:
+            if not isinstance(raw[name], str) or not re.fullmatch(r"[0-9a-f]{64}", raw[name]):
+                raise ValueError(f"{name} must be a SHA-256 hex digest or null")
+    return raw
+
+
+def replay_resource_journal(
+    entries: object,
+    *,
+    attempt: int,
+    completed_point_ids: object = (),
+) -> dict[str, Any]:
+    """Validate journal ordering and derive fail-closed resume actions for the latest attempt."""
+    attempt = _attempt(attempt)
+    if not isinstance(entries, list):
+        raise ValueError("resource journal entries must be a list")
+    if len(entries) > RESOURCE_JOURNAL_MAX_ENTRIES:
+        raise ValueError("resource journal exceeds the entry limit")
+    if not isinstance(completed_point_ids, (list, tuple, set, frozenset)):
+        raise ValueError("completed_point_ids must be a collection")
+    completed = {_identifier(item, "completed_point_id") for item in completed_point_ids}
+    normalized: list[dict[str, Any]] = []
+    expected_sequence: dict[int, int] = {}
+    latest_by_point: dict[tuple[int, str], dict[str, Any]] = {}
+    telemetry_by_hash: dict[str, dict[str, Any]] = {}
+    admission_by_hash: dict[str, dict[str, Any]] = {}
+    max_attempt = 0
+    last_attempt = 0
+    for item in entries:
+        entry = _validate_resource_journal_entry(item)
+        current_attempt = entry["attempt"]
+        if current_attempt < last_attempt:
+            raise ValueError("resource journal attempts are not monotonic")
+        last_attempt = current_attempt
+        max_attempt = max(max_attempt, current_attempt)
+        expected = expected_sequence.get(current_attempt, 0)
+        if entry["attempt_sequence"] != expected:
+            raise ValueError("resource journal attempt_sequence is not contiguous")
+        expected_sequence[current_attempt] = expected + 1
+        key = (current_attempt, entry["point_id"])
+        if entry["entry_type"] == "telemetry":
+            telemetry_by_hash[entry["entry_sha256"]] = entry
+            latest_by_point[key] = entry
+        elif entry["entry_type"] == "admission":
+            telemetry = telemetry_by_hash.get(entry["telemetry_entry_sha256"])
+            if (
+                telemetry is None
+                or telemetry["attempt"] != current_attempt
+                or telemetry["point_id"] != entry["point_id"]
+                or telemetry["stage"] != entry["stage"]
+                or telemetry["telemetry"]["sample_sha256"] != entry["sample_sha256"]
+                or latest_by_point.get(key, {}).get("entry_sha256")
+                != telemetry["entry_sha256"]
+            ):
+                raise ValueError("resource admission does not match the latest telemetry entry")
+            admission_by_hash[entry["entry_sha256"]] = entry
+            latest_by_point[key] = entry
+        else:
+            admission = admission_by_hash.get(entry["warning_admission_sha256"])
+            if (
+                admission is None
+                or admission["attempt"] != current_attempt
+                or admission["point_id"] != entry["point_id"]
+                or admission["stage"] != entry["stage"]
+                or admission["state"] != "warning"
+                or admission["decision"] != "require_confirmation"
+                or admission["sample_sha256"] != entry["sample_sha256"]
+                or admission["policy_sha256"] != entry["policy_sha256"]
+                or latest_by_point.get(key, {}).get("entry_sha256")
+                != admission["entry_sha256"]
+            ):
+                raise ValueError("warning continuation is stale or mismatched")
+            latest_by_point[key] = entry
+        normalized.append(entry)
+    if normalized and attempt != max_attempt:
+        raise ValueError("attempt must match the latest journal attempt")
+
+    points: dict[str, dict[str, Any]] = {}
+    for (entry_attempt, point_id), latest in sorted(latest_by_point.items()):
+        if entry_attempt != attempt:
+            continue
+        if point_id in completed:
+            action = "skip_completed"
+        elif latest["entry_type"] == "telemetry":
+            action = "admission_required"
+        elif latest["decision"] in {"allow", "allow_with_warning"}:
+            action = "start_point"
+        elif latest["decision"] == "require_confirmation":
+            action = "await_confirmation"
+        else:
+            action = "checkpoint_no_start"
+        points[point_id] = {
+            "stage": latest["stage"],
+            "latest_entry_type": latest["entry_type"],
+            "latest_entry_sha256": latest["entry_sha256"],
+            "decision": latest.get("decision"),
+            "start_authorized": action == "start_point",
+            "action": action,
+        }
+    return {
+        "schema_name": "comsol_mcp.resource_journal_replay",
+        "schema_version": "1.0.0",
+        "attempt": attempt,
+        "next_attempt_sequence": expected_sequence.get(attempt, 0),
+        "entry_count": len(normalized),
+        "points": points,
+        "completed_point_ids": sorted(completed),
+        "duplicate_valid_rows_authorized": False,
+        "temporary_scavenging": "disabled",
+    }
+
+
 __all__ = [
+    "RESOURCE_JOURNAL_MAX_ENTRIES",
+    "build_resource_admission_entries",
     "build_resource_calibration_report",
+    "build_resource_warning_continuation_entry",
     "collect_resource_telemetry",
     "evaluate_resource_admission",
     "normalize_resource_policy",
     "normalize_telemetry_sample",
+    "replay_resource_journal",
 ]
