@@ -171,11 +171,14 @@ def test_heartbeat_records_owned_comsol_server_pid(runtime_dir):
 
 def test_real_process_evidence_refuses_known_external_client(runtime_dir):
     child = subprocess.Popen(
-        [sys.executable, "-c", "import time; marker='mph.Client'; time.sleep(10)"],
+        [sys.executable, "-c", "import time; marker='mph.Client'; time.sleep(30)"],
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     try:
-        deadline = time.time() + 3
+        # Host-wide process inventory can be slow while an unrelated COMSOL
+        # factorization is active. Keep the marker alive beyond the bounded
+        # discovery window so scheduling delay cannot erase the evidence.
+        deadline = time.monotonic() + 10
         detected = None
         manager = SolverOwnership(
             runtime_dir,
@@ -185,7 +188,7 @@ def test_real_process_evidence_refuses_known_external_client(runtime_dir):
             command_line=["python.exe", "-m", "src.server"],
             owner="independent-mcp-observer",
         )
-        while time.time() < deadline:
+        while time.monotonic() < deadline:
             detected = manager.status()
             if any(item["pid"] == child.pid for item in detected["external_solver_processes"]):
                 break
