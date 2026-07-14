@@ -218,7 +218,8 @@ def test_hanging_semantic_worker_does_not_delay_control_plane_or_lexical_search(
     lexical_started = time.perf_counter()
     lexical = search_index("CopyFace", index_path=index)
     lexical_elapsed = time.perf_counter() - lexical_started
-    thread.join(timeout=2.0)
+    join_budget = min(8.0, max(4.0, baseline_elapsed * 2.0 + 1.0))
+    thread.join(timeout=join_budget)
 
     assert capabilities["success"] is True
     assert ownership["lease"]["state"] == "absent"
@@ -234,6 +235,7 @@ def test_hanging_semantic_worker_does_not_delay_control_plane_or_lexical_search(
     assert control_elapsed < 8.0
     assert control_elapsed < max(4.0, baseline_elapsed * 2.0 + 0.5)
     assert lexical_elapsed < 4.0
+    assert not thread.is_alive()
     assert result["success"] is False and result["cleanup"]["absent"] is True
     assert not (runtime / "solver_owner.json").exists()
     if root.exists():
