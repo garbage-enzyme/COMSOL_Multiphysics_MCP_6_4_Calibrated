@@ -21,6 +21,75 @@ from src.utils.runtime_paths import default_runtime_dir as _shared_default_runti
 
 LEASE_SCHEMA_VERSION = "2"
 CREATE_TIME_TOLERANCE_SECONDS = 0.05
+LEASE_IO_TIMEOUT_SECONDS = 1.0
+LEASE_IO_POLL_SECONDS = 0.02
+
+
+def _lease_io_deadline() -> float:
+    return time.monotonic() + LEASE_IO_TIMEOUT_SECONDS
+
+
+def _read_bytes_retry(path: Path, *, deadline: float | None = None) -> bytes:
+    deadline = _lease_io_deadline() if deadline is None else deadline
+    while True:
+        try:
+            return path.read_bytes()
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(LEASE_IO_POLL_SECONDS)
+
+
+def _unlink_retry(
+    path: Path,
+    *,
+    missing_ok: bool,
+    expected_bytes: bytes | None = None,
+) -> tuple[bool, str | None]:
+    """Unlink one lease artifact after bounded exact-content validation."""
+    deadline = _lease_io_deadline()
+    while True:
+        if expected_bytes is not None:
+            try:
+                if _read_bytes_retry(path, deadline=deadline) != expected_bytes:
+                    return False, "changed"
+            except FileNotFoundError:
+                return (True, None) if missing_ok else (False, "missing")
+            except PermissionError:
+                return False, "sharing_violation_timeout"
+        try:
+            path.unlink(missing_ok=missing_ok)
+            return True, None
+        except FileNotFoundError:
+            return (True, None) if missing_ok else (False, "missing")
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                return False, "sharing_violation_timeout"
+            time.sleep(LEASE_IO_POLL_SECONDS)
+
+
+def _replace_retry_if_unchanged(
+    temporary: Path,
+    destination: Path,
+    expected_bytes: bytes,
+) -> tuple[bool, str | None]:
+    """Atomically replace a lease only while its exact pre-state is unchanged."""
+    deadline = _lease_io_deadline()
+    while True:
+        try:
+            if _read_bytes_retry(destination, deadline=deadline) != expected_bytes:
+                return False, "changed"
+        except FileNotFoundError:
+            return False, "missing"
+        except PermissionError:
+            return False, "sharing_violation_timeout"
+        try:
+            os.replace(temporary, destination)
+            return True, None
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                return False, "sharing_violation_timeout"
+            time.sleep(LEASE_IO_POLL_SECONDS)
 
 
 def _is_ascii_path(path: Path) -> bool:
@@ -118,13 +187,20 @@ class SolverOwnership:
         self.command_signature = _command_signature(self.command_line)
         self.owner = owner or _agent_owner_label()
 
-    def _read_lease(self) -> tuple[Optional[dict[str, Any]], Optional[str]]:
+    def _read_lease_with_bytes(
+        self,
+    ) -> tuple[Optional[dict[str, Any]], Optional[bytes], Optional[str]]:
         if not self.lease_path.is_file():
-            return None, None
+            return None, None, None
         try:
-            return json.loads(self.lease_path.read_text(encoding="utf-8")), None
-        except (OSError, json.JSONDecodeError) as exc:
-            return None, f"Cannot read solver lease: {exc}"
+            raw = _read_bytes_retry(self.lease_path)
+            return json.loads(raw.decode("utf-8")), raw, None
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            return None, None, f"Cannot read solver lease: {exc}"
+
+    def _read_lease(self) -> tuple[Optional[dict[str, Any]], Optional[str]]:
+        lease, _raw, error = self._read_lease_with_bytes()
+        return lease, error
 
     def _lease_state(self, lease: dict[str, Any], processes: list[dict[str, Any]]) -> dict[str, Any]:
         required = {"pid", "process_create_time", "command_signature"}
@@ -395,7 +471,7 @@ class SolverOwnership:
     def heartbeat(
         self, *, model_path: Optional[str] = None, refresh_server_processes: bool = False
     ) -> bool:
-        lease, error = self._read_lease()
+        lease, original, error = self._read_lease_with_bytes()
         if error or not lease or int(lease.get("pid", -1)) != self.pid:
             return False
         if abs(float(lease.get("process_create_time", -1)) - self.create_time) > CREATE_TIME_TOLERANCE_SECONDS:
@@ -403,7 +479,8 @@ class SolverOwnership:
         acquisition_id = lease.get("acquisition_id")
         if not acquisition_id:
             return False
-        original = self.lease_path.read_bytes()
+        if original is None:
+            return False
         lease["heartbeat_epoch"] = time.time()
         if model_path is not None:
             lease["model_path"] = model_path
@@ -437,8 +514,6 @@ class SolverOwnership:
             lease["comsol_server_processes"] = servers
             # Keep v2 PID-only evidence readable, but never use it to act.
             lease["comsol_server_pids"] = [item["pid"] for item in servers]
-        if self.lease_path.read_bytes() != original:
-            return False
         temporary = self.lease_path.with_name(f".{self.lease_path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
         with temporary.open("w", encoding="utf-8", newline="\n") as handle:
             json.dump(lease, handle, ensure_ascii=False, indent=2, sort_keys=True)
@@ -446,15 +521,19 @@ class SolverOwnership:
             handle.flush()
             os.fsync(handle.fileno())
         try:
-            if self.lease_path.read_bytes() != original:
-                return False
-            os.replace(temporary, self.lease_path)
+            replaced, _reason = _replace_retry_if_unchanged(
+                temporary, self.lease_path, original
+            )
+            return replaced
         finally:
-            temporary.unlink(missing_ok=True)
-        return True
+            removed, reason = _unlink_retry(temporary, missing_ok=True)
+            if not removed:
+                raise RuntimeError(
+                    f"Cannot clean solver lease temporary file: {reason}"
+                )
 
     def release(self) -> dict[str, Any]:
-        lease, error = self._read_lease()
+        lease, original, error = self._read_lease_with_bytes()
         if error:
             return {"success": False, "released": False, "error": error}
         if lease is None:
@@ -465,19 +544,24 @@ class SolverOwnership:
             return {"success": False, "released": False, "error": "Refusing to release a foreign solver lease."}
         if not lease.get("acquisition_id"):
             return {"success": False, "released": False, "error": "Refusing to release a legacy lease without acquisition ID."}
-        original = self.lease_path.read_bytes()
-        if self.lease_path.read_bytes() != original:
-            return {"success": False, "released": False, "error": "Lease changed before release; retry status."}
-        self.lease_path.unlink(missing_ok=True)
+        if original is None:
+            return {"success": True, "released": False, "message": "No solver lease exists."}
+        removed, reason = _unlink_retry(
+            self.lease_path, missing_ok=True, expected_bytes=original
+        )
+        if not removed:
+            detail = "Lease changed before release; retry status." if reason == "changed" else f"Cannot release solver lease: {reason}"
+            return {"success": False, "released": False, "error": detail}
         return {"success": True, "released": True}
 
     def recover_stale(self) -> dict[str, Any]:
-        lease, error = self._read_lease()
+        lease, original, error = self._read_lease_with_bytes()
         if error:
             return {"success": False, "recovered": False, "error": error}
         if lease is None:
             return {"success": True, "recovered": False, "message": "No solver lease exists."}
-        original = self.lease_path.read_bytes()
+        if original is None:
+            return {"success": True, "recovered": False, "message": "No solver lease exists."}
         state = self._lease_state(lease, self._process_provider())
         if state["state"] != "stale":
             return {
@@ -488,9 +572,12 @@ class SolverOwnership:
             }
         if not lease.get("acquisition_id"):
             return {"success": False, "recovered": False, "error": "Lease has no acquisition ID; refusing stale recovery."}
-        if self.lease_path.read_bytes() != original:
-            return {"success": False, "recovered": False, "error": "Lease changed during recovery; retry status."}
-        self.lease_path.unlink()
+        removed, reason = _unlink_retry(
+            self.lease_path, missing_ok=False, expected_bytes=original
+        )
+        if not removed:
+            detail = "Lease changed during recovery; retry status." if reason == "changed" else f"Cannot recover stale solver lease: {reason}"
+            return {"success": False, "recovered": False, "error": detail}
         return {"success": True, "recovered": True, "reason": state["reason"]}
 
 

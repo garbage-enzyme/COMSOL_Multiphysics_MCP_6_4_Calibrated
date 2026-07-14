@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+import json
 import os
 import shutil
 import subprocess
@@ -13,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+import src.tools.ownership as ownership_module
 from src.tools.ownership import SolverOwnership, _command_signature
 
 
@@ -167,6 +169,204 @@ def test_heartbeat_records_owned_comsol_server_pid(runtime_dir):
             "command_signature": _command_signature(["comsolmphserver.exe", "-port", "2036"]),
         }
     ]
+
+
+def test_lease_read_retries_transient_windows_sharing_violation(runtime_dir, monkeypatch):
+    command = ["python.exe", "-m", "src.server"]
+    own_process = process(61, 601.0, command)
+    manager = owner(runtime_dir, 61, 601.0, command, [own_process])
+    assert manager.acquire(mode="local-client")["success"] is True
+    original_read_bytes = Path.read_bytes
+    attempts = 0
+
+    def flaky_read_bytes(path):
+        nonlocal attempts
+        if path == manager.lease_path and attempts < 2:
+            attempts += 1
+            raise PermissionError("simulated lease reader sharing violation")
+        return original_read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", flaky_read_bytes)
+    status = manager.status()
+
+    assert status["lease"]["state"] == "active"
+    assert attempts == 2
+
+
+def test_persistent_lease_read_failure_is_bounded_and_fails_closed(runtime_dir, monkeypatch):
+    command = ["python.exe", "-m", "src.server"]
+    own_process = process(611, 601.1, command)
+    manager = owner(runtime_dir, 611, 601.1, command, [own_process])
+    assert manager.acquire(mode="local-client")["success"] is True
+    original_read_bytes = Path.read_bytes
+
+    def blocked_read_bytes(path):
+        if path == manager.lease_path:
+            raise PermissionError("persistent simulated lease reader sharing violation")
+        return original_read_bytes(path)
+
+    monkeypatch.setattr(ownership_module, "LEASE_IO_TIMEOUT_SECONDS", 0.08)
+    monkeypatch.setattr(ownership_module, "LEASE_IO_POLL_SECONDS", 0.005)
+    monkeypatch.setattr(Path, "read_bytes", blocked_read_bytes)
+    started = time.monotonic()
+    status = manager.status()
+
+    assert time.monotonic() - started < 0.5
+    assert status["lease"]["state"] == "uncertain"
+    assert status["collision"] is True
+    assert "Cannot read solver lease" in status["lease"]["reason"]
+
+
+def test_heartbeat_retries_atomic_replace_and_leaves_no_temp(runtime_dir, monkeypatch):
+    command = ["python.exe", "-m", "src.server"]
+    own_process = process(62, 602.0, command)
+    manager = owner(runtime_dir, 62, 602.0, command, [own_process])
+    assert manager.acquire(mode="local-client")["success"] is True
+    original_replace = ownership_module.os.replace
+    attempts = 0
+
+    def flaky_replace(source, destination):
+        nonlocal attempts
+        if destination == manager.lease_path and attempts < 2:
+            attempts += 1
+            raise PermissionError("simulated lease replace sharing violation")
+        return original_replace(source, destination)
+
+    monkeypatch.setattr(ownership_module.os, "replace", flaky_replace)
+
+    assert manager.heartbeat() is True
+    assert attempts == 2
+    assert not list(runtime_dir.glob(".solver_owner.json.*.tmp"))
+
+
+def test_heartbeat_never_overwrites_lease_changed_during_replace_retry(runtime_dir, monkeypatch):
+    command = ["python.exe", "-m", "src.server"]
+    own_process = process(63, 603.0, command)
+    manager = owner(runtime_dir, 63, 603.0, command, [own_process])
+    assert manager.acquire(mode="local-client")["success"] is True
+    original_replace = ownership_module.os.replace
+    changed = False
+
+    def competing_replace(source, destination):
+        nonlocal changed
+        if destination == manager.lease_path and not changed:
+            changed = True
+            payload = json.loads(destination.read_text(encoding="utf-8"))
+            payload["acquisition_id"] = "competing-owner"
+            destination.write_text(json.dumps(payload), encoding="utf-8")
+            raise PermissionError("simulated collision with a competing heartbeat")
+        return original_replace(source, destination)
+
+    monkeypatch.setattr(ownership_module.os, "replace", competing_replace)
+
+    assert manager.heartbeat() is False
+    assert json.loads(manager.lease_path.read_text(encoding="utf-8"))["acquisition_id"] == "competing-owner"
+    assert not list(runtime_dir.glob(".solver_owner.json.*.tmp"))
+
+
+def test_release_retries_unlink_but_refuses_changed_lease(runtime_dir, monkeypatch):
+    command = ["python.exe", "-m", "src.server"]
+    own_process = process(64, 604.0, command)
+    manager = owner(runtime_dir, 64, 604.0, command, [own_process])
+    assert manager.acquire(mode="local-client")["success"] is True
+    original_unlink = Path.unlink
+    attempts = 0
+
+    def flaky_unlink(path, missing_ok=False):
+        nonlocal attempts
+        if path == manager.lease_path and attempts < 2:
+            attempts += 1
+            raise PermissionError("simulated lease unlink sharing violation")
+        return original_unlink(path, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", flaky_unlink)
+    assert manager.release() == {"success": True, "released": True}
+    assert attempts == 2
+
+    assert manager.acquire(mode="local-client")["success"] is True
+    changed = False
+
+    def competing_unlink(path, missing_ok=False):
+        nonlocal changed
+        if path == manager.lease_path and not changed:
+            changed = True
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            payload["acquisition_id"] = "competing-owner"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            raise PermissionError("simulated collision with a competing release")
+        return original_unlink(path, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", competing_unlink)
+    refused = manager.release()
+
+    assert refused["success"] is False
+    assert "changed before release" in refused["error"]
+    assert manager.lease_path.exists()
+
+
+def test_stale_recovery_retries_exact_lease_unlink(runtime_dir, monkeypatch):
+    original_command = ["python.exe", "owner"]
+    original_process = process(66, 606.0, original_command)
+    first = owner(runtime_dir, 66, 606.0, original_command, [original_process])
+    assert first.acquire(mode="local-client")["success"] is True
+    observer_process = process(67, 607.0, ["python.exe", "observer"])
+    reused = process(66, 999.0, ["python.exe", "unrelated"])
+    observer = owner(
+        runtime_dir,
+        67,
+        607.0,
+        observer_process["command_line"],
+        [observer_process, reused],
+    )
+    original_unlink = Path.unlink
+    attempts = 0
+
+    def flaky_unlink(path, missing_ok=False):
+        nonlocal attempts
+        if path == observer.lease_path and attempts < 2:
+            attempts += 1
+            raise PermissionError("simulated stale-lease unlink sharing violation")
+        return original_unlink(path, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", flaky_unlink)
+    recovered = observer.recover_stale()
+
+    assert recovered["success"] is True
+    assert recovered["recovered"] is True
+    assert attempts == 2
+    assert not observer.lease_path.exists()
+
+
+def test_persistent_replace_failure_is_bounded_and_temp_is_cleaned(runtime_dir, monkeypatch):
+    command = ["python.exe", "-m", "src.server"]
+    own_process = process(65, 605.0, command)
+    manager = owner(runtime_dir, 65, 605.0, command, [own_process])
+    assert manager.acquire(mode="local-client")["success"] is True
+    original_unlink = Path.unlink
+    cleanup_attempts = 0
+
+    def blocked_replace(source, destination):
+        raise PermissionError("persistent simulated replace sharing violation")
+
+    def flaky_temp_unlink(path, missing_ok=False):
+        nonlocal cleanup_attempts
+        if path.name.startswith(".solver_owner.json.") and cleanup_attempts < 2:
+            cleanup_attempts += 1
+            raise PermissionError("transient simulated temp cleanup sharing violation")
+        return original_unlink(path, missing_ok=missing_ok)
+
+    monkeypatch.setattr(ownership_module, "LEASE_IO_TIMEOUT_SECONDS", 0.08)
+    monkeypatch.setattr(ownership_module, "LEASE_IO_POLL_SECONDS", 0.005)
+    monkeypatch.setattr(ownership_module.os, "replace", blocked_replace)
+    monkeypatch.setattr(Path, "unlink", flaky_temp_unlink)
+    started = time.monotonic()
+
+    assert manager.heartbeat() is False
+
+    assert time.monotonic() - started < 0.5
+    assert cleanup_attempts == 2
+    assert manager.lease_path.exists()
+    assert not list(runtime_dir.glob(".solver_owner.json.*.tmp"))
 
 
 def test_real_process_evidence_refuses_known_external_client(runtime_dir):
