@@ -7,6 +7,7 @@ import json
 import os
 import platform
 import sys
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -23,6 +24,9 @@ LEASE_SCHEMA_VERSION = "2"
 CREATE_TIME_TOLERANCE_SECONDS = 0.05
 LEASE_IO_TIMEOUT_SECONDS = 1.0
 LEASE_IO_POLL_SECONDS = 0.02
+PROCESS_INVENTORY_STATUS_TIMEOUT_SECONDS = 0.5
+PROCESS_INVENTORY_MUTATION_TIMEOUT_SECONDS = 10.0
+PROCESS_INVENTORY_CACHE_SECONDS = 2.0
 
 
 def _lease_io_deadline() -> float:
@@ -139,6 +143,114 @@ def _system_processes() -> list[dict[str, Any]]:
     return records
 
 
+class _BoundedProcessInventory:
+    """Keep at most one daemon host scan in flight and expose bounded evidence."""
+
+    def __init__(self, collector: Callable[[], list[dict[str, Any]]]):
+        self._collector = collector
+        self._lock = threading.Lock()
+        self._thread: threading.Thread | None = None
+        self._generation = 0
+        self._cache_records: list[dict[str, Any]] | None = None
+        self._cache_started_monotonic: float | None = None
+        self._cache_completed_monotonic: float | None = None
+        self._cache_latency_seconds: float | None = None
+        self._last_error: str | None = None
+
+    def _start_locked(self) -> None:
+        self._generation += 1
+        generation = self._generation
+        started = time.monotonic()
+
+        def run() -> None:
+            try:
+                records = self._collector()
+                error = None
+            except Exception as exc:
+                records = None
+                error = f"{type(exc).__name__}: {exc}"
+            completed = time.monotonic()
+            with self._lock:
+                if generation != self._generation:
+                    return
+                self._last_error = error
+                if records is not None:
+                    self._cache_records = list(records)
+                    self._cache_started_monotonic = started
+                    self._cache_completed_monotonic = completed
+                    self._cache_latency_seconds = completed - started
+
+        self._thread = threading.Thread(
+            target=run,
+            name=f"comsol-process-inventory-{generation}",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def collect(self, *, require_fresh: bool, timeout: float) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        requested = time.monotonic()
+        timeout = max(0.01, float(timeout))
+        with self._lock:
+            cache_age = (
+                requested - self._cache_completed_monotonic
+                if self._cache_completed_monotonic is not None
+                else None
+            )
+            if (
+                not require_fresh
+                and self._cache_records is not None
+                and cache_age is not None
+                and cache_age <= PROCESS_INVENTORY_CACHE_SECONDS
+            ):
+                return list(self._cache_records), {
+                    "complete": True,
+                    "fresh": False,
+                    "source": "recent_complete_cache",
+                    "cache_age_seconds": round(cache_age, 6),
+                    "scan_latency_seconds": self._cache_latency_seconds,
+                    "timeout_seconds": timeout,
+                    "error": None,
+                }
+            if self._thread is None or not self._thread.is_alive():
+                self._start_locked()
+            thread = self._thread
+        assert thread is not None
+        thread.join(timeout=timeout)
+        completed = time.monotonic()
+        with self._lock:
+            fresh_complete = (
+                self._cache_records is not None
+                and self._cache_started_monotonic is not None
+                and self._cache_completed_monotonic is not None
+                and self._cache_started_monotonic >= requested
+                and self._cache_completed_monotonic <= completed
+            )
+            if fresh_complete:
+                return list(self._cache_records or []), {
+                    "complete": True,
+                    "fresh": True,
+                    "source": "fresh_scan",
+                    "cache_age_seconds": round(completed - self._cache_completed_monotonic, 6),
+                    "scan_latency_seconds": self._cache_latency_seconds,
+                    "timeout_seconds": timeout,
+                    "error": self._last_error,
+                }
+            cache_age = (
+                completed - self._cache_completed_monotonic
+                if self._cache_completed_monotonic is not None
+                else None
+            )
+            return list(self._cache_records or []), {
+                "complete": False,
+                "fresh": False,
+                "source": "stale_cache_after_timeout" if self._cache_records is not None else "unavailable_after_timeout",
+                "cache_age_seconds": round(cache_age, 6) if cache_age is not None else None,
+                "scan_latency_seconds": self._cache_latency_seconds,
+                "timeout_seconds": timeout,
+                "error": self._last_error or "process inventory deadline exceeded",
+            }
+
+
 def _agent_owner_label() -> str:
     configured = os.environ.get("COMSOL_MCP_OWNER")
     if configured:
@@ -173,6 +285,11 @@ class SolverOwnership:
             raise ValueError("COMSOL runtime/lease path must contain ASCII characters only")
         self.lease_path = self.runtime_dir / "solver_owner.json"
         self._process_provider = process_provider or _system_processes
+        self._process_inventory = (
+            None
+            if process_provider is not None
+            else _BoundedProcessInventory(self._process_provider)
+        )
         self.pid = int(pid if pid is not None else os.getpid())
         self.parent_pid = int(parent_pid if parent_pid is not None else os.getppid())
         if create_time is None:
@@ -186,6 +303,40 @@ class SolverOwnership:
         self.command_line = list(command_line)
         self.command_signature = _command_signature(self.command_line)
         self.owner = owner or _agent_owner_label()
+
+    def _collect_processes(
+        self,
+        *,
+        require_fresh: bool,
+        timeout: float,
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        if self._process_inventory is not None:
+            return self._process_inventory.collect(
+                require_fresh=require_fresh,
+                timeout=timeout,
+            )
+        started = time.monotonic()
+        try:
+            records = list(self._process_provider())
+        except Exception as exc:
+            return [], {
+                "complete": False,
+                "fresh": False,
+                "source": "custom_provider_error",
+                "cache_age_seconds": None,
+                "scan_latency_seconds": round(time.monotonic() - started, 6),
+                "timeout_seconds": timeout,
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+        return records, {
+            "complete": True,
+            "fresh": True,
+            "source": "custom_provider",
+            "cache_age_seconds": 0.0,
+            "scan_latency_seconds": round(time.monotonic() - started, 6),
+            "timeout_seconds": timeout,
+            "error": None,
+        }
 
     def _read_lease_with_bytes(
         self,
@@ -299,13 +450,33 @@ class SolverOwnership:
                 )
         return evidence
 
-    def status(self, session_state: Optional[dict[str, Any]] = None) -> dict[str, Any]:
-        processes = self._process_provider()
+    def status(
+        self,
+        session_state: Optional[dict[str, Any]] = None,
+        *,
+        require_fresh_inventory: bool = False,
+        inventory_timeout: float | None = None,
+    ) -> dict[str, Any]:
+        timeout = (
+            PROCESS_INVENTORY_MUTATION_TIMEOUT_SECONDS
+            if require_fresh_inventory
+            else PROCESS_INVENTORY_STATUS_TIMEOUT_SECONDS
+        ) if inventory_timeout is None else float(inventory_timeout)
+        processes, inventory = self._collect_processes(
+            require_fresh=require_fresh_inventory,
+            timeout=timeout,
+        )
         lease, lease_error = self._read_lease()
         if lease_error:
             lease_status = {"state": "uncertain", "reason": lease_error}
         elif lease is None:
             lease_status = {"state": "absent", "reason": "no solver lease exists"}
+        elif not inventory["complete"]:
+            lease_status = {
+                "state": "uncertain",
+                "reason": "process inventory is incomplete; lease identity cannot be validated safely",
+                "lease": lease,
+            }
         else:
             lease_status = {**self._lease_state(lease, processes), "lease": lease}
         external = self._external_solver_processes(processes, lease)
@@ -323,8 +494,9 @@ class SolverOwnership:
             "session": session_state or {"connected": False, "starting": False},
             "lease_path": str(self.lease_path),
             "lease": lease_status,
+            "process_inventory": inventory,
             "external_solver_processes": external,
-            "collision": bool(external) or (
+            "collision": not inventory["complete"] or bool(external) or (
                 lease_status["state"] in {"active", "uncertain"}
                 and not lease_status.get("owned_by_current_process", False)
             ),
@@ -340,10 +512,15 @@ class SolverOwnership:
         requested_version: Optional[str] = None,
         minimum_free_gb: float = 2.0,
     ) -> dict[str, Any]:
-        ownership = self.status(session_state=session_state)
+        ownership = self.status(
+            session_state=session_state,
+            require_fresh_inventory=True,
+        )
         blockers = []
         warnings = []
         lease = ownership["lease"]
+        if not ownership["process_inventory"]["complete"]:
+            blockers.append("host process inventory is incomplete")
         if ownership["external_solver_processes"]:
             blockers.append("external COMSOL/MPh solver process detected")
         if lease["state"] == "stale":
@@ -418,7 +595,7 @@ class SolverOwnership:
         }
 
     def acquire(self, *, mode: str, model_path: Optional[str] = None) -> dict[str, Any]:
-        status = self.status()
+        status = self.status(require_fresh_inventory=True)
         lease_status = status["lease"]
         if lease_status["state"] == "active" and lease_status.get("owned_by_current_process"):
             return {"success": True, "acquired": False, "reused": True, "lease": lease_status["lease"]}
@@ -485,7 +662,12 @@ class SolverOwnership:
         if model_path is not None:
             lease["model_path"] = model_path
         if refresh_server_processes:
-            processes = self._process_provider()
+            processes, inventory = self._collect_processes(
+                require_fresh=True,
+                timeout=PROCESS_INVENTORY_MUTATION_TIMEOUT_SECONDS,
+            )
+            if not inventory["complete"]:
+                return False
             parent_map = {
                 int(item["pid"]): int(item.get("parent_pid") or 0)
                 for item in processes
@@ -562,7 +744,18 @@ class SolverOwnership:
             return {"success": True, "recovered": False, "message": "No solver lease exists."}
         if original is None:
             return {"success": True, "recovered": False, "message": "No solver lease exists."}
-        state = self._lease_state(lease, self._process_provider())
+        processes, inventory = self._collect_processes(
+            require_fresh=True,
+            timeout=PROCESS_INVENTORY_MUTATION_TIMEOUT_SECONDS,
+        )
+        if not inventory["complete"]:
+            return {
+                "success": False,
+                "recovered": False,
+                "error": "Process inventory is incomplete; refusing stale lease recovery.",
+                "process_inventory": inventory,
+            }
+        state = self._lease_state(lease, processes)
         if state["state"] != "stale":
             return {
                 "success": False,
