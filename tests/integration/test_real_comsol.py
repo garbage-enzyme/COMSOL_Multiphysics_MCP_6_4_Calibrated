@@ -18,6 +18,8 @@ PROBES = (
     "tests/integration/h3d_real_preflight.py",
     "tests/integration/m1_periodic_mesh_audit.py",
     "tests/integration/m2_derived_geometry.py",
+    "tests/integration/m3_incidence_config.py",
+    "tests/integration/m4_resource_admission.py",
     "tests/integration/h3e_real_point_audit.py",
     "tests/integration/h3f_live_acceptance.py",
 )

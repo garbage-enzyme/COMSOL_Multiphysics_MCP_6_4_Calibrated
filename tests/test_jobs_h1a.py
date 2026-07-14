@@ -1049,3 +1049,192 @@ def test_production_worker_bridges_smoke_broad_and_lease_with_mocks(jobs_root, m
     assert store.read_state(job_id)["progress"] == {"completed": 2, "total": 2}
     assert lease_events[0] == "acquired"
     assert lease_events[-1] == "released"
+
+
+def test_production_worker_resource_gate_interrupts_before_second_solve(jobs_root, monkeypatch):
+    import src.jobs.resource_admission as resource_module
+    import src.tools.ownership as ownership_module
+    import src.tools.workflow as workflow_module
+
+    store = JobStore(jobs_root)
+    identity = process_identity(os.getpid())
+    spec = {
+        "schema_version": "1",
+        "spec_fingerprint": "mock-resource-config",
+        "job_type": "staged_sweep",
+        "source_model_path": str(jobs_root / "source.mph"),
+        "source_model_sha256": "0" * 64,
+        "parameter_name": "wl",
+        "parameter_values": [1.0, 2.0],
+        "expressions": ["A"],
+        "smoke_points": 1,
+        "resource_policy": {
+            "available_memory_refuse_fraction": 0.2,
+        },
+    }
+    Path(spec["source_model_path"]).write_bytes(b"mock")
+    job_id = store.create(
+        spec,
+        {
+            "schema_version": "1",
+            "status": "submitted",
+            "attempt": 1,
+            "worker_pid": identity["pid"],
+            "worker_process_create_time": identity["process_create_time"],
+            "worker_command_signature": identity["command_signature"],
+            "progress": {"completed": 0, "total": 2},
+        },
+    )
+    lease_events = []
+
+    class FakeOwnership:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def preflight(self, **_kwargs):
+            return {"ready": True}
+
+        def acquire(self, **_kwargs):
+            lease_events.append("acquired")
+            return {"success": True}
+
+        def heartbeat(self, **_kwargs):
+            return True
+
+        def release(self):
+            lease_events.append("released")
+            return {"success": True}
+
+    class FakeClient:
+        port = None
+
+        def __init__(self, **_kwargs):
+            pass
+
+        def load(self, _path):
+            return types.SimpleNamespace()
+
+        def clear(self):
+            pass
+
+    solved = []
+
+    def fake_runner(_model, parameter, values, _expressions, **kwargs):
+        output = Path(kwargs["csv_path"])
+        existing = []
+        if output.exists() and output.stat().st_size:
+            with output.open(newline="", encoding="utf-8") as handle:
+                existing = list(csv.DictReader(handle))
+        completed = {row["parameter_value"] for row in existing if row["status"] == "ok"}
+        processed = 0
+        stop_reason = None
+        for value in values:
+            token = str(value)
+            if token in completed:
+                continue
+            if kwargs.get("max_new_points") is not None and processed >= kwargs["max_new_points"]:
+                stop_reason = "max_new_points"
+                break
+            point_id = workflow_module._sweep_point_id(parameter, token)
+            action = kwargs["before_point_hook"](
+                {
+                    "stage": "pre_solve",
+                    "point_id": point_id,
+                    "config_id": "mock-resource-config",
+                }
+            )["action"]
+            if action == "checkpoint_no_start":
+                stop_reason = "before_point_checkpoint_no_start"
+                break
+            row = {
+                "config_id": "mock-resource-config",
+                "parameter_value": token,
+                "status": "ok",
+            }
+            with output.open("a", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(handle, fieldnames=list(row))
+                if handle.tell() == 0:
+                    writer.writeheader()
+                writer.writerow(row)
+                handle.flush()
+                os.fsync(handle.fileno())
+            solved.append(token)
+            kwargs["on_durable_row"](row)
+            kwargs["after_durable_row_hook"](
+                {
+                    "stage": "post_solve",
+                    "point_id": point_id,
+                    "config_id": "mock-resource-config",
+                }
+            )
+            processed += 1
+        return {
+            "success": True,
+            "stop_reason": stop_reason,
+            "stopped_early": stop_reason is not None,
+        }
+
+    samples = [
+        ("pre_solve", 90),
+        ("post_solve", 90),
+        ("pre_solve", 10),
+    ]
+
+    def fake_collect(*, stage, **_kwargs):
+        expected_stage, available = samples.pop(0)
+        assert stage == expected_stage
+        return {
+            "stage": stage,
+            "observed_at_epoch": 1000.0 + len(solved),
+            "available_memory_bytes": available,
+            "total_memory_bytes": 100,
+        }
+
+    monkeypatch.setattr(ownership_module, "SolverOwnership", FakeOwnership)
+    monkeypatch.setattr(workflow_module, "run_staged_parametric_sweep", fake_runner)
+    monkeypatch.setattr(resource_module, "collect_resource_telemetry", fake_collect)
+    monkeypatch.setattr("src.tools.mesh.get_mesh_info", lambda _model: {"success": False})
+    monkeypatch.setitem(sys.modules, "mph", types.SimpleNamespace(Client=FakeClient))
+
+    code = production_worker.run(str(jobs_root), job_id)
+
+    state = store.read_state(job_id)
+    assert code == 0
+    assert solved == ["1.0"]
+    assert state["status"] == "interrupted"
+    assert state["last_error"]["type"] == "ResourceAdmissionStop"
+    assert state["resource_gate"]["stop_reason"] == "before_point_checkpoint_no_start"
+    assert state["progress"] == {"completed": 1, "total": 2}
+    assert len(store.read_resource_journal(job_id)) == 6
+    assert lease_events == ["acquired", "released"]
+
+    store.update_state(
+        job_id,
+        "starting",
+        patch={
+            "attempt": 2,
+            "worker_pid": identity["pid"],
+            "worker_process_create_time": identity["process_create_time"],
+            "worker_command_signature": identity["command_signature"],
+            "last_error": None,
+        },
+        event="resume_requested",
+    )
+    samples.extend(
+        [
+            ("pre_solve", 90),
+            ("post_solve", 90),
+        ]
+    )
+
+    resumed_code = production_worker.run(str(jobs_root), job_id)
+
+    resumed_state = store.read_state(job_id)
+    assert resumed_code == 0
+    assert solved == ["1.0", "2.0"]
+    assert resumed_state["status"] == "completed"
+    assert resumed_state["progress"] == {"completed": 2, "total": 2}
+    journal = store.read_resource_journal(job_id)
+    assert len(journal) == 10
+    assert [entry["attempt"] for entry in journal] == [1] * 6 + [2] * 4
+    assert lease_events == ["acquired", "released", "acquired", "released"]

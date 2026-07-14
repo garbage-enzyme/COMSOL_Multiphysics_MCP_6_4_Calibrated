@@ -176,14 +176,21 @@ def normalize_telemetry_sample(sample: object) -> dict[str, Any]:
     """Normalize one bounded telemetry observation without inventing missing metrics."""
     raw = _mapping(sample, "telemetry_sample")
     if raw.get("schema_name") == "comsol_mcp.resource_telemetry_sample":
-        expected_fields = {
+        normalized_fields = {
             "schema_name",
             "schema_version",
             "values",
             "unavailable",
             "sample_sha256",
         }
-        if set(raw) != expected_fields:
+        collector_fields = {
+            "process_id",
+            "metric_sources",
+            "runtime_volume",
+            "collection_errors",
+            "solver_started",
+        }
+        if not normalized_fields <= set(raw) or set(raw) - normalized_fields - collector_fields:
             raise ValueError("normalized telemetry_sample has invalid fields")
         if raw.get("schema_version") != "1.0.0":
             raise ValueError("unsupported normalized telemetry_sample schema_version")

@@ -285,6 +285,33 @@ def test_host_telemetry_collector_is_bounded_solver_free_and_stage_typed(tmp_pat
     assert len(result["collection_errors"]) <= 10
 
 
+def test_collector_output_feeds_admission_without_dropping_sample_integrity(tmp_path):
+    collected = collect_resource_telemetry(
+        stage="pre_solve",
+        runtime_path=tmp_path,
+        elapsed_wall_seconds=1.0,
+    )
+
+    decision = evaluate_resource_admission(
+        {"runtime_free_space_refuse_bytes": 1},
+        collected,
+    )
+
+    assert decision["decision"] == "allow"
+    assert decision["telemetry"]["sample_sha256"] == collected["sample_sha256"]
+
+
+def test_collector_envelope_still_rejects_unknown_metadata(tmp_path):
+    collected = collect_resource_telemetry(
+        stage="pre_solve",
+        runtime_path=tmp_path,
+    )
+    collected["unbounded_extra"] = "refuse"
+
+    with pytest.raises(ValueError, match="invalid fields"):
+        evaluate_resource_admission(None, collected)
+
+
 def test_commit_collection_failure_is_explicit_and_not_fabricated(tmp_path, monkeypatch):
     from src.jobs import resource_admission
 

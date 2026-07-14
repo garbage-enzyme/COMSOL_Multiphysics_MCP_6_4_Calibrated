@@ -28,6 +28,41 @@ def _valid_row_count(csv_path: Path, config_id: str) -> int:
         )
 
 
+def _resource_gate_stop(store: JobStore, job_id: str, result: dict[str, Any]) -> bool:
+    """Checkpoint a bounded resource stop as resumable, not as a solve failure."""
+    reason = result.get("stop_reason")
+    if reason not in {
+        "before_point_await_confirmation",
+        "before_point_checkpoint_no_start",
+        "after_durable_row_await_confirmation",
+        "after_durable_row_checkpoint_no_start",
+    }:
+        return False
+    entries = store.read_resource_journal(job_id)
+    latest = entries[-1] if entries else None
+    gate = {
+        "stop_reason": reason,
+        "latest_entry_sha256": latest.get("entry_sha256") if latest else None,
+        "point_id": latest.get("point_id") if latest else None,
+        "stage": latest.get("stage") if latest else None,
+        "decision": latest.get("decision") if latest else None,
+    }
+    store.update_state(
+        job_id,
+        "interrupted",
+        patch={
+            "resource_gate": gate,
+            "last_error": {
+                "type": "ResourceAdmissionStop",
+                "message": f"Resource admission stopped the worker: {reason}",
+            },
+        },
+        event="resource_gate_stopped",
+        event_data=gate,
+    )
+    return True
+
+
 def _runner_kwargs(spec: dict[str, Any], directory: Path) -> dict[str, Any]:
     return {
         "parameter_unit": spec.get("parameter_unit"),
@@ -72,6 +107,7 @@ def _record_native_cancel(store: JobStore, job_id: str, attempt: int, result: di
 
 
 def _run(root: str, job_id: str) -> int:
+    worker_started_monotonic = time.monotonic()
     process_tree_contained = contain_current_process_tree()
     store = JobStore(Path(root))
     directory = store.job_dir(job_id)
@@ -131,12 +167,71 @@ def _run(root: str, job_id: str) -> int:
         lease_acquired = True
 
         import mph
-        from src.tools.workflow import run_staged_parametric_sweep
+        from src.jobs.resource_admission import ResourceStageAdapter, collect_resource_telemetry
+        from src.tools.mesh import get_mesh_info
+        from src.tools.workflow import _sweep_point_id, run_staged_parametric_sweep
 
         client_kwargs = {"cores": spec.get("cores"), "version": spec.get("version")}
         client = mph.Client(**{key: value for key, value in client_kwargs.items() if value is not None})
         ownership.heartbeat(model_path=spec["source_model_path"], refresh_server_processes=True)
         model = client.load(spec["source_model_path"])
+
+        resource_adapter = None
+        if spec.get("resource_policy") is not None:
+            results_path = directory / "results.csv"
+
+            def completed_point_ids() -> set[str]:
+                if not results_path.is_file() or not results_path.stat().st_size:
+                    return set()
+                with results_path.open(newline="", encoding="utf-8-sig") as handle:
+                    return {
+                        _sweep_point_id(spec["parameter_name"], str(row["parameter_value"]))
+                        for row in csv.DictReader(handle)
+                        if row.get("status") == "ok"
+                        and row.get("config_id") == spec["spec_fingerprint"]
+                        and row.get("parameter_value")
+                    }
+
+            def telemetry_provider(stage: str, _point_id: str) -> dict[str, Any]:
+                mesh_elements = None
+                try:
+                    mesh_result = get_mesh_info(model)
+                    if mesh_result.get("success"):
+                        mesh_elements = mesh_result.get("mesh", {}).get("num_elements")
+                except Exception:
+                    # The collector and admission result preserve unavailable
+                    # mesh evidence; never invent a count or weaken a policy.
+                    pass
+                durable_result_epoch = (
+                    results_path.stat().st_mtime if results_path.is_file() else None
+                )
+                return collect_resource_telemetry(
+                    stage=stage,
+                    runtime_path=store.root,
+                    process_id=os.getpid(),
+                    mesh_elements=mesh_elements,
+                    elapsed_wall_seconds=time.monotonic() - worker_started_monotonic,
+                    durable_result_epoch=durable_result_epoch,
+                )
+
+            resource_adapter = ResourceStageAdapter(
+                store=store,
+                job_id=job_id,
+                attempt=attempt,
+                policy=spec["resource_policy"],
+                telemetry_provider=telemetry_provider,
+                completed_point_ids_provider=completed_point_ids,
+            )
+
+        def resource_hook(context: dict[str, Any]) -> dict[str, Any]:
+            if resource_adapter is None:
+                raise RuntimeError("resource hook is disabled")
+            if context.get("config_id") != spec["spec_fingerprint"]:
+                raise ValueError("resource hook received a mismatched configuration")
+            return resource_adapter.evaluate(
+                stage=str(context["stage"]),
+                point_id=str(context["point_id"]),
+            )
 
         progress = {
             "completed": _valid_row_count(directory / "results.csv", spec["spec_fingerprint"]),
@@ -191,6 +286,8 @@ def _run(root: str, job_id: str) -> int:
             max_new_points=smoke_needed,
             should_stop=should_stop,
             on_durable_row=on_row,
+            before_point_hook=resource_hook if resource_adapter is not None else None,
+            after_durable_row_hook=resource_hook if resource_adapter is not None else None,
         )
         if should_stop() or smoke.get("stop_reason") == "control_request":
             store.record_cooperative_cancel_observed(
@@ -198,6 +295,8 @@ def _run(root: str, job_id: str) -> int:
                 attempt=attempt,
                 message="Stopped between points",
             )
+            return 0
+        if _resource_gate_stop(store, job_id, smoke):
             return 0
         if not smoke.get("success") or _valid_row_count(
             directory / "results.csv", spec["spec_fingerprint"]
@@ -217,6 +316,8 @@ def _run(root: str, job_id: str) -> int:
                 **common,
                 should_stop=should_stop,
                 on_durable_row=on_row,
+                before_point_hook=resource_hook if resource_adapter is not None else None,
+                after_durable_row_hook=resource_hook if resource_adapter is not None else None,
             )
             if should_stop() or broad.get("stop_reason") == "control_request":
                 store.record_cooperative_cancel_observed(
@@ -224,6 +325,8 @@ def _run(root: str, job_id: str) -> int:
                     attempt=attempt,
                     message="Stopped between points",
                 )
+                return 0
+            if _resource_gate_stop(store, job_id, broad):
                 return 0
             if not broad.get("success"):
                 raise RuntimeError(f"Broad sweep failed: {broad}")

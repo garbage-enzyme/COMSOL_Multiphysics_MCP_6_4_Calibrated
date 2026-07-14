@@ -47,6 +47,11 @@ def _bounded_text(value: object, *, name: str, limit: int) -> str:
 
 
 def _real_scalar(value: Any, *, expression: str) -> float:
+    if getattr(value, "shape", None) == () and hasattr(value, "item"):
+        # MPh 1.3.1 returns a zero-dimensional NumPy array for a scalar
+        # clientapi evaluation.  It advertises ``shape`` but ``len(value)`` is
+        # invalid, so unwrap it before handling one-element vectors.
+        value = value.item()
     while isinstance(value, (list, tuple)) or (
         hasattr(value, "shape") and hasattr(value, "__len__")
     ):

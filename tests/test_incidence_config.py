@@ -257,6 +257,19 @@ def test_angle_evaluation_requires_one_finite_real_scalar(value, match):
         preview(model, record)
 
 
+def test_angle_evaluation_accepts_mph_zero_dimensional_numpy_scalar():
+    import numpy as np
+
+    model, record = fixture(
+        values={"theta": np.asarray(20.0), "phi": np.asarray(0.0)}
+    )
+
+    result = preview(model, record)
+
+    assert result["evaluated_angles"]["alpha1_inc"]["evaluated_value"] == 20.0
+    assert result["evaluated_angles"]["alpha2_inc"]["evaluated_value"] == 0.0
+
+
 def test_dirty_or_untracked_models_are_rejected_by_public_tool(monkeypatch):
     model, record = fixture()
     server = FastMCP("incidence-preview-test")
