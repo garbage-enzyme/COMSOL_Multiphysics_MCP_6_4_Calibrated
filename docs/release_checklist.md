@@ -29,7 +29,10 @@ Before a release:
 6. Build once more from the clean release commit and compare discovery output.
 7. Install non-editably in the target MCP environment.
 8. Restart the MCP host; source and profile changes are not hot-reloaded.
-9. Call `capabilities` and treat its installed profile counts as authoritative.
+9. Call `capabilities`; require `deployment_identity.source_classification` to
+   be `installed_site_package`, compare its profile/schema/catalog hashes with
+   the clean release receipt, and then treat installed profile counts as
+   authoritative. A matching version string alone is insufficient.
 
 Hosted CI never runs licensed COMSOL integration tests. They remain explicit,
 serial, and unavailable by default.

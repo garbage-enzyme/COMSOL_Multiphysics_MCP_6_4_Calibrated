@@ -97,6 +97,8 @@ def test_installed_probe_checks_every_profile_without_solver_or_heavy_imports():
 
     assert "for profile in PROFILE_NAMES" in probe
     assert "snapshot_tool_schemas" in probe
+    assert "deployment_identity" in probe
+    assert "installed_site_package" in probe
     assert "installed-package discovery must not start COMSOL" in probe
     assert {"chromadb", "sentence_transformers", "torch"} <= set(
         re.findall(r'"([a-z_]+)"', probe)

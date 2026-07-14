@@ -32,16 +32,20 @@ def main() -> int:
     import src
     from src.server import create_server
     from src.tools.catalog import PROFILE_NAMES, snapshot_tool_schemas
+    from src.tools.capabilities import get_capabilities
+    from src.tools.profiles import resolve_profile
 
     expected_names = _load_json(args.snapshot_dir / "profile_tool_names.json")
     expected_schemas = _load_json(args.snapshot_dir / "full_tool_schemas.json")
     actual_counts: dict[str, int] = {}
+    deployment_identities: list[dict] = []
 
     if tuple(expected_names) != PROFILE_NAMES:
         raise AssertionError("installed profile order differs from the frozen snapshot")
 
     for profile in PROFILE_NAMES:
-        server = create_server(f"installed-{profile}", profile=profile)
+        selection = resolve_profile(profile)
+        server = create_server(f"installed-{profile}", profile=selection.name)
         schemas = asyncio.run(snapshot_tool_schemas(server))
         names = expected_names[profile]
         if sorted(schemas) != names:
@@ -50,6 +54,17 @@ def main() -> int:
         if schemas != expected_profile_schemas:
             raise AssertionError(f"installed {profile} schemas differ from snapshot")
         actual_counts[profile] = len(schemas)
+        deployment_identities.append(
+            get_capabilities(selection)["deployment_identity"]
+        )
+
+    if not all(identity == deployment_identities[0] for identity in deployment_identities[1:]):
+        raise AssertionError("installed profiles disagree on deployment identity")
+    deployment_identity = deployment_identities[0]
+    if deployment_identity["source_classification"] != "installed_site_package":
+        raise AssertionError("installed deployment identity reports source-tree shadowing")
+    if deployment_identity.get("contains_local_path") is not False:
+        raise AssertionError("installed deployment identity leaks a local path")
 
     imported_heavy = sorted(HEAVY_SEMANTIC_MODULES.intersection(sys.modules))
     if imported_heavy:
@@ -65,6 +80,7 @@ def main() -> int:
             "requirements": package_requirements,
         },
         "profile_counts": actual_counts,
+        "deployment_identity": deployment_identity,
         "schema_snapshot_match": True,
         "comsol_client_started": False,
         "heavy_semantic_modules_imported": imported_heavy,

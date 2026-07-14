@@ -30,7 +30,7 @@
 | `experimental` | 64 | 显式选择的通用创建、异步、属性逃生口和项目辅助工具。 |
 | `full` | 115 | 宽兼容/发现界面，包含可选语义工具。 |
 
-调用 `capabilities` 可在不启动 COMSOL 的情况下获知当前 profile、精确注册工具、目标版本、禁用工具组和重启要求。
+调用 `capabilities` 可在不启动 COMSOL 的情况下获知当前 profile、精确注册工具、目标版本、禁用工具组和重启要求。其中有界的 `deployment_identity` 会报告当前代码来自源码树还是已安装包，并给出冻结的 profile/schema 与 catalog 哈希；因此即使版本号相同，也能在重启后识别旧安装或源码遮蔽，且不暴露本机路径。
 
 ## 推荐工作流
 

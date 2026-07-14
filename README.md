@@ -30,7 +30,7 @@ Set `COMSOL_MCP_PROFILE` before starting the server. A profile is fixed for the 
 | `experimental` | 64 | Explicit opt-in generic creation, async, property escape hatches, and project helpers. |
 | `full` | 115 | Broad compatibility/discovery surface, including optional semantic tools. |
 
-Call `capabilities` to discover the active profile, exact registered tools, target versions, disabled groups, and restart requirements without starting COMSOL.
+Call `capabilities` to discover the active profile, exact registered tools, target versions, disabled groups, and restart requirements without starting COMSOL. Its bounded `deployment_identity` reports source-tree versus installed-package loading plus frozen profile/schema and catalog hashes, so a host restart can detect same-version stale installs or source shadowing without exposing local paths.
 
 ## Recommended workflows
 

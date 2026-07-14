@@ -1,5 +1,12 @@
 """Machine-readable capability reporting for a static MCP profile."""
 
+from __future__ import annotations
+
+from importlib.metadata import PackageNotFoundError, version
+import hashlib
+import json
+from pathlib import Path
+
 from mcp.server.fastmcp import FastMCP
 
 from src.evidence.contracts import (
@@ -27,6 +34,62 @@ from .profiles import (
 )
 from .session import session_manager
 from src.knowledge.semantic_runtime import semantic_capability_status
+
+
+_DEPLOYMENT_MANIFEST = Path(__file__).resolve().parents[1] / "deployment_manifest.json"
+
+
+def _catalog_contract_sha256() -> str:
+    payload = {
+        "profiles": {
+            profile: sorted(tool_names_for_profile(profile))
+            for profile in PROFILE_NAMES
+        },
+        "tools": {
+            name: TOOL_METADATA[name].to_dict()
+            for name in sorted(TOOL_METADATA)
+        },
+    }
+    canonical = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def _deployment_identity() -> dict:
+    try:
+        manifest = json.loads(_DEPLOYMENT_MANIFEST.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return {
+            "schema_name": "comsol_mcp.deployment_identity",
+            "schema_version": "1.0.0",
+            "available": False,
+            "source_classification": "unknown",
+            "error": f"{type(exc).__name__}: deployment manifest unavailable",
+        }
+    try:
+        package_version = version("comsol-mcp")
+    except PackageNotFoundError:
+        from src import __version__
+
+        package_version = __version__
+    module_path = str(Path(__file__).resolve()).replace("\\", "/").casefold()
+    source_classification = (
+        "installed_site_package"
+        if "/site-packages/" in module_path
+        else "source_tree"
+    )
+    return {
+        **manifest,
+        "available": True,
+        "package_version": package_version,
+        "source_classification": source_classification,
+        "catalog_contract_sha256": _catalog_contract_sha256(),
+        "contains_local_path": False,
+    }
 
 
 def _profile_inventory(selection: ProfileSelection) -> dict:
@@ -73,6 +136,7 @@ def get_capabilities(selection: ProfileSelection | None = None) -> dict:
             "comsol": "6.4+",
             "mph": "1.3.1 standalone clientapi",
         },
+        "deployment_identity": _deployment_identity(),
         "session": {
             "connected": bool(status.get("connected")),
             "starting": bool(status.get("starting")),
