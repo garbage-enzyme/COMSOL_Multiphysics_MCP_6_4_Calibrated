@@ -59,6 +59,11 @@ def _envelope(*, polarization_state: str = "measured"):
                 "wavelength.evaluated_parameter_m": {"state": "measured", "value": 4.37e-6, "unit": "m"},
                 "wavelength.solved_frequency_m": {"state": "measured", "value": 4.37e-6, "unit": "m"},
                 "polarization.target_to_transverse_ratio": polarization,
+                "polarization.reference_air_method_valid": (
+                    {"state": "measured", "value": True}
+                    if polarization_state == "measured"
+                    else {"state": polarization_state}
+                ),
                 "mesh.element_count": {"state": "measured", "value": 1200, "unit": "1"},
             },
             "limitations": [],
@@ -157,8 +162,110 @@ def test_label_only_or_unknown_required_evidence_cannot_pass_policy():
     assert label_only["overall"] == "missing"
     assert unknown["overall"] == "missing"
     assert label_only["rules"][0]["required_measurement_states"] == {
+        "polarization.reference_air_method_valid": "label_only",
         "polarization.target_to_transverse_ratio": "label_only"
     }
+
+
+def _with_evidence_records(envelope, records):
+    payload = deepcopy(envelope)
+    payload.pop("contract_sha256")
+    payload["evidence"].update(records)
+    return build_physical_evidence(payload)
+
+
+def _declared_flux_evidence(*, reflected=0.4, transmitted=1.2, eligible=True, convention=True):
+    incident = 2.0
+    r_value = reflected / incident
+    t_value = transmitted / incident
+    a_value = (incident - reflected - transmitted) / incident
+    return _with_evidence_records(
+        _envelope(),
+        {
+            "flux.incident_power_w": {"state": "measured", "value": incident, "unit": "W"},
+            "flux.reflected_power_w": {"state": "measured", "value": reflected, "unit": "W"},
+            "flux.transmitted_power_w": {"state": "measured", "value": transmitted, "unit": "W"},
+            "flux.R": {"state": "derived_from_declared_convention", "value": r_value, "unit": "1"},
+            "flux.T": {"state": "derived_from_declared_convention", "value": t_value, "unit": "1"},
+            "flux.A": {"state": "derived_from_declared_convention", "value": a_value, "unit": "1"},
+            "flux.closure_abs": {"state": "derived_from_declared_convention", "value": 0.0, "unit": "1"},
+            "flux.convention_complete": {
+                "state": "derived_from_declared_convention",
+                "value": convention,
+            },
+            "flux.physical_flux_closure_eligible": {
+                "state": "derived_from_declared_convention",
+                "value": eligible,
+            },
+        },
+    )
+
+
+def test_declared_flux_policy_requires_passive_bounds_and_exact_arithmetic():
+    policy = _policy(
+        "declared_flux_closure",
+        tolerances={"closure_abs": 1e-9, "margin": 0.0},
+    )
+
+    valid = evaluate_physical_evidence_policy(_declared_flux_evidence(), policy)
+    reversed_outgoing_sign = evaluate_physical_evidence_policy(
+        _declared_flux_evidence(reflected=-0.4),
+        policy,
+    )
+    absorption_above_one = evaluate_physical_evidence_policy(
+        _declared_flux_evidence(reflected=-0.4, transmitted=-0.2),
+        policy,
+    )
+
+    assert valid["overall"] == "pass"
+    assert reversed_outgoing_sign["overall"] == "fail"
+    assert absorption_above_one["overall"] == "fail"
+    assert reversed_outgoing_sign["rules"][0]["checks"]["passive_bounds"] is False
+
+
+def test_internal_normalization_cannot_substitute_for_physical_flux_closure():
+    policy = _policy(
+        "declared_flux_closure",
+        tolerances={"closure_abs": 1e-9, "margin": 0.0},
+    )
+
+    ineligible = evaluate_physical_evidence_policy(
+        _declared_flux_evidence(eligible=False),
+        policy,
+    )
+    missing_convention = evaluate_physical_evidence_policy(
+        _declared_flux_evidence(convention=False),
+        policy,
+    )
+
+    assert ineligible["overall"] == "fail"
+    assert missing_convention["overall"] == "fail"
+    assert ineligible["rules"][0]["checks"]["physical_flux_closure_eligible"] is False
+
+    derived_raw_payload = deepcopy(_declared_flux_evidence())
+    derived_raw_payload.pop("contract_sha256")
+    derived_raw_payload["evidence"]["flux.incident_power_w"]["state"] = "derived_from_declared_convention"
+    derived_raw = build_physical_evidence(derived_raw_payload)
+    result = evaluate_physical_evidence_policy(derived_raw, policy)
+    assert result["overall"] == "missing"
+    assert result["rules"][0]["required_measurement_states"]["flux.incident_power_w"] == (
+        "derived_from_declared_convention"
+    )
+
+
+def test_reference_air_ratio_requires_valid_reference_method_marker():
+    policy = _policy(
+        "reference_air_polarization_ratio",
+        tolerances={"minimum_ratio": 20.0},
+    )
+    valid = evaluate_physical_evidence_policy(_envelope(), policy)
+    invalid_method = _with_evidence_records(
+        _envelope(),
+        {"polarization.reference_air_method_valid": {"state": "measured", "value": False}},
+    )
+
+    assert valid["overall"] == "pass"
+    assert evaluate_physical_evidence_policy(invalid_method, policy)["overall"] == "fail"
 
 
 def test_all_five_portable_examples_are_strict_and_hashed():

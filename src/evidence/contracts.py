@@ -91,13 +91,26 @@ _RULE_SPECS = {
         "assumptions": {},
     },
     "declared_flux_closure": {
-        "required": ("flux.R", "flux.T", "flux.A", "flux.closure_abs"),
-        "tolerances": frozenset({"closure_abs"}),
-        "required_tolerances": frozenset({"closure_abs"}),
+        "required": (
+            "flux.incident_power_w",
+            "flux.reflected_power_w",
+            "flux.transmitted_power_w",
+            "flux.R",
+            "flux.T",
+            "flux.A",
+            "flux.closure_abs",
+            "flux.convention_complete",
+            "flux.physical_flux_closure_eligible",
+        ),
+        "tolerances": frozenset({"closure_abs", "margin"}),
+        "required_tolerances": frozenset({"closure_abs", "margin"}),
         "assumptions": {"sign_convention_declared": True, "plane_medium_declared": True},
     },
     "reference_air_polarization_ratio": {
-        "required": ("polarization.target_to_transverse_ratio",),
+        "required": (
+            "polarization.reference_air_method_valid",
+            "polarization.target_to_transverse_ratio",
+        ),
         "tolerances": frozenset({"minimum_ratio"}),
         "required_tolerances": frozenset({"minimum_ratio"}),
         "assumptions": {},
@@ -615,7 +628,20 @@ def _rule_outcome(rule: Mapping[str, Any], evidence: Mapping[str, Any]) -> dict[
         record = evidence.get(name)
         state = record.get("state") if isinstance(record, dict) else "unknown"
         states[name] = state
-        if state != "measured":
+        declared_flux_derived = {
+            "flux.R",
+            "flux.T",
+            "flux.A",
+            "flux.closure_abs",
+            "flux.convention_complete",
+            "flux.physical_flux_closure_eligible",
+        }
+        accepted_states = (
+            {"measured", "derived_from_declared_convention"}
+            if rule["rule_type"] == "declared_flux_closure" and name in declared_flux_derived
+            else {"measured"}
+        )
+        if state not in accepted_states:
             unavailable.append({"measurement": name, "state": state})
         else:
             values[name] = record.get("value")
@@ -649,16 +675,72 @@ def _rule_outcome(rule: Mapping[str, Any], evidence: Mapping[str, Any]) -> dict[
             passed = all(checks)
             detail = {"measured": {"absolute_m": absolute, "relative": relative}, "threshold": tolerances}
         elif rule_type == "declared_flux_closure":
+            incident = float(values["flux.incident_power_w"])
+            reflected = float(values["flux.reflected_power_w"])
+            transmitted = float(values["flux.transmitted_power_w"])
+            r_value = float(values["flux.R"])
+            t_value = float(values["flux.T"])
+            a_value = float(values["flux.A"])
             closure = float(values["flux.closure_abs"])
-            passed = closure <= float(tolerances["closure_abs"])
+            margin = float(tolerances["margin"])
+            convention_complete = values["flux.convention_complete"] is True
+            closure_eligible = values["flux.physical_flux_closure_eligible"] is True
+            finite = all(
+                math.isfinite(value)
+                for value in (incident, reflected, transmitted, r_value, t_value, a_value, closure)
+            )
+            passive_bounds = all(
+                -margin <= value <= 1.0 + margin
+                for value in (r_value, t_value, a_value)
+            )
+            arithmetic_consistent = (
+                incident > 0.0
+                and math.isclose(reflected / incident, r_value, rel_tol=1e-12, abs_tol=1e-15)
+                and math.isclose(transmitted / incident, t_value, rel_tol=1e-12, abs_tol=1e-15)
+                and math.isclose(
+                    (incident - reflected - transmitted) / incident,
+                    a_value,
+                    rel_tol=1e-12,
+                    abs_tol=1e-15,
+                )
+            )
+            passed = (
+                finite
+                and convention_complete
+                and closure_eligible
+                and passive_bounds
+                and arithmetic_consistent
+                and closure <= float(tolerances["closure_abs"])
+            )
             detail = {
-                "measured": {name: values[f"flux.{name}"] for name in ("R", "T", "A")} | {"closure_abs": closure},
+                "measured": {
+                    "incident_power_w": incident,
+                    "reflected_power_w": reflected,
+                    "transmitted_power_w": transmitted,
+                    "R": r_value,
+                    "T": t_value,
+                    "A": a_value,
+                    "closure_abs": closure,
+                    "convention_complete": convention_complete,
+                    "physical_flux_closure_eligible": closure_eligible,
+                },
                 "threshold": tolerances,
+                "checks": {
+                    "finite": finite,
+                    "passive_bounds": passive_bounds,
+                    "arithmetic_consistent": arithmetic_consistent,
+                    "convention_complete": convention_complete,
+                    "physical_flux_closure_eligible": closure_eligible,
+                },
             }
         elif rule_type == "reference_air_polarization_ratio":
             ratio = float(values["polarization.target_to_transverse_ratio"])
-            passed = ratio >= float(tolerances["minimum_ratio"])
-            detail = {"measured": ratio, "threshold": tolerances["minimum_ratio"]}
+            method_valid = values["polarization.reference_air_method_valid"] is True
+            passed = math.isfinite(ratio) and method_valid and ratio >= float(tolerances["minimum_ratio"])
+            detail = {
+                "measured": {"target_to_transverse_ratio": ratio, "reference_air_method_valid": method_valid},
+                "threshold": tolerances["minimum_ratio"],
+            }
         elif rule_type == "mesh_evidence_presence":
             count = int(values["mesh.element_count"])
             minimum = int(tolerances.get("minimum_elements", 1))
@@ -706,7 +788,7 @@ def example_validation_policies() -> dict[str, dict[str, Any]]:
         "declared_flux_closure": {
             "rule_type": "declared_flux_closure",
             "required_measurements": list(_RULE_SPECS["declared_flux_closure"]["required"]),
-            "tolerances": {"closure_abs": 0.0},
+            "tolerances": {"closure_abs": 0.0, "margin": 0.0},
             "assumptions": {"sign_convention_declared": True, "plane_medium_declared": True},
         },
         "reference_air_polarization_ratio": {

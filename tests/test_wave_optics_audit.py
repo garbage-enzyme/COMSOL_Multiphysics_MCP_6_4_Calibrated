@@ -375,6 +375,7 @@ def test_strict_policy_uses_physical_evidence_and_cannot_promote_structure_total
     assert result["assessment"]["project_verdict"] == "missing"
     rule = result["assessment"]["policy_evaluation"]["rules"][0]
     assert rule["required_measurement_states"] == {
+        "polarization.reference_air_method_valid": "unknown",
         "polarization.target_to_transverse_ratio": "unknown"
     }
 
