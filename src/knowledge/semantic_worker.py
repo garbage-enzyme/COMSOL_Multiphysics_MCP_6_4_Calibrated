@@ -167,6 +167,11 @@ class _RequestHandler(socketserver.StreamRequestHandler):
 class _WorkerServer(socketserver.ThreadingTCPServer):
     allow_reuse_address = False
     daemon_threads = True
+    # Keep the kernel accept backlog larger than the application queue so a
+    # bounded burst receives the structured ``busy`` response instead of an
+    # OS-level connection reset. This does not change execution concurrency or
+    # the semaphore-enforced public queue depth.
+    request_queue_size = max(16, PUBLIC_LIMITS["maximum_queue_depth"] * 8)
 
     def __init__(self, address: tuple[str, int], state: _WorkerState):
         self.state = state
