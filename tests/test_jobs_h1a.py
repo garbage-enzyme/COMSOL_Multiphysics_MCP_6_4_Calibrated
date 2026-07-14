@@ -122,13 +122,11 @@ def test_cooperative_cancel_is_truthful_and_resumable(jobs_root):
     wait_for(manager, result["job_id"], {"running"})
 
     requested = manager.cancel(result["job_id"])
-    terminal = wait_for(manager, result["job_id"], {"cancelled", "interrupted"})
+    terminal = wait_for(manager, result["job_id"], {"cancelled"})
 
     assert requested["status"] == "cancel_requested"
-    if terminal["status"] == "cancelled":
-        assert terminal["cancel"]["verification"]["absent"] is True
-    else:
-        assert terminal["last_error"]["type"] == "CooperativeCancel"
+    assert terminal["cancel"]["verification"]["absent"] is True
+    assert terminal["cancel"]["cooperative_observation"]["target_attempt"] == 1
     manager.resume(result["job_id"])
     wait_for(manager, result["job_id"], {"completed"})
 
@@ -313,6 +311,29 @@ def test_stale_attempt_cannot_record_cooperative_cancel_observation(jobs_root):
     assert "cooperative_observation" not in store.read_state(job_id)["cancel"]
 
 
+def test_status_preserves_matching_cancel_when_worker_identity_is_stale(jobs_root):
+    manager = JobManager(jobs_root, allow_test_jobs=True, reconcile_on_start=False)
+    identity = process_identity(os.getpid())
+    job_id = manager.store.create(
+        {"schema_version": "2", "job_type": "test"},
+        {
+            "schema_version": "2",
+            "status": "running",
+            "attempt": 1,
+            "worker_pid": identity["pid"],
+            "worker_process_create_time": identity["process_create_time"] - 1000,
+            "worker_command_signature": identity["command_signature"],
+        },
+    )
+    manager.store.request_cancel(job_id, requester_identity=identity)
+
+    observed = manager.status(job_id)
+
+    assert observed["status"] == "cancel_requested"
+    assert observed["worker_process_state"] == "stale"
+    assert manager.store.read_state(job_id)["status"] == "cancel_requested"
+
+
 def test_native_cancel_evidence_merges_without_overwriting_coordinator(jobs_root):
     store = JobStore(jobs_root)
     identity = process_identity(os.getpid())
@@ -460,10 +481,8 @@ def test_thirty_cancel_status_polling_races_have_no_false_terminal_state(jobs_ro
         result = manager.submit({"job_type": "test_sequence", "delays": [0.01, 0.25]})
         wait_for(manager, result["job_id"], {"running"})
         manager.cancel(result["job_id"])
-        final = wait_for(manager, result["job_id"], {"cancelled", "interrupted"}, timeout=5)
-        assert final["status"] != "completed"
-        if final["status"] == "cancelled":
-            assert final["cancel"]["verification"]["absent"] is True
+        final = wait_for(manager, result["job_id"], {"cancelled"}, timeout=5)
+        assert final["cancel"]["verification"]["absent"] is True
 
 
 def test_completed_state_is_immutable(jobs_root):

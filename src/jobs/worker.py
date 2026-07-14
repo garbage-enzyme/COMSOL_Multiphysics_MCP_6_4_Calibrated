@@ -88,11 +88,10 @@ def _run(root: str, job_id: str) -> int:
     state = store.read_state(job_id)
     attempt = int(state.get("attempt", 1))
     if state["status"] == "cancel_requested" or cancel_request_targets_attempt(store.read_control(job_id), attempt):
-        store.update_state(
+        store.record_cooperative_cancel_observed(
             job_id,
-            "interrupted",
-            patch={"last_error": {"type": "CooperativeCancel", "message": "Stopped before startup"}},
-            event="cooperative_cancel_observed",
+            attempt=attempt,
+            message="Stopped before startup",
         )
         return 0
     if state["status"] == "submitted":
@@ -166,11 +165,10 @@ def _run(root: str, job_id: str) -> int:
             ownership.heartbeat(model_path=spec["source_model_path"], refresh_server_processes=True)
 
         if should_stop():
-            store.update_state(
+            store.record_cooperative_cancel_observed(
                 job_id,
-                "interrupted",
-                patch={"last_error": {"type": "CooperativeCancel", "message": "Stopped before smoke"}},
-                event="cooperative_cancel_observed",
+                attempt=attempt,
+                message="Stopped before smoke",
             )
             return 0
         store.update_state(job_id, "smoke_running", event="smoke_started")
@@ -188,11 +186,10 @@ def _run(root: str, job_id: str) -> int:
             on_durable_row=on_row,
         )
         if should_stop() or smoke.get("stop_reason") == "control_request":
-            store.update_state(
+            store.record_cooperative_cancel_observed(
                 job_id,
-                "interrupted",
-                patch={"last_error": {"type": "CooperativeCancel", "message": "Stopped between points"}},
-                event="cooperative_cancel_observed",
+                attempt=attempt,
+                message="Stopped between points",
             )
             return 0
         if not smoke.get("success") or _valid_row_count(
@@ -215,11 +212,10 @@ def _run(root: str, job_id: str) -> int:
                 on_durable_row=on_row,
             )
             if should_stop() or broad.get("stop_reason") == "control_request":
-                store.update_state(
+                store.record_cooperative_cancel_observed(
                     job_id,
-                    "interrupted",
-                    patch={"last_error": {"type": "CooperativeCancel", "message": "Stopped between points"}},
-                    event="cooperative_cancel_observed",
+                    attempt=attempt,
+                    message="Stopped between points",
                 )
                 return 0
             if not broad.get("success"):
@@ -237,11 +233,10 @@ def _run(root: str, job_id: str) -> int:
     except Exception as exc:
         current = store.read_state(job_id)["status"]
         if current == "cancel_requested":
-            store.update_state(
+            store.record_cooperative_cancel_observed(
                 job_id,
-                "interrupted",
-                patch={"last_error": {"type": "CooperativeCancel", "message": "Stopped between blocking operations"}},
-                event="cooperative_cancel_observed",
+                attempt=attempt,
+                message="Stopped between blocking operations",
             )
         elif current == "cancelling":
             # The detached coordinator owns the terminal decision once it has
@@ -282,12 +277,12 @@ def run(root: str, job_id: str) -> int:
         return _run(root, job_id)
     except ValueError:
         store = JobStore(Path(root))
-        if store.read_state(job_id).get("status") == "cancel_requested":
-            store.update_state(
+        state = store.read_state(job_id)
+        if state.get("status") == "cancel_requested":
+            store.record_cooperative_cancel_observed(
                 job_id,
-                "interrupted",
-                patch={"last_error": {"type": "CooperativeCancel", "message": "Stopped between state transitions"}},
-                event="cooperative_cancel_observed",
+                attempt=int(state.get("attempt", 1)),
+                message="Stopped between state transitions",
             )
             return 0
         raise

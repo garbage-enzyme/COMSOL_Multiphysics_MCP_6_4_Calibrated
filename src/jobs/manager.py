@@ -21,6 +21,7 @@ from .store import (
     TRANSITIONS,
     JobStore,
     atomic_write_json,
+    cancel_request_targets_attempt,
     process_identity,
     process_identity_state,
 )
@@ -463,13 +464,22 @@ class JobManager:
                 process_state, reason = process_identity_state(identity)
                 current = str(state["status"])
                 if process_state == "stale" and current != "cancelling":
-                    if "interrupted" not in TRANSITIONS[current]:
-                        raise RuntimeError(f"Cannot reconcile state {current} as interrupted")
-                    state["status"] = "interrupted"
-                    state["last_error"] = {"type": "WorkerInterrupted", "message": reason}
-                    state["updated_at_epoch"] = time.time()
-                    atomic_write_json(self.store.job_dir(job_id) / "state.json", state)
-                    self.store._append_event_unlocked(job_id, "worker_interrupted", {"reason": reason}, "interrupted")
+                    control = self.store.read_control(job_id)
+                    attempt = int(state.get("attempt", 1))
+                    if current == "cancel_requested" and cancel_request_targets_attempt(control, attempt):
+                        # A matching cancellation owns this attempt's terminal
+                        # outcome.  Preserve the nonterminal state so the
+                        # coordinator can prove process/port/lease cleanup.
+                        state["worker_process_state"] = process_state
+                        state["worker_process_reason"] = reason
+                    else:
+                        if "interrupted" not in TRANSITIONS[current]:
+                            raise RuntimeError(f"Cannot reconcile state {current} as interrupted")
+                        state["status"] = "interrupted"
+                        state["last_error"] = {"type": "WorkerInterrupted", "message": reason}
+                        state["updated_at_epoch"] = time.time()
+                        atomic_write_json(self.store.job_dir(job_id) / "state.json", state)
+                        self.store._append_event_unlocked(job_id, "worker_interrupted", {"reason": reason}, "interrupted")
                 else:
                     state["worker_process_state"] = process_state
                     state["worker_process_reason"] = reason

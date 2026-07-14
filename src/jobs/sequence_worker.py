@@ -8,23 +8,7 @@ import csv
 import sys
 import time
 
-from .store import JobStore, atomic_write_json, cancel_request_targets_attempt, process_identity
-
-
-def _cooperative_interrupt(store: JobStore, job_id: str, message: str) -> bool:
-    """Commit H1 interruption only while an H2 coordinator has not claimed it."""
-    with store.lock(job_id):
-        state = store.read_state(job_id)
-        if state.get("status") == "cancelling":
-            return False
-        if state.get("status") != "cancel_requested":
-            return False
-        state["status"] = "interrupted"
-        state["last_error"] = {"type": "CooperativeCancel", "message": message}
-        state["updated_at_epoch"] = time.time()
-        atomic_write_json(store.job_dir(job_id) / "state.json", state)
-        store._append_event_unlocked(job_id, "cooperative_cancel_observed", {}, "interrupted")
-        return True
+from .store import JobStore, cancel_request_targets_attempt, process_identity
 
 
 def _run(root: str, job_id: str) -> int:
@@ -42,14 +26,22 @@ def _run(root: str, job_id: str) -> int:
     attempt = int(initial_state.get("attempt", 1))
     current = initial_state["status"]
     if current == "cancel_requested" or cancel_request_targets_attempt(store.read_control(job_id), attempt):
-        _cooperative_interrupt(store, job_id, "Stopped before startup")
+        store.record_cooperative_cancel_observed(
+            job_id,
+            attempt=attempt,
+            message="Stopped before startup",
+        )
         return 0
     if current == "submitted":
         store.update_state(job_id, "starting", event="worker_started")
     elif current != "starting":
         raise ValueError(f"Sequence worker cannot start from {current}")
     if cancel_request_targets_attempt(store.read_control(job_id), attempt):
-        _cooperative_interrupt(store, job_id, "Stopped before smoke")
+        store.record_cooperative_cancel_observed(
+            job_id,
+            attempt=attempt,
+            message="Stopped before smoke",
+        )
         return 0
     store.update_state(job_id, "smoke_running", event="smoke_started")
     delays = spec["delays"]
@@ -86,7 +78,11 @@ def _run(root: str, job_id: str) -> int:
                 event="sequence_step",
                 event_data={"index": index},
             )
-            _cooperative_interrupt(store, job_id, "Stopped between points")
+            store.record_cooperative_cancel_observed(
+                job_id,
+                attempt=attempt,
+                message="Stopped between points",
+            )
             return 0
         next_status = None
         if index == 0:
@@ -109,8 +105,13 @@ def run(root: str, job_id: str) -> int:
         return _run(root, job_id)
     except ValueError:
         store = JobStore(Path(root))
-        if store.read_state(job_id).get("status") == "cancel_requested":
-            _cooperative_interrupt(store, job_id, "Stopped between state transitions")
+        state = store.read_state(job_id)
+        if state.get("status") == "cancel_requested":
+            store.record_cooperative_cancel_observed(
+                job_id,
+                attempt=int(state.get("attempt", 1)),
+                message="Stopped between state transitions",
+            )
             return 0
         raise
 
