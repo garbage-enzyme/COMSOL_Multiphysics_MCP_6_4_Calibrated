@@ -7,6 +7,29 @@ import threading
 import pytest
 
 
+@pytest.fixture()
+def permissive_session_ownership(monkeypatch):
+    """Keep session lifecycle tests independent of host-wide solver state."""
+    import src.tools.session as session_module
+
+    class PermissiveOwnership:
+        def preflight(self, **_kwargs):
+            return {"ready": True, "blockers": []}
+
+        def acquire(self, **_kwargs):
+            return {"success": True}
+
+        def heartbeat(self, **_kwargs):
+            return {"success": True}
+
+        def release(self):
+            return {"success": True, "released": True}
+
+    manager = session_module.SessionManager()
+    monkeypatch.setattr(manager, "_ownership", PermissiveOwnership())
+    return manager
+
+
 class TestVersioning:
     """Tests for version naming utilities."""
     
@@ -254,7 +277,7 @@ class TestSessionManager:
         assert client.calls == ["clear", "disconnect"]
         assert sm.client is None
 
-    def test_disconnect_cancels_background_start(self, monkeypatch):
+    def test_disconnect_cancels_background_start(self, monkeypatch, permissive_session_ownership):
         import src.tools.session as session_module
 
         sm = session_module.SessionManager()
@@ -295,7 +318,7 @@ class TestSessionManager:
         assert sm.get_status()["connected"] is False
         assert client.calls == ["clear", "disconnect"]
 
-    def test_concurrent_start_calls_create_exactly_one_client(self, monkeypatch):
+    def test_concurrent_start_calls_create_exactly_one_client(self, monkeypatch, permissive_session_ownership):
         import src.tools.session as session_module
 
         sm = session_module.SessionManager()
@@ -335,7 +358,7 @@ class TestSessionManager:
         assert sm.client is not None
         sm.reset()
 
-    def test_reset_discards_client_that_finishes_starting_late(self, monkeypatch):
+    def test_reset_discards_client_that_finishes_starting_late(self, monkeypatch, permissive_session_ownership):
         import src.tools.session as session_module
 
         sm = session_module.SessionManager()
@@ -409,7 +432,7 @@ class TestSessionManager:
 
         sm.disconnect()
 
-    def test_start_does_not_forward_unsupported_products(self, monkeypatch):
+    def test_start_does_not_forward_unsupported_products(self, monkeypatch, permissive_session_ownership):
         import src.tools.session as session_module
 
         captured = {}
@@ -438,7 +461,7 @@ class TestSessionManager:
         assert captured == {"cores": 2, "version": "6.4"}
         sm.disconnect()
 
-    def test_start_failure_requires_explicit_reset(self, monkeypatch):
+    def test_start_failure_requires_explicit_reset(self, monkeypatch, permissive_session_ownership):
         import src.tools.session as session_module
 
         sm = session_module.SessionManager()

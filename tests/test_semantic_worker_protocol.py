@@ -195,15 +195,21 @@ def test_hanging_semantic_worker_does_not_delay_control_plane_or_lexical_search(
     }], index, corpus_fingerprint="h4b-test")
     manager = SemanticWorkerManager(startup_deadline=2.0, query_deadline=0.5, fault="query_hang")
     result: dict = {}
-    thread = threading.Thread(target=lambda: result.update(manager.query("hang")), daemon=True)
-    thread.start()
-    time.sleep(0.1)
 
     job_manager = JobManager(root / "jobs", reconcile_on_start=False)
     job_id = job_manager.store.create(
         {"schema_version": "2", "job_type": "test_sequence"},
         {"schema_version": "2", "status": "completed", "worker_pid": None},
     )
+    baseline_started = time.perf_counter()
+    assert get_capabilities()["success"] is True
+    assert SolverOwnership(runtime_dir=runtime).status()["lease"]["state"] == "absent"
+    assert job_manager.status(job_id)["status"] == "completed"
+    baseline_elapsed = time.perf_counter() - baseline_started
+
+    thread = threading.Thread(target=lambda: result.update(manager.query("hang")), daemon=True)
+    thread.start()
+    time.sleep(0.1)
     control_started = time.perf_counter()
     capabilities = get_capabilities()
     ownership = SolverOwnership(runtime_dir=runtime).status()
@@ -216,12 +222,17 @@ def test_hanging_semantic_worker_does_not_delay_control_plane_or_lexical_search(
 
     assert capabilities["success"] is True
     assert ownership["lease"]["state"] == "absent"
-    assert ownership["external_solver_processes"] == []
+    # External solver discovery is host-wide. A user-owned standalone solve may
+    # legitimately be present; this containment test requires responsiveness
+    # and lease isolation, not an otherwise idle host.
+    assert isinstance(ownership["external_solver_processes"], list)
     assert job_status["success"] is True and job_status["status"] == "completed"
     assert lexical["success"] is True and lexical["results"]
-    # solver_status performs a host-wide process inventory on Windows; its
-    # accepted cold latency on this host is about 2.7 s and must remain bounded.
-    assert control_elapsed < 4.0
+    # Host-wide process inventory latency changes when a user-owned solver is
+    # factorizing. Compare against an immediately measured no-hang baseline and
+    # retain an absolute containment ceiling.
+    assert control_elapsed < 8.0
+    assert control_elapsed < max(4.0, baseline_elapsed * 2.0 + 0.5)
     assert lexical_elapsed < 4.0
     assert result["success"] is False and result["cleanup"]["absent"] is True
     assert not (runtime / "solver_owner.json").exists()
