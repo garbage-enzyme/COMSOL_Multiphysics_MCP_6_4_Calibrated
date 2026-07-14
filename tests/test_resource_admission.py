@@ -6,6 +6,7 @@ import pytest
 
 from src.jobs.manager import validate_staged_sweep_spec
 from src.jobs.resource_admission import (
+    collect_resource_telemetry,
     evaluate_resource_admission,
     normalize_resource_policy,
     normalize_telemetry_sample,
@@ -235,3 +236,50 @@ def test_invalid_staged_sweep_policy_fails_before_submit_or_solver(tmp_path):
                 },
             )
         )
+
+
+@pytest.mark.parametrize(
+    "stage",
+    ["pre_mesh", "post_mesh", "pre_solve", "post_solve", "recovery"],
+)
+def test_host_telemetry_collector_is_bounded_solver_free_and_stage_typed(tmp_path, stage):
+    result = collect_resource_telemetry(
+        stage=stage,
+        runtime_path=tmp_path,
+        mesh_elements=123,
+        dof=456,
+        elapsed_wall_seconds=7.5,
+        durable_result_epoch=1000.0,
+    )
+
+    assert result["values"]["stage"] == stage
+    assert result["values"]["mesh_elements"] == 123
+    assert result["values"]["dof"] == 456
+    assert result["values"]["runtime_free_bytes"] >= 0
+    assert result["values"]["worker_working_set_bytes"] > 0
+    assert 0 <= result["values"]["remaining_commit_bytes"] <= result["values"]["commit_limit_bytes"]
+    assert result["solver_started"] is False
+    assert result["runtime_volume"]["absolute_path_redacted"] is True
+    assert len(result["collection_errors"]) <= 10
+
+
+def test_commit_collection_failure_is_explicit_and_not_fabricated(tmp_path, monkeypatch):
+    from src.jobs import resource_admission
+
+    monkeypatch.setattr(
+        resource_admission,
+        "_windows_commit_bytes",
+        lambda: (_ for _ in ()).throw(OSError("unavailable")),
+    )
+    result = collect_resource_telemetry(stage="pre_solve", runtime_path=tmp_path)
+
+    assert "remaining_commit_bytes" in result["unavailable"]
+    assert "commit_limit_bytes" in result["unavailable"]
+    assert {item["code"] for item in result["collection_errors"]} >= {"commit_unavailable"}
+
+
+def test_telemetry_collector_rejects_missing_runtime_and_invalid_pid(tmp_path):
+    with pytest.raises(ValueError, match="existing directory"):
+        collect_resource_telemetry(stage="pre_solve", runtime_path=tmp_path / "missing")
+    with pytest.raises(ValueError, match="positive integer"):
+        collect_resource_telemetry(stage="pre_solve", runtime_path=tmp_path, process_id=0)

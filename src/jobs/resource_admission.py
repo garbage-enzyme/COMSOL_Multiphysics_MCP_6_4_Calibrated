@@ -5,7 +5,13 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
+from pathlib import Path
+import shutil
+import time
 from typing import Any, Mapping
+
+import psutil
 
 
 _FRACTION_RULES = (
@@ -191,6 +197,122 @@ def normalize_telemetry_sample(sample: object) -> dict[str, Any]:
     }
 
 
+def _windows_commit_bytes() -> tuple[int, int]:
+    if os.name != "nt":
+        raise OSError("Windows commit telemetry is unavailable on this platform")
+    import ctypes
+
+    class MemoryStatusEx(ctypes.Structure):
+        _fields_ = [
+            ("dwLength", ctypes.c_ulong),
+            ("dwMemoryLoad", ctypes.c_ulong),
+            ("ullTotalPhys", ctypes.c_ulonglong),
+            ("ullAvailPhys", ctypes.c_ulonglong),
+            ("ullTotalPageFile", ctypes.c_ulonglong),
+            ("ullAvailPageFile", ctypes.c_ulonglong),
+            ("ullTotalVirtual", ctypes.c_ulonglong),
+            ("ullAvailVirtual", ctypes.c_ulonglong),
+            ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+        ]
+
+    status = MemoryStatusEx()
+    status.dwLength = ctypes.sizeof(status)
+    if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+        raise OSError(ctypes.get_last_error(), "GlobalMemoryStatusEx failed")
+    return int(status.ullAvailPageFile), int(status.ullTotalPageFile)
+
+
+def collect_resource_telemetry(
+    *,
+    stage: str,
+    runtime_path: str | Path,
+    process_id: int | None = None,
+    mesh_elements: int | None = None,
+    dof: int | None = None,
+    elapsed_wall_seconds: float | None = None,
+    durable_result_epoch: float | None = None,
+) -> dict[str, Any]:
+    """Collect one bounded, solver-free host/process/runtime observation."""
+    root = Path(runtime_path).expanduser().resolve()
+    if not root.is_dir():
+        raise ValueError("runtime_path must name an existing directory")
+    pid = os.getpid() if process_id is None else process_id
+    if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0:
+        raise ValueError("process_id must be a positive integer")
+    values: dict[str, Any] = {
+        "stage": stage,
+        "observed_at_epoch": time.time(),
+    }
+    optional = {
+        "mesh_elements": mesh_elements,
+        "dof": dof,
+        "elapsed_wall_seconds": elapsed_wall_seconds,
+        "durable_result_epoch": durable_result_epoch,
+    }
+    values.update({name: value for name, value in optional.items() if value is not None})
+    errors: list[dict[str, str]] = []
+
+    try:
+        memory = psutil.virtual_memory()
+        values["available_memory_bytes"] = int(memory.available)
+        values["total_memory_bytes"] = int(memory.total)
+    except Exception as exc:
+        errors.append({"code": "physical_memory_unavailable", "error": str(exc)[:200]})
+    try:
+        remaining_commit, commit_limit = _windows_commit_bytes()
+        values["remaining_commit_bytes"] = remaining_commit
+        values["commit_limit_bytes"] = commit_limit
+    except Exception as exc:
+        errors.append({"code": "commit_unavailable", "error": str(exc)[:200]})
+    try:
+        values["runtime_free_bytes"] = int(shutil.disk_usage(root).free)
+    except Exception as exc:
+        errors.append({"code": "runtime_free_space_unavailable", "error": str(exc)[:200]})
+    try:
+        process = psutil.Process(pid)
+        memory_info = process.memory_info()
+        values["worker_working_set_bytes"] = int(memory_info.rss)
+        private = getattr(memory_info, "private", None)
+        if private is not None:
+            values["worker_private_bytes"] = int(private)
+        cpu = process.cpu_times()
+        values["cpu_progress_proxy"] = float(cpu.user + cpu.system)
+    except Exception as exc:
+        errors.append({"code": "process_metrics_unavailable", "error": str(exc)[:200]})
+    try:
+        disk = psutil.disk_io_counters()
+        if disk is not None:
+            values["disk_io_bytes"] = int(disk.read_bytes + disk.write_bytes)
+    except Exception as exc:
+        errors.append({"code": "disk_io_unavailable", "error": str(exc)[:200]})
+    try:
+        swap = psutil.swap_memory()
+        values["pagefile_io_bytes"] = int(swap.sin + swap.sout)
+    except Exception as exc:
+        errors.append({"code": "pagefile_io_unavailable", "error": str(exc)[:200]})
+
+    telemetry = normalize_telemetry_sample(values)
+    return {
+        **telemetry,
+        "process_id": pid,
+        "metric_sources": {
+            "physical_memory": "psutil.virtual_memory",
+            "remaining_commit": "GlobalMemoryStatusEx.ullAvailPageFile",
+            "commit_limit": "GlobalMemoryStatusEx.ullTotalPageFile",
+            "runtime_free_space": "shutil.disk_usage",
+            "process_memory_cpu": "psutil.Process",
+            "disk_io": "psutil.disk_io_counters",
+            "pagefile_io": "psutil.swap_memory",
+        },
+        "runtime_volume": {
+            "path_class": "ascii" if str(root).isascii() else "non_ascii",
+            "absolute_path_redacted": True,
+        },
+        "collection_errors": errors[:10],
+        "solver_started": False,
+    }
+
+
 def _rule(
     evidence: list[dict[str, Any]],
     *,
@@ -341,6 +463,7 @@ def evaluate_resource_admission(
 
 
 __all__ = [
+    "collect_resource_telemetry",
     "evaluate_resource_admission",
     "normalize_resource_policy",
     "normalize_telemetry_sample",
