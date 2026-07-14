@@ -139,12 +139,25 @@ def capture_owned_descendants(worker_identity: dict[str, Any]) -> dict[str, Any]
     try:
         worker = psutil.Process(int(worker_identity["pid"]))
         descendants = [process_identity(item.pid) for item in worker.children(recursive=True)]
-    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, OSError) as exc:
+    except psutil.NoSuchProcess as exc:
+        # The worker can exit between the exact identity check and children().
+        # Re-inspect so callers can distinguish proven exit from inspection
+        # uncertainty. Descendant cleanup still requires separate containment
+        # evidence; an empty list alone is not proof.
+        after = inspect_identity(worker_identity)
+        return {
+            "worker": after,
+            "descendants": [],
+            "capture_complete": False,
+            "reason": f"worker exited during descendant capture: {exc}",
+        }
+    except (psutil.AccessDenied, psutil.ZombieProcess, OSError) as exc:
         return {
             "worker": {**verdict, "state": "uncertain", "reason": f"cannot inspect descendants: {exc}"},
             "descendants": [],
+            "capture_complete": False,
         }
-    return {"worker": verdict, "descendants": descendants}
+    return {"worker": verdict, "descendants": descendants, "capture_complete": True}
 
 
 def terminate_exact(identity: dict[str, Any], *, force: bool = False) -> dict[str, Any]:

@@ -372,9 +372,19 @@ class JobManager:
                     capture = cancel.get("descendant_capture")
                     capture_proved = (
                         isinstance(capture, dict)
-                        and isinstance(capture.get("worker"), dict)
-                        and capture["worker"].get("state") == "active"
                         and isinstance(cancel.get("descendants"), list)
+                        and (
+                            (
+                                isinstance(capture.get("worker"), dict)
+                                and capture["worker"].get("state") == "active"
+                                and capture.get("capture_method", "live_enumeration") == "live_enumeration"
+                            )
+                            or (
+                                capture.get("capture_method") == "contained_worker_exit"
+                                and capture.get("process_tree_contained") is True
+                                and state.get("process_tree_contained") is True
+                            )
+                        )
                     )
 
                     if (

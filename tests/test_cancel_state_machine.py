@@ -82,6 +82,12 @@ class FakeProcesses:
         return {
             "worker": verdict,
             "descendants": list(self.descendants) if verdict["state"] == "active" else [],
+            "capture_complete": verdict["state"] == "active",
+            "reason": (
+                None
+                if verdict["state"] == "active"
+                else "worker exited during descendant capture"
+            ),
         }
 
     def terminate(self, identity: dict[str, Any], *, force: bool = False) -> dict[str, Any]:
@@ -117,7 +123,12 @@ def jobs_root():
         shutil.rmtree(root, ignore_errors=True)
 
 
-def _prepare_cancel(store: JobStore, processes: FakeProcesses) -> tuple[str, str]:
+def _prepare_cancel(
+    store: JobStore,
+    processes: FakeProcesses,
+    *,
+    process_tree_contained: bool = True,
+) -> tuple[str, str]:
     worker = processes.worker
     job_id = store.create(
         {"schema_version": "2", "job_type": "test"},
@@ -128,6 +139,7 @@ def _prepare_cancel(store: JobStore, processes: FakeProcesses) -> tuple[str, str
             "worker_pid": worker["pid"],
             "worker_process_create_time": worker["process_create_time"],
             "worker_command_signature": worker["command_signature"],
+            "process_tree_contained": process_tree_contained,
         },
     )
     request = store.request_cancel(job_id, requester_identity=process_identity(os.getpid()))
@@ -218,6 +230,26 @@ def test_pid_reuse_is_never_terminated_and_can_be_verified_absent(jobs_root, mon
     assert state["status"] == "cancelled"
     assert processes.actions == []
     assert state["cancel"]["verification"]["verdicts"][0]["reason"] == "worker PID was reused"
+    assert state["cancel"]["descendant_capture"]["capture_method"] == "contained_worker_exit"
+
+
+def test_worker_exit_before_descendant_capture_blocks_without_containment(jobs_root, monkeypatch):
+    clock = FakeClock()
+    processes = FakeProcesses(clock, initial_worker_state="stale")
+    store = JobStore(jobs_root)
+    job_id, request_id = _prepare_cancel(
+        store,
+        processes,
+        process_tree_contained=False,
+    )
+    _install_fakes(monkeypatch, clock, processes)
+
+    assert cancel_worker.run(str(jobs_root), job_id, request_id, 1.0, 2.0) == 0
+    state = store.read_state(job_id)
+
+    assert state["status"] == "cancelling"
+    assert state["cancel"]["phase"] == "blocked"
+    assert state["cancel"]["blocker"] == "worker exited during descendant capture"
 
 
 def test_cleanup_uncertainty_stays_nonterminal_with_durable_blocker(jobs_root, monkeypatch):

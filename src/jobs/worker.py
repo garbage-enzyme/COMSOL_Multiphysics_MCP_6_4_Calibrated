@@ -72,7 +72,7 @@ def _record_native_cancel(store: JobStore, job_id: str, attempt: int, result: di
 
 
 def _run(root: str, job_id: str) -> int:
-    contain_current_process_tree()
+    process_tree_contained = contain_current_process_tree()
     store = JobStore(Path(root))
     directory = store.job_dir(job_id)
     spec = store.read_spec(job_id)
@@ -84,6 +84,13 @@ def _run(root: str, job_id: str) -> int:
         if time.monotonic() >= deadline:
             raise RuntimeError("Control plane did not durably record the worker identity")
         time.sleep(0.01)
+
+    store.update_state(
+        job_id,
+        patch={"process_tree_contained": bool(process_tree_contained)},
+        event="worker_containment_recorded",
+        event_data={"process_tree_contained": bool(process_tree_contained)},
+    )
 
     state = store.read_state(job_id)
     attempt = int(state.get("attempt", 1))

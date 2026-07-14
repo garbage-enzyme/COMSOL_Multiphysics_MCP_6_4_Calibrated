@@ -314,6 +314,21 @@ def run(
         if initial_capture["worker"]["state"] == "uncertain":
             _record_blocker(store, job_id, request_id, initial_capture["worker"]["reason"])
             return 0
+        process_tree_contained = bool(
+            store.read_state(job_id).get("process_tree_contained")
+        )
+        capture_complete = bool(initial_capture.get("capture_complete", True))
+        if not capture_complete and not process_tree_contained:
+            _record_blocker(
+                store,
+                job_id,
+                request_id,
+                str(
+                    initial_capture.get("reason")
+                    or "worker exited before descendants were captured and no process-tree containment is proved"
+                ),
+            )
+            return 0
         initial_descendants = initial_capture["descendants"]
         if not _checkpoint(
             store,
@@ -326,6 +341,12 @@ def run(
                 "descendant_capture": {
                     **initial_capture,
                     "captured_at_epoch": time.time(),
+                    "capture_method": (
+                        "live_enumeration"
+                        if capture_complete
+                        else "contained_worker_exit"
+                    ),
+                    "process_tree_contained": process_tree_contained,
                 },
             },
         ):

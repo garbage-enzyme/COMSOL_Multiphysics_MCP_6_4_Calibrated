@@ -8,10 +8,12 @@ import csv
 import sys
 import time
 
+from .process_control import contain_current_process_tree
 from .store import JobStore, cancel_request_targets_attempt, process_identity
 
 
 def _run(root: str, job_id: str) -> int:
+    process_tree_contained = contain_current_process_tree()
     store = JobStore(Path(root))
     spec = store.read_spec(job_id)
     if spec.get("job_type") != "test_sequence":
@@ -22,6 +24,12 @@ def _run(root: str, job_id: str) -> int:
         if time.monotonic() >= deadline:
             raise RuntimeError("Control plane did not durably record the worker identity")
         time.sleep(0.01)
+    store.update_state(
+        job_id,
+        patch={"process_tree_contained": bool(process_tree_contained)},
+        event="worker_containment_recorded",
+        event_data={"process_tree_contained": bool(process_tree_contained)},
+    )
     initial_state = store.read_state(job_id)
     attempt = int(initial_state.get("attempt", 1))
     current = initial_state["status"]
