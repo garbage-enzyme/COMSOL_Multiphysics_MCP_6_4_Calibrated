@@ -10,6 +10,7 @@ import pytest
 
 from src.jobs.manager import validate_staged_sweep_spec
 from src.jobs.resource_admission import (
+    ResourceStageAdapter,
     build_resource_admission_entries,
     build_resource_calibration_report,
     build_resource_warning_continuation_entry,
@@ -552,4 +553,110 @@ def test_job_store_rejects_wrong_attempt_before_appending(ascii_jobs_root):
 
     with pytest.raises(ValueError, match="latest journal attempt"):
         store.append_resource_journal(job_id, stale)
+    assert store.read_resource_journal(job_id) == []
+
+
+def test_stage_adapter_drives_fake_runner_through_all_bounded_actions(ascii_jobs_root):
+    store = JobStore(ascii_jobs_root / "jobs")
+    job_id = store.create({}, {"attempt": 1, "status": "running"}, job_id="job-adapter")
+    completed = set()
+    available = {"wl:4.25": 30, "wl:4.30": 20, "wl:4.35": 12}
+    provider_calls = []
+
+    def telemetry_provider(stage, point_id):
+        provider_calls.append((stage, point_id))
+        return sample(stage=stage, available_memory_bytes=available[point_id])
+
+    adapter = ResourceStageAdapter(
+        store=store,
+        job_id=job_id,
+        attempt=1,
+        policy=POLICY,
+        telemetry_provider=telemetry_provider,
+        completed_point_ids_provider=lambda: completed,
+    )
+
+    first = adapter.evaluate(stage="pre_solve", point_id="wl:4.25")
+    assert first["action"] == "start_point"
+    completed.add("wl:4.25")
+    post = adapter.evaluate(stage="post_solve", point_id="wl:4.25")
+    duplicate = adapter.evaluate(stage="pre_solve", point_id="wl:4.25")
+
+    warning = adapter.evaluate(stage="pre_solve", point_id="wl:4.30")
+    confirmed = adapter.confirm_warning(
+        point_id="wl:4.30",
+        confirmation_id="operator-confirm-030",
+    )
+    completed.add("wl:4.30")
+
+    refused = adapter.evaluate(stage="pre_solve", point_id="wl:4.35")
+    available["wl:4.35"] = 30
+    recovered = adapter.evaluate(stage="recovery", point_id="wl:4.35")
+
+    assert post["action"] == "skip_completed"
+    assert duplicate == {
+        "stage": "pre_solve",
+        "point_id": "wl:4.25",
+        "action": "skip_completed",
+        "start_authorized": False,
+        "journal_entries_appended": 0,
+    }
+    assert warning["action"] == "await_confirmation"
+    assert confirmed["action"] == "start_point"
+    assert refused["action"] == "checkpoint_no_start"
+    assert recovered["action"] == "start_point"
+    assert ("pre_solve", "wl:4.25") in provider_calls
+    assert provider_calls.count(("pre_solve", "wl:4.25")) == 1
+    assert len(store.read_resource_journal(job_id)) == 11
+
+
+def test_stage_adapter_starts_new_attempt_at_zero_and_rejects_stale_adapter(ascii_jobs_root):
+    store = JobStore(ascii_jobs_root / "jobs")
+    job_id = store.create({}, {"attempt": 1, "status": "running"}, job_id="job-adapter")
+    values = {"available": 12}
+
+    def provider(stage, _point_id):
+        return sample(stage=stage, available_memory_bytes=values["available"])
+
+    first = ResourceStageAdapter(
+        store=store,
+        job_id=job_id,
+        attempt=1,
+        policy=POLICY,
+        telemetry_provider=provider,
+        completed_point_ids_provider=lambda: (),
+    )
+    assert first.evaluate(stage="pre_solve", point_id="wl:4.25")["action"] == "checkpoint_no_start"
+    store.update_state(job_id, patch={"attempt": 2})
+    values["available"] = 30
+    resumed = ResourceStageAdapter(
+        store=store,
+        job_id=job_id,
+        attempt=2,
+        policy=POLICY,
+        telemetry_provider=provider,
+        completed_point_ids_provider=lambda: (),
+    )
+    result = resumed.evaluate(stage="recovery", point_id="wl:4.25")
+
+    assert result["action"] == "start_point"
+    assert result["next_attempt_sequence"] == 2
+    with pytest.raises(ValueError, match="attempt is stale"):
+        first.evaluate(stage="recovery", point_id="wl:4.25")
+
+
+def test_stage_adapter_rejects_provider_stage_mismatch_without_appending(ascii_jobs_root):
+    store = JobStore(ascii_jobs_root / "jobs")
+    job_id = store.create({}, {"attempt": 1, "status": "running"}, job_id="job-adapter")
+    adapter = ResourceStageAdapter(
+        store=store,
+        job_id=job_id,
+        attempt=1,
+        policy=POLICY,
+        telemetry_provider=lambda _stage, _point_id: sample(stage="post_solve"),
+        completed_point_ids_provider=lambda: (),
+    )
+
+    with pytest.raises(ValueError, match="mismatched stage"):
+        adapter.evaluate(stage="pre_solve", point_id="wl:4.25")
     assert store.read_resource_journal(job_id) == []

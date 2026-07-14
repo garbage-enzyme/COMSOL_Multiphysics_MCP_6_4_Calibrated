@@ -10,7 +10,7 @@ from pathlib import Path
 import re
 import shutil
 import time
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 import psutil
 
@@ -944,8 +944,132 @@ def replay_resource_journal(
     }
 
 
+class ResourceStageAdapter:
+    """Narrow in-process callback boundary between staged points and the journal."""
+
+    def __init__(
+        self,
+        *,
+        store: Any,
+        job_id: str,
+        attempt: int,
+        policy: object | None,
+        telemetry_provider: Callable[[str, str], object],
+        completed_point_ids_provider: Callable[[], object],
+    ) -> None:
+        if not callable(telemetry_provider):
+            raise ValueError("telemetry_provider must be callable")
+        if not callable(completed_point_ids_provider):
+            raise ValueError("completed_point_ids_provider must be callable")
+        self.store = store
+        self.job_id = job_id
+        self.attempt = _attempt(attempt)
+        self.policy = normalize_resource_policy(policy)
+        self.telemetry_provider = telemetry_provider
+        self.completed_point_ids_provider = completed_point_ids_provider
+
+    def _completed(self) -> tuple[str, ...]:
+        values = self.completed_point_ids_provider()
+        if not isinstance(values, (list, tuple, set, frozenset)):
+            raise ValueError("completed_point_ids_provider must return a collection")
+        return tuple(sorted({_identifier(item, "completed_point_id") for item in values}))
+
+    def _next_sequence(self, entries: list[dict[str, Any]]) -> int:
+        if not entries:
+            return 0
+        latest_attempt = max(int(item.get("attempt", 0)) for item in entries)
+        if latest_attempt > self.attempt:
+            raise ValueError("resource adapter attempt is stale")
+        if latest_attempt < self.attempt:
+            return 0
+        return replay_resource_journal(entries, attempt=self.attempt)["next_attempt_sequence"]
+
+    def evaluate(self, *, stage: str, point_id: str) -> dict[str, Any]:
+        """Persist one stage sample/decision and return a bounded worker action."""
+        if stage not in _STAGES:
+            raise ValueError("resource stage is invalid")
+        point_id = _identifier(point_id, "point_id")
+        completed = self._completed()
+        if stage == "pre_solve" and point_id in completed:
+            return {
+                "stage": stage,
+                "point_id": point_id,
+                "action": "skip_completed",
+                "start_authorized": False,
+                "journal_entries_appended": 0,
+            }
+        current = self.store.read_resource_journal(self.job_id)
+        sequence = self._next_sequence(current)
+        sample = normalize_telemetry_sample(self.telemetry_provider(stage, point_id))
+        if sample["values"]["stage"] != stage:
+            raise ValueError("telemetry_provider returned a mismatched stage")
+        new_entries = build_resource_admission_entries(
+            attempt=self.attempt,
+            point_id=point_id,
+            attempt_sequence=sequence,
+            policy=self.policy,
+            sample=sample,
+        )
+        self.store.append_resource_journal(self.job_id, new_entries)
+        combined = current + new_entries
+        replay = replay_resource_journal(
+            combined,
+            attempt=self.attempt,
+            completed_point_ids=completed,
+        )
+        point = replay["points"][point_id]
+        return {
+            "stage": stage,
+            "point_id": point_id,
+            "action": point["action"],
+            "start_authorized": point["start_authorized"],
+            "journal_entries_appended": len(new_entries),
+            "latest_entry_sha256": point["latest_entry_sha256"],
+            "next_attempt_sequence": replay["next_attempt_sequence"],
+        }
+
+    def confirm_warning(self, *, point_id: str, confirmation_id: str) -> dict[str, Any]:
+        """Persist a caller confirmation only for the exact latest warning decision."""
+        point_id = _identifier(point_id, "point_id")
+        current = self.store.read_resource_journal(self.job_id)
+        completed = self._completed()
+        replay = replay_resource_journal(
+            current,
+            attempt=self.attempt,
+            completed_point_ids=completed,
+        )
+        point = replay["points"].get(point_id)
+        if point is None or point["action"] != "await_confirmation":
+            raise ValueError("latest point state does not await warning confirmation")
+        warning_hash = point["latest_entry_sha256"]
+        warning = next(
+            (item for item in reversed(current) if item.get("entry_sha256") == warning_hash),
+            None,
+        )
+        continuation = build_resource_warning_continuation_entry(
+            warning_admission=warning,
+            attempt_sequence=replay["next_attempt_sequence"],
+            confirmation_id=confirmation_id,
+        )
+        self.store.append_resource_journal(self.job_id, [continuation])
+        final = replay_resource_journal(
+            current + [continuation],
+            attempt=self.attempt,
+            completed_point_ids=completed,
+        )["points"][point_id]
+        return {
+            "stage": final["stage"],
+            "point_id": point_id,
+            "action": final["action"],
+            "start_authorized": final["start_authorized"],
+            "journal_entries_appended": 1,
+            "latest_entry_sha256": final["latest_entry_sha256"],
+        }
+
+
 __all__ = [
     "RESOURCE_JOURNAL_MAX_ENTRIES",
+    "ResourceStageAdapter",
     "build_resource_admission_entries",
     "build_resource_calibration_report",
     "build_resource_warning_continuation_entry",
