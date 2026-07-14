@@ -4356,6 +4356,78 @@
     "title": "visual_review_request_createArguments",
     "type": "object"
   },
+  "wave_optics_incidence_preview": {
+    "properties": {
+      "alpha1_inc": {
+        "title": "Alpha1 Inc",
+        "type": "string"
+      },
+      "alpha1_unit": {
+        "default": "deg",
+        "enum": [
+          "deg",
+          "rad"
+        ],
+        "title": "Alpha1 Unit",
+        "type": "string"
+      },
+      "alpha2_inc": {
+        "title": "Alpha2 Inc",
+        "type": "string"
+      },
+      "alpha2_unit": {
+        "default": "deg",
+        "enum": [
+          "deg",
+          "rad"
+        ],
+        "title": "Alpha2 Unit",
+        "type": "string"
+      },
+      "component_tag": {
+        "default": "comp1",
+        "title": "Component Tag",
+        "type": "string"
+      },
+      "derived_model_id": {
+        "title": "Derived Model Id",
+        "type": "string"
+      },
+      "model_name": {
+        "title": "Model Name",
+        "type": "string"
+      },
+      "physical_polarization_target": {
+        "title": "Physical Polarization Target",
+        "type": "string"
+      },
+      "physics_tag": {
+        "default": "ewfd",
+        "title": "Physics Tag",
+        "type": "string"
+      },
+      "polarization": {
+        "enum": [
+          "S",
+          "P",
+          "rhcp",
+          "lhcp"
+        ],
+        "title": "Polarization",
+        "type": "string"
+      }
+    },
+    "required": [
+      "derived_model_id",
+      "model_name",
+      "alpha1_inc",
+      "alpha2_inc",
+      "polarization",
+      "physical_polarization_target"
+    ],
+    "title": "wave_optics_incidence_previewArguments",
+    "type": "object"
+  },
   "wave_optics_material_expression_preview": {
     "properties": {
       "fixed_angular_frequency": {

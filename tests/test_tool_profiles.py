@@ -49,8 +49,9 @@ def test_environment_profile_is_normalized(monkeypatch):
     assert selection.default_used is False
 
     server = create_server("environment-wave-profile-test")
-    assert len(_tool_names(server)) == 58
+    assert len(_tool_names(server)) == 59
     assert "wave_optics_material_expression_preview" in _tool_names(server)
+    assert "wave_optics_incidence_preview" in _tool_names(server)
     assert {
         "visual_review_capability_normalize", "visual_review_request_create",
         "visual_review_receipt_create", "visual_review_dual_evaluate",
@@ -82,12 +83,13 @@ def test_profile_registration_has_no_cross_server_leakage():
     experimental = create_server("isolated-experimental", profile="experimental")
 
     assert len(_tool_names(core)) == 38
-    assert len(_tool_names(full)) == 115
+    assert len(_tool_names(full)) == 116
     assert len(_tool_names(semantic)) == 41
     assert len(_tool_names(experimental)) == 64
     assert _tool_names(core) != _tool_names(experimental)
     assert {"semantic_search", "semantic_status", "semantic_worker_reset"} <= set(_tool_names(semantic))
     assert {"semantic_search", "semantic_status", "semantic_worker_reset"}.isdisjoint(_tool_names(core))
+    assert "wave_optics_incidence_preview" not in _tool_names(core)
 
 
 def test_registered_server_profile_is_immutable():
@@ -110,4 +112,4 @@ def test_capabilities_are_bound_to_each_server_profile(monkeypatch):
     assert core_result["tool_count"] == 38
     assert core_result["profile_source"]["source"] == "explicit_argument"
     assert wave_result["active_profile"] == "wave_optics"
-    assert wave_result["tool_count"] == 58
+    assert wave_result["tool_count"] == 59

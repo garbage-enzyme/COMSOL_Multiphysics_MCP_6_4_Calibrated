@@ -188,7 +188,7 @@ def test_default_and_other_research_profiles_remain_unchanged():
     assert counts == {
         "core": 38,
         "basic_fem": 76,
-        "wave_optics": 58,
+        "wave_optics": 59,
         "experimental": 64,
-        "full": 115,
+        "full": 116,
     }

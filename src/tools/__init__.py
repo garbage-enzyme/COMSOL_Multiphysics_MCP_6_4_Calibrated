@@ -17,6 +17,7 @@ from .properties import register_property_tools
 from .wave_optics_preflight import register_wave_optics_preflight_tools
 from .periodic_mesh_audit import register_periodic_mesh_audit_tools
 from .derived_geometry import register_derived_geometry_tools
+from .incidence_config import register_incidence_config_tools
 from .wave_optics_audit import register_wave_optics_audit_tools
 from .material_expressions import register_material_expression_tools
 from .visual_review import register_visual_review_tools
@@ -41,6 +42,7 @@ TOOL_REGISTRARS = (
     register_wave_optics_preflight_tools,
     register_periodic_mesh_audit_tools,
     register_derived_geometry_tools,
+    register_incidence_config_tools,
     register_wave_optics_audit_tools,
     register_material_expression_tools,
     register_visual_review_tools,
@@ -73,6 +75,7 @@ __all__ = [
     "register_wave_optics_preflight_tools",
     "register_periodic_mesh_audit_tools",
     "register_derived_geometry_tools",
+    "register_incidence_config_tools",
     "register_wave_optics_audit_tools",
     "register_material_expression_tools",
     "register_visual_review_tools",

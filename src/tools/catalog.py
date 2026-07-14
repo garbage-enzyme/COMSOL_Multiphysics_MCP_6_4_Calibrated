@@ -99,6 +99,9 @@ _TOOLS_BY_REGISTRAR = {
         "geometry_derived_clone", "geometry_fin_preview", "geometry_fin_apply",
         "geometry_blocks_preview", "geometry_blocks_apply",
     ),
+    "src.tools.incidence_config.register_incidence_config_tools": (
+        "wave_optics_incidence_preview",
+    ),
     "src.tools.wave_optics_audit.register_wave_optics_audit_tools": (
         "wave_optics_point_audit",
     ),
@@ -139,6 +142,7 @@ _GROUP_BY_REGISTRAR = {
     "register_wave_optics_preflight_tools": "wave_optics_audit",
     "register_periodic_mesh_audit_tools": "wave_optics_audit",
     "register_derived_geometry_tools": "geometry",
+    "register_incidence_config_tools": "wave_optics_incidence",
     "register_wave_optics_audit_tools": "wave_optics_audit",
     "register_material_expression_tools": "wave_optics_materials",
     "register_visual_review_tools": "visual_review",
@@ -174,6 +178,7 @@ _EXPERIMENTAL_TOOLS = frozenset({
     "wave_optics_point_audit",
     "geometry_derived_clone", "geometry_fin_preview", "geometry_fin_apply",
     "geometry_blocks_preview", "geometry_blocks_apply",
+    "wave_optics_incidence_preview",
     "semantic_search", "semantic_status", "semantic_worker_reset",
 })
 
@@ -299,6 +304,7 @@ _WAVE_OPTICS_ADDITIONS = frozenset({
     "wave_optics_periodic_mesh_smoke",
     "geometry_derived_clone", "geometry_fin_preview", "geometry_fin_apply",
     "geometry_blocks_preview", "geometry_blocks_apply",
+    "wave_optics_incidence_preview",
     "wave_optics_point_audit",
     "wave_optics_material_expression_preview",
     "visual_review_capability_normalize", "visual_review_request_create",
