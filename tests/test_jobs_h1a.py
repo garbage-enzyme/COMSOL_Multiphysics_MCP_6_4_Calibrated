@@ -427,6 +427,137 @@ def test_startup_reconciliation_relaunches_only_existing_stale_cancel_request(jo
     assert calls == [(job_id, "cancel-existing")]
 
 
+def test_orphan_reconciliation_commits_only_from_complete_cleanup_proof(jobs_root):
+    manager = JobManager(jobs_root, allow_test_jobs=True, reconcile_on_start=False)
+    identity = process_identity(os.getpid())
+    stale_worker = {**identity, "process_create_time": identity["process_create_time"] - 1000}
+    stale_coordinator = {**identity, "process_create_time": identity["process_create_time"] - 2000}
+    job_id = manager.store.create(
+        {"schema_version": "2", "job_type": "test"},
+        {
+            "schema_version": "2",
+            "status": "cancelling",
+            "attempt": 1,
+            "worker_pid": stale_worker["pid"],
+            "worker_process_create_time": stale_worker["process_create_time"],
+            "worker_command_signature": stale_worker["command_signature"],
+            "cancel": {
+                "request_id": "cancel-orphan",
+                "target_attempt": 1,
+                "phase": "verifying",
+                "phase_timestamps": {"requested": time.time() - 1, "verifying": time.time()},
+                "coordinator": stale_coordinator,
+                "descendants": [],
+                "descendant_capture": {
+                    "worker": {"identity": identity, "state": "active", "reason": "captured while active"},
+                    "descendants": [],
+                    "captured_at_epoch": time.time() - 0.5,
+                },
+            },
+        },
+    )
+    manager.store.write_control(
+        job_id,
+        "cancel_requested",
+        fields={
+            "request_id": "cancel-orphan",
+            "target_attempt": 1,
+            "target_worker": stale_worker,
+        },
+    )
+
+    assert manager.reconcile_cancellations() == 1
+    terminal = manager.store.read_state(job_id)
+
+    assert terminal["status"] == "cancelled"
+    assert terminal["cancel"]["verification"]["absent"] is True
+    assert len(terminal["cancel"]["verification"]["verdicts"]) == 2
+
+
+def test_orphan_reconciliation_fails_closed_without_descendant_capture(jobs_root, monkeypatch):
+    manager = JobManager(jobs_root, allow_test_jobs=True, reconcile_on_start=False)
+    identity = process_identity(os.getpid())
+    stale = {**identity, "process_create_time": identity["process_create_time"] - 1000}
+    job_id = manager.store.create(
+        {"schema_version": "2", "job_type": "test"},
+        {
+            "schema_version": "2",
+            "status": "cancelling",
+            "attempt": 1,
+            "cancel": {
+                "request_id": "cancel-missing-capture",
+                "target_attempt": 1,
+                "phase": "verifying",
+                "coordinator": stale,
+            },
+        },
+    )
+    manager.store.write_control(
+        job_id,
+        "cancel_requested",
+        fields={
+            "request_id": "cancel-missing-capture",
+            "target_attempt": 1,
+            "target_worker": stale,
+        },
+    )
+    launches = []
+    monkeypatch.setattr(manager, "_launch_cancel_coordinator", lambda *args: launches.append(args))
+
+    assert manager.reconcile_cancellations() == 0
+    blocked = manager.store.read_state(job_id)
+
+    assert blocked["status"] == "cancelling"
+    assert blocked["cancel"]["reconciliation"]["outcome"] == "blocked_missing_descendant_capture"
+    assert launches == []
+
+
+def test_orphan_reconciliation_fails_closed_on_uncertain_identity(jobs_root, monkeypatch):
+    manager = JobManager(jobs_root, allow_test_jobs=True, reconcile_on_start=False)
+    identity = process_identity(os.getpid())
+    job_id = manager.store.create(
+        {"schema_version": "2", "job_type": "test"},
+        {
+            "schema_version": "2",
+            "status": "cancelling",
+            "attempt": 1,
+            "cancel": {
+                "request_id": "cancel-uncertain",
+                "target_attempt": 1,
+                "phase": "verifying",
+                "coordinator": identity,
+                "descendants": [],
+                "descendant_capture": {
+                    "worker": {"identity": identity, "state": "active", "reason": "captured while active"},
+                    "descendants": [],
+                },
+            },
+        },
+    )
+    manager.store.write_control(
+        job_id,
+        "cancel_requested",
+        fields={
+            "request_id": "cancel-uncertain",
+            "target_attempt": 1,
+            "target_worker": identity,
+        },
+    )
+    monkeypatch.setattr(
+        "src.jobs.manager.inspect_identity",
+        lambda value: {"identity": value, "state": "uncertain", "reason": "access denied"},
+    )
+    launches = []
+    monkeypatch.setattr(manager, "_launch_cancel_coordinator", lambda *args: launches.append(args))
+
+    assert manager.reconcile_cancellations() == 0
+    blocked = manager.store.read_state(job_id)
+
+    assert blocked["status"] == "cancelling"
+    assert blocked["cancel"]["reconciliation"]["outcome"] == "blocked_uncertain_identity"
+    assert launches == []
+
+
 @pytest.mark.parametrize("crash_phase", ["native_grace", "terminate", "force_kill", "verifying"])
 def test_coordinator_loss_at_each_durable_phase_reconciles_safely(jobs_root, monkeypatch, crash_phase):
     manager = JobManager(

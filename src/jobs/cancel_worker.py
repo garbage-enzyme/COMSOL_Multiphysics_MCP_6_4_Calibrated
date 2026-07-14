@@ -265,8 +265,6 @@ def run(
         return 0
     control = claimed["control"]
     resume_phase = claimed["resume_phase"]
-    if phase_hook is not None:
-        phase_hook(resume_phase)
     worker = control.get("target_worker")
     if not isinstance(worker, dict) or worker.get("pid") is None:
         _record_blocker(store, job_id, request_id, "target worker identity is missing")
@@ -288,9 +286,18 @@ def run(
             request_id,
             identity,
             resume_phase,
-            patch={"descendants": initial_descendants},
+            patch={
+                "descendants": initial_descendants,
+                "descendant_capture": {
+                    **initial_capture,
+                    "captured_at_epoch": time.time(),
+                },
+            },
         ):
             return 0
+
+    if phase_hook is not None:
+        phase_hook(resume_phase)
 
     if resume_phase not in _RESUMABLE_PHASES:
         deadline = time.monotonic() + max(0.0, float(grace_seconds))

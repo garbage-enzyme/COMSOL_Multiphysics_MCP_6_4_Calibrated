@@ -14,7 +14,7 @@ from typing import Any, Callable
 
 import psutil
 
-from .process_control import inspect_identity
+from .process_control import inspect_identity, verify_absent
 from .store import (
     ACTIVE_STATES,
     JOB_SCHEMA_VERSION,
@@ -326,8 +326,8 @@ class JobManager:
             )
 
     def reconcile_cancellations(self, *, limit: int = 20) -> int:
-        """Boundedly relaunch only durable cancellation requests lacking a live coordinator."""
-        relaunched = 0
+        """Reconcile orphaned cancellation attempts without weakening cleanup proof."""
+        reconciled = 0
         if not self.store.root.is_dir():
             return 0
         count = max(1, min(int(limit), 100))
@@ -339,6 +339,7 @@ class JobManager:
         for directory in directories:
             job_id = directory.name
             try:
+                action: tuple[str, dict[str, Any]] | None = None
                 with self.store.lock(job_id, timeout=0.1):
                     state = self.store.read_state(job_id)
                     control = self.store.read_control(job_id)
@@ -346,15 +347,128 @@ class JobManager:
                         continue
                     if control.get("request") != "cancel_requested" or not control.get("request_id"):
                         continue
-                    coordinator = (state.get("cancel") or {}).get("coordinator")
-                    if isinstance(coordinator, dict) and inspect_identity(coordinator)["state"] == "active":
+                    attempt = int(state.get("attempt", 1))
+                    if not cancel_request_targets_attempt(control, attempt):
+                        continue
+                    cancel = dict(state.get("cancel") or {})
+                    if cancel.get("request_id") not in (None, control.get("request_id")):
+                        continue
+                    coordinator = cancel.get("coordinator")
+                    coordinator_verdict = (
+                        inspect_identity(coordinator)
+                        if isinstance(coordinator, dict)
+                        else {"identity": coordinator, "state": "missing", "reason": "coordinator identity is missing"}
+                    )
+                    if coordinator_verdict["state"] == "active":
                         continue
                     request_id = str(control["request_id"])
-                self._launch_cancel_coordinator(job_id, request_id)
-                relaunched += 1
+
+                    worker = control.get("target_worker")
+                    worker_verdict = (
+                        inspect_identity(worker)
+                        if isinstance(worker, dict)
+                        else {"identity": worker, "state": "missing", "reason": "worker identity is missing"}
+                    )
+                    capture = cancel.get("descendant_capture")
+                    capture_proved = (
+                        isinstance(capture, dict)
+                        and isinstance(capture.get("worker"), dict)
+                        and capture["worker"].get("state") == "active"
+                        and isinstance(cancel.get("descendants"), list)
+                    )
+
+                    if (
+                        state.get("status") == "cancelling"
+                        and coordinator_verdict["state"] == "stale"
+                        and worker_verdict["state"] == "stale"
+                        and capture_proved
+                    ):
+                        action = (
+                            "finalize",
+                            {
+                                "request_id": request_id,
+                                "identities": [worker, *cancel["descendants"], coordinator],
+                                "worker_actions": list(cancel.get("worker_actions") or []),
+                            },
+                        )
+                    elif "uncertain" in {coordinator_verdict["state"], worker_verdict["state"]}:
+                        now = time.time()
+                        cancel["reconciliation"] = {
+                            "observed_at_epoch": now,
+                            "outcome": "blocked_uncertain_identity",
+                            "coordinator": coordinator_verdict,
+                            "worker": worker_verdict,
+                        }
+                        state["cancel"] = cancel
+                        state["updated_at_epoch"] = now
+                        atomic_write_json(self.store.job_dir(job_id) / "state.json", state)
+                        self.store._append_event_unlocked(
+                            job_id,
+                            "cancel_reconciliation_blocked",
+                            {"request_id": request_id, "reason": "uncertain_identity"},
+                            str(state["status"]),
+                        )
+                    elif (
+                        state.get("status") == "cancelling"
+                        and coordinator_verdict["state"] == "stale"
+                        and worker_verdict["state"] == "stale"
+                        and not capture_proved
+                    ):
+                        now = time.time()
+                        cancel["reconciliation"] = {
+                            "observed_at_epoch": now,
+                            "outcome": "blocked_missing_descendant_capture",
+                            "coordinator": coordinator_verdict,
+                            "worker": worker_verdict,
+                        }
+                        state["cancel"] = cancel
+                        state["updated_at_epoch"] = now
+                        atomic_write_json(self.store.job_dir(job_id) / "state.json", state)
+                        self.store._append_event_unlocked(
+                            job_id,
+                            "cancel_reconciliation_blocked",
+                            {"request_id": request_id, "reason": "missing_descendant_capture"},
+                            str(state["status"]),
+                        )
+                    else:
+                        action = ("relaunch", {"request_id": request_id})
+
+                if action is None:
+                    continue
+                kind, payload = action
+                if kind == "finalize":
+                    from .cancel_worker import _commit_cancelled, _record_blocker, _verified_cancel
+
+                    verification = _verified_cancel(
+                        self.store,
+                        job_id,
+                        verify_absent(payload["identities"]),
+                    )
+                    if verification["absent"]:
+                        if _commit_cancelled(
+                            self.store,
+                            job_id,
+                            payload["request_id"],
+                            verification,
+                            payload["worker_actions"],
+                        ):
+                            reconciled += 1
+                    else:
+                        _record_blocker(
+                            self.store,
+                            job_id,
+                            payload["request_id"],
+                            str(
+                                verification.get("solver", {}).get("reason")
+                                or "orphan reconciliation cleanup is not proven"
+                            ),
+                        )
+                else:
+                    self._launch_cancel_coordinator(job_id, payload["request_id"])
+                    reconciled += 1
             except (FileNotFoundError, TimeoutError, ValueError, OSError):
                 continue
-        return relaunched
+        return reconciled
 
     def resume(self, job_id: str) -> dict[str, Any]:
         with self.store.lock(job_id):
