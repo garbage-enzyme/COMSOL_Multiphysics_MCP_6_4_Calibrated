@@ -650,18 +650,96 @@ def test_read_only_manager_construction_skips_startup_reconciliation(jobs_root, 
 
 
 def test_thirty_cancel_status_polling_races_have_no_false_terminal_state(jobs_root):
+    iterations = int(os.environ.get("COMSOL_E4R_SOAK_ITERATIONS", "30"))
+    if iterations < 1 or iterations > 100:
+        raise ValueError("COMSOL_E4R_SOAK_ITERATIONS must be between 1 and 100")
     manager = JobManager(
         jobs_root,
         allow_test_jobs=True,
         cancel_grace_seconds=0.02,
         cancel_terminate_seconds=0.05,
     )
-    for _ in range(30):
-        result = manager.submit({"job_type": "test_sequence", "delays": [0.01, 0.25]})
-        wait_for(manager, result["job_id"], {"running"})
-        manager.cancel(result["job_id"])
-        final = wait_for(manager, result["job_id"], {"cancelled"}, timeout=5)
-        assert final["cancel"]["verification"]["absent"] is True
+    calibration_count = min(5, iterations)
+    deadline_s = 5.0
+    latencies: list[float] = []
+    records: list[dict[str, object]] = []
+    summary_path = jobs_root / "e4r_cancellation_soak_summary.json"
+    active_job_id = None
+    try:
+        for index in range(iterations):
+            result = manager.submit({"job_type": "test_sequence", "delays": [0.01, 0.25]})
+            active_job_id = result["job_id"]
+            wait_for(manager, active_job_id, {"running"})
+            requested_at = time.monotonic()
+            request = manager.cancel(active_job_id)
+            final = wait_for(manager, active_job_id, {"cancelled"}, timeout=deadline_s)
+            latency = time.monotonic() - requested_at
+            latencies.append(latency)
+            records.append(
+                {
+                    "iteration": index + 1,
+                    "job_id": active_job_id,
+                    "request_id": request["request_id"],
+                    "deadline_s": deadline_s,
+                    "observed_latency_s": latency,
+                    "status": final["status"],
+                    "phase": final["cancel"].get("phase"),
+                    "cleanup_absent": final["cancel"]["verification"]["absent"],
+                    "teardown_latency": final["cancel"].get("teardown_latency"),
+                }
+            )
+            assert final["cancel"]["verification"]["absent"] is True
+            if len(latencies) == calibration_count:
+                baseline_s = max(latencies)
+                deadline_s = min(10.0, max(1.0, baseline_s * 4.0 + 0.5))
+        summary = {
+            "success": True,
+            "iterations": iterations,
+            "calibration_iterations": calibration_count,
+            "baseline_max_s": max(latencies[:calibration_count]),
+            "derived_deadline_s": deadline_s,
+            "maximum_observed_latency_s": max(latencies),
+            "records": records,
+        }
+        summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        artifact_root_value = os.environ.get("COMSOL_E4R_SOAK_ARTIFACT_ROOT")
+        if artifact_root_value:
+            artifact_root = Path(artifact_root_value)
+            artifact_root.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(
+                summary_path,
+                artifact_root / f"soak-{jobs_root.name}.json",
+            )
+    except Exception as exc:
+        summary = {
+            "success": False,
+            "iterations_requested": iterations,
+            "iterations_completed": len(records),
+            "active_job_id": active_job_id,
+            "deadline_s": deadline_s,
+            "error": f"{type(exc).__name__}: {exc}",
+            "records": records,
+            "active_state": manager.status(active_job_id) if active_job_id else None,
+            "active_tail": manager.tail(active_job_id, 100) if active_job_id else None,
+        }
+        summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        archive_root = Path(
+            os.environ.get("COMSOL_E4R_FAILURE_ROOT", "D:/comsol_runtime_test/e4r_failures")
+        )
+        archive_root.mkdir(parents=True, exist_ok=True)
+        archive = archive_root / f"{jobs_root.name}-{int(time.time())}"
+        archive.mkdir(parents=True, exist_ok=False)
+        shutil.copy2(summary_path, archive / summary_path.name)
+        try:
+            shutil.copytree(jobs_root, archive / "jobs", dirs_exist_ok=True)
+        except OSError as archive_exc:
+            (archive / "archive_error.txt").write_text(
+                f"{type(archive_exc).__name__}: {archive_exc}\n",
+                encoding="utf-8",
+            )
+        raise AssertionError(
+            f"E4R cancellation soak failed; durable evidence archived at {archive}"
+        ) from exc
 
 
 def test_completed_state_is_immutable(jobs_root):
