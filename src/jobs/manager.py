@@ -15,6 +15,7 @@ from typing import Any, Callable
 import psutil
 
 from .process_control import inspect_identity, verify_absent
+from .resource_admission import normalize_resource_policy
 from .store import (
     ACTIVE_STATES,
     JOB_SCHEMA_VERSION,
@@ -56,6 +57,7 @@ def validate_staged_sweep_spec(raw: dict[str, Any]) -> dict[str, Any]:
         "version",
         "smoke_points",
         "record_wavelength_controls",
+        "resource_policy",
     }
     unknown = sorted(set(spec) - allowed)
     if unknown:
@@ -109,6 +111,12 @@ def validate_staged_sweep_spec(raw: dict[str, Any]) -> dict[str, Any]:
                 raise ValueError("physical_bounds limits must be finite numbers")
             if float(limits[0]) > float(limits[1]):
                 raise ValueError("physical_bounds minimum must not exceed maximum")
+    if "resource_policy" in spec:
+        normalized_policy = normalize_resource_policy(spec["resource_policy"])
+        if normalized_policy is None:
+            spec.pop("resource_policy")
+        else:
+            spec["resource_policy"] = normalized_policy
     spec["source_model_path"] = str(source)
     digest = hashlib.sha256()
     with source.open("rb") as handle:

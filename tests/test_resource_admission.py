@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from src.jobs.manager import validate_staged_sweep_spec
 from src.jobs.resource_admission import (
     evaluate_resource_admission,
     normalize_resource_policy,
@@ -176,3 +177,61 @@ def test_absent_policy_is_explicitly_disabled_not_silently_defaulted():
     assert result["decision"] == "allow"
     assert result["policy"] is None
     assert result["cleanup_action"] == "none"
+
+
+def staged_spec(source, resource_policy="absent"):
+    result = {
+        "job_type": "staged_sweep",
+        "source_model_path": str(source),
+        "parameter_name": "wl",
+        "parameter_values": [4.25],
+        "expressions": ["ewfd.Atotal"],
+    }
+    if resource_policy != "absent":
+        result["resource_policy"] = resource_policy
+    return result
+
+
+def test_staged_sweep_spec_normalizes_policy_into_immutable_fingerprint(tmp_path):
+    source = tmp_path / "baseline.mph"
+    source.write_bytes(b"model")
+    first = validate_staged_sweep_spec(staged_spec(source, dict(POLICY)))
+    reordered = validate_staged_sweep_spec(
+        staged_spec(source, dict(reversed(list(POLICY.items()))))
+    )
+    changed = validate_staged_sweep_spec(
+        staged_spec(source, {**POLICY, "max_mesh_elements": 349_999})
+    )
+
+    assert first["resource_policy"]["policy_sha256"] == reordered["resource_policy"]["policy_sha256"]
+    assert first["spec_fingerprint"] == reordered["spec_fingerprint"]
+    assert changed["spec_fingerprint"] != first["spec_fingerprint"]
+    assert first["resource_policy"]["host_defaults_applied"] is False
+    assert first["resource_policy"]["temporary_scavenging"] == "disabled"
+
+
+def test_absent_and_explicit_null_policy_have_one_canonical_spec(tmp_path):
+    source = tmp_path / "baseline.mph"
+    source.write_bytes(b"model")
+    absent = validate_staged_sweep_spec(staged_spec(source))
+    explicit_null = validate_staged_sweep_spec(staged_spec(source, None))
+
+    assert "resource_policy" not in absent
+    assert "resource_policy" not in explicit_null
+    assert absent["spec_fingerprint"] == explicit_null["spec_fingerprint"]
+
+
+def test_invalid_staged_sweep_policy_fails_before_submit_or_solver(tmp_path):
+    source = tmp_path / "baseline.mph"
+    source.write_bytes(b"model")
+
+    with pytest.raises(ValueError, match="must not exceed"):
+        validate_staged_sweep_spec(
+            staged_spec(
+                source,
+                {
+                    "available_memory_warn_fraction": 0.1,
+                    "available_memory_refuse_fraction": 0.2,
+                },
+            )
+        )
