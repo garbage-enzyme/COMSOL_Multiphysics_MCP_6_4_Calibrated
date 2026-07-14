@@ -21,6 +21,8 @@ import math
 from pathlib import Path
 from typing import Iterable, Mapping, Sequence
 
+from src.utils.control_plane import measured_call
+
 
 DEFAULT_INDEX_DIR = Path("D:/comsol_docs_fts")
 DEFAULT_INDEX_PATH = DEFAULT_INDEX_DIR / "manuals.sqlite3"
@@ -435,19 +437,22 @@ def register_lexical_manual_tools(mcp) -> None:
         worker with a hard deadline. Optional filters select a module, source PDF,
         or inclusive page interval. Use manual_read_pages for full page text.
         """
-        return run_bounded(
-            "search",
-            {
-                "query": query,
-                "module": module,
-                "limit": limit,
-                "source": source,
-                "page_start": page_start,
-                "page_end": page_end,
-                "mode": mode,
-                "index_path": str(DEFAULT_INDEX_PATH),
-            },
-            SEARCH_TIMEOUT_SECONDS,
+        return measured_call(
+            "manual_search",
+            lambda: run_bounded(
+                "search",
+                {
+                    "query": query,
+                    "module": module,
+                    "limit": limit,
+                    "source": source,
+                    "page_start": page_start,
+                    "page_end": page_end,
+                    "mode": mode,
+                    "index_path": str(DEFAULT_INDEX_PATH),
+                },
+                SEARCH_TIMEOUT_SECONDS,
+            ),
         )
 
     @mcp.tool()
@@ -457,14 +462,17 @@ def register_lexical_manual_tools(mcp) -> None:
         The text comes from the immutable offline corpus. This read-only call is
         isolated from the COMSOL control process and has a hard deadline.
         """
-        return run_bounded(
-            "read",
-            {
-                "source": source,
-                "pages": pages,
-                "index_path": str(DEFAULT_INDEX_PATH),
-            },
-            READ_TIMEOUT_SECONDS,
+        return measured_call(
+            "manual_read_pages",
+            lambda: run_bounded(
+                "read",
+                {
+                    "source": source,
+                    "pages": pages,
+                    "index_path": str(DEFAULT_INDEX_PATH),
+                },
+                READ_TIMEOUT_SECONDS,
+            ),
         )
 
 

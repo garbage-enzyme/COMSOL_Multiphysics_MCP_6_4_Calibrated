@@ -32,6 +32,8 @@ Set `COMSOL_MCP_PROFILE` before starting the server. A profile is fixed for the 
 
 Call `capabilities` to discover the active profile, exact registered tools, target versions, disabled groups, and restart requirements without starting COMSOL. Its bounded `deployment_identity` reports source-tree versus installed-package loading plus frozen profile/schema and catalog hashes, so a host restart can detect same-version stale installs or source shadowing without exposing local paths.
 
+Control-plane responses from capabilities, solver ownership, durable jobs, and lexical manuals include a compact rolling `control_plane` block. It retains at most 256 samples per operation and reports success/busy/timeout/error counts plus p50/p95/max latency; full logs and unbounded telemetry are never returned inline.
+
 ## Recommended workflows
 
 ### General solver work

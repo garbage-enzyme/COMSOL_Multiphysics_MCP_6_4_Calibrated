@@ -6,6 +6,7 @@ from importlib.metadata import PackageNotFoundError, version
 import hashlib
 import json
 from pathlib import Path
+import time
 
 from mcp.server.fastmcp import FastMCP
 
@@ -34,6 +35,7 @@ from .profiles import (
 )
 from .session import session_manager
 from src.knowledge.semantic_runtime import semantic_capability_status
+from src.utils.control_plane import attach_control_plane_evidence
 
 
 _DEPLOYMENT_MANIFEST = Path(__file__).resolve().parents[1] / "deployment_manifest.json"
@@ -125,6 +127,7 @@ def _profile_inventory(selection: ProfileSelection) -> dict:
 
 def get_capabilities(selection: ProfileSelection | None = None) -> dict:
     """Describe supported, experimental, and disabled behavior without startup."""
+    started = time.perf_counter()
     active_selection = selection or resolve_profile()
     status = session_manager.get_status()
     semantic_profile_active = active_selection.name in {"semantic_docs", "full"}
@@ -160,6 +163,7 @@ def get_capabilities(selection: ProfileSelection | None = None) -> dict:
             "versioned_physical_evidence_contract",
             "solver_free_material_expression_preview",
             "solver_free_visual_review_contracts",
+            "bounded_control_plane_latency_and_outcome_evidence",
         ],
         "experimental": {
             "async_solver": {
@@ -247,7 +251,7 @@ def get_capabilities(selection: ProfileSelection | None = None) -> dict:
         "restart_required_after_source_changes": True,
     }
     result.update(_profile_inventory(active_selection))
-    return result
+    return attach_control_plane_evidence("capabilities", started, result)
 
 
 def startup_capability_summary(selection: ProfileSelection | None = None) -> str:

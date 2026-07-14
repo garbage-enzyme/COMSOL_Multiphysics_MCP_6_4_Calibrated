@@ -18,6 +18,7 @@ import psutil
 from mcp.server.fastmcp import FastMCP
 
 from src.utils.runtime_paths import default_runtime_dir as _shared_default_runtime_dir
+from src.utils.control_plane import measured_call
 
 
 LEASE_SCHEMA_VERSION = "2"
@@ -785,7 +786,12 @@ def register_ownership_tools(mcp: FastMCP) -> None:
         """Report MCP session, solver lease, process collisions, and job availability without starting COMSOL."""
         from .session import session_manager
 
-        return ownership_manager.status(session_state=session_manager.get_status())
+        return measured_call(
+            "solver_status",
+            lambda: ownership_manager.status(
+                session_state=session_manager.get_status()
+            ),
+        )
 
     @mcp.tool()
     def solver_preflight(
@@ -797,15 +803,21 @@ def register_ownership_tools(mcp: FastMCP) -> None:
         """Validate architecture, JRE, memory, paths, and ownership without starting COMSOL."""
         from .session import session_manager
 
-        return ownership_manager.preflight(
-            session_state=session_manager.get_status(),
-            model_path=model_path,
-            output_path=output_path,
-            requested_version=requested_version,
-            minimum_free_gb=minimum_free_gb,
+        return measured_call(
+            "solver_preflight",
+            lambda: ownership_manager.preflight(
+                session_state=session_manager.get_status(),
+                model_path=model_path,
+                output_path=output_path,
+                requested_version=requested_version,
+                minimum_free_gb=minimum_free_gb,
+            ),
         )
 
     @mcp.tool()
     def solver_recover_stale_lease() -> dict:
         """Remove only a lease proven stale by PID and process-creation evidence; never kill a process."""
-        return ownership_manager.recover_stale()
+        return measured_call(
+            "solver_recover_stale_lease",
+            ownership_manager.recover_stale,
+        )
