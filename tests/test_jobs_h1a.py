@@ -21,6 +21,7 @@ from src.jobs.manager import JobManager, validate_staged_sweep_spec
 from src.jobs.store import JobLock, JobStore, atomic_write_json, process_identity, process_identity_state
 import src.jobs.store as store_module
 from src.jobs import worker as production_worker
+from src.jobs import cancel_worker
 
 
 @pytest.fixture()
@@ -201,6 +202,41 @@ def test_stale_attempt_control_is_ignored_after_resume(jobs_root):
 
     assert resumed["attempt"] == 2
     assert completed["progress"] == {"completed": 2, "total": 2}
+
+
+def test_cancel_coordinator_refuses_stale_attempt_request(jobs_root):
+    store = JobStore(jobs_root)
+    identity = process_identity(os.getpid())
+    job_id = store.create(
+        {"schema_version": "2", "job_type": "test"},
+        {
+            "schema_version": "2",
+            "status": "cancel_requested",
+            "attempt": 2,
+            "cancel": {
+                "request_id": "cancel-attempt-1",
+                "target_attempt": 1,
+                "phase": "requested",
+            },
+        },
+    )
+    store.write_control(
+        job_id,
+        "cancel_requested",
+        fields={"request_id": "cancel-attempt-1", "target_attempt": 1},
+    )
+
+    claimed = cancel_worker._claim(
+        store,
+        job_id,
+        "cancel-attempt-1",
+        identity,
+        grace_seconds=1.0,
+        terminate_seconds=1.0,
+    )
+
+    assert claimed is None
+    assert store.read_state(job_id)["status"] == "cancel_requested"
 
 
 def test_legacy_h1_cancel_control_migrates_to_an_idempotent_request(jobs_root):

@@ -11,7 +11,7 @@ from typing import Any, Callable
 import psutil
 
 from .process_control import capture_owned_descendants, inspect_identity, terminate_exact, verify_absent
-from .store import JobStore, atomic_write_json, process_identity
+from .store import JobStore, atomic_write_json, cancel_request_targets_attempt, process_identity
 
 
 _RESUMABLE_PHASES = {"terminate", "force_kill", "verifying"}
@@ -39,9 +39,12 @@ def _claim(
         state = store.read_state(job_id)
         control = store.read_control(job_id)
         cancel = state.get("cancel") if isinstance(state.get("cancel"), dict) else {}
+        attempt = int(state.get("attempt", 1))
         if (
             control.get("request") != "cancel_requested"
             or control.get("request_id") != request_id
+            or not cancel_request_targets_attempt(control, attempt)
+            or cancel.get("target_attempt") not in (None, attempt)
             or state.get("status") not in {"cancel_requested", "cancelling"}
         ):
             return None
