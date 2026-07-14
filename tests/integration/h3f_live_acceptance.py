@@ -22,10 +22,11 @@ RUNTIME = Path(os.environ.get("COMSOL_MCP_RUNTIME_DIR", "D:/comsol_runtime"))
 ARTIFACT_DIR = RUNTIME / "H3f"
 PROFILE_COUNTS = {
     "core": 38,
-    "basic_fem": 71,
-    "wave_optics": 58,
+    "basic_fem": 76,
+    "wave_optics": 60,
+    "semantic_docs": 41,
     "experimental": 64,
-    "full": 100,
+    "full": 117,
 }
 ITERATIONS = Path(r"C:\Users\陆星\Desktop\iterations")
 CASES = (
@@ -100,12 +101,13 @@ def _decode(result: Any) -> dict[str, Any]:
 
 def _server(profile: str) -> StdioServerParameters:
     env = os.environ.copy()
+    env.pop("PYTHONPATH", None)
     env["COMSOL_MCP_PROFILE"] = profile
     env["COMSOL_MCP_RUNTIME_DIR"] = str(RUNTIME)
     return StdioServerParameters(
         command=str(PYTHON),
         args=["-m", "src.server"],
-        cwd=ROOT,
+        cwd=RUNTIME,
         env=env,
     )
 
@@ -146,6 +148,9 @@ async def _discover_profile(profile: str) -> dict[str, Any]:
     assert len(names) == expected, (profile, len(names), expected)
     assert capabilities["profile"] == profile, capabilities
     assert capabilities["tool_count"] == expected, capabilities
+    identity = capabilities["deployment_identity"]
+    assert identity["source_classification"] == "installed_site_package", identity
+    assert identity["contains_local_path"] is False, identity
     return {
         "profile": profile,
         "tool_count": len(names),
