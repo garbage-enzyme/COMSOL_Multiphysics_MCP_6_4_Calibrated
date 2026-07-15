@@ -30,6 +30,7 @@ from .power_audit import (
     normalize_declared_plane_flux,
     normalize_internal_absorption_consistency,
 )
+from .field_bundle import normalize_field_evidence_request
 
 __all__ = [
     "EVIDENCE_STATES",
@@ -56,4 +57,5 @@ __all__ = [
     "validate_visual_review_request",
     "normalize_declared_plane_flux",
     "normalize_internal_absorption_consistency",
+    "normalize_field_evidence_request",
 ]
