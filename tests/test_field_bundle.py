@@ -19,6 +19,7 @@ def _source(kind: str = "existing_dataset", suffix: str = "on") -> dict:
         return {
             "kind": kind,
             "component_tag": "comp1",
+            "dataset_name": f"Study 1//Solution {suffix}",
             "dataset_tag": f"dset_{suffix}",
             "solution_tag": f"sol_{suffix}",
             "solution_number": 1,
@@ -30,6 +31,7 @@ def _source(kind: str = "existing_dataset", suffix: str = "on") -> dict:
         "point_fingerprint": ("a" if suffix == "on" else "b") * 64,
         "artifact_id": f"audit-{suffix}",
         "component_tag": "comp1",
+        "dataset_name": f"Study 1//Solution {suffix}",
         "dataset_tag": f"dset_{suffix}",
         "solution_tag": f"sol_{suffix}",
     }

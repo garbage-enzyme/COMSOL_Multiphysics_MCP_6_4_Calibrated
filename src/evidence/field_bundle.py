@@ -128,6 +128,7 @@ def _normalize_source(value: object, label: str) -> dict[str, Any]:
         allowed = {
             "kind",
             "component_tag",
+            "dataset_name",
             "dataset_tag",
             "solution_tag",
             "solution_number",
@@ -135,7 +136,7 @@ def _normalize_source(value: object, label: str) -> dict[str, Any]:
         _exact_fields(
             raw,
             allowed,
-            {"kind", "component_tag", "dataset_tag", "solution_tag"},
+            {"kind", "component_tag", "dataset_name", "dataset_tag", "solution_tag"},
             label,
         )
         solution_number = raw.get("solution_number")
@@ -146,6 +147,7 @@ def _normalize_source(value: object, label: str) -> dict[str, Any]:
         result = {
             "kind": kind,
             "component_tag": _tag(raw["component_tag"], f"{label}.component_tag"),
+            "dataset_name": _text(raw["dataset_name"], f"{label}.dataset_name"),
             "dataset_tag": _tag(raw["dataset_tag"], f"{label}.dataset_tag"),
             "solution_tag": _tag(raw["solution_tag"], f"{label}.solution_tag"),
             "solution_number": solution_number,
@@ -158,6 +160,7 @@ def _normalize_source(value: object, label: str) -> dict[str, Any]:
             "point_fingerprint",
             "artifact_id",
             "component_tag",
+            "dataset_name",
             "dataset_tag",
             "solution_tag",
         }
@@ -173,6 +176,7 @@ def _normalize_source(value: object, label: str) -> dict[str, Any]:
                 raw["artifact_id"], f"{label}.artifact_id", identifier=True
             ),
             "component_tag": _tag(raw["component_tag"], f"{label}.component_tag"),
+            "dataset_name": _text(raw["dataset_name"], f"{label}.dataset_name"),
             "dataset_tag": _tag(raw["dataset_tag"], f"{label}.dataset_tag"),
             "solution_tag": _tag(raw["solution_tag"], f"{label}.solution_tag"),
         }

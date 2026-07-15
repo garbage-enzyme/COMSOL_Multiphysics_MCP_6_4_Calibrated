@@ -80,6 +80,7 @@ def _normalized_request():
     raw["views"][0]["source"] = {
         "kind": "existing_dataset",
         "component_tag": "comp1",
+        "dataset_name": "研究 1//解 1",
         "dataset_tag": "dset_on",
         "solution_tag": "sol_on",
         "solution_number": 1,
@@ -102,7 +103,7 @@ def test_existing_dataset_adapter_verifies_readback_and_writes_artifacts(tmp_pat
     assert model.calls == [
         (
             ["ewfd.normE", "ewfd.normH", "x", "y", "z"],
-            {"dataset": "dset_on", "inner": 1},
+            {"dataset": "研究 1//解 1", "inner": 1},
         )
     ]
     assert result["dataset_identity"]["readback_state"] == "verified"
@@ -169,6 +170,7 @@ def test_adapter_rejects_matrix_source_without_evaluating(tmp_path):
         "point_fingerprint": "a" * 64,
         "artifact_id": "audit-on",
         "component_tag": "comp1",
+        "dataset_name": "研究 1//解 1",
         "dataset_tag": "dset_on",
         "solution_tag": "sol_on",
     }

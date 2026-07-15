@@ -90,7 +90,7 @@ def collect_existing_dataset_field_evidence(
     try:
         evaluated = model.evaluate(
             evaluation_expressions,
-            dataset=source["dataset_tag"],
+            dataset=source["dataset_name"],
             inner=source["solution_number"],
         )
     except Exception as exc:
@@ -124,6 +124,7 @@ def collect_existing_dataset_field_evidence(
     )
     result["dataset_identity"] = {
         "component_tag": source["component_tag"],
+        "dataset_name": source["dataset_name"],
         "dataset_tag": source["dataset_tag"],
         "solution_tag": source["solution_tag"],
         "solution_number": source["solution_number"],
