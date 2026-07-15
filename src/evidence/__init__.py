@@ -38,6 +38,7 @@ from .field_manifest import (
     build_field_evidence_manifest,
     validate_field_evidence_manifest,
 )
+from .field_artifacts import write_field_evidence_artifacts
 
 __all__ = [
     "EVIDENCE_STATES",
@@ -68,4 +69,5 @@ __all__ = [
     "validate_field_evidence_request",
     "build_field_evidence_manifest",
     "validate_field_evidence_manifest",
+    "write_field_evidence_artifacts",
 ]
