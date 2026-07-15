@@ -197,3 +197,72 @@ def test_manifest_must_exist_inside_the_exact_attempt_artifact_root(tmp_path):
     row = read_validation_rows(directory / "matrix_rows.jsonl", spec)[0]
     assert row["status"] == "error"
     assert "escapes" in row["error"]["message"]
+
+
+def test_resource_refusal_before_point_writes_no_false_error_row(tmp_path):
+    spec = _spec(tmp_path)
+    directory = tmp_path / "job"
+    result = run_pending_validation_points(
+        spec,
+        directory,
+        attempt=1,
+        collector_executor=lambda *_args: (_ for _ in ()).throw(AssertionError("must not run")),
+        before_point_hook=lambda context: {
+            "action": "checkpoint_no_start",
+            "start_authorized": False,
+            "point_id": context["point_id"],
+        },
+    )
+
+    assert result["stop_reason"] == "before_point_checkpoint_no_start"
+    assert result["processed"] == 0
+    assert not (directory / "matrix_rows.jsonl").exists()
+
+
+def test_resource_stop_after_fsync_preserves_completed_row_then_stops(tmp_path):
+    spec = _spec(tmp_path)
+    directory = tmp_path / "job"
+    after_calls = []
+
+    def after(context):
+        after_calls.append(context)
+        return {
+            "action": "await_confirmation",
+            "start_authorized": False,
+            "point_id": context["point_id"],
+        }
+
+    result = run_pending_validation_points(
+        spec,
+        directory,
+        attempt=1,
+        collector_executor=_complete_executor,
+        after_durable_row_hook=after,
+    )
+
+    assert result["stop_reason"] == "after_durable_row_await_confirmation"
+    assert result["processed"] == 1
+    assert result["remaining"] == 1
+    assert len(read_validation_rows(directory / "matrix_rows.jsonl", spec)) == 1
+    assert after_calls[0]["stage"] == "post_solve"
+
+
+def test_resource_hook_identity_and_authorization_must_match(tmp_path):
+    spec = _spec(tmp_path)
+    for result in (
+        {"action": "start_point", "start_authorized": False},
+        {"action": "unknown", "start_authorized": False},
+        {"action": "start_point", "start_authorized": True, "point_id": "wrong"},
+    ):
+        try:
+            run_pending_validation_points(
+                spec,
+                tmp_path / result["action"],
+                attempt=1,
+                collector_executor=_complete_executor,
+                before_point_hook=lambda _context, value=result: value,
+            )
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("invalid resource hook output must fail closed")

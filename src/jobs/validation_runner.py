@@ -10,6 +10,9 @@ from .validation_rows import append_validation_row, completed_point_fingerprints
 
 
 MAX_MANIFEST_BYTES = 16 * 1024 * 1024
+_HOOK_ACTIONS = frozenset(
+    {"start_point", "skip_completed", "await_confirmation", "checkpoint_no_start"}
+)
 
 
 def _sha256_file(path: Path) -> str:
@@ -73,6 +76,36 @@ def summarize_collector_result(
     }
 
 
+def _run_point_hook(
+    hook: Callable[[dict[str, Any]], Mapping[str, Any]] | None,
+    *,
+    stage: str,
+    spec: Mapping[str, Any],
+    point: Mapping[str, Any],
+) -> dict[str, Any]:
+    if hook is None:
+        return {"action": "start_point", "start_authorized": True}
+    result = hook(
+        {
+            "stage": stage,
+            "config_id": spec["spec_fingerprint"],
+            "point_id": point["point_fingerprint"],
+            "declared_point_id": point["point_id"],
+        }
+    )
+    if not isinstance(result, Mapping):
+        raise ValueError(f"{stage} hook must return an object")
+    action = result.get("action")
+    if action not in _HOOK_ACTIONS:
+        raise ValueError(f"{stage} hook returned an unsupported action")
+    authorized = result.get("start_authorized")
+    if not isinstance(authorized, bool) or authorized != (action == "start_point"):
+        raise ValueError(f"{stage} hook returned inconsistent authorization")
+    if result.get("point_id") not in (None, point["point_fingerprint"]):
+        raise ValueError(f"{stage} hook returned a mismatched point_id")
+    return dict(result)
+
+
 def run_pending_validation_points(
     spec: Mapping[str, Any],
     job_directory: str | Path,
@@ -81,6 +114,8 @@ def run_pending_validation_points(
     collector_executor: Callable[[dict[str, Any], dict[str, Any], Path], Mapping[str, Any]],
     should_stop: Callable[[], bool] | None = None,
     on_durable_row: Callable[[dict[str, Any]], None] | None = None,
+    before_point_hook: Callable[[dict[str, Any]], Mapping[str, Any]] | None = None,
+    after_durable_row_hook: Callable[[dict[str, Any]], Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Run exact pending points and persist one complete or error row per attempt."""
     directory = Path(job_directory).resolve()
@@ -114,6 +149,23 @@ def run_pending_validation_points(
                 "errors": errors,
                 "remaining": len(points) - len(completed),
                 "last_row_sha256": last_row_sha256,
+            }
+        before = _run_point_hook(
+            before_point_hook,
+            stage="pre_solve",
+            spec=spec,
+            point=point,
+        )
+        if before["action"] != "start_point":
+            return {
+                "success": True,
+                "stop_reason": f"before_point_{before['action']}",
+                "processed": processed,
+                "skipped_completed": skipped,
+                "errors": errors,
+                "remaining": len(points) - len(completed),
+                "last_row_sha256": last_row_sha256,
+                "resource_gate": before,
             }
         summaries: list[dict[str, Any]] = []
         point_id = str(point["point_id"])
@@ -180,6 +232,23 @@ def run_pending_validation_points(
         last_row_sha256 = row["row_sha256"]
         if on_durable_row is not None:
             on_durable_row(row)
+        after = _run_point_hook(
+            after_durable_row_hook,
+            stage="post_solve",
+            spec=spec,
+            point=point,
+        )
+        if after["action"] != "start_point":
+            return {
+                "success": row["status"] == "ok",
+                "stop_reason": f"after_durable_row_{after['action']}",
+                "processed": processed,
+                "skipped_completed": skipped,
+                "errors": errors,
+                "remaining": len(points) - len(completed),
+                "last_row_sha256": last_row_sha256,
+                "resource_gate": after,
+            }
         if row["status"] == "error" and not spec.get("continue_on_error", False):
             return {
                 "success": False,
