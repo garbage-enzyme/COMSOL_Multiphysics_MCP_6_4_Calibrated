@@ -39,6 +39,7 @@ from .field_manifest import (
     validate_field_evidence_manifest,
 )
 from .field_artifacts import write_field_evidence_artifacts
+from .field_sampling import select_field_slice_samples
 
 __all__ = [
     "EVIDENCE_STATES",
@@ -70,4 +71,5 @@ __all__ = [
     "build_field_evidence_manifest",
     "validate_field_evidence_manifest",
     "write_field_evidence_artifacts",
+    "select_field_slice_samples",
 ]
