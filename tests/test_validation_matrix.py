@@ -184,3 +184,13 @@ def test_only_declared_collectors_and_portable_artifact_ids_are_accepted(tmp_pat
         normalize_validation_matrix_spec(_spec(source, points=[unsupported]))
     with pytest.raises(ValueError, match="bounded portable identifier"):
         normalize_validation_matrix_spec(_spec(source, points=[unsafe_artifact]))
+
+
+def test_each_collector_requires_one_unique_expected_artifact_id(tmp_path):
+    source = tmp_path / "fixture.mph"
+    source.write_bytes(b"model")
+    point = _point()
+    point["expected_artifact_ids"] = ["first", "extra"]
+
+    with pytest.raises(ValueError, match="exactly one expected artifact ID per collector"):
+        normalize_validation_matrix_spec(_spec(source, points=[point]))

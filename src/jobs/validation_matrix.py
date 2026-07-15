@@ -210,6 +210,9 @@ def _normalize_point(value: object, index: int, source_sha256: str) -> dict[str,
     ]
     if len(set(artifact_ids)) != len(artifact_ids):
         raise ValueError(f"{name}.expected_artifact_ids must not contain duplicates")
+    collectors = _normalize_collectors(raw["collectors"], name)
+    if len(artifact_ids) != len(collectors):
+        raise ValueError(f"{name} requires exactly one expected artifact ID per collector")
     point = {
         "point_id": _identifier(raw["point_id"], f"{name}.point_id"),
         "configuration_sha256": configuration_sha256.lower(),
@@ -219,7 +222,7 @@ def _normalize_point(value: object, index: int, source_sha256: str) -> dict[str,
             if "incidence" in raw and raw["incidence"] is not None
             else None
         ),
-        "collectors": _normalize_collectors(raw["collectors"], name),
+        "collectors": collectors,
         "expected_artifact_ids": artifact_ids,
     }
     point["point_fingerprint"] = _fingerprint(
