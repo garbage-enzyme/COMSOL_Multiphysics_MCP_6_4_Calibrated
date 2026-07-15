@@ -34,6 +34,10 @@ from .field_bundle import (
     normalize_field_evidence_request,
     validate_field_evidence_request,
 )
+from .field_manifest import (
+    build_field_evidence_manifest,
+    validate_field_evidence_manifest,
+)
 
 __all__ = [
     "EVIDENCE_STATES",
@@ -62,4 +66,6 @@ __all__ = [
     "normalize_internal_absorption_consistency",
     "normalize_field_evidence_request",
     "validate_field_evidence_request",
+    "build_field_evidence_manifest",
+    "validate_field_evidence_manifest",
 ]
