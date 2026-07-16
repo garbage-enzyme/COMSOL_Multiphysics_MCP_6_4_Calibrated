@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 from importlib.metadata import version
 import json
 import os
@@ -67,6 +68,14 @@ def _completed_summary(completed: subprocess.CompletedProcess | None) -> dict:
         "stdout_tail": (completed.stdout or "")[-4000:],
         "stderr_tail": (completed.stderr or "")[-4000:],
     }
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 def run_release_gate(
@@ -136,9 +145,12 @@ def run_release_gate(
 
     suite_completed = None
     if h1_passed:
+        fixture_spec = getattr(args, "fixture_spec", None)
+        if fixture_spec is None and args.require_h1:
+            fixture_spec = args.h1_spec
         fixture_environment = (
-            controlled_fixture_environment_from_h1_spec(args.h1_spec)
-            if args.require_h1
+            controlled_fixture_environment_from_h1_spec(fixture_spec)
+            if fixture_spec is not None
             else os.environ.copy()
         )
         suite_completed = command_runner(
@@ -180,7 +192,7 @@ def run_release_gate(
                 "timed_out": h1_timed_out,
                 "receipt_path": h1_receipt_path.name if args.require_h1 else None,
                 "receipt_sha256": (
-                    __import__("hashlib").sha256(h1_receipt_path.read_bytes()).hexdigest()
+                    _sha256_file(h1_receipt_path)
                     if h1_receipt_path.is_file() else None
                 ),
             },
@@ -189,6 +201,11 @@ def run_release_gate(
                 "test_target": "tests/integration/test_real_comsol.py",
                 "passed": suite_passed,
                 "skipped_reason": None if suite_completed is not None else "H1 did not pass",
+                "fixture_spec_sha256": (
+                    _sha256_file(Path(fixture_spec))
+                    if suite_completed is not None and fixture_spec is not None
+                    else None
+                ),
             },
         },
         "cleanup": {
@@ -213,6 +230,7 @@ def main() -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--require-h1", action="store_true")
     parser.add_argument("--h1-spec", type=Path)
+    parser.add_argument("--fixture-spec", type=Path)
     parser.add_argument("--h1-cores", type=int)
     parser.add_argument("--h1-timeout-seconds", type=float)
     args = parser.parse_args()

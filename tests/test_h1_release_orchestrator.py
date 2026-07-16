@@ -37,6 +37,7 @@ def _args(tmp_path, **overrides):
         "output": tmp_path / "release.json",
         "require_h1": True,
         "h1_spec": spec,
+        "fixture_spec": spec,
         "h1_cores": 8,
         "h1_timeout_seconds": 300.0,
     }
@@ -91,6 +92,33 @@ def test_h1_runs_before_regression_and_both_receipts_are_required(tmp_path):
     assert receipt["phases"]["h1"]["passed"] is True
     assert len(receipt["phases"]["h1"]["receipt_sha256"]) == 64
     assert receipt["phases"]["licensed_regression"]["passed"] is True
+    assert len(receipt["phases"]["licensed_regression"]["fixture_spec_sha256"]) == 64
+
+
+def test_fixture_spec_configures_regression_without_rerunning_h1(tmp_path):
+    runner = FakeRunner()
+    args = _args(
+        tmp_path,
+        require_h1=False,
+        h1_spec=None,
+        h1_cores=None,
+        h1_timeout_seconds=None,
+    )
+
+    receipt = run_release_gate(
+        args,
+        command_runner=runner,
+        owner=object(),
+        pid_provider=lambda: set(),
+        wait_clean=_clean,
+    )
+
+    assert receipt["returncode"] == 0
+    assert len(runner.commands) == 1
+    assert "tests/integration/test_real_comsol.py" in runner.commands[0]
+    assert Path(runner.kwargs[0]["env"][MODEL_ENV]).name == "controlled.mph"
+    assert receipt["phases"]["h1"]["started"] is False
+    assert len(receipt["phases"]["licensed_regression"]["fixture_spec_sha256"]) == 64
 
 
 def test_h1_failure_skips_remaining_licensed_suite_and_release_fails(tmp_path):

@@ -21,15 +21,21 @@ Before a release:
 4. On a free, licensed, version-pinned host, run the serial real gate explicitly:
 
    ```powershell
-   python scripts/run_real_release_gate.py --confirm RUN_REAL_COMSOL --output D:\comsol_release\real_gate.json
+   python scripts/run_real_release_gate.py --confirm RUN_REAL_COMSOL `
+     --fixture-spec D:\path\to\controlled_fixture_spec.json `
+     --output D:\comsol_release\real_gate.json
    ```
 
-5. Require an unchanged COMSOL PID set, an absent solver lease, no external
+5. `--fixture-spec` supplies the controlled model/wavelength/top-air environment
+   for the licensed regression suite without rerunning the optional mandatory-H1
+   phase. Use `--require-h1 --h1-spec ...` only when that release must generate a
+   new H1 receipt as well.
+6. Require an unchanged COMSOL PID set, an absent solver lease, no external
    collision, source-integrity evidence, and all fixture contracts to pass.
-6. Build once more from the clean release commit and compare discovery output.
-7. Install non-editably in the target MCP environment.
-8. Restart the MCP host; source and profile changes are not hot-reloaded.
-9. Call `capabilities`; require `deployment_identity.source_classification` to
+7. Build once more from the clean release commit and compare discovery output.
+8. Install non-editably in the target MCP environment.
+9. Restart the MCP host; source and profile changes are not hot-reloaded.
+10. Call `capabilities`; require `deployment_identity.source_classification` to
    be `installed_site_package`, compare its profile/schema/catalog hashes with
    the clean release receipt, and then treat installed profile counts as
    authoritative. A matching version string alone is insufficient.
