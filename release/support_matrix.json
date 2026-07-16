@@ -31,7 +31,7 @@
     {
       "name": "wave_optics",
       "support": "experimental_v2_in_progress",
-      "tool_count": 62
+      "tool_count": 63
     },
     {
       "name": "semantic_docs",
@@ -46,7 +46,7 @@
     {
       "name": "full",
       "support": "compatibility_only",
-      "tool_count": 119
+      "tool_count": 120
     }
   ],
   "unavailable": [

@@ -4379,6 +4379,30 @@
     "title": "wave_optics_field_datasetsArguments",
     "type": "object"
   },
+  "wave_optics_field_extract": {
+    "properties": {
+      "model_name": {
+        "title": "Model Name",
+        "type": "string"
+      },
+      "request": {
+        "additionalProperties": true,
+        "title": "Request",
+        "type": "object"
+      },
+      "view_id": {
+        "title": "View Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "model_name",
+      "request",
+      "view_id"
+    ],
+    "title": "wave_optics_field_extractArguments",
+    "type": "object"
+  },
   "wave_optics_incidence_apply": {
     "properties": {
       "alpha1_inc": {

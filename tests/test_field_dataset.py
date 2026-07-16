@@ -79,6 +79,7 @@ def _normalized_request():
     raw = _request(paired=False, png=False)
     raw["views"][0]["source"] = {
         "kind": "existing_dataset",
+        "source_model_sha256": "d" * 64,
         "component_tag": "comp1",
         "dataset_name": "研究 1//解 1",
         "dataset_tag": "dset_on",
@@ -103,7 +104,7 @@ def test_existing_dataset_adapter_verifies_readback_and_writes_artifacts(tmp_pat
     assert model.calls == [
         (
             ["ewfd.normE", "ewfd.normH", "x", "y", "z"],
-            {"dataset": "研究 1//解 1", "inner": 1},
+            {"dataset": "研究 1//解 1", "inner": [1]},
         )
     ]
     assert result["dataset_identity"]["readback_state"] == "verified"
@@ -165,6 +166,7 @@ def test_adapter_rejects_matrix_source_without_evaluating(tmp_path):
     raw = _request(paired=False, png=False)
     raw["views"][0]["source"] = {
         "kind": "validation_matrix_point",
+        "source_model_sha256": "d" * 64,
         "job_id": "job-123",
         "point_id": "on",
         "point_fingerprint": "a" * 64,

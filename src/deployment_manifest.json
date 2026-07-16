@@ -3,6 +3,6 @@
   "schema_version": "1.0.0",
   "package_name": "comsol-mcp",
   "package_version": "0.1.0",
-  "full_tool_schemas_sha256": "d439a488cc82be5116503c53ca4b8256eb7f8d346fc05a1d368bc9312c69d91a",
-  "profile_tool_names_sha256": "4b3d0117963b5d642f43ec1c7c2c7bf490490acd74c4c5543d8d2e247b4d6524"
+  "full_tool_schemas_sha256": "80aad88a609c3d7d990754420a0a67caa278cc32dc40b0262a13250ec13dcebf",
+  "profile_tool_names_sha256": "54657e5d00a9e0bc965cb54970c76e11bc48768c499e43ffac2d577501aeffcc"
 }

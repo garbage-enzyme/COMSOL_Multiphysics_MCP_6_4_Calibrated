@@ -11,7 +11,7 @@ from typing import Any, Mapping
 
 
 FIELD_EVIDENCE_REQUEST_SCHEMA = "comsol_mcp.field_evidence_request"
-FIELD_EVIDENCE_SCHEMA_VERSION = "1.0.0"
+FIELD_EVIDENCE_SCHEMA_VERSION = "1.1.0"
 
 MAX_FIELD_EXPRESSIONS = 8
 MAX_FIELD_VIEWS = 2
@@ -127,6 +127,7 @@ def _normalize_source(value: object, label: str) -> dict[str, Any]:
     if kind == "existing_dataset":
         allowed = {
             "kind",
+            "source_model_sha256",
             "component_tag",
             "dataset_name",
             "dataset_tag",
@@ -136,7 +137,14 @@ def _normalize_source(value: object, label: str) -> dict[str, Any]:
         _exact_fields(
             raw,
             allowed,
-            {"kind", "component_tag", "dataset_name", "dataset_tag", "solution_tag"},
+            {
+                "kind",
+                "source_model_sha256",
+                "component_tag",
+                "dataset_name",
+                "dataset_tag",
+                "solution_tag",
+            },
             label,
         )
         solution_number = raw.get("solution_number")
@@ -146,6 +154,9 @@ def _normalize_source(value: object, label: str) -> dict[str, Any]:
             )
         result = {
             "kind": kind,
+            "source_model_sha256": _sha256(
+                raw["source_model_sha256"], f"{label}.source_model_sha256"
+            ),
             "component_tag": _tag(raw["component_tag"], f"{label}.component_tag"),
             "dataset_name": _text(raw["dataset_name"], f"{label}.dataset_name"),
             "dataset_tag": _tag(raw["dataset_tag"], f"{label}.dataset_tag"),
@@ -155,6 +166,7 @@ def _normalize_source(value: object, label: str) -> dict[str, Any]:
     elif kind == "validation_matrix_point":
         allowed = {
             "kind",
+            "source_model_sha256",
             "job_id",
             "point_id",
             "point_fingerprint",
@@ -167,6 +179,9 @@ def _normalize_source(value: object, label: str) -> dict[str, Any]:
         _exact_fields(raw, allowed, allowed, label)
         result = {
             "kind": kind,
+            "source_model_sha256": _sha256(
+                raw["source_model_sha256"], f"{label}.source_model_sha256"
+            ),
             "job_id": _text(raw["job_id"], f"{label}.job_id", identifier=True),
             "point_id": _text(raw["point_id"], f"{label}.point_id", identifier=True),
             "point_fingerprint": _sha256(

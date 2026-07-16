@@ -230,12 +230,15 @@ def get_capabilities(selection: ProfileSelection | None = None) -> dict:
         },
         "field_evidence": {
             "dataset_discovery_tool": "wave_optics_field_datasets",
+            "existing_dataset_extraction_tool": "wave_optics_field_extract",
             "profiles": ["wave_optics", "full"],
             "dataset_name_transport": "live_mph_unicode_name",
             "dataset_identity": "exact_clientapi_tag_and_solution_readback",
             "study_run": False,
             "model_mutation": False,
-            "artifact_extraction": "not_yet_public",
+            "artifact_extraction": "owned_ascii_runtime_npz_and_manifest",
+            "caller_selected_artifact_path": False,
+            "png_rendering": "not_yet_public",
         },
         "manual_search": {
             "backend": "sqlite_fts5_bm25",

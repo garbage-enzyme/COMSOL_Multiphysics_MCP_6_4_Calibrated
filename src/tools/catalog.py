@@ -113,7 +113,7 @@ _TOOLS_BY_REGISTRAR = {
         "visual_review_receipt_create", "visual_review_dual_evaluate",
     ),
     "src.tools.field_evidence.register_field_evidence_tools": (
-        "wave_optics_field_datasets",
+        "wave_optics_field_datasets", "wave_optics_field_extract",
     ),
     "src.tools.semantic_docs.register_semantic_doc_tools": (
         "semantic_search", "semantic_status", "semantic_worker_reset",
@@ -186,6 +186,7 @@ _EXPERIMENTAL_TOOLS = frozenset({
     "wave_optics_incidence_preview",
     "wave_optics_incidence_apply",
     "wave_optics_field_datasets",
+    "wave_optics_field_extract",
     "semantic_search", "semantic_status", "semantic_worker_reset",
 })
 
@@ -319,6 +320,7 @@ _WAVE_OPTICS_ADDITIONS = frozenset({
     "wave_optics_reference_audit",
     "wave_optics_material_expression_preview",
     "wave_optics_field_datasets",
+    "wave_optics_field_extract",
     "visual_review_capability_normalize", "visual_review_request_create",
     "visual_review_receipt_create", "visual_review_dual_evaluate",
 })

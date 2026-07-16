@@ -18,6 +18,7 @@ def _source(kind: str = "existing_dataset", suffix: str = "on") -> dict:
     if kind == "existing_dataset":
         return {
             "kind": kind,
+            "source_model_sha256": "d" * 64,
             "component_tag": "comp1",
             "dataset_name": f"Study 1//Solution {suffix}",
             "dataset_tag": f"dset_{suffix}",
@@ -26,6 +27,7 @@ def _source(kind: str = "existing_dataset", suffix: str = "on") -> dict:
         }
     return {
         "kind": "validation_matrix_point",
+        "source_model_sha256": "d" * 64,
         "job_id": "job-123",
         "point_id": suffix,
         "point_fingerprint": ("a" if suffix == "on" else "b") * 64,

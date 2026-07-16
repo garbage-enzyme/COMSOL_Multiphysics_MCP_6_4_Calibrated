@@ -91,7 +91,11 @@ def collect_existing_dataset_field_evidence(
         evaluated = model.evaluate(
             evaluation_expressions,
             dataset=source["dataset_name"],
-            inner=source["solution_number"],
+            inner=(
+                [source["solution_number"]]
+                if source["solution_number"] is not None
+                else None
+            ),
         )
     except Exception as exc:
         raise RuntimeError(f"existing dataset field evaluation failed: {exc}") from exc
