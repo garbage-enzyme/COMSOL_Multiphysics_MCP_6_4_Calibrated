@@ -51,6 +51,7 @@ from .field_matrix import (
     bind_validation_matrix_field_request,
     normalize_validation_matrix_field_inputs,
 )
+from .field_render import render_field_png_bundle
 
 __all__ = [
     "EVIDENCE_STATES",
@@ -90,4 +91,5 @@ __all__ = [
     "discover_field_datasets",
     "bind_validation_matrix_field_request",
     "normalize_validation_matrix_field_inputs",
+    "render_field_png_bundle",
 ]

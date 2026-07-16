@@ -238,7 +238,8 @@ def get_capabilities(selection: ProfileSelection | None = None) -> dict:
             "model_mutation": False,
             "artifact_extraction": "owned_ascii_runtime_npz_and_manifest",
             "caller_selected_artifact_path": False,
-            "png_rendering": "not_yet_public",
+            "png_rendering": "isolated_bundle_renderer_available_not_yet_public",
+            "paired_png_shared_color_limits_required": True,
         },
         "manual_search": {
             "backend": "sqlite_fts5_bm25",
