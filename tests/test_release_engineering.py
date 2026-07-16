@@ -49,7 +49,7 @@ def test_support_matrix_matches_frozen_profile_counts_and_declared_dependencies(
         profile: len(tools) for profile, tools in names.items()
     }
     dependencies = "\n".join(pyproject["project"]["dependencies"])
-    for package in ("mcp", "mph", "pydantic", "psutil"):
+    for package in ("mcp", "mph", "numpy", "pydantic", "psutil", "scipy"):
         assert re.search(rf"(?m)^{package}(?:[<>=]|$)", dependencies)
     assert any(item.startswith("build>=") for item in pyproject["project"]["optional-dependencies"]["dev"])
 
@@ -90,6 +90,8 @@ def test_hosted_ci_is_dependency_only_and_real_gate_is_explicit():
     assert "python -m pytest -q" in workflow
     assert "python -m build" in workflow
     assert "release_gate.py --skip-tests" in workflow
+    assert "actions/checkout@v7" in workflow
+    assert "actions/setup-python@v6" in workflow
     assert "-m integration" not in workflow
     assert "RUN_REAL_COMSOL" in real_gate
     assert 'choices=["RUN_REAL_COMSOL"]' in real_gate
