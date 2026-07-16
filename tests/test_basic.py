@@ -65,6 +65,13 @@ class TestVersioning:
         assert result == tmp_path / "model" / "model_latest.mph"
         assert result.parent.is_dir()
 
+    def test_default_model_storage_uses_runtime_root(self, monkeypatch, tmp_path):
+        from src.utils.versioning import get_model_directory
+
+        monkeypatch.setenv("COMSOL_MCP_RUNTIME_DIR", str(tmp_path))
+
+        assert get_model_directory("model.mph") == tmp_path / "models" / "model"
+
     def test_list_versions_uses_custom_base(self, tmp_path):
         from src.utils.versioning import list_model_versions
 

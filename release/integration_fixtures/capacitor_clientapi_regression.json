@@ -3,7 +3,7 @@
   "fixture_id": "capacitor_clientapi_regression",
   "evidence_state": "verified_baseline",
   "real_comsol_required": true,
-  "runner": "tests/integration/test_real_comsol.py::test_real_comsol_probe_in_fresh_process[test_e2e_cap.py]",
+  "runner": "tests/integration/test_real_comsol.py::test_real_comsol_probe_in_fresh_process[capacitor]",
   "inputs": {
     "relative_permittivity": 2.1,
     "plate_side_m": 0.01,

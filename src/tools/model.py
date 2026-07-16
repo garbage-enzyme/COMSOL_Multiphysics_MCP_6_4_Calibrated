@@ -6,13 +6,12 @@ from tempfile import mkdtemp
 from mcp.server.fastmcp import FastMCP
 
 from .session import session_manager
+from ..utils.runtime_paths import default_runtime_dir
 from ..utils.versioning import (
     generate_version_path, 
     generate_latest_path,
     parse_version_info,
     list_model_versions,
-    get_model_directory,
-    MODELS_BASE_DIR
 )
 
 
@@ -36,10 +35,18 @@ def _save_model_file(
     return str(path)
 
 
-def _clone_model(client, model, new_name: Optional[str] = None):
+def _clone_model(
+    client,
+    model,
+    new_name: Optional[str] = None,
+    *,
+    clone_root: Optional[Path] = None,
+):
     """Clone a standalone client model through clientapi Save Copy + load."""
     clone_name = new_name or f"{model.name()}_copy"
-    temp_dir = Path(mkdtemp(prefix="comsol_mcp_clone_", dir=str(Path.cwd())))
+    root = clone_root or (default_runtime_dir() / "model_clones")
+    root.mkdir(parents=True, exist_ok=True)
+    temp_dir = Path(mkdtemp(prefix="comsol_mcp_clone_", dir=str(root)))
     copy_path = temp_dir / "clone.mph"
     try:
         model.java.save(str(copy_path), True)
@@ -268,18 +275,19 @@ def register_model_tools(mcp: FastMCP) -> None:
         """
         Save a model with a timestamp version suffix.
         
-        Creates a new file with structured path: 
-        ./comsol_models/{model_name}/{model_name}_{timestamp}.mph
+        Creates a new file with structured path:
+        <runtime>/models/{model_name}/{model_name}_{timestamp}.mph
         
         Also saves a 'latest' copy: 
-        ./comsol_models/{model_name}/{model_name}_latest.mph
+        <runtime>/models/{model_name}/{model_name}_latest.mph
         
         Useful for version control and design iterations.
         
         Args:
             model_name: Name of the model to save (default: current model)
             description: Optional description for this version (stored in metadata)
-            base_path: Optional model-storage root. Defaults to ``comsol_models``.
+            base_path: Optional model-storage root. Defaults to the runtime
+                directory's ``models`` subdirectory.
         
         Returns:
             Save confirmation with versioned file path, or error message

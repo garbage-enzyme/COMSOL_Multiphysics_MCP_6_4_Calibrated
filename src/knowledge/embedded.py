@@ -603,7 +603,7 @@ def register_knowledge_tools(
 
         ⚠️  db_dir / pdf_dir must use ASCII-only paths (no Chinese/Unicode characters).
            hnswlib (ChromaDB's C++ backend) cannot open indices on non-ASCII paths.
-           Example: db_dir="D:/comsol_kb_v2"  (not "C:\\Users\\张三\\...")
+           Example: db_dir="D:/comsol_kb_v2"  (not a non-ASCII profile path)
 
         Args:
             query: Search query describing what you're looking for

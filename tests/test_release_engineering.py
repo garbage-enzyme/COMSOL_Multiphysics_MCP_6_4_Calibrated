@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path, PurePosixPath, PureWindowsPath
 import re
+import subprocess
 import tomllib
 
 from scripts.run_real_release_gate import _wait_clean_ownership
@@ -14,6 +15,20 @@ ROOT = Path(__file__).parents[1]
 RELEASE = ROOT / "release"
 FIXTURES = RELEASE / "integration_fixtures"
 SNAPSHOTS = ROOT / "tests" / "snapshots"
+
+
+def _tracked_entries() -> list[tuple[str, str]]:
+    completed = subprocess.run(
+        ["git", "ls-files", "--stage"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return [
+        (metadata.split()[0], path)
+        for metadata, path in (line.split("\t", 1) for line in completed.stdout.splitlines())
+    ]
 
 
 def _json(path: Path):
@@ -52,6 +67,41 @@ def test_support_matrix_matches_frozen_profile_counts_and_declared_dependencies(
     for package in ("mcp", "mph", "numpy", "pydantic", "psutil", "scipy"):
         assert re.search(rf"(?m)^{package}(?:[<>=]|$)", dependencies)
     assert any(item.startswith("build>=") for item in pyproject["project"]["optional-dependencies"]["dev"])
+
+
+def test_repository_root_is_release_focused_and_free_of_generated_artifacts():
+    entries = _tracked_entries()
+    root_files = {path for _mode, path in entries if "/" not in path}
+    assert root_files == {
+        ".gitattributes",
+        ".gitignore",
+        "DEPLOYMENT.md",
+        "DEPLOYMENT_CN.md",
+        "LICENSE",
+        "README.md",
+        "README_CN.md",
+        "pyproject.toml",
+    }
+
+    forbidden_suffixes = {".class", ".lock", ".mph", ".pyc", ".recovery", ".status"}
+    for mode, path_text in entries:
+        path = Path(path_text)
+        assert mode != "160000", f"orphaned gitlink: {path_text}"
+        assert path.name != ".DS_Store"
+        assert "__pycache__" not in path.parts
+        assert path.suffix not in forbidden_suffixes
+        assert path.name not in {"server_err.txt", "server_log.txt"}
+
+
+def test_public_tracked_text_has_no_user_profile_paths():
+    text_suffixes = {".json", ".md", ".py", ".toml", ".yaml", ".yml"}
+    for _mode, path_text in _tracked_entries():
+        path = Path(path_text)
+        if path.parts[0] == "tests" or path.suffix not in text_suffixes:
+            continue
+        text = (ROOT / path).read_text(encoding="utf-8", errors="replace")
+        assert "C:/Users/" not in text, path_text
+        assert "C:\\\\Users\\\\" not in text, path_text
 
 
 def test_release_integration_fixture_manifest_is_complete_and_sanitized():

@@ -1,6 +1,7 @@
 """Unit tests for model management helpers without a COMSOL client."""
 
 import json
+from pathlib import Path
 
 from src.tools.model import _clone_model, _list_model_components, _save_model_file
 
@@ -90,18 +91,26 @@ class CloneClient:
         return self.cloned
 
 
-def test_clone_model_uses_clientapi_save_copy_and_load():
+def test_clone_model_uses_clientapi_save_copy_and_load(tmp_path):
     source = CloneModel()
     cloned = CloneModel("Loaded")
     client = CloneClient(cloned)
 
-    result, cleanup_path = _clone_model(client, source, "Independent Copy")
+    clone_root = tmp_path / "model_clones"
+    result, cleanup_path = _clone_model(
+        client,
+        source,
+        "Independent Copy",
+        clone_root=clone_root,
+    )
 
     assert result is cloned
     assert source.java.saved[0][1] is True
     assert client.loaded == [source.java.saved[0][0]]
     assert cleanup_path == source.java.saved[0][0]
+    assert Path(cleanup_path).parent.parent == clone_root
     assert cloned.java.model_label == "Independent Copy"
+    Path(cleanup_path).parent.rmdir()
 
 
 class JavaStringLike:

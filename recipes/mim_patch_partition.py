@@ -11,6 +11,7 @@ Patch = 0.3x0.3µm center rectangle on the Al2O3/air interface (bnd6).
 LayeredTransition + LML only on patch boundary; rest = plain continuity.
 """
 import mph, jpype, sys, time
+from _paths import recipe_output_dir
 try:
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
     sys.stderr.reconfigure(encoding='utf-8', errors='replace')
@@ -188,7 +189,8 @@ except Exception as e:
     print(f'Solve FAIL: {repr(e)[:300]}', flush=True)
     import traceback; traceback.print_exc()
 
-try: m.save('C:/Users/陆星/AppData/Local/Temp/opencode/MIM_patch.mph')
+output_dir = recipe_output_dir()
+try: m.java.save(str((output_dir / "MIM_patch.mph").resolve()))
 except Exception as e: print(f'save err: {repr(e)[:150]}', flush=True)
 try: client.disconnect()
 except Exception: pass

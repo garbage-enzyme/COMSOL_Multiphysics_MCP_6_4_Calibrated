@@ -1,9 +1,22 @@
 # Python
 __pycache__/
 *.pyc
+.pytest_cache/
+
+# OS and editor residue
+.DS_Store
 
 # Local environment / config
 opencode.json
+
+# COMSOL-generated local artifacts
+*.mph.lock
+*.class
+*.recovery
+*.status
+server_err.txt
+server_log.txt
+comsol_mcp_clone_*/
 
 # COMSOL knowledge base (binary, large, regenerable)
 knowledge_base/

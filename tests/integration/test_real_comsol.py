@@ -10,9 +10,9 @@ import pytest
 
 ROOT = Path(__file__).parents[2]
 PROBES = (
-    "test_study_mesh.py",
-    "test_e2e_cap.py",
-    "test_unicode_save.py",
+    pytest.param("tests/integration/probes/study_mesh.py", id="study_mesh"),
+    pytest.param("tests/integration/probes/capacitor.py", id="capacitor"),
+    pytest.param("tests/integration/probes/unicode_save.py", id="unicode_save"),
     "tests/integration/h2a_native_cancel_probe.py",
     "tests/integration/h3c_real_properties.py",
     "tests/integration/h3d_real_preflight.py",

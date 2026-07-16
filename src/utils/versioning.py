@@ -3,8 +3,12 @@
 from datetime import datetime
 from pathlib import Path
 
-# Base directory for all COMSOL models
-MODELS_BASE_DIR = Path(__file__).parent.parent.parent / "comsol_models"
+from .runtime_paths import default_runtime_dir
+
+
+def default_models_root() -> Path:
+    """Return the writable runtime directory for versioned model copies."""
+    return default_runtime_dir() / "models"
 
 
 def get_model_directory(
@@ -16,14 +20,15 @@ def get_model_directory(
     
     Args:
         model_name: Name of the model.
-        base_path: Optional model-storage root. Defaults to ``comsol_models``.
+        base_path: Optional model-storage root. Defaults to the runtime
+            directory's ``models`` subdirectory.
         
     Returns:
         Path to the model directory
     """
     # Clean model name (remove .mph extension if present)
     clean_name = Path(model_name).stem
-    root = Path(base_path).expanduser() if base_path is not None else MODELS_BASE_DIR
+    root = Path(base_path).expanduser() if base_path is not None else default_models_root()
     return root / clean_name
 
 
@@ -47,12 +52,12 @@ def generate_version_name(base_name: str) -> str:
 def generate_version_path(model_name: str, base_path: str | Path | None = None) -> str:
     """
     Generate a versioned file path with timestamp suffix.
-    Uses structured path: ./comsol_models/{model_name}/{model_name}_{timestamp}.mph
+    Uses structured path: <runtime>/models/{model_name}/{model_name}_{timestamp}.mph
     
     Args:
         model_name: Name of the model (used for directory)
         base_path: Optional directory in which to create the model subdirectory.
-            When omitted, uses the repository's ``comsol_models`` directory.
+            When omitted, uses the runtime directory's ``models`` subdirectory.
         
     Returns:
         Versioned file path with timestamp
@@ -77,11 +82,12 @@ def generate_latest_path(
 ) -> str:
     """
     Generate path for the 'latest' version of a model.
-    Uses structured path: ./comsol_models/{model_name}/{model_name}_latest.mph
+    Uses structured path: <runtime>/models/{model_name}/{model_name}_latest.mph
     
     Args:
         model_name: Name of the model.
-        base_path: Optional model-storage root. Defaults to ``comsol_models``.
+        base_path: Optional model-storage root. Defaults to the runtime
+            directory's ``models`` subdirectory.
         
     Returns:
         Path for the latest version
@@ -101,7 +107,8 @@ def list_model_versions(
     
     Args:
         model_name: Name of the model.
-        base_path: Optional model-storage root. Defaults to ``comsol_models``.
+        base_path: Optional model-storage root. Defaults to the runtime
+            directory's ``models`` subdirectory.
         
     Returns:
         List of version file paths, sorted by modification time (newest first)

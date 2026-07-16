@@ -4,6 +4,7 @@ Continuous Au film (no patch) first — verify Rtotal<1 at some wavelengths.
 Then patch (spatial-varying lth) for resonance.
 """
 import mph, jpype, sys, time
+from _paths import recipe_output_dir
 try:
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
     sys.stderr.reconfigure(encoding='utf-8', errors='replace')
@@ -124,7 +125,8 @@ except Exception as e:
     print('Solve FAIL:', repr(e)[:300], flush=True)
     import traceback; traceback.print_exc()
 
-try: m.save('C:/Users/陆星/AppData/Local/Temp/opencode/MIM_drude.mph')
+output_dir = recipe_output_dir()
+try: m.java.save(str((output_dir / "MIM_drude.mph").resolve()))
 except Exception as e: print('save err:', repr(e)[:150], flush=True)
 try: client.disconnect()
 except Exception: pass

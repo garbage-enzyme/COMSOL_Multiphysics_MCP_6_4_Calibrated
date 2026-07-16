@@ -8,16 +8,20 @@ import pytest
 
 
 @pytest.mark.parametrize(
-    "script_name",
-    ["test_e2e_cap.py", "test_study_mesh.py", "test_unicode_save.py"],
+    "script_path",
+    [
+        "tests/integration/probes/capacitor.py",
+        "tests/integration/probes/study_mesh.py",
+        "tests/integration/probes/unicode_save.py",
+    ],
 )
-def test_loading_standalone_probe_does_not_create_client(monkeypatch, script_name):
+def test_loading_standalone_probe_does_not_create_client(monkeypatch, script_path):
     def fail_client_creation(*args, **kwargs):
         raise AssertionError("mph.Client must not be called while loading a probe")
 
     monkeypatch.setattr(mph, "Client", fail_client_creation)
-    script_path = Path(__file__).parents[1] / script_name
+    full_path = Path(__file__).parents[1] / script_path
 
-    namespace = runpy.run_path(str(script_path), run_name="probe_import_test")
+    namespace = runpy.run_path(str(full_path), run_name="probe_import_test")
 
     assert callable(namespace["main"])
