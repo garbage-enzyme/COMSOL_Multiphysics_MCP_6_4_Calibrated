@@ -1,4 +1,4 @@
-"""M3 typed, solver-free PeriodicStructure incidence preview gates."""
+"""Typed, solver-free PeriodicStructure incidence preview gates."""
 
 from __future__ import annotations
 

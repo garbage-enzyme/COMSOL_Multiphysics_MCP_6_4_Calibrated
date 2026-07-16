@@ -1,4 +1,4 @@
-"""Detached, solver-free H2 cancellation coordinator."""
+"""Detached, solver-free durable cancellation cancellation coordinator."""
 
 from __future__ import annotations
 
@@ -189,7 +189,7 @@ def _commit_cancelled(
 def _verify_solver_cleanup(store: JobStore, job_id: str) -> dict[str, Any]:
     """Verify the target job's recorded lease, server identities, and port.
 
-    Bare historical server PIDs are intentionally insufficient: an H2 terminal
+    Bare historical server PIDs are intentionally insufficient: an durable cancellation terminal
     cancellation must remain blocked rather than risk acting after PID reuse.
     """
     # This common path is intentionally dependency-free: most workers release

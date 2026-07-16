@@ -1,4 +1,4 @@
-"""H1 solver-free gates for declared physical-power evidence."""
+"""reference-power solver-free gates for declared physical-power evidence."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""H4e static profile, public schema, configuration, and degradation gates."""
+"""semantic profile static profile, public schema, configuration, and degradation gates."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ from src.tools.semantic_docs import register_semantic_doc_tools
 
 @pytest.fixture
 def lightweight_deployment():
-    root = Path("D:/comsol_semantic_h4e_test") / uuid.uuid4().hex
+    root = Path("D:/comsol_semantic_profile_test") / uuid.uuid4().hex
     index = root / "indexes" / "corpus" / "model" / "build-1"
     model = root / "models" / "model" / "r1"
     lexical = root / "lexical" / "manuals.sqlite3"
@@ -182,7 +182,7 @@ print(json.dumps({'count': len(names), 'configured': status['configured']}))
 def test_default_and_other_research_profiles_remain_unchanged():
     counts = {}
     for profile in ("core", "basic_fem", "wave_optics", "experimental", "full"):
-        server = create_server(f"h4e-{profile}", profile=profile)
+        server = create_server(f"semantic-profile-{profile}", profile=profile)
         counts[profile] = len(asyncio.run(server.list_tools()))
 
     assert counts == {

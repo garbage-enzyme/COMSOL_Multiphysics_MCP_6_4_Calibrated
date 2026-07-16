@@ -66,7 +66,7 @@ def test_synthetic_large_inventory_preserves_external_owner_and_pid_identity(run
         parent_pid=0,
         create_time=own["create_time"],
         command_line=own["command_line"],
-        owner="p4-synthetic",
+        owner="process-inventory-synthetic",
     )
     latencies = []
     for _ in range(40):
@@ -95,9 +95,9 @@ def test_reused_lease_pid_fails_closed_without_acting_on_reused_process(runtime_
         parent_pid=0,
         create_time=original["create_time"],
         command_line=original_command,
-        owner="p4-original",
+        owner="process-inventory-original",
     )
-    assert owner.acquire(mode="p4-stress")["success"] is True
+    assert owner.acquire(mode="process-inventory-stress")["success"] is True
 
     reused = _record(920_001, 3999.0, ["python.exe", "unrelated-process"])
     observer_process = _record(920_002, 3001.0, ["python.exe", "observer"])
@@ -118,7 +118,7 @@ def test_reused_lease_pid_fails_closed_without_acting_on_reused_process(runtime_
         parent_pid=0,
         create_time=observer_process["create_time"],
         command_line=observer_process["command_line"],
-        owner="p4-observer",
+        owner="process-inventory-observer",
     )
     status = observer.status()
 
@@ -147,7 +147,7 @@ def test_bounded_inventory_timeout_fails_closed_and_cache_cannot_authorize_acqui
         parent_pid=0,
         create_time=1.0,
         command_line=["python.exe", "-m", "src.server"],
-        owner="p9-timeout-observer",
+        owner="inventory-timeout-timeout-observer",
     )
     started = time.monotonic()
     status = manager.status()
@@ -196,7 +196,7 @@ def test_real_host_inventory_retains_marker_during_short_process_churn(runtime_d
         parent_pid=0,
         create_time=1.0,
         command_line=["python.exe", "-m", "src.server"],
-        owner="p4-real-observer",
+        owner="process-inventory-real-observer",
     )
     latencies = []
     complete_scans = 0

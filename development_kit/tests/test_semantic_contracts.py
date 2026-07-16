@@ -1,4 +1,4 @@
-"""H4a gates for benchmark, manifests, limits, and import safety."""
+"""semantic benchmark gates for benchmark, manifests, limits, and import safety."""
 
 from __future__ import annotations
 
@@ -14,11 +14,11 @@ import pytest
 from src.knowledge.lexical_manual import build_index_from_records
 from development_kit.benchmarks.semantic_benchmark import evaluate_lexical_baseline
 from src.knowledge.semantic_contracts import (
-    H4A_CONTINUATION_GATE,
+    SEMANTIC_CONTINUATION_GATE,
     PUBLIC_LIMITS,
     THREAT_MODEL,
     canonical_json_bytes,
-    evaluate_h4a_continuation,
+    evaluate_semantic_continuation,
     validate_evaluation_set,
     validate_index_manifest,
     validate_model_manifest,
@@ -26,7 +26,7 @@ from src.knowledge.semantic_contracts import (
 
 
 ROOT = Path(__file__).parents[2]
-EVALUATION_PATH = ROOT / "development_kit" / "tests" / "fixtures" / "h4_retrieval_evaluation.json"
+EVALUATION_PATH = ROOT / "development_kit" / "tests" / "fixtures" / "semantic_retrieval_evaluation.json"
 SHA_A = "a" * 64
 SHA_B = "b" * 64
 SHA_C = "c" * 64
@@ -88,24 +88,24 @@ def test_contract_json_rejects_nonfinite_values_and_limits_are_bounded():
     assert "no_solver_lease_or_COMSOL_start" in THREAT_MODEL["containment"]
 
 
-def test_h4a_continuation_gate_requires_a_material_target_slice_gap():
-    blocked = evaluate_h4a_continuation({
+def test_semantic_continuation_gate_requires_a_material_target_slice_gap():
+    blocked = evaluate_semantic_continuation({
         "target_styles": {"query_count": 30, "recall_at_5": 0.9, "misses_at_5": 3}
     })
-    continuing = evaluate_h4a_continuation({
+    continuing = evaluate_semantic_continuation({
         "target_styles": {
-            "query_count": H4A_CONTINUATION_GATE["minimum_target_queries"],
-            "recall_at_5": H4A_CONTINUATION_GATE["maximum_lexical_recall_at_5"],
-            "misses_at_5": H4A_CONTINUATION_GATE["minimum_target_misses_at_5"],
+            "query_count": SEMANTIC_CONTINUATION_GATE["minimum_target_queries"],
+            "recall_at_5": SEMANTIC_CONTINUATION_GATE["maximum_lexical_recall_at_5"],
+            "misses_at_5": SEMANTIC_CONTINUATION_GATE["minimum_target_misses_at_5"],
         }
     })
 
-    assert blocked["continue_to_h4b"] is False
-    assert continuing["continue_to_h4b"] is True
+    assert blocked["continue_to_semantic_worker"] is False
+    assert continuing["continue_to_semantic_worker"] is True
 
 
 def test_lexical_baseline_computes_rank_metrics_without_semantic_dependencies():
-    root = Path("D:/comsol_semantic_h4a_test") / uuid.uuid4().hex
+    root = Path("D:/comsol_semantic_contract_test") / uuid.uuid4().hex
     index = root / "manuals.sqlite3"
     corpus = "d" * 64
     source = "COMSOL_Multiphysics/COMSOL_ReferenceManual.pdf"
@@ -145,10 +145,10 @@ def test_lexical_baseline_computes_rank_metrics_without_semantic_dependencies():
     assert result["query_count"] == 60
     assert result["summary"]["overall"]["recall_at_5"] == 1.0
     assert result["summary"]["overall"]["mrr_at_10"] == 1.0
-    assert result["continuation_gate"]["continue_to_h4b"] is False
+    assert result["continuation_gate"]["continue_to_semantic_worker"] is False
 
 
-def test_h4a_imports_do_not_load_heavy_semantic_or_comsol_modules():
+def test_semantic_contract_imports_do_not_load_heavy_semantic_or_comsol_modules():
     code = """
 import json, sys
 import src.knowledge.semantic_contracts

@@ -1,4 +1,4 @@
-"""Offline, versioned H4 semantic-index construction and validation.
+"""Offline, versioned semantic-index construction and validation.
 
 The module imports only the Python standard library at import time. NumPy and
 SentenceTransformers are loaded only inside offline build/validation calls.

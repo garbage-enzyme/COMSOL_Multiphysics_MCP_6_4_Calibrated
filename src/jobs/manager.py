@@ -1,4 +1,4 @@
-"""Solver-free H1 control plane for durable job submission and reconciliation."""
+"""Solver-free reference-power control plane for durable job submission and reconciliation."""
 
 from __future__ import annotations
 
@@ -635,7 +635,7 @@ class JobManager:
         # A cancellation coordinator must be able to acquire the durable lock
         # promptly.  Atomic state replacement makes this terminal observation
         # safe without taking the polling lock, and it avoids status callers
-        # starving the coordinator during the H2 grace/verification window.
+        # starving the coordinator during the durable cancellation grace/verification window.
         try:
             observed = self.store.read_state(job_id)
         except RuntimeError:

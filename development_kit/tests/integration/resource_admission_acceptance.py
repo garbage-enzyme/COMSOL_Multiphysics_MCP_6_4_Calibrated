@@ -1,4 +1,4 @@
-"""Controlled COMSOL 6.4 gate for M4 detached resource admission."""
+"""Controlled COMSOL 6.4 gate for detached resource admission."""
 
 from __future__ import annotations
 
@@ -48,18 +48,18 @@ def _build_source(runtime: Path, source_path: Path, mesh_receipt: Path) -> None:
     import jpype
     import mph
 
-    owner = SolverOwnership(runtime, owner="m4-resource-builder")
+    owner = SolverOwnership(runtime, owner="resource-admission-builder")
     client = None
     model = None
     result = {"success": False, "solve_ran": False}
     exit_code = 1
     started = time.monotonic()
     try:
-        claim = owner.acquire(mode="m4_mesh_builder", model_path=str(source_path))
+        claim = owner.acquire(mode="resource_mesh_builder", model_path=str(source_path))
         if not claim.get("acquired"):
             raise RuntimeError(f"solver lease unavailable: {claim}")
         client = mph.Client(cores=1, version="6.4")
-        model = client.create("M4ResourceSource")
+        model = client.create("ResourceAdmissionSource")
         jm = model.java
         for name, value in (
             ("L", "0.01[m]"),
@@ -159,25 +159,25 @@ def _poll_terminal(manager: JobManager, job_id: str, timeout_seconds: float) -> 
         if state["status"] in TERMINAL_STATES:
             return state
         time.sleep(0.25)
-    raise TimeoutError(f"M4 detached job did not become terminal: {job_id}")
+    raise TimeoutError(f"resource admission detached job did not become terminal: {job_id}")
 
 
 def _poll_cleanup(runtime: Path, timeout_seconds: float) -> dict:
     deadline = time.monotonic() + timeout_seconds
     latest = None
     while time.monotonic() < deadline:
-        latest = SolverOwnership(runtime, owner="m4-resource-gate-cleanup").status()
+        latest = SolverOwnership(runtime, owner="resource-admission-cleanup").status()
         if not latest["collision"] and latest["lease"]["state"] == "absent":
             return latest
         time.sleep(0.25)
-    raise TimeoutError(f"M4 detached worker cleanup did not complete: {latest}")
+    raise TimeoutError(f"resource admission detached worker cleanup did not complete: {latest}")
 
 
 def _run_gate() -> None:
     runtime = Path(os.environ.get("COMSOL_MCP_RUNTIME_DIR", "D:/comsol_runtime"))
-    artifact_dir = runtime / "M4"
+    artifact_dir = runtime / "resource_admission"
     artifact_dir.mkdir(parents=True, exist_ok=True)
-    source_path = artifact_dir / "m4_resource_source.mph"
+    source_path = artifact_dir / "resource_admission_source.mph"
     mesh_receipt_path = artifact_dir / "mesh_gate_receipt.json"
     result_path = artifact_dir / "resource_gate_result.json"
     result = {"success": False}
@@ -201,12 +201,12 @@ def _run_gate() -> None:
         )
         if completed.returncode != 0:
             raise RuntimeError(
-                "M4 source builder failed: "
+                "resource admission source builder failed: "
                 + (completed.stdout + completed.stderr)[-2000:]
             )
         mesh_receipt = json.loads(mesh_receipt_path.read_text(encoding="utf-8"))
         if not mesh_receipt.get("success") or not mesh_receipt.get("lease_release", {}).get("success"):
-            raise AssertionError(f"M4 mesh receipt failed: {mesh_receipt}")
+            raise AssertionError(f"resource admission mesh receipt failed: {mesh_receipt}")
         source_hash = _sha256(source_path)
         source_stat = source_path.stat()
 
@@ -235,7 +235,7 @@ def _run_gate() -> None:
             "total": 1,
         }:
             raise AssertionError(
-                f"M4 detached job did not complete one point: {terminal}; "
+                f"resource admission detached job did not complete one point: {terminal}; "
                 f"tail={manager.tail(job_id, 50)}"
             )
         job_dir = manager.store.job_dir(job_id)
@@ -244,17 +244,17 @@ def _run_gate() -> None:
         ) as handle:
             rows = list(csv.DictReader(handle))
         if len(rows) != 1 or rows[0].get("status") != "ok":
-            raise AssertionError(f"M4 result row mismatch: {rows}")
+            raise AssertionError(f"resource admission result row mismatch: {rows}")
         capacitance = float(rows[0]["2*es.intWe/V0^2"])
         if not 0.0 < capacitance < 1.0e-9:
-            raise AssertionError(f"M4 capacitance is outside bounds: {capacitance}")
+            raise AssertionError(f"resource admission capacitance is outside bounds: {capacitance}")
         journal = manager.store.read_resource_journal(job_id)
         telemetry = [entry for entry in journal if entry["entry_type"] == "telemetry"]
         admissions = [entry for entry in journal if entry["entry_type"] == "admission"]
         if [entry["stage"] for entry in telemetry] != ["pre_solve", "post_solve"]:
-            raise AssertionError(f"M4 telemetry stages mismatch: {telemetry}")
+            raise AssertionError(f"resource admission telemetry stages mismatch: {telemetry}")
         if any(entry["decision"] != "allow" for entry in admissions):
-            raise AssertionError(f"M4 admission did not stay green: {admissions}")
+            raise AssertionError(f"resource admission did not stay green: {admissions}")
         final_stat = source_path.stat()
         source_unchanged = (
             _sha256(source_path) == source_hash
@@ -262,7 +262,7 @@ def _run_gate() -> None:
             and final_stat.st_size == source_stat.st_size
         )
         if not source_unchanged:
-            raise AssertionError("M4 immutable source changed")
+            raise AssertionError("resource admission immutable source changed")
         final_status = _poll_cleanup(runtime, 30.0)
         result.update(
             success=True,

@@ -3,7 +3,7 @@
   "fixture_id": "passive_port_closure",
   "evidence_state": "contract_frozen_real_release_revalidation_required",
   "real_comsol_required": true,
-  "runner": "development_kit/tests/integration/h1_real_physical_evidence.py",
+  "runner": "development_kit/tests/integration/reference_power_acceptance.py",
   "acceptance": {
     "raw_rta_preserved": true,
     "r_min": 0.0,

@@ -18,7 +18,7 @@ from src.jobs.manager import JobManager
 
 fixture = controlled_fixture_from_environment()
 runtime = Path(os.environ.get("COMSOL_MCP_RUNTIME_DIR", "D:/comsol_runtime"))
-manager = JobManager(runtime / "h2d_real" / "jobs", cancel_grace_seconds=10, cancel_terminate_seconds=2)
+manager = JobManager(runtime / "durable_cancel" / "jobs", cancel_grace_seconds=10, cancel_terminate_seconds=2)
 wavelength = fixture["wavelength_um"]
 submitted = manager.submit(
     {

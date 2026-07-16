@@ -1,4 +1,4 @@
-"""H4a lexical baseline benchmark for the frozen semantic-retrieval evaluation set."""
+"""Lexical baseline benchmark for the frozen semantic-retrieval evaluation set."""
 
 from __future__ import annotations
 
@@ -15,9 +15,9 @@ from typing import Any, Iterable, Mapping
 
 from src.knowledge.lexical_manual import DEFAULT_INDEX_PATH, search_index
 from src.knowledge.semantic_contracts import (
-    H4A_CONTINUATION_GATE,
-    H4_PROMOTION_GATE,
-    evaluate_h4a_continuation,
+    SEMANTIC_CONTINUATION_GATE,
+    SEMANTIC_PROMOTION_GATE,
+    evaluate_semantic_continuation,
     object_sha256,
     validate_evaluation_set,
 )
@@ -28,7 +28,7 @@ DEFAULT_EVALUATION_PATH = (
     / "development_kit"
     / "tests"
     / "fixtures"
-    / "h4_retrieval_evaluation.json"
+    / "semantic_retrieval_evaluation.json"
 )
 BASELINE_SCHEMA_VERSION = "1"
 
@@ -188,7 +188,7 @@ def evaluate_lexical_baseline(
         style: _aggregate([row for row in rows if row["style"] == style])
         for style in sorted({row["style"] for row in rows})
     }
-    target_style_names = set(H4A_CONTINUATION_GATE["target_styles"])
+    target_style_names = set(SEMANTIC_CONTINUATION_GATE["target_styles"])
     target_rows = [
         row for row in rows
         if row["style"] in target_style_names and row["relevant"]
@@ -215,8 +215,8 @@ def evaluate_lexical_baseline(
         "query_count": len(rows),
         "lexical_index": public_index,
         "summary": summary,
-        "continuation_gate": evaluate_h4a_continuation(summary),
-        "future_promotion_gate": H4_PROMOTION_GATE,
+        "continuation_gate": evaluate_semantic_continuation(summary),
+        "future_promotion_gate": SEMANTIC_PROMOTION_GATE,
         "queries": rows,
     }
     return output

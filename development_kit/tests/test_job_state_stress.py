@@ -19,7 +19,7 @@ from src.jobs.store import JOB_SCHEMA_VERSION, JobStore
 
 
 def _stress_root() -> Path:
-    root = Path("D:/comsol_runtime_test/p3_state") / uuid.uuid4().hex
+    root = Path("D:/comsol_runtime_test/durable_state") / uuid.uuid4().hex
     root.mkdir(parents=True)
     return root
 
@@ -144,7 +144,7 @@ def test_concurrent_state_readers_writers_survive_sharing_violations(monkeypatch
         assert store.read_state(job_id) == final
     except BaseException as exc:
         archive = _archive_failure(root)
-        raise AssertionError(f"P3 durable-state stress failed; evidence archived at {archive}") from exc
+        raise AssertionError(f"durable-state durable-state stress failed; evidence archived at {archive}") from exc
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
@@ -255,6 +255,6 @@ def test_real_windows_exclusive_reader_does_not_corrupt_durable_state():
         assert not (store.job_dir(job_id) / ".state.lock").exists()
     except BaseException as exc:
         archive = _archive_failure(root)
-        raise AssertionError(f"P3 Windows sharing stress failed; evidence archived at {archive}") from exc
+        raise AssertionError(f"durable-state Windows sharing stress failed; evidence archived at {archive}") from exc
     finally:
         shutil.rmtree(root, ignore_errors=True)

@@ -28,9 +28,9 @@ Before a release:
    ```
 
 5. `--fixture-spec` supplies the controlled model/wavelength/top-air environment
-   for the licensed regression suite without rerunning the optional mandatory-H1
-   phase. Use `--require-h1 --h1-spec ...` only when that release must generate a
-   new H1 receipt as well.
+   for the licensed regression suite without rerunning the optional mandatory-reference-power
+   phase. Use `--require-reference-power --reference-power-spec ...` only when that release must generate a
+   new reference-power receipt as well.
 6. Require an unchanged COMSOL PID set, an absent solver lease, no external
    collision, source-integrity evidence, and all fixture contracts to pass.
 7. Build once more from the clean release commit and compare discovery output.

@@ -3,7 +3,7 @@
   "fixture_id": "periodic_mesh_audit",
   "evidence_state": "verified_baseline_release_revalidation_required",
   "real_comsol_required": true,
-  "runner": "development_kit/tests/integration/m1_periodic_mesh_audit.py",
+  "runner": "development_kit/tests/integration/periodic_mesh_acceptance.py",
   "acceptance": {
     "read_only": true,
     "source_sha256_unchanged": true,

@@ -1,4 +1,4 @@
-"""Isolated H4 semantic worker protocol with fake and hybrid backends."""
+"""Isolated semantic worker protocol with fake and hybrid backends."""
 
 from __future__ import annotations
 

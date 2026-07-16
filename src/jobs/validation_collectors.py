@@ -103,7 +103,7 @@ def execute_physical_audit_collector(
     point_audit_runner: Callable[..., Mapping[str, Any]] | None = None,
     reference_audit_runner: Callable[..., Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Run one declared H1 collector with matrix-owned identity fields."""
+    """Run one declared reference-power collector with matrix-owned identity fields."""
     if not isinstance(model_name, str) or not model_name:
         raise ValueError("model_name must be exact and nonempty")
     if not isinstance(expected_source_sha256, str) or not re.fullmatch(

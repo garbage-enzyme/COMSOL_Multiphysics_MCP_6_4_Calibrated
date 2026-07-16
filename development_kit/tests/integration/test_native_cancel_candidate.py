@@ -1,4 +1,4 @@
-"""Three-fresh-process acceptance gate for the H2a public cancel candidate."""
+"""Three-fresh-process acceptance gate for the native cancellation public cancel candidate."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ import pytest
 
 
 ROOT = Path(__file__).parents[3]
-PROBE = ROOT / "development_kit" / "tests" / "integration" / "h2a_native_cancel_probe.py"
+PROBE = ROOT / "development_kit" / "tests" / "integration" / "native_cancel_signature_probe.py"
 
 
 def _comsol_pids() -> set[int]:
@@ -34,16 +34,16 @@ def _comsol_pids() -> set[int]:
 
 @pytest.mark.integration
 def test_progress_context_cancel_stops_real_study_in_three_fresh_processes():
-    model_path = os.environ.get("COMSOL_H2A_PROBE_MODEL")
+    model_path = os.environ.get("COMSOL_durable cancellationA_PROBE_MODEL")
     if not model_path:
-        pytest.skip("set COMSOL_H2A_PROBE_MODEL to run the real H2a gate")
+        pytest.skip("set COMSOL_durable cancellationA_PROBE_MODEL to run the real native cancellation gate")
     assert Path(model_path).is_file(), model_path
 
     before = _comsol_pids()
     runs = []
     for index in range(3):
         environment = os.environ.copy()
-        environment["COMSOL_H2A_PROBE_MODEL"] = model_path
+        environment["COMSOL_durable cancellationA_PROBE_MODEL"] = model_path
         completed = subprocess.run(
             [sys.executable, str(PROBE)],
             cwd=ROOT,
@@ -56,7 +56,7 @@ def test_progress_context_cancel_stops_real_study_in_three_fresh_processes():
         try:
             result = json.loads(completed.stdout)
         except json.JSONDecodeError as exc:
-            pytest.fail(f"H2a probe did not emit one JSON manifest: {exc}\n{completed.stdout}")
+            pytest.fail(f"native cancellation probe did not emit one JSON manifest: {exc}\n{completed.stdout}")
         runs.append(result)
 
     time.sleep(2)

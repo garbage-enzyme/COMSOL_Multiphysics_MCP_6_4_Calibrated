@@ -28,13 +28,13 @@ def _sha256(path: Path) -> str:
 def main() -> None:
     artifact_dir = Path(
         os.environ.get("COMSOL_MCP_RUNTIME_DIR", "D:/comsol_runtime")
-    ) / "H3c"
+    ) / "clientapi property"
     artifact_dir.mkdir(parents=True, exist_ok=True)
     source_path = artifact_dir / "property_gate_source.mph"
     manifest_path = artifact_dir / "property_gate_result.json"
 
     client = mph.Client(cores=1)
-    model = client.create("H3cPropertyGate")
+    model = client.create("ClientapiPropertyGate")
     jm = model.java
     component = jm.component().create("comp1", True)
 

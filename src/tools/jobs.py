@@ -1,4 +1,4 @@
-"""MCP control-plane tools for durable H1 background jobs."""
+"""MCP control-plane tools for durable reference-power background jobs."""
 
 from __future__ import annotations
 

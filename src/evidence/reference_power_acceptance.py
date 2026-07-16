@@ -1,4 +1,4 @@
-"""Solver-free contracts for the H1 licensed physical-evidence gate."""
+"""Solver-free contracts for the reference-power licensed physical-evidence gate."""
 
 from __future__ import annotations
 
@@ -14,9 +14,9 @@ from .contracts import canonical_sha256
 from .power_audit import normalize_declared_plane_flux
 
 
-H1_CONTRACT_SCHEMA = "comsol_mcp.h1_licensed_gate"
-H1_EXECUTION_SCHEMA = "comsol_mcp.h1_execution_spec"
-H1_SCHEMA_VERSION = "1.0.0"
+REFERENCE_POWER_CONTRACT_SCHEMA = "comsol_mcp.h1_licensed_gate"
+REFERENCE_POWER_EXECUTION_SCHEMA = "comsol_mcp.h1_execution_spec"
+REFERENCE_POWER_SCHEMA_VERSION = "1.0.0"
 MAX_INPUT_BYTES = 256 * 1024
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 _TAG = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
@@ -119,10 +119,10 @@ def _relative_repo_path(value: Any, label: str) -> str:
     return path.as_posix()
 
 
-def validate_h1_acceptance_contract(value: Mapping[str, Any]) -> dict[str, Any]:
+def validate_reference_power_acceptance_contract(value: Mapping[str, Any]) -> dict[str, Any]:
     contract = _object(dict(value), "h1_acceptance_contract")
     _exact_fields(contract, _TOP_CONTRACT, "h1_acceptance_contract")
-    if contract["schema_name"] != H1_CONTRACT_SCHEMA or contract["schema_version"] != H1_SCHEMA_VERSION:
+    if contract["schema_name"] != REFERENCE_POWER_CONTRACT_SCHEMA or contract["schema_version"] != REFERENCE_POWER_SCHEMA_VERSION:
         raise ValueError("h1_acceptance_contract schema is unsupported")
     _text(contract["fixture_id"], "h1_acceptance_contract.fixture_id", 128)
     if contract["real_comsol_required"] is not True:
@@ -134,7 +134,7 @@ def validate_h1_acceptance_contract(value: Mapping[str, Any]) -> dict[str, Any]:
     for name in _LIMIT_FIELDS:
         _positive_int(limits[name], f"h1_acceptance_contract.limits.{name}")
     if limits["max_contract_bytes"] > MAX_INPUT_BYTES or limits["max_spec_bytes"] > MAX_INPUT_BYTES:
-        raise ValueError(f"H1 JSON input limits cannot exceed {MAX_INPUT_BYTES} bytes")
+        raise ValueError(f"reference-power JSON input limits cannot exceed {MAX_INPUT_BYTES} bytes")
     acceptance = _object(contract["acceptance"], "h1_acceptance_contract.acceptance")
     _exact_fields(acceptance, _ACCEPTANCE_FIELDS, "h1_acceptance_contract.acceptance")
     reference = _object(acceptance["reference_air"], "acceptance.reference_air")
@@ -178,16 +178,16 @@ def _validate_flux_declaration(value: Any) -> dict[str, Any]:
     }
 
 
-def validate_h1_execution_spec(
+def validate_reference_power_execution_spec(
     value: Mapping[str, Any],
     contract: Mapping[str, Any],
     *,
     verify_files: bool = False,
 ) -> dict[str, Any]:
-    strict_contract = validate_h1_acceptance_contract(contract)
+    strict_contract = validate_reference_power_acceptance_contract(contract)
     spec = _object(dict(value), "h1_execution_spec")
     _exact_fields(spec, _TOP_SPEC, "h1_execution_spec")
-    if spec["schema_name"] != H1_EXECUTION_SCHEMA or spec["schema_version"] != H1_SCHEMA_VERSION:
+    if spec["schema_name"] != REFERENCE_POWER_EXECUTION_SCHEMA or spec["schema_version"] != REFERENCE_POWER_SCHEMA_VERSION:
         raise ValueError("h1_execution_spec schema is unsupported")
     config_id = _text(spec["config_id"], "h1_execution_spec.config_id", 128)
     source_path = Path(_text(spec["source_model_path"], "h1_execution_spec.source_model_path")).expanduser()
@@ -239,8 +239,8 @@ def validate_h1_execution_spec(
         "t_expression": _text(reference["t_expression"], "reference_air.t_expression", 1024),
     }
     normalized = {
-        "schema_name": H1_EXECUTION_SCHEMA,
-        "schema_version": H1_SCHEMA_VERSION,
+        "schema_name": REFERENCE_POWER_EXECUTION_SCHEMA,
+        "schema_version": REFERENCE_POWER_SCHEMA_VERSION,
         "config_id": config_id,
         "source_model_path": str(source_path.resolve()),
         "expected_source_sha256": expected_hash,
@@ -272,16 +272,16 @@ def load_bounded_json(path: Path, maximum_bytes: int) -> dict[str, Any]:
     return _object(value, path.name)
 
 
-def build_h1_dry_run_receipt(
+def build_reference_power_dry_run_receipt(
     contract: Mapping[str, Any],
     spec: Mapping[str, Any] | None = None,
     *,
     verify_files: bool = False,
 ) -> dict[str, Any]:
-    strict_contract = validate_h1_acceptance_contract(contract)
+    strict_contract = validate_reference_power_acceptance_contract(contract)
     receipt: dict[str, Any] = {
         "schema_name": "comsol_mcp.h1_dry_run_receipt",
-        "schema_version": H1_SCHEMA_VERSION,
+        "schema_version": REFERENCE_POWER_SCHEMA_VERSION,
         "fixture_id": strict_contract["fixture_id"],
         "contract_sha256": canonical_sha256(strict_contract),
         "real_comsol_started": False,
@@ -289,7 +289,7 @@ def build_h1_dry_run_receipt(
         "spec_valid": None,
     }
     if spec is not None:
-        normalized = validate_h1_execution_spec(spec, strict_contract, verify_files=verify_files)
+        normalized = validate_reference_power_execution_spec(spec, strict_contract, verify_files=verify_files)
         path_free = deepcopy(normalized)
         path_free.pop("source_model_path")
         path_free.pop("artifact_dir")
@@ -306,11 +306,11 @@ def build_h1_dry_run_receipt(
 
 
 __all__ = [
-    "H1_CONTRACT_SCHEMA",
-    "H1_EXECUTION_SCHEMA",
-    "H1_SCHEMA_VERSION",
-    "build_h1_dry_run_receipt",
+    "REFERENCE_POWER_CONTRACT_SCHEMA",
+    "REFERENCE_POWER_EXECUTION_SCHEMA",
+    "REFERENCE_POWER_SCHEMA_VERSION",
+    "build_reference_power_dry_run_receipt",
     "load_bounded_json",
-    "validate_h1_acceptance_contract",
-    "validate_h1_execution_spec",
+    "validate_reference_power_acceptance_contract",
+    "validate_reference_power_execution_spec",
 ]

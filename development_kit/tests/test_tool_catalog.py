@@ -1,4 +1,4 @@
-"""Compatibility gates for the pre-H3 MCP discovery surface."""
+"""Compatibility gates for the pre-field evidence MCP discovery surface."""
 
 from __future__ import annotations
 
@@ -23,8 +23,8 @@ from src.tools.catalog import (
 
 
 SNAPSHOT_PATH = Path(__file__).parent / "snapshots" / "full_tool_schemas.json"
-PRE_H3_SNAPSHOT_PATH = (
-    Path(__file__).parent / "snapshots" / "pre_h3_tool_schemas.json"
+BASELINE_SNAPSHOT_PATH = (
+    Path(__file__).parent / "snapshots" / "baseline_tool_schemas.json"
 )
 
 
@@ -38,7 +38,7 @@ def test_full_tool_schema_snapshot_is_stable():
 
 
 def test_pre_h3_compatibility_snapshot_is_preserved():
-    legacy = json.loads(PRE_H3_SNAPSHOT_PATH.read_text(encoding="utf-8"))
+    legacy = json.loads(BASELINE_SNAPSHOT_PATH.read_text(encoding="utf-8"))
     current = json.loads(SNAPSHOT_PATH.read_text(encoding="utf-8"))
 
     assert len(legacy) == 96

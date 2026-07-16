@@ -1,4 +1,4 @@
-"""Pure M4 resource-policy validation and admission decisions."""
+"""Pure resource-policy validation and admission decisions."""
 
 from __future__ import annotations
 

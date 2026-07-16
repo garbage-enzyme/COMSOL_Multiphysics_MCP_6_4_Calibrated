@@ -1,4 +1,4 @@
-"""Dependency-free contracts for the optional H4 semantic retrieval service."""
+"""Dependency-free contracts for the optional semantic-retrieval service."""
 
 from __future__ import annotations
 
@@ -40,14 +40,14 @@ PUBLIC_LIMITS = {
     "maximum_queue_depth": 8,
 }
 
-H4A_CONTINUATION_GATE = {
+SEMANTIC_CONTINUATION_GATE = {
     "target_styles": ["paraphrase", "multi_concept", "zh_cross_language"],
     "maximum_lexical_recall_at_5": 0.80,
     "minimum_target_queries": 20,
     "minimum_target_misses_at_5": 10,
 }
 
-H4_PROMOTION_GATE = {
+SEMANTIC_PROMOTION_GATE = {
     "citation_validity": 1.0,
     "maximum_exact_symbol_recall_at_5_regression": 0.03,
     "minimum_target_recall_at_5_absolute_gain": 0.10,
@@ -114,7 +114,7 @@ def _require_sha256(value: Any, label: str) -> str:
 
 
 def validate_evaluation_set(payload: Mapping[str, Any], *, minimum_queries: int = 60) -> dict[str, Any]:
-    """Validate and normalize the frozen H4 retrieval evaluation set."""
+    """Validate and normalize the frozen semantic-retrieval evaluation set."""
     if not isinstance(payload, Mapping):
         raise ValueError("evaluation set must be an object")
     if payload.get("schema_version") != EVALUATION_SCHEMA_VERSION:
@@ -193,7 +193,7 @@ def validate_evaluation_set(payload: Mapping[str, Any], *, minimum_queries: int 
 
     return {
         "schema_version": EVALUATION_SCHEMA_VERSION,
-        "name": str(payload.get("name") or "h4-retrieval-evaluation"),
+        "name": str(payload.get("name") or "semantic-retrieval-evaluation"),
         "frozen_at": str(payload.get("frozen_at") or ""),
         "corpus_fingerprint": corpus_fingerprint,
         "queries": normalized_queries,
@@ -252,7 +252,7 @@ def validate_index_manifest(payload: Mapping[str, Any]) -> dict[str, Any]:
     return normalized
 
 
-def evaluate_h4a_continuation(baseline: Mapping[str, Any]) -> dict[str, Any]:
+def evaluate_semantic_continuation(baseline: Mapping[str, Any]) -> dict[str, Any]:
     """Apply the predeclared lexical-gap gate without semantic results."""
     target = baseline.get("target_styles")
     if not isinstance(target, Mapping):
@@ -263,18 +263,18 @@ def evaluate_h4a_continuation(baseline: Mapping[str, Any]) -> dict[str, Any]:
     finite = math.isfinite(recall_at_5)
     passed = (
         finite
-        and query_count >= H4A_CONTINUATION_GATE["minimum_target_queries"]
-        and recall_at_5 <= H4A_CONTINUATION_GATE["maximum_lexical_recall_at_5"]
-        and misses_at_5 >= H4A_CONTINUATION_GATE["minimum_target_misses_at_5"]
+        and query_count >= SEMANTIC_CONTINUATION_GATE["minimum_target_queries"]
+        and recall_at_5 <= SEMANTIC_CONTINUATION_GATE["maximum_lexical_recall_at_5"]
+        and misses_at_5 >= SEMANTIC_CONTINUATION_GATE["minimum_target_misses_at_5"]
     )
     return {
-        "continue_to_h4b": passed,
+        "continue_to_semantic_worker": passed,
         "measured": {
             "query_count": query_count,
             "recall_at_5": recall_at_5,
             "misses_at_5": misses_at_5,
         },
-        "thresholds": H4A_CONTINUATION_GATE,
+        "thresholds": SEMANTIC_CONTINUATION_GATE,
         "reason": (
             "material_lexical_gap_demonstrated" if passed
             else "material_lexical_gap_not_demonstrated"
@@ -285,15 +285,15 @@ def evaluate_h4a_continuation(baseline: Mapping[str, Any]) -> dict[str, Any]:
 __all__ = [
     "CONTRACT_VERSION",
     "DEFAULT_DEPLOYMENT_ROOT",
-    "H4A_CONTINUATION_GATE",
-    "H4_PROMOTION_GATE",
+    "SEMANTIC_CONTINUATION_GATE",
+    "SEMANTIC_PROMOTION_GATE",
     "INDEX_MANIFEST_SCHEMA_VERSION",
     "MODEL_MANIFEST_SCHEMA_VERSION",
     "PUBLIC_LIMITS",
     "THREAT_MODEL",
     "WORKER_PROTOCOL_SCHEMA_VERSION",
     "canonical_json_bytes",
-    "evaluate_h4a_continuation",
+    "evaluate_semantic_continuation",
     "object_sha256",
     "validate_evaluation_set",
     "validate_index_manifest",

@@ -1,4 +1,4 @@
-"""H4f forced 30-second hang/crash containment with live control-plane polls."""
+"""semantic soak forced 30-second hang/crash containment with live control-plane polls."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from src.tools.capabilities import get_capabilities
 from src.tools.ownership import SolverOwnership
 
 
-ROOT = Path("D:/comsol_runtime/H4f")
+ROOT = Path("D:/comsol_runtime/semantic_soak")
 MODEL = "D:/comsol_semantic/models/all-MiniLM-L6-v2/1110a243fdf4706b3f48f1d95db1a4f5529b4d41"
 
 

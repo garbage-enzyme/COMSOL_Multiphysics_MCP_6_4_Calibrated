@@ -3,7 +3,7 @@
   "fixture_id": "reference_air_polarization",
   "evidence_state": "contract_frozen_real_release_revalidation_required",
   "real_comsol_required": true,
-  "runner": "development_kit/tests/integration/h1_real_physical_evidence.py",
+  "runner": "development_kit/tests/integration/reference_power_acceptance.py",
   "acceptance": {
     "homogeneous_reference_selection_required": true,
     "incident_reference_artifact_required": true,

@@ -1,4 +1,4 @@
-"""E2 gates for solver-free dispersive material-expression previews."""
+"""material expressions gates for solver-free dispersive material-expression previews."""
 
 from __future__ import annotations
 

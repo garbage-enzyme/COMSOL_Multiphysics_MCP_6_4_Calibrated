@@ -1,4 +1,4 @@
-"""Solver-free validation entry point for the H1 licensed-gate inputs."""
+"""Solver-free validation entry point for the reference-power licensed-gate inputs."""
 
 from __future__ import annotations
 
@@ -12,11 +12,11 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.evidence.h1_acceptance import (
+from src.evidence.reference_power_acceptance import (
     MAX_INPUT_BYTES,
-    build_h1_dry_run_receipt,
+    build_reference_power_dry_run_receipt,
     load_bounded_json,
-    validate_h1_acceptance_contract,
+    validate_reference_power_acceptance_contract,
 )
 
 
@@ -25,7 +25,7 @@ DEFAULT_CONTRACT = (
     / "development_kit"
     / "release"
     / "integration_fixtures"
-    / "h1_physical_evidence.json"
+    / "reference_power_evidence.json"
 )
 
 
@@ -37,11 +37,11 @@ def main() -> int:
     parser.add_argument("--verify-files", action="store_true")
     args = parser.parse_args()
 
-    contract = validate_h1_acceptance_contract(load_bounded_json(args.contract, MAX_INPUT_BYTES))
+    contract = validate_reference_power_acceptance_contract(load_bounded_json(args.contract, MAX_INPUT_BYTES))
     spec = None
     if args.spec is not None:
         spec = load_bounded_json(args.spec, contract["limits"]["max_spec_bytes"])
-    receipt = build_h1_dry_run_receipt(contract, spec, verify_files=args.verify_files)
+    receipt = build_reference_power_dry_run_receipt(contract, spec, verify_files=args.verify_files)
     text = json.dumps(receipt, indent=2, sort_keys=True) + "\n"
     if args.output is not None:
         args.output.parent.mkdir(parents=True, exist_ok=True)

@@ -1,6 +1,6 @@
-"""H2a-only COMSOL native-cancellation inspection helpers.
+"""native cancellation-only COMSOL native-cancellation inspection helpers.
 
-Nothing in this module is a production cancellation path.  H2a uses it from a
+Nothing in this module is a production cancellation path.  native cancellation uses it from a
 fresh, opt-in integration subprocess to record the installed COMSOL build,
 JAR identities, and Java method signatures before any future worker is allowed
 to call an internal COMSOL cancellation API.
@@ -18,7 +18,7 @@ import jpype
 
 
 # These are candidate APIs only.  They are deliberately not an allowlist for a
-# production worker: a real H2a probe must prove a prompt stop and cleanup.
+# production worker: a real native cancellation probe must prove a prompt stop and cleanup.
 NATIVE_CANCEL_CANDIDATES = {
     "progress_context": {
         "class_name": "com.comsol.model.util.ProgressContext",
@@ -137,7 +137,7 @@ def select_progress_context_profile() -> dict[str, Any] | None:
 
 
 def request_native_cancel_once() -> dict[str, Any]:
-    """Invoke the H2a-approved public candidate only in an exact profile.
+    """Invoke the native cancellation-approved public candidate only in an exact profile.
 
     Caller owns attempt binding and process-level verification. This function
     neither starts a JVM nor claims that the solve has stopped.

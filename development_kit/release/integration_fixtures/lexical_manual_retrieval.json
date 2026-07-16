@@ -4,7 +4,7 @@
   "evidence_state": "verified_dependency_only_baseline",
   "real_comsol_required": false,
   "runner": "development_kit/tests/test_lexical_manual.py",
-  "frozen_judgments": "development_kit/tests/fixtures/h4_retrieval_evaluation.json",
+  "frozen_judgments": "development_kit/tests/fixtures/semantic_retrieval_evaluation.json",
   "acceptance": {
     "citation_validity": 1.0,
     "bounded_worker_required": true,

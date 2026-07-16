@@ -1,4 +1,4 @@
-"""Controlled COMSOL 6.4 gate for M3 typed incidence configuration."""
+"""Controlled COMSOL 6.4 gate for typed incidence configuration."""
 
 from __future__ import annotations
 
@@ -38,10 +38,10 @@ def _first_tag(tags, preferred: str) -> str | None:
 
 def main() -> None:
     runtime = Path(os.environ.get("COMSOL_MCP_RUNTIME_DIR", "D:/comsol_runtime"))
-    artifact_dir = runtime / "M3"
+    artifact_dir = runtime / "incidence_configuration"
     artifact_dir.mkdir(parents=True, exist_ok=True)
     result_path = artifact_dir / "incidence_gate_result.json"
-    owner = SolverOwnership(owner="m3-incidence-gate")
+    owner = SolverOwnership(owner="incidence-configuration-gate")
     client = None
     source = None
     clone = None
@@ -52,7 +52,7 @@ def main() -> None:
         source_path = controlled_fixture_from_environment()["source"]
         source_hash = _sha256(source_path)
         source_stat = source_path.stat()
-        claim = owner.acquire(mode="m3_incidence", model_path=str(source_path))
+        claim = owner.acquire(mode="incidence_configuration", model_path=str(source_path))
         if not claim.get("acquired"):
             raise RuntimeError(f"solver lease unavailable: {claim}")
         client = mph.Client(cores=1, version="6.4")
@@ -68,7 +68,7 @@ def main() -> None:
         clone, record = create_derived_geometry_clone(
             source,
             client,
-            new_name="M3IncidenceDerived",
+            new_name="IncidenceConfigurationClone",
             runtime_dir=artifact_dir,
         )
         preview = preview_incidence(

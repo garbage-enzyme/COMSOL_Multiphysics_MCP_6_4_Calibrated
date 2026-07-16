@@ -1,4 +1,4 @@
-"""Injected process-only worker used to prove H1 durability without COMSOL."""
+"""Injected process-only worker used to prove reference-power durability without COMSOL."""
 
 from __future__ import annotations
 

@@ -815,7 +815,7 @@ def collect_wave_optics_preflight(
     result["next_call"] = {
         "tool": "wave_optics_point_audit",
         "available": False,
-        "implementation_status": "planned_H3e",
+        "implementation_status": "planned_Wave Optics point audit",
         "minimal_inputs": {
             "model_name": model_name,
             "component_tag": topology.get("component_tag"),
@@ -830,7 +830,7 @@ def collect_wave_optics_preflight(
 
 
 def register_wave_optics_preflight_tools(mcp: FastMCP) -> None:
-    """Register the public read-only H3d preflight tool."""
+    """Register the public read-only Wave Optics preflight preflight tool."""
 
     @mcp.tool()
     def wave_optics_preflight(

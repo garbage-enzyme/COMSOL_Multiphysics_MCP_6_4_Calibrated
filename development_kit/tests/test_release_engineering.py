@@ -1,4 +1,4 @@
-"""Dependency-only E4 release-contract regression tests."""
+"""Dependency-only release engineering release-contract regression tests."""
 
 from __future__ import annotations
 
@@ -111,6 +111,33 @@ def test_repository_root_is_release_focused_and_free_of_generated_artifacts():
         assert path.name not in {"server_err.txt", "server_log.txt"}
 
 
+def test_active_implementation_has_only_enumerated_legacy_phase_codes():
+    phase_pattern = re.compile(
+        r"(?<![A-Za-z0-9_])(?:[EMH][0-9]+[A-Za-z]?|P(?:3|4|9|10|11|12))(?![A-Za-z0-9_])"
+        r"|(?<![A-Za-z0-9])(?:h1|h2a|h2d|h2f|h3c|h3d|h3e|h3f|h4a|h4b|h4c|h4d|h4e|h4f|e4r)(?![A-Za-z0-9])"
+    )
+    allowed = {
+        "development_kit/docs/legacy_phase_compatibility.md",
+        "development_kit/release/integration_fixtures/reference_power_evidence.json",
+        "development_kit/scripts/run_real_release_gate.py",
+        "development_kit/tests/test_durable_job_control_plane.py",
+        "development_kit/tests/test_reference_power_acceptance.py",
+        "development_kit/tests/test_reference_power_release_orchestrator.py",
+        "development_kit/tests/test_reference_power_runner.py",
+        "development_kit/tests/test_release_engineering.py",
+        "src/evidence/reference_power_acceptance.py",
+    }
+    violations = []
+    for _mode, path_text in _tracked_entries():
+        path = Path(path_text)
+        if path.suffix not in {".json", ".md", ".py", ".toml", ".yaml", ".yml"}:
+            continue
+        text = (ROOT / path).read_text(encoding="utf-8", errors="replace")
+        if phase_pattern.search(text) and path_text not in allowed:
+            violations.append(path_text)
+    assert violations == []
+
+
 def test_public_tracked_text_has_no_user_profile_paths():
     text_suffixes = {".json", ".md", ".py", ".toml", ".yaml", ".yml"}
     for _mode, path_text in _tracked_entries():
@@ -128,7 +155,7 @@ def test_release_integration_fixture_manifest_is_complete_and_sanitized():
         "capacitor_clientapi_regression",
         "periodic_mesh_audit",
         "reference_air_polarization",
-        "h1_physical_evidence",
+        "reference_power_evidence",
         "passive_port_closure",
         "source_immutability",
         "job_recovery_cancellation",

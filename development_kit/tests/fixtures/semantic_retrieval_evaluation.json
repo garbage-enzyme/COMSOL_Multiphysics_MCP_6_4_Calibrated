@@ -1,6 +1,6 @@
 {
   "schema_version": "1",
-  "name": "h4-comsol-manual-retrieval-v1",
+  "name": "semantic-comsol-manual-retrieval-v1",
   "frozen_at": "2026-07-13",
   "corpus_fingerprint": "870a953dee6126ec19aff9c0c67aceafa221c73e3edb0e1fdcb911fb3fb295ef",
   "queries": [

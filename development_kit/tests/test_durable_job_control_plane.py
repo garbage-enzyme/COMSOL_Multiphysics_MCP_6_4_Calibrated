@@ -1,4 +1,4 @@
-"""Process-only acceptance tests for the H1a durable job control plane."""
+"""Process-only acceptance tests for the durable job durable job control plane."""
 
 from __future__ import annotations
 
@@ -651,9 +651,9 @@ def test_read_only_manager_construction_skips_startup_reconciliation(jobs_root, 
 
 
 def test_thirty_cancel_status_polling_races_have_no_false_terminal_state(jobs_root):
-    iterations = int(os.environ.get("COMSOL_E4R_SOAK_ITERATIONS", "30"))
+    iterations = int(os.environ.get("COMSOL_cancellation determinism_SOAK_ITERATIONS", "30"))
     if iterations < 1 or iterations > 100:
-        raise ValueError("COMSOL_E4R_SOAK_ITERATIONS must be between 1 and 100")
+        raise ValueError("COMSOL_cancellation determinism_SOAK_ITERATIONS must be between 1 and 100")
     manager = JobManager(
         jobs_root,
         allow_test_jobs=True,
@@ -664,7 +664,7 @@ def test_thirty_cancel_status_polling_races_have_no_false_terminal_state(jobs_ro
     deadline_s = 5.0
     latencies: list[float] = []
     records: list[dict[str, object]] = []
-    summary_path = jobs_root / "e4r_cancellation_soak_summary.json"
+    summary_path = jobs_root / "cancellation_soak_summary.json"
     active_job_id = None
     try:
         for index in range(iterations):
@@ -703,7 +703,7 @@ def test_thirty_cancel_status_polling_races_have_no_false_terminal_state(jobs_ro
             "records": records,
         }
         summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        artifact_root_value = os.environ.get("COMSOL_E4R_SOAK_ARTIFACT_ROOT")
+        artifact_root_value = os.environ.get("COMSOL_cancellation determinism_SOAK_ARTIFACT_ROOT")
         if artifact_root_value:
             artifact_root = Path(artifact_root_value)
             artifact_root.mkdir(parents=True, exist_ok=True)
@@ -725,7 +725,7 @@ def test_thirty_cancel_status_polling_races_have_no_false_terminal_state(jobs_ro
         }
         summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         archive_root = Path(
-            os.environ.get("COMSOL_E4R_FAILURE_ROOT", "D:/comsol_runtime_test/e4r_failures")
+            os.environ.get("COMSOL_cancellation determinism_FAILURE_ROOT", "D:/comsol_runtime_test/cancellation_failures")
         )
         archive_root.mkdir(parents=True, exist_ok=True)
         archive = archive_root / f"{jobs_root.name}-{int(time.time())}"
@@ -739,7 +739,7 @@ def test_thirty_cancel_status_polling_races_have_no_false_terminal_state(jobs_ro
                 encoding="utf-8",
             )
         raise AssertionError(
-            f"E4R cancellation soak failed; durable evidence archived at {archive}"
+            f"cancellation determinism cancellation soak failed; durable evidence archived at {archive}"
         ) from exc
 
 

@@ -1,4 +1,4 @@
-"""Solver-free evaluation gates for the H1 fresh-process runner."""
+"""Solver-free evaluation gates for the reference-power fresh-process runner."""
 
 from __future__ import annotations
 
@@ -12,11 +12,11 @@ from src.evidence.contracts import (
     PHYSICAL_EVIDENCE_SCHEMA_VERSION,
     build_physical_evidence,
 )
-from src.evidence.h1_gate_runtime import (
-    build_h1_policies,
-    evaluate_h1_negative_controls,
-    evaluate_h1_results,
-    inventory_h1_artifacts,
+from src.evidence.reference_power_gate import (
+    build_reference_power_policies,
+    evaluate_reference_power_negative_controls,
+    evaluate_reference_power_results,
+    inventory_reference_power_artifacts,
 )
 
 
@@ -27,7 +27,7 @@ CONTRACT = json.loads(
         / "development_kit"
         / "release"
         / "integration_fixtures"
-        / "h1_physical_evidence.json"
+        / "reference_power_evidence.json"
     ).read_text(
         encoding="utf-8"
     )
@@ -40,10 +40,10 @@ def _physical_evidence():
         {
             "schema_name": PHYSICAL_EVIDENCE_SCHEMA_NAME,
             "schema_version": PHYSICAL_EVIDENCE_SCHEMA_VERSION,
-            "artifact_type": "h1_unit_point",
-            "producer": {"tool": "h1_unit", "tool_schema_version": "1"},
+            "artifact_type": "reference_power_unit_point",
+            "producer": {"tool": "reference_power_unit", "tool_schema_version": "1"},
             "identity": {
-                "config_id": "h1-unit",
+                "config_id": "reference-power-unit",
                 "config_sha256": "a" * 64,
                 "source_sha256": "b" * 64,
             },
@@ -77,7 +77,7 @@ def _physical_evidence():
 
 def _results():
     evidence = _physical_evidence()
-    policies = build_h1_policies(CONTRACT)
+    policies = build_reference_power_policies(CONTRACT)
     point = {
         "audit_status": "policy_evaluated",
         "assessment": {"project_verdict": "pass"},
@@ -104,7 +104,7 @@ def _results():
 
 def test_negative_controls_reuse_raw_evidence_and_must_fail_policy():
     _reference, point, policies = _results()
-    result = evaluate_h1_negative_controls(
+    result = evaluate_reference_power_negative_controls(
         point["physical_evidence"], policies["declared_flux"]
     )
 
@@ -114,14 +114,14 @@ def test_negative_controls_reuse_raw_evidence_and_must_fail_policy():
     assert point["physical_evidence"]["evidence"]["flux.reflected_positive_power_sign"]["value"] == 1
 
 
-def test_combined_h1_evaluation_requires_every_physical_and_negative_gate():
+def test_combined_reference_power_evaluation_requires_every_physical_and_negative_gate():
     reference, point, _policies = _results()
-    passed = evaluate_h1_results(CONTRACT, reference, point)
+    passed = evaluate_reference_power_results(CONTRACT, reference, point)
     failed_reference = dict(reference)
     failed_reference["reference"] = {**reference["reference"], "R": 0.01}
 
     assert passed["passed"] is True
-    failed = evaluate_h1_results(CONTRACT, failed_reference, point)
+    failed = evaluate_reference_power_results(CONTRACT, failed_reference, point)
     assert failed["passed"] is False
     assert failed["checks"]["reference_air"]["reflection"] is False
 
@@ -131,7 +131,7 @@ def test_artifact_inventory_is_relative_hashed_and_bounded(tmp_path):
     (tmp_path / "a.json").write_text("{}\n", encoding="utf-8")
     (tmp_path / "nested" / "b.csv").write_text("x\n1\n", encoding="utf-8")
 
-    result = inventory_h1_artifacts(tmp_path, CONTRACT["limits"])
+    result = inventory_reference_power_artifacts(tmp_path, CONTRACT["limits"])
 
     assert result["file_count"] == 2
     assert {item["relative_path"] for item in result["files"]} == {"a.json", "nested/b.csv"}
@@ -139,4 +139,4 @@ def test_artifact_inventory_is_relative_hashed_and_bounded(tmp_path):
 
     limited = {**CONTRACT["limits"], "max_artifact_files": 1}
     with pytest.raises(ValueError, match="file count"):
-        inventory_h1_artifacts(tmp_path, limited)
+        inventory_reference_power_artifacts(tmp_path, limited)

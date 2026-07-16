@@ -1,4 +1,4 @@
-"""Read-only COMSOL 6.4 gate for the H3d Wave Optics preflight."""
+"""Read-only COMSOL 6.4 gate for Wave Optics preflight evidence."""
 
 from __future__ import annotations
 
@@ -50,10 +50,10 @@ def _model_state(model) -> dict:
 
 
 def main() -> None:
-    artifact_dir = Path(os.environ.get("COMSOL_MCP_RUNTIME_DIR", "D:/comsol_runtime")) / "H3d"
+    artifact_dir = Path(os.environ.get("COMSOL_MCP_RUNTIME_DIR", "D:/comsol_runtime")) / "wave_optics_preflight"
     artifact_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = artifact_dir / "preflight_gate_result.json"
-    owner = SolverOwnership(owner="h3d-real-preflight")
+    owner = SolverOwnership(owner="wave-optics-preflight")
     client = None
     result = {"success": False, "solve_ran": False, "models": []}
     exit_code = 1
@@ -62,7 +62,7 @@ def main() -> None:
         for source in models:
             if not source.is_file():
                 raise FileNotFoundError(source)
-        claim = owner.acquire(mode="h3d_read_only", model_path=str(models[0]))
+        claim = owner.acquire(mode="wave_optics_preflight_read_only", model_path=str(models[0]))
         if not claim.get("acquired"):
             raise RuntimeError(f"solver lease unavailable: {claim}")
         client = mph.Client(cores=1)

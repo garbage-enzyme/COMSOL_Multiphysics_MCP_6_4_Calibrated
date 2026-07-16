@@ -1,4 +1,4 @@
-"""M1 periodic mesh audit and clone-smoke tests without COMSOL."""
+"""Periodic-mesh audit and clone-smoke tests without COMSOL."""
 
 from __future__ import annotations
 

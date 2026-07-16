@@ -77,19 +77,19 @@ def controlled_fixture_from_environment(
     }
 
 
-def controlled_fixture_environment_from_h1_spec(
+def controlled_fixture_environment_from_reference_power_spec(
     spec_path: Path,
     *,
     base_environment: Mapping[str, str] | None = None,
 ) -> dict[str, str]:
-    """Translate a validated local H1 spec into subprocess-only fixture inputs."""
+    """Translate a validated local reference-power spec into subprocess-only fixture inputs."""
     raw = json.loads(spec_path.read_text(encoding="utf-8"))
     wavelength = raw.get("wavelength")
     reference = raw.get("reference_air")
     if not isinstance(wavelength, dict) or wavelength.get("unit") != "um":
-        raise ValueError("licensed regression requires an H1 wavelength declared in um")
+        raise ValueError("licensed regression requires a reference-power wavelength declared in um")
     if not isinstance(reference, dict):
-        raise ValueError("licensed regression requires H1 reference_air metadata")
+        raise ValueError("licensed regression requires reference-power reference_air metadata")
     environment = dict(base_environment if base_environment is not None else os.environ)
     environment.update(
         {
@@ -112,6 +112,6 @@ __all__ = [
     "MODEL_ENV",
     "RANGE_ENV",
     "WAVELENGTH_ENV",
-    "controlled_fixture_environment_from_h1_spec",
+    "controlled_fixture_environment_from_reference_power_spec",
     "controlled_fixture_from_environment",
 ]

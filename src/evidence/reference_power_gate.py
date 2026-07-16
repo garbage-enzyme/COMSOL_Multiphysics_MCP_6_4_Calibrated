@@ -1,4 +1,4 @@
-"""Pure evaluation and artifact accounting for the H1 licensed gate."""
+"""Pure evaluation and artifact accounting for the reference-power licensed gate."""
 
 from __future__ import annotations
 
@@ -13,11 +13,11 @@ from .contracts import (
     evaluate_physical_evidence_policy,
     example_validation_policies,
 )
-from .h1_acceptance import validate_h1_acceptance_contract
+from .reference_power_acceptance import validate_reference_power_acceptance_contract
 
 
-def build_h1_policies(contract: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
-    strict = validate_h1_acceptance_contract(contract)
+def build_reference_power_policies(contract: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+    strict = validate_reference_power_acceptance_contract(contract)
     acceptance = strict["acceptance"]
     reference_template = example_validation_policies()["reference_air_polarization_ratio"]
     reference_rule = deepcopy(reference_template["rules"][0])
@@ -28,7 +28,7 @@ def build_h1_policies(contract: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
         {
             "schema_name": reference_template["schema_name"],
             "schema_version": reference_template["schema_version"],
-            "policy_id": "h1.reference_air",
+            "policy_id": "reference_power.reference_air",
             "rules": [reference_rule],
         }
     )
@@ -42,7 +42,7 @@ def build_h1_policies(contract: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
         {
             "schema_name": flux_template["schema_name"],
             "schema_version": flux_template["schema_version"],
-            "policy_id": "h1.declared_flux",
+            "policy_id": "reference_power.declared_flux",
             "rules": [flux_rule],
         }
     )
@@ -61,7 +61,7 @@ def _rebuilt_with_record_value(
     return build_physical_evidence(payload)
 
 
-def evaluate_h1_negative_controls(
+def evaluate_reference_power_negative_controls(
     physical_evidence: Mapping[str, Any], flux_policy: Mapping[str, Any]
 ) -> dict[str, Any]:
     sign_record = physical_evidence["evidence"].get("flux.reflected_positive_power_sign")
@@ -94,18 +94,18 @@ def evaluate_h1_negative_controls(
     }
 
 
-def evaluate_h1_results(
+def evaluate_reference_power_results(
     contract: Mapping[str, Any],
     reference_result: Mapping[str, Any],
     point_result: Mapping[str, Any],
 ) -> dict[str, Any]:
-    strict = validate_h1_acceptance_contract(contract)
-    policies = build_h1_policies(strict)
+    strict = validate_reference_power_acceptance_contract(contract)
+    policies = build_reference_power_policies(strict)
     acceptance = strict["acceptance"]
     reference = reference_result.get("reference") or {}
     point_measurement = point_result.get("measurement") or {}
     wavelength = point_measurement.get("wavelength") or {}
-    negative = evaluate_h1_negative_controls(
+    negative = evaluate_reference_power_negative_controls(
         point_result["physical_evidence"], policies["declared_flux"]
     )
     reference_checks = {
@@ -155,16 +155,16 @@ def evaluate_h1_results(
     }
 
 
-def inventory_h1_artifacts(root: Path, limits: Mapping[str, Any]) -> dict[str, Any]:
+def inventory_reference_power_artifacts(root: Path, limits: Mapping[str, Any]) -> dict[str, Any]:
     resolved = root.resolve()
     if not resolved.is_dir():
-        raise ValueError("H1 artifact root does not exist")
+        raise ValueError("reference-power artifact root does not exist")
     files = sorted(path for path in resolved.rglob("*") if path.is_file())
     if len(files) > int(limits["max_artifact_files"]):
-        raise ValueError("H1 artifact file count exceeds the contract")
+        raise ValueError("reference-power artifact file count exceeds the contract")
     total = sum(path.stat().st_size for path in files)
     if total > int(limits["max_artifact_bytes"]):
-        raise ValueError("H1 artifact bytes exceed the contract")
+        raise ValueError("reference-power artifact bytes exceed the contract")
     entries = []
     for path in files:
         relative = path.resolve().relative_to(resolved).as_posix()
@@ -179,8 +179,8 @@ def inventory_h1_artifacts(root: Path, limits: Mapping[str, Any]) -> dict[str, A
 
 
 __all__ = [
-    "build_h1_policies",
-    "evaluate_h1_negative_controls",
-    "evaluate_h1_results",
-    "inventory_h1_artifacts",
+    "build_reference_power_policies",
+    "evaluate_reference_power_negative_controls",
+    "evaluate_reference_power_results",
+    "inventory_reference_power_artifacts",
 ]

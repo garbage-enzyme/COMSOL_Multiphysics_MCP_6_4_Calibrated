@@ -1,4 +1,4 @@
-"""Fresh-host H3f profile discovery and live three-call acceptance gate."""
+"""Fresh-host live profile profile discovery and live three-call acceptance gate."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ from src.evidence.real_fixture import controlled_fixture_from_environment
 
 PYTHON = Path(sys.executable)
 RUNTIME = Path(os.environ.get("COMSOL_MCP_RUNTIME_DIR", "D:/comsol_runtime"))
-ARTIFACT_DIR = RUNTIME / "H3f"
+ARTIFACT_DIR = RUNTIME / "live_profile"
 PROFILE_COUNTS = {
     "core": 38,
     "basic_fem": 76,
@@ -225,7 +225,7 @@ async def _live_three_call_matrix() -> dict[str, Any]:
                         "study_step_tag": "wl_step",
                         "study_step_property": "plist",
                         "expected_source_sha256": source_hash,
-                        "config_id": f"h3f-{case['name']}",
+                        "config_id": f"live-profile-{case['name']}",
                         "artifact_dir": str(ARTIFACT_DIR / "audits"),
                         "top_air_domain_ids": case["top_air_domain_ids"],
                         "top_air_coordinate_range": case["top_air_coordinate_range"],

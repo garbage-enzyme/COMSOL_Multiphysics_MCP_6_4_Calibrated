@@ -1,4 +1,4 @@
-"""Frozen H4f retrieval benchmark, 500-query soak, and concurrent burst."""
+"""Frozen semantic soak retrieval benchmark, 500-query soak, and concurrent burst."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ import psutil
 
 from development_kit.benchmarks.semantic_benchmark import evaluate_lexical_baseline
 from src.knowledge.semantic_contracts import (
-    H4_PROMOTION_GATE,
+    SEMANTIC_PROMOTION_GATE,
     WORKER_PROTOCOL_SCHEMA_VERSION,
     object_sha256,
     validate_evaluation_set,
@@ -31,7 +31,7 @@ from src.knowledge.semantic_process import SemanticWorkerManager
 
 
 ROOT = Path(__file__).parents[3]
-EVALUATION_PATH = ROOT / "development_kit" / "tests" / "fixtures" / "h4_retrieval_evaluation.json"
+EVALUATION_PATH = ROOT / "development_kit" / "tests" / "fixtures" / "semantic_retrieval_evaluation.json"
 DEPLOYMENT = Path("D:/comsol_semantic")
 LEXICAL = Path("D:/comsol_docs_fts/manuals.sqlite3")
 MODEL = DEPLOYMENT / "models" / "all-MiniLM-L6-v2" / "1110a243fdf4706b3f48f1d95db1a4f5529b4d41"
@@ -166,14 +166,14 @@ def _promotion(lexical: Mapping[str, Any], hybrid: Mapping[str, Any]) -> dict[st
     absolute_gain = hybrid_target - lexical_target
     relative_gain = absolute_gain / lexical_target if lexical_target else math.inf
     gates = {
-        "citation_validity": hybrid["citation_validity"] == H4_PROMOTION_GATE["citation_validity"],
-        "exact_recall_regression": hybrid_exact - lexical_exact >= -H4_PROMOTION_GATE["maximum_exact_symbol_recall_at_5_regression"],
+        "citation_validity": hybrid["citation_validity"] == SEMANTIC_PROMOTION_GATE["citation_validity"],
+        "exact_recall_regression": hybrid_exact - lexical_exact >= -SEMANTIC_PROMOTION_GATE["maximum_exact_symbol_recall_at_5_regression"],
         "target_recall_gain": (
-            absolute_gain >= H4_PROMOTION_GATE["minimum_target_recall_at_5_absolute_gain"]
-            or relative_gain >= H4_PROMOTION_GATE["minimum_target_recall_at_5_relative_gain"]
+            absolute_gain >= SEMANTIC_PROMOTION_GATE["minimum_target_recall_at_5_absolute_gain"]
+            or relative_gain >= SEMANTIC_PROMOTION_GATE["minimum_target_recall_at_5_relative_gain"]
         ),
-        "warm_p95": hybrid["latency_seconds"]["p95"] < H4_PROMOTION_GATE["maximum_warm_p95_seconds"],
-        "hard_deadline": hybrid["latency_seconds"]["maximum"] < H4_PROMOTION_GATE["hard_query_deadline_seconds"],
+        "warm_p95": hybrid["latency_seconds"]["p95"] < SEMANTIC_PROMOTION_GATE["maximum_warm_p95_seconds"],
+        "hard_deadline": hybrid["latency_seconds"]["maximum"] < SEMANTIC_PROMOTION_GATE["hard_query_deadline_seconds"],
         "negative_abstention": hybrid["summary"]["overall"]["negative_abstention_rate"] == 1.0,
     }
     return {
@@ -189,7 +189,7 @@ def _promotion(lexical: Mapping[str, Any], hybrid: Mapping[str, Any]) -> dict[st
             "relative_gain": relative_gain,
             "hybrid_negative_abstention_rate": hybrid["summary"]["overall"]["negative_abstention_rate"],
         },
-        "thresholds": H4_PROMOTION_GATE,
+        "thresholds": SEMANTIC_PROMOTION_GATE,
         "decision": "promote" if all(gates.values()) else "retain_experimental_lexical_default",
     }
 
@@ -308,7 +308,7 @@ def _atomic_write(path: Path, value: Mapping[str, Any]) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output", default="D:/comsol_runtime/H4f/benchmark_soak.json")
+    parser.add_argument("--output", default="D:/comsol_runtime/semantic_soak/benchmark_soak.json")
     args = parser.parse_args()
     evaluation = validate_evaluation_set(json.loads(EVALUATION_PATH.read_text(encoding="utf-8")))
     corpus = _corpus_citations()
@@ -346,7 +346,7 @@ def main() -> None:
     soak = _soak(evaluation, index_path)
     output = {
         "schema_version": "1",
-        "phase": "H4f",
+        "phase": "semantic soak",
         "evaluation_sha256": object_sha256(evaluation),
         "evaluation_query_count": len(evaluation["queries"]),
         "lexical": lexical,

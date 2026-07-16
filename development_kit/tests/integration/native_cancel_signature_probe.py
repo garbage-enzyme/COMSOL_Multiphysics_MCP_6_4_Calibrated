@@ -1,4 +1,4 @@
-"""Opt-in H2a environment/signature probe; it does not invoke cancellation."""
+"""Opt-in native cancellation environment/signature probe; it does not invoke cancellation."""
 
 from __future__ import annotations
 
@@ -40,7 +40,7 @@ def _progress_context_noop_gate(client, model_path: Path) -> dict:
     from jpype import JClass
 
     before_hash = _sha256(model_path)
-    with tempfile.TemporaryDirectory(prefix="comsol-h2a-", dir=r"D:\comsol_runtime") as temporary:
+    with tempfile.TemporaryDirectory(prefix="comsol-native-cancel-", dir=r"D:\comsol_runtime") as temporary:
         copied_model = Path(temporary) / "probe_model.mph"
         shutil.copy2(model_path, copied_model)
         model = client.load(copied_model)
@@ -58,7 +58,7 @@ def _progress_context_noop_gate(client, model_path: Path) -> dict:
             finally:
                 outcome["solve_elapsed_s"] = round(time.monotonic() - started, 3)
 
-        thread = threading.Thread(target=solve, name="h2a-real-study", daemon=True)
+        thread = threading.Thread(target=solve, name="native-cancel-real-study", daemon=True)
         thread.start()
         time.sleep(4.0)
         active_before = thread.is_alive()
@@ -92,7 +92,7 @@ def _progress_context_noop_gate(client, model_path: Path) -> dict:
 
 def main() -> int:
     manifest = discover_environment()
-    model_path = Path(os.environ["COMSOL_H2A_PROBE_MODEL"]).resolve() if os.environ.get("COMSOL_H2A_PROBE_MODEL") else None
+    model_path = Path(os.environ["COMSOL_durable cancellationA_PROBE_MODEL"]).resolve() if os.environ.get("COMSOL_durable cancellationA_PROBE_MODEL") else None
     client = None
     try:
         client = mph.Client(cores=1)
@@ -103,7 +103,7 @@ def main() -> int:
         manifest["reflection"] = reflect_candidate_signatures()
         if model_path is not None:
             if not model_path.is_file():
-                raise FileNotFoundError(f"H2a probe model does not exist: {model_path}")
+                raise FileNotFoundError(f"native cancellation probe model does not exist: {model_path}")
             manifest["progress_context_gate"] = _progress_context_noop_gate(client, model_path)
         # Class availability/signatures alone never enable native cancellation.
         gate = manifest.get("progress_context_gate", {})

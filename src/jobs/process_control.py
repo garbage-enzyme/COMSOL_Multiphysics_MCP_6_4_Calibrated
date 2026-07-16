@@ -1,4 +1,4 @@
-"""Exact-identity process inspection used by the H2 cancellation coordinator."""
+"""Exact-identity process inspection used by the durable cancellation cancellation coordinator."""
 
 from __future__ import annotations
 

@@ -1187,7 +1187,7 @@ def run_wave_optics_point_audit(
                 "collision": bool(ownership_after.get("collision")),
                 "lease": ownership_after.get("lease"),
             },
-            "cleanup": "MCP session retained; ownership remains explicitly tracked by M2.",
+            "cleanup": "MCP session retained; ownership remains explicitly tracked by derived geometry.",
         },
         "measurement_errors": measurement_errors,
         "integrity_errors": integrity_errors,
@@ -1299,14 +1299,14 @@ def _replace_clone_materials_with_air(
         materials.remove(tag)
     if list(materials.tags()):
         raise ValueError("clone material removal readback is not empty")
-    air = materials.create("h1_air", "Common")
+    air = materials.create("reference_air_material", "Common")
     group = air.propertyGroup("def")
     group.set("relpermittivity", "1")
     group.set("relpermeability", "1")
     group.set("electricconductivity", "0[S/m]")
     air.selection().set(all_domain_ids)
     after = sorted(str(value) for value in list(materials.tags()))
-    if after != ["h1_air"]:
+    if after != ["reference_air_material"]:
         raise ValueError(f"all-air clone material readback is unexpected: {after}")
     selected = sorted(int(value) for value in list(air.selection().entities()))
     if selected != all_domain_ids:
@@ -1314,7 +1314,7 @@ def _replace_clone_materials_with_air(
     return {
         "method": "all_air_clone",
         "removed_material_tags": before,
-        "air_material_tag": "h1_air",
+        "air_material_tag": "reference_air_material",
         "air_properties": {
             "relpermittivity": "1",
             "relpermeability": "1",
@@ -1456,7 +1456,7 @@ def run_wave_optics_reference_audit(
     cleanup = {"attempted": False, "removed": False}
     started = time.perf_counter()
     try:
-        clone, record = factory(source_model, client, f"h1_reference_{uuid.uuid4().hex[:8]}")
+        clone, record = factory(source_model, client, f"reference_air_clone_{uuid.uuid4().hex[:8]}")
         clone_record = _clone_record_dict(record)
         clone_name = str(clone.name())
         if clone_register is not None:

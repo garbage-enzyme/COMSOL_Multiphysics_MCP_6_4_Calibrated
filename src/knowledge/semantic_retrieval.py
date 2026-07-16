@@ -1,4 +1,4 @@
-"""H4d read-only vector retrieval and deterministic BM25 fusion."""
+"""semantic retrieval read-only vector retrieval and deterministic BM25 fusion."""
 
 from __future__ import annotations
 

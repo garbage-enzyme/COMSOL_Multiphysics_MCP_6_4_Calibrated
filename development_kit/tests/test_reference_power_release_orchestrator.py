@@ -1,4 +1,4 @@
-"""Fake-process gates for mandatory H1 serial release orchestration."""
+"""Fake-process gates for mandatory reference-power serial release orchestration."""
 
 from __future__ import annotations
 
@@ -35,11 +35,11 @@ def _args(tmp_path, **overrides):
     )
     values = {
         "output": tmp_path / "release.json",
-        "require_h1": True,
-        "h1_spec": spec,
+        "require_reference_power": True,
+        "reference_power_spec": spec,
         "fixture_spec": spec,
-        "h1_cores": 8,
-        "h1_timeout_seconds": 300.0,
+        "reference_power_cores": 8,
+        "reference_power_timeout_seconds": 300.0,
     }
     values.update(overrides)
     return SimpleNamespace(**values)
@@ -50,8 +50,8 @@ def _clean(_owner):
 
 
 class FakeRunner:
-    def __init__(self, *, h1_success=True, suite_success=True):
-        self.h1_success = h1_success
+    def __init__(self, *, reference_power_success=True, suite_success=True):
+        self.reference_power_success = reference_power_success
         self.suite_success = suite_success
         self.commands = []
         self.kwargs = []
@@ -59,22 +59,22 @@ class FakeRunner:
     def __call__(self, command, **kwargs):
         self.commands.append(list(command))
         self.kwargs.append(kwargs)
-        if "h1_real_physical_evidence.py" in " ".join(command):
+        if "reference_power_acceptance.py" in " ".join(command):
             output = Path(command[command.index("--output") + 1])
             output.write_text(
                 json.dumps(
                     {
-                        "success": self.h1_success,
-                        "cleanup": {"passed": self.h1_success},
+                        "success": self.reference_power_success,
+                        "cleanup": {"passed": self.reference_power_success},
                     }
                 ),
                 encoding="utf-8",
             )
-            return subprocess.CompletedProcess(command, 0 if self.h1_success else 1, "h1", "")
+            return subprocess.CompletedProcess(command, 0 if self.reference_power_success else 1, "reference-power", "")
         return subprocess.CompletedProcess(command, 0 if self.suite_success else 1, "suite", "")
 
 
-def test_h1_runs_before_regression_and_both_receipts_are_required(tmp_path):
+def test_reference_power_runs_before_regression_and_both_receipts_are_required(tmp_path):
     runner = FakeRunner()
     receipt = run_release_gate(
         _args(tmp_path),
@@ -86,23 +86,23 @@ def test_h1_runs_before_regression_and_both_receipts_are_required(tmp_path):
 
     assert receipt["returncode"] == 0
     assert len(runner.commands) == 2
-    assert "h1_real_physical_evidence.py" in " ".join(runner.commands[0])
+    assert "reference_power_acceptance.py" in " ".join(runner.commands[0])
     assert "development_kit/tests/integration/test_real_comsol.py" in runner.commands[1]
     assert Path(runner.kwargs[1]["env"][MODEL_ENV]).name == "controlled.mph"
-    assert receipt["phases"]["h1"]["passed"] is True
-    assert len(receipt["phases"]["h1"]["receipt_sha256"]) == 64
+    assert receipt["phases"]["reference_power"]["passed"] is True
+    assert len(receipt["phases"]["reference_power"]["receipt_sha256"]) == 64
     assert receipt["phases"]["licensed_regression"]["passed"] is True
     assert len(receipt["phases"]["licensed_regression"]["fixture_spec_sha256"]) == 64
 
 
-def test_fixture_spec_configures_regression_without_rerunning_h1(tmp_path):
+def test_fixture_spec_configures_regression_without_rerunning_reference_power(tmp_path):
     runner = FakeRunner()
     args = _args(
         tmp_path,
-        require_h1=False,
-        h1_spec=None,
-        h1_cores=None,
-        h1_timeout_seconds=None,
+        require_reference_power=False,
+        reference_power_spec=None,
+        reference_power_cores=None,
+        reference_power_timeout_seconds=None,
     )
 
     receipt = run_release_gate(
@@ -117,12 +117,12 @@ def test_fixture_spec_configures_regression_without_rerunning_h1(tmp_path):
     assert len(runner.commands) == 1
     assert "development_kit/tests/integration/test_real_comsol.py" in runner.commands[0]
     assert Path(runner.kwargs[0]["env"][MODEL_ENV]).name == "controlled.mph"
-    assert receipt["phases"]["h1"]["started"] is False
+    assert receipt["phases"]["reference_power"]["started"] is False
     assert len(receipt["phases"]["licensed_regression"]["fixture_spec_sha256"]) == 64
 
 
-def test_h1_failure_skips_remaining_licensed_suite_and_release_fails(tmp_path):
-    runner = FakeRunner(h1_success=False)
+def test_reference_power_failure_skips_remaining_licensed_suite_and_release_fails(tmp_path):
+    runner = FakeRunner(reference_power_success=False)
     receipt = run_release_gate(
         _args(tmp_path),
         command_runner=runner,
@@ -133,12 +133,12 @@ def test_h1_failure_skips_remaining_licensed_suite_and_release_fails(tmp_path):
 
     assert receipt["returncode"] == 1
     assert len(runner.commands) == 1
-    assert receipt["phases"]["h1"]["passed"] is False
+    assert receipt["phases"]["reference_power"]["passed"] is False
     assert receipt["phases"]["licensed_regression"]["started"] is False
-    assert receipt["phases"]["licensed_regression"]["skipped_reason"] == "H1 did not pass"
+    assert receipt["phases"]["licensed_regression"]["skipped_reason"] == "reference-power did not pass"
 
 
-def test_missing_or_timed_out_h1_receipt_cannot_pass_release(tmp_path):
+def test_missing_or_timed_out_reference_power_receipt_cannot_pass_release(tmp_path):
     class MissingReceiptRunner:
         def __call__(self, command, **_kwargs):
             return subprocess.CompletedProcess(command, 0, "no receipt", "")
@@ -164,21 +164,21 @@ def test_missing_or_timed_out_h1_receipt_cannot_pass_release(tmp_path):
     )
 
     assert missing["returncode"] == 1
-    assert missing["phases"]["h1"]["receipt_sha256"] is None
+    assert missing["phases"]["reference_power"]["receipt_sha256"] is None
     assert timed_out["returncode"] == 1
-    assert timed_out["phases"]["h1"]["timed_out"] is True
+    assert timed_out["phases"]["reference_power"]["timed_out"] is True
     assert timed_out["phases"]["licensed_regression"]["started"] is False
 
 
 @pytest.mark.parametrize(
     "overrides,match",
     [
-        ({"h1_spec": None}, "requires"),
-        ({"h1_cores": 0}, "1..64"),
-        ({"h1_timeout_seconds": 8000.0}, "1..7200"),
+        ({"reference_power_spec": None}, "requires"),
+        ({"reference_power_cores": 0}, "1..64"),
+        ({"reference_power_timeout_seconds": 8000.0}, "1..7200"),
     ],
 )
-def test_mandatory_h1_mode_rejects_missing_or_unbounded_inputs(tmp_path, overrides, match):
+def test_mandatory_reference_power_mode_rejects_missing_or_unbounded_inputs(tmp_path, overrides, match):
     with pytest.raises(ValueError, match=match):
         run_release_gate(
             _args(tmp_path, **overrides),

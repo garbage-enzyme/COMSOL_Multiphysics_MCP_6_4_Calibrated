@@ -1,4 +1,4 @@
-"""Real H4d isolated-worker acceptance against the pinned local MiniLM index."""
+"""Real semantic retrieval isolated-worker acceptance against the pinned local MiniLM index."""
 
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ def _atomic_write(path: Path, value: dict) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output", default="D:/comsol_runtime/H4d/real_retrieval.json")
+    parser.add_argument("--output", default="D:/comsol_runtime/semantic_retrieval/real_retrieval.json")
     args = parser.parse_args()
     current = read_current(DEFAULT_ROOT)
     index_path = Path(current["pointer"]["index_path"])
@@ -93,7 +93,7 @@ def main() -> None:
     ownership_after = ownership_manager.status()
     output = {
         "schema_version": "1",
-        "phase": "H4d",
+        "phase": "semantic_retrieval",
         "success": True,
         "cold_start_seconds": cold_seconds,
         "queries": results,

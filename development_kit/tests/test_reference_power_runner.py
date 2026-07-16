@@ -1,4 +1,4 @@
-"""Process-only gates for the H1 licensed coordinator/worker boundary."""
+"""Process-only gates for the reference-power licensed coordinator/worker boundary."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import sys
 import time
 import uuid
 
-from development_kit.tests.integration.h1_real_physical_evidence import (
+from development_kit.tests.integration.reference_power_acceptance import (
     _admit_lightweight_status,
     _redacted_status,
     _worker_summary,
@@ -18,7 +18,7 @@ from development_kit.tests.integration.h1_real_physical_evidence import (
 
 
 ROOT = Path(__file__).parents[2]
-RUNNER = ROOT / "development_kit" / "tests" / "integration" / "h1_real_physical_evidence.py"
+RUNNER = ROOT / "development_kit" / "tests" / "integration" / "reference_power_acceptance.py"
 
 
 def test_runner_import_and_dry_run_do_not_import_mph_or_start_comsol():
@@ -27,7 +27,7 @@ def test_runner_import_and_dry_run_do_not_import_mph_or_start_comsol():
             sys.executable,
             "-c",
             (
-                "import sys; import development_kit.tests.integration.h1_real_physical_evidence; "
+                "import sys; import development_kit.tests.integration.reference_power_acceptance; "
                 "print('true' if 'mph' in sys.modules else 'false')"
             ),
         ],
@@ -129,7 +129,7 @@ def test_coordinator_refuses_collision_before_starting_worker(tmp_path):
         "# mph.Client collision marker for the lightweight scanner\nimport time\ntime.sleep(30)\n",
         encoding="utf-8",
     )
-    artifact_dir = Path(f"D:/comsol_runtime_test/h1_collision_{uuid.uuid4().hex}")
+    artifact_dir = Path(f"D:/comsol_runtime_test/reference_power_collision_{uuid.uuid4().hex}")
     spec_path = tmp_path / "spec.json"
     output_path = tmp_path / "receipt.json"
     spec = {

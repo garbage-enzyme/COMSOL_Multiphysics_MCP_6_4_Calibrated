@@ -1,4 +1,4 @@
-"""Controlled COMSOL 6.4 matrix for the H3e one-point evidence audit."""
+"""Controlled COMSOL 6.4 matrix for the one-point Wave Optics evidence audit."""
 
 from __future__ import annotations
 
@@ -48,11 +48,13 @@ def _study_step(study):
 
 
 def main() -> None:
-    default_artifact_dir = Path(os.environ.get("COMSOL_MCP_RUNTIME_DIR", "D:/comsol_runtime")) / "H3e"
-    artifact_dir = Path(os.environ.get("H3E_ARTIFACT_DIR", str(default_artifact_dir)))
+    default_artifact_dir = Path(os.environ.get("COMSOL_MCP_RUNTIME_DIR", "D:/comsol_runtime")) / "wave_optics_point_audit"
+    artifact_dir = Path(
+        os.environ.get("COMSOL_POINT_AUDIT_ARTIFACT_DIR", str(default_artifact_dir))
+    )
     artifact_dir.mkdir(parents=True, exist_ok=True)
     result_path = artifact_dir / "point_audit_gate_result.json"
-    owner = SolverOwnership(owner="h3e-real-point-audit")
+    owner = SolverOwnership(owner="wave-optics-point-audit")
     client = None
     fixture = controlled_fixture_from_environment()
     fixture["policy"] = {
@@ -73,7 +75,7 @@ def main() -> None:
         for case in active_cases:
             if not case["source"].is_file():
                 raise FileNotFoundError(case["source"])
-        claim = owner.acquire(mode="h3e_one_point_matrix", model_path=str(active_cases[0]["source"]))
+        claim = owner.acquire(mode="wave_optics_point_audit_matrix", model_path=str(active_cases[0]["source"]))
         if not claim.get("success"):
             raise RuntimeError(f"solver lease unavailable: {claim}")
         client = mph.Client(cores=8)
@@ -111,7 +113,7 @@ def main() -> None:
                 study_step_tag=step_tag,
                 study_step_property="plist",
                 expected_source_sha256=source_hash,
-                config_id=f"h3e-{case['name']}",
+                config_id=f"point-audit-{case['name']}",
                 artifact_dir=str(artifact_dir / "audits"),
                 r_expression=r_expression,
                 t_expression=t_expression,

@@ -1,4 +1,4 @@
-"""Deterministic E4R cancellation state-machine tests without wall-clock sleeps."""
+"""Deterministic cancellation determinism cancellation state-machine tests without wall-clock sleeps."""
 
 from __future__ import annotations
 
@@ -115,7 +115,7 @@ class FakeProcesses:
 
 @pytest.fixture()
 def jobs_root():
-    root = Path("D:/comsol_runtime_test/e4r") / uuid.uuid4().hex
+    root = Path("D:/comsol_runtime_test/cancellation_determinism") / uuid.uuid4().hex
     root.mkdir(parents=True)
     try:
         yield root

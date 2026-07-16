@@ -1,4 +1,4 @@
-"""Fresh-stdio H4e profile discovery and public semantic-tool acceptance."""
+"""Fresh-stdio semantic profile profile discovery and public semantic-tool acceptance."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from mcp.client.stdio import StdioServerParameters, stdio_client
 
 ROOT = Path(__file__).parents[3]
 PYTHON = Path(sys.executable)
-OUTPUT = Path("D:/comsol_runtime/H4e/live_profile.json")
+OUTPUT = Path("D:/comsol_runtime/semantic_profile/live_profile.json")
 MODEL = Path("D:/comsol_semantic/models/all-MiniLM-L6-v2/1110a243fdf4706b3f48f1d95db1a4f5529b4d41")
 PROFILE_COUNTS = {
     "core": 38,

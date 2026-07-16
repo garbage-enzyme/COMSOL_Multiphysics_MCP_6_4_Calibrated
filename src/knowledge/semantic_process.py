@@ -1,4 +1,4 @@
-"""Stdlib-only parent client and exact-child manager for the H4 worker."""
+"""Stdlib-only parent client and exact-child manager for the semantic retrieval worker."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Controlled real-COMSOL M1 periodic mesh audit and clone-smoke gate."""
+"""Controlled real-COMSOL periodic-mesh audit and clone-smoke gate."""
 
 from __future__ import annotations
 
@@ -57,11 +57,11 @@ def _copyface_tags(mesh) -> list[str]:
 
 def main() -> None:
     runtime = Path(os.environ.get("COMSOL_MCP_RUNTIME_DIR", "D:/comsol_runtime"))
-    artifact_dir = runtime / "M1"
+    artifact_dir = runtime / "periodic_mesh"
     artifact_dir.mkdir(parents=True, exist_ok=True)
     result_path = artifact_dir / "periodic_mesh_gate_result.json"
     broken_path = artifact_dir / "derived_missing_copyface.mph"
-    owner = SolverOwnership(owner="m1-periodic-mesh-gate")
+    owner = SolverOwnership(owner="periodic-mesh-gate")
     client = None
     source_model = None
     broken_model = None
@@ -71,7 +71,7 @@ def main() -> None:
         source_path = controlled_fixture_from_environment()["source"]
         source_hash = _sha256(source_path)
         source_stat = source_path.stat()
-        claim = owner.acquire(mode="m1_mesh_audit", model_path=str(source_path))
+        claim = owner.acquire(mode="periodic_mesh_audit", model_path=str(source_path))
         if not claim.get("acquired"):
             raise RuntimeError(f"solver lease unavailable: {claim}")
         client = mph.Client(cores=1)

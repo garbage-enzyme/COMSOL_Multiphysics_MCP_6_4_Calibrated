@@ -13,7 +13,7 @@
     {
       "fixture_id": "periodic_mesh_audit",
       "contract": "periodic_mesh_audit.json",
-      "canonical_json_sha256": "304ecd6614186c6d4a2ac958dff3baa5cd8e9031784ae3a4371200b29f283493",
+      "canonical_json_sha256": "1c9e88cfe6bc86f01797da6159ec04fad887400943710cafe971aa908420a543",
       "provenance": "repository_authored_contract",
       "redistribution_state": "redistributable_under_repository_license",
       "paper_derived": false
@@ -21,15 +21,15 @@
     {
       "fixture_id": "reference_air_polarization",
       "contract": "reference_air_polarization.json",
-      "canonical_json_sha256": "fca0097b4069eade6f1e53845072bb504e096dea173ac6d8aa613533dcd5aa3b",
+      "canonical_json_sha256": "f7d841ad380483bc31adc2f743dc14441ff18825bb7fed8c70044144331a0fa7",
       "provenance": "repository_authored_contract",
       "redistribution_state": "redistributable_under_repository_license",
       "paper_derived": false
     },
     {
-      "fixture_id": "h1_physical_evidence",
-      "contract": "h1_physical_evidence.json",
-      "canonical_json_sha256": "df04c20364cc196f9097e919ede08da3db7c6fb953ce364afa6b575031f4db3c",
+      "fixture_id": "reference_power_evidence",
+      "contract": "reference_power_evidence.json",
+      "canonical_json_sha256": "836117fb1ef6558b5fb0f446c7b51dac9236ec3b83423d053fdfff659a7c3356",
       "provenance": "repository_authored_contract",
       "redistribution_state": "redistributable_under_repository_license",
       "paper_derived": false
@@ -37,7 +37,7 @@
     {
       "fixture_id": "passive_port_closure",
       "contract": "passive_port_closure.json",
-      "canonical_json_sha256": "ca21e0af277684be115f2af0976774e0113ac4b50387a92b7046885fec335df5",
+      "canonical_json_sha256": "07a5f881e988b675a8bc7e2f90bedcc63fbf0b52bdec55d317ca6f796a88fc95",
       "provenance": "repository_authored_contract",
       "redistribution_state": "redistributable_under_repository_license",
       "paper_derived": false
@@ -45,7 +45,7 @@
     {
       "fixture_id": "source_immutability",
       "contract": "source_immutability.json",
-      "canonical_json_sha256": "0a5edb02a15c7d40c3f19b8a0564f8e35230012af88168d6fb4acf2310c18656",
+      "canonical_json_sha256": "990787ea2f368030fd8df62cf065ba81a468c4c57a97585534d777d5b35a0f22",
       "provenance": "repository_authored_contract",
       "redistribution_state": "redistributable_under_repository_license",
       "paper_derived": false
@@ -61,7 +61,7 @@
     {
       "fixture_id": "lexical_manual_retrieval",
       "contract": "lexical_manual_retrieval.json",
-      "canonical_json_sha256": "773cb72e5b849466be8a5a4d52cb3b264a9d184511572cf00ea62d519ac50e13",
+      "canonical_json_sha256": "17af6849054f0b73f1d81d68cef358e90e399cf9a9caa87f96ef0a36369804c8",
       "provenance": "repository_authored_contract",
       "redistribution_state": "redistributable_under_repository_license",
       "paper_derived": false

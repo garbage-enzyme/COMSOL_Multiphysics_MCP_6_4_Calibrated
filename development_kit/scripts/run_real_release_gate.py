@@ -15,7 +15,7 @@ import time
 
 import psutil
 
-from src.evidence.real_fixture import controlled_fixture_environment_from_h1_spec
+from src.evidence.real_fixture import controlled_fixture_environment_from_reference_power_spec
 from src.tools.ownership import SolverOwnership
 
 
@@ -86,76 +86,93 @@ def run_release_gate(
     pid_provider=_comsol_pids,
     wait_clean=_wait_clean_ownership,
 ) -> dict:
-    """Run optional mandatory-H1 mode followed by the existing serial suite."""
+    """Run optional mandatory-reference-power mode followed by the existing serial suite."""
     owner = owner or SolverOwnership()
     before_status = wait_clean(owner)
     before_pids = pid_provider()
     if before_status["collision"] or before_status["lease"]["state"] != "absent":
         raise RuntimeError("real release gate requires no external solver and no lease")
 
+    require_reference_power = bool(
+        getattr(args, "require_reference_power", getattr(args, "require_h1", False))
+    )
+    reference_power_spec = getattr(
+        args, "reference_power_spec", getattr(args, "h1_spec", None)
+    )
+    reference_power_cores = getattr(
+        args, "reference_power_cores", getattr(args, "h1_cores", None)
+    )
+    reference_power_timeout_seconds = getattr(
+        args,
+        "reference_power_timeout_seconds",
+        getattr(args, "h1_timeout_seconds", None),
+    )
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    h1_completed = None
-    h1_receipt = None
-    h1_timed_out = False
-    h1_receipt_path = args.output.with_name(f"{args.output.stem}.h1.json")
-    h1_passed = not args.require_h1
-    if args.require_h1:
-        if args.h1_spec is None or args.h1_cores is None or args.h1_timeout_seconds is None:
-            raise ValueError("--require-h1 requires --h1-spec, --h1-cores, and --h1-timeout-seconds")
-        if not 1 <= int(args.h1_cores) <= 64:
-            raise ValueError("--h1-cores must be in 1..64")
-        if not 1.0 <= float(args.h1_timeout_seconds) <= 7200.0:
-            raise ValueError("--h1-timeout-seconds must be in 1..7200")
-        if args.output.exists() or h1_receipt_path.exists():
-            raise ValueError("H1 release receipts must use new output paths")
-        h1_command = [
+    reference_power_completed = None
+    reference_power_receipt = None
+    reference_power_timed_out = False
+    reference_power_receipt_path = args.output.with_name(f"{args.output.stem}.reference_power.json")
+    reference_power_passed = not require_reference_power
+    if require_reference_power:
+        if reference_power_spec is None or reference_power_cores is None or reference_power_timeout_seconds is None:
+            raise ValueError(
+                "--require-reference-power requires --reference-power-spec, "
+                "--reference-power-cores, and --reference-power-timeout-seconds"
+            )
+        if not 1 <= int(reference_power_cores) <= 64:
+            raise ValueError("--reference-power-cores must be in 1..64")
+        if not 1.0 <= float(reference_power_timeout_seconds) <= 7200.0:
+            raise ValueError("--reference-power-timeout-seconds must be in 1..7200")
+        if args.output.exists() or reference_power_receipt_path.exists():
+            raise ValueError("reference-power release receipts must use new output paths")
+        reference_power_command = [
             sys.executable,
             str(
                 ROOT
                 / "development_kit"
                 / "tests"
                 / "integration"
-                / "h1_real_physical_evidence.py"
+                / "reference_power_acceptance.py"
             ),
             "--confirm", "RUN_REAL_COMSOL",
-            "--spec", str(args.h1_spec),
-            "--output", str(h1_receipt_path),
-            "--cores", str(args.h1_cores),
-            "--timeout-seconds", str(args.h1_timeout_seconds),
+            "--spec", str(reference_power_spec),
+            "--output", str(reference_power_receipt_path),
+            "--cores", str(reference_power_cores),
+            "--timeout-seconds", str(reference_power_timeout_seconds),
         ]
         try:
-            h1_completed = command_runner(
-                h1_command,
+            reference_power_completed = command_runner(
+                reference_power_command,
                 cwd=ROOT,
                 text=True,
                 capture_output=True,
                 check=False,
-                timeout=float(args.h1_timeout_seconds) + 90.0,
+                timeout=float(reference_power_timeout_seconds) + 90.0,
             )
         except subprocess.TimeoutExpired as exc:
-            h1_timed_out = True
-            h1_completed = subprocess.CompletedProcess(
-                h1_command,
+            reference_power_timed_out = True
+            reference_power_completed = subprocess.CompletedProcess(
+                reference_power_command,
                 124,
                 exc.stdout or "",
                 exc.stderr or "",
             )
-        if h1_receipt_path.is_file():
-            h1_receipt = json.loads(h1_receipt_path.read_text(encoding="utf-8"))
-        h1_passed = (
-            h1_completed.returncode == 0
-            and isinstance(h1_receipt, dict)
-            and h1_receipt.get("success") is True
-            and h1_receipt.get("cleanup", {}).get("passed") is True
+        if reference_power_receipt_path.is_file():
+            reference_power_receipt = json.loads(reference_power_receipt_path.read_text(encoding="utf-8"))
+        reference_power_passed = (
+            reference_power_completed.returncode == 0
+            and isinstance(reference_power_receipt, dict)
+            and reference_power_receipt.get("success") is True
+            and reference_power_receipt.get("cleanup", {}).get("passed") is True
         )
 
     suite_completed = None
-    if h1_passed:
+    if reference_power_passed:
         fixture_spec = getattr(args, "fixture_spec", None)
-        if fixture_spec is None and args.require_h1:
-            fixture_spec = args.h1_spec
+        if fixture_spec is None and require_reference_power:
+            fixture_spec = reference_power_spec
         fixture_environment = (
-            controlled_fixture_environment_from_h1_spec(fixture_spec)
+            controlled_fixture_environment_from_reference_power_spec(fixture_spec)
             if fixture_spec is not None
             else os.environ.copy()
         )
@@ -184,29 +201,32 @@ def run_release_gate(
         and not after_status["collision"]
     )
     suite_passed = suite_completed is not None and suite_completed.returncode == 0
-    overall = h1_passed and suite_passed and cleanup_passed
+    overall = reference_power_passed and suite_passed and cleanup_passed
+    reference_power_phase = {
+        **_completed_summary(reference_power_completed),
+        "required": require_reference_power,
+        "passed": reference_power_passed,
+        "timed_out": reference_power_timed_out,
+        "receipt_path": reference_power_receipt_path.name if require_reference_power else None,
+        "receipt_sha256": (
+            _sha256_file(reference_power_receipt_path)
+            if reference_power_receipt_path.is_file() else None
+        ),
+    }
     return {
-        "schema_version": "1.1.0",
+        "schema_version": "1.2.0",
         "gate": "serial_real_comsol_release",
-        "require_h1": bool(args.require_h1),
+        "require_reference_power": require_reference_power,
+        "require_h1": require_reference_power,
         "returncode": 0 if overall else 1,
         "phases": {
-            "h1": {
-                **_completed_summary(h1_completed),
-                "required": bool(args.require_h1),
-                "passed": h1_passed,
-                "timed_out": h1_timed_out,
-                "receipt_path": h1_receipt_path.name if args.require_h1 else None,
-                "receipt_sha256": (
-                    _sha256_file(h1_receipt_path)
-                    if h1_receipt_path.is_file() else None
-                ),
-            },
+            "reference_power": reference_power_phase,
+            "h1": reference_power_phase,
             "licensed_regression": {
                 **_completed_summary(suite_completed),
                 "test_target": "development_kit/tests/integration/test_real_comsol.py",
                 "passed": suite_passed,
-                "skipped_reason": None if suite_completed is not None else "H1 did not pass",
+                "skipped_reason": None if suite_completed is not None else "reference-power did not pass",
                 "fixture_spec_sha256": (
                     _sha256_file(Path(fixture_spec))
                     if suite_completed is not None and fixture_spec is not None
@@ -227,6 +247,10 @@ def run_release_gate(
             "comsol_build": "must match development_kit/release/support_matrix.json and probe evidence",
             "java": "must match development_kit/release/support_matrix.json and probe evidence",
         },
+        "legacy_compatibility": {
+            "cli_aliases": ["--require-h1", "--h1-spec", "--h1-cores", "--h1-timeout-seconds"],
+            "receipt_aliases": ["require_h1", "phases.h1"],
+        },
     }
 
 
@@ -234,11 +258,35 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--confirm", required=True, choices=["RUN_REAL_COMSOL"])
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--require-h1", action="store_true")
-    parser.add_argument("--h1-spec", type=Path)
+    parser.add_argument("--require-reference-power", action="store_true")
+    parser.add_argument(
+        "--require-h1",
+        dest="require_reference_power",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument("--reference-power-spec", type=Path)
+    parser.add_argument(
+        "--h1-spec",
+        dest="reference_power_spec",
+        type=Path,
+        help=argparse.SUPPRESS,
+    )
     parser.add_argument("--fixture-spec", type=Path)
-    parser.add_argument("--h1-cores", type=int)
-    parser.add_argument("--h1-timeout-seconds", type=float)
+    parser.add_argument("--reference-power-cores", type=int)
+    parser.add_argument(
+        "--h1-cores",
+        dest="reference_power_cores",
+        type=int,
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument("--reference-power-timeout-seconds", type=float)
+    parser.add_argument(
+        "--h1-timeout-seconds",
+        dest="reference_power_timeout_seconds",
+        type=float,
+        help=argparse.SUPPRESS,
+    )
     args = parser.parse_args()
     started = time.monotonic()
     try:

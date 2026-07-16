@@ -1,4 +1,4 @@
-"""M4 solver-free resource policy and P12 free-space admission gates."""
+"""resource admission solver-free resource policy and free-space admission free-space admission gates."""
 
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ POLICY = {
 
 @pytest.fixture
 def ascii_jobs_root():
-    root = Path("D:/comsol_runtime_test/m4_resource_journal") / uuid.uuid4().hex
+    root = Path("D:/comsol_runtime_test/resource_admission_journal") / uuid.uuid4().hex
     root.mkdir(parents=True)
     try:
         yield root

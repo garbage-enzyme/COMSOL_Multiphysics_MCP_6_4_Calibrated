@@ -1,4 +1,4 @@
-"""E3 gates for host-confirmed visual-review contracts."""
+"""visual review gates for host-confirmed visual-review contracts."""
 
 from __future__ import annotations
 

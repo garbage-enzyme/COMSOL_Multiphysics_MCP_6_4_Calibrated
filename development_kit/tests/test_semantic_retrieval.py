@@ -1,4 +1,4 @@
-"""H4d deterministic vector, filter, fusion, and cache-identity gates."""
+"""semantic retrieval deterministic vector, filter, fusion, and cache-identity gates."""
 
 from __future__ import annotations
 
@@ -52,7 +52,7 @@ class NonFiniteEncoder(ControlledEncoder):
 
 @pytest.fixture
 def retrieval_assets():
-    root = Path("D:/comsol_semantic_h4d_test") / uuid.uuid4().hex
+    root = Path("D:/comsol_semantic_retrieval_test") / uuid.uuid4().hex
     source_model = root / "source-model"
     source_model.mkdir(parents=True)
     (source_model / "config.json").write_text("{}\n", encoding="utf-8")

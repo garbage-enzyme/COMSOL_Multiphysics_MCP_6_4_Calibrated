@@ -1,4 +1,4 @@
-"""P11 bounded latency, overload outcome, and fairness evidence."""
+"""control-plane metrics bounded latency, overload outcome, and fairness evidence."""
 
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ def reset_control_metrics():
 
 @pytest.fixture()
 def runtime_root():
-    root = Path("D:/comsol_runtime_test/p11_control") / uuid.uuid4().hex
+    root = Path("D:/comsol_runtime_test/control_plane") / uuid.uuid4().hex
     root.mkdir(parents=True)
     try:
         yield root
@@ -93,7 +93,7 @@ def test_capability_job_and_manual_tools_attach_bounded_evidence(runtime_root, m
     assert capabilities["control_plane"]["outcome"] == "success"
 
     monkeypatch.setattr(jobs_module, "job_manager", jobs_module.JobManager(runtime_root / "jobs"))
-    job_server = FastMCP("p11-jobs")
+    job_server = FastMCP("control-plane-jobs")
     jobs_module.register_job_tools(job_server)
     status = job_server._tool_manager._tools["job_status"].fn("missing")
     tail = job_server._tool_manager._tools["job_tail"].fn("missing", 5)
@@ -106,7 +106,7 @@ def test_capability_job_and_manual_tools_attach_bounded_evidence(runtime_root, m
         {"success": False, "error_type": "TimeoutError", "error": "deadline exceeded"},
     ])
     monkeypatch.setattr(lexical_module, "run_bounded", lambda *_args, **_kwargs: next(responses))
-    manual_server = FastMCP("p11-manuals")
+    manual_server = FastMCP("control-plane-manuals")
     lexical_module.register_lexical_manual_tools(manual_server)
     busy = manual_server._tool_manager._tools["manual_search"].fn("query")
     timeout = manual_server._tool_manager._tools["manual_read_pages"].fn("manual.pdf", [1])
@@ -130,7 +130,7 @@ def test_slow_inventory_does_not_starve_durable_cancel_request(runtime_root, mon
         parent_pid=0,
         create_time=1.0,
         command_line=["python.exe", "-m", "src.server"],
-        owner="p11-fairness",
+        owner="control-plane-fairness",
     )
     store = JobStore(runtime_root / "jobs")
     job_id = store.create(
@@ -167,7 +167,7 @@ def test_concurrent_wrappers_record_bounded_latency_and_overload_outcomes(
     runtime_root, monkeypatch
 ):
     monkeypatch.setattr(jobs_module, "job_manager", jobs_module.JobManager(runtime_root / "jobs"))
-    jobs_server = FastMCP("p11-concurrent-jobs")
+    jobs_server = FastMCP("control-plane-concurrent-jobs")
     jobs_module.register_job_tools(jobs_server)
 
     own = SolverOwnership(
@@ -177,10 +177,10 @@ def test_concurrent_wrappers_record_bounded_latency_and_overload_outcomes(
         parent_pid=0,
         create_time=1.0,
         command_line=["python.exe", "-m", "src.server"],
-        owner="p11-concurrent",
+        owner="control-plane-concurrent",
     )
     monkeypatch.setattr(ownership_module, "ownership_manager", own)
-    ownership_server = FastMCP("p11-concurrent-ownership")
+    ownership_server = FastMCP("control-plane-concurrent-ownership")
     ownership_module.register_ownership_tools(ownership_server)
 
     response_lock = threading.Lock()
@@ -198,7 +198,7 @@ def test_concurrent_wrappers_record_bounded_latency_and_overload_outcomes(
         return {"success": False, "error_type": "TimeoutError", "error": "deadline exceeded"}
 
     monkeypatch.setattr(lexical_module, "run_bounded", manual_response)
-    manual_server = FastMCP("p11-concurrent-manual")
+    manual_server = FastMCP("control-plane-concurrent-manual")
     lexical_module.register_lexical_manual_tools(manual_server)
 
     calls = []

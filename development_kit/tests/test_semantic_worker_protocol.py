@@ -1,4 +1,4 @@
-"""H4b containment and protocol gates for the isolated fake worker."""
+"""semantic worker protocol containment and protocol gates for the isolated fake worker."""
 
 from __future__ import annotations
 
@@ -193,13 +193,13 @@ def test_idle_ttl_stops_worker_lazily():
 
 
 def test_hanging_semantic_worker_does_not_delay_control_plane_or_lexical_search():
-    root = Path("D:/comsol_semantic_h4b_test") / uuid.uuid4().hex
+    root = Path("D:/comsol_semantic_worker_test") / uuid.uuid4().hex
     index = root / "manuals.sqlite3"
     runtime = root / "runtime"
     build_index_from_records([{
         "source": "fake/manual.pdf", "module": "fake", "page": 1,
         "heading": "CopyFace", "text": "CopyFace source destination mesh",
-    }], index, corpus_fingerprint="h4b-test")
+    }], index, corpus_fingerprint="semantic-worker-test")
     manager = SemanticWorkerManager(startup_deadline=2.0, query_deadline=0.5, fault="query_hang")
     result: dict = {}
 

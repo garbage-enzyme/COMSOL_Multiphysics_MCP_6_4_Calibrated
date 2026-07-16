@@ -1,4 +1,4 @@
-"""E1 gates for versioned physical-evidence and policy contracts."""
+"""evidence contracts gates for versioned physical-evidence and policy contracts."""
 
 from __future__ import annotations
 

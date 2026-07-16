@@ -150,8 +150,8 @@ def process_identity_state(identity: dict[str, Any]) -> tuple[str, str]:
 def cancel_request_targets_attempt(control: dict[str, Any], attempt: int) -> bool:
     """Return whether a durable cancel request belongs to this worker attempt.
 
-    Schema-v1 controls have no target attempt, so they retain their H1 meaning
-    for the attempt that reads them. H2 controls are strict: an old request
+    Schema-v1 controls have no target attempt, so they retain their reference-power meaning
+    for the attempt that reads them. durable cancellation controls are strict: an old request
     must never stop a resumed worker.
     """
     if control.get("request") != "cancel_requested":

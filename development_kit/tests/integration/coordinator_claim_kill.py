@@ -1,4 +1,4 @@
-"""H2f helper: stop only the exact coordinator after its durable claim."""
+"""coordinator recovery helper: stop only the exact coordinator after its durable claim."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from src.jobs.store import JobStore, atomic_write_json
 
 def main(root: str, job_id: str, timeout_seconds: float = 30.0) -> int:
     store = JobStore(Path(root))
-    evidence_path = store.job_dir(job_id) / "h2f_coordinator_restart_probe.json"
+    evidence_path = store.job_dir(job_id) / "coordinator_restart_probe.json"
     deadline = time.monotonic() + float(timeout_seconds)
     while time.monotonic() < deadline:
         try:

@@ -469,7 +469,7 @@ def _run_bounded_sweep_hook(
     row_status: Optional[str] = None,
     row_attempt: Optional[int] = None,
 ) -> str:
-    """Run one in-process gate and validate only the bounded M4 action surface."""
+    """Run one in-process gate and validate only the bounded resource admission action surface."""
     context = {
         "phase": phase,
         "stage": stage,

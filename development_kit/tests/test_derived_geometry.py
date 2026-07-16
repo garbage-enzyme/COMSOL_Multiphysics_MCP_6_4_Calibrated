@@ -1,4 +1,4 @@
-"""M2 typed derived-geometry edit gates without COMSOL."""
+"""derived geometry typed derived-geometry edit gates without COMSOL."""
 
 from __future__ import annotations
 

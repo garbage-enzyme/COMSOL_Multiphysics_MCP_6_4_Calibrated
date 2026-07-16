@@ -1,4 +1,4 @@
-"""Solver-free normalization for H1 physical-power evidence.
+"""Solver-free normalization for reference-power physical-power evidence.
 
 The helpers in this module only validate caller declarations and perform
 arithmetic.  They do not infer plane orientation, medium identity, expressions,

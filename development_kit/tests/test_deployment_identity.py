@@ -1,4 +1,4 @@
-"""P10 deployment identity and concurrent fresh-process consistency."""
+"""deployment identity deployment identity and concurrent fresh-process consistency."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ def _sha256(path: Path) -> str:
 def _selection(profile: str) -> ProfileSelection:
     return ProfileSelection(
         name=profile,
-        source="p10-test",
+        source="deployment-identity-test",
         environment_variable="COMSOL_MCP_PROFILE",
         default_used=False,
     )

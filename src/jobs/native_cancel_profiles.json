@@ -31,7 +31,7 @@
           "stop(int)"
         ]
       },
-      "h2a_gate": {
+      "native_cancel_gate": {
         "fresh_subprocess_runs": 3,
         "result": "passed",
         "source_model_sha256": "465f111ff9408955830f957f6e661b9aeedac2ee04c35be255d96e73e71cee60",

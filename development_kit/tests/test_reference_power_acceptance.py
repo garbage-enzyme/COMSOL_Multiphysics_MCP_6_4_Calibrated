@@ -1,4 +1,4 @@
-"""Solver-free H1 licensed-gate contract and preflight tests."""
+"""Solver-free reference-power licensed-gate contract and preflight tests."""
 
 from __future__ import annotations
 
@@ -11,10 +11,10 @@ import sys
 
 import pytest
 
-from src.evidence.h1_acceptance import (
-    build_h1_dry_run_receipt,
-    validate_h1_acceptance_contract,
-    validate_h1_execution_spec,
+from src.evidence.reference_power_acceptance import (
+    build_reference_power_dry_run_receipt,
+    validate_reference_power_acceptance_contract,
+    validate_reference_power_execution_spec,
 )
 
 
@@ -24,7 +24,7 @@ CONTRACT_PATH = (
     / "development_kit"
     / "release"
     / "integration_fixtures"
-    / "h1_physical_evidence.json"
+    / "reference_power_evidence.json"
 )
 
 
@@ -49,10 +49,10 @@ def _spec(tmp_path):
     return {
         "schema_name": "comsol_mcp.h1_execution_spec",
         "schema_version": "1.0.0",
-        "config_id": "unit-h1-gate",
+        "config_id": "unit-reference-power-gate",
         "source_model_path": str(source.resolve()),
         "expected_source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
-        "artifact_dir": "D:/h1_gate_unit",
+        "artifact_dir": "D:/reference_power_gate_unit",
         "model": {
             "component_tag": "comp1",
             "physics_tag": "ewfd",
@@ -79,10 +79,10 @@ def _spec(tmp_path):
     }
 
 
-def test_frozen_h1_contract_is_strict_sanitized_and_bounded():
-    contract = validate_h1_acceptance_contract(_contract())
+def test_frozen_reference_power_contract_is_strict_sanitized_and_bounded():
+    contract = validate_reference_power_acceptance_contract(_contract())
 
-    assert contract["fixture_id"] == "h1_physical_evidence"
+    assert contract["fixture_id"] == "reference_power_evidence"
     serialized = json.dumps(contract, ensure_ascii=False)
     assert "C:\\Users\\" not in serialized
     assert "D:/" not in serialized
@@ -91,8 +91,8 @@ def test_frozen_h1_contract_is_strict_sanitized_and_bounded():
 
 def test_execution_spec_normalizes_exact_declarations_and_redacts_paths(tmp_path):
     spec = _spec(tmp_path)
-    normalized = validate_h1_execution_spec(spec, _contract(), verify_files=True)
-    receipt = build_h1_dry_run_receipt(_contract(), spec, verify_files=True)
+    normalized = validate_reference_power_execution_spec(spec, _contract(), verify_files=True)
+    receipt = build_reference_power_dry_run_receipt(_contract(), spec, verify_files=True)
 
     assert normalized["reference_air"]["top_air_domain_ids"] == [3]
     assert normalized["declared_plane_flux"]["incident"]["positive_power_sign"] == -1
@@ -117,12 +117,12 @@ def test_execution_spec_fails_closed_on_ambiguous_inputs(tmp_path, mutation, mat
     value = _spec(tmp_path)
     mutation(value)
     with pytest.raises(ValueError, match=match):
-        validate_h1_execution_spec(value, _contract())
+        validate_reference_power_execution_spec(value, _contract())
 
 
 def test_preflight_cli_validates_fixture_without_importing_mph():
     completed = subprocess.run(
-        [sys.executable, "development_kit/scripts/h1_gate_preflight.py"],
+        [sys.executable, "development_kit/scripts/reference_power_gate_preflight.py"],
         cwd=ROOT,
         text=True,
         capture_output=True,
@@ -136,5 +136,5 @@ def test_preflight_cli_validates_fixture_without_importing_mph():
     assert receipt["spec_valid"] is None
     assert receipt["real_comsol_started"] is False
     assert "mph" not in (
-        ROOT / "development_kit" / "scripts" / "h1_gate_preflight.py"
+        ROOT / "development_kit" / "scripts" / "reference_power_gate_preflight.py"
     ).read_text(encoding="utf-8")

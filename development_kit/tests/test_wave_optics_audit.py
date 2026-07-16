@@ -597,8 +597,8 @@ def test_all_air_mutation_is_clone_only_and_requires_exact_material_tags():
     )
 
     assert result["removed_material_tags"] == ["mat1", "mat2"]
-    assert clone.java.component_value.materials.tags() == ["h1_air"]
-    air = clone.java.component_value.materials.items["h1_air"]
+    assert clone.java.component_value.materials.tags() == ["reference_air_material"]
+    air = clone.java.component_value.materials.items["reference_air_material"]
     assert air.group.values == {
         "relpermittivity": "1",
         "relpermeability": "1",
@@ -642,7 +642,7 @@ def _run_reference(tmp_path, monkeypatch, *, material_error=False, cleanup_resul
         return {
             "method": "all_air_clone",
             "removed_material_tags": ["mat1"],
-            "air_material_tag": "h1_air",
+            "air_material_tag": "reference_air_material",
             "domain_ids": [1, 2, 3],
             "readback_complete": True,
         }

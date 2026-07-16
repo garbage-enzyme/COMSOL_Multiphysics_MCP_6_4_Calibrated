@@ -1,4 +1,4 @@
-"""Controlled COMSOL 6.4 gate for M2 derived geometry edits."""
+"""Controlled COMSOL 6.4 gate for typed derived-geometry edits."""
 
 from __future__ import annotations
 
@@ -42,11 +42,11 @@ def _strings(values):
 
 def main() -> None:
     runtime = Path(os.environ.get("COMSOL_MCP_RUNTIME_DIR", "D:/comsol_runtime"))
-    artifact_dir = runtime / "M2"
+    artifact_dir = runtime / "derived_geometry"
     artifact_dir.mkdir(parents=True, exist_ok=True)
-    source_path = artifact_dir / "m2_source.mph"
+    source_path = artifact_dir / "derived_geometry_source.mph"
     result_path = artifact_dir / "derived_geometry_gate_result.json"
-    owner = SolverOwnership(owner="m2-derived-geometry-gate")
+    owner = SolverOwnership(owner="derived-geometry-gate")
     client = None
     source = None
     clone = None
@@ -54,11 +54,11 @@ def main() -> None:
     result = {"success": False, "solve_ran": False}
     exit_code = 1
     try:
-        claim = owner.acquire(mode="m2_geometry", model_path=str(source_path))
+        claim = owner.acquire(mode="derived_geometry", model_path=str(source_path))
         if not claim.get("acquired"):
             raise RuntimeError(f"solver lease unavailable: {claim}")
         client = mph.Client(cores=1)
-        source = client.create("M2Source")
+        source = client.create("DerivedGeometrySource")
         jm = source.java
         component = jm.component().create("comp1", True)
         geom = component.geom().create("geom1", 3)
@@ -77,7 +77,7 @@ def main() -> None:
         source_stat = source_path.stat()
 
         clone, record = create_derived_geometry_clone(
-            source, client, new_name="M2Derived", runtime_dir=artifact_dir
+            source, client, new_name="DerivedGeometryClone", runtime_dir=artifact_dir
         )
         initial = _snapshot(clone, "comp1", "geom1")
         initial_hash = _state_hash(record, initial)

@@ -1,4 +1,4 @@
-"""H4c gates for immutable offline model and semantic-index publication."""
+"""semantic index gates for immutable offline model and semantic-index publication."""
 
 from __future__ import annotations
 
@@ -41,8 +41,8 @@ class FakeEncoder:
 
 
 @pytest.fixture
-def h4c_root():
-    root = Path("D:/comsol_semantic_h4c_test") / uuid.uuid4().hex
+def semantic_index_root():
+    root = Path("D:/comsol_semantic_index_test") / uuid.uuid4().hex
     root.mkdir(parents=True)
     try:
         yield root
@@ -51,12 +51,12 @@ def h4c_root():
 
 
 @pytest.fixture
-def h4c_assets(h4c_root):
-    source = h4c_root / "source-model"
+def semantic_index_assets(semantic_index_root):
+    source = semantic_index_root / "source-model"
     source.mkdir()
     (source / "config.json").write_text('{"dimension":4}\n', encoding="utf-8")
     (source / "model.bin").write_bytes(bytes(range(64)))
-    model = h4c_root / "deployment" / "models" / "fake" / "revision-1"
+    model = semantic_index_root / "deployment" / "models" / "fake" / "revision-1"
     pin_model_snapshot(
         source,
         model,
@@ -65,7 +65,7 @@ def h4c_assets(h4c_root):
         dimension=4,
         license_name="test-only",
     )
-    lexical = h4c_root / "lexical" / "manuals.sqlite3"
+    lexical = semantic_index_root / "lexical" / "manuals.sqlite3"
     corpus = "8" * 64
     build_index_from_records(
         [
@@ -88,7 +88,7 @@ def h4c_assets(h4c_root):
         corpus_fingerprint=corpus,
     )
     return {
-        "root": h4c_root / "deployment",
+        "root": semantic_index_root / "deployment",
         "model": model,
         "lexical": lexical,
         "corpus": corpus,
@@ -130,25 +130,25 @@ def test_chunking_is_deterministic_bounded_and_page_local():
     assert all("\n" not in item for item in first)
 
 
-def test_model_pin_is_ascii_immutable_and_revision_bound(h4c_assets):
-    model = validate_pinned_model(h4c_assets["model"])
+def test_model_pin_is_ascii_immutable_and_revision_bound(semantic_index_assets):
+    model = validate_pinned_model(semantic_index_assets["model"])
     assert model["revision"] == "revision-1"
     assert model["dimension"] == 4
     assert model["license"] == "test-only"
     assert Path(model["model_path"]).is_absolute()
     assert model["model_path"].isascii()
 
-    (h4c_assets["model"] / "model.bin").write_bytes(b"tampered")
+    (semantic_index_assets["model"] / "model.bin").write_bytes(b"tampered")
     with pytest.raises(ValueError, match="identity mismatch"):
-        validate_pinned_model(h4c_assets["model"])
+        validate_pinned_model(semantic_index_assets["model"])
 
 
-def test_build_validates_then_atomically_publishes_current(h4c_assets):
-    result = _build(h4c_assets, "build-001")
-    current = read_current(h4c_assets["root"])
+def test_build_validates_then_atomically_publishes_current(semantic_index_assets):
+    result = _build(semantic_index_assets, "build-001")
+    current = read_current(semantic_index_assets["root"])
     index = Path(current["pointer"]["index_path"])
     before = index_file_snapshot(index)
-    repeated = read_current(h4c_assets["root"])
+    repeated = read_current(semantic_index_assets["root"])
     after = index_file_snapshot(index)
 
     assert result["success"] is True
@@ -158,23 +158,23 @@ def test_build_validates_then_atomically_publishes_current(h4c_assets):
     assert current["index"]["manifest"]["vector_dimension"] == 4
     assert current["index"]["manifest"]["chunking"]["page_crossing"] is False
     assert repeated["index"]["manifest_sha256"] == current["index"]["manifest_sha256"]
-    citations = validate_index_against_lexical(index, h4c_assets["lexical"])
+    citations = validate_index_against_lexical(index, semantic_index_assets["lexical"])
     assert citations["semantic_citation_count"] == 2
     assert before == after
-    assert not list(h4c_assets["root"].rglob("*.tmp"))
+    assert not list(semantic_index_assets["root"].rglob("*.tmp"))
 
 
 @pytest.mark.parametrize("fault", ["after_chunks", "after_embeddings", "before_publish"])
-def test_interrupted_build_never_changes_active_pointer(h4c_assets, fault):
-    _build(h4c_assets, "accepted")
-    pointer = h4c_assets["root"] / "current.json"
+def test_interrupted_build_never_changes_active_pointer(semantic_index_assets, fault):
+    _build(semantic_index_assets, "accepted")
+    pointer = semantic_index_assets["root"] / "current.json"
     before = pointer.read_bytes()
 
     with pytest.raises(RuntimeError, match="injected interruption"):
         build_index(
-            deployment_root=h4c_assets["root"],
-            lexical_index=h4c_assets["lexical"],
-            model_path=h4c_assets["model"],
+            deployment_root=semantic_index_assets["root"],
+            lexical_index=semantic_index_assets["lexical"],
+            model_path=semantic_index_assets["model"],
             encoder=FakeEncoder(),
             build_id=f"failed-{fault.replace('_', '-')}",
             maximum_characters=240,
@@ -184,13 +184,13 @@ def test_interrupted_build_never_changes_active_pointer(h4c_assets, fault):
         )
 
     assert pointer.read_bytes() == before
-    assert read_current(h4c_assets["root"])["pointer"]["build_id"] == "accepted"
-    assert list(h4c_assets["root"].rglob("*.building"))
+    assert read_current(semantic_index_assets["root"])["pointer"]["build_id"] == "accepted"
+    assert list(semantic_index_assets["root"].rglob("*.building"))
 
 
-def test_validation_rejects_corrupt_manifest_duplicate_ids_and_partial_vectors(h4c_assets):
-    _build(h4c_assets, "good")
-    good = Path(read_current(h4c_assets["root"])["pointer"]["index_path"])
+def test_validation_rejects_corrupt_manifest_duplicate_ids_and_partial_vectors(semantic_index_assets):
+    _build(semantic_index_assets, "good")
+    good = Path(read_current(semantic_index_assets["root"])["pointer"]["index_path"])
 
     corrupt = good.parent / "corrupt"
     shutil.copytree(good, corrupt)
@@ -238,14 +238,14 @@ def test_validation_rejects_corrupt_manifest_duplicate_ids_and_partial_vectors(h
     _rewrite_data_identity(missing_citation, manifest)
     assert validate_index_directory(missing_citation)["validated"] is True
     with pytest.raises(ValueError, match="absent from lexical corpus"):
-        validate_index_against_lexical(missing_citation, h4c_assets["lexical"])
+        validate_index_against_lexical(missing_citation, semantic_index_assets["lexical"])
 
 
-def test_mismatch_non_ascii_and_pointer_rollback_gates(h4c_assets):
+def test_mismatch_non_ascii_and_pointer_rollback_gates(semantic_index_assets):
     with pytest.raises(ValueError, match="corpus fingerprint"):
         build_index(
-            deployment_root=h4c_assets["root"], lexical_index=h4c_assets["lexical"],
-            model_path=h4c_assets["model"], encoder=FakeEncoder(), build_id="wrong-corpus",
+            deployment_root=semantic_index_assets["root"], lexical_index=semantic_index_assets["lexical"],
+            model_path=semantic_index_assets["model"], encoder=FakeEncoder(), build_id="wrong-corpus",
             expected_corpus_fingerprint="0" * 64,
         )
 
@@ -253,25 +253,25 @@ def test_mismatch_non_ascii_and_pointer_rollback_gates(h4c_assets):
     wrong_encoder.dimension = 5
     with pytest.raises(ValueError, match="dimension"):
         build_index(
-            deployment_root=h4c_assets["root"], lexical_index=h4c_assets["lexical"],
-            model_path=h4c_assets["model"], encoder=wrong_encoder, build_id="wrong-model",
+            deployment_root=semantic_index_assets["root"], lexical_index=semantic_index_assets["lexical"],
+            model_path=semantic_index_assets["model"], encoder=wrong_encoder, build_id="wrong-model",
         )
 
     with pytest.raises(ValueError, match="ASCII"):
         build_index(
-            deployment_root="C:/Users/陆星/semantic", lexical_index=h4c_assets["lexical"],
-            model_path=h4c_assets["model"], encoder=FakeEncoder(), build_id="unicode-root",
+            deployment_root="C:/Users/陆星/semantic", lexical_index=semantic_index_assets["lexical"],
+            model_path=semantic_index_assets["model"], encoder=FakeEncoder(), build_id="unicode-root",
         )
 
-    _build(h4c_assets, "rollback-a")
-    first = Path(read_current(h4c_assets["root"])["pointer"]["index_path"])
-    _build(h4c_assets, "rollback-b")
-    assert read_current(h4c_assets["root"])["pointer"]["build_id"] == "rollback-b"
-    switch_current(h4c_assets["root"], first)
-    assert read_current(h4c_assets["root"])["pointer"]["build_id"] == "rollback-a"
+    _build(semantic_index_assets, "rollback-a")
+    first = Path(read_current(semantic_index_assets["root"])["pointer"]["index_path"])
+    _build(semantic_index_assets, "rollback-b")
+    assert read_current(semantic_index_assets["root"])["pointer"]["build_id"] == "rollback-b"
+    switch_current(semantic_index_assets["root"], first)
+    assert read_current(semantic_index_assets["root"])["pointer"]["build_id"] == "rollback-a"
 
 
-def test_semantic_index_import_does_not_load_ml_or_spawn(h4c_root):
+def test_semantic_index_import_does_not_load_ml_or_spawn(semantic_index_root):
     code = """
 import json, sys
 import src.knowledge.semantic_index

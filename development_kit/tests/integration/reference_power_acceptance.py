@@ -1,4 +1,4 @@
-"""Fresh-process coordinator and worker for the licensed H1 physical gate."""
+"""Fresh-process coordinator and worker for the licensed reference-power physical gate."""
 
 from __future__ import annotations
 
@@ -20,17 +20,17 @@ ROOT = Path(__file__).parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.evidence.h1_acceptance import (
+from src.evidence.reference_power_acceptance import (
     MAX_INPUT_BYTES,
-    build_h1_dry_run_receipt,
+    build_reference_power_dry_run_receipt,
     load_bounded_json,
-    validate_h1_acceptance_contract,
-    validate_h1_execution_spec,
+    validate_reference_power_acceptance_contract,
+    validate_reference_power_execution_spec,
 )
-from src.evidence.h1_gate_runtime import (
-    build_h1_policies,
-    evaluate_h1_results,
-    inventory_h1_artifacts,
+from src.evidence.reference_power_gate import (
+    build_reference_power_policies,
+    evaluate_reference_power_results,
+    inventory_reference_power_artifacts,
 )
 
 
@@ -39,7 +39,7 @@ DEFAULT_CONTRACT = (
     / "development_kit"
     / "release"
     / "integration_fixtures"
-    / "h1_physical_evidence.json"
+    / "reference_power_evidence.json"
 )
 
 
@@ -214,11 +214,11 @@ def _wait_lightweight_clean(timeout_seconds: float = 30.0) -> dict[str, Any]:
 
 
 def _load_inputs(contract_path: Path, spec_path: Path | None, *, verify_files: bool):
-    contract = validate_h1_acceptance_contract(load_bounded_json(contract_path, MAX_INPUT_BYTES))
+    contract = validate_reference_power_acceptance_contract(load_bounded_json(contract_path, MAX_INPUT_BYTES))
     spec = None
     if spec_path is not None:
         raw = load_bounded_json(spec_path, contract["limits"]["max_spec_bytes"])
-        spec = validate_h1_execution_spec(raw, contract, verify_files=verify_files)
+        spec = validate_reference_power_execution_spec(raw, contract, verify_files=verify_files)
     return contract, spec
 
 
@@ -249,14 +249,14 @@ def _run_worker(args: argparse.Namespace) -> int:
             run_wave_optics_reference_audit,
         )
 
-        owner = SolverOwnership(owner="h1-real-physical-evidence")
-        claim = owner.acquire(mode="h1_real_physical_evidence", model_path=spec["source_model_path"])
+        owner = SolverOwnership(owner="reference-power-evidence")
+        claim = owner.acquire(mode="reference_power_evidence", model_path=spec["source_model_path"])
         result["lease_claim"] = claim
         if not claim.get("success"):
             raise RuntimeError("solver lease acquisition failed")
         client = mph.Client(cores=args.cores)
         source_model = client.load(spec["source_model_path"])
-        policies = build_h1_policies(contract)
+        policies = build_reference_power_policies(contract)
         artifact_root = Path(spec["artifact_dir"]).resolve()
         artifact_root.mkdir(parents=True, exist_ok=True)
         reference_spec = spec["reference_air"]
@@ -310,7 +310,7 @@ def _run_worker(args: argparse.Namespace) -> int:
             active_profile="wave_optics",
             ownership_preflight={"ready": True},
         )
-        evaluation = evaluate_h1_results(contract, reference_result, point_result)
+        evaluation = evaluate_reference_power_results(contract, reference_result, point_result)
         result.update(
             {
                 "success": evaluation["passed"],
@@ -364,7 +364,7 @@ def _run_coordinator(args: argparse.Namespace) -> int:
     admitted, blockers = _admit_lightweight_status(before_status)
     receipt: dict[str, Any] = {
         "schema_version": "1.0.0",
-        "gate": "h1_fresh_process_licensed",
+        "gate": "reference_power_fresh_process_licensed",
         "pre_import_admission": {
             "admitted": admitted,
             "blockers": blockers,
@@ -385,7 +385,7 @@ def _run_coordinator(args: argparse.Namespace) -> int:
             {
                 "success": False,
                 "worker_started": False,
-                "artifact_error": "artifact root must be empty before a licensed H1 run",
+                "artifact_error": "artifact root must be empty before a licensed reference-power run",
             }
         )
         _atomic_json(args.output, receipt)
@@ -434,7 +434,7 @@ def _run_coordinator(args: argparse.Namespace) -> int:
         else {"success": False, "error": "worker result artifact is missing"}
     )
     try:
-        artifacts = inventory_h1_artifacts(artifact_root, contract["limits"])
+        artifacts = inventory_reference_power_artifacts(artifact_root, contract["limits"])
         artifact_error = None
     except Exception as exc:
         artifacts = None
@@ -494,7 +494,7 @@ def main() -> int:
         return _run_worker(args)
     if args.dry_run:
         contract, spec = _load_inputs(args.contract, args.spec, verify_files=args.spec is not None)
-        receipt = build_h1_dry_run_receipt(contract, spec, verify_files=False)
+        receipt = build_reference_power_dry_run_receipt(contract, spec, verify_files=False)
         if args.output is not None:
             _atomic_json(args.output, receipt)
         print(json.dumps(receipt, indent=2, sort_keys=True))

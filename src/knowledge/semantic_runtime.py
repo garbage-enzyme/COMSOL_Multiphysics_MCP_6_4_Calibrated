@@ -149,7 +149,7 @@ class SemanticService:
                 "solver_free": True,
                 "device": "cpu",
                 "maturity": "experimental",
-                "promotion_status": "rejected_by_h4f_minilm_benchmark",
+                "promotion_status": "rejected_by_semantic_minilm_benchmark",
                 "known_limitations": [
                     "paraphrase_multi_recall_regressed",
                     "direct_chinese_recall_at_5_is_zero",
