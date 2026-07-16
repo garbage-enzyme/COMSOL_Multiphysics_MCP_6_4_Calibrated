@@ -31,10 +31,10 @@ console entry point 绝对路径。
 | --- | ---: | --- |
 | `core` | 38 | 紧凑默认控制面和词法手册检索。 |
 | `basic_fem` | 76 | 常规 FEM 构建和有界导出。 |
-| `wave_optics` | 61 | 周期光学、超表面、预检和证据审计。 |
+| `wave_optics` | 62 | 周期光学、超表面、场数据集发现、预检和证据审计。 |
 | `semantic_docs` | 41 | 隔离的实验性语义手册检索。 |
 | `experimental` | 64 | 显式选择的通用和 escape-hatch 工具。 |
-| `full` | 118 | 宽兼容界面；默认不推荐。 |
+| `full` | 119 | 宽兼容界面；默认不推荐。 |
 
 在 client 的 server environment 中设置 `COMSOL_MCP_PROFILE`。省略时使用
 `core`。stdio 进程启动时会冻结 profile，修改后必须重启 client/MCP host。非法
@@ -124,7 +124,7 @@ JDK_HOME = 'D:\COMSOL64\Multiphysics\java\win64\jre'
 ```text
 profile = wave_optics
 active_profile = wave_optics
-tool_count = 61
+tool_count = 62
 ```
 
 然后在构造 client 前调用 `solver_status` 和 `solver_preflight`。保持单一 solver

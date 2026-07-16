@@ -58,10 +58,10 @@ Set `COMSOL_MCP_PROFILE` before starting the server. A profile is fixed for the 
 | --- | ---: | --- |
 | `core` (default) | 38 | Compact, mature control plane: status, ownership, session/model inspection, one-point solve/evaluation, and lexical manuals. |
 | `basic_fem` | 76 | `core` plus typed conventional FEM construction, derived-geometry edits, and bounded exports. |
-| `wave_optics` | 61 | Recommended for metasurfaces: `core` plus derived-geometry edits, material preview, periodic-mesh audit/smoke, visual-review contracts, Wave Optics preflight, point/reference audits, and staged workflows. |
+| `wave_optics` | 62 | Recommended for metasurfaces: `core` plus derived-geometry edits, material preview, locale-safe field-dataset discovery, periodic-mesh audit/smoke, visual-review contracts, Wave Optics preflight, point/reference audits, and staged workflows. |
 | `semantic_docs` | 41 | `core` plus isolated experimental vector-assisted manual retrieval. |
 | `experimental` | 64 | Explicit opt-in generic creation, async, property escape hatches, and project helpers. |
-| `full` | 118 | Broad compatibility/discovery surface, including optional semantic tools. |
+| `full` | 119 | Broad compatibility/discovery surface, including optional semantic tools. |
 
 Call `capabilities` to discover the active profile, exact registered tools, target versions, disabled groups, and restart requirements without starting COMSOL. Its bounded `deployment_identity` reports source-tree versus installed-package loading plus frozen profile/schema and catalog hashes, so a host restart can detect same-version stale installs or source shadowing without exposing local paths.
 

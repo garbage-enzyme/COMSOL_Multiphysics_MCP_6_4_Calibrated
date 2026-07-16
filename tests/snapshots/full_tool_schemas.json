@@ -4356,6 +4356,29 @@
     "title": "visual_review_request_createArguments",
     "type": "object"
   },
+  "wave_optics_field_datasets": {
+    "properties": {
+      "max_components": {
+        "default": 32,
+        "title": "Max Components",
+        "type": "integer"
+      },
+      "max_datasets": {
+        "default": 64,
+        "title": "Max Datasets",
+        "type": "integer"
+      },
+      "model_name": {
+        "title": "Model Name",
+        "type": "string"
+      }
+    },
+    "required": [
+      "model_name"
+    ],
+    "title": "wave_optics_field_datasetsArguments",
+    "type": "object"
+  },
   "wave_optics_incidence_apply": {
     "properties": {
       "alpha1_inc": {

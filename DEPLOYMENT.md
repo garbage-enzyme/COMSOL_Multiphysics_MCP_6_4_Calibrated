@@ -32,10 +32,10 @@ portable deployment. Configure the absolute installed console entry point.
 | --- | ---: | --- |
 | `core` | 38 | Compact default control plane and lexical manuals. |
 | `basic_fem` | 76 | Conventional FEM construction and bounded exports. |
-| `wave_optics` | 61 | Periodic optics, metasurfaces, preflight, and evidence audits. |
+| `wave_optics` | 62 | Periodic optics, metasurfaces, field-dataset discovery, preflight, and evidence audits. |
 | `semantic_docs` | 41 | Isolated experimental semantic manual retrieval. |
 | `experimental` | 64 | Explicit opt-in generic and escape-hatch tools. |
-| `full` | 118 | Broad compatibility surface; not recommended by default. |
+| `full` | 119 | Broad compatibility surface; not recommended by default. |
 
 Set `COMSOL_MCP_PROFILE` in the client's server environment. Omitting it selects
 `core`. The profile is frozen when the stdio process starts; changing it requires
@@ -128,7 +128,7 @@ report:
 ```text
 profile = wave_optics
 active_profile = wave_optics
-tool_count = 61
+tool_count = 62
 ```
 
 Then call `solver_status` and `solver_preflight` before constructing a client.

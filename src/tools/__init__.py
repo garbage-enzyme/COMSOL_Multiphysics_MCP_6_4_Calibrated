@@ -21,6 +21,7 @@ from .incidence_config import register_incidence_config_tools
 from .wave_optics_audit import register_wave_optics_audit_tools
 from .material_expressions import register_material_expression_tools
 from .visual_review import register_visual_review_tools
+from .field_evidence import register_field_evidence_tools
 from .semantic_docs import register_semantic_doc_tools
 from .profiles import ProfileSelection, register_profiled, resolve_profile, tool_names_for_profile
 
@@ -46,6 +47,7 @@ TOOL_REGISTRARS = (
     register_wave_optics_audit_tools,
     register_material_expression_tools,
     register_visual_review_tools,
+    register_field_evidence_tools,
     register_semantic_doc_tools,
 )
 
@@ -79,6 +81,7 @@ __all__ = [
     "register_wave_optics_audit_tools",
     "register_material_expression_tools",
     "register_visual_review_tools",
+    "register_field_evidence_tools",
     "register_semantic_doc_tools",
     "TOOL_REGISTRARS",
     "register_tool_modules",

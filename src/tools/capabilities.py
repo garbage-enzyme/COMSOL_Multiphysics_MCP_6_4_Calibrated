@@ -164,6 +164,7 @@ def get_capabilities(selection: ProfileSelection | None = None) -> dict:
             "versioned_physical_evidence_contract",
             "solver_free_material_expression_preview",
             "solver_free_visual_review_contracts",
+            "locale_safe_read_only_field_dataset_discovery",
             "bounded_control_plane_latency_and_outcome_evidence",
         ],
         "experimental": {
@@ -226,6 +227,15 @@ def get_capabilities(selection: ProfileSelection | None = None) -> dict:
             "host_delivery_required": True,
             "known_answer_calibration_required": True,
             "numerical_policy_authority": False,
+        },
+        "field_evidence": {
+            "dataset_discovery_tool": "wave_optics_field_datasets",
+            "profiles": ["wave_optics", "full"],
+            "dataset_name_transport": "live_mph_unicode_name",
+            "dataset_identity": "exact_clientapi_tag_and_solution_readback",
+            "study_run": False,
+            "model_mutation": False,
+            "artifact_extraction": "not_yet_public",
         },
         "manual_search": {
             "backend": "sqlite_fts5_bm25",

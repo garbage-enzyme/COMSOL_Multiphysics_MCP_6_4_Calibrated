@@ -112,6 +112,9 @@ _TOOLS_BY_REGISTRAR = {
         "visual_review_capability_normalize", "visual_review_request_create",
         "visual_review_receipt_create", "visual_review_dual_evaluate",
     ),
+    "src.tools.field_evidence.register_field_evidence_tools": (
+        "wave_optics_field_datasets",
+    ),
     "src.tools.semantic_docs.register_semantic_doc_tools": (
         "semantic_search", "semantic_status", "semantic_worker_reset",
     ),
@@ -146,6 +149,7 @@ _GROUP_BY_REGISTRAR = {
     "register_wave_optics_audit_tools": "wave_optics_audit",
     "register_material_expression_tools": "wave_optics_materials",
     "register_visual_review_tools": "visual_review",
+    "register_field_evidence_tools": "field_evidence",
     "register_semantic_doc_tools": "semantic_docs",
     "register_knowledge_tools": "embedded_docs",
     "register_lexical_manual_tools": "manuals",
@@ -181,6 +185,7 @@ _EXPERIMENTAL_TOOLS = frozenset({
     "geometry_blocks_preview", "geometry_blocks_apply",
     "wave_optics_incidence_preview",
     "wave_optics_incidence_apply",
+    "wave_optics_field_datasets",
     "semantic_search", "semantic_status", "semantic_worker_reset",
 })
 
@@ -313,6 +318,7 @@ _WAVE_OPTICS_ADDITIONS = frozenset({
     "wave_optics_point_audit",
     "wave_optics_reference_audit",
     "wave_optics_material_expression_preview",
+    "wave_optics_field_datasets",
     "visual_review_capability_normalize", "visual_review_request_create",
     "visual_review_receipt_create", "visual_review_dual_evaluate",
 })
