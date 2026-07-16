@@ -5,7 +5,7 @@
     {
       "fixture_id": "capacitor_clientapi_regression",
       "contract": "capacitor_clientapi_regression.json",
-      "sha256": "87a1a44ea07c60cfe44e0167d68ec8842954521bcbc136a7560b508e02b80d46",
+      "canonical_json_sha256": "b5e0548aafea05fe0bee214cef56e150e6b612aa8a872952705c7b6778c76eba",
       "provenance": "repository_authored_contract",
       "redistribution_state": "redistributable_under_repository_license",
       "paper_derived": false
@@ -13,7 +13,7 @@
     {
       "fixture_id": "periodic_mesh_audit",
       "contract": "periodic_mesh_audit.json",
-      "sha256": "6404bcacc6bb1789254c120e7b2c4ad353420ca2a97cdca3f7818918f94efda9",
+      "canonical_json_sha256": "304ecd6614186c6d4a2ac958dff3baa5cd8e9031784ae3a4371200b29f283493",
       "provenance": "repository_authored_contract",
       "redistribution_state": "redistributable_under_repository_license",
       "paper_derived": false
@@ -21,7 +21,7 @@
     {
       "fixture_id": "reference_air_polarization",
       "contract": "reference_air_polarization.json",
-      "sha256": "b0406c343a2ffdbe756328bb3de7d66e196c147428799a4ef7c2c22d23709647",
+      "canonical_json_sha256": "fca0097b4069eade6f1e53845072bb504e096dea173ac6d8aa613533dcd5aa3b",
       "provenance": "repository_authored_contract",
       "redistribution_state": "redistributable_under_repository_license",
       "paper_derived": false
@@ -29,7 +29,7 @@
     {
       "fixture_id": "h1_physical_evidence",
       "contract": "h1_physical_evidence.json",
-      "sha256": "6275622d7419da882229341f9756f257a221f335afd93424f594cdad8ad88c4f",
+      "canonical_json_sha256": "df04c20364cc196f9097e919ede08da3db7c6fb953ce364afa6b575031f4db3c",
       "provenance": "repository_authored_contract",
       "redistribution_state": "redistributable_under_repository_license",
       "paper_derived": false
@@ -37,7 +37,7 @@
     {
       "fixture_id": "passive_port_closure",
       "contract": "passive_port_closure.json",
-      "sha256": "d0dd645aac0bc64fcef3ab4b9a9ce100bdcd8afd54772444bee29a18eb89ebd1",
+      "canonical_json_sha256": "ca21e0af277684be115f2af0976774e0113ac4b50387a92b7046885fec335df5",
       "provenance": "repository_authored_contract",
       "redistribution_state": "redistributable_under_repository_license",
       "paper_derived": false
@@ -45,7 +45,7 @@
     {
       "fixture_id": "source_immutability",
       "contract": "source_immutability.json",
-      "sha256": "8833f58869c8c12887cccae330c45d33e124a0d891f9d4e02d38c9967d77c3c3",
+      "canonical_json_sha256": "0a5edb02a15c7d40c3f19b8a0564f8e35230012af88168d6fb4acf2310c18656",
       "provenance": "repository_authored_contract",
       "redistribution_state": "redistributable_under_repository_license",
       "paper_derived": false
@@ -53,7 +53,7 @@
     {
       "fixture_id": "job_recovery_cancellation",
       "contract": "job_recovery_cancellation.json",
-      "sha256": "26b0dcb982df7915cecfa155418fc49fb7574790b759a108e2b98c3311f01d8b",
+      "canonical_json_sha256": "0acfc91f4f194919030ea52d75a5394cca136aab063095c1813fc6de150ebc32",
       "provenance": "repository_authored_contract",
       "redistribution_state": "redistributable_under_repository_license",
       "paper_derived": false
@@ -61,7 +61,7 @@
     {
       "fixture_id": "lexical_manual_retrieval",
       "contract": "lexical_manual_retrieval.json",
-      "sha256": "ec9b36e0d138485625a50d3905c7cd619ce5ed26051184e8426bf846f89c6f71",
+      "canonical_json_sha256": "773cb72e5b849466be8a5a4d52cb3b264a9d184511572cf00ea62d519ac50e13",
       "provenance": "repository_authored_contract",
       "redistribution_state": "redistributable_under_repository_license",
       "paper_derived": false

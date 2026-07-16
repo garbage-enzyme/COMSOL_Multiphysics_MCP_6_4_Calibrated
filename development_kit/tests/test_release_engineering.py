@@ -40,6 +40,16 @@ def _json(path: Path):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _canonical_json_sha256(value) -> str:
+    payload = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
 def _strings(value):
     if isinstance(value, str):
         yield value
@@ -134,7 +144,7 @@ def test_release_integration_fixture_manifest_is_complete_and_sanitized():
         assert contract["fixture_id"] == entry["fixture_id"]
         assert contract["schema_version"] == "1.0.0"
         assert contract["acceptance"]
-        assert entry["sha256"] == hashlib.sha256(contract_path.read_bytes()).hexdigest()
+        assert entry["canonical_json_sha256"] == _canonical_json_sha256(contract)
         assert entry["provenance"] == "repository_authored_contract"
         assert entry["redistribution_state"] == "redistributable_under_repository_license"
         assert entry["paper_derived"] is False

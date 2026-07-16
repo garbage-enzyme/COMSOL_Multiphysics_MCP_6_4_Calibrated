@@ -48,7 +48,8 @@ record the paper citation and DOI/publisher link, the derivation relationship,
 and the separate redistribution state before it can pass the release gate.
 
 `release/integration_fixtures/manifest.json` is the authoritative fixture
-inventory. Every contract entry binds the exact file SHA-256, provenance,
-redistribution state, and `paper_derived` flag. Binary/model fixtures are not
-currently committed; any future binary must also include an exact SHA-256 and a
+inventory. Every JSON contract entry binds a canonical JSON SHA-256 that is
+stable across LF/CRLF checkout conversion, plus provenance, redistribution
+state, and a `paper_derived` flag. Binary/model fixtures are not currently
+committed; any future binary must include an exact raw-file SHA-256 and a
 source/generated/sanitized/derived classification.
