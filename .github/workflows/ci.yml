@@ -80,6 +80,27 @@ jobs:
         run: python -m pip install ".[dev]"
       - run: python -m pytest -q development_kit/tests/test_release_engineering.py
 
+  locked-runtime-security:
+    name: locked runtime vulnerability policy
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      # actions/checkout v7.0.0
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      # actions/setup-python v6.2.0
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: constraints/release_locked_py314.txt
+      - name: Install pinned audit tool
+        run: python -m pip install "pip-audit==2.10.1"
+      - name: Audit the exact locked runtime and apply review policy
+        run: |
+          python -m pip_audit --requirement constraints/release_locked_py314.txt --no-deps --format json --output pip-audit.json
+          if (-not (Test-Path pip-audit.json)) { exit 1 }
+          python development_kit/scripts/security_gate.py --report pip-audit.json --allowlist development_kit/release/vulnerability_allowlist.json --output security-receipt.json
+
 # Real COMSOL tests are intentionally absent from hosted CI. Run the explicit,
 # serial development_kit/scripts/run_real_release_gate.py gate on a licensed,
 # version-pinned host.

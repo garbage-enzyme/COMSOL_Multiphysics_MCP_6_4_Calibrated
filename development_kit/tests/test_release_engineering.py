@@ -276,7 +276,7 @@ def test_hosted_ci_is_dependency_only_and_real_gate_is_explicit():
         r"(?m)^\s*- uses: (actions/(?:checkout|setup-python))@([^\s]+)$",
         workflow + "\n" + dependency_report,
     )
-    assert len(action_references) == 8
+    assert len(action_references) == 10
     assert all(re.fullmatch(r"[0-9a-f]{40}", revision) for _action, revision in action_references)
     assert "# actions/checkout v7.0.0" in workflow
     assert "# actions/setup-python v6.2.0" in workflow
@@ -290,6 +290,11 @@ def test_hosted_ci_is_dependency_only_and_real_gate_is_explicit():
     assert "current-compatible" in workflow
     assert "constraints/minimum_supported_py314.txt" in workflow
     assert "--upgrade-strategy eager" in workflow
+    assert "locked runtime vulnerability policy" in workflow
+    assert 'pip-audit==2.10.1' in workflow
+    assert "constraints/release_locked_py314.txt --no-deps --format json" in workflow
+    assert "vulnerability_allowlist.json" in workflow
+    assert "security_gate.py" in workflow
     assert "release_locked_py314.txt" in workflow
     assert "-m integration" not in workflow
     assert "RUN_REAL_COMSOL" in real_gate

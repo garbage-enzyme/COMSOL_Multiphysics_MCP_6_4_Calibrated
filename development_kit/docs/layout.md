@@ -48,6 +48,7 @@ models are intentionally absent.
 ## Release contracts and fixtures
 
 - `development_kit/release/support_matrix.json` — This file declares release identity sources, profile states, and licensed-gate requirements.
+- `development_kit/release/vulnerability_allowlist.json` — This file records exact reviewed vulnerabilities with mandatory expiry dates.
 - `development_kit/release/planning_code_allowlist.json` — This file freezes historical planning-code matches by path, count, and hash.
 - `development_kit/release/integration_fixtures/manifest.json` — This file inventories sanitized integration contracts and their canonical hashes.
 - `development_kit/release/integration_fixtures/capacitor_clientapi_regression.json` — This contract defines the analytic capacitor clientapi regression.
@@ -69,6 +70,7 @@ models are intentionally absent.
 - `development_kit/scripts/reference_power_gate_preflight.py` — This script validates reference-power gate inputs without starting COMSOL.
 - `development_kit/scripts/release_gate.py` — This script runs compile, test, package, clean-install, and installed-discovery gates.
 - `development_kit/scripts/run_real_release_gate.py` — This script orchestrates the explicit serial licensed COMSOL release gate.
+- `development_kit/scripts/security_gate.py` — This script evaluates pip-audit findings against the exact expiring review policy.
 
 ## Test fixtures and frozen snapshots
 
@@ -157,6 +159,7 @@ models are intentionally absent.
 - `development_kit/tests/test_results.py` — This module tests result normalization without a COMSOL client.
 - `development_kit/tests/test_runtime_paths.py` — This module tests shared ASCII-safe runtime and lease paths.
 - `development_kit/tests/test_schema_registry.py` — This module tests named schema coverage and version support resolution.
+- `development_kit/tests/test_security_gate.py` — This module tests vulnerability report parsing and expiring allowlist policy.
 - `development_kit/tests/test_semantic_contracts.py` — This module tests semantic benchmark contracts, limits, and import safety.
 - `development_kit/tests/test_semantic_index.py` — This module tests immutable semantic index construction and publication.
 - `development_kit/tests/test_semantic_retrieval.py` — This module tests deterministic vector retrieval, filtering, fusion, and cache identity.
