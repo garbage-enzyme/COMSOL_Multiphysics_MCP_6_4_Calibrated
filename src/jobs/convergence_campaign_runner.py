@@ -23,6 +23,13 @@ CONVERGENCE_CAMPAIGN_SUMMARY_SCHEMA_NAME = "comsol_mcp.convergence_campaign_summ
 CONVERGENCE_CAMPAIGN_SUMMARY_SCHEMA_VERSION = "1.0.0"
 
 
+def convergence_level_directory(root: str | Path, ordinal: int) -> Path:
+    """Keep nested point-audit paths below the Windows legacy path budget."""
+    if isinstance(ordinal, bool) or not isinstance(ordinal, int) or ordinal < 0 or ordinal > 99:
+        raise ValueError("convergence level ordinal is out of bounds")
+    return Path(root).resolve() / f"l{ordinal}"
+
+
 def _canonical_bytes(value: object) -> bytes:
     return json.dumps(
         value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
@@ -268,7 +275,7 @@ def run_convergence_campaign(
             }
         if fault_hook is not None:
             fault_hook("before_level", {"level_id": level["level_id"]})
-        level_dir = root / "levels" / f"{level['ordinal']:02d}-{level['level_id']}"
+        level_dir = convergence_level_directory(root, level["ordinal"])
         result = level_executor(level, level_dir)
         if not isinstance(result, Mapping):
             raise RuntimeError("spectral level executor returned an invalid result")
@@ -299,6 +306,7 @@ __all__ = [
     "CONVERGENCE_CAMPAIGN_SUMMARY_SCHEMA_NAME",
     "CONVERGENCE_CAMPAIGN_SUMMARY_SCHEMA_VERSION",
     "build_convergence_campaign_progress",
+    "convergence_level_directory",
     "run_convergence_campaign",
     "write_convergence_campaign_summary",
 ]

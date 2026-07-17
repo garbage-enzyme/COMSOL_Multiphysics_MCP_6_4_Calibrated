@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from pathlib import Path
 
 import pytest
 
@@ -10,7 +11,10 @@ from development_kit.tests.spectral_job_fixtures import write_fake_point_audit
 from development_kit.tests.test_convergence_campaign_job import _raw_campaign
 from src.jobs.convergence_campaign import normalize_convergence_campaign_spec
 from src.jobs.convergence_campaign_rows import read_convergence_campaign_levels
-from src.jobs.convergence_campaign_runner import run_convergence_campaign
+from src.jobs.convergence_campaign_runner import (
+    convergence_level_directory,
+    run_convergence_campaign,
+)
 from src.jobs.spectral_runner import run_spectral_characterization
 
 
@@ -73,7 +77,7 @@ def test_declared_early_acceptance_stops_without_starting_later_level(tmp_path):
     assert result["progress"]["reason_code"] == "early_acceptance_allowed"
     assert result["summary"]["completed_level_count"] == 2
     assert result["summary"]["declared_level_count"] == 3
-    assert not (root / "levels" / "02-mesh-2").exists()
+    assert not convergence_level_directory(root, 2).exists()
 
 
 def test_without_early_stop_every_declared_level_runs(tmp_path):
@@ -151,7 +155,7 @@ def test_unresolved_level_is_scientific_completion_not_execution_failure(tmp_pat
     assert result["summary"]["completed_level_count"] == 1
     assert result["summary"]["scientific_disposition"] == "unresolved_at_declared_cap"
     assert result["summary"]["reason_code"].startswith("level_spectrum_")
-    assert not (root / "levels" / "01-mesh-1").exists()
+    assert not convergence_level_directory(root, 1).exists()
 
 
 def test_changed_stop_policy_has_a_distinct_campaign_identity(tmp_path):
@@ -161,3 +165,14 @@ def test_changed_stop_policy_has_a_distinct_campaign_identity(tmp_path):
     raw["stop_policy"]["allow_early_acceptance"] = True
     changed = normalize_convergence_campaign_spec(raw)
     assert changed["spec_fingerprint"] != first["spec_fingerprint"]
+
+
+def test_level_directory_stays_inside_the_windows_legacy_path_budget():
+    root = Path("D:/comsol_runtime/jobs") / ("job-" + "a" * 32)
+    directory = convergence_level_directory(root, 7)
+    suffix = (
+        "point_artifacts/" + "b" * 64 + "/" + "b" * 64
+        + "/1784320847805-afba0aeb/manifest.json.tmp-33728"
+    )
+    assert directory.name == "l7"
+    assert len(str(directory / suffix)) <= 259

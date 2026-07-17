@@ -14,13 +14,14 @@ from src.jobs.convergence_campaign_rows import (
     append_convergence_campaign_level,
     read_convergence_campaign_levels,
 )
+from src.jobs.convergence_campaign_runner import convergence_level_directory
 from src.jobs.spectral_runner import run_spectral_characterization
 
 
 def _complete_level(spec: dict, root, ordinal: int):
     level = spec["levels"][ordinal]
     child = level["spectral_job"]
-    directory = root / "levels" / f"{ordinal:02d}-{level['level_id']}"
+    directory = convergence_level_directory(root, ordinal)
 
     def execute(point, artifact_dir):
         wavelength = point["wavelength"]["value"]
