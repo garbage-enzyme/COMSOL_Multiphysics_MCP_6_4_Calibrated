@@ -94,6 +94,7 @@ models are intentionally absent.
 - `development_kit/tests/integration/native_cancel_signature_probe.py` — This probe inspects native cancellation signatures without invoking cancellation.
 - `development_kit/tests/integration/periodic_mesh_acceptance.py` — This gate checks periodic mesh audit and clone-only mesh smoke behavior.
 - `development_kit/tests/integration/reference_power_acceptance.py` — This coordinator runs the licensed reference-power acceptance worker.
+- `development_kit/tests/integration/spectral_characterization_acceptance.py` — This runner executes one explicit licensed durable spectral acceptance job.
 - `development_kit/tests/integration/resource_admission_acceptance.py` — This gate checks detached resource admission on controlled COMSOL input.
 - `development_kit/tests/integration/semantic_benchmark_soak.py` — This gate runs the frozen semantic retrieval soak and concurrent burst.
 - `development_kit/tests/integration/semantic_profile_acceptance.py` — This gate checks fresh-stdio semantic profile discovery and tools.
@@ -178,6 +179,7 @@ models are intentionally absent.
 - `development_kit/tests/test_server.py` — This module tests server construction and capabilities without starting a transport.
 - `development_kit/tests/test_spectral_characterization.py` — This module tests provenance-bound offline spectral validation and measurements.
 - `development_kit/tests/test_spectral_audit.py` — This module tests strict projection of point-audit artifacts into durable spectral rows.
+- `development_kit/tests/test_spectral_acceptance_runner.py` — This module tests the licensed spectral runner contract without starting COMSOL.
 - `development_kit/tests/test_spectral_characterization_job.py` — This module tests immutable bounded durable spectral job specifications.
 - `development_kit/tests/test_spectral_progress.py` — This module tests adaptive spectral transitions and policy-separated scientific outcomes.
 - `development_kit/tests/test_spectral_rows.py` — This module tests hash-chained durable spectral rows and exact artifact-bound resume.
