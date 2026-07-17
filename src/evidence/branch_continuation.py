@@ -632,7 +632,8 @@ def validate_continuation_states(value: Any) -> dict[str, Any]:
 _POLICY_FIELDS = {
     "policy_id", "guard_window_m", "absolute_bounds_m",
     "max_expansions", "max_total_window_m", "point_budget",
-    "stop_policy", "continuity_evidence", "declared_cap_reached",
+    "request_grid", "stop_policy", "continuity_evidence",
+    "declared_cap_reached",
 }
 _BOUNDARY_SIDES = {"lower", "upper", "both"}
 _STOP_POLICIES = {"stop_at_first_unresolved", "continue_all_declared"}
@@ -642,6 +643,8 @@ _CONTINUITY_EVIDENCE_FIELDS = {
     "tolerance", "evidence_sha256",
 }
 _CONTINUITY_METRICS = {"absolute_wavelength_shift_m"}
+_REQUEST_GRID_FIELDS = {"point_count", "spacing_rule"}
+_REQUEST_GRID_RULES = {"uniform_inclusive"}
 _TRANSITION_FIELDS = {
     "transition_index", "previous_state_id", "current_state_id",
     "declared_adjacent", "previous_peak_wavelength_m",
@@ -653,13 +656,17 @@ _TRANSITION_FIELDS = {
     "branch_followed", "branch_recovered",
     "selected_candidate_wavelength_m", "continuity_evidence_sha256",
     "measured_continuity_verified",
-    "next_request_window_m", "transition_sha256",
+    "next_request_window_m", "requested_point_count",
+    "requested_wavelengths_m", "point_budget_exhausted",
+    "cumulative_planned_point_count", "transition_sha256",
 }
 _PLAN_FIELDS = {
     "schema_name", "schema_version", "states_id", "states_sha256",
     "continuation_policy", "continuation_policy_sha256",
     "coordinate_transitions", "total_expansions_proposed",
     "ambiguous_transition_count", "branch_followed_transition_count",
+    "processed_transition_count", "skipped_state_ids",
+    "planned_point_count", "point_budget_exhausted",
     "scientific_disposition", "reason_code",
     "branch_disappearance_claimed", "undeclared_coordinate_started",
     "plan_sha256",
@@ -691,6 +698,21 @@ def _normalize_continuation_policy(
     point_budget = item["point_budget"]
     if isinstance(point_budget, bool) or not isinstance(point_budget, int) or point_budget <= 0:
         raise ValueError("continuation_policy.point_budget must be a positive integer")
+    request_grid = _exact_fields(
+        item["request_grid"], _REQUEST_GRID_FIELDS,
+        "continuation_policy.request_grid",
+    )
+    request_point_count = request_grid["point_count"]
+    if (
+        isinstance(request_point_count, bool)
+        or not isinstance(request_point_count, int)
+        or not 2 <= request_point_count <= 1024
+    ):
+        raise ValueError(
+            "continuation_policy.request_grid.point_count must be an integer from 2 to 1024"
+        )
+    if request_grid["spacing_rule"] not in _REQUEST_GRID_RULES:
+        raise ValueError("continuation_policy.request_grid.spacing_rule is unsupported")
     if item["stop_policy"] not in _STOP_POLICIES:
         raise ValueError("continuation_policy.stop_policy is unsupported")
     if not isinstance(item["declared_cap_reached"], bool):
@@ -793,6 +815,10 @@ def _normalize_continuation_policy(
         "max_expansions": max_expansions,
         "max_total_window_m": max_total,
         "point_budget": point_budget,
+        "request_grid": {
+            "point_count": request_point_count,
+            "spacing_rule": request_grid["spacing_rule"],
+        },
         "stop_policy": item["stop_policy"],
         "continuity_evidence": normalized_evidence,
         "declared_cap_reached": item["declared_cap_reached"],
@@ -807,6 +833,17 @@ def _compute_next_request(
     lower = max(seed_peak - guard, bounds["lower_m"])
     upper = min(seed_peak + guard, bounds["upper_m"])
     return {"lower_m": lower, "upper_m": upper}
+
+
+def _request_wavelengths(
+    window: Mapping[str, float], point_count: int
+) -> list[float]:
+    lower = window["lower_m"]
+    upper = window["upper_m"]
+    step = (upper - lower) / (point_count - 1)
+    wavelengths = [lower + index * step for index in range(point_count)]
+    wavelengths[-1] = upper
+    return wavelengths
 
 
 def _compute_expansion(
@@ -842,7 +879,8 @@ def _one_transition(
     current: Mapping[str, Any],
     policy: Mapping[str, Any],
     total_expansions: int,
-) -> tuple[dict[str, Any], int]:
+    planned_points: int,
+) -> tuple[dict[str, Any], int, int]:
     previous_peak = previous["candidate"]["peak_wavelength_m"]
     current_candidate = current["candidate"]
     current_peak = current_candidate["peak_wavelength_m"]
@@ -864,6 +902,7 @@ def _one_transition(
     selected_candidate = None
     continuity_evidence_sha256 = None
     measured_continuity_verified = False
+    expansion_available = False
 
     if classification == "multi_candidate":
         ambiguous = True
@@ -892,10 +931,7 @@ def _one_transition(
                 bounds,
                 policy["max_total_window_m"],
             )
-            if expansion_available:
-                expansion_requested = True
-                total_expansions += 1
-            else:
+            if not expansion_available:
                 expansion_exhausted = True
         else:
             expansion_count_exceeded = True
@@ -929,7 +965,7 @@ def _one_transition(
         branch_followed = False
 
     if expansion_required:
-        next_request = expansion_window
+        candidate_request = expansion_window
     else:
         seed_peak = (
             current_peak
@@ -938,10 +974,29 @@ def _one_transition(
             if selected_candidate is not None
             else previous_peak
         )
-        next_request = (
+        candidate_request = (
             _compute_next_request(seed_peak, guard, bounds)
             if seed_peak is not None else None
         )
+    request_point_count = policy["request_grid"]["point_count"]
+    point_budget_exhausted = (
+        candidate_request is not None
+        and planned_points + request_point_count > policy["point_budget"]
+    )
+    if candidate_request is not None and not point_budget_exhausted:
+        next_request = candidate_request
+        requested_point_count = request_point_count
+        requested_wavelengths = _request_wavelengths(
+            next_request, requested_point_count
+        )
+        planned_points += requested_point_count
+        if expansion_required:
+            expansion_requested = True
+            total_expansions += 1
+    else:
+        next_request = None
+        requested_point_count = 0
+        requested_wavelengths = []
 
     body = {
         "transition_index": current["ordinal"] - 1,
@@ -968,8 +1023,16 @@ def _one_transition(
         "continuity_evidence_sha256": continuity_evidence_sha256,
         "measured_continuity_verified": measured_continuity_verified,
         "next_request_window_m": next_request,
+        "requested_point_count": requested_point_count,
+        "requested_wavelengths_m": requested_wavelengths,
+        "point_budget_exhausted": point_budget_exhausted,
+        "cumulative_planned_point_count": planned_points,
     }
-    return {**body, "transition_sha256": _sha256(body)}, total_expansions
+    return (
+        {**body, "transition_sha256": _sha256(body)},
+        total_expansions,
+        planned_points,
+    )
 
 
 def plan_branch_continuation(
@@ -984,11 +1047,26 @@ def plan_branch_continuation(
     all_states = normalized_states["states"]
     transitions = []
     total_expansions = 0
+    planned_points = 0
+    stopped_after_state_index = None
     for index in range(1, len(all_states)):
-        transition, total_expansions = _one_transition(
-            all_states[index - 1], all_states[index], policy, total_expansions
+        transition, total_expansions, planned_points = _one_transition(
+            all_states[index - 1], all_states[index], policy,
+            total_expansions, planned_points,
         )
         transitions.append(transition)
+        if (
+            policy["stop_policy"] == "stop_at_first_unresolved"
+            and not transition["branch_followed"]
+        ):
+            stopped_after_state_index = index
+            break
+
+    skipped_state_ids = (
+        [state["state_id"] for state in all_states[stopped_after_state_index + 1:]]
+        if stopped_after_state_index is not None
+        else []
+    )
 
     ambiguous_count = sum(1 for t in transitions if t["ambiguous_candidates"])
     followed_count = sum(1 for t in transitions if t["branch_followed"])
@@ -997,6 +1075,11 @@ def plan_branch_continuation(
     unresolved_ambiguity = any(
         t["ambiguous_candidates"] and not t["measured_continuity_verified"]
         for t in transitions
+    )
+    required_request_budget_exhausted = any(
+        transition["expansion_required"]
+        and transition["point_budget_exhausted"]
+        for transition in transitions
     )
 
     recovered_expansion_indexes = {
@@ -1017,12 +1100,19 @@ def plan_branch_continuation(
         for index, transition in enumerate(transitions)
     )
 
-    if cap_exceeded or expansion_exhausted or unresolved_ambiguity:
+    if (
+        cap_exceeded
+        or expansion_exhausted
+        or required_request_budget_exhausted
+        or unresolved_ambiguity
+    ):
         disposition = "unresolved_at_declared_cap"
         if cap_exceeded:
             reason_code = "expansion_count_exceeded_at_declared_cap"
         elif expansion_exhausted:
             reason_code = "boundary_expansion_exhausted_at_declared_cap"
+        elif required_request_budget_exhausted:
+            reason_code = "point_budget_exhausted_at_declared_cap"
         else:
             reason_code = "ambiguous_candidates_without_measured_evidence"
     elif transitions_resolved:
@@ -1053,6 +1143,12 @@ def plan_branch_continuation(
         "total_expansions_proposed": total_expansions,
         "ambiguous_transition_count": ambiguous_count,
         "branch_followed_transition_count": followed_count,
+        "processed_transition_count": len(transitions),
+        "skipped_state_ids": skipped_state_ids,
+        "planned_point_count": planned_points,
+        "point_budget_exhausted": any(
+            transition["point_budget_exhausted"] for transition in transitions
+        ),
         "scientific_disposition": disposition,
         "reason_code": reason_code,
         "branch_disappearance_claimed": False,
@@ -1081,7 +1177,7 @@ def _validate_transition(value: Any, expected_index: int) -> dict[str, Any]:
         "peak_within_guard", "peak_at_search_boundary", "ambiguous_candidates",
         "expansion_required", "expansion_requested", "expansion_exhausted",
         "expansion_count_exceeded", "branch_followed", "branch_recovered",
-        "measured_continuity_verified",
+        "measured_continuity_verified", "point_budget_exhausted",
     ):
         if not isinstance(item[field], bool):
             raise ValueError(f"{label}.{field} must be boolean")
@@ -1094,6 +1190,38 @@ def _validate_transition(value: Any, expected_index: int) -> dict[str, Any]:
     next_request = item["next_request_window_m"]
     if next_request is not None:
         _normalize_search_window(next_request, f"{label}.next_request_window_m")
+    requested_point_count = item["requested_point_count"]
+    if (
+        isinstance(requested_point_count, bool)
+        or not isinstance(requested_point_count, int)
+        or requested_point_count < 0
+    ):
+        raise ValueError(f"{label}.requested_point_count is invalid")
+    requested_wavelengths = item["requested_wavelengths_m"]
+    if not isinstance(requested_wavelengths, list):
+        raise ValueError(f"{label}.requested_wavelengths_m must be a list")
+    normalized_wavelengths = [
+        _finite(wavelength, f"{label}.requested_wavelengths_m[{index}]")
+        for index, wavelength in enumerate(requested_wavelengths)
+    ]
+    if len(normalized_wavelengths) != requested_point_count:
+        raise ValueError(f"{label} requested point count does not match its grid")
+    if next_request is None:
+        if requested_point_count != 0:
+            raise ValueError(f"{label} cannot contain points without a request window")
+    elif (
+        requested_point_count < 2
+        or normalized_wavelengths[0] != next_request["lower_m"]
+        or normalized_wavelengths[-1] != next_request["upper_m"]
+    ):
+        raise ValueError(f"{label} request grid does not match its window")
+    cumulative_points = item["cumulative_planned_point_count"]
+    if (
+        isinstance(cumulative_points, bool)
+        or not isinstance(cumulative_points, int)
+        or cumulative_points < 0
+    ):
+        raise ValueError(f"{label}.cumulative_planned_point_count is invalid")
     selected_candidate = item["selected_candidate_wavelength_m"]
     if selected_candidate is not None:
         _finite(selected_candidate, f"{label}.selected_candidate_wavelength_m")

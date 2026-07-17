@@ -619,6 +619,7 @@ class TestContinuationStateBinding:
 
 def _continuation_policy(*, guard_window_m=0.5e-6, max_expansions=3,
                          max_total_window_m=4.0e-6, declared_cap_reached=False,
+                         point_budget=64, request_point_count=7,
                          continuity_evidence=None,
                          stop_policy="continue_all_declared"):
     return {
@@ -627,7 +628,11 @@ def _continuation_policy(*, guard_window_m=0.5e-6, max_expansions=3,
         "absolute_bounds_m": {"lower_m": 3.0e-6, "upper_m": 7.0e-6},
         "max_expansions": max_expansions,
         "max_total_window_m": max_total_window_m,
-        "point_budget": 64,
+        "point_budget": point_budget,
+        "request_grid": {
+            "point_count": request_point_count,
+            "spacing_rule": "uniform_inclusive",
+        },
         "stop_policy": stop_policy,
         "continuity_evidence": (
             [] if continuity_evidence is None else continuity_evidence
@@ -821,6 +826,86 @@ class TestBranchContinuationPlanning:
             plan_branch_continuation(
                 states, _continuation_policy(continuity_evidence=[evidence])
             )
+
+    def test_stop_policy_stops_after_first_unresolved_transition(self):
+        states = build_continuation_states(
+            states_id="wide-shift",
+            states=_build_dispersive_states(3, shift=0.8e-6),
+        )
+        continue_plan = plan_branch_continuation(
+            states,
+            _continuation_policy(
+                guard_window_m=0.1e-6,
+                stop_policy="continue_all_declared",
+            ),
+        )
+        stop_plan = plan_branch_continuation(
+            states,
+            _continuation_policy(
+                guard_window_m=0.1e-6,
+                stop_policy="stop_at_first_unresolved",
+            ),
+        )
+        assert continue_plan["processed_transition_count"] == 2
+        assert continue_plan["skipped_state_ids"] == []
+        assert stop_plan["processed_transition_count"] == 1
+        assert len(stop_plan["coordinate_transitions"]) == 1
+        assert stop_plan["skipped_state_ids"] == ["coord-2"]
+
+    def test_point_budget_binds_explicit_request_grids(self):
+        states = build_continuation_states(
+            states_id="budgeted-requests", states=_build_dispersive_states(3)
+        )
+        insufficient = plan_branch_continuation(
+            states,
+            _continuation_policy(point_budget=1, request_point_count=7),
+        )
+        sufficient = plan_branch_continuation(
+            states,
+            _continuation_policy(point_budget=100, request_point_count=7),
+        )
+        assert insufficient["point_budget_exhausted"] is True
+        assert insufficient["planned_point_count"] == 0
+        assert all(
+            transition["next_request_window_m"] is None
+            and transition["requested_point_count"] == 0
+            and transition["requested_wavelengths_m"] == []
+            for transition in insufficient["coordinate_transitions"]
+        )
+        assert sufficient["point_budget_exhausted"] is False
+        assert sufficient["planned_point_count"] == 14
+        for transition in sufficient["coordinate_transitions"]:
+            window = transition["next_request_window_m"]
+            wavelengths = transition["requested_wavelengths_m"]
+            assert transition["requested_point_count"] == 7
+            assert len(wavelengths) == 7
+            assert wavelengths[0] == window["lower_m"]
+            assert wavelengths[-1] == window["upper_m"]
+
+    def test_boundary_request_fails_closed_when_point_budget_is_exhausted(self):
+        normal = _state(0, 5.0e-6, None, coordinate_value=0.0)
+        boundary = _custom_state(
+            1,
+            [5.05e-6 + index * 0.05e-6 for index in range(7)],
+            [0.1, 0.2, 0.3, 0.5, 0.7, 0.85, 0.95],
+            "coord-0",
+            coordinate_value=5.0,
+            label="budget-blocked-boundary",
+        )
+        states = build_continuation_states(
+            states_id="budget-blocked-boundary", states=[normal, boundary]
+        )
+        plan = plan_branch_continuation(
+            states,
+            _continuation_policy(point_budget=1, request_point_count=7),
+        )
+        transition = plan["coordinate_transitions"][0]
+        assert transition["expansion_required"] is True
+        assert transition["expansion_requested"] is False
+        assert transition["point_budget_exhausted"] is True
+        assert transition["next_request_window_m"] is None
+        assert plan["scientific_disposition"] == "unresolved_at_declared_cap"
+        assert plan["reason_code"] == "point_budget_exhausted_at_declared_cap"
 
     def test_validate_branch_continuation_plan_round_trips(self):
         states_input = _build_dispersive_states(4, shift=0.1e-6)
