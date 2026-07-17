@@ -14,6 +14,7 @@ from src.evidence.reference_power_acceptance import (
 )
 from src.evidence.spectral_characterization import (
     SPECTRAL_BUNDLE_SCHEMA,
+    SPECTRAL_CHARACTERIZATION_SCHEMA,
     SPECTRAL_DECISION_SCHEMA,
     SPECTRAL_SCHEMA_VERSION,
 )
@@ -101,6 +102,11 @@ def _entries() -> list[dict[str, Any]]:
         ),
         _entry(
             SPECTRAL_BUNDLE_SCHEMA,
+            SPECTRAL_SCHEMA_VERSION,
+            "src.evidence.spectral_characterization",
+        ),
+        _entry(
+            SPECTRAL_CHARACTERIZATION_SCHEMA,
             SPECTRAL_SCHEMA_VERSION,
             "src.evidence.spectral_characterization",
         ),

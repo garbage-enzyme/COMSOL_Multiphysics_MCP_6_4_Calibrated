@@ -10,8 +10,10 @@ import pytest
 
 from src.evidence.spectral_characterization import (
     build_spectral_analysis_decision,
+    build_spectral_characterization,
     build_spectral_point_bundle,
     validate_spectral_analysis_decision,
+    validate_spectral_characterization,
     validate_spectral_point_bundle,
 )
 
@@ -182,3 +184,109 @@ def test_irregular_grid_is_valid_and_policy_tolerances_change_only_the_decision(
     assert flat["classification"] == "flat"
     assert strict["bundle_sha256"] == flat["bundle_sha256"]
     assert strict["analysis_policy_sha256"] != flat["analysis_policy_sha256"]
+
+
+def _measurement(**overrides):
+    value = {
+        "peak_method": "measured_grid",
+        "baseline_rule": "local_prominence",
+        "baseline_response_value": None,
+        "fwhm_definition": "half_prominence",
+    }
+    value.update(overrides)
+    return value
+
+
+def _characterize(values, *, measurement=None, wavelengths=None):
+    bundle = _bundle(values, wavelengths)
+    decision = build_spectral_analysis_decision(bundle, _policy())
+    result = build_spectral_characterization(
+        bundle, decision, measurement or _measurement()
+    )
+    return bundle, decision, result
+
+
+def test_measured_grid_peak_half_prominence_and_quality_factor_are_hash_bound():
+    wavelengths = [4.8e-6, 4.9e-6, 5.0e-6, 5.1e-6, 5.2e-6]
+    bundle, decision, result = _characterize(
+        [0.1, 0.5, 0.9, 0.5, 0.1], wavelengths=wavelengths
+    )
+
+    candidate = result["candidate"]
+    assert result["measurement_state"] == "measured"
+    assert candidate["peak"]["wavelength_m"] == 5.0e-6
+    assert candidate["peak"]["response_value"] == 0.9
+    assert candidate["fwhm"]["state"] == "bracketed"
+    assert candidate["fwhm"]["value_m"] == pytest.approx(0.2e-6)
+    assert candidate["quality_factor"]["value"] == pytest.approx(25.0)
+    assert result["evidence_binding"]["rows"] == [
+        {"row_id": row["row_id"], "raw_row_sha256": row["raw_row_sha256"]}
+        for row in bundle["rows"]
+    ]
+    assert validate_spectral_characterization(
+        result, bundle=bundle, decision=decision
+    ) == result
+
+
+def test_quadratic_interpolation_recovers_an_off_grid_peak_on_irregular_points():
+    center = 5.035e-6
+    wavelengths = [4.8e-6, 4.95e-6, 5.0e-6, 5.12e-6, 5.3e-6]
+    values = [0.9 - ((wavelength - center) / 0.4e-6) ** 2 for wavelength in wavelengths]
+    _bundle_value, _decision, result = _characterize(
+        values,
+        wavelengths=wavelengths,
+        measurement=_measurement(peak_method="quadratic_interpolation"),
+    )
+
+    peak = result["candidate"]["peak"]
+    assert peak["wavelength_m"] == pytest.approx(center, abs=1.0e-15)
+    assert peak["response_value"] == pytest.approx(0.9, abs=1.0e-12)
+    assert len(peak["support_rows"]) == 3
+    assert peak["diagnostics"]["residual_sum_squares"] < 1.0e-24
+
+
+def test_missing_half_prominence_crossing_is_explicit_and_quality_factor_is_absent():
+    _bundle_value, _decision, result = _characterize(
+        [0.7, 0.8, 0.9, 0.8, 0.7],
+        measurement=_measurement(
+            baseline_rule="declared_response", baseline_response_value=0.0
+        ),
+    )
+
+    candidate = result["candidate"]
+    assert candidate["fwhm"]["state"] == "unbracketed"
+    assert candidate["fwhm"]["missing_sides"] == ["left", "right"]
+    assert candidate["quality_factor"] == {
+        "state": "not_computed",
+        "reason_code": "fwhm_unbracketed",
+        "value": None,
+    }
+
+
+@pytest.mark.parametrize(
+    "values,expected_reason",
+    [
+        ([0.9, 0.5, 0.2, 0.1, 0.05], "classification_boundary_high"),
+        ([0.1, 0.8, 0.1, 0.7, 0.1], "classification_multi_candidate"),
+        ([0.2, 0.2, 0.2, 0.2, 0.2], "classification_flat"),
+    ],
+)
+def test_nonaccepted_classifications_never_produce_candidate_measurements(values, expected_reason):
+    _bundle_value, _decision, result = _characterize(values)
+
+    assert result["measurement_state"] == "not_measured"
+    assert result["reason_code"] == expected_reason
+    assert result["candidate"] is None
+
+
+def test_characterization_hash_tampering_and_unknown_configuration_fail_closed():
+    bundle, decision, result = _characterize([0.1, 0.5, 0.9, 0.5, 0.1])
+    tampered = deepcopy(result)
+    tampered["candidate"]["peak"]["wavelength_m"] += 1.0e-9
+    with pytest.raises(ValueError, match="noncanonical|hash"):
+        validate_spectral_characterization(tampered, bundle=bundle, decision=decision)
+
+    configuration = _measurement()
+    configuration["silent_fit_preference"] = "lorentzian"
+    with pytest.raises(ValueError, match="fields"):
+        build_spectral_characterization(bundle, decision, configuration)

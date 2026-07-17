@@ -10,9 +10,12 @@ from pathlib import PurePosixPath
 import re
 from typing import Any, Mapping
 
+import numpy as np
+
 
 SPECTRAL_BUNDLE_SCHEMA = "comsol_mcp.spectral_point_bundle"
 SPECTRAL_DECISION_SCHEMA = "comsol_mcp.spectral_analysis_decision"
+SPECTRAL_CHARACTERIZATION_SCHEMA = "comsol_mcp.spectral_characterization"
 SPECTRAL_SCHEMA_VERSION = "1.0.0"
 MAX_SPECTRAL_POINTS = 4096
 MAX_PARAMETER_STATE_BYTES = 64 * 1024
@@ -46,6 +49,12 @@ _POLICY_FIELDS = {
     "wavelength_sync_abs_m",
     "flat_response_abs_tolerance",
     "minimum_point_count",
+}
+_MEASUREMENT_FIELDS = {
+    "peak_method",
+    "baseline_rule",
+    "baseline_response_value",
+    "fwhm_definition",
 }
 
 
@@ -429,13 +438,318 @@ def validate_spectral_analysis_decision(
     return deepcopy(rebuilt)
 
 
+def _normalize_measurement_configuration(value: Any) -> dict[str, str]:
+    item = _exact_fields(value, _MEASUREMENT_FIELDS, "measurement_configuration")
+    if item["peak_method"] not in {"measured_grid", "quadratic_interpolation"}:
+        raise ValueError(
+            "measurement_configuration.peak_method must be measured_grid or quadratic_interpolation"
+        )
+    if item["baseline_rule"] not in {
+        "local_prominence",
+        "window_endpoints_mean",
+        "declared_response",
+    }:
+        raise ValueError(
+            "measurement_configuration.baseline_rule must be local_prominence, window_endpoints_mean, or declared_response"
+        )
+    declared_baseline = item["baseline_response_value"]
+    if item["baseline_rule"] == "declared_response":
+        declared_baseline = _finite(
+            declared_baseline,
+            "measurement_configuration.baseline_response_value",
+        )
+    elif declared_baseline is not None:
+        raise ValueError(
+            "measurement_configuration.baseline_response_value is only valid with declared_response"
+        )
+    if item["fwhm_definition"] != "half_prominence":
+        raise ValueError(
+            "measurement_configuration.fwhm_definition must be half_prominence"
+        )
+    return {
+        "peak_method": item["peak_method"],
+        "baseline_rule": item["baseline_rule"],
+        "baseline_response_value": declared_baseline,
+        "fwhm_definition": item["fwhm_definition"],
+    }
+
+
+def _row_reference(row: Mapping[str, Any]) -> dict[str, str]:
+    return {"row_id": row["row_id"], "raw_row_sha256": row["raw_row_sha256"]}
+
+
+def _linear_crossing(
+    x0: float, y0: float, x1: float, y1: float, level: float
+) -> float:
+    if y1 == y0:
+        raise ValueError("half-prominence crossing has zero response slope")
+    fraction = (level - y0) / (y1 - y0)
+    if not 0.0 <= fraction <= 1.0:
+        raise ValueError("half-prominence crossing is outside its row bracket")
+    return x0 + fraction * (x1 - x0)
+
+
+def _crossing_brackets(
+    wavelengths: list[float], oriented: list[float], candidate_index: int, level: float
+) -> tuple[tuple[int, int, float] | None, tuple[int, int, float] | None]:
+    left = None
+    for index in range(candidate_index - 1, -1, -1):
+        if oriented[index] <= level <= oriented[index + 1]:
+            left = (
+                index,
+                index + 1,
+                _linear_crossing(
+                    wavelengths[index],
+                    oriented[index],
+                    wavelengths[index + 1],
+                    oriented[index + 1],
+                    level,
+                ),
+            )
+            break
+    right = None
+    for index in range(candidate_index, len(oriented) - 1):
+        if oriented[index] >= level >= oriented[index + 1]:
+            right = (
+                index,
+                index + 1,
+                _linear_crossing(
+                    wavelengths[index],
+                    oriented[index],
+                    wavelengths[index + 1],
+                    oriented[index + 1],
+                    level,
+                ),
+            )
+            break
+    return left, right
+
+
+def _quadratic_peak(
+    wavelengths: list[float], oriented: list[float], candidate_index: int
+) -> tuple[float, float, list[int], dict[str, Any]]:
+    support = [candidate_index - 1, candidate_index, candidate_index + 1]
+    x = np.asarray([wavelengths[index] for index in support], dtype=float)
+    y = np.asarray([oriented[index] for index in support], dtype=float)
+    origin = float(x[1])
+    scale = float(max(abs(x[0] - origin), abs(x[2] - origin)))
+    if scale == 0.0:
+        raise ValueError("quadratic interpolation support has zero wavelength span")
+    normalized_x = (x - origin) / scale
+    coefficients = np.polyfit(normalized_x, y, 2)
+    curvature, slope, intercept = (float(value) for value in coefficients)
+    if curvature >= 0.0:
+        raise ValueError("quadratic interpolation does not have the requested peak curvature")
+    vertex = -slope / (2.0 * curvature)
+    wavelength = origin + vertex * scale
+    if not float(x[0]) <= wavelength <= float(x[-1]):
+        raise ValueError("quadratic interpolation peak is outside its support bracket")
+    response = float(np.polyval(coefficients, vertex))
+    residuals = y - np.polyval(coefficients, normalized_x)
+    diagnostics = {
+        "coordinate_origin_m": origin,
+        "coordinate_scale_m": scale,
+        "coefficients_oriented": [curvature, slope, intercept],
+        "residual_sum_squares": float(np.dot(residuals, residuals)),
+    }
+    return wavelength, response, support, diagnostics
+
+
+def build_spectral_characterization(
+    bundle: Mapping[str, Any],
+    decision: Mapping[str, Any],
+    measurement_configuration: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Measure one classified candidate without changing raw point evidence."""
+    normalized = validate_spectral_point_bundle(bundle)
+    normalized_decision = validate_spectral_analysis_decision(decision, bundle=normalized)
+    configuration = _normalize_measurement_configuration(measurement_configuration)
+    rows = normalized["rows"]
+    response_name = normalized_decision["analysis_policy"]["response_quantity"]
+    polarity = normalized_decision["analysis_policy"]["candidate_polarity"]
+    wavelengths = [row["requested_wavelength_m"] for row in rows]
+    measured_response = [row[response_name] for row in rows]
+    oriented = measured_response if polarity == "maximum" else [-value for value in measured_response]
+    evidence_rows = [_row_reference(row) for row in rows]
+    configuration_sha256 = _sha256(configuration)
+
+    body: dict[str, Any] = {
+        "schema_name": SPECTRAL_CHARACTERIZATION_SCHEMA,
+        "schema_version": SPECTRAL_SCHEMA_VERSION,
+        "bundle_id": normalized["bundle_id"],
+        "bundle_sha256": normalized["bundle_sha256"],
+        "decision_sha256": normalized_decision["decision_sha256"],
+        "configuration_sha256": normalized["configuration_sha256"],
+        "measurement_configuration": configuration,
+        "measurement_configuration_sha256": configuration_sha256,
+        "measurement_state": "not_measured",
+        "reason_code": f"classification_{normalized_decision['classification']}",
+        "candidate": None,
+        "evidence_binding": {
+            "analysis_policy_sha256": normalized_decision["analysis_policy_sha256"],
+            "measurement_configuration_sha256": configuration_sha256,
+            "rows": evidence_rows,
+        },
+    }
+    if normalized_decision["classification"] != "interior_candidate":
+        return {**body, "characterization_sha256": _sha256(body)}
+
+    candidate_id = normalized_decision["candidate_row_ids"][0]
+    candidate_index = next(
+        index for index, row in enumerate(rows) if row["row_id"] == candidate_id
+    )
+    if configuration["peak_method"] == "measured_grid":
+        peak_wavelength = wavelengths[candidate_index]
+        peak_oriented_response = oriented[candidate_index]
+        support_indices = [candidate_index]
+        peak_diagnostics = {
+            "interpolation": "none",
+            "residual_sum_squares": 0.0,
+        }
+    else:
+        try:
+            (
+                peak_wavelength,
+                peak_oriented_response,
+                support_indices,
+                peak_diagnostics,
+            ) = _quadratic_peak(wavelengths, oriented, candidate_index)
+        except ValueError as exc:
+            body["reason_code"] = "peak_interpolation_failed"
+            body["candidate"] = {"failure_reason": str(exc)}
+            return {**body, "characterization_sha256": _sha256(body)}
+
+    if configuration["baseline_rule"] == "local_prominence":
+        left_floor = min(oriented[: candidate_index + 1])
+        right_floor = min(oriented[candidate_index:])
+        baseline = max(left_floor, right_floor)
+    elif configuration["baseline_rule"] == "window_endpoints_mean":
+        baseline = (oriented[0] + oriented[-1]) / 2.0
+    else:
+        declared_baseline = configuration["baseline_response_value"]
+        assert declared_baseline is not None
+        baseline = declared_baseline if polarity == "maximum" else -declared_baseline
+    half_prominence = baseline + (peak_oriented_response - baseline) / 2.0
+    left, right = _crossing_brackets(
+        wavelengths, oriented, candidate_index, half_prominence
+    )
+    missing_sides = [
+        side for side, crossing in (("left", left), ("right", right)) if crossing is None
+    ]
+    fwhm: dict[str, Any]
+    quality_factor: dict[str, Any]
+    if missing_sides:
+        fwhm = {
+            "state": "unbracketed",
+            "definition": "half_prominence",
+            "baseline_oriented_response": baseline,
+            "half_prominence_oriented_response": half_prominence,
+            "missing_sides": missing_sides,
+            "left_crossing_m": None if left is None else left[2],
+            "right_crossing_m": None if right is None else right[2],
+            "value_m": None,
+        }
+        quality_factor = {
+            "state": "not_computed",
+            "reason_code": "fwhm_unbracketed",
+            "value": None,
+        }
+    else:
+        assert left is not None and right is not None
+        width = right[2] - left[2]
+        if not math.isfinite(width) or width <= 0.0:
+            raise ValueError("bracketed half-prominence width must be positive and finite")
+        fwhm = {
+            "state": "bracketed",
+            "definition": "half_prominence",
+            "baseline_oriented_response": baseline,
+            "half_prominence_oriented_response": half_prominence,
+            "missing_sides": [],
+            "left_crossing_m": left[2],
+            "right_crossing_m": right[2],
+            "value_m": width,
+            "crossing_rows": [
+                [_row_reference(rows[index]) for index in left[:2]],
+                [_row_reference(rows[index]) for index in right[:2]],
+            ],
+        }
+        quality_factor = {
+            "state": "computed_from_bracketed_fwhm",
+            "reason_code": "bracketed_half_prominence",
+            "value": peak_wavelength / width,
+        }
+
+    peak_response = (
+        peak_oriented_response if polarity == "maximum" else -peak_oriented_response
+    )
+    candidate = {
+        "candidate_row": _row_reference(rows[candidate_index]),
+        "peak": {
+            "method": configuration["peak_method"],
+            "wavelength_m": peak_wavelength,
+            "response_quantity": response_name,
+            "response_value": peak_response,
+            "support_rows": [_row_reference(rows[index]) for index in support_indices],
+            "diagnostics": peak_diagnostics,
+        },
+        "fwhm": fwhm,
+        "quality_factor": quality_factor,
+    }
+    body.update(
+        {
+            "measurement_state": "measured",
+            "reason_code": "candidate_measured",
+            "candidate": candidate,
+        }
+    )
+    return {**body, "characterization_sha256": _sha256(body)}
+
+
+def validate_spectral_characterization(
+    value: Any,
+    *,
+    bundle: Mapping[str, Any],
+    decision: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Recompute one characterization and reject noncanonical measurements."""
+    item = _mapping(value, "spectral_characterization")
+    expected = {
+        "schema_name",
+        "schema_version",
+        "bundle_id",
+        "bundle_sha256",
+        "decision_sha256",
+        "configuration_sha256",
+        "measurement_configuration",
+        "measurement_configuration_sha256",
+        "measurement_state",
+        "reason_code",
+        "candidate",
+        "evidence_binding",
+        "characterization_sha256",
+    }
+    if set(item) != expected:
+        raise ValueError("spectral characterization fields are invalid")
+    rebuilt = build_spectral_characterization(
+        bundle, decision, item["measurement_configuration"]
+    )
+    if item != rebuilt:
+        raise ValueError(
+            "spectral characterization is noncanonical or its hash does not match"
+        )
+    return deepcopy(rebuilt)
+
+
 __all__ = [
     "MAX_SPECTRAL_POINTS",
     "SPECTRAL_BUNDLE_SCHEMA",
+    "SPECTRAL_CHARACTERIZATION_SCHEMA",
     "SPECTRAL_DECISION_SCHEMA",
     "SPECTRAL_SCHEMA_VERSION",
     "build_spectral_analysis_decision",
+    "build_spectral_characterization",
     "build_spectral_point_bundle",
     "validate_spectral_analysis_decision",
+    "validate_spectral_characterization",
     "validate_spectral_point_bundle",
 ]
