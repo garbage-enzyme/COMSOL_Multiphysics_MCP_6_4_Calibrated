@@ -72,18 +72,23 @@ def _deployment_identity() -> dict:
             "source_classification": "unknown",
             "error": f"{type(exc).__name__}: deployment manifest unavailable",
         }
-    try:
-        package_version = version("comsol-mcp")
-    except PackageNotFoundError:
-        from src import __version__
-
-        package_version = __version__
     module_path = str(Path(__file__).resolve()).replace("\\", "/").casefold()
     source_classification = (
         "installed_site_package"
         if "/site-packages/" in module_path
         else "source_tree"
     )
+    if source_classification == "source_tree":
+        from src import __version__
+
+        package_version = __version__
+    else:
+        try:
+            package_version = version("comsol-mcp")
+        except PackageNotFoundError:
+            from src import __version__
+
+            package_version = __version__
     return {
         **manifest,
         "available": True,

@@ -8,7 +8,9 @@ import json
 from pathlib import Path
 import subprocess
 import sys
+import tomllib
 
+from src import __version__
 from src.tools.capabilities import get_capabilities
 from src.tools.profiles import ProfileSelection
 
@@ -36,6 +38,7 @@ def test_deployment_manifest_matches_frozen_profile_and_schema_snapshots():
     assert identity["available"] is True
     assert identity["schema_name"] == "comsol_mcp.deployment_identity"
     assert identity["schema_version"] == "1.0.0"
+    assert identity["package_version"] == __version__
     assert identity["full_tool_schemas_sha256"] == _sha256(
         SNAPSHOTS / "full_tool_schemas.json"
     )
@@ -49,6 +52,21 @@ def test_deployment_manifest_matches_frozen_profile_and_schema_snapshots():
     assert "陆星" not in serialized
     assert "C:\\Users\\" not in serialized
     assert str(ROOT) not in serialized
+
+
+def test_package_version_has_one_authoritative_source():
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    manifest = json.loads(
+        (ROOT / "src" / "deployment_manifest.json").read_text(encoding="utf-8")
+    )
+
+    assert project["project"]["dynamic"] == ["version"]
+    assert "version" not in project["project"]
+    assert project["tool"]["hatch"]["version"]["path"] == "src/__init__.py"
+    assert "package_version" not in manifest
+    assert get_capabilities(_selection("core"))["deployment_identity"][
+        "package_version"
+    ] == __version__
 
 
 def test_deployment_identity_is_profile_independent():
