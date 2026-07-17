@@ -265,3 +265,13 @@ def test_artifact_root_mapping_is_exact(tmp_path):
             request,
             artifact_roots={"case-one": tmp_path, "extra-case": tmp_path},
         )
+
+
+def test_development_handoff_documents_policy_free_contract_boundaries():
+    readme = (Path(__file__).parents[1] / "README.md").read_text(encoding="utf-8")
+    assert "execution.state" in readme
+    assert "evidence.state" in readme
+    assert "scientific.disposition" in readme
+    assert "process, descendant, port, and lease cleanup proof" in readme
+    assert "artifact SHA-256, JSON" in readme
+    assert "applies no paper target" in readme

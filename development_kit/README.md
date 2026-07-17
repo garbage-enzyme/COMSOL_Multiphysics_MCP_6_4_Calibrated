@@ -65,6 +65,29 @@ After every disposable build or install gate, retain the required hashes or
 receipt and remove the temporary build root unless archival retention was
 explicitly requested.
 
+## Outcome and portfolio evidence contracts
+
+`src/evidence/outcome_contract.py` keeps three decisions independent:
+
+- `execution.state` records whether requested work completed, failed, was
+  interrupted, or reached verified cancellation;
+- `evidence.state` records whether the evidence is complete, incomplete, or
+  invalid and preserves available raw artifacts as diagnostic evidence;
+- `scientific.disposition` records accepted, residual, unresolved at the
+  declared cap, invalid evidence, or not evaluated.
+
+Every non-accepted disposition carries a reason code, a declared-cap flag, a
+missing-evidence list, and the next caller-eligible action. A terminal cancelled
+state requires exact process, descendant, port, and lease cleanup proof.
+
+`src/evidence/portfolio_verifier.py` accepts a bounded list of cases. Each case
+contains one hashed outcome, one artifact-chain manifest, and zero or more
+summary claims. A claim names the `configuration`, `mesh`, `fit`, or
+`wavelength` dimension and cites an artifact ID, exact artifact SHA-256, JSON
+Pointer, and claimed JSON value. Verification fails unless that exact value is
+present in the verified chain. The verifier applies no paper target, portfolio
+threshold, acceptance tolerance, or automatic next action.
+
 ## Layout maintenance
 
 `docs/layout.md` is a tested inventory, not an informal sketch. Every tracked
