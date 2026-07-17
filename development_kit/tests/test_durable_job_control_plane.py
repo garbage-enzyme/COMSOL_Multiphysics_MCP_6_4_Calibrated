@@ -624,7 +624,11 @@ def test_coordinator_loss_at_each_durable_phase_reconciles_safely(jobs_root, mon
         "hook=lambda current: os._exit(91) if current==phase else None; "
         f"c.run({str(jobs_root)!r},{result['job_id']!r},{requested['request_id']!r},0.02,0.05,phase_hook=hook)"
     )
-    crashed = subprocess.Popen([sys.executable, "-c", crash_script], cwd=Path(__file__).resolve().parents[2])
+    crashed = subprocess.Popen(
+        [sys.executable, "-c", crash_script],
+        cwd=Path(__file__).resolve().parents[2],
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
     assert crashed.wait(timeout=5) == 91
     phase_state = manager.store.read_state(result["job_id"])
     assert phase_state["status"] == "cancelling"

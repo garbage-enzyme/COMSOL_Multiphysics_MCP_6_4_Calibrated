@@ -8,6 +8,8 @@ import psutil
 from src.jobs.process_control import capture_owned_descendants, terminate_exact, verify_absent
 from src.jobs.store import process_identity
 
+_HIDDEN_PROCESS_FLAGS = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
 
 def _wait_absent(identities, timeout=5.0):
     deadline = time.monotonic() + timeout
@@ -31,7 +33,10 @@ def test_exact_termination_refuses_a_reused_identity():
 
 
 def test_capture_and_terminate_only_owned_child_process():
-    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    child = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        creationflags=_HIDDEN_PROCESS_FLAGS,
+    )
     try:
         identity = process_identity(child.pid)
         captured = capture_owned_descendants(identity)
@@ -50,10 +55,23 @@ def test_capture_and_terminate_only_owned_child_process():
 
 def test_owned_tree_capture_excludes_unrelated_sentinel():
     grandchild = "import time; time.sleep(30)"
-    child = f"import subprocess,sys,time; subprocess.Popen([sys.executable, '-c', {grandchild!r}]); time.sleep(30)"
-    root_script = f"import subprocess,sys,time; subprocess.Popen([sys.executable, '-c', {child!r}]); time.sleep(30)"
-    root = subprocess.Popen([sys.executable, "-c", root_script])
-    sentinel = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    child = (
+        "import subprocess,sys,time; "
+        f"subprocess.Popen([sys.executable, '-c', {grandchild!r}], "
+        "creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0)); time.sleep(30)"
+    )
+    root_script = (
+        "import subprocess,sys,time; "
+        f"subprocess.Popen([sys.executable, '-c', {child!r}], "
+        "creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0)); time.sleep(30)"
+    )
+    root = subprocess.Popen(
+        [sys.executable, "-c", root_script], creationflags=_HIDDEN_PROCESS_FLAGS
+    )
+    sentinel = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        creationflags=_HIDDEN_PROCESS_FLAGS,
+    )
     try:
         identity = process_identity(root.pid)
         deadline = time.monotonic() + 5
@@ -85,10 +103,16 @@ def test_worker_job_object_kills_inherited_child_on_worker_exit_windows_only():
         "import subprocess,sys,time; "
         "from src.jobs.process_control import contain_current_process_tree; "
         "assert contain_current_process_tree(); "
-        "child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(30)']); "
+        "child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(30)'], "
+        "creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0)); "
         "print(child.pid, flush=True); time.sleep(.1)"
     )
-    worker = subprocess.Popen([sys.executable, "-c", script], stdout=subprocess.PIPE, text=True)
+    worker = subprocess.Popen(
+        [sys.executable, "-c", script],
+        stdout=subprocess.PIPE,
+        text=True,
+        creationflags=_HIDDEN_PROCESS_FLAGS,
+    )
     child_pid = int(worker.stdout.readline().strip())
     worker.wait(timeout=5)
     deadline = time.monotonic() + 5

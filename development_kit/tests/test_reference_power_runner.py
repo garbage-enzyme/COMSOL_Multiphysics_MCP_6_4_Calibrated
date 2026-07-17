@@ -168,7 +168,11 @@ def test_coordinator_refuses_collision_before_starting_worker(tmp_path):
         },
     }
     spec_path.write_text(json.dumps(spec), encoding="utf-8")
-    blocker = subprocess.Popen([sys.executable, str(blocker_script)], cwd=ROOT)
+    blocker = subprocess.Popen(
+        [sys.executable, str(blocker_script)],
+        cwd=ROOT,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
     try:
         time.sleep(0.25)
         completed = subprocess.run(
