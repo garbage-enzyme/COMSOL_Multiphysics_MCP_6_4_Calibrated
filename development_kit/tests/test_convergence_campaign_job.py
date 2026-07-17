@@ -70,6 +70,7 @@ def _raw_campaign(tmp_path) -> dict:
             "minimum_level_count": 3,
             "governing_pairs": "final_pair",
             "relative_denominator": "previous_abs",
+            "declared_cap_reached": False,
         },
         "stop_policy": {"allow_early_acceptance": False, "minimum_completed_levels": 3},
         "maximum_total_points": 30,

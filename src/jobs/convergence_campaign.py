@@ -86,7 +86,10 @@ def _nonnegative_optional(value: object, name: str) -> float | None:
 def _normalize_campaign_policy(value: object) -> dict[str, Any]:
     raw = _exact_mapping(
         value,
-        {"policy_id", "metrics", "minimum_level_count", "governing_pairs", "relative_denominator"},
+        {
+            "policy_id", "metrics", "minimum_level_count", "governing_pairs",
+            "relative_denominator", "declared_cap_reached",
+        },
         "convergence_policy",
     )
     metrics = raw["metrics"]
@@ -124,6 +127,8 @@ def _normalize_campaign_policy(value: object) -> dict[str, Any]:
         raise ValueError("convergence_policy.governing_pairs is unsupported")
     if raw["relative_denominator"] not in {"previous_abs", "maximum_abs"}:
         raise ValueError("convergence_policy.relative_denominator is unsupported")
+    if not isinstance(raw["declared_cap_reached"], bool):
+        raise ValueError("convergence_policy.declared_cap_reached must be boolean")
     return {
         "policy_id": _identifier(raw["policy_id"], "convergence_policy.policy_id"),
         "metrics": normalized_metrics,
@@ -135,6 +140,7 @@ def _normalize_campaign_policy(value: object) -> dict[str, Any]:
         ),
         "governing_pairs": raw["governing_pairs"],
         "relative_denominator": raw["relative_denominator"],
+        "declared_cap_reached": raw["declared_cap_reached"],
     }
 
 
