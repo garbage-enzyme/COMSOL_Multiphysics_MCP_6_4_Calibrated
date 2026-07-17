@@ -39,9 +39,9 @@ Before a release:
    ```
 
 6. `--fixture-spec` supplies the controlled model/wavelength/top-air environment
-   for the licensed regression suite without rerunning the optional mandatory-reference-power
-   phase. Use `--require-reference-power --reference-power-spec ...` only when that release must generate a
-   new reference-power receipt as well.
+   for the licensed regression suite without rerunning optional reference-power
+   evidence. Use `--require-reference-power --reference-power-spec ...` only
+   when that release must generate a new reference-power receipt as well.
 7. Require an unchanged COMSOL PID set, an absent solver lease, no external
    collision, source-integrity evidence, and all fixture contracts to pass.
 8. Build once more from the clean release commit and compare discovery output.

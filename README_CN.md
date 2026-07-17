@@ -1,10 +1,10 @@
-# COMSOL 6.4+ MCP Server
+# COMSOL 6.4 MCP Server
 
 [English](README.md) | 中文
 
 [![GitHub stars](https://img.shields.io/github/stars/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated?style=social)](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/stargazers)
 
-> [wjc9011/COMSOL_Multiphysics_MCP](https://github.com/wjc9011/COMSOL_Multiphysics_MCP) 的维护型 Fork，面向 **COMSOL Multiphysics 6.4+** 和 **MPh 1.3.1 standalone/clientapi**。
+> [wjc9011/COMSOL_Multiphysics_MCP](https://github.com/wjc9011/COMSOL_Multiphysics_MCP) 的维护型 Fork，已针对 **COMSOL Multiphysics 6.4.0.293** 和 **MPh 1.3.1 standalone/clientapi** 校准。其他 COMSOL build 需要各自的 licensed acceptance 证据。
 
 该服务器为 AI agent 提供更安全、更紧凑的 COMSOL 接口，用于模型检查、受控单点验证、可恢复的分段扫描与离线手册检索。它适配 `mph.Client()` 返回的 `model.java` clientapi 对象；该对象与上游面向的直接 `com.comsol.model.Model` API 有实质差异。
 
@@ -13,8 +13,8 @@
 Claude Code、Codex CLI、opencode、Hermes Agent 及其他支持 skill 的 agent，推荐将本服务器与
 [COMSOL 6.4+ metasurface agent skill](https://github.com/garbage-enzyme/COMSOL_6_4_agentskill_for_metasurfaces)
 配合使用。该 skill 采用短 `SKILL.md` 入口，并按需路由到 clientapi、周期 Wave
-Optics、材料与边界、durable jobs、物理证据、资源安全、故障诊断和 MCP
-开发/发布工程模块，避免每轮都把整份指南载入上下文。
+Optics、材料与边界、durable jobs、物理证据、资源安全和故障诊断模块，避免每轮
+都把整份指南载入上下文。仓库开发和发布流程保留在本仓库的 development kit 中。
 
 ## Client 兼容性与部署
 
@@ -33,8 +33,8 @@ Hermes 兼容性已依据其官方
 [MCP 文档](https://github.com/NousResearch/hermes-agent/blob/main/website/docs/user-guide/features/mcp.md)
 和 [client 源码](https://github.com/NousResearch/hermes-agent/blob/main/tools/mcp_tool.py)
 检查。本机通过安装后的 entry point 完成了 solver-free `initialize`、
-`list_tools` 和 `capabilities` 握手：server=`COMSOL MCP`，`core` 工具数 38，
-profile=`core`，`connected=false`。
+`list_tools` 和 `capabilities` 握手：server=`COMSOL MCP`、profile=`core`、
+`connected=false`。已安装工具界面以实时 discovery 为准，不以文档中复制的数量为准。
 
 ## 主要能力
 
@@ -49,16 +49,20 @@ profile=`core`，`connected=false`。
 
 在启动服务器前设置 `COMSOL_MCP_PROFILE`。一个 profile 在该服务器进程的整个生命周期内固定；更改后需重启。
 
-| Profile | 工具数 | 适用场景 |
-| --- | ---: | --- |
-| `core`（默认） | 38 | 紧凑且成熟的控制面：状态、所有权、会话/模型检查、单点求解/求值及词法手册检索。 |
-| `basic_fem` | 76 | 在 `core` 基础上增加传统 FEM 的类型化构建、派生几何编辑和有界导出。 |
-| `wave_optics` | 63 | 超表面推荐：在 `core` 基础上增加派生几何编辑、材料预览、locale-safe 场数据发现及有界 NPZ/manifest 提取、周期网格审计/冒烟、视觉审查合同、Wave Optics 预检、单点/参考审计和分段工作流。 |
-| `semantic_docs` | 41 | 在 `core` 基础上增加隔离的实验性向量辅助手册检索。 |
-| `experimental` | 64 | 显式选择的通用创建、异步、属性逃生口和项目辅助工具。 |
-| `full` | 120 | 宽兼容/发现界面，包含所有 profile 的全部工具。 |
+| Profile | 适用场景 |
+| --- | --- |
+| `core`（默认） | 紧凑且成熟的控制面：状态、所有权、会话/模型检查、单点求解/求值及词法手册检索。 |
+| `basic_fem` | 在 `core` 基础上增加传统 FEM 的类型化构建、派生几何编辑和有界导出。 |
+| `wave_optics` | 超表面推荐：在 `core` 基础上增加派生几何编辑、材料预览、locale-safe 场数据发现及有界 NPZ/manifest 提取、周期网格审计/冒烟、视觉审查合同、Wave Optics 预检、单点/参考审计和分段工作流。 |
+| `semantic_docs` | 在 `core` 基础上增加隔离的实验性向量辅助手册检索。 |
+| `experimental` | 显式选择的通用创建、异步、属性逃生口和项目辅助工具。 |
+| `full` | 宽兼容/发现界面，包含所有 profile 的全部工具。 |
 
 调用 `capabilities` 可在不启动 COMSOL 的情况下获知当前 profile、精确注册工具、目标版本、禁用工具组和重启要求。其中有界的 `deployment_identity` 会报告当前代码来自源码树还是已安装包，并给出冻结的 profile/schema 与 catalog 哈希；因此即使版本号相同，也能在重启后识别旧安装或源码遮蔽，且不暴露本机路径。
+
+当前版本**尚未**提供不拥有外部进程的共享 Desktop/attached-Server 工作流。
+旧 `comsol_connect` 只存在于 experimental 兼容 profile，不能视为安全的共享模型连接；
+它尚不具备显式用户确认、外部 Server 所有权保护和模型身份锁定。
 
 来自 capabilities、求解器所有权、持久化任务和词法手册的控制面响应会附带紧凑的滚动 `control_plane` 数据。每种操作最多保留 256 个样本，报告 success/busy/timeout/error 计数和 p50/p95/max 延迟；完整日志及无界遥测不会内联返回。
 
@@ -125,7 +129,7 @@ Python 3.14 licensed 平行板回归结果为 **1.8593794419540677 pF**；理论
 
 ## 环境要求与安装
 
-- COMSOL Multiphysics 6.4 或更新版本
+- COMSOL Multiphysics 6.4；licensed acceptance 固定于 build 6.4.0.293
 - Python 3.14（标准 GIL 版本，不要使用 Windows Store 版本）
 - MPh 1.3.1、`mcp`、`pydantic` 和 `psutil>=5.9.0`
 - 已验证配置中使用 COMSOL 自带的 Java 21 runtime
@@ -163,7 +167,7 @@ MCP 客户端配置示例：
   "mcp": {
     "comsol": {
       "type": "local",
-      "command": ["python", "-m", "src.server"],
+      "command": ["D:\\path\\to\\python-env\\Scripts\\comsol-mcp.exe"],
       "environment": { "COMSOL_MCP_PROFILE": "wave_optics" }
     }
   }
@@ -192,4 +196,5 @@ MCP 客户端配置示例：
 
 ## 许可证
 
-继承上游许可证，详见原仓库。
+本仓库采用 [MIT License](LICENSE)。COMSOL、授权手册、第三方模型、论文和数据集
+不因本仓库许可证而被重新授权。

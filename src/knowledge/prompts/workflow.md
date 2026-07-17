@@ -1,281 +1,200 @@
-# COMSOL Modeling Workflow Guide
+# COMSOL MCP workflow guide
 
-This guide describes the typical workflow for creating and running COMSOL simulations using the MCP tools.
+This guide describes the current profile-aware workflow. Tool availability and
+schemas come from live MCP discovery; examples are illustrative named-argument
+calls rather than a substitute for the returned schema.
 
-## Basic Workflow
+## 1. Discover before starting COMSOL
 
-### 1. Session Management
-
-```
-┌─────────────────────────────────────────────────────┐
-│  Start COMSOL Session                               │
-│  comsol_start(cores=4)                              │
-│  or                                                 │
-│  comsol_connect(port=2036, host="server")           │
-└─────────────────────────────────────────────────────┘
-                        │
-                        ▼
-┌─────────────────────────────────────────────────────┐
-│  Load or Create Model                               │
-│  model_load("existing.mph")                         │
-│  or                                                 │
-│  model_create("new_model")                          │
-└─────────────────────────────────────────────────────┘
+```text
+capabilities
+solver_status
+solver_preflight
 ```
 
-### 2. Model Setup (for new models)
+- `capabilities` is solver-free and reports the active profile, registered tools,
+  supported versions, maturity, and deployment hashes.
+- `solver_status` checks the shared ASCII runtime root, lease, and known process
+  identity.
+- `solver_preflight` performs the fresh checks required before constructing a
+  client or submitting substantial work.
+- Keep one solver owner and serialize COMSOL operations.
 
-```
-┌─────────────────────────────────────────────────────┐
-│  Define Parameters                                  │
-│  param_set("L", "10[mm]")                           │
-│  param_set("W", "5[mm]")                            │
-│  param_set("T", "1[mm]")                            │
-└─────────────────────────────────────────────────────┘
-                        │
-                        ▼
-┌─────────────────────────────────────────────────────┐
-│  Create Geometry                                    │
-│  geometry_add_block(size=["L", "W", "T"])           │
-│  geometry_build()                                   │
-└─────────────────────────────────────────────────────┘
-                        │
-                        ▼
-┌─────────────────────────────────────────────────────┐
-│  Add Physics                                        │
-│  physics_add_electrostatics()                       │
-│  physics_configure_boundary(...)                    │
-└─────────────────────────────────────────────────────┘
-                        │
-                        ▼
-┌─────────────────────────────────────────────────────┐
-│  Create Mesh                                        │
-│  mesh_create()                                      │
-└─────────────────────────────────────────────────────┘
+Do not use `comsol_connect` as a shared Desktop workflow. It is legacy
+experimental compatibility and does not protect a user-owned Server or lock one
+server-side model. The current release has no protected shared Desktop profile.
+
+## 2. Start and inspect a session
+
+The default `core` profile supports existing-model work:
+
+```text
+comsol_start(cores=4, version="6.4")
+comsol_status
+model_load(file_path="D:\\models\\source.mph")
+model_inspect
+model_list_components
+physics_list
+mesh_list
+study_list
+datasets_list
 ```
 
-### 3. Solve and Analyze
+`comsol_start` is non-blocking. Poll `comsol_status` until `connected=true`; do
+not call `comsol_start` again while `starting=true`.
 
-```
-┌─────────────────────────────────────────────────────┐
-│  Solve                                              │
-│  study_solve("stationary")                          │
-│  or                                                 │
-│  study_solve_async("time_dependent")                │
-│  study_get_progress()                               │
-└─────────────────────────────────────────────────────┘
-                        │
-                        ▼
-┌─────────────────────────────────────────────────────┐
-│  Evaluate Results                                   │
-│  results_evaluate("T", "K")                         │
-│  results_global_evaluate("ht.Tmax", "K")            │
-└─────────────────────────────────────────────────────┘
-                        │
-                        ▼
-┌─────────────────────────────────────────────────────┐
-│  Export and Save                                    │
-│  results_export_image("plot", "result.png")         │
-│  model_save_version(description="final")            │
-└─────────────────────────────────────────────────────┘
-```
+Treat the source `.mph` as immutable. Use a derived clone or a separately named
+output for mutations and checkpoints. Runtime, journal, index, and native-cache
+roots should be ASCII-only.
 
-## Common Workflows by Application
+## 3. Build a conventional FEM model
 
-### Electrostatics Simulation (Capacitor)
+Select `basic_fem` before the MCP host starts, then restart the host. A minimal
+new-model sequence is:
 
-```
-# 1. Start and create
-comsol_start(cores=1)
-model_load("capacitor_template.mph")
-
-# 2. Modify parameters
-param_set("electrode_spacing", "2[mm]")
-param_set("applied_voltage", "10[V]")
-param_set("dielectric_constant", "4.5")
-
-# 3. Solve
-study_solve("stationary")
-
-# 4. Evaluate
-C = results_global_evaluate("2*es.intWe/U^2", "pF")
-E_max = results_evaluate("es.normE", "V/m")
-
-# 5. Save version
-model_save_version(description=f"C={C:.2f}pF")
+```text
+model_create(name="capacitor")
+model_create_component(component_name="comp1", space_dimension=3)
+geometry_create(component_name="comp1", geometry_name="geom1", space_dimension=3)
+geometry_add_block(
+    component_name="comp1",
+    geometry_name="geom1",
+    size=[0.01, 0.01, 0.001],
+    position=[0.0, 0.0, 0.0]
+)
+geometry_build(component_name="comp1", geometry_name="geom1")
+geometry_probe_domains
+geometry_get_boundaries
 ```
 
-### Thermal Analysis
+Geometry helper dimensions are numeric SI values. Probe domains and boundaries
+after every topology-changing build; never assume entity IDs from feature order.
 
-```
-# 1. Create new model
-comsol_start()
-model_create("heat_sink")
+For a dielectric electrostatics model:
 
-# 2. Parameters
-param_set("base_temp", "300[K]")
-param_set("heat_flux", "1000[W/m^2]")
-param_set("convection_coeff", "15[W/(m^2*K)]")
-
-# 3. Geometry
-geometry_add_block(size=[0.1, 0.1, 0.01])  # Base
-geometry_add_block(position=[0.01, 0.01, 0.01], size=[0.02, 0.02, 0.05])  # Fin
-# Add more fins...
-geometry_build()
-
-# 4. Physics
-physics_add_heat_transfer()
-physics_configure_boundary("Heat Transfer", "HeatFlux", [1], {"q0": "heat_flux"})
-physics_configure_boundary("Heat Transfer", "ConvectiveHeatFlux", [3,4,5], {"h": "convection_coeff"})
-
-# 5. Mesh and solve
-mesh_create()
-study_solve()
-
-# 6. Results
-T_max = results_global_evaluate("ht.Tmax", "K")
-results_export_image("temperature", "temp_distribution.png")
+```text
+physics_add_electrostatics(relpermittivity=2.1, domain_numbers=[1])
+physics_configure_boundary(
+    physics_name="Electrostatics",
+    boundary_condition="Ground",
+    boundary_selection=[<probed-bottom-boundary>]
+)
+physics_configure_boundary(
+    physics_name="Electrostatics",
+    boundary_condition="ElectricPotential",
+    boundary_selection=[<probed-top-boundary>],
+    properties={"V0": "1[V]"}
+)
+mesh_sequence_create(
+    component_name="comp1",
+    mesh_name="mesh1",
+    element_type="FreeTet",
+    build=true
+)
+study_create(study_name="std1", study_type="Stationary")
 ```
 
-### Structural Analysis
+Passing `relpermittivity` creates the required material and
+`ChargeConservation` feature. Without it, COMSOL 6.3/6.4 Electrostatics defaults
+to `FreeSpace`, which uses vacuum permittivity.
 
-```
-# 1. Load model
-model_load("bracket.mph")
+## 4. Solve one point and collect evidence
 
-# 2. Parameters
-param_set("load_force", "1000[N]")
-param_set("youngs_modulus", "200[GPa]")
-param_set("poissons_ratio", "0.3")
-
-# 3. Physics
-physics_add_solid_mechanics()
-physics_configure_boundary("Solid Mechanics", "Fixed", [1])
-physics_configure_boundary("Solid Mechanics", "BoundaryLoad", [5], {"F_total": "load_force"})
-
-# 4. Solve
-mesh_create()
-study_solve()
-
-# 5. Evaluate
-stress = results_evaluate("solid.mises", "MPa")
-displacement = results_global_evaluate("solid.maxDisp", "mm")
+```text
+study_solve(study_name="std1", wait=true)
+results_global_evaluate(expression="2*es.intWe/(1[V])^2", unit="pF")
+model_save(file_path="D:\\derived_models\\capacitor_result.mph")
 ```
 
-### Parametric Sweep
+For transient or multi-solution models, pass an explicit dataset and inner
+solution to `results_evaluate`. A successful solve call is not by itself
+physical validation: preserve raw values, units, configuration identity, source
+hash, and the caller's acceptance policy.
 
-```
-# 1. Setup model
-model_load("sensitivity_study.mph")
+## 5. Durable sweeps and long work
 
-# 2. Configure sweep
-param_sweep_setup("electrode_spacing", [1, 2, 3, 4, 5])
-# Or continuous range: param_sweep_setup("voltage", ["1[V]", "5[V]", "10[V]", "20[V]"])
+Use the `core` durable job controls:
 
-# 3. Solve
-study_solve("parametric")
-
-# 4. Analyze results
-for i in range(1, 6):
-    C = results_global_evaluate("2*es.intWe/U^2", "pF", outer=i)
-    print(f"Spacing {i}mm: C = {C:.3f} pF")
-
-# 5. Export
-results_export_data("sweep_data", "parametric_results.txt")
+```text
+job_submit(spec=<immutable validated specification>)
+job_status(job_id="<job-id>")
+job_tail(job_id="<job-id>", n=20)
+job_cancel(job_id="<job-id>")
+job_resume(job_id="<job-id>")
 ```
 
-### Time-Dependent Simulation
+Read the exact schemas from discovery. Durable work runs in an owned worker and
+stores an immutable specification, atomic state, append-only result journal,
+checkpoint, and bounded log beneath the configured ASCII runtime root.
 
-```
-# 1. Setup
-model_load("transient_heat.mph")
+Each point follows this order:
 
-# 2. Solve asynchronously
-study_solve_async("time_dependent")
-
-# 3. Monitor progress
-while True:
-    progress = study_get_progress()
-    print(f"Progress: {progress['progress']*100:.1f}%")
-    if progress['status'] in ['completed', 'failed']:
-        break
-    time.sleep(10)
-
-# 4. Analyze time history
-indices, times = results_inner_values("time_dependent")
-for t, idx in zip(times[-5:], indices[-5:]):  # Last 5 time steps
-    T_max = results_global_evaluate("ht.Tmax", "K", inner=idx)
-    print(f"t={t}s: T_max={T_max:.1f}K")
+```text
+set point -> pre-solve resource admission -> solve -> evaluate raw evidence
+-> validate -> append row -> flush + fsync -> checkpoint -> next point
 ```
 
-### Multiphysics (Thermal-Stress)
+Resume only exact matching point identities. Cancellation is terminal only
+after the worker, owned descendants, port, and lease are verified clean. Do not
+use `study_solve_async` or daemon-thread progress as a resumable or unattended
+workflow; those tools are experimental compatibility only.
 
-```
-# 1. Create model
-model_create("thermal_stress_analysis")
+## 6. Wave Optics evidence workflow
 
-# 2. Geometry
-geometry_add_cylinder(radius="r", height="h")
-geometry_build()
+Select `wave_optics` and restart the MCP host:
 
-# 3. Add multiple physics
-physics_add_heat_transfer()
-physics_configure_boundary("Heat Transfer", "Temperature", [1], {"T0": "T_hot"})
-physics_configure_boundary("Heat Transfer", "Temperature", [2], {"T0": "T_cold"})
-
-physics_add_solid_mechanics()
-physics_configure_boundary("Solid Mechanics", "Fixed", [1])
-
-# 4. Add coupling
-multiphysics_add("ThermalStress", ["Heat Transfer", "Solid Mechanics"])
-
-# 5. Solve
-mesh_create()
-study_solve()
-
-# 6. Results
-T = results_evaluate("T", "K")
-stress = results_evaluate("solid.mises", "MPa")
-displacement = results_evaluate("solid.disp", "mm")
+```text
+solver_status
+solver_preflight
+wave_optics_preflight
+wave_optics_reference_audit   # optional and experimental
+wave_optics_point_audit       # exactly one declared wavelength
 ```
 
-## Version Control Workflow
+The preflight is read-only. A point audit binds the source hash, configuration,
+requested/evaluated wavelength, raw caller-declared R/T/A expressions, closure,
+mesh state, and artifact manifests. Without a versioned caller policy it returns
+evidence only, not a scientific pass/fail decision.
 
-```
-# Save versions at key milestones
-model_save_version(description="initial_geometry")
-# ... modify geometry ...
-model_save_version(description="geometry_final")
+Use staged one-point solves for parameter or wavelength scans. Fixed-wavelength
+amplitudes do not establish angular convergence; track each configuration's own
+peak when resonance motion matters.
 
-# ... add physics ...
-model_save_version(description="physics_configured")
+## 7. Save and disconnect
 
-# ... after solving ...
-model_save_version(description="solved_baseline")
+- Save only to an approved derived/output path.
+- On Unicode destinations, the server uses Java clientapi saving with an
+  absolute path.
+- `comsol_disconnect` clears models tracked by the MCP-owned session before
+  releasing the client.
+- `session_reset` is destructive and is intended for an MCP-owned session.
+- Verify `solver_status` after cleanup; process activity alone does not prove
+  progress or successful release.
 
-# ... parameter variation ...
-model_save_version(description="param_optimized_v1")
-```
+## 8. Common diagnostics
 
-## Troubleshooting Common Issues
+### Geometry build fails
 
-### Geometry Build Fails
-- Check for overlapping features
-- Ensure all parameters are defined
-- Verify coordinate systems
+- Confirm all numeric parameters and units.
+- Probe for tiny or overlapping features.
+- Rebuild, then re-probe all entity selections.
 
-### Mesh Generation Fails
-- Refine geometry details
-- Check for very small features
-- Try different mesh size settings
+### Mesh generation fails
 
-### Solver Convergence Issues
-- Refine mesh quality
-- Check boundary conditions
-- Use appropriate solver settings
-- Consider scaling of variables
+- Confirm a mesh sequence exists.
+- Inspect geometry scale and small features.
+- Use a smaller diagnostic before broad refinement.
 
-### Memory Issues
-- Reduce mesh density
-- Use symmetry to reduce domain size
-- Solve on more powerful hardware
+### Solver convergence fails
+
+- Check physics selections, materials, units, and study type.
+- Inspect scaling and boundary conditions.
+- Preserve the failed point and logs instead of silently retrying with changed
+  settings.
+
+### Memory pressure
+
+- Stop before starting another factorization when the caller's resource policy
+  refuses it.
+- Check durable rows and exact worker identity; CPU or disk activity alone is
+  not proof of progress.

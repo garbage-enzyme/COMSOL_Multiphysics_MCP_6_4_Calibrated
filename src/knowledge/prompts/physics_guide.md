@@ -1,6 +1,14 @@
 # Physics Interfaces Guide
 
-This guide covers the most commonly used physics interfaces in COMSOL Multiphysics and how to set them up using the MCP tools.
+This guide covers common COMSOL physics interfaces and the current typed MCP
+helpers. The verified runtime is COMSOL 6.4.0.293 with MPh 1.3.1. The creation
+helpers shown below require the `basic_fem` or `full` profile; call
+`capabilities` and use live tool schemas as authority.
+
+Before constructing physics, run `solver_status` and `solver_preflight`, build
+the geometry, and probe exact domain and boundary IDs. Entity numbers shown in
+examples are placeholders, not portable selections. After any topology change,
+probe again before applying physics.
 
 ## Overview
 
@@ -32,11 +40,18 @@ physics_configure_boundary("Electrostatics", "Ground", [1])
 physics_configure_boundary("Electrostatics", "ElectricPotential", [2], {"V0": "10[V]"})
 ```
 
+For a dielectric, call
+`physics_add_electrostatics(relpermittivity=2.1, domain_numbers=[...])`. COMSOL
+6.3/6.4 otherwise creates a default `FreeSpace` feature that uses vacuum
+permittivity instead of the material's relative permittivity.
+
 **Useful Expressions:**
 - `es.normE` - Electric field magnitude
 - `es.normD` - Electric displacement magnitude
-- `es.V` - Electric potential
+- a bare potential variable may be available where `es.V` is undefined
 - `es.intWe` - Electric energy (for integration)
+
+Use grouped unit expressions such as `2*es.intWe/(1[V])^2`.
 
 ### Electric Currents (ec)
 
@@ -98,7 +113,7 @@ For temperature distribution and thermal analysis.
 - Transient thermal analysis
 
 **Boundary Conditions:**
-- `Temperature`: Fixed temperature (T = T0)
+- `TemperatureBoundary` (alias `Temperature`): Fixed temperature (T = T0)
 - `HeatFlux`: Specified heat flux
 - `ConvectiveHeatFlux`: Convection (q = h·(T - T∞))
 - `Radiation`: Radiation heat transfer
@@ -108,7 +123,7 @@ For temperature distribution and thermal analysis.
 **Example:**
 ```
 physics_add_heat_transfer()
-physics_configure_boundary("Heat Transfer", "Temperature", [1], {"T0": "300[K]"})
+physics_configure_boundary("Heat Transfer", "TemperatureBoundary", [1], {"T0": "300[K]"})
 physics_configure_boundary("Heat Transfer", "ConvectiveHeatFlux", [2], {"h": "10[W/(m^2*K)]", "Text": "293[K]"})
 ```
 
@@ -151,6 +166,10 @@ physics_configure_boundary("Laminar Flow", "Outlet", [2], {"p0": "0[Pa]"})
 - `spf.rho` - Density
 
 ## Multiphysics Couplings
+
+`multiphysics_add` is an experimental/full-profile compatibility helper. Verify
+the exact coupling type, owning component, selections, and readback for the
+target COMSOL build before treating the coupling as configured.
 
 ### Thermal Stress (ts)
 
@@ -218,6 +237,10 @@ When choosing physics interfaces, consider:
 3. **Coupling**: Single physics or multiphysics
 4. **Nonlinearity**: Linear or nonlinear material behavior
 5. **Geometry complexity**: Simple shapes or imported CAD
+
+Typed creation returning success means only that the native API call completed.
+It does not prove correct selections, material use, polarization, power closure,
+or scientific acceptance.
 
 ## Study Types
 

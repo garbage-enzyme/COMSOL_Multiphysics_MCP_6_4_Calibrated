@@ -10,7 +10,8 @@ machine's actual paths.
 
 Requirements:
 
-- COMSOL Multiphysics 6.4+;
+- COMSOL Multiphysics 6.4 (licensed acceptance is pinned to 6.4.0.293; other
+  builds require separate validation);
 - standard GIL-enabled Python 3.14 in an ASCII-only environment path;
 - COMSOL's Java runtime for the verified local configuration.
 
@@ -28,19 +29,23 @@ portable deployment. Configure the absolute installed console entry point.
 
 ## 2. Select a profile
 
-| Profile | Tools | Intended use |
-| --- | ---: | --- |
-| `core` | 38 | Compact default control plane and lexical manuals. |
-| `basic_fem` | 76 | Conventional FEM construction and bounded exports. |
-| `wave_optics` | 63 | Periodic optics, metasurfaces, bounded field discovery/extraction, preflight, and evidence audits. |
-| `semantic_docs` | 41 | Isolated experimental semantic manual retrieval. |
-| `experimental` | 64 | Explicit opt-in generic and escape-hatch tools. |
-| `full` | 120 | Broad compatibility surface; not recommended by default. |
+| Profile | Intended use |
+| --- | --- |
+| `core` | Compact default control plane and lexical manuals. |
+| `basic_fem` | Conventional FEM construction and bounded exports. |
+| `wave_optics` | Periodic optics, metasurfaces, bounded field discovery/extraction, preflight, and evidence audits. |
+| `semantic_docs` | Isolated experimental semantic manual retrieval. |
+| `experimental` | Explicit opt-in generic and escape-hatch tools. |
+| `full` | Broad compatibility surface; not recommended by default. |
 
 Set `COMSOL_MCP_PROFILE` in the client's server environment. Omitting it selects
 `core`. The profile is frozen when the stdio process starts; changing it requires
 a client/MCP-host restart. An invalid profile fails startup instead of silently
 falling back.
+
+No current profile provides a protected shared Desktop/attached-Server mode.
+The experimental `comsol_connect` compatibility tool is not a non-owning shared-
+model lifecycle and must not be used as one.
 
 ## 3. Hermes Agent
 
@@ -128,8 +133,10 @@ report:
 ```text
 profile = wave_optics
 active_profile = wave_optics
-tool_count = 63
 ```
+
+Use the returned registered-tool list and deployment hashes as authority; do
+not compare against a tool count copied from this guide.
 
 Then call `solver_status` and `solver_preflight` before constructing a client.
 Keep one solver owner. Use durable jobs for long simulations instead of holding a

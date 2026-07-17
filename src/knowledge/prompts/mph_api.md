@@ -1,204 +1,183 @@
-# MPh API Reference
+# MPh 1.3.1 and COMSOL 6.4 clientapi reference
 
-This document provides a quick reference for the MPh (Python-COMSOL interface) API.
+This is a compact reference for the Python API used by this server. The verified
+runtime is MPh 1.3.1 with COMSOL 6.4.0.293. Other COMSOL or MPh builds require
+their own compatibility checks.
+
+## Safety and ownership
+
+- One Python process can construct only one MPh client because JPype permits one
+  JVM lifecycle.
+- When using this MCP server, call `solver_status` and `solver_preflight` before
+  `comsol_start`; do not instantiate a separate `mph.Client` in parallel.
+- Treat loaded source models as immutable. Work on a derived copy and save to a
+  separate path.
+- A direct `mph.Client(port=...)` connection does not by itself provide safe
+  shared Desktop ownership, model locking, or detach-preservation semantics.
+  The current MCP release has no protected shared Desktop mode.
 
 ## Installation
 
-```bash
-pip install mph
+The server declares the supported MPh range and should normally be installed as
+a non-editable package:
+
+```powershell
+python -m pip install .
 ```
 
-## Core Classes
+For direct API experiments in a separate environment:
 
-### Client
+```powershell
+python -m pip install "mph>=1.3.1,<1.4"
+```
 
-The `Client` class manages the COMSOL session.
+## Client
 
 ```python
 import mph
 
-# Start local session
-client = mph.Client(cores=1, version='6.0')
-
-# Connect to server
-client = mph.Client(port=2036, host='localhost')
-
-# Properties
-client.version      # COMSOL version string
-client.standalone   # True if standalone, False if connected
-client.cores        # Number of cores in use
-client.host         # Server host name
-client.port         # Server port number
+# Standalone client. Starting COMSOL can take 30-90 seconds.
+client = mph.Client(cores=1, version="6.4")
 ```
 
-### Model
-
-The `Model` class represents a COMSOL model.
-
-```python
-# Load model
-model = client.load('capacitor.mph')
-
-# Create new model
-model = client.create('my_model')
-
-# Model info
-model.name()        # Model name
-model.file()        # File path
-model.version()     # COMSOL version when saved
-
-# List features
-model.parameters()  # Dict of parameters
-model.physics()     # List of physics interfaces
-model.geometries()  # List of geometry sequences
-model.meshes()      # List of mesh sequences
-model.studies()     # List of studies
-model.datasets()    # List of datasets
-model.plots()       # List of plots
-model.exports()     # List of exports
-model.materials()   # List of materials
-
-# Operations
-model.build()       # Build geometry
-model.mesh()        # Generate mesh
-model.solve()       # Solve study
-model.save()        # Save model
-model.clear()       # Clear solution data
-model.reset()       # Reset history
-```
-
-### Parameters
-
-```python
-# Get/set parameter
-value = model.parameter('U')           # Returns expression string
-model.parameter('U', '5[V]')           # Set parameter value
-
-# Get all parameters
-params = model.parameters()            # Dict {name: expression}
-params = model.parameters(evaluate=True)  # Dict {name: float}
-
-# Description
-desc = model.description('U')          # Get description
-model.description('U', 'Applied voltage')  # Set description
-descs = model.descriptions()           # Dict of all descriptions
-```
-
-### Evaluation
-
-```python
-# Evaluate expression
-result = model.evaluate('es.normE', 'V/m')
-result = model.evaluate(['x', 'y', 'T'], dataset='dset1')
-
-# Global evaluation (scalar)
-C = model.evaluate('2*es.intWe/U^2', 'pF')
-
-# Time-dependent solutions
-(indices, times) = model.inner('time-dependent')
-
-# Parametric sweeps
-(indices, values) = model.outer('parametric sweep')
-
-# Selection
-model.evaluate(expr, unit, dataset, inner='first')  # First time step
-model.evaluate(expr, unit, dataset, inner='last')   # Last time step
-model.evaluate(expr, unit, dataset, inner=[0, 5])   # Steps 0 and 5
-model.evaluate(expr, unit, dataset, outer=1)        # Sweep index 1
-```
-
-### Node
-
-Access model tree nodes:
-
-```python
-# Access by path
-geom = model / 'geometries' / 'geometry1'
-physics = model / 'physics' / 'electrostatic'
-
-# Create features
-block = geom.create('Block')
-bc = physics.create('Ground')
-
-# Properties
-block.property('size', [1, 1, 1])
-block.property('pos', [0, 0, 0])
-value = block.property('size')
-
-# Remove
-model.remove(block)
-```
-
-### Export
-
-```python
-# Export via model
-model.export('data', 'output.txt')
-model.export('image', 'plot.png')
-
-# Export all
-model.export()
-```
-
-## Common Patterns
-
-### Load, Modify, Solve
+In a fresh Python process, the alternative direct Server connection is:
 
 ```python
 import mph
 
-client = mph.start()
-model = client.load('capacitor.mph')
-
-# Modify parameter
-model.parameter('U', '10[V]')
-
-# Solve
-model.solve('static')
-
-# Evaluate
-C = model.evaluate('2*es.intWe/U^2', 'pF')
-print(f'Capacitance: {C:.3f} pF')
-
-# Save
-model.save('capacitor_modified.mph')
+# Use only when ownership and cleanup are managed outside this example.
+client = mph.Client(port=2036, host="localhost")
 ```
 
-### Create New Model
+After constructing exactly one of those clients:
 
 ```python
-model = client.create('new_model')
-
-# Add geometry
-geom = model / 'geometries' / 'geom1'
-block = geom.create('Block')
-block.property('size', ['L', 'W', 'H'])
-geom.build()
-
-# Add physics
-es = model.create('physics', 'Electrostatics')
-
-# Add study
-study = model / 'studies' / 'study1'
-stationary = study.create('Stationary')
-
-# Mesh and solve
-model.mesh()
-model.solve()
+client.version       # discovered COMSOL version string
+client.standalone    # True for standalone, False for Server connection
+client.cores         # configured core count
+client.host          # connected Server host, otherwise None
+client.port          # connected Server port, otherwise None
+client.models()      # loaded model names
 ```
 
-## Error Handling
+Use `client.create(name)`, `client.load(path)`, `client.remove(model)`, and
+`client.clear()` for client-owned models. `client.disconnect()` is for a Server
+connection; it is not a substitute for verified cleanup of an MCP-owned
+standalone worker.
+
+## Model wrapper
 
 ```python
-try:
-    model = client.load('nonexistent.mph')
-except Exception as e:
-    print(f'Error: {e}')
+model = client.load("capacitor.mph")
+
+model.name()
+model.file()
+model.version()
+model.parameters()
+model.physics()
+model.geometries()
+model.meshes()
+model.studies()
+model.datasets()
+model.plots()
+model.exports()
+model.materials()
 ```
 
-## Limitations
+The returned names are normally labels used by the MPh node wrapper. Clientapi
+tags are separate and should be read from `model.java` when exact identity is
+required.
 
-- Only one Client instance per Python process
-- COMSOL must be installed and licensed
-- Java (JPype) bridge required
-- Some advanced features require direct Java API access
+## Parameters and evaluation
+
+```python
+value = model.parameter("U")
+model.parameter("U", "5[V]")
+values = model.parameters(evaluate=True)
+
+model.description("U", "Applied voltage")
+descriptions = model.descriptions()
+
+field = model.evaluate("es.normE", "V/m", dataset="Study 1//Solution 1")
+columns = model.evaluate(["x", "y", "T"], dataset="Study 1//Solution 1")
+indices, inner_values = model.inner(dataset="Study 1//Solution 1")
+outer_indices, outer_values = model.outer(dataset="Study 1//Solution 1")
+```
+
+Specify the dataset and inner solution when more than one solution exists.
+Multi-point outer sweeps are not reliably indexed by every clientapi path;
+staged one-point solves are preferred for durable work.
+
+## Model tree nodes
+
+```python
+geometry = model / "geometries" / "Geometry 1"
+physics = model / "physics" / "Electrostatics"
+
+block = geometry.create("Block", name="Block 1")
+block.property("size", [1, 1, 1])
+size = block.property("size")
+block.remove()
+```
+
+Node paths use labels and may be localized. For version-sensitive construction,
+inspect a trusted model or use the direct clientapi object rather than guessing
+labels, tags, feature types, or overloads.
+
+## Direct COMSOL clientapi
+
+MPh standalone exposes `model.java` as a
+`com.comsol.clientapi.impl.ModelClient`, not a direct
+`com.comsol.model.Model`. Important overloads include:
+
+```python
+jm = model.java
+component = jm.component().create("comp1", True)
+geometry = component.geom().create("geom1", 3)
+physics = component.physics().create(
+    "ewfd", "ElectromagneticWavesFrequencyDomain", "3"
+)
+feature = physics.feature().create("bc1", "FeatureType", 2)
+```
+
+- Convert Java tag arrays explicitly with `list(collection.tags())`.
+- Resolve an item by string tag; integer `get(index)` is commonly unsupported.
+- Use `feature().size()` rather than `len(feature())`.
+- Physics-interface creation takes a string spatial dimension such as `"3"`;
+  child features take an integer entity dimension.
+- Run a study with `jm.study("std1").run()`.
+- Use exact capitalization such as `getSDim()`, `getNumElem()`, and
+  `getNumVertex()`.
+
+## Solve, export, and save
+
+```python
+model.build("Geometry 1")
+model.mesh("Mesh 1")
+model.solve("Study 1")
+model.export("Data 1", "result.txt")
+```
+
+For an absolute Unicode destination, save through the Java clientapi:
+
+```python
+from pathlib import Path
+
+destination = Path(r"C:\path\to\derived_model.mph").resolve()
+model.java.save(str(destination))
+```
+
+Do not overwrite the immutable source. A loaded `.mph` may also be file-locked,
+so derived models and checkpoints should use unique paths.
+
+## Common failures
+
+- `No matching overloads`: a direct-Model overload was used on `ModelClient`.
+- `Operation_cannot_be_created_in_this_context`: wrong owning component, feature
+  type, or entity dimension.
+- List indexing errors: iterate tags and call `.get(tag)`.
+- Unexpected vacuum electrostatics: the default `FreeSpace` feature ignores a
+  material's relative permittivity; add `ChargeConservation` with
+  `materialType="from_mat"`.
+- Wrong transient results: select the intended dataset and inner solution
+  explicitly.

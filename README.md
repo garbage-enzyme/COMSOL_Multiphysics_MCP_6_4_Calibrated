@@ -1,10 +1,10 @@
-# COMSOL MCP Server for COMSOL 6.4+
+# COMSOL MCP Server for COMSOL 6.4
 
 English | [中文](README_CN.md)
 
 [![GitHub stars](https://img.shields.io/github/stars/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated?style=social)](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/stargazers)
 
-> A maintained fork of [wjc9011/COMSOL_Multiphysics_MCP](https://github.com/wjc9011/COMSOL_Multiphysics_MCP), calibrated for **COMSOL Multiphysics 6.4+** and **MPh 1.3.1 standalone/clientapi**.
+> A maintained fork of [wjc9011/COMSOL_Multiphysics_MCP](https://github.com/wjc9011/COMSOL_Multiphysics_MCP), calibrated for **COMSOL Multiphysics 6.4.0.293** and **MPh 1.3.1 standalone/clientapi**. Other COMSOL builds require their own licensed acceptance evidence.
 
 This server gives AI agents a safer, smaller interface for COMSOL inspection, controlled one-point validation, durable staged sweeps, and offline manual lookup. It is designed for the `model.java` clientapi object returned by `mph.Client()`, whose API differs materially from the direct `com.comsol.model.Model` API targeted by the upstream project.
 
@@ -14,9 +14,9 @@ For Claude Code, Codex CLI, opencode, Hermes Agent, and other skill-aware agents
 [COMSOL 6.4+ metasurface agent skill](https://github.com/garbage-enzyme/COMSOL_6_4_agentskill_for_metasurfaces)
 alongside this server. Its short `SKILL.md` entry routes agents to focused
 reference modules for clientapi, periodic Wave Optics, materials and boundaries,
-durable jobs, physical evidence, resource safety, troubleshooting, and MCP
-development/release engineering without forcing the full guide into context on
-every turn.
+durable jobs, physical evidence, resource safety, and troubleshooting without
+forcing the full guide into context on every turn. Repository development and
+release procedures remain in this repository's development kit.
 
 ## Client compatibility and deployment
 
@@ -38,8 +38,9 @@ Hermes compatibility was checked against its official
 [MCP documentation](https://github.com/NousResearch/hermes-agent/blob/main/website/docs/user-guide/features/mcp.md)
 and [client source](https://github.com/NousResearch/hermes-agent/blob/main/tools/mcp_tool.py).
 A solver-free installed-entry-point smoke gate completed `initialize`,
-`list_tools`, and `capabilities` with server `COMSOL MCP`, 38 `core` tools,
-profile `core`, and `connected=false`.
+`list_tools`, and `capabilities` with server `COMSOL MCP`, profile `core`, and
+`connected=false`. Treat live discovery, not a count copied from documentation,
+as the authority for the installed tool surface.
 
 ## Highlights
 
@@ -54,16 +55,22 @@ profile `core`, and `connected=false`.
 
 Set `COMSOL_MCP_PROFILE` before starting the server. A profile is fixed for the lifetime of that server process; restart after changing it.
 
-| Profile | Tools | Intended use |
-| --- | ---: | --- |
-| `core` (default) | 38 | Compact, mature control plane: status, ownership, session/model inspection, one-point solve/evaluation, and lexical manuals. |
-| `basic_fem` | 76 | `core` plus typed conventional FEM construction, derived-geometry edits, and bounded exports. |
-| `wave_optics` | 63 | Recommended for metasurfaces: `core` plus derived-geometry edits, material preview, locale-safe field discovery and bounded NPZ/manifest extraction, periodic-mesh audit/smoke, visual-review contracts, Wave Optics preflight, point/reference audits, and staged workflows. |
-| `semantic_docs` | 41 | `core` plus isolated experimental vector-assisted manual retrieval. |
-| `experimental` | 64 | Explicit opt-in generic creation, async, property escape hatches, and project helpers. |
-| `full` | 120 | Broad compatibility/discovery surface containing every tool across all profiles. |
+| Profile | Intended use |
+| --- | --- |
+| `core` (default) | Compact, mature control plane: status, ownership, session/model inspection, one-point solve/evaluation, and lexical manuals. |
+| `basic_fem` | `core` plus typed conventional FEM construction, derived-geometry edits, and bounded exports. |
+| `wave_optics` | Recommended for metasurfaces: `core` plus derived-geometry edits, material preview, locale-safe field discovery and bounded NPZ/manifest extraction, periodic-mesh audit/smoke, visual-review contracts, Wave Optics preflight, point/reference audits, and staged workflows. |
+| `semantic_docs` | `core` plus isolated experimental vector-assisted manual retrieval. |
+| `experimental` | Explicit opt-in generic creation, async, property escape hatches, and project helpers. |
+| `full` | Broad compatibility/discovery surface containing every tool across all profiles. |
 
 Call `capabilities` to discover the active profile, exact registered tools, target versions, disabled groups, and restart requirements without starting COMSOL. Its bounded `deployment_identity` reports source-tree versus installed-package loading plus frozen profile/schema and catalog hashes, so a host restart can detect same-version stale installs or source shadowing without exposing local paths.
+
+The current release does **not** provide a non-owning shared Desktop/attached-
+Server workflow. The legacy `comsol_connect` tool is restricted to experimental
+compatibility profiles and must not be treated as safe shared-model attachment;
+it does not provide explicit user opt-in, external-Server ownership protection,
+or model identity locking.
 
 Control-plane responses from capabilities, solver ownership, durable jobs, and lexical manuals include a compact rolling `control_plane` block. It retains at most 256 samples per operation and reports success/busy/timeout/error counts plus p50/p95/max latency; full logs and unbounded telemetry are never returned inline.
 
@@ -130,7 +137,7 @@ The Python 3.14 licensed parallel-plate regression returns **1.8593794419540677 
 
 ## Requirements and installation
 
-- COMSOL Multiphysics 6.4 or newer
+- COMSOL Multiphysics 6.4; licensed acceptance is pinned to build 6.4.0.293
 - Python 3.14 (standard GIL-enabled build, not the Windows Store build)
 - MPh 1.3.1, `mcp`, `pydantic`, and `psutil>=5.9.0`
 - COMSOL's Java 21 runtime in the verified configuration
@@ -170,7 +177,7 @@ Configure an MCP client, for example:
   "mcp": {
     "comsol": {
       "type": "local",
-      "command": ["python", "-m", "src.server"],
+      "command": ["D:\\path\\to\\python-env\\Scripts\\comsol-mcp.exe"],
       "environment": { "COMSOL_MCP_PROFILE": "wave_optics" }
     }
   }
@@ -199,4 +206,6 @@ Use this fork when the upstream server fails under MPh standalone with errors su
 
 ## License
 
-Inherits the upstream license. See the original repository for details.
+This repository is distributed under the [MIT License](LICENSE). COMSOL,
+licensed manuals, third-party models, papers, and datasets are not relicensed by
+this repository.

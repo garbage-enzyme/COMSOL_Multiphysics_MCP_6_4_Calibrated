@@ -9,7 +9,8 @@
 
 要求：
 
-- COMSOL Multiphysics 6.4+；
+- COMSOL Multiphysics 6.4（licensed acceptance 固定于 6.4.0.293；其他 build
+  需要单独验证）；
 - 标准 GIL 版本的 Python 3.14，环境路径只使用 ASCII 字符；
 - 已验证本机配置所需的 COMSOL Java runtime。
 
@@ -27,18 +28,22 @@ console entry point 绝对路径。
 
 ## 2. 选择 Profile
 
-| Profile | 工具数 | 用途 |
-| --- | ---: | --- |
-| `core` | 38 | 紧凑默认控制面和词法手册检索。 |
-| `basic_fem` | 76 | 常规 FEM 构建和有界导出。 |
-| `wave_optics` | 63 | 周期光学、超表面、有界场数据发现/提取、预检和证据审计。 |
-| `semantic_docs` | 41 | 隔离的实验性语义手册检索。 |
-| `experimental` | 64 | 显式选择的通用和 escape-hatch 工具。 |
-| `full` | 120 | 宽兼容界面；默认不推荐。 |
+| Profile | 用途 |
+| --- | --- |
+| `core` | 紧凑默认控制面和词法手册检索。 |
+| `basic_fem` | 常规 FEM 构建和有界导出。 |
+| `wave_optics` | 周期光学、超表面、有界场数据发现/提取、预检和证据审计。 |
+| `semantic_docs` | 隔离的实验性语义手册检索。 |
+| `experimental` | 显式选择的通用和 escape-hatch 工具。 |
+| `full` | 宽兼容界面；默认不推荐。 |
 
 在 client 的 server environment 中设置 `COMSOL_MCP_PROFILE`。省略时使用
 `core`。stdio 进程启动时会冻结 profile，修改后必须重启 client/MCP host。非法
 profile 会使启动失败，不会静默回退。
+
+当前没有任何 profile 提供受保护的共享 Desktop/attached-Server 模式。
+experimental 中的旧 `comsol_connect` 兼容工具不具备 non-owning 共享模型生命周期，
+不得按共享模式使用。
 
 ## 3. Hermes Agent
 
@@ -124,8 +129,9 @@ JDK_HOME = 'D:\COMSOL64\Multiphysics\java\win64\jre'
 ```text
 profile = wave_optics
 active_profile = wave_optics
-tool_count = 63
 ```
+
+以返回的注册工具列表和部署哈希为准，不要与本指南中复制的工具数量比较。
 
 然后在构造 client 前调用 `solver_status` 和 `solver_preflight`。保持单一 solver
 owner。长仿真使用 durable jobs，不要让单个同步 MCP call 持续占用全部 wall time。
