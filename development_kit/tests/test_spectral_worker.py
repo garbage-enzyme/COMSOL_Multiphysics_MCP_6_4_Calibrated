@@ -15,6 +15,7 @@ from development_kit.tests.spectral_job_fixtures import (
     write_fake_point_audit,
 )
 from src.jobs.spectral_worker import _run
+from src.jobs.manager import JobManager
 from src.jobs.store import JobStore, process_identity
 
 
@@ -99,6 +100,30 @@ def _created_job(tmp_path, ascii_root):
     return store, spec, job_id
 
 
+def _raw_spec(spec):
+    allowed = {
+        "job_type",
+        "source_model_path",
+        "source_model_relative_identity",
+        "configuration_sha256",
+        "parameter_state",
+        "wavelength_parameter",
+        "initial_grid",
+        "refinement_policy",
+        "expansion_policy",
+        "maximum_points",
+        "collector",
+        "analysis_policy",
+        "measurement_configuration",
+        "resource_policy",
+        "cores",
+        "version",
+        "max_retries",
+        "continue_on_error",
+    }
+    return {key: value for key, value in spec.items() if key in allowed}
+
+
 def test_injected_worker_reuses_ownership_resource_and_cleanup_paths(tmp_path, ascii_root):
     store, spec, job_id = _created_job(tmp_path, ascii_root)
     ownership = _Ownership()
@@ -161,3 +186,58 @@ def test_cleanup_fault_fails_attempt_but_still_releases_lease(tmp_path, ascii_ro
     assert "cleanup_hook" in state["last_error"]["message"]
     assert ownership.released is True
     assert (store.job_dir(job_id) / "analysis" / "summary.json").is_file()
+
+
+def test_manager_routes_exact_spectral_submissions_and_changed_specs(tmp_path, ascii_root, monkeypatch):
+    spec = spectral_job_spec(tmp_path)
+    manager = JobManager(
+        ascii_root / "manager-jobs",
+        preflight=lambda **_kwargs: {"ready": True},
+        reconcile_on_start=False,
+    )
+    launches = []
+
+    def launch(job_id, module):
+        launches.append((job_id, module))
+        return process_identity(os.getpid())
+
+    monkeypatch.setattr(manager, "_launch_worker", launch)
+    first = manager.submit(_raw_spec(spec))
+    duplicate = manager.submit(_raw_spec(spec))
+    assert launches == [(first["job_id"], "src.jobs.spectral_worker")]
+    assert duplicate["duplicate"] is True
+    assert duplicate["job_id"] == first["job_id"]
+    status = manager.status(first["job_id"])
+    assert status["spectral_progress"]["maximum_points"] == spec["maximum_points"]
+    assert status["spectral_progress"]["complete_points"] == 0
+
+    changed = _raw_spec(spec)
+    changed["configuration_sha256"] = "c" * 64
+    second = manager.submit(changed)
+    assert second["job_id"] != first["job_id"]
+    assert launches[-1][1] == "src.jobs.spectral_worker"
+
+
+def test_manager_resumes_spectral_worker_without_changing_spec(tmp_path, ascii_root, monkeypatch):
+    spec = spectral_job_spec(tmp_path)
+    manager = JobManager(
+        ascii_root / "resume-jobs",
+        preflight=lambda **_kwargs: {"ready": True},
+        reconcile_on_start=False,
+    )
+    launches = []
+    monkeypatch.setattr(
+        manager,
+        "_launch_worker",
+        lambda job_id, module: (
+            launches.append((job_id, module)) or process_identity(os.getpid())
+        ),
+    )
+    submitted = manager.submit(_raw_spec(spec))
+    manager.store.update_state(
+        submitted["job_id"], "interrupted", event="injected_interruption"
+    )
+    resumed = manager.resume(submitted["job_id"])
+    assert resumed["attempt"] == 2
+    assert launches[-1][1] == "src.jobs.spectral_worker"
+    assert manager.store.read_spec(submitted["job_id"])["spec_fingerprint"] == spec["spec_fingerprint"]

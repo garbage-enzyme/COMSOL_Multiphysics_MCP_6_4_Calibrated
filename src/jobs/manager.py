@@ -16,6 +16,7 @@ import psutil
 
 from .process_control import inspect_identity, verify_absent
 from .resource_admission import normalize_resource_policy
+from .spectral_characterization import normalize_spectral_characterization_job_spec
 from .validation_matrix import normalize_validation_matrix_spec
 from .store import (
     ACTIVE_STATES,
@@ -157,6 +158,7 @@ def _worker_module(job_type: str) -> str:
         "test_sequence": "src.jobs.sequence_worker",
         "staged_sweep": "src.jobs.worker",
         "validation_matrix": "src.jobs.validation_worker",
+        "spectral_characterization": "src.jobs.spectral_worker",
     }
     try:
         return modules[job_type]
@@ -165,10 +167,13 @@ def _worker_module(job_type: str) -> str:
 
 
 def _point_count(spec: dict[str, Any]) -> int:
-    field = "delays" if spec["job_type"] == "test_sequence" else (
-        "points" if spec["job_type"] == "validation_matrix" else "parameter_values"
-    )
-    return len(spec[field])
+    if spec["job_type"] == "test_sequence":
+        return len(spec["delays"])
+    if spec["job_type"] == "validation_matrix":
+        return len(spec["points"])
+    if spec["job_type"] == "spectral_characterization":
+        return int(spec["maximum_points"])
+    return len(spec["parameter_values"])
 
 
 class JobManager:
@@ -200,6 +205,8 @@ class JobManager:
             spec = _validate_test_spec(raw_spec)
         elif job_type == "validation_matrix":
             spec = normalize_validation_matrix_spec(raw_spec)
+        elif job_type == "spectral_characterization":
+            spec = normalize_spectral_characterization_job_spec(raw_spec)
         else:
             spec = validate_staged_sweep_spec(raw_spec)
         worker_module = _worker_module(spec["job_type"])
@@ -221,9 +228,11 @@ class JobManager:
             "progress": {"completed": 0, "total": total_points},
             "last_error": None,
         }
-        if spec["job_type"] == "validation_matrix":
+        if spec["job_type"] in {"validation_matrix", "spectral_characterization"}:
             with JobLock(self.store.root / ".submit.lock"):
-                duplicate = self._find_validation_duplicate(spec["spec_fingerprint"])
+                duplicate = self._find_exact_duplicate(
+                    spec["job_type"], spec["spec_fingerprint"]
+                )
                 if duplicate is not None:
                     existing_state = self.store.read_state(duplicate)
                     return {
@@ -264,6 +273,11 @@ class JobManager:
         return {"success": True, "job_id": job_id, "status": "submitted"}
 
     def _find_validation_duplicate(self, spec_fingerprint: str) -> str | None:
+        return self._find_exact_duplicate("validation_matrix", spec_fingerprint)
+
+    def _find_exact_duplicate(
+        self, job_type: str, spec_fingerprint: str
+    ) -> str | None:
         directories = sorted(
             path
             for path in self.store.root.iterdir()
@@ -274,7 +288,7 @@ class JobManager:
         for directory in directories:
             existing = read_json(directory / "spec.json")
             if (
-                existing.get("job_type") == "validation_matrix"
+                existing.get("job_type") == job_type
                 and existing.get("spec_fingerprint") == spec_fingerprint
             ):
                 return directory.name
@@ -561,7 +575,11 @@ class JobManager:
         # Ownership status merges durable-job summaries, so preflight must run
         # outside this job's lock.  The second locked validation below prevents
         # two concurrent resume callers from both transitioning and launching.
-        if spec["job_type"] in {"staged_sweep", "validation_matrix"}:
+        if spec["job_type"] in {
+            "staged_sweep",
+            "validation_matrix",
+            "spectral_characterization",
+        }:
             if self._preflight is None:
                 from src.tools.ownership import SolverOwnership
 
@@ -687,6 +705,27 @@ class JobManager:
                     "pending": len(spec["points"]) - len({row["point_fingerprint"] for row in ok}),
                     "last_row_sha256": rows[-1]["row_sha256"] if rows else None,
                     "last_error_type": errors[-1]["error"]["type"] if errors else None,
+                }
+            elif spec.get("job_type") == "spectral_characterization":
+                from .spectral_rows import read_spectral_rows
+                from .spectral_stages import read_spectral_stage_plans
+
+                directory = self.store.job_dir(job_id)
+                rows = read_spectral_rows(
+                    directory / "spectral_rows.jsonl",
+                    spec,
+                    artifact_root=directory,
+                )
+                stages = read_spectral_stage_plans(directory, spec)
+                planned = sum(len(stage["requested_points"]) for stage in stages)
+                state["spectral_progress"] = {
+                    "maximum_points": spec["maximum_points"],
+                    "planned_points": planned,
+                    "complete_points": len(rows),
+                    "pending_planned_points": planned - len(rows),
+                    "stage_count": len(stages),
+                    "last_stage_sha256": stages[-1]["stage_sha256"] if stages else None,
+                    "last_row_sha256": rows[-1]["row_sha256"] if rows else None,
                 }
             return {"success": True, "job_id": job_id, **state}
 

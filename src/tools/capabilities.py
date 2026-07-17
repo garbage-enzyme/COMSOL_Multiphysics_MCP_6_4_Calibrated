@@ -13,6 +13,11 @@ from mcp.server.fastmcp import FastMCP
 from src.build_identity import get_build_identity
 from src.compatibility import load_runtime_compatibility
 from src.environment_identity import get_environment_identity
+from src.jobs.spectral_characterization import (
+    MAX_REFINEMENT_STAGES,
+    MAX_WINDOW_EXPANSIONS,
+)
+from src.evidence.spectral_characterization import MAX_SPECTRAL_POINTS
 from src.schema_registry import get_schema_registry
 from src.evidence.contracts import (
     EVIDENCE_STATES,
@@ -182,6 +187,7 @@ def get_capabilities(selection: ProfileSelection | None = None) -> dict:
             "solver_ownership_and_preflight",
             "durable_background_staged_sweep_jobs",
             "durable_background_validation_matrix_jobs",
+            "durable_adaptive_spectral_characterization_jobs",
             "durable_job_real_cancellation_and_resume",
             "wave_optics_read_only_preflight",
             "wave_optics_one_point_policy_separated_audit",
@@ -274,10 +280,15 @@ def get_capabilities(selection: ProfileSelection | None = None) -> dict:
         "semantic_search": semantic,
         "long_jobs": {
             "durable_background_jobs": True,
-            "job_types": ["staged_sweep", "validation_matrix"],
+            "job_types": [
+                "staged_sweep",
+                "validation_matrix",
+                "spectral_characterization",
+            ],
             "control_tools": ["job_submit", "job_status", "job_tail", "job_cancel", "job_resume"],
             "cancellation_scope": (
-                "same-host durable staged_sweep and validation_matrix jobs "
+                "same-host durable staged_sweep, validation_matrix, and "
+                "spectral_characterization jobs "
                 "owned by this runtime root"
             ),
             "cancellation_strategy": (
@@ -298,6 +309,21 @@ def get_capabilities(selection: ProfileSelection | None = None) -> dict:
                 "wave_optics_field_evidence",
             ],
             "field_collector_requires_preceding_point_audit": True,
+            "spectral_characterization": {
+                "one_wavelength_per_solve": True,
+                "complete_audit_fsync_before_next_point": True,
+                "exact_identity_resume": True,
+                "maximum_points_server_cap": MAX_SPECTRAL_POINTS,
+                "maximum_refinement_stages_server_cap": MAX_REFINEMENT_STAGES,
+                "maximum_expansions_server_cap": MAX_WINDOW_EXPANSIONS,
+                "scientific_tolerances": "caller_declared_and_hash_bound",
+                "normal_nonacceptance": [
+                    "no_candidate",
+                    "boundary_high_at_declared_cap",
+                    "unbracketed_fwhm",
+                    "fit_sensitive",
+                ],
+            },
         },
         "restart_required_after_source_changes": True,
         "server_safety": {
@@ -336,7 +362,7 @@ def startup_capability_summary(selection: ProfileSelection | None = None) -> str
         f"tools={capabilities['tool_count']}; "
         f"target=COMSOL {targets['comsol']} exact licensed / MPh {targets['mph']}; "
         f"lexical_manual=enabled; semantic_docs={'active' if capabilities['semantic_search']['profile_active'] else 'disabled'}; "
-        "durable_jobs=staged_sweep,validation_matrix; "
+        "durable_jobs=staged_sweep,validation_matrix,spectral_characterization; "
         "solver_ownership=enforced; durable_job_cancellation=verified"
     )
 

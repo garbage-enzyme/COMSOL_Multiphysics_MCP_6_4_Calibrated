@@ -30,6 +30,22 @@ from src.evidence.spectral_characterization import (
     SPECTRAL_DECISION_SCHEMA,
     SPECTRAL_SCHEMA_VERSION,
 )
+from src.jobs.spectral_progress import (
+    SPECTRAL_PROGRESS_SCHEMA_NAME,
+    SPECTRAL_PROGRESS_SCHEMA_VERSION,
+)
+from src.jobs.spectral_rows import (
+    SPECTRAL_ROW_SCHEMA_NAME,
+    SPECTRAL_ROW_SCHEMA_VERSION,
+)
+from src.jobs.spectral_runner import (
+    SPECTRAL_SUMMARY_SCHEMA_NAME,
+    SPECTRAL_SUMMARY_SCHEMA_VERSION,
+)
+from src.jobs.spectral_stages import (
+    SPECTRAL_STAGE_SCHEMA_NAME,
+    SPECTRAL_STAGE_SCHEMA_VERSION,
+)
 
 
 _REGISTRY_SCHEMA = "comsol_mcp.schema_registry"
@@ -148,6 +164,30 @@ def _entries() -> list[dict[str, Any]]:
             SPECTRAL_CHARACTERIZATION_SCHEMA,
             SPECTRAL_SCHEMA_VERSION,
             "src.evidence.spectral_characterization",
+        ),
+        _entry(
+            SPECTRAL_PROGRESS_SCHEMA_NAME,
+            SPECTRAL_PROGRESS_SCHEMA_VERSION,
+            "src.jobs.spectral_progress",
+            artifact_kind="durable_artifact",
+        ),
+        _entry(
+            SPECTRAL_ROW_SCHEMA_NAME,
+            SPECTRAL_ROW_SCHEMA_VERSION,
+            "src.jobs.spectral_rows",
+            artifact_kind="durable_artifact",
+        ),
+        _entry(
+            SPECTRAL_STAGE_SCHEMA_NAME,
+            SPECTRAL_STAGE_SCHEMA_VERSION,
+            "src.jobs.spectral_stages",
+            artifact_kind="durable_artifact",
+        ),
+        _entry(
+            SPECTRAL_SUMMARY_SCHEMA_NAME,
+            SPECTRAL_SUMMARY_SCHEMA_VERSION,
+            "src.jobs.spectral_runner",
+            artifact_kind="durable_artifact",
         ),
         _entry("comsol_mcp.resource_calibration_report", "1.0.0", "src.jobs.resource_admission"),
         _entry("comsol_mcp.resource_journal_entry", "1.0.0", "src.jobs.resource_admission"),
