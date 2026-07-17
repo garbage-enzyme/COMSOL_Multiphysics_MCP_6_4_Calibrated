@@ -46,7 +46,20 @@ def _spec(tmp_path) -> dict:
                 "absolute_upper_m": 7e-6,
             },
             "maximum_points": 10,
-            "collector": {"name": "wave_optics_point_audit", "inputs": {}},
+            "collector": {
+                "name": "wave_optics_point_audit",
+                "inputs": {
+                    "component_tag": "comp1",
+                    "physics_tag": "ewfd",
+                    "study_tag": "std1",
+                    "study_step_tag": "freq",
+                    "study_step_property": "plist",
+                    "r_expression": "ewfd.Rtotal",
+                    "t_expression": "ewfd.Ttotal",
+                    "a_expression": "ewfd.Atotal",
+                    "top_air_domain_ids": [1],
+                },
+            },
             "analysis_policy": {
                 "response_quantity": "A",
                 "candidate_polarity": "maximum",

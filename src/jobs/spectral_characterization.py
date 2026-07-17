@@ -46,6 +46,39 @@ _LOCKED_COLLECTOR_INPUTS = frozenset(
         "clone_cleanup",
     }
 )
+_ALLOWED_COLLECTOR_INPUTS = frozenset(
+    {
+        "component_tag",
+        "physics_tag",
+        "study_tag",
+        "study_step_tag",
+        "study_step_property",
+        "r_expression",
+        "t_expression",
+        "a_expression",
+        "top_air_selection",
+        "top_air_domain_ids",
+        "top_air_coordinate_range",
+        "loss_map",
+        "power_provenance",
+        "declared_plane_flux",
+        "internal_absorption",
+        "air_reference_config_id",
+        "validation_policy",
+    }
+)
+_REQUIRED_COLLECTOR_INPUTS = frozenset(
+    {
+        "component_tag",
+        "physics_tag",
+        "study_tag",
+        "study_step_tag",
+        "study_step_property",
+        "r_expression",
+        "t_expression",
+        "a_expression",
+    }
+)
 
 
 def _canonical_bytes(value: object) -> bytes:
@@ -270,6 +303,30 @@ def _normalize_collector(value: object) -> dict[str, Any]:
     conflicts = sorted(set(inputs) & _LOCKED_COLLECTOR_INPUTS)
     if conflicts:
         raise ValueError(f"collector.inputs attempt to override locked fields: {conflicts}")
+    unknown = sorted(set(inputs) - _ALLOWED_COLLECTOR_INPUTS)
+    missing = sorted(_REQUIRED_COLLECTOR_INPUTS - set(inputs))
+    if unknown or missing:
+        raise ValueError(f"collector.inputs has unsupported={unknown} missing={missing}")
+    for field in (
+        "component_tag",
+        "physics_tag",
+        "study_tag",
+        "study_step_tag",
+        "study_step_property",
+    ):
+        if not isinstance(inputs[field], str) or not _TAG.fullmatch(inputs[field]):
+            raise ValueError(f"collector.inputs.{field} must be one exact tag")
+    for field in ("r_expression", "t_expression", "a_expression"):
+        if (
+            not isinstance(inputs[field], str)
+            or not inputs[field].strip()
+            or len(inputs[field]) > 1024
+        ):
+            raise ValueError(f"collector.inputs.{field} must be a bounded nonempty expression")
+    selection = inputs.get("top_air_selection")
+    domains = inputs.get("top_air_domain_ids")
+    if selection is None and not domains:
+        raise ValueError("collector.inputs requires top_air_selection or top_air_domain_ids")
     return {"name": raw["name"], "inputs": inputs}
 
 
