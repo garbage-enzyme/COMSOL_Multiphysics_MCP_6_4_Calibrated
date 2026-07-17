@@ -8,7 +8,9 @@ import pytest
 
 from src.jobs.spectral_characterization import (
     MAX_REFINEMENT_STAGES,
+    current_spectral_driver_identity,
     normalize_spectral_characterization_job_spec,
+    validate_spectral_driver_identity,
 )
 
 
@@ -94,6 +96,8 @@ def test_spec_is_canonical_hash_bound_and_solver_free(tmp_path):
     assert first["spec_fingerprint"]
     assert first["resource_policy"]["host_defaults_applied"] is False
     assert first["analysis_policy"] == raw["analysis_policy"]
+    assert first["driver_identity"] == current_spectral_driver_identity()
+    assert validate_spectral_driver_identity(first) == first["driver_identity"]
     assert first["measurement_configuration"]["peak_method"] == "quadratic_interpolation"
 
 
@@ -151,3 +155,10 @@ def test_source_bytes_are_part_of_the_immutable_identity(tmp_path):
 
     assert before["source_model_sha256"] != after["source_model_sha256"]
     assert before["spec_fingerprint"] != after["spec_fingerprint"]
+
+
+def test_changed_driver_identity_cannot_resume_existing_rows(tmp_path):
+    spec = normalize_spectral_characterization_job_spec(_raw_spec(tmp_path))
+    spec["driver_identity"]["package_content_sha256"] = "0" * 64
+    with pytest.raises(ValueError, match="driver identity"):
+        validate_spectral_driver_identity(spec)

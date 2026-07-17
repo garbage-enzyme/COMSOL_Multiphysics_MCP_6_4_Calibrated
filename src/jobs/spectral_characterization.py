@@ -9,6 +9,7 @@ from pathlib import Path, PurePosixPath
 import re
 from typing import Any, Mapping
 
+from src.build_identity import get_build_identity
 from src.evidence.spectral_characterization import (
     MAX_SPECTRAL_POINTS,
     normalize_spectral_analysis_policy,
@@ -25,6 +26,7 @@ MAX_REFINEMENT_STAGES = 8
 MAX_WINDOW_EXPANSIONS = 8
 MAX_SPECTRAL_JOB_SPEC_BYTES = 512 * 1024
 MAX_COLLECTOR_INPUT_BYTES = 64 * 1024
+SPECTRAL_JOB_DRIVER_VERSION = "1.0.0"
 
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 _TAG = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,127}$")
@@ -360,6 +362,26 @@ def _normalize_collector(value: object) -> dict[str, Any]:
     return {"name": raw["name"], "inputs": inputs}
 
 
+def current_spectral_driver_identity() -> dict[str, str]:
+    """Bind resume to the exact shipped package bytes and driver contract."""
+    build = get_build_identity()
+    return {
+        "implementation": "src.jobs.spectral_worker",
+        "driver_version": SPECTRAL_JOB_DRIVER_VERSION,
+        "package_content_sha256": build["package_content_sha256"],
+        "build_identity_sha256": build["build_identity_sha256"],
+    }
+
+
+def validate_spectral_driver_identity(spec: Mapping[str, Any]) -> dict[str, str]:
+    """Fail closed when an immutable job belongs to different package bytes."""
+    observed = spec.get("driver_identity")
+    expected = current_spectral_driver_identity()
+    if observed != expected:
+        raise ValueError("spectral job driver identity differs from the running package")
+    return expected
+
+
 def normalize_spectral_characterization_job_spec(raw_spec: object) -> dict[str, Any]:
     """Normalize one immutable adaptive spectrum request without importing COMSOL."""
     raw = _mapping(raw_spec, "spectral characterization job specification")
@@ -468,6 +490,7 @@ def normalize_spectral_characterization_job_spec(raw_spec: object) -> dict[str, 
         "version": version.strip() if isinstance(version, str) else None,
         "max_retries": max_retries,
         "continue_on_error": continue_on_error,
+        "driver_identity": current_spectral_driver_identity(),
     }
     encoded = _canonical_bytes(spec)
     if len(encoded) > MAX_SPECTRAL_JOB_SPEC_BYTES:
@@ -484,5 +507,8 @@ __all__ = [
     "MAX_SPECTRAL_JOB_SPEC_BYTES",
     "MAX_STAGE_POINTS",
     "MAX_WINDOW_EXPANSIONS",
+    "SPECTRAL_JOB_DRIVER_VERSION",
+    "current_spectral_driver_identity",
     "normalize_spectral_characterization_job_spec",
+    "validate_spectral_driver_identity",
 ]

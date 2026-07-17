@@ -12,6 +12,7 @@ import time
 from typing import Any, Callable, Mapping
 
 from .process_control import contain_current_process_tree
+from .spectral_characterization import validate_spectral_driver_identity
 from .spectral_rows import completed_spectral_point_fingerprints, read_spectral_rows
 from .store import JobStore, cancel_request_targets_attempt, process_identity
 
@@ -55,6 +56,7 @@ def _run(
     spec = store.read_spec(job_id)
     if spec.get("job_type") != "spectral_characterization":
         raise ValueError("Spectral worker accepts only spectral_characterization jobs")
+    validate_spectral_driver_identity(spec)
     identity = process_identity(os.getpid())
     deadline = time.monotonic() + 3.0
     while store.read_state(job_id).get("worker_pid") != identity["pid"]:
