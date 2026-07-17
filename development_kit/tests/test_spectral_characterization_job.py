@@ -53,6 +53,7 @@ def _raw_spec(tmp_path) -> dict:
                 "t_expression": "ewfd.Ttotal",
                 "a_expression": "ewfd.Atotal",
                 "top_air_domain_ids": [1],
+                "top_air_coordinate_range": {"x": [-1.0, 1.0], "y": [-1.0, 1.0], "z": [-1.0, 1.0]},
             },
         },
         "analysis_policy": {
@@ -122,6 +123,7 @@ def test_configuration_and_collector_identity_change_the_fingerprint(tmp_path):
         (lambda spec: spec["collector"]["inputs"].__setitem__("wavelength_value", 5.0e-6), "locked"),
         (lambda spec: spec["collector"]["inputs"].__setitem__("output_path", "outside.json"), "unsupported"),
         (lambda spec: spec["collector"]["inputs"].pop("r_expression"), "missing"),
+        (lambda spec: spec["collector"]["inputs"].pop("top_air_coordinate_range"), "missing"),
         (lambda spec: spec.__setitem__("source_model_relative_identity", "../private.mph"), "relative path"),
         (lambda spec: spec["analysis_policy"].__setitem__("hidden", 1.0), "fields"),
     ],

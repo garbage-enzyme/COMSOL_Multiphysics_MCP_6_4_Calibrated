@@ -55,6 +55,7 @@ def _spec(tmp_path):
                     "t_expression": "T",
                     "a_expression": "A",
                     "top_air_domain_ids": [1],
+                    "top_air_coordinate_range": {"x": [-1.0, 1.0], "y": [-1.0, 1.0], "z": [-1.0, 1.0]},
                 },
             },
             "analysis_policy": {

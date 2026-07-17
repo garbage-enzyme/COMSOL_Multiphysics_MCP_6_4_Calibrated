@@ -77,6 +77,7 @@ _REQUIRED_COLLECTOR_INPUTS = frozenset(
         "r_expression",
         "t_expression",
         "a_expression",
+        "top_air_coordinate_range",
     }
 )
 
@@ -345,6 +346,17 @@ def _normalize_collector(value: object) -> dict[str, Any]:
     domains = inputs.get("top_air_domain_ids")
     if selection is None and not domains:
         raise ValueError("collector.inputs requires top_air_selection or top_air_domain_ids")
+    coordinate_range = inputs["top_air_coordinate_range"]
+    if not isinstance(coordinate_range, dict) or set(coordinate_range) != {"x", "y", "z"}:
+        raise ValueError("collector.inputs.top_air_coordinate_range requires exactly x, y, and z")
+    for axis in ("x", "y", "z"):
+        limits = coordinate_range[axis]
+        if not isinstance(limits, list) or len(limits) != 2:
+            raise ValueError(f"collector.inputs.top_air_coordinate_range.{axis} must contain two limits")
+        low = _finite(limits[0], f"collector.inputs.top_air_coordinate_range.{axis}[0]")
+        high = _finite(limits[1], f"collector.inputs.top_air_coordinate_range.{axis}[1]")
+        if low > high:
+            raise ValueError(f"collector.inputs.top_air_coordinate_range.{axis} must be ordered")
     return {"name": raw["name"], "inputs": inputs}
 
 
