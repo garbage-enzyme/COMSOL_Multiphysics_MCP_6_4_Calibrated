@@ -181,6 +181,8 @@ models are intentionally absent.
 - `development_kit/tests/test_spectral_characterization_job.py` — This module tests immutable bounded durable spectral job specifications.
 - `development_kit/tests/test_spectral_progress.py` — This module tests adaptive spectral transitions and policy-separated scientific outcomes.
 - `development_kit/tests/test_spectral_rows.py` — This module tests hash-chained durable spectral rows and exact artifact-bound resume.
+- `development_kit/tests/spectral_job_fixtures.py` — This module creates sanitized fake point-audit artifacts for durable spectral tests.
+- `development_kit/tests/test_spectral_runner.py` — This module tests the adaptive spectral point loop, summaries, and fault recovery.
 - `development_kit/tests/test_spectral_stages.py` — This module tests immutable spectral stage planning, freezing, and replay.
 - `development_kit/tests/test_study.py` — This module tests study helpers without a COMSOL client.
 - `development_kit/tests/test_tool_catalog.py` — This module tests deterministic tool catalog metadata and discovery.
@@ -255,6 +257,7 @@ models are intentionally absent.
 - `src/jobs/spectral_audit.py` — This module verifies point-audit artifacts before durable spectral row persistence.
 - `src/jobs/spectral_characterization.py` — This module normalizes immutable bounded durable spectral job specifications.
 - `src/jobs/spectral_progress.py` — This module derives bounded adaptive spectral transitions from frozen stages and durable rows.
+- `src/jobs/spectral_runner.py` — This module runs the solver-independent adaptive spectral point loop and summary writes.
 - `src/jobs/spectral_rows.py` — This module persists hash-chained raw spectral points with artifact verification.
 - `src/jobs/spectral_stages.py` — This module builds and atomically freezes hash-chained adaptive spectral stage plans.
 - `src/jobs/store.py` — This module persists crash-durable job state and process-safe locks.
