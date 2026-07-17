@@ -1,7 +1,7 @@
 [project]
 name = "comsol-mcp"
 dynamic = ["version"]
-description = "MCP Server for COMSOL Multiphysics simulation automation"
+description = "A safety-focused MCP server for reproducible, provenance-bound COMSOL Multiphysics 6.4 automation and evidence workflows."
 readme = "README.md"
 requires-python = ">=3.14,<3.15"
 dependencies = [
