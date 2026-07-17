@@ -1,4 +1,44 @@
 {
+  "branch_continuation_plan": {
+    "properties": {
+      "continuation_policy": {
+        "additionalProperties": true,
+        "title": "Continuation Policy",
+        "type": "object"
+      },
+      "continuation_states": {
+        "anyOf": [
+          {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Continuation States"
+      },
+      "states_spec": {
+        "anyOf": [
+          {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "States Spec"
+      }
+    },
+    "required": [
+      "continuation_policy"
+    ],
+    "title": "branch_continuation_planArguments",
+    "type": "object"
+  },
   "capabilities": {
     "properties": {},
     "title": "capabilitiesArguments",

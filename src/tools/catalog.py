@@ -124,6 +124,9 @@ _TOOLS_BY_REGISTRAR = {
     "src.tools.convergence_evaluation.register_convergence_evaluation_tools": (
         "convergence_evaluate",
     ),
+    "src.tools.branch_continuation.register_branch_continuation_tools": (
+        "branch_continuation_plan",
+    ),
     "src.knowledge.embedded.register_knowledge_tools": (
         "docs_get", "docs_list", "physics_get_guide", "troubleshoot",
         "modeling_best_practices",
@@ -159,6 +162,7 @@ _GROUP_BY_REGISTRAR = {
     "register_semantic_doc_tools": "semantic_docs",
     "register_spectral_characterization_tools": "spectral_evidence",
     "register_convergence_evaluation_tools": "convergence_evidence",
+    "register_branch_continuation_tools": "branch_continuation_evidence",
     "register_knowledge_tools": "embedded_docs",
     "register_lexical_manual_tools": "manuals",
 }
@@ -296,6 +300,7 @@ _CORE_TOOLS = frozenset({
     "results_global_evaluate", "manual_search", "manual_read_pages",
     "spectral_characterize",
     "convergence_evaluate",
+    "branch_continuation_plan",
 })
 
 _BASIC_FEM_ADDITIONS = frozenset({

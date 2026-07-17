@@ -5,8 +5,12 @@ from __future__ import annotations
 from copy import deepcopy
 import hashlib
 import json
+from pathlib import Path
+import subprocess
+import sys
 
 import pytest
+from mcp.server.fastmcp import FastMCP
 
 from src.evidence.branch_continuation import (
     BRANCH_CONTINUATION_SCHEMA_VERSION,
@@ -22,6 +26,7 @@ from src.evidence.spectral_characterization import (
     build_spectral_characterization,
     build_spectral_point_bundle,
 )
+from src.tools.branch_continuation import register_branch_continuation_tools
 
 
 MATERIAL_SHA256 = "a" * 64
@@ -690,3 +695,109 @@ class TestBranchContinuationPlanning:
         policy["continuity_rule"] = "auto"
         with pytest.raises(ValueError, match="continuity_rule"):
             plan_branch_continuation(states, policy)
+
+
+def test_public_tool_returns_separate_states_and_plan_artifacts():
+    server = FastMCP("branch-continuation-test")
+    register_branch_continuation_tools(server)
+    result = server._tool_manager._tools["branch_continuation_plan"].fn(
+        states_spec={
+            "states_id": "dispersive",
+            "states": _build_dispersive_states(3, shift=0.1e-6),
+        },
+        continuation_policy=_continuation_policy(guard_window_m=0.3e-6),
+    )
+
+    assert result["success"] is True
+    assert result["scientific_disposition"] == "accepted"
+    assert result["artifact_separation"] == {
+        "ordered_evidence": "continuation_states",
+        "policy_plan": "branch_continuation_plan",
+    }
+    assert result["branch_continuation_plan"]["states_sha256"] == result[
+        "continuation_states"
+    ]["states_sha256"]
+    assert result["branch_disappearance_claimed"] is False
+    assert result["undeclared_coordinate_started"] is False
+    assert result["solver_started"] is False
+    assert result["filesystem_modified"] is False
+
+
+def test_public_tool_accepts_canonical_states_and_rejects_ambiguous_input():
+    states = build_continuation_states(
+        states_id="dispersive", states=_build_dispersive_states(3, shift=0.1e-6)
+    )
+    server = FastMCP("branch-continuation-input-test")
+    register_branch_continuation_tools(server)
+    tool = server._tool_manager._tools["branch_continuation_plan"]
+
+    accepted = tool.fn(
+        continuation_states=states,
+        continuation_policy=_continuation_policy(guard_window_m=0.3e-6),
+    )
+    rejected = tool.fn(continuation_policy=_continuation_policy())
+
+    assert accepted["success"] is True
+    assert rejected["success"] is False
+    assert rejected["scientific_disposition"] == "invalid_evidence"
+    assert "exactly one" in rejected["error"]
+    assert rejected["solver_started"] is False
+
+
+def test_public_branch_continuation_tool_never_constructs_a_comsol_client():
+    code = """
+import mph
+mph.Client = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError('Client called'))
+from mcp.server.fastmcp import FastMCP
+from src.tools.branch_continuation import register_branch_continuation_tools
+server = FastMCP('solver-free-branch-continuation-subprocess')
+register_branch_continuation_tools(server)
+result = server._tool_manager._tools['branch_continuation_plan'].fn(continuation_policy={})
+assert result['success'] is False
+assert result['solver_started'] is False
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=Path(__file__).parents[2], capture_output=True, text=True,
+        timeout=20, check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+
+def _canonical_hash(value):
+    return hashlib.sha256(
+        json.dumps(
+            value, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def test_self_rehashed_malformed_state_summary_still_fails_closed():
+    states = build_continuation_states(
+        states_id="dispersive", states=_build_dispersive_states(3, shift=0.1e-6)
+    )
+    malformed = deepcopy(states)
+    state = malformed["states"][1]
+    state["candidate"]["peak_wavelength_m"] = "5.02e-6"
+    state_body = dict(state)
+    state_body.pop("state_sha256")
+    state["state_sha256"] = _canonical_hash(state_body)
+    states_body = dict(malformed)
+    states_body.pop("states_sha256")
+    malformed["states_sha256"] = _canonical_hash(states_body)
+
+    with pytest.raises(ValueError, match="numeric"):
+        validate_continuation_states(malformed)
+
+
+def test_missing_middle_state_and_reordered_states_fail_closed():
+    states = _build_dispersive_states(3)
+    del states[1]
+    with pytest.raises(ValueError, match="ordinal|adjacency"):
+        build_continuation_states(states_id="missing-middle", states=states)
+
+    states = _build_dispersive_states(3)
+    states[1], states[2] = states[2], states[1]
+    with pytest.raises(ValueError, match="ordinal|adjacency"):
+        build_continuation_states(states_id="reordered", states=states)

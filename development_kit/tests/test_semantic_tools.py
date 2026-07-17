@@ -159,7 +159,7 @@ import asyncio, json, sys
 from src.server import create_server
 server = create_server('semantic-profile-subprocess', profile='semantic_docs')
 names = sorted(tool.name for tool in asyncio.run(server.list_tools()))
-assert len(names) == 43
+assert len(names) == 44
 assert {'semantic_search','semantic_status','semantic_worker_reset'} <= set(names)
 for name in ('chromadb','torch','sentence_transformers'):
     assert name not in sys.modules, name
@@ -176,7 +176,7 @@ print(json.dumps({'count': len(names), 'configured': status['configured']}))
     )
 
     assert completed.returncode == 0, completed.stderr
-    assert json.loads(completed.stdout)["count"] == 43
+    assert json.loads(completed.stdout)["count"] == 44
 
 
 def test_default_and_other_research_profiles_remain_unchanged():
@@ -186,9 +186,9 @@ def test_default_and_other_research_profiles_remain_unchanged():
         counts[profile] = len(asyncio.run(server.list_tools()))
 
     assert counts == {
-        "core": 40,
-        "basic_fem": 78,
-        "wave_optics": 65,
-        "experimental": 66,
-        "full": 122,
+        "core": 41,
+        "basic_fem": 79,
+        "wave_optics": 66,
+        "experimental": 67,
+        "full": 123,
     }

@@ -1,5 +1,6 @@
 {
   "core": [
+    "branch_continuation_plan",
     "capabilities",
     "comsol_disconnect",
     "comsol_start",
@@ -42,6 +43,7 @@
     "study_solve"
   ],
   "basic_fem": [
+    "branch_continuation_plan",
     "capabilities",
     "comsol_disconnect",
     "comsol_start",
@@ -122,6 +124,7 @@
     "study_solve"
   ],
   "wave_optics": [
+    "branch_continuation_plan",
     "capabilities",
     "comsol_disconnect",
     "comsol_start",
@@ -189,6 +192,7 @@
     "wave_optics_reference_audit"
   ],
   "semantic_docs": [
+    "branch_continuation_plan",
     "capabilities",
     "comsol_disconnect",
     "comsol_start",
@@ -234,6 +238,7 @@
     "study_solve"
   ],
   "experimental": [
+    "branch_continuation_plan",
     "capabilities",
     "clientapi_property_get",
     "clientapi_property_set",
@@ -302,6 +307,7 @@
     "troubleshoot"
   ],
   "full": [
+    "branch_continuation_plan",
     "capabilities",
     "clientapi_property_get",
     "clientapi_property_set",

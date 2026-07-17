@@ -25,11 +25,12 @@ def test_default_profile_is_core_after_h3_cutover(monkeypatch):
     server = create_server("default-core-profile-test")
 
     assert DEFAULT_PROFILE == "core"
-    assert len(_tool_names(server)) == 40
+    assert len(_tool_names(server)) == 41
     names = set(_tool_names(server))
     assert {"solver_status", "job_cancel", "model_load", "study_solve"} <= names
     assert "spectral_characterize" in names
     assert "convergence_evaluate" in names
+    assert "branch_continuation_plan" in names
     assert {
         "wave_optics_preflight", "wave_optics_point_audit",
         "mim_patch_build", "mim_evaluate_spectral", "study_solve_async",
@@ -51,7 +52,7 @@ def test_environment_profile_is_normalized(monkeypatch):
     assert selection.default_used is False
 
     server = create_server("environment-wave-profile-test")
-    assert len(_tool_names(server)) == 65
+    assert len(_tool_names(server)) == 66
     assert "wave_optics_field_datasets" in _tool_names(server)
     assert "wave_optics_field_extract" in _tool_names(server)
     assert "wave_optics_material_expression_preview" in _tool_names(server)
@@ -87,10 +88,10 @@ def test_profile_registration_has_no_cross_server_leakage():
     semantic = create_server("isolated-semantic", profile="semantic_docs")
     experimental = create_server("isolated-experimental", profile="experimental")
 
-    assert len(_tool_names(core)) == 40
-    assert len(_tool_names(full)) == 122
-    assert len(_tool_names(semantic)) == 43
-    assert len(_tool_names(experimental)) == 66
+    assert len(_tool_names(core)) == 41
+    assert len(_tool_names(full)) == 123
+    assert len(_tool_names(semantic)) == 44
+    assert len(_tool_names(experimental)) == 67
     assert _tool_names(core) != _tool_names(experimental)
     assert {"semantic_search", "semantic_status", "semantic_worker_reset"} <= set(_tool_names(semantic))
     assert {"semantic_search", "semantic_status", "semantic_worker_reset"}.isdisjoint(_tool_names(core))
@@ -115,7 +116,7 @@ def test_capabilities_are_bound_to_each_server_profile(monkeypatch):
     wave_result = wave._tool_manager._tools["capabilities"].fn()
 
     assert core_result["active_profile"] == "core"
-    assert core_result["tool_count"] == 40
+    assert core_result["tool_count"] == 41
     assert core_result["profile_source"]["source"] == "explicit_argument"
     assert wave_result["active_profile"] == "wave_optics"
-    assert wave_result["tool_count"] == 65
+    assert wave_result["tool_count"] == 66

@@ -25,6 +25,7 @@ from .field_evidence import register_field_evidence_tools
 from .semantic_docs import register_semantic_doc_tools
 from .spectral_characterization import register_spectral_characterization_tools
 from .convergence_evaluation import register_convergence_evaluation_tools
+from .branch_continuation import register_branch_continuation_tools
 from .profiles import ProfileSelection, register_profiled, resolve_profile, tool_names_for_profile
 
 TOOL_REGISTRARS = (
@@ -53,6 +54,7 @@ TOOL_REGISTRARS = (
     register_semantic_doc_tools,
     register_spectral_characterization_tools,
     register_convergence_evaluation_tools,
+    register_branch_continuation_tools,
 )
 
 
@@ -89,6 +91,7 @@ __all__ = [
     "register_semantic_doc_tools",
     "register_spectral_characterization_tools",
     "register_convergence_evaluation_tools",
+    "register_branch_continuation_tools",
     "TOOL_REGISTRARS",
     "register_tool_modules",
 ]
