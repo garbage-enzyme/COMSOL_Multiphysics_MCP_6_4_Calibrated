@@ -177,6 +177,7 @@ models are intentionally absent.
 - `development_kit/tests/test_semantic_worker_protocol.py` — This module tests isolated semantic worker protocol and containment.
 - `development_kit/tests/test_server.py` — This module tests server construction and capabilities without starting a transport.
 - `development_kit/tests/test_spectral_characterization.py` — This module tests provenance-bound offline spectral validation and measurements.
+- `development_kit/tests/test_spectral_audit.py` — This module tests strict projection of point-audit artifacts into durable spectral rows.
 - `development_kit/tests/test_spectral_characterization_job.py` — This module tests immutable bounded durable spectral job specifications.
 - `development_kit/tests/test_spectral_progress.py` — This module tests adaptive spectral transitions and policy-separated scientific outcomes.
 - `development_kit/tests/test_spectral_rows.py` — This module tests hash-chained durable spectral rows and exact artifact-bound resume.
@@ -251,6 +252,7 @@ models are intentionally absent.
 - `src/jobs/process_control.py` — This module performs exact-identity process inspection and containment.
 - `src/jobs/resource_admission.py` — This module validates resource policy, telemetry, journals, and admission.
 - `src/jobs/sequence_worker.py` — This module provides an injected process-only durability worker.
+- `src/jobs/spectral_audit.py` — This module verifies point-audit artifacts before durable spectral row persistence.
 - `src/jobs/spectral_characterization.py` — This module normalizes immutable bounded durable spectral job specifications.
 - `src/jobs/spectral_progress.py` — This module derives bounded adaptive spectral transitions from frozen stages and durable rows.
 - `src/jobs/spectral_rows.py` — This module persists hash-chained raw spectral points with artifact verification.
