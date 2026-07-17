@@ -192,6 +192,10 @@ def _measurement(**overrides):
         "baseline_rule": "local_prominence",
         "baseline_response_value": None,
         "fwhm_definition": "half_prominence",
+        "fit_support_points": None,
+        "fit_support_sensitivity_points": [],
+        "local_polynomial_degree": None,
+        "fit_max_evaluations": None,
     }
     value.update(overrides)
     return value
@@ -289,4 +293,137 @@ def test_characterization_hash_tampering_and_unknown_configuration_fail_closed()
     configuration = _measurement()
     configuration["silent_fit_preference"] = "lorentzian"
     with pytest.raises(ValueError, match="fields"):
+        build_spectral_characterization(bundle, decision, configuration)
+
+
+def _fit_measurement(method: str, support: int, sensitivity: list[int], **overrides):
+    value = _measurement(
+        peak_method=method,
+        baseline_rule="declared_response",
+        baseline_response_value=0.1,
+        fit_support_points=support,
+        fit_support_sensitivity_points=sensitivity,
+        local_polynomial_degree=2 if method == "local_polynomial_fit" else None,
+        fit_max_evaluations=20000,
+    )
+    value.update(overrides)
+    return value
+
+
+def test_local_polynomial_fit_records_window_residual_covariance_and_conditioning():
+    center = 5.013e-6
+    wavelengths = [4.8e-6 + index * 0.025e-6 for index in range(17)]
+    values = [0.9 - 0.7 * ((wavelength - center) / 0.2e-6) ** 2 for wavelength in wavelengths]
+    bundle, decision, result = _characterize(
+        values,
+        wavelengths=wavelengths,
+        measurement=_fit_measurement("local_polynomial_fit", 9, [5, 7, 9]),
+    )
+
+    peak = result["candidate"]["peak"]
+    diagnostics = peak["diagnostics"]
+    assert peak["wavelength_m"] == pytest.approx(center, abs=1.0e-15)
+    assert peak["response_value"] == pytest.approx(0.9, abs=1.0e-12)
+    assert diagnostics["support_point_count"] == 9
+    assert diagnostics["fit_window_m"] == [wavelengths[5], wavelengths[13]]
+    assert diagnostics["residual_sum_squares"] < 1.0e-24
+    assert diagnostics["covariance_kind"] == "unscaled_design"
+    assert diagnostics["covariance"] is not None
+    assert diagnostics["covariance_condition"] is not None
+    assert diagnostics["design_matrix_condition"] is not None
+    assert validate_spectral_characterization(
+        result, bundle=bundle, decision=decision
+    ) == result
+
+
+def test_analytic_lorentzian_fit_recovers_peak_fwhm_and_quality_factor():
+    center = 5.012e-6
+    half_width = 0.04e-6
+    wavelengths = [4.8e-6 + index * 0.01e-6 for index in range(45)]
+    values = [
+        0.1 + 0.8 / (1.0 + ((wavelength - center) / half_width) ** 2)
+        for wavelength in wavelengths
+    ]
+    _bundle_value, _decision, result = _characterize(
+        values,
+        wavelengths=wavelengths,
+        measurement=_fit_measurement("lorentzian_fit", 31, [15, 21, 31]),
+    )
+
+    candidate = result["candidate"]
+    assert candidate["peak"]["wavelength_m"] == pytest.approx(center, abs=2.0e-12)
+    assert candidate["peak"]["response_value"] == pytest.approx(0.9, abs=1.0e-6)
+    assert candidate["fwhm"]["value_m"] == pytest.approx(2.0 * half_width, rel=2.0e-4)
+    assert candidate["quality_factor"]["value"] == pytest.approx(
+        center / (2.0 * half_width), rel=2.0e-4
+    )
+    assert candidate["peak"]["diagnostics"]["covariance_kind"] == "curve_fit_estimate"
+
+
+def test_analytic_fano_fit_recovers_peak_and_declared_half_prominence_width():
+    center = 5.0e-6
+    half_width = 0.04e-6
+    asymmetry = 2.0
+    wavelengths = [4.7e-6 + index * 0.01e-6 for index in range(61)]
+
+    def fano(wavelength):
+        epsilon = (wavelength - center) / half_width
+        return 0.1 + 0.12 * (asymmetry + epsilon) ** 2 / (1.0 + epsilon**2)
+
+    values = [fano(wavelength) for wavelength in wavelengths]
+    _bundle_value, _decision, result = _characterize(
+        values,
+        wavelengths=wavelengths,
+        measurement=_fit_measurement("fano_fit", 41, [21, 31, 41]),
+    )
+
+    expected_peak = center + half_width / asymmetry
+    expected_width = (10.0 / 3.0) * half_width
+    candidate = result["candidate"]
+    assert candidate["peak"]["wavelength_m"] == pytest.approx(expected_peak, abs=2.0e-12)
+    assert candidate["peak"]["response_value"] == pytest.approx(0.7, abs=1.0e-6)
+    assert candidate["fwhm"]["value_m"] == pytest.approx(expected_width, rel=5.0e-4)
+    assert candidate["quality_factor"]["value"] == pytest.approx(
+        expected_peak / expected_width, rel=5.0e-4
+    )
+
+
+def test_fit_support_sensitivity_preserves_each_measurement_and_reports_spans():
+    center = 5.015e-6
+    wavelengths = [4.8e-6 + index * 0.01e-6 for index in range(45)]
+    values = [
+        0.1 + 0.8 / (1.0 + ((wavelength - center) / 0.045e-6) ** 2)
+        for wavelength in wavelengths
+    ]
+    _bundle_value, _decision, result = _characterize(
+        values,
+        wavelengths=wavelengths,
+        measurement=_fit_measurement("lorentzian_fit", 31, [11, 21, 31]),
+    )
+
+    sensitivity = result["candidate"]["fit_support_sensitivity"]
+    assert sensitivity["state"] == "measured_not_classified"
+    assert [item["support_point_count"] for item in sensitivity["measurements"]] == [11, 21, 31]
+    assert all(item["state"] == "measured" for item in sensitivity["measurements"])
+    assert all(item["support_rows"] for item in sensitivity["measurements"])
+    assert sensitivity["spans"]["peak_wavelength_m"] is not None
+    assert sensitivity["spans"]["fwhm_m"] is not None
+    assert sensitivity["policy_authority"] is False
+
+
+@pytest.mark.parametrize(
+    "changes,match",
+    [
+        ({"fit_support_points": 6}, "odd"),
+        ({"fit_support_sensitivity_points": [7, 7]}, "unique"),
+        ({"fit_max_evaluations": 20}, "100..100000"),
+        ({"local_polynomial_degree": 3}, "only valid"),
+    ],
+)
+def test_invalid_fit_configuration_fails_closed(changes, match):
+    bundle = _bundle([0.1, 0.4, 0.9, 0.4, 0.1, 0.05, 0.02])
+    decision = build_spectral_analysis_decision(bundle, _policy())
+    configuration = _fit_measurement("lorentzian_fit", 7, [])
+    configuration.update(changes)
+    with pytest.raises(ValueError, match=match):
         build_spectral_characterization(bundle, decision, configuration)
