@@ -271,6 +271,72 @@ def build_outcome_contract(value: Mapping[str, Any]) -> dict[str, Any]:
     return validate_outcome_contract(outcome)
 
 
+def execution_from_terminal_job_state(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Translate a reconciled durable job state without inventing cleanup proof."""
+    state = _mapping(dict(value), "job_state")
+    status = state.get("status")
+    if status not in EXECUTION_STATES:
+        raise ValueError("job state must be reconciled to a terminal execution state")
+
+    if status == "cancelled":
+        cancel = _mapping(state.get("cancel"), "job_state.cancel")
+        verification = _mapping(
+            cancel.get("verification"), "job_state.cancel.verification"
+        )
+        solver = _mapping(
+            verification.get("solver"), "job_state.cancel.verification.solver"
+        )
+        processes_absent = verification.get("absent") is True
+        cleanup = {
+            "processes_absent": processes_absent,
+            "descendants_absent": processes_absent,
+            "port_closed": solver.get("recorded_port_closed") is True,
+            "lease_absent": solver.get("lease_state") in {"absent", "recovered"},
+            "verified": False,
+        }
+        cleanup["verified"] = all(
+            cleanup[field]
+            for field in (
+                "processes_absent",
+                "descendants_absent",
+                "port_closed",
+                "lease_absent",
+            )
+        )
+        execution = {
+            "state": "cancelled",
+            "reason_code": "verified_user_cancellation",
+            "completed_requested_work": False,
+            "cleanup": cleanup,
+        }
+    else:
+        supplied_cleanup = state.get("cleanup_verification")
+        if supplied_cleanup is None:
+            cleanup = {
+                "processes_absent": status == "interrupted",
+                "descendants_absent": False,
+                "port_closed": False,
+                "lease_absent": False,
+                "verified": False,
+            }
+        else:
+            cleanup = deepcopy(
+                _mapping(supplied_cleanup, "job_state.cleanup_verification")
+            )
+        reason_code = {
+            "completed": "requested_work_completed",
+            "failed": "execution_failed",
+            "interrupted": "worker_process_lost",
+        }[status]
+        execution = {
+            "state": status,
+            "reason_code": reason_code,
+            "completed_requested_work": status == "completed",
+            "cleanup": cleanup,
+        }
+    return deepcopy(_validate_execution(execution))
+
+
 __all__ = [
     "EVIDENCE_COMPLETENESS_STATES",
     "EXECUTION_STATES",
@@ -279,5 +345,6 @@ __all__ = [
     "OUTCOME_SCHEMA_VERSION",
     "SCIENTIFIC_DISPOSITIONS",
     "build_outcome_contract",
+    "execution_from_terminal_job_state",
     "validate_outcome_contract",
 ]

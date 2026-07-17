@@ -62,6 +62,7 @@ from .outcome_contract import (
     OUTCOME_SCHEMA_VERSION,
     SCIENTIFIC_DISPOSITIONS,
     build_outcome_contract,
+    execution_from_terminal_job_state,
     validate_outcome_contract,
 )
 
@@ -113,5 +114,6 @@ __all__ = [
     "OUTCOME_SCHEMA_VERSION",
     "SCIENTIFIC_DISPOSITIONS",
     "build_outcome_contract",
+    "execution_from_terminal_job_state",
     "validate_outcome_contract",
 ]

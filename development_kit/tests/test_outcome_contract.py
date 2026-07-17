@@ -14,6 +14,7 @@ from src.evidence.outcome_contract import (
     OUTCOME_SCHEMA_VERSION,
     SCIENTIFIC_DISPOSITIONS,
     build_outcome_contract,
+    execution_from_terminal_job_state,
     validate_outcome_contract,
 )
 
@@ -145,3 +146,79 @@ def test_unknown_fields_and_hash_tampering_fail_closed():
     contract["scientific"]["reason_code"] = "tampered"
     with pytest.raises(ValueError, match="does not match"):
         validate_outcome_contract(contract)
+
+
+def test_verified_cancelled_job_maps_to_terminal_execution_without_losing_diagnostic_rows():
+    job_state = {
+        "status": "cancelled",
+        "cancel": {
+            "verification": {
+                "absent": True,
+                "verdicts": [],
+                "solver": {
+                    "ok": True,
+                    "lease_state": "absent",
+                    "recorded_port_closed": True,
+                },
+            }
+        },
+    }
+    execution = execution_from_terminal_job_state(job_state)
+    payload = _payload("cancelled", "incomplete", "not_evaluated")
+    payload["execution"] = execution
+    contract = build_outcome_contract(payload)
+
+    assert execution["cleanup"]["verified"] is True
+    assert contract["evidence"]["raw_artifact_ids"] == ["raw-point-001"]
+    assert contract["evidence"]["diagnostic_artifact_ids"] == ["raw-point-001"]
+
+
+def test_cancelled_mapping_fails_closed_without_process_port_or_lease_proof():
+    for verification in (
+        {"absent": False, "solver": {"lease_state": "absent", "recorded_port_closed": True}},
+        {"absent": True, "solver": {"lease_state": "uncertain", "recorded_port_closed": True}},
+        {"absent": True, "solver": {"lease_state": "absent", "recorded_port_closed": False}},
+    ):
+        with pytest.raises(ValueError, match="cancelled execution requires verified cleanup"):
+            execution_from_terminal_job_state(
+                {"status": "cancelled", "cancel": {"verification": verification}}
+            )
+
+
+def test_process_loss_maps_to_interrupted_and_never_claims_cleanup_or_acceptance():
+    execution = execution_from_terminal_job_state(
+        {
+            "status": "interrupted",
+            "last_error": {
+                "type": "WorkerInterrupted",
+                "message": "worker PID no longer exists",
+            },
+        }
+    )
+    assert execution["state"] == "interrupted"
+    assert execution["completed_requested_work"] is False
+    assert execution["cleanup"]["verified"] is False
+
+    payload = _payload("interrupted", "incomplete", "not_evaluated")
+    payload["execution"] = execution
+    assert build_outcome_contract(payload)["scientific"]["disposition"] == "not_evaluated"
+
+
+def test_nonterminal_or_completed_without_cleanup_proof_cannot_be_summarized():
+    for status in ("submitted", "running", "cancel_requested", "cancelling"):
+        with pytest.raises(ValueError, match="reconciled"):
+            execution_from_terminal_job_state({"status": status})
+
+    with pytest.raises(ValueError, match="completed execution requires verified cleanup"):
+        execution_from_terminal_job_state({"status": "completed"})
+
+    cleanup = {
+        "processes_absent": True,
+        "descendants_absent": True,
+        "port_closed": True,
+        "lease_absent": True,
+        "verified": True,
+    }
+    assert execution_from_terminal_job_state(
+        {"status": "completed", "cleanup_verification": cleanup}
+    )["state"] == "completed"
