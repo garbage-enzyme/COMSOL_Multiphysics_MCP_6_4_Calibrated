@@ -26,12 +26,12 @@ PYTHON = Path(sys.executable)
 RUNTIME = Path(os.environ.get("COMSOL_MCP_RUNTIME_DIR", "D:/comsol_runtime"))
 ARTIFACT_DIR = RUNTIME / "live_profile"
 PROFILE_COUNTS = {
-    "core": 38,
-    "basic_fem": 76,
-    "wave_optics": 63,
-    "semantic_docs": 41,
-    "experimental": 64,
-    "full": 120,
+    "core": 39,
+    "basic_fem": 77,
+    "wave_optics": 64,
+    "semantic_docs": 42,
+    "experimental": 65,
+    "full": 121,
 }
 
 

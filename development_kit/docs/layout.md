@@ -291,6 +291,7 @@ models are intentionally absent.
 - `src/tools/property_transport.py` — This module normalizes bounded property values for JSON transport.
 - `src/tools/results.py` — This module exposes result evaluation and export tools.
 - `src/tools/semantic_docs.py` — This module exposes bounded opt-in semantic documentation tools.
+- `src/tools/spectral_characterization.py` — This module exposes bounded solver-free spectral characterization.
 - `src/tools/session.py` — This module manages COMSOL client startup, status, models, and shutdown.
 - `src/tools/study.py` — This module exposes COMSOL study and solving tools.
 - `src/tools/visual_review.py` — This module exposes solver-free visual-review contract adapters.

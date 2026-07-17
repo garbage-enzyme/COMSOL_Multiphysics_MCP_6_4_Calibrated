@@ -118,6 +118,9 @@ _TOOLS_BY_REGISTRAR = {
     "src.tools.semantic_docs.register_semantic_doc_tools": (
         "semantic_search", "semantic_status", "semantic_worker_reset",
     ),
+    "src.tools.spectral_characterization.register_spectral_characterization_tools": (
+        "spectral_characterize",
+    ),
     "src.knowledge.embedded.register_knowledge_tools": (
         "docs_get", "docs_list", "physics_get_guide", "troubleshoot",
         "modeling_best_practices",
@@ -151,6 +154,7 @@ _GROUP_BY_REGISTRAR = {
     "register_visual_review_tools": "visual_review",
     "register_field_evidence_tools": "field_evidence",
     "register_semantic_doc_tools": "semantic_docs",
+    "register_spectral_characterization_tools": "spectral_evidence",
     "register_knowledge_tools": "embedded_docs",
     "register_lexical_manual_tools": "manuals",
 }
@@ -286,6 +290,7 @@ _CORE_TOOLS = frozenset({
     "mesh_list", "mesh_info",
     "study_list", "study_solve", "solutions_list", "datasets_list",
     "results_global_evaluate", "manual_search", "manual_read_pages",
+    "spectral_characterize",
 })
 
 _BASIC_FEM_ADDITIONS = frozenset({

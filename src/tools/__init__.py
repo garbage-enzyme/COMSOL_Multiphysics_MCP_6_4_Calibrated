@@ -23,6 +23,7 @@ from .material_expressions import register_material_expression_tools
 from .visual_review import register_visual_review_tools
 from .field_evidence import register_field_evidence_tools
 from .semantic_docs import register_semantic_doc_tools
+from .spectral_characterization import register_spectral_characterization_tools
 from .profiles import ProfileSelection, register_profiled, resolve_profile, tool_names_for_profile
 
 TOOL_REGISTRARS = (
@@ -49,6 +50,7 @@ TOOL_REGISTRARS = (
     register_visual_review_tools,
     register_field_evidence_tools,
     register_semantic_doc_tools,
+    register_spectral_characterization_tools,
 )
 
 
@@ -83,6 +85,7 @@ __all__ = [
     "register_visual_review_tools",
     "register_field_evidence_tools",
     "register_semantic_doc_tools",
+    "register_spectral_characterization_tools",
     "TOOL_REGISTRARS",
     "register_tool_modules",
 ]

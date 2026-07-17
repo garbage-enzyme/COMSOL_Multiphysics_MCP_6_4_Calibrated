@@ -3606,6 +3606,52 @@
     "title": "solver_statusArguments",
     "type": "object"
   },
+  "spectral_characterize": {
+    "properties": {
+      "analysis_policy": {
+        "additionalProperties": true,
+        "title": "Analysis Policy",
+        "type": "object"
+      },
+      "bundle_spec": {
+        "anyOf": [
+          {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Bundle Spec"
+      },
+      "measurement_configuration": {
+        "additionalProperties": true,
+        "title": "Measurement Configuration",
+        "type": "object"
+      },
+      "spectral_bundle": {
+        "anyOf": [
+          {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Spectral Bundle"
+      }
+    },
+    "required": [
+      "analysis_policy",
+      "measurement_configuration"
+    ],
+    "title": "spectral_characterizeArguments",
+    "type": "object"
+  },
   "study_cancel": {
     "properties": {},
     "title": "study_cancelArguments",

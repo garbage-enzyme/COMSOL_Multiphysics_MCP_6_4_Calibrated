@@ -18,7 +18,7 @@ SPECTRAL_BUNDLE_SCHEMA = "comsol_mcp.spectral_point_bundle"
 SPECTRAL_DECISION_SCHEMA = "comsol_mcp.spectral_analysis_decision"
 SPECTRAL_CHARACTERIZATION_SCHEMA = "comsol_mcp.spectral_characterization"
 SPECTRAL_SCHEMA_VERSION = "1.0.0"
-MAX_SPECTRAL_POINTS = 4096
+MAX_SPECTRAL_POINTS = 1024
 MAX_PARAMETER_STATE_BYTES = 64 * 1024
 
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")

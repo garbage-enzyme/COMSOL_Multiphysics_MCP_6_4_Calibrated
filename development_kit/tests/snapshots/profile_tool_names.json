@@ -36,6 +36,7 @@
     "solver_preflight",
     "solver_recover_stale_lease",
     "solver_status",
+    "spectral_characterize",
     "study_list",
     "study_solve"
   ],
@@ -113,6 +114,7 @@
     "solver_preflight",
     "solver_recover_stale_lease",
     "solver_status",
+    "spectral_characterize",
     "study_create",
     "study_list",
     "study_solve"
@@ -164,6 +166,7 @@
     "solver_preflight",
     "solver_recover_stale_lease",
     "solver_status",
+    "spectral_characterize",
     "study_list",
     "study_solve",
     "study_staged_parametric_sweep",
@@ -222,6 +225,7 @@
     "solver_preflight",
     "solver_recover_stale_lease",
     "solver_status",
+    "spectral_characterize",
     "study_list",
     "study_solve"
   ],
@@ -282,6 +286,7 @@
     "solver_preflight",
     "solver_recover_stale_lease",
     "solver_status",
+    "spectral_characterize",
     "study_cancel",
     "study_get_progress",
     "study_list",
@@ -389,6 +394,7 @@
     "solver_preflight",
     "solver_recover_stale_lease",
     "solver_status",
+    "spectral_characterize",
     "study_cancel",
     "study_create",
     "study_get_progress",

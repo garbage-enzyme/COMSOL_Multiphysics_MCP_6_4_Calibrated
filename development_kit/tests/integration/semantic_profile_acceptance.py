@@ -21,12 +21,12 @@ PYTHON = Path(sys.executable)
 OUTPUT = Path("D:/comsol_runtime/semantic_profile/live_profile.json")
 MODEL = Path("D:/comsol_semantic/models/all-MiniLM-L6-v2/1110a243fdf4706b3f48f1d95db1a4f5529b4d41")
 PROFILE_COUNTS = {
-    "core": 38,
-    "basic_fem": 71,
-    "wave_optics": 63,
-    "semantic_docs": 41,
-    "experimental": 64,
-    "full": 120,
+    "core": 39,
+    "basic_fem": 77,
+    "wave_optics": 64,
+    "semantic_docs": 42,
+    "experimental": 65,
+    "full": 121,
 }
 
 

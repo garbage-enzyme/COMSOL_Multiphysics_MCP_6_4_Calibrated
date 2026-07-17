@@ -5,8 +5,12 @@ from __future__ import annotations
 from copy import deepcopy
 import hashlib
 import json
+from pathlib import Path
+import subprocess
+import sys
 
 import pytest
+from mcp.server.fastmcp import FastMCP
 
 from src.evidence.spectral_characterization import (
     build_spectral_analysis_decision,
@@ -16,6 +20,7 @@ from src.evidence.spectral_characterization import (
     validate_spectral_characterization,
     validate_spectral_point_bundle,
 )
+from src.tools.spectral_characterization import register_spectral_characterization_tools
 
 
 CONFIGURATION_SHA256 = "a" * 64
@@ -427,3 +432,127 @@ def test_invalid_fit_configuration_fails_closed(changes, match):
     configuration.update(changes)
     with pytest.raises(ValueError, match=match):
         build_spectral_characterization(bundle, decision, configuration)
+
+
+def _bundle_spec(bundle):
+    return {
+        key: deepcopy(bundle[key])
+        for key in (
+            "bundle_id",
+            "source_model",
+            "configuration_sha256",
+            "parameter_state",
+            "wavelength_convention",
+            "expressions",
+            "rows",
+        )
+    }
+
+
+def test_public_tool_returns_three_separate_hash_bound_artifacts():
+    bundle = _bundle([0.1, 0.5, 0.9, 0.5, 0.1])
+    server = FastMCP("spectral-characterization-test")
+    register_spectral_characterization_tools(server)
+    tool = server._tool_manager._tools["spectral_characterize"]
+
+    result = tool.fn(
+        spectral_bundle=bundle,
+        analysis_policy=_policy(),
+        measurement_configuration=_measurement(),
+    )
+
+    assert result["success"] is True
+    assert result["classification"] == "interior_candidate"
+    assert result["artifact_separation"] == {
+        "raw_measurements": "raw_bundle",
+        "policy_decisions": "analysis_decision",
+        "derived_measurements": "candidate_measurements",
+    }
+    assert result["analysis_decision"]["bundle_sha256"] == result["raw_bundle"]["bundle_sha256"]
+    assert result["candidate_measurements"]["decision_sha256"] == result["analysis_decision"]["decision_sha256"]
+    assert result["solver_started"] is False
+    assert result["filesystem_modified"] is False
+
+
+def test_public_tool_classifies_nonfinite_rows_without_serializing_invalid_numbers():
+    bundle = _bundle([0.1, 0.5, 0.9, 0.5, 0.1])
+    spec = _bundle_spec(bundle)
+    spec["rows"][2]["A"] = float("nan")
+    server = FastMCP("spectral-nonfinite-test")
+    register_spectral_characterization_tools(server)
+
+    result = server._tool_manager._tools["spectral_characterize"].fn(
+        bundle_spec=spec,
+        analysis_policy=_policy(),
+        measurement_configuration=_measurement(),
+    )
+
+    assert result["success"] is False
+    assert result["classification"] == "non_finite"
+    assert result["invalid_rows"] == [
+        {
+            "row_id": "point-002",
+            "raw_row_sha256": bundle["rows"][2]["raw_row_sha256"],
+        }
+    ]
+    assert result["raw_bundle"] is None
+    assert "NaN" not in json.dumps(result)
+
+
+def test_existing_durable_bundle_bytes_and_timestamp_remain_unchanged(tmp_path):
+    bundle = _bundle([0.1, 0.5, 0.9, 0.5, 0.1])
+    path = tmp_path / "durable_spectrum.json"
+    path.write_text(json.dumps(bundle, sort_keys=True), encoding="utf-8")
+    before_bytes = path.read_bytes()
+    before_stat = path.stat()
+    loaded = json.loads(path.read_text(encoding="utf-8"))
+    server = FastMCP("spectral-immutable-input-test")
+    register_spectral_characterization_tools(server)
+
+    result = server._tool_manager._tools["spectral_characterize"].fn(
+        spectral_bundle=loaded,
+        analysis_policy=_policy(),
+        measurement_configuration=_measurement(),
+    )
+
+    after_stat = path.stat()
+    assert result["success"] is True
+    assert path.read_bytes() == before_bytes
+    assert after_stat.st_mtime_ns == before_stat.st_mtime_ns
+    assert after_stat.st_size == before_stat.st_size
+
+
+def test_public_tool_requires_exactly_one_input_form_and_import_is_solver_free():
+    server = FastMCP("spectral-input-form-test")
+    register_spectral_characterization_tools(server)
+    tool = server._tool_manager._tools["spectral_characterize"]
+    rejected = tool.fn(
+        analysis_policy=_policy(), measurement_configuration=_measurement()
+    )
+
+    assert rejected["success"] is False
+    assert rejected["classification"] == "invalid_input"
+    assert "exactly one" in rejected["error"]
+
+    code = """
+import mph
+mph.Client = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError('Client called'))
+from mcp.server.fastmcp import FastMCP
+from src.tools.spectral_characterization import register_spectral_characterization_tools
+server = FastMCP('solver-free-spectral-subprocess')
+register_spectral_characterization_tools(server)
+result = server._tool_manager._tools['spectral_characterize'].fn(
+    analysis_policy={}, measurement_configuration={}
+)
+assert result['success'] is False
+assert result['solver_started'] is False
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=Path(__file__).parents[2],
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr

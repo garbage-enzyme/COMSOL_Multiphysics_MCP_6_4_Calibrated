@@ -25,9 +25,10 @@ def test_default_profile_is_core_after_h3_cutover(monkeypatch):
     server = create_server("default-core-profile-test")
 
     assert DEFAULT_PROFILE == "core"
-    assert len(_tool_names(server)) == 38
+    assert len(_tool_names(server)) == 39
     names = set(_tool_names(server))
     assert {"solver_status", "job_cancel", "model_load", "study_solve"} <= names
+    assert "spectral_characterize" in names
     assert {
         "wave_optics_preflight", "wave_optics_point_audit",
         "mim_patch_build", "mim_evaluate_spectral", "study_solve_async",
@@ -49,7 +50,7 @@ def test_environment_profile_is_normalized(monkeypatch):
     assert selection.default_used is False
 
     server = create_server("environment-wave-profile-test")
-    assert len(_tool_names(server)) == 63
+    assert len(_tool_names(server)) == 64
     assert "wave_optics_field_datasets" in _tool_names(server)
     assert "wave_optics_field_extract" in _tool_names(server)
     assert "wave_optics_material_expression_preview" in _tool_names(server)
@@ -85,10 +86,10 @@ def test_profile_registration_has_no_cross_server_leakage():
     semantic = create_server("isolated-semantic", profile="semantic_docs")
     experimental = create_server("isolated-experimental", profile="experimental")
 
-    assert len(_tool_names(core)) == 38
-    assert len(_tool_names(full)) == 120
-    assert len(_tool_names(semantic)) == 41
-    assert len(_tool_names(experimental)) == 64
+    assert len(_tool_names(core)) == 39
+    assert len(_tool_names(full)) == 121
+    assert len(_tool_names(semantic)) == 42
+    assert len(_tool_names(experimental)) == 65
     assert _tool_names(core) != _tool_names(experimental)
     assert {"semantic_search", "semantic_status", "semantic_worker_reset"} <= set(_tool_names(semantic))
     assert {"semantic_search", "semantic_status", "semantic_worker_reset"}.isdisjoint(_tool_names(core))
@@ -113,7 +114,7 @@ def test_capabilities_are_bound_to_each_server_profile(monkeypatch):
     wave_result = wave._tool_manager._tools["capabilities"].fn()
 
     assert core_result["active_profile"] == "core"
-    assert core_result["tool_count"] == 38
+    assert core_result["tool_count"] == 39
     assert core_result["profile_source"]["source"] == "explicit_argument"
     assert wave_result["active_profile"] == "wave_optics"
-    assert wave_result["tool_count"] == 63
+    assert wave_result["tool_count"] == 64
