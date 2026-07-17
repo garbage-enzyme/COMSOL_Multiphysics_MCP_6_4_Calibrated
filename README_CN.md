@@ -43,7 +43,7 @@ client；保持 COMSOL 工具串行。调用 `capabilities` 可在不启动 COMS
 
 - **ClientAPI 适配。** 几何、物理场、材料、网格、研究、结果、模型克隆和 Unicode 安全的 `.mph` 保存已在 COMSOL 6.4.0.293 上通过 licensed acceptance；其他 build 在独立验收前均为 unknown。
 - **安全的求解器所有权。** ASCII 路径租约、进程身份核验、外部客户端检测、状态和预检可避免意外启动并发 COMSOL 客户端。
-- **持久化后台任务。** 分段扫描在独立 worker 中执行，具有不可变规格、原子状态、`fsync` CSV 日志、检查点、校验后的恢复，以及已验证的同主机取消能力。
+- **持久化后台任务。** 分段扫描和自适应光谱表征在独立 worker 中执行，具有不可变规格、原子状态、经 `fsync` 的证据行、检查点、校验后的恢复，以及已验证的同主机取消能力。
 - **Wave Optics 验证。** 专用 profile 支持只读模型预检，以及用于周期性超表面的单波长证据审计。
 - **有界离线手册检索。** SQLite FTS5/BM25 检索和页读取不在 COMSOL 控制进程中运行，返回紧凑的来源/页码引用。
 - **如实标注的可选语义检索。** 隔离式语义 profile 已具备进程隔离，但基线模型未通过质量和内存的晋级门槛；推荐默认使用词法手册检索。
@@ -80,6 +80,22 @@ client；保持 COMSOL 工具串行。调用 `capabilities` 可在不启动 COMS
 当检测到外部 MPh/COMSOL 所有者或有效租约时，服务器会拒绝继续启动。`solver_recover_stale_lease` 只有在进程身份信息证明租约过期时才移除它，绝不会终止不属于本服务器的进程。
 
 持久化扫描控制工具为 `job_submit`、`job_status`、`job_tail`、`job_cancel` 和 `job_resume`。每个任务在 ASCII-only runtime 目录中保存不可变规格、状态、CSV 日志、检查点和日志文件。恢复时只接受规格一致、数值有限且成功完成的行。只有 worker/相关进程清理和租约释放都得到验证后，取消才会进入终态。此协调机制仅适用于同一台主机上共享 runtime 目录的任务，不是分布式或跨主机取消。
+
+自适应光谱任务使用 `job_type: "spectral_characterization"`，并显式声明
+源模型/配置身份、初始波长网格、扩展与细化 policy、collector 配置、科学容差，
+以及点数、stage 和资源上限。worker 每次只求解一个波长；完整 point audit 及其
+哈希链证据行持久化后才进入下一点。每个请求 stage 都会冻结，因此精确恢复不会
+重新生成计划，也不会重复已完成波长。只有规范化规格、collector、源模型和精确
+worker driver 身份均相同时，重新提交才会观察到已有任务。
+
+执行状态与科学解释彼此独立。任务可以以 `status: "completed"` 完成，同时
+`scientific_disposition` 为 `residual` 或
+`unresolved_at_declared_cap`；边界峰、缺少有效 bracket、fit sensitivity 和扩展
+预算耗尽属于科学未验收结果，而不是 worker 执行失败。`accepted` 必须具有完整且
+可由哈希解析的原始证据。中断或取消前留下的部分行仍是 diagnostic；只有 worker、
+后代进程、端口、租约与清理证据全部通过，取消才进入终态。在声明的 collector 与
+证据支持相应量时，光谱 summary 会保留原始 R/T/A、闭合误差、波长同步、网格计数、
+own peak、FWHM、Q、stage 哈希及精确 artifact 引用。
 
 ### Wave Optics 超表面
 
@@ -190,7 +206,7 @@ MCP 客户端配置示例：
 | COMSOL API 目标 | 假定直接使用 `com.comsol.model.Model` API。 | 适配 MPh 1.3.1 standalone 的 `model.java` clientapi 包装层，包括不同的方法重载、tag、列表和 Java 字符串传输。 |
 | 工具界面 | 默认提供较宽的功能发现面。 | 默认采用紧凑 `core`；较大的构建和兼容界面须显式选择 profile。 |
 | 求解器并发 | 没有同主机所有权协议。 | 通过进程感知租约、外部客户端检测、状态、预检和过期租约恢复来防止冲突；不会终止不属于本服务器的进程。 |
-| 长任务 | 以交互式/当前进程工作流为主。 | 使用独立的持久化任务：不可变规格、`fsync` 行日志、检查点、校验恢复和已验证的取消清理。 |
+| 长任务 | 以交互式/当前进程工作流为主。 | 使用独立的持久化扫描和自适应光谱任务：不可变规格、经 `fsync` 的证据行、冻结 stage、校验恢复和已验证的取消清理。 |
 | Wave Optics | 只有通用工具。 | 提供周期性超表面专用的预检和单点证据审计，原始证据与调用方 policy 分离。 |
 | 手册检索 | 无有界手册检索。 | 默认使用有界、隔离的词法手册检索；实验性语义检索被隔离且明确未晋级。旧式进程内 ChromaDB 路径已移除。 |
 | Windows 路径 | 不特别保证 Unicode 保存路径。 | 通过 clientapi Java 保存 Unicode `.mph`；原生/持久化 runtime 和索引使用 ASCII-only 根目录。 |

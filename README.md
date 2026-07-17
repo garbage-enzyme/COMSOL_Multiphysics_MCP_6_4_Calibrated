@@ -51,7 +51,7 @@ surface.
 
 - **ClientAPI compatibility.** Geometry, physics, materials, meshes, studies, results, model cloning, and Unicode-safe `.mph` saving have licensed acceptance on COMSOL 6.4.0.293. Other builds remain unknown until independently accepted.
 - **Safe solver ownership.** An ASCII-path lease, process identity checks, external-client detection, status, and preflight checks prevent accidental competing COMSOL clients.
-- **Durable background work.** Staged sweeps run in detached workers with immutable specifications, atomic state, fsync'd CSV journals, checkpoints, validated resume, and verified same-host cancellation.
+- **Durable background work.** Staged sweeps and adaptive spectral characterization run in detached workers with immutable specifications, atomic state, fsync'd evidence rows, checkpoints, validated resume, and verified same-host cancellation.
 - **Wave Optics validation.** A focused profile provides read-only model preflight and a one-wavelength evidence audit for periodic metasurfaces.
 - **Bounded offline manuals.** SQLite FTS5/BM25 search and page retrieval run outside the COMSOL control process and return compact source/page citations.
 - **Honest optional semantic retrieval.** The isolated semantic profile is contained, but its baseline model did not meet quality and memory promotion gates. Lexical manual search remains the recommended default.
@@ -90,6 +90,27 @@ Control-plane responses from capabilities, solver ownership, durable jobs, and l
 The server fails closed when an external MPh/COMSOL owner or a valid lease is present. `solver_recover_stale_lease` only removes a lease that process identity evidence proves stale; it never terminates an unowned process.
 
 Durable sweep controls are `job_submit`, `job_status`, `job_tail`, `job_cancel`, and `job_resume`. Each job has its own ASCII-only runtime directory containing its immutable specification, state, CSV journal, checkpoint, and log. Resume accepts only matching, finite, successful rows. Cancellation reaches a terminal cancelled state only after worker/process cleanup and lease release are verified. This coordination is for a shared runtime directory on one host; it is not distributed execution.
+
+For an adaptive spectrum, submit `job_type: "spectral_characterization"` with
+an explicit source/configuration identity, initial wavelength grid, expansion
+and refinement policies, collector configuration, scientific tolerances, and
+point/stage/resource caps. The worker solves one wavelength at a time, persists
+the complete point audit and its hash-chained row before advancing, and freezes
+every requested stage so an exact resume neither regenerates the plan nor
+duplicates completed wavelengths. Resubmission observes an existing job only
+when its normalized specification, collector, source, and exact worker-driver
+identity match.
+
+Execution status and scientific interpretation are separate. A job can finish
+with `status: "completed"` while its `scientific_disposition` is `residual` or
+`unresolved_at_declared_cap`; boundary peaks, missing brackets, fit sensitivity,
+and exhausted expansion budgets are scientific non-acceptance outcomes, not
+worker failures. `accepted` requires complete hash-resolvable raw evidence.
+Partial interrupted or cancelled rows remain diagnostic, and cancellation is
+terminal only after worker, descendants, port, lease, and cleanup evidence pass.
+Spectral summaries retain raw R/T/A, closure, wavelength synchronization, mesh
+counts, own-peak, FWHM, Q, stage hashes, and exact artifact references when the
+declared collector and evidence support those quantities.
 
 ### Wave Optics metasurfaces
 
@@ -202,7 +223,7 @@ This is a COMSOL 6.4.0.293 standalone/clientapi compatibility and reliability fo
 | COMSOL API target | Direct `com.comsol.model.Model` API assumptions. | MPh 1.3.1 standalone `model.java` clientapi wrappers, including their different overloads, tags, lists, and Java-string transport. |
 | Tool surface | Broad feature discovery by default. | Compact `core` default; larger construction and compatibility surfaces require an explicit profile. |
 | Solver concurrency | No same-host ownership protocol. | Process-aware lease, external-client detection, status, preflight, and stale-lease recovery that never kills an unowned process. |
-| Long runs | Interactive/current-process workflows. | Detached durable jobs with immutable specs, fsync'd rows, checkpoints, validated resume, and verified cancellation cleanup. |
+| Long runs | Interactive/current-process workflows. | Detached durable sweeps and adaptive spectra with immutable specs, fsync'd evidence rows, frozen stages, validated resume, and verified cancellation cleanup. |
 | Wave Optics | General tools only. | A dedicated preflight plus one-point evidence audit for periodic metasurfaces, with raw evidence separated from caller policy. |
 | Manual search | No bounded manual retrieval. | Bounded isolated lexical manual retrieval is the production default; experimental semantic retrieval is isolated and explicitly not promoted. The legacy in-process ChromaDB path has been removed. |
 | Windows paths | No special guarantee for Unicode save paths. | Clientapi Java save path for Unicode `.mph` saves; ASCII-only runtime/index roots for native and durable artifacts. |
