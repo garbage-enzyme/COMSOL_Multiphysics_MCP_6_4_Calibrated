@@ -112,6 +112,7 @@ models are intentionally absent.
 - `development_kit/tests/test_artifact_chain.py` — This module tests bounded solver-free artifact hash-chain verification.
 - `development_kit/tests/test_async_solver.py` — This module tests asynchronous solver thread state with fake studies.
 - `development_kit/tests/test_basic.py` — This module tests basic server helpers and registration assumptions.
+- `development_kit/tests/test_branch_continuation.py` — This module tests ordered solver-free branch-continuation state binding and planning.
 - `development_kit/tests/test_cancel_state_machine.py` — This module tests deterministic cancellation state transitions without wall-clock sleeps.
 - `development_kit/tests/test_clientapi_properties.py` — This module tests constrained clientapi property access with mocks.
 - `development_kit/tests/test_control_plane_metrics.py` — This module tests bounded control-plane latency, overload, and fairness evidence.
@@ -208,6 +209,7 @@ models are intentionally absent.
 
 - `src/evidence/__init__.py` — This file exports versioned solver-free evidence contracts.
 - `src/evidence/contracts.py` — This module implements strict physical evidence, policy, and migration contracts.
+- `src/evidence/branch_continuation.py` — This module validates and plans ordered branch-continuation states without a solver.
 - `src/evidence/convergence_evaluation.py` — This module validates ordered spectral convergence ladders and caller policies.
 - `src/evidence/field_artifacts.py` — This module serializes bounded gridded scalar field artifacts.
 - `src/evidence/field_bundle.py` — This module normalizes bounded field-evidence extraction requests.
