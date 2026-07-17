@@ -3,8 +3,15 @@
 [中文](DEPLOYMENT_CN.md)
 
 This guide covers a fresh COMSOL MCP installation and client configuration for
-Hermes Agent, Codex CLI, and opencode. Replace every example path with the target
-machine's actual paths.
+Claude Code, Hermes Agent, Codex CLI, and opencode. Replace every example path
+with the target machine's actual paths.
+
+Client acceptance status:
+
+- Codex CLI and opencode have completed local installed-package validation.
+- Claude Code and Hermes Agent are expected to be compatible from their
+  documented stdio MCP configuration, but neither client has been tested
+  end-to-end by this project. Testing reports and pull requests are welcome.
 
 ## 1. Server installation
 
@@ -47,7 +54,52 @@ No current profile provides a protected shared Desktop/attached-Server mode.
 The experimental `comsol_connect` compatibility tool is not a non-owning shared-
 model lifecycle and must not be used as one.
 
-## 3. Hermes Agent
+## 3. Claude Code (theoretical compatibility; not yet tested)
+
+Claude Code officially supports local stdio MCP servers through `claude mcp
+add`, user/local configuration in `~/.claude.json`, or a project-scoped
+`.mcp.json`. The checked-in template is inactive until copied and edited:
+
+```powershell
+Copy-Item .\config\claude-code-mcp.example.json .\.mcp.json
+# Replace every example path in .mcp.json with an absolute local path.
+claude mcp list
+claude mcp get comsol
+```
+
+Claude Code asks for approval before using a project-scoped `.mcp.json`. Do not
+commit machine-specific executable, Java, runtime, credential, or model paths to
+a shared project.
+
+For a private user-scoped configuration instead of `.mcp.json`:
+
+```powershell
+claude mcp add --transport stdio --scope user `
+  --env COMSOL_MCP_PROFILE=wave_optics `
+  --env COMSOL_MCP_RUNTIME_DIR=D:\comsol_mcp_runtime `
+  --env JAVA_HOME=D:\COMSOL64\Multiphysics\java\win64\jre `
+  --env JDK_HOME=D:\COMSOL64\Multiphysics\java\win64\jre `
+  comsol -- 'D:\path\to\python-env\Scripts\comsol-mcp.exe'
+```
+
+All Claude options must precede the server name, and `--` separates the server
+name from its executable and arguments. Use the in-session `/mcp` panel to
+inspect connection status. The configuration deliberately uses an absolute
+installed executable and an ASCII runtime root; it does not depend on Claude
+Code's launch directory.
+
+Claude Code's documented `.mcp.json` format has no project-specific field used
+here to disable parallel calls. In the project `CLAUDE.md` or companion skill,
+instruct Claude to call `capabilities`, `solver_status`, and `solver_preflight`
+first and never issue COMSOL mutation or solver operations in parallel.
+
+Complete template: `config/claude-code-mcp.example.json`. This configuration is
+derived from the official [Claude Code MCP documentation](https://code.claude.com/docs/en/mcp),
+but remains untested with the real Claude Code client. Please submit a PR with a
+sanitized `initialize`, `list_tools`, `capabilities`, status, and cleanup receipt
+if you validate it.
+
+## 4. Hermes Agent (theoretical compatibility; not yet tested)
 
 Native Windows Hermes stores its default configuration at
 `%LOCALAPPDATA%\hermes\config.yaml`. Linux and WSL use
@@ -70,15 +122,17 @@ mcp_servers:
     max_lifetime_seconds: 0
 ```
 
-Hermes' stdio launcher passes `command`, `args`, and `env`, but does not provide a
-working directory to the child process. Keep `supports_parallel_tool_calls` false:
-COMSOL ownership and mutation must remain serialized. Native Windows is the
-documented configuration for a Windows COMSOL installation; this project does
-not claim that a WSL-to-Windows COMSOL bridge has been validated.
+Hermes' documented stdio launcher passes `command`, `args`, and `env`, but does
+not provide a working directory to the child process. Keep
+`supports_parallel_tool_calls` false: COMSOL ownership and mutation must remain
+serialized. Native Windows is the expected configuration for a Windows COMSOL
+installation; neither Hermes end-to-end operation nor a WSL-to-Windows COMSOL
+bridge has been tested by this project. Test reports and pull requests with
+sanitized discovery and cleanup receipts are welcome.
 
 Complete template: `config/hermes-mcp.example.yaml`.
 
-## 4. Codex CLI
+## 5. Codex CLI
 
 Windows configuration: `%USERPROFILE%\.codex\config.toml`.
 POSIX configuration: `~/.codex/config.toml`.
@@ -97,7 +151,7 @@ JDK_HOME = 'D:\COMSOL64\Multiphysics\java\win64\jre'
 
 Complete template: `config/codex-mcp.example.toml`.
 
-## 5. opencode
+## 6. opencode
 
 Use a project `opencode.json`, or merge the entry into
 `~/.config/opencode/opencode.json`.
@@ -122,10 +176,11 @@ Use a project `opencode.json`, or merge the entry into
 
 Complete template: `config/opencode-mcp.example.json`.
 
-## 6. Restart and verify
+## 7. Restart and verify
 
-Restart Hermes, Codex, or opencode after changing the profile, executable path,
-or installed package. Existing stdio hosts do not hot-load these changes.
+Restart Claude Code, Hermes, Codex, or opencode after changing the profile,
+executable path, or installed package. Existing stdio hosts do not hot-load
+these changes.
 
 Call `capabilities` before starting COMSOL. A `wave_optics` deployment should
 report:
@@ -142,7 +197,7 @@ Then call `solver_status` and `solver_preflight` before constructing a client.
 Keep one solver owner. Use durable jobs for long simulations instead of holding a
 single synchronous MCP call for the full wall time.
 
-## 7. Updating an installation
+## 8. Updating an installation
 
 After source changes:
 

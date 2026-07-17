@@ -20,8 +20,11 @@ release procedures remain in this repository's development kit.
 
 ## Client compatibility and deployment
 
-The installed FastMCP stdio server is compatible with Hermes Agent, Codex CLI,
-and opencode. Use the complete deployment guide for fresh installation, exact
+The installed FastMCP stdio server has been validated with Codex CLI and
+opencode. Its standard stdio configuration is expected to be compatible with
+Claude Code and Hermes Agent, but this project has not yet completed an
+end-to-end client test with either one. Community test reports and pull requests
+are welcome. Use the complete deployment guide for fresh installation, exact
 configuration paths, profile selection, restart behavior, and solver-free
 verification:
 
@@ -34,13 +37,15 @@ starts, restart the client after changing the profile or package, and keep COMSO
 tool calls serialized. Call `capabilities` to verify the deployed profile without
 starting COMSOL.
 
-Hermes compatibility was checked against its official
-[MCP documentation](https://github.com/NousResearch/hermes-agent/blob/main/website/docs/user-guide/features/mcp.md)
-and [client source](https://github.com/NousResearch/hermes-agent/blob/main/tools/mcp_tool.py).
-A solver-free installed-entry-point smoke gate completed `initialize`,
-`list_tools`, and `capabilities` with server `COMSOL MCP`, profile `core`, and
-`connected=false`. Treat live discovery, not a count copied from documentation,
-as the authority for the installed tool surface.
+The untested client configurations were derived from the official
+[Claude Code MCP documentation](https://code.claude.com/docs/en/mcp), Hermes
+[MCP documentation](https://github.com/NousResearch/hermes-agent/blob/main/website/docs/user-guide/features/mcp.md),
+and Hermes [client source](https://github.com/NousResearch/hermes-agent/blob/main/tools/mcp_tool.py).
+They are configuration-level compatibility guidance, not validation claims.
+A real client acceptance report should include `initialize`, `list_tools`, and
+`capabilities` readback without starting COMSOL. Treat live discovery, not a
+count copied from documentation, as the authority for the installed tool
+surface.
 
 ## Highlights
 
@@ -185,8 +190,8 @@ Configure an MCP client, for example:
 ```
 
 Omit `COMSOL_MCP_PROFILE` for `core`. Client examples are available at
-`config/codex-mcp.example.toml`, `config/hermes-mcp.example.yaml`, and
-`config/opencode-mcp.example.json`.
+`config/claude-code-mcp.example.json`, `config/codex-mcp.example.toml`,
+`config/hermes-mcp.example.yaml`, and `config/opencode-mcp.example.json`.
 
 ## How this fork differs from upstream
 

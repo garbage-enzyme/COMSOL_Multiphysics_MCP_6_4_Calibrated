@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "comsol": {
+      "type": "stdio",
+      "command": "D:\\path\\to\\python-env\\Scripts\\comsol-mcp.exe",
+      "args": [],
+      "env": {
+        "COMSOL_MCP_PROFILE": "wave_optics",
+        "COMSOL_MCP_RUNTIME_DIR": "D:\\comsol_mcp_runtime",
+        "JAVA_HOME": "D:\\COMSOL64\\Multiphysics\\java\\win64\\jre",
+        "JDK_HOME": "D:\\COMSOL64\\Multiphysics\\java\\win64\\jre"
+      }
+    }
+  }
+}
