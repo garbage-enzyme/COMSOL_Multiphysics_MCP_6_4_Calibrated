@@ -8,6 +8,10 @@ import json
 from typing import Any
 
 from src import __version__
+from src.evidence.convergence_evaluation import (
+    CONVERGENCE_LADDER_SCHEMA,
+    CONVERGENCE_SCHEMA_VERSION,
+)
 from src.evidence.reference_power_acceptance import (
     REFERENCE_POWER_CONTRACT_SCHEMA,
     REFERENCE_POWER_EXECUTION_SCHEMA,
@@ -58,6 +62,11 @@ def _entries() -> list[dict[str, Any]]:
         _entry("comsol_mcp.artifact_chain", "1.0.0", "src.artifact_chain"),
         _entry("comsol_mcp.artifact_chain_verification", "1.0.0", "src.artifact_chain"),
         _entry("comsol_mcp.build_identity", "1.0.0", "src.build_identity"),
+        _entry(
+            CONVERGENCE_LADDER_SCHEMA,
+            CONVERGENCE_SCHEMA_VERSION,
+            "src.evidence.convergence_evaluation",
+        ),
         _entry(
             "comsol_mcp.deployment_identity",
             "1.1.0",

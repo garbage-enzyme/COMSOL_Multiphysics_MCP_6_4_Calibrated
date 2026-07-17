@@ -115,6 +115,7 @@ models are intentionally absent.
 - `development_kit/tests/test_cancel_state_machine.py` — This module tests deterministic cancellation state transitions without wall-clock sleeps.
 - `development_kit/tests/test_clientapi_properties.py` — This module tests constrained clientapi property access with mocks.
 - `development_kit/tests/test_control_plane_metrics.py` — This module tests bounded control-plane latency, overload, and fairness evidence.
+- `development_kit/tests/test_convergence_evaluation.py` — This module tests ordered solver-free convergence evidence and policy evaluation.
 - `development_kit/tests/test_deployment_identity.py` — This module tests package version, build identity, and fresh-process deployment consistency.
 - `development_kit/tests/test_derived_geometry.py` — This module tests typed derived-geometry edits without COMSOL.
 - `development_kit/tests/test_durable_job_control_plane.py` — This module tests durable submission, reconciliation, status, cancellation, and resume behavior.
@@ -207,6 +208,7 @@ models are intentionally absent.
 
 - `src/evidence/__init__.py` — This file exports versioned solver-free evidence contracts.
 - `src/evidence/contracts.py` — This module implements strict physical evidence, policy, and migration contracts.
+- `src/evidence/convergence_evaluation.py` — This module validates ordered spectral convergence ladders and caller policies.
 - `src/evidence/field_artifacts.py` — This module serializes bounded gridded scalar field artifacts.
 - `src/evidence/field_bundle.py` — This module normalizes bounded field-evidence extraction requests.
 - `src/evidence/field_dataset.py` — This module adapts existing MPh datasets to field-evidence samples.
