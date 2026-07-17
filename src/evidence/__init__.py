@@ -3,6 +3,7 @@
 from .contracts import (
     EVIDENCE_STATES,
     PHYSICAL_EVIDENCE_SCHEMA_NAME,
+    PHYSICAL_EVIDENCE_READABLE_VERSIONS,
     PHYSICAL_EVIDENCE_SCHEMA_VERSION,
     VALIDATION_POLICY_SCHEMA_NAME,
     VALIDATION_POLICY_SCHEMA_VERSION,
@@ -12,6 +13,7 @@ from .contracts import (
     evaluate_physical_evidence_policy,
     example_validation_policies,
     migrate_legacy_point_audit,
+    migrate_legacy_point_audit_file,
     read_physical_evidence,
     validate_physical_evidence,
     validate_validation_policy,
@@ -56,6 +58,7 @@ from .field_render import render_field_png_bundle
 __all__ = [
     "EVIDENCE_STATES",
     "PHYSICAL_EVIDENCE_SCHEMA_NAME",
+    "PHYSICAL_EVIDENCE_READABLE_VERSIONS",
     "PHYSICAL_EVIDENCE_SCHEMA_VERSION",
     "VALIDATION_POLICY_SCHEMA_NAME",
     "VALIDATION_POLICY_SCHEMA_VERSION",
@@ -65,6 +68,7 @@ __all__ = [
     "evaluate_physical_evidence_policy",
     "example_validation_policies",
     "migrate_legacy_point_audit",
+    "migrate_legacy_point_audit_file",
     "read_physical_evidence",
     "validate_physical_evidence",
     "validate_validation_policy",

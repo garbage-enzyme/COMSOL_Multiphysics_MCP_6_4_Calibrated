@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import hashlib
+import json
 import math
 
 import pytest
@@ -15,9 +17,11 @@ from src.evidence.contracts import (
     build_physical_evidence,
     build_validation_policy,
     canonical_json_bytes,
+    canonical_sha256,
     evaluate_physical_evidence_policy,
     example_validation_policies,
     migrate_legacy_point_audit,
+    migrate_legacy_point_audit_file,
     read_physical_evidence,
     validate_physical_evidence,
     validate_validation_policy,
@@ -342,9 +346,83 @@ def test_legacy_reader_preserves_labels_and_does_not_invent_flux_evidence():
     read_back = read_physical_evidence(legacy)
 
     assert migrated == read_back
+    assert migrated["schema_version"] == "1.1.0"
     assert migrated["migration"]["semantics"] == "preserved_without_reinterpretation"
+    assert migrated["migration"]["source_hash_basis"] == "canonical_json"
+    assert migrated["migration"]["source_artifact_sha256"] == canonical_sha256(legacy)
+    assert migrated["migration"]["output_mode"] == "new_artifact"
     assert migrated["evidence"]["polarization.physical_incident"]["state"] == "label_only"
     assert migrated["evidence"]["flux.closure_abs"]["state"] == "not_requested"
+
+
+def test_file_migration_writes_new_hash_bound_artifact_without_touching_source(tmp_path):
+    legacy = {
+        "schema_version": "1",
+        "config_id": "legacy-config",
+        "config_sha256": CONFIG_HASH,
+        "source_sha256": SOURCE_HASH,
+        "measurement": {
+            "schema_version": "1",
+            "config_id": "legacy-config",
+            "provenance": {"config_sha256": CONFIG_HASH, "source_sha256_before": SOURCE_HASH},
+            "wavelength": {},
+            "power": {},
+            "polarization": {},
+            "mesh": {},
+        },
+    }
+    source = tmp_path / "legacy.json"
+    output = tmp_path / "physical_evidence.json"
+    source_bytes = json.dumps(legacy, indent=2).encode("utf-8")
+    source.write_bytes(source_bytes)
+    source_stat = source.stat()
+
+    migrated = migrate_legacy_point_audit_file(source, output)
+
+    assert source.read_bytes() == source_bytes
+    assert source.stat().st_mtime_ns == source_stat.st_mtime_ns
+    assert migrated["migration"]["source_hash_basis"] == "file_bytes"
+    assert migrated["migration"]["source_artifact_sha256"] == hashlib.sha256(source_bytes).hexdigest()
+    assert json.loads(output.read_text(encoding="utf-8")) == migrated
+    with pytest.raises(FileExistsError):
+        migrate_legacy_point_audit_file(source, output)
+    with pytest.raises(ValueError, match="distinct"):
+        migrate_legacy_point_audit_file(source, source)
+
+
+def test_physical_evidence_reader_preserves_supported_previous_schema():
+    previous = _envelope()
+    previous["schema_version"] = "1.0.0"
+    previous.pop("contract_sha256")
+    previous = build_physical_evidence(previous)
+
+    assert validate_physical_evidence(previous) == previous
+
+
+def test_migration_transformation_identity_fails_closed_on_tampering():
+    legacy = {
+        "schema_version": "1",
+        "config_id": "legacy-config",
+        "config_sha256": CONFIG_HASH,
+        "source_sha256": SOURCE_HASH,
+        "measurement": {
+            "schema_version": "1",
+            "config_id": "legacy-config",
+            "provenance": {"config_sha256": CONFIG_HASH, "source_sha256_before": SOURCE_HASH},
+            "wavelength": {},
+            "power": {},
+            "polarization": {},
+            "mesh": {},
+        },
+    }
+    migrated = migrate_legacy_point_audit(legacy)
+    migrated["migration"]["transformation_version"] = "9.9.9"
+    migrated["contract_sha256"] = canonical_sha256(
+        {key: value for key, value in migrated.items() if key != "contract_sha256"}
+    )
+
+    with pytest.raises(ValueError, match="transformation hash"):
+        validate_physical_evidence(migrated)
 
 
 def test_builders_reject_caller_supplied_self_hashes():

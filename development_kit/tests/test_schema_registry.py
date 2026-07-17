@@ -65,6 +65,13 @@ def test_every_entry_declares_read_write_and_non_mutating_migration_policy():
         assert entry["migration"]["available"] == bool(
             entry["migration"]["source_schema_names"]
         )
+    physical = next(
+        item
+        for item in get_schema_registry()["entries"]
+        if item["schema_name"] == "comsol_mcp.physical_evidence"
+    )
+    assert physical["readable_versions"] == ["1.0.0", "1.1.0"]
+    assert physical["writable_version"] == "1.1.0"
 
 
 def test_support_resolution_accepts_current_and_rejects_future_without_mutation():
@@ -86,7 +93,7 @@ def test_support_resolution_accepts_current_and_rejects_future_without_mutation(
         "reason_code": "unsupported_schema_version",
         "schema_name": "comsol_mcp.physical_evidence",
         "schema_version": "99.0.0",
-        "supported_versions": ["1.0.0"],
+        "supported_versions": ["1.0.0", "1.1.0"],
         "migration_available": True,
     }
     assert unknown["supported"] is False

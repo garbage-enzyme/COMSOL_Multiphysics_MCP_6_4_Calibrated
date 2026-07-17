@@ -11,12 +11,15 @@ from copy import deepcopy
 import hashlib
 import json
 import math
+import os
+from pathlib import Path
 import re
 from typing import Any, Mapping
 
 
 PHYSICAL_EVIDENCE_SCHEMA_NAME = "comsol_mcp.physical_evidence"
-PHYSICAL_EVIDENCE_SCHEMA_VERSION = "1.0.0"
+PHYSICAL_EVIDENCE_SCHEMA_VERSION = "1.1.0"
+PHYSICAL_EVIDENCE_READABLE_VERSIONS = frozenset({"1.0.0", "1.1.0"})
 VALIDATION_POLICY_SCHEMA_NAME = "comsol_mcp.validation_policy"
 VALIDATION_POLICY_SCHEMA_VERSION = "1.0.0"
 
@@ -73,7 +76,15 @@ _RECORD_FIELDS = {
     "source",
     "limitations",
 }
-_MIGRATION_FIELDS = {"source_schema_name", "source_schema_version", "semantics"}
+_LEGACY_MIGRATION_FIELDS = {"source_schema_name", "source_schema_version", "semantics"}
+_MIGRATION_FIELDS = _LEGACY_MIGRATION_FIELDS | {
+    "source_artifact_sha256",
+    "source_hash_basis",
+    "transformation_id",
+    "transformation_version",
+    "transformation_sha256",
+    "output_mode",
+}
 _POLICY_FIELDS = {"schema_name", "schema_version", "policy_id", "rules", "policy_sha256"}
 _RULE_FIELDS = {"rule_id", "rule_type", "required_measurements", "tolerances", "assumptions"}
 
@@ -255,7 +266,8 @@ def validate_physical_evidence(payload: Any, *, verify_hash: bool = True) -> dic
     _reject_unknown(envelope, _ENVELOPE_FIELDS, "physical_evidence")
     if envelope.get("schema_name") != PHYSICAL_EVIDENCE_SCHEMA_NAME:
         raise ValueError("physical_evidence.schema_name is unsupported")
-    if envelope.get("schema_version") != PHYSICAL_EVIDENCE_SCHEMA_VERSION:
+    schema_version = envelope.get("schema_version")
+    if schema_version not in PHYSICAL_EVIDENCE_READABLE_VERSIONS:
         raise ValueError("physical_evidence.schema_version is unsupported")
     _identifier(envelope.get("artifact_type"), "physical_evidence.artifact_type")
 
@@ -294,11 +306,45 @@ def validate_physical_evidence(payload: Any, *, verify_hash: bool = True) -> dic
     _validate_text_list(envelope.get("limitations", []), "physical_evidence.limitations")
     if "migration" in envelope:
         migration = _require_mapping(envelope["migration"], "physical_evidence.migration")
-        _reject_unknown(migration, _MIGRATION_FIELDS, "physical_evidence.migration")
+        migration_fields = (
+            _LEGACY_MIGRATION_FIELDS
+            if schema_version == "1.0.0"
+            else _MIGRATION_FIELDS
+        )
+        _reject_unknown(migration, migration_fields, "physical_evidence.migration")
+        if set(migration) != migration_fields:
+            raise ValueError("physical_evidence.migration fields are incomplete")
         _bounded_text(migration.get("source_schema_name"), "physical_evidence.migration.source_schema_name")
         _bounded_text(migration.get("source_schema_version"), "physical_evidence.migration.source_schema_version")
         if migration.get("semantics") != "preserved_without_reinterpretation":
             raise ValueError("physical_evidence.migration.semantics is unsupported")
+        if schema_version != "1.0.0":
+            _hash64(
+                migration.get("source_artifact_sha256"),
+                "physical_evidence.migration.source_artifact_sha256",
+            )
+            if migration.get("source_hash_basis") not in {"canonical_json", "file_bytes"}:
+                raise ValueError("physical_evidence.migration.source_hash_basis is unsupported")
+            _identifier(
+                migration.get("transformation_id"),
+                "physical_evidence.migration.transformation_id",
+            )
+            _bounded_text(
+                migration.get("transformation_version"),
+                "physical_evidence.migration.transformation_version",
+            )
+            if migration.get("output_mode") != "new_artifact":
+                raise ValueError("physical_evidence.migration.output_mode is unsupported")
+            supplied_transformation_hash = _hash64(
+                migration.get("transformation_sha256"),
+                "physical_evidence.migration.transformation_sha256",
+            )
+            transformation = dict(migration)
+            transformation.pop("transformation_sha256")
+            transformation["target_schema_name"] = PHYSICAL_EVIDENCE_SCHEMA_NAME
+            transformation["target_schema_version"] = schema_version
+            if supplied_transformation_hash != canonical_sha256(transformation):
+                raise ValueError("physical_evidence.migration transformation hash does not match")
 
     supplied_hash = _hash64(envelope.get("contract_sha256"), "physical_evidence.contract_sha256")
     without_hash = dict(envelope)
@@ -372,7 +418,13 @@ def _measured_or_unknown(
     )
 
 
-def _point_audit_envelope(payload: Mapping[str, Any], *, migrated: bool) -> dict[str, Any]:
+def _point_audit_envelope(
+    payload: Mapping[str, Any],
+    *,
+    migrated: bool,
+    source_artifact_sha256: str | None = None,
+    source_hash_basis: str = "canonical_json",
+) -> dict[str, Any]:
     outer = _require_mapping(dict(payload), "legacy_point_audit")
     measurement = outer.get("measurement", outer)
     measurement = _require_mapping(measurement, "legacy_point_audit.measurement")
@@ -655,11 +707,25 @@ def _point_audit_envelope(payload: Mapping[str, Any], *, migrated: bool) -> dict
             ],
         }
     if migrated:
-        envelope["migration"] = {
+        migration = {
             "source_schema_name": "comsol_mcp.wave_optics_point_audit",
             "source_schema_version": str(measurement.get("schema_version", "1")),
+            "source_artifact_sha256": (
+                _hash64(source_artifact_sha256, "legacy source artifact sha256")
+                if source_artifact_sha256 is not None
+                else canonical_sha256(dict(payload))
+            ),
+            "source_hash_basis": source_hash_basis,
+            "transformation_id": "legacy_point_audit_to_physical_evidence",
+            "transformation_version": "1.0.0",
             "semantics": "preserved_without_reinterpretation",
+            "output_mode": "new_artifact",
         }
+        transformation = dict(migration)
+        transformation["target_schema_name"] = PHYSICAL_EVIDENCE_SCHEMA_NAME
+        transformation["target_schema_version"] = PHYSICAL_EVIDENCE_SCHEMA_VERSION
+        migration["transformation_sha256"] = canonical_sha256(transformation)
+        envelope["migration"] = migration
     return build_physical_evidence(envelope)
 
 
@@ -671,6 +737,44 @@ def build_point_audit_physical_evidence(payload: Mapping[str, Any]) -> dict[str,
 def migrate_legacy_point_audit(payload: Mapping[str, Any]) -> dict[str, Any]:
     """Read a schema-1 point audit without promoting old labels to measurements."""
     return _point_audit_envelope(payload, migrated=True)
+
+
+def migrate_legacy_point_audit_file(
+    source_path: str | Path,
+    output_path: str | Path,
+) -> dict[str, Any]:
+    """Write one migrated artifact to a distinct new file without altering source bytes."""
+    source = Path(source_path).resolve()
+    output = Path(output_path).resolve()
+    if source == output:
+        raise ValueError("migration output must be distinct from the source artifact")
+    source_bytes = source.read_bytes()
+    if len(source_bytes) > MAX_CONTRACT_BYTES:
+        raise ValueError(f"legacy source artifact exceeds {MAX_CONTRACT_BYTES} bytes")
+    source_sha256 = hashlib.sha256(source_bytes).hexdigest()
+    try:
+        payload = json.loads(source_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("legacy source artifact must be UTF-8 JSON") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("legacy source artifact must contain one JSON object")
+    migrated = _point_audit_envelope(
+        payload,
+        migrated=True,
+        source_artifact_sha256=source_sha256,
+        source_hash_basis="file_bytes",
+    )
+    output_bytes = canonical_json_bytes(migrated) + b"\n"
+    with output.open("xb") as stream:
+        stream.write(output_bytes)
+        stream.flush()
+        os.fsync(stream.fileno())
+    if hashlib.sha256(source.read_bytes()).hexdigest() != source_sha256:
+        raise RuntimeError("legacy source artifact changed during migration")
+    written = json.loads(output.read_text(encoding="utf-8"))
+    if validate_physical_evidence(written) != migrated:
+        raise RuntimeError("written migration artifact failed readback validation")
+    return deepcopy(migrated)
 
 
 def read_physical_evidence(payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -992,6 +1096,7 @@ def example_validation_policies() -> dict[str, dict[str, Any]]:
 __all__ = [
     "EVIDENCE_STATES",
     "PHYSICAL_EVIDENCE_SCHEMA_NAME",
+    "PHYSICAL_EVIDENCE_READABLE_VERSIONS",
     "PHYSICAL_EVIDENCE_SCHEMA_VERSION",
     "VALIDATION_POLICY_SCHEMA_NAME",
     "VALIDATION_POLICY_SCHEMA_VERSION",
@@ -1003,6 +1108,7 @@ __all__ = [
     "evaluate_physical_evidence_policy",
     "example_validation_policies",
     "migrate_legacy_point_audit",
+    "migrate_legacy_point_audit_file",
     "read_physical_evidence",
     "validate_physical_evidence",
     "validate_validation_policy",

@@ -83,7 +83,7 @@ def test_capabilities_report_risky_operations_without_starting_comsol(monkeypatc
     assert result["wave_optics_audit"]["default_assessment"] == "evidence_only"
     assert result["physical_evidence_contract"] == {
         "schema_name": "comsol_mcp.physical_evidence",
-        "schema_version": "1.0.0",
+        "schema_version": "1.1.0",
         "evidence_states": [
             "derived_from_declared_convention",
             "label_only",

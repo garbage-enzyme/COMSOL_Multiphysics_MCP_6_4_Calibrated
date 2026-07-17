@@ -28,6 +28,7 @@ def _entry(
     *,
     artifact_kind: str = "public_artifact",
     writable: bool = True,
+    readable_versions: tuple[str, ...] | None = None,
     migration_sources: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     return {
@@ -35,7 +36,7 @@ def _entry(
         "artifact_kind": artifact_kind,
         "producer": producer,
         "producer_version": __version__,
-        "readable_versions": [version],
+        "readable_versions": list(readable_versions or (version,)),
         "writable_version": version if writable else None,
         "migration": {
             "available": bool(migration_sources),
@@ -60,8 +61,9 @@ def _entries() -> list[dict[str, Any]]:
         _entry("comsol_mcp.periodic_mesh_smoke", "1.0.0", "src.tools.periodic_mesh_audit"),
         _entry(
             "comsol_mcp.physical_evidence",
-            "1.0.0",
+            "1.1.0",
             "src.evidence.contracts",
+            readable_versions=("1.0.0", "1.1.0"),
             migration_sources=(legacy_point_audit,),
         ),
         _entry("comsol_mcp.resource_calibration_report", "1.0.0", "src.jobs.resource_admission"),
