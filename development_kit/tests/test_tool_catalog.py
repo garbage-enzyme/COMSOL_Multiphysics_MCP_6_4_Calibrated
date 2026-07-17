@@ -70,6 +70,9 @@ def test_every_registered_tool_has_complete_canonical_metadata():
         assert metadata.concurrency_class in {
             "control_plane", "solver_free", "comsol_bound",
         }
+        assert isinstance(metadata.requires_model_revision, bool)
+        assert isinstance(metadata.advances_model_revision, bool)
+        assert not metadata.advances_model_revision or metadata.requires_model_revision
         assert isinstance(metadata.starts_solver, bool)
         assert metadata.intended_profiles
         assert set(metadata.intended_profiles) <= set(PROFILE_NAMES)

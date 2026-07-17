@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import functools
+import inspect
 import json
 import os
 from pathlib import Path
 import threading
 import time
-from typing import Any, Callable
+from typing import Any, Callable, get_type_hints
 import uuid
 
 import psutil
@@ -246,11 +247,15 @@ def guard_tool_call(
     side_effect_class: str,
     concurrency_class: str,
     profile_name: str = "full",
+    requires_model_revision: bool = False,
+    advances_model_revision: bool = False,
 ) -> Callable[..., Any]:
     """Wrap one registered tool with fail-fast COMSOL operation arbitration."""
     @functools.wraps(function)
     def guarded(*args: Any, **kwargs: Any) -> Any:
         from src.path_policy import validate_tool_paths
+
+        expected_model_revision = kwargs.pop("expected_model_revision", None)
 
         try:
             normalized_args, normalized_kwargs, path_evidence = validate_tool_paths(
@@ -292,7 +297,51 @@ def guard_tool_call(
             }
         result: Any
         try:
-            result = function(*normalized_args, **normalized_kwargs)
+            revision_evidence = None
+            revision_model_name = None
+            if requires_model_revision:
+                from src.tools.session import session_manager
+
+                signature = inspect.signature(function)
+                bound = signature.bind(*normalized_args, **normalized_kwargs)
+                revision_model_name = (
+                    bound.arguments.get("model_name")
+                    or bound.arguments.get("source_model_name")
+                    or session_manager.current_model
+                )
+                current_revision = session_manager.get_model_revision(
+                    revision_model_name
+                )
+                if current_revision is None and profile_name == "full":
+                    result = function(*normalized_args, **normalized_kwargs)
+                elif current_revision is None:
+                    result = {
+                        "success": False,
+                        "error": "A tracked model revision is required for this operation.",
+                    }
+                elif (
+                    profile_name != "full"
+                    and expected_model_revision
+                    != current_revision["revision_sha256"]
+                ):
+                    result = {
+                        "success": False,
+                        "error": "expected_model_revision does not match current model state.",
+                        "model_revision": current_revision,
+                    }
+                else:
+                    result = function(*normalized_args, **normalized_kwargs)
+                    revision_evidence = current_revision
+                    if (
+                        isinstance(result, dict)
+                        and result.get("success") is True
+                        and advances_model_revision
+                    ):
+                        revision_evidence = session_manager.advance_model_revision(
+                            revision_model_name, tool_name
+                        )
+            else:
+                result = function(*normalized_args, **normalized_kwargs)
         finally:
             release = arbiter.release(claim)
         if isinstance(result, dict):
@@ -302,11 +351,32 @@ def guard_tool_call(
                 "release": release,
             }
             result["path_policy"] = {**path_evidence, "accepted": True}
+            if revision_evidence is not None:
+                result["model_revision"] = revision_evidence
             if not release["verified"]:
                 result["success"] = False
                 result["error"] = "Operation completed but lock release could not be verified."
         return result
 
+    if requires_model_revision:
+        signature = inspect.signature(function)
+        hints = get_type_hints(function)
+        parameters = [
+            parameter.replace(
+                annotation=hints.get(parameter.name, parameter.annotation)
+            )
+            for parameter in signature.parameters.values()
+        ]
+        parameters.append(inspect.Parameter(
+            "expected_model_revision",
+            kind=inspect.Parameter.KEYWORD_ONLY,
+            default=None,
+            annotation=str | None,
+        ))
+        guarded.__signature__ = signature.replace(
+            parameters=parameters,
+            return_annotation=hints.get("return", signature.return_annotation),
+        )
     return guarded
 
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import inspect
 import threading
 
 import psutil
@@ -152,3 +153,123 @@ def test_metadata_keeps_required_tools_outside_comsol_mutex():
         assert TOOL_METADATA[name].concurrency_class != "comsol_bound"
     assert TOOL_METADATA["study_solve"].concurrency_class == "comsol_bound"
     assert TOOL_METADATA["param_set"].concurrency_class == "comsol_bound"
+
+
+def test_expected_model_revision_is_checked_after_lock_and_advances(
+    tmp_path, monkeypatch
+):
+    from src.tools.session import session_manager
+
+    class FakeModel:
+        def name(self):
+            return "model"
+
+        def file(self):
+            return None
+
+    original = {
+        "models": session_manager._models,
+        "paths": session_manager._model_paths,
+        "revisions": session_manager._model_revisions,
+        "current": session_manager._current_model,
+    }
+    session_manager._models = {"model": FakeModel()}
+    session_manager._model_paths = {}
+    session_manager._model_revisions = {}
+    session_manager._current_model = "model"
+    initial = session_manager.get_model_revision("model")
+    arbiter = OperationArbiter(
+        tmp_path,
+        pid=100,
+        process_create_time=10.0,
+        process_probe=lambda pid: 10.0,
+    )
+    monkeypatch.setattr("src.operation_arbiter.get_operation_arbiter", lambda: arbiter)
+    calls = []
+
+    def param_set(name: str, value: str, model_name: str | None = None):
+        calls.append((name, value, model_name))
+        return {"success": True}
+
+    guarded = guard_tool_call(
+        param_set,
+        tool_name="param_set",
+        side_effect_class="model_mutation",
+        concurrency_class="comsol_bound",
+        profile_name="core",
+        requires_model_revision=True,
+        advances_model_revision=True,
+    )
+    try:
+        assert "expected_model_revision" in inspect.signature(guarded).parameters
+        stale = guarded(
+            "p", "1", expected_model_revision="0" * 64
+        )
+        assert stale["success"] is False
+        assert calls == []
+        accepted = guarded(
+            "p", "1", expected_model_revision=initial["revision_sha256"]
+        )
+        assert accepted["success"] is True
+        assert calls == [("p", "1", None)]
+        assert accepted["model_revision"]["sequence"] == 1
+        assert accepted["model_revision"]["revision_sha256"] != initial[
+            "revision_sha256"
+        ]
+        replay = guarded(
+            "p", "2", expected_model_revision=initial["revision_sha256"]
+        )
+        assert replay["success"] is False
+        assert calls == [("p", "1", None)]
+    finally:
+        session_manager._models = original["models"]
+        session_manager._model_paths = original["paths"]
+        session_manager._model_revisions = original["revisions"]
+        session_manager._current_model = original["current"]
+
+
+def test_full_profile_tracks_revision_without_enforcing_expected_token(
+    tmp_path, monkeypatch
+):
+    from src.tools.session import session_manager
+
+    class FakeModel:
+        pass
+
+    original = (
+        session_manager._models,
+        session_manager._model_paths,
+        session_manager._model_revisions,
+        session_manager._current_model,
+    )
+    session_manager._models = {"model": FakeModel()}
+    session_manager._model_paths = {}
+    session_manager._model_revisions = {}
+    session_manager._current_model = "model"
+    arbiter = OperationArbiter(
+        tmp_path,
+        pid=100,
+        process_create_time=10.0,
+        process_probe=lambda pid: 10.0,
+    )
+    monkeypatch.setattr("src.operation_arbiter.get_operation_arbiter", lambda: arbiter)
+    guarded = guard_tool_call(
+        lambda model_name=None: {"success": True},
+        tool_name="param_set",
+        side_effect_class="model_mutation",
+        concurrency_class="comsol_bound",
+        profile_name="full",
+        requires_model_revision=True,
+        advances_model_revision=True,
+    )
+    try:
+        result = guarded()
+        assert result["success"] is True
+        assert result["model_revision"]["sequence"] == 1
+    finally:
+        (
+            session_manager._models,
+            session_manager._model_paths,
+            session_manager._model_revisions,
+            session_manager._current_model,
+        ) = original

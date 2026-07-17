@@ -8,6 +8,8 @@ import json
 from typing import Any
 
 from src import __version__
+from src.operation_arbiter import OPERATION_LOCK_SCHEMA, OPERATION_LOCK_VERSION
+from src.path_policy import PATH_POLICY_SCHEMA, PATH_POLICY_VERSION
 from src.evidence.branch_continuation import (
     BRANCH_CONTINUATION_PLAN_SCHEMA,
     BRANCH_CONTINUATION_SCHEMA_VERSION,
@@ -108,6 +110,13 @@ def _entries() -> list[dict[str, Any]]:
         _entry(REFERENCE_POWER_CONTRACT_SCHEMA, "1.0.0", "src.evidence.reference_power_acceptance"),
         _entry("comsol_mcp.periodic_mesh_audit", "1.0.0", "src.tools.periodic_mesh_audit"),
         _entry("comsol_mcp.periodic_mesh_smoke", "1.0.0", "src.tools.periodic_mesh_audit"),
+        _entry(
+            OPERATION_LOCK_SCHEMA,
+            OPERATION_LOCK_VERSION,
+            "src.operation_arbiter",
+            artifact_kind="durable_artifact",
+        ),
+        _entry(PATH_POLICY_SCHEMA, PATH_POLICY_VERSION, "src.path_policy"),
         _entry(
             "comsol_mcp.physical_evidence",
             "1.1.0",

@@ -20,6 +20,8 @@ class ToolMetadata:
     maturity: str
     side_effect_class: str
     concurrency_class: str
+    requires_model_revision: bool
+    advances_model_revision: bool
     starts_solver: bool
     intended_profiles: tuple[str, ...]
 
@@ -303,6 +305,30 @@ _SOLVER_FREE_TOOLS = frozenset({
     "wave_optics_incidence_preview",
 })
 
+_MODEL_REVISION_EXCLUSIONS = frozenset({
+    "job_submit", "job_resume", "comsol_start", "comsol_connect",
+    "comsol_disconnect", "session_clear_models", "session_reset",
+    "model_create", "model_load", "model_set_current",
+    "mim_patch_build",
+    "solver_recover_stale_lease", "semantic_worker_reset",
+})
+
+_MODEL_REVISION_REQUIRED_CLASSES = frozenset({
+    "model_mutation", "destructive_session", "solver_execution",
+    "filesystem_write_model_mutation",
+})
+
+_MODEL_REVISION_REQUIRED_ADDITIONS = frozenset({
+    "model_save", "model_save_version",
+})
+
+_MODEL_REVISION_NONADVANCING = frozenset({
+    "model_save", "model_save_version", "model_clone",
+    "model_remove",
+    "geometry_derived_clone", "wave_optics_periodic_mesh_smoke",
+    "wave_optics_point_audit", "wave_optics_reference_audit",
+})
+
 _CORE_TOOLS = frozenset({
     "capabilities",
     "solver_status", "solver_preflight", "solver_recover_stale_lease",
@@ -393,18 +419,27 @@ def _build_registry() -> dict[str, ToolMetadata]:
     for registrar, names in _TOOLS_BY_REGISTRAR.items():
         group = _GROUP_BY_REGISTRAR[registrar.rsplit(".", 1)[-1]]
         for name in names:
+            side_effect_class = _SIDE_EFFECTS.get(name, "read_only")
+            requires_revision = (
+                side_effect_class in _MODEL_REVISION_REQUIRED_CLASSES
+                or name in _MODEL_REVISION_REQUIRED_ADDITIONS
+            ) and name not in _MODEL_REVISION_EXCLUSIONS
             registry[name] = ToolMetadata(
                 name=name,
                 registrar=registrar,
                 group=group,
                 maturity="experimental" if name in _EXPERIMENTAL_TOOLS else "verified",
-                side_effect_class=_SIDE_EFFECTS.get(name, "read_only"),
+                side_effect_class=side_effect_class,
                 concurrency_class=(
                     "control_plane"
                     if name in _CONTROL_PLANE_TOOLS
                     else "solver_free"
                     if name in _SOLVER_FREE_TOOLS
                     else "comsol_bound"
+                ),
+                requires_model_revision=requires_revision,
+                advances_model_revision=(
+                    requires_revision and name not in _MODEL_REVISION_NONADVANCING
                 ),
                 starts_solver=name in _STARTS_SOLVER,
                 intended_profiles=tuple(

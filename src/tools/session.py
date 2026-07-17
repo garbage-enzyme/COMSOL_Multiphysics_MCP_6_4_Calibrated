@@ -1,5 +1,7 @@
 """Session management tools for COMSOL MCP Server."""
 
+import hashlib
+import json
 import threading
 from pathlib import Path
 from typing import Optional
@@ -26,6 +28,7 @@ class SessionManager:
                 instance._client = None
                 instance._models = {}
                 instance._model_paths = {}
+                instance._model_revisions = {}
                 instance._model_cleanup_paths = {}
                 instance._current_model = None
                 # comsol_start runs mph.Client() in this background thread.
@@ -284,6 +287,7 @@ class SessionManager:
             self._cleanup_model_artifact(name)
         self._models.clear()
         self._model_paths.clear()
+        self._model_revisions.clear()
         self._current_model = None
         try:
             mph_session.client = None
@@ -329,6 +333,10 @@ class SessionManager:
             model_path = self._model_paths.get(name)
             if model_path is not None:
                 model_info["file"] = model_path
+            revision = self.get_model_revision(name)
+            if revision is not None:
+                model_info["revision_sha256"] = revision["revision_sha256"]
+                model_info["revision_sequence"] = revision["sequence"]
             model_list.append(model_info)
         
         return {
@@ -386,6 +394,7 @@ class SessionManager:
         name = model.name()
         if name in self._model_cleanup_paths:
             self._cleanup_model_artifact(name)
+        self._model_revisions.pop(name, None)
         self._models[name] = model
         if cleanup_path:
             self._model_cleanup_paths[name] = str(cleanup_path)
@@ -395,10 +404,63 @@ class SessionManager:
             model_path = model.file() if hasattr(model, "file") else None
             if model_path is not None:
                 self._model_paths[name] = str(model_path)
+            self._initialize_model_revision(name, self._model_paths.get(name))
             self._ownership.heartbeat(model_path=str(model_path) if model_path else None)
         except Exception:
-            pass
+            self._initialize_model_revision(name, self._model_paths.get(name))
         return name
+
+    @staticmethod
+    def _revision_hash(body: dict) -> str:
+        canonical = json.dumps(
+            body, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+        return hashlib.sha256(canonical).hexdigest()
+
+    def _initialize_model_revision(
+        self, name: str, source_path: Optional[str]
+    ) -> dict:
+        existing = self._model_revisions.get(name)
+        if existing is not None:
+            return dict(existing)
+        body = {
+            "model_name": name,
+            "sequence": 0,
+            "previous_revision_sha256": None,
+            "operation": "model_registered",
+            "source_path_present": source_path is not None,
+        }
+        revision = {**body, "revision_sha256": self._revision_hash(body)}
+        self._model_revisions[name] = revision
+        return dict(revision)
+
+    def get_model_revision(self, name: Optional[str] = None) -> Optional[dict]:
+        """Return the local optimistic-concurrency token without clientapi calls."""
+        model_name = name or self._current_model
+        if model_name is None or model_name not in self._models:
+            return None
+        return dict(
+            self._model_revisions.get(model_name)
+            or self._initialize_model_revision(
+                model_name, self._model_paths.get(model_name)
+            )
+        )
+
+    def advance_model_revision(self, name: str, operation: str) -> dict:
+        """Advance one model token after a serialized successful mutation."""
+        current = self.get_model_revision(name)
+        if current is None:
+            raise ValueError(f"Model revision unavailable: {name}")
+        body = {
+            "model_name": name,
+            "sequence": int(current["sequence"]) + 1,
+            "previous_revision_sha256": current["revision_sha256"],
+            "operation": operation,
+            "source_path_present": self._model_paths.get(name) is not None,
+        }
+        revision = {**body, "revision_sha256": self._revision_hash(body)}
+        self._model_revisions[name] = revision
+        return dict(revision)
 
     def preflight_long_operation(
         self, *, model_path: Optional[str] = None, output_path: Optional[str] = None
@@ -455,6 +517,7 @@ class SessionManager:
                 self._client.remove(self._models[name])
                 del self._models[name]
                 self._model_paths.pop(name, None)
+                self._model_revisions.pop(name, None)
                 self._cleanup_model_artifact(name)
                 if self._current_model == name:
                     self._current_model = next(iter(self._models.keys()), None)

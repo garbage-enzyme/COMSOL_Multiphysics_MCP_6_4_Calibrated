@@ -170,9 +170,13 @@ class TestSessionManager:
             status = sm.get_status()
             json.dumps(status)
             assert status["models"][0]["file"] == str(tmp_path / "model.mph")
+            assert len(status["models"][0]["revision_sha256"]) == 64
+            assert status["models"][0]["revision_sequence"] == 0
         finally:
             sm._client = None
             sm._models = {}
+            sm._model_paths = {}
+            sm._model_revisions = {}
             sm._current_model = None
 
     def test_disconnect_releases_client(self):

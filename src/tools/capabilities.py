@@ -308,6 +308,14 @@ def get_capabilities(selection: ProfileSelection | None = None) -> dict:
             "path_policy": PathPolicy.from_environment().capability(
                 enforced=active_selection.name != "full"
             ),
+            "model_revision_policy": {
+                "required_for_verified_mutation_and_solve": (
+                    active_selection.name != "full"
+                ),
+                "checked_after_operation_lock_acquisition": True,
+                "successful_mutations_advance_revision": True,
+                "compatibility_profile_enforcement": False,
+            },
             "compatibility_profile": "full",
             "compatibility_profile_weaker_guarantees": True,
         },

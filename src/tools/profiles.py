@@ -112,6 +112,8 @@ class ProfiledRegistrar:
                     side_effect_class=metadata.side_effect_class,
                     concurrency_class=metadata.concurrency_class,
                     profile_name=self.profile_selection.name,
+                    requires_model_revision=metadata.requires_model_revision,
+                    advances_model_revision=metadata.advances_model_revision,
                 )
                 return real_decorator(guarded)
             return function

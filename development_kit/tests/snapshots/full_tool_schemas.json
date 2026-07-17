@@ -101,6 +101,18 @@
         "title": "Container",
         "type": "string"
       },
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
+      },
       "feature_tag": {
         "title": "Feature Tag",
         "type": "string"
@@ -348,6 +360,18 @@
         "title": "Component Name",
         "type": "string"
       },
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
+      },
       "feature_name": {
         "anyOf": [
           {
@@ -419,6 +443,18 @@
         "title": "Component Name",
         "type": "string"
       },
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
+      },
       "feature_name": {
         "anyOf": [
           {
@@ -481,6 +517,18 @@
         "default": "comp1",
         "title": "Component Name",
         "type": "string"
+      },
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
       },
       "feature_name": {
         "anyOf": [
@@ -550,6 +598,18 @@
         "default": "comp1",
         "title": "Component Name",
         "type": "string"
+      },
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
       },
       "feature_name": {
         "anyOf": [
@@ -683,6 +743,18 @@
         "title": "Component Name",
         "type": "string"
       },
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
+      },
       "feature_name": {
         "anyOf": [
           {
@@ -751,6 +823,18 @@
         "default": "comp1",
         "title": "Component Name",
         "type": "string"
+      },
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
       },
       "feature_name": {
         "anyOf": [
@@ -828,6 +912,18 @@
         "title": "Derived Model Id",
         "type": "string"
       },
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
+      },
       "expected_state_sha256": {
         "title": "Expected State Sha256",
         "type": "string"
@@ -900,6 +996,18 @@
         "title": "Component Name",
         "type": "string"
       },
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
+      },
       "feature_name": {
         "anyOf": [
           {
@@ -962,6 +1070,18 @@
         "title": "Component Name",
         "type": "string"
       },
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
+      },
       "feature_name": {
         "anyOf": [
           {
@@ -1019,6 +1139,18 @@
         "title": "Component Name",
         "type": "string"
       },
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
+      },
       "geometry_name": {
         "anyOf": [
           {
@@ -1053,6 +1185,18 @@
         "default": "comp1",
         "title": "Component Name",
         "type": "string"
+      },
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
       },
       "geometry_name": {
         "anyOf": [
@@ -1089,6 +1233,18 @@
   },
   "geometry_derived_clone": {
     "properties": {
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
+      },
       "new_name": {
         "title": "New Name",
         "type": "string"
@@ -1127,6 +1283,18 @@
       "derived_model_id": {
         "title": "Derived Model Id",
         "type": "string"
+      },
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
       },
       "expected_state_sha256": {
         "title": "Expected State Sha256",
@@ -1215,6 +1383,18 @@
         "default": "comp1",
         "title": "Component Name",
         "type": "string"
+      },
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
       },
       "geometry_name": {
         "anyOf": [
@@ -1362,6 +1542,18 @@
         "default": "comp1",
         "title": "Component Name",
         "type": "string"
+      },
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
       },
       "geometry_name": {
         "anyOf": [
@@ -1600,6 +1792,18 @@
         "default": null,
         "title": "Csv Path"
       },
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
+      },
       "expressions": {
         "items": {
           "type": "string"
@@ -1749,6 +1953,18 @@
   },
   "mesh_create": {
     "properties": {
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
+      },
       "mesh_name": {
         "anyOf": [
           {
@@ -1860,6 +2076,18 @@
         "default": "FreeTet",
         "title": "Element Type",
         "type": "string"
+      },
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
       },
       "mesh_name": {
         "default": "mesh1",
@@ -2017,6 +2245,18 @@
   },
   "model_clone": {
     "properties": {
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
+      },
       "model_name": {
         "anyOf": [
           {
@@ -2079,6 +2319,18 @@
         "default": "comp1",
         "title": "Component Name",
         "type": "string"
+      },
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
       },
       "model_name": {
         "anyOf": [
@@ -2162,6 +2414,18 @@
   },
   "model_remove": {
     "properties": {
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
+      },
       "model_name": {
         "title": "Model Name",
         "type": "string"
@@ -2175,6 +2439,18 @@
   },
   "model_save": {
     "properties": {
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
+      },
       "file_path": {
         "anyOf": [
           {
@@ -2241,6 +2517,18 @@
         "default": null,
         "title": "Description"
       },
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
+      },
       "model_name": {
         "anyOf": [
           {
@@ -2289,6 +2577,18 @@
         "title": "Coupling Type",
         "type": "string"
       },
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
+      },
       "model_name": {
         "anyOf": [
           {
@@ -2318,6 +2618,18 @@
   },
   "param_description": {
     "properties": {
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
+      },
       "model_name": {
         "anyOf": [
           {
@@ -2420,6 +2732,18 @@
         "default": null,
         "title": "Description"
       },
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
+      },
       "model_name": {
         "anyOf": [
           {
@@ -2450,6 +2774,18 @@
   },
   "param_sweep_setup": {
     "properties": {
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
+      },
       "model_name": {
         "anyOf": [
           {
@@ -2526,6 +2862,18 @@
         "default": null,
         "title": "Component Name"
       },
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
+      },
       "model_name": {
         "anyOf": [
           {
@@ -2557,6 +2905,18 @@
         },
         "title": "Domain Selection",
         "type": "array"
+      },
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
       },
       "feature_tag": {
         "anyOf": [
@@ -2641,6 +3001,18 @@
         "default": null,
         "title": "Domain Selection"
       },
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
+      },
       "model_name": {
         "anyOf": [
           {
@@ -2683,6 +3055,18 @@
         "default": null,
         "title": "Domain Selection"
       },
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
+      },
       "model_name": {
         "anyOf": [
           {
@@ -2712,6 +3096,18 @@
         ],
         "default": null,
         "title": "Domain Selection"
+      },
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
       },
       "model_name": {
         "anyOf": [
@@ -2743,6 +3139,18 @@
         "default": null,
         "title": "Domain Selection"
       },
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
+      },
       "model_name": {
         "anyOf": [
           {
@@ -2771,6 +3179,18 @@
         },
         "title": "Boundary Numbers",
         "type": "array"
+      },
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
       },
       "model_name": {
         "anyOf": [
@@ -2822,6 +3242,18 @@
         },
         "title": "Boundary Selection",
         "type": "array"
+      },
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
       },
       "model_name": {
         "anyOf": [
@@ -2881,6 +3313,18 @@
   },
   "physics_interactive_setup_flow": {
     "properties": {
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
+      },
       "model_name": {
         "anyOf": [
           {
@@ -2904,6 +3348,18 @@
   },
   "physics_interactive_setup_heat": {
     "properties": {
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
+      },
       "model_name": {
         "anyOf": [
           {
@@ -2970,6 +3426,18 @@
   },
   "physics_remove": {
     "properties": {
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
+      },
       "model_name": {
         "anyOf": [
           {
@@ -3009,6 +3477,18 @@
         ],
         "default": null,
         "title": "Domain Selection"
+      },
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
       },
       "material_name": {
         "title": "Material Name",
@@ -3053,6 +3533,18 @@
   },
   "physics_setup_flow_boundaries": {
     "properties": {
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
+      },
       "inlet_boundaries": {
         "items": {
           "type": "integer"
@@ -3128,6 +3620,18 @@
         "default": "10[W/(m^2*K)]",
         "title": "Convection Coeff",
         "type": "string"
+      },
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
       },
       "heat_flux_boundaries": {
         "anyOf": [
@@ -3739,6 +4243,18 @@
   },
   "study_create": {
     "properties": {
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
+      },
       "model_name": {
         "anyOf": [
           {
@@ -3815,6 +4331,18 @@
   },
   "study_solve": {
     "properties": {
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
+      },
       "model_name": {
         "anyOf": [
           {
@@ -3862,6 +4390,18 @@
   },
   "study_solve_async": {
     "properties": {
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
+      },
       "model_name": {
         "anyOf": [
           {
@@ -3947,6 +4487,18 @@
         ],
         "default": null,
         "title": "Csv Path"
+      },
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
       },
       "expressions": {
         "items": {
@@ -4566,6 +5118,18 @@
         "title": "Derived Model Id",
         "type": "string"
       },
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
+      },
       "expected_state_sha256": {
         "title": "Expected State Sha256",
         "type": "string"
@@ -4929,6 +5493,18 @@
         ],
         "default": null,
         "title": "Expected Mesh Tag"
+      },
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
       },
       "expected_source_sha256": {
         "title": "Expected Source Sha256",
@@ -5430,6 +6006,18 @@
         ],
         "default": null
       },
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
+      },
       "expected_source_sha256": {
         "title": "Expected Source Sha256",
         "type": "string"
@@ -5872,6 +6460,18 @@
         },
         "title": "Expected Material Tags",
         "type": "array"
+      },
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
       },
       "expected_source_sha256": {
         "title": "Expected Source Sha256",
