@@ -79,6 +79,16 @@ def _entries() -> list[dict[str, Any]]:
             readable_versions=("1.0.0", "1.1.0"),
             migration_sources=(legacy_point_audit,),
         ),
+        _entry(
+            "comsol_mcp.portfolio_evidence_request",
+            "1.0.0",
+            "src.evidence.portfolio_verifier",
+        ),
+        _entry(
+            "comsol_mcp.portfolio_evidence_verification",
+            "1.0.0",
+            "src.evidence.portfolio_verifier",
+        ),
         _entry("comsol_mcp.resource_calibration_report", "1.0.0", "src.jobs.resource_admission"),
         _entry("comsol_mcp.resource_journal_entry", "1.0.0", "src.jobs.resource_admission"),
         _entry("comsol_mcp.resource_journal_replay", "1.0.0", "src.jobs.resource_admission"),

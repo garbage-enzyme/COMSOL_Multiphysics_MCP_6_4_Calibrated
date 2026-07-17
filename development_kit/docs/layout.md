@@ -148,6 +148,7 @@ models are intentionally absent.
 - `development_kit/tests/test_parameters.py` — This module tests parameter tools without a COMSOL client.
 - `development_kit/tests/test_periodic_mesh_audit.py` — This module tests periodic mesh evidence and clone-only smoke logic.
 - `development_kit/tests/test_physics.py` — This module tests physics helpers without a COMSOL client.
+- `development_kit/tests/test_portfolio_verifier.py` — This module tests policy-free summary citations against exact hashed evidence chains.
 - `development_kit/tests/test_power_audit.py` — This module tests solver-free declared physical-power evidence.
 - `development_kit/tests/test_process_control.py` — This module tests exact-identity process inspection and termination policy.
 - `development_kit/tests/test_process_inventory_stress.py` — This module stress-tests host inventory under PID churn without COMSOL.
@@ -218,6 +219,7 @@ models are intentionally absent.
 - `src/evidence/field_sampling.py` — This module selects bounded raw samples for one declared slice.
 - `src/evidence/material_expressions.py` — This module constructs and previews dispersive material expressions.
 - `src/evidence/outcome_contract.py` — This module validates solver-free execution, evidence-completeness, and scientific-disposition outcomes.
+- `src/evidence/portfolio_verifier.py` — This module verifies summary claims against exact values in hash-bound evidence chains.
 - `src/evidence/power_audit.py` — This module normalizes declared reference-power evidence.
 - `src/evidence/real_fixture.py` — This module validates portable controlled licensed-fixture contracts.
 - `src/evidence/reference_power_acceptance.py` — This module validates reference-power acceptance and execution inputs.
