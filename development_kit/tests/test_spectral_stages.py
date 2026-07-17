@@ -170,3 +170,22 @@ def test_float_precision_collapse_and_out_of_window_targets_are_rejected(tmp_pat
             previous_stage_sha256=None,
             evidence_row_sha256=None,
         )
+
+
+def test_stage_targets_deduplicate_one_ulp_center_variants(tmp_path):
+    spec = _spec(tmp_path)
+    initial = build_initial_spectral_stage(spec)
+    center = initial["requested_points"][2]["point_fingerprint"]
+    variant = build_spectral_stage_plan(
+        spec,
+        stage_index=1,
+        stage_kind="refinement",
+        planning_reason="precision_regression",
+        window_lower_m=4.9e-6,
+        window_upper_m=5.1e-6,
+        requested_wavelengths_m=[4.999999999999999e-6],
+        previous_stage_sha256=initial["stage_sha256"],
+        evidence_row_sha256="b" * 64,
+    )
+    assert variant["requested_points"][0]["point_fingerprint"] == center
+    assert variant["requested_wavelengths_m"] == [5e-6]

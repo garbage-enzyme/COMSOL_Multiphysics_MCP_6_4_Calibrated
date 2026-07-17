@@ -10,7 +10,11 @@ import math
 from pathlib import Path
 from typing import Any, Mapping
 
-from .spectral_rows import SPECTRAL_STAGE_KINDS, spectral_point_identity
+from .spectral_rows import (
+    SPECTRAL_STAGE_KINDS,
+    normalize_spectral_wavelength_m,
+    spectral_point_identity,
+)
 from .store import atomic_write_json, read_json
 
 
@@ -76,11 +80,13 @@ def inclusive_wavelength_grid(lower_m: object, upper_m: object, point_count: obj
         decimal_upper = Decimal(str(upper))
         decimal_span = decimal_upper - decimal_lower
         values = [
-            float(decimal_lower + decimal_span * index / (point_count - 1))
+            normalize_spectral_wavelength_m(
+                float(decimal_lower + decimal_span * index / (point_count - 1))
+            )
             for index in range(point_count)
         ]
-    values[0] = lower
-    values[-1] = upper
+    values[0] = normalize_spectral_wavelength_m(lower)
+    values[-1] = normalize_spectral_wavelength_m(upper)
     if any(not math.isfinite(value) or value <= 0.0 for value in values):
         raise ValueError("wavelength grid contains a nonpositive or nonfinite value")
     if any(right <= left for left, right in zip(values, values[1:])):
@@ -116,7 +122,9 @@ def build_spectral_stage_plan(
     if not isinstance(requested_wavelengths_m, list) or not requested_wavelengths_m:
         raise ValueError("requested_wavelengths_m must be a nonempty list")
     wavelengths = [
-        _finite(value, f"requested_wavelengths_m[{index}]", positive=True)
+        normalize_spectral_wavelength_m(
+            _finite(value, f"requested_wavelengths_m[{index}]", positive=True)
+        )
         for index, value in enumerate(requested_wavelengths_m)
     ]
     if any(right <= left for left, right in zip(wavelengths, wavelengths[1:])):

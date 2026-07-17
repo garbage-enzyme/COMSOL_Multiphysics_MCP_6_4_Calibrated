@@ -219,3 +219,13 @@ def test_changed_configuration_cannot_reuse_rows(tmp_path):
     changed["configuration_sha256"] = "b" * 64
     with pytest.raises(ValueError, match="configuration hash|spec fingerprint"):
         read_spectral_rows(journal, changed, artifact_root=root)
+
+
+def test_one_ulp_wavelength_variants_share_one_canonical_point_identity(tmp_path):
+    spec = _spec(tmp_path)
+    exact = spectral_point_identity(spec, 5e-6)
+    one_ulp_lower = spectral_point_identity(spec, 4.999999999999999e-6)
+    one_ulp_upper = spectral_point_identity(spec, 5.000000000000001e-6)
+
+    assert exact == one_ulp_lower == one_ulp_upper
+    assert exact["requested_wavelength_m"] == 5e-6

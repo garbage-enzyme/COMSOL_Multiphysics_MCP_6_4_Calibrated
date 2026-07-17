@@ -94,9 +94,18 @@ def spectral_collector_identity(spec: Mapping[str, Any]) -> str:
     return _fingerprint(_mapping(spec.get("collector"), "collector"))
 
 
+def normalize_spectral_wavelength_m(value: object) -> float:
+    """Canonicalize a metre wavelength before deduplication and persistence."""
+    wavelength = _finite(value, "wavelength_m", positive=True)
+    normalized = float(format(wavelength, ".15g"))
+    if not math.isfinite(normalized) or normalized <= 0.0:
+        raise ValueError("normalized wavelength_m must remain positive and finite")
+    return normalized
+
+
 def spectral_point_identity(spec: Mapping[str, Any], wavelength_m: object) -> dict[str, Any]:
     """Create the exact deduplication identity for one normalized wavelength."""
-    wavelength = _finite(wavelength_m, "wavelength_m", positive=True)
+    wavelength = normalize_spectral_wavelength_m(wavelength_m)
     body = {
         "source_model_sha256": _hex_digest(
             spec.get("source_model_sha256"), "source_model_sha256"
@@ -421,6 +430,7 @@ __all__ = [
     "append_spectral_row",
     "completed_spectral_point_fingerprints",
     "read_spectral_rows",
+    "normalize_spectral_wavelength_m",
     "spectral_collector_identity",
     "spectral_point_identity",
 ]
