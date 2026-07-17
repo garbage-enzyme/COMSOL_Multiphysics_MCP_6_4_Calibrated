@@ -225,6 +225,46 @@
     "title": "comsol_statusArguments",
     "type": "object"
   },
+  "convergence_evaluate": {
+    "properties": {
+      "convergence_ladder": {
+        "anyOf": [
+          {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Convergence Ladder"
+      },
+      "convergence_policy": {
+        "additionalProperties": true,
+        "title": "Convergence Policy",
+        "type": "object"
+      },
+      "ladder_spec": {
+        "anyOf": [
+          {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Ladder Spec"
+      }
+    },
+    "required": [
+      "convergence_policy"
+    ],
+    "title": "convergence_evaluateArguments",
+    "type": "object"
+  },
   "datasets_list": {
     "properties": {
       "model_name": {

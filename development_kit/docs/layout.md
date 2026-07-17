@@ -274,6 +274,7 @@ models are intentionally absent.
 
 - `src/tools/__init__.py` — This file exports and registers MCP tool modules.
 - `src/tools/capabilities.py` — This module reports profiles, compatibility, identities, schemas, and feature maturity.
+- `src/tools/convergence_evaluation.py` — This module exposes bounded solver-free convergence evaluation.
 - `src/tools/catalog.py` — This module classifies tools and snapshots deterministic public schemas.
 - `src/tools/derived_geometry.py` — This module applies typed edits only to provenance-tracked derived models.
 - `src/tools/field_evidence.py` — This module exposes read-only field discovery and extraction tools.

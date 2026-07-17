@@ -5,8 +5,12 @@ from __future__ import annotations
 from copy import deepcopy
 import hashlib
 import json
+from pathlib import Path
+import subprocess
+import sys
 
 import pytest
+from mcp.server.fastmcp import FastMCP
 
 from src.evidence.convergence_evaluation import (
     build_convergence_ladder,
@@ -19,6 +23,7 @@ from src.evidence.spectral_characterization import (
     build_spectral_characterization,
     build_spectral_point_bundle,
 )
+from src.tools.convergence_evaluation import register_convergence_evaluation_tools
 
 
 MATERIAL_SHA256 = "d" * 64
@@ -473,3 +478,63 @@ def test_monotonicity_is_observation_and_fixed_reference_is_diagnostic_only():
         assert pair["governs_convergence"] is False
         assert pair["comparisons"][0]["diagnostic_only"] is True
         assert pair["comparisons"][0]["policy_authority"] is False
+
+
+def test_public_tool_returns_separate_ladder_and_policy_artifacts():
+    server = FastMCP("convergence-evaluation-test")
+    register_convergence_evaluation_tools(server)
+    result = server._tool_manager._tools["convergence_evaluate"].fn(
+        ladder_spec={"ladder_id": "three-mesh-ladder", "levels": _levels()},
+        convergence_policy=_policy(),
+    )
+
+    assert result["success"] is True
+    assert result["scientific_disposition"] == "accepted"
+    assert result["artifact_separation"] == {
+        "ordered_evidence": "convergence_ladder",
+        "policy_decision": "convergence_evaluation",
+    }
+    assert result["convergence_evaluation"]["ladder_sha256"] == result[
+        "convergence_ladder"
+    ]["ladder_sha256"]
+    assert result["fixed_reference_governs"] is False
+    assert result["monotonicity_proves_convergence"] is False
+    assert result["undeclared_configuration_started"] is False
+    assert result["solver_started"] is False
+    assert result["filesystem_modified"] is False
+
+
+def test_public_tool_accepts_canonical_ladder_and_rejects_ambiguous_input():
+    ladder = build_convergence_ladder(ladder_id="three-mesh-ladder", levels=_levels())
+    server = FastMCP("convergence-input-test")
+    register_convergence_evaluation_tools(server)
+    tool = server._tool_manager._tools["convergence_evaluate"]
+
+    accepted = tool.fn(convergence_ladder=ladder, convergence_policy=_policy())
+    rejected = tool.fn(convergence_policy=_policy())
+
+    assert accepted["success"] is True
+    assert rejected["success"] is False
+    assert rejected["scientific_disposition"] == "invalid_evidence"
+    assert "exactly one" in rejected["error"]
+    assert rejected["solver_started"] is False
+
+
+def test_public_convergence_tool_never_constructs_a_comsol_client():
+    code = """
+import mph
+mph.Client = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError('Client called'))
+from mcp.server.fastmcp import FastMCP
+from src.tools.convergence_evaluation import register_convergence_evaluation_tools
+server = FastMCP('solver-free-convergence-subprocess')
+register_convergence_evaluation_tools(server)
+result = server._tool_manager._tools['convergence_evaluate'].fn(convergence_policy={})
+assert result['success'] is False
+assert result['solver_started'] is False
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=Path(__file__).parents[2], capture_output=True, text=True,
+        timeout=20, check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
