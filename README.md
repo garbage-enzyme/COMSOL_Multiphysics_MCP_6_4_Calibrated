@@ -112,6 +112,17 @@ Spectral summaries retain raw R/T/A, closure, wavelength synchronization, mesh
 counts, own-peak, FWHM, Q, stage hashes, and exact artifact references when the
 declared collector and evidence support those quantities.
 
+A durable convergence campaign uses `job_type: "convergence_campaign"` and an
+immutable ordered ladder of two to eight exact source or prebuilt derived model
+identities. Every level runs the accepted adaptive spectral job, persists its
+complete hash-bound artifacts, and enters the offline convergence evaluator only
+at its own bracketed peak. The caller supplies metrics, units, tolerances,
+governing-pair and declared-cap rules, total point/wall-time caps, and any early-
+acceptance permission. One solver owner and client serve the whole campaign;
+the worker never invents an extra level and resumes only verified complete level
+rows. This release does not apply arbitrary parameter setters inside a campaign;
+prepare and verify derived model levels before submission.
+
 ### Wave Optics metasurfaces
 
 Use the `wave_optics` profile and follow this bounded sequence:
@@ -177,6 +188,21 @@ Its raw rows span **R = 0.000428181826928114 to 0.506857218704363**,
 **max |A| = 1.695203805977834e-17**, with maximum closure error
 **2.903982508976606e-14** and zero wavelength-sync error. Both runs preserved
 the source SHA-256 and released the solver lease and client.
+
+Licensed convergence acceptance used three neutral periodic-port slab meshes:
+**2,386/560**, **4,798/1,039**, and **13,904/2,752** elements/vertices. Their
+own peaks were **5.200438265718366**, **5.200823291715278**, and
+**5.200959692754783 um**; fitted peak T values were
+**0.9999455861474655**, **0.9999455828498416**, and
+**0.9999455989864663**. The governing medium-to-fine peak shift was
+**0.1364010395043668 nm**. Across 30 raw rows,
+**R = 0.000426677111557779 to 0.506857218704365**,
+**T = 0.493142781295614 to 0.999573322888467**, and
+**max |A| = 4.526776969362989e-17**; maximum closure error was
+**2.48772546066357e-14** and wavelength-sync error was zero. A separate campaign
+with a declared **0.001 nm** peak-shift tolerance completed all three levels as
+`residual` while its amplitude check passed. Both campaigns preserved all source
+hashes and left no client, process, or lease residue.
 
 ## Requirements and installation
 

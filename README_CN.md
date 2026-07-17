@@ -97,6 +97,15 @@ worker driver 身份均相同时，重新提交才会观察到已有任务。
 证据支持相应量时，光谱 summary 会保留原始 R/T/A、闭合误差、波长同步、网格计数、
 own peak、FWHM、Q、stage 哈希及精确 artifact 引用。
 
+持久化收敛任务使用 `job_type: "convergence_campaign"`，并声明 2–8 个严格排序的
+exact source 或预先构建并验证的 derived model identity。每个 level 都复用已验收的
+自适应光谱任务，完整持久化哈希绑定 artifacts，并且只以各 level 自己 bracketed
+own peak 进入离线 convergence evaluator。调用方必须声明 metrics、units、容差、
+governing-pair 与 declared-cap 规则、总 point/wall-time 上限及任何 early-acceptance
+权限。整个 campaign 只使用一个 solver owner 和一个 client，不会自行增加 level；
+resume 只复用验证完整的 level rows。当前版本不会在 campaign 内应用任意 parameter
+setter；derived model level 必须在提交前完成构建和验证。
+
 ### Wave Optics 超表面
 
 使用 `wave_optics` profile，并遵循下面的有界流程：
@@ -160,6 +169,20 @@ own peak **5.200823291715346 um**、**T = 0.9999455828498357**、
 **max |A| = 1.695203805977834e-17**，最大闭合误差为
 **2.903982508976606e-14**，波长同步误差为零。两次运行均保持源模型 SHA-256
 不变，并释放 solver lease 和 client。
+
+licensed convergence 验收使用三层中性 periodic-port slab mesh：单元/顶点数分别为
+**2,386/560**、**4,798/1,039** 和 **13,904/2,752**。各层 own peak 为
+**5.200438265718366**、**5.200823291715278**、**5.200959692754783 um**，拟合
+peak T 分别为 **0.9999455861474655**、**0.9999455828498416**、
+**0.9999455989864663**；governing medium-to-fine peak shift 为
+**0.1364010395043668 nm**。30 行原始数据总体范围为
+**R = 0.000426677111557779 至 0.506857218704365**、
+**T = 0.493142781295614 至 0.999573322888467**、
+**max |A| = 4.526776969362989e-17**；最大闭合误差为
+**2.48772546066357e-14**，波长同步误差为零。独立 campaign 使用声明的
+**0.001 nm** peak-shift tolerance，三层执行全部完成但 disposition 为 `residual`，
+同时 amplitude gate 通过。两次 campaign 均保持全部 source hash 不变，结束后无
+client、进程或 lease 残留。
 
 ## 环境要求与安装
 
