@@ -215,3 +215,25 @@ def test_unplanned_or_wrong_stage_row_fails_closed(tmp_path):
     rows[0]["stage_index"] = 2
     with pytest.raises(ValueError, match="stage identity"):
         build_spectral_progress(spec, [initial], rows)
+
+
+def test_rehashed_adaptive_stage_with_changed_targets_fails_replay(tmp_path):
+    spec = _spec(tmp_path)
+    initial = build_initial_spectral_stage(spec)
+    rows = _rows(spec, initial, [0.1, 0.3, 0.9, 0.3, 0.1])
+    progress = build_spectral_progress(spec, [initial], rows)
+    tampered = dict(progress["next_stage_plan"])
+    tampered["planning_reason"] = "attacker_selected_targets"
+    body = {key: value for key, value in tampered.items() if key != "stage_sha256"}
+    tampered["stage_sha256"] = hashlib.sha256(
+        json.dumps(
+            body,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+
+    with pytest.raises(ValueError, match="deterministic evidence replay"):
+        build_spectral_progress(spec, [initial, tampered], rows)

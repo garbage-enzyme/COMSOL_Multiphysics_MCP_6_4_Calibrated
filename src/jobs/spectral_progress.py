@@ -403,6 +403,114 @@ def _final_candidate_disposition(
     )
 
 
+def _action_after_completed_stage(
+    spec: Mapping[str, Any],
+    plans: list[Mapping[str, Any]],
+    rows: list[Mapping[str, Any]],
+    artifacts: Mapping[str, Any],
+) -> dict[str, Any]:
+    classification = artifacts["decision"]["classification"]
+    if classification == "invalid_evidence":
+        return _completion(
+            reason_code="spectral_point_evidence_invalid",
+            disposition="invalid_evidence",
+            declared_cap_reached=False,
+        )
+    if classification == "boundary_high":
+        next_plan, reason = _expansion_plan(spec, plans, rows, artifacts)
+        if next_plan is not None:
+            return {
+                "action": "schedule_next_stage",
+                "reason_code": reason,
+                "scientific_disposition": "not_assessed",
+                "declared_cap_reached": False,
+                "pending_points": [],
+                "next_stage_plan": next_plan,
+            }
+        return _completion(
+            reason_code=reason,
+            disposition="unresolved_at_declared_cap",
+            declared_cap_reached=True,
+        )
+    if classification == "interior_candidate":
+        refinement_count = sum(plan["stage_kind"] == "refinement" for plan in plans)
+        converged = False
+        if refinement_count:
+            previous_rows = [
+                row for row in rows if int(row["stage_index"]) < len(plans) - 1
+            ]
+            previous_peak = _candidate_peak(_analysis_artifacts(spec, previous_rows))
+            current_peak = _candidate_peak(artifacts)
+            converged = (
+                previous_peak is not None
+                and current_peak is not None
+                and abs(current_peak - previous_peak)
+                <= float(spec["refinement_policy"]["peak_shift_abs_tolerance_m"])
+            )
+        if converged:
+            return _final_candidate_disposition(
+                spec,
+                plans,
+                rows,
+                artifacts,
+                "refinement_converged",
+            )
+        next_plan, reason = _refinement_plan(spec, plans, rows, artifacts)
+        if next_plan is not None:
+            return {
+                "action": "schedule_next_stage",
+                "reason_code": reason,
+                "scientific_disposition": "not_assessed",
+                "declared_cap_reached": False,
+                "pending_points": [],
+                "next_stage_plan": next_plan,
+            }
+        return _final_candidate_disposition(
+            spec,
+            plans,
+            rows,
+            artifacts,
+            reason,
+        )
+    return _completion(
+        reason_code=f"classification_{classification}",
+        disposition="residual",
+        declared_cap_reached=False,
+    )
+
+
+def _validate_adaptive_stage_history(
+    spec: Mapping[str, Any],
+    plans: list[Mapping[str, Any]],
+    rows: list[Mapping[str, Any]],
+) -> None:
+    if not plans:
+        return
+    if plans[0] != build_initial_spectral_stage(spec):
+        raise ValueError("initial spectral stage differs from the immutable job")
+    for index in range(1, len(plans)):
+        prior_plans = plans[:index]
+        prior_fingerprints = {
+            point["point_fingerprint"]
+            for plan in prior_plans
+            for point in plan["requested_points"]
+        }
+        prior_rows = [
+            row for row in rows if row.get("point_fingerprint") in prior_fingerprints
+        ]
+        _planned, observed = _validate_stage_row_membership(prior_plans, prior_rows)
+        if _pending_points(prior_plans[-1], observed):
+            raise ValueError("adaptive spectral stage was frozen before its evidence completed")
+        artifacts = _analysis_artifacts(spec, prior_rows)
+        expected_action = _action_after_completed_stage(
+            spec, prior_plans, prior_rows, artifacts
+        )
+        if expected_action["action"] != "schedule_next_stage":
+            raise ValueError("adaptive spectral stage exists after a terminal scientific decision")
+        if expected_action["next_stage_plan"] != plans[index]:
+            raise ValueError("adaptive spectral stage differs from deterministic evidence replay")
+
+
 def build_spectral_progress(
     spec: Mapping[str, Any],
     stage_plans: list[Mapping[str, Any]],
@@ -425,6 +533,7 @@ def build_spectral_progress(
         artifacts = None
     else:
         _planned, observed = _validate_stage_row_membership(plans, normalized_rows)
+        _validate_adaptive_stage_history(spec, plans, normalized_rows)
         pending = _pending_points(plans[-1], observed)
         if pending:
             action = {
@@ -438,82 +547,9 @@ def build_spectral_progress(
             artifacts = None
         else:
             artifacts = _analysis_artifacts(spec, normalized_rows)
-            classification = artifacts["decision"]["classification"]
-            if classification == "invalid_evidence":
-                action = _completion(
-                    reason_code="spectral_point_evidence_invalid",
-                    disposition="invalid_evidence",
-                    declared_cap_reached=False,
-                )
-            elif classification == "boundary_high":
-                next_plan, reason = _expansion_plan(spec, plans, normalized_rows, artifacts)
-                action = (
-                    {
-                        "action": "schedule_next_stage",
-                        "reason_code": reason,
-                        "scientific_disposition": "not_assessed",
-                        "declared_cap_reached": False,
-                        "pending_points": [],
-                        "next_stage_plan": next_plan,
-                    }
-                    if next_plan is not None
-                    else _completion(
-                        reason_code=reason,
-                        disposition="unresolved_at_declared_cap",
-                        declared_cap_reached=True,
-                    )
-                )
-            elif classification == "interior_candidate":
-                refinement_count = sum(plan["stage_kind"] == "refinement" for plan in plans)
-                converged = False
-                if refinement_count:
-                    previous_rows = [
-                        row for row in normalized_rows if int(row["stage_index"]) < len(plans) - 1
-                    ]
-                    previous_peak = _candidate_peak(_analysis_artifacts(spec, previous_rows))
-                    current_peak = _candidate_peak(artifacts)
-                    converged = (
-                        previous_peak is not None
-                        and current_peak is not None
-                        and abs(current_peak - previous_peak)
-                        <= float(spec["refinement_policy"]["peak_shift_abs_tolerance_m"])
-                    )
-                if converged:
-                    action = _final_candidate_disposition(
-                        spec,
-                        plans,
-                        normalized_rows,
-                        artifacts,
-                        "refinement_converged",
-                    )
-                else:
-                    next_plan, reason = _refinement_plan(
-                        spec, plans, normalized_rows, artifacts
-                    )
-                    action = (
-                        {
-                            "action": "schedule_next_stage",
-                            "reason_code": reason,
-                            "scientific_disposition": "not_assessed",
-                            "declared_cap_reached": False,
-                            "pending_points": [],
-                            "next_stage_plan": next_plan,
-                        }
-                        if next_plan is not None
-                        else _final_candidate_disposition(
-                            spec,
-                            plans,
-                            normalized_rows,
-                            artifacts,
-                            reason,
-                        )
-                    )
-            else:
-                action = _completion(
-                    reason_code=f"classification_{classification}",
-                    disposition="residual",
-                    declared_cap_reached=False,
-                )
+            action = _action_after_completed_stage(
+                spec, plans, normalized_rows, artifacts
+            )
 
     body = {
         "schema_name": SPECTRAL_PROGRESS_SCHEMA_NAME,
