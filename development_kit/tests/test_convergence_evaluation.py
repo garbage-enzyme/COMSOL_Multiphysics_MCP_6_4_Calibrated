@@ -337,7 +337,7 @@ def test_missing_metric_or_minimum_levels_returns_invalid_evidence():
     minimum = evaluate_convergence(ladder, _policy(minimum_level_count=4))
 
     assert missing["scientific_disposition"] == "invalid_evidence"
-    assert missing["evidence_issues"] == ["governing_metric_evidence_incomplete"]
+    assert missing["evidence_issues"] == ["declared_metric_evidence_incomplete"]
     assert minimum["scientific_disposition"] == "invalid_evidence"
     assert minimum["evidence_issues"] == ["minimum_level_count_not_met"]
 
@@ -538,3 +538,47 @@ assert result['solver_started'] is False
         timeout=20, check=False,
     )
     assert completed.returncode == 0, completed.stderr
+
+
+def _canonical_hash(value):
+    return hashlib.sha256(
+        json.dumps(
+            value, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def test_self_rehashed_malformed_level_summary_still_fails_closed():
+    ladder = build_convergence_ladder(ladder_id="three-mesh-ladder", levels=_levels())
+    malformed = deepcopy(ladder)
+    level = malformed["levels"][1]
+    level["measurements"]["peak_wavelength_m"] = "5.02e-6"
+    level_body = dict(level)
+    level_body.pop("level_sha256")
+    level["level_sha256"] = _canonical_hash(level_body)
+    ladder_body = dict(malformed)
+    ladder_body.pop("ladder_sha256")
+    malformed["ladder_sha256"] = _canonical_hash(ladder_body)
+
+    with pytest.raises(ValueError, match="numeric"):
+        validate_convergence_ladder(malformed)
+
+
+def test_missing_middle_level_and_non_governing_missing_evidence_fail_closed():
+    levels = _levels()
+    del levels[1]
+    with pytest.raises(ValueError, match="ordinal|adjacency"):
+        build_convergence_ladder(ladder_id="missing-middle", levels=levels)
+
+    levels = _levels()
+    levels[0]["optional_field_metrics"] = {}
+    ladder = build_convergence_ladder(ladder_id="missing-earlier-field", levels=levels)
+    evaluation = evaluate_convergence(
+        ladder,
+        _policy(metrics=[_metric("field:field_integral", "J", absolute=0.11)]),
+    )
+    assert evaluation["governing_pair_indices"] == [1]
+    assert evaluation["pair_comparisons"][1]["evidence_complete"] is True
+    assert evaluation["scientific_disposition"] == "invalid_evidence"
+    assert evaluation["evidence_issues"] == ["declared_metric_evidence_incomplete"]

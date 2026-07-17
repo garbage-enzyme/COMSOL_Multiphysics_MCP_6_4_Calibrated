@@ -6,6 +6,7 @@ from copy import deepcopy
 import hashlib
 import json
 import math
+from pathlib import PurePosixPath
 import re
 from typing import Any, Mapping
 
@@ -111,6 +112,14 @@ def _bounded_text(value: Any, label: str, maximum: int = 128) -> str:
     if not isinstance(value, str) or not value or len(value) > maximum:
         raise ValueError(f"{label} must be nonempty and at most {maximum} characters")
     return value
+
+
+def _relative_identity(value: Any, label: str) -> str:
+    text = _bounded_text(value, label, 512).replace("\\", "/")
+    path = PurePosixPath(text)
+    if path.is_absolute() or ".." in path.parts or re.match(r"^[A-Za-z]:", text):
+        raise ValueError(f"{label} must be relative and traversal-free")
+    return text
 
 
 def _normalize_mesh_counts(value: Any, label: str) -> dict[str, int]:
@@ -300,24 +309,166 @@ def _summarize_level(value: Any, expected_ordinal: int) -> dict[str, Any]:
 def _validate_level_summary(value: Any, expected_ordinal: int) -> dict[str, Any]:
     label = f"ladder.levels[{expected_ordinal}]"
     item = _exact_fields(value, _LEVEL_SUMMARY_FIELDS, label)
-    supplied_hash = _hash(item["level_sha256"], f"{label}.level_sha256")
-    body = dict(item)
-    body.pop("level_sha256")
-    if _sha256(body) != supplied_hash:
-        raise ValueError(f"{label} hash does not match")
-    if item["ordinal"] != expected_ordinal:
+    ordinal = item["ordinal"]
+    if isinstance(ordinal, bool) or not isinstance(ordinal, int) or ordinal != expected_ordinal:
         raise ValueError(f"{label}.ordinal must match list order")
-    _identifier(item["level_id"], f"{label}.level_id")
+    level_id = _identifier(item["level_id"], f"{label}.level_id")
     predecessor = item["declared_predecessor_level_id"]
     if predecessor is not None:
-        _identifier(predecessor, f"{label}.declared_predecessor_level_id")
-    _hash(item["configuration_sha256"], f"{label}.configuration_sha256")
-    source = _mapping(item["source_model"], f"{label}.source_model")
-    _hash(source.get("sha256"), f"{label}.source_model.sha256")
-    _normalize_mesh_counts(item["mesh_counts"], f"{label}.mesh_counts")
-    _hash(item["material_identity_sha256"], f"{label}.material_identity_sha256")
-    _hash(item["incidence_identity_sha256"], f"{label}.incidence_identity_sha256")
-    return deepcopy(item)
+        predecessor = _identifier(predecessor, f"{label}.declared_predecessor_level_id")
+    source = _exact_fields(
+        item["source_model"], {"relative_identity", "sha256"}, f"{label}.source_model"
+    )
+    normalized_source = {
+        "relative_identity": _relative_identity(
+            source["relative_identity"], f"{label}.source_model.relative_identity"
+        ),
+        "sha256": _hash(source["sha256"], f"{label}.source_model.sha256"),
+    }
+    artifacts = _exact_fields(
+        item["spectral_artifacts"],
+        {
+            "bundle_sha256", "decision_sha256", "characterization_sha256",
+            "analysis_policy_sha256", "measurement_configuration_sha256",
+            "raw_row_sha256s",
+        },
+        f"{label}.spectral_artifacts",
+    )
+    raw_hashes = artifacts["raw_row_sha256s"]
+    if not isinstance(raw_hashes, list) or not 3 <= len(raw_hashes) <= 1024:
+        raise ValueError(f"{label}.spectral_artifacts.raw_row_sha256s is invalid")
+    normalized_raw_hashes = [
+        _hash(value, f"{label}.spectral_artifacts.raw_row_sha256s[{index}]")
+        for index, value in enumerate(raw_hashes)
+    ]
+    if len(normalized_raw_hashes) != len(set(normalized_raw_hashes)):
+        raise ValueError(f"{label}.spectral_artifacts contains duplicate raw row hashes")
+    normalized_artifacts = {
+        name: _hash(artifacts[name], f"{label}.spectral_artifacts.{name}")
+        for name in (
+            "bundle_sha256", "decision_sha256", "characterization_sha256",
+            "analysis_policy_sha256", "measurement_configuration_sha256",
+        )
+    }
+    normalized_artifacts["raw_row_sha256s"] = normalized_raw_hashes
+    evidence_state = item["evidence_state"]
+    if evidence_state not in {"complete_own_peak", "incomplete_own_peak"}:
+        raise ValueError(f"{label}.evidence_state is invalid")
+    measurements = _exact_fields(
+        item["measurements"], set(_BUILTIN_METRIC_UNITS), f"{label}.measurements"
+    )
+    normalized_measurements = {
+        name: None if measurements[name] is None else _finite(
+            measurements[name], f"{label}.measurements.{name}"
+        )
+        for name in _BUILTIN_METRIC_UNITS
+    }
+    complete = all(value is not None for value in normalized_measurements.values())
+    if (evidence_state == "complete_own_peak") != complete:
+        raise ValueError(f"{label}.evidence_state does not match its measurements")
+    sensitivity = _mapping(
+        item["fit_support_sensitivity"], f"{label}.fit_support_sensitivity"
+    )
+    if set(sensitivity) != {"state", "measurements", "policy_authority"}:
+        raise ValueError(f"{label}.fit_support_sensitivity fields are invalid")
+    if sensitivity["state"] not in {
+        "not_requested", "measured_not_classified", "unavailable"
+    }:
+        raise ValueError(f"{label}.fit_support_sensitivity.state is invalid")
+    if not isinstance(sensitivity["policy_authority"], bool) or sensitivity["policy_authority"]:
+        raise ValueError(f"{label}.fit_support_sensitivity cannot have policy authority")
+    sensitivity_measurements = sensitivity["measurements"]
+    if not isinstance(sensitivity_measurements, list) or len(sensitivity_measurements) > 16:
+        raise ValueError(f"{label}.fit_support_sensitivity.measurements is invalid")
+    normalized_sensitivity_measurements = []
+    for index, measurement in enumerate(sensitivity_measurements):
+        measurement_label = f"{label}.fit_support_sensitivity.measurements[{index}]"
+        entry = _mapping(measurement, measurement_label)
+        support_count = _positive_count(
+            entry.get("support_point_count"), f"{measurement_label}.support_point_count"
+        )
+        if entry.get("state") == "fit_failed":
+            if set(entry) != {"support_point_count", "state", "failure_reason"}:
+                raise ValueError(f"{measurement_label} failure fields are invalid")
+            normalized_sensitivity_measurements.append({
+                "support_point_count": support_count,
+                "state": "fit_failed",
+                "failure_reason": _bounded_text(
+                    entry["failure_reason"], f"{measurement_label}.failure_reason", 2048
+                ),
+            })
+            continue
+        expected_measurement = {
+            "support_point_count", "state", "peak_wavelength_m",
+            "peak_response_value", "fwhm_m", "quality_factor",
+            "support_row_hashes",
+        }
+        if entry.get("state") != "measured" or set(entry) != expected_measurement:
+            raise ValueError(f"{measurement_label} measured fields are invalid")
+        support_hashes = entry["support_row_hashes"]
+        if not isinstance(support_hashes, list) or not support_hashes:
+            raise ValueError(f"{measurement_label}.support_row_hashes is invalid")
+        normalized_sensitivity_measurements.append({
+            "support_point_count": support_count,
+            "state": "measured",
+            "peak_wavelength_m": _finite(
+                entry["peak_wavelength_m"], f"{measurement_label}.peak_wavelength_m"
+            ),
+            "peak_response_value": _finite(
+                entry["peak_response_value"], f"{measurement_label}.peak_response_value"
+            ),
+            "fwhm_m": None if entry["fwhm_m"] is None else _finite(
+                entry["fwhm_m"], f"{measurement_label}.fwhm_m"
+            ),
+            "quality_factor": None if entry["quality_factor"] is None else _finite(
+                entry["quality_factor"], f"{measurement_label}.quality_factor"
+            ),
+            "support_row_hashes": [
+                _hash(digest, f"{measurement_label}.support_row_hashes")
+                for digest in support_hashes
+            ],
+        })
+    support_counts = [
+        entry["support_point_count"] for entry in normalized_sensitivity_measurements
+    ]
+    if support_counts != sorted(support_counts) or len(support_counts) != len(set(support_counts)):
+        raise ValueError(f"{label}.fit_support_sensitivity support counts are invalid")
+    normalized_sensitivity = {
+        "state": sensitivity["state"],
+        "measurements": normalized_sensitivity_measurements,
+        "policy_authority": False,
+    }
+    body = {
+        "level_id": level_id,
+        "ordinal": ordinal,
+        "declared_predecessor_level_id": predecessor,
+        "source_model": normalized_source,
+        "configuration_sha256": _hash(
+            item["configuration_sha256"], f"{label}.configuration_sha256"
+        ),
+        "mesh_counts": _normalize_mesh_counts(item["mesh_counts"], f"{label}.mesh_counts"),
+        "material_identity_sha256": _hash(
+            item["material_identity_sha256"], f"{label}.material_identity_sha256"
+        ),
+        "incidence_identity_sha256": _hash(
+            item["incidence_identity_sha256"], f"{label}.incidence_identity_sha256"
+        ),
+        "spectral_artifacts": normalized_artifacts,
+        "evidence_state": evidence_state,
+        "measurements": normalized_measurements,
+        "fit_support_sensitivity": normalized_sensitivity,
+        "optional_field_metrics": _normalize_metric_mapping(
+            item["optional_field_metrics"], f"{label}.optional_field_metrics"
+        ),
+        "fixed_reference_diagnostics": _normalize_metric_mapping(
+            item["fixed_reference_diagnostics"], f"{label}.fixed_reference_diagnostics"
+        ),
+    }
+    supplied_hash = _hash(item["level_sha256"], f"{label}.level_sha256")
+    rebuilt = {**body, "level_sha256": _sha256(body)}
+    if rebuilt["level_sha256"] != supplied_hash or rebuilt != item:
+        raise ValueError(f"{label} is noncanonical or its hash does not match")
+    return rebuilt
 
 
 def _validate_ladder_invariants(levels: list[dict[str, Any]]) -> None:
@@ -773,8 +924,8 @@ def evaluate_convergence(
     issues = []
     if len(levels) < policy["minimum_level_count"]:
         issues.append("minimum_level_count_not_met")
-    if any(not pair["evidence_complete"] for pair in governing):
-        issues.append("governing_metric_evidence_incomplete")
+    if any(not pair["evidence_complete"] for pair in pairs):
+        issues.append("declared_metric_evidence_incomplete")
     if issues:
         disposition = "invalid_evidence"
         reason_code = issues[0]
