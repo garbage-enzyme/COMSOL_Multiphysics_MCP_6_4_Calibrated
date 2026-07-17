@@ -21,7 +21,9 @@
     "test_result": "645 passed, 13 deselected in 69.89 s; pip check clean",
     "licensed_result": {
       "status": "passed",
-      "source_commit": "f1750f79cb51f4e7b623911d2d30be5023e96dba",
+      "source_commit": "afc466f6fd12a5aba92320081588bc6f788c39c2",
+      "source_tree": "ae74deb3ed1202786225ef41987f83ac742b29ff",
+      "receipt_source_commit_before_history_rewrite": "f1750f79cb51f4e7b623911d2d30be5023e96dba",
       "receipt": "D:/experimental_build/runtime/python_compatibility_f1750f7.json",
       "receipt_sha256": "d89f42fe89357560da5bcb312f4ea9ff2571b938e2be0618e5efced382791387",
       "comsol": "6.4.0.293",
