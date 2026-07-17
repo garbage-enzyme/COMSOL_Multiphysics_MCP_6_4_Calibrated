@@ -9,34 +9,10 @@ permissions:
   contents: read
 
 jobs:
-  unit-and-package-py311:
-    name: unit-and-package (Python 3.11, production lane)
-    runs-on: windows-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.11"
-          cache: pip
-      - name: Install dependency-only test environment
-        run: python -m pip install ".[dev]"
-      - name: Verify pip check
-        run: python -m pip check
-      - name: Compile Python sources
-        run: python -m compileall -q src development_kit
-      - name: Run dependency-only regression suite
-        run: python -m pytest -q
-      - name: Build wheel and source distribution
-        run: python -m build
-      - name: Probe a clean non-editable wheel install
-        run: python development_kit/scripts/release_gate.py --skip-tests --allow-dirty --artifact-root "$env:RUNNER_TEMP\comsol_release"
-
   unit-and-package-py314:
-    name: unit-and-package (Python 3.14, experimental lane)
+    name: unit-and-package (Python 3.14, default production lane)
     runs-on: windows-latest
     timeout-minutes: 30
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
@@ -51,6 +27,10 @@ jobs:
         run: python -m compileall -q src development_kit
       - name: Run dependency-only regression suite
         run: python -m pytest -q
+      - name: Build wheel and source distribution
+        run: python -m build
+      - name: Probe a clean non-editable wheel install
+        run: python development_kit/scripts/release_gate.py --skip-tests --allow-dirty --dependency-lock constraints/release_locked_py314.txt --artifact-root "$env:RUNNER_TEMP\comsol_release"
 
   integration-contracts:
     runs-on: ubuntu-latest
@@ -59,7 +39,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.11"
+          python-version: "3.14"
       - name: Validate sanitized real-COMSOL fixture contracts
         run: python -m pip install ".[dev]"
       - run: python -m pytest -q development_kit/tests/test_release_engineering.py

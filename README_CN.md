@@ -126,9 +126,13 @@ python -m pytest -q -m integration development_kit/tests/integration
 ## 环境要求与安装
 
 - COMSOL Multiphysics 6.4 或更新版本
-- Python 3.10+（不要使用 Windows Store 版本）
+- Python 3.14（标准 GIL 版本，不要使用 Windows Store 版本）
 - MPh 1.3.1、`mcp`、`pydantic` 和 `psutil>=5.9.0`
 - 已验证配置中使用 COMSOL 自带的 Java 21 runtime
+
+本项目仍在积极开发，依赖范围与锁定版本可能随时调整，不保证较长的弃用过渡期。
+更新现有部署前，请先在隔离环境中验证 Python、COMSOL/MPh/JPype 及所需可选
+extra 的适配性；全部检查通过后，再替换当前安装并重启 MCP host。
 
 ```bash
 git clone https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated.git

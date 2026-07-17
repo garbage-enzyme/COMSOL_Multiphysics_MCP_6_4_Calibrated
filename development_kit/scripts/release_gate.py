@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import platform
 import subprocess
 import sys
 import tarfile
@@ -47,6 +48,29 @@ def _venv_python(venv_dir: Path) -> Path:
     return venv_dir / "bin" / "python"
 
 
+def _lock_lane(path: Path) -> str:
+    prefix = "# Python-Lane:"
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError as exc:
+        raise ValueError(f"cannot read dependency lock {path}: {exc}") from exc
+    values = [line[len(prefix) :].strip() for line in lines if line.startswith(prefix)]
+    if len(values) != 1:
+        raise ValueError(f"dependency lock must declare exactly one {prefix} header")
+    return values[0]
+
+
+def _validated_dependency_lock(path: Path) -> Path:
+    resolved = path.expanduser().resolve()
+    expected_lane = f"{sys.version_info.major}.{sys.version_info.minor}"
+    actual_lane = _lock_lane(resolved)
+    if actual_lane != expected_lane:
+        raise ValueError(
+            f"dependency lock targets Python {actual_lane}, current interpreter is {expected_lane}"
+        )
+    return resolved
+
+
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -83,6 +107,12 @@ def main() -> int:
     parser.add_argument("--skip-tests", action="store_true")
     parser.add_argument("--skip-install", action="store_true")
     parser.add_argument("--artifact-root", type=Path, default=_default_artifact_root())
+    parser.add_argument(
+        "--dependency-lock",
+        type=Path,
+        default=None,
+        help="complete hash-pinned runtime dependency lock for this Python lane",
+    )
     args = parser.parse_args()
 
     dirty = _git_status()
@@ -94,6 +124,11 @@ def main() -> int:
     run_root = Path(tempfile.mkdtemp(prefix="gate-", dir=artifact_root))
     dist_dir = run_root / "dist"
     probe_result = run_root / "installed_probe.json"
+    dependency_lock = (
+        _validated_dependency_lock(args.dependency_lock)
+        if args.dependency_lock is not None
+        else None
+    )
 
     _run(
         [
@@ -123,7 +158,25 @@ def main() -> int:
         wheels = sorted(dist_dir.glob("*.whl"))
         if len(wheels) != 1:
             raise RuntimeError(f"expected one wheel, found {wheels}")
-        _run([str(python), "-m", "pip", "install", str(wheels[0])], cwd=run_root)
+        if dependency_lock is not None:
+            _run(
+                [
+                    str(python),
+                    "-m",
+                    "pip",
+                    "install",
+                    "--require-hashes",
+                    "-r",
+                    str(dependency_lock),
+                ],
+                cwd=run_root,
+            )
+            _run(
+                [str(python), "-m", "pip", "install", "--no-deps", str(wheels[0])],
+                cwd=run_root,
+            )
+        else:
+            _run([str(python), "-m", "pip", "install", str(wheels[0])], cwd=run_root)
         _run([str(python), "-m", "pip", "check"], cwd=run_root)
         probe_workdir = run_root / "probe_workdir"
         probe_workdir.mkdir()
@@ -145,6 +198,12 @@ def main() -> int:
 
     report = {
         "schema_version": "1.0.0",
+        "environment": {
+            "python": platform.python_version(),
+            "implementation": platform.python_implementation(),
+            "machine": platform.machine(),
+            "platform": platform.platform(),
+        },
         "clean_tree_required": not args.allow_dirty,
         "dirty_entry_count": len(dirty),
         "compile_passed": True,
@@ -152,6 +211,16 @@ def main() -> int:
         "package_build_passed": True,
         "distribution_artifacts": distributions,
         "non_editable_install_run": not args.skip_install,
+        "dependency_lock": (
+            {
+                "path": str(dependency_lock.relative_to(ROOT)),
+                "sha256": _sha256(dependency_lock),
+                "python_lane": _lock_lane(dependency_lock),
+                "require_hashes": True,
+            }
+            if dependency_lock is not None
+            else None
+        ),
         "installed_probe": (
             json.loads(probe_result.read_text(encoding="utf-8"))
             if probe_result.is_file()

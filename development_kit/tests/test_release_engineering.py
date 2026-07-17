@@ -12,7 +12,16 @@ import zipfile
 
 import pytest
 
-from development_kit.scripts.release_gate import _distribution_inventory
+from development_kit.scripts.generate_release_lock import _render_lock
+from development_kit.scripts.python_compatibility_licensed_gate import (
+    _select_expected_backend,
+    _status_is_clean,
+)
+from development_kit.scripts.release_gate import (
+    _distribution_inventory,
+    _lock_lane,
+    _validated_dependency_lock,
+)
 from development_kit.scripts.run_real_release_gate import _wait_clean_ownership
 
 
@@ -82,6 +91,7 @@ def test_support_matrix_matches_frozen_profile_counts_and_declared_dependencies(
     for package in ("matplotlib", "mcp", "mph", "numpy", "pydantic", "psutil", "scipy"):
         assert re.search(rf"(?m)^{package}(?:[<>=]|$)", dependencies)
     assert any(item.startswith("build>=") for item in pyproject["project"]["optional-dependencies"]["dev"])
+    assert pyproject["project"]["requires-python"] == ">=3.14,<3.15"
     assert pyproject["tool"]["hatch"]["build"]["targets"]["sdist"]["exclude"] == [
         "/development_kit"
     ]
@@ -208,9 +218,73 @@ def test_hosted_ci_is_dependency_only_and_real_gate_is_explicit():
     assert "release_gate.py --skip-tests" in workflow
     assert "actions/checkout@v7" in workflow
     assert "actions/setup-python@v6" in workflow
+    assert "continue-on-error" not in workflow
+    assert "Python 3.14, default production lane" in workflow
+    assert "release_locked_py314.txt" in workflow
     assert "-m integration" not in workflow
     assert "RUN_REAL_COMSOL" in real_gate
     assert 'choices=["RUN_REAL_COMSOL"]' in real_gate
+
+
+def test_release_dependency_lock_is_complete_and_matches_current_lane(tmp_path):
+    lane = f"{__import__('sys').version_info.major}.{__import__('sys').version_info.minor}"
+    lock = tmp_path / "lock.txt"
+    lock.write_text(
+        f"# Python-Lane: {lane}\nexample==1.0 \\\n"
+        "    --hash=sha256:" + "a" * 64 + "\n",
+        encoding="utf-8",
+    )
+    assert _lock_lane(lock) == lane
+    assert _validated_dependency_lock(lock) == lock.resolve()
+
+    rendered = _render_lock(
+        lane=lane,
+        python_version=f"{lane}.0",
+        pins=["example==1.0"],
+        hashes={("example", "1.0"): ["b" * 64]},
+    )
+    assert f"# Python-Lane: {lane}" in rendered
+    assert "example==1.0" in rendered
+    assert f"--hash=sha256:{'b' * 64}" in rendered
+
+    production_lock = ROOT / "constraints" / "release_locked_py314.txt"
+    lock_text = production_lock.read_text(encoding="utf-8")
+    assert _lock_lane(production_lock) == "3.14"
+    requirement_lines = [
+        line for line in lock_text.splitlines() if line and not line.startswith(("#", " "))
+    ]
+    assert len(requirement_lines) >= 40
+    assert all(re.fullmatch(r"[a-z0-9-]+==[^ ]+ \\", line) for line in requirement_lines)
+    assert lock_text.count("--hash=sha256:") >= len(requirement_lines)
+
+
+def test_python_compatibility_gate_requires_exact_backend_and_clean_control_plane():
+    backend = _select_expected_backend(
+        [
+            {
+                "name": "6.4",
+                "major": 6,
+                "minor": 4,
+                "patch": 0,
+                "build": 293,
+                "root": "D:/COMSOL64/Multiphysics",
+                "jvm": "D:/COMSOL64/Multiphysics/java/jvm.dll",
+            }
+        ]
+    )
+    assert backend["build"] == 293
+    with pytest.raises(RuntimeError, match="exactly one"):
+        _select_expected_backend([])
+
+    clean = {
+        "collision": False,
+        "process_inventory": {"complete": True, "fresh": True},
+        "lease": {"state": "absent"},
+        "durable_jobs": {"available": True, "active_count": 0},
+    }
+    assert _status_is_clean(clean) is True
+    clean["durable_jobs"]["active_count"] = 1
+    assert _status_is_clean(clean) is False
 
 
 def test_installed_probe_checks_every_profile_without_solver_or_heavy_imports():

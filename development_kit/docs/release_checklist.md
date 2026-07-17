@@ -1,10 +1,11 @@
 # Release checklist
 
-The dependency-only gate is reproducible and must run from a clean tree. It does
-not start COMSOL:
+The dependency-only gate must run from a clean tree and does not start COMSOL.
+The Python 3.14 production lane additionally consumes its complete hash lock:
 
 ```powershell
-python development_kit/scripts/release_gate.py
+python development_kit/scripts/release_gate.py `
+  --dependency-lock constraints/release_locked_py314.txt
 ```
 
 The gate compiles `src`, `tests`, and `scripts`; runs the default unit suite;
@@ -19,7 +20,17 @@ Before a release:
 2. Run the dependency-only gate and archive its sanitized JSON report.
 3. Confirm `development_kit/release/support_matrix.json` matches the intended
    version tuple.
-4. On a free, licensed, version-pinned host, run the serial real gate explicitly:
+4. For a Python runtime promotion, run the provenance-bound compatibility gate
+   from the clean candidate commit:
+
+   ```powershell
+   python development_kit/scripts/python_compatibility_licensed_gate.py `
+     --confirm RUN_REAL_COMSOL `
+     --runtime-root D:\comsol_runtime `
+     --output D:\comsol_release\python_compatibility.json
+   ```
+
+5. On a free, licensed, version-pinned host, run the serial real gate explicitly:
 
    ```powershell
    python development_kit/scripts/run_real_release_gate.py --confirm RUN_REAL_COMSOL `
@@ -27,16 +38,16 @@ Before a release:
      --output D:\comsol_release\real_gate.json
    ```
 
-5. `--fixture-spec` supplies the controlled model/wavelength/top-air environment
+6. `--fixture-spec` supplies the controlled model/wavelength/top-air environment
    for the licensed regression suite without rerunning the optional mandatory-reference-power
    phase. Use `--require-reference-power --reference-power-spec ...` only when that release must generate a
    new reference-power receipt as well.
-6. Require an unchanged COMSOL PID set, an absent solver lease, no external
+7. Require an unchanged COMSOL PID set, an absent solver lease, no external
    collision, source-integrity evidence, and all fixture contracts to pass.
-7. Build once more from the clean release commit and compare discovery output.
-8. Install non-editably in the target MCP environment.
-9. Restart the MCP host; source and profile changes are not hot-reloaded.
-10. Call `capabilities`; require `deployment_identity.source_classification` to
+8. Build once more from the clean release commit and compare discovery output.
+9. Install non-editably in the target MCP environment.
+10. Restart the MCP host; source and profile changes are not hot-reloaded.
+11. Call `capabilities`; require `deployment_identity.source_classification` to
    be `installed_site_package`, compare its profile/schema/catalog hashes with
    the clean release receipt, and then treat installed profile counts as
    authoritative. A matching version string alone is insufficient.

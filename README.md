@@ -131,9 +131,15 @@ The parallel-plate regression returns **1.8593794419540652 pF**, versus the theo
 ## Requirements and installation
 
 - COMSOL Multiphysics 6.4 or newer
-- Python 3.10+ (not the Windows Store build)
+- Python 3.14 (standard GIL-enabled build, not the Windows Store build)
 - MPh 1.3.1, `mcp`, `pydantic`, and `psutil>=5.9.0`
 - COMSOL's Java 21 runtime in the verified configuration
+
+This project is under active development, so dependency ranges and locked
+versions may change without a long deprecation window. Before updating an
+existing deployment, validate Python, COMSOL/MPh/JPype, and any optional extras
+in an isolated environment, then replace the active installation and restart
+the MCP host only after those checks pass.
 
 ```bash
 git clone https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated.git

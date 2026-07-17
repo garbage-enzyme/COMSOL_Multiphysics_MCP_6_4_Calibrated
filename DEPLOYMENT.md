@@ -11,7 +11,7 @@ machine's actual paths.
 Requirements:
 
 - COMSOL Multiphysics 6.4+;
-- Python 3.10+ in an ASCII-only environment path;
+- standard GIL-enabled Python 3.14 in an ASCII-only environment path;
 - COMSOL's Java runtime for the verified local configuration.
 
 Perform a non-editable install:

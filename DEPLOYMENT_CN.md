@@ -10,7 +10,7 @@
 要求：
 
 - COMSOL Multiphysics 6.4+；
-- Python 3.10+，环境路径只使用 ASCII 字符；
+- 标准 GIL 版本的 Python 3.14，环境路径只使用 ASCII 字符；
 - 已验证本机配置所需的 COMSOL Java runtime。
 
 执行非 editable 安装：
