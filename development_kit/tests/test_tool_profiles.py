@@ -120,3 +120,27 @@ def test_capabilities_are_bound_to_each_server_profile(monkeypatch):
     assert core_result["profile_source"]["source"] == "explicit_argument"
     assert wave_result["active_profile"] == "wave_optics"
     assert wave_result["tool_count"] == 66
+
+
+@pytest.mark.parametrize("profile", ["core", "basic_fem", "wave_optics", "semantic_docs"])
+def test_recommended_profiles_exclude_synthetic_async_solver(profile):
+    names = set(_tool_names(create_server(f"no-synthetic-async-{profile}", profile=profile)))
+    assert {
+        "study_solve_async", "study_get_progress", "study_cancel", "study_wait",
+    }.isdisjoint(names)
+
+
+def test_compatibility_profile_and_durable_async_guidance_are_explicit():
+    full = create_server("legacy-async-compatibility", profile="full")
+    names = set(_tool_names(full))
+    capabilities = full._tool_manager._tools["capabilities"].fn()
+
+    assert {
+        "study_solve_async", "study_get_progress", "study_cancel", "study_wait",
+    } <= names
+    assert capabilities["profile"] == "full"
+    assert capabilities["server_safety"]["compatibility_profile_weaker_guarantees"] is True
+    assert capabilities["experimental"]["async_solver"]["recommended_profile_exposure"] is False
+    assert capabilities["experimental"]["async_solver"]["durable_alternative"] == (
+        "job_submit/job_status/job_cancel/job_resume"
+    )

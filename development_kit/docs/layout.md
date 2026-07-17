@@ -145,9 +145,11 @@ models are intentionally absent.
 - `development_kit/tests/test_mim_patch.py` — This module tests patch-metasurface helper behavior without a COMSOL client.
 - `development_kit/tests/test_model.py` — This module tests model management helpers without a COMSOL client.
 - `development_kit/tests/test_outcome_contract.py` — This module tests orthogonal execution, evidence, and scientific outcome contracts.
+- `development_kit/tests/test_operation_arbiter.py` — This module tests durable serialization and responsive control-plane operation classes.
 - `development_kit/tests/test_native_cancel_probe.py` — This module tests native cancellation discovery and allowlisting without COMSOL.
 - `development_kit/tests/test_ownership.py` — This module tests solver ownership, leases, and collision detection.
 - `development_kit/tests/test_parameters.py` — This module tests parameter tools without a COMSOL client.
+- `development_kit/tests/test_path_policy.py` — This module tests configured model-read and owned-artifact path containment.
 - `development_kit/tests/test_periodic_mesh_audit.py` — This module tests periodic mesh evidence and clone-only smoke logic.
 - `development_kit/tests/test_physics.py` — This module tests physics helpers without a COMSOL client.
 - `development_kit/tests/test_portfolio_verifier.py` — This module tests policy-free summary citations against exact hashed evidence chains.
@@ -197,6 +199,8 @@ models are intentionally absent.
 - `src/compatibility_manifest.json` — This file declares exact licensed, dependency-only, and unknown runtime compatibility.
 - `src/deployment_manifest.json` — This file binds deployment identity to frozen tool and profile snapshots.
 - `src/environment_identity.py` — This module reports redacted Python, platform, dependency, and optional-feature identity.
+- `src/operation_arbiter.py` — This module serializes COMSOL-bound calls with a durable exact-process lock.
+- `src/path_policy.py` — This module enforces configured model-read and owned ASCII artifact roots.
 - `src/schema_registry.py` — This module registers named artifact schema producers and readable and writable versions.
 - `src/server.py` — This module creates the profiled MCP server and console entry point.
 

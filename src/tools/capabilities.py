@@ -198,6 +198,9 @@ def get_capabilities(selection: ProfileSelection | None = None) -> dict:
                     "cooperative Python flag; does not interrupt a blocking "
                     "COMSOL study.run()"
                 ),
+                "profiles": ["experimental", "full"],
+                "recommended_profile_exposure": False,
+                "durable_alternative": "job_submit/job_status/job_cancel/job_resume",
             },
             "semantic_manual_search": semantic,
         },
