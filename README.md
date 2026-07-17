@@ -150,7 +150,7 @@ The electrostatics helper can create `ChargeConservation` and a material node be
 
 ## Verification
 
-The current dependency/process-only gate is **694 passed, 13 deselected**. Unit tests are side-effect-free: collection does not start COMSOL, and integration probes run only when explicitly requested in fresh, sequential subprocesses with exact process-tree cleanup. Repository-only tests, release fixtures, gates, and provenance are documented in `development_kit/README.md`; ordinary wheel/sdist artifacts exclude that directory.
+The current dependency/process-only gate is **886 passed, 13 deselected**. Unit tests are side-effect-free: collection does not start COMSOL, and integration probes run only when explicitly requested in fresh, sequential subprocesses with exact process-tree cleanup. Repository-only tests, release fixtures, gates, and provenance are documented in `development_kit/README.md`; ordinary wheel/sdist artifacts exclude that directory.
 
 ```bash
 python -m pytest -q
@@ -160,6 +160,23 @@ python -m pytest -q -m integration development_kit/tests/integration
 Real COMSOL checks include localized JSON transport; circle/union geometry; DXF import; parametric sweep properties; multiphysics coupling; clone cleanup; Unicode-path saving; solver ownership; durable interruption/restart/resume/cancellation; profile discovery; Wave Optics preflight and one-point audit; and bounded manual retrieval.
 
 The Python 3.14 licensed parallel-plate regression returns **1.8593794419540677 pF**, versus the theoretical **1.8593794406880002 pF**, on COMSOL **6.4.0.293**.
+
+Licensed adaptive spectral acceptance on the same COMSOL build used a neutral
+air-dielectric-air periodic-port slab with 4,798 elements and 1,039 vertices.
+The accepted 10-row spectrum found its interpolated own peak at
+**5.200823291715346 um**, with **T = 0.9999455828498357**,
+**FWHM = 0.4807802607560452 um**, and **Q = 10.817464268472365**.
+Its raw rows span **R = 0.000428181826928114 to 0.506857218704363**,
+**T = 0.493142781295616 to 0.999571818173077**, and
+**max |A| = 2.985136902408465e-17**; maximum power-closure error is
+**2.103241887902518e-14** and maximum wavelength-sync error is zero. A separate
+9-row boundary control expanded its declared window and completed normally as
+`unresolved_at_declared_cap`; its raw ranges are
+**R = 0.113752050554409 to 0.697262752330585**,
+**T = 0.302737247669409 to 0.886247949445593**, and
+**max |A| = 1.695203805977834e-17**, with maximum closure error
+**2.903982508976606e-14** and zero wavelength-sync error. Both runs preserved
+the source SHA-256 and released the solver lease and client.
 
 ## Requirements and installation
 
