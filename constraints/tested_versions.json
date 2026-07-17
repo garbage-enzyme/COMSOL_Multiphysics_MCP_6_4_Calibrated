@@ -18,7 +18,7 @@
       "psutil": "7.2.2",
       "pymupdf": "1.28.0"
     },
-    "test_result": "645 passed, 13 deselected in 69.89 s; pip check clean",
+    "test_result": "674 passed, 13 deselected in 70.84 s; clean locked release gate and pip check passed at source commit 4fe80ec86a7148b52183f2bedb0a58df454a7b96",
     "licensed_result": {
       "status": "passed",
       "source_commit": "afc466f6fd12a5aba92320081588bc6f788c39c2",
@@ -51,7 +51,20 @@
     },
     "selection_basis": "earliest reviewed binary-installable versions for standard CPython 3.14 within package metadata ranges",
     "local_resolution_result": "non-editable package install and pip check passed",
-    "hosted_ci_result": "pending"
+    "hosted_ci_result": "passed"
+  },
+  "hosted_dependency_ci": {
+    "workflow": "dependency-only-ci",
+    "run_id": 29575335356,
+    "source_commit": "4fe80ec86a7148b52183f2bedb0a58df454a7b96",
+    "result": "passed",
+    "jobs": {
+      "minimum_supported": "passed",
+      "current_compatible": "passed",
+      "locked_production": "passed",
+      "integration_contracts": "passed",
+      "locked_runtime_vulnerability_policy": "passed"
+    }
   },
   "release_lock": {
     "path": "constraints/release_locked_py314.txt",

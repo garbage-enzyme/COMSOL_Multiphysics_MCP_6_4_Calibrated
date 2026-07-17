@@ -366,7 +366,13 @@ def test_minimum_supported_lane_matches_reviewed_manifest_and_package_ranges():
     assert lane["gil_mode"] == "standard"
     assert pins == lane["direct_dependencies"]
     assert lane["local_resolution_result"] == "non-editable package install and pip check passed"
-    assert lane["hosted_ci_result"] == "pending"
+    assert lane["hosted_ci_result"] == "passed"
+    hosted = manifest["hosted_dependency_ci"]
+    assert hosted["workflow"] == "dependency-only-ci"
+    assert hosted["result"] == "passed"
+    assert re.fullmatch(r"[0-9a-f]{40}", hosted["source_commit"])
+    assert isinstance(hosted["run_id"], int) and hosted["run_id"] > 0
+    assert set(hosted["jobs"].values()) == {"passed"}
 
 
 def test_python_compatibility_gate_requires_exact_backend_and_clean_control_plane():
