@@ -120,6 +120,7 @@ models are intentionally absent.
 - `development_kit/tests/test_convergence_campaign_job.py` — This module tests immutable bounded durable convergence campaign specifications.
 - `development_kit/tests/test_convergence_campaign_rows.py` — This module tests hash-chained durable convergence level evidence and artifact replay.
 - `development_kit/tests/test_convergence_campaign_runner.py` — This module tests composed spectral-level execution, convergence stopping, and exact resume.
+- `development_kit/tests/test_convergence_campaign_worker.py` — This module tests convergence worker ownership, later-level recovery, and cleanup failure.
 - `development_kit/tests/test_convergence_evaluation.py` — This module tests ordered solver-free convergence evidence and policy evaluation.
 - `development_kit/tests/test_deployment_identity.py` — This module tests package version, build identity, and fresh-process deployment consistency.
 - `development_kit/tests/test_derived_geometry.py` — This module tests typed derived-geometry edits without COMSOL.
@@ -257,6 +258,7 @@ models are intentionally absent.
 - `src/jobs/convergence_campaign.py` — This module normalizes immutable bounded durable convergence campaign specifications.
 - `src/jobs/convergence_campaign_rows.py` — This module persists hash-chained convergence level evidence bound to completed spectral artifacts.
 - `src/jobs/convergence_campaign_runner.py` — This module composes completed spectral levels with offline convergence evaluation and durable summaries.
+- `src/jobs/convergence_campaign_worker.py` — This worker runs exact-model convergence ladders under one owned COMSOL attempt.
 - `src/jobs/field_review.py` — This module assembles paired validation-matrix field-review artifacts.
 - `src/jobs/manager.py` — This module handles durable job submission, status, cancellation, resume, and reconciliation.
 - `src/jobs/native_cancel_probe.py` — This module inspects allowlisted native cancellation support.

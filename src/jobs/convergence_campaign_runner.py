@@ -270,8 +270,17 @@ def run_convergence_campaign(
             fault_hook("before_level", {"level_id": level["level_id"]})
         level_dir = root / "levels" / f"{level['ordinal']:02d}-{level['level_id']}"
         result = level_executor(level, level_dir)
-        if not isinstance(result, Mapping) or result.get("completed") is not True:
-            raise RuntimeError("spectral level executor did not complete the declared level")
+        if not isinstance(result, Mapping):
+            raise RuntimeError("spectral level executor returned an invalid result")
+        if result.get("completed") is not True:
+            return {
+                "completed": False,
+                "stop_reason": str(result.get("stop_reason") or "spectral_level_incomplete"),
+                "solved_this_attempt": solved_this_attempt,
+                "skipped_complete": skipped_complete,
+                "progress": progress,
+                "level_result": dict(result),
+            }
         row = append_convergence_campaign_level(
             journal,
             spec,
