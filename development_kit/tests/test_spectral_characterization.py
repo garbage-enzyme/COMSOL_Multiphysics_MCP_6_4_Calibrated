@@ -16,6 +16,8 @@ from src.evidence.spectral_characterization import (
     build_spectral_analysis_decision,
     build_spectral_characterization,
     build_spectral_point_bundle,
+    normalize_spectral_analysis_policy,
+    normalize_spectral_measurement_configuration,
     validate_spectral_analysis_decision,
     validate_spectral_characterization,
     validate_spectral_point_bundle,
@@ -82,6 +84,33 @@ def _policy(**overrides):
     }
     value.update(overrides)
     return value
+
+
+def test_public_policy_normalizers_are_canonical_and_fail_closed():
+    policy = normalize_spectral_analysis_policy(_policy())
+    measurement = normalize_spectral_measurement_configuration(
+        {
+            "peak_method": "quadratic_interpolation",
+            "baseline_rule": "local_prominence",
+            "baseline_response_value": None,
+            "fwhm_definition": "half_prominence",
+            "fit_support_points": None,
+            "fit_support_sensitivity_points": [],
+            "local_polynomial_degree": None,
+            "fit_max_evaluations": None,
+        }
+    )
+
+    assert policy == _policy()
+    assert measurement["peak_method"] == "quadratic_interpolation"
+    policy["response_quantity"] = "R"
+    assert normalize_spectral_analysis_policy(_policy())["response_quantity"] == "A"
+    with pytest.raises(ValueError, match="fields"):
+        normalize_spectral_analysis_policy({**_policy(), "hidden_threshold": 1.0})
+    with pytest.raises(ValueError, match="fields"):
+        normalize_spectral_measurement_configuration(
+            {**measurement, "automatic_acceptance": True}
+        )
 
 
 def test_bundle_is_deterministic_hash_bound_and_unknown_fields_fail_closed():

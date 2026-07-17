@@ -318,6 +318,11 @@ def _normalize_analysis_policy(value: Any) -> dict[str, Any]:
     }
 
 
+def normalize_spectral_analysis_policy(value: Any) -> dict[str, Any]:
+    """Return one canonical caller-owned spectral evidence policy."""
+    return deepcopy(_normalize_analysis_policy(value))
+
+
 def build_spectral_analysis_decision(
     bundle: Mapping[str, Any], analysis_policy: Mapping[str, Any]
 ) -> dict[str, Any]:
@@ -544,6 +549,11 @@ def _normalize_measurement_configuration(value: Any) -> dict[str, str]:
         "local_polynomial_degree": degree,
         "fit_max_evaluations": max_evaluations,
     }
+
+
+def normalize_spectral_measurement_configuration(value: Any) -> dict[str, Any]:
+    """Return one canonical caller-owned peak and linewidth configuration."""
+    return deepcopy(_normalize_measurement_configuration(value))
 
 
 def _row_reference(row: Mapping[str, Any]) -> dict[str, str]:
@@ -1138,6 +1148,8 @@ __all__ = [
     "build_spectral_analysis_decision",
     "build_spectral_characterization",
     "build_spectral_point_bundle",
+    "normalize_spectral_analysis_policy",
+    "normalize_spectral_measurement_configuration",
     "validate_spectral_analysis_decision",
     "validate_spectral_characterization",
     "validate_spectral_point_bundle",
