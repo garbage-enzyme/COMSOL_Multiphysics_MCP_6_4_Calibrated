@@ -9,6 +9,38 @@ permissions:
   contents: read
 
 jobs:
+  dependency-compatibility:
+    name: dependency compatibility (${{ matrix.lane }}, Python 3.14)
+    runs-on: windows-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: [minimum-supported, current-compatible]
+    steps:
+      # actions/checkout v7.0.0
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      # actions/setup-python v6.2.0
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            constraints/minimum_supported_py314.txt
+      - name: Install minimum-supported dependency lane
+        if: matrix.lane == 'minimum-supported'
+        run: python -m pip install --constraint constraints/minimum_supported_py314.txt ".[dev]"
+      - name: Install current-compatible dependency lane
+        if: matrix.lane == 'current-compatible'
+        run: python -m pip install --upgrade --upgrade-strategy eager ".[dev]"
+      - name: Verify resolved dependencies
+        run: python -m pip check
+      - name: Compile Python sources
+        run: python -m compileall -q src development_kit
+      - name: Run dependency and process regression suite
+        run: python -m pytest -q
+
   unit-and-package-py314:
     name: unit-and-package (Python 3.14, default production lane)
     runs-on: windows-latest

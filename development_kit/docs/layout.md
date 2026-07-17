@@ -24,6 +24,7 @@ models are intentionally absent.
 - `config/hermes-mcp.example.yaml` — This file provides an example Hermes Agent stdio MCP configuration.
 - `config/opencode-mcp.example.json` — This file provides an example opencode stdio MCP configuration.
 - `constraints/release_locked_py314.txt` — This file locks the complete Python 3.14 runtime dependency set with hashes.
+- `constraints/minimum_supported_py314.txt` — This file pins the reviewed minimum binary-installable Python 3.14 direct dependencies.
 - `constraints/tested_versions.json` — This file records the human-reviewed direct dependency versions and compatibility lane.
 - `docs/profile_migration.md` — This file explains static profile selection and migration from broader tool surfaces.
 

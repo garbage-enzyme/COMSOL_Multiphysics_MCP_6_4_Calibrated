@@ -270,7 +270,7 @@ def test_hosted_ci_is_dependency_only_and_real_gate_is_explicit():
         r"(?m)^\s*- uses: (actions/(?:checkout|setup-python))@([^\s]+)$",
         workflow + "\n" + dependency_report,
     )
-    assert len(action_references) == 6
+    assert len(action_references) == 8
     assert all(re.fullmatch(r"[0-9a-f]{40}", revision) for _action, revision in action_references)
     assert "# actions/checkout v7.0.0" in workflow
     assert "# actions/setup-python v6.2.0" in workflow
@@ -278,6 +278,12 @@ def test_hosted_ci_is_dependency_only_and_real_gate_is_explicit():
     assert "# actions/setup-python v6.2.0" in dependency_report
     assert "continue-on-error" not in workflow
     assert "Python 3.14, default production lane" in workflow
+    assert "dependency compatibility (${{ matrix.lane }}, Python 3.14)" in workflow
+    assert "matrix:" in workflow
+    assert "minimum-supported" in workflow
+    assert "current-compatible" in workflow
+    assert "constraints/minimum_supported_py314.txt" in workflow
+    assert "--upgrade-strategy eager" in workflow
     assert "release_locked_py314.txt" in workflow
     assert "-m integration" not in workflow
     assert "RUN_REAL_COMSOL" in real_gate
@@ -314,6 +320,25 @@ def test_release_dependency_lock_is_complete_and_matches_current_lane(tmp_path):
     assert len(requirement_lines) >= 40
     assert all(re.fullmatch(r"[a-z0-9-]+==[^ ]+ \\", line) for line in requirement_lines)
     assert lock_text.count("--hash=sha256:") >= len(requirement_lines)
+
+
+def test_minimum_supported_lane_matches_reviewed_manifest_and_package_ranges():
+    manifest = _json(ROOT / "constraints" / "tested_versions.json")
+    lane = manifest["minimum_supported_python_3_14"]
+    constraints_path = ROOT / lane["constraints"]
+    pins = {}
+    for line in constraints_path.read_text(encoding="utf-8").splitlines():
+        if not line or line.startswith("#"):
+            continue
+        name, version = line.split("==", 1)
+        pins[name] = version
+
+    assert lane["python"] == "3.14.6"
+    assert lane["abi"] == "cp314-win_amd64"
+    assert lane["gil_mode"] == "standard"
+    assert pins == lane["direct_dependencies"]
+    assert lane["local_resolution_result"] == "non-editable package install and pip check passed"
+    assert lane["hosted_ci_result"] == "pending"
 
 
 def test_python_compatibility_gate_requires_exact_backend_and_clean_control_plane():

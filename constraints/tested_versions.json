@@ -34,6 +34,25 @@
       "cleanup_passed": true
     }
   },
+  "minimum_supported_python_3_14": {
+    "python": "3.14.6",
+    "abi": "cp314-win_amd64",
+    "gil_mode": "standard",
+    "platform": "win_amd64",
+    "constraints": "constraints/minimum_supported_py314.txt",
+    "direct_dependencies": {
+      "mcp": "1.28.1",
+      "mph": "1.3.1",
+      "matplotlib": "3.10.7",
+      "numpy": "2.3.3",
+      "scipy": "1.16.2",
+      "pydantic": "2.12.3",
+      "psutil": "7.1.0"
+    },
+    "selection_basis": "earliest reviewed binary-installable versions for standard CPython 3.14 within package metadata ranges",
+    "local_resolution_result": "non-editable package install and pip check passed",
+    "hosted_ci_result": "pending"
+  },
   "release_lock": {
     "path": "constraints/release_locked_py314.txt",
     "sha256": "d8304e7416d0be3a8f8c5613740f75c05c28483ddee3e376e4106b4a1db24c76",
