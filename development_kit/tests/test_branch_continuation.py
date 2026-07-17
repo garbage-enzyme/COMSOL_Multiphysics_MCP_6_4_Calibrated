@@ -107,13 +107,16 @@ def _state(
     *,
     coordinate_value: float,
     coordinate_identity: str | None = None,
-    search_lower: float = 4.0e-6,
-    search_upper: float = 6.0e-6,
+    search_lower: float | None = None,
+    search_upper: float | None = None,
     amplitude: float = 0.9,
 ):
     bundle, decision, characterization = _spectral_artifacts(
         index, center, amplitude=amplitude
     )
+    requested_wavelengths = [
+        row["requested_wavelength_m"] for row in bundle["rows"]
+    ]
     return {
         "state_id": f"coord-{index}",
         "ordinal": index,
@@ -127,8 +130,8 @@ def _state(
         "configuration_sha256": bundle["configuration_sha256"],
         "material_identity_sha256": MATERIAL_SHA256,
         "search_window_m": {
-            "lower_m": search_lower,
-            "upper_m": search_upper,
+            "lower_m": min(requested_wavelengths) if search_lower is None else search_lower,
+            "upper_m": max(requested_wavelengths) if search_upper is None else search_upper,
         },
         "spectral_bundle": bundle,
         "analysis_decision": decision,
@@ -208,7 +211,7 @@ class TestContinuationStateBinding:
         tampered = deepcopy(built)
         tampered["states"][0]["candidate"]["peak_wavelength_m"] = 3.0e-6
         tampered["states"][0]["state_sha256"] = "0" * 64
-        with pytest.raises(ValueError, match="noncanonical"):
+        with pytest.raises(ValueError, match="outside its tested search window"):
             validate_continuation_states(tampered)
 
     def test_wrong_ordinal_is_rejected(self):
@@ -236,6 +239,7 @@ class TestContinuationStateBinding:
         states[1]["candidate_measurements"] = deepcopy(states[0]["candidate_measurements"])
         states[1]["source_model_sha256"] = states[0]["source_model_sha256"]
         states[1]["configuration_sha256"] = states[0]["configuration_sha256"]
+        states[1]["search_window_m"] = deepcopy(states[0]["search_window_m"])
         with pytest.raises(ValueError, match="duplicate configuration hashes"):
             build_continuation_states(states_id="angle-sweep", states=states)
 
@@ -291,6 +295,26 @@ class TestContinuationStateBinding:
         states[0]["search_window_m"]["upper_m"] = 4.0e-6
         with pytest.raises(ValueError, match="search_window"):
             build_continuation_states(states_id="angle-sweep", states=states)
+
+    def test_search_window_must_exactly_match_raw_requested_wavelengths(self):
+        states = _build_dispersive_states(3)
+        states[0]["search_window_m"] = {"lower_m": 4.0e-6, "upper_m": 6.0e-6}
+        with pytest.raises(ValueError, match="tested requested-wavelength domain"):
+            build_continuation_states(states_id="mismatched-domain", states=states)
+
+    def test_declared_four_to_six_micrometers_rejects_eight_micrometer_rows(self):
+        states = _build_dispersive_states(3)
+        out_of_domain = _state(
+            0,
+            8.0e-6,
+            None,
+            coordinate_value=0.0,
+            search_lower=4.0e-6,
+            search_upper=6.0e-6,
+        )
+        states[0] = out_of_domain
+        with pytest.raises(ValueError, match="tested requested-wavelength domain"):
+            build_continuation_states(states_id="mismatched-domain", states=states)
 
     def test_unrecognized_polarization_is_rejected(self):
         states = _build_dispersive_states(3)
@@ -381,7 +405,10 @@ class TestContinuationStateBinding:
             "source_model_sha256": SOURCE_SHA,
             "configuration_sha256": configuration,
             "material_identity_sha256": MATERIAL_SHA256,
-            "search_window_m": {"lower_m": 4.0e-6, "upper_m": 6.0e-6},
+            "search_window_m": {
+                "lower_m": min(wavelengths),
+                "upper_m": max(wavelengths),
+            },
             "spectral_bundle": bundle,
             "analysis_decision": decision,
             "candidate_measurements": characterization,
@@ -406,7 +433,7 @@ class TestContinuationStateBinding:
         states = _build_dispersive_states(3)
         built = build_continuation_states(states_id="angle-sweep", states=states)
         tampered = deepcopy(built)
-        tampered["schema_version"] = "2.0.0"
+        tampered["schema_version"] = "3.0.0"
         with pytest.raises(ValueError, match="schema is unsupported"):
             validate_continuation_states(tampered)
 
@@ -483,7 +510,10 @@ class TestContinuationStateBinding:
             "source_model_sha256": _hex_id("boundary-source-0"),
             "configuration_sha256": configuration,
             "material_identity_sha256": MATERIAL_SHA256,
-            "search_window_m": {"lower_m": 4.0e-6, "upper_m": 6.0e-6},
+            "search_window_m": {
+                "lower_m": min(wavelengths),
+                "upper_m": max(wavelengths),
+            },
             "spectral_bundle": bundle,
             "analysis_decision": decision,
             "candidate_measurements": characterization,
@@ -550,7 +580,7 @@ class TestBranchContinuationPlanning:
             validate_branch_continuation_plan(tampered, states=states)
 
     def test_peak_beyond_guard_window_is_not_followed(self):
-        states_input = _build_dispersive_states(3, shift=1.0e-6)
+        states_input = _build_dispersive_states(3, shift=0.8e-6)
         states = build_continuation_states(states_id="wide-shift", states=states_input)
         plan = plan_branch_continuation(states, _continuation_policy(guard_window_m=0.1e-6))
         assert plan["scientific_disposition"] == "residual"
@@ -558,7 +588,7 @@ class TestBranchContinuationPlanning:
         assert plan["branch_followed_transition_count"] == 0
 
     def test_peak_beyond_guard_at_declared_cap_is_unresolved(self):
-        states_input = _build_dispersive_states(3, shift=1.0e-6)
+        states_input = _build_dispersive_states(3, shift=0.8e-6)
         states = build_continuation_states(states_id="wide-shift", states=states_input)
         plan = plan_branch_continuation(
             states, _continuation_policy(guard_window_m=0.1e-6, declared_cap_reached=True)
@@ -639,7 +669,10 @@ class TestBranchContinuationPlanning:
             "source_model_sha256": _hex_id("flat-source-1"),
             "configuration_sha256": configuration,
             "material_identity_sha256": MATERIAL_SHA256,
-            "search_window_m": {"lower_m": 4.0e-6, "upper_m": 6.0e-6},
+            "search_window_m": {
+                "lower_m": min(wavelengths),
+                "upper_m": max(wavelengths),
+            },
             "spectral_bundle": flat_bundle,
             "analysis_decision": flat_decision,
             "candidate_measurements": flat_characterization,
@@ -684,7 +717,7 @@ class TestBranchContinuationPlanning:
         states_input = _build_dispersive_states(3)
         states = build_continuation_states(states_id="test", states=states_input)
         policy = _continuation_policy()
-        policy["absolute_bounds_m"] = {"lower_m": 4.5e-6, "upper_m": 5.5e-6}
+        policy["absolute_bounds_m"] = {"lower_m": 4.9e-6, "upper_m": 5.1e-6}
         with pytest.raises(ValueError, match="absolute_bounds_m"):
             plan_branch_continuation(states, policy)
 

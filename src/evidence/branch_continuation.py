@@ -19,7 +19,7 @@ from src.evidence.spectral_characterization import (
 
 BRANCH_CONTINUATION_STATES_SCHEMA = "comsol_mcp.branch_continuation_states"
 BRANCH_CONTINUATION_PLAN_SCHEMA = "comsol_mcp.branch_continuation_plan"
-BRANCH_CONTINUATION_SCHEMA_VERSION = "1.0.0"
+BRANCH_CONTINUATION_SCHEMA_VERSION = "2.0.0"
 MAX_CONTINUATION_STATES = 64
 MAX_OPTIONAL_METRICS = 32
 
@@ -39,6 +39,7 @@ _STATE_INPUT_FIELDS = {
 }
 _WINDOW_FIELDS = {"lower_m", "upper_m"}
 _METRIC_FIELDS = {"value", "unit", "evidence_artifact_sha256"}
+_SPECTRAL_ROW_BINDING_FIELDS = {"raw_row_sha256", "requested_wavelength_m"}
 _CANDIDATE_FIELDS = {
     "classification", "measurement_state",
     "peak_wavelength_m", "peak_response_value",
@@ -268,6 +269,28 @@ def _summarize_state(value: Any, expected_ordinal: int) -> dict[str, Any]:
     if bundle["configuration_sha256"] != configuration_hash:
         raise ValueError(f"{label} configuration hash does not match its spectral bundle")
     candidate = _extract_candidate(decision, characterization, bundle)
+    spectral_rows = [
+        {
+            "raw_row_sha256": row["raw_row_sha256"],
+            "requested_wavelength_m": row["requested_wavelength_m"],
+        }
+        for row in bundle["rows"]
+    ]
+    requested_wavelengths = [
+        row["requested_wavelength_m"] for row in spectral_rows
+    ]
+    if (
+        search_window["lower_m"] != min(requested_wavelengths)
+        or search_window["upper_m"] != max(requested_wavelengths)
+    ):
+        raise ValueError(
+            f"{label}.search_window_m must exactly match the tested requested-wavelength domain"
+        )
+    candidate_peak = candidate["peak_wavelength_m"]
+    if candidate_peak is not None and not (
+        search_window["lower_m"] <= candidate_peak <= search_window["upper_m"]
+    ):
+        raise ValueError(f"{label} measured candidate lies outside its tested search window")
     body = {
         "state_id": state_id,
         "ordinal": ordinal,
@@ -292,9 +315,7 @@ def _summarize_state(value: Any, expected_ordinal: int) -> dict[str, Any]:
             "measurement_configuration_sha256": characterization[
                 "measurement_configuration_sha256"
             ],
-            "raw_row_sha256s": [
-                row["raw_row_sha256"] for row in bundle["rows"]
-            ],
+            "raw_rows": spectral_rows,
         },
         "candidate": candidate,
         "optional_field_metrics": _normalize_metric_mapping(
@@ -352,19 +373,36 @@ def _validate_state_summary(value: Any, expected_ordinal: int) -> dict[str, Any]
         {
             "bundle_sha256", "decision_sha256", "characterization_sha256",
             "analysis_policy_sha256", "measurement_configuration_sha256",
-            "raw_row_sha256s",
+            "raw_rows",
         },
         f"{label}.spectral_artifacts",
     )
-    raw_hashes = artifacts["raw_row_sha256s"]
-    if not isinstance(raw_hashes, list) or not 3 <= len(raw_hashes) <= 1024:
-        raise ValueError(f"{label}.spectral_artifacts.raw_row_sha256s is invalid")
-    normalized_raw_hashes = [
-        _hash(digest, f"{label}.spectral_artifacts.raw_row_sha256s[{index}]")
-        for index, digest in enumerate(raw_hashes)
-    ]
-    if len(normalized_raw_hashes) != len(set(normalized_raw_hashes)):
+    raw_rows = artifacts["raw_rows"]
+    if not isinstance(raw_rows, list) or not 3 <= len(raw_rows) <= 1024:
+        raise ValueError(f"{label}.spectral_artifacts.raw_rows is invalid")
+    normalized_raw_rows = []
+    for index, raw_row in enumerate(raw_rows):
+        raw_label = f"{label}.spectral_artifacts.raw_rows[{index}]"
+        raw_item = _exact_fields(raw_row, _SPECTRAL_ROW_BINDING_FIELDS, raw_label)
+        normalized_raw_rows.append({
+            "raw_row_sha256": _hash(
+                raw_item["raw_row_sha256"], f"{raw_label}.raw_row_sha256"
+            ),
+            "requested_wavelength_m": _finite(
+                raw_item["requested_wavelength_m"],
+                f"{raw_label}.requested_wavelength_m",
+            ),
+        })
+    raw_hashes = [row["raw_row_sha256"] for row in normalized_raw_rows]
+    if len(raw_hashes) != len(set(raw_hashes)):
         raise ValueError(f"{label}.spectral_artifacts contains duplicate raw row hashes")
+    requested_wavelengths = [
+        row["requested_wavelength_m"] for row in normalized_raw_rows
+    ]
+    if len(requested_wavelengths) != len(set(requested_wavelengths)):
+        raise ValueError(
+            f"{label}.spectral_artifacts contains duplicate requested wavelengths"
+        )
     normalized_artifacts = {
         name: _hash(artifacts[name], f"{label}.spectral_artifacts.{name}")
         for name in (
@@ -372,7 +410,7 @@ def _validate_state_summary(value: Any, expected_ordinal: int) -> dict[str, Any]
             "analysis_policy_sha256", "measurement_configuration_sha256",
         )
     }
-    normalized_artifacts["raw_row_sha256s"] = normalized_raw_hashes
+    normalized_artifacts["raw_rows"] = normalized_raw_rows
     candidate = _exact_fields(item["candidate"], _CANDIDATE_FIELDS, f"{label}.candidate")
     classification = candidate["classification"]
     if classification not in _VALID_CLASSIFICATIONS:
@@ -423,6 +461,18 @@ def _validate_state_summary(value: Any, expected_ordinal: int) -> dict[str, Any]
         )
     if complete and normalized_candidate["peak_wavelength_m"] is None:
         raise ValueError(f"{label}.candidate measured state requires a peak wavelength")
+    if (
+        search_window["lower_m"] != min(requested_wavelengths)
+        or search_window["upper_m"] != max(requested_wavelengths)
+    ):
+        raise ValueError(
+            f"{label}.search_window_m must exactly match the tested requested-wavelength domain"
+        )
+    candidate_peak = normalized_candidate["peak_wavelength_m"]
+    if candidate_peak is not None and not (
+        search_window["lower_m"] <= candidate_peak <= search_window["upper_m"]
+    ):
+        raise ValueError(f"{label} measured candidate lies outside its tested search window")
     body = {
         "state_id": state_id,
         "ordinal": ordinal,
