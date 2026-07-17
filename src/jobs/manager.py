@@ -16,6 +16,7 @@ import psutil
 
 from .process_control import inspect_identity, verify_absent
 from .resource_admission import normalize_resource_policy
+from .branch_continuation_campaign import normalize_branch_continuation_campaign_spec
 from .convergence_campaign import normalize_convergence_campaign_spec
 from .spectral_characterization import normalize_spectral_characterization_job_spec
 from .validation_matrix import normalize_validation_matrix_spec
@@ -161,6 +162,7 @@ def _worker_module(job_type: str) -> str:
         "validation_matrix": "src.jobs.validation_worker",
         "spectral_characterization": "src.jobs.spectral_worker",
         "convergence_campaign": "src.jobs.convergence_campaign_worker",
+        "branch_continuation_campaign": "src.jobs.branch_continuation_campaign_worker",
     }
     try:
         return modules[job_type]
@@ -176,6 +178,8 @@ def _point_count(spec: dict[str, Any]) -> int:
     if spec["job_type"] == "spectral_characterization":
         return int(spec["maximum_points"])
     if spec["job_type"] == "convergence_campaign":
+        return int(spec["maximum_total_points"])
+    if spec["job_type"] == "branch_continuation_campaign":
         return int(spec["maximum_total_points"])
     return len(spec["parameter_values"])
 
@@ -213,6 +217,8 @@ class JobManager:
             spec = normalize_spectral_characterization_job_spec(raw_spec)
         elif job_type == "convergence_campaign":
             spec = normalize_convergence_campaign_spec(raw_spec)
+        elif job_type == "branch_continuation_campaign":
+            spec = normalize_branch_continuation_campaign_spec(raw_spec)
         else:
             spec = validate_staged_sweep_spec(raw_spec)
         worker_module = _worker_module(spec["job_type"])
@@ -235,7 +241,8 @@ class JobManager:
             "last_error": None,
         }
         if spec["job_type"] in {
-            "validation_matrix", "spectral_characterization", "convergence_campaign"
+            "validation_matrix", "spectral_characterization", "convergence_campaign",
+            "branch_continuation_campaign",
         }:
             with JobLock(self.store.root / ".submit.lock"):
                 duplicate = self._find_exact_duplicate(
@@ -306,11 +313,15 @@ class JobManager:
         model_path = (
             spec["levels"][0]["spectral_job"]["source_model_path"]
             if spec.get("job_type") == "convergence_campaign"
+            else spec["states"][0]["spectral_job"]["source_model_path"]
+            if spec.get("job_type") == "branch_continuation_campaign"
             else spec["source_model_path"]
         )
         requested_version = (
             spec["levels"][0]["spectral_job"].get("version")
             if spec.get("job_type") == "convergence_campaign"
+            else spec["states"][0]["spectral_job"].get("version")
+            if spec.get("job_type") == "branch_continuation_campaign"
             else spec.get("version")
         )
         if self._preflight is not None:
@@ -598,6 +609,7 @@ class JobManager:
             "validation_matrix",
             "spectral_characterization",
             "convergence_campaign",
+            "branch_continuation_campaign",
         }:
             if self._preflight is None:
                 from src.tools.ownership import SolverOwnership
@@ -761,6 +773,25 @@ class JobManager:
                     "pending_levels": len(spec["levels"]) - len(rows),
                     "completed_level_ids": [row["level_id"] for row in rows],
                     "last_level_row_sha256": rows[-1]["row_sha256"] if rows else None,
+                    "maximum_total_points": spec["maximum_total_points"],
+                }
+            elif spec.get("job_type") == "branch_continuation_campaign":
+                from .branch_continuation_campaign_rows import (
+                    read_branch_continuation_campaign_states,
+                )
+
+                directory = self.store.job_dir(job_id)
+                rows = read_branch_continuation_campaign_states(
+                    directory / "continuation_states.jsonl",
+                    spec,
+                    artifact_root=directory,
+                )
+                state["branch_continuation_progress"] = {
+                    "declared_states": len(spec["states"]),
+                    "completed_states": len(rows),
+                    "pending_states": len(spec["states"]) - len(rows),
+                    "completed_state_ids": [row["state_id"] for row in rows],
+                    "last_state_row_sha256": rows[-1]["row_sha256"] if rows else None,
                     "maximum_total_points": spec["maximum_total_points"],
                 }
             return {"success": True, "job_id": job_id, **state}

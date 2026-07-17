@@ -17,6 +17,10 @@ from src.jobs.convergence_campaign import (
     MAX_CONVERGENCE_CAMPAIGN_LEVELS,
     MAX_CONVERGENCE_CAMPAIGN_POINTS,
 )
+from src.jobs.branch_continuation_campaign import (
+    MAX_BRANCH_CONTINUATION_POINTS,
+    MAX_BRANCH_CONTINUATION_STATES,
+)
 from src.jobs.spectral_characterization import (
     MAX_REFINEMENT_STAGES,
     MAX_WINDOW_EXPANSIONS,
@@ -289,11 +293,13 @@ def get_capabilities(selection: ProfileSelection | None = None) -> dict:
                 "validation_matrix",
                 "spectral_characterization",
                 "convergence_campaign",
+                "branch_continuation_campaign",
             ],
             "control_tools": ["job_submit", "job_status", "job_tail", "job_cancel", "job_resume"],
             "cancellation_scope": (
                 "same-host durable staged_sweep, validation_matrix, and "
-                "spectral_characterization and convergence_campaign jobs "
+                "spectral_characterization, convergence_campaign, and "
+                "branch_continuation_campaign jobs "
                 "owned by this runtime root"
             ),
             "cancellation_strategy": (
@@ -340,6 +346,18 @@ def get_capabilities(selection: ProfileSelection | None = None) -> dict:
                 "early_acceptance_requires_explicit_policy": True,
                 "undeclared_level_creation": False,
             },
+            "branch_continuation_campaign": {
+                "composes_spectral_characterization": True,
+                "composes_offline_branch_continuation_planning": True,
+                "exact_model_states_only": True,
+                "maximum_states_server_cap": MAX_BRANCH_CONTINUATION_STATES,
+                "maximum_total_points_server_cap": MAX_BRANCH_CONTINUATION_POINTS,
+                "one_solver_owner_per_campaign": True,
+                "own_peak_continuation": True,
+                "exact_incidence_readback_required": True,
+                "branch_disappearance_claimed": False,
+                "undeclared_coordinate_creation": False,
+            },
         },
         "restart_required_after_source_changes": True,
         "server_safety": {
@@ -378,7 +396,8 @@ def startup_capability_summary(selection: ProfileSelection | None = None) -> str
         f"tools={capabilities['tool_count']}; "
         f"target=COMSOL {targets['comsol']} exact licensed / MPh {targets['mph']}; "
         f"lexical_manual=enabled; semantic_docs={'active' if capabilities['semantic_search']['profile_active'] else 'disabled'}; "
-        "durable_jobs=staged_sweep,validation_matrix,spectral_characterization,convergence_campaign; "
+        "durable_jobs=staged_sweep,validation_matrix,spectral_characterization,"
+        "convergence_campaign,branch_continuation_campaign; "
         "solver_ownership=enforced; durable_job_cancellation=verified"
     )
 

@@ -17,6 +17,7 @@ from src.jobs.branch_continuation_campaign_rows import (
     read_branch_continuation_campaign_states,
 )
 from src.jobs.branch_continuation_campaign_worker import _run
+from src.jobs.manager import JobManager
 from src.jobs.store import JobStore, process_identity
 
 
@@ -217,3 +218,35 @@ def test_cleanup_failure_prevents_false_completed_state(tmp_path, ascii_root):
     assert code == 1
     assert state["status"] == "failed"
     assert "lease_release" in state["last_error"]["message"]
+
+
+def test_manager_exact_resubmission_observes_existing_campaign(
+    tmp_path, ascii_root, monkeypatch
+):
+    raw = _raw_campaign(tmp_path / "sources")
+    manager = JobManager(
+        ascii_root / "manager" / "jobs",
+        preflight=lambda **_kwargs: {"ready": True},
+        reconcile_on_start=False,
+    )
+    monkeypatch.setattr(manager, "_launch_worker", lambda *_args: process_identity(os.getpid()))
+
+    first = manager.submit(raw)
+    second = manager.submit(raw)
+    status = manager.status(first["job_id"])
+
+    assert second == {
+        "success": True,
+        "job_id": first["job_id"],
+        "status": "submitted",
+        "duplicate": True,
+        "action": "observe_existing",
+    }
+    assert status["branch_continuation_progress"] == {
+        "declared_states": 3,
+        "completed_states": 0,
+        "pending_states": 3,
+        "completed_state_ids": [],
+        "last_state_row_sha256": None,
+        "maximum_total_points": 30,
+    }
