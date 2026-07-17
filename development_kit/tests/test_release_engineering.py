@@ -126,6 +126,22 @@ def test_repository_root_is_release_focused_and_free_of_generated_artifacts():
         assert path.name not in {"server_err.txt", "server_log.txt"}
 
 
+def test_repository_layout_documents_every_tracked_file_once():
+    layout_path = ROOT / "development_kit" / "docs" / "layout.md"
+    layout = layout_path.read_text(encoding="utf-8")
+    entries = re.findall(r"(?m)^- `([^`]+)` — (.+)$", layout)
+    documented = [path for path, _description in entries]
+    tracked = {path for _mode, path in _tracked_entries()}
+    tracked.add("development_kit/docs/layout.md")
+
+    assert len(documented) == len(set(documented))
+    assert set(documented) == tracked
+    for path, description in entries:
+        assert description.isascii(), path
+        assert description.endswith("."), path
+        assert "\n" not in description, path
+
+
 def test_active_implementation_has_only_enumerated_legacy_phase_codes():
     phase_pattern = re.compile(
         r"(?<![A-Za-z0-9_])(?:[EMH][0-9]+[A-Za-z]?|P(?:3|4|9|10|11|12))(?![A-Za-z0-9_])"

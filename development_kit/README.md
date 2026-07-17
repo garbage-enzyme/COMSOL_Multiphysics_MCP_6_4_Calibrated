@@ -6,16 +6,44 @@ is intentionally excluded from the ordinary wheel and source distribution.
 Installed runtime imports and the `comsol-mcp` console entry point must depend
 only on packaged runtime resources under `src/`.
 
-## Layout
+## Start here
 
-- `tests/`: dependency/process-only tests, licensed integration probes, frozen
-  schemas, and benchmark judgments.
-- `release/`: the supported-version matrix and sanitized real-COMSOL acceptance
-  contracts.
-- `scripts/`: compile, package, installed-discovery, knowledge-base, and serial
-  licensed release gates.
-- `benchmarks/`: offline evaluation drivers that are not part of the runtime.
-- `docs/`: developer release procedures.
+Read [`docs/layout.md`](docs/layout.md) before scanning the repository. It maps
+every tracked file to one short purpose statement and clearly separates shipped
+runtime code from repository-only development assets.
+
+The main boundaries are:
+
+- `src/` is the only packaged runtime implementation.
+- `development_kit/tests/` contains dependency/process tests, frozen snapshots,
+  and explicit licensed integration probes.
+- `development_kit/release/` contains sanitized acceptance contracts and release
+  support metadata.
+- `development_kit/scripts/` contains build, clean-install, installed-discovery,
+  and licensed release gates.
+- `development_kit/benchmarks/` contains offline evaluation drivers that are not
+  part of the runtime.
+- `recipes/` contains standalone examples and is not imported by the server.
+- `config/` and `constraints/` contain client templates and dependency policy.
+
+## Handoff reading order
+
+1. Read [`docs/layout.md`](docs/layout.md) and open only the files related to the
+   requested change.
+2. Read `src/tools/catalog.py` and `src/tools/profiles.py` before changing tool
+   registration or profile membership.
+3. Read `src/tools/capabilities.py`, `src/schema_registry.py`, and the nearest
+   contract module before changing public identity or artifact schemas.
+4. Run the smallest related test module first, then run the complete default
+   suite before commit.
+5. Use [`docs/release_checklist.md`](docs/release_checklist.md) for package,
+   clean-install, deployment, or licensed acceptance changes.
+
+Do not start COMSOL for ordinary unit, schema, package, documentation, or
+process-only work. Files under `tests/integration/` are explicit opt-in gates and
+must run serially on a controlled licensed host.
+
+## Test and release commands
 
 Run the dependency/process-only suite from the repository root:
 
@@ -32,6 +60,16 @@ python development_kit/scripts/run_real_release_gate.py `
   --fixture-spec <controlled-spec.json> `
   --output <new-receipt.json>
 ```
+
+After every disposable build or install gate, retain the required hashes or
+receipt and remove the temporary build root unless archival retention was
+explicitly requested.
+
+## Layout maintenance
+
+`docs/layout.md` is a tested inventory, not an informal sketch. Every tracked
+file must appear there with one English sentence describing its purpose; update
+the layout in the same commit whenever a file is added, renamed, or removed.
 
 ## Copyright and provenance
 
