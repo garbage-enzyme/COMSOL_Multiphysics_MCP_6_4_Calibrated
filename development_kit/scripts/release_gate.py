@@ -244,6 +244,7 @@ def main() -> int:
             "-m",
             "compileall",
             "-q",
+            "comsol_mcp",
             "src",
             "development_kit",
         ]

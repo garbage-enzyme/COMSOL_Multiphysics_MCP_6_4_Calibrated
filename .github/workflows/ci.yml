@@ -37,7 +37,7 @@ jobs:
       - name: Verify resolved dependencies
         run: python -m pip check
       - name: Compile Python sources
-        run: python -m compileall -q src development_kit
+        run: python -m compileall -q comsol_mcp src development_kit
       - name: Run dependency and process regression suite
         run: python -m pytest -q
 
@@ -58,7 +58,7 @@ jobs:
       - name: Verify pip check
         run: python -m pip check
       - name: Compile Python sources
-        run: python -m compileall -q src development_kit
+        run: python -m compileall -q comsol_mcp src development_kit
       - name: Run dependency-only regression suite
         run: python -m pytest -q
       - name: Build wheel and source distribution
