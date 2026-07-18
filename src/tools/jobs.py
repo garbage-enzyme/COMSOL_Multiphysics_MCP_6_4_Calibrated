@@ -7,13 +7,41 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 
 from src.contracts import JobSubmissionSpec, validate_job_submission
-from src.jobs.attached_backend import normalize_attached_execution_request
-from src.jobs.manager import JobManager, validate_staged_sweep_spec
-from src.tools.shared_session import shared_session_manager
 from src.utils.control_plane import measured_call
 
 
-job_manager = JobManager()
+class _LazyJobManager:
+    """Load the durable worker stack only when a job operation is called."""
+
+    def __init__(self) -> None:
+        self._manager: Any = None
+
+    def _get(self) -> Any:
+        if self._manager is None:
+            from src.jobs.manager import JobManager
+
+            self._manager = JobManager()
+        return self._manager
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._get(), name)
+
+
+job_manager: Any = _LazyJobManager()
+
+
+def __getattr__(name: str) -> Any:
+    """Preserve the historical JobManager module attribute lazily.
+
+    Control-plane discovery must not import the durable worker stack, while
+    existing callers that construct ``src.tools.jobs.JobManager`` continue to
+    receive the real implementation on demand.
+    """
+    if name == "JobManager":
+        from src.jobs.manager import JobManager
+
+        return JobManager
+    raise AttributeError(name)
 
 
 def _attached_handoff_summary(value: dict[str, Any]) -> dict[str, Any]:
@@ -38,8 +66,8 @@ def _attached_handoff_summary(value: dict[str, Any]) -> dict[str, Any]:
 def _submit_job(
     spec: JobSubmissionSpec | dict[str, Any],
     *,
-    manager: JobManager = job_manager,
-    session_manager=shared_session_manager,
+    manager: Any = job_manager,
+    session_manager: Any = None,
 ) -> dict[str, Any]:
     spec = validate_job_submission(spec)
     execution_request = spec.get("execution_backend")
@@ -49,7 +77,12 @@ def _submit_job(
         raise ValueError(
             "attached execution is currently supported only for staged_sweep jobs"
         )
+    from src.jobs.attached_backend import normalize_attached_execution_request
+    from src.jobs.manager import validate_staged_sweep_spec
+    from src.tools.shared_session import shared_session_manager
+
     request = normalize_attached_execution_request(execution_request)
+    session_manager = session_manager or shared_session_manager
     standalone_fields = dict(spec)
     standalone_fields.pop("execution_backend")
     validated = validate_staged_sweep_spec(standalone_fields)
