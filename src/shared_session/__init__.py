@@ -36,6 +36,7 @@ from .preflight import (
     normalize_shared_preflight_snapshot,
 )
 from .process_probe import collect_shared_preflight_snapshot
+from .lifecycle import SharedSessionManager
 
 __all__ = [
     "SHARED_SERVER_FEATURE_ENV",
@@ -49,6 +50,7 @@ __all__ = [
     "SharedServerEndpoint",
     "SharedServerAttachRequest",
     "SharedServerFeatureGate",
+    "SharedSessionManager",
     "build_shared_model_lock",
     "build_shared_model_revision",
     "classify_shared_server_preflight",
