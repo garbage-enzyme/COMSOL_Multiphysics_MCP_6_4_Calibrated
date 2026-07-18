@@ -259,6 +259,32 @@ def test_model_lock_binds_fresh_server_model_revision_and_process(tmp_path):
     assert status["model_lock"]["lock_sha256"] == lock["lock_sha256"]
 
 
+def test_model_lock_verifies_immutable_source_bytes(tmp_path):
+    manager, _ownership, _client = _manager(tmp_path)
+    assert manager.attach(
+        _request(),
+        profile="desktop_shared",
+        environ={SHARED_SERVER_FEATURE_ENV: "true"},
+    )["success"] is True
+    source = tmp_path / "source.mph"
+    source.write_bytes(b"immutable model fixture")
+    source_sha256 = hashlib.sha256(source.read_bytes()).hexdigest()
+
+    rejected = manager.lock_model(
+        collaboration_mode="interactive_inspection",
+        immutable_source={"path": str(source), "sha256": "0" * 64},
+    )
+    accepted = manager.lock_model(
+        collaboration_mode="interactive_inspection",
+        immutable_source={"path": str(source), "sha256": source_sha256},
+    )
+
+    assert rejected["success"] is False
+    assert "does not match" in rejected["error"]
+    assert accepted["success"] is True
+    assert accepted["model_lock"]["immutable_source"]["sha256"] == source_sha256
+
+
 def test_model_lock_verify_detects_desktop_readback_change(tmp_path):
     revision_state = {
         "structural": {"components": ["comp1"], "studies": ["std1"]},

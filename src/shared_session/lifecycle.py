@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from pathlib import Path
 import threading
 import time
 from typing import Any, Callable, Mapping
@@ -26,6 +27,7 @@ from .process_probe import collect_shared_preflight_snapshot
 
 MAX_SERVER_MODELS = 32
 MAX_UNLOCK_REASON_CHARACTERS = 512
+SOURCE_HASH_CHUNK_BYTES = 1024 * 1024
 
 
 def _canonical_sha256(value: Any) -> str:
@@ -113,6 +115,29 @@ def _default_mcp_process_identity() -> dict[str, Any]:
         "process_create_time": process.create_time(),
         "command_signature": signature,
     }
+
+
+def _verify_immutable_source(
+    immutable_source: Mapping[str, Any] | None,
+) -> Mapping[str, Any] | None:
+    if immutable_source is None:
+        return None
+    if not isinstance(immutable_source, Mapping):
+        raise ValueError("immutable source must be an object")
+    path_value = immutable_source.get("path")
+    expected_sha256 = immutable_source.get("sha256")
+    if not isinstance(path_value, str) or not isinstance(expected_sha256, str):
+        raise ValueError("immutable source path and SHA-256 are required together")
+    path = Path(path_value)
+    if not path.is_file():
+        raise ValueError("immutable source is not an existing file")
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while chunk := handle.read(SOURCE_HASH_CHUNK_BYTES):
+            digest.update(chunk)
+    if digest.hexdigest() != expected_sha256.casefold():
+        raise ValueError("immutable source SHA-256 does not match the source bytes")
+    return dict(immutable_source)
 
 
 class SharedSessionManager:
@@ -447,7 +472,7 @@ class SharedSessionManager:
                     model=current_model,
                     revision=revision,
                     collaboration_mode=collaboration_mode,
-                    immutable_source=immutable_source,
+                    immutable_source=_verify_immutable_source(immutable_source),
                     lock_created_at_epoch=self._clock(),
                     mcp_process=self._mcp_process_identity_provider(),
                 )
