@@ -14,7 +14,6 @@ topology-mismatch issue that occurs when a patch domain changes the cross-sectio
 """
 
 from typing import Optional, Sequence
-import jpype
 from mcp.server.fastmcp import FastMCP
 
 from .session import session_manager

@@ -3,13 +3,19 @@
 from typing import Any, Optional, Union, Sequence
 
 from mcp.server.fastmcp import FastMCP
-import numpy as np
 
 from .session import session_manager
 
 
+def _numpy():
+    import numpy as np
+
+    return np
+
+
 def _json_safe(value: Any) -> Any:
     """Recursively convert NumPy and complex values to JSON-safe objects."""
+    np = _numpy()
     if isinstance(value, np.ndarray):
         return _json_safe(value.tolist())
     if isinstance(value, np.generic):
@@ -35,6 +41,7 @@ def evaluate_result(
     outer: Optional[Union[int, Sequence[int]]] = None,
 ) -> dict:
     """Evaluate model data and normalize the response for MCP transport."""
+    np = _numpy()
     result = model.evaluate(
         expression,
         unit=unit,
@@ -61,6 +68,7 @@ def evaluate_global_result(
     dataset: Optional[str] = None,
 ) -> dict:
     """Evaluate a global expression and return its first JSON-safe scalar."""
+    np = _numpy()
     result = model.evaluate(expression, unit=unit, dataset=dataset)
     array = np.asarray(result)
     if array.size == 0:

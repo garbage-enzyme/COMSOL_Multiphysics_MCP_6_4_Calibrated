@@ -2,7 +2,6 @@
 
 from typing import Optional, Sequence, Union
 
-from jpype import JArray, JString
 from mcp.server.fastmcp import FastMCP
 
 from .session import session_manager
@@ -11,6 +10,8 @@ from .study import _resolve_study_tag
 
 def _java_string_array(values: Sequence[str]):
     """Build the Java ``String[]`` required by clientapi array properties."""
+    from jpype import JArray, JString
+
     return JArray(JString)([str(value) for value in values])
 
 

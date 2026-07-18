@@ -1,7 +1,6 @@
 """Physics tools for COMSOL MCP Server."""
 
 from typing import Optional, Sequence
-import jpype
 from mcp.server.fastmcp import FastMCP
 
 from .session import session_manager

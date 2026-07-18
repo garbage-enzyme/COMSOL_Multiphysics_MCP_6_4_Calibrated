@@ -6,13 +6,6 @@ from typing import Any, Optional
 
 from mcp.server.fastmcp import FastMCP
 
-from src.evidence.convergence_evaluation import (
-    build_convergence_ladder,
-    evaluate_convergence,
-    validate_convergence_ladder,
-)
-
-
 def register_convergence_evaluation_tools(mcp: FastMCP) -> None:
     """Register one read-only convergence evaluation tool."""
 
@@ -23,6 +16,12 @@ def register_convergence_evaluation_tools(mcp: FastMCP) -> None:
         convergence_ladder: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
         """Compare an ordered configuration ladder at each level's own peak."""
+        from src.evidence.convergence_evaluation import (
+            build_convergence_ladder,
+            evaluate_convergence,
+            validate_convergence_ladder,
+        )
+
         try:
             if (ladder_spec is None) == (convergence_ladder is None):
                 raise ValueError(

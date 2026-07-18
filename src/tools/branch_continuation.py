@@ -6,13 +6,6 @@ from typing import Any, Optional
 
 from mcp.server.fastmcp import FastMCP
 
-from src.evidence.branch_continuation import (
-    build_continuation_states,
-    plan_branch_continuation,
-    validate_continuation_states,
-)
-
-
 def register_branch_continuation_tools(mcp: FastMCP) -> None:
     """Register one read-only branch-continuation planning tool."""
 
@@ -23,6 +16,12 @@ def register_branch_continuation_tools(mcp: FastMCP) -> None:
         continuation_states: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
         """Plan bounded per-coordinate continuation windows from spectral evidence."""
+        from src.evidence.branch_continuation import (
+            build_continuation_states,
+            plan_branch_continuation,
+            validate_continuation_states,
+        )
+
         try:
             if (states_spec is None) == (continuation_states is None):
                 raise ValueError(

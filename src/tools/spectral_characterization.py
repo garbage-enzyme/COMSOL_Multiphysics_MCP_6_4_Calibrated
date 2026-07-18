@@ -7,14 +7,6 @@ from typing import Any, Optional
 
 from mcp.server.fastmcp import FastMCP
 
-from src.evidence.spectral_characterization import (
-    build_spectral_analysis_decision,
-    build_spectral_characterization,
-    build_spectral_point_bundle,
-    validate_spectral_point_bundle,
-)
-
-
 def _nonfinite_row_summary(bundle_spec: dict[str, Any]) -> dict[str, Any] | None:
     rows = bundle_spec.get("rows")
     if not isinstance(rows, list):
@@ -73,6 +65,13 @@ def register_spectral_characterization_tools(mcp: FastMCP) -> None:
         spectral_bundle: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
         """Validate raw spectral evidence and derive bounded candidate measurements."""
+        from src.evidence.spectral_characterization import (
+            build_spectral_analysis_decision,
+            build_spectral_characterization,
+            build_spectral_point_bundle,
+            validate_spectral_point_bundle,
+        )
+
         try:
             if (bundle_spec is None) == (spectral_bundle is None):
                 raise ValueError(

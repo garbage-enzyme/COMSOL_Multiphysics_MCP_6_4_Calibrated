@@ -14,36 +14,6 @@ from src.build_identity import get_build_identity
 from src.compatibility import load_runtime_compatibility
 from src.environment_identity import get_environment_identity
 from src.durable import canonical_sha256_v1
-from src.jobs.convergence_campaign import (
-    MAX_CONVERGENCE_CAMPAIGN_LEVELS,
-    MAX_CONVERGENCE_CAMPAIGN_POINTS,
-)
-from src.jobs.branch_continuation_campaign import (
-    MAX_BRANCH_CONTINUATION_POINTS,
-    MAX_BRANCH_CONTINUATION_STATES,
-)
-from src.jobs.spectral_characterization import (
-    MAX_REFINEMENT_STAGES,
-    MAX_WINDOW_EXPANSIONS,
-)
-from src.evidence.spectral_characterization import MAX_SPECTRAL_POINTS
-from src.evidence.integrity_controls import evidence_integrity_capability
-from src.artifact_chain import ARTIFACT_CHAIN_SCHEMA, ARTIFACT_CHAIN_SCHEMA_VERSION
-from src.schema_registry import get_schema_registry
-from src.evidence.contracts import (
-    EVIDENCE_STATES,
-    PHYSICAL_EVIDENCE_SCHEMA_NAME,
-    PHYSICAL_EVIDENCE_SCHEMA_VERSION,
-    VALIDATION_POLICY_SCHEMA_NAME,
-    VALIDATION_POLICY_SCHEMA_VERSION,
-    example_validation_policies,
-)
-from src.evidence.visual_review import (
-    VISUAL_CAPABILITY_SCHEMA,
-    VISUAL_RECEIPT_SCHEMA,
-    VISUAL_REQUEST_SCHEMA,
-    VISUAL_REVIEW_SCHEMA_VERSION,
-)
 from .catalog import PROFILE_NAMES, TOOL_METADATA
 from .profiles import (
     DEFAULT_PROFILE,
@@ -53,8 +23,7 @@ from .profiles import (
     resolve_profile,
     tool_names_for_profile,
 )
-from .session import session_manager
-from src.knowledge.semantic_runtime import semantic_capability_status
+from .session_status import get_session_status
 from src.utils.control_plane import attach_control_plane_evidence
 from src.path_policy import PathPolicy
 from src.settings import SETTINGS_PATH_ENV, settings_status
@@ -63,6 +32,48 @@ from src.shared_session.contracts import (
     SHARED_SERVER_PROFILE,
     normalize_shared_server_feature_gate,
 )
+
+
+ARTIFACT_CHAIN_SCHEMA = "comsol_mcp.artifact_chain"
+ARTIFACT_CHAIN_SCHEMA_VERSION = "1.0.0"
+PHYSICAL_EVIDENCE_SCHEMA_NAME = "comsol_mcp.physical_evidence"
+PHYSICAL_EVIDENCE_SCHEMA_VERSION = "1.1.0"
+VALIDATION_POLICY_SCHEMA_NAME = "comsol_mcp.validation_policy"
+VALIDATION_POLICY_SCHEMA_VERSION = "1.0.0"
+EVIDENCE_STATES = (
+    "derived_from_declared_convention",
+    "label_only",
+    "measured",
+    "not_applicable",
+    "not_requested",
+    "unknown",
+)
+VISUAL_CAPABILITY_SCHEMA = "comsol_mcp.visual_reviewer_capability"
+VISUAL_REQUEST_SCHEMA = "comsol_mcp.visual_review_request"
+VISUAL_RECEIPT_SCHEMA = "comsol_mcp.visual_review_receipt"
+VISUAL_REVIEW_SCHEMA_VERSION = "1.0.0"
+MAX_SPECTRAL_POINTS = 1024
+MAX_REFINEMENT_STAGES = 8
+MAX_WINDOW_EXPANSIONS = 8
+MAX_CONVERGENCE_CAMPAIGN_LEVELS = 8
+MAX_CONVERGENCE_CAMPAIGN_POINTS = 512
+MAX_BRANCH_CONTINUATION_STATES = 16
+MAX_BRANCH_CONTINUATION_POINTS = 512
+_PORTABLE_POLICY_NAMES = (
+    "declared_flux_closure",
+    "mesh_evidence_presence",
+    "passive_rta_bounds",
+    "reference_air_polarization_ratio",
+    "wavelength_synchronization",
+)
+
+
+class _LightweightSessionStatus:
+    def get_status(self) -> dict[str, bool]:
+        return get_session_status()
+
+
+session_manager = _LightweightSessionStatus()
 
 
 _DEPLOYMENT_MANIFEST = Path(__file__).resolve().parents[1] / "deployment_manifest.json"
@@ -154,6 +165,10 @@ def _profile_inventory(selection: ProfileSelection) -> dict:
 
 def get_capabilities(selection: ProfileSelection | None = None) -> dict:
     """Describe supported, experimental, and disabled behavior without startup."""
+    from src.evidence.integrity_controls import evidence_integrity_capability
+    from src.knowledge.semantic_runtime import semantic_capability_status
+    from src.schema_registry import get_schema_registry
+
     started = time.perf_counter()
     active_selection = selection or resolve_profile()
     status = session_manager.get_status()
@@ -255,7 +270,7 @@ def get_capabilities(selection: ProfileSelection | None = None) -> dict:
             "evidence_states": sorted(EVIDENCE_STATES),
             "policy_schema_name": VALIDATION_POLICY_SCHEMA_NAME,
             "policy_schema_version": VALIDATION_POLICY_SCHEMA_VERSION,
-            "portable_example_policies": sorted(example_validation_policies()),
+            "portable_example_policies": list(_PORTABLE_POLICY_NAMES),
             "legacy_point_audit_semantics": "preserved_without_reinterpretation",
         },
         "visual_review_contract": {

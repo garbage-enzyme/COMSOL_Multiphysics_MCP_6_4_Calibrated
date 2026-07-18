@@ -6,8 +6,6 @@ from typing import Any, Optional
 
 from mcp.server.fastmcp import FastMCP
 
-from src.evidence.integrity_controls import load_evidence_integrity_status, warning_fields
-from src.evidence.integrity_verifier import verify_evidence_integrity
 from src.path_policy import PathPolicy
 
 
@@ -17,6 +15,8 @@ def register_evidence_integrity_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     def evidence_integrity_status() -> dict[str, Any]:
         """Report every effective default-on check and the settings fingerprint."""
+        from src.evidence.integrity_controls import load_evidence_integrity_status
+
         return load_evidence_integrity_status()
 
     @mcp.tool()
@@ -27,6 +27,12 @@ def register_evidence_integrity_tools(mcp: FastMCP) -> None:
         producer_compatibility: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
         """Verify exact outcomes, artifact bytes, summary citations, and resume identity."""
+        from src.evidence.integrity_controls import (
+            load_evidence_integrity_status,
+            warning_fields,
+        )
+        from src.evidence.integrity_verifier import verify_evidence_integrity
+
         status = load_evidence_integrity_status()
         if status.get("configuration_state") != "valid":
             return verify_evidence_integrity(
