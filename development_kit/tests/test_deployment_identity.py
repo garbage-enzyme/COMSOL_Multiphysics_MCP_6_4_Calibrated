@@ -22,8 +22,10 @@ ROOT = Path(__file__).parents[2]
 SNAPSHOTS = ROOT / "development_kit" / "tests" / "snapshots"
 
 
-def _sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+def _snapshot_sha256(path: Path) -> str:
+    """Hash snapshot content independently of Git checkout line endings."""
+    normalized = path.read_bytes().replace(b"\r\n", b"\n")
+    return hashlib.sha256(normalized).hexdigest()
 
 
 def _selection(profile: str) -> ProfileSelection:
@@ -44,10 +46,10 @@ def test_deployment_manifest_matches_frozen_profile_and_schema_snapshots():
     assert identity["package_version"] == __version__
     assert identity["build_identity"] == get_build_identity()
     assert identity["build_identity"]["package_version"] == __version__
-    assert identity["full_tool_schemas_sha256"] == _sha256(
+    assert identity["full_tool_schemas_sha256"] == _snapshot_sha256(
         SNAPSHOTS / "full_tool_schemas.json"
     )
-    assert identity["profile_tool_names_sha256"] == _sha256(
+    assert identity["profile_tool_names_sha256"] == _snapshot_sha256(
         SNAPSHOTS / "profile_tool_names.json"
     )
     assert len(identity["catalog_contract_sha256"]) == 64
@@ -57,6 +59,15 @@ def test_deployment_manifest_matches_frozen_profile_and_schema_snapshots():
     assert "陆星" not in serialized
     assert "C:\\Users\\" not in serialized
     assert str(ROOT) not in serialized
+
+
+def test_snapshot_identity_is_invariant_to_checkout_line_endings(tmp_path):
+    lf = tmp_path / "lf.json"
+    crlf = tmp_path / "crlf.json"
+    lf.write_bytes(b'{\n  "value": 1\n}\n')
+    crlf.write_bytes(b'{\r\n  "value": 1\r\n}\r\n')
+
+    assert _snapshot_sha256(lf) == _snapshot_sha256(crlf)
 
 
 def test_build_identity_ignores_generated_files_and_changes_with_package_bytes(tmp_path):
