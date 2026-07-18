@@ -115,9 +115,66 @@ def verify_attached_model_revision(
     return current.to_dict()
 
 
+def verify_attached_process_preservation(
+    target: AttachedExecutionTarget,
+    *,
+    first_probe: Mapping[str, Any],
+    second_probe: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Prove the exact external Desktop/Server/listener survived worker detach."""
+    from src.shared_session.lifecycle import SharedSessionManager
+    from src.shared_session.preflight import classify_shared_server_preflight
+
+    endpoint = {
+        "host": target.server.endpoint.host,
+        "port": target.server.endpoint.port,
+    }
+    preflight = classify_shared_server_preflight(
+        endpoint=endpoint,
+        first_probe=first_probe,
+        second_probe=second_probe,
+    )
+    if not preflight.get("success"):
+        return {
+            "success": False,
+            "state": "attached_external_resources_not_preserved",
+            "preflight": preflight,
+        }
+    try:
+        observed = SharedSessionManager._server_identity_from_snapshot(
+            target.server.endpoint, second_probe
+        )
+    except Exception as exc:
+        return {
+            "success": False,
+            "state": "attached_server_identity_unavailable_after_detach",
+            "error": f"{type(exc).__name__}: {exc}",
+            "preflight": preflight,
+        }
+    if observed.identity_sha256 != target.server.identity_sha256:
+        return {
+            "success": False,
+            "state": "attached_server_identity_changed_after_detach",
+            "expected_server_identity_sha256": target.server.identity_sha256,
+            "observed_server_identity_sha256": observed.identity_sha256,
+            "preflight": preflight,
+        }
+    return {
+        "success": True,
+        "state": "attached_external_resources_preserved",
+        "server_identity_sha256": observed.identity_sha256,
+        "listener_active": True,
+        "desktop_ready": True,
+        "listener_bind_scope": observed.listener_bind_scope,
+        "mph_imported": False,
+        "client_constructed": False,
+    }
+
+
 __all__ = [
     "AttachedExecutionTarget",
     "normalize_attached_execution_target",
     "verify_attached_model_inventory",
     "verify_attached_model_revision",
+    "verify_attached_process_preservation",
 ]

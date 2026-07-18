@@ -18,6 +18,7 @@ from .attached_runtime import (
     normalize_attached_execution_target,
     verify_attached_model_inventory,
     verify_attached_model_revision,
+    verify_attached_process_preservation,
 )
 from .store import JobStore, atomic_write_json, cancel_request_targets_attempt, process_identity
 
@@ -126,6 +127,92 @@ def _select_attached_model(client: Any, target: AttachedExecutionTarget):
     return matches[0]
 
 
+def _collect_attached_process_preservation(
+    target: AttachedExecutionTarget,
+) -> dict[str, Any]:
+    from src.shared_session.process_probe import collect_shared_preflight_snapshot
+
+    return verify_attached_process_preservation(
+        target,
+        first_probe=collect_shared_preflight_snapshot(),
+        second_probe=collect_shared_preflight_snapshot(),
+    )
+
+
+def _cleanup_attached_execution(
+    *,
+    client: Any,
+    ownership: Any,
+    lease_acquired: bool,
+    target: AttachedExecutionTarget,
+) -> dict[str, Any]:
+    from src.shared_session.lifecycle import _default_model_inventory_reader
+
+    model_identity_preserved = False
+    model_error = None
+    client_disconnected = client is None
+    if client is not None:
+        try:
+            inventory = _default_model_inventory_reader(client)
+            verify_attached_model_inventory(target, inventory)
+            model_identity_preserved = True
+        except Exception as exc:
+            model_error = f"{type(exc).__name__}: {exc}"
+        try:
+            client.disconnect()
+            client_disconnected = True
+        except Exception as exc:
+            client_disconnected = False
+            if model_error is None:
+                model_error = f"{type(exc).__name__}: {exc}"
+    release = {
+        "success": not lease_acquired,
+        "released": False,
+        "message": "No attached lease was acquired.",
+    }
+    if lease_acquired and client_disconnected:
+        release = ownership.release()
+    elif lease_acquired:
+        release = {
+            "success": False,
+            "released": False,
+            "error": "Attached lease retained because client disconnect was not verified.",
+        }
+    lease_path = getattr(ownership, "lease_path", None)
+    lease_absent = bool(
+        release.get("success")
+        and (lease_path is None or not Path(lease_path).exists())
+    )
+    try:
+        preservation = _collect_attached_process_preservation(target)
+    except Exception as exc:
+        preservation = {
+            "success": False,
+            "state": "attached_preservation_probe_failed",
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+    success = bool(
+        client is not None
+        and model_identity_preserved
+        and client_disconnected
+        and lease_absent
+        and preservation.get("success")
+    )
+    return {
+        "success": success,
+        "state": "attached_cleanup_verified" if success else "attached_cleanup_unverified",
+        "model_identity_preserved": model_identity_preserved,
+        "model_error": model_error,
+        "client_disconnected": client_disconnected,
+        "lease_release": release,
+        "lease_absent": lease_absent,
+        "external_resources": preservation,
+        "model_clear_attempted": False,
+        "external_server_shutdown_attempted": False,
+        "external_server_termination_attempted": False,
+    }
+
+
 def _record_native_cancel(store: JobStore, job_id: str, attempt: int, result: dict[str, Any]) -> bool:
     """Merge native-cancel evidence without overwriting coordinator state."""
     with store.lock(job_id):
@@ -186,6 +273,7 @@ def _run(root: str, job_id: str) -> int:
     ownership = None
     lease_acquired = False
     attached_target: AttachedExecutionTarget | None = None
+    attached_completion_count: int | None = None
     native_monitor_stop = threading.Event()
     native_monitor: threading.Thread | None = None
     try:
@@ -434,12 +522,15 @@ def _run(root: str, job_id: str) -> int:
         completed = _valid_row_count(directory / "results.csv", spec["spec_fingerprint"])
         if completed != len(spec["parameter_values"]):
             raise RuntimeError(f"Expected {len(spec['parameter_values'])} valid rows, found {completed}")
-        store.update_state(
-            job_id,
-            "completed",
-            patch={"progress": {"completed": completed, "total": completed}},
-            event="completed",
-        )
+        if attached_target is not None:
+            attached_completion_count = completed
+        else:
+            store.update_state(
+                job_id,
+                "completed",
+                patch={"progress": {"completed": completed, "total": completed}},
+                event="completed",
+            )
         return 0
     except Exception as exc:
         current = store.read_state(job_id)["status"]
@@ -467,13 +558,59 @@ def _run(root: str, job_id: str) -> int:
         native_monitor_stop.set()
         if native_monitor is not None:
             native_monitor.join(timeout=1.0)
-        if client is not None:
-            if attached_target is not None:
-                try:
-                    client.disconnect()
-                except Exception as exc:
-                    print(f"Client disconnect warning: {exc}", file=sys.stderr, flush=True)
-            else:
+        if attached_target is not None:
+            cleanup = _cleanup_attached_execution(
+                client=client,
+                ownership=ownership,
+                lease_acquired=lease_acquired,
+                target=attached_target,
+            )
+            current = store.read_state(job_id)["status"]
+            if attached_completion_count is not None and current not in {
+                "cancel_requested",
+                "cancelling",
+            }:
+                if cleanup["success"]:
+                    store.update_state(
+                        job_id,
+                        "completed",
+                        patch={
+                            "progress": {
+                                "completed": attached_completion_count,
+                                "total": attached_completion_count,
+                            },
+                            "attached_cleanup": cleanup,
+                        },
+                        event="attached_cleanup_verified",
+                        event_data={"success": True},
+                    )
+                else:
+                    store.update_state(
+                        job_id,
+                        "failed",
+                        patch={
+                            "attached_cleanup": cleanup,
+                            "last_error": {
+                                "type": "AttachedCleanupUnverified",
+                                "message": "Attached resources could not be proved preserved.",
+                            },
+                        },
+                        event="attached_cleanup_unverified",
+                        event_data={"success": False},
+                    )
+            elif current != "completed":
+                store.update_state(
+                    job_id,
+                    patch={"attached_cleanup": cleanup},
+                    event=(
+                        "attached_cleanup_verified"
+                        if cleanup["success"]
+                        else "attached_cleanup_unverified"
+                    ),
+                    event_data={"success": cleanup["success"]},
+                )
+        else:
+            if client is not None:
                 try:
                     client.clear()
                 except Exception as exc:
@@ -483,7 +620,7 @@ def _run(root: str, job_id: str) -> int:
                         client.disconnect()
                     except Exception as exc:
                         print(f"Client disconnect warning: {exc}", file=sys.stderr, flush=True)
-        if ownership is not None and lease_acquired:
+        if attached_target is None and ownership is not None and lease_acquired:
             release = ownership.release()
             if not release.get("success"):
                 print(json.dumps(release, ensure_ascii=False), file=sys.stderr, flush=True)

@@ -23,6 +23,7 @@ from src.jobs.attached_runtime import (
     normalize_attached_execution_target,
     verify_attached_model_inventory,
     verify_attached_model_revision,
+    verify_attached_process_preservation,
 )
 from src.jobs.manager import JobManager, validate_staged_sweep_spec
 from src.jobs.store import JobStore, process_identity
@@ -409,6 +410,16 @@ def test_attached_production_worker_uses_existing_model_and_never_clears_server(
     monkeypatch.setattr(ownership_module, "SolverOwnership", FakeOwnership)
     monkeypatch.setattr(workflow_module, "run_staged_parametric_sweep", fake_runner)
     monkeypatch.setitem(sys.modules, "mph", types.SimpleNamespace(Client=FakeClient))
+    monkeypatch.setattr(
+        production_worker,
+        "_collect_attached_process_preservation",
+        lambda _target: {
+            "success": True,
+            "state": "attached_external_resources_preserved",
+            "listener_active": True,
+            "desktop_ready": True,
+        },
+    )
 
     code = production_worker.run(str(store.root), job_id)
 
@@ -419,6 +430,10 @@ def test_attached_production_worker_uses_existing_model_and_never_clears_server(
     assert state["attached_execution"]["resource_ownership"] == (
         "external_user_owned_server"
     )
+    assert state["attached_cleanup"]["success"] is True
+    assert state["attached_cleanup"]["model_identity_preserved"] is True
+    assert state["attached_cleanup"]["model_clear_attempted"] is False
+    assert state["attached_cleanup"]["external_server_termination_attempted"] is False
     assert runner_save_copy == [True, True]
     assert events[0][0] == "acquire_attached"
     assert ("client", {"host": "127.0.0.1", "port": 2036}) in events
@@ -456,6 +471,28 @@ def _attached_process_snapshot(*, server_pid=4200, server_created=1234.5):
         ],
         "listeners": [{"host": "::", "port": 2036, "pid": server_pid}],
     }
+
+
+def test_attached_process_preservation_requires_same_server_listener_and_desktop():
+    target = normalize_attached_execution_target(_backend())
+
+    preserved = verify_attached_process_preservation(
+        target,
+        first_probe=_attached_process_snapshot(),
+        second_probe=_attached_process_snapshot(),
+    )
+    changed = verify_attached_process_preservation(
+        target,
+        first_probe=_attached_process_snapshot(server_pid=4300),
+        second_probe=_attached_process_snapshot(server_pid=4300),
+    )
+
+    assert preserved["success"] is True
+    assert preserved["state"] == "attached_external_resources_preserved"
+    assert preserved["listener_active"] is True
+    assert preserved["desktop_ready"] is True
+    assert changed["success"] is False
+    assert changed["state"] == "attached_server_identity_changed_after_detach"
 
 
 def test_attached_manager_preflight_is_process_only_and_binds_server_identity(
