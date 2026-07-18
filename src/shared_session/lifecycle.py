@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import threading
 import time
 from typing import Any, Callable, Mapping
@@ -11,7 +12,11 @@ from typing import Any, Callable, Mapping
 from .attach_request import normalize_shared_server_attach_request
 from .cleanup import evaluate_attached_detach
 from .identity import normalize_attached_server_identity
-from .locking import normalize_shared_model_identity
+from .locking import (
+    build_shared_model_lock,
+    build_shared_model_revision,
+    normalize_shared_model_identity,
+)
 from .preflight import (
     classify_shared_server_preflight,
     normalize_shared_preflight_snapshot,
@@ -20,6 +25,7 @@ from .process_probe import collect_shared_preflight_snapshot
 
 
 MAX_SERVER_MODELS = 32
+MAX_UNLOCK_REASON_CHARACTERS = 512
 
 
 def _canonical_sha256(value: Any) -> str:
@@ -65,6 +71,50 @@ def _default_model_inventory_reader(client: Any) -> list[dict[str, Any]]:
     return inventory
 
 
+def _default_model_revision_reader(
+    client: Any, model_tag: str
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    matches = [
+        model for model in list(client.models())
+        if str(model.java.tag()) == model_tag
+    ]
+    if len(matches) != 1:
+        raise ValueError("adopted server model is no longer uniquely available")
+    model = matches[0]
+    structural = {
+        "components": sorted(str(value) for value in model.components()),
+        "studies": sorted(str(value) for value in model.studies()),
+        "datasets": sorted(str(value) for value in model.datasets()),
+    }
+    state = {
+        "parameters": {
+            str(name): str(value)
+            for name, value in sorted(model.parameters().items())
+        }
+    }
+    return structural, state
+
+
+def _default_mcp_process_identity() -> dict[str, Any]:
+    import psutil
+
+    process = psutil.Process(os.getpid())
+    try:
+        command = list(process.cmdline())
+    except (psutil.AccessDenied, psutil.ZombieProcess):
+        command = []
+    signature = hashlib.sha256(
+        "\0".join(str(part) for part in command).encode(
+            "utf-8", errors="replace"
+        )
+    ).hexdigest()
+    return {
+        "pid": process.pid,
+        "process_create_time": process.create_time(),
+        "command_signature": signature,
+    }
+
+
 class SharedSessionManager:
     """One process-local facade for an exact non-owned server connection."""
 
@@ -75,12 +125,20 @@ class SharedSessionManager:
         ownership_factory: Callable[[], Any] = _default_ownership_factory,
         client_factory: Callable[[str, int], Any] = _default_client_factory,
         model_inventory_reader: Callable[[Any], list[dict[str, Any]]] = _default_model_inventory_reader,
+        model_revision_reader: Callable[
+            [Any, str], tuple[dict[str, Any], dict[str, Any]]
+        ] = _default_model_revision_reader,
+        mcp_process_identity_provider: Callable[
+            [], Mapping[str, Any]
+        ] = _default_mcp_process_identity,
         clock: Callable[[], float] = time.time,
     ):
         self._snapshot_provider = snapshot_provider
         self._ownership_factory = ownership_factory
         self._client_factory = client_factory
         self._model_inventory_reader = model_inventory_reader
+        self._model_revision_reader = model_revision_reader
+        self._mcp_process_identity_provider = mcp_process_identity_provider
         self._clock = clock
         self._lock = threading.RLock()
         self._client = None
@@ -90,6 +148,8 @@ class SharedSessionManager:
         self._selected_model = None
         self._inventory_sha256 = None
         self._session_acquisition_id = None
+        self._model_lock = None
+        self._unlock_audit: list[dict[str, Any]] = []
 
     @staticmethod
     def _inventory(reader: Callable[[Any], list[dict[str, Any]]], client: Any):
@@ -271,9 +331,13 @@ class SharedSessionManager:
                 "success": True,
                 "attached": self._client is not None,
                 "state": (
-                    "attached_model_pending_lock"
-                    if self._client is not None
-                    else "detached"
+                    "attached_model_locked"
+                    if self._model_lock is not None
+                    else (
+                        "attached_model_pending_lock"
+                        if self._client is not None
+                        else "detached"
+                    )
                 ),
                 "server_identity_sha256": (
                     None
@@ -288,6 +352,17 @@ class SharedSessionManager:
                     else None
                 ),
                 "can_start_comsol": False,
+                "model_lock": (
+                    None if self._model_lock is None else {
+                        "lock_id": self._model_lock.lock_id,
+                        "lock_sha256": self._model_lock.lock_sha256,
+                        "revision_sha256": self._model_lock.revision["revision_sha256"],
+                        "collaboration_mode": self._model_lock.collaboration_mode,
+                    }
+                ),
+                "last_unlock_audit": (
+                    None if not self._unlock_audit else dict(self._unlock_audit[-1])
+                ),
             }
 
     def models(self) -> dict[str, Any]:
@@ -312,11 +387,173 @@ class SharedSessionManager:
                 }
             return {
                 "success": True,
-                "state": "attached_model_pending_lock",
+                "state": (
+                    "attached_model_locked"
+                    if self._model_lock is not None
+                    else "attached_model_pending_lock"
+                ),
                 "models": [model.to_dict() for model in models],
                 "model_count": len(models),
                 "model_inventory_sha256": inventory_sha256,
                 "attached_inventory_sha256": self._inventory_sha256,
+            }
+
+    def lock_model(
+        self,
+        *,
+        collaboration_mode: str,
+        immutable_source: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Lock the exact adopted model against bounded optimistic readback."""
+        with self._lock:
+            if self._client is None or self._selected_model is None:
+                return {"success": False, "state": "detached"}
+            if self._model_lock is not None:
+                return {
+                    "success": False,
+                    "state": "model_already_locked",
+                    "lock_sha256": self._model_lock.lock_sha256,
+                }
+            try:
+                server_now = self._server_identity_from_snapshot(
+                    self._server_identity.endpoint, self._snapshot_provider()
+                )
+                if server_now.identity_sha256 != self._server_identity.identity_sha256:
+                    raise RuntimeError("attached server identity changed before model lock")
+                models, _inventory_sha256 = self._inventory(
+                    self._model_inventory_reader, self._client
+                )
+                matches = [
+                    model for model in models
+                    if model.tag == self._selected_model.tag
+                ]
+                if len(matches) != 1:
+                    raise RuntimeError("adopted model tag is no longer unique")
+                current_model = matches[0]
+                if current_model.identity_sha256 != self._selected_model.identity_sha256:
+                    raise RuntimeError("adopted model identity changed before model lock")
+                structural, state = self._model_revision_reader(
+                    self._client, current_model.tag
+                )
+                revision = build_shared_model_revision(
+                    current_model,
+                    sequence=0,
+                    structural_readback=structural,
+                    state_readback=state,
+                )
+                model_lock = build_shared_model_lock(
+                    attached_server=self._server_identity,
+                    session_acquisition_id=self._session_acquisition_id,
+                    model=current_model,
+                    revision=revision,
+                    collaboration_mode=collaboration_mode,
+                    immutable_source=immutable_source,
+                    lock_created_at_epoch=self._clock(),
+                    mcp_process=self._mcp_process_identity_provider(),
+                )
+            except Exception as exc:
+                return {
+                    "success": False,
+                    "state": "model_lock_rejected",
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+            self._model_lock = model_lock
+            return {
+                "success": True,
+                "state": "attached_model_locked",
+                "model_lock": model_lock.to_dict(),
+            }
+
+    def verify_model_lock(
+        self, *, expected_lock_sha256: str, expected_revision_sha256: str
+    ) -> dict[str, Any]:
+        """Re-read exact server/model/revision identities and fail closed."""
+        with self._lock:
+            if self._model_lock is None or self._client is None:
+                return {"success": False, "state": "model_not_locked"}
+            changed_fields = []
+            if expected_lock_sha256 != self._model_lock.lock_sha256:
+                changed_fields.append("expected_lock_sha256")
+            locked_revision_sha256 = self._model_lock.revision["revision_sha256"]
+            if expected_revision_sha256 != locked_revision_sha256:
+                changed_fields.append("expected_revision_sha256")
+            try:
+                server_now = self._server_identity_from_snapshot(
+                    self._server_identity.endpoint, self._snapshot_provider()
+                )
+                if server_now.identity_sha256 != self._server_identity.identity_sha256:
+                    changed_fields.append("attached_server")
+                models, _inventory_sha256 = self._inventory(
+                    self._model_inventory_reader, self._client
+                )
+                matches = [
+                    model for model in models
+                    if model.tag == self._selected_model.tag
+                ]
+                if len(matches) != 1:
+                    changed_fields.append("model_tag")
+                else:
+                    current_model = matches[0]
+                    if current_model.identity_sha256 != self._selected_model.identity_sha256:
+                        changed_fields.append("model_identity")
+                    else:
+                        structural, state = self._model_revision_reader(
+                            self._client, current_model.tag
+                        )
+                        current_revision = build_shared_model_revision(
+                            current_model,
+                            sequence=self._model_lock.revision["sequence"],
+                            structural_readback=structural,
+                            state_readback=state,
+                        )
+                        if current_revision.structural_sha256 != self._model_lock.revision["structural_sha256"]:
+                            changed_fields.append("structural_readback")
+                        if current_revision.readback_sha256 != self._model_lock.revision["readback_sha256"]:
+                            changed_fields.append("state_readback")
+            except Exception as exc:
+                return {
+                    "success": False,
+                    "state": "model_lock_verification_failed",
+                    "error": f"{type(exc).__name__}: {exc}",
+                    "changed_fields": sorted(set(changed_fields)),
+                }
+            changed_fields = sorted(set(changed_fields))
+            return {
+                "success": not changed_fields,
+                "state": "model_lock_verified" if not changed_fields else "model_guard_mismatch",
+                "changed_fields": changed_fields,
+                "lock_sha256": self._model_lock.lock_sha256,
+                "revision_sha256": locked_revision_sha256,
+            }
+
+    def unlock_model(
+        self, *, expected_lock_sha256: str, reason: str
+    ) -> dict[str, Any]:
+        """Release only the MCP guard and retain one bounded audit record."""
+        with self._lock:
+            if self._model_lock is None:
+                return {"success": False, "state": "model_not_locked"}
+            if expected_lock_sha256 != self._model_lock.lock_sha256:
+                return {"success": False, "state": "model_lock_identity_mismatch"}
+            if not isinstance(reason, str) or not reason.strip():
+                return {"success": False, "state": "unlock_reason_required"}
+            normalized_reason = reason.strip()
+            if len(normalized_reason) > MAX_UNLOCK_REASON_CHARACTERS:
+                return {"success": False, "state": "unlock_reason_too_long"}
+            body = {
+                "lock_id": self._model_lock.lock_id,
+                "lock_sha256": self._model_lock.lock_sha256,
+                "reason": normalized_reason,
+                "unlocked_at_epoch": self._clock(),
+            }
+            audit = {**body, "audit_sha256": _canonical_sha256(body)}
+            self._unlock_audit.append(audit)
+            self._unlock_audit = self._unlock_audit[-32:]
+            self._model_lock = None
+            return {
+                "success": True,
+                "state": "attached_model_pending_lock",
+                "unlock_audit": audit,
             }
 
     def detach(self) -> dict[str, Any]:
@@ -324,6 +561,12 @@ class SharedSessionManager:
         with self._lock:
             if self._client is None:
                 return {"success": True, "state": "detached", "detached": False}
+            if self._model_lock is not None:
+                return {
+                    "success": False,
+                    "state": "model_lock_active",
+                    "error": "Unlock the shared model before detaching.",
+                }
             try:
                 _models, inventory_after = self._inventory(
                     self._model_inventory_reader, self._client
@@ -365,6 +608,7 @@ class SharedSessionManager:
             self._selected_model = None
             self._inventory_sha256 = None
             self._session_acquisition_id = None
+            self._model_lock = None
             return {
                 **outcome.to_dict(),
                 "state": "detached" if outcome.success else "detached_preservation_failed",

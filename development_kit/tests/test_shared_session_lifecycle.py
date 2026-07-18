@@ -124,16 +124,37 @@ def _inventory(models=None):
     ]
 
 
-def _manager(tmp_path, *, client=None, snapshots=None, models=None, client_factory=None):
-    values = iter(snapshots or [_snapshot(), _snapshot(), _snapshot()])
+def _manager(
+    tmp_path,
+    *,
+    client=None,
+    snapshots=None,
+    models=None,
+    client_factory=None,
+    revision_state=None,
+):
+    values = iter(snapshots or [_snapshot() for _ in range(10)])
     ownership = FakeOwnership(tmp_path)
     client = client or FakeClient()
+    revision_state = revision_state or {
+        "structural": {"components": ["comp1"], "studies": ["std1"]},
+        "state": {"parameters": {"gap": "10[nm]"}},
+    }
     return (
         SharedSessionManager(
             snapshot_provider=lambda: next(values),
             ownership_factory=lambda: ownership,
             client_factory=client_factory or (lambda host, port: client),
             model_inventory_reader=lambda value: _inventory(models),
+            model_revision_reader=lambda value, tag: (
+                revision_state["structural"], revision_state["state"]
+            ),
+            mcp_process_identity_provider=lambda: {
+                "pid": 5000,
+                "process_create_time": 900.0,
+                "command_signature": "f" * 64,
+            },
+            clock=lambda: 1100.0,
         ),
         ownership,
         client,
@@ -211,6 +232,142 @@ def test_model_inventory_requires_an_attached_client(tmp_path):
         "models": [],
         "model_count": 0,
     }
+
+
+def _attach_and_lock(manager):
+    assert manager.attach(
+        _request(),
+        profile="desktop_shared",
+        environ={SHARED_SERVER_FEATURE_ENV: "true"},
+    )["success"] is True
+    locked = manager.lock_model(collaboration_mode="interactive_inspection")
+    assert locked["success"] is True
+    return locked["model_lock"]
+
+
+def test_model_lock_binds_fresh_server_model_revision_and_process(tmp_path):
+    manager, _ownership, _client = _manager(tmp_path)
+
+    lock = _attach_and_lock(manager)
+    status = manager.status()
+
+    assert lock["attached_server"]["server_pid"] == 20
+    assert lock["model"]["tag"] == "Model_1"
+    assert lock["revision"]["sequence"] == 0
+    assert lock["mcp_process"]["pid"] == 5000
+    assert status["state"] == "attached_model_locked"
+    assert status["model_lock"]["lock_sha256"] == lock["lock_sha256"]
+
+
+def test_model_lock_verify_detects_desktop_readback_change(tmp_path):
+    revision_state = {
+        "structural": {"components": ["comp1"], "studies": ["std1"]},
+        "state": {"parameters": {"gap": "10[nm]"}},
+    }
+    manager, _ownership, _client = _manager(
+        tmp_path, revision_state=revision_state
+    )
+    lock = _attach_and_lock(manager)
+    revision_state["state"] = {"parameters": {"gap": "11[nm]"}}
+
+    result = manager.verify_model_lock(
+        expected_lock_sha256=lock["lock_sha256"],
+        expected_revision_sha256=lock["revision"]["revision_sha256"],
+    )
+
+    assert result["success"] is False
+    assert result["state"] == "model_guard_mismatch"
+    assert result["changed_fields"] == ["state_readback"]
+
+
+def test_model_lock_verify_detects_changed_model_identity(tmp_path):
+    models = [
+        {"tag": "Model_1", "label": "Shared", "file_path": None, "unsaved": True}
+    ]
+    manager, _ownership, _client = _manager(tmp_path, models=models)
+    lock = _attach_and_lock(manager)
+    models[0] = {
+        "tag": "Model_1",
+        "label": "Changed in Desktop",
+        "file_path": None,
+        "unsaved": True,
+    }
+
+    result = manager.verify_model_lock(
+        expected_lock_sha256=lock["lock_sha256"],
+        expected_revision_sha256=lock["revision"]["revision_sha256"],
+    )
+
+    assert result["success"] is False
+    assert result["changed_fields"] == ["model_identity"]
+
+
+def test_model_lock_verify_detects_changed_server_identity(tmp_path):
+    snapshots = [
+        _snapshot(),
+        _snapshot(),
+        _snapshot(),
+        _snapshot(server_created=999.0),
+    ]
+    manager, _ownership, _client = _manager(tmp_path, snapshots=snapshots)
+    lock = _attach_and_lock(manager)
+
+    result = manager.verify_model_lock(
+        expected_lock_sha256=lock["lock_sha256"],
+        expected_revision_sha256=lock["revision"]["revision_sha256"],
+    )
+
+    assert result["success"] is False
+    assert result["changed_fields"] == ["attached_server"]
+
+
+def test_model_lock_verify_rejects_stale_caller_identities(tmp_path):
+    manager, _ownership, _client = _manager(tmp_path)
+    lock = _attach_and_lock(manager)
+
+    result = manager.verify_model_lock(
+        expected_lock_sha256="0" * 64,
+        expected_revision_sha256="1" * 64,
+    )
+
+    assert result["success"] is False
+    assert result["changed_fields"] == [
+        "expected_lock_sha256",
+        "expected_revision_sha256",
+    ]
+
+
+def test_unlock_requires_reason_and_leaves_bounded_audit(tmp_path):
+    manager, _ownership, _client = _manager(tmp_path)
+    lock = _attach_and_lock(manager)
+
+    missing = manager.unlock_model(
+        expected_lock_sha256=lock["lock_sha256"], reason="  "
+    )
+    unlocked = manager.unlock_model(
+        expected_lock_sha256=lock["lock_sha256"], reason="Return control to Desktop"
+    )
+
+    assert missing == {"success": False, "state": "unlock_reason_required"}
+    assert unlocked["success"] is True
+    assert unlocked["unlock_audit"]["reason"] == "Return control to Desktop"
+    assert len(unlocked["unlock_audit"]["audit_sha256"]) == 64
+    assert manager.status()["last_unlock_audit"] == unlocked["unlock_audit"]
+
+
+def test_detach_refuses_while_model_lock_is_active(tmp_path):
+    manager, ownership, client = _manager(tmp_path)
+    lock = _attach_and_lock(manager)
+
+    result = manager.detach()
+
+    assert result["success"] is False
+    assert result["state"] == "model_lock_active"
+    assert client.calls == []
+    assert ownership.releases == 0
+    assert manager.unlock_model(
+        expected_lock_sha256=lock["lock_sha256"], reason="Detach"
+    )["success"] is True
 
 
 def test_attach_and_detach_preserve_server_listener_and_model_inventory(tmp_path):
