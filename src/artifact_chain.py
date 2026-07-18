@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from copy import deepcopy
-import hashlib
 import json
 from pathlib import Path, PurePosixPath
 import re
 from typing import Any, Mapping
 
 from src import __version__
+from src.durable import canonical_json_v1, canonical_sha256_v1, sha256_file_bounded
 from src.schema_registry import check_schema_support
 
 
@@ -45,19 +45,14 @@ _PARENT_FIELDS = {"artifact_id", "sha256"}
 
 def _canonical_bytes(value: Any) -> bytes:
     try:
-        return json.dumps(
-            value,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        ).encode("utf-8")
+        return canonical_json_v1(value)
     except (TypeError, ValueError) as exc:
         raise ValueError("artifact chain must contain finite JSON values") from exc
 
 
 def _sha256(value: Any) -> str:
-    return hashlib.sha256(_canonical_bytes(value)).hexdigest()
+    _canonical_bytes(value)
+    return canonical_sha256_v1(value)
 
 
 def _mapping(value: Any, label: str) -> dict[str, Any]:
@@ -271,15 +266,15 @@ def verify_artifact_chain(value: Any, *, artifact_root: str | Path) -> dict[str,
             raise ValueError("artifact path escapes artifact_root") from exc
         if candidate.is_symlink() or not resolved.is_file():
             raise ValueError("artifact path must be a regular non-symlink file")
-        payload = resolved.read_bytes()
-        verified_bytes += len(payload)
+        receipt = sha256_file_bounded(resolved, max_bytes=MAX_ARTIFACT_BYTES)
+        verified_bytes += receipt["byte_count"]
         if verified_bytes > MAX_CHAIN_BYTES:
             raise ValueError("artifact chain exceeds the total byte limit")
-        if len(payload) != item["byte_count"]:
+        if receipt["byte_count"] != item["byte_count"]:
             raise ValueError("artifact byte count does not match")
-        measured_hash = hashlib.sha256(payload).hexdigest()
-        if measured_hash != item["sha256"]:
+        if receipt["sha256"] != item["sha256"]:
             raise ValueError("artifact SHA-256 does not match")
+        payload = resolved.read_bytes()
         try:
             document = json.loads(payload.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -291,7 +286,9 @@ def verify_artifact_chain(value: Any, *, artifact_root: str | Path) -> dict[str,
             or document.get("schema_version") != item["schema_version"]
         ):
             raise ValueError("artifact embedded schema identity does not match")
-        verified_hashes.append({"artifact_id": item["artifact_id"], "sha256": measured_hash})
+        verified_hashes.append(
+            {"artifact_id": item["artifact_id"], "sha256": receipt["sha256"]}
+        )
 
     receipt_body = {
         "schema_name": ARTIFACT_CHAIN_VERIFICATION_SCHEMA,

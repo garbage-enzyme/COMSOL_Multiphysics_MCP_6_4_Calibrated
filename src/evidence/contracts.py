@@ -16,6 +16,8 @@ from pathlib import Path
 import re
 from typing import Any, Mapping
 
+from src.durable import canonical_json_v1, canonical_sha256_v1
+
 
 PHYSICAL_EVIDENCE_SCHEMA_NAME = "comsol_mcp.physical_evidence"
 PHYSICAL_EVIDENCE_SCHEMA_VERSION = "1.1.0"
@@ -208,20 +210,15 @@ def _finite_json(value: Any, label: str = "value", depth: int = 0) -> None:
 def canonical_json_bytes(value: Any) -> bytes:
     """Return deterministic UTF-8 JSON after rejecting non-finite data."""
     _finite_json(value)
-    encoded = json.dumps(
-        value,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-        allow_nan=False,
-    ).encode("utf-8")
+    encoded = canonical_json_v1(value)
     if len(encoded) > MAX_CONTRACT_BYTES:
         raise ValueError(f"contract exceeds {MAX_CONTRACT_BYTES} bytes")
     return encoded
 
 
 def canonical_sha256(value: Any) -> str:
-    return hashlib.sha256(canonical_json_bytes(value)).hexdigest()
+    canonical_json_bytes(value)
+    return canonical_sha256_v1(value)
 
 
 def _validate_text_list(value: Any, label: str) -> list[str]:
