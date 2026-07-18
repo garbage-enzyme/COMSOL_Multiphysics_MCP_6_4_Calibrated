@@ -6,7 +6,7 @@
 [![Python 3.14](https://img.shields.io/badge/python-3.14-blue)](https://www.python.org/downloads/)
 [![Tests](https://img.shields.io/badge/tests-1193%20passed-brightgreen)](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
-![Status: beta](https://img.shields.io/badge/status-beta-orange)
+![Status: alpha](https://img.shields.io/badge/status-alpha-red)
 [![GitHub stars](https://img.shields.io/github/stars/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated?style=social)](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/stargazers)
 
 > [wjc9011/COMSOL_Multiphysics_MCP](https://github.com/wjc9011/COMSOL_Multiphysics_MCP) 的维护型 Fork，已接受 **`COMSOL 6.4.0.*` release line** 和 **MPh 1.3.1 standalone/clientapi**。licensed reference 证据使用 **COMSOL 6.4.0.293**；第三位数字变化视为新的 release family，需要重新验收。
