@@ -10,6 +10,8 @@ from typing import Any
 from src import __version__
 from src.operation_arbiter import OPERATION_LOCK_SCHEMA, OPERATION_LOCK_VERSION
 from src.path_policy import PATH_POLICY_SCHEMA, PATH_POLICY_VERSION
+from src.shared_session.cleanup import CLEANUP_OUTCOME_SCHEMA, CLEANUP_OUTCOME_VERSION
+from src.shared_session.locking import SHARED_MODEL_LOCK_SCHEMA, SHARED_MODEL_LOCK_VERSION
 from src.evidence.branch_continuation import (
     BRANCH_CONTINUATION_PLAN_SCHEMA,
     BRANCH_CONTINUATION_SCHEMA_VERSION,
@@ -102,6 +104,11 @@ def _entries() -> list[dict[str, Any]]:
         _entry("comsol_mcp.artifact_chain", "1.0.0", "src.artifact_chain"),
         _entry("comsol_mcp.artifact_chain_verification", "1.0.0", "src.artifact_chain"),
         _entry("comsol_mcp.build_identity", "1.0.0", "src.build_identity"),
+        _entry(
+            CLEANUP_OUTCOME_SCHEMA,
+            CLEANUP_OUTCOME_VERSION,
+            "src.shared_session.cleanup",
+        ),
         _entry(
             BRANCH_CONTINUATION_PLAN_SCHEMA,
             BRANCH_CONTINUATION_SCHEMA_VERSION,
@@ -236,6 +243,12 @@ def _entries() -> list[dict[str, Any]]:
         _entry("comsol_mcp.resource_telemetry_sample", "1.0.0", "src.jobs.resource_admission"),
         _entry("comsol_mcp.runtime_compatibility", "1.0.0", "src.compatibility"),
         _entry(_REGISTRY_SCHEMA, _REGISTRY_VERSION, "src.schema_registry"),
+        _entry(
+            SHARED_MODEL_LOCK_SCHEMA,
+            SHARED_MODEL_LOCK_VERSION,
+            "src.shared_session.locking",
+            artifact_kind="durable_artifact",
+        ),
         _entry("comsol_mcp.validation_matrix_collector", "1.0.0", "src.jobs.validation_collectors"),
         _entry("comsol_mcp.validation_matrix_field_collector", "1.0.0", "src.jobs.validation_collectors"),
         _entry("comsol_mcp.validation_matrix_field_review", "1.0.0", "src.jobs.field_review"),

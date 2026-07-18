@@ -189,6 +189,11 @@ models are intentionally absent.
 - `development_kit/tests/test_semantic_tools.py` — This module tests semantic profile schemas, configuration, and degradation behavior.
 - `development_kit/tests/test_semantic_worker_protocol.py` — This module tests isolated semantic worker protocol and containment.
 - `development_kit/tests/test_server.py` — This module tests server construction and capabilities without starting a transport.
+- `development_kit/tests/test_shared_attach_request.py` — This module tests the complete pre-lease shared-server attach gate.
+- `development_kit/tests/test_shared_cleanup_contracts.py` — This module tests non-owning detach and owned-cleanup outcome semantics.
+- `development_kit/tests/test_shared_model_locking.py` — This module tests bounded shared-model revisions and exact enforcement locks.
+- `development_kit/tests/test_shared_session_contracts.py` — This module tests default-off feature and loopback endpoint contracts.
+- `development_kit/tests/test_shared_session_identity.py` — This module tests attached-server and exact model-selector identities.
 - `development_kit/tests/test_spectral_characterization.py` — This module tests provenance-bound offline spectral validation and measurements.
 - `development_kit/tests/test_spectral_audit.py` — This module tests strict projection of point-audit artifacts into durable spectral rows.
 - `development_kit/tests/test_spectral_acceptance_runner.py` — This module tests the licensed spectral runner contract without starting COMSOL.
@@ -314,6 +319,15 @@ models are intentionally absent.
 
 - `src/resources/__init__.py` — This file exports MCP model resources.
 - `src/resources/model_resources.py` — This module exposes bounded model status and information resources.
+
+## Shared Desktop and attached-server contracts
+
+- `src/shared_session/__init__.py` — This file exports the default-off shared-session contracts.
+- `src/shared_session/attach_request.py` — This module normalizes all static and per-call gates before attached lease acquisition.
+- `src/shared_session/cleanup.py` — This module distinguishes external-resource-preserving detach from owned cleanup.
+- `src/shared_session/contracts.py` — This module normalizes the shared feature gate and local loopback endpoint.
+- `src/shared_session/identity.py` — This module defines exact non-owned server and model-selector identities.
+- `src/shared_session/locking.py` — This module defines bounded model revisions and shared-model enforcement locks.
 
 ## MCP tool adapters
 
