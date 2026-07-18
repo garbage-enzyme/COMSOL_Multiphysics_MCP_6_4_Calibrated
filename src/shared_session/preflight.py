@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 import math
 import re
 from typing import Any, Mapping
+
+from src.durable import canonical_sha256_v1
 
 from .contracts import (
     LISTENER_BIND_SCOPE_WILDCARD,
@@ -46,17 +46,6 @@ _VERSION = re.compile(r"(?<!\d)(\d+)\.(\d+)\.(\d+)\.(\d+)(?!\d)")
 _CLIENTAPI_DISPLAY_VERSION = re.compile(
     r"(?<!\d)(\d+)\.(\d+)(?!\.\d).*?\([^\d)]*(\d+)[^)]*\)"
 )
-
-
-def _canonical_sha256(value: Any) -> str:
-    payload = json.dumps(
-        value,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    ).encode("utf-8")
-    return hashlib.sha256(payload).hexdigest()
 
 
 def _exact_mapping(value: Any, fields: frozenset[str], label: str) -> dict[str, Any]:
@@ -156,7 +145,7 @@ def _normalize_process(value: Any, index: int) -> dict[str, Any]:
         ),
         "responding": raw["responding"],
     }
-    body["identity_sha256"] = _canonical_sha256(
+    body["identity_sha256"] = canonical_sha256_v1(
         {
             key: body[key]
             for key in (
@@ -333,7 +322,7 @@ def classify_shared_server_preflight(
         "server_count": len(servers),
         "accepted_release_line": "6.4.0.*",
         "processes": public_processes,
-        "process_inventory_sha256": _canonical_sha256(public_processes),
+        "process_inventory_sha256": canonical_sha256_v1(public_processes),
         "violations": violations,
         "warnings": warnings,
         "paths_included": False,

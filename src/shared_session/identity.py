@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-import hashlib
-import json
 import math
 import ntpath
 import re
 from typing import Any, Mapping
+
+from src.durable import canonical_sha256_v1
 
 from .contracts import (
     LISTENER_BIND_SCOPE_LOOPBACK,
@@ -38,17 +38,6 @@ _MODEL_SELECTOR_FIELDS = frozenset(
 _HEX64 = re.compile(r"^[0-9a-fA-F]{64}$")
 _MODEL_TAG = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 _WINDOWS_DEVICE_PATH = re.compile(r"^(?:\\\\[?.]\\|//[?.]/)")
-
-
-def _canonical_sha256(value: Any) -> str:
-    payload = json.dumps(
-        value,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    ).encode("utf-8")
-    return hashlib.sha256(payload).hexdigest()
 
 
 def _mapping(value: Any, fields: frozenset[str], label: str) -> dict[str, Any]:
@@ -153,7 +142,7 @@ def normalize_attached_server_identity(value: Any) -> AttachedServerIdentity:
         server_command_signature=identity_body["server_command_signature"],
         listener_bind_scope=identity_body["listener_bind_scope"],
         listener_observed_at_epoch=observed_at,
-        identity_sha256=_canonical_sha256(identity_body),
+        identity_sha256=canonical_sha256_v1(identity_body),
     )
 
 

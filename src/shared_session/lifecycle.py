@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 from pathlib import Path
 import threading
 import time
 from typing import Any, Callable, Mapping
 import uuid
+
+from src.durable import atomic_write_json, canonical_sha256_v1
 
 from .attach_request import normalize_shared_server_attach_request
 from .cleanup import evaluate_attached_detach
@@ -38,17 +39,6 @@ SOURCE_HASH_CHUNK_BYTES = 1024 * 1024
 MAX_SNAPSHOT_BYTES = 32 * 1024 * 1024 * 1024
 SHARED_MODEL_SNAPSHOT_SCHEMA = "comsol_mcp.shared_model_snapshot"
 SHARED_MODEL_SNAPSHOT_VERSION = "1.0.0"
-
-
-def _canonical_sha256(value: Any) -> str:
-    payload = json.dumps(
-        value,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    ).encode("utf-8")
-    return hashlib.sha256(payload).hexdigest()
 
 
 def _default_ownership_factory():
@@ -181,8 +171,6 @@ def _default_save_copy_writer(client: Any, model_tag: str, target: Path) -> None
 
 
 def _default_manifest_writer(path: Path, value: dict[str, Any]) -> None:
-    from src.jobs.store import atomic_write_json
-
     atomic_write_json(path, value)
 
 
@@ -247,7 +235,7 @@ class SharedSessionManager:
         if len(tags) != len(set(tags)):
             raise ValueError("server model inventory contains duplicate tags")
         public = [item.to_dict() for item in normalized]
-        return normalized, _canonical_sha256(public)
+        return normalized, canonical_sha256_v1(public)
 
     @staticmethod
     def _matches(selector, model) -> bool:
@@ -700,7 +688,7 @@ class SharedSessionManager:
                 "reason": normalized_reason,
                 "unlocked_at_epoch": self._clock(),
             }
-            audit = {**body, "audit_sha256": _canonical_sha256(body)}
+            audit = {**body, "audit_sha256": canonical_sha256_v1(body)}
             self._unlock_audit.append(audit)
             self._unlock_audit = self._unlock_audit[-32:]
             self._model_lock = None

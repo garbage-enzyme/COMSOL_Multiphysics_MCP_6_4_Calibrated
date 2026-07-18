@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 import hashlib
-import json
 import math
 import re
 from typing import Any, Mapping
+
+from src.durable import canonical_json_v1, canonical_sha256_v1
 
 from .identity import (
     AttachedServerIdentity,
@@ -38,17 +39,11 @@ _MODEL_TAG = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 
 
 def _canonical_bytes(value: Any) -> bytes:
-    return json.dumps(
-        value,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    ).encode("utf-8")
+    return canonical_json_v1(value)
 
 
 def _sha256(value: Any) -> str:
-    return hashlib.sha256(_canonical_bytes(value)).hexdigest()
+    return canonical_sha256_v1(value)
 
 
 def _exact_mapping(value: Any, fields: frozenset[str], label: str) -> dict[str, Any]:
