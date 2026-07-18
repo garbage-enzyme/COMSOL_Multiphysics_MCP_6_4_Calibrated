@@ -4,7 +4,6 @@ English | [中文](README_CN.md)
 
 [![CI](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/actions/workflows/ci.yml)
 [![Python 3.14](https://img.shields.io/badge/python-3.14-blue)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-1199%20passed-brightgreen)](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
 ![Status: alpha](https://img.shields.io/badge/status-alpha-red)
 [![GitHub stars](https://img.shields.io/github/stars/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated?style=social)](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/stargazers)
@@ -226,11 +225,10 @@ The electrostatics helper can create `ChargeConservation` and a material node be
 
 ## Verification
 
-The current source dependency/process-only gate is **1161 passed, 13 deselected**.
-The optimized-Python production guard, compileall, hash-locked isolated
-non-editable wheel/install gate, licensed attached sweep/cancellation/recovery,
-PID-reuse rejection, and final detach-preservation receipt all pass. Exact-head
-hosted CI run `29640775538` passed all five jobs. Unit tests are side-effect-free:
+The source dependency/process-only gate, optimized-Python production guard,
+compileall, hash-locked isolated non-editable wheel/install gate, licensed
+attached sweep/cancellation/recovery, PID-reuse rejection, and detach-preservation
+receipt are maintained as release checks. Unit tests are side-effect-free:
 collection does not start COMSOL, and integration probes run only when explicitly
 requested in fresh, sequential subprocesses with exact process-tree cleanup.
 Repository-only tests, release fixtures, gates, and provenance are documented in

@@ -4,7 +4,6 @@
 
 [![CI](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/actions/workflows/ci.yml)
 [![Python 3.14](https://img.shields.io/badge/python-3.14-blue)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-1199%20passed-brightgreen)](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
 ![Status: alpha](https://img.shields.io/badge/status-alpha-red)
 [![GitHub stars](https://img.shields.io/github/stars/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated?style=social)](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/stargazers)
@@ -203,10 +202,9 @@ solver_status -> wave_optics_preflight -> wave_optics_reference_audit（可选�
 
 ## 验证
 
-当前源码 dependency/process-only 门槛为 **1161 passed, 13 deselected**。
-optimized-Python production guard、compileall、hash-locked 隔离 non-editable wheel/install、
-licensed attached sweep/cancellation/recovery、PID reuse 拒绝和最终 detach preservation
-receipt 均通过。exact-head hosted CI run `29640775538` 五项全部通过。单元测试无副作用：
+源码 dependency/process-only 门槛、optimized-Python production guard、compileall、
+hash-locked 隔离 non-editable wheel/install、licensed attached sweep/cancellation/recovery、
+PID reuse 拒绝和 detach preservation receipt 均作为 release checks 维护。单元测试无副作用：
 测试收集不会启动 COMSOL；integration probe 仅在显式请求时运行，并在全新的串行子进程中对
 精确进程树进行清理。仓库专用测试、release fixture、gate 与 provenance 见
 `development_kit/README.md`；普通 wheel/sdist 不包含该目录。
