@@ -330,12 +330,74 @@ class JobManager:
             if spec.get("job_type") == "branch_continuation_campaign"
             else spec.get("version")
         )
+        execution_backend = spec.get("execution_backend")
         if self._preflight is not None:
             return self._preflight(
                 model_path=model_path,
                 output_path=str(self.store.root / "probe"),
                 requested_version=requested_version,
+                execution_backend=execution_backend,
             )
+        if execution_backend is not None:
+            from src.jobs.attached_runtime import normalize_attached_execution_target
+            from src.shared_session.lifecycle import SharedSessionManager
+            from src.shared_session.preflight import classify_shared_server_preflight
+            from src.shared_session.process_probe import (
+                collect_shared_preflight_snapshot,
+            )
+
+            target = normalize_attached_execution_target(execution_backend)
+            endpoint = {
+                "host": target.server.endpoint.host,
+                "port": target.server.endpoint.port,
+            }
+            first = collect_shared_preflight_snapshot()
+            second = collect_shared_preflight_snapshot()
+            preflight = classify_shared_server_preflight(
+                endpoint=endpoint,
+                first_probe=first,
+                second_probe=second,
+            )
+            if not preflight.get("success"):
+                return {
+                    **preflight,
+                    "ready": False,
+                    "execution_backend": "attached_shared_server",
+                }
+            try:
+                observed = SharedSessionManager._server_identity_from_snapshot(
+                    target.server.endpoint, second
+                )
+            except Exception as exc:
+                return {
+                    "success": False,
+                    "ready": False,
+                    "state": "attached_server_identity_unavailable",
+                    "blockers": [f"{type(exc).__name__}: {exc}"],
+                    "execution_backend": "attached_shared_server",
+                }
+            if observed.identity_sha256 != target.server.identity_sha256:
+                return {
+                    "success": False,
+                    "ready": False,
+                    "state": "attached_server_identity_changed",
+                    "blockers": ["attached_server_identity_changed"],
+                    "expected_server_identity_sha256": (
+                        target.server.identity_sha256
+                    ),
+                    "observed_server_identity_sha256": observed.identity_sha256,
+                    "execution_backend": "attached_shared_server",
+                }
+            return {
+                "success": True,
+                "ready": True,
+                "state": "ready_for_attached_worker",
+                "execution_backend": "attached_shared_server",
+                "server_identity_sha256": observed.identity_sha256,
+                "preflight": preflight,
+                "mph_imported": False,
+                "client_constructed": False,
+            }
         from src.tools.ownership import SolverOwnership
         from src.tools.session import session_manager
 

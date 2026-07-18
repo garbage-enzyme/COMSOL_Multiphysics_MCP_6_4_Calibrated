@@ -21,7 +21,7 @@ from src.jobs.attached_runtime import (
     verify_attached_model_inventory,
     verify_attached_model_revision,
 )
-from src.jobs.manager import validate_staged_sweep_spec
+from src.jobs.manager import JobManager, validate_staged_sweep_spec
 from src.jobs.store import JobStore, process_identity
 import src.jobs.worker as production_worker
 from src.shared_session.identity import normalize_attached_server_identity
@@ -402,3 +402,107 @@ def test_attached_production_worker_uses_existing_model_and_never_clears_server(
     assert hashlib.sha256(source.read_bytes()).hexdigest() == spec[
         "source_model_sha256"
     ]
+
+
+def _attached_process_snapshot(*, server_pid=4200, server_created=1234.5):
+    return {
+        "inventory_complete": True,
+        "observed_at_epoch": 3000.0,
+        "processes": [
+            {
+                "pid": 4100,
+                "parent_pid": 0,
+                "kind": "comsol_desktop",
+                "create_time": 1200.0,
+                "command_signature": "d" * 64,
+                "file_version": "6.4.0.293",
+                "window_count": 1,
+                "responding": True,
+            },
+            {
+                "pid": server_pid,
+                "parent_pid": 0,
+                "kind": "comsol_server",
+                "create_time": server_created,
+                "command_signature": "a" * 64,
+                "file_version": "6.4.0.293",
+                "window_count": 0,
+                "responding": True,
+            },
+        ],
+        "listeners": [{"host": "::", "port": 2036, "pid": server_pid}],
+    }
+
+
+def test_attached_manager_preflight_is_process_only_and_binds_server_identity(
+    ascii_job_root, monkeypatch
+):
+    import src.shared_session.process_probe as process_probe
+
+    source = ascii_job_root / "immutable-source.mph"
+    source.write_bytes(b"immutable source")
+    spec = validate_staged_sweep_spec(
+        {
+            "job_type": "staged_sweep",
+            "source_model_path": str(source),
+            "parameter_name": "gap",
+            "parameter_values": [10.0],
+            "expressions": ["A"],
+            "execution_backend": _backend(),
+        }
+    )
+    monkeypatch.setattr(
+        process_probe,
+        "collect_shared_preflight_snapshot",
+        lambda: _attached_process_snapshot(),
+    )
+
+    store = JobStore(ascii_job_root / "runtime" / "jobs")
+    manager = JobManager(
+        store.root,
+        reconcile_on_start=False,
+    )
+    preflight = manager._run_preflight(spec)
+
+    assert preflight["success"] is True
+    assert preflight["ready"] is True
+    assert preflight["state"] == "ready_for_attached_worker"
+    assert preflight["server_identity_sha256"] == spec["execution_backend"][
+        "attached_server"
+    ]["identity_sha256"]
+    assert preflight["mph_imported"] is False
+    assert preflight["client_constructed"] is False
+
+
+def test_attached_manager_preflight_rejects_changed_server_process(
+    ascii_job_root, monkeypatch
+):
+    import src.shared_session.process_probe as process_probe
+
+    source = ascii_job_root / "immutable-source.mph"
+    source.write_bytes(b"immutable source")
+    spec = validate_staged_sweep_spec(
+        {
+            "job_type": "staged_sweep",
+            "source_model_path": str(source),
+            "parameter_name": "gap",
+            "parameter_values": [10.0],
+            "expressions": ["A"],
+            "execution_backend": _backend(),
+        }
+    )
+    monkeypatch.setattr(
+        process_probe,
+        "collect_shared_preflight_snapshot",
+        lambda: _attached_process_snapshot(server_pid=4300),
+    )
+    manager = JobManager(
+        ascii_job_root / "runtime" / "jobs",
+        reconcile_on_start=False,
+    )
+
+    preflight = manager._run_preflight(spec)
+
+    assert preflight["success"] is False
+    assert preflight["ready"] is False
+    assert preflight["state"] == "attached_server_identity_changed"
