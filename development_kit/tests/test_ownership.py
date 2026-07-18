@@ -8,10 +8,12 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from pathlib import Path
 
+import psutil
 import pytest
 
 import src.tools.ownership as ownership_module
@@ -144,6 +146,133 @@ def test_lease_is_active_for_same_os_process_identity(runtime_dir):
     assert lease["state"] == "active"
     assert lease["owned_by_current_process"] is True
     assert lease["lease"]["command_signature"] == _command_signature(command)
+
+
+def test_absent_lease_has_complete_collision_inventory(runtime_dir):
+    manager = SolverOwnership(
+        runtime_dir,
+        process_provider=lambda: [],
+        pid=42,
+        parent_pid=0,
+        create_time=42.0,
+        command_line=["python.exe", "observer"],
+        owner="absent-lease",
+    )
+
+    status = manager.status()
+
+    assert status["lease"]["state"] == "absent"
+    assert status["process_inventory"]["state"] == "complete"
+    assert status["full_collision_inventory"] == {
+        "state": "complete",
+        "complete": True,
+        "targeted_lease_identity": "not_requested",
+        "collision_decision": "verified",
+    }
+    assert status["collision"] is False
+
+
+def test_incomplete_process_access_is_explicit_and_fail_closed(runtime_dir):
+    def inaccessible_inventory():
+        raise PermissionError("simulated process access denial")
+
+    manager = SolverOwnership(
+        runtime_dir,
+        process_provider=inaccessible_inventory,
+        pid=43,
+        parent_pid=0,
+        create_time=43.0,
+        command_line=["python.exe", "observer"],
+        owner="incomplete-inventory",
+    )
+
+    status = manager.status()
+
+    assert status["process_inventory"]["complete"] is False
+    assert status["process_inventory"]["state"] == "unavailable"
+    assert status["full_collision_inventory"]["state"] == "unavailable"
+    assert status["full_collision_inventory"]["collision_decision"] == (
+        "fail_closed_until_complete"
+    )
+    assert status["collision"] is True
+    assert manager.acquire(mode="local-client")["success"] is False
+
+
+def test_targeted_active_identity_does_not_claim_collision_free(runtime_dir, monkeypatch):
+    current = psutil.Process(os.getpid())
+    command = list(current.cmdline())
+    payload = {
+        "schema_version": ownership_module.LEASE_SCHEMA_VERSION,
+        "owner": "pending-inventory",
+        "mode": "local-client",
+        "pid": current.pid,
+        "parent_pid": current.ppid(),
+        "process_create_time": current.create_time(),
+        "command_line": command,
+        "command_signature": _command_signature(command),
+        "model_path": None,
+        "heartbeat_epoch": time.time(),
+        "created_at_epoch": time.time(),
+        "acquisition_id": "pending-inventory-acquisition",
+        "resource_ownership": "mcp_owned",
+        "attached_server": None,
+        "comsol_server_pids": [],
+        "comsol_server_processes": [],
+        "comsol_server_port": None,
+    }
+    manager = SolverOwnership(runtime_dir, owner="pending-inventory")
+    manager.lease_path.write_text(json.dumps(payload), encoding="utf-8")
+    started = threading.Event()
+
+    def delayed_inventory():
+        started.set()
+        time.sleep(0.25)
+        return []
+
+    monkeypatch.setattr(ownership_module, "_system_processes", delayed_inventory)
+    monkeypatch.setattr(
+        ownership_module, "PROCESS_INVENTORY_MUTATION_TIMEOUT_SECONDS", 0.02
+    )
+    manager._process_provider = ownership_module._system_processes
+    manager._process_inventory = ownership_module._BoundedProcessInventory(
+        manager._process_provider
+    )
+
+    status = manager.status(inventory_timeout=0.02)
+
+    assert started.wait(timeout=1)
+    assert status["process_inventory"]["state"] == "pending"
+    assert status["lease"]["state"] == "active"
+    assert status["lease"]["identity_source"] == "targeted_process_probe"
+    assert status["full_collision_inventory"]["state"] == "pending"
+    assert status["full_collision_inventory"]["targeted_lease_identity"] == "active"
+    assert status["full_collision_inventory"]["collision_decision"] == (
+        "fail_closed_until_complete"
+    )
+    assert status["collision"] is True
+    assert manager.acquire(mode="local-client")["success"] is False
+
+
+def test_uncertain_lease_identity_cannot_be_acquired(runtime_dir):
+    manager = SolverOwnership(
+        runtime_dir,
+        process_provider=lambda: [],
+        pid=44,
+        parent_pid=0,
+        create_time=44.0,
+        command_line=["python.exe", "observer"],
+        owner="uncertain-lease",
+    )
+    manager.lease_path.write_text(
+        json.dumps({"schema_version": ownership_module.LEASE_SCHEMA_VERSION}),
+        encoding="utf-8",
+    )
+
+    status = manager.status()
+
+    assert status["lease"]["state"] == "uncertain"
+    assert status["collision"] is True
+    assert manager.acquire(mode="local-client")["success"] is False
 
 
 def test_heartbeat_records_owned_comsol_server_pid(runtime_dir):

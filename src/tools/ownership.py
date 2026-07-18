@@ -13,7 +13,6 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-import mph
 import psutil
 from mcp.server.fastmcp import FastMCP
 
@@ -218,6 +217,7 @@ class _BoundedProcessInventory:
             ):
                 return list(self._cache_records), {
                     "complete": True,
+                    "state": "complete",
                     "fresh": False,
                     "source": "recent_complete_cache",
                     "cache_age_seconds": round(cache_age, 6),
@@ -243,6 +243,7 @@ class _BoundedProcessInventory:
             if fresh_complete:
                 return list(self._cache_records or []), {
                     "complete": True,
+                    "state": "complete",
                     "fresh": True,
                     "source": "fresh_scan",
                     "cache_age_seconds": round(completed - self._cache_completed_monotonic, 6),
@@ -257,6 +258,7 @@ class _BoundedProcessInventory:
             )
             return list(self._cache_records or []), {
                 "complete": False,
+                "state": "unavailable" if self._last_error and not thread.is_alive() else "pending",
                 "fresh": False,
                 "source": "stale_cache_after_timeout" if self._cache_records is not None else "unavailable_after_timeout",
                 "cache_age_seconds": round(cache_age, 6) if cache_age is not None else None,
@@ -336,6 +338,7 @@ class SolverOwnership:
         except Exception as exc:
             return [], {
                 "complete": False,
+                "state": "unavailable",
                 "fresh": False,
                 "source": "custom_provider_error",
                 "cache_age_seconds": None,
@@ -345,6 +348,7 @@ class SolverOwnership:
             }
         return records, {
             "complete": True,
+            "state": "complete",
             "fresh": True,
             "source": "custom_provider",
             "cache_age_seconds": 0.0,
@@ -568,6 +572,20 @@ class SolverOwnership:
         else:
             lease_status = {**self._lease_state(lease, processes), "lease": lease}
         external = self._external_solver_processes(processes, lease)
+        full_collision_inventory = {
+            "state": inventory.get("state", "complete")
+            if inventory["complete"]
+            else inventory.get("state", "pending"),
+            "complete": bool(inventory["complete"]),
+            "targeted_lease_identity": (
+                targeted_lease_state.get("state")
+                if targeted_lease_state is not None
+                else "not_requested"
+            ),
+            "collision_decision": (
+                "verified" if inventory["complete"] else "fail_closed_until_complete"
+            ),
+        }
         try:
             from src.jobs.manager import JobManager
 
@@ -583,6 +601,7 @@ class SolverOwnership:
             "lease_path": str(self.lease_path),
             "lease": lease_status,
             "process_inventory": inventory,
+            "full_collision_inventory": full_collision_inventory,
             "external_solver_processes": external,
             "collision": not inventory["complete"] or bool(external) or (
                 lease_status["state"] in {"active", "uncertain"}
@@ -600,6 +619,8 @@ class SolverOwnership:
         requested_version: Optional[str] = None,
         minimum_free_gb: float = 2.0,
     ) -> dict[str, Any]:
+        import mph
+
         ownership = self.status(
             session_state=session_state,
             require_fresh_inventory=True,
@@ -686,7 +707,11 @@ class SolverOwnership:
     def acquire(self, *, mode: str, model_path: Optional[str] = None) -> dict[str, Any]:
         status = self.status(require_fresh_inventory=True)
         lease_status = status["lease"]
-        if lease_status["state"] == "active" and lease_status.get("owned_by_current_process"):
+        if (
+            lease_status["state"] == "active"
+            and lease_status.get("owned_by_current_process")
+            and not status["collision"]
+        ):
             return {"success": True, "acquired": False, "reused": True, "lease": lease_status["lease"]}
         if status["collision"] or lease_status["state"] == "stale":
             return {
