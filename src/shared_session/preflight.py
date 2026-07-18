@@ -101,6 +101,13 @@ def _normalize_version(
     return ".".join(str(item) for item in parts), parts
 
 
+def normalize_comsol_version_readback(
+    value: Any,
+) -> tuple[str | None, tuple[int, int, int, int] | None]:
+    """Normalize one bounded full COMSOL build readback for post-connect gates."""
+    return _normalize_version(value)
+
+
 def _normalize_process(value: Any, index: int) -> dict[str, Any]:
     label = f"processes[{index}]"
     raw = _exact_mapping(value, _PROCESS_FIELDS, label)
@@ -320,5 +327,6 @@ __all__ = [
     "SHARED_SERVER_PREFLIGHT_SCHEMA",
     "SHARED_SERVER_PREFLIGHT_VERSION",
     "classify_shared_server_preflight",
+    "normalize_comsol_version_readback",
     "normalize_shared_preflight_snapshot",
 ]

@@ -24,7 +24,9 @@ from .locking import (
     normalize_shared_model_identity,
 )
 from .preflight import (
+    ACCEPTED_RELEASE_LINE,
     classify_shared_server_preflight,
+    normalize_comsol_version_readback,
     normalize_shared_preflight_snapshot,
 )
 from .process_probe import collect_shared_preflight_snapshot
@@ -59,6 +61,10 @@ def _default_client_factory(host: str, port: int):
     import mph
 
     return mph.Client(host=host, port=port)
+
+
+def _default_client_version_reader(client: Any) -> str:
+    return str(client.java.getComsolVersion())
 
 
 def _default_model_inventory_reader(client: Any) -> list[dict[str, Any]]:
@@ -189,6 +195,7 @@ class SharedSessionManager:
         snapshot_provider: Callable[[], Mapping[str, Any]] = collect_shared_preflight_snapshot,
         ownership_factory: Callable[[], Any] = _default_ownership_factory,
         client_factory: Callable[[str, int], Any] = _default_client_factory,
+        client_version_reader: Callable[[Any], str] = _default_client_version_reader,
         model_inventory_reader: Callable[[Any], list[dict[str, Any]]] = _default_model_inventory_reader,
         model_revision_reader: Callable[
             [Any, str], tuple[dict[str, Any], dict[str, Any]]
@@ -208,6 +215,7 @@ class SharedSessionManager:
         self._snapshot_provider = snapshot_provider
         self._ownership_factory = ownership_factory
         self._client_factory = client_factory
+        self._client_version_reader = client_version_reader
         self._model_inventory_reader = model_inventory_reader
         self._model_revision_reader = model_revision_reader
         self._mcp_process_identity_provider = mcp_process_identity_provider
@@ -330,11 +338,45 @@ class SharedSessionManager:
                     "lease_acquired": False,
                 }
             client = None
+            post_connect = None
             try:
                 client = self._client_factory(
                     normalized_request.endpoint.host,
                     normalized_request.endpoint.port,
                 )
+                clientapi_version, version_parts = normalize_comsol_version_readback(
+                    self._client_version_reader(client)
+                )
+                if (
+                    version_parts is None
+                    or version_parts[:3] != ACCEPTED_RELEASE_LINE
+                ):
+                    raise RuntimeError(
+                        "post-connect COMSOL version is outside the accepted 6.4.0.* line"
+                    )
+                server_after = self._server_identity_from_snapshot(
+                    normalized_request.endpoint, self._snapshot_provider()
+                )
+                if server_after.identity_sha256 != server_identity.identity_sha256:
+                    raise RuntimeError(
+                        "attached server identity changed after client connection"
+                    )
+                server_versions = {
+                    item["file_version"]
+                    for item in preflight["processes"]
+                    if item["kind"] == "comsol_server"
+                }
+                version_warnings = []
+                if server_versions != {clientapi_version}:
+                    version_warnings.append(
+                        "same_accepted_release_line_build_difference"
+                    )
+                post_connect = {
+                    "clientapi_comsol_version": clientapi_version,
+                    "accepted_release_line": "6.4.0.*",
+                    "server_identity_verified": True,
+                    "warnings": version_warnings,
+                }
                 models, inventory_sha256 = self._inventory(
                     self._model_inventory_reader, client
                 )
@@ -376,6 +418,7 @@ class SharedSessionManager:
                 "ownership": "external_user_owned_server",
                 "can_start_comsol": False,
                 "preflight": preflight,
+                "post_connect": post_connect,
             }
 
     def status(self) -> dict[str, Any]:

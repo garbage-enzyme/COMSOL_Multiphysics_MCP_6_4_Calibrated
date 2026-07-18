@@ -139,6 +139,7 @@ def _manager(
     snapshots=None,
     models=None,
     client_factory=None,
+    client_version="6.4.0.293",
     revision_state=None,
     snapshot_writer=None,
 ):
@@ -154,6 +155,7 @@ def _manager(
             snapshot_provider=lambda: next(values),
             ownership_factory=lambda: ownership,
             client_factory=client_factory or (lambda host, port: client),
+            client_version_reader=lambda value: client_version,
             model_inventory_reader=lambda value: _inventory(models),
             model_revision_reader=lambda value, tag: (
                 revision_state["structural"], revision_state["state"]
@@ -413,6 +415,7 @@ def test_model_lock_verify_detects_changed_server_identity(tmp_path):
         _snapshot(),
         _snapshot(),
         _snapshot(),
+        _snapshot(),
         _snapshot(server_created=999.0),
     ]
     manager, _ownership, _client = _manager(tmp_path, snapshots=snapshots)
@@ -605,6 +608,12 @@ def test_attach_and_detach_preserve_server_listener_and_model_inventory(tmp_path
     assert attached["state"] == "attached_model_pending_adoption"
     assert attached["ownership"] == "external_user_owned_server"
     assert attached["can_start_comsol"] is False
+    assert attached["post_connect"] == {
+        "clientapi_comsol_version": "6.4.0.293",
+        "accepted_release_line": "6.4.0.*",
+        "server_identity_verified": True,
+        "warnings": [],
+    }
     assert status["attached"] is True
     assert detached["success"] is True
     assert detached["external_resources_preserved"] is True
@@ -612,6 +621,57 @@ def test_attach_and_detach_preserve_server_listener_and_model_inventory(tmp_path
     assert client.calls == ["disconnect"]
     assert ownership.releases == 1
     assert not ownership.lease_path.exists()
+
+
+def test_post_connect_accepts_final_build_difference_with_warning(tmp_path):
+    manager, _ownership, _client = _manager(
+        tmp_path, client_version="COMSOL Multiphysics 6.4.0.310"
+    )
+
+    result = manager.attach(
+        _request(),
+        profile="desktop_shared",
+        environ={SHARED_SERVER_FEATURE_ENV: "true"},
+    )
+
+    assert result["success"] is True
+    assert result["post_connect"]["clientapi_comsol_version"] == "6.4.0.310"
+    assert result["post_connect"]["warnings"] == [
+        "same_accepted_release_line_build_difference"
+    ]
+
+
+def test_post_connect_rejects_other_release_and_releases_lease(tmp_path):
+    manager, ownership, client = _manager(tmp_path, client_version="6.4.1.12")
+
+    result = manager.attach(
+        _request(),
+        profile="desktop_shared",
+        environ={SHARED_SERVER_FEATURE_ENV: "true"},
+    )
+
+    assert result["success"] is False
+    assert result["state"] == "attach_failed"
+    assert "outside the accepted 6.4.0.* line" in result["error"]
+    assert client.calls == ["disconnect"]
+    assert ownership.releases == 1
+    assert not ownership.lease_path.exists()
+
+
+def test_post_connect_rejects_changed_server_identity_before_inventory(tmp_path):
+    snapshots = [_snapshot(), _snapshot(), _snapshot(server_created=999.0)]
+    manager, ownership, client = _manager(tmp_path, snapshots=snapshots)
+
+    result = manager.attach(
+        _request(),
+        profile="desktop_shared",
+        environ={SHARED_SERVER_FEATURE_ENV: "true"},
+    )
+
+    assert result["success"] is False
+    assert "identity changed after client connection" in result["error"]
+    assert client.calls == ["disconnect"]
+    assert ownership.releases == 1
 
 
 def test_client_construction_failure_releases_only_mcp_lease(tmp_path):
@@ -680,7 +740,12 @@ def test_disconnect_failure_keeps_lease_and_reports_uncertain(tmp_path):
 
 
 def test_changed_server_identity_after_disconnect_fails_preservation(tmp_path):
-    snapshots = [_snapshot(), _snapshot(), _snapshot(server_created=999.0)]
+    snapshots = [
+        _snapshot(),
+        _snapshot(),
+        _snapshot(),
+        _snapshot(server_created=999.0),
+    ]
     manager, ownership, client = _manager(tmp_path, snapshots=snapshots)
     assert manager.attach(
         _request(),
