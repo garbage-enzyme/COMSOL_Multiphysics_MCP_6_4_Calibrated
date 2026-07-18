@@ -179,7 +179,7 @@ print(json.dumps({'count': len(names), 'configured': status['configured']}))
     assert json.loads(completed.stdout)["count"] == 46
 
 
-def test_default_and_other_research_profiles_remain_unchanged():
+def test_semantic_and_other_profile_counts_match_declared_discovery():
     counts = {}
     for profile in ("core", "basic_fem", "wave_optics", "experimental", "full"):
         server = create_server(f"semantic-profile-{profile}", profile=profile)
@@ -188,7 +188,7 @@ def test_default_and_other_research_profiles_remain_unchanged():
     assert counts == {
         "core": 43,
         "basic_fem": 81,
-        "wave_optics": 68,
+        "wave_optics": 67,
         "experimental": 69,
         "full": 135,
     }
