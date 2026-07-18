@@ -177,7 +177,7 @@ The electrostatics helper can create `ChargeConservation` and a material node be
 
 ## Verification
 
-The current dependency/process-only gate is **922 passed, 13 deselected**. Unit tests are side-effect-free: collection does not start COMSOL, and integration probes run only when explicitly requested in fresh, sequential subprocesses with exact process-tree cleanup. Repository-only tests, release fixtures, gates, and provenance are documented in `development_kit/README.md`; ordinary wheel/sdist artifacts exclude that directory.
+The current dependency/process-only gate is **956 passed, 13 deselected**. Unit tests are side-effect-free: collection does not start COMSOL, and integration probes run only when explicitly requested in fresh, sequential subprocesses with exact process-tree cleanup. Repository-only tests, release fixtures, gates, and provenance are documented in `development_kit/README.md`; ordinary wheel/sdist artifacts exclude that directory.
 
 ```bash
 python -m pytest -q
