@@ -43,6 +43,9 @@ _PROCESS_KINDS = frozenset(
 )
 _HEX64 = re.compile(r"^[0-9a-fA-F]{64}$")
 _VERSION = re.compile(r"(?<!\d)(\d+)\.(\d+)\.(\d+)\.(\d+)(?!\d)")
+_CLIENTAPI_DISPLAY_VERSION = re.compile(
+    r"(?<!\d)(\d+)\.(\d+)(?!\.\d).*?\([^\d)]*(\d+)[^)]*\)"
+)
 
 
 def _canonical_sha256(value: Any) -> str:
@@ -103,9 +106,27 @@ def _normalize_version(
 
 def normalize_comsol_version_readback(
     value: Any,
+    *,
+    expected_file_version: str | None = None,
 ) -> tuple[str | None, tuple[int, int, int, int] | None]:
     """Normalize one bounded full COMSOL build readback for post-connect gates."""
-    return _normalize_version(value)
+    normalized, parts = _normalize_version(value)
+    if parts is not None or not isinstance(value, str):
+        return normalized, parts
+    display = _CLIENTAPI_DISPLAY_VERSION.search(value)
+    if display is None or expected_file_version is None:
+        return normalized, parts
+    expected_normalized, expected_parts = _normalize_version(expected_file_version)
+    if expected_parts is None:
+        return normalized, parts
+    major, minor, build = (int(item) for item in display.groups())
+    if (major, minor, build) != (
+        expected_parts[0],
+        expected_parts[1],
+        expected_parts[3],
+    ):
+        return "unreadable", None
+    return expected_normalized, expected_parts
 
 
 def _normalize_process(value: Any, index: int) -> dict[str, Any]:

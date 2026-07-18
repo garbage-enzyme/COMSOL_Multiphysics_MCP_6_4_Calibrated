@@ -344,8 +344,19 @@ class SharedSessionManager:
                     normalized_request.endpoint.host,
                     normalized_request.endpoint.port,
                 )
+                clientapi_raw_version = self._client_version_reader(client)
+                server_versions = {
+                    item["file_version"]
+                    for item in preflight["processes"]
+                    if item["kind"] == "comsol_server"
+                }
+                if len(server_versions) != 1:
+                    raise RuntimeError(
+                        "post-connect Server file version is not unique"
+                    )
                 clientapi_version, version_parts = normalize_comsol_version_readback(
-                    self._client_version_reader(client)
+                    clientapi_raw_version,
+                    expected_file_version=next(iter(server_versions)),
                 )
                 if (
                     version_parts is None
@@ -361,17 +372,13 @@ class SharedSessionManager:
                     raise RuntimeError(
                         "attached server identity changed after client connection"
                     )
-                server_versions = {
-                    item["file_version"]
-                    for item in preflight["processes"]
-                    if item["kind"] == "comsol_server"
-                }
                 version_warnings = []
                 if server_versions != {clientapi_version}:
                     version_warnings.append(
                         "same_accepted_release_line_build_difference"
                     )
                 post_connect = {
+                    "clientapi_raw_version": clientapi_raw_version,
                     "clientapi_comsol_version": clientapi_version,
                     "accepted_release_line": "6.4.0.*",
                     "server_identity_verified": True,

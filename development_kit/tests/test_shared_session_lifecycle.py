@@ -609,6 +609,7 @@ def test_attach_and_detach_preserve_server_listener_and_model_inventory(tmp_path
     assert attached["ownership"] == "external_user_owned_server"
     assert attached["can_start_comsol"] is False
     assert attached["post_connect"] == {
+        "clientapi_raw_version": "6.4.0.293",
         "clientapi_comsol_version": "6.4.0.293",
         "accepted_release_line": "6.4.0.*",
         "server_identity_verified": True,
@@ -641,6 +642,28 @@ def test_post_connect_accepts_final_build_difference_with_warning(tmp_path):
     ]
 
 
+def test_post_connect_correlates_localized_clientapi_build_to_file_version(tmp_path):
+    manager, _ownership, _client = _manager(
+        tmp_path,
+        client_version="COMSOL Multiphysics 6.4 (开发版本: 293)",
+    )
+
+    result = manager.attach(
+        _request(),
+        profile="desktop_shared",
+        environ={SHARED_SERVER_FEATURE_ENV: "true"},
+    )
+
+    assert result["success"] is True
+    assert result["post_connect"] == {
+        "clientapi_raw_version": "COMSOL Multiphysics 6.4 (开发版本: 293)",
+        "clientapi_comsol_version": "6.4.0.293",
+        "accepted_release_line": "6.4.0.*",
+        "server_identity_verified": True,
+        "warnings": [],
+    }
+
+
 def test_post_connect_rejects_other_release_and_releases_lease(tmp_path):
     manager, ownership, client = _manager(tmp_path, client_version="6.4.1.12")
 
@@ -656,6 +679,24 @@ def test_post_connect_rejects_other_release_and_releases_lease(tmp_path):
     assert client.calls == ["disconnect"]
     assert ownership.releases == 1
     assert not ownership.lease_path.exists()
+
+
+def test_post_connect_rejects_localized_build_mismatch(tmp_path):
+    manager, ownership, client = _manager(
+        tmp_path,
+        client_version="COMSOL Multiphysics 6.4 (Build: 294)",
+    )
+
+    result = manager.attach(
+        _request(),
+        profile="desktop_shared",
+        environ={SHARED_SERVER_FEATURE_ENV: "true"},
+    )
+
+    assert result["success"] is False
+    assert "outside the accepted 6.4.0.* line" in result["error"]
+    assert client.calls == ["disconnect"]
+    assert ownership.releases == 1
 
 
 def test_post_connect_rejects_changed_server_identity_before_inventory(tmp_path):
