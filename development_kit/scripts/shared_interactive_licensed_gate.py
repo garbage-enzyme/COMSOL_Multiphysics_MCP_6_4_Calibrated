@@ -40,7 +40,9 @@ def _parser() -> argparse.ArgumentParser:
         description="Run one bounded non-owning shared-session acceptance phase."
     )
     parser.add_argument(
-        "--mode", choices=("prepare", "readback", "saved"), required=True
+        "--mode",
+        choices=("prepare", "readback", "saved", "saved_readback"),
+        required=True,
     )
     parser.add_argument("--host", default="localhost")
     parser.add_argument("--port", type=int, default=2036)
@@ -75,7 +77,9 @@ def _git_head() -> str | None:
 
 
 def _spec(args: argparse.Namespace) -> dict[str, Any]:
-    if args.mode in {"readback", "saved"} and not args.expected_desktop_value:
+    if args.mode in {"readback", "saved", "saved_readback"} and not (
+        args.expected_desktop_value
+    ):
         raise ValueError(f"{args.mode} mode requires --expected-desktop-value")
     if args.mode == "prepare" and (
         args.expected_desktop_value is not None
@@ -90,7 +94,7 @@ def _spec(args: argparse.Namespace) -> dict[str, Any]:
         or args.immutable_source_path is not None
     ):
         raise ValueError("readback mode does not accept saved-model paths")
-    if args.mode == "saved":
+    if args.mode in {"saved", "saved_readback"}:
         if args.expected_file_path is None:
             raise ValueError("saved mode requires --expected-file-path")
         if args.immutable_source_path is None:
@@ -114,7 +118,7 @@ def _spec(args: argparse.Namespace) -> dict[str, Any]:
         "tag": args.model_tag,
         "expected_label": args.expected_label,
     }
-    if args.mode == "saved":
+    if args.mode in {"saved", "saved_readback"}:
         selector["expected_file_path"] = str(args.expected_file_path)
     else:
         selector["expected_unsaved"] = True
@@ -312,6 +316,26 @@ def _saved_model_edit(model: Any, expected_desktop_value: str) -> dict[str, Any]
     }
 
 
+def _saved_model_readback(model: Any, expected_desktop_value: str) -> dict[str, Any]:
+    parameters = _parameter_expressions(model)
+    if parameters.get(MCP_PARAMETER) != MCP_PARAMETER_VALUE:
+        raise RuntimeError("saved model does not preserve the MCP-written parameter")
+    if parameters.get(DESKTOP_PARAMETER) != expected_desktop_value:
+        raise RuntimeError("saved model does not preserve the Desktop-edited parameter")
+    if SAVED_MODEL_PARAMETER not in parameters:
+        raise RuntimeError("saved working model is missing the shared edit parameter")
+    return {
+        "parameters": {
+            MCP_PARAMETER: parameters[MCP_PARAMETER],
+            DESKTOP_PARAMETER: parameters[DESKTOP_PARAMETER],
+            SAVED_MODEL_PARAMETER: parameters[SAVED_MODEL_PARAMETER],
+        },
+        "model_mutation_requested": False,
+        "solve_requested": False,
+        "snapshot_requested": False,
+    }
+
+
 def _run(args: argparse.Namespace) -> dict[str, Any]:
     spec = _spec(args)
     result: dict[str, Any] = {
@@ -328,7 +352,7 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
     attached = False
     immutable_source = None
     try:
-        if args.mode == "saved":
+        if args.mode in {"saved", "saved_readback"}:
             source_path = Path(spec["immutable_source_path"])
             if not source_path.is_file():
                 raise RuntimeError("declared saved model source does not exist")
@@ -378,8 +402,9 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
             tool_name=f"shared_interactive_gate_{args.mode}",
             side_effect_class={
                 "prepare": "solver_execution",
-                "readback": "read_only",
+                "readback": "filesystem_write",
                 "saved": "model_mutation",
+                "saved_readback": "read_only",
             }[args.mode],
         )
         result["operation_acquisition"] = acquisition
@@ -391,6 +416,10 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
             result["phase"] = _prepare_capacitor(model)
         elif args.mode == "saved":
             result["phase"] = _saved_model_edit(
+                model, args.expected_desktop_value
+            )
+        elif args.mode == "saved_readback":
+            result["phase"] = _saved_model_readback(
                 model, args.expected_desktop_value
             )
         else:
@@ -426,22 +455,30 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
             if source_sha256_after_edit != immutable_source["sha256"]:
                 raise RuntimeError("saved source bytes changed during in-memory edit")
 
-        current_revision = relocked["model_lock"]["revision"]["revision_sha256"]
-        snapshot = manager.snapshot_model(
-            expected_lock_sha256=active_lock_sha256,
-            expected_revision_sha256=current_revision,
-            max_snapshot_bytes=MAX_SNAPSHOT_BYTES,
-        )
-        result["snapshot"] = snapshot
-        if not snapshot.get("success"):
-            raise RuntimeError("identity-preserving Save Copy failed")
-        if immutable_source is not None:
-            source_sha256_after_snapshot = _sha256(Path(immutable_source["path"]))
-            result["immutable_source_after_snapshot_sha256"] = (
-                source_sha256_after_snapshot
+        if args.mode == "saved_readback":
+            result["snapshot"] = {
+                "success": True,
+                "state": "not_requested",
+            }
+        else:
+            current_revision = relocked["model_lock"]["revision"]["revision_sha256"]
+            snapshot = manager.snapshot_model(
+                expected_lock_sha256=active_lock_sha256,
+                expected_revision_sha256=current_revision,
+                max_snapshot_bytes=MAX_SNAPSHOT_BYTES,
             )
-            if source_sha256_after_snapshot != immutable_source["sha256"]:
-                raise RuntimeError("saved source bytes changed during Save Copy")
+            result["snapshot"] = snapshot
+            if not snapshot.get("success"):
+                raise RuntimeError("identity-preserving Save Copy failed")
+            if immutable_source is not None:
+                source_sha256_after_snapshot = _sha256(
+                    Path(immutable_source["path"])
+                )
+                result["immutable_source_after_snapshot_sha256"] = (
+                    source_sha256_after_snapshot
+                )
+                if source_sha256_after_snapshot != immutable_source["sha256"]:
+                    raise RuntimeError("saved source bytes changed during Save Copy")
         unlocked = manager.unlock_model(
             expected_lock_sha256=active_lock_sha256,
             reason=f"Complete licensed shared {args.mode} phase",

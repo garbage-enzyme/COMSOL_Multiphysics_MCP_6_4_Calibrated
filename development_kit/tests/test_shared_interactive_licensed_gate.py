@@ -140,3 +140,39 @@ def test_shared_interactive_saved_mode_binds_exact_source_path():
     assert result["spec"]["immutable_source_path"] == str(
         Path(_ascii_source())
     )
+
+
+def test_saved_readback_mode_uses_distinct_source_and_working_paths():
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--mode",
+            "saved_readback",
+            "--model-tag",
+            "Model1",
+            "--expected-label",
+            "existing_model_working.mph",
+            "--expected-desktop-value",
+            "29[mm]",
+            "--expected-file-path",
+            _ascii_working_model(),
+            "--immutable-source-path",
+            _ascii_source(),
+            "--receipt",
+            _ascii_receipt(),
+            "--dry-run",
+        ],
+        cwd=Path(__file__).parents[2],
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    result = json.loads(completed.stdout)
+    assert result["spec"]["mode"] == "saved_readback"
+    assert result["spec"]["selector"]["expected_file_path"] == str(
+        Path(_ascii_working_model())
+    )
