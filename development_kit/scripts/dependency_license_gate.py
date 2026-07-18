@@ -85,10 +85,7 @@ def load_license_review(path: str | Path) -> dict[str, Any]:
             not isinstance(signals, list)
             or not signals
             or len(signals) != len(set(signals))
-            or not all(
-                isinstance(signal, str) and _SIGNAL.fullmatch(signal)
-                for signal in signals
-            )
+            or not all(isinstance(signal, str) and _SIGNAL.fullmatch(signal) for signal in signals)
             or not isinstance(reason, str)
             or not reason.strip()
             or len(reason) > 1024
@@ -165,9 +162,7 @@ def build_license_receipt(
             failures.append({"dependency": name, "reason_code": "not_installed"})
             continue
         if installed["dependency"] != name:
-            failures.append(
-                {"dependency": name, "reason_code": "metadata_name_mismatch"}
-            )
+            failures.append({"dependency": name, "reason_code": "metadata_name_mismatch"})
             continue
         entry = review["entries"].get(name)
         matched = (
@@ -176,13 +171,9 @@ def build_license_receipt(
             else []
         )
         if not installed["signals"]:
-            failures.append(
-                {"dependency": name, "reason_code": "license_metadata_missing"}
-            )
+            failures.append({"dependency": name, "reason_code": "license_metadata_missing"})
         elif entry is not None and not matched:
-            failures.append(
-                {"dependency": name, "reason_code": "license_metadata_unmatched"}
-            )
+            failures.append({"dependency": name, "reason_code": "license_metadata_unmatched"})
         records.append(
             {
                 "dependency": name,

@@ -68,9 +68,7 @@ def test_every_entry_declares_read_write_and_non_mutating_migration_policy():
             or entry["writable_version"] in entry["readable_versions"]
         )
         assert entry["migration"]["rewrites_source_in_place"] is False
-        assert entry["migration"]["available"] == bool(
-            entry["migration"]["source_schema_names"]
-        )
+        assert entry["migration"]["available"] == bool(entry["migration"]["source_schema_names"])
     physical = next(
         item
         for item in get_schema_registry()["entries"]

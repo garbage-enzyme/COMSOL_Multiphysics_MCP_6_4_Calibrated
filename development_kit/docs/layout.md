@@ -59,6 +59,7 @@ models are intentionally absent.
 - `development_kit/release/profile_migration.json` — This receipt records the exact recommended-profile tool diff and compatibility replacement.
 - `development_kit/release/vulnerability_allowlist.json` — This file records exact reviewed vulnerabilities with mandatory expiry dates.
 - `development_kit/release/dependency_license_review.json` — This file records accepted license metadata for every declared runtime dependency.
+- `development_kit/release/coverage_policy.json` — This file records the non-decreasing global coverage floor and owned per-file safety targets.
 - `development_kit/release/planning_code_allowlist.json` — This file freezes historical planning-code matches by path, count, and hash.
 - `development_kit/release/integration_fixtures/manifest.json` — This file inventories sanitized integration contracts and their canonical hashes.
 - `development_kit/release/integration_fixtures/capacitor_clientapi_regression.json` — This contract defines the analytic capacitor clientapi regression.
@@ -75,6 +76,7 @@ models are intentionally absent.
 
 - `development_kit/scripts/__init__.py` — This file marks repository-only release utilities as a Python package.
 - `development_kit/scripts/dependency_license_gate.py` — This script emits a path-free receipt and fails on expired, missing, stale, or unmatched runtime dependency license reviews.
+- `development_kit/scripts/quality_gate.py` — This script runs the ratcheted lint, format, typing, property, coverage, license, cold-start, and response-budget gates.
 - `development_kit/scripts/generate_release_lock.py` — This script generates the complete hashed Windows Python release lock.
 - `development_kit/scripts/installed_package_probe.py` — This script verifies installed discovery, schemas, profiles, and deployment identity without COMSOL startup.
 - `development_kit/scripts/installed_stdio_probe.py` — This script verifies the installed console entry point over real MCP stdio transport.
@@ -196,6 +198,7 @@ models are intentionally absent.
 - `development_kit/tests/test_property_transport.py` — This module tests bounded JSON transport for clientapi properties.
 - `development_kit/tests/test_public_input_contracts.py` — This module tests bounded discovery schemas and matching pre-side-effect runtime limits.
 - `development_kit/tests/test_quality_properties.py` — This module provides seeded property tests and exhaustive safety-decision branch cases for foundation contracts.
+- `development_kit/tests/test_quality_gate.py` — This module tests exact coverage floors and fail-closed quality-policy evaluation.
 - `development_kit/tests/test_real_fixture_contract.py` — This module tests portable contracts for controlled licensed fixtures.
 - `development_kit/tests/test_recipe_paths.py` — This module tests standalone recipe output path policy.
 - `development_kit/tests/test_reference_power_acceptance.py` — This module tests reference-power acceptance contracts and preflight.

@@ -44,9 +44,7 @@ def bounded_public_schema(value: dict[str, Any]) -> dict[str, Any]:
     return schema
 
 
-def validate_public_structure(
-    value: Any, *, path: str = "arguments", depth: int = 0
-) -> None:
+def validate_public_structure(value: Any, *, path: str = "arguments", depth: int = 0) -> None:
     """Apply the same generic structural limits before any tool side effect."""
     if depth > MAX_PUBLIC_NESTING_DEPTH:
         raise ValueError(f"{path} exceeds the public nesting limit")

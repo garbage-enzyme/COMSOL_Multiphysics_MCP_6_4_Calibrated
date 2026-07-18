@@ -26,9 +26,7 @@ from src.tools.catalog import (
 )
 
 SNAPSHOT_PATH = Path(__file__).parent / "snapshots" / "full_tool_schemas.json"
-BASELINE_SNAPSHOT_PATH = (
-    Path(__file__).parent / "snapshots" / "baseline_tool_schemas.json"
-)
+BASELINE_SNAPSHOT_PATH = Path(__file__).parent / "snapshots" / "baseline_tool_schemas.json"
 
 
 def test_full_tool_schema_snapshot_is_stable():
@@ -103,10 +101,7 @@ def test_profile_registrar_selection_is_derived_from_tool_specs():
     full = registrars_for_profile("full")
     assert core
     assert len(core) < len(full)
-    assert (
-        "comsol_mcp.tools.wave_optics_audit.register_wave_optics_audit_tools"
-        not in core
-    )
+    assert "comsol_mcp.tools.wave_optics_audit.register_wave_optics_audit_tools" not in core
     assert "comsol_mcp.tools.wave_optics_audit.register_wave_optics_audit_tools" in full
 
 
@@ -174,9 +169,7 @@ def test_metadata_registrars_match_actual_registration():
         registrar(server)
         registrar_name = f"{registrar.__module__}.{registrar.__name__}"
         expected = {
-            name
-            for name, metadata in TOOL_METADATA.items()
-            if metadata.registrar == registrar_name
+            name for name, metadata in TOOL_METADATA.items() if metadata.registrar == registrar_name
         }
         assert set(server._tool_manager._tools) == expected
 

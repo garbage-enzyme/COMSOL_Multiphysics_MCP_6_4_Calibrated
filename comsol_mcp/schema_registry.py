@@ -348,9 +348,7 @@ def _entries() -> list[dict[str, Any]]:
             "1.0.0",
             "comsol_mcp.jobs.resource_admission",
         ),
-        _entry(
-            "comsol_mcp.resource_policy", "1.0.0", "comsol_mcp.jobs.resource_admission"
-        ),
+        _entry("comsol_mcp.resource_policy", "1.0.0", "comsol_mcp.jobs.resource_admission"),
         _entry(
             "comsol_mcp.resource_telemetry_sample",
             "1.0.0",
@@ -396,9 +394,7 @@ def _entries() -> list[dict[str, Any]]:
             "1.0.0",
             "comsol_mcp.jobs.field_review",
         ),
-        _entry(
-            "comsol_mcp.validation_policy", "1.0.0", "comsol_mcp.evidence.contracts"
-        ),
+        _entry("comsol_mcp.validation_policy", "1.0.0", "comsol_mcp.evidence.contracts"),
         _entry(
             "comsol_mcp.visual_dual_review",
             "1.0.0",

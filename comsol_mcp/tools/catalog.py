@@ -737,9 +737,7 @@ def _build_registry() -> dict[str, ToolMetadata]:
                 ),
                 starts_solver=name in _STARTS_SOLVER,
                 intended_profiles=tuple(
-                    profile
-                    for profile in PROFILE_NAMES
-                    if name in profile_tools[profile]
+                    profile for profile in PROFILE_NAMES if name in profile_tools[profile]
                 ),
                 input_contract=f"tool-input/{name}/1",
                 output_contract=f"tool-output/{name}/1",
@@ -749,21 +747,16 @@ def _build_registry() -> dict[str, ToolMetadata]:
                 ),
                 artifact_path_classes=(
                     "owned_artifact"
-                    if side_effect_class
-                    in {"filesystem_write", "filesystem_write_model_mutation"}
+                    if side_effect_class in {"filesystem_write", "filesystem_write_model_mutation"}
                     else "none",
                 ),
                 required_features=("comsol",) if name in _STARTS_SOLVER else (),
                 replacement_tool=(
                     "job_submit" if name == "study_staged_parametric_sweep" else None
                 ),
-                sunset_release=(
-                    "next_major" if name == "study_staged_parametric_sweep" else None
-                ),
+                sunset_release=("next_major" if name == "study_staged_parametric_sweep" else None),
                 deprecation_state=(
-                    "deprecated"
-                    if name == "study_staged_parametric_sweep"
-                    else "active"
+                    "deprecated" if name == "study_staged_parametric_sweep" else "active"
                 ),
             )
     return registry
@@ -814,9 +807,7 @@ def validate_tool_specs(
             "solver_execution",
             "process_lifecycle",
         }:
-            raise ValueError(
-                f"solver-starting ToolSpec has impossible effects: {name!r}"
-            )
+            raise ValueError(f"solver-starting ToolSpec has impossible effects: {name!r}")
         if spec.maturity == "experimental" and {
             "core",
             "basic_fem",
@@ -863,10 +854,7 @@ def get_tool_metadata(name: str) -> ToolMetadata:
 async def snapshot_tool_schemas(server: Any) -> dict[str, dict[str, Any]]:
     """Return name-keyed public input schemas for every registered tool."""
     tools = await server.list_tools()
-    return {
-        tool.name: tool.inputSchema
-        for tool in sorted(tools, key=lambda item: item.name)
-    }
+    return {tool.name: tool.inputSchema for tool in sorted(tools, key=lambda item: item.name)}
 
 
 __all__ = [

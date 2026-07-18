@@ -45,11 +45,7 @@ def sha256_file_bounded(
     candidate = Path(path)
     if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or max_bytes < 0:
         raise ValueError("max_bytes must be a non-negative integer")
-    if (
-        isinstance(chunk_bytes, bool)
-        or not isinstance(chunk_bytes, int)
-        or chunk_bytes < 1
-    ):
+    if isinstance(chunk_bytes, bool) or not isinstance(chunk_bytes, int) or chunk_bytes < 1:
         raise ValueError("chunk_bytes must be a positive integer")
     stat = candidate.stat()
     if not candidate.is_file():
@@ -234,8 +230,7 @@ def read_complete_jsonl(
         if not current_version:
             raise ValueError("current_version is required for versioned JSONL recovery")
         versions = {
-            record.get(version_field) if isinstance(record, dict) else None
-            for record in records
+            record.get(version_field) if isinstance(record, dict) else None for record in records
         }
         if versions == {current_version}:
             state = "current_valid"

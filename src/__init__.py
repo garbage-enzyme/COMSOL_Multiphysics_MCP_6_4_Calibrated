@@ -46,9 +46,7 @@ class _CanonicalAliasLoader(Loader):
             canonical_spec.submodule_search_locations = list(module.__path__)
         module.__spec__ = canonical_spec
         module.__package__ = (
-            self.canonical_name
-            if is_package
-            else self.canonical_name.rpartition(".")[0]
+            self.canonical_name if is_package else self.canonical_name.rpartition(".")[0]
         )
 
     def get_code(self, fullname: str) -> CodeType | None:

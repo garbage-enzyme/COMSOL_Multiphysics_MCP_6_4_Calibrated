@@ -54,9 +54,7 @@ def test_canonical_driver_writers_and_legacy_readers_agree():
         expected = writer()
         legacy = {
             **expected,
-            "implementation": expected["implementation"].replace(
-                "comsol_mcp.", "src.", 1
-            ),
+            "implementation": expected["implementation"].replace("comsol_mcp.", "src.", 1),
         }
         assert reader({"driver_identity": legacy}) == expected
 
@@ -75,9 +73,7 @@ def test_canonical_implementation_has_no_legacy_imports():
     legacy_import = re.compile(r"(?:from|import)\s+src(?:\.|\s)")
     matches = []
     for path in (ROOT / "comsol_mcp").rglob("*.py"):
-        for line_number, line in enumerate(
-            path.read_text(encoding="utf-8").splitlines(), start=1
-        ):
+        for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
             if legacy_import.search(line):
                 matches.append(f"{path.relative_to(ROOT)}:{line_number}")
 
@@ -93,6 +89,6 @@ def test_packaging_declares_canonical_implementation_and_one_shim():
         "comsol_mcp",
         "src",
     ]
-    assert [
-        path.relative_to(ROOT).as_posix() for path in (ROOT / "src").rglob("*.py")
-    ] == ["src/__init__.py"]
+    assert [path.relative_to(ROOT).as_posix() for path in (ROOT / "src").rglob("*.py")] == [
+        "src/__init__.py"
+    ]

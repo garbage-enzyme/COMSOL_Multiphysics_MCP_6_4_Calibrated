@@ -38,8 +38,7 @@ def test_job_submit_discovery_is_a_closed_finite_discriminated_union():
     }
     assert len(spec["oneOf"]) == 5
     assert all(
-        definition["additionalProperties"] is False
-        for definition in schema["$defs"].values()
+        definition["additionalProperties"] is False for definition in schema["$defs"].values()
     )
 
 

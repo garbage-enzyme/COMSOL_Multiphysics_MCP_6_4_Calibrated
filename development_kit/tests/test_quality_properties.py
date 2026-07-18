@@ -606,9 +606,7 @@ def _invalid_manifest(case: str) -> object:
     elif case == "unknown_status":
         value["unknown_compatibility"]["status"] = "accepted"
     elif case == "unknown_claim":
-        value["unknown_compatibility"]["requires_independent_licensed_acceptance"] = (
-            False
-        )
+        value["unknown_compatibility"]["requires_independent_licensed_acceptance"] = False
     else:
         raise AssertionError(f"unknown test case: {case}")
     return value

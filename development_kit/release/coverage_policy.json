@@ -1,0 +1,68 @@
+{
+  "global": {
+    "minimum_percent_covered": 73.4,
+    "owner": "repository maintainers",
+    "rationale": "This is the first complete branch-aware baseline for the canonical package.",
+    "removal_gate": "Raise this floor whenever the complete solver-free suite increases coverage."
+  },
+  "schema_name": "comsol_mcp.coverage_policy",
+  "schema_version": "1.0.0",
+  "targets": [
+    {
+      "minimum_percent_covered": 100.0,
+      "owner": "contract maintainers",
+      "path": "comsol_mcp/compatibility.py",
+      "rationale": "Every runtime compatibility acceptance decision must be exercised.",
+      "removal_gate": "Permanent safety target; do not lower."
+    },
+    {
+      "minimum_percent_covered": 100.0,
+      "owner": "contract maintainers",
+      "path": "comsol_mcp/contracts/job_submission.py",
+      "rationale": "Every discriminated job transport decision must be exercised.",
+      "removal_gate": "Permanent safety target; do not lower."
+    },
+    {
+      "minimum_percent_covered": 100.0,
+      "owner": "contract maintainers",
+      "path": "comsol_mcp/contracts/structural.py",
+      "rationale": "Every pre-side-effect structural rejection decision must be exercised.",
+      "removal_gate": "Permanent safety target; do not lower."
+    },
+    {
+      "minimum_percent_covered": 100.0,
+      "owner": "durability maintainers",
+      "path": "comsol_mcp/durable/canonical.py",
+      "rationale": "Every canonical identity validation decision must be exercised.",
+      "removal_gate": "Permanent safety target; do not lower."
+    },
+    {
+      "minimum_percent_covered": 97.0,
+      "owner": "durability maintainers",
+      "path": "comsol_mcp/durable/io.py",
+      "rationale": "The Windows lane cannot execute the POSIX directory fsync implementation branch.",
+      "removal_gate": "Run the same policy on a POSIX lane and require complete cross-platform branch coverage."
+    },
+    {
+      "minimum_percent_covered": 100.0,
+      "owner": "contract maintainers",
+      "path": "comsol_mcp/schema_registry.py",
+      "rationale": "Every public schema support decision must be exercised.",
+      "removal_gate": "Permanent safety target; do not lower."
+    },
+    {
+      "minimum_percent_covered": 100.0,
+      "owner": "tool surface maintainers",
+      "path": "comsol_mcp/tools/catalog.py",
+      "rationale": "Every immutable tool specification conflict must fail closed under test.",
+      "removal_gate": "Permanent safety target; do not lower."
+    },
+    {
+      "minimum_percent_covered": 100.0,
+      "owner": "control-plane maintainers",
+      "path": "comsol_mcp/tools/session_status.py",
+      "rationale": "The dependency-free status store must retain complete copy and update coverage.",
+      "removal_gate": "Permanent safety target; do not lower."
+    }
+  ]
+}

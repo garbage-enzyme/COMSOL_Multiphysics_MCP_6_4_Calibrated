@@ -29,9 +29,7 @@ def canonical_module_identifier(value: object) -> object:
 
 def module_identity_matches(expected: object, observed: object) -> bool:
     """Compare module identities while preserving all non-namespace fields."""
-    return canonical_module_identifier(expected) == canonical_module_identifier(
-        observed
-    )
+    return canonical_module_identifier(expected) == canonical_module_identifier(observed)
 
 
 def load_runtime_compatibility() -> dict[str, Any]:
