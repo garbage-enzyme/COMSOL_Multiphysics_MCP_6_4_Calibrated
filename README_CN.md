@@ -198,6 +198,22 @@ peak T 分别为 **0.9999455861474655**、**0.9999455828498416**、
 同时 amplitude gate 通过。两次 campaign 均保持全部 source hash 不变，结束后无
 client、进程或 lease 残留。
 
+licensed branch-continuation 验收使用两个不可变的中性 slab models，网格均为
+4,798 个单元、1,039 个顶点，并在 **0 度和 10 度**对 periodic parent 与两个
+ports 完成精确 incidence readback。两个 own peaks 分别为
+**5.200823291715293** 和 **5.195931563688228 um**，实测 shift 为
+**4.891728027065 nm**，位于调用方 guard window 内。peak T 分别为
+**0.9999455828498354** 和 **0.9999448178081717**；FWHM 分别为
+**0.4807802607560502** 和 **0.4836621446746728 um**；Q 分别为
+**10.817464268472143** 和 **10.742894851080779**。20 行原始数据总体范围为
+**R = 0.000422180032088570 至 0.512242443246136**、
+**T = 0.487757556753878 至 0.999577819967919**、
+**max |A| = 3.015050383793419e-17**；最大闭合误差为
+**1.33935578502046e-14**，波长同步误差为零。独立的 18 行 boundary control
+消耗了唯一一次声明的 expansion，并以 `unresolved_at_declared_cap` 完成；它没有
+生成额外 request，也没有宣称 branch disappearance。两个 campaigns 均保持 source
+hash 不变，结束后无 client、进程或 lease 残留。
+
 ## 环境要求与安装
 
 - COMSOL Multiphysics 6.4；licensed acceptance 固定于 build 6.4.0.293

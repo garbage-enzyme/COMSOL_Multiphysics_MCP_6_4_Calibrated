@@ -220,6 +220,23 @@ with a declared **0.001 nm** peak-shift tolerance completed all three levels as
 `residual` while its amplitude check passed. Both campaigns preserved all source
 hashes and left no client, process, or lease residue.
 
+Licensed branch-continuation acceptance used two immutable 4,798-element,
+1,039-vertex neutral slab models with exact periodic-parent and two-port
+incidence readback at **0 and 10 degrees**. Their own peaks were
+**5.200823291715293** and **5.195931563688228 um**, a measured shift of
+**4.891728027065 nm** within the caller's guard window. Peak T values were
+**0.9999455828498354** and **0.9999448178081717**; FWHM values were
+**0.4807802607560502** and **0.4836621446746728 um**; Q values were
+**10.817464268472143** and **10.742894851080779**. Across 20 raw rows,
+**R = 0.000422180032088570 to 0.512242443246136**,
+**T = 0.487757556753878 to 0.999577819967919**, and
+**max |A| = 3.015050383793419e-17**; maximum closure error was
+**1.33935578502046e-14** and wavelength-sync error was zero. A separate 18-row
+boundary control consumed its one declared expansion and completed as
+`unresolved_at_declared_cap` with no additional request and no branch-
+disappearance claim. Both campaigns preserved the source hashes and left no
+client, process, or lease residue.
+
 ## Requirements and installation
 
 - COMSOL Multiphysics 6.4; licensed acceptance is pinned to build 6.4.0.293
