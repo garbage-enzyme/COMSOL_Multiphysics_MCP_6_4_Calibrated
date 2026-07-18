@@ -137,6 +137,7 @@ models are intentionally absent.
 - `development_kit/tests/test_clientapi_properties.py` — This module tests constrained clientapi property access with mocks.
 - `development_kit/tests/test_control_plane_metrics.py` — This module tests bounded control-plane latency, overload, and fairness evidence.
 - `development_kit/tests/test_control_plane_startup.py` — This module tests solver-free cold discovery and startup budgets.
+- `development_kit/tests/conftest.py` — This module prepares the shared ASCII runtime parent for dependency-only tests.
 - `development_kit/tests/test_convergence_campaign_job.py` — This module tests immutable bounded durable convergence campaign specifications.
 - `development_kit/tests/test_convergence_campaign_rows.py` — This module tests hash-chained durable convergence level evidence and artifact replay.
 - `development_kit/tests/test_convergence_campaign_runner.py` — This module tests composed spectral-level execution, convergence stopping, and exact resume.
