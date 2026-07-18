@@ -180,3 +180,35 @@ def test_explicit_comsol_executable_identity_does_not_require_command_substrings
         "comsol_desktop",
         "comsol_server",
     ]
+
+
+def test_comsol_64_ui_process_is_classified_as_desktop():
+    records = [
+        _record(
+            10,
+            0,
+            "ComsolUI.exe",
+            ["C:/Program Files/COMSOL/COMSOL64/Multiphysics/bin/win64/ComsolUI.exe"],
+        )
+    ]
+
+    snapshot = collect_shared_preflight_snapshot(
+        process_provider=lambda: records,
+        listener_provider=list,
+        window_provider=lambda: {10: {"window_count": 2, "responding": True}},
+        version_provider=lambda path: "6.4.0.293",
+        clock=lambda: 1000.0,
+    )
+
+    assert snapshot["processes"] == [
+        {
+            "pid": 10,
+            "parent_pid": 0,
+            "kind": "comsol_desktop",
+            "create_time": 10.0,
+            "command_signature": snapshot["processes"][0]["command_signature"],
+            "file_version": "6.4.0.293",
+            "window_count": 2,
+            "responding": True,
+        }
+    ]

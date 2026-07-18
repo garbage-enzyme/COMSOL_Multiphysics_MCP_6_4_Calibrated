@@ -19,6 +19,7 @@ MAX_PROCESS_RECORDS = 4096
 _DESKTOP_EXECUTABLES = frozenset({
     "comsol.exe",
     "comsolmphclient.exe",
+    "comsolui.exe",
 })
 _SERVER_EXECUTABLES = frozenset({
     "comsolmphserver.exe",
