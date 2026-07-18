@@ -44,7 +44,8 @@ def select_field_slice_samples(
         elif values.size != raw_count:
             raise ValueError("all coordinate arrays must have the same length")
         coordinate_arrays[axis] = values
-    assert raw_count is not None
+    if raw_count is None:
+        raise RuntimeError("coordinate normalization produced no sample count")
 
     if not isinstance(quantities, Mapping):
         raise ValueError("quantities must be an object")

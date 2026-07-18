@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath, PureWindowsPath
 import re
 import subprocess
+import sys
 import tomllib
 import zipfile
 
@@ -37,6 +39,47 @@ ROOT = Path(__file__).parents[2]
 RELEASE = ROOT / "development_kit" / "release"
 FIXTURES = RELEASE / "integration_fixtures"
 SNAPSHOTS = ROOT / "development_kit" / "tests" / "snapshots"
+
+
+def test_production_runtime_guards_survive_python_optimization():
+    assert_statements = []
+    for path in (ROOT / "src").rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        assert_statements.extend(
+            f"{path.relative_to(ROOT)}:{node.lineno}"
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Assert)
+        )
+    assert assert_statements == []
+
+    code = """
+from src.evidence.spectral_characterization import _fit_candidate
+
+try:
+    _fit_candidate(
+        method='local_polynomial_fit',
+        wavelengths=[1.0, 2.0, 3.0],
+        oriented=[0.0, 1.0, 0.0],
+        candidate_index=1,
+        support_count=3,
+        baseline=0.0,
+        polynomial_degree=None,
+        max_evaluations=10,
+    )
+except ValueError as exc:
+    if str(exc) != 'polynomial_degree is required for local_polynomial_fit':
+        raise
+else:
+    raise SystemExit('optimized Python skipped the production runtime guard')
+"""
+    completed = subprocess.run(
+        [sys.executable, "-O", "-c", code],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+    assert completed.returncode == 0, completed.stderr
 
 
 def _tracked_entries() -> list[tuple[str, str]]:

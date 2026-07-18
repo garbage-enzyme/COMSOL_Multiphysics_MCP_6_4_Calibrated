@@ -227,7 +227,8 @@ class _BoundedProcessInventory:
             if self._thread is None or not self._thread.is_alive():
                 self._start_locked()
             thread = self._thread
-        assert thread is not None
+        if thread is None:
+            raise RuntimeError("process inventory thread failed to initialize")
         thread.join(timeout=timeout)
         completed = time.monotonic()
         with self._lock:

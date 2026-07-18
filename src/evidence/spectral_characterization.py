@@ -710,7 +710,10 @@ def _fit_candidate(
     parameter_values: list[float]
 
     if method == "local_polynomial_fit":
-        assert polynomial_degree is not None
+        if polynomial_degree is None:
+            raise ValueError(
+                "polynomial_degree is required for local_polynomial_fit"
+            )
         coefficients, covariance = np.polyfit(z, y, polynomial_degree, cov="unscaled")
         polynomial = np.poly1d(coefficients)
         derivative = np.polyder(polynomial)
@@ -897,7 +900,10 @@ def build_spectral_characterization(
         baseline = (oriented[0] + oriented[-1]) / 2.0
     else:
         declared_baseline = configuration["baseline_response_value"]
-        assert declared_baseline is not None
+        if declared_baseline is None:
+            raise RuntimeError(
+                "validated fixed baseline configuration is missing its value"
+            )
         baseline = declared_baseline if polarity == "maximum" else -declared_baseline
 
     fit_methods = {"local_polynomial_fit", "lorentzian_fit", "fano_fit"}
@@ -924,7 +930,10 @@ def build_spectral_characterization(
             return {**body, "characterization_sha256": _sha256(body)}
         fit_result = None
     else:
-        assert configuration["peak_method"] in fit_methods
+        if configuration["peak_method"] not in fit_methods:
+            raise RuntimeError(
+                "validated measurement configuration has an unsupported peak method"
+            )
         try:
             fit_result = _fit_candidate(
                 method=configuration["peak_method"],
@@ -980,7 +989,10 @@ def build_spectral_characterization(
             "value": None,
         }
     else:
-        assert left_crossing is not None and right_crossing is not None
+        if left_crossing is None or right_crossing is None:
+            raise RuntimeError(
+                "complete crossing classification is missing a crossing value"
+            )
         width = right_crossing - left_crossing
         if not math.isfinite(width) or width <= 0.0:
             raise ValueError("bracketed half-prominence width must be positive and finite")

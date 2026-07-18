@@ -164,9 +164,13 @@ class SemanticWorkerManager:
             self._job = _KillOnCloseJob.assign(int(process._handle)) if os.name == "nt" else None
             self._token = token
             line_queue: queue.Queue[bytes] = queue.Queue(maxsize=1)
-            assert process.stdout is not None
-            threading.Thread(target=lambda: line_queue.put(process.stdout.readline()), daemon=True).start()
             try:
+                stdout = process.stdout
+                if stdout is None:
+                    raise RuntimeError("semantic worker stdout pipe was not created")
+                threading.Thread(
+                    target=lambda: line_queue.put(stdout.readline()), daemon=True
+                ).start()
                 line = line_queue.get(timeout=self.startup_deadline)
                 ready = json.loads(line.decode("utf-8"))
                 if ready.get("schema_version") != WORKER_PROTOCOL_SCHEMA_VERSION or ready.get("event") != "ready" or ready.get("pid") != process.pid or ready.get("host") != "127.0.0.1":

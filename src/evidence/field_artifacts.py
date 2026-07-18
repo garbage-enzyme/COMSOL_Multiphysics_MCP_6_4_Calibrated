@@ -229,7 +229,8 @@ def write_field_evidence_artifacts(
     if raw_array_bytes > request_value["limits"]["max_artifact_bytes"]:
         raise ValueError("uncompressed field arrays exceed the caller-declared byte limit")
 
-    assert missing_mask is not None
+    if missing_mask is None:
+        raise RuntimeError("validated field request produced no expression mask")
     missing_count = int(missing_mask.sum())
     covered_count = request_value["grid_point_count"] - missing_count
     slice_value = request_value["slice"]["value"]
