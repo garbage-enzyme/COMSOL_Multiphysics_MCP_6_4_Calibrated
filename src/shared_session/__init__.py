@@ -22,11 +22,17 @@ from .locking import (
     build_shared_model_revision,
     normalize_shared_model_identity,
 )
+from .cleanup import (
+    CleanupOutcome,
+    evaluate_attached_detach,
+    evaluate_owned_cleanup,
+)
 
 __all__ = [
     "SHARED_SERVER_FEATURE_ENV",
     "SHARED_SERVER_PROFILE",
     "AttachedServerIdentity",
+    "CleanupOutcome",
     "SharedModelIdentity",
     "SharedModelLock",
     "SharedModelRevision",
@@ -35,6 +41,8 @@ __all__ = [
     "SharedServerFeatureGate",
     "build_shared_model_lock",
     "build_shared_model_revision",
+    "evaluate_attached_detach",
+    "evaluate_owned_cleanup",
     "normalize_attached_server_identity",
     "normalize_shared_model_identity",
     "normalize_shared_model_selector",

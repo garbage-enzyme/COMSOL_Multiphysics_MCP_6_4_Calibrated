@@ -33,6 +33,16 @@ def test_attached_server_identity_is_exact_stable_and_non_owned():
     assert first.to_dict()["endpoint"]["scope"] == "loopback"
 
 
+def test_listener_observation_time_is_evidence_not_process_identity():
+    before = _server_identity()
+    after = {**before, "listener_observed_at_epoch": 9999.0}
+
+    assert (
+        normalize_attached_server_identity(before).identity_sha256
+        == normalize_attached_server_identity(after).identity_sha256
+    )
+
+
 @pytest.mark.parametrize(
     "field,value",
     [

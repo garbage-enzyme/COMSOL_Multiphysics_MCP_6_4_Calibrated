@@ -120,25 +120,25 @@ def normalize_attached_server_identity(value: Any) -> AttachedServerIdentity:
     signature = raw["server_command_signature"]
     if not isinstance(signature, str) or not _HEX64.fullmatch(signature):
         raise ValueError("server command signature must be exactly 64 hexadecimal characters")
-    body = {
+    identity_body = {
         "endpoint": endpoint.to_dict(),
         "server_pid": _positive_integer(raw["server_pid"], "server PID"),
         "server_process_create_time": _positive_finite(
             raw["server_process_create_time"], "server process creation time"
         ),
         "server_command_signature": signature.casefold(),
-        "listener_observed_at_epoch": _positive_finite(
-            raw["listener_observed_at_epoch"], "listener observation time"
-        ),
         "ownership": "external_user_owned",
     }
+    observed_at = _positive_finite(
+        raw["listener_observed_at_epoch"], "listener observation time"
+    )
     return AttachedServerIdentity(
         endpoint=endpoint,
-        server_pid=body["server_pid"],
-        server_process_create_time=body["server_process_create_time"],
-        server_command_signature=body["server_command_signature"],
-        listener_observed_at_epoch=body["listener_observed_at_epoch"],
-        identity_sha256=_canonical_sha256(body),
+        server_pid=identity_body["server_pid"],
+        server_process_create_time=identity_body["server_process_create_time"],
+        server_command_signature=identity_body["server_command_signature"],
+        listener_observed_at_epoch=observed_at,
+        identity_sha256=_canonical_sha256(identity_body),
     )
 
 
