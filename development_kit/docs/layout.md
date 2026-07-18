@@ -55,6 +55,7 @@ models are intentionally absent.
 ## Release contracts and fixtures
 
 - `development_kit/release/support_matrix.json` — This file declares release identity sources, profile states, and licensed-gate requirements.
+- `development_kit/release/release_facts.json` — This generated view records live tool, profile, schema, and compatibility identities.
 - `development_kit/release/vulnerability_allowlist.json` — This file records exact reviewed vulnerabilities with mandatory expiry dates.
 - `development_kit/release/planning_code_allowlist.json` — This file freezes historical planning-code matches by path, count, and hash.
 - `development_kit/release/integration_fixtures/manifest.json` — This file inventories sanitized integration contracts and their canonical hashes.
@@ -77,6 +78,7 @@ models are intentionally absent.
 - `development_kit/scripts/python_compatibility_licensed_gate.py` — This script runs the pinned Python and COMSOL compatibility regression on a licensed host.
 - `development_kit/scripts/reference_power_gate_preflight.py` — This script validates reference-power gate inputs without starting COMSOL.
 - `development_kit/scripts/release_gate.py` — This script runs compile, test, package, clean-install, and installed-discovery gates.
+- `development_kit/scripts/release_facts.py` — This script generates and checks the durable release-facts view from live implementation data.
 - `development_kit/scripts/run_real_release_gate.py` — This script orchestrates the explicit serial licensed COMSOL release gate.
 - `development_kit/scripts/sbom_probe.py` — This script generates a deterministic CycloneDX SBOM from the locked installed runtime.
 - `development_kit/scripts/security_gate.py` — This script evaluates pip-audit findings against the exact expiring review policy.
@@ -190,6 +192,7 @@ models are intentionally absent.
 - `development_kit/tests/test_reference_power_release_orchestrator.py` — This module tests mandatory serial release orchestration with fake processes.
 - `development_kit/tests/test_reference_power_runner.py` — This module tests reference-power coordinator and worker process boundaries.
 - `development_kit/tests/test_release_engineering.py` — This module tests repository, dependency, fixture, archive, and release policies.
+- `development_kit/tests/test_release_facts.py` — This module tests the generated release-facts view against live implementation data.
 - `development_kit/tests/test_release_receipts.py` — This module tests deterministic SBOM and release inventory receipts.
 - `development_kit/tests/test_resource_admission.py` — This module tests resource policy normalization, telemetry, and admission decisions.
 - `development_kit/tests/test_results.py` — This module tests result normalization without a COMSOL client.
