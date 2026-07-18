@@ -520,10 +520,14 @@ def _run_bounded_sweep_hook(
     return str(action)
 
 
-def _save_model(model, file_path: str) -> None:
+def _save_model(model, file_path: str, *, save_copy: bool = False) -> None:
     """Save through the Java clientapi to preserve non-ASCII Windows paths."""
     _ensure_parent_dir(file_path)
-    model.java.save(str(Path(file_path).expanduser().resolve()))
+    target = str(Path(file_path).expanduser().resolve())
+    if save_copy:
+        model.java.save(target, True)
+    else:
+        model.java.save(target)
 
 
 def run_staged_parametric_sweep(
@@ -546,6 +550,7 @@ def run_staged_parametric_sweep(
     checkpoint_model_path: Optional[str] = None,
     checkpoint_every: int = 1,
     save_model_path: Optional[str] = None,
+    save_model_copy: bool = False,
     manifest_path: Optional[str] = None,
     source_model_path: Optional[str] = None,
     config_id: Optional[str] = None,
@@ -758,7 +763,11 @@ def run_staged_parametric_sweep(
                 journal_tail.append(row)
                 _write_rows_csv(csv_path, fieldnames, [row], append=True)
                 if checkpoint_model_path and len(rows) % checkpoint_every == 0:
-                    _save_model(model, checkpoint_model_path)
+                    _save_model(
+                        model,
+                        checkpoint_model_path,
+                        save_copy=save_model_copy,
+                    )
                     checkpointed_at = len(rows)
                 processed += 1
             except Exception as exc:
@@ -811,9 +820,9 @@ def run_staged_parametric_sweep(
             break
 
     if save_model_path:
-        _save_model(model, save_model_path)
+        _save_model(model, save_model_path, save_copy=save_model_copy)
     elif checkpoint_model_path and rows and checkpointed_at != len(rows):
-        _save_model(model, checkpoint_model_path)
+        _save_model(model, checkpoint_model_path, save_copy=save_model_copy)
 
     return {
         "success": not failed_rows,

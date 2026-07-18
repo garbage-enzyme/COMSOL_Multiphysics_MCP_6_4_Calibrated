@@ -127,8 +127,8 @@ class FakeJava:
     def component(self, _tag):
         return self.component_node
 
-    def save(self, path):
-        self.saved.append(path)
+    def save(self, path, save_copy=False):
+        self.saved.append((path, save_copy))
 
 
 class FakeModel:
@@ -178,6 +178,26 @@ def test_staged_sweep_retries_and_checkpoints(tmp_path):
     assert Path(result["manifest_path"]).is_file()
     assert "rows" not in result
     assert len(model.java.saved) == 2
+    assert all(saved[1] is False for saved in model.java.saved)
+
+
+def test_staged_sweep_can_checkpoint_through_save_copy_overload(tmp_path):
+    checkpoint = tmp_path / "attached-checkpoint.mph"
+    model = FakeModel()
+
+    result = run_staged_parametric_sweep(
+        model,
+        "wl",
+        [1, 2],
+        ["A"],
+        parameter_unit="m",
+        checkpoint_model_path=str(checkpoint),
+        save_model_copy=True,
+    )
+
+    assert result["success"] is True
+    assert len(model.java.saved) == 2
+    assert all(saved[1] is True for saved in model.java.saved)
 
 
 def test_staged_sweep_resumes_legacy_csv(tmp_path):
