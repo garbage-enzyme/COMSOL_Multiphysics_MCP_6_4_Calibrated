@@ -10,6 +10,11 @@ import sys
 import pytest
 
 from src.jobs.attached_backend import normalize_attached_execution_backend
+from src.jobs.attached_runtime import (
+    normalize_attached_execution_target,
+    verify_attached_model_inventory,
+    verify_attached_model_revision,
+)
 from src.jobs.manager import validate_staged_sweep_spec
 from src.shared_session.identity import normalize_attached_server_identity
 from src.shared_session.locking import (
@@ -143,3 +148,70 @@ def test_staged_sweep_fingerprint_binds_normalized_attached_backend(tmp_path):
             "execution_backend": _backend(),
         }
     )["spec_fingerprint"]
+
+
+def test_attached_runtime_restores_exact_target_and_accepts_unchanged_readback():
+    target = normalize_attached_execution_target(_backend())
+
+    selected = verify_attached_model_inventory(
+        target,
+        [target.model.to_dict(), {
+            "tag": "Other",
+            "label": "other.mph",
+            "file_path": "D:/models/other.mph",
+            "unsaved": False,
+        }],
+    )
+    revision = verify_attached_model_revision(
+        target,
+        structural_readback={"components": ["comp1"], "studies": ["std1"]},
+        state_readback={"parameters": {"gap": "10[nm]"}},
+    )
+
+    assert selected == target.model.to_dict()
+    assert revision == target.expected_revision
+    assert target.server.listener_bind_scope == "wildcard"
+
+
+@pytest.mark.parametrize(
+    "inventory",
+    [
+        [],
+        [{
+            "tag": "Model1",
+            "label": "different.mph",
+            "file_path": "D:/models/different.mph",
+            "unsaved": False,
+        }],
+        [
+            {
+                "tag": "Model1",
+                "label": "working.mph",
+                "file_path": "D:/models/working.mph",
+                "unsaved": False,
+            },
+            {
+                "tag": "Model1",
+                "label": "working-copy.mph",
+                "file_path": "D:/models/working-copy.mph",
+                "unsaved": False,
+            },
+        ],
+    ],
+)
+def test_attached_runtime_rejects_missing_changed_or_duplicate_model(inventory):
+    target = normalize_attached_execution_target(_backend())
+
+    with pytest.raises(ValueError, match="server model|matching"):
+        verify_attached_model_inventory(target, inventory)
+
+
+def test_attached_runtime_rejects_external_revision_change():
+    target = normalize_attached_execution_target(_backend())
+
+    with pytest.raises(ValueError, match="revision changed.*readback_sha256"):
+        verify_attached_model_revision(
+            target,
+            structural_readback={"components": ["comp1"], "studies": ["std1"]},
+            state_readback={"parameters": {"gap": "11[nm]"}},
+        )
