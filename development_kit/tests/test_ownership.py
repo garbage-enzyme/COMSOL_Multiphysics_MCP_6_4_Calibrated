@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 import src.tools.ownership as ownership_module
+from src.shared_session.identity import normalize_attached_server_identity
 from src.tools.ownership import SolverOwnership, _command_signature
 
 
@@ -399,3 +400,101 @@ def test_real_process_evidence_refuses_known_external_client(runtime_dir):
     finally:
         child.terminate()
         child.wait(timeout=5)
+
+
+def _attached_identity(pid=720, created=720.0, command=None):
+    command = command or ["comsolmphserver.exe", "-port", "2036"]
+    return normalize_attached_server_identity({
+        "endpoint": {"host": "127.0.0.1", "port": 2036},
+        "server_pid": pid,
+        "server_process_create_time": created,
+        "server_command_signature": _command_signature(command),
+        "listener_observed_at_epoch": 800.0,
+    })
+
+
+def test_attached_lease_separates_external_server_from_owned_targets(runtime_dir):
+    own_process = process(710, 710.0, ["python.exe", "-m", "src.server"])
+    server_command = ["comsolmphserver.exe", "-port", "2036"]
+    server = process(720, 720.0, server_command)
+    manager = owner(
+        runtime_dir,
+        710,
+        710.0,
+        own_process["command_line"],
+        [own_process, server],
+    )
+
+    result = manager.acquire_attached(
+        _attached_identity(command=server_command),
+        listener_provider=lambda: [
+            {"host": "127.0.0.1", "port": 2036, "pid": 720}
+        ],
+    )
+    lease = result["lease"]
+
+    assert result["success"] is True
+    assert lease["resource_ownership"] == "external_user_owned_server"
+    assert lease["attached_server"]["owned"] is False
+    assert lease["attached_server"]["server_pid"] == 720
+    assert lease["comsol_server_pids"] == []
+    assert lease["comsol_server_processes"] == []
+    assert lease["comsol_server_port"] is None
+    status = manager.status(require_fresh_inventory=True)
+    assert status["collision"] is False
+    assert status["external_solver_processes"] == []
+    assert manager.release() == {"success": True, "released": True}
+    after = manager.status(require_fresh_inventory=True)
+    assert after["external_solver_processes"][0]["pid"] == 720
+
+
+@pytest.mark.parametrize("changed", ["pid_reuse", "listener_owner"])
+def test_attached_lease_rejects_changed_server_identity(runtime_dir, changed):
+    own_process = process(730, 730.0, ["python.exe", "-m", "src.server"])
+    command = ["comsolmphserver.exe", "-port", "2036"]
+    server = process(740, 999.0 if changed == "pid_reuse" else 740.0, command)
+    manager = owner(
+        runtime_dir,
+        730,
+        730.0,
+        own_process["command_line"],
+        [own_process, server],
+    )
+    listeners = [{
+        "host": "127.0.0.1",
+        "port": 2036,
+        "pid": 741 if changed == "listener_owner" else 740,
+    }]
+
+    result = manager.acquire_attached(
+        _attached_identity(pid=740, created=740.0, command=command),
+        listener_provider=lambda: listeners,
+    )
+
+    assert result["success"] is False
+    assert not manager.lease_path.exists()
+
+
+def test_attached_lease_rejects_other_external_mph_client(runtime_dir):
+    own_process = process(750, 750.0, ["python.exe", "-m", "src.server"])
+    command = ["comsolmphserver.exe", "-port", "2036"]
+    server = process(760, 760.0, command)
+    foreign = process(770, 770.0, ["python.exe", "-c", "import mph; mph.Client()"])
+    manager = owner(
+        runtime_dir,
+        750,
+        750.0,
+        own_process["command_line"],
+        [own_process, server, foreign],
+    )
+
+    result = manager.acquire_attached(
+        _attached_identity(pid=760, created=760.0, command=command),
+        listener_provider=lambda: [
+            {"host": "127.0.0.1", "port": 2036, "pid": 760}
+        ],
+    )
+
+    assert result["success"] is False
+    assert result["external_solver_processes"][0]["pid"] == 770
+    assert not manager.lease_path.exists()

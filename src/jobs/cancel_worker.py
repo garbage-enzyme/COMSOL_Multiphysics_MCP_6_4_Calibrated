@@ -208,9 +208,12 @@ def _verify_solver_cleanup(store: JobStore, job_id: str) -> dict[str, Any]:
     lease = lease_status.get("lease")
     if not isinstance(lease, dict) or lease.get("owner") != f"job:{job_id}":
         return {"ok": False, "reason": "target job does not exclusively own the recorded solver lease", "lease_state": lease_status["state"]}
-    servers = lease.get("comsol_server_processes")
-    if not isinstance(servers, list):
-        return {"ok": False, "reason": "lease server identities are missing", "lease_state": lease_status["state"]}
+    from src.jobs.process_control import owned_solver_identities_from_lease
+
+    try:
+        servers = owned_solver_identities_from_lease(lease)
+    except ValueError as exc:
+        return {"ok": False, "reason": str(exc), "lease_state": lease_status["state"]}
     if lease.get("comsol_server_pids") and not servers:
         return {"ok": False, "reason": "lease contains only legacy server PIDs", "lease_state": lease_status["state"]}
     server_verification = verify_absent(servers)

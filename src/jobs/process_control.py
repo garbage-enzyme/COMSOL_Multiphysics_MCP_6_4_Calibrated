@@ -12,6 +12,22 @@ import psutil
 from .store import process_identity, process_identity_state
 
 
+def owned_solver_identities_from_lease(lease: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return only termination-eligible solver identities from one lease."""
+    servers = lease.get("comsol_server_processes")
+    if not isinstance(servers, list):
+        raise ValueError("lease server identities are missing")
+    attached = lease.get("attached_server")
+    attached_pid = (
+        attached.get("server_pid")
+        if isinstance(attached, dict) and attached.get("owned") is False
+        else None
+    )
+    if any(item.get("pid") == attached_pid for item in servers):
+        raise ValueError("non-owned attached server appears in owned termination identities")
+    return servers
+
+
 class OwnedJobObject:
     """Windows kill-on-close containment for one process tree we launched.
 

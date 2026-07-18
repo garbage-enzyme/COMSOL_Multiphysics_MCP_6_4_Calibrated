@@ -21,7 +21,7 @@ from src.utils.runtime_paths import default_runtime_dir as _shared_default_runti
 from src.utils.control_plane import measured_call
 
 
-LEASE_SCHEMA_VERSION = "2"
+LEASE_SCHEMA_VERSION = "3"
 CREATE_TIME_TOLERANCE_SECONDS = 0.05
 LEASE_IO_TIMEOUT_SECONDS = 1.0
 LEASE_IO_POLL_SECONDS = 0.02
@@ -142,6 +142,18 @@ def _system_processes() -> list[dict[str, Any]]:
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
             continue
     return records
+
+
+def _system_listeners() -> list[dict[str, Any]]:
+    listeners = []
+    for connection in psutil.net_connections(kind="tcp"):
+        if connection.status != psutil.CONN_LISTEN or connection.pid is None:
+            continue
+        host = getattr(connection.laddr, "ip", None)
+        port = getattr(connection.laddr, "port", None)
+        if host is not None and port is not None:
+            listeners.append({"host": str(host), "port": int(port), "pid": int(connection.pid)})
+    return listeners
 
 
 class _BoundedProcessInventory:
@@ -404,8 +416,27 @@ class SolverOwnership:
             ancestor_pids.add(current)
             current = parent_map.get(current, 0)
         owned_pids = {self.pid}
+        allowed_external_roots = set()
         if lease and int(lease.get("pid", -1)) == self.pid:
             owned_pids.update(int(pid) for pid in lease.get("comsol_server_pids", []))
+            attached = lease.get("attached_server")
+            if isinstance(attached, dict) and attached.get("owned") is False:
+                attached_pid = attached.get("server_pid")
+                match = next(
+                    (item for item in processes if item.get("pid") == attached_pid),
+                    None,
+                )
+                if match is not None:
+                    actual_command = [str(part) for part in match.get("command_line") or []]
+                    actual_time = match.get("create_time")
+                    if (
+                        actual_time is not None
+                        and abs(float(actual_time) - float(attached.get("process_create_time", -1)))
+                        <= CREATE_TIME_TOLERANCE_SECONDS
+                        and _command_signature(actual_command)
+                        == attached.get("command_signature")
+                    ):
+                        allowed_external_roots.add(int(attached_pid))
         evidence = []
         for item in processes:
             pid = int(item.get("pid") or 0)
@@ -414,6 +445,10 @@ class SolverOwnership:
                 or pid in owned_pids
                 or pid in ancestor_pids
                 or self._is_descendant(pid, parent_map, self.pid)
+                or any(
+                    self._is_descendant(pid, parent_map, root)
+                    for root in allowed_external_roots
+                )
             ):
                 continue
             name = str(item.get("name") or "").casefold()
@@ -446,6 +481,7 @@ class SolverOwnership:
                         "parent_pid": item.get("parent_pid"),
                         "process_create_time": item.get("create_time"),
                         "kind": kind,
+                        "command_signature": _command_signature(command_line),
                         "command_line": command_line[:32],
                     }
                 )
@@ -622,10 +658,16 @@ class SolverOwnership:
             "heartbeat_epoch": now,
             "created_at_epoch": now,
             "acquisition_id": uuid.uuid4().hex,
+            "resource_ownership": "mcp_owned",
+            "attached_server": None,
             "comsol_server_pids": [],
             "comsol_server_processes": [],
             "comsol_server_port": None,
         }
+        self.runtime_dir.mkdir(parents=True, exist_ok=True)
+        return self._create_lease(payload)
+
+    def _create_lease(self, payload: dict[str, Any]) -> dict[str, Any]:
         data = (json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode("utf-8")
         try:
             descriptor = os.open(self.lease_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
@@ -645,6 +687,119 @@ class SolverOwnership:
             self.lease_path.unlink(missing_ok=True)
             raise
         return {"success": True, "acquired": True, "reused": False, "lease": payload}
+
+    def acquire_attached(
+        self,
+        attached_server: Any,
+        *,
+        listener_provider: Callable[[], list[dict[str, Any]]] = _system_listeners,
+    ) -> dict[str, Any]:
+        """Acquire the existing lease while preserving one exact external server."""
+        from src.shared_session.identity import AttachedServerIdentity
+
+        if not isinstance(attached_server, AttachedServerIdentity):
+            raise ValueError("attached_server must be a normalized AttachedServerIdentity")
+        processes, inventory = self._collect_processes(
+            require_fresh=True,
+            timeout=PROCESS_INVENTORY_MUTATION_TIMEOUT_SECONDS,
+        )
+        if not inventory["complete"]:
+            return {
+                "success": False,
+                "acquired": False,
+                "error": "Fresh process inventory is incomplete.",
+                "process_inventory": inventory,
+            }
+        lease, lease_error = self._read_lease()
+        if lease_error or lease is not None:
+            return {
+                "success": False,
+                "acquired": False,
+                "error": lease_error or "A solver lease already exists.",
+            }
+        server = next(
+            (item for item in processes if item.get("pid") == attached_server.server_pid),
+            None,
+        )
+        command = [str(part) for part in (server or {}).get("command_line") or []]
+        if (
+            server is None
+            or server.get("create_time") is None
+            or abs(float(server["create_time"]) - attached_server.server_process_create_time)
+            > CREATE_TIME_TOLERANCE_SECONDS
+            or _command_signature(command) != attached_server.server_command_signature
+        ):
+            return {
+                "success": False,
+                "acquired": False,
+                "error": "Attached server process identity changed before lease acquisition.",
+            }
+        try:
+            listeners = list(listener_provider())
+        except Exception as exc:
+            return {
+                "success": False,
+                "acquired": False,
+                "error": f"Attached listener inventory failed: {type(exc).__name__}",
+            }
+        endpoint = attached_server.endpoint
+        matching_listeners = [
+            item
+            for item in listeners
+            if str(item.get("host")) == endpoint.host
+            and item.get("port") == endpoint.port
+            and item.get("pid") == attached_server.server_pid
+        ]
+        if len(matching_listeners) != 1:
+            return {
+                "success": False,
+                "acquired": False,
+                "error": "Attached listener ownership changed before lease acquisition.",
+            }
+        attached_payload = {
+            "owned": False,
+            "identity_sha256": attached_server.identity_sha256,
+            "host": endpoint.host,
+            "port": endpoint.port,
+            "server_pid": attached_server.server_pid,
+            "process_create_time": attached_server.server_process_create_time,
+            "command_signature": attached_server.server_command_signature,
+        }
+        synthetic_lease = {
+            "pid": self.pid,
+            "attached_server": attached_payload,
+            "comsol_server_pids": [],
+        }
+        external = self._external_solver_processes(processes, synthetic_lease)
+        if external:
+            return {
+                "success": False,
+                "acquired": False,
+                "error": "Unclassified external COMSOL/MPh process remains.",
+                "external_solver_processes": external,
+            }
+        now = time.time()
+        payload = {
+            "schema_version": LEASE_SCHEMA_VERSION,
+            "owner": self.owner,
+            "mode": "attached-server",
+            "pid": self.pid,
+            "parent_pid": self.parent_pid,
+            "process_create_time": self.create_time,
+            "command_line": self.command_line,
+            "command_signature": self.command_signature,
+            "model_path": None,
+            "heartbeat_epoch": now,
+            "created_at_epoch": now,
+            "acquisition_id": uuid.uuid4().hex,
+            "resource_ownership": "external_user_owned_server",
+            "attached_server": attached_payload,
+            "comsol_server_pids": [],
+            "comsol_server_processes": [],
+            "comsol_server_port": None,
+        }
+        self.runtime_dir.mkdir(parents=True, exist_ok=True)
+        return self._create_lease(payload)
 
     def heartbeat(
         self, *, model_path: Optional[str] = None, refresh_server_processes: bool = False

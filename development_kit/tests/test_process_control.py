@@ -5,7 +5,12 @@ import time
 
 import psutil
 
-from src.jobs.process_control import capture_owned_descendants, terminate_exact, verify_absent
+from src.jobs.process_control import (
+    capture_owned_descendants,
+    owned_solver_identities_from_lease,
+    terminate_exact,
+    verify_absent,
+)
 from src.jobs.store import process_identity
 
 _HIDDEN_PROCESS_FLAGS = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -119,3 +124,33 @@ def test_worker_job_object_kills_inherited_child_on_worker_exit_windows_only():
     while time.monotonic() < deadline and psutil.pid_exists(child_pid):
         time.sleep(0.05)
     assert not psutil.pid_exists(child_pid)
+
+
+def test_attached_server_is_never_returned_as_an_owned_termination_identity():
+    attached = {
+        "owned": False,
+        "server_pid": 900,
+        "process_create_time": 900.0,
+        "command_signature": "a" * 64,
+    }
+    lease = {
+        "attached_server": attached,
+        "comsol_server_processes": [],
+    }
+
+    assert owned_solver_identities_from_lease(lease) == []
+
+    contaminated = {
+        **lease,
+        "comsol_server_processes": [{
+            "pid": 900,
+            "process_create_time": 900.0,
+            "command_signature": "a" * 64,
+        }],
+    }
+    try:
+        owned_solver_identities_from_lease(contaminated)
+    except ValueError as exc:
+        assert "non-owned attached server" in str(exc)
+    else:
+        raise AssertionError("attached server entered owned termination identities")
