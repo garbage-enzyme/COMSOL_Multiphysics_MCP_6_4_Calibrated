@@ -1,0 +1,10 @@
+{
+  "schema_name": "comsol_mcp.evidence_integrity_settings",
+  "schema_version": "1.0.0",
+  "checks": {
+    "outcome_contract_validation": true,
+    "artifact_chain_verification": true,
+    "summary_claim_verification": true,
+    "producer_driver_compatibility": true
+  }
+}

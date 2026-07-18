@@ -27,6 +27,9 @@ models are intentionally absent.
 - `constraints/minimum_supported_py314.txt` — This file pins the reviewed minimum binary-installable Python 3.14 direct dependencies.
 - `constraints/tested_versions.json` — This file records the human-reviewed direct dependency versions and compatibility lane.
 - `docs/profile_migration.md` — This file explains static profile selection and migration from broader tool surfaces.
+- `docs/evidence_integrity/README.md` — This file is the complete English evidence-integrity and anti-hallucination user guide.
+- `docs/evidence_integrity/default_settings.json` — This file is the tested all-checks-enabled evidence-integrity settings example.
+- `docs/evidence_integrity/exploration_settings.json` — This file is the tested single-check opt-out exploration example.
 
 ## Standalone recipes
 
@@ -139,6 +142,7 @@ models are intentionally absent.
 - `development_kit/tests/test_evidence_contracts.py` — This module tests physical evidence, policies, and immutable migration contracts.
 - `development_kit/tests/test_evidence_integrity_controls.py` — This module tests default-on settings, explicit per-check opt-out, and fail-closed disclosure.
 - `development_kit/tests/test_evidence_integrity_verifier.py` — This module tests settings-aware formal evidence verification and resume identity checks.
+- `development_kit/tests/test_user_guides.py` — This module checks documented settings, tool names, warnings, and bilingual guide contracts.
 - `development_kit/tests/test_field_artifacts.py` — This module tests bounded durable scalar field serialization.
 - `development_kit/tests/test_field_bundle.py` — This module tests field-evidence request normalization and identity.
 - `development_kit/tests/test_field_dataset.py` — This module tests read-only dataset adaptation to field evidence.
