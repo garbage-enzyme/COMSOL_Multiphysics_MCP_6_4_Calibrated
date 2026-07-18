@@ -29,15 +29,15 @@ def main() -> int:
         AssertionError("installed-package discovery must not start COMSOL")
     )
 
-    import src
-    from src.server import create_server
-    from src.shared_session.contracts import (
+    import comsol_mcp
+    from comsol_mcp.server import create_server
+    from comsol_mcp.shared_session.contracts import (
         SHARED_SERVER_FEATURE_ENV,
         SHARED_SERVER_PROFILE,
     )
-    from src.tools.catalog import PROFILE_NAMES, snapshot_tool_schemas
-    from src.tools.capabilities import get_capabilities
-    from src.tools.profiles import resolve_profile
+    from comsol_mcp.tools.catalog import PROFILE_NAMES, snapshot_tool_schemas
+    from comsol_mcp.tools.capabilities import get_capabilities
+    from comsol_mcp.tools.profiles import resolve_profile
 
     expected_names = _load_json(args.snapshot_dir / "profile_tool_names.json")
     expected_schemas = _load_json(args.snapshot_dir / "full_tool_schemas.json")
@@ -101,7 +101,7 @@ def main() -> int:
         "installed_package": {
             "name": "comsol-mcp",
             "version": version("comsol-mcp"),
-            "module_path_is_site_package": "site-packages" in str(Path(src.__file__).resolve()).lower(),
+            "module_path_is_site_package": "site-packages" in str(Path(comsol_mcp.__file__).resolve()).lower(),
             "requirements": package_requirements,
         },
         "profile_counts": actual_counts,
@@ -112,7 +112,7 @@ def main() -> int:
         "heavy_semantic_modules_imported": imported_heavy,
     }
     if not result["installed_package"]["module_path_is_site_package"]:
-        raise AssertionError(f"probe imported source tree instead of installed wheel: {src.__file__}")
+        raise AssertionError(f"probe imported source tree instead of installed wheel: {comsol_mcp.__file__}")
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(

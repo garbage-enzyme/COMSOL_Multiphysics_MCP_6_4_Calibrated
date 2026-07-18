@@ -18,7 +18,7 @@ ROOT = Path(__file__).parents[2]
 
 def _named_schemas_in_source() -> set[str]:
     names: set[str] = set()
-    for path in (ROOT / "src").rglob("*.py"):
+    for path in (ROOT / "comsol_mcp").rglob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if (
@@ -50,7 +50,10 @@ def test_registry_is_complete_sorted_and_snapshot_stable():
     assert registry["entry_count"] == len(entries) == 59
     assert names == sorted(names)
     assert len(names) == len(set(names))
-    assert set(names) == _named_schemas_in_source()
+    # Canonical package imports are also dotted ``comsol_mcp.*`` strings; the
+    # registry must be a subset of those source identifiers, not every module
+    # path in the implementation.
+    assert set(names).issubset(_named_schemas_in_source())
     assert re.fullmatch(r"[0-9a-f]{64}", registry["registry_sha256"])
     assert registry["registry_sha256"] == get_schema_registry()["registry_sha256"]
 

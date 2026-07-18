@@ -68,6 +68,7 @@ models are intentionally absent.
 - `development_kit/release/integration_fixtures/reference_air_polarization.json` — This contract defines reference-air polarization acceptance.
 - `development_kit/release/integration_fixtures/reference_power_evidence.json` — This contract defines reference-power evidence acceptance.
 - `development_kit/release/integration_fixtures/source_immutability.json` — This contract defines immutable-source acceptance.
+- `development_kit/docs/namespace_migration.md` — This document declares the canonical namespace and bounded compatibility interval.
 
 ## Development and release scripts
 
@@ -179,6 +180,7 @@ models are intentionally absent.
 - `development_kit/tests/test_outcome_contract.py` — This module tests orthogonal execution, evidence, and scientific outcome contracts.
 - `development_kit/tests/test_operation_arbiter.py` — This module tests durable serialization and responsive control-plane operation classes.
 - `development_kit/tests/test_native_cancel_probe.py` — This module tests native cancellation discovery and allowlisting without COMSOL.
+- `development_kit/tests/test_namespace_compatibility.py` — This module tests canonical package identity and the bounded legacy import interval.
 - `development_kit/tests/test_ownership.py` — This module tests solver ownership, leases, and collision detection.
 - `development_kit/tests/test_parameters.py` — This module tests parameter tools without a COMSOL client.
 - `development_kit/tests/test_path_policy.py` — This module tests configured model-read and owned-artifact path containment.
@@ -248,168 +250,169 @@ models are intentionally absent.
 
 ## Packaged runtime root
 
-- `src/__init__.py` — This module defines the single authored package version.
-- `src/artifact_chain.py` — This module verifies bounded JSON artifact dependency chains without a solver.
-- `src/build_identity.py` — This module derives package build identity from shipped paths and bytes.
-- `src/compatibility.py` — This module loads and validates the packaged runtime compatibility declaration.
-- `src/contracts/__init__.py` — This module exports lightweight public input contracts without solver imports.
-- `src/contracts/job_submission.py` — This module defines bounded discriminated durable-job submission inputs.
-- `src/contracts/structural.py` — This module applies shared public schema and runtime structural limits.
-- `src/durable/__init__.py` — This module exports versioned canonicalization and durable filesystem primitives.
-- `src/durable/canonical.py` — This module preserves legacy canonical bytes and adds domain-separated identities for new schemas.
-- `src/durable/io.py` — This module implements bounded hashing, atomic replacement, and complete-row persistence.
-- `src/compatibility_manifest.json` — This file declares exact licensed, dependency-only, and unknown runtime compatibility.
-- `src/deployment_manifest.json` — This file binds deployment identity to frozen tool and profile snapshots.
-- `src/environment_identity.py` — This module reports redacted Python, platform, dependency, and optional-feature identity.
-- `src/operation_arbiter.py` — This module serializes COMSOL-bound calls with a durable exact-process lock.
-- `src/path_policy.py` — This module enforces configured model-read and owned ASCII artifact roots.
-- `src/schema_registry.py` — This module registers named artifact schema producers and readable and writable versions.
-- `src/server.py` — This module creates the profiled MCP server and console entry point.
-- `src/settings.py` — This module loads grouped project settings and reports bounded fallback errors.
+- `src/__init__.py` — This compatibility package aliases legacy imports to the canonical implementation modules.
+- `comsol_mcp/__init__.py` — This module defines the single authored package version.
+- `comsol_mcp/artifact_chain.py` — This module verifies bounded JSON artifact dependency chains without a solver.
+- `comsol_mcp/build_identity.py` — This module derives package build identity from shipped paths and bytes.
+- `comsol_mcp/compatibility.py` — This module loads and validates the packaged runtime compatibility declaration.
+- `comsol_mcp/contracts/__init__.py` — This module exports lightweight public input contracts without solver imports.
+- `comsol_mcp/contracts/job_submission.py` — This module defines bounded discriminated durable-job submission inputs.
+- `comsol_mcp/contracts/structural.py` — This module applies shared public schema and runtime structural limits.
+- `comsol_mcp/durable/__init__.py` — This module exports versioned canonicalization and durable filesystem primitives.
+- `comsol_mcp/durable/canonical.py` — This module preserves legacy canonical bytes and adds domain-separated identities for new schemas.
+- `comsol_mcp/durable/io.py` — This module implements bounded hashing, atomic replacement, and complete-row persistence.
+- `comsol_mcp/compatibility_manifest.json` — This file declares exact licensed, dependency-only, and unknown runtime compatibility.
+- `comsol_mcp/deployment_manifest.json` — This file binds deployment identity to frozen tool and profile snapshots.
+- `comsol_mcp/environment_identity.py` — This module reports redacted Python, platform, dependency, and optional-feature identity.
+- `comsol_mcp/operation_arbiter.py` — This module serializes COMSOL-bound calls with a durable exact-process lock.
+- `comsol_mcp/path_policy.py` — This module enforces configured model-read and owned ASCII artifact roots.
+- `comsol_mcp/schema_registry.py` — This module registers named artifact schema producers and readable and writable versions.
+- `comsol_mcp/server.py` — This module creates the profiled MCP server and console entry point.
+- `comsol_mcp/settings.py` — This module loads grouped project settings and reports bounded fallback errors.
 
 ## Asynchronous compatibility layer
 
-- `src/async_handler/__init__.py` — This file exports asynchronous compatibility handlers.
-- `src/async_handler/solver.py` — This module implements the experimental in-process asynchronous solver wrapper.
+- `comsol_mcp/async_handler/__init__.py` — This file exports asynchronous compatibility handlers.
+- `comsol_mcp/async_handler/solver.py` — This module implements the experimental in-process asynchronous solver wrapper.
 
 ## Evidence modules
 
-- `src/evidence/__init__.py` — This file exports versioned solver-free evidence contracts.
-- `src/evidence/contracts.py` — This module implements strict physical evidence, policy, and migration contracts.
-- `src/evidence/branch_continuation.py` — This module validates and plans ordered branch-continuation states without a solver.
-- `src/evidence/convergence_evaluation.py` — This module validates ordered spectral convergence ladders and caller policies.
-- `src/evidence/integrity_controls.py` — This module loads default-on evidence-integrity settings and defines warning propagation.
-- `src/evidence/integrity_verifier.py` — This module composes settings-aware outcome, artifact, summary, and resume verification.
-- `src/evidence/field_artifacts.py` — This module serializes bounded gridded scalar field artifacts.
-- `src/evidence/field_bundle.py` — This module normalizes bounded field-evidence extraction requests.
-- `src/evidence/field_dataset.py` — This module adapts existing MPh datasets to field-evidence samples.
-- `src/evidence/field_discovery.py` — This module discovers exact dataset, solution, and component identities.
-- `src/evidence/field_interpolation.py` — This module interpolates selected field samples onto declared grids.
-- `src/evidence/field_manifest.py` — This module builds and validates field-evidence manifests.
-- `src/evidence/field_matrix.py` — This module binds validation-matrix points to field requests.
-- `src/evidence/field_pipeline.py` — This module coordinates raw field samples into durable artifacts.
-- `src/evidence/field_plot_worker.py` — This module renders bounded scalar field PNGs in an isolated worker.
-- `src/evidence/field_render.py` — This module coordinates isolated field PNG rendering.
-- `src/evidence/field_sampling.py` — This module selects bounded raw samples for one declared slice.
-- `src/evidence/material_expressions.py` — This module constructs and previews dispersive material expressions.
-- `src/evidence/outcome_contract.py` — This module validates solver-free execution, evidence-completeness, and scientific-disposition outcomes.
-- `src/evidence/portfolio_verifier.py` — This module verifies summary claims against exact values in hash-bound evidence chains.
-- `src/evidence/power_audit.py` — This module normalizes declared reference-power evidence.
-- `src/evidence/real_fixture.py` — This module validates portable controlled licensed-fixture contracts.
-- `src/evidence/reference_power_acceptance.py` — This module validates reference-power acceptance and execution inputs.
-- `src/evidence/reference_power_gate.py` — This module evaluates reference-power receipts and artifact accounting.
-- `src/evidence/spectral_characterization.py` — This module validates and characterizes provenance-bound spectra without a solver.
-- `src/evidence/visual_review.py` — This module defines visual-review capability, request, receipt, and dual-review contracts.
+- `comsol_mcp/evidence/__init__.py` — This file exports versioned solver-free evidence contracts.
+- `comsol_mcp/evidence/contracts.py` — This module implements strict physical evidence, policy, and migration contracts.
+- `comsol_mcp/evidence/branch_continuation.py` — This module validates and plans ordered branch-continuation states without a solver.
+- `comsol_mcp/evidence/convergence_evaluation.py` — This module validates ordered spectral convergence ladders and caller policies.
+- `comsol_mcp/evidence/integrity_controls.py` — This module loads default-on evidence-integrity settings and defines warning propagation.
+- `comsol_mcp/evidence/integrity_verifier.py` — This module composes settings-aware outcome, artifact, summary, and resume verification.
+- `comsol_mcp/evidence/field_artifacts.py` — This module serializes bounded gridded scalar field artifacts.
+- `comsol_mcp/evidence/field_bundle.py` — This module normalizes bounded field-evidence extraction requests.
+- `comsol_mcp/evidence/field_dataset.py` — This module adapts existing MPh datasets to field-evidence samples.
+- `comsol_mcp/evidence/field_discovery.py` — This module discovers exact dataset, solution, and component identities.
+- `comsol_mcp/evidence/field_interpolation.py` — This module interpolates selected field samples onto declared grids.
+- `comsol_mcp/evidence/field_manifest.py` — This module builds and validates field-evidence manifests.
+- `comsol_mcp/evidence/field_matrix.py` — This module binds validation-matrix points to field requests.
+- `comsol_mcp/evidence/field_pipeline.py` — This module coordinates raw field samples into durable artifacts.
+- `comsol_mcp/evidence/field_plot_worker.py` — This module renders bounded scalar field PNGs in an isolated worker.
+- `comsol_mcp/evidence/field_render.py` — This module coordinates isolated field PNG rendering.
+- `comsol_mcp/evidence/field_sampling.py` — This module selects bounded raw samples for one declared slice.
+- `comsol_mcp/evidence/material_expressions.py` — This module constructs and previews dispersive material expressions.
+- `comsol_mcp/evidence/outcome_contract.py` — This module validates solver-free execution, evidence-completeness, and scientific-disposition outcomes.
+- `comsol_mcp/evidence/portfolio_verifier.py` — This module verifies summary claims against exact values in hash-bound evidence chains.
+- `comsol_mcp/evidence/power_audit.py` — This module normalizes declared reference-power evidence.
+- `comsol_mcp/evidence/real_fixture.py` — This module validates portable controlled licensed-fixture contracts.
+- `comsol_mcp/evidence/reference_power_acceptance.py` — This module validates reference-power acceptance and execution inputs.
+- `comsol_mcp/evidence/reference_power_gate.py` — This module evaluates reference-power receipts and artifact accounting.
+- `comsol_mcp/evidence/spectral_characterization.py` — This module validates and characterizes provenance-bound spectra without a solver.
+- `comsol_mcp/evidence/visual_review.py` — This module defines visual-review capability, request, receipt, and dual-review contracts.
 
 ## Durable job modules
 
-- `src/jobs/__init__.py` — This file exports durable background-job primitives.
-- `src/jobs/attached_backend.py` — This module normalizes immutable automation-exclusive attached-server execution specifications.
-- `src/jobs/attached_runtime.py` — This module verifies attached server, model, revision, and preservation identities for durable workers.
-- `src/jobs/cancel_worker.py` — This module coordinates detached durable cancellation and cleanup.
-- `src/jobs/convergence_campaign.py` — This module normalizes immutable bounded durable convergence campaign specifications.
-- `src/jobs/branch_continuation_campaign.py` — This module normalizes immutable bounded durable branch-continuation campaign specifications.
-- `src/jobs/branch_continuation_campaign_rows.py` — This module persists hash-chained continuation state evidence bound to completed spectral artifacts.
-- `src/jobs/branch_continuation_campaign_runner.py` — This module composes completed spectral states with offline continuation planning and durable summaries.
-- `src/jobs/branch_continuation_campaign_worker.py` — This worker runs exact-model continuation states under one owned COMSOL attempt.
-- `src/jobs/convergence_campaign_rows.py` — This module persists hash-chained convergence level evidence bound to completed spectral artifacts.
-- `src/jobs/convergence_campaign_runner.py` — This module composes completed spectral levels with offline convergence evaluation and durable summaries.
-- `src/jobs/convergence_campaign_worker.py` — This worker runs exact-model convergence ladders under one owned COMSOL attempt.
-- `src/jobs/field_review.py` — This module assembles paired validation-matrix field-review artifacts.
-- `src/jobs/manager.py` — This module handles durable job submission, status, cancellation, resume, and reconciliation.
-- `src/jobs/native_cancel_probe.py` — This module inspects allowlisted native cancellation support.
-- `src/jobs/native_cancel_profiles.json` — This file stores exact native cancellation compatibility profiles.
-- `src/jobs/process_control.py` — This module performs exact-identity process inspection and containment.
-- `src/jobs/resource_admission.py` — This module validates resource policy, telemetry, journals, and admission.
-- `src/jobs/sequence_worker.py` — This module provides an injected process-only durability worker.
-- `src/jobs/spectral_audit.py` — This module verifies point-audit artifacts before durable spectral row persistence.
-- `src/jobs/spectral_characterization.py` — This module normalizes immutable bounded durable spectral job specifications.
-- `src/jobs/spectral_progress.py` — This module derives bounded adaptive spectral transitions from frozen stages and durable rows.
-- `src/jobs/spectral_runner.py` — This module runs the solver-independent adaptive spectral point loop and summary writes.
-- `src/jobs/spectral_level_execution.py` — This module runs the accepted spectral pipeline against an already loaded owned model.
-- `src/jobs/spectral_rows.py` — This module persists hash-chained raw spectral points with artifact verification.
-- `src/jobs/spectral_stages.py` — This module builds and atomically freezes hash-chained adaptive spectral stage plans.
-- `src/jobs/spectral_worker.py` — This module runs detached adaptive spectral jobs through the shared solver runtime.
-- `src/jobs/store.py` — This module persists crash-durable job state and process-safe locks.
-- `src/jobs/validation_collectors.py` — This module adapts validation points to physical evidence collectors.
-- `src/jobs/validation_matrix.py` — This module normalizes bounded durable validation-matrix specifications.
-- `src/jobs/validation_rows.py` — This module writes and validates append-only durable validation rows.
-- `src/jobs/validation_runner.py` — This module runs the solver-independent validation point loop.
-- `src/jobs/validation_worker.py` — This module runs one detached physical-validation matrix worker.
-- `src/jobs/worker.py` — This module runs one detached staged COMSOL sweep worker.
+- `comsol_mcp/jobs/__init__.py` — This file exports durable background-job primitives.
+- `comsol_mcp/jobs/attached_backend.py` — This module normalizes immutable automation-exclusive attached-server execution specifications.
+- `comsol_mcp/jobs/attached_runtime.py` — This module verifies attached server, model, revision, and preservation identities for durable workers.
+- `comsol_mcp/jobs/cancel_worker.py` — This module coordinates detached durable cancellation and cleanup.
+- `comsol_mcp/jobs/convergence_campaign.py` — This module normalizes immutable bounded durable convergence campaign specifications.
+- `comsol_mcp/jobs/branch_continuation_campaign.py` — This module normalizes immutable bounded durable branch-continuation campaign specifications.
+- `comsol_mcp/jobs/branch_continuation_campaign_rows.py` — This module persists hash-chained continuation state evidence bound to completed spectral artifacts.
+- `comsol_mcp/jobs/branch_continuation_campaign_runner.py` — This module composes completed spectral states with offline continuation planning and durable summaries.
+- `comsol_mcp/jobs/branch_continuation_campaign_worker.py` — This worker runs exact-model continuation states under one owned COMSOL attempt.
+- `comsol_mcp/jobs/convergence_campaign_rows.py` — This module persists hash-chained convergence level evidence bound to completed spectral artifacts.
+- `comsol_mcp/jobs/convergence_campaign_runner.py` — This module composes completed spectral levels with offline convergence evaluation and durable summaries.
+- `comsol_mcp/jobs/convergence_campaign_worker.py` — This worker runs exact-model convergence ladders under one owned COMSOL attempt.
+- `comsol_mcp/jobs/field_review.py` — This module assembles paired validation-matrix field-review artifacts.
+- `comsol_mcp/jobs/manager.py` — This module handles durable job submission, status, cancellation, resume, and reconciliation.
+- `comsol_mcp/jobs/native_cancel_probe.py` — This module inspects allowlisted native cancellation support.
+- `comsol_mcp/jobs/native_cancel_profiles.json` — This file stores exact native cancellation compatibility profiles.
+- `comsol_mcp/jobs/process_control.py` — This module performs exact-identity process inspection and containment.
+- `comsol_mcp/jobs/resource_admission.py` — This module validates resource policy, telemetry, journals, and admission.
+- `comsol_mcp/jobs/sequence_worker.py` — This module provides an injected process-only durability worker.
+- `comsol_mcp/jobs/spectral_audit.py` — This module verifies point-audit artifacts before durable spectral row persistence.
+- `comsol_mcp/jobs/spectral_characterization.py` — This module normalizes immutable bounded durable spectral job specifications.
+- `comsol_mcp/jobs/spectral_progress.py` — This module derives bounded adaptive spectral transitions from frozen stages and durable rows.
+- `comsol_mcp/jobs/spectral_runner.py` — This module runs the solver-independent adaptive spectral point loop and summary writes.
+- `comsol_mcp/jobs/spectral_level_execution.py` — This module runs the accepted spectral pipeline against an already loaded owned model.
+- `comsol_mcp/jobs/spectral_rows.py` — This module persists hash-chained raw spectral points with artifact verification.
+- `comsol_mcp/jobs/spectral_stages.py` — This module builds and atomically freezes hash-chained adaptive spectral stage plans.
+- `comsol_mcp/jobs/spectral_worker.py` — This module runs detached adaptive spectral jobs through the shared solver runtime.
+- `comsol_mcp/jobs/store.py` — This module persists crash-durable job state and process-safe locks.
+- `comsol_mcp/jobs/validation_collectors.py` — This module adapts validation points to physical evidence collectors.
+- `comsol_mcp/jobs/validation_matrix.py` — This module normalizes bounded durable validation-matrix specifications.
+- `comsol_mcp/jobs/validation_rows.py` — This module writes and validates append-only durable validation rows.
+- `comsol_mcp/jobs/validation_runner.py` — This module runs the solver-independent validation point loop.
+- `comsol_mcp/jobs/validation_worker.py` — This module runs one detached physical-validation matrix worker.
+- `comsol_mcp/jobs/worker.py` — This module runs one detached staged COMSOL sweep worker.
 
 ## Knowledge modules and prompts
 
-- `src/knowledge/__init__.py` — This file exports knowledge and documentation services.
-- `src/knowledge/embedded.py` — This module registers embedded documentation tools.
-- `src/knowledge/lexical_manual.py` — This module implements bounded SQLite full-text manual search.
-- `src/knowledge/lexical_worker.py` — This module isolates lexical manual operations behind JSON transport.
-- `src/knowledge/semantic_contracts.py` — This module defines dependency-free semantic service contracts.
-- `src/knowledge/semantic_index.py` — This module builds and validates immutable semantic indexes.
-- `src/knowledge/semantic_process.py` — This module manages the exact semantic worker child process.
-- `src/knowledge/semantic_retrieval.py` — This module performs vector retrieval and deterministic BM25 fusion.
-- `src/knowledge/semantic_runtime.py` — This module reports opt-in semantic runtime configuration.
-- `src/knowledge/semantic_worker.py` — This module implements the isolated semantic worker protocol.
-- `src/knowledge/prompts/mph_api.md` — This prompt summarizes calibrated MPh and clientapi usage.
-- `src/knowledge/prompts/physics_guide.md` — This prompt summarizes physics construction and verification guidance.
-- `src/knowledge/prompts/workflow.md` — This prompt summarizes safe model workflow sequencing.
+- `comsol_mcp/knowledge/__init__.py` — This file exports knowledge and documentation services.
+- `comsol_mcp/knowledge/embedded.py` — This module registers embedded documentation tools.
+- `comsol_mcp/knowledge/lexical_manual.py` — This module implements bounded SQLite full-text manual search.
+- `comsol_mcp/knowledge/lexical_worker.py` — This module isolates lexical manual operations behind JSON transport.
+- `comsol_mcp/knowledge/semantic_contracts.py` — This module defines dependency-free semantic service contracts.
+- `comsol_mcp/knowledge/semantic_index.py` — This module builds and validates immutable semantic indexes.
+- `comsol_mcp/knowledge/semantic_process.py` — This module manages the exact semantic worker child process.
+- `comsol_mcp/knowledge/semantic_retrieval.py` — This module performs vector retrieval and deterministic BM25 fusion.
+- `comsol_mcp/knowledge/semantic_runtime.py` — This module reports opt-in semantic runtime configuration.
+- `comsol_mcp/knowledge/semantic_worker.py` — This module implements the isolated semantic worker protocol.
+- `comsol_mcp/knowledge/prompts/mph_api.md` — This prompt summarizes calibrated MPh and clientapi usage.
+- `comsol_mcp/knowledge/prompts/physics_guide.md` — This prompt summarizes physics construction and verification guidance.
+- `comsol_mcp/knowledge/prompts/workflow.md` — This prompt summarizes safe model workflow sequencing.
 
 ## MCP resources
 
-- `src/resources/__init__.py` — This file exports MCP model resources.
-- `src/resources/model_resources.py` — This module exposes bounded model status and information resources.
+- `comsol_mcp/resources/__init__.py` — This file exports MCP model resources.
+- `comsol_mcp/resources/model_resources.py` — This module exposes bounded model status and information resources.
 
 ## Shared Desktop and attached-server contracts
 
-- `src/shared_session/__init__.py` — This file exports the default-off shared-session contracts.
-- `src/shared_session/attach_request.py` — This module normalizes all static and per-call gates before attached lease acquisition.
-- `src/shared_session/cleanup.py` — This module distinguishes external-resource-preserving detach from owned cleanup.
-- `src/shared_session/contracts.py` — This module normalizes the shared feature gate and local loopback endpoint.
-- `src/shared_session/identity.py` — This module defines exact non-owned server and model-selector identities.
-- `src/shared_session/locking.py` — This module defines bounded model revisions and shared-model enforcement locks.
-- `src/shared_session/lifecycle.py` — This module attaches and disconnects one non-owned server client without start or clear behavior.
-- `src/shared_session/preflight.py` — This module classifies stable local Desktop and Server readiness without importing MPh.
-- `src/shared_session/process_probe.py` — This module collects bounded Windows process, listener, window, and executable-version evidence.
+- `comsol_mcp/shared_session/__init__.py` — This file exports the default-off shared-session contracts.
+- `comsol_mcp/shared_session/attach_request.py` — This module normalizes all static and per-call gates before attached lease acquisition.
+- `comsol_mcp/shared_session/cleanup.py` — This module distinguishes external-resource-preserving detach from owned cleanup.
+- `comsol_mcp/shared_session/contracts.py` — This module normalizes the shared feature gate and local loopback endpoint.
+- `comsol_mcp/shared_session/identity.py` — This module defines exact non-owned server and model-selector identities.
+- `comsol_mcp/shared_session/locking.py` — This module defines bounded model revisions and shared-model enforcement locks.
+- `comsol_mcp/shared_session/lifecycle.py` — This module attaches and disconnects one non-owned server client without start or clear behavior.
+- `comsol_mcp/shared_session/preflight.py` — This module classifies stable local Desktop and Server readiness without importing MPh.
+- `comsol_mcp/shared_session/process_probe.py` — This module collects bounded Windows process, listener, window, and executable-version evidence.
 
 ## MCP tool adapters
 
-- `src/tools/__init__.py` — This file exports and registers MCP tool modules.
-- `src/tools/capabilities.py` — This module reports profiles, compatibility, identities, schemas, and feature maturity.
-- `src/tools/branch_continuation.py` — This module exposes bounded solver-free branch-continuation planning.
-- `src/tools/convergence_evaluation.py` — This module exposes bounded solver-free convergence evaluation.
-- `src/tools/catalog.py` — This module classifies tools and snapshots deterministic public schemas.
-- `src/tools/derived_geometry.py` — This module applies typed edits only to provenance-tracked derived models.
-- `src/tools/evidence_integrity.py` — This module exposes solver-free evidence-integrity status and formal verification tools.
-- `src/tools/field_evidence.py` — This module exposes read-only field discovery and extraction tools.
-- `src/tools/geometry.py` — This module exposes COMSOL geometry tools.
-- `src/tools/incidence_config.py` — This module exposes typed periodic incidence preview and mutation gates.
-- `src/tools/jobs.py` — This module exposes durable job submission and control tools.
-- `src/tools/material_expressions.py` — This module exposes solver-free material-expression preview tools.
-- `src/tools/mesh.py` — This module exposes COMSOL mesh tools.
-- `src/tools/mim_patch.py` — This module exposes patch-metasurface construction helpers.
-- `src/tools/model.py` — This module exposes model creation, loading, cloning, saving, and listing tools.
-- `src/tools/ownership.py` — This module enforces cross-process solver ownership and collision preflight.
-- `src/tools/parameters.py` — This module exposes COMSOL parameter tools.
-- `src/tools/periodic_mesh_audit.py` — This module exposes periodic geometry and mesh evidence tools.
-- `src/tools/physics.py` — This module exposes COMSOL physics and multiphysics tools.
-- `src/tools/profiles.py` — This module resolves static profiles and filters tool registration.
-- `src/tools/session_status.py` — This module stores last-known session booleans without importing COMSOL or MPh.
-- `src/tools/properties.py` — This module exposes constrained clientapi property access.
-- `src/tools/property_transport.py` — This module normalizes bounded property values for JSON transport.
-- `src/tools/results.py` — This module exposes result evaluation and export tools.
-- `src/tools/semantic_docs.py` — This module exposes bounded opt-in semantic documentation tools.
-- `src/tools/spectral_characterization.py` — This module exposes bounded solver-free spectral characterization.
-- `src/tools/session.py` — This module manages COMSOL client startup, status, models, and shutdown.
-- `src/tools/shared_session.py` — This module exposes default-off local attached-server lifecycle tools.
-- `src/tools/study.py` — This module exposes COMSOL study and solving tools.
-- `src/tools/visual_review.py` — This module exposes solver-free visual-review contract adapters.
-- `src/tools/wave_optics_audit.py` — This module exposes one-point policy-separated Wave Optics evidence audits.
-- `src/tools/wave_optics_preflight.py` — This module exposes threshold-free read-only Wave Optics preflight.
-- `src/tools/workflow.py` — This module exposes reusable staged study workflows.
+- `comsol_mcp/tools/__init__.py` — This file exports and registers MCP tool modules.
+- `comsol_mcp/tools/capabilities.py` — This module reports profiles, compatibility, identities, schemas, and feature maturity.
+- `comsol_mcp/tools/branch_continuation.py` — This module exposes bounded solver-free branch-continuation planning.
+- `comsol_mcp/tools/convergence_evaluation.py` — This module exposes bounded solver-free convergence evaluation.
+- `comsol_mcp/tools/catalog.py` — This module classifies tools and snapshots deterministic public schemas.
+- `comsol_mcp/tools/derived_geometry.py` — This module applies typed edits only to provenance-tracked derived models.
+- `comsol_mcp/tools/evidence_integrity.py` — This module exposes solver-free evidence-integrity status and formal verification tools.
+- `comsol_mcp/tools/field_evidence.py` — This module exposes read-only field discovery and extraction tools.
+- `comsol_mcp/tools/geometry.py` — This module exposes COMSOL geometry tools.
+- `comsol_mcp/tools/incidence_config.py` — This module exposes typed periodic incidence preview and mutation gates.
+- `comsol_mcp/tools/jobs.py` — This module exposes durable job submission and control tools.
+- `comsol_mcp/tools/material_expressions.py` — This module exposes solver-free material-expression preview tools.
+- `comsol_mcp/tools/mesh.py` — This module exposes COMSOL mesh tools.
+- `comsol_mcp/tools/mim_patch.py` — This module exposes patch-metasurface construction helpers.
+- `comsol_mcp/tools/model.py` — This module exposes model creation, loading, cloning, saving, and listing tools.
+- `comsol_mcp/tools/ownership.py` — This module enforces cross-process solver ownership and collision preflight.
+- `comsol_mcp/tools/parameters.py` — This module exposes COMSOL parameter tools.
+- `comsol_mcp/tools/periodic_mesh_audit.py` — This module exposes periodic geometry and mesh evidence tools.
+- `comsol_mcp/tools/physics.py` — This module exposes COMSOL physics and multiphysics tools.
+- `comsol_mcp/tools/profiles.py` — This module resolves static profiles and filters tool registration.
+- `comsol_mcp/tools/session_status.py` — This module stores last-known session booleans without importing COMSOL or MPh.
+- `comsol_mcp/tools/properties.py` — This module exposes constrained clientapi property access.
+- `comsol_mcp/tools/property_transport.py` — This module normalizes bounded property values for JSON transport.
+- `comsol_mcp/tools/results.py` — This module exposes result evaluation and export tools.
+- `comsol_mcp/tools/semantic_docs.py` — This module exposes bounded opt-in semantic documentation tools.
+- `comsol_mcp/tools/spectral_characterization.py` — This module exposes bounded solver-free spectral characterization.
+- `comsol_mcp/tools/session.py` — This module manages COMSOL client startup, status, models, and shutdown.
+- `comsol_mcp/tools/shared_session.py` — This module exposes default-off local attached-server lifecycle tools.
+- `comsol_mcp/tools/study.py` — This module exposes COMSOL study and solving tools.
+- `comsol_mcp/tools/visual_review.py` — This module exposes solver-free visual-review contract adapters.
+- `comsol_mcp/tools/wave_optics_audit.py` — This module exposes one-point policy-separated Wave Optics evidence audits.
+- `comsol_mcp/tools/wave_optics_preflight.py` — This module exposes threshold-free read-only Wave Optics preflight.
+- `comsol_mcp/tools/workflow.py` — This module exposes reusable staged study workflows.
 
 ## Shared utilities
 
-- `src/utils/__init__.py` — This file exports shared utility functions.
-- `src/utils/control_plane.py` — This module attaches bounded latency and outcome evidence to control calls.
-- `src/utils/runtime_paths.py` — This module defines shared ASCII-safe runtime artifact locations.
-- `src/utils/versioning.py` — This module creates and parses versioned model filenames.
+- `comsol_mcp/utils/__init__.py` — This file exports shared utility functions.
+- `comsol_mcp/utils/control_plane.py` — This module attaches bounded latency and outcome evidence to control calls.
+- `comsol_mcp/utils/runtime_paths.py` — This module defines shared ASCII-safe runtime artifact locations.
+- `comsol_mcp/utils/versioning.py` — This module creates and parses versioned model filenames.

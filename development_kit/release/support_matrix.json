@@ -2,8 +2,8 @@
   "schema_name": "comsol_mcp.release_support_matrix",
   "schema_version": "2.0.0",
   "release_identity_sources": {
-    "package_version": "src/__init__.py",
-    "runtime_compatibility": "src/compatibility_manifest.json",
+    "package_version": "comsol_mcp/__init__.py",
+    "runtime_compatibility": "comsol_mcp/compatibility_manifest.json",
     "dependency_ranges": "pyproject.toml"
   },
   "profiles": [

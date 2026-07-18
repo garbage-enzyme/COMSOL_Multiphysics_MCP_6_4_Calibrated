@@ -15,8 +15,8 @@ import time
 
 import psutil
 
-from src.evidence.real_fixture import controlled_fixture_environment_from_reference_power_spec
-from src.tools.ownership import SolverOwnership
+from comsol_mcp.evidence.real_fixture import controlled_fixture_environment_from_reference_power_spec
+from comsol_mcp.tools.ownership import SolverOwnership
 
 
 ROOT = Path(__file__).resolve().parents[2]

@@ -17,8 +17,8 @@ import uuid
 
 import psutil
 
-from src.jobs.store import atomic_write_json
-from src.tools.ownership import SolverOwnership, _command_signature
+from comsol_mcp.jobs.store import atomic_write_json
+from comsol_mcp.tools.ownership import SolverOwnership, _command_signature
 
 
 ROOT = Path(__file__).resolve().parents[2]

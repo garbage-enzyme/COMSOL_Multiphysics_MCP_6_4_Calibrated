@@ -295,7 +295,7 @@ python -m pip install ".[semantic-docs]"
 #   semantic_docs.model_path = "D:/comsol_semantic/models/<model>/<revision>"
 ```
 
-若 Windows 用户目录含非 ASCII 字符，请避免 editable install。源码变化后运行 `python -m pip install . --no-deps`，并重启 MCP host；服务器不会热加载 `src/tools/`。
+若 Windows 用户目录含非 ASCII 字符，请避免 editable install。源码变化后运行 `python -m pip install . --no-deps`，并重启 MCP host；服务器不会热加载 `comsol_mcp/tools/`。
 
 MCP 客户端配置示例：
 

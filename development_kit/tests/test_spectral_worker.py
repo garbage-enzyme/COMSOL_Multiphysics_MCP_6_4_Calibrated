@@ -204,7 +204,7 @@ def test_manager_routes_exact_spectral_submissions_and_changed_specs(tmp_path, a
     monkeypatch.setattr(manager, "_launch_worker", launch)
     first = manager.submit(_raw_spec(spec))
     duplicate = manager.submit(_raw_spec(spec))
-    assert launches == [(first["job_id"], "src.jobs.spectral_worker")]
+    assert launches == [(first["job_id"], "comsol_mcp.jobs.spectral_worker")]
     assert duplicate["duplicate"] is True
     assert duplicate["job_id"] == first["job_id"]
     status = manager.status(first["job_id"])
@@ -215,7 +215,7 @@ def test_manager_routes_exact_spectral_submissions_and_changed_specs(tmp_path, a
     changed["configuration_sha256"] = "c" * 64
     second = manager.submit(changed)
     assert second["job_id"] != first["job_id"]
-    assert launches[-1][1] == "src.jobs.spectral_worker"
+    assert launches[-1][1] == "comsol_mcp.jobs.spectral_worker"
 
 
 def test_manager_resumes_spectral_worker_without_changing_spec(tmp_path, ascii_root, monkeypatch):
@@ -239,5 +239,5 @@ def test_manager_resumes_spectral_worker_without_changing_spec(tmp_path, ascii_r
     )
     resumed = manager.resume(submitted["job_id"])
     assert resumed["attempt"] == 2
-    assert launches[-1][1] == "src.jobs.spectral_worker"
+    assert launches[-1][1] == "comsol_mcp.jobs.spectral_worker"
     assert manager.store.read_spec(submitted["job_id"])["spec_fingerprint"] == spec["spec_fingerprint"]

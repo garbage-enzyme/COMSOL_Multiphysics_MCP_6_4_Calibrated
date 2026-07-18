@@ -15,7 +15,7 @@
     {
       "path": "development_kit/scripts/run_real_release_gate.py",
       "match_count": 16,
-      "match_sha256": "6f51a4734f4865e704af7426b9fd7bab250d98948310128920b29197a9038c39"
+      "match_sha256": "8bdb4410c74247b42d5f786a76e050f733c0b2391579b98865fe978bc18151a7"
     },
     {
       "path": "development_kit/tests/test_durable_job_control_plane.py",
@@ -33,7 +33,7 @@
       "match_sha256": "b3c34326a3fbaa3d7dbdc2d6ae7889800c76973a15756110b73e63dcdc7f0646"
     },
     {
-      "path": "src/evidence/reference_power_acceptance.py",
+      "path": "comsol_mcp/evidence/reference_power_acceptance.py",
       "match_count": 31,
       "match_sha256": "18aa9c5e8451072800679c6af222a8f2a044bd61170cd54b0f8a2f460c6470a3"
     }

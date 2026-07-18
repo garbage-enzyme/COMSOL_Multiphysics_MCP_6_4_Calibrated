@@ -68,7 +68,7 @@ def test_every_registered_tool_has_complete_canonical_metadata():
     assert len(TOOL_METADATA) == 135
     for name, metadata in TOOL_METADATA.items():
         assert metadata.name == name
-        assert metadata.registrar.startswith("src.")
+        assert metadata.registrar.startswith("comsol_mcp.")
         assert metadata.group
         assert metadata.maturity in {"verified", "experimental"}
         assert metadata.side_effect_class
@@ -103,8 +103,8 @@ def test_profile_registrar_selection_is_derived_from_tool_specs():
     full = registrars_for_profile("full")
     assert core
     assert len(core) < len(full)
-    assert "src.tools.wave_optics_audit.register_wave_optics_audit_tools" not in core
-    assert "src.tools.wave_optics_audit.register_wave_optics_audit_tools" in full
+    assert "comsol_mcp.tools.wave_optics_audit.register_wave_optics_audit_tools" not in core
+    assert "comsol_mcp.tools.wave_optics_audit.register_wave_optics_audit_tools" in full
 
 
 def test_deprecated_foreground_sweep_has_a_durable_replacement():

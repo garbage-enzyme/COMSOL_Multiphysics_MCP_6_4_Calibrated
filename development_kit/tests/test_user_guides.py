@@ -152,8 +152,8 @@ def test_deployment_guides_explain_the_shared_settings_file_and_fallbacks():
 def test_embedded_guidance_no_longer_denies_the_shared_profile():
     documents = [
         ROOT / "docs" / "profile_migration.md",
-        ROOT / "src" / "knowledge" / "prompts" / "workflow.md",
-        ROOT / "src" / "knowledge" / "prompts" / "mph_api.md",
+        ROOT / "comsol_mcp" / "knowledge" / "prompts" / "workflow.md",
+        ROOT / "comsol_mcp" / "knowledge" / "prompts" / "mph_api.md",
     ]
     combined = "\n".join(path.read_text(encoding="utf-8") for path in documents)
 

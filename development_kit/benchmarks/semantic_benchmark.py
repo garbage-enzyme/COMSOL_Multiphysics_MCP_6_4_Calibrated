@@ -13,8 +13,8 @@ import statistics
 import time
 from typing import Any, Iterable, Mapping
 
-from src.knowledge.lexical_manual import DEFAULT_INDEX_PATH, search_index
-from src.knowledge.semantic_contracts import (
+from comsol_mcp.knowledge.lexical_manual import DEFAULT_INDEX_PATH, search_index
+from comsol_mcp.knowledge.semantic_contracts import (
     SEMANTIC_CONTINUATION_GATE,
     SEMANTIC_PROMOTION_GATE,
     evaluate_semantic_continuation,

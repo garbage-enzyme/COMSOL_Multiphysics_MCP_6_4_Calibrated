@@ -13,11 +13,11 @@ ROOT = Path(__file__).parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src import __version__
-from src.compatibility import load_runtime_compatibility
-from src.schema_registry import get_schema_registry
-from src.tools.catalog import PROFILE_NAMES, TOOL_METADATA
-from src.tools.profiles import tool_names_for_profile
+from comsol_mcp import __version__
+from comsol_mcp.compatibility import load_runtime_compatibility
+from comsol_mcp.schema_registry import get_schema_registry
+from comsol_mcp.tools.catalog import PROFILE_NAMES, TOOL_METADATA
+from comsol_mcp.tools.profiles import tool_names_for_profile
 
 
 FACTS_PATH = ROOT / "development_kit" / "release" / "release_facts.json"

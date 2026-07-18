@@ -16,10 +16,10 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
-from src.jobs.store import atomic_write_json
-from src.operation_arbiter import get_operation_arbiter
-from src.shared_session.contracts import SHARED_SERVER_FEATURE_ENV
-from src.shared_session.lifecycle import SharedSessionManager
+from comsol_mcp.jobs.store import atomic_write_json
+from comsol_mcp.operation_arbiter import get_operation_arbiter
+from comsol_mcp.shared_session.contracts import SHARED_SERVER_FEATURE_ENV
+from comsol_mcp.shared_session.lifecycle import SharedSessionManager
 
 
 SCHEMA_NAME = "comsol_mcp.shared_interactive_licensed_gate"

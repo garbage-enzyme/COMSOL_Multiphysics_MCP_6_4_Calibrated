@@ -94,12 +94,12 @@ def test_build_identity_ignores_generated_files_and_changes_with_package_bytes(t
 def test_package_version_has_one_authoritative_source():
     project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     manifest = json.loads(
-        (ROOT / "src" / "deployment_manifest.json").read_text(encoding="utf-8")
+        (ROOT / "comsol_mcp" / "deployment_manifest.json").read_text(encoding="utf-8")
     )
 
     assert project["project"]["dynamic"] == ["version"]
     assert "version" not in project["project"]
-    assert project["tool"]["hatch"]["version"]["path"] == "src/__init__.py"
+    assert project["tool"]["hatch"]["version"]["path"] == "comsol_mcp/__init__.py"
     assert "package_version" not in manifest
     assert get_capabilities(_selection("core"))["deployment_identity"][
         "package_version"

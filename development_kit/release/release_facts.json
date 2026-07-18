@@ -14,10 +14,10 @@
   },
   "schema_registry": {
     "entry_count": 59,
-    "registry_sha256": "239541ca00d34cadb164a0b84e75991e80880044ad215a6e9a39b6debb43e5a9"
+    "registry_sha256": "21d34d69a0fbaaa8baced07d1696dac9e5ed8dcea7bb9b7e4c6b3d3ec86f8dfe"
   },
   "identities": {
-    "catalog_sha256": "a95ca8de6d879cdf1bc102a227b41e05b0d5c8e187f5145ae3c9d59c866d3d41",
+    "catalog_sha256": "93b6c956496e327abfaa122717729db95e10285d776c3a6640e8b8b4fe87995a",
     "profile_tools_sha256": "91007c83379fdf6387eca804680eef15226c03047b283410901441cdea23b93f",
     "runtime_compatibility_sha256": "f1a5ee126b15dec89fec3c5758b2d4ee5d0981a8dcd39e6b9cdca1980c82e640"
   }

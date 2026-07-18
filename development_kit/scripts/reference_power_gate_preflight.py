@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.evidence.reference_power_acceptance import (
+from comsol_mcp.evidence.reference_power_acceptance import (
     MAX_INPUT_BYTES,
     build_reference_power_dry_run_receipt,
     load_bounded_json,

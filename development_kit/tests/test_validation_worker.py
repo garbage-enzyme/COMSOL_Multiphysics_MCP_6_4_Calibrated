@@ -209,12 +209,15 @@ def test_manager_routes_validation_submit_and_resume_to_dedicated_worker(tmp_pat
         "completed": 0,
         "total": 2,
     }
-    assert modules == ["src.jobs.validation_worker"]
+    assert modules == ["comsol_mcp.jobs.validation_worker"]
 
     manager.store.update_state(submitted["job_id"], "interrupted", event="test_interrupt")
     resumed = manager.resume(submitted["job_id"])
     assert resumed["attempt"] == 2
-    assert modules == ["src.jobs.validation_worker", "src.jobs.validation_worker"]
+    assert modules == [
+        "comsol_mcp.jobs.validation_worker",
+        "comsol_mcp.jobs.validation_worker",
+    ]
 
 
 def test_manager_rejects_matrix_bounds_before_preflight_or_launch(tmp_path, ascii_root, monkeypatch):

@@ -144,8 +144,8 @@ def test_support_matrix_matches_frozen_profile_counts_and_declared_dependencies(
 
     assert matrix["schema_name"] == "comsol_mcp.release_support_matrix"
     assert matrix["release_identity_sources"] == {
-        "package_version": "src/__init__.py",
-        "runtime_compatibility": "src/compatibility_manifest.json",
+        "package_version": "comsol_mcp/__init__.py",
+        "runtime_compatibility": "comsol_mcp/compatibility_manifest.json",
         "dependency_ranges": "pyproject.toml",
     }
     assert matrix["real_integration"] == {
@@ -299,7 +299,7 @@ def test_release_integration_fixture_manifest_is_complete_and_sanitized():
 def test_distribution_inventory_rejects_development_kit_members(tmp_path):
     clean = tmp_path / "clean.whl"
     with zipfile.ZipFile(clean, "w") as archive:
-        archive.writestr("src/server.py", "pass\n")
+        archive.writestr("comsol_mcp/server.py", "pass\n")
     inventory = _distribution_inventory(clean)
     assert inventory["development_kit_excluded"] is True
     assert inventory["forbidden_entries_absent"] is True
@@ -317,8 +317,8 @@ def test_distribution_inventory_enforces_frozen_planning_codes_and_private_paths
     legacy = tmp_path / "legacy.whl"
     with zipfile.ZipFile(legacy, "w") as archive:
         archive.writestr(
-            "src/evidence/reference_power_acceptance.py",
-            (ROOT / "src" / "evidence" / "reference_power_acceptance.py").read_bytes(),
+            "comsol_mcp/evidence/reference_power_acceptance.py",
+            (ROOT / "comsol_mcp" / "evidence" / "reference_power_acceptance.py").read_bytes(),
         )
     assert _distribution_inventory(legacy)["planning_code_gate"][
         "matched_occurrence_count"
@@ -326,19 +326,19 @@ def test_distribution_inventory_enforces_frozen_planning_codes_and_private_paths
 
     unexpected = tmp_path / "unexpected.whl"
     with zipfile.ZipFile(unexpected, "w") as archive:
-        archive.writestr("src/new_module.py", "marker = '" + "E" + "2'\n")
+        archive.writestr("comsol_mcp/new_module.py", "marker = '" + "E" + "2'\n")
     with pytest.raises(RuntimeError, match="planning-code compatibility surface changed"):
         _distribution_inventory(unexpected)
 
     private = tmp_path / "private.whl"
     with zipfile.ZipFile(private, "w") as archive:
-        archive.writestr("src/config.json", '{"path":"C:/Users/example/private"}\n')
+        archive.writestr("comsol_mcp/config.json", '{"path":"C:/Users/example/private"}\n')
     with pytest.raises(RuntimeError, match="private user path"):
         _distribution_inventory(private)
 
     model = tmp_path / "model.whl"
     with zipfile.ZipFile(model, "w") as archive:
-        archive.writestr("src/private_model.mph", b"binary")
+        archive.writestr("comsol_mcp/private_model.mph", b"binary")
     with pytest.raises(RuntimeError, match="forbidden members"):
         _distribution_inventory(model)
 
