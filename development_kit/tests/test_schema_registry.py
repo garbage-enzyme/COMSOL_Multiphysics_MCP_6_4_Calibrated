@@ -118,3 +118,29 @@ def test_support_resolution_accepts_current_and_rejects_future_without_mutation(
 def test_capabilities_embed_the_complete_schema_registry():
     capabilities = get_capabilities(_selection())
     assert capabilities["schema_registry"] == get_schema_registry()
+
+
+def test_every_advertised_capability_schema_pair_is_readable():
+    capabilities = get_capabilities(_selection())
+    pairs: list[tuple[str, str, str]] = []
+
+    def collect(value: object, path: str = "capabilities") -> None:
+        if isinstance(value, dict):
+            schema_name = value.get("schema_name")
+            schema_version = value.get("schema_version")
+            if isinstance(schema_name, str) and isinstance(schema_version, str):
+                pairs.append((path, schema_name, schema_version))
+            for key, nested in value.items():
+                collect(nested, f"{path}.{key}")
+        elif isinstance(value, list):
+            for index, nested in enumerate(value):
+                collect(nested, f"{path}[{index}]")
+
+    collect(capabilities)
+    assert pairs
+    unsupported = [
+        (path, schema_name, schema_version)
+        for path, schema_name, schema_version in pairs
+        if not check_schema_support(schema_name, schema_version)["supported"]
+    ]
+    assert unsupported == []
