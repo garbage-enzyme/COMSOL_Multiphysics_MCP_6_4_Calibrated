@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from importlib.metadata import PackageNotFoundError, version
-import hashlib
 import json
 from pathlib import Path
 import time
@@ -14,6 +13,7 @@ from mcp.server.fastmcp import FastMCP
 from src.build_identity import get_build_identity
 from src.compatibility import load_runtime_compatibility
 from src.environment_identity import get_environment_identity
+from src.durable import canonical_sha256_v1
 from src.jobs.convergence_campaign import (
     MAX_CONVERGENCE_CAMPAIGN_LEVELS,
     MAX_CONVERGENCE_CAMPAIGN_POINTS,
@@ -79,13 +79,7 @@ def _catalog_contract_sha256() -> str:
             for name in sorted(TOOL_METADATA)
         },
     }
-    canonical = json.dumps(
-        payload,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return hashlib.sha256(canonical).hexdigest()
+    return canonical_sha256_v1(payload)
 
 
 def _deployment_identity() -> dict:

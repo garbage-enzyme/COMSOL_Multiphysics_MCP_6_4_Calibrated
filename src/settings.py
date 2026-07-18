@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from copy import deepcopy
-import hashlib
 import json
 import os
 from pathlib import Path
 from typing import Any, Callable, Mapping
+
+from src.durable import canonical_sha256_v1
 
 
 SETTINGS_PATH_ENV = "COMSOL_MCP_SETTINGS_PATH"
@@ -104,16 +105,6 @@ def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 
 def _is_comment_key(key: str) -> bool:
     return key.startswith(_COMMENT_PREFIX)
-
-
-def _canonical_bytes(value: Any) -> bytes:
-    return json.dumps(
-        value,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    ).encode("utf-8")
 
 
 def _record_error(
@@ -577,7 +568,7 @@ def load_settings(environ: Mapping[str, str] | None = None) -> dict[str, Any]:
 def settings_fingerprint(settings: Mapping[str, Any] | None = None) -> str:
     """Return the canonical settings hash without exposing local paths."""
     value = dict(settings) if settings is not None else load_settings()
-    return hashlib.sha256(_canonical_bytes(value)).hexdigest()
+    return canonical_sha256_v1(value)
 
 
 def settings_status(environ: Mapping[str, str] | None = None) -> dict[str, Any]:

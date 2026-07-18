@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 from copy import deepcopy
-import hashlib
-import json
 from typing import Any
 
 from src import __version__
+from src.durable import canonical_sha256_v1
 from src.operation_arbiter import OPERATION_LOCK_SCHEMA, OPERATION_LOCK_VERSION
 from src.path_policy import PATH_POLICY_SCHEMA, PATH_POLICY_VERSION
 from src.settings import SETTINGS_SCHEMA, SETTINGS_VERSION
@@ -325,16 +324,6 @@ def _entries() -> list[dict[str, Any]]:
     return sorted(entries, key=lambda item: item["schema_name"])
 
 
-def _canonical_sha256(value: Any) -> str:
-    payload = json.dumps(
-        value,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return hashlib.sha256(payload).hexdigest()
-
-
 def get_schema_registry() -> dict[str, Any]:
     """Return the complete deterministic schema support registry."""
     entries = _entries()
@@ -345,7 +334,7 @@ def get_schema_registry() -> dict[str, Any]:
         "entries": entries,
         "entry_count": len(entries),
     }
-    return deepcopy({**body, "registry_sha256": _canonical_sha256(body)})
+    return deepcopy({**body, "registry_sha256": canonical_sha256_v1(body)})
 
 
 def check_schema_support(

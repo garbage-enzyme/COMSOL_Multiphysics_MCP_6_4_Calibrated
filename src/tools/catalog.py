@@ -499,8 +499,8 @@ def _build_registry() -> dict[str, ToolMetadata]:
                 intended_profiles=tuple(
                     profile for profile in PROFILE_NAMES if name in profile_tools[profile]
                 ),
-                input_contract=f"comsol_mcp.tool.{name}.input/1.0.0",
-                output_contract=f"comsol_mcp.tool.{name}.output/1.0.0",
+                input_contract=f"tool-input/{name}/1",
+                output_contract=f"tool-output/{name}/1",
                 structural_limits=(
                     ("request_bytes", 1_048_576),
                     ("response_bytes", 4_194_304),

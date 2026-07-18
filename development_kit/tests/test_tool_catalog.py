@@ -92,8 +92,8 @@ def test_tool_specs_are_the_validated_canonical_registry():
         "profile_count": len(PROFILE_NAMES),
     }
     for spec in TOOL_SPECS.values():
-        assert spec.input_contract.startswith("comsol_mcp.tool.")
-        assert spec.output_contract.startswith("comsol_mcp.tool.")
+        assert spec.input_contract.startswith("tool-input/")
+        assert spec.output_contract.startswith("tool-output/")
         assert dict(spec.structural_limits)["request_bytes"] > 0
         assert dict(spec.structural_limits)["response_bytes"] > 0
 

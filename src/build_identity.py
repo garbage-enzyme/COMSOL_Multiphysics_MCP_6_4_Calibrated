@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import hashlib
-import json
 from pathlib import Path
 from typing import Any
 
 from src import __version__
+from src.durable import canonical_sha256_v1
 
 
 def _package_files(package_root: Path) -> list[Path]:
@@ -53,8 +53,7 @@ def get_build_identity(package_root: str | Path | None = None) -> dict[str, Any]
         "generated_files_included": False,
         "paths_included": False,
     }
-    canonical = json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    return {**body, "build_identity_sha256": hashlib.sha256(canonical).hexdigest()}
+    return {**body, "build_identity_sha256": canonical_sha256_v1(body)}
 
 
 __all__ = ["get_build_identity", "package_content_sha256"]

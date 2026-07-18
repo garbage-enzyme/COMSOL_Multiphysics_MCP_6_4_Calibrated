@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import hashlib
 from importlib.metadata import PackageNotFoundError, version
-import json
 import platform
 import struct
 import sys
@@ -13,6 +11,7 @@ from typing import Any
 
 from src import __version__
 from src.compatibility import load_runtime_compatibility
+from src.durable import canonical_sha256_v1
 
 
 _DIRECT_DISTRIBUTIONS = (
@@ -45,16 +44,6 @@ def _distribution_record(name: str) -> dict[str, Any]:
     except PackageNotFoundError:
         return {"name": name, "availability": "not_installed", "version": None}
     return {"name": name, "availability": "installed", "version": installed_version}
-
-
-def _canonical_sha256(value: dict[str, Any]) -> str:
-    payload = json.dumps(
-        value,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return hashlib.sha256(payload).hexdigest()
 
 
 def get_environment_identity() -> dict[str, Any]:
@@ -120,7 +109,7 @@ def get_environment_identity() -> dict[str, Any]:
             "user_identity_included": False,
         },
     }
-    return {**identity, "identity_sha256": _canonical_sha256(identity)}
+    return {**identity, "identity_sha256": canonical_sha256_v1(identity)}
 
 
 __all__ = ["get_environment_identity"]
