@@ -169,6 +169,16 @@ def _persisted_attached_revision(
     return dict(revision)
 
 
+def _attached_point_start_result(context: dict[str, Any]) -> dict[str, Any]:
+    """Return the attached revision gate result accepted by the sweep hook contract."""
+    return {
+        "action": "start_point",
+        "start_authorized": True,
+        "stage": context.get("stage"),
+        "point_id": context.get("point_id"),
+    }
+
+
 def _collect_attached_process_preservation(
     target: AttachedExecutionTarget,
 ) -> dict[str, Any]:
@@ -475,13 +485,7 @@ def _run(root: str, job_id: str) -> int:
                 )
             if resource_adapter is not None:
                 return resource_hook(context)
-            return {
-                "action": "start_point",
-                "start_authorized": True,
-                "stage": context.get("stage"),
-                "point_id": context.get("point_id"),
-                "config_id": context.get("config_id"),
-            }
+            return _attached_point_start_result(context)
 
         progress = {
             "completed": _valid_row_count(directory / "results.csv", spec["spec_fingerprint"]),

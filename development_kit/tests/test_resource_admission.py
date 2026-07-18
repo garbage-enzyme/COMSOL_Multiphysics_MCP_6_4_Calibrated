@@ -21,7 +21,9 @@ from src.jobs.resource_admission import (
     replay_resource_journal,
 )
 from src.jobs.store import JobStore
+import src.jobs.worker as production_worker
 from src.tools.workflow import _sweep_point_id, run_staged_parametric_sweep
+from src.tools.workflow import _run_bounded_sweep_hook
 from development_kit.tests.test_workflow import FakeModel, read_csv
 
 
@@ -743,3 +745,24 @@ def test_stage_adapter_gates_in_process_fake_comsol_sweep(ascii_jobs_root):
     assert result["hook_action_counts"]["after_durable_row"]["skip_completed"] == 1
     assert result["hook_action_counts"]["before_point"]["await_confirmation"] == 1
     assert len(store.read_resource_journal(job_id)) == 6
+
+
+def test_attached_revision_gate_matches_bounded_sweep_hook_contract():
+    context = {
+        "stage": "pre_solve",
+        "point_id": "point:30",
+        "config_id": "config-30",
+    }
+
+    result = production_worker._attached_point_start_result(context)
+
+    assert _run_bounded_sweep_hook(
+        lambda _context: result,
+        phase="before_point",
+        stage="pre_solve",
+        point_id="point:30",
+        parameter_name="saved_model_agent_value",
+        parameter_value="30[mm]",
+        config_id="config-30",
+    ) == "start_point"
+    assert "config_id" not in result
