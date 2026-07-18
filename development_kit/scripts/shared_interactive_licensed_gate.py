@@ -48,6 +48,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--expected-label", required=True)
     parser.add_argument("--expected-desktop-value")
     parser.add_argument("--expected-file-path", type=Path)
+    parser.add_argument("--immutable-source-path", type=Path)
     parser.add_argument("--receipt", type=Path, required=True)
     parser.add_argument("--dry-run", action="store_true")
     return parser
@@ -79,20 +80,34 @@ def _spec(args: argparse.Namespace) -> dict[str, Any]:
     if args.mode == "prepare" and (
         args.expected_desktop_value is not None
         or args.expected_file_path is not None
+        or args.immutable_source_path is not None
     ):
         raise ValueError(
             "prepare mode does not accept saved-model confirmation inputs"
         )
-    if args.mode == "readback" and args.expected_file_path is not None:
-        raise ValueError("readback mode does not accept --expected-file-path")
+    if args.mode == "readback" and (
+        args.expected_file_path is not None
+        or args.immutable_source_path is not None
+    ):
+        raise ValueError("readback mode does not accept saved-model paths")
     if args.mode == "saved":
         if args.expected_file_path is None:
             raise ValueError("saved mode requires --expected-file-path")
+        if args.immutable_source_path is None:
+            raise ValueError("saved mode requires --immutable-source-path")
         if (
             not args.expected_file_path.is_absolute()
             or not str(args.expected_file_path).isascii()
         ):
-            raise ValueError("saved model path must be absolute and ASCII")
+            raise ValueError("saved working-model path must be absolute and ASCII")
+        if (
+            not args.immutable_source_path.is_absolute()
+            or not str(args.immutable_source_path).isascii()
+            or args.immutable_source_path == args.expected_file_path
+        ):
+            raise ValueError(
+                "immutable source must be a distinct absolute ASCII path"
+            )
     if not args.receipt.is_absolute() or not str(args.receipt).isascii():
         raise ValueError("receipt must be an absolute ASCII path")
     selector = {
@@ -112,6 +127,11 @@ def _spec(args: argparse.Namespace) -> dict[str, Any]:
             None
             if args.expected_file_path is None
             else str(args.expected_file_path)
+        ),
+        "immutable_source_path": (
+            None
+            if args.immutable_source_path is None
+            else str(args.immutable_source_path)
         ),
         "mcp_parameter": {"name": MCP_PARAMETER, "value": MCP_PARAMETER_VALUE},
         "desktop_parameter": {
@@ -309,7 +329,7 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
     immutable_source = None
     try:
         if args.mode == "saved":
-            source_path = Path(spec["expected_file_path"])
+            source_path = Path(spec["immutable_source_path"])
             if not source_path.is_file():
                 raise RuntimeError("declared saved model source does not exist")
             immutable_source = {

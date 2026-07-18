@@ -28,6 +28,14 @@ def _ascii_source() -> str:
     )
 
 
+def _ascii_working_model() -> str:
+    return (
+        "D:/shared_interactive_gate_test_working.mph"
+        if os.name == "nt"
+        else "/tmp/shared_interactive_gate_test_working.mph"
+    )
+
+
 def test_shared_interactive_gate_dry_run_is_solver_free(tmp_path):
     receipt = Path(_ascii_receipt())
     completed = subprocess.run(
@@ -104,6 +112,8 @@ def test_shared_interactive_saved_mode_binds_exact_source_path():
             "--expected-desktop-value",
             "29[mm]",
             "--expected-file-path",
+            _ascii_working_model(),
+            "--immutable-source-path",
             _ascii_source(),
             "--receipt",
             _ascii_receipt(),
@@ -121,9 +131,12 @@ def test_shared_interactive_saved_mode_binds_exact_source_path():
     assert result["spec"]["selector"] == {
         "tag": "Model1",
         "expected_label": "existing_model_source.mph",
-        "expected_file_path": str(Path(_ascii_source())),
+        "expected_file_path": str(Path(_ascii_working_model())),
     }
     assert result["spec"]["saved_model_parameter"] == {
         "name": "saved_model_agent_value",
         "value": "31[mm]",
     }
+    assert result["spec"]["immutable_source_path"] == str(
+        Path(_ascii_source())
+    )
