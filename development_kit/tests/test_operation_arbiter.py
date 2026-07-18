@@ -8,7 +8,7 @@ import threading
 
 import psutil
 
-from src.operation_arbiter import OperationArbiter, guard_tool_call
+from src.operation_arbiter import OperationArbiter, get_operation_status, guard_tool_call
 from src.tools.catalog import TOOL_METADATA
 
 
@@ -84,6 +84,78 @@ def test_control_plane_call_remains_responsive_while_solver_call_blocks(
     assert status()["success"] is True
     assert called == [True]
     assert arbiter.release(claim)["verified"] is True
+
+
+def test_solver_free_status_reports_active_shared_operation(tmp_path, monkeypatch):
+    arbiter = OperationArbiter(
+        tmp_path,
+        pid=100,
+        process_create_time=10.0,
+        process_probe=lambda pid: 10.0,
+        clock=lambda: 20.0,
+    )
+    monkeypatch.setattr("src.operation_arbiter.get_operation_arbiter", lambda: arbiter)
+    claim, _ = arbiter.try_acquire(
+        tool_name="shared_model_snapshot",
+        side_effect_class="filesystem_write",
+    )
+    assert claim is not None
+
+    status = get_operation_status()
+
+    assert status == {
+        "state": "active",
+        "retryable": True,
+        "retry_after_ms": 250,
+        "reason": "recorded process identity is active",
+        "active_operation": {
+            "operation_id": claim.operation_id,
+            "tool_name": "shared_model_snapshot",
+            "side_effect_class": "filesystem_write",
+            "pid": 100,
+            "process_create_time": 10.0,
+            "acquired_at_epoch": 20.0,
+        },
+    }
+    assert arbiter.lock_path.exists()
+    assert arbiter.release(claim)["verified"] is True
+
+
+def test_status_does_not_recover_stale_or_malformed_lock(tmp_path):
+    missing_pid = 999_999_991
+
+    def probe(pid):
+        raise psutil.NoSuchProcess(pid)
+
+    stale = {
+        "schema_name": "comsol_mcp.operation_lock",
+        "schema_version": "1.0.0",
+        "operation_id": "old-operation",
+        "tool_name": "shared_model_snapshot",
+        "side_effect_class": "filesystem_write",
+        "pid": missing_pid,
+        "process_create_time": 1.0,
+        "acquired_at_epoch": 2.0,
+    }
+    lock_path = tmp_path / "operation.lock"
+    lock_path.write_text(
+        json.dumps(stale, sort_keys=True, separators=(",", ":")),
+        encoding="utf-8",
+    )
+    arbiter = OperationArbiter(
+        tmp_path,
+        pid=200,
+        process_create_time=20.0,
+        process_probe=probe,
+    )
+
+    assert arbiter.inspect()["state"] == "stale"
+    assert lock_path.exists()
+    lock_path.write_bytes(b"not-json")
+    uncertain = arbiter.inspect()
+    assert uncertain["state"] == "uncertain"
+    assert uncertain["retryable"] is False
+    assert lock_path.read_bytes() == b"not-json"
 
 
 def test_stale_lock_is_recovered_after_coordinator_restart(tmp_path):

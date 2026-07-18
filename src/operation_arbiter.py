@@ -122,6 +122,40 @@ class OperationArbiter:
         except (FileNotFoundError, OSError):
             return False
 
+    def inspect(self) -> dict[str, Any]:
+        """Inspect the operation lock without acquiring or recovering it."""
+        lock, _original, error = self._read_lock()
+        if error:
+            return {
+                "state": "uncertain",
+                "retryable": False,
+                "retry_after_ms": None,
+                "error": error,
+                "active_operation": None,
+            }
+        if lock is None:
+            return {
+                "state": "idle",
+                "retryable": True,
+                "retry_after_ms": 0,
+                "active_operation": None,
+            }
+        state, reason = self._owner_state(lock)
+        return {
+            "state": state,
+            "retryable": state in {"active", "stale"},
+            "retry_after_ms": RETRY_AFTER_MS if state == "active" else 0 if state == "stale" else None,
+            "reason": reason,
+            "active_operation": {
+                "operation_id": lock["operation_id"],
+                "tool_name": lock["tool_name"],
+                "side_effect_class": lock["side_effect_class"],
+                "pid": lock["pid"],
+                "process_create_time": lock["process_create_time"],
+                "acquired_at_epoch": lock["acquired_at_epoch"],
+            },
+        }
+
     def try_acquire(
         self, *, tool_name: str, side_effect_class: str
     ) -> tuple[OperationClaim | None, dict[str, Any]]:
@@ -238,6 +272,11 @@ def get_operation_arbiter() -> OperationArbiter:
             arbiter = OperationArbiter(default_runtime_dir())
             _ARBITERS[root] = arbiter
         return arbiter
+
+
+def get_operation_status() -> dict[str, Any]:
+    """Return bounded solver-free operation status for control-plane tools."""
+    return get_operation_arbiter().inspect()
 
 
 def guard_tool_call(
