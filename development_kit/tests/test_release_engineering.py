@@ -180,6 +180,7 @@ def test_repository_root_is_release_focused_and_free_of_generated_artifacts():
         "README.md",
         "README_CN.md",
         "pyproject.toml",
+        "settings.json",
     }
 
     forbidden_suffixes = {".class", ".lock", ".mph", ".pyc", ".recovery", ".status"}

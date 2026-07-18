@@ -16,6 +16,7 @@ models are intentionally absent.
 - `DEPLOYMENT.md` — This file explains the supported English deployment procedure.
 - `DEPLOYMENT_CN.md` — This file explains the supported Chinese deployment procedure.
 - `pyproject.toml` — This file defines package metadata, dependencies, build settings, tests, and the console entry point.
+- `settings.json` — This file stores the shared grouped startup settings and safe defaults.
 
 ## Client configuration and dependency constraints
 
@@ -201,6 +202,7 @@ models are intentionally absent.
 - `development_kit/tests/test_semantic_tools.py` — This module tests semantic profile schemas, configuration, and degradation behavior.
 - `development_kit/tests/test_semantic_worker_protocol.py` — This module tests isolated semantic worker protocol and containment.
 - `development_kit/tests/test_server.py` — This module tests server construction and capabilities without starting a transport.
+- `development_kit/tests/test_settings.py` — This module tests grouped settings defaults, validation, and fallback errors.
 - `development_kit/tests/test_shared_attach_request.py` — This module tests the complete pre-lease shared-server attach gate.
 - `development_kit/tests/test_shared_cleanup_contracts.py` — This module tests non-owning detach and owned-cleanup outcome semantics.
 - `development_kit/tests/test_shared_interactive_licensed_gate.py` — This module tests the licensed shared interactive gate's solver-free specification path.
@@ -249,6 +251,7 @@ models are intentionally absent.
 - `src/path_policy.py` — This module enforces configured model-read and owned ASCII artifact roots.
 - `src/schema_registry.py` — This module registers named artifact schema producers and readable and writable versions.
 - `src/server.py` — This module creates the profiled MCP server and console entry point.
+- `src/settings.py` — This module loads grouped project settings and reports bounded fallback errors.
 
 ## Asynchronous compatibility layer
 
