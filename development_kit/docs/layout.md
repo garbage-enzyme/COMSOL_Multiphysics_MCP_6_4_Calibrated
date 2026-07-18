@@ -73,6 +73,7 @@ models are intentionally absent.
 - `development_kit/scripts/run_real_release_gate.py` — This script orchestrates the explicit serial licensed COMSOL release gate.
 - `development_kit/scripts/sbom_probe.py` — This script generates a deterministic CycloneDX SBOM from the locked installed runtime.
 - `development_kit/scripts/security_gate.py` — This script evaluates pip-audit findings against the exact expiring review policy.
+- `development_kit/scripts/shared_interactive_licensed_gate.py` — This script runs bounded non-owning shared Desktop/Server prepare and readback acceptance phases.
 
 ## Test fixtures and frozen snapshots
 
@@ -191,6 +192,7 @@ models are intentionally absent.
 - `development_kit/tests/test_server.py` — This module tests server construction and capabilities without starting a transport.
 - `development_kit/tests/test_shared_attach_request.py` — This module tests the complete pre-lease shared-server attach gate.
 - `development_kit/tests/test_shared_cleanup_contracts.py` — This module tests non-owning detach and owned-cleanup outcome semantics.
+- `development_kit/tests/test_shared_interactive_licensed_gate.py` — This module tests the licensed shared interactive gate's solver-free specification path.
 - `development_kit/tests/test_shared_model_locking.py` — This module tests bounded shared-model revisions and exact enforcement locks.
 - `development_kit/tests/test_shared_operation_dependencies.py` — This module tests shared operations against the reused arbiter and path-containment dependencies.
 - `development_kit/tests/test_shared_process_probe.py` — This module tests redacted Windows process, listener, window, and version inventory.
