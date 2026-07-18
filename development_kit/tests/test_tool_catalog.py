@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 import json
 from pathlib import Path
 import subprocess
 import sys
 
 from mcp.server.fastmcp import FastMCP
+import pytest
 
 from src.knowledge.embedded import register_knowledge_tools
 from src.knowledge.lexical_manual import register_lexical_manual_tools
@@ -112,6 +114,34 @@ def test_deprecated_foreground_sweep_has_a_durable_replacement():
     assert spec.sunset_release == "next_major"
     assert "wave_optics" not in spec.intended_profiles
     assert {"experimental", "full"} <= set(spec.intended_profiles)
+
+
+def test_tool_spec_validation_rejects_conflicting_declarations_import_free():
+    specs = tuple(TOOL_SPECS.values())
+    with pytest.raises(ValueError, match="duplicate tool names"):
+        validate_tool_specs((*specs, specs[0]))
+
+    read_only = TOOL_SPECS["capabilities"]
+    with pytest.raises(ValueError, match="read-only ToolSpec"):
+        validate_tool_specs(
+            {**TOOL_SPECS, read_only.name: replace(read_only, requires_model_revision=True)}
+        )
+
+    experimental = TOOL_SPECS["semantic_search"]
+    with pytest.raises(ValueError, match="stable profile contains experimental"):
+        validate_tool_specs(
+            {**TOOL_SPECS, experimental.name: replace(
+                experimental,
+                intended_profiles=("core", "full"),
+            )}
+        )
+
+    duplicated_profile = replace(
+        read_only,
+        intended_profiles=(*read_only.intended_profiles, "full"),
+    )
+    with pytest.raises(ValueError, match="profiles are invalid"):
+        validate_tool_specs({**TOOL_SPECS, read_only.name: duplicated_profile})
 
 
 def test_unknown_tool_metadata_fails_closed():

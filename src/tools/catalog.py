@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from types import MappingProxyType
+from collections.abc import Iterable
 from typing import Any, Mapping
 
 
@@ -228,8 +229,6 @@ _EXPERIMENTAL_TOOLS = frozenset({
     "wave_optics_periodic_mesh_smoke",
     "wave_optics_point_audit",
     "wave_optics_reference_audit",
-    "geometry_derived_clone", "geometry_fin_preview", "geometry_fin_apply",
-    "geometry_blocks_preview", "geometry_blocks_apply",
     "wave_optics_incidence_preview",
     "wave_optics_incidence_apply",
     "wave_optics_field_datasets",
@@ -530,23 +529,35 @@ TOOL_METADATA = TOOL_SPECS
 
 
 def validate_tool_specs(
-    specs: Mapping[str, ToolSpec] = TOOL_SPECS,
+    specs: Mapping[str, ToolSpec] | Iterable[ToolSpec] = TOOL_SPECS,
 ) -> dict[str, Any]:
     """Validate the import-free invariants of the public tool registry."""
-    names = list(specs)
+    if isinstance(specs, Mapping):
+        entries = tuple(specs.values())
+        keys = tuple(specs)
+    else:
+        entries = tuple(specs)
+        keys = tuple(spec.name for spec in entries)
+    names = [spec.name for spec in entries]
     if len(names) != len(set(names)):
         raise ValueError("duplicate tool names in ToolSpec registry")
     if not names:
         raise ValueError("ToolSpec registry cannot be empty")
+    normalized = {spec.name: spec for spec in entries}
     profile_set = set(PROFILE_NAMES)
-    for name, spec in specs.items():
-        if spec.name != name:
+    for key, spec in zip(keys, entries, strict=True):
+        name = spec.name
+        if key != name:
             raise ValueError(f"ToolSpec key/name mismatch for {name!r}")
         if "." not in spec.registrar or not spec.registrar.rsplit(".", 1)[-1]:
             raise ValueError(f"ToolSpec registrar is invalid for {name!r}")
         if not spec.group or not spec.input_contract or not spec.output_contract:
             raise ValueError(f"ToolSpec contract metadata is incomplete for {name!r}")
-        if not spec.intended_profiles or not set(spec.intended_profiles) <= profile_set:
+        if (
+            not spec.intended_profiles
+            or len(spec.intended_profiles) != len(set(spec.intended_profiles))
+            or not set(spec.intended_profiles) <= profile_set
+        ):
             raise ValueError(f"ToolSpec profiles are invalid for {name!r}")
         if "full" not in spec.intended_profiles:
             raise ValueError(f"ToolSpec compatibility profile is missing for {name!r}")
@@ -554,15 +565,25 @@ def validate_tool_specs(
             raise ValueError(f"ToolSpec maturity is invalid for {name!r}")
         if spec.side_effect_class == "read_only" and spec.requires_model_revision:
             raise ValueError(f"read-only ToolSpec requires a model revision: {name!r}")
+        if spec.starts_solver and spec.side_effect_class not in {
+            "solver_execution",
+            "process_lifecycle",
+        }:
+            raise ValueError(f"solver-starting ToolSpec has impossible effects: {name!r}")
+        if spec.maturity == "experimental" and {
+            "core",
+            "basic_fem",
+        } & set(spec.intended_profiles):
+            raise ValueError(f"stable profile contains experimental ToolSpec: {name!r}")
         if spec.advances_model_revision and not spec.requires_model_revision:
             raise ValueError(f"advancing ToolSpec lacks revision requirement: {name!r}")
         if spec.deprecation_state == "deprecated" and not spec.replacement_tool:
             raise ValueError(f"deprecated ToolSpec lacks replacement: {name!r}")
-        if spec.replacement_tool and spec.replacement_tool not in specs:
+        if spec.replacement_tool and spec.replacement_tool not in normalized:
             raise ValueError(f"ToolSpec replacement is unknown for {name!r}")
     return {
         "valid": True,
-        "tool_count": len(specs),
+        "tool_count": len(entries),
         "profile_count": len(PROFILE_NAMES),
     }
 

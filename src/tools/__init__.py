@@ -6,37 +6,9 @@ from collections.abc import Iterator, Sequence
 from importlib import import_module
 from typing import Any, Callable
 
+from .catalog import registrars_for_profile
 
-_REGISTRAR_PATHS = (
-    "src.tools.capabilities.register_capability_tools",
-    "src.tools.evidence_integrity.register_evidence_integrity_tools",
-    "src.tools.ownership.register_ownership_tools",
-    "src.tools.jobs.register_job_tools",
-    "src.tools.session.register_session_tools",
-    "src.tools.model.register_model_tools",
-    "src.tools.parameters.register_parameter_tools",
-    "src.tools.geometry.register_geometry_tools",
-    "src.tools.physics.register_physics_tools",
-    "src.tools.mesh.register_mesh_tools",
-    "src.tools.study.register_study_tools",
-    "src.tools.results.register_results_tools",
-    "src.tools.mim_patch.register_mim_patch_tools",
-    "src.tools.workflow.register_workflow_tools",
-    "src.tools.properties.register_property_tools",
-    "src.tools.wave_optics_preflight.register_wave_optics_preflight_tools",
-    "src.tools.periodic_mesh_audit.register_periodic_mesh_audit_tools",
-    "src.tools.derived_geometry.register_derived_geometry_tools",
-    "src.tools.incidence_config.register_incidence_config_tools",
-    "src.tools.wave_optics_audit.register_wave_optics_audit_tools",
-    "src.tools.material_expressions.register_material_expression_tools",
-    "src.tools.visual_review.register_visual_review_tools",
-    "src.tools.field_evidence.register_field_evidence_tools",
-    "src.tools.semantic_docs.register_semantic_doc_tools",
-    "src.tools.spectral_characterization.register_spectral_characterization_tools",
-    "src.tools.convergence_evaluation.register_convergence_evaluation_tools",
-    "src.tools.branch_continuation.register_branch_continuation_tools",
-    "src.tools.shared_session.register_shared_session_tools",
-)
+_REGISTRAR_PATHS = registrars_for_profile("full")
 
 
 def _load_symbol(path: str) -> Any:
@@ -62,7 +34,6 @@ TOOL_REGISTRARS: Sequence[Callable[..., Any]] = _LazyRegistrarSequence()
 
 def register_tool_modules(mcp, profile="full") -> None:
     """Import and register only after the static profile gate is accepted."""
-    from .catalog import registrars_for_profile
     from .profiles import ProfileSelection, resolve_profile, tool_names_for_profile
 
     selection = (
