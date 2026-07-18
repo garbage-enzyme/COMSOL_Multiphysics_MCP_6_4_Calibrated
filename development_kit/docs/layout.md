@@ -195,6 +195,7 @@ models are intentionally absent.
 - `development_kit/tests/test_shared_operation_dependencies.py` — This module tests shared operations against the reused arbiter and path-containment dependencies.
 - `development_kit/tests/test_shared_session_contracts.py` — This module tests default-off feature and loopback endpoint contracts.
 - `development_kit/tests/test_shared_session_identity.py` — This module tests attached-server and exact model-selector identities.
+- `development_kit/tests/test_shared_server_preflight.py` — This module tests two-probe Desktop, listener, collision, and COMSOL release-line classification.
 - `development_kit/tests/test_spectral_characterization.py` — This module tests provenance-bound offline spectral validation and measurements.
 - `development_kit/tests/test_spectral_audit.py` — This module tests strict projection of point-audit artifacts into durable spectral rows.
 - `development_kit/tests/test_spectral_acceptance_runner.py` — This module tests the licensed spectral runner contract without starting COMSOL.
@@ -329,6 +330,7 @@ models are intentionally absent.
 - `src/shared_session/contracts.py` — This module normalizes the shared feature gate and local loopback endpoint.
 - `src/shared_session/identity.py` — This module defines exact non-owned server and model-selector identities.
 - `src/shared_session/locking.py` — This module defines bounded model revisions and shared-model enforcement locks.
+- `src/shared_session/preflight.py` — This module classifies stable local Desktop and Server readiness without importing MPh.
 
 ## MCP tool adapters
 

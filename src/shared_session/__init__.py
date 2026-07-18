@@ -31,6 +31,10 @@ from .attach_request import (
     SharedServerAttachRequest,
     normalize_shared_server_attach_request,
 )
+from .preflight import (
+    classify_shared_server_preflight,
+    normalize_shared_preflight_snapshot,
+)
 
 __all__ = [
     "SHARED_SERVER_FEATURE_ENV",
@@ -46,11 +50,13 @@ __all__ = [
     "SharedServerFeatureGate",
     "build_shared_model_lock",
     "build_shared_model_revision",
+    "classify_shared_server_preflight",
     "evaluate_attached_detach",
     "evaluate_owned_cleanup",
     "normalize_attached_server_identity",
     "normalize_shared_model_identity",
     "normalize_shared_model_selector",
+    "normalize_shared_preflight_snapshot",
     "normalize_shared_server_endpoint",
     "normalize_shared_server_attach_request",
     "normalize_shared_server_feature_gate",

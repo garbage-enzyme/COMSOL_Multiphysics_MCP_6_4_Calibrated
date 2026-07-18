@@ -12,6 +12,10 @@ from src.operation_arbiter import OPERATION_LOCK_SCHEMA, OPERATION_LOCK_VERSION
 from src.path_policy import PATH_POLICY_SCHEMA, PATH_POLICY_VERSION
 from src.shared_session.cleanup import CLEANUP_OUTCOME_SCHEMA, CLEANUP_OUTCOME_VERSION
 from src.shared_session.locking import SHARED_MODEL_LOCK_SCHEMA, SHARED_MODEL_LOCK_VERSION
+from src.shared_session.preflight import (
+    SHARED_SERVER_PREFLIGHT_SCHEMA,
+    SHARED_SERVER_PREFLIGHT_VERSION,
+)
 from src.evidence.branch_continuation import (
     BRANCH_CONTINUATION_PLAN_SCHEMA,
     BRANCH_CONTINUATION_SCHEMA_VERSION,
@@ -253,6 +257,11 @@ def _entries() -> list[dict[str, Any]]:
             SHARED_MODEL_LOCK_VERSION,
             "src.shared_session.locking",
             artifact_kind="durable_artifact",
+        ),
+        _entry(
+            SHARED_SERVER_PREFLIGHT_SCHEMA,
+            SHARED_SERVER_PREFLIGHT_VERSION,
+            "src.shared_session.preflight",
         ),
         _entry("comsol_mcp.validation_matrix_collector", "1.0.0", "src.jobs.validation_collectors"),
         _entry("comsol_mcp.validation_matrix_field_collector", "1.0.0", "src.jobs.validation_collectors"),
