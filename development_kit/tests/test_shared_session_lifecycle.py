@@ -203,6 +203,42 @@ def test_attached_inventory_is_bounded_sorted_and_keeps_duplicate_metadata(tmp_p
     assert result["model_inventory_sha256"] == result["attached_inventory_sha256"]
 
 
+def test_exact_tag_adoption_allows_duplicate_unicode_labels_and_paths(tmp_path):
+    shared_path = "C:/研究/共享.mph"
+    models = [
+        {
+            "tag": "Model_2",
+            "label": "共享",
+            "file_path": shared_path,
+            "unsaved": False,
+        },
+        {
+            "tag": "Model_1",
+            "label": "共享",
+            "file_path": shared_path,
+            "unsaved": False,
+        },
+    ]
+    request = _request()
+    request["model_selector"] = {
+        "tag": "Model_1",
+        "expected_label": "共享",
+        "expected_file_path": shared_path,
+    }
+    manager, _ownership, _client = _manager(tmp_path, models=models)
+
+    attached = manager.attach(
+        request,
+        profile="desktop_shared",
+        environ={SHARED_SERVER_FEATURE_ENV: "true"},
+    )
+
+    assert attached["success"] is True
+    assert attached["selected_model"]["tag"] == "Model_1"
+    assert attached["selected_model"]["file_path"] == "C:\\研究\\共享.mph"
+    assert attached["model_count"] == 2
+
+
 def test_duplicate_server_model_tags_fail_attach_closed(tmp_path):
     models = [
         {"tag": "Model_1", "label": "First", "file_path": None, "unsaved": True},
