@@ -81,5 +81,48 @@ def register_shared_session_tools(mcp: FastMCP) -> None:
             "operation": get_operation_status(),
         }
 
+    @mcp.tool()
+    def shared_server_models() -> dict[str, Any]:
+        """Enumerate bounded metadata for models held by the attached server."""
+        return shared_session_manager.models()
+
+    @mcp.tool()
+    def shared_model_lock(
+        collaboration_mode: str,
+        immutable_source_path: str | None = None,
+        immutable_source_sha256: str | None = None,
+    ) -> dict[str, Any]:
+        """Guard the adopted model with exact identity and bounded readbacks."""
+        immutable_source = None
+        if immutable_source_path is not None or immutable_source_sha256 is not None:
+            immutable_source = {
+                "path": immutable_source_path,
+                "sha256": immutable_source_sha256,
+            }
+        return shared_session_manager.lock_model(
+            collaboration_mode=collaboration_mode,
+            immutable_source=immutable_source,
+        )
+
+    @mcp.tool()
+    def shared_model_verify(
+        expected_lock_sha256: str, expected_revision_sha256: str
+    ) -> dict[str, Any]:
+        """Re-read the attached server, adopted model, and current revision."""
+        return shared_session_manager.verify_model_lock(
+            expected_lock_sha256=expected_lock_sha256,
+            expected_revision_sha256=expected_revision_sha256,
+        )
+
+    @mcp.tool()
+    def shared_model_unlock(
+        expected_lock_sha256: str, reason: str
+    ) -> dict[str, Any]:
+        """Release only the MCP model guard and retain a bounded audit reason."""
+        return shared_session_manager.unlock_model(
+            expected_lock_sha256=expected_lock_sha256,
+            reason=reason,
+        )
+
 
 __all__ = ["register_shared_session_tools", "shared_session_manager"]

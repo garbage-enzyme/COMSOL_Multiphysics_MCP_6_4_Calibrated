@@ -91,7 +91,7 @@ def test_profile_registration_has_no_cross_server_leakage():
     experimental = create_server("isolated-experimental", profile="experimental")
 
     assert len(_tool_names(core)) == 41
-    assert len(_tool_names(full)) == 127
+    assert len(_tool_names(full)) == 131
     assert len(_tool_names(semantic)) == 44
     assert len(_tool_names(experimental)) == 67
     assert _tool_names(core) != _tool_names(experimental)
@@ -114,6 +114,8 @@ def test_desktop_shared_profile_is_static_default_off_and_minimal(monkeypatch):
         "capabilities", "solver_status", "job_status", "job_tail", "job_cancel",
         "shared_server_preflight", "shared_server_attach",
         "shared_server_detach", "shared_server_status",
+        "shared_server_models", "shared_model_lock",
+        "shared_model_verify", "shared_model_unlock",
     }
     assert {
         "comsol_start", "comsol_connect", "comsol_disconnect", "session_reset",
@@ -136,6 +138,8 @@ def test_validated_shared_startup_selection_is_not_reresolved(monkeypatch):
         "capabilities", "solver_status", "job_status", "job_tail", "job_cancel",
         "shared_server_preflight", "shared_server_attach",
         "shared_server_detach", "shared_server_status",
+        "shared_server_models", "shared_model_lock",
+        "shared_model_verify", "shared_model_unlock",
     }
 
 
@@ -143,6 +147,8 @@ def test_existing_profiles_expose_no_shared_session_tools():
     shared = {
         "shared_server_preflight", "shared_server_attach",
         "shared_server_detach", "shared_server_status",
+        "shared_server_models", "shared_model_lock",
+        "shared_model_verify", "shared_model_unlock",
     }
     for profile in ("core", "wave_optics", "semantic_docs", "experimental"):
         assert shared.isdisjoint(

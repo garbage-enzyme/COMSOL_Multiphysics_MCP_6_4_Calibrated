@@ -4115,6 +4115,79 @@
     "title": "session_resetArguments",
     "type": "object"
   },
+  "shared_model_lock": {
+    "properties": {
+      "collaboration_mode": {
+        "title": "Collaboration Mode",
+        "type": "string"
+      },
+      "immutable_source_path": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Immutable Source Path"
+      },
+      "immutable_source_sha256": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Immutable Source Sha256"
+      }
+    },
+    "required": [
+      "collaboration_mode"
+    ],
+    "title": "shared_model_lockArguments",
+    "type": "object"
+  },
+  "shared_model_unlock": {
+    "properties": {
+      "expected_lock_sha256": {
+        "title": "Expected Lock Sha256",
+        "type": "string"
+      },
+      "reason": {
+        "title": "Reason",
+        "type": "string"
+      }
+    },
+    "required": [
+      "expected_lock_sha256",
+      "reason"
+    ],
+    "title": "shared_model_unlockArguments",
+    "type": "object"
+  },
+  "shared_model_verify": {
+    "properties": {
+      "expected_lock_sha256": {
+        "title": "Expected Lock Sha256",
+        "type": "string"
+      },
+      "expected_revision_sha256": {
+        "title": "Expected Revision Sha256",
+        "type": "string"
+      }
+    },
+    "required": [
+      "expected_lock_sha256",
+      "expected_revision_sha256"
+    ],
+    "title": "shared_model_verifyArguments",
+    "type": "object"
+  },
   "shared_server_attach": {
     "properties": {
       "expected_file_path": {
@@ -4182,6 +4255,11 @@
   "shared_server_detach": {
     "properties": {},
     "title": "shared_server_detachArguments",
+    "type": "object"
+  },
+  "shared_server_models": {
+    "properties": {},
+    "title": "shared_server_modelsArguments",
     "type": "object"
   },
   "shared_server_preflight": {

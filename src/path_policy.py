@@ -264,6 +264,9 @@ _MODEL_READ_ARGUMENTS = {
     "wave_optics_preflight": (("expected_source_path", (".mph",)),),
     "study_staged_parametric_sweep": (("source_model_path", (".mph",)),),
 }
+_SHARED_SOURCE_READ_ARGUMENTS = {
+    "shared_model_lock": ("immutable_source_path",),
+}
 _ARTIFACT_READ_ARGUMENTS = {
     "wave_optics_point_audit": ("air_reference_artifact_path",),
 }
@@ -312,6 +315,12 @@ def validate_tool_paths(
         value = bound.arguments.get(argument)
         if value is not None:
             decision = policy.validate_model_read(value, suffixes=suffixes)
+            bound.arguments[argument] = str(decision.normalized_path)
+            decisions.append(decision)
+    for argument in _SHARED_SOURCE_READ_ARGUMENTS.get(tool_name, ()):
+        value = bound.arguments.get(argument)
+        if value is not None:
+            decision = policy.validate_shared_source(value)
             bound.arguments[argument] = str(decision.normalized_path)
             decisions.append(decision)
     for argument in _ARTIFACT_READ_ARGUMENTS.get(tool_name, ()):

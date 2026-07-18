@@ -194,6 +194,43 @@ def test_shared_source_and_fixed_snapshot_root_reuse_containment(tmp_path, ascii
     assert policy.shared_snapshot_root == write_root / "shared_snapshots"
 
 
+def test_shared_model_lock_wrapper_normalizes_immutable_source(
+    tmp_path, ascii_root, monkeypatch
+):
+    _policy_value, read_root, write_root = _policy(tmp_path, ascii_root)
+    source = read_root / "shared.mph"
+    source.write_bytes(b"immutable")
+    outside = tmp_path / "outside.mph"
+    outside.write_bytes(b"outside")
+    monkeypatch.setenv(MODEL_READ_ROOTS_ENV, str(read_root))
+    monkeypatch.setenv(ARTIFACT_WRITE_ROOT_ENV, str(write_root))
+    called = []
+
+    def shared_model_lock(
+        collaboration_mode: str,
+        immutable_source_path: str | None = None,
+        immutable_source_sha256: str | None = None,
+    ):
+        called.append(immutable_source_path)
+        return {"success": True}
+
+    guarded = guard_tool_call(
+        shared_model_lock,
+        tool_name="shared_model_lock",
+        side_effect_class="shared_model_guard",
+        concurrency_class="solver_free",
+        profile_name="desktop_shared",
+    )
+    accepted = guarded("interactive_inspection", str(source), "a" * 64)
+    rejected = guarded("interactive_inspection", str(outside), "a" * 64)
+
+    assert accepted["success"] is True
+    assert accepted["path_policy"]["validated_kinds"] == ["shared_source_read"]
+    assert called == [str(source.resolve())]
+    assert rejected["success"] is False
+    assert rejected["path_policy"]["accepted"] is False
+
+
 def test_shared_snapshot_rejects_external_alias_and_overwrite(tmp_path, ascii_root):
     policy, _, write_root = _policy(tmp_path, ascii_root)
     outside = ascii_root / "outside.mph"

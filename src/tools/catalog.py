@@ -141,6 +141,8 @@ _TOOLS_BY_REGISTRAR = {
     "src.tools.shared_session.register_shared_session_tools": (
         "shared_server_preflight", "shared_server_attach",
         "shared_server_detach", "shared_server_status",
+        "shared_server_models", "shared_model_lock",
+        "shared_model_verify", "shared_model_unlock",
     ),
     "src.knowledge.embedded.register_knowledge_tools": (
         "docs_get", "docs_list", "physics_get_guide", "troubleshoot",
@@ -218,6 +220,8 @@ _EXPERIMENTAL_TOOLS = frozenset({
     "semantic_search", "semantic_status", "semantic_worker_reset",
     "shared_server_preflight", "shared_server_attach",
     "shared_server_detach", "shared_server_status",
+    "shared_server_models", "shared_model_lock",
+    "shared_model_verify", "shared_model_unlock",
 })
 
 _SIDE_EFFECTS = {
@@ -296,6 +300,8 @@ _SIDE_EFFECTS = {
     "semantic_worker_reset": "process_control",
     "shared_server_attach": "process_lifecycle",
     "shared_server_detach": "process_lifecycle",
+    "shared_model_lock": "shared_model_guard",
+    "shared_model_unlock": "shared_model_guard",
 }
 
 _STARTS_SOLVER = frozenset({
@@ -424,6 +430,8 @@ _DESKTOP_SHARED_FOUNDATION = frozenset({
     "capabilities", "solver_status", "job_status", "job_tail", "job_cancel",
     "shared_server_preflight", "shared_server_attach",
     "shared_server_detach", "shared_server_status",
+    "shared_server_models", "shared_model_lock",
+    "shared_model_verify", "shared_model_unlock",
 })
 
 
