@@ -163,7 +163,7 @@ def test_unclassified_mph_collision_is_rejected():
     assert _classify(snapshot)["state"] == "unclassified_comsol_or_mph_collision"
 
 
-def test_incomplete_or_unreadable_inventory_fails_before_classification():
+def test_incomplete_inventory_fails_and_unreadable_version_is_classified():
     incomplete = _ready()
     incomplete["inventory_complete"] = False
     unreadable = _ready()
@@ -171,5 +171,6 @@ def test_incomplete_or_unreadable_inventory_fails_before_classification():
 
     with pytest.raises(ValueError, match="complete"):
         _classify(incomplete)
-    with pytest.raises(ValueError, match="unreadable"):
-        _classify(unreadable)
+    assert _classify(unreadable)["state"] == (
+        "unsupported_or_ambiguous_comsol_version"
+    )

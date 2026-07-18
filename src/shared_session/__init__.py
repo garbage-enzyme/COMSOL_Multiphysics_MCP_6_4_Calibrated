@@ -35,6 +35,7 @@ from .preflight import (
     classify_shared_server_preflight,
     normalize_shared_preflight_snapshot,
 )
+from .process_probe import collect_shared_preflight_snapshot
 
 __all__ = [
     "SHARED_SERVER_FEATURE_ENV",
@@ -51,6 +52,7 @@ __all__ = [
     "build_shared_model_lock",
     "build_shared_model_revision",
     "classify_shared_server_preflight",
+    "collect_shared_preflight_snapshot",
     "evaluate_attached_detach",
     "evaluate_owned_cleanup",
     "normalize_attached_server_identity",

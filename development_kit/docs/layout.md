@@ -193,6 +193,7 @@ models are intentionally absent.
 - `development_kit/tests/test_shared_cleanup_contracts.py` — This module tests non-owning detach and owned-cleanup outcome semantics.
 - `development_kit/tests/test_shared_model_locking.py` — This module tests bounded shared-model revisions and exact enforcement locks.
 - `development_kit/tests/test_shared_operation_dependencies.py` — This module tests shared operations against the reused arbiter and path-containment dependencies.
+- `development_kit/tests/test_shared_process_probe.py` — This module tests redacted Windows process, listener, window, and version inventory.
 - `development_kit/tests/test_shared_session_contracts.py` — This module tests default-off feature and loopback endpoint contracts.
 - `development_kit/tests/test_shared_session_identity.py` — This module tests attached-server and exact model-selector identities.
 - `development_kit/tests/test_shared_server_preflight.py` — This module tests two-probe Desktop, listener, collision, and COMSOL release-line classification.
@@ -331,6 +332,7 @@ models are intentionally absent.
 - `src/shared_session/identity.py` — This module defines exact non-owned server and model-selector identities.
 - `src/shared_session/locking.py` — This module defines bounded model revisions and shared-model enforcement locks.
 - `src/shared_session/preflight.py` — This module classifies stable local Desktop and Server readiness without importing MPh.
+- `src/shared_session/process_probe.py` — This module collects bounded Windows process, listener, window, and executable-version evidence.
 
 ## MCP tool adapters
 

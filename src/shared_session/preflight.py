@@ -82,12 +82,16 @@ def _finite(value: Any, label: str, *, positive: bool = True) -> float:
     return number
 
 
-def _normalize_version(value: Any) -> tuple[str, tuple[int, int, int, int]]:
+def _normalize_version(
+    value: Any,
+) -> tuple[str | None, tuple[int, int, int, int] | None]:
+    if value is None:
+        return None, None
     if not isinstance(value, str) or not value or len(value) > 128:
-        raise ValueError("COMSOL file version must be a bounded string")
+        raise ValueError("COMSOL file version must be a bounded string or null")
     match = _VERSION.search(value)
     if match is None:
-        raise ValueError("COMSOL file version is unreadable")
+        return "unreadable", None
     parts = tuple(int(item) for item in match.groups())
     return ".".join(str(item) for item in parts), parts
 
@@ -223,8 +227,15 @@ def classify_shared_server_preflight(
     state = "ready_for_attach"
     retryable = False
 
-    all_versions = [item["version_parts"] for item in processes]
-    if any(parts[:3] != ACCEPTED_RELEASE_LINE for parts in all_versions):
+    comsol_versions = [
+        item["version_parts"]
+        for item in processes
+        if item["kind"] != "mph_client"
+    ]
+    if any(
+        parts is None or parts[:3] != ACCEPTED_RELEASE_LINE
+        for parts in comsol_versions
+    ):
         violations.append("unsupported_or_ambiguous_comsol_version")
         state = "unsupported_or_ambiguous_comsol_version"
     elif changed:

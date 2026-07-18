@@ -96,7 +96,7 @@ def normalize_shared_server_endpoint(value: Any) -> SharedServerEndpoint:
     if len(host) > MAX_ENDPOINT_HOST_CHARACTERS:
         raise ValueError("shared server endpoint host is too long")
     if host == "localhost":
-        normalized_host = host
+        normalized_host = "127.0.0.1"
     else:
         try:
             address = ipaddress.ip_address(host)

@@ -54,7 +54,7 @@ def test_shared_feature_rejects_ambiguous_flag_values(value):
 @pytest.mark.parametrize(
     ("raw", "expected_host"),
     [
-        ({"host": "LOCALHOST", "port": 2036}, "localhost"),
+        ({"host": "LOCALHOST", "port": 2036}, "127.0.0.1"),
         ({"host": "127.0.0.1", "port": 2036}, "127.0.0.1"),
         ({"host": "127.25.3.9", "port": 1}, "127.25.3.9"),
         ({"host": "0:0:0:0:0:0:0:1", "port": 65535}, "::1"),
