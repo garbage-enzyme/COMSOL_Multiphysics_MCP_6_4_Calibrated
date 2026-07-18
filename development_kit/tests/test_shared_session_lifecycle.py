@@ -48,12 +48,15 @@ def _snapshot(server_created=20.0):
 def _request():
     return {
         "endpoint": {"host": "127.0.0.1", "port": 2036},
-        "model_selector": {
-            "tag": "Model_1",
-            "expected_label": "Shared",
-            "expected_unsaved": True,
-        },
         "user_confirmed": True,
+    }
+
+
+def _selector():
+    return {
+        "tag": "Model_1",
+        "expected_label": "Shared",
+        "expected_unsaved": True,
     }
 
 
@@ -240,8 +243,7 @@ def test_exact_tag_adoption_allows_duplicate_unicode_labels_and_paths(tmp_path):
             "unsaved": False,
         },
     ]
-    request = _request()
-    request["model_selector"] = {
+    selector = {
         "tag": "Model_1",
         "expected_label": "共享",
         "expected_file_path": shared_path,
@@ -249,14 +251,15 @@ def test_exact_tag_adoption_allows_duplicate_unicode_labels_and_paths(tmp_path):
     manager, _ownership, _client = _manager(tmp_path, models=models)
 
     attached = manager.attach(
-        request,
+        _request(),
         profile="desktop_shared",
         environ={SHARED_SERVER_FEATURE_ENV: "true"},
     )
+    adopted = manager.adopt_model(selector)
 
     assert attached["success"] is True
-    assert attached["selected_model"]["tag"] == "Model_1"
-    assert attached["selected_model"]["file_path"] == "C:\\研究\\共享.mph"
+    assert adopted["selected_model"]["tag"] == "Model_1"
+    assert adopted["selected_model"]["file_path"] == "C:\\研究\\共享.mph"
     assert attached["model_count"] == 2
 
 
@@ -297,6 +300,7 @@ def _attach_and_lock(manager):
         profile="desktop_shared",
         environ={SHARED_SERVER_FEATURE_ENV: "true"},
     )["success"] is True
+    assert manager.adopt_model(_selector())["success"] is True
     locked = manager.lock_model(collaboration_mode="interactive_inspection")
     assert locked["success"] is True
     return locked["model_lock"]
@@ -323,6 +327,7 @@ def test_model_lock_verifies_immutable_source_bytes(tmp_path):
         profile="desktop_shared",
         environ={SHARED_SERVER_FEATURE_ENV: "true"},
     )["success"] is True
+    assert manager.adopt_model(_selector())["success"] is True
     source = tmp_path / "source.mph"
     source.write_bytes(b"immutable model fixture")
     source_sha256 = hashlib.sha256(source.read_bytes()).hexdigest()
@@ -480,6 +485,7 @@ def test_snapshot_rehashes_and_preserves_declared_immutable_source(tmp_path):
         profile="desktop_shared",
         environ={SHARED_SERVER_FEATURE_ENV: "true"},
     )["success"] is True
+    assert manager.adopt_model(_selector())["success"] is True
     source = tmp_path / "source.mph"
     source.write_bytes(b"immutable source bytes")
     source_sha256 = hashlib.sha256(source.read_bytes()).hexdigest()
@@ -578,7 +584,7 @@ def test_attach_and_detach_preserve_server_listener_and_model_inventory(tmp_path
     detached = manager.detach()
 
     assert attached["success"] is True
-    assert attached["state"] == "attached_model_pending_lock"
+    assert attached["state"] == "attached_model_pending_adoption"
     assert attached["ownership"] == "external_user_owned_server"
     assert attached["can_start_comsol"] is False
     assert status["attached"] is True
@@ -609,17 +615,23 @@ def test_client_construction_failure_releases_only_mcp_lease(tmp_path):
     assert not ownership.lease_path.exists()
 
 
-def test_zero_or_nonmatching_models_detach_without_clear(tmp_path):
+def test_zero_models_attach_for_inventory_then_reject_adoption_without_clear(tmp_path):
     manager, ownership, client = _manager(tmp_path, models=[])
 
-    result = manager.attach(
+    attached = manager.attach(
         _request(),
         profile="desktop_shared",
         environ={SHARED_SERVER_FEATURE_ENV: "true"},
     )
 
-    assert result["success"] is False
-    assert result["state"] == "no_server_models"
+    adoption = manager.adopt_model(_selector())
+    result = manager.detach()
+
+    assert attached["success"] is True
+    assert attached["model_count"] == 0
+    assert adoption["success"] is False
+    assert adoption["state"] == "no_server_models"
+    assert result["success"] is True
     assert client.calls == ["disconnect"]
     assert ownership.releases == 1
 
@@ -637,6 +649,7 @@ def test_disconnect_failure_keeps_lease_and_reports_uncertain(tmp_path):
         profile="desktop_shared",
         environ={SHARED_SERVER_FEATURE_ENV: "true"},
     )
+    assert manager.adopt_model(_selector())["success"] is True
 
     result = manager.detach()
 

@@ -30,7 +30,7 @@
     {
       "name": "desktop_shared",
       "support": "experimental_default_off",
-      "tool_count": 14
+      "tool_count": 15
     },
     {
       "name": "experimental",
@@ -40,7 +40,7 @@
     {
       "name": "full",
       "support": "compatibility_only",
-      "tool_count": 132
+      "tool_count": 133
     }
   ],
   "unavailable": [

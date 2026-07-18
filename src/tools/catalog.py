@@ -143,6 +143,7 @@ _TOOLS_BY_REGISTRAR = {
         "shared_server_detach", "shared_server_status",
         "shared_server_models", "shared_model_lock",
         "shared_model_verify", "shared_model_unlock", "shared_model_snapshot",
+        "shared_model_adopt",
     ),
     "src.knowledge.embedded.register_knowledge_tools": (
         "docs_get", "docs_list", "physics_get_guide", "troubleshoot",
@@ -222,6 +223,7 @@ _EXPERIMENTAL_TOOLS = frozenset({
     "shared_server_detach", "shared_server_status",
     "shared_server_models", "shared_model_lock",
     "shared_model_verify", "shared_model_unlock", "shared_model_snapshot",
+    "shared_model_adopt",
 })
 
 _SIDE_EFFECTS = {
@@ -301,6 +303,7 @@ _SIDE_EFFECTS = {
     "shared_server_attach": "process_lifecycle",
     "shared_server_detach": "process_lifecycle",
     "shared_model_lock": "shared_model_guard",
+    "shared_model_adopt": "shared_model_guard",
     "shared_model_unlock": "shared_model_guard",
     "shared_model_snapshot": "filesystem_write",
 }
@@ -433,6 +436,7 @@ _DESKTOP_SHARED_FOUNDATION = frozenset({
     "shared_server_detach", "shared_server_status",
     "shared_server_models", "shared_model_lock",
     "shared_model_verify", "shared_model_unlock", "shared_model_snapshot",
+    "shared_model_adopt",
 })
 
 

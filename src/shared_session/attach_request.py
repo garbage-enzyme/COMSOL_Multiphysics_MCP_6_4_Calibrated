@@ -10,12 +10,7 @@ from .contracts import (
     normalize_shared_server_endpoint,
     normalize_shared_server_feature_gate,
 )
-from .identity import SharedModelSelector, normalize_shared_model_selector
-
-
-_ATTACH_REQUEST_FIELDS = frozenset(
-    {"endpoint", "model_selector", "user_confirmed"}
-)
+_ATTACH_REQUEST_FIELDS = frozenset({"endpoint", "user_confirmed"})
 
 
 @dataclass(frozen=True)
@@ -23,7 +18,6 @@ class SharedServerAttachRequest:
     """One normalized request that is eligible for process preflight."""
 
     endpoint: SharedServerEndpoint
-    model_selector: SharedModelSelector
     user_confirmed: bool
     feature_gate: dict[str, Any]
 
@@ -57,10 +51,8 @@ def normalize_shared_server_attach_request(
     if value["user_confirmed"] is not True:
         raise ValueError("shared server attach requires user_confirmed=true")
     endpoint = normalize_shared_server_endpoint(value["endpoint"])
-    selector = normalize_shared_model_selector(value["model_selector"])
     return SharedServerAttachRequest(
         endpoint=endpoint,
-        model_selector=selector,
         user_confirmed=True,
         feature_gate=gate.to_dict(),
     )

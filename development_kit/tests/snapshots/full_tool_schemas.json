@@ -4115,6 +4115,55 @@
     "title": "session_resetArguments",
     "type": "object"
   },
+  "shared_model_adopt": {
+    "properties": {
+      "expected_file_path": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected File Path"
+      },
+      "expected_label": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Label"
+      },
+      "expected_unsaved": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Unsaved"
+      },
+      "model_tag": {
+        "title": "Model Tag",
+        "type": "string"
+      }
+    },
+    "required": [
+      "model_tag"
+    ],
+    "title": "shared_model_adoptArguments",
+    "type": "object"
+  },
   "shared_model_lock": {
     "properties": {
       "collaboration_mode": {
@@ -4213,48 +4262,8 @@
   },
   "shared_server_attach": {
     "properties": {
-      "expected_file_path": {
-        "anyOf": [
-          {
-            "type": "string"
-          },
-          {
-            "type": "null"
-          }
-        ],
-        "default": null,
-        "title": "Expected File Path"
-      },
-      "expected_label": {
-        "anyOf": [
-          {
-            "type": "string"
-          },
-          {
-            "type": "null"
-          }
-        ],
-        "default": null,
-        "title": "Expected Label"
-      },
-      "expected_unsaved": {
-        "anyOf": [
-          {
-            "type": "boolean"
-          },
-          {
-            "type": "null"
-          }
-        ],
-        "default": null,
-        "title": "Expected Unsaved"
-      },
       "host": {
         "title": "Host",
-        "type": "string"
-      },
-      "model_tag": {
-        "title": "Model Tag",
         "type": "string"
       },
       "port": {
@@ -4269,7 +4278,6 @@
     "required": [
       "host",
       "port",
-      "model_tag",
       "user_confirmed"
     ],
     "title": "shared_server_attachArguments",

@@ -13,7 +13,10 @@ import uuid
 
 from .attach_request import normalize_shared_server_attach_request
 from .cleanup import evaluate_attached_detach
-from .identity import normalize_attached_server_identity
+from .identity import (
+    normalize_attached_server_identity,
+    normalize_shared_model_selector,
+)
 from .locking import (
     build_shared_model_lock,
     build_shared_model_revision,
@@ -290,7 +293,7 @@ class SharedSessionManager:
         profile: str,
         environ: Mapping[str, str] | None = None,
     ) -> dict[str, Any]:
-        """Attach to one exact existing server and resolve one model selector."""
+        """Attach to one exact existing server without selecting a model."""
         normalized_request = normalize_shared_server_attach_request(
             request, profile=profile, environ=environ
         )
@@ -335,26 +338,6 @@ class SharedSessionManager:
                 models, inventory_sha256 = self._inventory(
                     self._model_inventory_reader, client
                 )
-                matches = [
-                    model
-                    for model in models
-                    if self._matches(normalized_request.model_selector, model)
-                ]
-                if len(matches) != 1:
-                    state = (
-                        "no_server_models" if not models
-                        else "model_selector_not_unique"
-                    )
-                    client.disconnect()
-                    release = ownership.release()
-                    return {
-                        "success": False,
-                        "state": state,
-                        "model_count": len(models),
-                        "match_count": len(matches),
-                        "client_disconnected": True,
-                        "lease_release": release,
-                    }
             except Exception as exc:
                 disconnected = client is None
                 if client is not None:
@@ -379,16 +362,15 @@ class SharedSessionManager:
             self._client = client
             self._ownership = ownership
             self._server_identity = server_identity
-            self._selector = normalized_request.model_selector
-            self._selected_model = matches[0]
+            self._selector = None
+            self._selected_model = None
             self._inventory_sha256 = inventory_sha256
             self._session_acquisition_id = lease["lease"]["acquisition_id"]
             return {
                 "success": True,
-                "state": "attached_model_pending_lock",
+                "state": "attached_model_pending_adoption",
                 "server_identity_sha256": server_identity.identity_sha256,
                 "session_acquisition_id": self._session_acquisition_id,
-                "selected_model": matches[0].to_dict(),
                 "model_count": len(models),
                 "model_inventory_sha256": inventory_sha256,
                 "ownership": "external_user_owned_server",
@@ -406,8 +388,12 @@ class SharedSessionManager:
                     if self._model_lock is not None
                     else (
                         "attached_model_pending_lock"
-                        if self._client is not None
-                        else "detached"
+                        if self._selected_model is not None
+                        else (
+                            "attached_model_pending_adoption"
+                            if self._client is not None
+                            else "detached"
+                        )
                     )
                 ),
                 "server_identity_sha256": (
@@ -461,12 +447,59 @@ class SharedSessionManager:
                 "state": (
                     "attached_model_locked"
                     if self._model_lock is not None
-                    else "attached_model_pending_lock"
+                    else (
+                        "attached_model_pending_lock"
+                        if self._selected_model is not None
+                        else "attached_model_pending_adoption"
+                    )
                 ),
                 "models": [model.to_dict() for model in models],
                 "model_count": len(models),
                 "model_inventory_sha256": inventory_sha256,
                 "attached_inventory_sha256": self._inventory_sha256,
+            }
+
+    def adopt_model(self, selector: Mapping[str, Any]) -> dict[str, Any]:
+        """Adopt one fresh exact tag after the caller has seen inventory."""
+        normalized_selector = normalize_shared_model_selector(selector)
+        with self._lock:
+            if self._client is None:
+                return {"success": False, "state": "detached"}
+            if self._model_lock is not None:
+                return {"success": False, "state": "model_lock_active"}
+            try:
+                models, inventory_sha256 = self._inventory(
+                    self._model_inventory_reader, self._client
+                )
+                matches = [
+                    model for model in models
+                    if self._matches(normalized_selector, model)
+                ]
+            except Exception as exc:
+                return {
+                    "success": False,
+                    "state": "model_adoption_failed",
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+            if len(matches) != 1:
+                return {
+                    "success": False,
+                    "state": (
+                        "no_server_models" if not models
+                        else "model_selector_not_unique"
+                    ),
+                    "model_count": len(models),
+                    "match_count": len(matches),
+                    "model_inventory_sha256": inventory_sha256,
+                }
+            self._selector = normalized_selector
+            self._selected_model = matches[0]
+            return {
+                "success": True,
+                "state": "attached_model_pending_lock",
+                "selected_model": matches[0].to_dict(),
+                "model_count": len(models),
+                "model_inventory_sha256": inventory_sha256,
             }
 
     def lock_model(

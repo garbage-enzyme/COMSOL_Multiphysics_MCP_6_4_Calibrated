@@ -15,7 +15,6 @@ from src.shared_session.contracts import SHARED_SERVER_FEATURE_ENV
 def _request():
     return {
         "endpoint": {"host": "127.0.0.1", "port": 2036},
-        "model_selector": {"tag": "Model_1", "expected_label": "Shared"},
         "user_confirmed": True,
     }
 
@@ -38,7 +37,7 @@ def test_attach_request_requires_all_static_and_per_call_gates():
         )
 
 
-def test_attach_request_normalizes_exact_endpoint_and_selector():
+def test_attach_request_normalizes_exact_endpoint():
     result = normalize_shared_server_attach_request(
         _request(),
         profile="desktop_shared",
@@ -46,7 +45,6 @@ def test_attach_request_normalizes_exact_endpoint_and_selector():
     )
 
     assert result.endpoint.host == "127.0.0.1"
-    assert result.model_selector.tag == "Model_1"
     assert result.user_confirmed is True
     assert result.feature_gate["gate_open"] is True
 
@@ -55,7 +53,7 @@ def test_attach_request_normalizes_exact_endpoint_and_selector():
     "raw_request",
     [
         {**_request(), "endpoint": {"host": "10.0.0.1", "port": 2036}},
-        {**_request(), "model_selector": {"tag": "ambiguous-tag"}},
+        {**_request(), "model_selector": {"tag": "Model_1"}},
         {**_request(), "lease_mode": "force"},
     ],
 )

@@ -45,13 +45,25 @@ def register_shared_session_tools(mcp: FastMCP) -> None:
     def shared_server_attach(
         host: str,
         port: int,
-        model_tag: str,
         user_confirmed: bool,
+    ) -> dict[str, Any]:
+        """Attach to one existing server before enumerating and adopting a model."""
+        return shared_session_manager.attach(
+            {
+                "endpoint": {"host": host, "port": port},
+                "user_confirmed": user_confirmed,
+            },
+            profile=profile_name,
+        )
+
+    @mcp.tool()
+    def shared_model_adopt(
+        model_tag: str,
         expected_label: str | None = None,
         expected_file_path: str | None = None,
         expected_unsaved: bool | None = None,
     ) -> dict[str, Any]:
-        """Attach to one existing server and resolve one exact model selector."""
+        """Adopt one exact tag from the fresh attached-server inventory."""
         selector: dict[str, Any] = {"tag": model_tag}
         if expected_label is not None:
             selector["expected_label"] = expected_label
@@ -59,14 +71,7 @@ def register_shared_session_tools(mcp: FastMCP) -> None:
             selector["expected_file_path"] = expected_file_path
         if expected_unsaved is not None:
             selector["expected_unsaved"] = expected_unsaved
-        return shared_session_manager.attach(
-            {
-                "endpoint": {"host": host, "port": port},
-                "model_selector": selector,
-                "user_confirmed": user_confirmed,
-            },
-            profile=profile_name,
-        )
+        return shared_session_manager.adopt_model(selector)
 
     @mcp.tool()
     def shared_server_detach() -> dict[str, Any]:

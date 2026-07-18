@@ -190,5 +190,5 @@ def test_default_and_other_research_profiles_remain_unchanged():
         "basic_fem": 79,
         "wave_optics": 66,
         "experimental": 67,
-        "full": 132,
+        "full": 133,
     }
