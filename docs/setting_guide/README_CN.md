@@ -8,6 +8,13 @@
 有意不包含注释。未知字段会写入 `settings_errors`。缺失字段使用下方安全默认值；非法
 字段仅自身回退默认值。JSON 损坏或不可读时，使用完整安全默认配置。
 
+## 更新或重装前备份设置
+
+更新或重装 MCP package 前，先备份实际生效的 `settings.json`。如果设置了
+`COMSOL_MCP_SETTINGS_PATH`，应备份该绝对路径文件，而不是只依赖源码树模板。安装后恢复
+已批准的设置文件，重启准确的 MCP host，再通过 `capabilities.project_settings` 确认
+configuration state 有效。
+
 ## 文档身份
 
 | 字段 | 含义 | 默认值 | 可接受值 |

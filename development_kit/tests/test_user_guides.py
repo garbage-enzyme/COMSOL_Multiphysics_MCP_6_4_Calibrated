@@ -178,6 +178,8 @@ def test_settings_guides_cover_every_checked_in_setting_and_keep_languages_separ
     assert "../interactive_shared_session/README.md" in english
     assert "../evidence_integrity/README_CN.md" in chinese
     assert "../interactive_shared_session/README_CN.md" in chinese
+    assert "back up the effective" in english
+    assert "更新或重装 MCP package 前，先备份实际生效的" in chinese
 
 
 def test_language_switch_is_limited_to_the_main_readmes():

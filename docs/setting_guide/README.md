@@ -12,6 +12,14 @@ Unknown fields are reported in `settings_errors`. A missing field uses the safe
 default below; an invalid field uses only its own default. Malformed or unreadable
 JSON uses the complete safe default document.
 
+## Preserve settings before an update or reinstall
+
+Before updating or reinstalling the MCP package, back up the effective
+`settings.json`. If `COMSOL_MCP_SETTINGS_PATH` is set, back up that absolute
+file rather than relying on a source-tree template. Restore the approved file
+after installation, restart the exact MCP host, then check
+`capabilities.project_settings` for a valid configuration state.
+
 ## Document identity
 
 | Field | Meaning | Default | Accepted value |
