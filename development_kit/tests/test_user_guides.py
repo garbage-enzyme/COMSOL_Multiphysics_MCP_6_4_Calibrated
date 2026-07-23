@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import re
+from pathlib import Path
 
 from src.evidence.integrity_controls import (
     DISABLED_CHECK_WARNING,
@@ -13,11 +13,13 @@ from src.evidence.integrity_controls import (
     load_evidence_integrity_status,
 )
 
-
 ROOT = Path(__file__).parents[2]
 EVIDENCE_DOCS = ROOT / "docs" / "evidence_integrity"
 INTERACTIVE_DOCS = ROOT / "docs" / "interactive_shared_session"
-CHINESE_DISABLED_WARNING = "严格证据检查已关闭；这些结果未经过完整验证，可能包含 AI 生成或幻觉内容。"
+SETTINGS_DOCS = ROOT / "docs" / "setting_guide"
+CHINESE_DISABLED_WARNING = (
+    "严格证据检查已关闭；这些结果未经过完整验证，可能包含 AI 生成或幻觉内容。"
+)
 
 
 def test_documented_default_and_exploration_settings_are_executable():
@@ -119,7 +121,7 @@ def test_chinese_interactive_guide_is_complete_and_contract_equivalent():
     assert "Save Copy snapshot/checkpoint" in guide
 
 
-def test_root_readmes_expose_two_separate_feature_entry_points():
+def test_root_readmes_expose_same_language_feature_and_settings_guides():
     english = (ROOT / "README.md").read_text(encoding="utf-8")
     chinese = (ROOT / "README_CN.md").read_text(encoding="utf-8")
 
@@ -127,16 +129,77 @@ def test_root_readmes_expose_two_separate_feature_entry_points():
     assert "## 特色功能" in chinese
     for guide_path in (
         "docs/evidence_integrity/README.md",
-        "docs/evidence_integrity/README_CN.md",
         "docs/interactive_shared_session/README.md",
-        "docs/interactive_shared_session/README_CN.md",
+        "docs/setting_guide/README.md",
     ):
         assert guide_path in english
+        assert guide_path not in chinese
+    for guide_path in (
+        "docs/evidence_integrity/README_CN.md",
+        "docs/interactive_shared_session/README_CN.md",
+        "docs/setting_guide/README_CN.md",
+    ):
         assert guide_path in chinese
+        assert guide_path not in english
     assert "default-on" in english
     assert "default-off" in english
     assert "默认开启" in chinese
     assert "默认关闭" in chinese
+
+
+def test_settings_guides_cover_every_checked_in_setting_and_keep_languages_separate():
+    english = (SETTINGS_DOCS / "README.md").read_text(encoding="utf-8")
+    chinese = (SETTINGS_DOCS / "README_CN.md").read_text(encoding="utf-8")
+    fields = (
+        "schema_name",
+        "schema_version",
+        "profile.name",
+        "runtime.directory",
+        "runtime.jobs_directory",
+        "paths.model_read_roots",
+        "paths.artifact_write_root",
+        "shared_server.enabled",
+        "evidence_integrity.checks.outcome_contract_validation",
+        "evidence_integrity.checks.artifact_chain_verification",
+        "evidence_integrity.checks.summary_claim_verification",
+        "evidence_integrity.checks.producer_driver_compatibility",
+        "semantic_docs.root",
+        "semantic_docs.lexical_index",
+        "semantic_docs.model_path",
+        "ownership.owner",
+        "java.java_home",
+        "java.jdk_home",
+    )
+
+    assert all(field in english for field in fields)
+    assert all(field in chinese for field in fields)
+    assert "README_CN.md" not in english
+    assert "../evidence_integrity/README.md" in english
+    assert "../interactive_shared_session/README.md" in english
+    assert "../evidence_integrity/README_CN.md" in chinese
+    assert "../interactive_shared_session/README_CN.md" in chinese
+
+
+def test_language_switch_is_limited_to_the_main_readmes():
+    english = (ROOT / "README.md").read_text(encoding="utf-8")
+    chinese = (ROOT / "README_CN.md").read_text(encoding="utf-8")
+
+    assert "English | [中文](README_CN.md)" in english
+    assert "[English](README.md) | 中文" in chinese
+
+    for path in (
+        ROOT / "DEPLOYMENT.md",
+        ROOT / "DEPLOYMENT_CN.md",
+        EVIDENCE_DOCS / "README.md",
+        EVIDENCE_DOCS / "README_CN.md",
+        INTERACTIVE_DOCS / "README.md",
+        INTERACTIVE_DOCS / "README_CN.md",
+        SETTINGS_DOCS / "README.md",
+        SETTINGS_DOCS / "README_CN.md",
+    ):
+        content = path.read_text(encoding="utf-8")
+        assert "[English]" not in content, path
+        assert "[中文]" not in content, path
 
 
 def test_deployment_guides_explain_the_shared_settings_file_and_fallbacks():

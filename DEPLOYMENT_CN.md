@@ -1,7 +1,5 @@
 # COMSOL MCP 部署指南
 
-[English](DEPLOYMENT.md)
-
 本指南覆盖 COMSOL MCP 的全新安装，以及 Claude Code、Hermes Agent、Codex CLI
 和 opencode 配置。所有示例路径都必须替换为目标机器的实际路径。
 
@@ -37,16 +35,15 @@ console entry point 绝对路径。
 启动任何 client 前，编辑项目根目录的 [`settings.json`](settings.json)。它是 profile、
 runtime/jobs、模型读取和 artifact containment、shared-server 开关、证据检查、语义
 手册路径、owner label 以及可选 COMSOL Java 路径的唯一设置来源。Codex、opencode、
-Claude Code 和 Hermes 都使用同一个文件。标准 JSON 没有注释语法，因此文件使用合法
-的 `_comment` 和 `_comment_*` 字段保存英语注释。
+Claude Code 和 Hermes 都使用同一个文件。每个字段的含义、默认值和可接受值见
+[设置指南](docs/setting_guide/README_CN.md)。
 
 模板列出所有设置和默认值。用户删去设置条目时，该条目使用安全默认值；输入非法值时，
 仅该条目回退默认值，并在 `settings_errors` 中报错；JSON 整体损坏时回退完整安全默认
 文件并报错。启动后调用 `capabilities` 或 `evidence_integrity_status`，检查
 `project_settings.configuration_state` 和 `project_settings.settings_errors`。
 
-例如，Wave Optics 可按功能修改这些条目（这是 partial edit，不要用它替换带注释的完整
-模板）：
+例如，Wave Optics 可按功能修改这些条目（这是 partial edit，不要用它替换完整模板）：
 
 ```json
 {

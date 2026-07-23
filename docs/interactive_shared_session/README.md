@@ -1,7 +1,5 @@
 # Interactive COMSOL Desktop/Server collaboration
 
-[English](README.md) | [中文](README_CN.md)
-
 We thank the original [Ching-Chiang/comsol-mcp](https://github.com/Ching-Chiang/comsol-mcp) repository for the method and UX contribution that informed this interaction concept. That repository was used only as behavioral research: this project independently implemented its own default-off design and did not copy, adapt, translate, cherry-pick, or mechanically rewrite the original repository's source code. This credit recognizes a method contribution; it does not claim that the two implementations or all behaviors are identical.
 
 This mode lets you keep a COMSOL model visible in Desktop while an agent attaches
@@ -72,8 +70,9 @@ Edit the shared project-root `settings.json` before starting the MCP host:
 }
 ```
 
-These are partial edits; keep the English `_comment_*` fields and all other
-settings from the project template. If the host does not preserve the project
+These are partial edits; keep all other settings from the project template. See
+the [settings guide](../setting_guide/README.md) for every field's meaning,
+default, and accepted values. If the host does not preserve the project
 path, pass only the one locator variable:
 
 ```text

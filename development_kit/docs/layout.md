@@ -30,6 +30,8 @@ models are intentionally absent.
 - `constraints/minimum_supported_py314.txt` — This file pins the reviewed minimum binary-installable Python 3.14 direct dependencies.
 - `constraints/tested_versions.json` — This file records the human-reviewed direct dependency versions and compatibility lane.
 - `docs/profile_migration.md` — This file explains static profile selection and migration from broader tool surfaces.
+- `docs/setting_guide/README.md` — This file defines every English project settings field, default, and accepted value.
+- `docs/setting_guide/README_CN.md` — This file defines every Chinese project settings field, default, and accepted value.
 - `docs/evidence_integrity/README.md` — This file is the complete English evidence-integrity and anti-hallucination user guide.
 - `docs/evidence_integrity/README_CN.md` — This file is the complete Chinese evidence-integrity and anti-hallucination user guide.
 - `docs/evidence_integrity/default_settings.json` — This file is the tested all-checks-enabled evidence-integrity settings example.
@@ -40,6 +42,7 @@ models are intentionally absent.
 ## Standalone recipes
 
 - `recipes/_paths.py` — This module provides shared ASCII-safe paths for standalone recipes.
+- `recipes/acdc_2d_differential_coils.py` — This script builds a two-coil Induction Currents model from a caller-supplied baseline.
 - `recipes/mim_drude_sweep.py` — This script demonstrates a durable Drude-material parameter sweep.
 - `recipes/mim_lml_continuous.py` — This script demonstrates a continuous layered-metal workflow.
 - `recipes/mim_patch_partition.py` — This script demonstrates partitioned patch-metasurface construction.
@@ -131,6 +134,7 @@ models are intentionally absent.
 ## Dependency and process tests
 
 - `development_kit/tests/test_artifact_chain.py` — This module tests bounded solver-free artifact hash-chain verification.
+- `development_kit/tests/test_acdc_differential_coils_recipe.py` — This module tests static portability and input contracts for the differential-coil recipe.
 - `development_kit/tests/test_attached_job_backend.py` — This module tests immutable attached-job targets, handoff, worker execution, resume, cancellation, and preservation.
 - `development_kit/tests/test_async_solver.py` — This module tests asynchronous solver thread state with fake studies.
 - `development_kit/tests/test_basic.py` — This module tests basic server helpers and registration assumptions.

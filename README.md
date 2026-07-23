@@ -18,13 +18,11 @@ This server gives AI agents a safer, smaller interface for COMSOL inspection, co
   claims can be checked against exact outcome contracts, raw artifact chains,
   summary citations, and resume producer/driver identity. Users may explicitly
   opt out per check for exploration, but affected results carry an unverified
-  warning. Read the independent [English evidence-integrity guide](docs/evidence_integrity/README.md)
-  or [中文证据完整性指南](docs/evidence_integrity/README_CN.md).
+  warning. Read the independent [evidence-integrity guide](docs/evidence_integrity/README.md).
 - **Interactive COMSOL Desktop/Server collaboration (default-off).** A user and
   agent can take explicit turns with one user-owned local Server, one connected
   Desktop, and one exact server-held model. It requires explicit profile/flag
-  enablement and per-session confirmation. Read the [English interactive guide](docs/interactive_shared_session/README.md)
-  or [中文交互协作指南](docs/interactive_shared_session/README_CN.md).
+  enablement and per-session confirmation. Read the [interactive guide](docs/interactive_shared_session/README.md).
 
 ## Recommended companion skill
 
@@ -46,8 +44,7 @@ are welcome. Use the complete deployment guide for fresh installation, exact
 configuration paths, profile selection, restart behavior, and solver-free
 verification:
 
-- [Deployment guide (English)](DEPLOYMENT.md)
-- [部署指南（中文）](DEPLOYMENT_CN.md)
+- [Deployment guide](DEPLOYMENT.md)
 
 The essential rules are: perform a non-editable install, configure the absolute
 installed `comsol-mcp` executable, edit the shared project-root [`settings.json`](settings.json),
@@ -80,9 +77,10 @@ surface.
 All startup settings are grouped in the project-root [`settings.json`](settings.json).
 Use the same file for Codex, opencode, Claude Code, and Hermes so that agents do
 not silently receive different profiles, paths, Java runtimes, or evidence rules.
-The file uses valid JSON `_comment`/`_comment_*` fields because standard JSON has
-no comment syntax. Missing entries use their documented safe defaults. An invalid
-entry keeps only that entry at its default and is reported by `capabilities` and
+The template intentionally contains configuration only; the complete meaning,
+defaults, and accepted values are in the [settings guide](docs/setting_guide/README.md).
+Missing entries use their documented safe defaults. An invalid entry keeps only
+that entry at its default and is reported by `capabilities` and
 `evidence_integrity_status`; malformed JSON falls back to the complete safe default
 document and reports the error. Do not create a second agent-owned settings file.
 

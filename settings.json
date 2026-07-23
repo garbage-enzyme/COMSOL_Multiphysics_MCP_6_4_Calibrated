@@ -1,63 +1,38 @@
 {
-  "_comment": "Shared COMSOL MCP startup settings. Keep this file stable and use the same file for every agent.",
   "schema_name": "comsol_mcp.settings",
   "schema_version": "1.0.0",
   "profile": {
-    "_comment": "Static tool profile. core is the safe default; change only when the MCP host will be restarted.",
-    "_comment_name": "Examples: core, basic_fem, wave_optics, semantic_docs, desktop_shared, experimental, or full.",
     "name": "core"
   },
   "runtime": {
-    "_comment": "Durable runtime roots. null selects the platform-safe default; configured paths must be absolute.",
-    "_comment_directory": "Example: D:/comsol_runtime. null uses D:/comsol_runtime when available, otherwise the platform default.",
     "directory": null,
-    "_comment_jobs_directory": "Example: D:/comsol_runtime/jobs. null uses the jobs subdirectory below directory.",
     "jobs_directory": null
   },
   "paths": {
-    "_comment": "Containment roots. Keep model reads empty until an explicit existing model directory is approved.",
-    "_comment_model_read_roots": "Example: [\"D:/comsol_models\"]. Every directory must be absolute and existing when used.",
     "model_read_roots": [],
-    "_comment_artifact_write_root": "Example: D:/comsol_runtime/owned_artifacts. null uses directory/owned_artifacts.",
     "artifact_write_root": null
   },
   "shared_server": {
-    "_comment": "Shared Desktop/attached-Server collaboration is deliberately disabled by default.",
-    "_comment_enabled": "Set true only after manually starting the local COMSOL Server and restarting the MCP host.",
     "enabled": false
   },
   "evidence_integrity": {
-    "_comment": "Every formal evidence check is default-on. Set an individual value false only for declared exploration.",
     "checks": {
-      "_comment_outcome_contract_validation": "Verify declared outcomes and their machine-readable contract.",
       "outcome_contract_validation": true,
-      "_comment_artifact_chain_verification": "Verify owned artifact bytes, provenance, and hash-chain identity.",
       "artifact_chain_verification": true,
-      "_comment_summary_claim_verification": "Verify summary claims against exact cited artifact values.",
       "summary_claim_verification": true,
-      "_comment_producer_driver_compatibility": "Verify resume producer and driver identities before continuation.",
       "producer_driver_compatibility": true
     }
   },
   "semantic_docs": {
-    "_comment": "Optional isolated semantic retrieval paths. The profile remains unavailable until all required artifacts exist.",
-    "_comment_root": "Example: D:/comsol_semantic. Use an ASCII-only absolute deployment root.",
     "root": "D:/comsol_semantic",
-    "_comment_lexical_index": "Example: D:/comsol_docs_fts/manuals.sqlite3. This is the immutable lexical index file.",
     "lexical_index": "D:/comsol_docs_fts/manuals.sqlite3",
-    "_comment_model_path": "Example: D:/comsol_semantic/models/all-MiniLM-L6-v2/revision. null leaves semantic retrieval unavailable.",
     "model_path": null
   },
   "ownership": {
-    "_comment": "Optional stable owner label. null derives a bounded label from the parent agent process.",
-    "_comment_owner": "Example: codex-mcp or opencode-mcp. null auto-detects the parent agent label.",
     "owner": null
   },
   "java": {
-    "_comment": "Optional COMSOL-bundled Java paths. null preserves the host Java environment.",
-    "_comment_java_home": "Example: D:/COMSOL64/Multiphysics/java/win64/jre. Set only when COMSOL's bundled Java is needed.",
     "java_home": null,
-    "_comment_jdk_home": "Example: D:/COMSOL64/Multiphysics/java/win64/jre. Usually the same value as java_home.",
     "jdk_home": null
   }
 }

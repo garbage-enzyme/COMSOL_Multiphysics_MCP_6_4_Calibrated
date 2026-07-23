@@ -1,7 +1,5 @@
 # COMSOL MCP deployment guide
 
-[中文](DEPLOYMENT_CN.md)
-
 This guide covers a fresh COMSOL MCP installation and client configuration for
 Claude Code, Hermes Agent, Codex CLI, and opencode. Replace every example path
 with the target machine's actual paths.
@@ -40,8 +38,8 @@ Edit the checked-in project-root [`settings.json`](settings.json) before startin
 any client. It is the single source for profile, runtime/job roots, model and
 artifact containment, shared-server enablement, evidence checks, semantic-doc
 paths, ownership label, and optional COMSOL Java paths. Keep the same file for
-every agent. JSON has no standard comment syntax, so the file stores English
-comments in `_comment` and `_comment_*` fields.
+every agent. See the [settings guide](docs/setting_guide/README.md) for every
+field's meaning, default, and accepted values.
 
 The template contains every setting and its default. Removing a field restores
 that field's safe default. An illegal value restores only that field's default
@@ -68,7 +66,7 @@ For example, edit only the relevant grouped entries for a Wave Optics deployment
 ```
 
 The snippet is a partial edit, not a replacement document: keep the schema fields
-and comments from the repository template. If a client does not preserve the
+and other required settings from the repository template. If a client does not preserve the
 project path, pass one absolute locator variable and no per-setting variables:
 
 ```text

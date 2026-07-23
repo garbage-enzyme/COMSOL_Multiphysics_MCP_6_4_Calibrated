@@ -21,7 +21,7 @@ def _settings_path(tmp_path: Path, payload: object) -> Path:
     return path
 
 
-def test_project_settings_is_grouped_and_has_machine_parseable_comments():
+def test_project_settings_is_grouped_and_contains_no_embedded_comments():
     root = Path(__file__).parents[2]
     document = json.loads((root / "settings.json").read_text(encoding="utf-8"))
 
@@ -30,8 +30,17 @@ def test_project_settings_is_grouped_and_has_machine_parseable_comments():
     assert document["profile"]["name"] == "core"
     assert document["shared_server"]["enabled"] is False
     assert all(document["evidence_integrity"]["checks"].values())
-    assert document["paths"]["_comment_model_read_roots"].startswith("Example:")
-    assert document["java"]["_comment_java_home"].startswith("Example:")
+    assert all(not key.startswith("_comment") for key in _walk_keys(document))
+
+
+def _walk_keys(value):
+    if isinstance(value, dict):
+        for key, item in value.items():
+            yield key
+            yield from _walk_keys(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _walk_keys(item)
 
 
 def test_deleted_entries_use_safe_defaults_without_an_error(tmp_path):

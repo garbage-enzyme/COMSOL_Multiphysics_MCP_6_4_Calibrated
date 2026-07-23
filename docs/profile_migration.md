@@ -14,7 +14,8 @@ workflow before the MCP process starts.
 | Generic or risky legacy helpers | `experimental` | Experimental |
 | Maximum legacy discovery compatibility | `full` | Compatibility only |
 
-Set `profile.name` in the shared project-root `settings.json`, reinstall
+Set `profile.name` in the shared project-root `settings.json`; see the
+[settings guide](setting_guide/README.md) for the complete field reference. Reinstall
 non-editably after source changes, and restart the host. Profiles are immutable
 for a server process. A deleted entry uses `core`; an invalid value remains at
 `core` and is reported through `project_settings.settings_errors`.

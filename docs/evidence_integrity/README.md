@@ -1,7 +1,5 @@
 # Evidence integrity and AI-hallucination resistance
 
-[English](README.md) | [中文](README_CN.md)
-
 AI assistants are useful for COMSOL work, but a fluent answer can still describe
 the wrong run, mix old and new files, omit a failed point, repeat a result after
 the model changed, or treat a plausible plot as stronger evidence than it is.
@@ -91,7 +89,8 @@ that it was truthful.
 
 ## Default-on settings and explicit opt-out
 
-The project-root `settings.json` is the canonical settings file. Its
+The project-root `settings.json` is the canonical settings file. See the
+[settings guide](../setting_guide/README.md) for the full settings reference. Its
 `evidence_integrity.checks` object contains all four checks and their defaults:
 
 ```json

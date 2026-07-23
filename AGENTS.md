@@ -68,6 +68,20 @@ removed.
    configuration changes. Do not describe an untested client path as validated.
 6. Before committing, inspect the staged diff and leave unrelated changes alone.
 
+## Standalone recipes
+
+- Recipes are examples, not MCP runtime dependencies. Keep them self-contained,
+  parameterized, and free of hard-coded user paths or committed model binaries.
+- `recipes/acdc_2d_differential_coils.py` derives a two-coil Induction Currents
+  model from an upstream example baseline containing `comp1`, `geom1`, and the
+  `mf` interface with its required default features. It verifies the baseline
+  hash, saves only to a distinct output model, and requires `--overwrite-output`
+  before replacing an existing output; do not represent the upstream model as
+  original work by this repository.
+- That recipe builds and saves by default. A real 1 kHz solve requires the
+  explicit `--solve` flag, a free licensed host, and a separate acceptance run;
+  no result is validated until that run supplies its evidence.
+
 ## Testing and release checks
 
 Run commands from the repository root in the declared development environment:
