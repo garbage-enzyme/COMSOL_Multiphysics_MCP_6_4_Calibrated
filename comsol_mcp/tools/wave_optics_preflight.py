@@ -2,22 +2,40 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import hashlib
 import math
-from pathlib import Path
 import re
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
 
 from mcp.server.fastmcp import FastMCP
 
+from .catalog import get_tool_metadata
 from .ownership import ownership_manager
 from .session import session_manager
-
 
 MAX_BOUNDARIES = 256
 MAX_TAGS = 256
 MAX_ERROR_CHARS = 300
+POINT_AUDIT_TOOL = "wave_optics_point_audit"
+
+
+def _point_audit_next_call(
+    *, active_profile: str, inspection_status: str, missing_evidence: list[str]
+) -> dict[str, Any]:
+    metadata = get_tool_metadata(POINT_AUDIT_TOOL)
+    profile = active_profile.strip().lower() if isinstance(active_profile, str) else ""
+    return {
+        "tool": POINT_AUDIT_TOOL,
+        "available": (
+            profile in metadata.intended_profiles
+            and not missing_evidence
+            and inspection_status != "integrity_blocked"
+        ),
+        "implementation_status": metadata.maturity,
+        "missing_evidence": list(missing_evidence),
+    }
 
 
 @dataclass
@@ -707,7 +725,18 @@ def collect_preflight_foundation(
         "incidence": {"physical_polarization_evidence": "label_only"},
         "wavelength": {},
         "mesh_study_results": {},
-        "next_call": {"tool": "wave_optics_point_audit", "available": False, "missing_evidence": ["topology", "periodicity", "ports", "incidence", "wavelength", "mesh_study_results"]},
+        "next_call": _point_audit_next_call(
+            active_profile=active_profile,
+            inspection_status=ledger.inspection_status,
+            missing_evidence=[
+                "topology",
+                "periodicity",
+                "ports",
+                "incidence",
+                "wavelength",
+                "mesh_study_results",
+            ],
+        ),
     }
 
 
@@ -812,19 +841,18 @@ def collect_wave_optics_preflight(
         section for section in ("topology", "periodicity", "ports", "incidence", "wavelength", "mesh_study_results")
         if not result.get(section)
     ]
-    result["next_call"] = {
-        "tool": "wave_optics_point_audit",
-        "available": False,
-        "implementation_status": "planned_Wave Optics point audit",
-        "minimal_inputs": {
-            "model_name": model_name,
-            "component_tag": topology.get("component_tag"),
-            "physics_tag": physics_tag,
-            "study_tag": study_tag,
-            "wavelength_parameter": wavelength.get("parameter_name"),
-            "source_sha256": result["provenance"].get("source_sha256"),
-        },
-        "missing_evidence": missing,
+    result["next_call"] = _point_audit_next_call(
+        active_profile=active_profile,
+        inspection_status=result["inspection_status"],
+        missing_evidence=missing,
+    )
+    result["next_call"]["minimal_inputs"] = {
+        "model_name": model_name,
+        "component_tag": topology.get("component_tag"),
+        "physics_tag": physics_tag,
+        "study_tag": study_tag,
+        "wavelength_parameter": wavelength.get("parameter_name"),
+        "source_sha256": result["provenance"].get("source_sha256"),
     }
     return result
 

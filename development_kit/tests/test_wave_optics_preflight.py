@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 
 import pytest
-
 from src.tools.wave_optics_preflight import (
     EvidenceLedger,
     collect_preflight_foundation,
@@ -78,6 +77,15 @@ def test_foundation_reports_evidence_only_and_preserves_source(tmp_path, monkeyp
     assert result["provenance"]["source_sha256"] == source_hash
     assert result["ownership"]["solve_permitted"] is True
     assert result["incidence"]["physical_polarization_evidence"] == "label_only"
+    assert result["next_call"]["available"] is False
+    assert result["next_call"]["missing_evidence"] == [
+        "topology",
+        "periodicity",
+        "ports",
+        "incidence",
+        "wavelength",
+        "mesh_study_results",
+    ]
     assert _hash(source) == source_hash
 
 
@@ -107,6 +115,7 @@ def test_foundation_blocks_only_declared_integrity_mismatch(tmp_path, monkeypatc
     )
 
     assert result["inspection_status"] == "integrity_blocked"
+    assert result["next_call"]["available"] is False
     codes = {item["code"] for item in result["evidence"]["integrity_errors"]}
     assert f"source_{mismatch}_mismatch" in codes
 
@@ -351,7 +360,7 @@ class FullFakeModel(MetadataOnlyModel):
         return ["Study 1//Solution 1"]
 
 
-def _full_result(tmp_path, monkeypatch, **fixture):
+def _full_result(tmp_path, monkeypatch, *, active_profile="wave_optics", **fixture):
     source = tmp_path / "fixture.mph"
     source.write_bytes(b"immutable fixture")
     monkeypatch.setattr(
@@ -362,7 +371,7 @@ def _full_result(tmp_path, monkeypatch, **fixture):
         FullFakeModel(source, **fixture),
         model_name="ExactModel",
         session_state={"connected": True},
-        active_profile="wave_optics",
+        active_profile=active_profile,
         expected_component_tag="comp1",
         expected_physics_tag="ewfd",
         expected_study_tag="std1",
@@ -386,6 +395,18 @@ def test_full_preflight_collects_read_only_wave_optics_evidence(tmp_path, monkey
     assert result["wavelength"]["structurally_linked"] is True
     assert result["mesh_study_results"]["meshes"][0]["element_count"] == 1200
     assert result["assessment"]["project_verdict"] is None
+    assert result["next_call"]["available"] is True
+    assert result["next_call"]["implementation_status"] == "experimental"
+    assert result["next_call"]["missing_evidence"] == []
+
+
+def test_complete_preflight_does_not_recommend_tool_outside_profile(tmp_path, monkeypatch):
+    result = _full_result(tmp_path, monkeypatch, active_profile="core")
+
+    assert result["inspection_status"] != "integrity_blocked"
+    assert result["next_call"]["available"] is False
+    assert result["next_call"]["implementation_status"] == "experimental"
+    assert result["next_call"]["missing_evidence"] == []
 
 
 @pytest.mark.parametrize(
