@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 import hashlib
-from pathlib import Path
 import shutil
 import uuid
+from pathlib import Path
 
+import pytest
 from mcp.server.fastmcp import FastMCP
-
 from src.evidence.field_bundle import normalize_field_evidence_request
 from src.tools.field_evidence import register_field_evidence_tools
+
 from development_kit.tests.test_field_bundle import _request
 from development_kit.tests.test_field_dataset import _Model as _DatasetModel
 
@@ -127,15 +128,20 @@ def _extraction_request(source: Path):
     }
     raw["grid"]["shape"] = [9, 11]
     raw["limits"]["max_grid_points"] = 200
-    return normalize_field_evidence_request(raw)
+    return raw
 
 
-def test_public_field_extract_binds_source_and_owned_runtime(tmp_path, monkeypatch):
+@pytest.mark.parametrize("canonical_transport", [False, True])
+def test_public_field_extract_binds_source_and_owned_runtime(
+    tmp_path, monkeypatch, canonical_transport
+):
     from src.tools import field_evidence
 
     source = tmp_path / "fixture.mph"
     source.write_bytes(b"immutable-mph-fixture")
-    request = _extraction_request(source)
+    raw_request = _extraction_request(source)
+    canonical_request = normalize_field_evidence_request(raw_request)
+    request = canonical_request if canonical_transport else raw_request
     model = _DatasetModel()
     model.file = lambda: str(source)
     runtime = Path(r"D:\r") / uuid.uuid4().hex[:8]
@@ -154,7 +160,9 @@ def test_public_field_extract_binds_source_and_owned_runtime(tmp_path, monkeypat
         assert result["source_unchanged"] is True
         assert result["study_run"] is False
         assert result["model_mutated"] is False
-        assert result["artifact_root_id"].startswith("field_evidence/")
+        assert result["artifact_root_id"] == (
+            f"field_evidence/{canonical_request['request_fingerprint']}"
+        )
         root = runtime / Path(result["artifact_root_id"])
         assert (root / result["array_artifact"]["relative_path"]).is_file()
         assert (root / result["manifest_artifact"]["relative_path"]).is_file()
@@ -196,6 +204,31 @@ def test_public_field_extract_rejects_source_mismatch_before_evaluation(tmp_path
     assert model.calls == []
 
 
+@pytest.mark.parametrize("tamper", ["fingerprint", "schema"])
+def test_public_field_extract_rejects_tampered_canonical_request(
+    tmp_path, monkeypatch, tamper
+):
+    from src.tools import field_evidence
+
+    source = tmp_path / "fixture.mph"
+    source.write_bytes(b"immutable-mph-fixture")
+    request = normalize_field_evidence_request(_extraction_request(source))
+    if tamper == "fingerprint":
+        request["request_fingerprint"] = "0" * 64
+    else:
+        request.pop("schema_name")
+    model = _DatasetModel()
+    model.file = lambda: str(source)
+    monkeypatch.setattr(field_evidence.session_manager, "get_model", lambda name: model)
+
+    result = _tool("wave_optics_field_extract")(
+        model_name="fixture", request=request, view_id="on"
+    )
+
+    assert result["success"] is False
+    assert model.calls == []
+
+
 def test_public_field_extract_rejects_png_and_matrix_sources(tmp_path, monkeypatch):
     from src.tools import field_evidence
 
@@ -206,7 +239,9 @@ def test_public_field_extract_rejects_png_and_matrix_sources(tmp_path, monkeypat
     monkeypatch.setattr(field_evidence.session_manager, "get_model", lambda name: model)
 
     png_raw = _request(paired=False, png=True)
-    source_value = dict(_extraction_request(source)["views"][0]["source"])
+    source_value = dict(
+        normalize_field_evidence_request(_extraction_request(source))["views"][0]["source"]
+    )
     source_value.pop("source_fingerprint")
     png_raw["views"][0]["source"] = source_value
     png_request = normalize_field_evidence_request(png_raw)

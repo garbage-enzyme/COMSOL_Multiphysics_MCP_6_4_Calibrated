@@ -8,12 +8,31 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-from comsol_mcp.evidence.field_bundle import validate_field_evidence_request
+from comsol_mcp.evidence.field_bundle import (
+    normalize_field_evidence_request,
+    validate_field_evidence_request,
+)
 from comsol_mcp.evidence.field_dataset import collect_existing_dataset_field_evidence
 from comsol_mcp.evidence.field_discovery import discover_field_datasets
 
 from .ownership import ownership_manager
 from .session import session_manager
+
+_NORMALIZED_REQUEST_MARKERS = frozenset(
+    {
+        "schema_name",
+        "schema_version",
+        "grid_point_count",
+        "visual_review_state",
+        "request_fingerprint",
+    }
+)
+
+
+def _normalize_public_field_request(request: object) -> dict[str, Any]:
+    if isinstance(request, dict) and _NORMALIZED_REQUEST_MARKERS & request.keys():
+        return validate_field_evidence_request(request)
+    return validate_field_evidence_request(normalize_field_evidence_request(request))
 
 
 def _sha256_file(path: Path) -> str:
@@ -93,7 +112,7 @@ def register_field_evidence_tools(mcp: FastMCP) -> None:
         if model is None:
             return {"success": False, "error": f"Model not found: {model_name}"}
         try:
-            normalized = validate_field_evidence_request(request)
+            normalized = _normalize_public_field_request(request)
             matches = [
                 view for view in normalized["views"] if view["view_id"] == view_id
             ]
