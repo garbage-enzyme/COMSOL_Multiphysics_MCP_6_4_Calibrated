@@ -96,6 +96,11 @@ python development_kit/scripts/quality_gate.py --artifact-root <artifact-root>
 python development_kit/scripts/release_gate.py
 ```
 
+Use a provisional 10-minute timeout for complete solver-free test, coverage,
+quality, and release-gate runs. Reassess that timeout when the collected test
+count exceeds 2,000; focused test commands should retain narrower proportional
+timeouts.
+
 For a release candidate, use the locked dependency lane from a clean tree:
 
 ```powershell

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import json
 
 import pytest
@@ -222,3 +223,55 @@ def test_partial_or_integrity_blocked_collectors_cannot_form_complete_rows(tmp_p
                 status="ok",
                 collector_summaries=[summary],
             )
+
+
+def test_partial_tail_is_truncated_before_concurrent_safe_append(tmp_path):
+    spec = _spec(tmp_path)
+    path = tmp_path / "rows.jsonl"
+    first = append_validation_row(
+        path,
+        spec,
+        attempt=1,
+        point_id="off",
+        status="ok",
+        collector_summaries=[_summary("off")],
+    )
+    with path.open("ab") as handle:
+        handle.write(b'{"sequence":2')
+
+    second = append_validation_row(
+        path,
+        spec,
+        attempt=1,
+        point_id="target",
+        status="ok",
+        collector_summaries=[_summary("target", "d" * 64)],
+    )
+
+    assert read_validation_rows(path, spec) == [first, second]
+    assert not (tmp_path / ".rows.jsonl.lock").exists()
+
+
+def test_concurrent_validation_appends_form_one_contiguous_chain(tmp_path):
+    spec = _spec(tmp_path)
+    path = tmp_path / "rows.jsonl"
+
+    def append(point_id):
+        return append_validation_row(
+            path,
+            spec,
+            attempt=1,
+            point_id=point_id,
+            status="ok",
+            collector_summaries=[_summary(point_id)],
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        rows = list(pool.map(append, ["off", "target"]))
+
+    replayed = read_validation_rows(path, spec)
+    assert {row["row_sha256"] for row in replayed} == {
+        row["row_sha256"] for row in rows
+    }
+    assert [row["sequence"] for row in replayed] == [1, 2]
+    assert replayed[1]["previous_row_sha256"] == replayed[0]["row_sha256"]

@@ -15,6 +15,7 @@ from comsol_mcp.evidence.spectral_characterization import (
 )
 
 from .spectral_rows import read_spectral_rows
+from .journal import locked_journal, recover_jsonl_tail
 from .store import read_json
 
 
@@ -244,7 +245,7 @@ def _validate_row(
     return row
 
 
-def read_branch_continuation_campaign_states(
+def _read_branch_continuation_campaign_states_unlocked(
     path: str | Path,
     spec: Mapping[str, Any],
     *,
@@ -253,6 +254,9 @@ def read_branch_continuation_campaign_states(
     journal = Path(path)
     if not journal.exists():
         return []
+    recover_jsonl_tail(
+        journal, max_row_bytes=MAX_BRANCH_CONTINUATION_CAMPAIGN_ROW_BYTES
+    )
     if journal.stat().st_size > len(spec["states"]) * MAX_BRANCH_CONTINUATION_CAMPAIGN_ROW_BYTES:
         raise ValueError("branch-continuation campaign state journal exceeds its bound")
     values = [json.loads(line) for line in journal.read_text(encoding="utf-8").splitlines() if line.strip()]
@@ -274,6 +278,19 @@ def read_branch_continuation_campaign_states(
     return result
 
 
+def read_branch_continuation_campaign_states(
+    path: str | Path,
+    spec: Mapping[str, Any],
+    *,
+    artifact_root: str | Path,
+) -> list[dict[str, Any]]:
+    """Read and validate campaign states under their journal lock."""
+    with locked_journal(path) as journal:
+        return _read_branch_continuation_campaign_states_unlocked(
+            journal, spec, artifact_root=artifact_root
+        )
+
+
 def append_branch_continuation_campaign_state(
     path: str | Path,
     spec: Mapping[str, Any],
@@ -283,16 +300,19 @@ def append_branch_continuation_campaign_state(
     artifact_root: str | Path,
 ) -> dict[str, Any]:
     root = Path(artifact_root).resolve()
-    existing = read_branch_continuation_campaign_states(path, spec, artifact_root=root)
-    ordinal = len(existing)
-    if ordinal >= len(spec["states"]):
-        raise ValueError("all declared branch-continuation states are already complete")
-    if isinstance(attempt, bool) or not isinstance(attempt, int) or attempt <= 0:
-        raise ValueError("attempt must be a positive integer")
-    state = spec["states"][ordinal]
-    loaded = _load_state_artifacts(root, Path(state_dir).resolve(), state)
-    summary = loaded["summary"]
-    body = {
+    with locked_journal(path) as journal:
+        existing = _read_branch_continuation_campaign_states_unlocked(
+            journal, spec, artifact_root=root
+        )
+        ordinal = len(existing)
+        if ordinal >= len(spec["states"]):
+            raise ValueError("all declared branch-continuation states are already complete")
+        if isinstance(attempt, bool) or not isinstance(attempt, int) or attempt <= 0:
+            raise ValueError("attempt must be a positive integer")
+        state = spec["states"][ordinal]
+        loaded = _load_state_artifacts(root, Path(state_dir).resolve(), state)
+        summary = loaded["summary"]
+        body = {
         "schema_name": BRANCH_CONTINUATION_CAMPAIGN_STATE_SCHEMA_NAME,
         "schema_version": BRANCH_CONTINUATION_CAMPAIGN_STATE_SCHEMA_VERSION,
         "spec_fingerprint": spec["spec_fingerprint"],
@@ -314,20 +334,20 @@ def append_branch_continuation_campaign_state(
         "mesh_counts": loaded["mesh_counts"],
         "artifacts": loaded["artifacts"],
         "previous_row_sha256": existing[-1]["row_sha256"] if existing else None,
-    }
-    row = {**body, "row_sha256": _fingerprint(body)}
-    if len(_canonical_bytes(row)) > MAX_BRANCH_CONTINUATION_CAMPAIGN_ROW_BYTES:
-        raise ValueError("branch-continuation campaign state row exceeds its bound")
-    journal = Path(path)
-    journal.parent.mkdir(parents=True, exist_ok=True)
-    with journal.open("ab") as handle:
-        handle.write(_canonical_bytes(row) + b"\n")
-        handle.flush()
-        os.fsync(handle.fileno())
-    replayed = read_branch_continuation_campaign_states(path, spec, artifact_root=root)
-    if replayed[-1] != row:
-        raise RuntimeError("branch-continuation campaign state row did not replay after append")
-    return row
+        }
+        row = {**body, "row_sha256": _fingerprint(body)}
+        if len(_canonical_bytes(row)) > MAX_BRANCH_CONTINUATION_CAMPAIGN_ROW_BYTES:
+            raise ValueError("branch-continuation campaign state row exceeds its bound")
+        with journal.open("ab") as handle:
+            handle.write(_canonical_bytes(row) + b"\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        replayed = _read_branch_continuation_campaign_states_unlocked(
+            journal, spec, artifact_root=root
+        )
+        if replayed[-1] != row:
+            raise RuntimeError("branch-continuation campaign state row did not replay after append")
+        return row
 
 
 __all__ = [

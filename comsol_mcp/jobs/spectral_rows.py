@@ -12,6 +12,8 @@ from typing import Any, Mapping
 
 from comsol_mcp.evidence.contracts import validate_physical_evidence
 
+from .journal import locked_journal, recover_jsonl_tail
+
 
 SPECTRAL_ROW_SCHEMA_NAME = "comsol_mcp.durable_spectral_point"
 SPECTRAL_ROW_SCHEMA_VERSION = "1.0.0"
@@ -297,7 +299,7 @@ def _normalize_row(
     return normalized
 
 
-def read_spectral_rows(
+def _read_spectral_rows_unlocked(
     path: str | Path,
     spec: Mapping[str, Any],
     *,
@@ -307,6 +309,7 @@ def read_spectral_rows(
     journal = Path(path)
     if not journal.exists():
         return []
+    recover_jsonl_tail(journal, max_row_bytes=MAX_SPECTRAL_ROW_BYTES)
     root = Path(artifact_root) if artifact_root is not None else None
     rows: list[dict[str, Any]] = []
     previous: str | None = None
@@ -338,6 +341,19 @@ def read_spectral_rows(
     if len(complete) != len(set(complete)):
         raise ValueError("spectral row journal contains a duplicate complete point")
     return rows
+
+
+def read_spectral_rows(
+    path: str | Path,
+    spec: Mapping[str, Any],
+    *,
+    artifact_root: str | Path | None = None,
+) -> list[dict[str, Any]]:
+    """Read and validate every durable row under its journal lock."""
+    with locked_journal(path) as journal:
+        return _read_spectral_rows_unlocked(
+            journal, spec, artifact_root=artifact_root
+        )
 
 
 def completed_spectral_point_fingerprints(
@@ -373,11 +389,16 @@ def append_spectral_row(
     created_at_epoch: float | None = None,
 ) -> dict[str, Any]:
     """Append and fsync one complete raw point only after its artifact validates."""
-    rows = read_spectral_rows(path, spec, artifact_root=artifact_root)
-    identity = spectral_point_identity(spec, requested_wavelength_m)
-    if identity["point_fingerprint"] in {row["point_fingerprint"] for row in rows}:
-        raise ValueError("an exact complete spectral point already exists")
-    row = {
+    with locked_journal(path) as journal:
+        rows = _read_spectral_rows_unlocked(
+            journal, spec, artifact_root=artifact_root
+        )
+        identity = spectral_point_identity(spec, requested_wavelength_m)
+        if identity["point_fingerprint"] in {
+            row["point_fingerprint"] for row in rows
+        }:
+            raise ValueError("an exact complete spectral point already exists")
+        row = {
         "schema_name": SPECTRAL_ROW_SCHEMA_NAME,
         "schema_version": SPECTRAL_ROW_SCHEMA_VERSION,
         "sequence": len(rows) + 1,
@@ -402,27 +423,25 @@ def append_spectral_row(
         "solve_seconds": solve_seconds,
         "audit_artifact": dict(audit_artifact),
         "previous_row_sha256": rows[-1]["row_sha256"] if rows else None,
-    }
-    row["row_sha256"] = _fingerprint(row)
-    normalized = _normalize_row(
-        row,
-        spec=spec,
-        sequence=row["sequence"],
-        previous_row_sha256=row["previous_row_sha256"],
-        artifact_root=Path(artifact_root),
-    )
-    payload = _canonical_bytes(normalized) + b"\n"
-    if len(payload) > MAX_SPECTRAL_ROW_BYTES:
-        raise ValueError("spectral row exceeds its byte limit")
-    if len(rows) >= min(int(spec["maximum_points"]), MAX_SPECTRAL_ROWS):
-        raise ValueError("spectral row journal reached the declared point cap")
-    journal = Path(path)
-    journal.parent.mkdir(parents=True, exist_ok=True)
-    with journal.open("ab") as handle:
-        handle.write(payload)
-        handle.flush()
-        os.fsync(handle.fileno())
-    return normalized
+        }
+        row["row_sha256"] = _fingerprint(row)
+        normalized = _normalize_row(
+            row,
+            spec=spec,
+            sequence=row["sequence"],
+            previous_row_sha256=row["previous_row_sha256"],
+            artifact_root=Path(artifact_root),
+        )
+        payload = _canonical_bytes(normalized) + b"\n"
+        if len(payload) > MAX_SPECTRAL_ROW_BYTES:
+            raise ValueError("spectral row exceeds its byte limit")
+        if len(rows) >= min(int(spec["maximum_points"]), MAX_SPECTRAL_ROWS):
+            raise ValueError("spectral row journal reached the declared point cap")
+        with journal.open("ab") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        return normalized
 
 
 __all__ = [

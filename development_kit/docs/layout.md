@@ -334,6 +334,7 @@ models are intentionally absent.
 - `comsol_mcp/jobs/convergence_campaign_runner.py` — This module composes completed spectral levels with offline convergence evaluation and durable summaries.
 - `comsol_mcp/jobs/convergence_campaign_worker.py` — This worker runs exact-model convergence ladders under one owned COMSOL attempt.
 - `comsol_mcp/jobs/field_review.py` — This module assembles paired validation-matrix field-review artifacts.
+- `comsol_mcp/jobs/journal.py` — This module provides shared process-safe locking and crash-tail recovery for bounded JSONL journals.
 - `comsol_mcp/jobs/manager.py` — This module handles durable job submission, status, cancellation, resume, and reconciliation.
 - `comsol_mcp/jobs/native_cancel_probe.py` — This module inspects allowlisted native cancellation support.
 - `comsol_mcp/jobs/native_cancel_profiles.json` — This file stores exact native cancellation compatibility profiles.

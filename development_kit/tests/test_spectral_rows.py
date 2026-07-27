@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 from pathlib import Path
@@ -239,3 +240,37 @@ def test_one_ulp_wavelength_variants_share_one_canonical_point_identity(tmp_path
 
     assert exact == one_ulp_lower == one_ulp_upper
     assert exact["requested_wavelength_m"] == 5e-6
+
+
+def test_concurrent_appends_are_serialized_and_leave_no_lock(tmp_path):
+    spec = _spec(tmp_path)
+    root = tmp_path / "job"
+    journal = root / "spectral_rows.jsonl"
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        rows = list(
+            pool.map(
+                lambda item: _append(journal, root, spec, *item),
+                [(4e-6, 0.1), (5e-6, 0.8)],
+            )
+        )
+
+    replayed = read_spectral_rows(journal, spec, artifact_root=root)
+    assert {row["row_sha256"] for row in replayed} == {
+        row["row_sha256"] for row in rows
+    }
+    assert [row["sequence"] for row in replayed] == [1, 2]
+    assert replayed[1]["previous_row_sha256"] == replayed[0]["row_sha256"]
+    assert not (root / ".spectral_rows.jsonl.lock").exists()
+
+
+def test_complete_newline_free_tail_is_retained_before_next_append(tmp_path):
+    spec = _spec(tmp_path)
+    root = tmp_path / "job"
+    journal = root / "spectral_rows.jsonl"
+    first = _append(journal, root, spec, 4e-6, 0.1)
+    journal.write_bytes(journal.read_bytes().removesuffix(b"\n"))
+
+    second = _append(journal, root, spec, 5e-6, 0.8)
+
+    assert read_spectral_rows(journal, spec, artifact_root=root) == [first, second]
+    assert journal.read_bytes().endswith(b"\n")

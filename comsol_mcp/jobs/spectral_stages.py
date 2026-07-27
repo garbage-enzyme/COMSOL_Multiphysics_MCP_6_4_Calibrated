@@ -16,6 +16,7 @@ from .spectral_rows import (
     spectral_point_identity,
 )
 from .store import atomic_write_json, read_json
+from .store import JobLock
 
 
 SPECTRAL_STAGE_SCHEMA_NAME = "comsol_mcp.spectral_stage_plan"
@@ -236,7 +237,9 @@ def validate_spectral_stage_plan(
     return deepcopy(rebuilt)
 
 
-def read_spectral_stage_plans(job_dir: str | Path, spec: Mapping[str, Any]) -> list[dict[str, Any]]:
+def _read_spectral_stage_plans_unlocked(
+    job_dir: str | Path, spec: Mapping[str, Any]
+) -> list[dict[str, Any]]:
     """Read one contiguous immutable stage chain from its durable directory."""
     root = Path(job_dir) / "stage_plans"
     if not root.exists():
@@ -274,6 +277,14 @@ def read_spectral_stage_plans(job_dir: str | Path, spec: Mapping[str, Any]) -> l
     return plans
 
 
+def read_spectral_stage_plans(job_dir: str | Path, spec: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Read one contiguous immutable stage chain under its publication lock."""
+    root = Path(job_dir)
+    root.mkdir(parents=True, exist_ok=True)
+    with JobLock(root / ".stage_plans.lock"):
+        return _read_spectral_stage_plans_unlocked(root, spec)
+
+
 def write_spectral_stage_plan(
     job_dir: str | Path,
     spec: Mapping[str, Any],
@@ -281,26 +292,36 @@ def write_spectral_stage_plan(
 ) -> dict[str, Any]:
     """Atomically freeze one next stage; exact replay observes the existing bytes."""
     root = Path(job_dir)
-    existing = read_spectral_stage_plans(root, spec)
-    expected_index = len(existing)
-    previous = existing[-1]["stage_sha256"] if existing else None
-    normalized = validate_spectral_stage_plan(
-        plan,
-        spec,
-        expected_index=expected_index,
-        previous_stage_sha256=previous,
-    )
-    target = root / "stage_plans" / f"{expected_index:03d}.json"
-    if target.exists():
-        observed = read_json(target)
-        if observed != normalized:
-            raise ValueError("existing spectral stage bytes differ from the requested plan")
+    root.mkdir(parents=True, exist_ok=True)
+    with JobLock(root / ".stage_plans.lock"):
+        existing = _read_spectral_stage_plans_unlocked(root, spec)
+        requested_index = plan.get("stage_index")
+        if isinstance(requested_index, bool) or not isinstance(requested_index, int):
+            raise ValueError("spectral stage index is invalid")
+        if requested_index > len(existing):
+            raise ValueError("spectral stage index is not contiguous")
+        previous = (
+            existing[requested_index - 1]["stage_sha256"]
+            if requested_index > 0
+            else None
+        )
+        normalized = validate_spectral_stage_plan(
+            plan,
+            spec,
+            expected_index=requested_index,
+            previous_stage_sha256=previous,
+        )
+        if requested_index < len(existing):
+            observed = existing[requested_index]
+            if observed != normalized:
+                raise ValueError("existing spectral stage bytes differ from the requested plan")
+            return normalized
+        target = root / "stage_plans" / f"{requested_index:03d}.json"
+        atomic_write_json(target, normalized)
+        replayed = _read_spectral_stage_plans_unlocked(root, spec)
+        if replayed[-1] != normalized:
+            raise RuntimeError("spectral stage did not replay after its atomic write")
         return normalized
-    atomic_write_json(target, normalized)
-    replayed = read_spectral_stage_plans(root, spec)
-    if replayed[-1] != normalized:
-        raise RuntimeError("spectral stage did not replay after its atomic write")
-    return normalized
 
 
 __all__ = [

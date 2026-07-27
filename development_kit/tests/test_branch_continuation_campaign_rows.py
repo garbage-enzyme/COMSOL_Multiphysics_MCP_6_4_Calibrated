@@ -106,3 +106,25 @@ def test_changed_campaign_identity_cannot_reuse_state_rows(tmp_path):
     changed["spec_fingerprint"] = "f" * 64
     with pytest.raises(ValueError, match="chain identity"):
         read_branch_continuation_campaign_states(journal, changed, artifact_root=root)
+
+
+def test_partial_campaign_tail_is_removed_before_next_state(tmp_path):
+    spec = normalize_branch_continuation_campaign_spec(_raw_campaign(tmp_path / "sources"))
+    root = tmp_path / "campaign"
+    journal = root / "continuation_states.jsonl"
+    first_dir = _complete_state(spec, root, 0)
+    first = append_branch_continuation_campaign_state(
+        journal, spec, attempt=1, state_dir=first_dir, artifact_root=root
+    )
+    with journal.open("ab") as handle:
+        handle.write(b'{"ordinal":1')
+    second_dir = _complete_state(spec, root, 1)
+
+    second = append_branch_continuation_campaign_state(
+        journal, spec, attempt=1, state_dir=second_dir, artifact_root=root
+    )
+
+    assert read_branch_continuation_campaign_states(
+        journal, spec, artifact_root=root
+    ) == [first, second]
+    assert not (root / ".continuation_states.jsonl.lock").exists()

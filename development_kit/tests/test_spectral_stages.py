@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from concurrent.futures import ThreadPoolExecutor
 import json
 import math
 
@@ -115,6 +116,7 @@ def test_stage_is_atomically_frozen_and_exact_replay_is_idempotent(tmp_path):
     assert write_spectral_stage_plan(job, spec, plan) == plan
     before = (job / "stage_plans" / "000.json").read_bytes()
     assert read_spectral_stage_plans(job, spec) == [plan]
+    assert write_spectral_stage_plan(job, spec, plan) == plan
     assert (job / "stage_plans" / "000.json").read_bytes() == before
 
 
@@ -207,3 +209,40 @@ def test_stage_window_and_endpoint_share_the_same_canonical_precision(tmp_path):
         evidence_row_sha256="b" * 64,
     )
     assert plan["window"]["upper_m"] == plan["requested_wavelengths_m"][0]
+
+
+def test_concurrent_different_next_stages_cannot_overwrite(tmp_path):
+    spec = _spec(tmp_path)
+    job = tmp_path / "job"
+    initial = write_spectral_stage_plan(job, spec, build_initial_spectral_stage(spec))
+
+    def candidate(wavelength):
+        return build_spectral_stage_plan(
+            spec,
+            stage_index=1,
+            stage_kind="refinement",
+            planning_reason="measured_candidate_refinement",
+            window_lower_m=4.0e-6,
+            window_upper_m=4.4e-6,
+            requested_wavelengths_m=[wavelength],
+            previous_stage_sha256=initial["stage_sha256"],
+            evidence_row_sha256="b" * 64,
+        )
+
+    candidates = [candidate(4.1e-6), candidate(4.2e-6)]
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [
+            pool.submit(write_spectral_stage_plan, job, spec, plan)
+            for plan in candidates
+        ]
+    outcomes = []
+    for future in futures:
+        try:
+            outcomes.append(future.result())
+        except ValueError as exc:
+            assert "existing spectral stage bytes differ" in str(exc)
+
+    replayed = read_spectral_stage_plans(job, spec)
+    assert len(outcomes) == 1
+    assert replayed == [initial, outcomes[0]]
+    assert not (job / ".stage_plans.lock").exists()

@@ -10,6 +10,8 @@ from pathlib import Path, PurePosixPath
 import time
 from typing import Any, Mapping
 
+from .journal import locked_journal, recover_jsonl_tail
+
 
 VALIDATION_ROW_SCHEMA_VERSION = "1.0.0"
 MAX_VALIDATION_ROWS = 256
@@ -224,11 +226,14 @@ def _normalize_row(
     return normalized
 
 
-def read_validation_rows(path: str | Path, spec: Mapping[str, Any]) -> list[dict[str, Any]]:
+def _read_validation_rows_unlocked(
+    path: str | Path, spec: Mapping[str, Any]
+) -> list[dict[str, Any]]:
     """Read and validate the bounded row journal and its exact identity chain."""
     journal = Path(path)
     if not journal.exists():
         return []
+    recover_jsonl_tail(journal, max_row_bytes=MAX_VALIDATION_ROW_BYTES)
     rows: list[dict[str, Any]] = []
     previous: str | None = None
     with journal.open("r", encoding="utf-8") as handle:
@@ -252,6 +257,12 @@ def read_validation_rows(path: str | Path, spec: Mapping[str, Any]) -> list[dict
             rows.append(row)
             previous = row["row_sha256"]
     return rows
+
+
+def read_validation_rows(path: str | Path, spec: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Read and validate the bounded row journal under its lock."""
+    with locked_journal(path) as journal:
+        return _read_validation_rows_unlocked(journal, spec)
 
 
 def completed_point_fingerprints(
@@ -279,16 +290,17 @@ def append_validation_row(
     """Append one hashed row, flushing and fsyncing before it becomes resumable."""
     if isinstance(attempt, bool) or not isinstance(attempt, int) or attempt <= 0:
         raise ValueError("attempt must be a positive integer")
-    rows = read_validation_rows(path, spec)
-    points = _point_map(spec)
-    if point_id not in points:
-        raise ValueError("point_id is not declared by the immutable job")
-    point = points[point_id]
-    if status == "ok" and point["point_fingerprint"] in {
-        row["point_fingerprint"] for row in rows if row["status"] == "ok"
-    }:
-        raise ValueError("an exact complete validation row already exists")
-    row = {
+    with locked_journal(path) as journal:
+        rows = _read_validation_rows_unlocked(journal, spec)
+        points = _point_map(spec)
+        if point_id not in points:
+            raise ValueError("point_id is not declared by the immutable job")
+        point = points[point_id]
+        if status == "ok" and point["point_fingerprint"] in {
+            row["point_fingerprint"] for row in rows if row["status"] == "ok"
+        }:
+            raise ValueError("an exact complete validation row already exists")
+        row = {
         "schema_version": VALIDATION_ROW_SCHEMA_VERSION,
         "sequence": len(rows) + 1,
         "attempt": attempt,
@@ -302,26 +314,24 @@ def append_validation_row(
         "collector_summaries": list(collector_summaries or []),
         "error": error,
         "previous_row_sha256": rows[-1]["row_sha256"] if rows else None,
-    }
-    row["row_sha256"] = _fingerprint(row)
-    normalized = _normalize_row(
-        row,
-        spec=spec,
-        sequence=row["sequence"],
-        previous_row_sha256=row["previous_row_sha256"],
-    )
-    payload = _canonical_bytes(normalized) + b"\n"
-    if len(payload) > MAX_VALIDATION_ROW_BYTES:
-        raise ValueError("validation row exceeds its byte limit")
-    if len(rows) >= MAX_VALIDATION_ROWS:
-        raise ValueError("validation row journal exceeds its entry limit")
-    journal = Path(path)
-    journal.parent.mkdir(parents=True, exist_ok=True)
-    with journal.open("ab") as handle:
-        handle.write(payload)
-        handle.flush()
-        os.fsync(handle.fileno())
-    return normalized
+        }
+        row["row_sha256"] = _fingerprint(row)
+        normalized = _normalize_row(
+            row,
+            spec=spec,
+            sequence=row["sequence"],
+            previous_row_sha256=row["previous_row_sha256"],
+        )
+        payload = _canonical_bytes(normalized) + b"\n"
+        if len(payload) > MAX_VALIDATION_ROW_BYTES:
+            raise ValueError("validation row exceeds its byte limit")
+        if len(rows) >= MAX_VALIDATION_ROWS:
+            raise ValueError("validation row journal exceeds its entry limit")
+        with journal.open("ab") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        return normalized
 
 
 __all__ = [
