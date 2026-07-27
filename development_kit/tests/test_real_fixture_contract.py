@@ -73,6 +73,33 @@ def test_fixture_environment_fails_closed_on_missing_or_ambiguous_metadata(tmp_p
         controlled_fixture_from_environment(environment)
 
 
+@pytest.mark.parametrize("value", [True, "5.292"])
+def test_reference_power_spec_rejects_coercive_wavelength_values(tmp_path, value):
+    path = _spec(tmp_path)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["wavelength"]["value"] = value
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="must be numeric"):
+        controlled_fixture_environment_from_reference_power_spec(path, base_environment={})
+
+
+@pytest.mark.parametrize("value", [True, "0", None, [], {}])
+def test_fixture_coordinate_bounds_require_strict_json_numbers(tmp_path, value):
+    environment = controlled_fixture_environment_from_reference_power_spec(
+        _spec(tmp_path), base_environment={}
+    )
+    coordinate_range = json.loads(environment[RANGE_ENV])
+    coordinate_range["x"][0] = value
+    environment[RANGE_ENV] = json.dumps(coordinate_range)
+
+    with pytest.raises(
+        ValueError,
+        match=r"COMSOL_REAL_TEST_TOP_AIR_COORDINATE_RANGE.x\[0\] must be numeric",
+    ):
+        controlled_fixture_from_environment(environment)
+
+
 def test_real_probe_sources_contain_no_private_model_defaults():
     probes = (
         "development_kit/tests/integration/durable_cancel_acceptance.py",

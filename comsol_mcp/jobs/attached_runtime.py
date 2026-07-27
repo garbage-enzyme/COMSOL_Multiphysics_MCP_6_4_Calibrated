@@ -14,6 +14,7 @@ from comsol_mcp.shared_session.locking import (
     build_shared_model_revision,
     normalize_shared_model_identity,
 )
+from comsol_mcp.utils.validation import strict_json_integer
 
 from .attached_backend import normalize_attached_execution_backend
 
@@ -98,7 +99,11 @@ def verify_attached_model_revision(
     """Compare a fresh bounded readback against the persisted initial revision."""
     current = build_shared_model_revision(
         target.model,
-        sequence=int(target.expected_revision["sequence"]),
+        sequence=strict_json_integer(
+            target.expected_revision["sequence"],
+            "expected_revision.sequence",
+            minimum=0,
+        ),
         structural_readback=structural_readback,
         state_readback=state_readback,
     )

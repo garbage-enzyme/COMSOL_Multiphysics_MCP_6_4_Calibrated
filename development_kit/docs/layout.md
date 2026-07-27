@@ -430,4 +430,5 @@ models are intentionally absent.
 - `comsol_mcp/utils/__init__.py` — This file exports shared utility functions.
 - `comsol_mcp/utils/control_plane.py` — This module attaches bounded latency and outcome evidence to control calls.
 - `comsol_mcp/utils/runtime_paths.py` — This module defines shared ASCII-safe runtime artifact locations.
+- `comsol_mcp/utils/validation.py` — This module provides strict dependency-free JSON scalar validation.
 - `comsol_mcp/utils/versioning.py` — This module creates and parses versioned model filenames.

@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
-import math
 import os
 from pathlib import Path
 from typing import Any, Mapping
+
+from comsol_mcp.utils.validation import strict_json_number
 
 
 MODEL_ENV = "COMSOL_REAL_TEST_MODEL"
@@ -16,13 +17,17 @@ RANGE_ENV = "COMSOL_REAL_TEST_TOP_AIR_COORDINATE_RANGE"
 
 
 def _positive_wavelength(value: Any) -> float:
+    return strict_json_number(value, WAVELENGTH_ENV, positive=True)
+
+
+def _environment_wavelength(value: Any) -> float:
+    if not isinstance(value, str):
+        raise ValueError(f"{WAVELENGTH_ENV} must be numeric")
     try:
-        result = float(value)
-    except (TypeError, ValueError) as exc:
+        parsed = float(value)
+    except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError(f"{WAVELENGTH_ENV} must be numeric") from exc
-    if not math.isfinite(result) or result <= 0:
-        raise ValueError(f"{WAVELENGTH_ENV} must be finite and positive")
-    return result
+    return _positive_wavelength(parsed)
 
 
 def _domains(value: Any) -> list[int]:
@@ -43,8 +48,9 @@ def _coordinate_range(value: Any) -> dict[str, list[float]]:
         bounds = value[axis]
         if not isinstance(bounds, list) or len(bounds) != 2:
             raise ValueError(f"{RANGE_ENV}.{axis} must contain two numbers")
-        low, high = (float(bounds[0]), float(bounds[1]))
-        if not math.isfinite(low) or not math.isfinite(high) or low > high:
+        low = strict_json_number(bounds[0], f"{RANGE_ENV}.{axis}[0]")
+        high = strict_json_number(bounds[1], f"{RANGE_ENV}.{axis}[1]")
+        if low > high:
             raise ValueError(f"{RANGE_ENV}.{axis} is invalid")
         result[axis] = [low, high]
     return result
@@ -71,7 +77,7 @@ def controlled_fixture_from_environment(
     return {
         "name": "current_controlled_fixture",
         "source": source,
-        "wavelength_um": _positive_wavelength(values[WAVELENGTH_ENV]),
+        "wavelength_um": _environment_wavelength(values[WAVELENGTH_ENV]),
         "top_air_domain_ids": _domains(domains_raw),
         "top_air_coordinate_range": _coordinate_range(range_raw),
     }

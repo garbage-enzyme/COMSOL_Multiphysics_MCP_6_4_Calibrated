@@ -155,6 +155,31 @@ def test_policy_rejects_unknown_nonfinite_and_hash_mismatch():
         validate_validation_policy(mismatch)
 
 
+@pytest.mark.parametrize("value", [True, "0", 10**400])
+def test_policy_rejects_coercive_or_overflowing_numeric_tolerances(value):
+    policy = _policy(
+        "passive_rta_bounds",
+        tolerances={"margin": 0.0},
+        assumptions={"passive": True, "power_normalized": True},
+    )
+    policy["rules"][0]["tolerances"]["margin"] = value
+
+    with pytest.raises(ValueError, match="numeric|finite"):
+        validate_validation_policy(policy, verify_hash=False)
+
+
+def test_policy_assumptions_require_exact_json_booleans():
+    policy = _policy(
+        "passive_rta_bounds",
+        tolerances={"margin": 0.0},
+        assumptions={"passive": True, "power_normalized": True},
+    )
+    policy["rules"][0]["assumptions"] = {"passive": 1, "power_normalized": 1}
+
+    with pytest.raises(ValueError, match="must be boolean"):
+        validate_validation_policy(policy, verify_hash=False)
+
+
 def test_label_only_or_unknown_required_evidence_cannot_pass_policy():
     policy = _policy("reference_air_polarization_ratio", tolerances={"minimum_ratio": 20.0})
 
@@ -169,6 +194,20 @@ def test_label_only_or_unknown_required_evidence_cannot_pass_policy():
         "polarization.reference_air_method_valid": "label_only",
         "polarization.target_to_transverse_ratio": "label_only"
     }
+
+
+@pytest.mark.parametrize("value", [True, "0.2", 10**400])
+def test_policy_evaluation_rejects_coercive_or_overflowing_measured_numbers(value):
+    payload = deepcopy(_envelope())
+    payload.pop("contract_sha256")
+    payload["evidence"]["power.R"]["value"] = value
+    evidence = build_physical_evidence(payload)
+    policy = _policy("passive_rta_bounds", tolerances={"margin": 0.0})
+
+    result = evaluate_physical_evidence_policy(evidence, policy)
+
+    assert result["overall"] == "missing"
+    assert "invalid shape" in result["rules"][0]["reason"]
 
 
 def _with_evidence_records(envelope, records):

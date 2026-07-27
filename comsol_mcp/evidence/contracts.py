@@ -17,6 +17,11 @@ import re
 from typing import Any, Mapping
 
 from comsol_mcp.durable import canonical_json_v1, canonical_sha256_v1
+from comsol_mcp.utils.validation import (
+    strict_json_boolean,
+    strict_json_integer,
+    strict_json_number,
+)
 
 
 PHYSICAL_EVIDENCE_SCHEMA_NAME = "comsol_mcp.physical_evidence"
@@ -808,13 +813,21 @@ def _validate_rule(rule: Any, index: int) -> dict[str, Any]:
     if rule_type == "wavelength_synchronization" and not tolerances:
         raise ValueError("wavelength_synchronization requires absolute_m and/or relative tolerance")
     for name, value in tolerances.items():
-        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)) or float(value) < 0:
-            raise ValueError(f"validation_policy.rules[{index}].tolerances.{name} must be finite and non-negative")
-        if name == "minimum_elements" and int(value) != value:
-            raise ValueError(f"validation_policy.rules[{index}].tolerances.minimum_elements must be an integer")
+        label = f"validation_policy.rules[{index}].tolerances.{name}"
+        if name == "minimum_elements":
+            strict_json_integer(value, label, minimum=0)
+        else:
+            strict_json_number(value, label, nonnegative=True)
     assumptions = _require_mapping(item.get("assumptions", {}), f"validation_policy.rules[{index}].assumptions")
     _reject_unknown(assumptions, set(spec["assumptions"]), f"validation_policy.rules[{index}].assumptions")
-    if assumptions != spec["assumptions"]:
+    normalized_assumptions = {
+        name: strict_json_boolean(
+            assumptions.get(name),
+            f"validation_policy.rules[{index}].assumptions.{name}",
+        )
+        for name in spec["assumptions"]
+    }
+    if normalized_assumptions != spec["assumptions"]:
         raise ValueError(
             f"validation_policy.rules[{index}].assumptions must exactly equal {spec['assumptions']}"
         )
@@ -896,39 +909,59 @@ def _rule_outcome(rule: Mapping[str, Any], evidence: Mapping[str, Any]) -> dict[
 
     tolerances = rule["tolerances"]
     rule_type = rule["rule_type"]
+
+    def measured_number(name: str) -> float:
+        return strict_json_number(values[name], f"evidence.{name}.value")
+
+    def measured_integer(name: str) -> int:
+        return strict_json_integer(values[name], f"evidence.{name}.value")
+
     try:
         if rule_type == "passive_rta_bounds":
-            margin = float(tolerances["margin"])
-            measured = {name: float(values[f"power.{name}"]) for name in ("R", "T", "A")}
+            margin = strict_json_number(tolerances["margin"], "policy.margin", nonnegative=True)
+            measured = {
+                name: measured_number(f"power.{name}") for name in ("R", "T", "A")
+            }
             passed = all(-margin <= value <= 1.0 + margin for value in measured.values())
             detail = {"measured": measured, "threshold": {"minimum": -margin, "maximum": 1.0 + margin}}
         elif rule_type == "wavelength_synchronization":
-            left = float(values["wavelength.evaluated_parameter_m"])
-            right = float(values["wavelength.solved_frequency_m"])
+            left = measured_number("wavelength.evaluated_parameter_m")
+            right = measured_number("wavelength.solved_frequency_m")
             absolute = abs(left - right)
             relative = None if right == 0 else absolute / abs(right)
             checks = []
             if "absolute_m" in tolerances:
-                checks.append(absolute <= float(tolerances["absolute_m"]))
+                checks.append(
+                    absolute
+                    <= strict_json_number(
+                        tolerances["absolute_m"], "policy.absolute_m", nonnegative=True
+                    )
+                )
             if "relative" in tolerances:
-                checks.append(relative is not None and relative <= float(tolerances["relative"]))
+                checks.append(
+                    relative is not None
+                    and relative
+                    <= strict_json_number(
+                        tolerances["relative"], "policy.relative", nonnegative=True
+                    )
+                )
             passed = all(checks)
             detail = {"measured": {"absolute_m": absolute, "relative": relative}, "threshold": tolerances}
         elif rule_type == "declared_flux_closure":
-            incident_raw = float(values["flux.incident_raw_power_w"])
-            reflected_raw = float(values["flux.reflected_raw_power_w"])
-            transmitted_raw = float(values["flux.transmitted_raw_power_w"])
-            incident_sign = int(values["flux.incident_positive_power_sign"])
-            reflected_sign = int(values["flux.reflected_positive_power_sign"])
-            transmitted_sign = int(values["flux.transmitted_positive_power_sign"])
-            incident = float(values["flux.incident_power_w"])
-            reflected = float(values["flux.reflected_power_w"])
-            transmitted = float(values["flux.transmitted_power_w"])
-            r_value = float(values["flux.R"])
-            t_value = float(values["flux.T"])
-            a_value = float(values["flux.A"])
-            closure = float(values["flux.closure_abs"])
-            margin = float(tolerances["margin"])
+            incident_raw = measured_number("flux.incident_raw_power_w")
+            reflected_raw = measured_number("flux.reflected_raw_power_w")
+            transmitted_raw = measured_number("flux.transmitted_raw_power_w")
+            incident_sign = measured_integer("flux.incident_positive_power_sign")
+            reflected_sign = measured_integer("flux.reflected_positive_power_sign")
+            transmitted_sign = measured_integer("flux.transmitted_positive_power_sign")
+            incident = measured_number("flux.incident_power_w")
+            reflected = measured_number("flux.reflected_power_w")
+            transmitted = measured_number("flux.transmitted_power_w")
+            r_value = measured_number("flux.R")
+            t_value = measured_number("flux.T")
+            a_value = measured_number("flux.A")
+            closure = measured_number("flux.closure_abs")
+            margin = strict_json_number(tolerances["margin"], "policy.margin", nonnegative=True)
             convention_complete = values["flux.convention_complete"] is True
             closure_eligible = values["flux.physical_flux_closure_eligible"] is True
             finite = all(
@@ -972,7 +1005,10 @@ def _rule_outcome(rule: Mapping[str, Any], evidence: Mapping[str, Any]) -> dict[
                 and closure_eligible
                 and passive_bounds
                 and arithmetic_consistent
-                and closure <= float(tolerances["closure_abs"])
+                and closure
+                <= strict_json_number(
+                    tolerances["closure_abs"], "policy.closure_abs", nonnegative=True
+                )
             )
             detail = {
                 "measured": {
@@ -1007,16 +1043,26 @@ def _rule_outcome(rule: Mapping[str, Any], evidence: Mapping[str, Any]) -> dict[
                 },
             }
         elif rule_type == "reference_air_polarization_ratio":
-            ratio = float(values["polarization.target_to_transverse_ratio"])
+            ratio = measured_number("polarization.target_to_transverse_ratio")
             method_valid = values["polarization.reference_air_method_valid"] is True
-            passed = math.isfinite(ratio) and method_valid and ratio >= float(tolerances["minimum_ratio"])
+            passed = (
+                method_valid
+                and ratio
+                >= strict_json_number(
+                    tolerances["minimum_ratio"], "policy.minimum_ratio", nonnegative=True
+                )
+            )
             detail = {
                 "measured": {"target_to_transverse_ratio": ratio, "reference_air_method_valid": method_valid},
                 "threshold": tolerances["minimum_ratio"],
             }
         elif rule_type == "mesh_evidence_presence":
-            count = int(values["mesh.element_count"])
-            minimum = int(tolerances.get("minimum_elements", 1))
+            count = measured_integer("mesh.element_count")
+            minimum = strict_json_integer(
+                tolerances.get("minimum_elements", 1),
+                "policy.minimum_elements",
+                minimum=0,
+            )
             passed = count >= minimum
             detail = {"measured": count, "threshold": minimum}
         else:  # pragma: no cover - guarded by strict validation

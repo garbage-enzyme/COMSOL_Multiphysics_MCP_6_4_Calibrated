@@ -141,6 +141,20 @@ def test_declared_point_time_and_resource_bounds_fail_closed_before_runtime(
         normalize_validation_matrix_spec(spec)
 
 
+@pytest.mark.parametrize("field", ["wavelength", "theta_degrees", "phi_degrees"])
+def test_matrix_numeric_fields_reject_integer_overflow_as_validation_error(tmp_path, field):
+    source = tmp_path / "fixture.mph"
+    source.write_bytes(b"model")
+    point = _point()
+    if field == "wavelength":
+        point["wavelength"]["value"] = 10**400
+    else:
+        point["incidence"][field] = 10**400
+
+    with pytest.raises(ValueError, match="must be finite"):
+        normalize_validation_matrix_spec(_spec(source, points=[point]))
+
+
 def test_duplicate_exact_points_and_artifact_ids_are_rejected(tmp_path):
     source = tmp_path / "fixture.mph"
     source.write_bytes(b"model")

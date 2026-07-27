@@ -273,6 +273,23 @@ def test_attached_runtime_rejects_external_revision_change():
         )
 
 
+@pytest.mark.parametrize("sequence", [True, "0", 0.5])
+def test_attached_revision_verifier_rejects_coercive_sequence_values(sequence):
+    target = normalize_attached_execution_target(_backend())
+    target.expected_revision["sequence"] = sequence
+
+    with pytest.raises(ValueError, match="expected_revision.sequence must be an integer"):
+        verify_attached_model_revision(
+            target,
+            structural_readback={
+                "components": ["comp1"],
+                "studies": ["std1"],
+                "datasets": [],
+            },
+            state_readback={"parameters": {"gap": "10[nm]"}},
+        )
+
+
 def test_attached_production_worker_uses_existing_model_and_never_clears_server(
     ascii_job_root, monkeypatch
 ):
