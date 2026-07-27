@@ -18,6 +18,7 @@ if str(ROOT) not in sys.path:
 from src.tools.ownership import SolverOwnership
 from src.tools.wave_optics_preflight import collect_wave_optics_preflight
 from src.evidence.real_fixture import controlled_fixture_from_environment
+from development_kit.scripts.acceptance_cleanup import CleanupRecorder, lease_released
 
 
 def _sha256(path: Path) -> str:
@@ -119,17 +120,15 @@ def main() -> None:
             })
             client.remove(model)
         result.update(success=True, client={"standalone": client.port is None, "cores": 1})
-        exit_code = 0
     except Exception as exc:
         result["error"] = str(exc)
         result["traceback"] = traceback.format_exc(limit=8)
     finally:
+        cleanup = CleanupRecorder(result)
         if client is not None:
-            try:
-                client.clear()
-            except Exception:
-                pass
-        result["lease_release"] = owner.release()
+            cleanup.run("client_clear", client.clear, expose_result=False)
+        cleanup.run("lease_release", owner.release, passed=lease_released)
+        exit_code = cleanup.finalize()
         manifest_path.write_text(json.dumps(result, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
         print(json.dumps(result, ensure_ascii=False), flush=True)
         os._exit(exit_code)

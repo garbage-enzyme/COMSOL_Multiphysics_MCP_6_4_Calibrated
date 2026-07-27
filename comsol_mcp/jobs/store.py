@@ -459,6 +459,8 @@ class JobStore:
         event: str | None = None,
         event_data: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        if patch and "status" in patch:
+            raise ValueError("status must be changed through new_status")
         with self.lock(job_id):
             state = self.read_state(job_id)
             current = str(state.get("status"))

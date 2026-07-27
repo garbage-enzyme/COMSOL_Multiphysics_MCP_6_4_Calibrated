@@ -80,6 +80,7 @@ models are intentionally absent.
 ## Development and release scripts
 
 - `development_kit/scripts/__init__.py` — This file marks repository-only release utilities as a Python package.
+- `development_kit/scripts/acceptance_cleanup.py` — This module records independent licensed-gate cleanup steps and makes them part of final success.
 - `development_kit/scripts/dependency_license_gate.py` — This script emits a path-free receipt and fails on expired, missing, stale, or unmatched runtime dependency license reviews.
 - `development_kit/scripts/quality_gate.py` — This script runs the ratcheted lint, format, typing, property, coverage, license, cold-start, and response-budget gates.
 - `development_kit/scripts/generate_release_lock.py` — This script generates the complete hashed Windows Python release lock.
@@ -133,6 +134,7 @@ models are intentionally absent.
 
 ## Dependency and process tests
 
+- `development_kit/tests/test_acceptance_cleanup.py` — This module tests licensed-gate cleanup accounting without starting COMSOL.
 - `development_kit/tests/test_artifact_chain.py` — This module tests bounded solver-free artifact hash-chain verification.
 - `development_kit/tests/test_acdc_differential_coils_recipe.py` — This module tests static portability and input contracts for the differential-coil recipe.
 - `development_kit/tests/test_attached_job_backend.py` — This module tests immutable attached-job targets, handoff, worker execution, resume, cancellation, and preservation.

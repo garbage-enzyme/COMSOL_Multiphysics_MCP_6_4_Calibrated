@@ -26,6 +26,7 @@ from src.tools.derived_geometry import (
     preview_fin,
 )
 from src.tools.ownership import SolverOwnership
+from development_kit.scripts.acceptance_cleanup import CleanupRecorder, lease_released
 
 
 def _sha256(path: Path) -> str:
@@ -136,31 +137,32 @@ def main() -> None:
             blocks=block_result,
             explicit_post_edit_build=counts,
         )
-        exit_code = 0
     except Exception as exc:
         result["error"] = str(exc)
         result["traceback"] = traceback.format_exc(limit=10)
     finally:
+        cleanup = CleanupRecorder(result)
         if client is not None:
-            for model in (clone, source):
-                if model is not None:
-                    try:
-                        client.remove(model)
-                    except Exception:
-                        pass
-            try:
-                client.clear()
-            except Exception:
-                pass
+            if clone is not None:
+                cleanup.run(
+                    "clone_remove", lambda: client.remove(clone), expose_result=False
+                )
+            if source is not None:
+                cleanup.run(
+                    "source_remove", lambda: client.remove(source), expose_result=False
+                )
+            cleanup.run("client_clear", client.clear, expose_result=False)
         if record is not None:
             backing = Path(record.backing_path)
-            backing.unlink(missing_ok=True)
-            try:
+
+            def remove_backing() -> bool:
+                backing.unlink(missing_ok=True)
                 backing.parent.rmdir()
-            except OSError:
-                pass
-            result["derived_cleanup"] = not backing.exists() and not backing.parent.exists()
-        result["lease_release"] = owner.release()
+                return not backing.exists() and not backing.parent.exists()
+
+            cleanup.run("derived_cleanup", remove_backing, passed=lambda value: value is True)
+        cleanup.run("lease_release", owner.release, passed=lease_released)
+        exit_code = cleanup.finalize()
         result_path.write_text(json.dumps(result, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
         print(json.dumps(result, ensure_ascii=False), flush=True)
         os._exit(exit_code)

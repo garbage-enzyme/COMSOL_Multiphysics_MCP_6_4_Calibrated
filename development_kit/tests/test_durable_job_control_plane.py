@@ -758,6 +758,19 @@ def test_completed_state_is_immutable(jobs_root):
         manager.store.update_state(result["job_id"], patch={"last_error": {"message": "rewrite"}})
 
 
+def test_state_patch_cannot_bypass_transition_validation(jobs_root):
+    store = JobStore(jobs_root)
+    job_id = store.create(
+        {"schema_version": "1", "job_type": "test"},
+        {"schema_version": "1", "status": "submitted"},
+    )
+
+    with pytest.raises(ValueError, match="new_status"):
+        store.update_state(job_id, patch={"status": "completed"})
+
+    assert store.read_state(job_id)["status"] == "submitted"
+
+
 def test_lock_removes_only_proven_stale_identity(jobs_root):
     store = JobStore(jobs_root)
     job_id = store.create(
