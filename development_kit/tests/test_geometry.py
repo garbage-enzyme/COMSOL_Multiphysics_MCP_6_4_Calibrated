@@ -56,6 +56,9 @@ class FakeFeatureList:
     def get(self, tag):
         return self.features[tag][1]
 
+    def remove(self, tag):
+        del self.features[tag]
+
 
 class JavaStringLike:
     def __init__(self, value):
@@ -137,7 +140,7 @@ def test_add_geometry_feature_uses_first_clientapi_geometry():
     assert feature.properties["size"] == ["1", "2", "3"]
 
 
-def test_add_geometry_feature_reports_property_errors():
+def test_add_geometry_feature_rolls_back_property_errors():
     geometry = FakeGeometry(failing_property="bad")
     model = FakeModel(geometry)
 
@@ -148,9 +151,27 @@ def test_add_geometry_feature_reports_property_errors():
         properties={"r": "1", "bad": "value"},
     )
 
-    assert result["success"] is True
+    assert result["success"] is False
     assert result["property_errors"] == {"bad": "unsupported property"}
-    assert "warning" in result
+    assert result["rolled_back"] is True
+    assert "sph1" not in geometry.features.features
+
+
+def test_add_geometry_feature_chooses_first_unused_tag_and_rejects_collision():
+    geometry = FakeGeometry()
+    geometry.features.create("feat1", "Block")
+    geometry.features.create("feat3", "Sphere")
+
+    created = add_geometry_feature(FakeModel(geometry), "Cylinder")
+    collision = add_geometry_feature(
+        FakeModel(geometry), "Cylinder", feature_name="feat1"
+    )
+
+    assert created["feature"]["name"] == "feat2"
+    assert collision == {
+        "success": False,
+        "error": "Feature tag already exists: feat1",
+    }
 
 
 def test_add_geometry_feature_validates_type():

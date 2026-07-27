@@ -62,7 +62,16 @@ def add_geometry_feature(
         return {"success": False, "error": error}
 
     feature_list = geom.feature()
-    tag = feature_name or f"feat{feature_list.size() + 1}"
+    existing_tags = {str(item) for item in list(feature_list.tags())}
+    if feature_name:
+        tag = feature_name
+        if tag in existing_tags:
+            return {"success": False, "error": f"Feature tag already exists: {tag}"}
+    else:
+        index = 1
+        while f"feat{index}" in existing_tags:
+            index += 1
+        tag = f"feat{index}"
     feature = feature_list.create(tag, feature_type)
     property_errors = {}
     for name, value in normalized_properties.items():
@@ -71,7 +80,24 @@ def add_geometry_feature(
         except Exception as exc:
             property_errors[name] = str(exc)
 
-    result = {
+    if property_errors:
+        try:
+            feature_list.remove(tag)
+        except Exception:
+            return {
+                "success": False,
+                "error": "Feature properties failed and rollback was incomplete.",
+                "property_errors": property_errors,
+                "rolled_back": False,
+            }
+        return {
+            "success": False,
+            "error": "Feature properties could not be applied.",
+            "property_errors": property_errors,
+            "rolled_back": True,
+        }
+
+    return {
         "success": True,
         "feature": {
             "name": tag,
@@ -80,10 +106,6 @@ def add_geometry_feature(
             "component": component_name,
         },
     }
-    if property_errors:
-        result["warning"] = "Feature created, but some properties could not be set."
-        result["property_errors"] = property_errors
-    return result
 
 
 def list_geometry_features(

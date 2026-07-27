@@ -57,6 +57,13 @@ def test_same_evidence_can_fail_or_pass_two_declared_policies():
     assert evidence["power"]["closure_abs"] == 0.05
 
 
+def test_empty_legacy_policy_cannot_produce_a_pass_verdict():
+    result = evaluate_validation_policy(_measurement(), {})
+
+    assert result["overall"] == "missing"
+    assert result["rules"] == []
+
+
 def test_a_above_one_is_classified_only_under_passive_normalized_assumptions():
     evidence = _measurement()
     passive = evaluate_validation_policy(

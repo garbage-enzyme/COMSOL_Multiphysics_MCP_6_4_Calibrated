@@ -450,7 +450,15 @@ def evaluate_validation_policy(measurement: dict[str, Any], policy: dict[str, An
         rules.append(_policy_rule("mesh.require_unchanged", "pass" if measured is True else ("fail" if measured is False else "missing"), measured=measured, threshold=True))
 
     outcomes = [rule["outcome"] for rule in rules]
-    overall = "fail" if "fail" in outcomes else ("missing" if "missing" in outcomes else "pass")
+    overall = (
+        "missing"
+        if not outcomes
+        else "fail"
+        if "fail" in outcomes
+        else "missing"
+        if "missing" in outcomes
+        else "pass"
+    )
     return {"mode": "explicit_policy", "overall": overall, "rules": rules, "policy_sha256": _canonical_hash(policy)}
 
 

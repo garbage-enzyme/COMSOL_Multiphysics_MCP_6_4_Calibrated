@@ -96,6 +96,21 @@ def test_tool_specs_are_the_validated_canonical_registry():
         assert dict(spec.structural_limits)["response_bytes"] > 0
 
 
+def test_new_tool_without_explicit_side_effect_class_fails_closed(monkeypatch):
+    from src.tools import catalog
+
+    registrars = dict(catalog._TOOLS_BY_REGISTRAR)
+    registrar = next(iter(registrars))
+    monkeypatch.setattr(
+        catalog,
+        "_TOOLS_BY_REGISTRAR",
+        {**registrars, registrar: (*registrars[registrar], "unclassified_tool")},
+    )
+
+    with pytest.raises(ValueError, match="no explicit side-effect classification"):
+        catalog._build_registry()
+
+
 def test_profile_registrar_selection_is_derived_from_tool_specs():
     core = registrars_for_profile("core")
     full = registrars_for_profile("full")
