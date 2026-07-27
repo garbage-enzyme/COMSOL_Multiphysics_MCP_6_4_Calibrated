@@ -7,6 +7,7 @@ import hashlib
 import io
 import json
 import os
+import stat
 import time
 import uuid
 from pathlib import Path
@@ -17,6 +18,48 @@ from .canonical import validate_finite_json
 DEFAULT_REPLACE_RETRY_SECONDS = 1.0
 DEFAULT_MAX_JSONL_BYTES = 256 * 1024 * 1024
 WriteStageHook = Callable[[str, Path], None]
+
+
+class _FileSizeLimitError(ValueError):
+    pass
+
+
+def _open_regular_file_descriptor(path: str | Path) -> tuple[int, os.stat_result]:
+    candidate = Path(path)
+    before = os.stat(candidate, follow_symlinks=False)
+    if not stat.S_ISREG(before.st_mode):
+        raise ValueError("bounded reading requires a regular file without links")
+    flags = os.O_RDONLY
+    for name in ("O_BINARY", "O_NOINHERIT", "O_NONBLOCK", "O_NOFOLLOW"):
+        flags |= getattr(os, name, 0)
+    descriptor = os.open(candidate, flags)
+    try:
+        opened = os.fstat(descriptor)
+        if not stat.S_ISREG(opened.st_mode):
+            raise ValueError("bounded reading requires a regular file")
+        if (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino):
+            raise ValueError("file identity changed before bounded reading")
+        return descriptor, opened
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def read_file_bytes_bounded(path: str | Path, *, max_bytes: int) -> bytes:
+    """Read at most one regular file's declared byte limit from one descriptor."""
+    if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or max_bytes < 0:
+        raise ValueError("max_bytes must be a non-negative integer")
+    descriptor, opened = _open_regular_file_descriptor(path)
+    try:
+        if opened.st_size > max_bytes:
+            raise _FileSizeLimitError("file exceeds the declared reading limit")
+        with os.fdopen(descriptor, "rb", closefd=False) as handle:
+            data = handle.read(max_bytes + 1)
+        if len(data) > max_bytes:
+            raise _FileSizeLimitError("file grew beyond the declared reading limit")
+        return data
+    finally:
+        os.close(descriptor)
 
 
 def _notify(hook: WriteStageHook | None, stage: str, path: Path) -> None:
@@ -42,24 +85,24 @@ def sha256_file_bounded(
     chunk_bytes: int = 1024 * 1024,
 ) -> dict[str, Any]:
     """Hash one regular file while refusing a caller-declared size overflow."""
-    candidate = Path(path)
     if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or max_bytes < 0:
         raise ValueError("max_bytes must be a non-negative integer")
     if isinstance(chunk_bytes, bool) or not isinstance(chunk_bytes, int) or chunk_bytes < 1:
         raise ValueError("chunk_bytes must be a positive integer")
-    stat = candidate.stat()
-    if not candidate.is_file():
-        raise ValueError("bounded hashing requires a regular file")
-    if stat.st_size > max_bytes:
-        raise ValueError("file exceeds the declared hashing limit")
+    descriptor, opened = _open_regular_file_descriptor(path)
     digest = hashlib.sha256()
     observed = 0
-    with candidate.open("rb") as handle:
-        while block := handle.read(min(chunk_bytes, max_bytes - observed + 1)):
-            observed += len(block)
-            if observed > max_bytes:
-                raise ValueError("file grew beyond the declared hashing limit")
-            digest.update(block)
+    try:
+        if opened.st_size > max_bytes:
+            raise ValueError("file exceeds the declared hashing limit")
+        with os.fdopen(descriptor, "rb", closefd=False) as handle:
+            while block := handle.read(min(chunk_bytes, max_bytes - observed + 1)):
+                observed += len(block)
+                if observed > max_bytes:
+                    raise ValueError("file grew beyond the declared hashing limit")
+                digest.update(block)
+    finally:
+        os.close(descriptor)
     return {"sha256": digest.hexdigest(), "byte_count": observed}
 
 
@@ -204,8 +247,9 @@ def read_complete_jsonl(
     candidate = Path(path)
     if not candidate.exists():
         return {"state": "absent", "records": [], "complete_byte_count": 0}
-    data = candidate.read_bytes()
-    if len(data) > max_bytes:
+    try:
+        data = read_file_bytes_bounded(candidate, max_bytes=max_bytes)
+    except _FileSizeLimitError:
         return {"state": "oversized", "records": [], "complete_byte_count": 0}
     complete_end = data.rfind(b"\n") + 1
     complete = data[:complete_end]
@@ -255,6 +299,7 @@ __all__ = [
     "atomic_write_json",
     "fsync_directory",
     "json_document_bytes",
+    "read_file_bytes_bounded",
     "read_complete_jsonl",
     "sha256_file_bounded",
 ]

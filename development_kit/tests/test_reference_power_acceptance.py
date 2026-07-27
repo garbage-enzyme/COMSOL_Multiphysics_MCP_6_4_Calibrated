@@ -13,6 +13,7 @@ import pytest
 
 from src.evidence.reference_power_acceptance import (
     build_reference_power_dry_run_receipt,
+    load_bounded_json,
     validate_reference_power_acceptance_contract,
     validate_reference_power_execution_spec,
 )
@@ -101,6 +102,22 @@ def test_execution_spec_normalizes_exact_declarations_and_redacts_paths(tmp_path
     assert receipt["paths_redacted"] is True
     assert "source_model_path" not in receipt
     assert "artifact_dir" not in receipt
+
+
+def test_execution_spec_hashes_source_incrementally_under_contract_limit(tmp_path):
+    contract = _contract()
+    contract["limits"]["max_artifact_bytes"] = 4
+
+    with pytest.raises(ValueError, match="hashing limit"):
+        validate_reference_power_execution_spec(_spec(tmp_path), contract, verify_files=True)
+
+
+def test_bounded_json_reads_limit_plus_one_from_one_descriptor(tmp_path):
+    path = tmp_path / "input.json"
+    path.write_bytes(b'{"value":"0123456789"}')
+
+    with pytest.raises(ValueError, match="exceeds 8 bytes"):
+        load_bounded_json(path, 8)
 
 
 @pytest.mark.parametrize(

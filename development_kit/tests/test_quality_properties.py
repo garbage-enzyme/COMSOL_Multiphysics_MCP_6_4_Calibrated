@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import tempfile
 from dataclasses import replace
-from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -343,20 +343,21 @@ def test_bounded_hash_rejects_directories_and_growth(
     with pytest.raises(ValueError, match="regular file"):
         durable_io.sha256_file_bounded(tmp_path, max_bytes=1)
 
-    class GrowingFile:
-        def stat(self) -> SimpleNamespace:
-            return SimpleNamespace(st_size=1)
-
-        def is_file(self) -> bool:
-            return True
-
-        def open(self, mode: str) -> BytesIO:
-            assert mode == "rb"
-            return BytesIO(b"ab")
-
-    monkeypatch.setattr(durable_io, "Path", lambda _value: GrowingFile())
+    growing = tmp_path / "growing.bin"
+    growing.write_bytes(b"ab")
+    opened = os.stat(growing)
+    monkeypatch.setattr(
+        durable_io.os,
+        "fstat",
+        lambda _descriptor: SimpleNamespace(
+            st_mode=opened.st_mode,
+            st_dev=opened.st_dev,
+            st_ino=opened.st_ino,
+            st_size=1,
+        ),
+    )
     with pytest.raises(ValueError, match="grew"):
-        durable_io.sha256_file_bounded("ignored", max_bytes=1)
+        durable_io.sha256_file_bounded(growing, max_bytes=1)
 
 
 def test_atomic_write_validates_payload_retries_and_compact_names(

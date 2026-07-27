@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 from src.settings import (
+    MAX_SETTINGS_BYTES,
     SETTINGS_PATH_ENV,
     SETTINGS_SCHEMA,
     SETTINGS_VERSION,
@@ -104,6 +105,16 @@ def test_malformed_json_falls_back_to_the_complete_safe_defaults(tmp_path):
     assert status["configuration_state"] == "degraded"
     assert status["reason_code"] == "settings_json_invalid"
     assert status["settings_errors"][0]["path"] == "settings"
+
+
+def test_oversized_settings_fall_back_without_unbounded_read(tmp_path):
+    path = tmp_path / "oversized.json"
+    path.write_bytes(b"{" + b" " * MAX_SETTINGS_BYTES + b"}")
+
+    status = settings_status({SETTINGS_PATH_ENV: str(path)})
+
+    assert status["configuration_state"] == "degraded"
+    assert status["reason_code"] == "settings_size_invalid"
 
 
 def test_project_settings_fill_legacy_runtime_shape_for_existing_callers(tmp_path):

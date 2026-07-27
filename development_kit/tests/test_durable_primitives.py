@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+import os
+from types import SimpleNamespace
 
 import pytest
 from src.durable import (
@@ -13,8 +15,11 @@ from src.durable import (
     canonical_sha256_v1,
     domain_sha256_v2,
     read_complete_jsonl,
+    read_file_bytes_bounded,
     sha256_file_bounded,
 )
+
+import comsol_mcp.durable.io as durable_io
 
 
 def test_legacy_canonical_bytes_and_hash_are_golden_and_order_independent():
@@ -53,6 +58,80 @@ def test_bounded_file_hash_reports_exact_bytes_and_refuses_overflow(tmp_path):
     }
     with pytest.raises(ValueError, match="hashing limit"):
         sha256_file_bounded(path, max_bytes=16)
+
+
+def test_bounded_reader_refuses_oversized_and_nonregular_inputs(tmp_path):
+    path = tmp_path / "input.bin"
+    path.write_bytes(b"limit-plus-one")
+
+    with pytest.raises(ValueError, match="reading limit"):
+        read_file_bytes_bounded(path, max_bytes=len(b"limit-plus-one") - 1)
+    with pytest.raises(ValueError, match="regular"):
+        read_file_bytes_bounded(tmp_path, max_bytes=64)
+
+
+@pytest.mark.parametrize("maximum", [True, -1, 1.5])
+def test_bounded_reader_rejects_invalid_limits(tmp_path, maximum):
+    path = tmp_path / "input.bin"
+    path.write_bytes(b"input")
+
+    with pytest.raises(ValueError, match="max_bytes"):
+        read_file_bytes_bounded(path, max_bytes=maximum)  # type: ignore[arg-type]
+
+
+def test_bounded_reader_rejects_nonregular_opened_descriptor(tmp_path, monkeypatch):
+    path = tmp_path / "input.bin"
+    path.write_bytes(b"input")
+    opened = os.stat(path)
+    monkeypatch.setattr(
+        durable_io.os,
+        "fstat",
+        lambda _descriptor: SimpleNamespace(
+            st_mode=durable_io.stat.S_IFDIR,
+            st_dev=opened.st_dev,
+            st_ino=opened.st_ino,
+            st_size=opened.st_size,
+        ),
+    )
+
+    with pytest.raises(ValueError, match="regular file"):
+        read_file_bytes_bounded(path, max_bytes=64)
+
+
+def test_bounded_reader_detects_growth_after_open(tmp_path, monkeypatch):
+    path = tmp_path / "growing.bin"
+    path.write_bytes(b"ab")
+    opened = os.stat(path)
+    monkeypatch.setattr(
+        durable_io.os,
+        "fstat",
+        lambda _descriptor: SimpleNamespace(
+            st_mode=opened.st_mode,
+            st_dev=opened.st_dev,
+            st_ino=opened.st_ino,
+            st_size=1,
+        ),
+    )
+
+    with pytest.raises(ValueError, match="grew"):
+        read_file_bytes_bounded(path, max_bytes=1)
+
+
+def test_bounded_reader_binds_precheck_to_opened_file_identity(tmp_path, monkeypatch):
+    path = tmp_path / "input.bin"
+    replacement = tmp_path / "replacement.bin"
+    path.write_bytes(b"first")
+    replacement.write_bytes(b"second")
+    real_open = durable_io.os.open
+
+    def replace_then_open(candidate, flags):
+        os.replace(replacement, path)
+        return real_open(candidate, flags)
+
+    monkeypatch.setattr(durable_io.os, "open", replace_then_open)
+
+    with pytest.raises(ValueError, match="identity changed"):
+        read_file_bytes_bounded(path, max_bytes=64)
 
 
 @pytest.mark.parametrize(

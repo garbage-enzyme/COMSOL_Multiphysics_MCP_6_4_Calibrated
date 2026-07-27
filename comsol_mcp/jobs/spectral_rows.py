@@ -310,17 +310,20 @@ def read_spectral_rows(
     root = Path(artifact_root) if artifact_root is not None else None
     rows: list[dict[str, Any]] = []
     previous: str | None = None
-    with journal.open("r", encoding="utf-8") as handle:
-        for sequence, line in enumerate(handle, 1):
-            if not line.strip():
+    with journal.open("rb") as handle:
+        for sequence in range(1, MAX_SPECTRAL_ROWS + 2):
+            raw_line = handle.readline(MAX_SPECTRAL_ROW_BYTES + 1)
+            if not raw_line:
+                break
+            if len(raw_line) > MAX_SPECTRAL_ROW_BYTES:
+                raise ValueError("spectral row exceeds its byte limit")
+            if not raw_line.strip():
                 raise ValueError("spectral row journal contains a blank record")
             if sequence > MAX_SPECTRAL_ROWS:
                 raise ValueError("spectral row journal exceeds its entry limit")
-            if len(line.encode("utf-8")) > MAX_SPECTRAL_ROW_BYTES:
-                raise ValueError("spectral row exceeds its byte limit")
             try:
-                value = json.loads(line)
-            except json.JSONDecodeError as exc:
+                value = json.loads(raw_line.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
                 raise ValueError("spectral row journal contains malformed JSON") from exc
             row = _normalize_row(
                 value,

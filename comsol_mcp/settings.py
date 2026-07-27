@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-from comsol_mcp.durable import canonical_sha256_v1
+from comsol_mcp.durable import canonical_sha256_v1, read_file_bytes_bounded
 
 
 SETTINGS_PATH_ENV = "COMSOL_MCP_SETTINGS_PATH"
@@ -532,13 +532,27 @@ def load_settings_report(environ: Mapping[str, str] | None = None) -> dict[str, 
     """Load settings and return safe defaults plus bounded validation errors."""
     try:
         path = default_settings_path(environ)
-        raw = path.read_bytes()
+        raw = read_file_bytes_bounded(path, max_bytes=MAX_SETTINGS_BYTES)
+    except ValueError as exc:
+        if "reading limit" in str(exc):
+            error = SettingsError(
+                f"settings.json must contain 1..{MAX_SETTINGS_BYTES} bytes",
+                reason_code="settings_size_invalid",
+            )
+            return {
+                "settings": deepcopy(_DEFAULT_SETTINGS),
+                "errors": [_report_error(error)],
+            }
+        return {
+            "settings": deepcopy(_DEFAULT_SETTINGS),
+            "errors": [_report_error(exc)],
+        }
     except (OSError, RuntimeError, SettingsError) as exc:
         return {
             "settings": deepcopy(_DEFAULT_SETTINGS),
             "errors": [_report_error(exc)],
         }
-    if not raw or len(raw) > MAX_SETTINGS_BYTES:
+    if not raw:
         error = SettingsError(
             f"settings.json must contain 1..{MAX_SETTINGS_BYTES} bytes",
             reason_code="settings_size_invalid",

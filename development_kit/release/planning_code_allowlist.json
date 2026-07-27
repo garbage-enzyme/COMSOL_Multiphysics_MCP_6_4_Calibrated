@@ -25,7 +25,7 @@
     {
       "path": "development_kit/tests/test_reference_power_acceptance.py",
       "match_count": 1,
-      "match_sha256": "8da5ddec0ac9deb9152f04d2645fde63d9fafbe6337d0f58e1ed7f2b3555a180"
+      "match_sha256": "e173140109bcdfa12c46089045f94d8e1f5d5332dbe69268c60f54b57c57f5b4"
     },
     {
       "path": "development_kit/tests/test_reference_power_runner.py",
@@ -35,7 +35,7 @@
     {
       "path": "comsol_mcp/evidence/reference_power_acceptance.py",
       "match_count": 31,
-      "match_sha256": "18aa9c5e8451072800679c6af222a8f2a044bd61170cd54b0f8a2f460c6470a3"
+      "match_sha256": "a9702626b0d24a6442b1717c33a843149c0331a02cc5e238e126da9086125b60"
     }
   ]
 }
