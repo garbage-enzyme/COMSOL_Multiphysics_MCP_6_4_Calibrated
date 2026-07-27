@@ -328,6 +328,7 @@ class TestSessionManager:
     def test_disconnect_cancels_background_start(self, monkeypatch, permissive_session_ownership):
         import src.tools.session as session_module
 
+        monkeypatch.setattr(session_module, "STARTUP_TIMEOUT_SECONDS", 60.0)
         sm = session_module.SessionManager()
         created = threading.Event()
         release = threading.Event()
