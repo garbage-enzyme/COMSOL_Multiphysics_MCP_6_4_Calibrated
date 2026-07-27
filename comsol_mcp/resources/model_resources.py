@@ -1,9 +1,13 @@
 """MCP Resources for COMSOL model information."""
 
+import logging
+
 from typing import Optional
 from mcp.server.fastmcp import FastMCP
 
 from ..tools.session import session_manager
+
+logger = logging.getLogger(__name__)
 
 
 def register_model_resources(mcp: FastMCP) -> None:
@@ -103,8 +107,9 @@ def register_model_resources(mcp: FastMCP) -> None:
                 lines.append("")
             
             return "\n".join(lines)
-        except Exception as e:
-            return f"# Error\n\nFailed to get model tree: {str(e)}"
+        except Exception:
+            logger.exception("Model-tree resource failed")
+            return "# Error\n\nModel tree is unavailable."
     
     @mcp.resource("comsol://model/{name}/parameters")
     def get_model_parameters(name: str) -> str:
@@ -136,8 +141,9 @@ def register_model_resources(mcp: FastMCP) -> None:
                 lines.append(f"| {param_name} | `{value}` | {desc} |")
             
             return "\n".join(lines)
-        except Exception as e:
-            return f"# Error\n\nFailed to get parameters: {str(e)}"
+        except Exception:
+            logger.exception("Model-parameters resource failed")
+            return "# Error\n\nModel parameters are unavailable."
     
     @mcp.resource("comsol://model/{name}/physics")
     def get_model_physics(name: str) -> str:
@@ -178,5 +184,6 @@ def register_model_resources(mcp: FastMCP) -> None:
                 lines.append("No physics interfaces defined.")
             
             return "\n".join(lines)
-        except Exception as e:
-            return f"# Error\n\nFailed to get physics: {str(e)}"
+        except Exception:
+            logger.exception("Model-physics resource failed")
+            return "# Error\n\nModel physics is unavailable."

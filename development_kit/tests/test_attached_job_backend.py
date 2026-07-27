@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 import csv
+from dataclasses import replace
 import hashlib
 import os
 from pathlib import Path
@@ -95,6 +96,15 @@ def test_attached_backend_is_deterministic_idempotent_and_non_owned():
     assert first["attached_server"]["listener_bind_scope"] == "wildcard"
     assert first["model"]["tag"] == "Model1"
     assert len(first["backend_identity_sha256"]) == 64
+
+
+def test_attached_target_nested_snapshots_are_immutable():
+    target = normalize_attached_execution_target(_backend())
+
+    with pytest.raises(TypeError, match="frozen"):
+        target.backend["model"]["tag"] = "changed"
+    with pytest.raises(TypeError, match="frozen"):
+        target.expected_revision["sequence"] = 9
 
 
 @pytest.mark.parametrize(
@@ -276,7 +286,10 @@ def test_attached_runtime_rejects_external_revision_change():
 @pytest.mark.parametrize("sequence", [True, "0", 0.5])
 def test_attached_revision_verifier_rejects_coercive_sequence_values(sequence):
     target = normalize_attached_execution_target(_backend())
-    target.expected_revision["sequence"] = sequence
+    target = replace(
+        target,
+        expected_revision={**target.expected_revision, "sequence": sequence},
+    )
 
     with pytest.raises(ValueError, match="expected_revision.sequence must be an integer"):
         verify_attached_model_revision(

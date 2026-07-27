@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,10 @@ from comsol_mcp.evidence.field_discovery import discover_field_datasets
 
 from .ownership import ownership_manager
 from .session import session_manager
+
+from comsol_mcp.utils.public_errors import public_error
+
+logger = logging.getLogger(__name__)
 
 _NORMALIZED_REQUEST_MARKERS = frozenset(
     {
@@ -161,12 +166,12 @@ def register_field_evidence_tools(mcp: FastMCP) -> None:
                 "solver_started_by_tool": False,
                 **result,
             }
-        except (ValueError, FileExistsError) as exc:
+        except ValueError as exc:
             return {"success": False, "error": str(exc)}
-        except Exception as exc:
-            return {
-                "success": False,
-                "error": f"Field extraction failed safely: {type(exc).__name__}: {exc}",
-            }
+        except Exception:
+            logger.exception("Field extraction backend failed")
+            return public_error(
+                "field_extraction_failed", "Field extraction failed safely."
+            )
 
 __all__ = ["register_field_evidence_tools"]

@@ -192,6 +192,19 @@ def test_point_identity_and_complete_audit_projection(tmp_path):
     assert projected["audit_artifact"]["physical_evidence_sha256"]
 
 
+def test_point_incidence_is_detached_from_the_normalized_spec(tmp_path):
+    spec = _spec(tmp_path)
+    spec["parameter_state"]["incidence"] = {
+        "polarization": "S",
+        "angles": [20.0, 0.0],
+    }
+    point = build_spectral_audit_point(spec, 5e-6)
+
+    spec["parameter_state"]["incidence"]["angles"][0] = 45.0
+
+    assert point["incidence"] == {"polarization": "S", "angles": [20.0, 0.0]}
+
+
 def test_incomplete_audit_is_not_projected(tmp_path):
     spec = _spec(tmp_path)
     job = tmp_path / "job"

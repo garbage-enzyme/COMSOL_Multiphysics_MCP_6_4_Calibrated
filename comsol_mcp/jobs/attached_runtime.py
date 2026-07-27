@@ -15,6 +15,7 @@ from comsol_mcp.shared_session.locking import (
     normalize_shared_model_identity,
 )
 from comsol_mcp.utils.validation import strict_json_integer
+from comsol_mcp.utils.immutability import deep_freeze
 
 from .attached_backend import normalize_attached_execution_backend
 
@@ -27,6 +28,12 @@ class AttachedExecutionTarget:
     server: AttachedServerIdentity
     model: SharedModelIdentity
     expected_revision: dict[str, Any]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "backend", deep_freeze(self.backend))
+        object.__setattr__(
+            self, "expected_revision", deep_freeze(self.expected_revision)
+        )
 
 
 def normalize_attached_execution_target(value: Any) -> AttachedExecutionTarget:

@@ -47,6 +47,11 @@ def test_attach_request_normalizes_exact_endpoint():
     assert result.endpoint.host == "127.0.0.1"
     assert result.user_confirmed is True
     assert result.feature_gate["gate_open"] is True
+    with pytest.raises(TypeError, match="frozen"):
+        result.feature_gate["gate_open"] = False
+    exported = result.to_dict()
+    exported["feature_gate"]["gate_open"] = False
+    assert result.feature_gate["gate_open"] is True
 
 
 @pytest.mark.parametrize(

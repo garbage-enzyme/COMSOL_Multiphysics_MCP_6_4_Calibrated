@@ -154,9 +154,9 @@ def verify_evidence_integrity(
                 "state": "failed",
                 "reason_code": "deterministic_check_failed",
                 "error_type": type(exc).__name__,
-                "error": str(exc)[:1024],
+                "error": "Evidence check failed.",
             }
-            failures.append({"check": check_name, "error": str(exc)[:1024]})
+            failures.append({"check": check_name, "error": "Evidence check failed."})
 
     producer_check = "producer_driver_compatibility"
     if not checks[producer_check]["enabled"]:
@@ -187,9 +187,14 @@ def verify_evidence_integrity(
                 "state": "failed",
                 "reason_code": "resume_compatibility_failed",
                 "error_type": type(exc).__name__,
-                "error": str(exc)[:1024],
+                "error": "Producer compatibility verification failed.",
             }
-            failures.append({"check": producer_check, "error": str(exc)[:1024]})
+            failures.append(
+                {
+                    "check": producer_check,
+                    "error": "Producer compatibility verification failed.",
+                }
+            )
 
     fully_active = status["strict_verification_active"] is True
     strictly_verified = fully_active and not failures and all(

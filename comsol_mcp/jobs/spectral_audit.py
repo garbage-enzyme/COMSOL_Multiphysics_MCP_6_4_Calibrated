@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -72,7 +73,7 @@ def build_spectral_audit_point(
             "unit": "m",
             "parameter": spec["wavelength_parameter"],
         },
-        "incidence": incidence if isinstance(incidence, Mapping) else None,
+        "incidence": deepcopy(incidence) if isinstance(incidence, Mapping) else None,
         "collectors": [collector],
         "expected_artifact_ids": [f"audit-{identity['point_fingerprint'][:20]}"],
     }

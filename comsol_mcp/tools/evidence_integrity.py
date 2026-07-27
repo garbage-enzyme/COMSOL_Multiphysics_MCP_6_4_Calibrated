@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Optional
 
 from mcp.server.fastmcp import FastMCP
 
 from comsol_mcp.path_policy import PathPolicy
+from comsol_mcp.utils.public_errors import public_error
+
+logger = logging.getLogger(__name__)
 
 
 def register_evidence_integrity_tools(mcp: FastMCP) -> None:
@@ -78,14 +82,15 @@ def register_evidence_integrity_tools(mcp: FastMCP) -> None:
                 "paths_included": False,
             }
             return result
-        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        except (OSError, RuntimeError, TypeError, ValueError):
+            logger.exception("Evidence integrity verification failed")
             result = {
-                "success": False,
+                **public_error(
+                    "artifact_root_rejected",
+                    "Artifact-root validation or integrity verification failed.",
+                ),
                 "verification_state": "blocked",
                 "strictly_verified": False,
-                "reason_code": "artifact_root_rejected",
-                "error_type": type(exc).__name__,
-                "error": str(exc)[:1024],
                 "artifact_root_validation": {
                     "enforced": True,
                     "accepted": False,

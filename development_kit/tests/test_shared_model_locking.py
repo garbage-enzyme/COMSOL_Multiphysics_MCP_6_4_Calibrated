@@ -160,6 +160,10 @@ def test_lock_binds_server_session_model_revision_source_and_mcp_process():
     assert payload["revision"]["revision_sha256"] == revision.revision_sha256
     assert payload["immutable_source"]["sha256"] == "c" * 64
     assert len(payload["lock_sha256"]) == 64
+    with pytest.raises(TypeError, match="frozen"):
+        lock.revision["sequence"] = 1
+    payload["revision"]["sequence"] = 1
+    assert lock.revision["sequence"] == 0
 
 
 def test_lock_rejects_revision_from_a_different_model():

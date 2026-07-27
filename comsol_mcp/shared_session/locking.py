@@ -8,6 +8,8 @@ import math
 import re
 from typing import Any, Mapping
 
+from comsol_mcp.utils.immutability import deep_freeze, deep_thaw
+
 from comsol_mcp.durable import canonical_json_v1, canonical_sha256_v1
 
 from .identity import (
@@ -178,8 +180,20 @@ class SharedModelLock:
     mcp_process: dict[str, Any]
     lock_sha256: str
 
+    def __post_init__(self) -> None:
+        for name in (
+            "attached_server",
+            "model",
+            "revision",
+            "immutable_source",
+            "mcp_process",
+        ):
+            value = getattr(self, name)
+            if value is not None:
+                object.__setattr__(self, name, deep_freeze(value))
+
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        return deep_thaw(asdict(self))
 
 
 def normalize_shared_model_identity(value: Any) -> SharedModelIdentity:
