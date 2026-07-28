@@ -14,6 +14,35 @@ _TOP_LEVEL_FIELDS = {
     "dependency_compatibility",
     "unknown_compatibility",
 }
+_LICENSED_LANE_FIELDS = {
+    "status",
+    "comsol_build",
+    "mph_version",
+    "java_version",
+    "python_version",
+    "scope",
+}
+_DEPENDENCY_FIELDS = {
+    "status",
+    "python",
+    "mph",
+    "mcp",
+    "comsol_builds",
+    "establishes_licensed_compatibility",
+}
+_UNKNOWN_FIELDS = {
+    "status",
+    "comsol_builds",
+    "requires_independent_licensed_acceptance",
+}
+_MAX_COMPATIBILITY_TEXT = 256
+_MAX_ACCEPTANCE_SCOPE_ITEMS = 32
+
+
+def _bounded_text(value: object, label: str) -> str:
+    if not isinstance(value, str) or not value.strip() or len(value) > _MAX_COMPATIBILITY_TEXT:
+        raise ValueError(f"{label} must be a bounded nonempty string")
+    return value
 
 
 def canonical_module_identifier(value: object) -> object:
@@ -47,28 +76,43 @@ def load_runtime_compatibility() -> dict[str, Any]:
     if not isinstance(accepted, list) or len(accepted) != 1:
         raise ValueError("runtime compatibility must declare one accepted lane")
     lane = accepted[0]
-    if not isinstance(lane, dict) or lane.get("status") != "exact_licensed_acceptance":
+    if (
+        not isinstance(lane, dict)
+        or set(lane) != _LICENSED_LANE_FIELDS
+        or lane.get("status") != "exact_licensed_acceptance"
+    ):
         raise ValueError("licensed compatibility lane is invalid")
     for field in ("comsol_build", "mph_version", "java_version", "python_version"):
-        if not isinstance(lane.get(field), str) or not lane[field]:
-            raise ValueError(f"licensed compatibility {field} is invalid")
+        _bounded_text(lane[field], f"licensed compatibility {field}")
+    scope = lane["scope"]
+    if not isinstance(scope, list) or not 1 <= len(scope) <= _MAX_ACCEPTANCE_SCOPE_ITEMS:
+        raise ValueError("licensed compatibility scope is invalid")
+    if not all(isinstance(item, str) for item in scope) or len(scope) != len(set(scope)):
+        raise ValueError("licensed compatibility scope is invalid")
+    for index, item in enumerate(scope):
+        _bounded_text(item, f"licensed compatibility scope[{index}]")
 
     dependency = value.get("dependency_compatibility")
     if (
         not isinstance(dependency, dict)
+        or set(dependency) != _DEPENDENCY_FIELDS
         or dependency.get("status") != "dependency_only"
         or dependency.get("comsol_builds") != []
         or dependency.get("establishes_licensed_compatibility") is not False
     ):
         raise ValueError("dependency compatibility declaration is invalid")
+    for field in ("python", "mph", "mcp"):
+        _bounded_text(dependency[field], f"dependency compatibility {field}")
 
     unknown = value.get("unknown_compatibility")
     if (
         not isinstance(unknown, dict)
+        or set(unknown) != _UNKNOWN_FIELDS
         or unknown.get("status") != "unknown"
         or unknown.get("requires_independent_licensed_acceptance") is not True
     ):
         raise ValueError("unknown compatibility declaration is invalid")
+    _bounded_text(unknown["comsol_builds"], "unknown compatibility comsol_builds")
     return value
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import math
 import os
@@ -167,6 +168,7 @@ def test_public_schema_adds_limits_without_overwriting_explicit_policy() -> None
                 "properties": {},
                 "additionalProperties": True,
             },
+            "implicit_closed": {"type": "object"},
             "number": {"type": "number"},
             "bounded": {"type": "integer", "minimum": 0, "maximum": 9},
             "union": {"oneOf": [{"type": "string"}, None]},
@@ -182,6 +184,7 @@ def test_public_schema_adds_limits_without_overwriting_explicit_policy() -> None
     assert result["properties"]["limited_text"]["maxLength"] == 7
     assert result["properties"]["items"]["maxItems"] == MAX_PUBLIC_COLLECTION_ITEMS
     assert result["properties"]["closed"]["additionalProperties"] is True
+    assert result["properties"]["implicit_closed"]["additionalProperties"] is False
     assert result["properties"]["number"]["minimum"] == (-MAX_PUBLIC_NUMBER_MAGNITUDE)
     assert result["properties"]["bounded"] == {
         "type": "integer",
@@ -220,6 +223,7 @@ def _overdeep_value() -> list[object]:
         float("nan"),
         float("inf"),
         MAX_PUBLIC_NUMBER_MAGNITUDE * 1.01,
+        pytest.param(10**10_000, id="huge_integer"),
         [None] * (MAX_PUBLIC_COLLECTION_ITEMS + 1),
         {str(index): None for index in range(MAX_PUBLIC_OBJECT_FIELDS + 1)},
         {1: None},
@@ -238,6 +242,34 @@ def test_structural_guard_executes_after_successful_validation() -> None:
         return value, enabled
 
     assert operation("bounded", enabled=True) == ("bounded", True)
+
+
+def test_structural_guard_skips_only_declared_method_receivers() -> None:
+    class Operations:
+        @structurally_guarded
+        def sync(self, value: str) -> str:
+            return value
+
+        @structurally_guarded
+        async def async_operation(self, value: str) -> str:
+            return value
+
+        @classmethod
+        @structurally_guarded
+        def class_operation(cls, value: str) -> str:
+            return value
+
+    operations = Operations()
+    assert operations.sync("bounded") == "bounded"
+    assert asyncio.run(operations.async_operation("bounded")) == "bounded"
+    assert Operations.class_operation("bounded") == "bounded"
+
+    @structurally_guarded
+    def ordinary(receiver: object) -> object:
+        return receiver
+
+    with pytest.raises(ValueError, match="unsupported public input type"):
+        ordinary(object())
 
 
 @seed(20260721)
@@ -624,6 +656,20 @@ def _invalid_manifest(case: str) -> object:
         value["licensed_acceptance"][0]["status"] = "unknown"
     elif case == "lane_field":
         value["licensed_acceptance"][0]["comsol_build"] = ""
+    elif case == "lane_fields":
+        value["licensed_acceptance"][0]["extra"] = True
+    elif case == "lane_missing":
+        value["licensed_acceptance"][0].pop("scope")
+    elif case == "lane_overlong":
+        value["licensed_acceptance"][0]["comsol_build"] = "x" * 257
+    elif case == "lane_scope_type":
+        value["licensed_acceptance"][0]["scope"] = "package_runtime"
+    elif case == "lane_scope_empty":
+        value["licensed_acceptance"][0]["scope"] = []
+    elif case == "lane_scope_item":
+        value["licensed_acceptance"][0]["scope"] = [1]
+    elif case == "lane_scope_duplicate":
+        value["licensed_acceptance"][0]["scope"] = ["package_runtime"] * 2
     elif case == "dependency_type":
         value["dependency_compatibility"] = []
     elif case == "dependency_status":
@@ -632,12 +678,24 @@ def _invalid_manifest(case: str) -> object:
         value["dependency_compatibility"]["comsol_builds"] = ["unlicensed"]
     elif case == "dependency_claim":
         value["dependency_compatibility"]["establishes_licensed_compatibility"] = True
+    elif case == "dependency_fields":
+        value["dependency_compatibility"]["extra"] = True
+    elif case == "dependency_missing":
+        value["dependency_compatibility"].pop("mcp")
+    elif case == "dependency_range":
+        value["dependency_compatibility"]["python"] = []
     elif case == "unknown_type":
         value["unknown_compatibility"] = []
     elif case == "unknown_status":
         value["unknown_compatibility"]["status"] = "accepted"
     elif case == "unknown_claim":
         value["unknown_compatibility"]["requires_independent_licensed_acceptance"] = False
+    elif case == "unknown_fields":
+        value["unknown_compatibility"]["extra"] = True
+    elif case == "unknown_missing":
+        value["unknown_compatibility"].pop("comsol_builds")
+    elif case == "unknown_builds":
+        value["unknown_compatibility"]["comsol_builds"] = []
     else:
         raise AssertionError(f"unknown test case: {case}")
     return value
@@ -655,13 +713,26 @@ def _invalid_manifest(case: str) -> object:
         "lane_type",
         "lane_status",
         "lane_field",
+        "lane_fields",
+        "lane_missing",
+        "lane_overlong",
+        "lane_scope_type",
+        "lane_scope_empty",
+        "lane_scope_item",
+        "lane_scope_duplicate",
         "dependency_type",
         "dependency_status",
         "dependency_builds",
         "dependency_claim",
+        "dependency_fields",
+        "dependency_missing",
+        "dependency_range",
         "unknown_type",
         "unknown_status",
         "unknown_claim",
+        "unknown_fields",
+        "unknown_missing",
+        "unknown_builds",
     ],
 )
 def test_compatibility_manifest_validation_fails_closed(

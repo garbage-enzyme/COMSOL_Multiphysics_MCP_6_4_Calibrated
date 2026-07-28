@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 import hashlib
 import json
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
-
+import src.artifact_chain as artifact_chain_module
 from src.artifact_chain import (
     build_artifact_chain_manifest,
     validate_artifact_chain_manifest,
@@ -72,6 +72,20 @@ def _chain(root: Path):
         artifacts=artifacts,
         terminal_artifact_ids=["receipt"],
     )
+
+
+def _rehash_manifest(manifest: dict) -> None:
+    body = dict(manifest)
+    body.pop("manifest_sha256")
+    manifest["manifest_sha256"] = hashlib.sha256(
+        json.dumps(
+            body,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
 
 
 def test_complete_chain_verifies_exact_bytes_and_returns_path_redacted_receipt(tmp_path):
@@ -159,3 +173,25 @@ def test_chain_rejects_future_schema_and_path_traversal(tmp_path):
             artifacts=[traversal],
             terminal_artifact_ids=["raw"],
         )
+
+
+@pytest.mark.parametrize("version", [None, "", {"unbounded": True}, "x" * 129])
+def test_chain_rejects_invalid_producer_version(tmp_path, version):
+    manifest = _chain(tmp_path)
+    manifest["producer"]["version"] = version
+    _rehash_manifest(manifest)
+
+    with pytest.raises(ValueError, match="producer"):
+        validate_artifact_chain_manifest(manifest)
+
+
+def test_chain_rechecks_size_after_validating_supplied_producer(tmp_path, monkeypatch):
+    manifest = _chain(tmp_path)
+    manifest["producer"]["version"] = "release-candidate"
+    _rehash_manifest(manifest)
+    unhashed = {key: value for key, value in manifest.items() if key != "manifest_sha256"}
+    exact_size = len(artifact_chain_module._canonical_bytes(unhashed))
+    monkeypatch.setattr(artifact_chain_module, "MAX_CHAIN_MANIFEST_BYTES", exact_size - 1)
+
+    with pytest.raises(ValueError, match="oversized"):
+        validate_artifact_chain_manifest(manifest)

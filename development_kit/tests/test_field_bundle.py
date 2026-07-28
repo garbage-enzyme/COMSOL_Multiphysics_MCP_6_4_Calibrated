@@ -107,7 +107,10 @@ def test_normalization_is_solver_free_deterministic_and_binds_sources(monkeypatc
     assert len(first["request_fingerprint"]) == 64
     assert first["views"][0]["source"]["kind"] == "validation_matrix_point"
     assert first["views"][1]["source"]["kind"] == "existing_dataset"
-    assert first["views"][0]["source"]["source_fingerprint"] != first["views"][1]["source"]["source_fingerprint"]
+    assert (
+        first["views"][0]["source"]["source_fingerprint"]
+        != first["views"][1]["source"]["source_fingerprint"]
+    )
 
 
 def test_source_or_extraction_changes_change_request_identity():
@@ -120,7 +123,10 @@ def test_source_or_extraction_changes_change_request_identity():
     third = normalize_field_evidence_request(changed_source)
 
     assert first["request_fingerprint"] != second["request_fingerprint"]
-    assert first["views"][0]["source"]["source_fingerprint"] != third["views"][0]["source"]["source_fingerprint"]
+    assert (
+        first["views"][0]["source"]["source_fingerprint"]
+        != third["views"][0]["source"]["source_fingerprint"]
+    )
 
 
 def test_request_byte_limit_includes_added_fingerprint(monkeypatch):
@@ -233,6 +239,14 @@ def test_nonfinite_values_duplicate_expressions_and_duplicate_sources_are_reject
         normalize_field_evidence_request(duplicate_expression)
     with pytest.raises(ValueError, match="unique exact source identities"):
         normalize_field_evidence_request(duplicate_source)
+
+
+def test_huge_integer_is_rejected_as_an_invalid_finite_field_value():
+    request = _request()
+    request["views"][0]["wavelength_m"] = 10**10_000
+
+    with pytest.raises(ValueError, match="positive and finite"):
+        normalize_field_evidence_request(request)
 
 
 def test_normalized_request_survives_json_transport_and_detects_tampering():

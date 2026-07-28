@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 import json
-from pathlib import Path, PurePosixPath
 import re
+from copy import deepcopy
+from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
 
 from comsol_mcp import __version__
 from comsol_mcp.durable import canonical_json_v1, canonical_sha256_v1, sha256_file_bounded
 from comsol_mcp.schema_registry import check_schema_support
-
 
 ARTIFACT_CHAIN_SCHEMA = "comsol_mcp.artifact_chain"
 ARTIFACT_CHAIN_VERIFICATION_SCHEMA = "comsol_mcp.artifact_chain_verification"
@@ -41,6 +40,7 @@ _ARTIFACT_FIELDS = {
     "parents",
 }
 _PARENT_FIELDS = {"artifact_id", "sha256"}
+_MAX_PRODUCER_VERSION_LENGTH = 128
 
 
 def _canonical_bytes(value: Any) -> bytes:
@@ -232,7 +232,14 @@ def validate_artifact_chain_manifest(value: Any) -> dict[str, Any]:
     ):
         raise ValueError("artifact chain schema is unsupported")
     producer = _mapping(item["producer"], "artifact_chain.producer")
-    if set(producer) != {"package", "version"} or producer["package"] != "comsol-mcp":
+    producer_version = producer.get("version")
+    if (
+        set(producer) != {"package", "version"}
+        or producer.get("package") != "comsol-mcp"
+        or not isinstance(producer_version, str)
+        or not producer_version.strip()
+        or len(producer_version) > _MAX_PRODUCER_VERSION_LENGTH
+    ):
         raise ValueError("artifact chain producer is invalid")
     supplied_hash = _hash(item["manifest_sha256"], "artifact_chain.manifest_sha256")
     rebuilt = build_artifact_chain_manifest(
@@ -243,6 +250,8 @@ def validate_artifact_chain_manifest(value: Any) -> dict[str, Any]:
     rebuilt["producer"] = producer
     unhashed = dict(rebuilt)
     unhashed.pop("manifest_sha256")
+    if len(_canonical_bytes(unhashed)) > MAX_CHAIN_MANIFEST_BYTES:
+        raise ValueError("artifact chain manifest is oversized")
     rebuilt["manifest_sha256"] = _sha256(unhashed)
     if rebuilt["manifest_sha256"] != supplied_hash or rebuilt != item:
         raise ValueError("artifact chain is noncanonical or its hash does not match")
