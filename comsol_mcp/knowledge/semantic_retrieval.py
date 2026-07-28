@@ -11,7 +11,7 @@ import time
 from typing import Any, Callable, Mapping, Sequence
 
 from .lexical_manual import run_bounded
-from .semantic_contracts import PUBLIC_LIMITS, object_sha256
+from .semantic_contracts import PUBLIC_LIMITS, object_sha256, validate_semantic_filters
 from .semantic_index import (
     SentenceTransformerEncoder,
     index_file_snapshot,
@@ -73,26 +73,6 @@ def _filters_match(record: Mapping[str, Any], filters: Mapping[str, Any]) -> boo
     return True
 
 
-def _validate_filters(filters: Mapping[str, Any] | None) -> dict[str, Any]:
-    value = dict(filters or {})
-    unknown = sorted(set(value) - {"module", "source", "page_start", "page_end"})
-    if unknown:
-        raise ValueError(f"unsupported semantic filters: {unknown}")
-    for field in ("module", "source"):
-        if value.get(field) is not None and (not isinstance(value[field], str) or not value[field].strip()):
-            raise ValueError(f"{field} filter must be a nonempty string")
-        if isinstance(value.get(field), str):
-            value[field] = value[field].strip()
-    for field in ("page_start", "page_end"):
-        if value.get(field) is not None and (
-            not isinstance(value[field], int) or isinstance(value[field], bool) or value[field] < 1
-        ):
-            raise ValueError(f"{field} must be a positive integer")
-    if value.get("page_start") and value.get("page_end") and value["page_start"] > value["page_end"]:
-        raise ValueError("page_start cannot exceed page_end")
-    return value
-
-
 class HybridRetriever:
     """Load one immutable index/model and serve deterministic bounded queries."""
 
@@ -139,6 +119,14 @@ class HybridRetriever:
         with (self.index_path / "chunks.jsonl").open("r", encoding="utf-8") as handle:
             for line in handle:
                 self.chunks.append(json.loads(line))
+        self.pinned_chunks = {
+            chunk["id"]: {
+                "source": chunk["source"],
+                "page": chunk["page"],
+                "ordinal": chunk["ordinal"],
+            }
+            for chunk in self.chunks
+        }
         self.embeddings = np.load(self.index_path / "embeddings.npy", mmap_mode="r", allow_pickle=False)
         if len(self.chunks) != self.embeddings.shape[0]:
             raise ValueError("chunk/vector count mismatch at retriever load")
@@ -258,7 +246,7 @@ class HybridRetriever:
             raise ValueError("limit violates public limits")
         if retrieval_mode not in {"hybrid", "vector", "lexical"}:
             raise ValueError("retrieval_mode must be hybrid, vector, or lexical")
-        normalized_filters = _validate_filters(filters)
+        normalized_filters = validate_semantic_filters(filters) or {}
         self._check_identity()
         started = time.perf_counter()
         vector = [] if retrieval_mode == "lexical" else self._vector_candidates(
@@ -281,6 +269,7 @@ class HybridRetriever:
                 "model_fingerprint": self.manifest["model_fingerprint"],
                 "runtime_dependencies": self.runtime_dependencies,
             },
+            pinned_chunks=self.pinned_chunks,
         )
         self.query_count += 1
         return {
@@ -305,15 +294,52 @@ def fuse_candidates(
     limit: int,
     retrieval_mode: str,
     provenance: Mapping[str, Any],
+    pinned_chunks: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Fuse page candidates deterministically while protecting exact symbols."""
+    if not isinstance(pinned_chunks, Mapping) or not pinned_chunks:
+        raise ValueError("pinned chunk proof is required before citation validation")
+    pinned_citations: set[tuple[str, int]] = set()
+    normalized_chunks: dict[str, tuple[str, int, int]] = {}
+    for chunk_id, item in pinned_chunks.items():
+        if not isinstance(chunk_id, str) or not chunk_id or not isinstance(item, Mapping):
+            raise ValueError("pinned chunk proof is malformed")
+        source = item.get("source")
+        page = item.get("page")
+        ordinal = item.get("ordinal")
+        if (
+            not isinstance(source, str)
+            or not source
+            or not isinstance(page, int)
+            or isinstance(page, bool)
+            or page < 1
+            or not isinstance(ordinal, int)
+            or isinstance(ordinal, bool)
+            or ordinal < 0
+        ):
+            raise ValueError("pinned chunk proof is malformed")
+        identity = (source, page, ordinal)
+        normalized_chunks[chunk_id] = identity
+        pinned_citations.add(identity[:2])
     pages: dict[tuple[str, int], dict[str, Any]] = {}
     k = int(RANKER_CONFIG["rrf_constant"])
     for rank, row in enumerate(lexical, 1):
         lexical_score = float(row["rank"])
         if not math.isfinite(lexical_score):
             raise ValueError("lexical candidate contains a non-finite score")
-        key = (str(row["source"]), int(row["page"]))
+        source = row.get("source")
+        page_number = row.get("page")
+        if (
+            not isinstance(source, str)
+            or not source
+            or not isinstance(page_number, int)
+            or isinstance(page_number, bool)
+            or page_number < 1
+        ):
+            raise ValueError("lexical citation identity is malformed")
+        key = (source, page_number)
+        if key not in pinned_citations:
+            raise ValueError("lexical citation is absent from the pinned chunk set")
         page = pages.setdefault(key, {"source": key[0], "page": key[1]})
         page.update({
             "module": row.get("module"),
@@ -330,7 +356,29 @@ def fuse_candidates(
         if vector_rank_value < 1 or not math.isfinite(similarity) or not math.isfinite(distance):
             raise ValueError("vector candidate contains an invalid rank or non-finite score")
         chunk = item["chunk"]
-        key = (str(chunk["source"]), int(chunk["page"]))
+        if not isinstance(chunk, Mapping):
+            raise ValueError("vector citation identity is malformed")
+        source = chunk.get("source")
+        page_number = chunk.get("page")
+        chunk_id = chunk.get("id")
+        ordinal = chunk.get("ordinal")
+        if (
+            not isinstance(source, str)
+            or not source
+            or not isinstance(page_number, int)
+            or isinstance(page_number, bool)
+            or page_number < 1
+            or not isinstance(chunk_id, str)
+            or not chunk_id
+            or not isinstance(ordinal, int)
+            or isinstance(ordinal, bool)
+            or ordinal < 0
+        ):
+            raise ValueError("vector citation identity is malformed")
+        key = (source, page_number)
+        observed_chunk = (source, page_number, ordinal)
+        if normalized_chunks.get(chunk_id) != observed_chunk:
+            raise ValueError("vector citation does not match its pinned chunk identity")
         page = pages.setdefault(key, {
             "source": key[0], "page": key[1], "module": chunk.get("module"),
             "heading": chunk.get("heading"),

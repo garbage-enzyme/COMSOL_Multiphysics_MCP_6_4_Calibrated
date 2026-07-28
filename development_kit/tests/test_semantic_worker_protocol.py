@@ -19,6 +19,7 @@ from src.jobs.manager import JobManager
 from src.knowledge.lexical_manual import build_index_from_records, search_index
 from src.knowledge.semantic_contracts import PUBLIC_LIMITS, WORKER_PROTOCOL_SCHEMA_VERSION
 from src.knowledge.semantic_process import SemanticWorkerManager
+from src.knowledge.semantic_runtime import _lightweight_deployment_identity
 from src.knowledge.semantic_worker import _RequestHandler, _WorkerServer, _WorkerState
 from src.tools.capabilities import get_capabilities
 from src.tools.ownership import SolverOwnership
@@ -99,6 +100,121 @@ def test_startup_hang_and_port_collision_are_contained():
     result = hanging.start()
     assert result["success"] is False
     assert result["cleanup"]["absent"] is True
+
+
+def test_non_object_startup_handshake_is_contained_and_reaped(monkeypatch):
+    manager = SemanticWorkerManager(startup_deadline=2.0)
+    command = [
+        sys.executable,
+        "-c",
+        "import time; print('[]', flush=True); time.sleep(30)",
+    ]
+    monkeypatch.setattr(manager, "_command", lambda: command)
+    result = None
+    try:
+        result = manager.start()
+    finally:
+        manager.reset()
+
+    assert result is not None
+    assert result["success"] is False
+    assert result["error"]["code"] == "startup_failed"
+    assert result["cleanup"]["absent"] is True
+
+
+def test_nested_query_filters_are_rejected_before_worker_start(monkeypatch):
+    manager = SemanticWorkerManager()
+    starts = []
+    monkeypatch.setattr(
+        manager,
+        "start",
+        lambda: starts.append(True) or {"success": True},
+    )
+
+    result = manager.query("bounded", filters={"module": {"nested": object()}})
+
+    assert result["success"] is False
+    assert result["error"]["code"] == "invalid_filters"
+    assert starts == []
+
+
+@pytest.mark.parametrize("invalid_document", [[], "manifest", 1])
+def test_lightweight_identity_rejects_non_object_decoded_manifests(
+    tmp_path, invalid_document
+):
+    root = tmp_path / "deployment"
+    index = root / "index"
+    model = root / "model"
+    index.mkdir(parents=True)
+    model.mkdir()
+    (root / "current.json").write_text(
+        json.dumps(
+            {
+                "index_path": str(index),
+                "manifest_sha256": "a" * 64,
+                "build_id": "build",
+                "model_fingerprint": "b" * 64,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (index / "manifest.json").write_text(
+        json.dumps(invalid_document), encoding="utf-8"
+    )
+    (model / "model_manifest.json").write_text(
+        json.dumps({"model_sha256": "b" * 64}), encoding="utf-8"
+    )
+
+    result = _lightweight_deployment_identity(
+        {
+            "configured": True,
+            "root": str(root),
+            "model_path": str(model),
+        }
+    )
+
+    assert result is not None
+    assert result["readable"] is False
+
+
+def test_lightweight_identity_rejects_non_object_model_manifest(tmp_path):
+    root = tmp_path / "deployment"
+    index = root / "index"
+    model = root / "model"
+    index.mkdir(parents=True)
+    model.mkdir()
+    (root / "current.json").write_text(
+        json.dumps(
+            {
+                "index_path": str(index),
+                "manifest_sha256": "a" * 64,
+                "build_id": "build",
+                "model_fingerprint": "b" * 64,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (index / "manifest.json").write_text(
+        json.dumps(
+            {
+                "build_id": "build",
+                "model_fingerprint": "b" * 64,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (model / "model_manifest.json").write_text("[]", encoding="utf-8")
+
+    result = _lightweight_deployment_identity(
+        {
+            "configured": True,
+            "root": str(root),
+            "model_path": str(model),
+        }
+    )
+
+    assert result is not None
+    assert result["readable"] is False
 
     with socket.socket() as occupied:
         occupied.bind(("127.0.0.1", 0))

@@ -13,6 +13,7 @@ import pytest
 
 from src.knowledge.lexical_manual import build_index_from_records
 from development_kit.benchmarks.semantic_benchmark import evaluate_lexical_baseline
+from development_kit.tests.integration.semantic_benchmark_soak import _promotion
 from src.knowledge.semantic_contracts import (
     SEMANTIC_CONTINUATION_GATE,
     PUBLIC_LIMITS,
@@ -102,6 +103,51 @@ def test_semantic_continuation_gate_requires_a_material_target_slice_gap():
 
     assert blocked["continue_to_semantic_worker"] is False
     assert continuing["continue_to_semantic_worker"] is True
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        {"query_count": "20", "recall_at_5": "0.8", "misses_at_5": "10"},
+        {"query_count": 20, "recall_at_5": -1.0, "misses_at_5": 10},
+        {"query_count": 20, "recall_at_5": 0.8, "misses_at_5": 21},
+        {"query_count": 20.9, "recall_at_5": 0.8, "misses_at_5": 10},
+    ],
+)
+def test_semantic_continuation_rejects_coercive_or_impossible_metrics(target):
+    with pytest.raises(ValueError):
+        evaluate_semantic_continuation({"target_styles": target})
+
+
+def test_semantic_continuation_requires_an_object_baseline():
+    with pytest.raises(ValueError, match="baseline must be an object"):
+        evaluate_semantic_continuation([])
+
+
+def test_zero_lexical_baseline_cannot_create_infinite_promotion_gain():
+    lexical = {
+        "summary": {
+            "by_style": {"exact": {"recall_at_5": 1.0}},
+            "paraphrase_multi": {"recall_at_5": 0.0},
+        },
+        "citation_validity": 1.0,
+        "latency_seconds": {"p95": 0.1, "maximum": 0.2},
+    }
+    hybrid = {
+        "summary": {
+            "by_style": {"exact": {"recall_at_5": 1.0}},
+            "paraphrase_multi": {"recall_at_5": 0.01},
+            "overall": {"negative_abstention_rate": 1.0},
+        },
+        "citation_validity": 1.0,
+        "latency_seconds": {"p95": 0.1, "maximum": 0.2},
+    }
+
+    result = _promotion(lexical, hybrid)
+
+    assert result["passed"] is False
+    assert result["measurements"]["relative_gain"] is None
+    json.dumps(result, allow_nan=False)
 
 
 def test_lexical_baseline_computes_rank_metrics_without_semantic_dependencies():

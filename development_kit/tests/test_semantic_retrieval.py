@@ -191,10 +191,19 @@ def test_exact_api_symbol_tier_outranks_loose_semantic_page():
         "index_manifest_sha256": "d" * 64, "model_id": "test",
         "model_revision": "r1", "model_fingerprint": "e" * 64,
     }
+    pinned_chunks = {
+        item["chunk"]["id"]: {
+            "source": item["chunk"]["source"],
+            "page": item["chunk"]["page"],
+            "ordinal": item["chunk"]["ordinal"],
+        }
+        for item in vector
+    }
 
     result = fuse_candidates(
         "getUpDown adjacent domains", lexical, vector, limit=2,
         retrieval_mode="hybrid", provenance=provenance,
+        pinned_chunks=pinned_chunks,
     )
 
     assert result[0]["source"] == "api.pdf"
@@ -217,16 +226,68 @@ def test_page_dedup_abstention_and_nonfinite_scores_are_bounded():
         "index_manifest_sha256": "d" * 64, "model_id": "test",
         "model_revision": "r1", "model_fingerprint": "e" * 64,
     }
+    pinned_chunks = {
+        item["chunk"]["id"]: {
+            "source": item["chunk"]["source"],
+            "page": item["chunk"]["page"],
+            "ordinal": item["chunk"]["ordinal"],
+        }
+        for item in vector
+    }
 
     assert fuse_candidates(
         "out of corpus", [], vector, limit=5,
         retrieval_mode="vector", provenance=provenance,
+        pinned_chunks=pinned_chunks,
     ) == []
     vector[0]["similarity"] = float("nan")
     with pytest.raises(ValueError, match="non-finite"):
         fuse_candidates(
             "query", [], vector, limit=5,
             retrieval_mode="vector", provenance=provenance,
+            pinned_chunks=pinned_chunks,
+        )
+
+
+def test_fusion_refuses_to_validate_citations_without_pinned_chunk_proof():
+    lexical = [{
+        "source": "invented.pdf",
+        "module": "invented",
+        "page": 999,
+        "heading": "Invented",
+        "snippet": "not in the pinned index",
+        "rank": -1.0,
+        "coverage": 1.0,
+    }]
+    provenance = {
+        "corpus_fingerprint": "c" * 64,
+        "index_build_id": "test",
+        "index_manifest_sha256": "d" * 64,
+        "model_id": "test",
+        "model_revision": "r1",
+        "model_fingerprint": "e" * 64,
+    }
+
+    with pytest.raises(ValueError, match="pinned chunk"):
+        fuse_candidates(
+            "invented",
+            lexical,
+            [],
+            limit=1,
+            retrieval_mode="lexical",
+            provenance=provenance,
+        )
+    with pytest.raises(ValueError, match="absent from the pinned chunk"):
+        fuse_candidates(
+            "invented",
+            lexical,
+            [],
+            limit=1,
+            retrieval_mode="lexical",
+            provenance=provenance,
+            pinned_chunks={
+                "real": {"source": "real.pdf", "page": 1, "ordinal": 0}
+            },
         )
 
 

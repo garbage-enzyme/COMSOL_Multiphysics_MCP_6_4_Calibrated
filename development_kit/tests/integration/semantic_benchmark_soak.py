@@ -164,14 +164,21 @@ def _promotion(lexical: Mapping[str, Any], hybrid: Mapping[str, Any]) -> dict[st
     hybrid_exact = float(hybrid["summary"]["by_style"]["exact"]["recall_at_5"])
     lexical_target = float(lexical["summary"]["paraphrase_multi"]["recall_at_5"])
     hybrid_target = float(hybrid["summary"]["paraphrase_multi"]["recall_at_5"])
+    recalls = (lexical_exact, hybrid_exact, lexical_target, hybrid_target)
+    if any(not math.isfinite(value) or not 0.0 <= value <= 1.0 for value in recalls):
+        raise ValueError("promotion recall metrics must be finite and in 0..1")
     absolute_gain = hybrid_target - lexical_target
-    relative_gain = absolute_gain / lexical_target if lexical_target else math.inf
+    relative_gain = absolute_gain / lexical_target if lexical_target > 0.0 else None
     gates = {
         "citation_validity": hybrid["citation_validity"] == SEMANTIC_PROMOTION_GATE["citation_validity"],
         "exact_recall_regression": hybrid_exact - lexical_exact >= -SEMANTIC_PROMOTION_GATE["maximum_exact_symbol_recall_at_5_regression"],
         "target_recall_gain": (
             absolute_gain >= SEMANTIC_PROMOTION_GATE["minimum_target_recall_at_5_absolute_gain"]
-            or relative_gain >= SEMANTIC_PROMOTION_GATE["minimum_target_recall_at_5_relative_gain"]
+            or (
+                relative_gain is not None
+                and relative_gain
+                >= SEMANTIC_PROMOTION_GATE["minimum_target_recall_at_5_relative_gain"]
+            )
         ),
         "warm_p95": hybrid["latency_seconds"]["p95"] < SEMANTIC_PROMOTION_GATE["maximum_warm_p95_seconds"],
         "hard_deadline": hybrid["latency_seconds"]["maximum"] < SEMANTIC_PROMOTION_GATE["hard_query_deadline_seconds"],

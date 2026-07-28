@@ -17,7 +17,11 @@ import uuid
 from ctypes import wintypes
 from typing import Any
 
-from .semantic_contracts import PUBLIC_LIMITS, WORKER_PROTOCOL_SCHEMA_VERSION
+from .semantic_contracts import (
+    PUBLIC_LIMITS,
+    WORKER_PROTOCOL_SCHEMA_VERSION,
+    validate_semantic_filters,
+)
 
 CREATE_TIME_TOLERANCE_SECONDS = 0.05
 
@@ -188,6 +192,8 @@ class SemanticWorkerManager:
                 ).start()
                 line = line_queue.get(timeout=self.startup_deadline)
                 ready = json.loads(line.decode("utf-8"))
+                if not isinstance(ready, dict):
+                    raise RuntimeError("worker startup handshake must be a JSON object")
                 if ready.get("schema_version") != WORKER_PROTOCOL_SCHEMA_VERSION or ready.get("event") != "ready" or ready.get("pid") != process.pid or ready.get("host") != "127.0.0.1":
                     raise RuntimeError("invalid worker startup handshake")
                 self._port = int(ready["port"])
@@ -265,8 +271,13 @@ class SemanticWorkerManager:
 
         request_id = f"semantic-{uuid.uuid4().hex}"
         request = {"schema_version": WORKER_PROTOCOL_SCHEMA_VERSION, "request_id": request_id, "token": self._token, "operation": operation, **fields}
-        encoded = json.dumps(request, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode("utf-8") + b"\n"
         try:
+            encoded = json.dumps(
+                request,
+                ensure_ascii=False,
+                allow_nan=False,
+                separators=(",", ":"),
+            ).encode("utf-8") + b"\n"
             with socket.create_connection(("127.0.0.1", int(self._port)), timeout=remaining()) as connection:
                 connection.settimeout(remaining())
                 connection.sendall(encoded)
@@ -284,7 +295,15 @@ class SemanticWorkerManager:
                 raise RuntimeError("worker response identity or schema mismatch")
             self._last_activity = time.monotonic()
             return response
-        except (OSError, TimeoutError, UnicodeDecodeError, json.JSONDecodeError, RuntimeError) as exc:
+        except (
+            OSError,
+            TimeoutError,
+            UnicodeDecodeError,
+            json.JSONDecodeError,
+            TypeError,
+            ValueError,
+            RuntimeError,
+        ) as exc:
             error = {"code": "worker_protocol_failure", "message": f"{type(exc).__name__}: {exc}"}
             self._last_error = error
             cleanup = self._terminate_owned("protocol_failure")
@@ -295,12 +314,17 @@ class SemanticWorkerManager:
             return {"success": False, "error": {"code": "invalid_query", "message": "query violates public limits"}}
         if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= PUBLIC_LIMITS["maximum_results"]:
             return {"success": False, "error": {"code": "invalid_limit", "message": "limit violates public limits"}}
-        if filters is not None and not isinstance(filters, dict):
-            return {"success": False, "error": {"code": "invalid_filters", "message": "filters must be an object"}}
+        try:
+            normalized_filters = validate_semantic_filters(filters)
+        except ValueError as exc:
+            return {
+                "success": False,
+                "error": {"code": "invalid_filters", "message": str(exc)},
+            }
         if retrieval_mode not in {"hybrid", "vector", "lexical"}:
             return {"success": False, "error": {"code": "invalid_retrieval_mode", "message": "retrieval_mode is unsupported"}}
         with self._lock:
-            return self._request("query", {"query": query.strip(), "limit": limit, "filters": filters, "retrieval_mode": retrieval_mode}, self.query_deadline)
+            return self._request("query", {"query": query.strip(), "limit": limit, "filters": normalized_filters, "retrieval_mode": retrieval_mode}, self.query_deadline)
 
     def health(self) -> dict[str, Any]:
         with self._lock:

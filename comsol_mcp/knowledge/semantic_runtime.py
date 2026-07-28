@@ -65,8 +65,14 @@ def _lightweight_deployment_identity(configuration: Mapping[str, Any]) -> dict[s
     try:
         root = Path(str(configuration["root"]))
         pointer = json.loads((root / "current.json").read_text(encoding="utf-8"))
+        if not isinstance(pointer, dict):
+            raise TypeError("current pointer must be a JSON object")
         manifest = json.loads((Path(pointer["index_path"]) / "manifest.json").read_text(encoding="utf-8"))
+        if not isinstance(manifest, dict):
+            raise TypeError("index manifest must be a JSON object")
         model = json.loads((Path(str(configuration["model_path"])) / "model_manifest.json").read_text(encoding="utf-8"))
+        if not isinstance(model, dict):
+            raise TypeError("model manifest must be a JSON object")
     except (OSError, KeyError, TypeError, json.JSONDecodeError) as exc:
         return {"readable": False, "error": f"{type(exc).__name__}: {exc}"}
     matches = (

@@ -88,6 +88,40 @@ def object_sha256(value: Any) -> str:
     return canonical_sha256_v1(value)
 
 
+def validate_semantic_filters(filters: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    """Validate bounded public query filters before a worker is started."""
+    if filters is None:
+        return None
+    if not isinstance(filters, Mapping):
+        raise ValueError("filters must be an object")
+    value = dict(filters)
+    if not all(isinstance(key, str) for key in value):
+        raise ValueError("filter names must be strings")
+    unknown = sorted(set(value) - {"module", "source", "page_start", "page_end"})
+    if unknown:
+        raise ValueError(f"unsupported semantic filters: {unknown}")
+    for field in ("module", "source"):
+        item = value.get(field)
+        if item is not None and (not isinstance(item, str) or not item.strip()):
+            raise ValueError(f"{field} filter must be a nonempty string")
+        if isinstance(item, str):
+            value[field] = item.strip()
+    for field in ("page_start", "page_end"):
+        item = value.get(field)
+        if item is not None and (
+            not isinstance(item, int) or isinstance(item, bool) or item < 1
+        ):
+            raise ValueError(f"{field} must be a positive integer")
+    if (
+        value.get("page_start") is not None
+        and value.get("page_end") is not None
+        and value["page_start"] > value["page_end"]
+    ):
+        raise ValueError("page_start cannot exceed page_end")
+    canonical_json_bytes(value)
+    return value
+
+
 def _require_ascii_absolute_path(value: Any, label: str) -> str:
     if not isinstance(value, str) or not value:
         raise ValueError(f"{label} must be a non-empty string")
@@ -248,16 +282,38 @@ def validate_index_manifest(payload: Mapping[str, Any]) -> dict[str, Any]:
 
 def evaluate_semantic_continuation(baseline: Mapping[str, Any]) -> dict[str, Any]:
     """Apply the predeclared lexical-gap gate without semantic results."""
+    if not isinstance(baseline, Mapping):
+        raise ValueError("baseline must be an object")
     target = baseline.get("target_styles")
     if not isinstance(target, Mapping):
         raise ValueError("baseline target_styles metrics are missing")
-    query_count = int(target.get("query_count", 0))
-    recall_at_5 = float(target.get("recall_at_5", math.nan))
-    misses_at_5 = int(target.get("misses_at_5", 0))
-    finite = math.isfinite(recall_at_5)
+    query_count = target.get("query_count")
+    recall_at_5 = target.get("recall_at_5")
+    misses_at_5 = target.get("misses_at_5")
+    if (
+        not isinstance(query_count, int)
+        or isinstance(query_count, bool)
+        or query_count < 0
+    ):
+        raise ValueError("baseline target_styles.query_count must be a non-negative integer")
+    if (
+        isinstance(recall_at_5, bool)
+        or not isinstance(recall_at_5, (int, float))
+        or not math.isfinite(float(recall_at_5))
+        or not 0.0 <= float(recall_at_5) <= 1.0
+    ):
+        raise ValueError("baseline target_styles.recall_at_5 must be finite and in 0..1")
+    if (
+        not isinstance(misses_at_5, int)
+        or isinstance(misses_at_5, bool)
+        or not 0 <= misses_at_5 <= query_count
+    ):
+        raise ValueError(
+            "baseline target_styles.misses_at_5 must be an integer in 0..query_count"
+        )
+    recall_at_5 = float(recall_at_5)
     passed = (
-        finite
-        and query_count >= SEMANTIC_CONTINUATION_GATE["minimum_target_queries"]
+        query_count >= SEMANTIC_CONTINUATION_GATE["minimum_target_queries"]
         and recall_at_5 <= SEMANTIC_CONTINUATION_GATE["maximum_lexical_recall_at_5"]
         and misses_at_5 >= SEMANTIC_CONTINUATION_GATE["minimum_target_misses_at_5"]
     )
@@ -289,6 +345,7 @@ __all__ = [
     "canonical_json_bytes",
     "evaluate_semantic_continuation",
     "object_sha256",
+    "validate_semantic_filters",
     "validate_evaluation_set",
     "validate_index_manifest",
     "validate_model_manifest",
