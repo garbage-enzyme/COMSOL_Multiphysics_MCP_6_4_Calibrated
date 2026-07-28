@@ -180,7 +180,7 @@ comsol_mcp/
 | `param_sweep_setup` | Setup parametric sweep |
 | `param_description` | Get/set description |
 
-### Geometry (14)
+### Geometry (16)
 
 | Tool | Description |
 |------|-------------|
@@ -198,8 +198,10 @@ comsol_mcp/
 | `geometry_build` | Build geometry |
 | `geometry_list_features` | List features |
 | `geometry_get_boundaries` | Get boundary numbers |
+| `geometry_create_box_selection` | Create a named selection by position |
+| `geometry_create_side_selections` | Create left/right/top/bottom selections |
 
-### Physics (16)
+### Physics (28)
 
 | Tool | Description |
 |------|-------------|
@@ -210,7 +212,18 @@ comsol_mcp/
 | `physics_add_solid_mechanics` | Add Solid Mechanics |
 | `physics_add_heat_transfer` | Add Heat Transfer |
 | `physics_add_laminar_flow` | Add Laminar Flow |
+| `physics_add_acoustics` | Add a geometry-based acoustic interface by COMSOL type |
+| `physics_add_pressure_acoustics` | Add Pressure Acoustics |
+| `physics_add_coefficient_form_pde` | Add Coefficient Form PDE |
+| `physics_add_general_form_pde` | Add General Form PDE |
+| `physics_add_weak_form_pde` | Add Weak Form PDE |
 | `physics_configure_boundary` | Configure boundary condition |
+| `physics_configure_acoustic_boundary` | Configure one acoustic boundary condition |
+| `physics_setup_acoustic_boundaries` | Configure multiple acoustic boundary conditions |
+| `physics_configure_pde_boundary` | Configure one PDE boundary condition |
+| `physics_setup_pde_boundaries` | Configure multiple PDE boundary conditions |
+| `physics_get_acoustic_boundary_conditions` | List common acoustic boundary feature types |
+| `physics_get_pde_boundary_conditions` | List common PDE boundary feature types |
 | `physics_set_material` | Assign material |
 | `physics_list_features` | List physics features |
 | `physics_remove` | Remove physics |
@@ -220,11 +233,12 @@ comsol_mcp/
 | `physics_interactive_setup_flow` | Interactive flow BC setup |
 | `physics_boundary_selection` | Generic boundary setup |
 
-### Mesh (3)
+### Mesh (4)
 
 | Tool | Description |
 |------|-------------|
 | `mesh_list` | List mesh sequences |
+| `mesh_create_sequence` | Create a mesh sequence |
 | `mesh_create` | Generate mesh |
 | `mesh_info` | Get mesh statistics |
 
@@ -368,6 +382,20 @@ bc.set('U0', '1[mm/s]')
 | Heat Transfer | ConvectiveHeatFlux | `h`, `Text` |
 | Laminar Flow | InletBoundary | `U0`, `NormalInflowVelocity` |
 | Laminar Flow | OutletBoundary | `p0` |
+| Pressure Acoustics | SoundHard | No additional property |
+| Pressure Acoustics | SoundSoft | No additional property |
+| Pressure Acoustics | Pressure | `p0` |
+| Pressure Acoustics | Impedance | `Zn` |
+| Pressure Acoustics | NormalAcceleration | `nacc` |
+| Pressure Acoustics | NormalVelocity | `nvel` |
+| Pressure Acoustics | PlaneWaveRadiation | No additional property |
+| Pressure Acoustics | SphericalWaveRadiation | No additional property |
+| PDE | DirichletBoundary | `r` |
+| PDE | FluxBoundary | `g`, `q` |
+| PDE | ZeroFluxBoundary | No additional property |
+| PDE | WeakContribution | `weak` |
+| PDE | PeriodicCondition | No additional property |
+
 
 ### 3. Client Session Limitation
 
