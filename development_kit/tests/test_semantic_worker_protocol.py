@@ -19,7 +19,7 @@ from src.jobs.manager import JobManager
 from src.knowledge.lexical_manual import build_index_from_records, search_index
 from src.knowledge.semantic_contracts import PUBLIC_LIMITS, WORKER_PROTOCOL_SCHEMA_VERSION
 from src.knowledge.semantic_process import SemanticWorkerManager
-from src.knowledge.semantic_worker import _RequestHandler, _WorkerServer
+from src.knowledge.semantic_worker import _RequestHandler, _WorkerServer, _WorkerState
 from src.tools.capabilities import get_capabilities
 from src.tools.ownership import SolverOwnership
 
@@ -199,6 +199,144 @@ def test_unserializable_worker_response_uses_stable_json_fallback():
     response = json.loads(handler.wfile.getvalue())
     assert response["success"] is False
     assert response["error"]["code"] == "invalid_response"
+
+
+def test_backend_exception_returns_structured_failure_without_killing_handler():
+    class Backend:
+        def query(self, *_args, **_kwargs):
+            raise RuntimeError("private backend detail")
+
+        def status(self):
+            return {"backend": "test"}
+
+    state = _WorkerState("0" * 64, None, 0.0, backend=Backend())
+    handler = object.__new__(_RequestHandler)
+    handler.server = SimpleNamespace(state=state)
+    handler.wfile = BytesIO()
+
+    handler._dispatch(
+        "backend-error",
+        {
+            "operation": "query",
+            "query": "bounded failure",
+            "limit": 1,
+            "filters": None,
+            "retrieval_mode": "hybrid",
+        },
+    )
+
+    response = json.loads(handler.wfile.getvalue())
+    assert response["error"] == {
+        "code": "backend_failure",
+        "message": "semantic backend query failed",
+    }
+    assert "private backend detail" not in json.dumps(response)
+    assert state.last_error == "RuntimeError: backend query failed"
+
+
+def test_health_remains_observable_while_query_holds_backend_lock():
+    with SemanticWorkerManager(startup_deadline=2.0, query_delay=0.75) as manager:
+        assert manager.start()["success"] is True
+        port = int(manager._port)
+        result: dict = {}
+        query_thread = threading.Thread(
+            target=lambda: result.update(
+                _raw_request(
+                    port,
+                    _request(
+                        manager,
+                        "slow-query",
+                        operation="query",
+                        query="slow",
+                        limit=1,
+                    ),
+                )
+            )
+        )
+        query_thread.start()
+        time.sleep(0.1)
+
+        started = time.monotonic()
+        health = _raw_request(
+            port,
+            _request(manager, "health-during-query", operation="health"),
+        )
+        elapsed = time.monotonic() - started
+        query_thread.join(timeout=3.0)
+
+        assert health["success"] is True
+        assert elapsed < 0.5
+        assert not query_thread.is_alive()
+        assert result["success"] is True
+
+
+def test_worker_start_os_error_is_structured_and_leaves_no_state(monkeypatch):
+    manager = SemanticWorkerManager(python_executable="missing-python")
+    monkeypatch.setattr(
+        "src.knowledge.semantic_process.subprocess.Popen",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            FileNotFoundError("private executable path")
+        ),
+    )
+
+    result = manager.start()
+
+    assert result["success"] is False
+    assert result["error"] == {
+        "code": "startup_failed",
+        "message": "FileNotFoundError: semantic worker process could not be started",
+    }
+    assert result["cleanup"]["absent"] is True
+    assert manager.status(probe=False)["state"] == "stopped"
+
+
+def test_request_uses_one_monotonic_deadline_across_trickled_receives(monkeypatch):
+    class Connection:
+        def __init__(self):
+            self.timeout = 1.0
+            self.blocks = [b'{"schema_version":"1",', b'"request_id":"late",', b'"success":true}\n']
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def settimeout(self, timeout):
+            self.timeout = timeout
+
+        def sendall(self, _payload):
+            return None
+
+        def recv(self, _maximum):
+            delay = 0.03
+            if self.timeout < delay:
+                raise TimeoutError("deadline exhausted")
+            time.sleep(delay)
+            return self.blocks.pop(0)
+
+    manager = SemanticWorkerManager(query_deadline=0.05)
+    manager._port = 1
+    manager._token = "0" * 64
+    monkeypatch.setattr(manager, "start", lambda: {"success": True})
+    monkeypatch.setattr(
+        "src.knowledge.semantic_process.socket.create_connection",
+        lambda *_args, **_kwargs: Connection(),
+    )
+    monkeypatch.setattr(
+        manager,
+        "_terminate_owned",
+        lambda reason: {"reason": reason, "absent": True},
+    )
+
+    started = time.monotonic()
+    result = manager.query("trickle")
+    elapsed = time.monotonic() - started
+
+    assert result["success"] is False
+    assert result["error"]["code"] == "worker_protocol_failure"
+    assert result["cleanup"]["absent"] is True
+    assert elapsed < 0.08
 
 
 def test_stale_identity_refuses_action_until_exact_record_is_restored():

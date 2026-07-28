@@ -108,8 +108,7 @@ class _RequestHandler(socketserver.StreamRequestHandler):
         if not isinstance(request_id, str) or not request_id or len(request_id) > 128:
             self._write(_response(None, success=False, error={"code": "invalid_request_id", "message": "request_id is required"}))
             return
-        with self.server.state.active:
-            self._dispatch(request_id, request)
+        self._dispatch(request_id, request)
 
     def _dispatch(self, request_id: str, request: dict[str, Any]) -> None:
         operation = request.get("operation")
@@ -130,12 +129,23 @@ class _RequestHandler(socketserver.StreamRequestHandler):
                 response = _response(request_id, success=False, error={"code": "invalid_retrieval_mode", "message": "retrieval_mode is unsupported"})
             else:
                 try:
-                    payload = self.server.state.query(
-                        query.strip(), limit, filters=filters, retrieval_mode=retrieval_mode
-                    )
+                    with self.server.state.active:
+                        payload = self.server.state.query(
+                            query.strip(), limit, filters=filters, retrieval_mode=retrieval_mode
+                        )
                     response = _response(request_id, success=True, **payload, status=self.server.state.status())
                 except ValueError as exc:
                     response = _response(request_id, success=False, error={"code": "invalid_arguments", "message": str(exc)})
+                except Exception as exc:
+                    self.server.state.last_error = f"{type(exc).__name__}: backend query failed"
+                    response = _response(
+                        request_id,
+                        success=False,
+                        error={
+                            "code": "backend_failure",
+                            "message": "semantic backend query failed",
+                        },
+                    )
         else:
             response = _response(request_id, success=False, error={"code": "unknown_operation", "message": "operation is unsupported"})
 

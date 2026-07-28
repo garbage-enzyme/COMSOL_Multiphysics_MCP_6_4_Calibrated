@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import ctypes
-from ctypes import wintypes
 import hashlib
 import json
 import os
@@ -14,11 +13,11 @@ import subprocess
 import sys
 import threading
 import time
-from typing import Any
 import uuid
+from ctypes import wintypes
+from typing import Any
 
 from .semantic_contracts import PUBLIC_LIMITS, WORKER_PROTOCOL_SCHEMA_VERSION
-
 
 CREATE_TIME_TOLERANCE_SECONDS = 0.05
 
@@ -157,7 +156,23 @@ class SemanticWorkerManager:
             environment = os.environ.copy()
             environment["COMSOL_SEMANTIC_SESSION_TOKEN"] = token
             creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
-            process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=environment, creationflags=creationflags)
+            try:
+                process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=environment, creationflags=creationflags)
+            except OSError as exc:
+                error = {
+                    "code": "startup_failed",
+                    "message": f"{type(exc).__name__}: semantic worker process could not be started",
+                }
+                self._last_error = error
+                return {
+                    "success": False,
+                    "error": error,
+                    "cleanup": {
+                        "reason": "startup_failure",
+                        "acted": False,
+                        "absent": True,
+                    },
+                }
             self._process = process
             created = _windows_process_create_time(int(process._handle)) if os.name == "nt" else time.time()
             self._identity = {"pid": process.pid, "process_create_time": created, "command_signature": _command_signature(command)}
@@ -236,15 +251,24 @@ class SemanticWorkerManager:
         started = self.start()
         if not started.get("success"):
             return started
+        request_started = time.monotonic()
+
+        def remaining() -> float:
+            value = float(deadline) - (time.monotonic() - request_started)
+            if value <= 0:
+                raise TimeoutError("semantic worker request deadline exceeded")
+            return value
+
         request_id = f"semantic-{uuid.uuid4().hex}"
         request = {"schema_version": WORKER_PROTOCOL_SCHEMA_VERSION, "request_id": request_id, "token": self._token, "operation": operation, **fields}
         encoded = json.dumps(request, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode("utf-8") + b"\n"
         try:
-            with socket.create_connection(("127.0.0.1", int(self._port)), timeout=deadline) as connection:
-                connection.settimeout(deadline)
+            with socket.create_connection(("127.0.0.1", int(self._port)), timeout=remaining()) as connection:
+                connection.settimeout(remaining())
                 connection.sendall(encoded)
                 chunks = bytearray()
                 while not chunks.endswith(b"\n"):
+                    connection.settimeout(remaining())
                     block = connection.recv(min(4096, PUBLIC_LIMITS["maximum_response_bytes"] + 1 - len(chunks)))
                     if not block:
                         raise RuntimeError("worker closed connection before a complete response")
