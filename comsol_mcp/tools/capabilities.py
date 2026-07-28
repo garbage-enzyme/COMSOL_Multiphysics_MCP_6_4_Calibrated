@@ -103,6 +103,14 @@ def _deployment_identity() -> dict:
             "source_classification": "unknown",
             "error": f"{type(exc).__name__}: deployment manifest unavailable",
         }
+    if not isinstance(manifest, dict):
+        return {
+            "schema_name": "comsol_mcp.deployment_identity",
+            "schema_version": "1.0.0",
+            "available": False,
+            "source_classification": "unknown",
+            "error": "TypeError: deployment manifest unavailable",
+        }
     module_path = str(Path(__file__).resolve()).replace("\\", "/").casefold()
     source_classification = (
         "installed_site_package"

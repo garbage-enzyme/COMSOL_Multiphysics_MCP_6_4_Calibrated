@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tomllib
 
+import src.tools.capabilities as capabilities_module
 from src import __version__
 from src.build_identity import get_build_identity, package_content_sha256
 from src.compatibility import load_runtime_compatibility
@@ -59,6 +60,18 @@ def test_deployment_manifest_matches_frozen_profile_and_schema_snapshots():
     assert "陆星" not in serialized
     assert "C:\\Users\\" not in serialized
     assert str(ROOT) not in serialized
+
+
+def test_nonobject_deployment_manifest_fails_closed(tmp_path, monkeypatch):
+    manifest = tmp_path / "deployment_manifest.json"
+    manifest.write_text("[]", encoding="utf-8")
+    monkeypatch.setattr(capabilities_module, "_DEPLOYMENT_MANIFEST", manifest)
+
+    identity = get_capabilities(_selection("core"))["deployment_identity"]
+
+    assert identity["available"] is False
+    assert identity["source_classification"] == "unknown"
+    assert "deployment manifest unavailable" in identity["error"]
 
 
 def test_snapshot_identity_is_invariant_to_checkout_line_endings(tmp_path):

@@ -180,7 +180,7 @@ def _read_value(
 ) -> Any:
     try:
         return parser(value)
-    except (SettingsError, TypeError, ValueError) as exc:
+    except (SettingsError, TypeError, ValueError, RuntimeError) as exc:
         _record_error(errors, location, exc)
         return deepcopy(default)
 
@@ -569,8 +569,19 @@ def load_settings_report(environ: Mapping[str, str] | None = None) -> dict[str, 
             reason_code="settings_json_invalid",
         )
         return {"settings": deepcopy(_DEFAULT_SETTINGS), "errors": [_report_error(error)]}
+    except RecursionError as exc:
+        return {
+            "settings": deepcopy(_DEFAULT_SETTINGS),
+            "errors": [_report_error(exc)],
+        }
     errors: list[dict[str, str]] = []
-    settings = _normalize(document, errors=errors)
+    try:
+        settings = _normalize(document, errors=errors)
+    except RecursionError as exc:
+        return {
+            "settings": deepcopy(_DEFAULT_SETTINGS),
+            "errors": [_report_error(exc)],
+        }
     return {"settings": settings, "errors": errors}
 
 
