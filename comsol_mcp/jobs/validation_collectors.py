@@ -4,16 +4,18 @@ from __future__ import annotations
 
 import hashlib
 import json
-from pathlib import Path
+import math
 import re
+from pathlib import Path
 from typing import Any, Callable, Mapping
 
-from .store import atomic_write_json
+from comsol_mcp.evidence.contracts import validate_physical_evidence
 from comsol_mcp.evidence.field_matrix import (
     MATRIX_FIELD_COLLECTOR,
     bind_validation_matrix_field_request,
 )
 
+from .store import atomic_write_json
 
 _LOCKED_INPUTS = frozenset(
     {
@@ -57,6 +59,73 @@ def _contained_manifest(result: Mapping[str, Any], artifact_root: Path) -> Path:
     if not manifest.is_file() or manifest.stat().st_size <= 0:
         raise ValueError("physical audit manifest is missing or empty")
     return manifest
+
+
+def _validate_point_audit_inner_manifest(
+    path: Path,
+    *,
+    expected_status: object,
+    point: Mapping[str, Any],
+    expected_source_sha256: str,
+    require_clean_measurement: bool = False,
+) -> dict[str, Any]:
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("point audit inner manifest is not valid JSON") from exc
+    if not isinstance(document, Mapping):
+        raise ValueError("point audit inner manifest must be a JSON object")
+    if document.get("audit_status") != expected_status or expected_status not in {
+        "measurement_complete",
+        "policy_evaluated",
+    }:
+        raise ValueError("point audit inner manifest status is incomplete or inconsistent")
+    try:
+        physical = validate_physical_evidence(document.get("physical_evidence"))
+    except ValueError as exc:
+        raise ValueError("point audit inner manifest physical evidence is invalid") from exc
+    if physical["producer"]["tool"] != "wave_optics_point_audit":
+        raise ValueError("point audit inner manifest producer is unsupported")
+    identity = physical["identity"]
+    if (
+        identity["source_sha256"] != expected_source_sha256.lower()
+        or identity["config_id"] != point.get("point_fingerprint")
+    ):
+        raise ValueError("point audit inner manifest identity differs from the matrix point")
+    measurement = document.get("measurement")
+    if not isinstance(measurement, Mapping):
+        raise ValueError("point audit inner manifest measurement is unavailable")
+    if require_clean_measurement:
+        solve = measurement.get("solve")
+        if (
+            not isinstance(solve, Mapping)
+            or solve.get("ran") is not True
+            or solve.get("error") is not None
+        ):
+            raise ValueError("point audit inner manifest solve did not complete cleanly")
+        if measurement.get("measurement_errors") not in ([], None):
+            raise ValueError("point audit inner manifest contains measurement errors")
+        if measurement.get("integrity_errors") not in ([], None):
+            raise ValueError("point audit inner manifest contains integrity errors")
+    wavelength = measurement.get("wavelength")
+    declared = point.get("wavelength")
+    scales = {"m": 1.0, "um": 1.0e-6, "nm": 1.0e-9}
+    if not isinstance(wavelength, Mapping) or not isinstance(declared, Mapping):
+        raise ValueError("point audit inner manifest wavelength identity is unavailable")
+    value = declared.get("value")
+    unit = declared.get("unit")
+    requested = wavelength.get("requested_m")
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or unit not in scales
+        or isinstance(requested, bool)
+        or not isinstance(requested, (int, float))
+        or not math.isfinite(float(requested))
+        or not math.isclose(float(requested), float(value) * scales[unit], rel_tol=1e-12)
+    ):
+        raise ValueError("point audit inner manifest wavelength differs from the matrix point")
+    return dict(document)
 
 
 def _locked_kwargs(
@@ -145,6 +214,13 @@ def execute_physical_audit_collector(
     if result.get("success") is not True:
         return dict(result)
     inner_manifest = _contained_manifest(result, root)
+    if name == "wave_optics_point_audit":
+        _validate_point_audit_inner_manifest(
+            inner_manifest,
+            expected_status=result.get("audit_status"),
+            point=point,
+            expected_source_sha256=expected_source_sha256,
+        )
     wrapper_path = root / "matrix_collector.json"
     inner_relative = inner_manifest.relative_to(root).as_posix()
     wrapper = {

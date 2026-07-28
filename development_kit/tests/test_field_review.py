@@ -1,20 +1,21 @@
 from __future__ import annotations
 
-from copy import deepcopy
 import hashlib
 import json
+from copy import deepcopy
 from pathlib import Path
 
 import numpy as np
 import pytest
-
 import src.jobs.field_review as field_review_module
+from src.evidence.contracts import build_physical_evidence
 from src.evidence.field_pipeline import build_field_evidence_from_samples
 from src.jobs.field_review import assemble_validation_matrix_field_review
 from src.jobs.store import atomic_write_json
 from src.jobs.validation_collectors import execute_field_evidence_collector
 from src.jobs.validation_matrix import normalize_validation_matrix_spec
 from src.jobs.validation_rows import append_validation_row
+
 from development_kit.tests.test_field_matrix import _field_inputs
 
 
@@ -46,7 +47,7 @@ def _point(point_id, wavelength, *, grid=None):
     }
 
 
-def _create_job(tmp_path, *, second_grid=None):
+def _create_job(tmp_path, *, second_grid=None, mutate_field_manifest=None):
     directory = tmp_path / "job-pair"
     directory.mkdir(parents=True)
     source = tmp_path / "fixture.mph"
@@ -74,7 +75,46 @@ def _create_job(tmp_path, *, second_grid=None):
         audit_root = directory / "artifacts" / point["expected_artifact_ids"][0] / "attempt-1"
         audit_root.mkdir(parents=True)
         audit_inner = audit_root / "inner.json"
-        atomic_write_json(audit_inner, {"point_id": point["point_id"]})
+        physical = build_physical_evidence(
+            {
+                "schema_name": "comsol_mcp.physical_evidence",
+                "schema_version": "1.1.0",
+                "artifact_type": "wave_optics_point_audit",
+                "producer": {
+                    "tool": "wave_optics_point_audit",
+                    "tool_schema_version": "test",
+                },
+                "identity": {
+                    "config_id": point["point_fingerprint"],
+                    "config_sha256": point["configuration_sha256"],
+                    "source_sha256": spec["source_model_sha256"],
+                },
+                "model": {
+                    "component_tag": "comp1",
+                    "physics_tag": "ewfd",
+                    "study_tag": "std1",
+                    "study_step_tag": "freq",
+                    "mesh_tag": "mesh1",
+                    "mesh_element_count": 12,
+                    "mesh_vertex_count": 8,
+                },
+                "evidence": {},
+                "limitations": [],
+            }
+        )
+        atomic_write_json(
+            audit_inner,
+            {
+                "audit_status": "policy_evaluated",
+                "measurement": {
+                    "wavelength": {"requested_m": point["wavelength"]["value"] * 1.0e-6},
+                    "solve": {"ran": True, "error": None},
+                    "measurement_errors": [],
+                    "integrity_errors": [],
+                },
+                "physical_evidence": physical,
+            },
+        )
         audit_wrapper = audit_root / "matrix_collector.json"
         atomic_write_json(
             audit_wrapper,
@@ -124,6 +164,15 @@ def _create_job(tmp_path, *, second_grid=None):
             field_runner=runner,
         )
         field_wrapper = Path(field_result["artifacts"]["manifest"])
+        if mutate_field_manifest is not None:
+            wrapper = json.loads(field_wrapper.read_text(encoding="utf-8"))
+            manifest_path = field_root / wrapper["field_manifest"]["relative_path"]
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            mutate_field_manifest(manifest)
+            atomic_write_json(manifest_path, manifest)
+            wrapper["field_manifest"]["sha256"] = _sha256(manifest_path)
+            wrapper["field_manifest"]["byte_count"] = manifest_path.stat().st_size
+            atomic_write_json(field_wrapper, wrapper)
         summaries = [
             {
                 "collector": "wave_optics_point_audit",
@@ -212,6 +261,23 @@ def test_pair_assembler_rejects_mismatched_common_grid(tmp_path):
             job_directory=directory,
             point_ids=["off:res", "target"],
             bundle_id="grid-mismatch",
+            quantity_name="abs_ex",
+            quantity_unit="V/m",
+            coordinate_unit="um",
+        )
+
+
+def test_pair_assembler_uses_complete_request_bound_manifest_validation(tmp_path):
+    def add_noncanonical_claim(manifest):
+        manifest["semantic_claim"] = "localized mode"
+
+    directory = _create_job(tmp_path, mutate_field_manifest=add_noncanonical_claim)
+
+    with pytest.raises(ValueError, match="unsupported fields"):
+        assemble_validation_matrix_field_review(
+            job_directory=directory,
+            point_ids=["off:res", "target"],
+            bundle_id="noncanonical-manifest",
             quantity_name="abs_ex",
             quantity_unit="V/m",
             coordinate_unit="um",

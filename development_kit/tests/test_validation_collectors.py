@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
-
+from src.evidence.contracts import build_physical_evidence
 from src.jobs.validation_collectors import execute_physical_audit_collector
 from src.jobs.validation_matrix import normalize_validation_matrix_spec
 
@@ -48,7 +48,49 @@ def _complete_runner(captured, artifact_name="inner.json"):
         captured["kwargs"] = kwargs
         root = Path(kwargs["artifact_dir"])
         manifest = root / artifact_name
-        manifest.write_text(json.dumps({"raw": "evidence"}), encoding="utf-8")
+        wavelength_m = kwargs["wavelength_value"] * 1.0e-6
+        physical = build_physical_evidence(
+            {
+                "schema_name": "comsol_mcp.physical_evidence",
+                "schema_version": "1.1.0",
+                "artifact_type": "wave_optics_point_audit",
+                "producer": {
+                    "tool": "wave_optics_point_audit",
+                    "tool_schema_version": "test",
+                },
+                "identity": {
+                    "config_id": kwargs["config_id"],
+                    "config_sha256": "a" * 64,
+                    "source_sha256": kwargs["expected_source_sha256"],
+                },
+                "model": {
+                    "component_tag": "comp1",
+                    "physics_tag": "ewfd",
+                    "study_tag": "std1",
+                    "study_step_tag": "freq",
+                    "mesh_tag": "mesh1",
+                    "mesh_element_count": 12,
+                    "mesh_vertex_count": 8,
+                },
+                "evidence": {},
+                "limitations": [],
+            }
+        )
+        manifest.write_text(
+            json.dumps(
+                {
+                    "audit_status": "measurement_complete",
+                    "measurement": {
+                        "wavelength": {"requested_m": wavelength_m},
+                        "solve": {"ran": True, "error": None},
+                        "measurement_errors": [],
+                        "integrity_errors": [],
+                    },
+                    "physical_evidence": physical,
+                }
+            ),
+            encoding="utf-8",
+        )
         return {
             "success": True,
             "audit_status": "measurement_complete",
@@ -57,6 +99,34 @@ def _complete_runner(captured, artifact_name="inner.json"):
         }
 
     return run
+
+
+def test_point_audit_wrapper_rejects_semantically_unbound_inner_manifest(tmp_path):
+    spec, point, collector = _normalized_point(tmp_path)
+
+    with pytest.raises(ValueError, match="point audit inner manifest"):
+        execute_physical_audit_collector(
+            point,
+            collector,
+            tmp_path / "artifact",
+            model=object(),
+            client=object(),
+            model_name="fixture",
+            expected_source_sha256=spec["source_model_sha256"],
+            session_state={"connected": True},
+            ownership_preflight={"ready": True},
+            point_audit_runner=lambda *_args, **kwargs: _write_unbound_audit(kwargs),
+        )
+
+
+def _write_unbound_audit(kwargs):
+    manifest = Path(kwargs["artifact_dir"]) / "inner.json"
+    manifest.write_text(json.dumps({"raw": "unbound evidence"}), encoding="utf-8")
+    return {
+        "success": True,
+        "audit_status": "measurement_complete",
+        "artifacts": {"manifest": str(manifest)},
+    }
 
 
 def test_point_audit_identity_fields_are_matrix_locked_and_wrapped(tmp_path):

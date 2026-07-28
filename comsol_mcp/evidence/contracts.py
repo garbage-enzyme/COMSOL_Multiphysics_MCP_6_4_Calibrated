@@ -7,13 +7,13 @@ workers, and by offline artifact reviewers.
 
 from __future__ import annotations
 
-from copy import deepcopy
 import hashlib
 import json
 import math
 import os
-from pathlib import Path
 import re
+from copy import deepcopy
+from pathlib import Path
 from typing import Any, Mapping
 
 from comsol_mcp.durable import canonical_json_v1, canonical_sha256_v1
@@ -22,7 +22,6 @@ from comsol_mcp.utils.validation import (
     strict_json_integer,
     strict_json_number,
 )
-
 
 PHYSICAL_EVIDENCE_SCHEMA_NAME = "comsol_mcp.physical_evidence"
 PHYSICAL_EVIDENCE_SCHEMA_VERSION = "1.1.0"
@@ -420,6 +419,56 @@ def _measured_or_unknown(
     )
 
 
+def _legacy_declared_flux_is_complete(value: Mapping[str, Any]) -> bool:
+    planes = value.get("planes")
+    if not isinstance(planes, Mapping):
+        return False
+    for name in ("incident", "reflected", "transmitted"):
+        plane = planes.get(name)
+        if not isinstance(plane, Mapping):
+            return False
+        for field in ("raw_power_w", "directed_power_w"):
+            number = plane.get(field)
+            if (
+                isinstance(number, bool)
+                or not isinstance(number, (int, float))
+                or not math.isfinite(float(number))
+            ):
+                return False
+        sign = plane.get("positive_power_sign")
+        if isinstance(sign, bool) or not isinstance(sign, int) or sign not in {-1, 1}:
+            return False
+        expression = plane.get("expression")
+        selection_ids = plane.get("selection_ids")
+        if (
+            not isinstance(expression, str)
+            or not expression.strip()
+            or len(expression) > MAX_TEXT
+        ):
+            return False
+        if (
+            not isinstance(selection_ids, list)
+            or not 1 <= len(selection_ids) <= MAX_LIST_ITEMS
+            or any(
+                isinstance(entity, bool)
+                or not isinstance(entity, (int, str))
+                or (isinstance(entity, int) and entity <= 0)
+                or (isinstance(entity, str) and (not entity.strip() or len(entity) > MAX_TEXT))
+                for entity in selection_ids
+            )
+        ):
+            return False
+    for field in ("R", "T", "A", "closure_abs"):
+        number = value.get(field)
+        if (
+            isinstance(number, bool)
+            or not isinstance(number, (int, float))
+            or not math.isfinite(float(number))
+        ):
+            return False
+    return True
+
+
 def _point_audit_envelope(
     payload: Mapping[str, Any],
     *,
@@ -512,7 +561,10 @@ def _point_audit_envelope(
         "convention_complete",
         "physical_flux_closure_eligible",
     )
-    if declared_flux.get("state") == "derived_from_declared_convention":
+    if (
+        declared_flux.get("state") == "derived_from_declared_convention"
+        and _legacy_declared_flux_is_complete(declared_flux)
+    ):
         planes = declared_flux.get("planes", {})
         for plane_name in ("incident", "reflected", "transmitted"):
             plane = planes.get(plane_name, {}) if isinstance(planes, dict) else {}

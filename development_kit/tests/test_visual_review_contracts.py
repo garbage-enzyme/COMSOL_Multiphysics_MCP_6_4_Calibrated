@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 import json
-from pathlib import Path
 import subprocess
 import sys
+from copy import deepcopy
+from pathlib import Path
 
 import pytest
 from mcp.server.fastmcp import FastMCP
-
+from src.evidence.contracts import canonical_sha256
 from src.evidence.visual_review import (
     build_visual_review_receipt,
     build_visual_review_request,
@@ -22,7 +22,6 @@ from src.evidence.visual_review import (
     validate_visual_review_request,
 )
 from src.tools.visual_review import register_visual_review_tools
-
 
 CONFIG_HASH = "a" * 64
 ON_HASH = "b" * 64
@@ -239,6 +238,17 @@ def test_capability_hash_and_unknown_fields_fail_closed():
         validate_reviewer_capability(unknown)
 
 
+@pytest.mark.parametrize("field", ["provider", "model"])
+def test_capability_requires_explicit_transport_identity_fields(field):
+    capability = deepcopy(_codex())
+    capability.pop(field)
+    capability.pop("contract_sha256")
+    capability["contract_sha256"] = canonical_sha256(capability)
+
+    with pytest.raises(ValueError, match=field):
+        validate_reviewer_capability(capability)
+
+
 def test_review_request_is_deterministic_bounded_and_contains_shared_view_evidence():
     first = _request()
     second = _request()
@@ -287,6 +297,23 @@ def test_complete_receipt_requires_calibration_delivery_hashes_inspection_and_fi
     assert "known_answer_calibration_incomplete" in no_calibration["incomplete_reasons"]
     assert "received_artifacts_incomplete_or_mismatched" in missing_artifact["incomplete_reasons"]
     assert "visual_inspection_not_performed" in no_inspection["incomplete_reasons"]
+
+
+def test_receipt_rejects_impossible_utc_timestamp():
+    with pytest.raises(ValueError, match="UTC ISO-8601"):
+        build_visual_review_receipt(
+            review_id="impossible-time",
+            request=_request("dual_blind"),
+            capability=_codex(),
+            session_id="impossible-time-session",
+            received_artifacts=_refs(),
+            visual_inspection_performed=True,
+            findings=_findings(),
+            uncertainties=[],
+            rejected_claims=[],
+            prior_review_exposure=False,
+            timestamp="2026-99-99T29:70:70Z",
+        )
 
 
 def test_visual_contract_hashes_survive_json_number_round_trip():
@@ -348,6 +375,38 @@ def test_dual_blind_review_requires_two_independent_complete_receipts():
     assert agreement["state"] == "dual_review_complete"
     assert disagreement["state"] == "adjudication_required"
     assert disagreement["numerical_policy_authority"] is False
+
+
+def test_dual_review_compares_received_artifacts_as_an_order_independent_set():
+    request = _request("dual_blind")
+    first = _receipt(_codex(), session="ordered-session")
+    opencode_capability = normalize_opencode_capability(
+        provider="opencode-go",
+        model="future-vision-model",
+        provider_metadata={
+            "id": "opencode-go/future-vision-model",
+            "capabilities": {"input": {"image": True}},
+        },
+        cli_attachment_supported=True,
+        attachment_part_confirmed=True,
+        delivered_artifacts=_refs(),
+        calibration=_calibration(),
+    )
+    second = _receipt(
+        opencode_capability,
+        session="reversed-session",
+        received=list(reversed(_refs())),
+    )
+
+    result = evaluate_dual_visual_review(
+        request=request,
+        first_receipt=first,
+        second_receipt=second,
+        comparison="agreement",
+    )
+
+    assert result["state"] == "dual_review_complete"
+    assert "artifact_sets_differ" not in result["reasons"]
 
 
 def test_dual_review_remains_incomplete_after_prior_review_exposure():

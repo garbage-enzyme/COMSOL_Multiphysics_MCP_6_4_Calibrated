@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 import math
-from pathlib import PurePosixPath
 import re
+from copy import deepcopy
+from datetime import datetime, timezone
+from pathlib import PurePosixPath
 from typing import Any, Mapping
 
 from .contracts import canonical_json_bytes, canonical_sha256
-
 
 VISUAL_CAPABILITY_SCHEMA = "comsol_mcp.visual_reviewer_capability"
 VISUAL_REQUEST_SCHEMA = "comsol_mcp.visual_review_request"
@@ -122,6 +122,19 @@ def _hash(value: Any, label: str) -> str:
     text = _text(value, label).lower()
     if not _HEX64.fullmatch(text):
         raise ValueError(f"{label} must be exactly 64 hexadecimal characters")
+    return text
+
+
+def _utc_timestamp(value: Any, label: str) -> str:
+    text = _text(value, label)
+    if not _TIMESTAMP.fullmatch(text):
+        raise ValueError(f"{label} must be UTC ISO-8601")
+    try:
+        parsed = datetime.fromisoformat(text[:-1] + "+00:00")
+    except ValueError as exc:
+        raise ValueError(f"{label} must be UTC ISO-8601") from exc
+    if parsed.tzinfo != timezone.utc:
+        raise ValueError(f"{label} must be UTC ISO-8601")
     return text
 
 
@@ -353,8 +366,20 @@ def validate_reviewer_capability(value: Any) -> dict[str, Any]:
     if item.get("schema_name") != VISUAL_CAPABILITY_SCHEMA or item.get("schema_version") != VISUAL_REVIEW_SCHEMA_VERSION:
         raise ValueError("reviewer_capability schema is unsupported")
     client = _text(item.get("client"), "reviewer_capability.client", identifier=True)
-    if item.get("transport") not in {"file_attachment", "view_image_tool"}:
+    transport = item.get("transport")
+    if transport not in {"file_attachment", "view_image_tool"}:
         raise ValueError("reviewer_capability.transport is unsupported")
+    if "provider" not in item or "model" not in item:
+        raise ValueError("reviewer_capability provider and model fields are required")
+    if transport == "file_attachment":
+        _text(item["provider"], "reviewer_capability.provider", identifier=True)
+        _text(item["model"], "reviewer_capability.model")
+    elif item["provider"] is not None or item["model"] is not None:
+        raise ValueError("view_image_tool capability provider and model must be null")
+    if client == "opencode" and transport != "file_attachment":
+        raise ValueError("opencode capability requires file_attachment transport")
+    if client == "codex" and transport != "view_image_tool":
+        raise ValueError("codex capability requires view_image_tool transport")
     for field in (
         "image_input", "original_resolution_support", "host_capability_confirmed",
         "delivery_confirmed", "scientific_review_eligible",
@@ -599,7 +624,7 @@ def build_visual_review_receipt(
         "uncertainties": _strings(uncertainties, "uncertainties", MAX_FINDINGS),
         "rejected_claims": _strings(rejected_claims, "rejected_claims", MAX_FINDINGS),
         "prior_review_exposure": prior_review_exposure,
-        "timestamp": _text(timestamp, "timestamp"),
+        "timestamp": _utc_timestamp(timestamp, "timestamp"),
         "inspection_status": "performed" if visual_inspection_performed else "not_performed",
         "status": status,
         "incomplete_reasons": reasons,
@@ -632,8 +657,7 @@ def validate_visual_review_receipt(value: Any) -> dict[str, Any]:
             raise ValueError(f"visual_review_receipt.{field} must be boolean")
     if item.get("numerical_policy_authority") is not False:
         raise ValueError("visual review cannot have numerical policy authority")
-    if not _TIMESTAMP.fullmatch(_text(item.get("timestamp"), "visual_review_receipt.timestamp")):
-        raise ValueError("visual_review_receipt.timestamp must be UTC ISO-8601")
+    _utc_timestamp(item.get("timestamp"), "visual_review_receipt.timestamp")
     if item.get("status") not in {"visual_review_required", "visual_review_complete"}:
         raise ValueError("visual_review_receipt.status is unsupported")
     _hash(item.get("request_sha256"), "visual_review_receipt.request_sha256")
@@ -681,7 +705,13 @@ def evaluate_dual_visual_review(
         reasons.append("review_clients_not_distinct")
     if first["prior_review_exposure"] or second["prior_review_exposure"]:
         reasons.append("blind_review_contaminated")
-    if first["received_artifacts"] != second["received_artifacts"]:
+    first_artifacts = {
+        (item["artifact_id"], item["sha256"]) for item in first["received_artifacts"]
+    }
+    second_artifacts = {
+        (item["artifact_id"], item["sha256"]) for item in second["received_artifacts"]
+    }
+    if first_artifacts != second_artifacts:
         reasons.append("artifact_sets_differ")
     if first["status"] != "visual_review_complete" or second["status"] != "visual_review_complete":
         reasons.append("one_or_more_reviews_incomplete")

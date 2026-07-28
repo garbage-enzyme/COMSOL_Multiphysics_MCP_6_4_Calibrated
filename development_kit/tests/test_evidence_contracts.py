@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 import hashlib
 import json
 import math
+from copy import deepcopy
 
 import pytest
-
 from src.evidence.contracts import (
     PHYSICAL_EVIDENCE_SCHEMA_NAME,
     PHYSICAL_EVIDENCE_SCHEMA_VERSION,
@@ -26,7 +25,6 @@ from src.evidence.contracts import (
     validate_physical_evidence,
     validate_validation_policy,
 )
-
 
 SOURCE_HASH = "a" * 64
 CONFIG_HASH = "b" * 64
@@ -409,6 +407,46 @@ def test_legacy_reader_preserves_labels_and_does_not_invent_flux_evidence():
     assert migrated["migration"]["output_mode"] == "new_artifact"
     assert migrated["evidence"]["polarization.physical_incident"]["state"] == "label_only"
     assert migrated["evidence"]["flux.closure_abs"]["state"] == "not_requested"
+
+
+def test_legacy_declared_flux_state_cannot_substitute_for_nested_measurements():
+    legacy = {
+        "schema_version": "1",
+        "config_id": "legacy-config",
+        "config_sha256": CONFIG_HASH,
+        "source_sha256": SOURCE_HASH,
+        "measurement": {
+            "schema_version": "1",
+            "config_id": "legacy-config",
+            "provenance": {
+                "config_sha256": CONFIG_HASH,
+                "source_sha256_before": SOURCE_HASH,
+            },
+            "wavelength": {},
+            "power": {},
+            "polarization": {},
+            "mesh": {},
+            "declared_plane_flux": {
+                "state": "derived_from_declared_convention",
+                "planes": {"incident": None},
+            },
+        },
+    }
+
+    migrated = migrate_legacy_point_audit(legacy)
+
+    for name in (
+        "incident_raw_power_w",
+        "reflected_raw_power_w",
+        "transmitted_raw_power_w",
+        "R",
+        "T",
+        "A",
+        "closure_abs",
+        "convention_complete",
+        "physical_flux_closure_eligible",
+    ):
+        assert migrated["evidence"][f"flux.{name}"]["state"] == "unknown"
 
 
 def test_file_migration_writes_new_hash_bound_artifact_without_touching_source(tmp_path):

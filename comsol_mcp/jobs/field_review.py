@@ -4,17 +4,18 @@ from __future__ import annotations
 
 import hashlib
 import json
-from pathlib import Path
 import re
 import shutil
+from pathlib import Path
 from typing import Any, Mapping
 
+from comsol_mcp.evidence.field_manifest import validate_field_evidence_manifest
 from comsol_mcp.evidence.field_matrix import bind_validation_matrix_field_request
 from comsol_mcp.evidence.field_render import render_field_png_bundle
 
 from .store import atomic_write_json
+from .validation_collectors import _validate_point_audit_inner_manifest
 from .validation_rows import read_validation_rows
-
 
 FIELD_REVIEW_BUNDLE_SCHEMA = "comsol_mcp.validation_matrix_field_review"
 FIELD_REVIEW_BUNDLE_VERSION = "1.0.0"
@@ -165,11 +166,19 @@ def _load_source_audit(
         or _sha256_file(inner_path) != inner_descriptor.get("sha256")
     ):
         raise ValueError("point audit inner manifest differs from its wrapper")
+    inner = _validate_point_audit_inner_manifest(
+        inner_path,
+        expected_status=summary["audit_status"],
+        point=declared_point,
+        expected_source_sha256=spec["source_model_sha256"],
+        require_clean_measurement=True,
+    )
     return {
         "summary": summary,
         "wrapper_path": wrapper_path,
         "inner_path": inner_path,
         "inner_descriptor": dict(inner_descriptor),
+        "inner": inner,
     }
 
 
@@ -261,12 +270,10 @@ def _load_point_field(
         label="field manifest",
         maximum_bytes=MAX_FIELD_MANIFEST_BYTES,
     )
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    if (
-        manifest.get("schema_name") != "comsol_mcp.field_evidence_manifest"
-        or manifest.get("schema_version") != "1.0.0"
-    ):
-        raise ValueError("field manifest schema is unsupported")
+    manifest = validate_field_evidence_manifest(
+        json.loads(manifest_path.read_text(encoding="utf-8")),
+        request=expected_request,
+    )
     if manifest.get("measurement_status") != "measurement_complete":
         raise ValueError("paired review requires complete field manifests")
     if (
