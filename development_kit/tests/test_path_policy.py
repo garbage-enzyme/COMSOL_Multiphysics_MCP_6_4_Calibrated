@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import tempfile
 import unicodedata
 from pathlib import Path
 
@@ -27,12 +26,7 @@ from development_kit.tests.conftest import _create_ascii_temp_dir
 
 @pytest.fixture
 def ascii_root():
-    base = (
-        Path("D:/comsol_runtime")
-        if Path("D:/").exists()
-        else Path(os.environ.get("SystemRoot", "C:/Windows")) / "Temp"
-    )
-    root = Path(tempfile.mkdtemp(prefix="comsol_mcp_path_policy_", dir=base))
+    root = _create_ascii_temp_dir()
     try:
         yield root
     finally:
