@@ -396,7 +396,7 @@ def test_shared_source_and_fixed_snapshot_root_reuse_containment(tmp_path, ascii
     assert source_decision.normalized_path == source.resolve()
     assert snapshot_decision.kind == "shared_snapshot_write"
     assert snapshot_decision.normalized_path == snapshot.resolve()
-    assert policy.shared_snapshot_root == write_root / "shared_snapshots"
+    assert policy.shared_snapshot_root == (write_root / "shared_snapshots").resolve()
 
 
 def test_shared_model_lock_wrapper_normalizes_immutable_source(tmp_path, ascii_root, monkeypatch):
