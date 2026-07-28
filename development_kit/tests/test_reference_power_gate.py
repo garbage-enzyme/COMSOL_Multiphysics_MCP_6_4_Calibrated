@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 import pytest
-
+from src.evidence import reference_power_gate as gate_module
 from src.evidence.contracts import (
     PHYSICAL_EVIDENCE_SCHEMA_NAME,
     PHYSICAL_EVIDENCE_SCHEMA_VERSION,
@@ -19,7 +19,6 @@ from src.evidence.reference_power_gate import (
     inventory_reference_power_artifacts,
 )
 
-
 ROOT = Path(__file__).parents[2]
 CONTRACT = json.loads(
     (
@@ -28,9 +27,7 @@ CONTRACT = json.loads(
         / "release"
         / "integration_fixtures"
         / "reference_power_evidence.json"
-    ).read_text(
-        encoding="utf-8"
-    )
+    ).read_text(encoding="utf-8")
 )
 
 
@@ -54,21 +51,64 @@ def _physical_evidence():
                 "study_step_tag": "wl_step",
             },
             "evidence": {
-                "flux.incident_raw_power_w": {"state": "measured", "value": incident_raw, "unit": "W"},
-                "flux.reflected_raw_power_w": {"state": "measured", "value": reflected_raw, "unit": "W"},
-                "flux.transmitted_raw_power_w": {"state": "measured", "value": transmitted_raw, "unit": "W"},
-                "flux.incident_positive_power_sign": {"state": "derived_from_declared_convention", "value": -1},
-                "flux.reflected_positive_power_sign": {"state": "derived_from_declared_convention", "value": 1},
-                "flux.transmitted_positive_power_sign": {"state": "derived_from_declared_convention", "value": -1},
-                "flux.incident_power_w": {"state": "derived_from_declared_convention", "value": 2.0, "unit": "W"},
-                "flux.reflected_power_w": {"state": "derived_from_declared_convention", "value": 0.4, "unit": "W"},
-                "flux.transmitted_power_w": {"state": "derived_from_declared_convention", "value": 1.2, "unit": "W"},
+                "flux.incident_raw_power_w": {
+                    "state": "measured",
+                    "value": incident_raw,
+                    "unit": "W",
+                },
+                "flux.reflected_raw_power_w": {
+                    "state": "measured",
+                    "value": reflected_raw,
+                    "unit": "W",
+                },
+                "flux.transmitted_raw_power_w": {
+                    "state": "measured",
+                    "value": transmitted_raw,
+                    "unit": "W",
+                },
+                "flux.incident_positive_power_sign": {
+                    "state": "derived_from_declared_convention",
+                    "value": -1,
+                },
+                "flux.reflected_positive_power_sign": {
+                    "state": "derived_from_declared_convention",
+                    "value": 1,
+                },
+                "flux.transmitted_positive_power_sign": {
+                    "state": "derived_from_declared_convention",
+                    "value": -1,
+                },
+                "flux.incident_power_w": {
+                    "state": "derived_from_declared_convention",
+                    "value": 2.0,
+                    "unit": "W",
+                },
+                "flux.reflected_power_w": {
+                    "state": "derived_from_declared_convention",
+                    "value": 0.4,
+                    "unit": "W",
+                },
+                "flux.transmitted_power_w": {
+                    "state": "derived_from_declared_convention",
+                    "value": 1.2,
+                    "unit": "W",
+                },
                 "flux.R": {"state": "derived_from_declared_convention", "value": 0.2, "unit": "1"},
                 "flux.T": {"state": "derived_from_declared_convention", "value": 0.6, "unit": "1"},
                 "flux.A": {"state": "derived_from_declared_convention", "value": 0.2, "unit": "1"},
-                "flux.closure_abs": {"state": "derived_from_declared_convention", "value": 0.0, "unit": "1"},
-                "flux.convention_complete": {"state": "derived_from_declared_convention", "value": True},
-                "flux.physical_flux_closure_eligible": {"state": "derived_from_declared_convention", "value": True},
+                "flux.closure_abs": {
+                    "state": "derived_from_declared_convention",
+                    "value": 0.0,
+                    "unit": "1",
+                },
+                "flux.convention_complete": {
+                    "state": "derived_from_declared_convention",
+                    "value": True,
+                },
+                "flux.physical_flux_closure_eligible": {
+                    "state": "derived_from_declared_convention",
+                    "value": True,
+                },
             },
             "limitations": [],
         }
@@ -111,7 +151,9 @@ def test_negative_controls_reuse_raw_evidence_and_must_fail_policy():
     assert result["reversed_sign"]["overall"] == "fail"
     assert result["internal_consistency_substitution"]["overall"] == "fail"
     assert result["reversed_sign"]["passed_rejection_gate"] is True
-    assert point["physical_evidence"]["evidence"]["flux.reflected_positive_power_sign"]["value"] == 1
+    assert (
+        point["physical_evidence"]["evidence"]["flux.reflected_positive_power_sign"]["value"] == 1
+    )
 
 
 def test_combined_reference_power_evaluation_requires_every_physical_and_negative_gate():
@@ -124,6 +166,110 @@ def test_combined_reference_power_evaluation_requires_every_physical_and_negativ
     failed = evaluate_reference_power_results(CONTRACT, failed_reference, point)
     assert failed["passed"] is False
     assert failed["checks"]["reference_air"]["reflection"] is False
+
+
+@pytest.mark.parametrize(
+    "group,key,mutation",
+    [
+        (
+            "reference_air",
+            "audit_complete",
+            lambda reference, _point: reference.update({"audit_status": "failed"}),
+        ),
+        (
+            "reference_air",
+            "policy_pass",
+            lambda reference, _point: reference["assessment"].update({"overall": "fail"}),
+        ),
+        (
+            "reference_air",
+            "reflection",
+            lambda reference, _point: reference["reference"].update({"R": 1.0}),
+        ),
+        (
+            "reference_air",
+            "r_plus_t_residual",
+            lambda reference, _point: reference["reference"].update({"R_plus_T_residual_abs": 1.0}),
+        ),
+        (
+            "reference_air",
+            "target_ratio",
+            lambda reference, _point: reference["reference"].update(
+                {"target_to_transverse_ratio": 0.0}
+            ),
+        ),
+        (
+            "reference_air",
+            "clone_cleanup",
+            lambda reference, _point: reference["cleanup"].update({"removed": False}),
+        ),
+        (
+            "physical_point",
+            "audit_complete",
+            lambda _reference, point: point.update({"audit_status": "failed"}),
+        ),
+        (
+            "physical_point",
+            "policy_pass",
+            lambda _reference, point: point["assessment"].update({"project_verdict": "fail"}),
+        ),
+        (
+            "physical_point",
+            "wavelength_absolute",
+            lambda _reference, point: point["measurement"]["wavelength"].update(
+                {"absolute_difference_m": 1.0}
+            ),
+        ),
+        (
+            "physical_point",
+            "wavelength_relative",
+            lambda _reference, point: point["measurement"]["wavelength"].update(
+                {"relative_difference": 1.0}
+            ),
+        ),
+        (
+            "physical_point",
+            "source_unchanged",
+            lambda _reference, point: point["measurement"]["integrity"].update(
+                {"source_unchanged": False}
+            ),
+        ),
+    ],
+)
+def test_each_reference_power_physical_gate_is_independently_required(group, key, mutation):
+    reference, point, _policies = _results()
+    mutation(reference, point)
+
+    result = evaluate_reference_power_results(CONTRACT, reference, point)
+
+    assert result["passed"] is False
+    assert result["checks"][group][key] is False
+
+
+@pytest.mark.parametrize(
+    "failed_control",
+    ["reversed_sign", "internal_consistency_substitution"],
+)
+def test_each_reference_power_negative_control_is_independently_required(
+    monkeypatch, failed_control
+):
+    reference, point, _policies = _results()
+    original = gate_module.evaluate_reference_power_negative_controls
+
+    def fail_one_control(physical_evidence, flux_policy):
+        result = original(physical_evidence, flux_policy)
+        result[failed_control]["passed_rejection_gate"] = False
+        return result
+
+    monkeypatch.setattr(
+        gate_module,
+        "evaluate_reference_power_negative_controls",
+        fail_one_control,
+    )
+
+    result = evaluate_reference_power_results(CONTRACT, reference, point)
+
+    assert result["passed"] is False
 
 
 def test_reference_power_rejects_negative_errors_and_infinite_target_ratios():
@@ -164,3 +310,7 @@ def test_artifact_inventory_is_relative_hashed_and_bounded(tmp_path):
     limited = {**CONTRACT["limits"], "max_artifact_files": 1}
     with pytest.raises(ValueError, match="file count"):
         inventory_reference_power_artifacts(tmp_path, limited)
+
+    byte_limited = {**CONTRACT["limits"], "max_artifact_bytes": 2}
+    with pytest.raises(ValueError, match="artifact bytes"):
+        inventory_reference_power_artifacts(tmp_path, byte_limited)

@@ -6,7 +6,6 @@ import json
 from pathlib import Path
 
 import pytest
-
 from src.evidence.real_fixture import (
     DOMAINS_ENV,
     MODEL_ENV,
@@ -15,7 +14,6 @@ from src.evidence.real_fixture import (
     controlled_fixture_environment_from_reference_power_spec,
     controlled_fixture_from_environment,
 )
-
 
 ROOT = Path(__file__).parents[2]
 
@@ -66,8 +64,12 @@ def test_reference_power_spec_translates_to_explicit_subprocess_only_fixture_env
         (lambda env: env.update({RANGE_ENV: '{"x":[0,1]}'}), "exactly x, y, and z"),
     ],
 )
-def test_fixture_environment_fails_closed_on_missing_or_ambiguous_metadata(tmp_path, mutation, match):
-    environment = controlled_fixture_environment_from_reference_power_spec(_spec(tmp_path), base_environment={})
+def test_fixture_environment_fails_closed_on_missing_or_ambiguous_metadata(
+    tmp_path, mutation, match
+):
+    environment = controlled_fixture_environment_from_reference_power_spec(
+        _spec(tmp_path), base_environment={}
+    )
     mutation(environment)
     with pytest.raises((ValueError, FileNotFoundError), match=match):
         controlled_fixture_from_environment(environment)
@@ -82,6 +84,72 @@ def test_reference_power_spec_rejects_coercive_wavelength_values(tmp_path, value
 
     with pytest.raises(ValueError, match="must be numeric"):
         controlled_fixture_environment_from_reference_power_spec(path, base_environment={})
+
+
+def test_reference_power_spec_rejects_malformed_json(tmp_path):
+    path = _spec(tmp_path)
+    path.write_text("{broken", encoding="utf-8")
+
+    with pytest.raises(json.JSONDecodeError):
+        controlled_fixture_environment_from_reference_power_spec(path, base_environment={})
+
+
+@pytest.mark.parametrize(
+    "mutation,match",
+    [
+        (lambda value, _tmp: value["wavelength"].update({"unit": "m"}), "declared in um"),
+        (lambda value, _tmp: value["wavelength"].update({"value": 0}), "finite and positive"),
+        (
+            lambda value, _tmp: value["reference_air"].update({"top_air_domain_ids": []}),
+            "non-empty",
+        ),
+        (
+            lambda value, _tmp: value["reference_air"].update({"top_air_domain_ids": [1, 1]}),
+            "duplicates",
+        ),
+        (
+            lambda value, _tmp: value["reference_air"]["top_air_coordinate_range"].update(
+                {"x": [2, 1]}
+            ),
+            "is invalid",
+        ),
+    ],
+)
+def test_reference_power_spec_rejects_invalid_physical_and_path_boundaries(
+    tmp_path, mutation, match
+):
+    path = _spec(tmp_path)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    mutation(payload, tmp_path)
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises((ValueError, FileNotFoundError), match=match):
+        controlled_fixture_environment_from_reference_power_spec(path, base_environment={})
+
+
+def test_reference_power_spec_rejects_a_directory_as_the_model_source(tmp_path):
+    path = _spec(tmp_path)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["source_model_path"] = str(tmp_path)
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(FileNotFoundError) as caught:
+        controlled_fixture_environment_from_reference_power_spec(path, base_environment={})
+
+    assert caught.value.args == (tmp_path.resolve(),)
+
+
+def test_missing_fixture_error_identifies_the_declared_model_not_the_spec(tmp_path):
+    path = _spec(tmp_path)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    source = Path(payload["source_model_path"])
+    source.unlink()
+    assert path.is_file()
+
+    with pytest.raises(FileNotFoundError) as caught:
+        controlled_fixture_environment_from_reference_power_spec(path, base_environment={})
+
+    assert caught.value.args == (source.resolve(),)
 
 
 @pytest.mark.parametrize("value", [True, "0", None, [], {}])

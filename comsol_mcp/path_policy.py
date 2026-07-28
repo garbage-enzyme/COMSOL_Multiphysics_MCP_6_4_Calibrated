@@ -2,18 +2,19 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import ctypes
 import hashlib
 import inspect
 import os
-from pathlib import Path
 import re
-from typing import Any, Mapping
 import unicodedata
+from contextlib import contextmanager
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Mapping
 
 from comsol_mcp.settings import settings_environment
 from comsol_mcp.utils.runtime_paths import default_runtime_dir
-
 
 MODEL_READ_ROOTS_ENV = "COMSOL_MCP_MODEL_READ_ROOTS"
 ARTIFACT_WRITE_ROOT_ENV = "COMSOL_MCP_ARTIFACT_WRITE_ROOT"
@@ -21,11 +22,17 @@ PATH_POLICY_SCHEMA = "comsol_mcp.path_policy"
 PATH_POLICY_VERSION = "1.1.0"
 SHARED_SNAPSHOT_DIRECTORY = "shared_snapshots"
 
-_WINDOWS_RESERVED = frozenset({
-    "CON", "PRN", "AUX", "NUL", "CLOCK$",
-    *(f"COM{index}" for index in range(1, 10)),
-    *(f"LPT{index}" for index in range(1, 10)),
-})
+_WINDOWS_RESERVED = frozenset(
+    {
+        "CON",
+        "PRN",
+        "AUX",
+        "NUL",
+        "CLOCK$",
+        *(f"COM{index}" for index in range(1, 10)),
+        *(f"LPT{index}" for index in range(1, 10)),
+    }
+)
 _DEVICE_PREFIX = re.compile(r"^(?:\\\\[?.]\\|//[?.]/)")
 
 
@@ -36,6 +43,115 @@ class PathDecision:
     kind: str
     normalized_path: Path
     root_id: str
+    read_pin: "ValidatedReadPin | None" = None
+
+
+@dataclass(frozen=True)
+class ValidatedReadPin:
+    """Private filesystem identity retained across a guarded read operation."""
+
+    path: Path
+    root: Path
+    path_identity: tuple[int, int]
+    root_identity: tuple[int, int]
+
+
+class ReadPinError(OSError):
+    """A validated input could not be held stable for the consumer call."""
+
+
+def _file_identity(path: Path) -> tuple[int, int]:
+    stat = path.stat()
+    return stat.st_dev, stat.st_ino
+
+
+def _read_pin(path: Path, root: Path) -> ValidatedReadPin:
+    return ValidatedReadPin(
+        path=path,
+        root=root,
+        path_identity=_file_identity(path),
+        root_identity=_file_identity(root),
+    )
+
+
+def _open_windows_read_pin(path: Path, *, directory: bool) -> int:
+    if os.name != "nt":
+        raise ReadPinError("stable read-path pinning requires Windows")
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    create_file = kernel32.CreateFileW
+    create_file.argtypes = (
+        ctypes.c_wchar_p,
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+        ctypes.c_void_p,
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+        ctypes.c_void_p,
+    )
+    create_file.restype = ctypes.c_void_p
+    access = 0x00000080 if directory else 0x80000000
+    flags = 0x02000000 if directory else 0x00000080
+    handle = create_file(str(path), access, 0x00000001, None, 3, flags, None)
+    invalid_handle = ctypes.c_void_p(-1).value
+    if handle in (None, invalid_handle):
+        error = ctypes.get_last_error()
+        raise ReadPinError(
+            error,
+            f"validated read path could not be pinned: {path.name}",
+        )
+    return int(handle)
+
+
+def _close_windows_handle(handle: int) -> None:
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    close_handle = kernel32.CloseHandle
+    close_handle.argtypes = (ctypes.c_void_p,)
+    close_handle.restype = ctypes.c_int
+    close_handle(ctypes.c_void_p(handle))
+
+
+@contextmanager
+def pin_validated_reads(pins: tuple[ValidatedReadPin, ...]):
+    """Deny mutation or ancestor replacement while validated files are consumed."""
+    handles: list[int] = []
+    opened: set[Path] = set()
+    try:
+        for pin in pins:
+            ancestors: list[Path] = []
+            current = pin.path.parent
+            while True:
+                ancestors.append(current)
+                if current == pin.root:
+                    break
+                if current.parent == current:
+                    raise ReadPinError("validated read path no longer belongs to its root")
+                current = current.parent
+            for directory in reversed(ancestors):
+                if directory not in opened:
+                    handles.append(_open_windows_read_pin(directory, directory=True))
+                    opened.add(directory)
+            if pin.path not in opened:
+                handles.append(_open_windows_read_pin(pin.path, directory=False))
+                opened.add(pin.path)
+            if (
+                pin.path.resolve(strict=True) != pin.path
+                or _file_identity(pin.path) != pin.path_identity
+                or _file_identity(pin.root) != pin.root_identity
+            ):
+                raise ReadPinError("validated read path identity changed before use")
+    except (OSError, RuntimeError, ValueError) as exc:
+        for handle in reversed(handles):
+            _close_windows_handle(handle)
+        if isinstance(exc, ReadPinError):
+            raise
+        raise ReadPinError(
+            f"validated read path could not be pinned: {type(exc).__name__}"
+        ) from exc
+    try:
+        yield
+    finally:
+        for handle in reversed(handles):
+            _close_windows_handle(handle)
 
 
 def _root_id(path: Path) -> str:
@@ -45,7 +161,9 @@ def _root_id(path: Path) -> str:
 
 def _is_relative_to(path: Path, root: Path) -> bool:
     try:
-        return os.path.commonpath((os.path.normcase(str(path)), os.path.normcase(str(root)))) == os.path.normcase(str(root))
+        return os.path.commonpath(
+            (os.path.normcase(str(path)), os.path.normcase(str(root)))
+        ) == os.path.normcase(str(root))
     except ValueError:
         return False
 
@@ -120,21 +238,16 @@ class PathPolicy:
     ) -> "PathPolicy":
         environment = settings_environment(environ)
         configured_roots = environment.get(MODEL_READ_ROOTS_ENV, "")
-        root_values = tuple(
-            value for value in configured_roots.split(os.pathsep) if value
-        )
+        root_values = tuple(value for value in configured_roots.split(os.pathsep) if value)
         read_roots = tuple(
-            _normalize_root(value, require_ascii=False, must_exist=True)
-            for value in root_values
+            _normalize_root(value, require_ascii=False, must_exist=True) for value in root_values
         )
         runtime = Path(runtime_root or default_runtime_dir()).resolve()
         write_value = environment.get(
             ARTIFACT_WRITE_ROOT_ENV,
             str(runtime / "owned_artifacts"),
         )
-        write_root = _normalize_root(
-            write_value, require_ascii=True, must_exist=False
-        )
+        write_root = _normalize_root(write_value, require_ascii=True, must_exist=False)
         return cls(read_roots, write_root)
 
     def capability(self, *, enforced: bool) -> dict[str, Any]:
@@ -156,9 +269,7 @@ class PathPolicy:
     ) -> PathDecision:
         text = _reject_lexical_path(value, require_ascii=False)
         if not self.model_read_roots:
-            raise ValueError(
-                f"no model read root is configured in {MODEL_READ_ROOTS_ENV}"
-            )
+            raise ValueError(f"no model read root is configured in {MODEL_READ_ROOTS_ENV}")
         try:
             resolved = Path(text).resolve(strict=True)
         except (OSError, RuntimeError) as exc:
@@ -171,7 +282,12 @@ class PathPolicy:
             raise ValueError("model input has an unsupported file extension")
         for root in self.model_read_roots:
             if _is_relative_to(resolved, root):
-                return PathDecision("model_read", resolved, _root_id(root))
+                return PathDecision(
+                    "model_read",
+                    resolved,
+                    _root_id(root),
+                    read_pin=_read_pin(resolved, root),
+                )
         raise ValueError("model input escapes the configured read roots")
 
     def validate_artifact_read(self, value: Any) -> PathDecision:
@@ -183,7 +299,12 @@ class PathPolicy:
         root = self.artifact_write_root.resolve(strict=False)
         if not resolved.is_file() or not _is_relative_to(resolved, root):
             raise ValueError("artifact input escapes the owned artifact root")
-        return PathDecision("artifact_read", resolved, _root_id(root))
+        return PathDecision(
+            "artifact_read",
+            resolved,
+            _root_id(root),
+            read_pin=_read_pin(resolved, root),
+        )
 
     def validate_artifact_read_root(self, value: Any) -> PathDecision:
         """Validate one caller-selected directory beneath the owned artifact root."""
@@ -192,9 +313,7 @@ class PathPolicy:
         try:
             resolved = path.resolve(strict=True)
         except (OSError, RuntimeError) as exc:
-            raise ValueError(
-                f"artifact root cannot be resolved: {type(exc).__name__}"
-            ) from exc
+            raise ValueError(f"artifact root cannot be resolved: {type(exc).__name__}") from exc
         is_junction = getattr(path, "is_junction", lambda: False)
         root = self.artifact_write_root.resolve(strict=False)
         if (
@@ -206,9 +325,7 @@ class PathPolicy:
             raise ValueError("artifact root escapes the owned artifact root")
         return PathDecision("artifact_read_root", resolved, _root_id(root))
 
-    def validate_artifact_write(
-        self, value: Any, *, directory: bool = False
-    ) -> PathDecision:
+    def validate_artifact_write(self, value: Any, *, directory: bool = False) -> PathDecision:
         return self._validate_write_under_root(
             value,
             root=self.artifact_write_root,
@@ -220,7 +337,10 @@ class PathPolicy:
         """Validate one immutable shared-session source model."""
         decision = self.validate_model_read(value, suffixes=(".mph",))
         return PathDecision(
-            "shared_source_read", decision.normalized_path, decision.root_id
+            "shared_source_read",
+            decision.normalized_path,
+            decision.root_id,
+            read_pin=decision.read_pin,
         )
 
     def validate_shared_snapshot_write(self, value: Any) -> PathDecision:
@@ -319,16 +439,26 @@ def validate_tool_paths(
     *,
     tool_name: str,
     profile_name: str,
-) -> tuple[tuple[Any, ...], dict[str, Any], dict[str, Any]]:
+) -> tuple[
+    tuple[Any, ...],
+    dict[str, Any],
+    dict[str, Any],
+    tuple[ValidatedReadPin, ...],
+]:
     """Validate and normalize known caller-selected path arguments."""
     if profile_name == "full":
-        return args, kwargs, {
-            "schema_name": PATH_POLICY_SCHEMA,
-            "schema_version": PATH_POLICY_VERSION,
-            "enforced": False,
-            "compatibility_mode": "legacy_broad_paths",
-            "validated_input_count": 0,
-        }
+        return (
+            args,
+            kwargs,
+            {
+                "schema_name": PATH_POLICY_SCHEMA,
+                "schema_version": PATH_POLICY_VERSION,
+                "enforced": False,
+                "compatibility_mode": "legacy_broad_paths",
+                "validated_input_count": 0,
+            },
+            (),
+        )
     policy = PathPolicy.from_environment()
     signature = inspect.signature(function)
     bound = signature.bind(*args, **kwargs)
@@ -355,9 +485,7 @@ def validate_tool_paths(
         value = bound.arguments.get(argument)
         if value is None:
             if required:
-                raise ValueError(
-                    f"{tool_name}.{argument} is required by the contained path policy"
-                )
+                raise ValueError(f"{tool_name}.{argument} is required by the contained path policy")
             continue
         decision = policy.validate_artifact_write(value, directory=directory)
         bound.arguments[argument] = str(decision.normalized_path)
@@ -365,9 +493,7 @@ def validate_tool_paths(
     if tool_name == "job_submit":
         spec = bound.arguments.get("spec")
         if isinstance(spec, Mapping) and spec.get("source_model_path") is not None:
-            decision = policy.validate_model_read(
-                spec["source_model_path"], suffixes=(".mph",)
-            )
+            decision = policy.validate_model_read(spec["source_model_path"], suffixes=(".mph",))
             normalized_spec = dict(spec)
             normalized_spec["source_model_path"] = str(decision.normalized_path)
             bound.arguments["spec"] = normalized_spec
@@ -378,7 +504,8 @@ def validate_tool_paths(
         "validated_kinds": sorted(decision.kind for decision in decisions),
         "root_ids": sorted({decision.root_id for decision in decisions}),
     }
-    return bound.args, bound.kwargs, evidence
+    read_pins = tuple(decision.read_pin for decision in decisions if decision.read_pin is not None)
+    return bound.args, bound.kwargs, evidence, read_pins
 
 
 __all__ = [
@@ -388,6 +515,9 @@ __all__ = [
     "PATH_POLICY_VERSION",
     "SHARED_SNAPSHOT_DIRECTORY",
     "PathDecision",
+    "ReadPinError",
+    "ValidatedReadPin",
+    "pin_validated_reads",
     "PathPolicy",
     "validate_tool_paths",
 ]

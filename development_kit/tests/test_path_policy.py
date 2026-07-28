@@ -15,6 +15,8 @@ from src.path_policy import (
     ARTIFACT_WRITE_ROOT_ENV,
     MODEL_READ_ROOTS_ENV,
     PathPolicy,
+    ReadPinError,
+    pin_validated_reads,
 )
 from src.tools.capabilities import get_capabilities
 from src.tools.profiles import ProfileSelection
@@ -167,6 +169,56 @@ def test_recommended_profile_wrapper_rejects_unconfigured_model_path(
     assert result["success"] is False
     assert result["path_policy"]["accepted"] is False
     assert called == []
+
+
+def test_guarded_model_read_pins_file_and_ancestors_until_consumer_returns(
+    tmp_path, ascii_root, monkeypatch
+):
+    _policy_value, read_root, write_root = _policy(tmp_path, ascii_root)
+    source = read_root / "source.mph"
+    source.write_bytes(b"validated")
+    replacement = tmp_path / "replacement.mph"
+    replacement.write_bytes(b"replacement")
+    moved_root = tmp_path / "moved-models"
+    monkeypatch.setenv(MODEL_READ_ROOTS_ENV, str(read_root))
+    monkeypatch.setenv(ARTIFACT_WRITE_ROOT_ENV, str(write_root))
+
+    def model_load(file_path: str):
+        with pytest.raises(OSError):
+            os.replace(replacement, file_path)
+        with pytest.raises(OSError):
+            read_root.rename(moved_root)
+        return {"success": True, "bytes": Path(file_path).read_bytes()}
+
+    guarded = guard_tool_call(
+        model_load,
+        tool_name="model_load",
+        side_effect_class="filesystem_read_model_mutation",
+        concurrency_class="solver_free",
+        profile_name="core",
+    )
+
+    result = guarded(str(source))
+
+    assert result["success"] is True
+    assert result["bytes"] == b"validated"
+    os.replace(replacement, source)
+    read_root.rename(moved_root)
+
+
+def test_read_pin_rejects_replacement_between_validation_and_acquisition(tmp_path, ascii_root):
+    policy, read_root, _write_root = _policy(tmp_path, ascii_root)
+    source = read_root / "source.mph"
+    source.write_bytes(b"validated")
+    decision = policy.validate_model_read(str(source), suffixes=(".mph",))
+    assert decision.read_pin is not None
+    replacement = tmp_path / "replacement.mph"
+    replacement.write_bytes(b"replacement")
+    os.replace(replacement, source)
+
+    with pytest.raises(ReadPinError, match="identity changed"):
+        with pin_validated_reads((decision.read_pin,)):
+            pytest.fail("replacement identity must not reach the consumer")
 
 
 def test_full_profile_visibly_preserves_legacy_path_compatibility(tmp_path):

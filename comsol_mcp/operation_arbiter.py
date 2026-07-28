@@ -24,9 +24,9 @@ RETRY_AFTER_MS = 250
 
 
 def _canonical_bytes(value: Any) -> bytes:
-    return json.dumps(
-        value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-    ).encode("utf-8")
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode(
+        "utf-8"
+    )
 
 
 def _process_create_time(pid: int) -> float:
@@ -58,9 +58,7 @@ class OperationArbiter:
         self.lock_path = self.runtime_root / "operation.lock"
         self.pid = int(os.getpid() if pid is None else pid)
         self.process_create_time = float(
-            process_probe(self.pid)
-            if process_create_time is None
-            else process_create_time
+            process_probe(self.pid) if process_create_time is None else process_create_time
         )
         self._process_probe = process_probe
         self._clock = clock
@@ -75,11 +73,16 @@ class OperationArbiter:
             return None, None, f"operation lock cannot be read: {type(exc).__name__}"
         try:
             value = json.loads(payload.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError):
+        except UnicodeDecodeError, json.JSONDecodeError:
             return None, payload, "operation lock is malformed"
         expected = {
-            "schema_name", "schema_version", "operation_id", "tool_name",
-            "side_effect_class", "pid", "process_create_time",
+            "schema_name",
+            "schema_version",
+            "operation_id",
+            "tool_name",
+            "side_effect_class",
+            "pid",
+            "process_create_time",
             "acquired_at_epoch",
         }
         if not isinstance(value, dict) or set(value) != expected:
@@ -118,7 +121,7 @@ class OperationArbiter:
                 return False
             self.lock_path.unlink()
             return True
-        except (FileNotFoundError, OSError):
+        except FileNotFoundError, OSError:
             return False
 
     def inspect(self) -> dict[str, Any]:
@@ -143,7 +146,11 @@ class OperationArbiter:
         return {
             "state": state,
             "retryable": state in {"active", "stale"},
-            "retry_after_ms": RETRY_AFTER_MS if state == "active" else 0 if state == "stale" else None,
+            "retry_after_ms": RETRY_AFTER_MS
+            if state == "active"
+            else 0
+            if state == "stale"
+            else None,
             "reason": reason,
             "active_operation": {
                 "operation_id": lock["operation_id"],
@@ -302,7 +309,11 @@ def guard_tool_call(
     @functools.wraps(function)
     def guarded(*args: Any, **kwargs: Any) -> Any:
         from comsol_mcp.evidence.integrity_controls import annotate_tool_response
-        from comsol_mcp.path_policy import validate_tool_paths
+        from comsol_mcp.path_policy import (
+            ReadPinError,
+            pin_validated_reads,
+            validate_tool_paths,
+        )
 
         def finalize(value: Any) -> Any:
             return annotate_tool_response(tool_name, value)
@@ -310,7 +321,7 @@ def guard_tool_call(
         expected_model_revision = kwargs.pop("expected_model_revision", None)
 
         try:
-            normalized_args, normalized_kwargs, path_evidence = validate_tool_paths(
+            normalized_args, normalized_kwargs, path_evidence, read_pins = validate_tool_paths(
                 function,
                 args,
                 kwargs,
@@ -318,19 +329,31 @@ def guard_tool_call(
                 profile_name=profile_name,
             )
         except (OSError, TypeError, ValueError) as exc:
-            return finalize({
-                "success": False,
-                "error": str(exc),
-                "path_policy": {
-                    "schema_name": "comsol_mcp.path_policy",
-                    "schema_version": "1.0.0",
-                    "enforced": profile_name != "full",
-                    "accepted": False,
-                    "error_type": type(exc).__name__,
-                },
-            })
+            return finalize(
+                {
+                    "success": False,
+                    "error": str(exc),
+                    "path_policy": {
+                        "schema_name": "comsol_mcp.path_policy",
+                        "schema_version": "1.0.0",
+                        "enforced": profile_name != "full",
+                        "accepted": False,
+                        "error_type": type(exc).__name__,
+                    },
+                }
+            )
         if concurrency_class != "comsol_bound":
-            result = function(*normalized_args, **normalized_kwargs)
+            try:
+                with pin_validated_reads(read_pins):
+                    result = function(*normalized_args, **normalized_kwargs)
+            except ReadPinError as exc:
+                return finalize(
+                    {
+                        "success": False,
+                        "error": str(exc),
+                        "path_policy": {**path_evidence, "accepted": False},
+                    }
+                )
             if isinstance(result, dict):
                 result = dict(result)
                 result["path_policy"] = {**path_evidence, "accepted": True}
@@ -341,13 +364,16 @@ def guard_tool_call(
             side_effect_class=side_effect_class,
         )
         if claim is None:
-            return finalize({
-                "success": False,
-                "error": "Another COMSOL-bound operation owns the runtime.",
-                "operation_gate": acquisition,
-                "path_policy": {**path_evidence, "accepted": True},
-            })
+            return finalize(
+                {
+                    "success": False,
+                    "error": "Another COMSOL-bound operation owns the runtime.",
+                    "operation_gate": acquisition,
+                    "path_policy": {**path_evidence, "accepted": True},
+                }
+            )
         result: Any
+        pin_failed = False
         try:
             revision_evidence = None
             revision_model_name = None
@@ -361,11 +387,10 @@ def guard_tool_call(
                     or bound.arguments.get("source_model_name")
                     or session_manager.current_model
                 )
-                current_revision = session_manager.get_model_revision(
-                    revision_model_name
-                )
+                current_revision = session_manager.get_model_revision(revision_model_name)
                 if current_revision is None and profile_name == "full":
-                    result = function(*normalized_args, **normalized_kwargs)
+                    with pin_validated_reads(read_pins):
+                        result = function(*normalized_args, **normalized_kwargs)
                 elif current_revision is None:
                     result = {
                         "success": False,
@@ -373,8 +398,7 @@ def guard_tool_call(
                     }
                 elif (
                     profile_name != "full"
-                    and expected_model_revision
-                    != current_revision["revision_sha256"]
+                    and expected_model_revision != current_revision["revision_sha256"]
                 ):
                     result = {
                         "success": False,
@@ -382,7 +406,8 @@ def guard_tool_call(
                         "model_revision": current_revision,
                     }
                 else:
-                    result = function(*normalized_args, **normalized_kwargs)
+                    with pin_validated_reads(read_pins):
+                        result = function(*normalized_args, **normalized_kwargs)
                     revision_evidence = current_revision
                     if (
                         isinstance(result, dict)
@@ -393,7 +418,11 @@ def guard_tool_call(
                             revision_model_name, tool_name
                         )
             else:
-                result = function(*normalized_args, **normalized_kwargs)
+                with pin_validated_reads(read_pins):
+                    result = function(*normalized_args, **normalized_kwargs)
+        except ReadPinError as exc:
+            pin_failed = True
+            result = {"success": False, "error": str(exc)}
         finally:
             release = arbiter.release(claim)
         if isinstance(result, dict):
@@ -402,7 +431,7 @@ def guard_tool_call(
                 **acquisition,
                 "release": release,
             }
-            result["path_policy"] = {**path_evidence, "accepted": True}
+            result["path_policy"] = {**path_evidence, "accepted": not pin_failed}
             if revision_evidence is not None:
                 result["model_revision"] = revision_evidence
             if not release["verified"]:
@@ -414,17 +443,17 @@ def guard_tool_call(
         signature = inspect.signature(function)
         hints = get_type_hints(function)
         parameters = [
-            parameter.replace(
-                annotation=hints.get(parameter.name, parameter.annotation)
-            )
+            parameter.replace(annotation=hints.get(parameter.name, parameter.annotation))
             for parameter in signature.parameters.values()
         ]
-        parameters.append(inspect.Parameter(
-            "expected_model_revision",
-            kind=inspect.Parameter.KEYWORD_ONLY,
-            default=None,
-            annotation=str | None,
-        ))
+        parameters.append(
+            inspect.Parameter(
+                "expected_model_revision",
+                kind=inspect.Parameter.KEYWORD_ONLY,
+                default=None,
+                annotation=str | None,
+            )
+        )
         guarded.__signature__ = signature.replace(
             parameters=parameters,
             return_annotation=hints.get("return", signature.return_annotation),
@@ -448,13 +477,17 @@ def _guard_async_tool_call(
     @functools.wraps(function)
     async def guarded(*args: Any, **kwargs: Any) -> Any:
         from comsol_mcp.evidence.integrity_controls import annotate_tool_response
-        from comsol_mcp.path_policy import validate_tool_paths
+        from comsol_mcp.path_policy import (
+            ReadPinError,
+            pin_validated_reads,
+            validate_tool_paths,
+        )
 
         def finalize(value: Any) -> Any:
             return annotate_tool_response(tool_name, value)
 
         try:
-            normalized_args, normalized_kwargs, path_evidence = validate_tool_paths(
+            normalized_args, normalized_kwargs, path_evidence, read_pins = validate_tool_paths(
                 function,
                 args,
                 kwargs,
@@ -462,18 +495,30 @@ def _guard_async_tool_call(
                 profile_name=profile_name,
             )
         except (OSError, TypeError, ValueError) as exc:
-            return finalize({
-                "success": False,
-                "error": str(exc),
-                "path_policy": {
-                    "schema_name": "comsol_mcp.path_policy",
-                    "schema_version": "1.0.0",
-                    "enforced": profile_name != "full",
-                    "accepted": False,
-                    "error_type": type(exc).__name__,
-                },
-            })
-        result = await function(*normalized_args, **normalized_kwargs)
+            return finalize(
+                {
+                    "success": False,
+                    "error": str(exc),
+                    "path_policy": {
+                        "schema_name": "comsol_mcp.path_policy",
+                        "schema_version": "1.0.0",
+                        "enforced": profile_name != "full",
+                        "accepted": False,
+                        "error_type": type(exc).__name__,
+                    },
+                }
+            )
+        try:
+            with pin_validated_reads(read_pins):
+                result = await function(*normalized_args, **normalized_kwargs)
+        except ReadPinError as exc:
+            return finalize(
+                {
+                    "success": False,
+                    "error": str(exc),
+                    "path_policy": {**path_evidence, "accepted": False},
+                }
+            )
         if isinstance(result, dict):
             result = dict(result)
             result["path_policy"] = {**path_evidence, "accepted": True}
