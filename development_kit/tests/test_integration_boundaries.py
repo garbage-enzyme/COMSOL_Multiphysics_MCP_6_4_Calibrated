@@ -1,10 +1,26 @@
 """Safety tests for standalone integration probe boundaries."""
 
-from pathlib import Path
+import ast
 import runpy
+from pathlib import Path
 
 import mph
 import pytest
+
+
+def test_clientapi_property_acceptance_uses_explicit_runtime_checks():
+    script = (
+        Path(__file__).parents[2]
+        / "development_kit"
+        / "tests"
+        / "integration"
+        / "clientapi_property_acceptance.py"
+    )
+    source = script.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+
+    assert not [node for node in ast.walk(tree) if isinstance(node, ast.Assert)]
+    assert "_require(" in source
 
 
 @pytest.mark.parametrize(

@@ -5,8 +5,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from pathlib import Path
 import sys
+from pathlib import Path
 
 import mph
 
@@ -25,10 +25,15 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _require(condition: bool, message: str) -> None:
+    if not condition:
+        raise RuntimeError(message)
+
+
 def main() -> None:
-    artifact_dir = Path(
-        os.environ.get("COMSOL_MCP_RUNTIME_DIR", "D:/comsol_runtime")
-    ) / "clientapi property"
+    artifact_dir = (
+        Path(os.environ.get("COMSOL_MCP_RUNTIME_DIR", "D:/comsol_runtime")) / "clientapi property"
+    )
     artifact_dir.mkdir(parents=True, exist_ok=True)
     source_path = artifact_dir / "property_gate_source.mph"
     manifest_path = artifact_dir / "property_gate_result.json"
@@ -67,10 +72,8 @@ def main() -> None:
     )
     results = []
     for container, feature_tag, property_name, temporary_value in cases:
-        before = get_existing_property(
-            model, "comp1", container, feature_tag, property_name
-        )
-        assert before["success"], before
+        before = get_existing_property(model, "comp1", container, feature_tag, property_name)
+        _require(bool(before.get("success")), f"property read failed: {before}")
         changed = set_existing_property(
             model,
             "comp1",
@@ -79,7 +82,7 @@ def main() -> None:
             property_name,
             temporary_value,
         )
-        assert changed["success"], changed
+        _require(bool(changed.get("success")), f"property update failed: {changed}")
         restored = set_existing_property(
             model,
             "comp1",
@@ -88,23 +91,29 @@ def main() -> None:
             property_name,
             before["value"],
         )
-        assert restored["success"], restored
-        final = get_existing_property(
-            model, "comp1", container, feature_tag, property_name
+        _require(bool(restored.get("success")), f"property restore failed: {restored}")
+        final = get_existing_property(model, "comp1", container, feature_tag, property_name)
+        _require(bool(final.get("success")), f"property readback failed: {final}")
+        _require(
+            final.get("value") == before.get("value"),
+            f"property restoration mismatch: before={before}, final={final}",
         )
-        assert final["success"], final
-        assert final["value"] == before["value"], (before, final)
-        results.append({
-            "container": container,
-            "feature_tag": feature_tag,
-            "property": property_name,
-            "before": before["value"],
-            "temporary": changed["new_value"],
-            "restored": final["value"],
-        })
+        results.append(
+            {
+                "container": container,
+                "feature_tag": feature_tag,
+                "property": property_name,
+                "before": before["value"],
+                "temporary": changed["new_value"],
+                "restored": final["value"],
+            }
+        )
 
     source_hash_after = _sha256(source_path)
-    assert source_hash_after == source_hash_before
+    _require(
+        source_hash_after == source_hash_before,
+        "source model changed during property acceptance",
+    )
     result = {
         "success": True,
         "solve_ran": False,

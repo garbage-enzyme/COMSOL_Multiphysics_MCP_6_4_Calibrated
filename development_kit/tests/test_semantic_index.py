@@ -4,17 +4,17 @@ from __future__ import annotations
 
 import hashlib
 import json
-from pathlib import Path
+import os
 import shutil
 import subprocess
 import sys
 import uuid
+from pathlib import Path
 
 import numpy as np
 import pytest
-
-from src.knowledge.lexical_manual import build_index_from_records
 from src.knowledge import semantic_index as index_module
+from src.knowledge.lexical_manual import build_index_from_records
 from src.knowledge.semantic_index import (
     build_index,
     chunk_page,
@@ -276,15 +276,19 @@ def test_semantic_index_import_does_not_load_ml_or_spawn(semantic_index_root):
 import json, sys
 import src.knowledge.semantic_index
 for name in ('numpy', 'chromadb', 'torch', 'sentence_transformers', 'mph', 'psutil'):
-    assert name not in sys.modules, name
+    if name in sys.modules:
+        raise RuntimeError(f'forbidden eager import: {name}')
 print(json.dumps({'ok': True}))
 """
+    environment = os.environ.copy()
+    environment["PYTHONOPTIMIZE"] = "1"
     completed = subprocess.run(
         [sys.executable, "-c", code],
         cwd=Path(__file__).parents[2],
         capture_output=True,
         text=True,
         timeout=20,
+        env=environment,
     )
     assert completed.returncode == 0, completed.stderr
     assert json.loads(completed.stdout)["ok"] is True

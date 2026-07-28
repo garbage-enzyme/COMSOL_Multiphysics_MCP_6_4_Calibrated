@@ -6,24 +6,24 @@ import ast
 import hashlib
 import json
 import os
-from pathlib import Path, PurePosixPath, PureWindowsPath
 import re
 import subprocess
 import sys
 import tomllib
 import zipfile
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import pytest
 
 from development_kit.scripts.generate_release_lock import _render_lock
-from development_kit.scripts.python_compatibility_licensed_gate import (
-    _select_expected_backend,
-    _status_is_clean,
-)
 from development_kit.scripts.planning_code_gate import (
     TEXT_SUFFIXES,
     load_planning_code_allowlist,
     verify_planning_code_texts,
+)
+from development_kit.scripts.python_compatibility_licensed_gate import (
+    _select_expected_backend,
+    _status_is_clean,
 )
 from development_kit.scripts.release_gate import (
     PLANNING_CODE_ALLOWLIST,
@@ -33,7 +33,6 @@ from development_kit.scripts.release_gate import (
     _validated_dependency_lock,
 )
 from development_kit.scripts.run_real_release_gate import _wait_clean_ownership
-
 
 ROOT = Path(__file__).parents[2]
 RELEASE = ROOT / "development_kit" / "release"
@@ -165,6 +164,10 @@ def test_support_matrix_matches_frozen_profile_counts_and_declared_dependencies(
     for package in ("matplotlib", "mcp", "mph", "numpy", "pydantic", "psutil", "scipy"):
         assert re.search(rf"(?m)^{package}(?:[<>=]|$)", dependencies)
     assert any(item.startswith("build>=") for item in pyproject["project"]["optional-dependencies"]["dev"])
+    assert pyproject["build-system"]["requires"] == ["hatchling==1.31.0"]
+    assert pyproject["project"]["optional-dependencies"]["manuals"] == [
+        "pymupdf>=1.24.0,<2"
+    ]
     assert pyproject["project"]["requires-python"] == ">=3.14,<3.15"
     assert pyproject["tool"]["hatch"]["build"]["targets"]["sdist"]["exclude"] == [
         "/development_kit"

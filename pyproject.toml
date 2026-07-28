@@ -16,7 +16,7 @@ dependencies = [
 
 [project.optional-dependencies]
 manuals = [
-    "pymupdf>=1.24.0",
+    "pymupdf>=1.24.0,<2",
 ]
 semantic-docs = [
     "numpy>=2.0,<3.0",
@@ -36,7 +36,7 @@ dev = [
 comsol-mcp = "comsol_mcp.server:main"
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling==1.31.0"]
 build-backend = "hatchling.build"
 
 [tool.hatch.version]
