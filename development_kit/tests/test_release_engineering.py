@@ -380,6 +380,10 @@ def test_hosted_ci_is_dependency_only_and_real_gate_is_explicit():
     assert "continue-on-error" not in workflow
     assert "Python 3.14, default production lane" in workflow
     assert "dependency compatibility (${{ matrix.lane }}, Python 3.14)" in workflow
+    assert "python -m pytest -q -n 4 --dist loadscope" in workflow
+    assert "New-Item -ItemType Directory -Force -Path D:\\comsol_pytest" in workflow
+    assert "--ignore development_kit/tests/test_control_plane_startup.py" in workflow
+    assert "test_control_plane_startup.py --basetemp" in workflow
     assert "matrix:" in workflow
     assert "minimum-supported" in workflow
     assert "current-compatible" in workflow
