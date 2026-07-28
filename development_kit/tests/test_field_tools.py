@@ -167,8 +167,12 @@ def test_public_field_extract_binds_source_and_owned_runtime(
         f"field_evidence/{canonical_request['request_fingerprint']}"
     )
     root = runtime / Path(result["artifact_root_id"])
-    assert (root / result["array_artifact"]["relative_path"]).is_file()
-    assert (root / result["manifest_artifact"]["relative_path"]).is_file()
+    for artifact in (result["array_artifact"], result["manifest_artifact"]):
+        relative = Path(artifact["relative_path"])
+        resolved = (root / relative).resolve(strict=True)
+        assert not relative.is_absolute()
+        assert resolved.is_relative_to(root.resolve())
+        assert resolved.is_file()
 
 
 def test_public_field_extract_rejects_source_mismatch_before_evaluation(tmp_path, monkeypatch):

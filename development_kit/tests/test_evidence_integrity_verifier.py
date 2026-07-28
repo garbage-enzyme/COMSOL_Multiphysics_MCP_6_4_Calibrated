@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import _winapi
 import json
 import os
 import shutil
@@ -54,9 +55,11 @@ def _compatibility(driver: str = "d" * 64) -> dict:
 
 @pytest.fixture
 def ascii_artifact_root():
-    base = Path("D:/comsol_runtime") if Path("D:/").exists() else Path(
-        os.environ.get("SystemRoot", "C:/Windows")
-    ) / "Temp"
+    base = (
+        Path("D:/comsol_runtime")
+        if Path("D:/").exists()
+        else Path(os.environ.get("SystemRoot", "C:/Windows")) / "Temp"
+    )
     root = Path(tempfile.mkdtemp(prefix="evidence_integrity_", dir=base))
     try:
         yield root
@@ -78,10 +81,7 @@ def test_all_default_checks_produce_one_strictly_verified_receipt(tmp_path):
     assert result["strictly_verified"] is True
     assert result["reason_code"] == "all_enabled_checks_passed"
     assert result["check_results"]["producer_driver_compatibility"]["state"] == "not_applicable"
-    assert all(
-        result["check_results"][name]["state"] == "passed"
-        for name in EVIDENCE_CHECKS[:-1]
-    )
+    assert all(result["check_results"][name]["state"] == "passed" for name in EVIDENCE_CHECKS[:-1])
     assert result["paths_included"] is False
     assert len(result["verification_sha256"]) == 64
 
@@ -206,9 +206,7 @@ def test_invalid_settings_block_formal_verification_before_artifact_reads(tmp_pa
         lambda status: status.__setitem__("strict_verification_active", False),
     ],
 )
-def test_caller_supplied_settings_status_requires_complete_typed_checks(
-    tmp_path, mutation
-):
+def test_caller_supplied_settings_status_requires_complete_typed_checks(tmp_path, mutation):
     status = load_evidence_integrity_status({})
     mutation(status)
 
@@ -257,3 +255,29 @@ def test_mcp_verify_tool_enforces_owned_artifact_root_and_returns_no_path(
     assert result["artifact_root_validation"]["validated_root_count"] == 1
     assert result["artifact_root_validation"]["paths_included"] is False
     assert str(ascii_artifact_root) not in json.dumps(result)
+
+
+def test_mcp_verify_tool_rejects_external_and_junction_artifact_roots(
+    ascii_artifact_root, tmp_path, monkeypatch
+):
+    owned = ascii_artifact_root / "owned"
+    owned.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    junction = owned / "linked"
+    _winapi.CreateJunction(str(outside), str(junction))
+    monkeypatch.delenv(EVIDENCE_SETTINGS_ENV, raising=False)
+    monkeypatch.setenv(ARTIFACT_WRITE_ROOT_ENV, str(owned))
+    server = FastMCP("evidence-integrity-path-negative-test")
+    register_evidence_integrity_tools(server)
+    tool = server._tool_manager._tools["evidence_integrity_verify"].fn
+
+    external = tool({}, {"case-one": str(outside)})
+    linked = tool({}, {"case-one": str(junction)})
+
+    for result in (external, linked):
+        assert result["success"] is False
+        assert result["verification_state"] == "blocked"
+        assert result["artifact_root_validation"]["accepted"] is False
+        assert str(outside) not in json.dumps(result)
+    junction.rmdir()

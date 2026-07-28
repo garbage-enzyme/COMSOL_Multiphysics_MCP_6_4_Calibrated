@@ -180,12 +180,15 @@ def _reject_lexical_path(value: Any, *, require_ascii: bool) -> str:
         raise ValueError("device and extended-length paths are not allowed")
     if normalized_slashes.startswith("\\\\"):
         raise ValueError("UNC paths are not allowed")
+    lexical_parts = normalized_slashes.split("\\")
+    if any(part in {".", ".."} for part in lexical_parts[1:]):
+        raise ValueError("path traversal escapes and dot aliases are not allowed")
+    if any(not part for part in lexical_parts[1:-1]):
+        raise ValueError("path contains ambiguous empty components")
     path = Path(value)
     if not path.is_absolute():
         raise ValueError("path must be absolute")
     for part in path.parts[1:]:
-        if part in {".", ".."}:
-            raise ValueError("path traversal escapes are not allowed")
         if part.endswith((" ", ".")):
             raise ValueError("path components cannot end with spaces or dots")
         stem = part.split(".", 1)[0].upper()

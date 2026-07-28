@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import _winapi
 import hashlib
 import json
 from copy import deepcopy
@@ -173,6 +174,41 @@ def test_chain_rejects_future_schema_and_path_traversal(tmp_path):
             artifacts=[traversal],
             terminal_artifact_ids=["raw"],
         )
+
+
+def test_chain_rejects_absolute_and_junction_escaped_artifact_paths(tmp_path):
+    artifact = _write(tmp_path, "raw", "comsol_mcp.environment_identity", "1.0.0")
+    absolute = {
+        **artifact,
+        "role": "raw_evidence",
+        "parents": [],
+        "relative_path": str((tmp_path / "raw.json").resolve()),
+    }
+    with pytest.raises(ValueError, match="relative and traversal-free"):
+        build_artifact_chain_manifest(
+            chain_id="absolute",
+            artifacts=[absolute],
+            terminal_artifact_ids=["raw"],
+        )
+
+    outside = tmp_path.parent / f"{tmp_path.name}-outside"
+    outside.mkdir()
+    escaped = _write(outside, "escaped", "comsol_mcp.environment_identity", "1.0.0")
+    junction = tmp_path / "linked"
+    _winapi.CreateJunction(str(outside), str(junction))
+    escaped["relative_path"] = "linked/escaped.json"
+    manifest = build_artifact_chain_manifest(
+        chain_id="junction",
+        artifacts=[{**escaped, "role": "raw_evidence", "parents": []}],
+        terminal_artifact_ids=["escaped"],
+    )
+    try:
+        with pytest.raises(ValueError, match="escapes artifact_root"):
+            verify_artifact_chain(manifest, artifact_root=tmp_path)
+    finally:
+        junction.rmdir()
+        (outside / "escaped.json").unlink()
+        outside.rmdir()
 
 
 @pytest.mark.parametrize("version", [None, "", {"unbounded": True}, "x" * 129])

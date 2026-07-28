@@ -104,6 +104,41 @@ def test_unicode_alias_reserved_name_and_device_paths_are_rejected(tmp_path, asc
         policy.validate_model_read(r"\\?\C:\models\source.mph")
 
 
+@pytest.mark.parametrize(
+    "value,match",
+    [
+        (r"\\?\/C:\models\source.mph", "device|extended"),
+        (r"//?\\C:\models\source.mph", "device|extended"),
+        (r"\models\source.mph", "absolute"),
+        (r"C:models\source.mph", "absolute"),
+        (r"C:\models\.\source.mph", "dot aliases"),
+        (r"C:\models\\source.mph", "ambiguous empty"),
+    ],
+)
+def test_mixed_device_root_relative_and_ambiguous_paths_are_rejected(
+    tmp_path, ascii_root, value, match
+):
+    policy, _read_root, _write_root = _policy(tmp_path, ascii_root)
+
+    with pytest.raises(ValueError, match=match):
+        policy.validate_model_read(value)
+
+
+def test_model_read_rejects_missing_wrong_suffix_and_directory_inputs(tmp_path, ascii_root):
+    policy, read_root, _write_root = _policy(tmp_path, ascii_root)
+    wrong_suffix = read_root / "source.txt"
+    wrong_suffix.write_bytes(b"not-mph")
+    directory = read_root / "directory.mph"
+    directory.mkdir()
+
+    with pytest.raises(ValueError, match="cannot be resolved"):
+        policy.validate_model_read(str(read_root / "missing.mph"), suffixes=(".mph",))
+    with pytest.raises(ValueError, match="unsupported file extension"):
+        policy.validate_model_read(str(wrong_suffix), suffixes=(".mph",))
+    with pytest.raises(ValueError, match="regular file"):
+        policy.validate_model_read(str(directory), suffixes=(".mph",))
+
+
 def test_artifact_writes_are_ascii_new_and_contained(tmp_path, ascii_root):
     policy, _, write_root = _policy(tmp_path, ascii_root)
     accepted = policy.validate_artifact_write(str(write_root / "result.json"))
@@ -169,6 +204,52 @@ def test_recommended_profile_wrapper_rejects_unconfigured_model_path(
     assert result["success"] is False
     assert result["path_policy"]["accepted"] is False
     assert called == []
+
+
+@pytest.mark.parametrize(
+    "tool_name,parameter,suffix",
+    [
+        ("wave_optics_preflight", "expected_source_path", ".mph"),
+        ("wave_optics_point_audit", "air_reference_artifact_path", ".json"),
+    ],
+)
+def test_wave_optics_read_arguments_are_enforced_by_recommended_profiles(
+    tmp_path, ascii_root, monkeypatch, tool_name, parameter, suffix
+):
+    _policy_value, read_root, write_root = _policy(tmp_path, ascii_root)
+    root = read_root if suffix == ".mph" else write_root
+    source = root / f"source{suffix}"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_bytes(b"fixture")
+    outside = tmp_path / f"outside{suffix}"
+    outside.write_bytes(b"outside")
+    monkeypatch.setenv(MODEL_READ_ROOTS_ENV, str(read_root))
+    monkeypatch.setenv(ARTIFACT_WRITE_ROOT_ENV, str(write_root))
+    calls = []
+
+    def tool(**kwargs):
+        calls.append(kwargs[parameter])
+        return {"success": True}
+
+    tool.__signature__ = __import__("inspect").Signature(
+        [__import__("inspect").Parameter(parameter, __import__("inspect").Parameter.KEYWORD_ONLY)]
+    )
+    guarded = guard_tool_call(
+        tool,
+        tool_name=tool_name,
+        side_effect_class="filesystem_read",
+        concurrency_class="solver_free",
+        profile_name="wave_optics",
+    )
+
+    accepted = guarded(**{parameter: str(source)})
+    rejected = guarded(**{parameter: str(outside)})
+
+    assert accepted["success"] is True
+    assert accepted["path_policy"]["validated_input_count"] == 1
+    assert calls == [str(source.resolve())]
+    assert rejected["success"] is False
+    assert rejected["path_policy"]["accepted"] is False
 
 
 def test_guarded_model_read_pins_file_and_ancestors_until_consumer_returns(
