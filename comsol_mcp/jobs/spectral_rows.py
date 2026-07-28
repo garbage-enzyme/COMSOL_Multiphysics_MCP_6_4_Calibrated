@@ -63,7 +63,11 @@ def _hex_digest(value: object, name: str) -> str:
 def _finite(value: object, name: str, *, positive: bool = False) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{name} must be numeric")
-    number = float(value)
+    try:
+        number = float(value)
+    except OverflowError as exc:
+        qualifier = "positive and finite" if positive else "finite"
+        raise ValueError(f"{name} must be {qualifier}") from exc
     if not math.isfinite(number) or (positive and number <= 0.0):
         qualifier = "positive and finite" if positive else "finite"
         raise ValueError(f"{name} must be {qualifier}")
@@ -398,6 +402,22 @@ def append_spectral_row(
             row["point_fingerprint"] for row in rows
         }:
             raise ValueError("an exact complete spectral point already exists")
+        created = _finite(
+            created_at_epoch if created_at_epoch is not None else time.time(),
+            "created_at_epoch",
+        )
+        evaluated = _finite(
+            evaluated_wavelength_m, "evaluated_wavelength_m", positive=True
+        )
+        frequency = _finite(
+            frequency_wavelength_m, "frequency_wavelength_m", positive=True
+        )
+        reflection = _finite(R, "R")
+        transmission = _finite(T, "T")
+        absorption = _finite(A, "A")
+        duration = _finite(solve_seconds, "solve_seconds")
+        if duration < 0.0:
+            raise ValueError("solve_seconds must be nonnegative")
         row = {
         "schema_name": SPECTRAL_ROW_SCHEMA_NAME,
         "schema_version": SPECTRAL_ROW_SCHEMA_VERSION,
@@ -405,7 +425,7 @@ def append_spectral_row(
         "attempt": attempt,
         "stage_index": stage_index,
         "stage_kind": stage_kind,
-        "created_at_epoch": float(created_at_epoch if created_at_epoch is not None else time.time()),
+        "created_at_epoch": created,
         "spec_fingerprint": spec["spec_fingerprint"],
         "source_model_sha256": spec["source_model_sha256"],
         "configuration_sha256": spec["configuration_sha256"],
@@ -413,14 +433,14 @@ def append_spectral_row(
         "point_id": identity["point_id"],
         "point_fingerprint": identity["point_fingerprint"],
         "requested_wavelength_m": identity["requested_wavelength_m"],
-        "evaluated_wavelength_m": evaluated_wavelength_m,
-        "frequency_wavelength_m": frequency_wavelength_m,
-        "R": R,
-        "T": T,
-        "A": A,
+        "evaluated_wavelength_m": evaluated,
+        "frequency_wavelength_m": frequency,
+        "R": reflection,
+        "T": transmission,
+        "A": absorption,
         "mesh_element_count": mesh_element_count,
         "mesh_vertex_count": mesh_vertex_count,
-        "solve_seconds": solve_seconds,
+        "solve_seconds": duration,
         "audit_artifact": dict(audit_artifact),
         "previous_row_sha256": rows[-1]["row_sha256"] if rows else None,
         }

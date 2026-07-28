@@ -11,6 +11,7 @@ import pytest
 from src.evidence.contracts import example_validation_policies
 from src.tools.wave_optics_audit import (
     _load_air_reference,
+    _load_policy,
     _replace_clone_materials_with_air,
     evaluate_validation_policy,
     run_wave_optics_point_audit,
@@ -62,6 +63,26 @@ def test_empty_legacy_policy_cannot_produce_a_pass_verdict():
 
     assert result["overall"] == "missing"
     assert result["rules"] == []
+
+
+@pytest.mark.parametrize(
+    "policy",
+    [
+        {"assumptions": {"passive": 1}},
+        {"mesh": {"require_unchanged": "yes"}},
+        {"tolerances": {"closure_abs": -1.0}},
+        {"tolerances": {"closure_abs": float("inf")}},
+        pytest.param(
+            {"tolerances": {"closure_abs": 10**10_000}},
+            id="huge-integer-tolerance",
+        ),
+    ],
+)
+def test_legacy_policy_requires_exact_booleans_and_nonnegative_finite_tolerances(
+    policy,
+):
+    with pytest.raises(ValueError):
+        _load_policy(policy, None)
 
 
 def test_a_above_one_is_classified_only_under_passive_normalized_assumptions():

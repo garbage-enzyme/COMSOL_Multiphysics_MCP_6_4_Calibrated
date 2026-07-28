@@ -274,7 +274,7 @@ def test_public_solver_preflight_runs_entire_callback_off_event_loop(monkeypatch
             worker_threads["session_state"] = kwargs["session_state"]
             entered.set()
             assert release.wait(timeout=2.0)
-            return {"ready": True, "blockers": []}
+            return {"success": True, "ready": True, "blockers": []}
 
     def get_status():
         worker_threads["session"] = threading.get_ident()
@@ -309,6 +309,20 @@ def test_public_solver_preflight_runs_entire_callback_off_event_loop(monkeypatch
     assert result["control_plane"]["operation"] == "solver_preflight"
     assert result["control_plane"]["outcome"] == "success"
     assert result["path_policy"]["accepted"] is True
+
+
+@pytest.mark.parametrize("result", [{}, {"success": "yes"}, {"success": 1}])
+def test_metrics_require_explicit_boolean_success(result):
+    metrics = ControlPlaneMetrics(window_size=8)
+
+    metrics.record("callback", 0.1, result)
+
+    assert metrics.summary("callback")["outcomes"] == {
+        "success": 0,
+        "busy": 0,
+        "timeout": 0,
+        "error": 1,
+    }
 
 
 def test_public_solver_preflight_worker_exception_is_transported(monkeypatch):

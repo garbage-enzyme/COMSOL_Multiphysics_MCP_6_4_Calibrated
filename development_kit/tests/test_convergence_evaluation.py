@@ -520,6 +520,24 @@ def test_public_tool_accepts_canonical_ladder_and_rejects_ambiguous_input():
     assert rejected["solver_started"] is False
 
 
+def test_public_tool_structures_extreme_integer_rejection():
+    levels = _levels()
+    levels[0]["candidate_measurements"]["candidate"]["peak"][
+        "wavelength_m"
+    ] = 10**10_000
+    server = FastMCP("convergence-extreme-input-test")
+    register_convergence_evaluation_tools(server)
+
+    result = server._tool_manager._tools["convergence_evaluate"].fn(
+        ladder_spec={"ladder_id": "extreme-ladder", "levels": levels},
+        convergence_policy=_policy(),
+    )
+
+    assert result["success"] is False
+    assert result["reason_code"] == "convergence_input_rejected"
+    assert result["solver_started"] is False
+
+
 def test_public_convergence_tool_never_constructs_a_comsol_client():
     code = """
 import mph

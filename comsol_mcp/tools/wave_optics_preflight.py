@@ -31,7 +31,7 @@ def _point_audit_next_call(
         "available": (
             profile in metadata.intended_profiles
             and not missing_evidence
-            and inspection_status != "integrity_blocked"
+            and inspection_status == "complete"
         ),
         "implementation_status": metadata.maturity,
         "missing_evidence": list(missing_evidence),

@@ -1,5 +1,7 @@
 """Results evaluation and export tools for COMSOL MCP Server."""
 
+import math
+
 from typing import Any, Optional, Union, Sequence
 
 from mcp.server.fastmcp import FastMCP
@@ -21,7 +23,11 @@ def _json_safe(value: Any) -> Any:
     if isinstance(value, np.generic):
         return _json_safe(value.item())
     if isinstance(value, complex):
+        if not math.isfinite(value.real) or not math.isfinite(value.imag):
+            raise ValueError("result values must be finite")
         return {"real": float(value.real), "imag": float(value.imag)}
+    if isinstance(value, float) and not math.isfinite(value):
+        raise ValueError("result values must be finite")
     if isinstance(value, tuple):
         return [_json_safe(item) for item in value]
     if isinstance(value, list):

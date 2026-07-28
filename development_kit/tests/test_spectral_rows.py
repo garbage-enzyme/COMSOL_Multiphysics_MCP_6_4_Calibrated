@@ -146,7 +146,15 @@ def _artifact(root: Path, spec: dict, wavelength: float) -> dict:
     }
 
 
-def _append(path: Path, root: Path, spec: dict, wavelength: float, absorption: float):
+def _append(
+    path: Path,
+    root: Path,
+    spec: dict,
+    wavelength: float,
+    absorption: float,
+    *,
+    reflectance: float | None = None,
+):
     return append_spectral_row(
         path,
         spec,
@@ -156,7 +164,7 @@ def _append(path: Path, root: Path, spec: dict, wavelength: float, absorption: f
         requested_wavelength_m=wavelength,
         evaluated_wavelength_m=wavelength,
         frequency_wavelength_m=wavelength,
-        R=0.95 - absorption,
+        R=0.95 - absorption if reflectance is None else reflectance,
         T=0.05,
         A=absorption,
         mesh_element_count=12,
@@ -192,6 +200,27 @@ def test_exact_complete_wavelength_cannot_be_appended_twice(tmp_path):
     _append(journal, root, spec, 4e-6, 0.1)
     with pytest.raises(ValueError, match="already exists"):
         _append(journal, root, spec, 4e-6, 0.1)
+
+
+@pytest.mark.parametrize(
+    "absorption",
+    [float("inf"), pytest.param(10**10_000, id="huge-integer")],
+)
+def test_nonfinite_equivalent_rows_share_the_validation_error_boundary(
+    tmp_path, absorption
+):
+    spec = _spec(tmp_path)
+    root = tmp_path / "job"
+
+    with pytest.raises(ValueError, match="finite"):
+        _append(
+            root / "spectral_rows.jsonl",
+            root,
+            spec,
+            4e-6,
+            absorption,
+            reflectance=0.0,
+        )
 
 
 def test_row_and_artifact_tampering_fail_before_resume(tmp_path):

@@ -288,6 +288,27 @@ def _load_policy(
             raise ValueError(
                 f"validation_policy.{mapping_name} contains unknown fields: {unknown_nested}"
             )
+    assumptions = policy.get("assumptions", {})
+    for name in ("passive", "linear", "port_power_normalized", "reciprocal"):
+        if name in assumptions and type(assumptions[name]) is not bool:
+            raise ValueError(f"validation_policy.assumptions.{name} must be boolean")
+    mesh = policy.get("mesh", {})
+    if "require_unchanged" in mesh and type(mesh["require_unchanged"]) is not bool:
+        raise ValueError("validation_policy.mesh.require_unchanged must be boolean")
+    for name, value in policy.get("tolerances", {}).items():
+        try:
+            finite = math.isfinite(float(value))
+        except (TypeError, ValueError, OverflowError):
+            finite = False
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not finite
+            or value < 0
+        ):
+            raise ValueError(
+                f"validation_policy.tolerances.{name} must be finite and nonnegative"
+            )
     required = policy.get("required_evidence", [])
     if not isinstance(required, list) or not all(isinstance(item, str) for item in required):
         raise ValueError("validation_policy.required_evidence must be a string list")

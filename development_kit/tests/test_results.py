@@ -47,3 +47,19 @@ def test_evaluate_global_result_rejects_empty_data():
 
     with pytest.raises(ValueError, match="no values"):
         evaluate_global_result(model, "missing")
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        float("nan"),
+        float("inf"),
+        complex(float("nan"), 0.0),
+        np.float64("-inf"),
+    ],
+)
+def test_result_normalization_rejects_nonfinite_public_values(value):
+    model = FakeModel(np.asarray([value]))
+
+    with pytest.raises(ValueError, match="finite"):
+        evaluate_result(model, "unsafe")

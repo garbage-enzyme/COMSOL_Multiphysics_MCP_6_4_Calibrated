@@ -6,10 +6,21 @@ import hashlib
 
 import pytest
 from src.tools.wave_optics_preflight import (
+    _point_audit_next_call,
     EvidenceLedger,
     collect_preflight_foundation,
     collect_wave_optics_preflight,
 )
+
+
+def test_partial_preflight_never_authorizes_point_audit_from_truthy_skeletons():
+    result = _point_audit_next_call(
+        active_profile="wave_optics",
+        inspection_status="partial",
+        missing_evidence=[],
+    )
+
+    assert result["available"] is False
 
 
 class MetadataOnlyModel:
@@ -336,6 +347,9 @@ class FakeJavaModel:
 
     def study(self):
         return self._studies
+
+    def tag(self):
+        return "ExactModel"
 
 
 class FullFakeModel(MetadataOnlyModel):

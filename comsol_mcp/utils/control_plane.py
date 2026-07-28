@@ -14,7 +14,7 @@ CONTROL_PLANE_WINDOW_SIZE = 256
 
 
 def _outcome(result: dict[str, Any]) -> str:
-    if result.get("success", True):
+    if result.get("success") is True:
         return "success"
     error = result.get("error")
     error_code = error.get("code") if isinstance(error, dict) else None
