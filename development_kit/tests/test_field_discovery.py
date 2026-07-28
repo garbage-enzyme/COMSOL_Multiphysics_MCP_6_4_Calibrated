@@ -163,6 +163,16 @@ def test_discovery_rejects_duplicate_names_tags_and_invalid_clientapi_tags():
         discover_field_datasets(invalid_tag)
 
 
+@pytest.mark.parametrize("reference", [None, "", "bad tag", "x" * 129, object()])
+def test_discovery_rejects_malformed_dataset_references(reference):
+    model = _Model(
+        datasets=[_Node("Data", "dset1", "Solution", {"solution": reference})]
+    )
+
+    with pytest.raises(ValueError, match="exact clientapi tag|bounded nonempty text"):
+        discover_field_datasets(model)
+
+
 def test_discovery_does_not_evaluate_or_run_study():
     model = _Model()
 

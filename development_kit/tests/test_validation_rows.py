@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
 import json
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
-
 from src.jobs.validation_matrix import normalize_validation_matrix_spec
 from src.jobs.validation_rows import (
     append_validation_row,
@@ -206,6 +205,35 @@ def test_blank_malformed_and_absolute_artifact_paths_are_rejected(tmp_path):
             point_id="off",
             status="ok",
             collector_summaries=[unsafe],
+        )
+
+
+@pytest.mark.parametrize(
+    ("scope", "field"),
+    [
+        ("spec", "spec_fingerprint"),
+        ("spec", "source_model_sha256"),
+        ("point", "point_fingerprint"),
+        ("point", "configuration_sha256"),
+        ("point", "collectors"),
+        ("point", "expected_artifact_ids"),
+    ],
+)
+def test_malformed_immutable_spec_raises_validation_error_before_row_indexing(
+    tmp_path, scope, field
+):
+    spec = _spec(tmp_path)
+    target = spec if scope == "spec" else spec["points"][0]
+    target.pop(field)
+
+    with pytest.raises(ValueError, match="validation_matrix|spec|point"):
+        append_validation_row(
+            tmp_path / "malformed-spec.jsonl",
+            spec,
+            attempt=1,
+            point_id="off",
+            status="ok",
+            collector_summaries=[],
         )
 
 

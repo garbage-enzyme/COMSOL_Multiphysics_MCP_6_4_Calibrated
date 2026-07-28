@@ -6,6 +6,7 @@ import csv
 import hashlib
 import io
 import json
+import math
 import os
 import stat
 import time
@@ -126,8 +127,14 @@ def atomic_write_bytes(
     target = Path(path)
     if not isinstance(payload, bytes):
         raise ValueError("atomic payload must be bytes")
-    if retry_seconds < 0:
-        raise ValueError("retry_seconds must be non-negative")
+    if (
+        isinstance(retry_seconds, bool)
+        or not isinstance(retry_seconds, (int, float))
+        or not math.isfinite(float(retry_seconds))
+        or retry_seconds < 0
+    ):
+        raise ValueError("retry_seconds must be a finite non-negative number")
+    retry_seconds = float(retry_seconds)
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = target.with_name(
         f".tmp-{uuid.uuid4().hex[:8]}"
@@ -270,18 +277,19 @@ def read_complete_jsonl(
             "error_type": type(exc).__name__,
         }
     state = "incomplete" if trailing else "current_valid"
-    if not trailing and version_field is not None:
+    if version_field is not None:
         if not current_version:
             raise ValueError("current_version is required for versioned JSONL recovery")
         versions = {
             record.get(version_field) if isinstance(record, dict) else None for record in records
         }
         if versions == {current_version}:
-            state = "current_valid"
-        elif len(versions) == 1 and versions <= set(legacy_versions):
+            state = "incomplete" if trailing else "current_valid"
+        elif not trailing and len(versions) == 1 and versions <= set(legacy_versions):
             state = "legacy_valid"
         else:
             state = "corrupt"
+            records = []
     return {
         "state": state,
         "records": records,

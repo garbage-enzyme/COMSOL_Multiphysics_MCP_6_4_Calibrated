@@ -2,17 +2,15 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 import json
 import os
-from pathlib import Path
 import shutil
 import tempfile
+from copy import deepcopy
+from pathlib import Path
 
 import pytest
 from mcp.server.fastmcp import FastMCP
-
-from development_kit.tests.test_portfolio_verifier import _fixture, _rehash_request
 from src.evidence.integrity_controls import (
     DISABLED_CHECK_WARNING,
     DISABLED_CHECK_WARNING_CODE,
@@ -25,6 +23,8 @@ from src.evidence.integrity_controls import (
 from src.evidence.integrity_verifier import verify_evidence_integrity
 from src.path_policy import ARTIFACT_WRITE_ROOT_ENV
 from src.tools.evidence_integrity import register_evidence_integrity_tools
+
+from development_kit.tests.test_portfolio_verifier import _fixture, _rehash_request
 
 
 def _settings(tmp_path, checks: dict[str, bool]) -> dict:
@@ -194,6 +194,46 @@ def test_invalid_settings_block_formal_verification_before_artifact_reads(tmp_pa
     assert result["verification_state"] == "blocked"
     assert result["strictly_verified"] is False
     assert result["reason_code"] == "evidence_integrity_settings_invalid"
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda status: status.pop("checks"),
+        lambda status: status["checks"].pop(EVIDENCE_CHECKS[0]),
+        lambda status: status["checks"][EVIDENCE_CHECKS[0]].__setitem__("enabled", 1),
+        lambda status: status.__setitem__("strict_verification_active", "yes"),
+        lambda status: status.__setitem__("strict_verification_active", False),
+    ],
+)
+def test_caller_supplied_settings_status_requires_complete_typed_checks(
+    tmp_path, mutation
+):
+    status = load_evidence_integrity_status({})
+    mutation(status)
+
+    with pytest.raises(ValueError, match="settings_status"):
+        verify_evidence_integrity(
+            portfolio_request={},
+            artifact_roots={},
+            settings_status=status,
+        )
+
+
+def test_degraded_project_settings_status_remains_a_blocked_receipt():
+    status = load_evidence_integrity_status({})
+    status["configuration_state"] = "degraded"
+    status["reason_code"] = "settings_invalid"
+    status["settings_errors"] = [{"reason_code": "settings_invalid"}]
+
+    result = verify_evidence_integrity(
+        portfolio_request={},
+        artifact_roots={},
+        settings_status=status,
+    )
+
+    assert result["success"] is False
+    assert result["verification_state"] == "blocked"
 
 
 def test_mcp_verify_tool_enforces_owned_artifact_root_and_returns_no_path(

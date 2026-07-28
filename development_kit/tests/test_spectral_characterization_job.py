@@ -139,6 +139,30 @@ def test_invalid_or_hidden_policy_inputs_fail_closed(tmp_path, mutation, match):
         normalize_spectral_characterization_job_spec(raw)
 
 
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda inputs: inputs.__setitem__("top_air_domain_ids", "1"),
+        lambda inputs: inputs.__setitem__("top_air_domain_ids", [1, None]),
+        lambda inputs: inputs.__setitem__("top_air_domain_ids", list(range(1, 514))),
+        lambda inputs: (
+            inputs.pop("top_air_domain_ids"),
+            inputs.__setitem__("top_air_selection", {}),
+        ),
+        lambda inputs: (
+            inputs.pop("top_air_domain_ids"),
+            inputs.__setitem__("top_air_selection", "bad tag"),
+        ),
+    ],
+)
+def test_collector_top_air_identity_is_validated_at_submission(tmp_path, mutation):
+    raw = _raw_spec(tmp_path)
+    mutation(raw["collector"]["inputs"])
+
+    with pytest.raises(ValueError, match="top_air"):
+        normalize_spectral_characterization_job_spec(raw)
+
+
 def test_point_cap_must_fit_the_declared_wall_budget(tmp_path):
     raw = _raw_spec(tmp_path)
     raw["resource_policy"]["wall_time_budget_seconds"] = 3999

@@ -2,20 +2,20 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 import re
+from copy import deepcopy
 from typing import Any, Mapping
 
 from comsol_mcp.evidence.contracts import canonical_sha256
 from comsol_mcp.evidence.integrity_controls import (
     EVIDENCE_CHECKS,
     EVIDENCE_INTEGRITY_VERSION,
+    EVIDENCE_STATUS_SCHEMA,
     EVIDENCE_VERIFICATION_SCHEMA,
     load_evidence_integrity_status,
     warning_fields,
 )
 from comsol_mcp.evidence.portfolio_verifier import verify_portfolio_evidence_checks
-
 
 _HASH = re.compile(r"^[0-9a-f]{64}$")
 _COMPATIBILITY_FIELDS = {
@@ -24,6 +24,64 @@ _COMPATIBILITY_FIELDS = {
     "driver_sha256",
     "schema_version",
 }
+
+
+def _validated_settings_status(value: Any) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ValueError("settings_status must be an object")
+    status = deepcopy(dict(value))
+    if status.get("schema_name") != EVIDENCE_STATUS_SCHEMA:
+        raise ValueError("settings_status schema_name is invalid")
+    if status.get("schema_version") != EVIDENCE_INTEGRITY_VERSION:
+        raise ValueError("settings_status schema_version is invalid")
+    state = status.get("configuration_state")
+    if state not in {"valid", "degraded", "invalid"}:
+        raise ValueError("settings_status configuration_state is invalid")
+    strict = status.get("strict_verification_active")
+    if not isinstance(strict, bool):
+        raise ValueError("settings_status strict_verification_active must be boolean")
+    checks = status.get("checks")
+    if not isinstance(checks, Mapping) or set(checks) != set(EVIDENCE_CHECKS):
+        raise ValueError("settings_status checks are incomplete")
+    enabled: dict[str, bool] = {}
+    for name in EVIDENCE_CHECKS:
+        check = checks[name]
+        if not isinstance(check, Mapping) or set(check) != {"enabled", "source"}:
+            raise ValueError(f"settings_status checks.{name} is invalid")
+        if not isinstance(check["enabled"], bool):
+            raise ValueError(f"settings_status checks.{name}.enabled must be boolean")
+        if (
+            not isinstance(check["source"], str)
+            or not check["source"]
+            or len(check["source"]) > 64
+        ):
+            raise ValueError(f"settings_status checks.{name}.source is invalid")
+        enabled[name] = check["enabled"]
+    disabled = [name for name in EVIDENCE_CHECKS if not enabled[name]]
+    supplied_disabled = status.get("disabled_checks")
+    if (
+        not isinstance(supplied_disabled, list)
+        or supplied_disabled != disabled
+        or not all(isinstance(name, str) for name in supplied_disabled)
+    ):
+        raise ValueError("settings_status disabled_checks is inconsistent")
+    for field in ("warning_codes", "warning_messages"):
+        items = status.get(field)
+        if not isinstance(items, list) or not all(
+            isinstance(item, str) and len(item) <= 2048 for item in items
+        ):
+            raise ValueError(f"settings_status {field} is invalid")
+    if state == "valid":
+        if status.get("success") is not True:
+            raise ValueError("settings_status valid state must be successful")
+        fingerprint = status.get("settings_fingerprint_sha256")
+        if not isinstance(fingerprint, str) or not _HASH.fullmatch(fingerprint):
+            raise ValueError("settings_status fingerprint is invalid")
+        if strict is not all(enabled.values()):
+            raise ValueError("settings_status strict verification state is inconsistent")
+    elif state == "invalid" and strict:
+        raise ValueError("settings_status invalid configuration cannot be strictly verified")
+    return status
 
 
 def _bounded_text(value: Any, label: str) -> str:
@@ -85,8 +143,8 @@ def verify_evidence_integrity(
     ):
         raise ValueError("artifact_roots must map case IDs to absolute directory strings")
 
-    status = deepcopy(
-        dict(settings_status)
+    status = _validated_settings_status(
+        settings_status
         if settings_status is not None
         else load_evidence_integrity_status()
     )

@@ -121,11 +121,15 @@ def discover_field_datasets(
         solution_tag = None
         if reference_kind is not None:
             try:
-                solution_tag = str(node.property(reference_kind))
+                reference = node.property(reference_kind)
             except Exception as exc:
                 raise ValueError(
                     f"datasets[{index}] {reference_kind} property is unavailable"
                 ) from exc
+            solution_tag = _tag(
+                reference,
+                f"datasets[{index}].{reference_kind}",
+            )
         solution = solution_by_tag.get(solution_tag) if solution_tag else None
         row = {
             "dataset_name": name,

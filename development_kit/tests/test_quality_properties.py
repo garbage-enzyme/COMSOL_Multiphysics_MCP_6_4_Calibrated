@@ -370,6 +370,31 @@ def test_jsonl_recovery_rejects_missing_version_policy_and_oversized_files(
     assert read_complete_jsonl(path, max_bytes=1)["state"] == "oversized"
 
 
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b'{"schema_version":"1"}\n{"partial"',
+        b'{"schema_version":"1"}\n{"schema_version":"2"}\n{"partial"',
+        b'{"sequence":1}\n{"partial"',
+    ],
+)
+def test_incomplete_versioned_jsonl_never_exposes_incompatible_prefixes(
+    tmp_path: Path, payload: bytes
+) -> None:
+    path = tmp_path / "incompatible-prefix.jsonl"
+    path.write_bytes(payload)
+
+    result = read_complete_jsonl(
+        path,
+        version_field="schema_version",
+        current_version="2",
+        legacy_versions=("1",),
+    )
+
+    assert result["state"] == "corrupt"
+    assert result["records"] == []
+
+
 @pytest.mark.parametrize("max_bytes", [True, -1, 1.5])
 def test_bounded_hash_rejects_invalid_size_limits(
     tmp_path: Path,
@@ -430,6 +455,18 @@ def test_atomic_write_validates_payload_retries_and_compact_names(
         durable_io.atomic_write_bytes(target, "bytes required")  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="retry_seconds"):
         durable_io.atomic_write_bytes(target, b"value", retry_seconds=-1)
+
+    def unexpected_replace(*_args) -> None:
+        raise AssertionError("replace must not run for invalid retry_seconds")
+
+    for invalid in (True, float("nan"), float("inf"), float("-inf"), "1"):
+        with pytest.raises(ValueError, match="retry_seconds"):
+            durable_io.atomic_write_bytes(
+                target,
+                b"value",
+                retry_seconds=invalid,  # type: ignore[arg-type]
+                replace_fn=unexpected_replace,
+            )
 
     attempts = 0
 
