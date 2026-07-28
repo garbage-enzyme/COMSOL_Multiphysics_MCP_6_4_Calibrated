@@ -49,7 +49,7 @@ packages = ["comsol_mcp", "src"]
 "settings.json" = "comsol_mcp/settings.json"
 
 [tool.hatch.build.targets.sdist]
-exclude = ["/development_kit"]
+exclude = ["/development_kit", "/.claude"]
 
 [tool.pytest.ini_options]
 testpaths = ["development_kit/tests"]

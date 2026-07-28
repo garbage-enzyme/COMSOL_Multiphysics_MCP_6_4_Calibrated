@@ -6,14 +6,13 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path
-from pathlib import PurePosixPath, PureWindowsPath
 import platform
 import subprocess
 import sys
 import tarfile
 import tempfile
 import zipfile
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 if __package__:
     from .planning_code_gate import (
@@ -34,6 +33,7 @@ PLANNING_CODE_ALLOWLIST = (
     ROOT / "development_kit" / "release" / "planning_code_allowlist.json"
 )
 _FORBIDDEN_PARTS = {
+    ".claude",
     "comsol_models",
     "development_kit",
     "knowledge_base",

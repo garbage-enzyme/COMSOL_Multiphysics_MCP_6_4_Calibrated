@@ -170,7 +170,8 @@ def test_support_matrix_matches_frozen_profile_counts_and_declared_dependencies(
     ]
     assert pyproject["project"]["requires-python"] == ">=3.14,<3.15"
     assert pyproject["tool"]["hatch"]["build"]["targets"]["sdist"]["exclude"] == [
-        "/development_kit"
+        "/development_kit",
+        "/.claude",
     ]
 
 
@@ -316,6 +317,12 @@ def test_distribution_inventory_rejects_development_kit_members(tmp_path):
         archive.writestr("development_kit/tests/test_server.py", "pass\n")
     with pytest.raises(RuntimeError, match="forbidden members"):
         _distribution_inventory(contaminated)
+
+    agent_config = tmp_path / "agent-config.whl"
+    with zipfile.ZipFile(agent_config, "w") as archive:
+        archive.writestr(".claude/settings.local.json", "{}\n")
+    with pytest.raises(RuntimeError, match="forbidden members"):
+        _distribution_inventory(agent_config)
 
 
 def test_distribution_inventory_enforces_frozen_planning_codes_and_private_paths(tmp_path):
