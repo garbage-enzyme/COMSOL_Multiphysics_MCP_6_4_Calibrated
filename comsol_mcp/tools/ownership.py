@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import ctypes
 import hashlib
 import importlib.metadata
 import json
@@ -31,6 +32,7 @@ LEASE_IO_POLL_SECONDS = 0.02
 PROCESS_INVENTORY_STATUS_TIMEOUT_SECONDS = 0.5
 PROCESS_INVENTORY_MUTATION_TIMEOUT_SECONDS = 10.0
 PROCESS_INVENTORY_CACHE_SECONDS = 2.0
+PROCESS_INVENTORY_REFRESH_SECONDS = 1.0
 JOB_STATUS_MAX_BYTES = 1024 * 1024
 DURABLE_ACTIVE_STATES = frozenset(
     {
@@ -284,27 +286,115 @@ def _command_signature(command_line: list[str]) -> str:
     return hashlib.sha256(canonical.encode("utf-8", errors="replace")).hexdigest()
 
 
+def _process_may_host_solver(name: str) -> bool:
+    normalized = name.casefold()
+    return (
+        normalized in {"python", "python.exe", "pythonw", "pythonw.exe", "java", "java.exe"}
+        or "comsol" in normalized
+        or "mphserver" in normalized
+    )
+
+
 def _process_record(process: psutil.Process) -> dict[str, Any]:
     with process.oneshot():
-        try:
-            command_line = list(process.cmdline())
-        except (psutil.AccessDenied, psutil.ZombieProcess):
-            command_line = []
-        try:
-            executable = process.exe()
-        except (psutil.AccessDenied, psutil.ZombieProcess):
-            executable = None
+        name = process.name()
+        command_line = []
+        if _process_may_host_solver(name):
+            try:
+                command_line = list(process.cmdline())
+            except (psutil.AccessDenied, psutil.ZombieProcess):
+                command_line = []
         return {
             "pid": process.pid,
             "parent_pid": process.ppid(),
-            "name": process.name(),
+            "name": name,
             "create_time": process.create_time(),
             "command_line": command_line,
-            "executable": executable,
+            "executable": None,
         }
 
 
+def _windows_process_table() -> list[tuple[int, int, str]]:
+    """Read PID, PPID, and image name in one Windows Toolhelp snapshot."""
+    from ctypes import wintypes
+
+    class ProcessEntry32W(ctypes.Structure):
+        _fields_ = [
+            ("dwSize", wintypes.DWORD),
+            ("cntUsage", wintypes.DWORD),
+            ("th32ProcessID", wintypes.DWORD),
+            ("th32DefaultHeapID", ctypes.c_size_t),
+            ("th32ModuleID", wintypes.DWORD),
+            ("cntThreads", wintypes.DWORD),
+            ("th32ParentProcessID", wintypes.DWORD),
+            ("pcPriClassBase", wintypes.LONG),
+            ("dwFlags", wintypes.DWORD),
+            ("szExeFile", wintypes.WCHAR * 260),
+        ]
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    create_snapshot = kernel32.CreateToolhelp32Snapshot
+    create_snapshot.argtypes = (wintypes.DWORD, wintypes.DWORD)
+    create_snapshot.restype = wintypes.HANDLE
+    process_first = kernel32.Process32FirstW
+    process_first.argtypes = (wintypes.HANDLE, ctypes.POINTER(ProcessEntry32W))
+    process_first.restype = wintypes.BOOL
+    process_next = kernel32.Process32NextW
+    process_next.argtypes = (wintypes.HANDLE, ctypes.POINTER(ProcessEntry32W))
+    process_next.restype = wintypes.BOOL
+    close_handle = kernel32.CloseHandle
+    close_handle.argtypes = (wintypes.HANDLE,)
+    close_handle.restype = wintypes.BOOL
+
+    handle = create_snapshot(0x00000002, 0)
+    if handle == wintypes.HANDLE(-1).value:
+        raise OSError(ctypes.get_last_error(), "CreateToolhelp32Snapshot failed")
+    entries = []
+    try:
+        entry = ProcessEntry32W()
+        entry.dwSize = ctypes.sizeof(entry)
+        if not process_first(handle, ctypes.byref(entry)):
+            raise OSError(ctypes.get_last_error(), "Process32FirstW failed")
+        while True:
+            entries.append(
+                (
+                    int(entry.th32ProcessID),
+                    int(entry.th32ParentProcessID),
+                    str(entry.szExeFile),
+                )
+            )
+            if not process_next(handle, ctypes.byref(entry)):
+                break
+    finally:
+        close_handle(handle)
+    return entries
+
+
 def _system_processes() -> list[dict[str, Any]]:
+    if os.name == "nt":
+        records = []
+        for pid, parent_pid, name in _windows_process_table():
+            try:
+                process = psutil.Process(pid)
+                command_line = []
+                if _process_may_host_solver(name):
+                    try:
+                        command_line = list(process.cmdline())
+                    except (psutil.AccessDenied, psutil.ZombieProcess):
+                        command_line = []
+                records.append(
+                    {
+                        "pid": pid,
+                        "parent_pid": parent_pid,
+                        "name": name,
+                        "create_time": process.create_time(),
+                        "command_line": command_line,
+                        "executable": None,
+                    }
+                )
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                continue
+        return records
     records = []
     for process in psutil.process_iter():
         try:
@@ -385,6 +475,11 @@ class _BoundedProcessInventory:
                 and cache_age is not None
                 and cache_age <= PROCESS_INVENTORY_CACHE_SECONDS
             ):
+                if (
+                    cache_age >= PROCESS_INVENTORY_REFRESH_SECONDS
+                    and (self._thread is None or not self._thread.is_alive())
+                ):
+                    self._start_locked()
                 return list(self._cache_records), {
                     "complete": True,
                     "state": "complete",
@@ -426,6 +521,24 @@ class _BoundedProcessInventory:
                 if self._cache_completed_monotonic is not None
                 else None
             )
+            if (
+                not require_fresh
+                and self._cache_records is not None
+                and cache_age is not None
+                and cache_age <= PROCESS_INVENTORY_CACHE_SECONDS
+                and self._cache_completed_monotonic is not None
+                and self._cache_completed_monotonic <= completed
+            ):
+                return list(self._cache_records), {
+                    "complete": True,
+                    "state": "complete",
+                    "fresh": False,
+                    "source": "completed_inflight_scan",
+                    "cache_age_seconds": round(cache_age, 6),
+                    "scan_latency_seconds": self._cache_latency_seconds,
+                    "timeout_seconds": timeout,
+                    "error": None,
+                }
             return list(self._cache_records or []), {
                 "complete": False,
                 "state": "unavailable" if self._last_error and not thread.is_alive() else "pending",

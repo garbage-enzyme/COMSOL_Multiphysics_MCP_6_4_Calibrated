@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import json
+import math
+import subprocess
 from copy import deepcopy
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -11,6 +15,7 @@ from development_kit.scripts.quality_gate import (
     POLICY_PATH,
     evaluate_coverage,
     load_coverage_policy,
+    run_quality_gate,
 )
 
 
@@ -81,3 +86,67 @@ def test_coverage_policy_rejects_unowned_exclusions(tmp_path: Path) -> None:
     path.write_text(json.dumps(invalid), encoding="utf-8")
     with pytest.raises(ValueError, match="values"):
         load_coverage_policy(path)
+
+
+@pytest.mark.parametrize("threshold", [True, math.nan, math.inf, -math.inf])
+def test_coverage_policy_rejects_nonfinite_and_boolean_floors(
+    tmp_path: Path,
+    threshold: object,
+) -> None:
+    policy = load_coverage_policy(POLICY_PATH)
+    policy["global"]["minimum_percent_covered"] = threshold
+    path = tmp_path / "coverage-policy.json"
+    path.write_text(json.dumps(policy), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="values"):
+        load_coverage_policy(path)
+
+
+@pytest.mark.parametrize("observed", [True, math.nan, math.inf, -math.inf])
+def test_coverage_report_rejects_nonfinite_and_boolean_percentages(observed: object) -> None:
+    policy = load_coverage_policy(POLICY_PATH)
+    report = _passing_report()
+    report["totals"]["percent_covered"] = observed
+
+    with pytest.raises(ValueError, match="percentage"):
+        evaluate_coverage(report, policy)
+
+    report = _passing_report()
+    first_path = policy["targets"][0]["path"].replace("/", "\\")
+    report["files"][first_path]["summary"]["percent_covered"] = observed
+    receipt = evaluate_coverage(report, policy)
+    assert receipt["status"] == "failed"
+    assert receipt["failures"][0]["reason_code"] == "coverage_target_missing"
+
+
+def test_command_failure_writes_one_machine_readable_receipt(
+    ascii_tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_command(*_args: object, **_kwargs: object) -> None:
+        raise subprocess.CalledProcessError(7, ["private", "command"])
+
+    monkeypatch.setattr(subprocess, "run", fail_command)
+    receipt = run_quality_gate(ascii_tmp_path, as_of=date(2026, 7, 28))
+    outputs = list(ascii_tmp_path.glob("run-*/quality-receipt.json"))
+
+    assert receipt["status"] == "failed"
+    assert receipt["command_failure"] == {"stage": "lint", "returncode": 7}
+    assert len(outputs) == 1
+    assert json.loads(outputs[0].read_text(encoding="utf-8")) == receipt
+    assert "private" not in outputs[0].read_text(encoding="utf-8")
+
+
+def test_quality_runs_allocate_independent_evidence_directories(
+    ascii_tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_command(*_args: object, **_kwargs: object) -> None:
+        raise subprocess.CalledProcessError(1, ["command"])
+
+    monkeypatch.setattr(subprocess, "run", fail_command)
+    first = run_quality_gate(ascii_tmp_path, as_of=date(2026, 7, 28))
+    second = run_quality_gate(ascii_tmp_path, as_of=date(2026, 7, 28))
+
+    assert first["run_id"] != second["run_id"]
+    assert len(list(ascii_tmp_path.glob("run-*/quality-receipt.json"))) == 2

@@ -211,8 +211,10 @@ message. A mismatch invalidates the old revision and requires a new lock.
 1. Adopt and lock the exact model in `interactive_inspection` mode.
 2. Retain `lock_sha256` and `revision_sha256`.
 3. Run `shared_model_verify` immediately before any identity-sensitive action.
-4. For a Save Copy, call `shared_model_snapshot` with the expected lock,
-   revision, and a caller-declared maximum byte count.
+4. A snapshot writer must enforce the caller-declared maximum byte count while
+   writing. COMSOL 6.4 exposes only path-based `Model.save` overloads, so this
+   build returns `snapshot_write_bound_unavailable` before attempting Save Copy;
+   post-write deletion is not treated as a byte bound.
 5. Verify again, then call `shared_model_unlock` with a short audit reason.
 6. Tell the user that their turn has resumed.
 

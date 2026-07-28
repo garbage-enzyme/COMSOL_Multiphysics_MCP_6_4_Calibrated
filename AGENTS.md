@@ -99,7 +99,9 @@ python development_kit/scripts/release_gate.py
 Use a provisional 10-minute timeout for complete solver-free test, coverage,
 quality, and release-gate runs. Reassess that timeout when the collected test
 count exceeds 2,000; focused test commands should retain narrower proportional
-timeouts.
+timeouts. The quality gate uses four pytest workers for the isolated main suite
+and runs process-inventory discovery tests serially; do not replace the bounded
+worker count with `-n auto` without a new timing and isolation benchmark.
 
 For a release candidate, use the locked dependency lane from a clean tree:
 

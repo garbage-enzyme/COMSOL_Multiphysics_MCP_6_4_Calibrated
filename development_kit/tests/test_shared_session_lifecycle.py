@@ -214,6 +214,7 @@ def _manager(
     client_version="6.4.0.293",
     revision_state=None,
     snapshot_writer=None,
+    bounded_snapshot_writer=True,
     manifest_writer=None,
     ownership=None,
 ):
@@ -243,6 +244,7 @@ def _manager(
             save_copy_writer=snapshot_writer or (
                 lambda value, tag, target: target.write_bytes(b"snapshot fixture")
             ),
+            save_copy_writer_is_bounded=bounded_snapshot_writer,
             manifest_writer=manifest_writer or (
                 lambda path, value: path.write_text(
                     json.dumps(value), encoding="utf-8"
@@ -914,6 +916,32 @@ def test_save_copy_snapshot_commits_manifest_after_identity_verification(tmp_pat
     assert manifest["save_copy_api"] == "Model.java.save(path, True)"
     assert manifest["snapshot"]["sha256"] == result["snapshot_sha256"]
     assert manifest["model"]["file_path"] is None
+
+
+def test_native_path_only_writer_fails_before_any_snapshot_write(tmp_path):
+    def unbounded_writer(_client, _tag, _target):
+        pytest.fail("an unbounded native Save Copy must not be attempted")
+
+    manager, _ownership, _client = _manager(
+        tmp_path,
+        snapshot_writer=unbounded_writer,
+        bounded_snapshot_writer=False,
+    )
+    lock = _attach_and_lock(manager)
+
+    result = manager.snapshot_model(
+        expected_lock_sha256=lock["lock_sha256"],
+        expected_revision_sha256=lock["revision"]["revision_sha256"],
+        max_snapshot_bytes=1024,
+    )
+
+    assert result == {
+        "success": False,
+        "state": "snapshot_write_bound_unavailable",
+        "write_attempted": False,
+        "required_capability": "incremental_native_write_byte_limit",
+    }
+    assert list(tmp_path.glob("Model_1-snapshot*")) == []
 
 
 def test_snapshot_rehashes_and_preserves_declared_immutable_source(tmp_path):

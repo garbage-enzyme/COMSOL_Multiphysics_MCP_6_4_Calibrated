@@ -356,6 +356,7 @@ class SharedSessionManager:
         save_copy_writer: Callable[
             [Any, str, Path], None
         ] = _default_save_copy_writer,
+        save_copy_writer_is_bounded: bool = False,
         manifest_writer: Callable[
             [Path, dict[str, Any]], None
         ] = _default_manifest_writer,
@@ -370,6 +371,7 @@ class SharedSessionManager:
         self._mcp_process_identity_provider = mcp_process_identity_provider
         self._snapshot_target_factory = snapshot_target_factory
         self._save_copy_writer = save_copy_writer
+        self._save_copy_writer_is_bounded = bool(save_copy_writer_is_bounded)
         self._manifest_writer = manifest_writer
         self._clock = clock
         self._lock = threading.RLock()
@@ -945,6 +947,13 @@ class SharedSessionManager:
                 or max_snapshot_bytes > MAX_SNAPSHOT_BYTES
             ):
                 return {"success": False, "state": "snapshot_size_limit_invalid"}
+            if not self._save_copy_writer_is_bounded:
+                return {
+                    "success": False,
+                    "state": "snapshot_write_bound_unavailable",
+                    "write_attempted": False,
+                    "required_capability": "incremental_native_write_byte_limit",
+                }
             verified_before = self.verify_model_lock(
                 expected_lock_sha256=expected_lock_sha256,
                 expected_revision_sha256=expected_revision_sha256,

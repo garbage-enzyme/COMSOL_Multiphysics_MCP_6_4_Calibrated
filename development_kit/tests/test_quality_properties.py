@@ -679,12 +679,15 @@ def test_compatibility_manifest_validation_fails_closed(
 
 def test_compatibility_manifest_and_session_status_have_copy_semantics() -> None:
     assert compatibility.load_runtime_compatibility()["schema_version"] == "1.0.0"
-    set_session_status(connected=1, starting=0)  # type: ignore[arg-type]
-    snapshot = get_session_status()
-    snapshot["connected"] = False
+    previous = get_session_status()
+    try:
+        set_session_status(connected=1, starting=0)  # type: ignore[arg-type]
+        snapshot = get_session_status()
+        snapshot["connected"] = False
 
-    assert get_session_status() == {"connected": True, "starting": False}
-    set_session_status(connected=False, starting=False)
+        assert get_session_status() == {"connected": True, "starting": False}
+    finally:
+        set_session_status(**previous)
 
 
 @pytest.mark.parametrize(

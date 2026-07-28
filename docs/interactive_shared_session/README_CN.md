@@ -191,8 +191,9 @@ process/window ambiguity。它无法检查所有 GUI tab 并猜目标。应把 t
 1. 采用精确模型，以 `interactive_inspection` lock。
 2. 保存 `lock_sha256` 和 `revision_sha256`。
 3. 每个 identity-sensitive action 前立即调用 `shared_model_verify`。
-4. 需要 Save Copy 时，调用 `shared_model_snapshot`，传入 expected lock、revision
-   和 caller-declared maximum byte count。
+4. Snapshot writer 必须在写入过程中执行 caller-declared maximum byte count。
+   COMSOL 6.4 仅提供 path-based `Model.save` overload，因此本构建会在 Save Copy
+   前返回 `snapshot_write_bound_unavailable`；写完后删除不算 byte bound。
 5. 再次 verify，然后用简短 audit reason 调用 `shared_model_unlock`。
 6. 明确告诉用户可以继续其回合。
 

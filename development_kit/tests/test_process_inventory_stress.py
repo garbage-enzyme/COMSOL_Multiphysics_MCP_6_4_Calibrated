@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from concurrent.futures import ThreadPoolExecutor
 import math
 import os
@@ -169,6 +170,66 @@ def test_bounded_inventory_timeout_fails_closed_and_cache_cannot_authorize_acqui
     assert preflight["ready"] is False
     assert "host process inventory is incomplete" in preflight["blockers"]
     assert not manager.lease_path.exists()
+
+
+def test_read_only_recheck_accepts_scan_that_was_already_in_flight(
+    runtime_dir, monkeypatch
+):
+    def briefly_slow_inventory():
+        time.sleep(0.08)
+        return []
+
+    monkeypatch.setattr(ownership_module, "_system_processes", briefly_slow_inventory)
+    manager = SolverOwnership(
+        runtime_dir,
+        pid=os.getpid() + 2_000_001,
+        parent_pid=0,
+        create_time=1.0,
+        command_line=["python.exe", "-m", "src.server"],
+        owner="inventory-inflight-observer",
+    )
+
+    first = manager.status(inventory_timeout=0.05)
+    second = manager.status(inventory_timeout=0.05)
+
+    assert first["process_inventory"]["complete"] is False
+    assert first["process_inventory"]["source"] == "unavailable_after_timeout"
+    assert second["process_inventory"]["complete"] is True
+    assert second["process_inventory"]["fresh"] is False
+    assert second["process_inventory"]["source"] == "completed_inflight_scan"
+    assert second["collision"] is False
+
+
+def test_host_inventory_skips_expensive_metadata_for_unrelated_processes(monkeypatch):
+    class UnrelatedProcess:
+        pid = 77
+
+        def oneshot(self):
+            return nullcontext()
+
+        def name(self):
+            return "unrelated-gui.exe"
+
+        def ppid(self):
+            return 7
+
+        def create_time(self):
+            return 70.0
+
+        def cmdline(self):
+            pytest.fail("unrelated command lines must not be queried")
+
+        def exe(self):
+            pytest.fail("executables are not required for collision classification")
+
+    assert ownership_module._process_record(UnrelatedProcess()) == {
+        "pid": 77,
+        "parent_pid": 7,
+        "name": "unrelated-gui.exe",
+        "create_time": 70.0,
+        "command_line": [],
+        "executable": None,
+    }
 
 
 def test_independent_cold_observers_prove_stale_lease_without_full_inventory(
