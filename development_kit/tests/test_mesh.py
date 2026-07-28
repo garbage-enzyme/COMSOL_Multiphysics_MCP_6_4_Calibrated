@@ -1,6 +1,6 @@
 """Unit tests for mesh helpers without a COMSOL client."""
 
-from src.tools.mesh import get_mesh_info
+from src.tools.mesh import create_mesh_sequence, get_mesh_info
 
 
 class FakeFeatureList:
@@ -143,3 +143,93 @@ def test_get_mesh_info_normalizes_java_string_tags():
     assert result["success"] is True
     assert result["mesh"]["name"] == "mesh1"
     assert result["mesh"]["features"] == ["size", "ftet1"]
+
+
+class MutableMeshFeatureList:
+    def __init__(self, fail=False):
+        self.created = []
+        self.fail = fail
+
+    def create(self, tag, feature_type):
+        if self.fail:
+            raise RuntimeError("feature failure")
+        self.created.append((tag, feature_type))
+
+
+class MutableMeshSequence:
+    def __init__(self, *, fail_feature=False, fail_run=False):
+        self.features = MutableMeshFeatureList(fail_feature)
+        self.fail_run = fail_run
+
+    def feature(self):
+        return self.features
+
+    def run(self):
+        if self.fail_run:
+            raise RuntimeError("build failure")
+
+    def getNumElem(self):
+        return 12
+
+    def getNumVertex(self):
+        return 7
+
+
+class MutableMeshList:
+    def __init__(self, existing=(), *, fail_feature=False, fail_run=False):
+        self.meshes = {tag: object() for tag in existing}
+        self.fail_feature = fail_feature
+        self.fail_run = fail_run
+
+    def tags(self):
+        return list(self.meshes)
+
+    def create(self, tag):
+        sequence = MutableMeshSequence(
+            fail_feature=self.fail_feature,
+            fail_run=self.fail_run,
+        )
+        self.meshes[tag] = sequence
+        return sequence
+
+    def remove(self, tag):
+        del self.meshes[tag]
+
+
+class MutableMeshComponent(FakeComponent):
+    def __init__(self, mesh_list):
+        self.mesh_list = mesh_list
+
+    def mesh(self):
+        return self.mesh_list
+
+
+def test_create_mesh_sequence_rolls_back_feature_and_build_failures():
+    for failure in ("fail_feature", "fail_run"):
+        mesh_list = MutableMeshList(**{failure: True})
+        model = FakeModel({})
+        model.java = FakeJava(MutableMeshComponent(mesh_list))
+
+        result = create_mesh_sequence(model, mesh_name="mesh2")
+
+        assert result == {
+            "success": False,
+            "error": "Mesh setup failed.",
+            "rolled_back": True,
+        }
+        assert "mesh2" not in mesh_list.meshes
+
+
+def test_create_mesh_sequence_validates_before_creation_and_builds_successfully():
+    mesh_list = MutableMeshList(existing=("mesh1",))
+    model = FakeModel({})
+    model.java = FakeJava(MutableMeshComponent(mesh_list))
+
+    invalid = create_mesh_sequence(model, mesh_name=" ")
+    created = create_mesh_sequence(model, mesh_name="mesh2")
+
+    assert invalid["success"] is False
+    assert list(mesh_list.meshes) == ["mesh1", "mesh2"]
+    assert created["success"] is True
+    assert created["built"] is True
+    assert created["num_elements"] == 12

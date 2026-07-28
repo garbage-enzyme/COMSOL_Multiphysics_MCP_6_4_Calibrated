@@ -4,6 +4,7 @@ from src.tools.physics import (
     _resolve_geometry_tag,
     add_boundary_condition,
     add_domain_feature,
+    add_electrostatics_interface,
     add_multiphysics_coupling,
     add_physics_interface,
     assign_material,
@@ -387,10 +388,16 @@ class BoundaryFeatureList:
     def __init__(self):
         self.created = []
 
+    def tags(self):
+        return [item[0] for item in self.created]
+
     def create(self, tag, feature_type, entity_dimension):
         feature = BoundaryFeature()
         self.created.append((tag, feature_type, entity_dimension, feature))
         return feature
+
+    def remove(self, tag):
+        self.created = [item for item in self.created if item[0] != tag]
 
 
 class BoundaryPhysics:
@@ -474,6 +481,79 @@ def test_add_boundary_condition_validates_selection():
     )
 
     assert result["success"] is False
+
+
+def test_add_boundary_condition_validates_inputs_before_creating_feature():
+    physics = BoundaryPhysics()
+    model = FakeModel(BoundaryComponent(physics))
+
+    bad_boundary = add_boundary_condition(model, "ht", "Temperature", [1.5])
+    bad_property = add_boundary_condition(
+        model, "ht", "Temperature", [1], properties={"command": "bad"}
+    )
+
+    assert bad_boundary["success"] is False
+    assert bad_property["success"] is False
+    assert physics.features.created == []
+
+
+def test_add_boundary_condition_uses_first_unused_live_tag():
+    physics = BoundaryPhysics()
+    physics.features.created.extend(
+        [
+            ("temp_1", "Existing", 2, BoundaryFeature()),
+            ("temp_3", "Existing", 2, BoundaryFeature()),
+        ]
+    )
+
+    result = add_boundary_condition(
+        FakeModel(BoundaryComponent(physics)),
+        "ht",
+        "Temperature",
+        [1],
+        feature_prefix="temp",
+    )
+
+    assert result["boundary_condition"]["tag"] == "temp_2"
+
+
+class FailingBoundarySelection(BoundarySelection):
+    def set(self, entities):
+        raise RuntimeError("selection failure")
+
+
+class FailingBoundaryFeature(BoundaryFeature):
+    def __init__(self):
+        super().__init__()
+        self.selection_node = FailingBoundarySelection()
+
+
+class FailingBoundaryFeatureList(BoundaryFeatureList):
+    def __init__(self, fail_on_create_number):
+        super().__init__()
+        self.fail_on_create_number = fail_on_create_number
+
+    def create(self, tag, feature_type, entity_dimension):
+        feature = (
+            FailingBoundaryFeature()
+            if len(self.created) + 1 == self.fail_on_create_number
+            else BoundaryFeature()
+        )
+        self.created.append((tag, feature_type, entity_dimension, feature))
+        return feature
+
+
+def test_boundary_failure_removes_current_feature():
+    physics = BoundaryPhysics()
+    physics.features = FailingBoundaryFeatureList(1)
+
+    result = add_boundary_condition(
+        FakeModel(BoundaryComponent(physics)), "ht", "Temperature", [1]
+    )
+
+    assert result["success"] is False
+    assert result["rolled_back"] is True
+    assert physics.features.created == []
 
 
 class DimensionGeometry:
@@ -744,6 +824,19 @@ def test_setup_flow_boundaries_uses_clientapi_features():
     assert physics.features.created[1][3].properties == {"p0": "1[Pa]"}
 
 
+def test_setup_flow_boundaries_rolls_back_earlier_features():
+    physics = BoundaryPhysics()
+    physics.features = FailingBoundaryFeatureList(2)
+
+    result = setup_flow_boundaries(
+        FakeModel(BoundaryComponent(physics)), "ht", [1], [2]
+    )
+
+    assert result["success"] is False
+    assert result["composite_rolled_back"] is True
+    assert physics.features.created == []
+
+
 def test_setup_heat_boundaries_creates_all_requested_types():
     physics = BoundaryPhysics()
     model = FakeModel(BoundaryComponent(physics))
@@ -766,3 +859,66 @@ def test_setup_heat_boundaries_creates_all_requested_types():
         "TemperatureBoundary",
         "ConvectiveHeatFlux",
     ]
+
+
+class ElectrostaticsPhysics(BoundaryPhysics):
+    def __init__(self, fail_charge_conservation=False):
+        super().__init__()
+        if fail_charge_conservation:
+            self.features = FailingCreateFeatureList()
+        self.selection_node = BoundarySelection()
+
+    def selection(self):
+        return self.selection_node
+
+
+class FailingCreateFeatureList(BoundaryFeatureList):
+    def create(self, tag, feature_type, entity_dimension):
+        raise RuntimeError("charge conservation failure")
+
+
+class ElectrostaticsPhysicsList:
+    def __init__(self, fail_charge_conservation=False):
+        self.nodes = {}
+        self.fail_charge_conservation = fail_charge_conservation
+
+    def tags(self):
+        return list(self.nodes)
+
+    def create(self, tag, interface_type, dimension):
+        node = ElectrostaticsPhysics(self.fail_charge_conservation)
+        self.nodes[tag] = node
+        return node
+
+    def remove(self, tag):
+        del self.nodes[tag]
+
+
+class ElectrostaticsMaterialList(MaterialList):
+    def remove(self, tag):
+        del self.nodes[tag]
+
+
+class ElectrostaticsComponent(FakeComponent):
+    def __init__(self, fail_charge_conservation=False):
+        self.physics_list = ElectrostaticsPhysicsList(fail_charge_conservation)
+        self.material_list = ElectrostaticsMaterialList()
+
+    def physics(self):
+        return self.physics_list
+
+    def material(self):
+        return self.material_list
+
+
+def test_electrostatics_setup_rolls_back_physics_and_material():
+    component = ElectrostaticsComponent(fail_charge_conservation=True)
+
+    result = add_electrostatics_interface(
+        FakeModel(component), relpermittivity=2.5, domain_numbers=[1]
+    )
+
+    assert result["success"] is False
+    assert result["rolled_back"] is True
+    assert component.physics_list.nodes == {}
+    assert component.material_list.nodes == {}

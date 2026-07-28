@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.tools.study import _resolve_study_tag, list_studies
+from src.tools.study import _resolve_study_tag, create_study, list_studies
 
 
 class FakeEntity:
@@ -126,3 +126,91 @@ def test_study_helpers_normalize_java_string_tags():
     assert result["studies"][0]["tag"] == "std1"
     assert result["studies"][0]["steps"][0]["tag"] == "step1"
     assert _resolve_study_tag(model, "研究 1") == "std1"
+
+
+class MutableStudyStep:
+    def __init__(self, fail_set=False):
+        self.fail_set = fail_set
+        self.properties = {}
+
+    def set(self, name, value):
+        if self.fail_set:
+            raise RuntimeError("property failure")
+        self.properties[name] = value
+
+
+class MutableStudy:
+    def __init__(self, *, fail_create=False, fail_set=False):
+        self.fail_create = fail_create
+        self.step = MutableStudyStep(fail_set)
+
+    def create(self, tag, step_type):
+        if self.fail_create:
+            raise RuntimeError("step failure")
+
+    def feature(self, tag):
+        assert tag == "step1"
+        return self.step
+
+
+class MutableStudyList:
+    def __init__(self, existing=(), *, fail_create=False, fail_set=False):
+        self.studies = {tag: object() for tag in existing}
+        self.fail_create = fail_create
+        self.fail_set = fail_set
+
+    def tags(self):
+        return list(self.studies)
+
+    def create(self, tag):
+        study = MutableStudy(
+            fail_create=self.fail_create,
+            fail_set=self.fail_set,
+        )
+        self.studies[tag] = study
+        return study
+
+    def remove(self, tag):
+        del self.studies[tag]
+
+
+class MutableStudyJava:
+    def __init__(self, studies):
+        self.studies = studies
+
+    def study(self):
+        return self.studies
+
+
+class MutableStudyModel:
+    def __init__(self, studies):
+        self.java = MutableStudyJava(studies)
+
+    def name(self):
+        return "model"
+
+
+def test_create_study_rolls_back_step_and_tlist_failures():
+    for options in ({"fail_create": True}, {"fail_set": True}):
+        studies = MutableStudyList(**options)
+        result = create_study(
+            MutableStudyModel(studies),
+            study_type="Transient",
+            time_list=[0, 1],
+        )
+
+        assert result["success"] is False
+        assert result["rolled_back"] is True
+        assert studies.studies == {}
+
+
+def test_create_study_validates_before_creation_and_uses_first_free_tag():
+    studies = MutableStudyList(existing=("std1", "std3"))
+    model = MutableStudyModel(studies)
+
+    invalid = create_study(model, time_list=[float("inf")])
+    created = create_study(model)
+
+    assert invalid["success"] is False
+    assert list(studies.studies) == ["std1", "std3", "std2"]
+    assert created["study"] == "std2"

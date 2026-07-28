@@ -1,11 +1,13 @@
 """Physics tools for COMSOL MCP Server."""
 
+import math
 from typing import Optional, Sequence
 from mcp.server.fastmcp import FastMCP
 
-from .session import session_manager
+from comsol_mcp.utils.validation import strict_json_integer
 
-_tag_counter = {}
+from .property_transport import validate_properties
+from .session import session_manager
 
 PHYSICS_TYPE_ALIASES = {
     "es": ("es", "Electrostatics"),
@@ -110,10 +112,19 @@ def add_boundary_condition(
     *,
     properties: Optional[dict] = None,
     feature_tag: Optional[str] = None,
+    feature_prefix: Optional[str] = None,
 ) -> dict:
     """Create a boundary feature with the required clientapi entity dimension."""
-    if not boundary_selection:
-        return {"success": False, "error": "boundary_selection must not be empty."}
+    try:
+        boundaries = [
+            strict_json_integer(value, "boundary_selection", minimum=1)
+            for value in boundary_selection
+        ]
+        if not boundaries:
+            raise ValueError("boundary_selection must not be empty")
+        normalized_properties = validate_properties(properties)
+    except (TypeError, ValueError) as exc:
+        return {"success": False, "error": str(exc)}
 
     comp, physics = _find_physics_context(model.java, physics_name)
     if physics is None:
@@ -125,17 +136,25 @@ def add_boundary_condition(
     normalized = boundary_condition.replace(" ", "").casefold()
     feature_type = BOUNDARY_TYPE_ALIASES.get(normalized, boundary_condition)
     boundary_dim = max(int(_component_sdim(comp)) - 1, 0)
-    tag = feature_tag or _make_tag(feature_type.lower())
-    feature = physics.feature().create(tag, feature_type, boundary_dim)
-    boundaries = [int(boundary) for boundary in boundary_selection]
-    feature.selection().set(boundaries)
-
-    property_errors = {}
-    for name, value in (properties or {}).items():
-        try:
+    feature_list = physics.feature()
+    existing = {str(value) for value in list(feature_list.tags())}
+    if feature_tag is not None:
+        if feature_tag in existing:
+            return {"success": False, "error": f"Physics feature tag already exists: {feature_tag}"}
+        tag = feature_tag
+    else:
+        tag = _make_tag(feature_prefix or feature_type.lower(), feature_list)
+    feature = feature_list.create(tag, feature_type, boundary_dim)
+    try:
+        feature.selection().set(boundaries)
+        for name, value in normalized_properties.items():
             feature.set(name, value)
-        except Exception as exc:
-            property_errors[name] = str(exc)
+    except Exception:
+        try:
+            feature_list.remove(tag)
+        except Exception:
+            return {"success": False, "error": "Boundary setup failed and rollback was incomplete.", "rolled_back": False}
+        return {"success": False, "error": "Boundary setup failed.", "rolled_back": True}
     try:
         feature.label(f"{boundary_condition} (Boundaries {boundaries})")
     except Exception:
@@ -149,13 +168,10 @@ def add_boundary_condition(
             "type": feature_type,
             "requested_type": boundary_condition,
             "boundaries": boundaries,
-            "properties": dict(properties or {}),
+            "properties": normalized_properties,
             "entity_dimension": boundary_dim,
         },
     }
-    if property_errors:
-        result["warning"] = "Boundary created, but some properties could not be set."
-        result["property_errors"] = property_errors
     return result
 
 
@@ -180,7 +196,7 @@ def add_domain_feature(
         }
 
     sdim = int(_component_sdim(comp))
-    tag = feature_tag or _make_tag(feature_type.lower())
+    tag = feature_tag or _make_tag(feature_type.lower(), physics.feature())
     feature = physics.feature().create(tag, feature_type, sdim)
     domains = [int(domain) for domain in domain_selection]
     feature.selection().set(domains)
@@ -358,6 +374,7 @@ def setup_flow_boundaries(
 ) -> dict:
     """Create per-boundary inlet and outlet features through clientapi."""
     configured = {"inlets": [], "outlets": []}
+    created_tags: list[str] = []
     for boundary in inlet_boundaries:
         result = add_boundary_condition(
             model,
@@ -365,10 +382,11 @@ def setup_flow_boundaries(
             "InletBoundary",
             [boundary],
             properties={"U0": inlet_velocity},
-            feature_tag=_make_tag("inl"),
+            feature_prefix="inl",
         )
         if not result["success"]:
-            return result
+            return _rollback_composite_features(model, physics_name, created_tags, result)
+        created_tags.append(result["boundary_condition"]["tag"])
         configured["inlets"].append(
             {
                 "tag": result["boundary_condition"]["tag"],
@@ -383,10 +401,11 @@ def setup_flow_boundaries(
             "OutletBoundary",
             [boundary],
             properties={"p0": outlet_pressure},
-            feature_tag=_make_tag("out"),
+            feature_prefix="out",
         )
         if not result["success"]:
-            return result
+            return _rollback_composite_features(model, physics_name, created_tags, result)
+        created_tags.append(result["boundary_condition"]["tag"])
         configured["outlets"].append(
             {
                 "tag": result["boundary_condition"]["tag"],
@@ -417,6 +436,7 @@ def setup_heat_boundaries(
 ) -> dict:
     """Create per-boundary heat-transfer features through clientapi."""
     configured = {"heat_flux": [], "temperature": [], "convection": []}
+    created_tags: list[str] = []
     specifications = (
         (
             "heat_flux",
@@ -451,10 +471,13 @@ def setup_heat_boundaries(
                 feature_type,
                 [boundary],
                 properties=properties,
-                feature_tag=_make_tag(prefix),
+                feature_prefix=prefix,
             )
             if not result["success"]:
-                return result
+                return _rollback_composite_features(
+                    model, physics_name, created_tags, result
+                )
+            created_tags.append(result["boundary_condition"]["tag"])
             configured[key].append(
                 {
                     "tag": result["boundary_condition"]["tag"],
@@ -474,10 +497,27 @@ def setup_heat_boundaries(
     }
 
 
-def _make_tag(prefix="bc"):
-    """Generate a unique tag using a monotonic counter."""
-    _tag_counter[prefix] = _tag_counter.get(prefix, 0) + 1
-    return f"{prefix}_{_tag_counter[prefix]}"
+def _rollback_composite_features(model, physics_name, tags, failure):
+    physics = _find_physics_java(model.java, physics_name)
+    rolled_back = True
+    if physics is None:
+        rolled_back = False
+    else:
+        for tag in reversed(tags):
+            try:
+                physics.feature().remove(tag)
+            except Exception:
+                rolled_back = False
+    return {**failure, "composite_rolled_back": rolled_back}
+
+
+def _make_tag(prefix, feature_list):
+    """Generate the first unused tag from the live feature inventory."""
+    existing = {str(value) for value in list(feature_list.tags())}
+    index = 1
+    while f"{prefix}_{index}" in existing:
+        index += 1
+    return f"{prefix}_{index}"
 
 
 def _physics_spec(physics_type: str) -> tuple[str, str]:
@@ -527,6 +567,112 @@ def add_physics_interface(
             "component": str(comp.tag()),
         },
     }
+
+
+def add_electrostatics_interface(
+    model,
+    *,
+    domain_selection: Optional[str] = None,
+    relpermittivity: Optional[float] = None,
+    domain_numbers: Optional[Sequence[int]] = None,
+) -> dict:
+    """Create Electrostatics and optional dielectric nodes as one transaction."""
+    try:
+        domains = (
+            [
+                strict_json_integer(value, "domain_numbers", minimum=1)
+                for value in domain_numbers
+            ]
+            if domain_numbers is not None
+            else []
+        )
+        if domain_selection is not None and (
+            not isinstance(domain_selection, str) or not domain_selection.strip()
+        ):
+            raise ValueError("domain_selection must be a nonempty string")
+        if relpermittivity is not None:
+            if (
+                isinstance(relpermittivity, bool)
+                or not isinstance(relpermittivity, (int, float))
+                or not math.isfinite(float(relpermittivity))
+                or float(relpermittivity) <= 0.0
+            ):
+                raise ValueError("relpermittivity must be positive and finite")
+            permittivity = float(relpermittivity)
+        else:
+            permittivity = None
+    except ValueError as exc:
+        return {"success": False, "error": str(exc)}
+
+    comp = _first_component(model.java)
+    if comp is None:
+        return {"success": False, "error": "No component found in model."}
+    if "es" in {str(value) for value in list(comp.physics().tags())}:
+        return {"success": False, "error": "Physics tag already exists: es"}
+    mat_tag = "mat_es"
+    if permittivity is not None and mat_tag in {
+        str(value) for value in list(comp.material().tags())
+    }:
+        return {"success": False, "error": f"Material tag already exists: {mat_tag}"}
+
+    physics_created = False
+    material_created = False
+    try:
+        physics_java = comp.physics().create(
+            "es", "Electrostatics", _component_sdim(comp)
+        )
+        physics_created = True
+        if domain_selection:
+            physics_java.selection().set(domain_selection)
+        ccn_info = None
+        if permittivity is not None:
+            material = comp.material().create(mat_tag, "Common")
+            material_created = True
+            material.label(f"dielectric_epsr_{permittivity}")
+            material.propertyGroup("def").set("relpermittivity", str(permittivity))
+            if domains:
+                material.selection().set(domains)
+            ccn = physics_java.feature().create(
+                "ccn1", "ChargeConservation", int(_component_sdim(comp))
+            )
+            if domains:
+                ccn.selection().set(domains)
+            ccn.set("materialType", "from_mat")
+            ccn_info = {
+                "tag": "ccn1",
+                "type": "ChargeConservation",
+                "materialType": "from_mat",
+                "relpermittivity": permittivity,
+                "material_tag": mat_tag,
+                "domain_numbers": domains or "all",
+            }
+        return {
+            "success": True,
+            "physics": {
+                "name": str(physics_java.label()),
+                "type": "Electrostatics",
+                "tag": "es",
+                "domain_selection": domain_selection,
+                "charge_conservation": ccn_info,
+            },
+        }
+    except Exception:
+        rolled_back = True
+        if material_created:
+            try:
+                comp.material().remove(mat_tag)
+            except Exception:
+                rolled_back = False
+        if physics_created:
+            try:
+                comp.physics().remove("es")
+            except Exception:
+                rolled_back = False
+        return {
+            "success": False,
+            "error": "Electrostatics setup failed.",
+            "rolled_back": rolled_back,
+        }
 
 
 def list_physics_features(model, physics_name: str) -> dict:
@@ -760,62 +906,12 @@ def register_physics_tools(mcp: FastMCP) -> None:
             }
 
         try:
-            jm = model.java
-            comp = _first_component(jm)
-            if comp is None:
-                return {"success": False, "error": "No component found in model."}
-            physics_java = comp.physics().create("es", "Electrostatics", _component_sdim(comp))
-
-            if domain_selection:
-                try:
-                    physics_java.selection().set(domain_selection)
-                except Exception:
-                    pass
-
-            ccn_info = None
-            if relpermittivity is not None:
-                # Create material node with relpermittivity under propertyGroup('def')
-                mat_tag = "mat_es"
-                try:
-                    mat = comp.material().create(mat_tag, "Common")
-                    mat.label(f"dielectric_epsr_{relpermittivity}")
-                    mat.propertyGroup("def").set("relpermittivity", str(relpermittivity))
-                    if domain_numbers:
-                        mat.selection().set([int(d) for d in domain_numbers])
-                except Exception as e:
-                    return {"success": False, "error": f"Created Electrostatics but failed to add material: {str(e)}"}
-
-                # Create ChargeConservation domain feature (overrides default FreeSpace fsp1)
-                try:
-                    sdim = _component_sdim(comp)
-                    ccn = physics_java.feature().create("ccn1", "ChargeConservation", int(sdim))
-                    if domain_numbers:
-                        ccn.selection().set([int(d) for d in domain_numbers])
-                    ccn.set("materialType", "from_mat")
-                    ccn_info = {
-                        "tag": "ccn1",
-                        "type": "ChargeConservation",
-                        "materialType": "from_mat",
-                        "relpermittivity": relpermittivity,
-                        "material_tag": mat_tag,
-                        "domain_numbers": list(domain_numbers) if domain_numbers else "all",
-                    }
-                except Exception as e:
-                    return {"success": False, "error": f"Created Electrostatics+material but failed to add ChargeConservation: {str(e)}"}
-
-            return {
-                "success": True,
-                "physics": {
-                    "name": str(physics_java.label()) if hasattr(physics_java, 'label') else "Electrostatics",
-                    "type": "Electrostatics",
-                    "tag": "es",
-                    "domain_selection": domain_selection,
-                    "charge_conservation": ccn_info,
-                    "note": ("ChargeConservation+material created (6.3+/6.4 default FreeSpace would ignore eps_r)."
-                             if ccn_info else
-                             "No relpermittivity given: 6.3+/6.4 default FreeSpace uses vacuum eps0. Pass relpermittivity to model a dielectric."),
-                }
-            }
+            return add_electrostatics_interface(
+                model,
+                domain_selection=domain_selection,
+                relpermittivity=relpermittivity,
+                domain_numbers=domain_numbers,
+            )
         except Exception as e:
             return {"success": False, "error": f"Failed to add Electrostatics: {str(e)}"}
     

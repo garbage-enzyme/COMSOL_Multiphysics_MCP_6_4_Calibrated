@@ -1,10 +1,79 @@
 """Study and solving tools for COMSOL MCP Server."""
 
+import math
 from typing import Optional, Sequence
 from mcp.server.fastmcp import FastMCP
 
 from .session import session_manager
 from ..async_handler.solver import async_solver
+
+
+def create_study(
+    model,
+    study_type: str = "Stationary",
+    study_name: Optional[str] = None,
+    time_list: Optional[Sequence] = None,
+    time_unit: str = "s",
+) -> dict:
+    """Create one study and remove it if step configuration cannot complete."""
+    if not isinstance(study_type, str) or not study_type.strip():
+        return {"success": False, "error": "study_type must be nonempty"}
+    if study_name is not None and (
+        not isinstance(study_name, str) or not study_name.strip()
+    ):
+        return {"success": False, "error": "study_name must be nonempty"}
+    if not isinstance(time_unit, str) or not time_unit.strip():
+        return {"success": False, "error": "time_unit must be nonempty"}
+    normalized_times = None
+    if time_list is not None:
+        if isinstance(time_list, (str, bytes)):
+            return {"success": False, "error": "time_list must be numeric"}
+        normalized_times = []
+        for value in time_list:
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                return {"success": False, "error": "time_list must be numeric"}
+            number = float(value)
+            if not math.isfinite(number):
+                return {"success": False, "error": "time_list must be finite"}
+            normalized_times.append(number)
+    aliases = {
+        "stat": "Stationary", "time": "Transient", "timedependent": "Transient",
+        "transient": "Transient", "eig": "Eigenfrequency",
+        "freq": "FrequencyDomain", "frequency": "FrequencyDomain",
+        "pert": "Perturbation",
+    }
+    step_type = aliases.get(study_type.casefold(), study_type)
+    study_list = model.java.study()
+    existing = {str(value) for value in list(study_list.tags())}
+    if study_name:
+        study_tag = study_name
+        if study_tag in existing:
+            return {"success": False, "error": f"Study tag already exists: {study_tag}"}
+    else:
+        index = 1
+        while f"std{index}" in existing:
+            index += 1
+        study_tag = f"std{index}"
+    created = False
+    try:
+        study = study_list.create(study_tag)
+        created = True
+        study.create("step1", step_type)
+        if step_type == "Transient" and normalized_times is not None:
+            study.feature("step1").set(
+                "tlist", " ".join(f"{value}[{time_unit}]" for value in normalized_times)
+            )
+    except Exception:
+        if created:
+            try:
+                study_list.remove(study_tag)
+            except Exception:
+                return {"success": False, "error": "Study setup failed and rollback was incomplete.", "rolled_back": False}
+        return {"success": False, "error": "Study setup failed.", "rolled_back": True}
+    result = {"success": True, "study": study_tag, "type": study_type, "step_type": step_type, "model": model.name()}
+    if step_type == "Transient" and normalized_times is None:
+        result["warning"] = "Transient study created without time_list."
+    return result
 
 
 def _resolve_study_tag(model, study_name: Optional[str]) -> Optional[str]:
@@ -134,60 +203,13 @@ def register_study_tools(mcp: FastMCP) -> None:
             }
 
         try:
-            jm = model.java
-            existing_studies = jm.study().size()
-            study_tag = study_name or f"std{existing_studies + 1}"
-
-            # clientapi (mph 1.3+ standalone) requires the FULL step-type name
-            # (e.g. "Stationary", "Transient"), NOT the short tag ("stat").
-            # Direct-Model API used the short form, but clientapi rejects it
-            # with "Operation_cannot_be_created_in_this_context".  Note that
-            # the *real* tag for a time-dependent study step is "Transient"
-            # (NOT "TimeDependent"); the historical alias is normalised here.
-            SHORT_TO_FULL = {
-                "stat": "Stationary",
-                "time": "Transient",
-                "timedependent": "Transient",
-                "transient": "Transient",
-                "eig": "Eigenfrequency",
-                "freq": "FrequencyDomain",
-                "frequency": "FrequencyDomain",
-                "pert": "Perturbation",
-            }
-            step_type = SHORT_TO_FULL.get(study_type.lower(), study_type)
-
-            study = jm.study().create(study_tag)
-            study.create("step1", step_type)
-
-            tlist_warning = None
-            if step_type == "Transient" and time_list is not None:
-                try:
-                    step = study.feature("step1")
-                    tlist_str = " ".join(
-                        f"{float(t)}[{time_unit}]" for t in time_list
-                    )
-                    step.set("tlist", tlist_str)
-                except Exception as exc:
-                    tlist_warning = (
-                        f"Study created but failed to set tlist: {exc}"
-                    )
-
-            result = {
-                "success": True,
-                "study": study_tag,
-                "type": study_type,
-                "step_type": step_type,
-                "model": model.name(),
-            }
-            if step_type == "Transient" and time_list is None:
-                result["warning"] = (
-                    "Transient study created without time_list. Set it via "
-                    "study_create(time_list=...) or the COMSOL GUI before "
-                    "solving."
-                )
-            if tlist_warning:
-                result["warning"] = tlist_warning
-            return result
+            return create_study(
+                model,
+                study_type=study_type,
+                study_name=study_name,
+                time_list=time_list,
+                time_unit=time_unit,
+            )
         except Exception as e:
             return {"success": False, "error": f"Failed to create study: {str(e)}"}
     
