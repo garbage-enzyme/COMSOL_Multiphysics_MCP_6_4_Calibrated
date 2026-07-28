@@ -1,11 +1,50 @@
 """Geometry tools for COMSOL MCP Server."""
 
+import math
 from pathlib import Path
 from typing import Optional, Sequence
 from mcp.server.fastmcp import FastMCP
 
 from .property_transport import JSONValue, validate_properties
 from .session import session_manager
+
+
+def _finite_vector(
+    value: Sequence[float], name: str, length: int, *, positive: bool = False
+) -> list[float]:
+    if isinstance(value, (str, bytes)) or len(value) != length:
+        raise ValueError(f"{name} must contain exactly {length} values")
+    normalized = []
+    for item in value:
+        if isinstance(item, bool) or not isinstance(item, (int, float)):
+            raise ValueError(f"{name} must contain only finite numbers")
+        number = float(item)
+        if not math.isfinite(number) or (positive and number <= 0.0):
+            qualifier = "positive finite numbers" if positive else "finite numbers"
+            raise ValueError(f"{name} must contain only {qualifier}")
+        normalized.append(number)
+    return normalized
+
+
+def _finite_positive(value: float, name: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{name} must be a positive finite number")
+    normalized = float(value)
+    if not math.isfinite(normalized) or normalized <= 0.0:
+        raise ValueError(f"{name} must be a positive finite number")
+    return normalized
+
+
+def _next_feature_tag(feature_list, prefix: str, requested: str | None) -> str:
+    existing = {str(item) for item in list(feature_list.tags())}
+    if requested:
+        if requested in existing:
+            raise ValueError(f"Feature tag already exists: {requested}")
+        return requested
+    index = 1
+    while f"{prefix}{index}" in existing:
+        index += 1
+    return f"{prefix}{index}"
 
 
 def _get_geometry_node(model, geometry_name: Optional[str], component_name: str = "comp1"):
@@ -62,16 +101,10 @@ def add_geometry_feature(
         return {"success": False, "error": error}
 
     feature_list = geom.feature()
-    existing_tags = {str(item) for item in list(feature_list.tags())}
-    if feature_name:
-        tag = feature_name
-        if tag in existing_tags:
-            return {"success": False, "error": f"Feature tag already exists: {tag}"}
-    else:
-        index = 1
-        while f"feat{index}" in existing_tags:
-            index += 1
-        tag = f"feat{index}"
+    try:
+        tag = _next_feature_tag(feature_list, "feat", feature_name)
+    except ValueError as exc:
+        return {"success": False, "error": str(exc)}
     feature = feature_list.create(tag, feature_type)
     property_errors = {}
     for name, value in normalized_properties.items():
@@ -171,6 +204,100 @@ def add_circle_feature(
     return result
 
 
+def add_primitive_feature(
+    model,
+    feature_type: str,
+    position: Sequence[float],
+    dimensions: Sequence[float],
+    *,
+    geometry_name: Optional[str] = None,
+    component_name: str = "comp1",
+    feature_name: Optional[str] = None,
+) -> dict:
+    """Validate one primitive completely before delegating its atomic creation."""
+    dimension = 2 if feature_type == "Rectangle" else 3
+    try:
+        normalized_position = _finite_vector(position, "position", dimension)
+        if feature_type == "Block":
+            normalized_dimensions = _finite_vector(dimensions, "size", 3, positive=True)
+            properties = {"pos": normalized_position, "size": normalized_dimensions}
+        elif feature_type == "Rectangle":
+            normalized_dimensions = _finite_vector(dimensions, "size", 2, positive=True)
+            properties = {"pos": normalized_position, "size": normalized_dimensions}
+        elif feature_type == "Cylinder":
+            radius = _finite_positive(dimensions[0], "radius")
+            height = _finite_positive(dimensions[1], "height")
+            normalized_dimensions = [radius, height]
+            properties = {"pos": normalized_position, "r": radius, "h": height}
+        elif feature_type == "Sphere":
+            radius = _finite_positive(dimensions[0], "radius")
+            normalized_dimensions = [radius]
+            properties = {"pos": normalized_position, "r": radius}
+        else:
+            raise ValueError("unsupported primitive feature type")
+    except (IndexError, TypeError, ValueError) as exc:
+        return {"success": False, "error": str(exc)}
+    result = add_geometry_feature(
+        model,
+        feature_type,
+        geometry_name=geometry_name,
+        component_name=component_name,
+        feature_name=feature_name,
+        properties={key: [str(item) for item in value] if isinstance(value, list) else str(value) for key, value in properties.items()},
+    )
+    if result["success"]:
+        result["feature"]["position"] = normalized_position
+        if feature_type in {"Block", "Rectangle"}:
+            result["feature"]["size"] = normalized_dimensions
+        elif feature_type == "Cylinder":
+            result["feature"].update(radius=normalized_dimensions[0], height=normalized_dimensions[1])
+        else:
+            result["feature"]["radius"] = normalized_dimensions[0]
+    return result
+
+
+def add_difference_feature(
+    model,
+    input_object: str,
+    objects_to_subtract: Sequence[str],
+    *,
+    geometry_name: Optional[str] = None,
+    component_name: str = "comp1",
+    feature_name: Optional[str] = None,
+) -> dict:
+    """Validate referenced objects and roll back incomplete Difference creation."""
+    subtract = list(objects_to_subtract) if not isinstance(objects_to_subtract, (str, bytes)) else []
+    if not isinstance(input_object, str) or not input_object or not subtract:
+        return {"success": False, "error": "difference inputs must be nonempty tags"}
+    if not all(isinstance(item, str) and item for item in subtract):
+        return {"success": False, "error": "difference inputs must be nonempty tags"}
+    if input_object in subtract or len(subtract) != len(set(subtract)):
+        return {"success": False, "error": "difference inputs must be distinct"}
+    geom, error = _get_geometry_node(model, geometry_name, component_name)
+    if error:
+        return {"success": False, "error": error}
+    feature_list = geom.feature()
+    existing = {str(item) for item in list(feature_list.tags())}
+    missing = sorted({input_object, *subtract} - existing)
+    if missing:
+        return {"success": False, "error": f"difference inputs are missing: {missing}"}
+    try:
+        tag = _next_feature_tag(feature_list, "dif", feature_name)
+    except ValueError as exc:
+        return {"success": False, "error": str(exc)}
+    feature = feature_list.create(tag, "Difference")
+    try:
+        feature.selection("input").set([input_object])
+        feature.selection("input2").set(subtract)
+    except Exception:
+        try:
+            feature_list.remove(tag)
+        except Exception:
+            return {"success": False, "error": "Difference setup failed and rollback was incomplete.", "rolled_back": False}
+        return {"success": False, "error": "Difference setup failed.", "rolled_back": True}
+    return {"success": True, "feature": {"name": tag, "type": "Difference", "input_object": input_object, "subtracted": subtract}}
+
+
 def add_union_feature(
     model,
     input_objects: Sequence[str],
@@ -218,9 +345,20 @@ def add_import_feature(
     geom, error = _get_geometry_node(model, geometry_name, component_name)
     if error:
         return {"success": False, "error": error}
-    tag = feature_name or f"imp{geom.feature().size() + 1}"
-    feature = geom.feature().create(tag, "Import")
-    feature.set("filename", str(path))
+    feature_list = geom.feature()
+    try:
+        tag = _next_feature_tag(feature_list, "imp", feature_name)
+    except ValueError as exc:
+        return {"success": False, "error": str(exc)}
+    feature = feature_list.create(tag, "Import")
+    try:
+        feature.set("filename", str(path))
+    except Exception:
+        try:
+            feature_list.remove(tag)
+        except Exception:
+            return {"success": False, "error": "Import setup failed and rollback was incomplete.", "rolled_back": False}
+        return {"success": False, "error": "Import filename could not be applied.", "rolled_back": True}
     return {
         "success": True,
         "feature": {
@@ -400,25 +538,11 @@ def register_geometry_tools(mcp: FastMCP) -> None:
             }
         
         try:
-            geom, error = _get_geometry_node(model, geometry_name, component_name)
-            if error:
-                return {"success": False, "error": error}
-            
-            feat_name = feature_name or f"blk{geom.feature().size()+1}"
-            block = geom.feature().create(feat_name, "Block")
-            
-            block.set("pos", [str(p) for p in position])
-            block.set("size", [str(s) for s in size])
-            
-            return {
-                "success": True,
-                "feature": {
-                    "name": feat_name,
-                    "type": "Block",
-                    "position": list(position),
-                    "size": list(size),
-                }
-            }
+            return add_primitive_feature(
+                model, "Block", position, size,
+                geometry_name=geometry_name, component_name=component_name,
+                feature_name=feature_name,
+            )
         except Exception as e:
             return {"success": False, "error": f"Failed to add block: {str(e)}"}
     
@@ -455,27 +579,11 @@ def register_geometry_tools(mcp: FastMCP) -> None:
             }
         
         try:
-            geom, error = _get_geometry_node(model, geometry_name, component_name)
-            if error:
-                return {"success": False, "error": error}
-            
-            feat_name = feature_name or f"cyl{geom.feature().size()+1}"
-            cyl = geom.feature().create(feat_name, "Cylinder")
-            
-            cyl.set("pos", [str(p) for p in position])
-            cyl.set("r", str(radius))
-            cyl.set("h", str(height))
-            
-            return {
-                "success": True,
-                "feature": {
-                    "name": feat_name,
-                    "type": "Cylinder",
-                    "position": list(position),
-                    "radius": radius,
-                    "height": height,
-                }
-            }
+            return add_primitive_feature(
+                model, "Cylinder", position, (radius, height),
+                geometry_name=geometry_name, component_name=component_name,
+                feature_name=feature_name,
+            )
         except Exception as e:
             return {"success": False, "error": f"Failed to add cylinder: {str(e)}"}
     
@@ -510,25 +618,11 @@ def register_geometry_tools(mcp: FastMCP) -> None:
             }
         
         try:
-            geom, error = _get_geometry_node(model, geometry_name, component_name)
-            if error:
-                return {"success": False, "error": error}
-            
-            feat_name = feature_name or f"sph{geom.feature().size()+1}"
-            sphere = geom.feature().create(feat_name, "Sphere")
-            
-            sphere.set("pos", [str(p) for p in position])
-            sphere.set("r", str(radius))
-            
-            return {
-                "success": True,
-                "feature": {
-                    "name": feat_name,
-                    "type": "Sphere",
-                    "position": list(position),
-                    "radius": radius,
-                }
-            }
+            return add_primitive_feature(
+                model, "Sphere", position, (radius,),
+                geometry_name=geometry_name, component_name=component_name,
+                feature_name=feature_name,
+            )
         except Exception as e:
             return {"success": False, "error": f"Failed to add sphere: {str(e)}"}
     
@@ -563,25 +657,11 @@ def register_geometry_tools(mcp: FastMCP) -> None:
             }
         
         try:
-            geom, error = _get_geometry_node(model, geometry_name, component_name)
-            if error:
-                return {"success": False, "error": error}
-            
-            feat_name = feature_name or f"r{geom.feature().size()+1}"
-            rect = geom.feature().create(feat_name, "Rectangle")
-            
-            rect.set("pos", [str(p) for p in position])
-            rect.set("size", [str(s) for s in size])
-            
-            return {
-                "success": True,
-                "feature": {
-                    "name": feat_name,
-                    "type": "Rectangle",
-                    "position": list(position),
-                    "size": list(size),
-                }
-            }
+            return add_primitive_feature(
+                model, "Rectangle", position, size,
+                geometry_name=geometry_name, component_name=component_name,
+                feature_name=feature_name,
+            )
         except Exception as e:
             return {"success": False, "error": f"Failed to add rectangle: {str(e)}"}
     
@@ -697,25 +777,11 @@ def register_geometry_tools(mcp: FastMCP) -> None:
             }
         
         try:
-            geom, error = _get_geometry_node(model, geometry_name, component_name)
-            if error:
-                return {"success": False, "error": error}
-            
-            feat_name = feature_name or f"dif{geom.feature().size()+1}"
-            diff = geom.feature().create(feat_name, "Difference")
-            
-            diff.selection("input").set([input_object])
-            diff.selection("input2").set(list(objects_to_subtract))
-            
-            return {
-                "success": True,
-                "feature": {
-                    "name": feat_name,
-                    "type": "Difference",
-                    "input_object": input_object,
-                    "subtracted": list(objects_to_subtract),
-                }
-            }
+            return add_difference_feature(
+                model, input_object, objects_to_subtract,
+                geometry_name=geometry_name, component_name=component_name,
+                feature_name=feature_name,
+            )
         except Exception as e:
             return {"success": False, "error": f"Failed to create difference: {str(e)}"}
     

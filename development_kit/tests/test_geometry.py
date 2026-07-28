@@ -1,9 +1,13 @@
 """Unit tests for geometry helpers without a COMSOL client."""
 
+import pytest
+
 from src.tools.geometry import (
     add_circle_feature,
+    add_difference_feature,
     add_geometry_feature,
     add_import_feature,
+    add_primitive_feature,
     add_union_feature,
     list_geometry_features,
 )
@@ -296,3 +300,82 @@ def test_add_import_feature_requires_existing_file(tmp_path):
     )
 
     assert result["success"] is False
+
+
+@pytest.mark.parametrize(
+    ("feature_type", "position", "dimensions"),
+    [
+        ("Block", [0, 0], [1, 1, 1]),
+        ("Block", [0, 0, 0], [1, 0, 1]),
+        ("Cylinder", [0, 0, float("nan")], [1, 1]),
+        ("Cylinder", [0, 0, 0], [-1, 1]),
+        ("Sphere", [0, 0, 0], [False]),
+        ("Rectangle", [0, float("inf")], [1, 1]),
+    ],
+)
+def test_primitive_validation_precedes_feature_creation(
+    feature_type, position, dimensions
+):
+    geometry = FakeGeometry()
+
+    result = add_primitive_feature(
+        FakeModel(geometry), feature_type, position, dimensions
+    )
+
+    assert result["success"] is False
+    assert geometry.features.features == {}
+
+
+def test_primitive_property_failure_removes_created_feature():
+    geometry = FakeGeometry(failing_property="size")
+
+    result = add_primitive_feature(
+        FakeModel(geometry), "Block", [0, 0, 0], [1, 1, 1]
+    )
+
+    assert result["success"] is False
+    assert result["rolled_back"] is True
+    assert geometry.features.features == {}
+
+
+def test_difference_validates_inputs_before_creation_and_rolls_back_selection():
+    geometry = FakeGeometry()
+    geometry.features.create("blk1", "Block")
+    missing = add_difference_feature(FakeModel(geometry), "blk1", ["missing"])
+    assert missing["success"] is False
+    assert set(geometry.features.features) == {"blk1"}
+
+    class FailingSelection:
+        def set(self, _objects):
+            raise RuntimeError("controlled selection failure")
+
+    class FailingDifference(FakeFeature):
+        def selection(self, _name):
+            return FailingSelection()
+
+    original_create = geometry.features.create
+
+    def create(tag, feature_type):
+        if feature_type == "Difference":
+            feature = FailingDifference()
+            geometry.features.features[tag] = (feature_type, feature)
+            return feature
+        return original_create(tag, feature_type)
+
+    geometry.features.create = create
+    geometry.features.create("cyl1", "Cylinder")
+    failed = add_difference_feature(FakeModel(geometry), "blk1", ["cyl1"])
+    assert failed["rolled_back"] is True
+    assert not any(tag.startswith("dif") for tag in geometry.features.features)
+
+
+def test_import_filename_failure_removes_created_feature(tmp_path):
+    source = tmp_path / "part.step"
+    source.write_text("dummy", encoding="utf-8")
+    geometry = FakeGeometry(failing_property="filename")
+
+    result = add_import_feature(FakeModel(geometry), str(source))
+
+    assert result["success"] is False
+    assert result["rolled_back"] is True
+    assert geometry.features.features == {}
