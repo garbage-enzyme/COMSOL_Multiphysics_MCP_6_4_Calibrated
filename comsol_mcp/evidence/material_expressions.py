@@ -51,7 +51,10 @@ _ANGULAR_UNITS = {"rad/s", "1/s", "s^-1"}
 def _number(value: Any, label: str, *, nonnegative: bool = False, positive: bool = False) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{label} must be numeric")
-    result = float(value)
+    try:
+        result = float(value)
+    except OverflowError as exc:
+        raise ValueError(f"{label} must be finite") from exc
     if not math.isfinite(result):
         raise ValueError(f"{label} must be finite")
     if positive and result <= 0:
@@ -75,10 +78,14 @@ def _validate_name(value: str, label: str, *, dotted: bool = False) -> str:
 def _angular_value(value: float, unit: str | None, label: str) -> float:
     normalized = unit.strip().lower() if isinstance(unit, str) and unit.strip() else None
     if normalized is None or normalized in _ANGULAR_UNITS:
-        return value
-    if normalized in _FREQUENCY_FACTORS:
-        return 2.0 * math.pi * value * _FREQUENCY_FACTORS[normalized]
-    raise ValueError(f"{label} unit must be rad/s, 1/s, s^-1, or a supported Hz unit")
+        result = value
+    elif normalized in _FREQUENCY_FACTORS:
+        result = 2.0 * math.pi * value * _FREQUENCY_FACTORS[normalized]
+    else:
+        raise ValueError(f"{label} unit must be rad/s, 1/s, s^-1, or a supported Hz unit")
+    if not math.isfinite(result) or result < 0.0:
+        raise ValueError(f"{label} converted angular frequency must be finite and nonnegative")
+    return result
 
 
 def _angular_expression(value: float, unit: str | None, name: str | None) -> str:
@@ -200,6 +207,8 @@ def preview_material_expression(
         if key not in units:
             warnings.append({"code": "missing_parameter_unit", "parameter": key, "assumed_unit": "1/s"})
         converted_values[key] = _angular_value(values[key], units.get(key), f"parameter_units.{key}")
+        if key != "damping_angular_frequency" and converted_values[key] <= 0.0:
+            raise ValueError(f"parameter_units.{key} converted angular frequency must be positive")
     for key in set(units) - _ANGULAR_PARAMETERS:
         if units[key].strip().lower() not in {"1", "dimensionless"}:
             warnings.append({"code": "dimensionless_parameter_unit_ignored", "parameter": key, "unit": units[key]})
@@ -209,10 +218,16 @@ def preview_material_expression(
         raise ValueError("wavelength_unit must be m, um, µm, or nm")
     if not isinstance(test_wavelengths, list) or not test_wavelengths or len(test_wavelengths) > MAX_PREVIEW_WAVELENGTHS:
         raise ValueError(f"test_wavelengths must contain 1..{MAX_PREVIEW_WAVELENGTHS} values")
-    wavelengths_m = [
-        _number(value, f"test_wavelengths[{index}]", positive=True) * _WAVELENGTH_FACTORS[normalized_wavelength_unit]
-        for index, value in enumerate(test_wavelengths)
-    ]
+    wavelengths_m = []
+    for index, value in enumerate(test_wavelengths):
+        wavelength_m = _number(
+            value, f"test_wavelengths[{index}]", positive=True
+        ) * _WAVELENGTH_FACTORS[normalized_wavelength_unit]
+        if not math.isfinite(wavelength_m) or wavelength_m <= 0.0:
+            raise ValueError(
+                f"test_wavelengths[{index}] converted wavelength must be positive and finite"
+            )
+        wavelengths_m.append(wavelength_m)
 
     fixed_omega_si = None
     if frequency_source == "fixed_angular_frequency":
@@ -224,6 +239,10 @@ def preview_material_expression(
             fixed_angular_frequency_unit,
             "fixed_angular_frequency_unit",
         )
+        if fixed_omega_si <= 0.0:
+            raise ValueError(
+                "fixed_angular_frequency_unit converted angular frequency must be positive"
+            )
         omega_expression = _angular_expression(
             fixed_value, fixed_angular_frequency_unit, None
         )
@@ -285,7 +304,12 @@ def preview_material_expression(
     preview = []
     for requested, wavelength_m in zip(test_wavelengths, wavelengths_m):
         omega = fixed_omega_si if fixed_omega_si is not None else 2.0 * math.pi * _C / wavelength_m
-        epsilon = _complex_preview(model_kind, converted_values, omega, imaginary_sign)
+        if not math.isfinite(omega) or omega <= 0.0:
+            raise ValueError("preview converted angular frequency must be positive and finite")
+        try:
+            epsilon = _complex_preview(model_kind, converted_values, omega, imaginary_sign)
+        except (OverflowError, ZeroDivisionError) as exc:
+            raise ValueError("expression preview arithmetic exceeded finite bounds") from exc
         if not math.isfinite(epsilon.real) or not math.isfinite(epsilon.imag):
             raise ValueError("expression preview produced non-finite permittivity")
         expected_direction = 1 if imaginary_sign == "positive" else -1

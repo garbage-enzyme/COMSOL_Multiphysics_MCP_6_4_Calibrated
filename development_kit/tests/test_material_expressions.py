@@ -169,6 +169,36 @@ def test_malformed_ambiguous_and_nonfinite_inputs_fail_closed(changes, match):
         preview_material_expression(**arguments)
 
 
+def test_wavelength_conversion_rejects_positive_values_that_underflow_to_zero():
+    with pytest.raises(ValueError, match="converted wavelength"):
+        preview_material_expression(
+            **{**COMMON, "test_wavelengths": [5e-324], "wavelength_unit": "nm"},
+            model_kind="constant",
+            parameters={"epsilon_real": 2.0, "epsilon_imag": 0.1},
+            imaginary_sign="positive",
+        )
+
+
+def test_frequency_conversion_and_parameter_squaring_fail_as_controlled_validation():
+    with pytest.raises(ValueError, match="converted angular frequency"):
+        _drude(
+            "positive",
+            frequency_source="fixed_angular_frequency",
+            fixed_angular_frequency=1.0e308,
+            fixed_angular_frequency_unit="thz",
+        )
+
+    with pytest.raises(ValueError, match="preview arithmetic"):
+        _drude(
+            "positive",
+            parameters={
+                "epsilon_inf": 1.0,
+                "plasma_angular_frequency": 1.0e308,
+                "damping_angular_frequency": 1.0,
+            },
+        )
+
+
 def test_preview_is_deterministic_and_import_does_not_load_solver_stack():
     first = _drude("negative")
     second = _drude("negative")

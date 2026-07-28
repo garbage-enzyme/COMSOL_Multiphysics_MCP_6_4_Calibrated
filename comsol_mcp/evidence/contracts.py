@@ -999,12 +999,20 @@ def _rule_outcome(rule: Mapping[str, Any], evidence: Mapping[str, Any]) -> dict[
                     abs_tol=1e-15,
                 )
             )
+            expected_closure = abs(1.0 - r_value - t_value - a_value)
+            closure_consistent = closure >= 0.0 and math.isclose(
+                closure,
+                expected_closure,
+                rel_tol=1e-12,
+                abs_tol=1e-15,
+            )
             passed = (
                 finite
                 and convention_complete
                 and closure_eligible
                 and passive_bounds
                 and arithmetic_consistent
+                and closure_consistent
                 and closure
                 <= strict_json_number(
                     tolerances["closure_abs"], "policy.closure_abs", nonnegative=True
@@ -1037,6 +1045,7 @@ def _rule_outcome(rule: Mapping[str, Any], evidence: Mapping[str, Any]) -> dict[
                     "finite": finite,
                     "passive_bounds": passive_bounds,
                     "arithmetic_consistent": arithmetic_consistent,
+                    "closure_consistent": closure_consistent,
                     "signs_valid": signs_valid,
                     "convention_complete": convention_complete,
                     "physical_flux_closure_eligible": closure_eligible,

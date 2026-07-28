@@ -126,6 +126,30 @@ def test_combined_reference_power_evaluation_requires_every_physical_and_negativ
     assert failed["checks"]["reference_air"]["reflection"] is False
 
 
+def test_reference_power_rejects_negative_errors_and_infinite_target_ratios():
+    reference, point, _policies = _results()
+    reference["reference"].update(
+        {
+            "R": -1.0,
+            "R_plus_T_residual_abs": -1.0,
+            "target_to_transverse_ratio": float("inf"),
+        }
+    )
+    point["measurement"]["wavelength"] = {
+        "absolute_difference_m": -1.0,
+        "relative_difference": -1.0,
+    }
+
+    result = evaluate_reference_power_results(CONTRACT, reference, point)
+
+    assert result["passed"] is False
+    assert result["checks"]["reference_air"]["reflection"] is False
+    assert result["checks"]["reference_air"]["r_plus_t_residual"] is False
+    assert result["checks"]["reference_air"]["target_ratio"] is False
+    assert result["checks"]["physical_point"]["wavelength_absolute"] is False
+    assert result["checks"]["physical_point"]["wavelength_relative"] is False
+
+
 def test_artifact_inventory_is_relative_hashed_and_bounded(tmp_path):
     (tmp_path / "nested").mkdir()
     (tmp_path / "a.json").write_text("{}\n", encoding="utf-8")

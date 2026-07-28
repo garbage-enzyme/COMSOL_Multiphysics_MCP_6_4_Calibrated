@@ -283,6 +283,23 @@ def test_declared_flux_policy_requires_passive_bounds_and_exact_arithmetic():
     assert absorption_above_one["overall"] == "fail"
     assert reversed_outgoing_sign["rules"][0]["checks"]["passive_bounds"] is False
 
+    negative_closure = deepcopy(_declared_flux_evidence())
+    negative_closure.pop("contract_sha256")
+    negative_closure["evidence"]["flux.closure_abs"]["value"] = -1.0
+    inconsistent_closure = deepcopy(_declared_flux_evidence())
+    inconsistent_closure.pop("contract_sha256")
+    inconsistent_closure["evidence"]["flux.closure_abs"]["value"] = 1.0e-12
+
+    negative_result = evaluate_physical_evidence_policy(
+        build_physical_evidence(negative_closure), policy
+    )
+    inconsistent_result = evaluate_physical_evidence_policy(
+        build_physical_evidence(inconsistent_closure), policy
+    )
+
+    assert negative_result["overall"] == "fail"
+    assert inconsistent_result["overall"] == "fail"
+
 
 def test_internal_normalization_cannot_substitute_for_physical_flux_closure():
     policy = _policy(

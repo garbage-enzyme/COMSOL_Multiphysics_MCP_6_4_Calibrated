@@ -64,7 +64,10 @@ def _text(value: Any, label: str) -> str:
 def _finite(value: Any, label: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{label} must be a finite number")
-    result = float(value)
+    try:
+        result = float(value)
+    except OverflowError as exc:
+        raise ValueError(f"{label} must be a finite number") from exc
     if not math.isfinite(result):
         raise ValueError(f"{label} must be a finite number")
     return result
@@ -104,7 +107,7 @@ def _plane(value: Any, label: str) -> dict[str, Any]:
     item = _mapping(value, label)
     _reject_unknown(item, _PLANE_FIELDS, label)
     sign = item.get("positive_power_sign")
-    if isinstance(sign, bool) or sign not in {-1, 1}:
+    if type(sign) is not int or sign not in {-1, 1}:
         raise ValueError(f"{label}.positive_power_sign must be exactly -1 or 1")
     raw_power = _finite(item.get("raw_power_w"), f"{label}.raw_power_w")
     normalized = {
@@ -129,7 +132,7 @@ def normalize_declared_plane_flux(value: Mapping[str, Any]) -> dict[str, Any]:
     declared outgoing channels; it is not derived from volume ``Qh``.
     """
 
-    spec = _mapping(dict(value), "declared_plane_flux")
+    spec = _mapping(value, "declared_plane_flux")
     _reject_unknown(spec, _FLUX_FIELDS, "declared_plane_flux")
     missing = sorted(_FLUX_FIELDS - set(spec))
     if missing:
@@ -144,6 +147,12 @@ def normalize_declared_plane_flux(value: Mapping[str, Any]) -> dict[str, Any]:
     t_value = transmitted / incident
     a_value = (incident - reflected - transmitted) / incident
     closure = abs(1.0 - r_value - t_value - a_value)
+    net_absorbed = incident - reflected - transmitted
+    if not all(
+        math.isfinite(item)
+        for item in (r_value, t_value, a_value, closure, net_absorbed)
+    ):
+        raise ValueError("declared_plane_flux must produce finite derived values")
     return {
         "schema_version": "1.0.0",
         "state": "derived_from_declared_convention",
@@ -152,7 +161,7 @@ def normalize_declared_plane_flux(value: Mapping[str, Any]) -> dict[str, Any]:
         "T": t_value,
         "A": a_value,
         "closure_abs": closure,
-        "net_absorbed_power_w": incident - reflected - transmitted,
+        "net_absorbed_power_w": net_absorbed,
         "limitations": [
             "Plane orientation, medium identity, expressions, and signs are caller declarations.",
             "Volume-loss and cross-section normalizations are not substitutes for this declared-plane evidence.",
@@ -177,7 +186,7 @@ def normalize_internal_absorption_consistency(
             "physical_flux_closure_eligible": False,
         }
 
-    cross = _mapping(dict(cross_section), "cross_section_absorption")
+    cross = _mapping(cross_section, "cross_section_absorption")
     _reject_unknown(cross, _CROSS_SECTION_FIELDS, "cross_section_absorption")
     normalized_cross = {
         "expression": _text(cross.get("expression"), "cross_section_absorption.expression"),
@@ -208,7 +217,7 @@ def normalize_internal_absorption_consistency(
             "limitations": ["Volume-loss normalization was not declared."],
         }
 
-    volume = _mapping(dict(volume_loss), "volume_loss_absorption")
+    volume = _mapping(volume_loss, "volume_loss_absorption")
     _reject_unknown(volume, _VOLUME_LOSS_FIELDS, "volume_loss_absorption")
     normalized_volume = {
         "expression": _text(volume.get("expression"), "volume_loss_absorption.expression"),

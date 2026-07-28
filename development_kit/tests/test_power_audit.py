@@ -80,6 +80,35 @@ def test_declared_plane_flux_fails_closed_on_ambiguous_inputs(mutation, match):
         normalize_declared_plane_flux(value)
 
 
+@pytest.mark.parametrize("sign", [1.0, [1], {"sign": 1}])
+def test_declared_plane_flux_requires_strict_integer_signs(sign):
+    value = _flux_spec()
+    value["reflected"]["positive_power_sign"] = sign
+
+    with pytest.raises(ValueError, match="exactly -1 or 1"):
+        normalize_declared_plane_flux(value)
+
+
+def test_power_audit_entry_points_reject_pair_iterables_instead_of_coercing_them():
+    with pytest.raises(ValueError, match="JSON object"):
+        normalize_declared_plane_flux(list(_flux_spec().items()))
+    with pytest.raises(ValueError, match="JSON object"):
+        normalize_internal_absorption_consistency(list(_cross_section().items()), None)
+
+
+def test_declared_plane_flux_rejects_nonfinite_derived_results_and_huge_integers():
+    overflow = _flux_spec()
+    overflow["incident"]["raw_power_w"] = -1.0e-308
+    overflow["reflected"]["raw_power_w"] = 1.0e308
+    huge = _flux_spec()
+    huge["incident"]["raw_power_w"] = 10**10_000
+
+    with pytest.raises(ValueError, match="finite derived values"):
+        normalize_declared_plane_flux(overflow)
+    with pytest.raises(ValueError, match="finite number"):
+        normalize_declared_plane_flux(huge)
+
+
 def _cross_section():
     return {
         "expression": "ewfd.sigmaAbs",

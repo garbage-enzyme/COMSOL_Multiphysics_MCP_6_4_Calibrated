@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 import hashlib
+import math
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -14,6 +15,26 @@ from .contracts import (
     example_validation_policies,
 )
 from .reference_power_acceptance import validate_reference_power_acceptance_contract
+
+
+def _finite_nonnegative(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    try:
+        result = float(value)
+    except OverflowError:
+        return None
+    return result if math.isfinite(result) and result >= 0.0 else None
+
+
+def _at_most(value: Any, threshold: float) -> bool:
+    result = _finite_nonnegative(value)
+    return result is not None and result <= threshold
+
+
+def _at_least(value: Any, threshold: float) -> bool:
+    result = _finite_nonnegative(value)
+    return result is not None and result >= threshold
 
 
 def build_reference_power_policies(contract: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
@@ -111,21 +132,30 @@ def evaluate_reference_power_results(
     reference_checks = {
         "audit_complete": reference_result.get("audit_status") == "measurement_complete",
         "policy_pass": reference_result.get("assessment", {}).get("overall") == "pass",
-        "reflection": float(reference.get("R", float("inf")))
-        <= acceptance["reference_air"]["reflection_max"],
-        "r_plus_t_residual": float(reference.get("R_plus_T_residual_abs", float("inf")))
-        <= acceptance["reference_air"]["r_plus_t_residual_max"],
-        "target_ratio": float(reference.get("target_to_transverse_ratio", -1.0))
-        >= acceptance["reference_air"]["target_to_transverse_ratio_min"],
+        "reflection": _at_most(
+            reference.get("R"), acceptance["reference_air"]["reflection_max"]
+        ),
+        "r_plus_t_residual": _at_most(
+            reference.get("R_plus_T_residual_abs"),
+            acceptance["reference_air"]["r_plus_t_residual_max"],
+        ),
+        "target_ratio": _at_least(
+            reference.get("target_to_transverse_ratio"),
+            acceptance["reference_air"]["target_to_transverse_ratio_min"],
+        ),
         "clone_cleanup": reference_result.get("cleanup", {}).get("removed") is True,
     }
     point_checks = {
         "audit_complete": point_result.get("audit_status") == "policy_evaluated",
         "policy_pass": point_result.get("assessment", {}).get("project_verdict") == "pass",
-        "wavelength_absolute": float(wavelength.get("absolute_difference_m", float("inf")))
-        <= acceptance["wavelength"]["absolute_m_max"],
-        "wavelength_relative": float(wavelength.get("relative_difference", float("inf")))
-        <= acceptance["wavelength"]["relative_max"],
+        "wavelength_absolute": _at_most(
+            wavelength.get("absolute_difference_m"),
+            acceptance["wavelength"]["absolute_m_max"],
+        ),
+        "wavelength_relative": _at_most(
+            wavelength.get("relative_difference"),
+            acceptance["wavelength"]["relative_max"],
+        ),
         "source_unchanged": point_measurement.get("integrity", {}).get("source_unchanged") is True,
     }
     negative_checks = {
