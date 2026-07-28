@@ -1,7 +1,6 @@
 """Unit tests for geometry helpers without a COMSOL client."""
 
 import pytest
-
 from src.tools.geometry import (
     add_circle_feature,
     add_difference_feature,
@@ -167,9 +166,7 @@ def test_add_geometry_feature_chooses_first_unused_tag_and_rejects_collision():
     geometry.features.create("feat3", "Sphere")
 
     created = add_geometry_feature(FakeModel(geometry), "Cylinder")
-    collision = add_geometry_feature(
-        FakeModel(geometry), "Cylinder", feature_name="feat1"
-    )
+    collision = add_geometry_feature(FakeModel(geometry), "Cylinder", feature_name="feat1")
 
     assert created["feature"]["name"] == "feat2"
     assert collision == {
@@ -226,9 +223,7 @@ def test_list_geometry_features_normalizes_java_string_tags():
 
     result = list_geometry_features(FakeModel(geometry))
 
-    assert result["features"] == [
-        {"tag": "blk1", "label": "Geometry Feature"}
-    ]
+    assert result["features"] == [{"tag": "blk1", "label": "Geometry Feature"}]
 
 
 def test_add_circle_feature_uses_clientapi_properties():
@@ -248,11 +243,25 @@ def test_add_circle_feature_uses_clientapi_properties():
     assert result["feature"]["radius"] == 0.5
 
 
-def test_add_circle_feature_validates_geometry_values():
-    model = FakeModel(FakeGeometry())
+@pytest.mark.parametrize(
+    "position,radius",
+    [
+        ([0], 1),
+        ([0, 0], 0),
+        ([float("nan"), 0], 1),
+        ([0, float("inf")], 1),
+        ([0, 0], float("nan")),
+        ([0, 0], float("inf")),
+        ([0, 0], -float("inf")),
+    ],
+)
+def test_add_circle_feature_validates_geometry_values_before_creation(position, radius):
+    geometry = FakeGeometry()
 
-    assert add_circle_feature(model, [0], 1)["success"] is False
-    assert add_circle_feature(model, [0, 0], 0)["success"] is False
+    result = add_circle_feature(FakeModel(geometry), position, radius)
+
+    assert result["success"] is False
+    assert geometry.features.features == {}
 
 
 def test_add_union_feature_sets_input_selection():
@@ -313,14 +322,10 @@ def test_add_import_feature_requires_existing_file(tmp_path):
         ("Rectangle", [0, float("inf")], [1, 1]),
     ],
 )
-def test_primitive_validation_precedes_feature_creation(
-    feature_type, position, dimensions
-):
+def test_primitive_validation_precedes_feature_creation(feature_type, position, dimensions):
     geometry = FakeGeometry()
 
-    result = add_primitive_feature(
-        FakeModel(geometry), feature_type, position, dimensions
-    )
+    result = add_primitive_feature(FakeModel(geometry), feature_type, position, dimensions)
 
     assert result["success"] is False
     assert geometry.features.features == {}
@@ -329,9 +334,7 @@ def test_primitive_validation_precedes_feature_creation(
 def test_primitive_property_failure_removes_created_feature():
     geometry = FakeGeometry(failing_property="size")
 
-    result = add_primitive_feature(
-        FakeModel(geometry), "Block", [0, 0, 0], [1, 1, 1]
-    )
+    result = add_primitive_feature(FakeModel(geometry), "Block", [0, 0, 0], [1, 1, 1])
 
     assert result["success"] is False
     assert result["rolled_back"] is True

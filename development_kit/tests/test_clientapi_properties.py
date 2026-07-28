@@ -5,7 +5,6 @@ from __future__ import annotations
 import math
 
 import pytest
-
 from src.tools.properties import get_existing_property, set_existing_property
 
 
@@ -134,9 +133,7 @@ def feature():
     ["geometry_feature", "physics_feature", "mesh_feature", "study_step", "result_feature"],
 )
 def test_property_get_resolves_each_allowlisted_container(feature, container):
-    result = get_existing_property(
-        FakeModel(feature), "comp1", container, "parent1/child1", "size"
-    )
+    result = get_existing_property(FakeModel(feature), "comp1", container, "parent1/child1", "size")
 
     assert result["success"] is True
     assert result["value"] == ["1", "2", "3"]
@@ -154,9 +151,7 @@ def test_property_get_resolves_each_allowlisted_container(feature, container):
         ("active", False),
     ],
 )
-def test_property_set_returns_normalized_old_and_new_values(
-    feature, property_name, new_value
-):
+def test_property_set_returns_normalized_old_and_new_values(feature, property_name, new_value):
     old_value = feature.values[property_name]
 
     result = set_existing_property(
@@ -177,20 +172,36 @@ def test_property_set_returns_normalized_old_and_new_values(
 def test_property_access_rejects_unknown_targets_and_properties(feature):
     model = FakeModel(feature)
 
-    assert get_existing_property(
-        model, "comp1", "arbitrary_java", "parent1/child1", "label"
-    )["success"] is False
-    assert get_existing_property(
-        model, "comp1", "geometry_feature", "parent1/child1/run", "label"
-    )["success"] is False
-    result = get_existing_property(
-        model, "comp1", "geometry_feature", "parent1/child1", "missing"
+    assert (
+        get_existing_property(model, "comp1", "arbitrary_java", "parent1/child1", "label")[
+            "success"
+        ]
+        is False
     )
+    assert (
+        get_existing_property(model, "comp1", "geometry_feature", "parent1/child1/run", "label")[
+            "success"
+        ]
+        is False
+    )
+    result = get_existing_property(model, "comp1", "geometry_feature", "parent1/child1", "missing")
     assert result["success"] is False
     assert "unknown property" in result["error"]
 
 
-def test_property_set_rejects_nonfinite_before_resolving_clientapi():
+@pytest.mark.parametrize(
+    "value",
+    [
+        math.nan,
+        math.inf,
+        -math.inf,
+        [1.0, math.inf],
+        [1.0, -math.inf],
+        [[1.0, math.nan]],
+        [[math.inf], [-math.inf]],
+    ],
+)
+def test_property_set_rejects_nonfinite_before_resolving_clientapi(value):
     class UntouchableModel:
         @property
         def java(self):
@@ -202,7 +213,7 @@ def test_property_set_rejects_nonfinite_before_resolving_clientapi():
         "geometry_feature",
         "parent1/child1",
         "scale",
-        math.nan,
+        value,
     )
 
     assert result["success"] is False

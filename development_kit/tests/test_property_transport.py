@@ -5,7 +5,6 @@ from __future__ import annotations
 import math
 
 import pytest
-
 from src.tools.property_transport import (
     MAX_LIST_ITEMS,
     MAX_PROPERTY_KEYS,
@@ -31,6 +30,20 @@ def test_properties_accept_scalar_vector_and_matrix_values():
 
 @pytest.mark.parametrize("value", [math.nan, math.inf, -math.inf])
 def test_properties_reject_nonfinite_numbers(value):
+    with pytest.raises(ValueError, match="finite"):
+        validate_properties({"value": value})
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        [1.0, math.inf],
+        [1.0, -math.inf],
+        [[1.0, math.nan]],
+        [[math.inf], [-math.inf]],
+    ],
+)
+def test_properties_reject_nested_nonfinite_numbers(value):
     with pytest.raises(ValueError, match="finite"):
         validate_properties({"value": value})
 

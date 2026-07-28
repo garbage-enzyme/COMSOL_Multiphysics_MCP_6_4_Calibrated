@@ -3,6 +3,7 @@
 import math
 from pathlib import Path
 from typing import Optional, Sequence
+
 from mcp.server.fastmcp import FastMCP
 
 from .property_transport import JSONValue, validate_properties
@@ -49,21 +50,24 @@ def _next_feature_tag(feature_list, prefix: str, requested: str | None) -> str:
 
 def _get_geometry_node(model, geometry_name: Optional[str], component_name: str = "comp1"):
     """Helper to get geometry node via Java API.
-    
+
     Returns:
         tuple: (geom_node, error_message) - geom_node is None if error
     """
     jm = model.java
-    
+
     try:
         comp = jm.component(component_name)
         if comp is None:
             return None, f"Component '{component_name}' not found."
-        
+
         if geometry_name:
             geom = comp.geom(geometry_name)
             if geom is None:
-                return None, f"Geometry '{geometry_name}' not found in component '{component_name}'."
+                return (
+                    None,
+                    f"Geometry '{geometry_name}' not found in component '{component_name}'.",
+                )
         else:
             # clientapi: ComponentGeomListClient supports neither list() nor
             # subscripting; iterate via tags() and get(tag).
@@ -72,7 +76,7 @@ def _get_geometry_node(model, geometry_name: Optional[str], component_name: str 
                 return None, "No geometry sequences found. Create one first with geometry_create."
             tags = list(geoms.tags())
             geom = geoms.get(tags[0])
-        
+
         return geom, None
     except Exception as e:
         return None, f"Failed to get geometry: {str(e)}"
@@ -182,10 +186,11 @@ def add_circle_feature(
     feature_name: Optional[str] = None,
 ) -> dict:
     """Add a validated 2D Circle feature through clientapi."""
-    if len(position) != 2:
-        return {"success": False, "error": "position must contain exactly 2 values."}
-    if radius <= 0:
-        return {"success": False, "error": "radius must be positive."}
+    try:
+        normalized_position = _finite_vector(position, "position", 2)
+        normalized_radius = _finite_positive(radius, "radius")
+    except (TypeError, ValueError) as exc:
+        return {"success": False, "error": str(exc)}
 
     result = add_geometry_feature(
         model,
@@ -194,13 +199,13 @@ def add_circle_feature(
         component_name=component_name,
         feature_name=feature_name,
         properties={
-            "pos": [str(value) for value in position],
-            "r": str(radius),
+            "pos": [str(value) for value in normalized_position],
+            "r": str(normalized_radius),
         },
     )
     if result["success"]:
-        result["feature"]["position"] = list(position)
-        result["feature"]["radius"] = radius
+        result["feature"]["position"] = normalized_position
+        result["feature"]["radius"] = normalized_radius
     return result
 
 
@@ -243,14 +248,19 @@ def add_primitive_feature(
         geometry_name=geometry_name,
         component_name=component_name,
         feature_name=feature_name,
-        properties={key: [str(item) for item in value] if isinstance(value, list) else str(value) for key, value in properties.items()},
+        properties={
+            key: [str(item) for item in value] if isinstance(value, list) else str(value)
+            for key, value in properties.items()
+        },
     )
     if result["success"]:
         result["feature"]["position"] = normalized_position
         if feature_type in {"Block", "Rectangle"}:
             result["feature"]["size"] = normalized_dimensions
         elif feature_type == "Cylinder":
-            result["feature"].update(radius=normalized_dimensions[0], height=normalized_dimensions[1])
+            result["feature"].update(
+                radius=normalized_dimensions[0], height=normalized_dimensions[1]
+            )
         else:
             result["feature"]["radius"] = normalized_dimensions[0]
     return result
@@ -266,7 +276,9 @@ def add_difference_feature(
     feature_name: Optional[str] = None,
 ) -> dict:
     """Validate referenced objects and roll back incomplete Difference creation."""
-    subtract = list(objects_to_subtract) if not isinstance(objects_to_subtract, (str, bytes)) else []
+    subtract = (
+        list(objects_to_subtract) if not isinstance(objects_to_subtract, (str, bytes)) else []
+    )
     if not isinstance(input_object, str) or not input_object or not subtract:
         return {"success": False, "error": "difference inputs must be nonempty tags"}
     if not all(isinstance(item, str) and item for item in subtract):
@@ -293,9 +305,21 @@ def add_difference_feature(
         try:
             feature_list.remove(tag)
         except Exception:
-            return {"success": False, "error": "Difference setup failed and rollback was incomplete.", "rolled_back": False}
+            return {
+                "success": False,
+                "error": "Difference setup failed and rollback was incomplete.",
+                "rolled_back": False,
+            }
         return {"success": False, "error": "Difference setup failed.", "rolled_back": True}
-    return {"success": True, "feature": {"name": tag, "type": "Difference", "input_object": input_object, "subtracted": subtract}}
+    return {
+        "success": True,
+        "feature": {
+            "name": tag,
+            "type": "Difference",
+            "input_object": input_object,
+            "subtracted": subtract,
+        },
+    }
 
 
 def add_union_feature(
@@ -357,8 +381,16 @@ def add_import_feature(
         try:
             feature_list.remove(tag)
         except Exception:
-            return {"success": False, "error": "Import setup failed and rollback was incomplete.", "rolled_back": False}
-        return {"success": False, "error": "Import filename could not be applied.", "rolled_back": True}
+            return {
+                "success": False,
+                "error": "Import setup failed and rollback was incomplete.",
+                "rolled_back": False,
+            }
+        return {
+            "success": False,
+            "error": "Import filename could not be applied.",
+            "rolled_back": True,
+        }
     return {
         "success": True,
         "feature": {
@@ -373,15 +405,15 @@ def add_import_feature(
 
 def register_geometry_tools(mcp: FastMCP) -> None:
     """Register geometry tools with the MCP server."""
-    
+
     @mcp.tool()
     def geometry_list(model_name: Optional[str] = None) -> dict:
         """
         List all geometry sequences in a model.
-        
+
         Args:
             model_name: Model name (default: current model)
-        
+
         Returns:
             List of geometry sequence names
         """
@@ -389,9 +421,9 @@ def register_geometry_tools(mcp: FastMCP) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
-        
+
         try:
             geometries = model.geometries()
             return {
@@ -401,25 +433,25 @@ def register_geometry_tools(mcp: FastMCP) -> None:
             }
         except Exception as e:
             return {"success": False, "error": f"Failed to list geometries: {str(e)}"}
-    
+
     @mcp.tool()
     def geometry_create(
         geometry_name: Optional[str] = None,
         space_dimension: int = 3,
         component_name: str = "comp1",
-        model_name: Optional[str] = None
+        model_name: Optional[str] = None,
     ) -> dict:
         """
         Create a new geometry sequence in the model's component.
-        
+
         IMPORTANT: A component must exist first. Use model_create_component if needed.
-        
+
         Args:
             geometry_name: Name for the geometry sequence (default: 'geom1')
             space_dimension: Space dimension - 2 for 2D, 3 for 3D (default: 3)
             component_name: Component name (default: 'comp1')
             model_name: Model name (default: current model)
-        
+
         Returns:
             Created geometry info
         """
@@ -427,23 +459,26 @@ def register_geometry_tools(mcp: FastMCP) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
-        
+
         try:
             jm = model.java
-            
+
             geom_name = geometry_name or "geom1"
-            
+
             comp = jm.component(component_name)
             if comp is None:
                 return {
                     "success": False,
-                    "error": f"Component '{component_name}' not found. Create it first with model_create_component."
+                    "error": (
+                        f"Component '{component_name}' not found. Create it first "
+                        "with model_create_component."
+                    ),
                 }
-            
-            geom = comp.geom().create(geom_name, space_dimension)
-            
+
+            comp.geom().create(geom_name, space_dimension)
+
             return {
                 "success": True,
                 "geometry": geom_name,
@@ -452,7 +487,7 @@ def register_geometry_tools(mcp: FastMCP) -> None:
             }
         except Exception as e:
             return {"success": False, "error": f"Failed to create geometry: {str(e)}"}
-    
+
     @mcp.tool()
     def geometry_add_feature(
         feature_type: str,
@@ -464,7 +499,7 @@ def register_geometry_tools(mcp: FastMCP) -> None:
     ) -> dict:
         """
         Add a geometry feature to a geometry sequence.
-        
+
         Common feature types:
         - Block: Rectangular block (3D)
         - Cylinder: Cylinder (3D)
@@ -476,7 +511,7 @@ def register_geometry_tools(mcp: FastMCP) -> None:
         - Polygon: Polygon from points
         - Import: Import CAD geometry
         - Union, Intersection, Difference: Boolean operations
-        
+
         Args:
             feature_type: Type of geometry feature (Block, Cylinder, etc.)
             geometry_name: Geometry sequence name (default: first geometry)
@@ -484,7 +519,7 @@ def register_geometry_tools(mcp: FastMCP) -> None:
             feature_name: Name for the feature (auto-generated if None)
             model_name: Model name (default: current model)
             properties: Feature-specific bounded JSON properties (position, size, etc.)
-        
+
         Returns:
             Created feature info
         """
@@ -492,9 +527,9 @@ def register_geometry_tools(mcp: FastMCP) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
-        
+
         try:
             return add_geometry_feature(
                 model,
@@ -506,7 +541,7 @@ def register_geometry_tools(mcp: FastMCP) -> None:
             )
         except Exception as e:
             return {"success": False, "error": f"Failed to add geometry feature: {str(e)}"}
-    
+
     @mcp.tool()
     def geometry_add_block(
         position: Sequence[float] = (0, 0, 0),
@@ -514,11 +549,11 @@ def register_geometry_tools(mcp: FastMCP) -> None:
         geometry_name: Optional[str] = None,
         component_name: str = "comp1",
         feature_name: Optional[str] = None,
-        model_name: Optional[str] = None
+        model_name: Optional[str] = None,
     ) -> dict:
         """
         Add a block (rectangular cuboid) to the geometry.
-        
+
         Args:
             position: Base position [x, y, z] in meters (default: origin)
             size: Dimensions [width, depth, height] in meters (default: 1m cube)
@@ -526,7 +561,7 @@ def register_geometry_tools(mcp: FastMCP) -> None:
             component_name: Component name (default: 'comp1')
             feature_name: Feature name (auto-generated if None)
             model_name: Model name (default: current model)
-        
+
         Returns:
             Created block info
         """
@@ -534,18 +569,22 @@ def register_geometry_tools(mcp: FastMCP) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
-        
+
         try:
             return add_primitive_feature(
-                model, "Block", position, size,
-                geometry_name=geometry_name, component_name=component_name,
+                model,
+                "Block",
+                position,
+                size,
+                geometry_name=geometry_name,
+                component_name=component_name,
                 feature_name=feature_name,
             )
         except Exception as e:
             return {"success": False, "error": f"Failed to add block: {str(e)}"}
-    
+
     @mcp.tool()
     def geometry_add_cylinder(
         position: Sequence[float] = (0, 0, 0),
@@ -554,11 +593,11 @@ def register_geometry_tools(mcp: FastMCP) -> None:
         geometry_name: Optional[str] = None,
         component_name: str = "comp1",
         feature_name: Optional[str] = None,
-        model_name: Optional[str] = None
+        model_name: Optional[str] = None,
     ) -> dict:
         """
         Add a cylinder to the geometry.
-        
+
         Args:
             position: Center of base [x, y, z] in meters
             radius: Radius in meters (default: 0.5)
@@ -567,7 +606,7 @@ def register_geometry_tools(mcp: FastMCP) -> None:
             component_name: Component name (default: 'comp1')
             feature_name: Feature name (auto-generated if None)
             model_name: Model name (default: current model)
-        
+
         Returns:
             Created cylinder info
         """
@@ -575,18 +614,22 @@ def register_geometry_tools(mcp: FastMCP) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
-        
+
         try:
             return add_primitive_feature(
-                model, "Cylinder", position, (radius, height),
-                geometry_name=geometry_name, component_name=component_name,
+                model,
+                "Cylinder",
+                position,
+                (radius, height),
+                geometry_name=geometry_name,
+                component_name=component_name,
                 feature_name=feature_name,
             )
         except Exception as e:
             return {"success": False, "error": f"Failed to add cylinder: {str(e)}"}
-    
+
     @mcp.tool()
     def geometry_add_sphere(
         position: Sequence[float] = (0, 0, 0),
@@ -594,11 +637,11 @@ def register_geometry_tools(mcp: FastMCP) -> None:
         geometry_name: Optional[str] = None,
         component_name: str = "comp1",
         feature_name: Optional[str] = None,
-        model_name: Optional[str] = None
+        model_name: Optional[str] = None,
     ) -> dict:
         """
         Add a sphere to the geometry.
-        
+
         Args:
             position: Center [x, y, z] in meters
             radius: Radius in meters (default: 0.5)
@@ -606,7 +649,7 @@ def register_geometry_tools(mcp: FastMCP) -> None:
             component_name: Component name (default: 'comp1')
             feature_name: Feature name (auto-generated if None)
             model_name: Model name (default: current model)
-        
+
         Returns:
             Created sphere info
         """
@@ -614,18 +657,22 @@ def register_geometry_tools(mcp: FastMCP) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
-        
+
         try:
             return add_primitive_feature(
-                model, "Sphere", position, (radius,),
-                geometry_name=geometry_name, component_name=component_name,
+                model,
+                "Sphere",
+                position,
+                (radius,),
+                geometry_name=geometry_name,
+                component_name=component_name,
                 feature_name=feature_name,
             )
         except Exception as e:
             return {"success": False, "error": f"Failed to add sphere: {str(e)}"}
-    
+
     @mcp.tool()
     def geometry_add_rectangle(
         position: Sequence[float] = (0, 0),
@@ -633,11 +680,11 @@ def register_geometry_tools(mcp: FastMCP) -> None:
         geometry_name: Optional[str] = None,
         component_name: str = "comp1",
         feature_name: Optional[str] = None,
-        model_name: Optional[str] = None
+        model_name: Optional[str] = None,
     ) -> dict:
         """
         Add a rectangle to a 2D geometry or work plane.
-        
+
         Args:
             position: Base position [x, y] in meters
             size: Dimensions [width, height] in meters
@@ -645,7 +692,7 @@ def register_geometry_tools(mcp: FastMCP) -> None:
             component_name: Component name (default: 'comp1')
             feature_name: Feature name (auto-generated if None)
             model_name: Model name (default: current model)
-        
+
         Returns:
             Created rectangle info
         """
@@ -653,18 +700,22 @@ def register_geometry_tools(mcp: FastMCP) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
-        
+
         try:
             return add_primitive_feature(
-                model, "Rectangle", position, size,
-                geometry_name=geometry_name, component_name=component_name,
+                model,
+                "Rectangle",
+                position,
+                size,
+                geometry_name=geometry_name,
+                component_name=component_name,
                 feature_name=feature_name,
             )
         except Exception as e:
             return {"success": False, "error": f"Failed to add rectangle: {str(e)}"}
-    
+
     @mcp.tool()
     def geometry_add_circle(
         position: Sequence[float] = (0, 0),
@@ -672,11 +723,11 @@ def register_geometry_tools(mcp: FastMCP) -> None:
         geometry_name: Optional[str] = None,
         component_name: str = "comp1",
         feature_name: Optional[str] = None,
-        model_name: Optional[str] = None
+        model_name: Optional[str] = None,
     ) -> dict:
         """
         Add a circle to a 2D geometry or work plane.
-        
+
         Args:
             position: Center [x, y] in meters
             radius: Radius in meters (default: 0.5)
@@ -684,7 +735,7 @@ def register_geometry_tools(mcp: FastMCP) -> None:
             component_name: Component containing the geometry (default: comp1)
             feature_name: Optional feature tag
             model_name: Model name (default: current model)
-        
+
         Returns:
             Created circle info
         """
@@ -692,9 +743,9 @@ def register_geometry_tools(mcp: FastMCP) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
-        
+
         try:
             return add_circle_feature(
                 model,
@@ -706,25 +757,25 @@ def register_geometry_tools(mcp: FastMCP) -> None:
             )
         except Exception as e:
             return {"success": False, "error": f"Failed to add circle: {str(e)}"}
-    
+
     @mcp.tool()
     def geometry_boolean_union(
         input_objects: Sequence[str],
         geometry_name: Optional[str] = None,
         component_name: str = "comp1",
         feature_name: Optional[str] = None,
-        model_name: Optional[str] = None
+        model_name: Optional[str] = None,
     ) -> dict:
         """
         Create a boolean union of geometry objects.
-        
+
         Args:
             input_objects: Names of objects to unite
             geometry_name: Geometry sequence name
             component_name: Component containing the geometry (default: comp1)
             feature_name: Optional feature tag
             model_name: Model name (default: current model)
-        
+
         Returns:
             Created union operation info
         """
@@ -732,9 +783,9 @@ def register_geometry_tools(mcp: FastMCP) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
-        
+
         try:
             return add_union_feature(
                 model,
@@ -745,7 +796,7 @@ def register_geometry_tools(mcp: FastMCP) -> None:
             )
         except Exception as e:
             return {"success": False, "error": f"Failed to create union: {str(e)}"}
-    
+
     @mcp.tool()
     def geometry_boolean_difference(
         input_object: str,
@@ -753,11 +804,11 @@ def register_geometry_tools(mcp: FastMCP) -> None:
         geometry_name: Optional[str] = None,
         component_name: str = "comp1",
         feature_name: Optional[str] = None,
-        model_name: Optional[str] = None
+        model_name: Optional[str] = None,
     ) -> dict:
         """
         Create a boolean difference (subtract objects from another).
-        
+
         Args:
             input_object: Object to subtract from (e.g., 'blk1')
             objects_to_subtract: Objects to remove (e.g., ['cyl1'])
@@ -765,7 +816,7 @@ def register_geometry_tools(mcp: FastMCP) -> None:
             component_name: Component name (default: 'comp1')
             feature_name: Feature name (auto-generated if None)
             model_name: Model name (default: current model)
-        
+
         Returns:
             Created difference operation info
         """
@@ -773,18 +824,21 @@ def register_geometry_tools(mcp: FastMCP) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
-        
+
         try:
             return add_difference_feature(
-                model, input_object, objects_to_subtract,
-                geometry_name=geometry_name, component_name=component_name,
+                model,
+                input_object,
+                objects_to_subtract,
+                geometry_name=geometry_name,
+                component_name=component_name,
                 feature_name=feature_name,
             )
         except Exception as e:
             return {"success": False, "error": f"Failed to create difference: {str(e)}"}
-    
+
     @mcp.tool()
     def geometry_import(
         file_path: str,
@@ -792,13 +846,13 @@ def register_geometry_tools(mcp: FastMCP) -> None:
         import_type: str = "CAD",
         component_name: str = "comp1",
         feature_name: Optional[str] = None,
-        model_name: Optional[str] = None
+        model_name: Optional[str] = None,
     ) -> dict:
         """
         Import geometry from a CAD file.
-        
+
         Supported formats: STEP, IGES, STL, NASTRAN, etc.
-        
+
         Args:
             file_path: Path to the CAD file
             geometry_name: Geometry sequence name
@@ -806,7 +860,7 @@ def register_geometry_tools(mcp: FastMCP) -> None:
             component_name: Component containing the geometry (default: comp1)
             feature_name: Optional feature tag
             model_name: Model name (default: current model)
-        
+
         Returns:
             Import operation info
         """
@@ -814,9 +868,9 @@ def register_geometry_tools(mcp: FastMCP) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
-        
+
         try:
             result = add_import_feature(
                 model,
@@ -830,23 +884,23 @@ def register_geometry_tools(mcp: FastMCP) -> None:
             return result
         except Exception as e:
             return {"success": False, "error": f"Failed to import geometry: {str(e)}"}
-    
+
     @mcp.tool()
     def geometry_build(
         geometry_name: Optional[str] = None,
         component_name: str = "comp1",
-        model_name: Optional[str] = None
+        model_name: Optional[str] = None,
     ) -> dict:
         """
         Build the geometry sequence to generate the actual geometry.
-        
+
         This must be called after adding/modifying geometry features.
-        
+
         Args:
             geometry_name: Geometry sequence name (default: build all)
             component_name: Component name (default: 'comp1')
             model_name: Model name (default: current model)
-        
+
         Returns:
             Build status
         """
@@ -854,16 +908,16 @@ def register_geometry_tools(mcp: FastMCP) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
-        
+
         try:
             geom, error = _get_geometry_node(model, geometry_name, component_name)
             if error:
                 return {"success": False, "error": error}
-            
+
             geom.run()
-            
+
             return {
                 "success": True,
                 "geometry": geometry_name or "first",
@@ -871,21 +925,21 @@ def register_geometry_tools(mcp: FastMCP) -> None:
             }
         except Exception as e:
             return {"success": False, "error": f"Failed to build geometry: {str(e)}"}
-    
+
     @mcp.tool()
     def geometry_list_features(
         geometry_name: Optional[str] = None,
         component_name: str = "comp1",
-        model_name: Optional[str] = None
+        model_name: Optional[str] = None,
     ) -> dict:
         """
         List all features in a geometry sequence.
-        
+
         Args:
             geometry_name: Geometry sequence name (default: first geometry)
             component_name: Component containing the geometry (default: comp1)
             model_name: Model name (default: current model)
-        
+
         Returns:
             List of geometry features with their types
         """
@@ -893,9 +947,9 @@ def register_geometry_tools(mcp: FastMCP) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
-        
+
         try:
             return list_geometry_features(
                 model,

@@ -7,10 +7,9 @@ or whether an internal absorption normalization is physical flux closure.
 
 from __future__ import annotations
 
-from copy import deepcopy
 import math
+from copy import deepcopy
 from typing import Any, Mapping
-
 
 _PLANE_FIELDS = {
     "expression",
@@ -113,7 +112,9 @@ def _plane(value: Any, label: str) -> dict[str, Any]:
     normalized = {
         "expression": _text(item.get("expression"), f"{label}.expression"),
         "selection_ids": _selection_ids(item.get("selection_ids"), f"{label}.selection_ids"),
-        "plane_coordinate_m": _finite(item.get("plane_coordinate_m"), f"{label}.plane_coordinate_m"),
+        "plane_coordinate_m": _finite(
+            item.get("plane_coordinate_m"), f"{label}.plane_coordinate_m"
+        ),
         "normal": _unit_normal(item.get("normal"), f"{label}.normal"),
         "medium_id": _text(item.get("medium_id"), f"{label}.medium_id"),
         "raw_power_w": raw_power,
@@ -137,7 +138,9 @@ def normalize_declared_plane_flux(value: Mapping[str, Any]) -> dict[str, Any]:
     missing = sorted(_FLUX_FIELDS - set(spec))
     if missing:
         raise ValueError(f"declared_plane_flux is missing fields: {missing}")
-    planes = {name: _plane(spec[name], f"declared_plane_flux.{name}") for name in sorted(_FLUX_FIELDS)}
+    planes = {
+        name: _plane(spec[name], f"declared_plane_flux.{name}") for name in sorted(_FLUX_FIELDS)
+    }
     incident = planes["incident"]["directed_power_w"]
     if incident <= 0.0:
         raise ValueError("declared_plane_flux.incident directed power must be strictly positive")
@@ -148,10 +151,7 @@ def normalize_declared_plane_flux(value: Mapping[str, Any]) -> dict[str, Any]:
     a_value = (incident - reflected - transmitted) / incident
     closure = abs(1.0 - r_value - t_value - a_value)
     net_absorbed = incident - reflected - transmitted
-    if not all(
-        math.isfinite(item)
-        for item in (r_value, t_value, a_value, closure, net_absorbed)
-    ):
+    if not all(math.isfinite(item) for item in (r_value, t_value, a_value, closure, net_absorbed)):
         raise ValueError("declared_plane_flux must produce finite derived values")
     return {
         "schema_version": "1.0.0",
@@ -164,7 +164,8 @@ def normalize_declared_plane_flux(value: Mapping[str, Any]) -> dict[str, Any]:
         "net_absorbed_power_w": net_absorbed,
         "limitations": [
             "Plane orientation, medium identity, expressions, and signs are caller declarations.",
-            "Volume-loss and cross-section normalizations are not substitutes for this declared-plane evidence.",
+            "Volume-loss and cross-section normalizations are not substitutes "
+            "for this declared-plane evidence.",
         ],
     }
 
@@ -200,13 +201,17 @@ def normalize_internal_absorption_consistency(
             cross.get("unit_cell_area_m2"),
             "cross_section_absorption.unit_cell_area_m2",
         ),
-        "source_feature": _text(cross.get("source_feature"), "cross_section_absorption.source_feature"),
+        "source_feature": _text(
+            cross.get("source_feature"), "cross_section_absorption.source_feature"
+        ),
     }
     if normalized_cross["unit"] != "m^2":
         raise ValueError("cross_section_absorption.unit must be exactly 'm^2'")
     normalized_cross["normalized_absorption"] = (
         normalized_cross["value_m2"] / normalized_cross["unit_cell_area_m2"]
     )
+    if not math.isfinite(normalized_cross["normalized_absorption"]):
+        raise ValueError("cross-section normalization must produce a finite value")
 
     if volume_loss is None:
         return {
@@ -237,12 +242,16 @@ def normalize_internal_absorption_consistency(
     normalized_volume["normalized_absorption"] = (
         normalized_volume["value_w"] / normalized_volume["incident_power_w"]
     )
+    if not math.isfinite(normalized_volume["normalized_absorption"]):
+        raise ValueError("volume-loss normalization must produce a finite value")
 
     cross_value = normalized_cross["normalized_absorption"]
     volume_value = normalized_volume["normalized_absorption"]
     absolute_residual = abs(cross_value - volume_value)
     denominator = max(abs(cross_value), abs(volume_value))
     relative_residual = 0.0 if denominator == 0.0 else absolute_residual / denominator
+    if not math.isfinite(absolute_residual) or not math.isfinite(relative_residual):
+        raise ValueError("absorption consistency must produce finite residuals")
     return {
         "schema_version": "1.0.0",
         "state": "measured",
@@ -253,7 +262,8 @@ def normalize_internal_absorption_consistency(
         "relative_residual": relative_residual,
         "physical_flux_closure_eligible": False,
         "limitations": [
-            "Agreement between internal normalizations does not establish independent declared-plane flux closure."
+            "Agreement between internal normalizations does not establish "
+            "independent declared-plane flux closure."
         ],
     }
 
