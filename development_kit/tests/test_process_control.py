@@ -5,6 +5,7 @@ import time
 
 import psutil
 
+import src.jobs.manager as manager_module
 from src.jobs.process_control import (
     capture_owned_descendants,
     owned_solver_identities_from_lease,
@@ -25,6 +26,22 @@ def _wait_absent(identities, timeout=5.0):
         time.sleep(0.025)
         verification = verify_absent(identities)
     return verification
+
+
+def test_detached_process_tracker_reaps_completed_child_without_wait():
+    process = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(0.1)"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        creationflags=_HIDDEN_PROCESS_FLAGS,
+    )
+    manager_module._track_detached_process(process)
+
+    deadline = time.monotonic() + 5.0
+    while process.returncode is None and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert process.returncode == 0
 
 
 def test_exact_termination_refuses_a_reused_identity():
@@ -118,8 +135,8 @@ def test_worker_job_object_kills_inherited_child_on_worker_exit_windows_only():
         text=True,
         creationflags=_HIDDEN_PROCESS_FLAGS,
     )
-    child_pid = int(worker.stdout.readline().strip())
-    worker.wait(timeout=5)
+    stdout, _stderr = worker.communicate(timeout=5)
+    child_pid = int(stdout.strip())
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline and psutil.pid_exists(child_pid):
         time.sleep(0.05)

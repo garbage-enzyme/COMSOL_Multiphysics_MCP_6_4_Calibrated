@@ -6,21 +6,21 @@ import hashlib
 import json
 import math
 import os
-from pathlib import Path
 import subprocess
 import sys
+import threading
 import time
-from typing import Any, Callable
+from pathlib import Path
+from typing import Any, Callable, Protocol
 
 import psutil
 
-from .process_control import inspect_identity, verify_absent
-from .resource_admission import normalize_resource_policy
 from .attached_backend import normalize_attached_execution_backend
 from .branch_continuation_campaign import normalize_branch_continuation_campaign_spec
 from .convergence_campaign import normalize_convergence_campaign_spec
+from .process_control import inspect_identity, verify_absent
+from .resource_admission import normalize_resource_policy
 from .spectral_characterization import normalize_spectral_characterization_job_spec
-from .validation_matrix import normalize_validation_matrix_spec
 from .store import (
     ACTIVE_STATES,
     JOB_SCHEMA_VERSION,
@@ -33,6 +33,52 @@ from .store import (
     process_identity_state,
     read_json,
 )
+from .validation_matrix import normalize_validation_matrix_spec
+
+
+class _PollableProcess(Protocol):
+    def poll(self) -> int | None: ...
+
+
+_DETACHED_PROCESS_LOCK = threading.Lock()
+_DETACHED_PROCESS_WAKE = threading.Event()
+_DETACHED_PROCESSES: set[_PollableProcess] = set()
+_DETACHED_REAPER_STARTED = False
+
+
+def _reap_detached_processes_once() -> int:
+    """Reap completed detached children without waiting for active jobs."""
+    with _DETACHED_PROCESS_LOCK:
+        completed = [process for process in _DETACHED_PROCESSES if process.poll() is not None]
+        _DETACHED_PROCESSES.difference_update(completed)
+        return len(completed)
+
+
+def _detached_process_reaper() -> None:
+    while True:
+        _DETACHED_PROCESS_WAKE.wait()
+        _reap_detached_processes_once()
+        with _DETACHED_PROCESS_LOCK:
+            active = bool(_DETACHED_PROCESSES)
+            if not active:
+                _DETACHED_PROCESS_WAKE.clear()
+        if active:
+            time.sleep(0.05)
+
+
+def _track_detached_process(process: _PollableProcess) -> None:
+    """Retain and asynchronously reap a detached child's parent-side handle."""
+    global _DETACHED_REAPER_STARTED
+    with _DETACHED_PROCESS_LOCK:
+        _DETACHED_PROCESSES.add(process)
+        if not _DETACHED_REAPER_STARTED:
+            threading.Thread(
+                target=_detached_process_reaper,
+                name="comsol-detached-process-reaper",
+                daemon=True,
+            ).start()
+            _DETACHED_REAPER_STARTED = True
+    _DETACHED_PROCESS_WAKE.set()
 
 
 def _fingerprint(value: dict[str, Any]) -> str:
@@ -428,6 +474,7 @@ class JobManager:
                 creationflags=flags,
                 start_new_session=(os.name != "nt"),
             )
+        _track_detached_process(process)
         deadline = time.monotonic() + 2.0
         while True:
             try:
@@ -491,7 +538,7 @@ class JobManager:
         if os.name == "nt":
             flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "DETACHED_PROCESS", 0)
         with (directory / "worker.log").open("ab", buffering=0) as log:
-            subprocess.Popen(
+            process = subprocess.Popen(
                 command,
                 stdin=subprocess.DEVNULL,
                 stdout=log,
@@ -500,6 +547,7 @@ class JobManager:
                 creationflags=flags,
                 start_new_session=(os.name != "nt"),
             )
+        _track_detached_process(process)
 
     def reconcile_cancellations(self, *, limit: int = 20) -> int:
         """Reconcile orphaned cancellation attempts without weakening cleanup proof."""
