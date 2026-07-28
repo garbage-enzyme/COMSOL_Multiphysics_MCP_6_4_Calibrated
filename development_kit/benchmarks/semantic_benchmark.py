@@ -7,10 +7,11 @@ import hashlib
 import json
 import math
 import os
-from pathlib import Path
 import sqlite3
 import statistics
 import time
+from contextlib import closing
+from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from comsol_mcp.knowledge.lexical_manual import DEFAULT_INDEX_PATH, search_index
@@ -21,7 +22,6 @@ from comsol_mcp.knowledge.semantic_contracts import (
     object_sha256,
     validate_evaluation_set,
 )
-
 
 DEFAULT_EVALUATION_PATH = (
     Path(__file__).resolve().parents[2]
@@ -124,7 +124,7 @@ def _aggregate(rows: list[Mapping[str, Any]]) -> dict[str, Any]:
 
 def _index_identity(index_path: Path) -> dict[str, Any]:
     uri = index_path.resolve().as_uri() + "?mode=ro"
-    with sqlite3.connect(uri, uri=True, timeout=0.25) as connection:
+    with closing(sqlite3.connect(uri, uri=True, timeout=0.25)) as connection:
         metadata = dict(connection.execute("SELECT key, value FROM metadata"))
         citations = {
             (str(source), int(page))

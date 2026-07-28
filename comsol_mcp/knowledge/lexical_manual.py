@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import multiprocessing as mp
 import os
 import re
@@ -17,12 +18,11 @@ import sqlite3
 import subprocess
 import sys
 import time
-import math
+from contextlib import closing
 from pathlib import Path
 from typing import Iterable, Mapping, Sequence
 
 from comsol_mcp.utils.control_plane import measured_call
-
 
 DEFAULT_INDEX_DIR = Path("D:/comsol_docs_fts")
 DEFAULT_INDEX_PATH = DEFAULT_INDEX_DIR / "manuals.sqlite3"
@@ -291,7 +291,7 @@ def search_index(
         ORDER BY rank, source, page
         LIMIT ?
     """
-    with _open_index(path, readonly=True) as connection:
+    with closing(_open_index(path, readonly=True)) as connection:
         rows = [
             dict(row)
             for row in connection.execute(
@@ -363,7 +363,7 @@ def read_index_pages(
         "SELECT source, module, page, heading, text FROM pages "
         f"WHERE source = ? AND page IN ({placeholders}) ORDER BY page"
     )
-    with _open_index(path, readonly=True) as connection:
+    with closing(_open_index(path, readonly=True)) as connection:
         rows = [dict(row) for row in connection.execute(sql, [normalized_source, *requested])]
     return {
         "success": True,
@@ -492,7 +492,7 @@ def _main() -> None:
         if not path.is_file():
             result = {"success": False, "index_path": str(path), "error": "not found"}
         else:
-            with _open_index(path, readonly=True) as connection:
+            with closing(_open_index(path, readonly=True)) as connection:
                 result = {
                     "success": True,
                     "index_path": str(path),

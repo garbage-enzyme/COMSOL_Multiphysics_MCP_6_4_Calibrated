@@ -2,23 +2,22 @@
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
 import argparse
 import json
 import math
 import os
-from pathlib import Path
 import socket
 import sqlite3
 import statistics
 import threading
 import time
-from typing import Any, Iterable, Mapping
 import uuid
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
+from pathlib import Path
+from typing import Any, Iterable, Mapping
 
 import psutil
-
-from development_kit.benchmarks.semantic_benchmark import evaluate_lexical_baseline
 from src.knowledge.semantic_contracts import (
     SEMANTIC_PROMOTION_GATE,
     WORKER_PROTOCOL_SCHEMA_VERSION,
@@ -28,6 +27,7 @@ from src.knowledge.semantic_contracts import (
 from src.knowledge.semantic_index import index_file_snapshot, read_current
 from src.knowledge.semantic_process import SemanticWorkerManager
 
+from development_kit.benchmarks.semantic_benchmark import evaluate_lexical_baseline
 
 ROOT = Path(__file__).parents[3]
 EVALUATION_PATH = ROOT / "development_kit" / "tests" / "fixtures" / "semantic_retrieval_evaluation.json"
@@ -110,7 +110,9 @@ def _manager() -> SemanticWorkerManager:
 
 
 def _corpus_citations() -> set[tuple[str, int]]:
-    with sqlite3.connect(LEXICAL.resolve().as_uri() + "?mode=ro", uri=True) as connection:
+    with closing(
+        sqlite3.connect(LEXICAL.resolve().as_uri() + "?mode=ro", uri=True)
+    ) as connection:
         return {(str(source), int(page)) for source, page in connection.execute("SELECT source, page FROM pages")}
 
 

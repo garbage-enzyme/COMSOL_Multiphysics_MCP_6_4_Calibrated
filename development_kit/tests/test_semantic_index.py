@@ -164,6 +164,41 @@ def test_build_validates_then_atomically_publishes_current(semantic_index_assets
     assert not list(semantic_index_assets["root"].rglob("*.tmp"))
 
 
+def test_read_only_semantic_connections_close_deterministically(
+    semantic_index_assets, monkeypatch
+):
+    result = _build(semantic_index_assets, "connection-close")
+    index = Path(result["index"]["path"])
+    real_connect = index_module.sqlite3.connect
+    tracked = []
+
+    class TrackingConnection:
+        def __init__(self, connection):
+            self.connection = connection
+            self.closed = False
+
+        def __getattr__(self, name):
+            return getattr(self.connection, name)
+
+        def close(self):
+            self.connection.close()
+            self.closed = True
+
+    def tracking_connect(*args, **kwargs):
+        connection = TrackingConnection(real_connect(*args, **kwargs))
+        tracked.append(connection)
+        return connection
+
+    monkeypatch.setattr(index_module.sqlite3, "connect", tracking_connect)
+
+    index_module._lexical_identity(semantic_index_assets["lexical"])
+    list(index_module._iter_pages(semantic_index_assets["lexical"]))
+    validate_index_against_lexical(index, semantic_index_assets["lexical"])
+
+    assert len(tracked) == 4
+    assert all(connection.closed for connection in tracked)
+
+
 @pytest.mark.parametrize("fault", ["after_chunks", "after_embeddings", "before_publish"])
 def test_interrupted_build_never_changes_active_pointer(semantic_index_assets, fault):
     _build(semantic_index_assets, "accepted")

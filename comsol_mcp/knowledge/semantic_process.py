@@ -234,6 +234,10 @@ class SemanticWorkerManager:
         absent = self._process is None or self._process.poll() is not None
         if self._job is not None:
             self._job.close()
+        if self._process is not None and absent:
+            for stream in (self._process.stdout, self._process.stderr):
+                if stream is not None:
+                    stream.close()
         self._process = None
         self._identity = None
         self._job = None

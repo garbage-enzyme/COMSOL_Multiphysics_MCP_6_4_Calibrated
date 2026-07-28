@@ -10,15 +10,16 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path
 import re
 import shutil
 import sqlite3
 import sys
 import time
-from typing import Any, Iterator, Mapping, Protocol, Sequence
 import unicodedata
 import uuid
+from contextlib import closing
+from pathlib import Path
+from typing import Any, Iterator, Mapping, Protocol, Sequence
 
 from comsol_mcp.durable import atomic_write_json, sha256_file_bounded
 
@@ -30,7 +31,6 @@ from .semantic_contracts import (
     validate_index_manifest,
     validate_model_manifest,
 )
-
 
 CHUNK_SCHEMA_VERSION = "1"
 CURRENT_POINTER_SCHEMA_VERSION = "1"
@@ -133,7 +133,7 @@ def _chunk_id(corpus_fingerprint: str, source: str, page: int, ordinal: int, tex
 
 def _lexical_identity(index_path: Path) -> dict[str, Any]:
     uri = index_path.resolve().as_uri() + "?mode=ro"
-    with sqlite3.connect(uri, uri=True, timeout=0.25) as connection:
+    with closing(sqlite3.connect(uri, uri=True, timeout=0.25)) as connection:
         metadata = dict(connection.execute("SELECT key, value FROM metadata"))
         actual_count = int(connection.execute("SELECT COUNT(*) FROM pages").fetchone()[0])
     declared_count = int(metadata.get("page_count", "0"))
@@ -152,7 +152,7 @@ def _lexical_identity(index_path: Path) -> dict[str, Any]:
 
 def _iter_pages(index_path: Path) -> Iterator[tuple[str, str, int, str, str]]:
     uri = index_path.resolve().as_uri() + "?mode=ro"
-    with sqlite3.connect(uri, uri=True, timeout=0.25) as connection:
+    with closing(sqlite3.connect(uri, uri=True, timeout=0.25)) as connection:
         for source, module, page, heading, text in connection.execute(
             "SELECT source, module, page, heading, text FROM pages ORDER BY source, page"
         ):
@@ -514,7 +514,7 @@ def validate_index_against_lexical(
         if lexical[field] != expected:
             raise ValueError(f"lexical {field} does not match the semantic manifest")
     uri = lexical_path.resolve().as_uri() + "?mode=ro"
-    with sqlite3.connect(uri, uri=True, timeout=0.25) as connection:
+    with closing(sqlite3.connect(uri, uri=True, timeout=0.25)) as connection:
         citations = {
             (str(source).replace("\\", "/"), int(page))
             for source, page in connection.execute("SELECT source, page FROM pages")

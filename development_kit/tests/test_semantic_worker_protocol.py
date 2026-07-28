@@ -66,9 +66,13 @@ def test_happy_path_reuses_one_worker_and_reset_verifies_absence():
         assert health["status"]["query_count"] == 2
         assert health["status"]["load_count"] == 0
         assert manager.status(probe=False)["identity"]["pid"] == pid
+        process = manager._process
+        assert process is not None and process.stdout is not None and process.stderr is not None
         reset = manager.reset()
         assert reset["success"] is True
         assert reset["reset"]["absent"] is True
+        assert process.stdout.closed is True
+        assert process.stderr.closed is True
         assert manager.status()["state"] == "stopped"
 
 

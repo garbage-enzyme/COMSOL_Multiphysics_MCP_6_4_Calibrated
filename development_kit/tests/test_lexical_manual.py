@@ -1,10 +1,10 @@
-from pathlib import Path
 import shutil
 import time
 import uuid
+from pathlib import Path
 
 import pytest
-
+from src.knowledge import lexical_manual as manual_module
 from src.knowledge.lexical_manual import (
     build_index_from_records,
     read_index_pages,
@@ -111,6 +111,42 @@ def test_read_pages_reports_missing_pages(manual_index: Path):
 
     assert [row["page"] for row in result["pages"]] == [2033]
     assert result["missing_pages"] == [2034]
+
+
+def test_read_only_lexical_connections_close_deterministically(
+    manual_index: Path, monkeypatch
+):
+    real_open = manual_module._open_index
+    tracked = []
+
+    class TrackingConnection:
+        def __init__(self, connection):
+            self.connection = connection
+            self.closed = False
+
+        def __getattr__(self, name):
+            return getattr(self.connection, name)
+
+        def close(self):
+            self.connection.close()
+            self.closed = True
+
+    def tracking_open(*args, **kwargs):
+        connection = TrackingConnection(real_open(*args, **kwargs))
+        tracked.append(connection)
+        return connection
+
+    monkeypatch.setattr(manual_module, "_open_index", tracking_open)
+
+    search_index("CopyFace", index_path=manual_index)
+    read_index_pages(
+        "COMSOL_Multiphysics/COMSOL_ReferenceManual.pdf",
+        [2033],
+        index_path=manual_index,
+    )
+
+    assert len(tracked) == 2
+    assert all(connection.closed for connection in tracked)
 
 
 def test_bounded_worker_searches_without_loading_comsol(manual_index: Path):
