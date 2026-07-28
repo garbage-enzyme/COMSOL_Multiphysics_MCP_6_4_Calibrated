@@ -23,7 +23,9 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import os
 import sys
+import uuid
 from pathlib import Path
 
 import mph
@@ -184,6 +186,32 @@ def configure_results(java_model: object) -> None:
     surface.set("unit", "T")
 
 
+def save_staged_model(java_model: object, output: Path) -> Path:
+    """Save a complete model to a unique staging path."""
+    staging = output.with_name(f".{output.name}.{uuid.uuid4().hex}.save")
+    try:
+        java_model.save(str(staging))
+        if not staging.is_file() or staging.stat().st_size <= 0:
+            raise RuntimeError("COMSOL did not create a complete staging model")
+        return staging
+    except BaseException:
+        staging.unlink(missing_ok=True)
+        raise
+
+
+def publish_staged_model(staging: Path, output: Path, *, overwrite: bool) -> None:
+    """Atomically publish one staged model without an accidental overwrite."""
+    try:
+        if overwrite:
+            os.replace(staging, output)
+        else:
+            os.link(staging, output)
+            staging.unlink()
+    except BaseException:
+        staging.unlink(missing_ok=True)
+        raise
+
+
 def main() -> None:
     """Build the derived model, optionally solve one point, and save it."""
     args = parse_args()
@@ -204,6 +232,7 @@ def main() -> None:
 
     client = mph.Client(version="6.4")
     model = client.load(str(baseline))
+    staging = None
     try:
         java_model, component, geometry = require_baseline_contract(model)
         replace_geometry(geometry)
@@ -215,13 +244,18 @@ def main() -> None:
             java_model.study("std1").run()
             values = model.evaluate("mf.normB", "T")
             print(f"Solved; max mf.normB = {max(values):.6g} T", flush=True)
-        java_model.save(str(output))
-        print(f"Saved derived model: {output} (baseline SHA-256: {baseline_sha256})", flush=True)
+        staging = save_staged_model(java_model, output)
     finally:
         client.remove(model)
 
     if sha256_file(baseline) != baseline_sha256:
+        if staging is not None:
+            staging.unlink(missing_ok=True)
         raise RuntimeError("baseline model changed while building the derived model")
+    if staging is None:
+        raise RuntimeError("derived model staging did not complete")
+    publish_staged_model(staging, output, overwrite=args.overwrite_output)
+    print(f"Saved derived model: {output} (baseline SHA-256: {baseline_sha256})", flush=True)
 
 
 if __name__ == "__main__":

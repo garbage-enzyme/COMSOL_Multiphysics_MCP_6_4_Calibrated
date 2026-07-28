@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import math
 import os
-import time
 import uuid
 from pathlib import Path
 from typing import Any, Mapping
+
+from comsol_mcp.durable.io import (
+    atomic_write_json_exclusive,
+    publish_file_exclusive,
+    unlink_if_identity,
+)
 
 from .field_bundle import validate_field_evidence_request
 from .field_manifest import build_field_evidence_manifest
@@ -25,16 +29,6 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _fsync_directory(path: Path) -> None:
-    if os.name == "nt":
-        return
-    descriptor = os.open(path, os.O_RDONLY)
-    try:
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
-
-
 def _resolve_root(value: object) -> Path:
     if not isinstance(value, (str, os.PathLike)):
         raise ValueError("artifact_root must be a filesystem path")
@@ -43,43 +37,6 @@ def _resolve_root(value: object) -> Path:
     if not root.is_dir():
         raise ValueError("artifact_root must be a directory")
     return root
-
-
-def _replace_with_retry(temporary: Path, destination: Path) -> None:
-    deadline = time.monotonic() + 1.0
-    while True:
-        try:
-            if destination.exists():
-                raise FileExistsError(f"field artifact already exists: {destination}")
-            os.replace(temporary, destination)
-            _fsync_directory(destination.parent)
-            return
-        except PermissionError:
-            if time.monotonic() >= deadline:
-                raise
-            time.sleep(0.02)
-
-
-def _atomic_json(path: Path, value: Mapping[str, Any]) -> None:
-    payload = (
-        json.dumps(
-            value,
-            ensure_ascii=False,
-            indent=2,
-            sort_keys=True,
-            allow_nan=False,
-        )
-        + "\n"
-    ).encode("utf-8")
-    temporary = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
-    try:
-        with temporary.open("xb") as handle:
-            handle.write(payload)
-            handle.flush()
-            os.fsync(handle.fileno())
-        _replace_with_retry(temporary, path)
-    finally:
-        temporary.unlink(missing_ok=True)
 
 
 def _descriptor(
@@ -253,7 +210,8 @@ def write_field_evidence_artifacts(
     if array_path.exists() or manifest_path.exists():
         raise FileExistsError("field evidence artifacts already exist for this view")
     temporary = view_directory / f".field_arrays.{os.getpid()}.{uuid.uuid4().hex}.tmp"
-    created_array = False
+    array_identity: tuple[int, int] | None = None
+    manifest_identity: tuple[int, int] | None = None
     try:
         with temporary.open("xb") as handle:
             np.savez_compressed(
@@ -263,8 +221,7 @@ def write_field_evidence_artifacts(
             )
             handle.flush()
             os.fsync(handle.fileno())
-        _replace_with_retry(temporary, array_path)
-        created_array = True
+        array_identity = publish_file_exclusive(temporary, array_path)
         array_descriptor = _descriptor(
             array_path,
             root=root,
@@ -290,7 +247,7 @@ def write_field_evidence_artifacts(
             array_artifact=array_descriptor,
             png_artifact=png_descriptor,
         )
-        _atomic_json(manifest_path, manifest)
+        manifest_identity = atomic_write_json_exclusive(manifest_path, manifest)
         manifest_descriptor = _descriptor(
             manifest_path,
             root=root,
@@ -324,9 +281,10 @@ def write_field_evidence_artifacts(
             "semantic_mode_label": "not_assigned",
         }
     except Exception:
-        manifest_path.unlink(missing_ok=True)
-        if created_array:
-            array_path.unlink(missing_ok=True)
+        if manifest_identity is not None:
+            unlink_if_identity(manifest_path, manifest_identity)
+        if array_identity is not None:
+            unlink_if_identity(array_path, array_identity)
         raise
     finally:
         temporary.unlink(missing_ok=True)

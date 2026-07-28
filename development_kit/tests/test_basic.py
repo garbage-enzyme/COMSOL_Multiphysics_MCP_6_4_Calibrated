@@ -68,22 +68,22 @@ def permissive_session_ownership(monkeypatch, tmp_path):
 
 class TestVersioning:
     """Tests for version naming utilities."""
-    
+
     def test_generate_version_name(self):
         from src.utils.versioning import generate_version_name
-        
+
         result = generate_version_name("model.mph")
         assert result.startswith("model_")
         assert result.endswith(".mph")
         assert len(result) > len("model.mph")
-    
+
     def test_generate_version_name_no_extension(self):
         from src.utils.versioning import generate_version_name
-        
+
         result = generate_version_name("model")
         assert result.startswith("model_")
         assert result.endswith(".mph")
-    
+
     def test_generate_version_path(self, tmp_path):
         from src.utils.versioning import generate_version_path
 
@@ -100,6 +100,16 @@ class TestVersioning:
 
         assert result == tmp_path / "model" / "model_latest.mph"
         assert result.parent.is_dir()
+
+    def test_version_paths_reject_dot_model_names_and_avoid_same_second_collisions(self, tmp_path):
+        from src.utils.versioning import generate_version_path
+
+        first = generate_version_path("model.mph", base_path=tmp_path)
+        second = generate_version_path("model.mph", base_path=tmp_path)
+
+        assert first != second
+        with pytest.raises(ValueError, match="safe model directory"):
+            generate_version_path("..", base_path=tmp_path)
 
     def test_default_model_storage_uses_runtime_root(self, monkeypatch, tmp_path):
         from src.utils.versioning import get_model_directory
@@ -125,31 +135,31 @@ class TestVersioning:
 
         assert set(result) == {str(older), str(newer)}
         assert str(latest) not in result
-    
+
     def test_parse_version_info_valid(self):
         from src.utils.versioning import parse_version_info
-        
+
         result = parse_version_info("model_20260215_143022.mph")
         assert result is not None
         assert result["base_name"] == "model"
         assert result["timestamp"] == "20260215_143022"
-    
+
     def test_parse_version_info_invalid(self):
         from src.utils.versioning import parse_version_info
-        
+
         result = parse_version_info("model.mph")
         assert result is None
-        
+
         result = parse_version_info("model_20260215.mph")
         assert result is None
 
 
 class TestSessionManager:
     """Tests for session manager (without actual COMSOL)."""
-    
+
     def test_session_manager_singleton(self):
         from src.tools.session import SessionManager
-        
+
         sm1 = SessionManager()
         sm2 = SessionManager()
         assert sm1 is sm2
@@ -163,19 +173,19 @@ class TestSessionManager:
         assert all(manager is managers[0] for manager in managers)
         assert "_models" in managers[0].__dict__
         assert "_start_lock" in managers[0].__dict__
-    
+
     def test_session_manager_initial_state(self):
         from src.tools.session import SessionManager
-        
+
         sm = SessionManager()
         assert sm.client is None
         assert not sm.is_connected
         assert sm.current_model is None
         assert sm.models == {}
-    
+
     def test_get_status_disconnected(self):
         from src.tools.session import SessionManager
-        
+
         sm = SessionManager()
         status = sm.get_status()
         assert status["connected"] is False
@@ -367,7 +377,9 @@ class TestSessionManager:
         assert sm.get_status()["connected"] is False
         assert client.calls == ["clear", "disconnect"]
 
-    def test_concurrent_start_calls_create_exactly_one_client(self, monkeypatch, permissive_session_ownership):
+    def test_concurrent_start_calls_create_exactly_one_client(
+        self, monkeypatch, permissive_session_ownership
+    ):
         import src.tools.session as session_module
 
         sm = session_module.SessionManager()
@@ -407,7 +419,9 @@ class TestSessionManager:
         assert sm.client is not None
         sm.reset()
 
-    def test_reset_discards_client_that_finishes_starting_late(self, monkeypatch, permissive_session_ownership):
+    def test_reset_discards_client_that_finishes_starting_late(
+        self, monkeypatch, permissive_session_ownership
+    ):
         import src.tools.session as session_module
 
         sm = session_module.SessionManager()
@@ -481,7 +495,9 @@ class TestSessionManager:
 
         sm.disconnect()
 
-    def test_start_does_not_forward_unsupported_products(self, monkeypatch, permissive_session_ownership):
+    def test_start_does_not_forward_unsupported_products(
+        self, monkeypatch, permissive_session_ownership
+    ):
         import src.tools.session as session_module
 
         captured = {}

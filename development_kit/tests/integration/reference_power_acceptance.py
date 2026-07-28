@@ -6,52 +6,47 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
 import time
 import traceback
+from importlib import import_module
+from pathlib import Path
 from typing import Any
 
 import psutil
-
 
 ROOT = Path(__file__).parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.evidence.reference_power_acceptance import (
-    MAX_INPUT_BYTES,
-    build_reference_power_dry_run_receipt,
-    load_bounded_json,
-    validate_reference_power_acceptance_contract,
-    validate_reference_power_execution_spec,
-)
-from src.evidence.reference_power_gate import (
-    build_reference_power_policies,
-    evaluate_reference_power_results,
-    inventory_reference_power_artifacts,
-)
+_durable_io = import_module("src.durable.io")
+_reference_power_acceptance = import_module("src.evidence.reference_power_acceptance")
+_reference_power_gate = import_module("src.evidence.reference_power_gate")
 
+atomic_write_json_exclusive = _durable_io.atomic_write_json_exclusive
+MAX_INPUT_BYTES = _reference_power_acceptance.MAX_INPUT_BYTES
+build_reference_power_dry_run_receipt = (
+    _reference_power_acceptance.build_reference_power_dry_run_receipt
+)
+load_bounded_json = _reference_power_acceptance.load_bounded_json
+validate_reference_power_acceptance_contract = (
+    _reference_power_acceptance.validate_reference_power_acceptance_contract
+)
+validate_reference_power_execution_spec = (
+    _reference_power_acceptance.validate_reference_power_execution_spec
+)
+build_reference_power_policies = _reference_power_gate.build_reference_power_policies
+evaluate_reference_power_results = _reference_power_gate.evaluate_reference_power_results
+inventory_reference_power_artifacts = _reference_power_gate.inventory_reference_power_artifacts
 
 DEFAULT_CONTRACT = (
-    ROOT
-    / "development_kit"
-    / "release"
-    / "integration_fixtures"
-    / "reference_power_evidence.json"
+    ROOT / "development_kit" / "release" / "integration_fixtures" / "reference_power_evidence.json"
 )
 
 
 def _atomic_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    data = (json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False) + "\n").encode("utf-8")
-    with temporary.open("wb") as handle:
-        handle.write(data)
-        handle.flush()
-        os.fsync(handle.fileno())
-    os.replace(temporary, path)
+    atomic_write_json_exclusive(path, payload)
 
 
 def _runtime_root() -> Path:
@@ -64,7 +59,7 @@ def _ancestor_pids(pid: int) -> set[int]:
     while current:
         try:
             current = psutil.Process(current).ppid()
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
+        except psutil.NoSuchProcess, psutil.AccessDenied:
             break
         if not current or current in result:
             break
@@ -96,7 +91,10 @@ def _lightweight_solver_status() -> dict[str, Any]:
                     kind = "comsol-server"
                 elif name in {"java", "java.exe"} and "comsol" in command and "server" in command:
                     kind = "comsol-java-server"
-                elif any(pattern in command for pattern in ("mph.client", "import mph", "from mph", "-m mph")):
+                elif any(
+                    pattern in command
+                    for pattern in ("mph.client", "import mph", "from mph", "-m mph")
+                ):
                     kind = "python-mph-client"
                 elif name in {"python", "python.exe", "pythonw", "pythonw.exe"}:
                     for argument in command_line[1:]:
@@ -118,7 +116,7 @@ def _lightweight_solver_status() -> dict[str, Any]:
                             "command_line": command_line[:32],
                         }
                     )
-            except (psutil.NoSuchProcess, psutil.AccessDenied, OSError):
+            except psutil.NoSuchProcess, psutil.AccessDenied, OSError:
                 continue
     except Exception as exc:
         complete = False
@@ -196,7 +194,7 @@ def _comsol_pids() -> set[int]:
                 name in {"java", "java.exe"} and "comsol" in command and "server" in command
             ):
                 result.add(int(process.info["pid"]))
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
+        except psutil.NoSuchProcess, psutil.AccessDenied:
             continue
     return result
 
@@ -214,7 +212,9 @@ def _wait_lightweight_clean(timeout_seconds: float = 30.0) -> dict[str, Any]:
 
 
 def _load_inputs(contract_path: Path, spec_path: Path | None, *, verify_files: bool):
-    contract = validate_reference_power_acceptance_contract(load_bounded_json(contract_path, MAX_INPUT_BYTES))
+    contract = validate_reference_power_acceptance_contract(
+        load_bounded_json(contract_path, MAX_INPUT_BYTES)
+    )
     spec = None
     if spec_path is not None:
         raw = load_bounded_json(spec_path, contract["limits"]["max_spec_bytes"])
@@ -242,8 +242,8 @@ def _run_worker(args: argparse.Namespace) -> int:
         if not admitted:
             raise RuntimeError(f"pre-import solver admission refused: {blockers}")
 
-        from src.tools.ownership import SolverOwnership
         import mph
+        from src.tools.ownership import SolverOwnership
         from src.tools.wave_optics_audit import (
             run_wave_optics_point_audit,
             run_wave_optics_reference_audit,
@@ -340,15 +340,21 @@ def _run_worker(args: argparse.Namespace) -> int:
                 result["success"] = False
         result["finished_at_epoch"] = time.time()
         _atomic_json(args.worker_result, result)
-        print(json.dumps({"success": result.get("success"), "worker_result": str(args.worker_result)}), flush=True)
+        print(
+            json.dumps(
+                {"success": result.get("success"), "worker_result": str(args.worker_result)}
+            ),
+            flush=True,
+        )
         os._exit(exit_code)
 
 
 def _terminate_owned_tree(process: subprocess.Popen) -> None:
     if process.poll() is not None:
         return
+    taskkill = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "taskkill.exe"
     subprocess.run(
-        ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+        [str(taskkill), "/PID", str(process.pid), "/T", "/F"],
         check=False,
         capture_output=True,
         text=True,
@@ -360,6 +366,14 @@ def _run_coordinator(args: argparse.Namespace) -> int:
     contract, spec = _load_inputs(args.contract, args.spec, verify_files=True)
     if spec is None:
         raise ValueError("licensed coordinator requires --spec")
+    artifact_root = Path(spec["artifact_dir"]).resolve()
+    output = args.output.resolve()
+    try:
+        output.relative_to(artifact_root)
+    except ValueError:
+        pass
+    else:
+        raise ValueError("licensed receipt output must remain outside the artifact root")
     before_status = _lightweight_solver_status()
     admitted, blockers = _admit_lightweight_status(before_status)
     receipt: dict[str, Any] = {
@@ -378,14 +392,15 @@ def _run_coordinator(args: argparse.Namespace) -> int:
         _atomic_json(args.output, receipt)
         return 2
     before_pids = _comsol_pids()
-    artifact_root = Path(spec["artifact_dir"]).resolve()
     artifact_root.mkdir(parents=True, exist_ok=True)
     if any(artifact_root.iterdir()):
         receipt.update(
             {
                 "success": False,
                 "worker_started": False,
-                "artifact_error": "artifact root must be empty before a licensed reference-power run",
+                "artifact_error": (
+                    "artifact root must be empty before a licensed reference-power run"
+                ),
             }
         )
         _atomic_json(args.output, receipt)
@@ -395,11 +410,16 @@ def _run_coordinator(args: argparse.Namespace) -> int:
         sys.executable,
         str(Path(__file__).resolve()),
         "--worker",
-        "--confirm", "RUN_REAL_COMSOL",
-        "--contract", str(args.contract),
-        "--spec", str(args.spec),
-        "--worker-result", str(worker_result),
-        "--cores", str(args.cores),
+        "--confirm",
+        "RUN_REAL_COMSOL",
+        "--contract",
+        str(args.contract),
+        "--spec",
+        str(args.spec),
+        "--worker-result",
+        str(worker_result),
+        "--cores",
+        str(args.cores),
     ]
     creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(
         subprocess, "CREATE_NEW_PROCESS_GROUP", 0
@@ -509,7 +529,8 @@ def main() -> int:
         or not 1.0 <= args.timeout_seconds <= 7200.0
     ):
         raise SystemExit(
-            "licensed run requires --confirm RUN_REAL_COMSOL, --spec, a new --output, cores in 1..64, and timeout in 1..7200 seconds"
+            "licensed run requires --confirm RUN_REAL_COMSOL, --spec, a new --output, "
+            "cores in 1..64, and timeout in 1..7200 seconds"
         )
     if args.output.exists():
         raise SystemExit("licensed run output must not already exist")

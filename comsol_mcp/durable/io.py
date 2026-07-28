@@ -169,6 +169,75 @@ def atomic_write_bytes(
             temporary.unlink(missing_ok=True)
 
 
+def publish_file_exclusive(
+    temporary: str | Path,
+    target: str | Path,
+    *,
+    link_fn: Callable[[str | Path, str | Path], None] | None = None,
+) -> tuple[int, int]:
+    """Atomically publish a complete same-directory file without replacement."""
+    source = Path(temporary)
+    destination = Path(target)
+    if source.parent.resolve() != destination.parent.resolve():
+        raise ValueError("exclusive publication requires one directory")
+    opened = os.stat(source, follow_symlinks=False)
+    if not stat.S_ISREG(opened.st_mode) or source.is_symlink():
+        raise ValueError("exclusive publication requires a regular temporary file")
+    link = link_fn or os.link
+    link(source, destination)
+    published = os.stat(destination, follow_symlinks=False)
+    identity = (published.st_dev, published.st_ino)
+    if identity != (opened.st_dev, opened.st_ino):
+        raise RuntimeError("exclusive publication produced a different file identity")
+    source.unlink()
+    fsync_directory(destination.parent)
+    return identity
+
+
+def unlink_if_identity(path: str | Path, identity: tuple[int, int]) -> bool:
+    """Remove only the exact file identity published by the current operation."""
+    target = Path(path)
+    try:
+        observed = os.stat(target, follow_symlinks=False)
+    except FileNotFoundError:
+        return False
+    if target.is_symlink() or (observed.st_dev, observed.st_ino) != identity:
+        return False
+    target.unlink()
+    return True
+
+
+def atomic_write_bytes_exclusive(
+    path: str | Path,
+    payload: bytes,
+    *,
+    stage_hook: WriteStageHook | None = None,
+    link_fn: Callable[[str | Path, str | Path], None] | None = None,
+) -> tuple[int, int]:
+    """Durably publish bytes only when the destination is still absent."""
+    target = Path(path)
+    if not isinstance(payload, bytes):
+        raise ValueError("atomic payload must be bytes")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_name(f".{target.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+    published = False
+    try:
+        _notify(stage_hook, "before_temporary_write", target)
+        with temporary.open("xb") as handle:
+            handle.write(payload)
+            _notify(stage_hook, "after_temporary_write", target)
+            handle.flush()
+            os.fsync(handle.fileno())
+        _notify(stage_hook, "after_file_fsync", target)
+        identity = publish_file_exclusive(temporary, target, link_fn=link_fn)
+        published = True
+        _notify(stage_hook, "after_publish", target)
+        return identity
+    finally:
+        if not published:
+            temporary.unlink(missing_ok=True)
+
+
 def json_document_bytes(value: Any) -> bytes:
     """Return the legacy pretty JSON document bytes used by durable state."""
     validate_finite_json(value)
@@ -206,6 +275,22 @@ def atomic_write_json(
         stage_hook=stage_hook,
         replace_fn=replace_fn,
         compact_temporary=compact_temporary,
+    )
+
+
+def atomic_write_json_exclusive(
+    path: str | Path,
+    value: Any,
+    *,
+    stage_hook: WriteStageHook | None = None,
+    link_fn: Callable[[str | Path, str | Path], None] | None = None,
+) -> tuple[int, int]:
+    """Write one finite JSON document without replacing an existing target."""
+    return atomic_write_bytes_exclusive(
+        path,
+        json_document_bytes(value),
+        stage_hook=stage_hook,
+        link_fn=link_fn,
     )
 
 
@@ -304,10 +389,14 @@ __all__ = [
     "append_csv_row",
     "append_jsonl_record",
     "atomic_write_bytes",
+    "atomic_write_bytes_exclusive",
     "atomic_write_json",
+    "atomic_write_json_exclusive",
     "fsync_directory",
     "json_document_bytes",
+    "publish_file_exclusive",
     "read_file_bytes_bounded",
     "read_complete_jsonl",
     "sha256_file_bounded",
+    "unlink_if_identity",
 ]

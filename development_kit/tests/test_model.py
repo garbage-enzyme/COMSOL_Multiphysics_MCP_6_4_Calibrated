@@ -3,6 +3,7 @@
 import json
 from pathlib import Path
 
+import pytest
 from src.tools.model import _clone_model, _list_model_components, _save_model_file
 
 
@@ -12,6 +13,7 @@ class FakeJavaModel:
 
     def save(self, file_path):
         self.saved.append(file_path)
+        Path(file_path).write_bytes(b"saved-model")
 
 
 class FakeModel:
@@ -25,6 +27,7 @@ class FakeModel:
 
     def save(self, path=None, format=None):
         self.high_level_saves.append((path, format))
+        Path(path).write_bytes(b"saved-export")
 
 
 def test_save_mph_uses_java_clientapi_for_unicode_path(tmp_path):
@@ -34,7 +37,8 @@ def test_save_mph_uses_java_clientapi_for_unicode_path(tmp_path):
     saved = _save_model_file(model, str(requested))
 
     assert saved == str(requested.resolve())
-    assert model.java.saved == [str(requested.resolve())]
+    assert len(model.java.saved) == 1
+    assert Path(model.java.saved[0]).name.startswith(f".{requested.name}.")
     assert model.high_level_saves == []
     assert requested.parent.is_dir()
 
@@ -46,7 +50,8 @@ def test_save_mph_uses_existing_model_file(tmp_path):
     saved = _save_model_file(model)
 
     assert saved == str(current.resolve())
-    assert model.java.saved == [str(current.resolve())]
+    assert len(model.java.saved) == 1
+    assert current.read_bytes() == b"saved-model"
 
 
 def test_save_source_export_keeps_mph_format_api(tmp_path):
@@ -56,8 +61,27 @@ def test_save_source_export_keeps_mph_format_api(tmp_path):
     saved = _save_model_file(model, str(requested), format="Java")
 
     assert saved == str(requested)
-    assert model.high_level_saves == [(str(requested), "Java")]
+    assert len(model.high_level_saves) == 1
+    assert model.high_level_saves[0][1] == "Java"
     assert model.java.saved == []
+
+
+def test_save_never_overwrites_a_target_created_during_native_staging(tmp_path):
+    requested = tmp_path / "model.mph"
+
+    class CompetingJava:
+        def save(self, staging):
+            Path(staging).write_bytes(b"ours")
+            requested.write_bytes(b"competitor")
+
+    model = FakeModel()
+    model.java = CompetingJava()
+
+    with pytest.raises(FileExistsError):
+        _save_model_file(model, str(requested))
+
+    assert requested.read_bytes() == b"competitor"
+    assert not list(tmp_path.glob(".*.save"))
 
 
 class CloneJava:

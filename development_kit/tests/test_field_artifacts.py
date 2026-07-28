@@ -6,6 +6,7 @@ from copy import deepcopy
 
 import numpy as np
 import pytest
+from src.evidence import field_artifacts as field_artifacts_module
 from src.evidence.field_artifacts import write_field_evidence_artifacts
 from src.evidence.field_bundle import normalize_field_evidence_request
 from src.evidence.field_manifest import validate_field_evidence_manifest
@@ -145,6 +146,51 @@ def test_writer_cleans_owned_partial_files_when_manifest_build_fails(tmp_path):
 
     assert not list(tmp_path.rglob("field_arrays.npz"))
     assert not list(tmp_path.rglob("field_manifest.json"))
+    assert not list(tmp_path.rglob("*.tmp"))
+
+
+def test_writer_never_overwrites_or_cleans_a_competing_array(tmp_path, monkeypatch):
+    _, kwargs = _inputs(tmp_path)
+    real_publish = field_artifacts_module.publish_file_exclusive
+
+    def competing_publish(temporary, destination):
+        if destination.name == "field_arrays.npz":
+            destination.write_bytes(b"competitor")
+        return real_publish(temporary, destination)
+
+    monkeypatch.setattr(
+        field_artifacts_module,
+        "publish_file_exclusive",
+        competing_publish,
+    )
+
+    with pytest.raises(FileExistsError):
+        write_field_evidence_artifacts(**kwargs)
+
+    assert next(tmp_path.rglob("field_arrays.npz")).read_bytes() == b"competitor"
+    assert not list(tmp_path.rglob("field_manifest.json"))
+    assert not list(tmp_path.rglob("*.tmp"))
+
+
+def test_manifest_collision_preserves_competitor_and_cleans_only_owned_array(tmp_path, monkeypatch):
+    _, kwargs = _inputs(tmp_path)
+    real_publish = field_artifacts_module.atomic_write_json_exclusive
+
+    def competing_manifest(destination, value):
+        destination.write_bytes(b"competitor")
+        return real_publish(destination, value)
+
+    monkeypatch.setattr(
+        field_artifacts_module,
+        "atomic_write_json_exclusive",
+        competing_manifest,
+    )
+
+    with pytest.raises(FileExistsError):
+        write_field_evidence_artifacts(**kwargs)
+
+    assert next(tmp_path.rglob("field_manifest.json")).read_bytes() == b"competitor"
+    assert not list(tmp_path.rglob("field_arrays.npz"))
     assert not list(tmp_path.rglob("*.tmp"))
 
 

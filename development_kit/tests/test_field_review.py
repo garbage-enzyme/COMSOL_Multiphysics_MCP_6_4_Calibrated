@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import _winapi
 import hashlib
 import json
 from copy import deepcopy
@@ -221,9 +222,10 @@ def test_pair_assembler_verifies_rows_and_renders_shared_scale_bundle(tmp_path):
     assert result["visual_review_state"] == "visual_review_required"
     bundle_path = directory / result["bundle_artifact"]["relative_path"]
     bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
-    assert bundle["points"][0]["png_artifact"]["color_limits"] == bundle["points"][1][
-        "png_artifact"
-    ]["color_limits"]
+    assert (
+        bundle["points"][0]["png_artifact"]["color_limits"]
+        == bundle["points"][1]["png_artifact"]["color_limits"]
+    )
     assert bundle["shared_color_limits"] == bundle["points"][0]["png_artifact"]["color_limits"]
     assert bundle["artifact_path_base"] == "job_directory"
     for point in bundle["points"]:
@@ -234,6 +236,27 @@ def test_pair_assembler_verifies_rows_and_renders_shared_scale_bundle(tmp_path):
         assert (directory / point["source_audit"]["wrapper_relative_path"]).is_file()
         assert (directory / point["source_audit"]["inner_relative_path"]).is_file()
     assert ":" not in bundle["points"][0]["png_artifact"]["relative_path"]
+
+
+def test_pair_assembler_rejects_junctioned_publication_parent(tmp_path):
+    directory = _create_job(tmp_path)
+    outside = tmp_path / "outside-review"
+    outside.mkdir()
+    visual_root = directory / "artifacts" / "visual-review"
+    _winapi.CreateJunction(str(outside), str(visual_root))
+    try:
+        with pytest.raises(ValueError, match="link or junction"):
+            assemble_validation_matrix_field_review(
+                job_directory=directory,
+                point_ids=["off:res", "target"],
+                bundle_id="escaped",
+                quantity_name="abs_ex",
+                quantity_unit="V/m",
+                coordinate_unit="um",
+            )
+        assert list(outside.iterdir()) == []
+    finally:
+        visual_root.rmdir()
 
 
 def test_pair_assembler_rejects_tampered_wrapper_before_rendering(tmp_path):

@@ -259,3 +259,21 @@ def test_inner_manifest_must_remain_inside_assigned_artifact_root(tmp_path):
                 "artifacts": {"manifest": str(outside)},
             },
         )
+
+
+def test_inner_manifest_cannot_claim_the_reserved_wrapper_path(tmp_path):
+    spec, point, collector = _normalized_point(tmp_path)
+
+    with pytest.raises(ValueError, match="collides with the reserved wrapper"):
+        execute_physical_audit_collector(
+            point,
+            collector,
+            tmp_path / "artifact",
+            model=object(),
+            client=object(),
+            model_name="fixture",
+            expected_source_sha256=spec["source_model_sha256"],
+            session_state={"connected": True},
+            ownership_preflight={"ready": True},
+            point_audit_runner=_complete_runner({}, "matrix_collector.json"),
+        )

@@ -9,13 +9,12 @@ import re
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
+from comsol_mcp.durable.io import atomic_write_json_exclusive
 from comsol_mcp.evidence.contracts import validate_physical_evidence
 from comsol_mcp.evidence.field_matrix import (
     MATRIX_FIELD_COLLECTOR,
     bind_validation_matrix_field_request,
 )
-
-from .store import atomic_write_json
 
 _LOCKED_INPUTS = frozenset(
     {
@@ -87,10 +86,9 @@ def _validate_point_audit_inner_manifest(
     if physical["producer"]["tool"] != "wave_optics_point_audit":
         raise ValueError("point audit inner manifest producer is unsupported")
     identity = physical["identity"]
-    if (
-        identity["source_sha256"] != expected_source_sha256.lower()
-        or identity["config_id"] != point.get("point_fingerprint")
-    ):
+    if identity["source_sha256"] != expected_source_sha256.lower() or identity[
+        "config_id"
+    ] != point.get("point_fingerprint"):
         raise ValueError("point audit inner manifest identity differs from the matrix point")
     measurement = document.get("measurement")
     if not isinstance(measurement, Mapping):
@@ -222,6 +220,8 @@ def execute_physical_audit_collector(
             expected_source_sha256=expected_source_sha256,
         )
     wrapper_path = root / "matrix_collector.json"
+    if inner_manifest == wrapper_path:
+        raise ValueError("physical audit manifest collides with the reserved wrapper path")
     inner_relative = inner_manifest.relative_to(root).as_posix()
     wrapper = {
         "schema_name": "comsol_mcp.validation_matrix_collector",
@@ -243,7 +243,7 @@ def execute_physical_audit_collector(
             "size_bytes": inner_manifest.stat().st_size,
         },
     }
-    atomic_write_json(wrapper_path, wrapper)
+    atomic_write_json_exclusive(wrapper_path, wrapper)
     return {
         "success": True,
         "audit_status": result.get("audit_status"),
@@ -286,9 +286,7 @@ def execute_field_evidence_collector(
         raise ValueError("field evidence collector returned a non-object result")
     manifest_descriptor = result.get("manifest_artifact")
     array_descriptor = result.get("array_artifact")
-    if not isinstance(manifest_descriptor, Mapping) or not isinstance(
-        array_descriptor, Mapping
-    ):
+    if not isinstance(manifest_descriptor, Mapping) or not isinstance(array_descriptor, Mapping):
         raise ValueError("field evidence collector did not return artifact descriptors")
 
     def resolve_descriptor(descriptor: Mapping[str, Any], label: str) -> Path:
@@ -316,6 +314,8 @@ def execute_field_evidence_collector(
             "error": "matrix field evidence is partial and remains retryable",
         }
     wrapper_path = root / "matrix_collector.json"
+    if manifest_path == wrapper_path:
+        raise ValueError("field manifest collides with the reserved wrapper path")
     wrapper = {
         "schema_name": "comsol_mcp.validation_matrix_field_collector",
         "schema_version": "1.0.0",
@@ -336,7 +336,7 @@ def execute_field_evidence_collector(
         "visual_review_state": "visual_review_required",
         "semantic_mode_label": "not_assigned",
     }
-    atomic_write_json(wrapper_path, wrapper)
+    atomic_write_json_exclusive(wrapper_path, wrapper)
     return {
         "success": True,
         "audit_status": "measurement_complete",

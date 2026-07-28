@@ -1,9 +1,10 @@
 """Unit tests for result normalization without a COMSOL client."""
 
+from pathlib import Path
+
 import numpy as np
 import pytest
-
-from src.tools.results import evaluate_global_result, evaluate_result
+from src.tools.results import evaluate_global_result, evaluate_result, export_result_file
 
 
 class FakeModel:
@@ -63,3 +64,18 @@ def test_result_normalization_rejects_nonfinite_public_values(value):
 
     with pytest.raises(ValueError, match="finite"):
         evaluate_result(model, "unsafe")
+
+
+def test_result_export_preserves_a_target_created_during_staging(tmp_path):
+    target = tmp_path / "result.csv"
+
+    class ExportModel:
+        def export(self, _node_name, staging):
+            Path(staging).write_bytes(b"ours")
+            target.write_bytes(b"competitor")
+
+    with pytest.raises(FileExistsError):
+        export_result_file(ExportModel(), "data1", str(target))
+
+    assert target.read_bytes() == b"competitor"
+    assert not list(tmp_path.glob(".*.export"))

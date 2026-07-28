@@ -312,6 +312,7 @@ def guard_tool_call(
         from comsol_mcp.path_policy import (
             ReadPinError,
             pin_validated_reads,
+            pin_validated_writes,
             validate_tool_paths,
         )
 
@@ -321,12 +322,14 @@ def guard_tool_call(
         expected_model_revision = kwargs.pop("expected_model_revision", None)
 
         try:
-            normalized_args, normalized_kwargs, path_evidence, read_pins = validate_tool_paths(
-                function,
-                args,
-                kwargs,
-                tool_name=tool_name,
-                profile_name=profile_name,
+            normalized_args, normalized_kwargs, path_evidence, read_pins, write_pins = (
+                validate_tool_paths(
+                    function,
+                    args,
+                    kwargs,
+                    tool_name=tool_name,
+                    profile_name=profile_name,
+                )
             )
         except (OSError, TypeError, ValueError) as exc:
             return finalize(
@@ -345,7 +348,8 @@ def guard_tool_call(
         if concurrency_class != "comsol_bound":
             try:
                 with pin_validated_reads(read_pins):
-                    result = function(*normalized_args, **normalized_kwargs)
+                    with pin_validated_writes(write_pins):
+                        result = function(*normalized_args, **normalized_kwargs)
             except ReadPinError as exc:
                 return finalize(
                     {
@@ -390,7 +394,8 @@ def guard_tool_call(
                 current_revision = session_manager.get_model_revision(revision_model_name)
                 if current_revision is None and profile_name == "full":
                     with pin_validated_reads(read_pins):
-                        result = function(*normalized_args, **normalized_kwargs)
+                        with pin_validated_writes(write_pins):
+                            result = function(*normalized_args, **normalized_kwargs)
                 elif current_revision is None:
                     result = {
                         "success": False,
@@ -407,7 +412,8 @@ def guard_tool_call(
                     }
                 else:
                     with pin_validated_reads(read_pins):
-                        result = function(*normalized_args, **normalized_kwargs)
+                        with pin_validated_writes(write_pins):
+                            result = function(*normalized_args, **normalized_kwargs)
                     revision_evidence = current_revision
                     if (
                         isinstance(result, dict)
@@ -419,7 +425,8 @@ def guard_tool_call(
                         )
             else:
                 with pin_validated_reads(read_pins):
-                    result = function(*normalized_args, **normalized_kwargs)
+                    with pin_validated_writes(write_pins):
+                        result = function(*normalized_args, **normalized_kwargs)
         except ReadPinError as exc:
             pin_failed = True
             result = {"success": False, "error": str(exc)}
@@ -480,6 +487,7 @@ def _guard_async_tool_call(
         from comsol_mcp.path_policy import (
             ReadPinError,
             pin_validated_reads,
+            pin_validated_writes,
             validate_tool_paths,
         )
 
@@ -487,12 +495,14 @@ def _guard_async_tool_call(
             return annotate_tool_response(tool_name, value)
 
         try:
-            normalized_args, normalized_kwargs, path_evidence, read_pins = validate_tool_paths(
-                function,
-                args,
-                kwargs,
-                tool_name=tool_name,
-                profile_name=profile_name,
+            normalized_args, normalized_kwargs, path_evidence, read_pins, write_pins = (
+                validate_tool_paths(
+                    function,
+                    args,
+                    kwargs,
+                    tool_name=tool_name,
+                    profile_name=profile_name,
+                )
             )
         except (OSError, TypeError, ValueError) as exc:
             return finalize(
@@ -510,7 +520,8 @@ def _guard_async_tool_call(
             )
         try:
             with pin_validated_reads(read_pins):
-                result = await function(*normalized_args, **normalized_kwargs)
+                with pin_validated_writes(write_pins):
+                    result = await function(*normalized_args, **normalized_kwargs)
         except ReadPinError as exc:
             return finalize(
                 {

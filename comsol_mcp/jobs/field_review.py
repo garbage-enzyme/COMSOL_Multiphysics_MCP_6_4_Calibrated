@@ -187,9 +187,7 @@ def _load_point_field(
     spec: Mapping[str, Any],
     row: Mapping[str, Any],
 ) -> dict[str, Any]:
-    declared_points = [
-        item for item in spec["points"] if item.get("point_id") == row["point_id"]
-    ]
+    declared_points = [item for item in spec["points"] if item.get("point_id") == row["point_id"]]
     if len(declared_points) != 1:
         raise ValueError("matrix row does not resolve to one immutable point")
     declared_point = declared_points[0]
@@ -338,10 +336,7 @@ def assemble_validation_matrix_field_review(
         not isinstance(point_ids, list)
         or len(point_ids) != 2
         or len(set(point_ids)) != 2
-        or any(
-            not isinstance(item, str) or not _IDENTIFIER.fullmatch(item)
-            for item in point_ids
-        )
+        or any(not isinstance(item, str) or not _IDENTIFIER.fullmatch(item) for item in point_ids)
     ):
         raise ValueError("point_ids must contain exactly two unique portable IDs")
     if not _portable_path_identifier(bundle_id):
@@ -353,16 +348,16 @@ def assemble_validation_matrix_field_review(
     if spec.get("job_type") != "validation_matrix":
         raise ValueError("paired field review requires a validation_matrix job")
     spec_fingerprint = spec.get("spec_fingerprint")
-    if not isinstance(spec_fingerprint, str) or _fingerprint(
-        {key: value for key, value in spec.items() if key != "spec_fingerprint"}
-    ) != spec_fingerprint:
+    if (
+        not isinstance(spec_fingerprint, str)
+        or _fingerprint({key: value for key, value in spec.items() if key != "spec_fingerprint"})
+        != spec_fingerprint
+    ):
         raise ValueError("durable matrix spec fingerprint does not match")
     rows = read_validation_rows(directory / "matrix_rows.jsonl", spec)
     selected = []
     for point_id in point_ids:
-        matches = [
-            row for row in rows if row["status"] == "ok" and row["point_id"] == point_id
-        ]
+        matches = [row for row in rows if row["status"] == "ok" and row["point_id"] == point_id]
         if len(matches) != 1:
             raise ValueError("each paired point must have exactly one complete row")
         selected.append(_load_point_field(directory, spec, matches[0]))
@@ -378,9 +373,7 @@ def assemble_validation_matrix_field_review(
         isinstance(item, Mapping) for item in expression_list
     ):
         raise ValueError("field manifest expressions are unavailable")
-    expressions = [
-        item for item in expression_list if item.get("name") == quantity_name
-    ]
+    expressions = [item for item in expression_list if item.get("name") == quantity_name]
     if len(expressions) != 1 or expressions[0].get("unit") != quantity_unit:
         raise ValueError("requested paired quantity/unit is not present in both manifests")
     coordinate_ranges = first_manifest.get("coordinate_ranges")
@@ -390,7 +383,20 @@ def assemble_validation_matrix_field_review(
     ):
         raise ValueError("requested coordinate unit differs from the field manifests")
 
-    output_root = directory / "artifacts" / "visual-review" / bundle_id
+    visual_root = directory / "artifacts" / "visual-review"
+    for candidate in (directory / "artifacts", visual_root):
+        is_junction = getattr(candidate, "is_junction", lambda: False)
+        if candidate.exists() and (candidate.is_symlink() or is_junction()):
+            raise ValueError("field-review output path contains a link or junction")
+        if candidate.exists():
+            try:
+                candidate.resolve(strict=True).relative_to(directory)
+            except ValueError as exc:
+                raise ValueError("field-review output path escapes the job directory") from exc
+    visual_root.mkdir(parents=True, exist_ok=True)
+    if visual_root.is_symlink() or getattr(visual_root, "is_junction", lambda: False)():
+        raise ValueError("field-review output path contains a link or junction")
+    output_root = visual_root / bundle_id
     try:
         output_root.mkdir(parents=True)
     except FileExistsError:
@@ -437,34 +443,22 @@ def assemble_validation_matrix_field_review(
                     "row_sha256": item["row"]["row_sha256"],
                     "wavelength_m": item["manifest"]["wavelength_m"],
                     "source_audit": {
-                        "artifact_id": item["source_audit"]["summary"][
-                            "artifact_id"
-                        ],
-                        "wrapper_relative_path": item["source_audit"][
-                            "wrapper_path"
-                        ]
+                        "artifact_id": item["source_audit"]["summary"]["artifact_id"],
+                        "wrapper_relative_path": item["source_audit"]["wrapper_path"]
                         .relative_to(directory)
                         .as_posix(),
-                        "wrapper_sha256": item["source_audit"]["summary"][
-                            "manifest_sha256"
-                        ],
+                        "wrapper_sha256": item["source_audit"]["summary"]["manifest_sha256"],
                         "wrapper_byte_count": item["source_audit"]["summary"][
                             "manifest_size_bytes"
                         ],
                         "inner_relative_path": item["source_audit"]["inner_path"]
                         .relative_to(directory)
                         .as_posix(),
-                        "inner_sha256": item["source_audit"]["inner_descriptor"][
-                            "sha256"
-                        ],
-                        "inner_byte_count": item["source_audit"]["inner_descriptor"][
-                            "size_bytes"
-                        ],
+                        "inner_sha256": item["source_audit"]["inner_descriptor"]["sha256"],
+                        "inner_byte_count": item["source_audit"]["inner_descriptor"]["size_bytes"],
                     },
                     "wrapper": {
-                        "relative_path": item["wrapper_path"]
-                        .relative_to(directory)
-                        .as_posix(),
+                        "relative_path": item["wrapper_path"].relative_to(directory).as_posix(),
                         "sha256": item["field_summary"]["manifest_sha256"],
                         "byte_count": item["field_summary"]["manifest_size_bytes"],
                     },

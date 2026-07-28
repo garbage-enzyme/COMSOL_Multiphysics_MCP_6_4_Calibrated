@@ -526,6 +526,74 @@ def test_atomic_write_cleans_up_after_replace_deadline(tmp_path: Path) -> None:
     assert list(tmp_path.iterdir()) == []
 
 
+def test_exclusive_publish_preserves_a_competing_target_and_cleans_temporary(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "exclusive.bin"
+
+    def competing_link(source: object, destination: object) -> None:
+        Path(destination).write_bytes(b"competitor")
+        durable_io.os.link(source, destination)
+
+    with pytest.raises(FileExistsError):
+        durable_io.atomic_write_bytes_exclusive(
+            target,
+            b"ours",
+            link_fn=competing_link,
+        )
+
+    assert target.read_bytes() == b"competitor"
+    assert list(tmp_path.iterdir()) == [target]
+
+
+def test_identity_cleanup_never_removes_a_replacement(tmp_path: Path) -> None:
+    target = tmp_path / "published.bin"
+    identity = durable_io.atomic_write_bytes_exclusive(target, b"ours")
+    replacement = tmp_path / "replacement.bin"
+    replacement.write_bytes(b"competitor")
+    os.replace(replacement, target)
+
+    assert durable_io.unlink_if_identity(target, identity) is False
+    assert target.read_bytes() == b"competitor"
+
+
+def test_exclusive_publish_rejects_invalid_sources_and_identity_mismatch(
+    tmp_path: Path,
+) -> None:
+    other = tmp_path / "other"
+    other.mkdir()
+    source = tmp_path / "source.tmp"
+    source.write_bytes(b"ours")
+
+    with pytest.raises(ValueError, match="one directory"):
+        durable_io.publish_file_exclusive(source, other / "target.bin")
+
+    directory_source = tmp_path / "directory.tmp"
+    directory_source.mkdir()
+    with pytest.raises(ValueError, match="regular temporary file"):
+        durable_io.publish_file_exclusive(directory_source, tmp_path / "directory.bin")
+
+    target = tmp_path / "mismatched.bin"
+
+    def publish_different_file(_source: object, destination: object) -> None:
+        Path(destination).write_bytes(b"competitor")
+
+    with pytest.raises(RuntimeError, match="different file identity"):
+        durable_io.atomic_write_bytes_exclusive(
+            target,
+            b"ours",
+            link_fn=publish_different_file,
+        )
+
+    assert target.read_bytes() == b"competitor"
+    assert durable_io.unlink_if_identity(tmp_path / "missing.bin", (0, 0)) is False
+    with pytest.raises(ValueError, match="payload"):
+        durable_io.atomic_write_bytes_exclusive(
+            tmp_path / "invalid.bin",
+            "bytes required",  # type: ignore[arg-type]
+        )
+
+
 def test_json_document_and_atomic_json_share_finite_serialization(
     tmp_path: Path,
 ) -> None:

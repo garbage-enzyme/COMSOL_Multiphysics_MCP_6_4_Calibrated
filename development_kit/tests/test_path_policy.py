@@ -17,6 +17,7 @@ from src.path_policy import (
     PathPolicy,
     ReadPinError,
     pin_validated_reads,
+    pin_validated_writes,
 )
 from src.tools.capabilities import get_capabilities
 from src.tools.profiles import ProfileSelection
@@ -300,6 +301,48 @@ def test_read_pin_rejects_replacement_between_validation_and_acquisition(tmp_pat
     with pytest.raises(ReadPinError, match="identity changed"):
         with pin_validated_reads((decision.read_pin,)):
             pytest.fail("replacement identity must not reach the consumer")
+
+
+def test_guarded_write_pins_ancestors_but_allows_file_creation(tmp_path, ascii_root, monkeypatch):
+    _policy_value, read_root, write_root = _policy(tmp_path, ascii_root)
+    target = write_root / "saved.mph"
+    moved_root = ascii_root / "moved-artifacts"
+    monkeypatch.setenv(MODEL_READ_ROOTS_ENV, str(read_root))
+    monkeypatch.setenv(ARTIFACT_WRITE_ROOT_ENV, str(write_root))
+
+    def model_save(file_path: str):
+        with pytest.raises(OSError):
+            write_root.rename(moved_root)
+        Path(file_path).write_bytes(b"staged-write")
+        return {"success": True}
+
+    guarded = guard_tool_call(
+        model_save,
+        tool_name="model_save",
+        side_effect_class="filesystem_write",
+        concurrency_class="solver_free",
+        profile_name="core",
+    )
+
+    result = guarded(file_path=str(target))
+
+    assert result["success"] is True
+    assert target.read_bytes() == b"staged-write"
+    target.unlink()
+    write_root.rename(moved_root)
+
+
+def test_write_pin_rejects_ancestor_replacement_before_acquisition(tmp_path, ascii_root):
+    policy, _read_root, write_root = _policy(tmp_path, ascii_root)
+    decision = policy.validate_artifact_write(str(write_root / "saved.mph"))
+    assert decision.write_pin is not None
+    moved_root = ascii_root / "moved-artifacts"
+    write_root.rename(moved_root)
+    write_root.mkdir()
+
+    with pytest.raises(ReadPinError, match="identity changed"):
+        with pin_validated_writes((decision.write_pin,)):
+            pytest.fail("replacement ancestor must not reach the writer")
 
 
 def test_full_profile_visibly_preserves_legacy_path_compatibility(tmp_path):

@@ -1,17 +1,25 @@
 """Model management tools for COMSOL MCP Server."""
 
-from typing import Optional
+import logging
+import os
+import uuid
 from pathlib import Path
 from tempfile import mkdtemp
+from typing import Optional
+
 from mcp.server.fastmcp import FastMCP
 
-from .session import session_manager
+from comsol_mcp.durable.io import publish_file_exclusive
+
 from ..utils.runtime_paths import default_runtime_dir
 from ..utils.versioning import (
-    generate_version_path, 
     generate_latest_path,
+    generate_version_path,
     parse_version_info,
 )
+from .session import session_manager
+
+logger = logging.getLogger(__name__)
 
 
 def _save_model_file(
@@ -21,16 +29,26 @@ def _save_model_file(
 ) -> str:
     """Save a model, using clientapi for reliable Unicode ``.mph`` paths."""
     normalized_format = format.casefold() if format else "comsol"
-    if normalized_format not in {"comsol", "mph"}:
-        model.save(path=file_path, format=format)
-        return str(file_path or model.file())
-
     target = file_path or model.file()
     if not target:
         raise ValueError("file_path is required for a model that has not been saved.")
     path = Path(target).expanduser().resolve()
     path.parent.mkdir(parents=True, exist_ok=True)
-    model.java.save(str(path))
+    overwrite = path.exists()
+    staging = path.with_name(f".{path.name}.{uuid.uuid4().hex}.save")
+    try:
+        if normalized_format not in {"comsol", "mph"}:
+            model.save(path=str(staging), format=format)
+        else:
+            model.java.save(str(staging))
+        if not staging.is_file():
+            raise RuntimeError("model save did not create the staging artifact")
+        if overwrite:
+            os.replace(staging, path)
+        else:
+            publish_file_exclusive(staging, path)
+    finally:
+        staging.unlink(missing_ok=True)
     return str(path)
 
 
@@ -74,41 +92,44 @@ def _list_model_components(model) -> list[dict[str, str]]:
 
 def register_model_tools(mcp: FastMCP) -> None:
     """Register model management tools with the MCP server."""
-    
+
     @mcp.tool()
     def model_load(file_path: str, set_current: bool = True) -> dict:
         """
         Load a COMSOL model from a .mph file.
-        
+
         Args:
             file_path: Absolute or relative path to the .mph model file
             set_current: Whether to set this as the current active model (default: True)
-        
+
         Returns:
             Model info including name, file path, and version, or error message
         """
         if not session_manager.is_connected:
-            return {"success": False, "error": "No active COMSOL session. Start with comsol_start first."}
-        
+            return {
+                "success": False,
+                "error": "No active COMSOL session. Start with comsol_start first.",
+            }
+
         client = session_manager.client
         if client is None:
             return {"success": False, "error": "Client not available."}
-        
+
         try:
             path = Path(file_path)
             if not path.exists():
                 return {"success": False, "error": f"File not found: {file_path}"}
             if not path.suffix.lower() == ".mph":
                 return {"success": False, "error": f"File must be a .mph file: {file_path}"}
-            
+
             model = client.load(str(path.absolute()))
             name = session_manager.add_model(model)
-            
+
             if set_current:
                 session_manager.set_current_model(name)
-            
+
             version_info = parse_version_info(name)
-            
+
             return {
                 "success": True,
                 "model": {
@@ -117,52 +138,53 @@ def register_model_tools(mcp: FastMCP) -> None:
                     "comsol_version": model.version(),
                     "is_versioned": version_info is not None,
                     "version_info": version_info,
-                }
+                },
             }
         except Exception as e:
             return {"success": False, "error": f"Failed to load model: {str(e)}"}
-    
+
     @mcp.tool()
     def model_create(name: Optional[str] = None, set_current: bool = True) -> dict:
         """
         Create a new empty COMSOL model.
-        
+
         Args:
             name: Optional name for the model (auto-generated if not provided)
             set_current: Whether to set this as the current active model (default: True)
-        
+
         Returns:
             Model info including name, or error message
         """
         if not session_manager.is_connected:
-            return {"success": False, "error": "No active COMSOL session. Start with comsol_start first."}
-        
+            return {
+                "success": False,
+                "error": "No active COMSOL session. Start with comsol_start first.",
+            }
+
         client = session_manager.client
         if client is None:
             return {"success": False, "error": "Client not available."}
-        
+
         try:
             model = client.create(name)
             model_name = session_manager.add_model(model)
-            
+
             if set_current:
                 session_manager.set_current_model(model_name)
-            
+
             return {
                 "success": True,
                 "model": {
                     "name": model_name,
                     "is_new": True,
-                }
+                },
             }
         except Exception as e:
             return {"success": False, "error": f"Failed to create model: {str(e)}"}
-    
+
     @mcp.tool()
     def model_create_component(
-        component_name: str = "comp1",
-        space_dimension: int = 3,
-        model_name: Optional[str] = None
+        component_name: str = "comp1", space_dimension: int = 3, model_name: Optional[str] = None
     ) -> dict:
         """
         Create a component in the model (required before adding geometry/physics).
@@ -172,7 +194,8 @@ def register_model_tools(mcp: FastMCP) -> None:
 
         Args:
             component_name: Name for the component (default: 'comp1')
-            space_dimension: Space dimension - 0=0D, 1=1D, 2=2D, 3=3D, 20=2D axisymmetric, 30=3D axisymmetric (default: 3)
+            space_dimension: Space dimension - 0=0D, 1=1D, 2=2D, 3=3D,
+                20=2D axisymmetric, 30=3D axisymmetric (default: 3)
             model_name: Model name (default: current model)
 
         Returns:
@@ -182,12 +205,12 @@ def register_model_tools(mcp: FastMCP) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
 
         try:
             jm = model.java
-            comp = jm.component().create(component_name, True)
+            jm.component().create(component_name, True)
 
             return {
                 "success": True,
@@ -197,17 +220,15 @@ def register_model_tools(mcp: FastMCP) -> None:
             }
         except Exception as e:
             return {"success": False, "error": f"Failed to create component: {str(e)}"}
-    
+
     @mcp.tool()
-    def model_list_components(
-        model_name: Optional[str] = None
-    ) -> dict:
+    def model_list_components(model_name: Optional[str] = None) -> dict:
         """
         List all components in a model.
-        
+
         Args:
             model_name: Model name (default: current model)
-        
+
         Returns:
             List of component names
         """
@@ -215,12 +236,12 @@ def register_model_tools(mcp: FastMCP) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
-        
+
         try:
             components = _list_model_components(model)
-            
+
             return {
                 "success": True,
                 "components": components,
@@ -228,21 +249,21 @@ def register_model_tools(mcp: FastMCP) -> None:
             }
         except Exception as e:
             return {"success": False, "error": f"Failed to list components: {str(e)}"}
-    
+
     @mcp.tool()
     def model_save(
         model_name: Optional[str] = None,
         file_path: Optional[str] = None,
-        format: Optional[str] = None
+        format: Optional[str] = None,
     ) -> dict:
         """
         Save a COMSOL model to file.
-        
+
         Args:
             model_name: Name of the model to save (default: current model)
             file_path: Path to save to (default: original file path)
             format: Save format - 'Comsol', 'Java', 'Matlab', or 'VBA' (default: Comsol/.mph)
-        
+
         Returns:
             Save confirmation with file path, or error message
         """
@@ -250,12 +271,12 @@ def register_model_tools(mcp: FastMCP) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
-        
+
         try:
             saved_path = _save_model_file(model, file_path=file_path, format=format)
-            
+
             return {
                 "success": True,
                 "model": model.name(),
@@ -264,7 +285,7 @@ def register_model_tools(mcp: FastMCP) -> None:
             }
         except Exception as e:
             return {"success": False, "error": f"Failed to save model: {str(e)}"}
-    
+
     @mcp.tool()
     def model_save_version(
         model_name: Optional[str] = None,
@@ -273,21 +294,21 @@ def register_model_tools(mcp: FastMCP) -> None:
     ) -> dict:
         """
         Save a model with a timestamp version suffix.
-        
+
         Creates a new file with structured path:
         <runtime>/models/{model_name}/{model_name}_{timestamp}.mph
-        
-        Also saves a 'latest' copy: 
+
+        Also saves a 'latest' copy:
         <runtime>/models/{model_name}/{model_name}_latest.mph
-        
+
         Useful for version control and design iterations.
-        
+
         Args:
             model_name: Name of the model to save (default: current model)
             description: Optional description for this version (stored in metadata)
             base_path: Optional model-storage root. Defaults to the runtime
                 directory's ``models`` subdirectory.
-        
+
         Returns:
             Save confirmation with versioned file path, or error message
         """
@@ -295,23 +316,23 @@ def register_model_tools(mcp: FastMCP) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
-        
+
         try:
             # Get model name for directory structure
             name = model.name()
-            
+
             # Generate versioned path using new structure
             versioned_path = generate_version_path(name, base_path=base_path)
-            
+
             # Save versioned copy
             _save_model_file(model, versioned_path)
-            
+
             # Also save as 'latest'
             latest_path = generate_latest_path(name, base_path=base_path)
             _save_model_file(model, latest_path)
-            
+
             return {
                 "success": True,
                 "model": name,
@@ -321,21 +342,21 @@ def register_model_tools(mcp: FastMCP) -> None:
             }
         except Exception as e:
             return {"success": False, "error": f"Failed to save version: {str(e)}"}
-    
+
     @mcp.tool()
     def model_list() -> dict:
         """
         List all models currently loaded in the COMSOL session.
-        
+
         Returns:
             List of models with their names, file paths, and status
         """
         if not session_manager.is_connected:
             return {"success": False, "error": "No active COMSOL session."}
-        
+
         models = session_manager.models
         current = session_manager.current_model
-        
+
         model_list = []
         for name, model in models.items():
             info = {
@@ -345,25 +366,25 @@ def register_model_tools(mcp: FastMCP) -> None:
             try:
                 info["file"] = model.file()
                 info["comsol_version"] = model.version()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Could not inspect model metadata for %s: %s", name, exc)
             model_list.append(info)
-        
+
         return {
             "success": True,
             "models": model_list,
             "count": len(model_list),
             "current_model": current,
         }
-    
+
     @mcp.tool()
     def model_set_current(model_name: str) -> dict:
         """
         Set the current active model for subsequent operations.
-        
+
         Args:
             model_name: Name of the model to set as current
-        
+
         Returns:
             Confirmation or error message
         """
@@ -372,25 +393,20 @@ def register_model_tools(mcp: FastMCP) -> None:
                 "success": True,
                 "current_model": model_name,
             }
-        return {
-            "success": False,
-            "error": f"Model not found: {model_name}"
-        }
-    
+        return {"success": False, "error": f"Model not found: {model_name}"}
+
     @mcp.tool()
     def model_clone(
-        model_name: Optional[str] = None,
-        new_name: Optional[str] = None,
-        set_current: bool = False
+        model_name: Optional[str] = None, new_name: Optional[str] = None, set_current: bool = False
     ) -> dict:
         """
         Clone a model to create a copy for comparison or modification.
-        
+
         Args:
             model_name: Name of the model to clone (default: current model)
             new_name: Name for the cloned model (auto-generated if not provided)
             set_current: Whether to set the clone as current model (default: False)
-        
+
         Returns:
             Info about the cloned model, or error message
         """
@@ -398,23 +414,23 @@ def register_model_tools(mcp: FastMCP) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
-        
+
         try:
             client = session_manager.client
             if client is None:
                 return {"success": False, "error": "Client not available."}
-            
+
             cloned_model, cleanup_path = _clone_model(client, model, new_name)
             clone_name = session_manager.add_model(
                 cloned_model,
                 cleanup_path=cleanup_path,
             )
-            
+
             if set_current:
                 session_manager.set_current_model(clone_name)
-            
+
             return {
                 "success": True,
                 "original": model.name(),
@@ -423,15 +439,15 @@ def register_model_tools(mcp: FastMCP) -> None:
             }
         except Exception as e:
             return {"success": False, "error": f"Failed to clone model: {str(e)}"}
-    
+
     @mcp.tool()
     def model_remove(model_name: str) -> dict:
         """
         Remove a model from memory.
-        
+
         Args:
             model_name: Name of the model to remove
-        
+
         Returns:
             Confirmation or error message
         """
@@ -441,19 +457,16 @@ def register_model_tools(mcp: FastMCP) -> None:
                 "removed": model_name,
                 "current_model": session_manager.current_model,
             }
-        return {
-            "success": False,
-            "error": f"Failed to remove model: {model_name}"
-        }
-    
+        return {"success": False, "error": f"Failed to remove model: {model_name}"}
+
     @mcp.tool()
     def model_inspect(model_name: Optional[str] = None) -> dict:
         """
         Get detailed information about a model's structure and contents.
-        
+
         Args:
             model_name: Name of the model to inspect (default: current model)
-        
+
         Returns:
             Detailed model structure including parameters, physics, studies, etc.
         """
@@ -461,9 +474,9 @@ def register_model_tools(mcp: FastMCP) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
-        
+
         try:
             info = {
                 "name": model.name(),
@@ -485,11 +498,11 @@ def register_model_tools(mcp: FastMCP) -> None:
                 "exports": model.exports(),
                 "modules": model.modules(),
             }
-            
+
             problems = model.problems()
             if problems:
                 info["problems"] = problems
-            
+
             return {"success": True, "model": info}
         except Exception as e:
             return {"success": False, "error": f"Failed to inspect model: {str(e)}"}

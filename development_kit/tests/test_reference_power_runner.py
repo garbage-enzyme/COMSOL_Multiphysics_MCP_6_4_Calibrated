@@ -8,7 +8,11 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
+import pytest
+
+from development_kit.tests.integration import reference_power_acceptance as runner_module
 from development_kit.tests.integration.reference_power_acceptance import (
     _admit_lightweight_status,
     _redacted_status,
@@ -100,6 +104,28 @@ def test_coordinator_summary_keeps_failure_details_in_worker_artifact_only():
     assert "traceback" not in summary
     assert "reference_result" not in summary
     assert "private" not in json.dumps(summary)
+
+
+def test_coordinator_rejects_receipt_inside_artifact_root_before_admission(tmp_path, monkeypatch):
+    artifact_root = tmp_path / "artifacts"
+    output = artifact_root / "worker_result.json"
+    monkeypatch.setattr(
+        runner_module,
+        "_load_inputs",
+        lambda *_args, **_kwargs: ({}, {"artifact_dir": str(artifact_root)}),
+    )
+    monkeypatch.setattr(
+        runner_module,
+        "_lightweight_solver_status",
+        lambda: pytest.fail("admission must not run for an invalid output path"),
+    )
+
+    with pytest.raises(ValueError, match="outside the artifact root"):
+        runner_module._run_coordinator(
+            SimpleNamespace(contract=tmp_path / "contract", spec=tmp_path / "spec", output=output)
+        )
+
+    assert not output.exists()
 
 
 def test_real_mode_requires_explicit_authority_and_resource_limits():

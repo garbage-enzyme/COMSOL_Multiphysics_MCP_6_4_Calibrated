@@ -44,6 +44,7 @@ class PathDecision:
     normalized_path: Path
     root_id: str
     read_pin: "ValidatedReadPin | None" = None
+    write_pin: "ValidatedWritePin | None" = None
 
 
 @dataclass(frozen=True)
@@ -54,6 +55,17 @@ class ValidatedReadPin:
     root: Path
     path_identity: tuple[int, int]
     root_identity: tuple[int, int]
+
+
+@dataclass(frozen=True)
+class ValidatedWritePin:
+    """Private directory identity held while a validated target is written."""
+
+    target: Path
+    root: Path
+    ancestor: Path
+    root_identity: tuple[int, int]
+    ancestor_identity: tuple[int, int]
 
 
 class ReadPinError(OSError):
@@ -74,7 +86,12 @@ def _read_pin(path: Path, root: Path) -> ValidatedReadPin:
     )
 
 
-def _open_windows_read_pin(path: Path, *, directory: bool) -> int:
+def _open_windows_read_pin(
+    path: Path,
+    *,
+    directory: bool,
+    allow_writes: bool = False,
+) -> int:
     if os.name != "nt":
         raise ReadPinError("stable read-path pinning requires Windows")
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -89,9 +106,10 @@ def _open_windows_read_pin(path: Path, *, directory: bool) -> int:
         ctypes.c_void_p,
     )
     create_file.restype = ctypes.c_void_p
-    access = 0x00000080 if directory else 0x80000000
+    access = (0x00000080 | 0x00010000) if directory else 0x80000000
     flags = 0x02000000 if directory else 0x00000080
-    handle = create_file(str(path), access, 0x00000001, None, 3, flags, None)
+    share_mode = 0x00000001 | (0x00000002 if allow_writes else 0)
+    handle = create_file(str(path), access, share_mode, None, 3, flags, None)
     invalid_handle = ctypes.c_void_p(-1).value
     if handle in (None, invalid_handle):
         error = ctypes.get_last_error()
@@ -146,6 +164,52 @@ def pin_validated_reads(pins: tuple[ValidatedReadPin, ...]):
             raise
         raise ReadPinError(
             f"validated read path could not be pinned: {type(exc).__name__}"
+        ) from exc
+    try:
+        yield
+    finally:
+        for handle in reversed(handles):
+            _close_windows_handle(handle)
+
+
+@contextmanager
+def pin_validated_writes(pins: tuple[ValidatedWritePin, ...]):
+    """Prevent replacement of validated write ancestors during native writes."""
+    handles: list[int] = []
+    opened: set[Path] = set()
+    try:
+        for pin in pins:
+            ancestors: list[Path] = []
+            current = pin.ancestor
+            while True:
+                ancestors.append(current)
+                if current == pin.root:
+                    break
+                if current.parent == current:
+                    raise ReadPinError("validated write target no longer belongs to its root")
+                current = current.parent
+            for directory in reversed(ancestors):
+                if directory not in opened:
+                    handles.append(
+                        _open_windows_read_pin(
+                            directory,
+                            directory=True,
+                            allow_writes=True,
+                        )
+                    )
+                    opened.add(directory)
+            if (
+                _file_identity(pin.root) != pin.root_identity
+                or _file_identity(pin.ancestor) != pin.ancestor_identity
+            ):
+                raise ReadPinError("validated write ancestor identity changed before use")
+    except (OSError, RuntimeError, ValueError) as exc:
+        for handle in reversed(handles):
+            _close_windows_handle(handle)
+        if isinstance(exc, ReadPinError):
+            raise
+        raise ReadPinError(
+            f"validated write path could not be pinned: {type(exc).__name__}"
         ) from exc
     try:
         yield
@@ -380,6 +444,13 @@ class PathPolicy:
                 f"{kind_prefix}_directory",
                 resolved_directory,
                 _root_id(root),
+                write_pin=ValidatedWritePin(
+                    target=resolved_directory,
+                    root=root,
+                    ancestor=resolved_directory,
+                    root_identity=_file_identity(root),
+                    ancestor_identity=_file_identity(resolved_directory),
+                ),
             )
         existing_ancestor = target.parent
         while not existing_ancestor.exists():
@@ -399,6 +470,13 @@ class PathPolicy:
             f"{kind_prefix}_directory" if directory else kind_prefix,
             normalized,
             _root_id(root),
+            write_pin=ValidatedWritePin(
+                target=normalized,
+                root=root,
+                ancestor=resolved_ancestor,
+                root_identity=_file_identity(root),
+                ancestor_identity=_file_identity(resolved_ancestor),
+            ),
         )
 
 
@@ -447,6 +525,7 @@ def validate_tool_paths(
     dict[str, Any],
     dict[str, Any],
     tuple[ValidatedReadPin, ...],
+    tuple[ValidatedWritePin, ...],
 ]:
     """Validate and normalize known caller-selected path arguments."""
     if profile_name == "full":
@@ -460,6 +539,7 @@ def validate_tool_paths(
                 "compatibility_mode": "legacy_broad_paths",
                 "validated_input_count": 0,
             },
+            (),
             (),
         )
     policy = PathPolicy.from_environment()
@@ -508,7 +588,10 @@ def validate_tool_paths(
         "root_ids": sorted({decision.root_id for decision in decisions}),
     }
     read_pins = tuple(decision.read_pin for decision in decisions if decision.read_pin is not None)
-    return bound.args, bound.kwargs, evidence, read_pins
+    write_pins = tuple(
+        decision.write_pin for decision in decisions if decision.write_pin is not None
+    )
+    return bound.args, bound.kwargs, evidence, read_pins, write_pins
 
 
 __all__ = [
@@ -520,7 +603,9 @@ __all__ = [
     "PathDecision",
     "ReadPinError",
     "ValidatedReadPin",
+    "ValidatedWritePin",
     "pin_validated_reads",
+    "pin_validated_writes",
     "PathPolicy",
     "validate_tool_paths",
 ]

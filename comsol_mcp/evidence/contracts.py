@@ -10,13 +10,16 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-import os
 import re
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Mapping
 
 from comsol_mcp.durable import canonical_json_v1, canonical_sha256_v1
+from comsol_mcp.durable.io import (
+    atomic_write_bytes_exclusive,
+    read_file_bytes_bounded,
+)
 from comsol_mcp.utils.validation import (
     strict_json_boolean,
     strict_json_integer,
@@ -250,7 +253,9 @@ def _validate_record(key: str, record: Any) -> None:
             raise ValueError(f"evidence.{key}.selection_ids must be a bounded list")
         for index, entity in enumerate(selection_ids):
             if isinstance(entity, bool) or not isinstance(entity, (int, str)):
-                raise ValueError(f"evidence.{key}.selection_ids[{index}] must be an integer or string")
+                raise ValueError(
+                    f"evidence.{key}.selection_ids[{index}] must be an integer or string"
+                )
             if isinstance(entity, int) and entity <= 0:
                 raise ValueError(f"evidence.{key}.selection_ids[{index}] must be positive")
             if isinstance(entity, str):
@@ -275,7 +280,9 @@ def validate_physical_evidence(payload: Any, *, verify_hash: bool = True) -> dic
     producer = _require_mapping(envelope.get("producer"), "physical_evidence.producer")
     _reject_unknown(producer, _PRODUCER_FIELDS, "physical_evidence.producer")
     _identifier(producer.get("tool"), "physical_evidence.producer.tool")
-    _bounded_text(producer.get("tool_schema_version"), "physical_evidence.producer.tool_schema_version")
+    _bounded_text(
+        producer.get("tool_schema_version"), "physical_evidence.producer.tool_schema_version"
+    )
 
     identity = _require_mapping(envelope.get("identity"), "physical_evidence.identity")
     _reject_unknown(identity, _IDENTITY_FIELDS, "physical_evidence.identity")
@@ -283,7 +290,9 @@ def validate_physical_evidence(payload: Any, *, verify_hash: bool = True) -> dic
     _hash64(identity.get("config_sha256"), "physical_evidence.identity.config_sha256")
     _hash64(identity.get("source_sha256"), "physical_evidence.identity.source_sha256")
     if "source_artifact_id" in identity:
-        _bounded_text(identity["source_artifact_id"], "physical_evidence.identity.source_artifact_id")
+        _bounded_text(
+            identity["source_artifact_id"], "physical_evidence.identity.source_artifact_id"
+        )
 
     model = _require_mapping(envelope.get("model"), "physical_evidence.model")
     _reject_unknown(model, _MODEL_FIELDS, "physical_evidence.model")
@@ -294,7 +303,9 @@ def validate_physical_evidence(payload: Any, *, verify_hash: bool = True) -> dic
         if model.get(field) is not None and (
             isinstance(model[field], bool) or not isinstance(model[field], int) or model[field] < 0
         ):
-            raise ValueError(f"physical_evidence.model.{field} must be a non-negative integer or null")
+            raise ValueError(
+                f"physical_evidence.model.{field} must be a non-negative integer or null"
+            )
 
     evidence = _require_mapping(envelope.get("evidence"), "physical_evidence.evidence")
     if len(evidence) > MAX_EVIDENCE_RECORDS:
@@ -308,15 +319,18 @@ def validate_physical_evidence(payload: Any, *, verify_hash: bool = True) -> dic
     if "migration" in envelope:
         migration = _require_mapping(envelope["migration"], "physical_evidence.migration")
         migration_fields = (
-            _LEGACY_MIGRATION_FIELDS
-            if schema_version == "1.0.0"
-            else _MIGRATION_FIELDS
+            _LEGACY_MIGRATION_FIELDS if schema_version == "1.0.0" else _MIGRATION_FIELDS
         )
         _reject_unknown(migration, migration_fields, "physical_evidence.migration")
         if set(migration) != migration_fields:
             raise ValueError("physical_evidence.migration fields are incomplete")
-        _bounded_text(migration.get("source_schema_name"), "physical_evidence.migration.source_schema_name")
-        _bounded_text(migration.get("source_schema_version"), "physical_evidence.migration.source_schema_version")
+        _bounded_text(
+            migration.get("source_schema_name"), "physical_evidence.migration.source_schema_name"
+        )
+        _bounded_text(
+            migration.get("source_schema_version"),
+            "physical_evidence.migration.source_schema_version",
+        )
         if migration.get("semantics") != "preserved_without_reinterpretation":
             raise ValueError("physical_evidence.migration.semantics is unsupported")
         if schema_version != "1.0.0":
@@ -406,7 +420,10 @@ def _measured_or_unknown(
     limitations: list[str] | None = None,
 ) -> dict[str, Any]:
     if value is None:
-        return _record("unknown", limitations=limitations or ["Legacy artifact did not contain this measurement."])
+        return _record(
+            "unknown",
+            limitations=limitations or ["Legacy artifact did not contain this measurement."],
+        )
     return _record(
         "measured",
         value=value,
@@ -440,11 +457,7 @@ def _legacy_declared_flux_is_complete(value: Mapping[str, Any]) -> bool:
             return False
         expression = plane.get("expression")
         selection_ids = plane.get("selection_ids")
-        if (
-            not isinstance(expression, str)
-            or not expression.strip()
-            or len(expression) > MAX_TEXT
-        ):
+        if not isinstance(expression, str) or not expression.strip() or len(expression) > MAX_TEXT:
             return False
         if (
             not isinstance(selection_ids, list)
@@ -479,10 +492,16 @@ def _point_audit_envelope(
     outer = _require_mapping(dict(payload), "legacy_point_audit")
     measurement = outer.get("measurement", outer)
     measurement = _require_mapping(measurement, "legacy_point_audit.measurement")
-    provenance = _require_mapping(measurement.get("provenance"), "legacy_point_audit.measurement.provenance")
-    wavelength = _require_mapping(measurement.get("wavelength", {}), "legacy_point_audit.measurement.wavelength")
+    provenance = _require_mapping(
+        measurement.get("provenance"), "legacy_point_audit.measurement.provenance"
+    )
+    wavelength = _require_mapping(
+        measurement.get("wavelength", {}), "legacy_point_audit.measurement.wavelength"
+    )
     power = _require_mapping(measurement.get("power", {}), "legacy_point_audit.measurement.power")
-    polarization = _require_mapping(measurement.get("polarization", {}), "legacy_point_audit.measurement.polarization")
+    polarization = _require_mapping(
+        measurement.get("polarization", {}), "legacy_point_audit.measurement.polarization"
+    )
     declared_flux = _require_mapping(
         measurement.get("declared_plane_flux", {"state": "not_requested"}),
         "legacy_point_audit.measurement.declared_plane_flux",
@@ -492,13 +511,23 @@ def _point_audit_envelope(
         "legacy_point_audit.measurement.internal_absorption_consistency",
     )
     mesh = _require_mapping(measurement.get("mesh", {}), "legacy_point_audit.measurement.mesh")
-    integrity = _require_mapping(measurement.get("integrity", {}), "legacy_point_audit.measurement.integrity")
+    integrity = _require_mapping(
+        measurement.get("integrity", {}), "legacy_point_audit.measurement.integrity"
+    )
 
     config_sha256 = provenance.get("config_sha256") or outer.get("config_sha256")
     source_sha256 = provenance.get("source_sha256_before") or outer.get("source_sha256")
-    power_expressions = power.get("expressions", {}) if isinstance(power.get("expressions", {}), dict) else {}
-    power_provenance = power.get("provenance", {}) if isinstance(power.get("provenance", {}), dict) else {}
-    flux_directions = power_provenance.get("flux_directions", {}) if isinstance(power_provenance.get("flux_directions", {}), dict) else {}
+    power_expressions = (
+        power.get("expressions", {}) if isinstance(power.get("expressions", {}), dict) else {}
+    )
+    power_provenance = (
+        power.get("provenance", {}) if isinstance(power.get("provenance", {}), dict) else {}
+    )
+    flux_directions = (
+        power_provenance.get("flux_directions", {})
+        if isinstance(power_provenance.get("flux_directions", {}), dict)
+        else {}
+    )
     record_source = "legacy_point_audit_v1" if migrated else "wave_optics_point_audit"
 
     evidence: dict[str, dict[str, Any]] = {
@@ -512,7 +541,10 @@ def _point_audit_envelope(
                 source=record_source,
             )
             if wavelength.get("requested_m") is not None
-            else _record("unknown", limitations=["Legacy artifact did not contain the requested wavelength in metres."])
+            else _record(
+                "unknown",
+                limitations=["Legacy artifact did not contain the requested wavelength in metres."],
+            )
         ),
         "wavelength.evaluated_parameter_m": _measured_or_unknown(
             wavelength.get("evaluated_parameter_m"), unit="m", source=record_source
@@ -527,21 +559,41 @@ def _point_audit_envelope(
             wavelength.get("relative_difference"), unit="1", source=record_source
         ),
         "power.R": _measured_or_unknown(
-            power.get("R"), unit="1", expression=power_expressions.get("R"), sign_convention=flux_directions.get("R"), source=record_source
+            power.get("R"),
+            unit="1",
+            expression=power_expressions.get("R"),
+            sign_convention=flux_directions.get("R"),
+            source=record_source,
         ),
         "power.T": _measured_or_unknown(
-            power.get("T"), unit="1", expression=power_expressions.get("T"), sign_convention=flux_directions.get("T"), source=record_source
+            power.get("T"),
+            unit="1",
+            expression=power_expressions.get("T"),
+            sign_convention=flux_directions.get("T"),
+            source=record_source,
         ),
         "power.A": _measured_or_unknown(
-            power.get("A"), unit="1", expression=power_expressions.get("A"), sign_convention=power_provenance.get("A_definition"), source=record_source
+            power.get("A"),
+            unit="1",
+            expression=power_expressions.get("A"),
+            sign_convention=power_provenance.get("A_definition"),
+            source=record_source,
         ),
         "power.port_closure_abs": _measured_or_unknown(
-            power.get("closure_abs"), unit="1", source=record_source,
+            power.get("closure_abs"),
+            unit="1",
+            source=record_source,
             limitations=["This legacy port-variable closure is not declared-plane flux closure."],
         ),
-        "mesh.element_count": _measured_or_unknown(mesh.get("element_count"), unit="1", source=record_source),
-        "mesh.vertex_count": _measured_or_unknown(mesh.get("vertex_count"), unit="1", source=record_source),
-        "integrity.source_unchanged": _measured_or_unknown(integrity.get("source_unchanged"), unit="1", source=record_source),
+        "mesh.element_count": _measured_or_unknown(
+            mesh.get("element_count"), unit="1", source=record_source
+        ),
+        "mesh.vertex_count": _measured_or_unknown(
+            mesh.get("vertex_count"), unit="1", source=record_source
+        ),
+        "integrity.source_unchanged": _measured_or_unknown(
+            integrity.get("source_unchanged"), unit="1", source=record_source
+        ),
     }
 
     flux_names = (
@@ -561,10 +613,9 @@ def _point_audit_envelope(
         "convention_complete",
         "physical_flux_closure_eligible",
     )
-    if (
-        declared_flux.get("state") == "derived_from_declared_convention"
-        and _legacy_declared_flux_is_complete(declared_flux)
-    ):
+    if declared_flux.get(
+        "state"
+    ) == "derived_from_declared_convention" and _legacy_declared_flux_is_complete(declared_flux):
         planes = declared_flux.get("planes", {})
         for plane_name in ("incident", "reflected", "transmitted"):
             plane = planes.get(plane_name, {}) if isinstance(planes, dict) else {}
@@ -649,7 +700,10 @@ def _point_audit_envelope(
             limitations=["Internal normalization consistency is not physical flux closure."],
         )
         evidence["absorption.internal_consistency_closure_eligible"] = _record(
-            "derived_from_declared_convention", value=False, value_present=True, source=record_source
+            "derived_from_declared_convention",
+            value=False,
+            value_present=True,
+            source=record_source,
         )
     else:
         internal_state = (
@@ -673,7 +727,10 @@ def _point_audit_envelope(
             value=legacy_level,
             value_present=True,
             source=record_source,
-            limitations=["The legacy evidence level is preserved; component statistics remain in the original artifact."],
+            limitations=[
+                "The legacy evidence level is preserved; component statistics remain in the "
+                "original artifact."
+            ],
         )
     elif legacy_level == "label_only":
         evidence["polarization.physical_incident"] = _record(
@@ -689,11 +746,16 @@ def _point_audit_envelope(
         )
     evidence["polarization.target_to_transverse_ratio"] = _record(
         "unknown",
-        limitations=["Legacy point-audit schema did not normalize a declared target/transverse reference-air ratio."],
+        limitations=[
+            "Legacy point-audit schema did not normalize a declared target/transverse "
+            "reference-air ratio."
+        ],
     )
     evidence["polarization.reference_air_method_valid"] = _record(
         "unknown",
-        limitations=["The point audit does not independently validate the reference-air construction method."],
+        limitations=[
+            "The point audit does not independently validate the reference-air construction method."
+        ],
     )
     structure_field = polarization.get("structure_total_field")
     if isinstance(structure_field, dict) and structure_field.get("complete"):
@@ -704,7 +766,8 @@ def _point_audit_envelope(
             selection_ids.append(selection["named_selection"])
         if isinstance(selection.get("domain_ids"), list):
             selection_ids.extend(
-                entity for entity in selection["domain_ids"]
+                entity
+                for entity in selection["domain_ids"]
                 if isinstance(entity, int) and not isinstance(entity, bool) and entity > 0
             )
         evidence["polarization.structure_total_field"] = _record(
@@ -717,7 +780,9 @@ def _point_audit_envelope(
             expression=f"{provenance.get('physics_tag', 'ewfd')}.Ex/Ey/Ez",
             selection_ids=selection_ids,
             source=record_source,
-            limitations=["Structure total field contains reflection and cannot prove the incident vector."],
+            limitations=[
+                "Structure total field contains reflection and cannot prove the incident vector."
+            ],
         )
     else:
         evidence["polarization.structure_total_field"] = _record(
@@ -726,40 +791,42 @@ def _point_audit_envelope(
         )
 
     envelope: dict[str, Any] = {
-            "schema_name": PHYSICAL_EVIDENCE_SCHEMA_NAME,
-            "schema_version": PHYSICAL_EVIDENCE_SCHEMA_VERSION,
-            "artifact_type": "wave_optics_point_audit",
-            "producer": {
-                "tool": "wave_optics_point_audit",
-                "tool_schema_version": (
-                    str(measurement.get("schema_version", "1"))
-                    if migrated
-                    else "physical-evidence-1"
-                ),
-            },
-            "identity": {
-                "config_id": str(measurement.get("config_id") or outer.get("config_id") or "legacy-unknown"),
-                "config_sha256": _hash64(config_sha256, "legacy config_sha256"),
-                "source_sha256": _hash64(source_sha256, "legacy source_sha256"),
-            },
-            "model": {
-                "component_tag": provenance.get("component_tag"),
-                "physics_tag": provenance.get("physics_tag"),
-                "study_tag": provenance.get("study_tag"),
-                "study_step_tag": provenance.get("study_step_tag"),
-                "mesh_tag": mesh.get("mesh_tag"),
-                "mesh_element_count": mesh.get("element_count"),
-                "mesh_vertex_count": mesh.get("vertex_count"),
-            },
-            "evidence": evidence,
-            "limitations": [
-                (
-                    "Schema-1 fields are preserved without promoting labels or shared normalizations to newer physical evidence."
-                    if migrated
-                    else "Structure total field and port-variable closure retain their diagnostic limitations."
-                ),
-            ],
-        }
+        "schema_name": PHYSICAL_EVIDENCE_SCHEMA_NAME,
+        "schema_version": PHYSICAL_EVIDENCE_SCHEMA_VERSION,
+        "artifact_type": "wave_optics_point_audit",
+        "producer": {
+            "tool": "wave_optics_point_audit",
+            "tool_schema_version": (
+                str(measurement.get("schema_version", "1")) if migrated else "physical-evidence-1"
+            ),
+        },
+        "identity": {
+            "config_id": str(
+                measurement.get("config_id") or outer.get("config_id") or "legacy-unknown"
+            ),
+            "config_sha256": _hash64(config_sha256, "legacy config_sha256"),
+            "source_sha256": _hash64(source_sha256, "legacy source_sha256"),
+        },
+        "model": {
+            "component_tag": provenance.get("component_tag"),
+            "physics_tag": provenance.get("physics_tag"),
+            "study_tag": provenance.get("study_tag"),
+            "study_step_tag": provenance.get("study_step_tag"),
+            "mesh_tag": mesh.get("mesh_tag"),
+            "mesh_element_count": mesh.get("element_count"),
+            "mesh_vertex_count": mesh.get("vertex_count"),
+        },
+        "evidence": evidence,
+        "limitations": [
+            (
+                "Schema-1 fields are preserved without promoting labels or shared "
+                "normalizations to newer physical evidence."
+                if migrated
+                else "Structure total field and port-variable closure retain their "
+                "diagnostic limitations."
+            ),
+        ],
+    }
     if migrated:
         migration = {
             "source_schema_name": "comsol_mcp.wave_optics_point_audit",
@@ -802,9 +869,7 @@ def migrate_legacy_point_audit_file(
     output = Path(output_path).resolve()
     if source == output:
         raise ValueError("migration output must be distinct from the source artifact")
-    source_bytes = source.read_bytes()
-    if len(source_bytes) > MAX_CONTRACT_BYTES:
-        raise ValueError(f"legacy source artifact exceeds {MAX_CONTRACT_BYTES} bytes")
+    source_bytes = read_file_bytes_bounded(source, max_bytes=MAX_CONTRACT_BYTES)
     source_sha256 = hashlib.sha256(source_bytes).hexdigest()
     try:
         payload = json.loads(source_bytes.decode("utf-8"))
@@ -819,15 +884,15 @@ def migrate_legacy_point_audit_file(
         source_hash_basis="file_bytes",
     )
     output_bytes = canonical_json_bytes(migrated) + b"\n"
-    with output.open("xb") as stream:
-        stream.write(output_bytes)
-        stream.flush()
-        os.fsync(stream.fileno())
-    if hashlib.sha256(source.read_bytes()).hexdigest() != source_sha256:
-        raise RuntimeError("legacy source artifact changed during migration")
-    written = json.loads(output.read_text(encoding="utf-8"))
+    written = json.loads(output_bytes.decode("utf-8"))
     if validate_physical_evidence(written) != migrated:
-        raise RuntimeError("written migration artifact failed readback validation")
+        raise RuntimeError("migration artifact failed pre-publication validation")
+    if (
+        hashlib.sha256(read_file_bytes_bounded(source, max_bytes=MAX_CONTRACT_BYTES)).hexdigest()
+        != source_sha256
+    ):
+        raise RuntimeError("legacy source artifact changed during migration")
+    atomic_write_bytes_exclusive(output, output_bytes)
     return deepcopy(migrated)
 
 
@@ -854,14 +919,21 @@ def _validate_rule(rule: Any, index: int) -> dict[str, Any]:
         raise ValueError(f"unsupported validation rule type: {rule_type}")
     required = item.get("required_measurements")
     if not isinstance(required, list) or tuple(required) != spec["required"]:
+        expected = list(spec["required"])
         raise ValueError(
-            f"validation_policy.rules[{index}].required_measurements must exactly equal {list(spec['required'])}"
+            f"validation_policy.rules[{index}].required_measurements must exactly equal {expected}"
         )
-    tolerances = _require_mapping(item.get("tolerances", {}), f"validation_policy.rules[{index}].tolerances")
-    _reject_unknown(tolerances, set(spec["tolerances"]), f"validation_policy.rules[{index}].tolerances")
+    tolerances = _require_mapping(
+        item.get("tolerances", {}), f"validation_policy.rules[{index}].tolerances"
+    )
+    _reject_unknown(
+        tolerances, set(spec["tolerances"]), f"validation_policy.rules[{index}].tolerances"
+    )
     missing_tolerances = sorted(set(spec["required_tolerances"]) - set(tolerances))
     if missing_tolerances:
-        raise ValueError(f"validation_policy.rules[{index}].tolerances is missing {missing_tolerances}")
+        raise ValueError(
+            f"validation_policy.rules[{index}].tolerances is missing {missing_tolerances}"
+        )
     if rule_type == "wavelength_synchronization" and not tolerances:
         raise ValueError("wavelength_synchronization requires absolute_m and/or relative tolerance")
     for name, value in tolerances.items():
@@ -870,8 +942,12 @@ def _validate_rule(rule: Any, index: int) -> dict[str, Any]:
             strict_json_integer(value, label, minimum=0)
         else:
             strict_json_number(value, label, nonnegative=True)
-    assumptions = _require_mapping(item.get("assumptions", {}), f"validation_policy.rules[{index}].assumptions")
-    _reject_unknown(assumptions, set(spec["assumptions"]), f"validation_policy.rules[{index}].assumptions")
+    assumptions = _require_mapping(
+        item.get("assumptions", {}), f"validation_policy.rules[{index}].assumptions"
+    )
+    _reject_unknown(
+        assumptions, set(spec["assumptions"]), f"validation_policy.rules[{index}].assumptions"
+    )
     normalized_assumptions = {
         name: strict_json_boolean(
             assumptions.get(name),
@@ -956,7 +1032,13 @@ def _rule_outcome(rule: Mapping[str, Any], evidence: Mapping[str, Any]) -> dict[
         "required_measurement_states": states,
     }
     if unavailable:
-        result.update({"outcome": "missing", "reason": "required measured evidence is unavailable", "unavailable": unavailable})
+        result.update(
+            {
+                "outcome": "missing",
+                "reason": "required measured evidence is unavailable",
+                "unavailable": unavailable,
+            }
+        )
         return result
 
     tolerances = rule["tolerances"]
@@ -971,11 +1053,12 @@ def _rule_outcome(rule: Mapping[str, Any], evidence: Mapping[str, Any]) -> dict[
     try:
         if rule_type == "passive_rta_bounds":
             margin = strict_json_number(tolerances["margin"], "policy.margin", nonnegative=True)
-            measured = {
-                name: measured_number(f"power.{name}") for name in ("R", "T", "A")
-            }
+            measured = {name: measured_number(f"power.{name}") for name in ("R", "T", "A")}
             passed = all(-margin <= value <= 1.0 + margin for value in measured.values())
-            detail = {"measured": measured, "threshold": {"minimum": -margin, "maximum": 1.0 + margin}}
+            detail = {
+                "measured": measured,
+                "threshold": {"minimum": -margin, "maximum": 1.0 + margin},
+            }
         elif rule_type == "wavelength_synchronization":
             left = measured_number("wavelength.evaluated_parameter_m")
             right = measured_number("wavelength.solved_frequency_m")
@@ -998,7 +1081,10 @@ def _rule_outcome(rule: Mapping[str, Any], evidence: Mapping[str, Any]) -> dict[
                     )
                 )
             passed = all(checks)
-            detail = {"measured": {"absolute_m": absolute, "relative": relative}, "threshold": tolerances}
+            detail = {
+                "measured": {"absolute_m": absolute, "relative": relative},
+                "threshold": tolerances,
+            }
         elif rule_type == "declared_flux_closure":
             incident_raw = measured_number("flux.incident_raw_power_w")
             reflected_raw = measured_number("flux.reflected_raw_power_w")
@@ -1031,17 +1117,24 @@ def _rule_outcome(rule: Mapping[str, Any], evidence: Mapping[str, Any]) -> dict[
                     closure,
                 )
             )
-            signs_valid = all(sign in {-1, 1} for sign in (incident_sign, reflected_sign, transmitted_sign))
+            signs_valid = all(
+                sign in {-1, 1} for sign in (incident_sign, reflected_sign, transmitted_sign)
+            )
             passive_bounds = all(
-                -margin <= value <= 1.0 + margin
-                for value in (r_value, t_value, a_value)
+                -margin <= value <= 1.0 + margin for value in (r_value, t_value, a_value)
             )
             arithmetic_consistent = (
                 incident > 0.0
                 and signs_valid
-                and math.isclose(incident_raw * incident_sign, incident, rel_tol=1e-12, abs_tol=1e-15)
-                and math.isclose(reflected_raw * reflected_sign, reflected, rel_tol=1e-12, abs_tol=1e-15)
-                and math.isclose(transmitted_raw * transmitted_sign, transmitted, rel_tol=1e-12, abs_tol=1e-15)
+                and math.isclose(
+                    incident_raw * incident_sign, incident, rel_tol=1e-12, abs_tol=1e-15
+                )
+                and math.isclose(
+                    reflected_raw * reflected_sign, reflected, rel_tol=1e-12, abs_tol=1e-15
+                )
+                and math.isclose(
+                    transmitted_raw * transmitted_sign, transmitted, rel_tol=1e-12, abs_tol=1e-15
+                )
                 and math.isclose(reflected / incident, r_value, rel_tol=1e-12, abs_tol=1e-15)
                 and math.isclose(transmitted / incident, t_value, rel_tol=1e-12, abs_tol=1e-15)
                 and math.isclose(
@@ -1106,15 +1199,14 @@ def _rule_outcome(rule: Mapping[str, Any], evidence: Mapping[str, Any]) -> dict[
         elif rule_type == "reference_air_polarization_ratio":
             ratio = measured_number("polarization.target_to_transverse_ratio")
             method_valid = values["polarization.reference_air_method_valid"] is True
-            passed = (
-                method_valid
-                and ratio
-                >= strict_json_number(
-                    tolerances["minimum_ratio"], "policy.minimum_ratio", nonnegative=True
-                )
+            passed = method_valid and ratio >= strict_json_number(
+                tolerances["minimum_ratio"], "policy.minimum_ratio", nonnegative=True
             )
             detail = {
-                "measured": {"target_to_transverse_ratio": ratio, "reference_air_method_valid": method_valid},
+                "measured": {
+                    "target_to_transverse_ratio": ratio,
+                    "reference_air_method_valid": method_valid,
+                },
                 "threshold": tolerances["minimum_ratio"],
             }
         elif rule_type == "mesh_evidence_presence":
@@ -1129,7 +1221,9 @@ def _rule_outcome(rule: Mapping[str, Any], evidence: Mapping[str, Any]) -> dict[
         else:  # pragma: no cover - guarded by strict validation
             raise ValueError(f"unsupported rule type: {rule_type}")
     except (TypeError, ValueError, KeyError) as exc:
-        result.update({"outcome": "missing", "reason": f"measured evidence has invalid shape: {exc}"})
+        result.update(
+            {"outcome": "missing", "reason": f"measured evidence has invalid shape: {exc}"}
+        )
         return result
     result.update({"outcome": "pass" if passed else "fail", **detail})
     return result
@@ -1173,7 +1267,9 @@ def example_validation_policies() -> dict[str, dict[str, Any]]:
         },
         "reference_air_polarization_ratio": {
             "rule_type": "reference_air_polarization_ratio",
-            "required_measurements": list(_RULE_SPECS["reference_air_polarization_ratio"]["required"]),
+            "required_measurements": list(
+                _RULE_SPECS["reference_air_polarization_ratio"]["required"]
+            ),
             "tolerances": {"minimum_ratio": 1.0},
             "assumptions": {},
         },
