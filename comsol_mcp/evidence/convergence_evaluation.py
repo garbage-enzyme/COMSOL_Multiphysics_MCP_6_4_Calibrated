@@ -22,6 +22,7 @@ CONVERGENCE_EVALUATION_SCHEMA = "comsol_mcp.convergence_evaluation"
 CONVERGENCE_SCHEMA_VERSION = "1.0.0"
 MAX_CONVERGENCE_LEVELS = 32
 MAX_OPTIONAL_METRICS = 32
+MAX_SENSITIVITY_SUPPORT_ROWS = 1024
 
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 _IDENTIFIER = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]{0,127}$")
@@ -196,6 +197,14 @@ def _normalize_sensitivity(value: Any, label: str) -> dict[str, Any]:
                 row["raw_row_sha256"],
                 f"{measurement_label}.support_rows[{row_index}].raw_row_sha256",
             ))
+        if len(hashes) > MAX_SENSITIVITY_SUPPORT_ROWS:
+            raise ValueError(f"{measurement_label}.support_rows exceeds its limit")
+        if len(hashes) != support_count:
+            raise ValueError(
+                f"{measurement_label}.support_point_count must match support_rows"
+            )
+        if len(hashes) != len(set(hashes)):
+            raise ValueError(f"{measurement_label}.support_rows must be unique")
         normalized_measurements.append({
             "support_point_count": support_count,
             "state": state,
@@ -409,8 +418,22 @@ def _validate_level_summary(value: Any, expected_ordinal: int) -> dict[str, Any]
         if entry.get("state") != "measured" or set(entry) != expected_measurement:
             raise ValueError(f"{measurement_label} measured fields are invalid")
         support_hashes = entry["support_row_hashes"]
-        if not isinstance(support_hashes, list) or not support_hashes:
+        if (
+            not isinstance(support_hashes, list)
+            or not support_hashes
+            or len(support_hashes) > MAX_SENSITIVITY_SUPPORT_ROWS
+        ):
             raise ValueError(f"{measurement_label}.support_row_hashes is invalid")
+        normalized_support_hashes = [
+            _hash(digest, f"{measurement_label}.support_row_hashes")
+            for digest in support_hashes
+        ]
+        if len(normalized_support_hashes) != support_count:
+            raise ValueError(
+                f"{measurement_label}.support_point_count must match support_row_hashes"
+            )
+        if len(normalized_support_hashes) != len(set(normalized_support_hashes)):
+            raise ValueError(f"{measurement_label}.support_row_hashes must be unique")
         normalized_sensitivity_measurements.append({
             "support_point_count": support_count,
             "state": "measured",
@@ -426,10 +449,7 @@ def _validate_level_summary(value: Any, expected_ordinal: int) -> dict[str, Any]
             "quality_factor": None if entry["quality_factor"] is None else _finite(
                 entry["quality_factor"], f"{measurement_label}.quality_factor"
             ),
-            "support_row_hashes": [
-                _hash(digest, f"{measurement_label}.support_row_hashes")
-                for digest in support_hashes
-            ],
+            "support_row_hashes": normalized_support_hashes,
         })
     support_counts = [
         entry["support_point_count"] for entry in normalized_sensitivity_measurements
@@ -469,7 +489,10 @@ def _validate_level_summary(value: Any, expected_ordinal: int) -> dict[str, Any]
     }
     supplied_hash = _hash(item["level_sha256"], f"{label}.level_sha256")
     rebuilt = {**body, "level_sha256": _sha256(body)}
-    if rebuilt["level_sha256"] != supplied_hash or rebuilt != item:
+    if (
+        rebuilt["level_sha256"] != supplied_hash
+        or _canonical_bytes(rebuilt) != _canonical_bytes(item)
+    ):
         raise ValueError(f"{label} is noncanonical or its hash does not match")
     return rebuilt
 
@@ -528,25 +551,44 @@ def validate_convergence_ladder(value: Any) -> dict[str, Any]:
         raise ValueError("convergence ladder fields are invalid")
     if item["schema_name"] != CONVERGENCE_LADDER_SCHEMA or item["schema_version"] != CONVERGENCE_SCHEMA_VERSION:
         raise ValueError("convergence ladder schema is unsupported")
+    ladder_id = _identifier(item["ladder_id"], "ladder.ladder_id")
+    level_count = _positive_count(item["level_count"], "ladder.level_count")
     levels = item["levels"]
     if (
         not isinstance(levels, list)
         or not 2 <= len(levels) <= MAX_CONVERGENCE_LEVELS
-        or item["level_count"] != len(levels)
+        or level_count != len(levels)
     ):
         raise ValueError("convergence ladder level count is invalid")
     normalized = [_validate_level_summary(level, index) for index, level in enumerate(levels)]
     _validate_ladder_invariants(normalized)
-    if item["material_identity_sha256"] != normalized[0]["material_identity_sha256"]:
+    material_identity = _hash(
+        item["material_identity_sha256"], "ladder.material_identity_sha256"
+    )
+    incidence_identity = _hash(
+        item["incidence_identity_sha256"], "ladder.incidence_identity_sha256"
+    )
+    if material_identity != normalized[0]["material_identity_sha256"]:
         raise ValueError("ladder material identity does not match its levels")
-    if item["incidence_identity_sha256"] != normalized[0]["incidence_identity_sha256"]:
+    if incidence_identity != normalized[0]["incidence_identity_sha256"]:
         raise ValueError("ladder incidence identity does not match its levels")
     supplied_hash = _hash(item["ladder_sha256"], "ladder.ladder_sha256")
-    body = dict(item)
-    body.pop("ladder_sha256")
-    if _sha256(body) != supplied_hash:
-        raise ValueError("convergence ladder hash does not match")
-    return deepcopy(item)
+    body = {
+        "schema_name": CONVERGENCE_LADDER_SCHEMA,
+        "schema_version": CONVERGENCE_SCHEMA_VERSION,
+        "ladder_id": ladder_id,
+        "level_count": level_count,
+        "material_identity_sha256": material_identity,
+        "incidence_identity_sha256": incidence_identity,
+        "levels": normalized,
+    }
+    rebuilt = {**body, "ladder_sha256": _sha256(body)}
+    if (
+        rebuilt["ladder_sha256"] != supplied_hash
+        or _canonical_bytes(rebuilt) != _canonical_bytes(item)
+    ):
+        raise ValueError("convergence ladder is noncanonical or its hash does not match")
+    return rebuilt
 
 
 def _nonnegative_optional(value: Any, label: str) -> float | None:

@@ -583,6 +583,79 @@ def test_self_rehashed_malformed_level_summary_still_fails_closed():
         validate_convergence_ladder(malformed)
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("ladder_id", "invalid ladder id"), ("level_count", 3.0)],
+)
+def test_self_rehashed_noncanonical_ladder_fields_fail_closed(field, value):
+    malformed = build_convergence_ladder(
+        ladder_id="three-mesh-ladder", levels=_levels()
+    )
+    malformed[field] = value
+    ladder_body = dict(malformed)
+    ladder_body.pop("ladder_sha256")
+    malformed["ladder_sha256"] = _canonical_hash(ladder_body)
+
+    with pytest.raises(ValueError, match="ladder_id|level_count|noncanonical"):
+        validate_convergence_ladder(malformed)
+
+
+@pytest.mark.parametrize("mutation", ["count_mismatch", "duplicate", "over_cap"])
+def test_self_rehashed_support_rows_bind_count_uniqueness_and_cap(mutation):
+    levels = [
+        _fitted_level(0, 5.0e-6, None),
+        _fitted_level(1, 5.006e-6, "fitted-mesh-0"),
+    ]
+    malformed = build_convergence_ladder(
+        ladder_id="fit-sensitive-ladder", levels=levels
+    )
+    measurements = malformed["levels"][0]["fit_support_sensitivity"][
+        "measurements"
+    ]
+    measurement = measurements[-1] if mutation == "over_cap" else measurements[0]
+    if mutation == "count_mismatch":
+        measurement["support_point_count"] += 1
+    elif mutation == "duplicate":
+        measurement["support_row_hashes"].append(
+            measurement["support_row_hashes"][0]
+        )
+        measurement["support_point_count"] += 1
+    else:
+        measurement["support_row_hashes"] = [
+            hashlib.sha256(f"support-{index}".encode()).hexdigest()
+            for index in range(1025)
+        ]
+        measurement["support_point_count"] = 1025
+    level = malformed["levels"][0]
+    level_body = dict(level)
+    level_body.pop("level_sha256")
+    level["level_sha256"] = _canonical_hash(level_body)
+    ladder_body = dict(malformed)
+    ladder_body.pop("ladder_sha256")
+    malformed["ladder_sha256"] = _canonical_hash(ladder_body)
+
+    with pytest.raises(ValueError, match="support"):
+        validate_convergence_ladder(malformed)
+
+
+def test_self_rehashed_equal_but_noncanonical_numeric_form_fails_closed():
+    malformed = build_convergence_ladder(
+        ladder_id="three-mesh-ladder", levels=_levels()
+    )
+    level = malformed["levels"][0]
+    assert level["optional_field_metrics"]["field_integral"]["value"] == 1.0
+    level["optional_field_metrics"]["field_integral"]["value"] = 1
+    level_body = dict(level)
+    level_body.pop("level_sha256")
+    level["level_sha256"] = _canonical_hash(level_body)
+    ladder_body = dict(malformed)
+    ladder_body.pop("ladder_sha256")
+    malformed["ladder_sha256"] = _canonical_hash(ladder_body)
+
+    with pytest.raises(ValueError, match="noncanonical"):
+        validate_convergence_ladder(malformed)
+
+
 def test_missing_middle_level_and_non_governing_missing_evidence_fail_closed():
     levels = _levels()
     del levels[1]

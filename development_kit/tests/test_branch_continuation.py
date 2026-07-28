@@ -736,7 +736,11 @@ class TestBranchContinuationPlanning:
             states_id="measured-recovery", states=[normal, boundary, recovered]
         )
         recovered_plan = plan_branch_continuation(
-            recovered_states, _continuation_policy(guard_window_m=guard)
+            recovered_states,
+            _continuation_policy(
+                guard_window_m=guard,
+                stop_policy="stop_at_first_unresolved",
+            ),
         )
         recovery = recovered_plan["coordinate_transitions"][1]
         assert request["expansion_window_m"] == recovered["search_window_m"]
@@ -930,6 +934,12 @@ class TestBranchContinuationPlanning:
         assert plan["scientific_disposition"] == "residual"
         assert plan["reason_code"] == "branch_not_followed"
         assert plan["branch_followed_transition_count"] == 0
+        transition = plan["coordinate_transitions"][0]
+        request = transition["next_request_window_m"]
+        previous_peak = transition["previous_peak_wavelength_m"]
+        assert (request["lower_m"] + request["upper_m"]) / 2 == pytest.approx(
+            previous_peak
+        )
 
     def test_peak_beyond_guard_at_declared_cap_is_unresolved(self):
         states_input = _build_dispersive_states(3, shift=0.8e-6)
@@ -1163,6 +1173,41 @@ def test_self_rehashed_malformed_state_summary_still_fails_closed():
     malformed["states_sha256"] = _canonical_hash(states_body)
 
     with pytest.raises(ValueError, match="numeric"):
+        validate_continuation_states(malformed)
+
+
+def test_self_rehashed_noncanonical_states_id_fails_closed():
+    malformed = build_continuation_states(
+        states_id="dispersive", states=_build_dispersive_states(3, shift=0.1e-6)
+    )
+    malformed["states_id"] = "invalid states id"
+    states_body = dict(malformed)
+    states_body.pop("states_sha256")
+    malformed["states_sha256"] = _canonical_hash(states_body)
+
+    with pytest.raises(ValueError, match="states_id|noncanonical"):
+        validate_continuation_states(malformed)
+
+
+def test_self_rehashed_unmeasured_candidate_cannot_retain_metrics():
+    malformed = build_continuation_states(
+        states_id="dispersive", states=_build_dispersive_states(3, shift=0.1e-6)
+    )
+    state = malformed["states"][1]
+    candidate = state["candidate"]
+    assert candidate["fwhm_m"] is not None
+    assert candidate["quality_factor"] is not None
+    candidate["measurement_state"] = "not_measured"
+    candidate["peak_wavelength_m"] = None
+    candidate["peak_response_value"] = None
+    state_body = dict(state)
+    state_body.pop("state_sha256")
+    state["state_sha256"] = _canonical_hash(state_body)
+    states_body = dict(malformed)
+    states_body.pop("states_sha256")
+    malformed["states_sha256"] = _canonical_hash(states_body)
+
+    with pytest.raises(ValueError, match="not_measured|noncanonical"):
         validate_continuation_states(malformed)
 
 

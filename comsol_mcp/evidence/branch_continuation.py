@@ -460,11 +460,11 @@ def _validate_state_summary(value: Any, expected_ordinal: int) -> dict[str, Any]
             if complete else None
         ),
         "fwhm_m": (
-            None if candidate["fwhm_m"] is None
+            None if not complete or candidate["fwhm_m"] is None
             else _finite(candidate["fwhm_m"], f"{label}.candidate.fwhm_m")
         ),
         "quality_factor": (
-            None if candidate["quality_factor"] is None
+            None if not complete or candidate["quality_factor"] is None
             else _finite(candidate["quality_factor"], f"{label}.candidate.quality_factor")
         ),
         "boundary_side": candidate["boundary_side"],
@@ -523,7 +523,10 @@ def _validate_state_summary(value: Any, expected_ordinal: int) -> dict[str, Any]
     }
     supplied_hash = _hash(item["state_sha256"], f"{label}.state_sha256")
     rebuilt = {**body, "state_sha256": _sha256(body)}
-    if rebuilt["state_sha256"] != supplied_hash or rebuilt != item:
+    if (
+        rebuilt["state_sha256"] != supplied_hash
+        or _canonical_bytes(rebuilt) != _canonical_bytes(item)
+    ):
         raise ValueError(f"{label} is noncanonical or its hash does not match")
     return rebuilt
 
@@ -602,31 +605,52 @@ def validate_continuation_states(value: Any) -> dict[str, Any]:
         or item["schema_version"] != BRANCH_CONTINUATION_SCHEMA_VERSION
     ):
         raise ValueError("continuation states schema is unsupported")
+    states_id = _identifier(item["states_id"], "continuation_states.states_id")
+    state_count = item["state_count"]
+    if isinstance(state_count, bool) or not isinstance(state_count, int):
+        raise ValueError("continuation states count is invalid")
     states = item["states"]
     if (
         not isinstance(states, list)
         or not 2 <= len(states) <= MAX_CONTINUATION_STATES
-        or item["state_count"] != len(states)
+        or state_count != len(states)
     ):
         raise ValueError("continuation states count is invalid")
     normalized = [
         _validate_state_summary(state, index) for index, state in enumerate(states)
     ]
     _validate_states_invariants(normalized)
-    if item["coordinate_name"] != normalized[0]["coordinate_name"]:
+    coordinate_name = normalized[0]["coordinate_name"]
+    coordinate_unit = normalized[0]["coordinate_unit"]
+    polarization = normalized[0]["polarization"]
+    material_identity = normalized[0]["material_identity_sha256"]
+    if item["coordinate_name"] != coordinate_name:
         raise ValueError("continuation states coordinate_name does not match its states")
-    if item["coordinate_unit"] != normalized[0]["coordinate_unit"]:
+    if item["coordinate_unit"] != coordinate_unit:
         raise ValueError("continuation states coordinate_unit does not match its states")
-    if item["polarization"] != normalized[0]["polarization"]:
+    if item["polarization"] != polarization:
         raise ValueError("continuation states polarization does not match its states")
-    if item["material_identity_sha256"] != normalized[0]["material_identity_sha256"]:
+    if item["material_identity_sha256"] != material_identity:
         raise ValueError("continuation states material identity does not match its states")
     supplied_hash = _hash(item["states_sha256"], "continuation_states.states_sha256")
-    body = dict(item)
-    body.pop("states_sha256")
-    if _sha256(body) != supplied_hash:
-        raise ValueError("continuation states hash does not match")
-    return deepcopy(item)
+    body = {
+        "schema_name": BRANCH_CONTINUATION_STATES_SCHEMA,
+        "schema_version": BRANCH_CONTINUATION_SCHEMA_VERSION,
+        "states_id": states_id,
+        "state_count": state_count,
+        "coordinate_name": coordinate_name,
+        "coordinate_unit": coordinate_unit,
+        "polarization": polarization,
+        "material_identity_sha256": material_identity,
+        "states": normalized,
+    }
+    rebuilt = {**body, "states_sha256": _sha256(body)}
+    if (
+        rebuilt["states_sha256"] != supplied_hash
+        or _canonical_bytes(rebuilt) != _canonical_bytes(item)
+    ):
+        raise ValueError("continuation states are noncanonical or their hash does not match")
+    return rebuilt
 
 
 _POLICY_FIELDS = {
@@ -967,13 +991,16 @@ def _one_transition(
     if expansion_required:
         candidate_request = expansion_window
     else:
-        seed_peak = (
-            current_peak
-            if current_peak is not None
-            else selected_candidate
-            if selected_candidate is not None
-            else previous_peak
-        )
+        if branch_followed:
+            seed_peak = (
+                selected_candidate
+                if selected_candidate is not None
+                else current_peak
+            )
+        elif previous["candidate"]["classification"] != "boundary_high":
+            seed_peak = previous_peak
+        else:
+            seed_peak = None
         candidate_request = (
             _compute_next_request(seed_peak, guard, bounds)
             if seed_peak is not None else None
@@ -1058,6 +1085,7 @@ def plan_branch_continuation(
         if (
             policy["stop_policy"] == "stop_at_first_unresolved"
             and not transition["branch_followed"]
+            and not transition["expansion_requested"]
         ):
             stopped_after_state_index = index
             break
