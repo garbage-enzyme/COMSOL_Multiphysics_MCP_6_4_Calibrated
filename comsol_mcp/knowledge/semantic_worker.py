@@ -7,13 +7,11 @@ import json
 import os
 import secrets
 import socketserver
-import sys
 import threading
 import time
 from typing import Any
 
 from .semantic_contracts import PUBLIC_LIMITS, WORKER_PROTOCOL_SCHEMA_VERSION
-
 
 MAXIMUM_REQUEST_BYTES = 16_384
 TOKEN_ENVIRONMENT_VARIABLE = "COMSOL_SEMANTIC_SESSION_TOKEN"
@@ -83,6 +81,12 @@ class _RequestHandler(socketserver.StreamRequestHandler):
     server: "_WorkerServer"
 
     def handle(self) -> None:
+        try:
+            self._handle_bounded()
+        finally:
+            self.server.state.capacity.release()
+
+    def _handle_bounded(self) -> None:
         self.connection.settimeout(PUBLIC_LIMITS["query_deadline_seconds"])
         raw = self.rfile.readline(MAXIMUM_REQUEST_BYTES + 1)
         if len(raw) > MAXIMUM_REQUEST_BYTES or not raw.endswith(b"\n"):
@@ -104,14 +108,8 @@ class _RequestHandler(socketserver.StreamRequestHandler):
         if not isinstance(request_id, str) or not request_id or len(request_id) > 128:
             self._write(_response(None, success=False, error={"code": "invalid_request_id", "message": "request_id is required"}))
             return
-        if not self.server.state.capacity.acquire(blocking=False):
-            self._write(_response(request_id, success=False, error={"code": "busy", "message": "worker queue is full"}))
-            return
-        try:
-            with self.server.state.active:
-                self._dispatch(request_id, request)
-        finally:
-            self.server.state.capacity.release()
+        with self.server.state.active:
+            self._dispatch(request_id, request)
 
     def _dispatch(self, request_id: str, request: dict[str, Any]) -> None:
         operation = request.get("operation")
@@ -157,7 +155,25 @@ class _RequestHandler(socketserver.StreamRequestHandler):
             os._exit(74)
 
     def _write(self, response: dict[str, Any]) -> None:
-        encoded = json.dumps(response, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode("utf-8") + b"\n"
+        try:
+            encoded = json.dumps(
+                response,
+                ensure_ascii=False,
+                allow_nan=False,
+                separators=(",", ":"),
+            ).encode("utf-8") + b"\n"
+        except (TypeError, ValueError):
+            encoded = json.dumps(
+                _response(
+                    response.get("request_id"),
+                    success=False,
+                    error={
+                        "code": "invalid_response",
+                        "message": "worker response is not finite JSON",
+                    },
+                ),
+                separators=(",", ":"),
+            ).encode("utf-8") + b"\n"
         if len(encoded) > PUBLIC_LIMITS["maximum_response_bytes"]:
             encoded = json.dumps(_response(response.get("request_id"), success=False, error={"code": "response_too_large", "message": "response exceeds public limit"}), separators=(",", ":")).encode("utf-8") + b"\n"
         self.wfile.write(encoded)
@@ -176,6 +192,29 @@ class _WorkerServer(socketserver.ThreadingTCPServer):
     def __init__(self, address: tuple[str, int], state: _WorkerState):
         self.state = state
         super().__init__(address, _RequestHandler)
+
+    def process_request(self, request: Any, client_address: Any) -> None:
+        if not self.state.capacity.acquire(blocking=False):
+            try:
+                request.sendall(
+                    json.dumps(
+                        _response(
+                            None,
+                            success=False,
+                            error={"code": "busy", "message": "worker queue is full"},
+                        ),
+                        separators=(",", ":"),
+                    ).encode("utf-8")
+                    + b"\n"
+                )
+            finally:
+                self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except Exception:
+            self.state.capacity.release()
+            raise
 
 
 def main() -> None:

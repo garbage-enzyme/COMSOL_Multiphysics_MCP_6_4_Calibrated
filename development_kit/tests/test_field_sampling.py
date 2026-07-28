@@ -4,9 +4,9 @@ from copy import deepcopy
 
 import numpy as np
 import pytest
-
 from src.evidence.field_bundle import normalize_field_evidence_request
 from src.evidence.field_sampling import select_field_slice_samples
+
 from development_kit.tests.test_field_bundle import _request
 
 
@@ -101,6 +101,22 @@ def test_raw_arrays_must_be_finite_aligned_numeric_and_bounded():
     ):
         with pytest.raises(ValueError, match=message):
             select_field_slice_samples(**value)
+
+
+def test_oversized_coordinate_is_rejected_before_array_conversion():
+    request, kwargs = _samples()
+
+    class OversizedCoordinate:
+        def __len__(self):
+            return request["limits"]["max_raw_points"] + 1
+
+        def __array__(self, *_args, **_kwargs):
+            pytest.fail("oversized coordinate must not be converted")
+
+    kwargs["coordinates"]["x"] = OversizedCoordinate()
+
+    with pytest.raises(ValueError, match="caller-declared point limit"):
+        select_field_slice_samples(**kwargs)
 
 
 def test_coordinate_and_quantity_keys_are_exact_and_view_is_bound():

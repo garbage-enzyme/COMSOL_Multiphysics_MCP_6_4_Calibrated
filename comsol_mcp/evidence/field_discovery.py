@@ -7,11 +7,11 @@ import json
 import re
 from typing import Any
 
-
 FIELD_DATASET_DISCOVERY_SCHEMA = "comsol_mcp.field_dataset_discovery"
 FIELD_DATASET_DISCOVERY_VERSION = "1.0.0"
 MAX_DISCOVERED_DATASETS = 64
 MAX_DISCOVERED_COMPONENTS = 32
+MAX_DISCOVERED_SOLUTIONS = 64
 MAX_DISCOVERY_TEXT = 4096
 
 _TAG = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,127}$")
@@ -47,11 +47,18 @@ def _positive_limit(value: object, label: str, maximum: int) -> int:
     return value
 
 
-def _children(model: Any, group: str) -> list[Any]:
+def _children(model: Any, group: str, limit: int) -> list[Any]:
     try:
-        return list(model / group)
+        collection = iter(model / group)
     except Exception as exc:
         raise ValueError(f"MPh {group} collection is unavailable") from exc
+    children = []
+    for index, child in enumerate(collection):
+        if index >= limit:
+            singular = group[:-1] if group.endswith("s") else group
+            raise ValueError(f"{singular} count exceeds its discovery limit")
+        children.append(child)
+    return children
 
 
 def discover_field_datasets(
@@ -67,13 +74,9 @@ def discover_field_datasets(
     component_limit = _positive_limit(
         max_components, "max_components", MAX_DISCOVERED_COMPONENTS
     )
-    components = _children(model, "components")
-    datasets = _children(model, "datasets")
-    solutions = _children(model, "solutions")
-    if len(components) > component_limit:
-        raise ValueError("component count exceeds the caller-declared discovery limit")
-    if len(datasets) > dataset_limit:
-        raise ValueError("dataset count exceeds the caller-declared discovery limit")
+    components = _children(model, "components", component_limit)
+    datasets = _children(model, "datasets", dataset_limit)
+    solutions = _children(model, "solutions", MAX_DISCOVERED_SOLUTIONS)
 
     component_rows = [
         {
@@ -169,5 +172,6 @@ __all__ = [
     "FIELD_DATASET_DISCOVERY_VERSION",
     "MAX_DISCOVERED_COMPONENTS",
     "MAX_DISCOVERED_DATASETS",
+    "MAX_DISCOVERED_SOLUTIONS",
     "discover_field_datasets",
 ]

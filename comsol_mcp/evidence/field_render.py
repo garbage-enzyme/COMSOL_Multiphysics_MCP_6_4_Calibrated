@@ -5,12 +5,12 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from pathlib import Path
 import re
 import subprocess
 import sys
+import tempfile
+from pathlib import Path
 from typing import Any, Mapping
-
 
 MAX_RENDER_VIEWS = 2
 MAX_RENDER_ARRAY_BYTES = 256 * 1024 * 1024
@@ -108,24 +108,40 @@ def render_field_png_bundle(
         "views": normalized,
     }
     try:
-        completed = subprocess.run(
-            [sys.executable, "-m", "comsol_mcp.evidence.field_plot_worker"],
-            input=json.dumps(payload, ensure_ascii=False),
-            text=True,
-            capture_output=True,
-            timeout=float(timeout_seconds),
-            check=False,
-            creationflags=(getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0),
-        )
-        if len(completed.stdout.encode("utf-8")) > MAX_RENDER_RESPONSE_BYTES or len(
-            completed.stderr.encode("utf-8")
-        ) > MAX_RENDER_RESPONSE_BYTES:
-            raise RuntimeError("field plot worker response exceeded its bound")
-        if completed.returncode != 0:
-            raise RuntimeError(
-                f"field plot worker failed: {completed.stderr.strip()[:2000]}"
+        command = [sys.executable, "-m", "comsol_mcp.evidence.field_plot_worker"]
+        encoded_input = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        with tempfile.TemporaryFile() as stdout_file, tempfile.TemporaryFile() as stderr_file:
+            process = subprocess.Popen(
+                command,
+                stdin=subprocess.PIPE,
+                stdout=stdout_file,
+                stderr=stderr_file,
+                creationflags=(
+                    getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
+                ),
             )
-        response = json.loads(completed.stdout)
+            try:
+                process.communicate(input=encoded_input, timeout=float(timeout_seconds))
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+                raise
+            stdout_file.seek(0)
+            stderr_file.seek(0)
+            stdout_bytes = stdout_file.read(MAX_RENDER_RESPONSE_BYTES + 1)
+            stderr_bytes = stderr_file.read(MAX_RENDER_RESPONSE_BYTES + 1)
+        if (
+            len(stdout_bytes) > MAX_RENDER_RESPONSE_BYTES
+            or len(stderr_bytes) > MAX_RENDER_RESPONSE_BYTES
+        ):
+            raise RuntimeError("field plot worker response exceeded its bound")
+        stdout = stdout_bytes.decode("utf-8")
+        stderr = stderr_bytes.decode("utf-8", errors="replace")
+        if process.returncode != 0:
+            raise RuntimeError(
+                f"field plot worker failed: {stderr.strip()[:2000]}"
+            )
+        response = json.loads(stdout)
         if response.get("success") is not True:
             raise RuntimeError("field plot worker did not report success")
         limits_by_view = {

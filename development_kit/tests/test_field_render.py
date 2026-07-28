@@ -5,7 +5,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-
+import src.evidence.field_render as field_render_module
 from src.evidence.field_render import render_field_png_bundle
 
 
@@ -142,3 +142,33 @@ def test_renderer_rejects_hash_policy_and_log_failures_without_residue(tmp_path)
             output_root=output,
         )
     assert not list(output.glob("*.png"))
+
+
+def test_worker_output_is_redirected_and_read_with_a_hard_bound(tmp_path, monkeypatch):
+    array = tmp_path / "bounded.npz"
+    digest = _array(array)
+
+    class FakeProcess:
+        returncode = 0
+
+        def __init__(self, _command, **kwargs):
+            assert kwargs["stdout"] is not field_render_module.subprocess.PIPE
+            assert kwargs["stderr"] is not field_render_module.subprocess.PIPE
+            self.stdout = kwargs["stdout"]
+
+        def communicate(self, *, input, timeout):
+            assert input and timeout > 0
+            self.stdout.write(b"x" * (field_render_module.MAX_RENDER_RESPONSE_BYTES + 1))
+
+    monkeypatch.setattr(field_render_module.subprocess, "Popen", FakeProcess)
+
+    with pytest.raises(RuntimeError, match="response exceeded"):
+        render_field_png_bundle(
+            views=[_view("target", array, digest)],
+            quantity_name="abs_ex",
+            quantity_unit="V/m",
+            coordinate_unit="um",
+            color_scale="linear",
+            shared_color_limits=False,
+            output_root=tmp_path / "output",
+        )

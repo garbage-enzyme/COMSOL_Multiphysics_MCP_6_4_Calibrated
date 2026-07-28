@@ -2,25 +2,26 @@
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
 import json
-import os
-from pathlib import Path
 import socket
 import subprocess
 import sys
 import threading
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
+from io import BytesIO
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
-
+from src.jobs.manager import JobManager
+from src.knowledge.lexical_manual import build_index_from_records, search_index
 from src.knowledge.semantic_contracts import PUBLIC_LIMITS, WORKER_PROTOCOL_SCHEMA_VERSION
 from src.knowledge.semantic_process import SemanticWorkerManager
-from src.knowledge.lexical_manual import build_index_from_records, search_index
+from src.knowledge.semantic_worker import _RequestHandler, _WorkerServer
 from src.tools.capabilities import get_capabilities
 from src.tools.ownership import SolverOwnership
-from src.jobs.manager import JobManager
 
 
 def _raw_request(
@@ -153,6 +154,39 @@ def test_queue_overflow_is_bounded_and_worker_recovers():
         busy = [item for item in responses if not item["success"] and item["error"]["code"] == "busy"]
         assert busy
         assert manager.health()["success"] is True
+
+
+def test_queue_capacity_is_reserved_before_handler_thread_creation():
+    state = SimpleNamespace(capacity=threading.BoundedSemaphore(1))
+    assert state.capacity.acquire(blocking=False)
+    server = object.__new__(_WorkerServer)
+    server.state = state
+    server.shutdown_request = lambda _request: None
+
+    class Request:
+        def __init__(self):
+            self.payload = b""
+
+        def sendall(self, payload):
+            self.payload += payload
+
+    request = Request()
+    server.process_request(request, ("127.0.0.1", 1))
+
+    assert json.loads(request.payload)["error"]["code"] == "busy"
+
+
+def test_unserializable_worker_response_uses_stable_json_fallback():
+    handler = object.__new__(_RequestHandler)
+    handler.wfile = BytesIO()
+
+    handler._write(
+        {"request_id": "response-1", "success": True, "value": object()}
+    )
+
+    response = json.loads(handler.wfile.getvalue())
+    assert response["success"] is False
+    assert response["error"]["code"] == "invalid_response"
 
 
 def test_stale_identity_refuses_action_until_exact_record_is_restored():

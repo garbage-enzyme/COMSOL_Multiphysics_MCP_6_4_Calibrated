@@ -28,10 +28,22 @@ def select_field_slice_samples(
         raise ValueError("coordinates must contain exactly x, y, and z")
     coordinate_arrays: dict[str, Any] = {}
     raw_count: int | None = None
+    point_limit = request_value["limits"]["max_raw_points"]
     for axis in ("x", "y", "z"):
-        values = np.asarray(coordinates[axis])
+        raw_values = coordinates[axis]
+        try:
+            declared_count = len(raw_values)
+        except TypeError:
+            declared_count = None
+        if declared_count is not None and declared_count > point_limit:
+            raise ValueError("raw field samples exceed the caller-declared point limit")
+        values = np.asarray(raw_values)
         if values.ndim != 1 or values.dtype.kind not in "fiu":
             raise ValueError(f"coordinates.{axis} must be a one-dimensional numeric array")
+        if values.size > point_limit:
+            raise ValueError("raw field samples exceed the caller-declared point limit")
+        if raw_count is not None and values.size != raw_count:
+            raise ValueError("all coordinate arrays must have the same length")
         values = values.astype(np.float64, copy=False)
         if not np.all(np.isfinite(values)):
             raise ValueError(f"coordinates.{axis} must contain only finite values")
@@ -39,10 +51,6 @@ def select_field_slice_samples(
             raw_count = int(values.size)
             if raw_count <= 0:
                 raise ValueError("raw field samples must not be empty")
-            if raw_count > request_value["limits"]["max_raw_points"]:
-                raise ValueError("raw field samples exceed the caller-declared point limit")
-        elif values.size != raw_count:
-            raise ValueError("all coordinate arrays must have the same length")
         coordinate_arrays[axis] = values
     if raw_count is None:
         raise RuntimeError("coordinate normalization produced no sample count")
@@ -54,7 +62,16 @@ def select_field_slice_samples(
         raise ValueError("quantities must contain exactly the requested expressions")
     quantity_arrays: dict[str, Any] = {}
     for name in expression_names:
-        values = np.asarray(quantities[name])
+        raw_values = quantities[name]
+        try:
+            declared_count = len(raw_values)
+        except TypeError:
+            declared_count = None
+        if declared_count is not None and declared_count != raw_count:
+            raise ValueError(
+                f"quantities.{name} must be a one-dimensional numeric array matching coordinates"
+            )
+        values = np.asarray(raw_values)
         if values.ndim != 1 or values.size != raw_count or values.dtype.kind not in "fiu":
             raise ValueError(
                 f"quantities.{name} must be a one-dimensional numeric array matching coordinates"

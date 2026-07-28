@@ -3,7 +3,6 @@ from __future__ import annotations
 import builtins
 
 import pytest
-
 from src.evidence.field_discovery import discover_field_datasets
 
 
@@ -115,6 +114,30 @@ def test_discovery_limits_fail_before_unbounded_response():
         discover_field_datasets(model, max_components=2)
     with pytest.raises(ValueError, match="dataset count exceeds"):
         discover_field_datasets(model, max_datasets=2)
+
+
+def test_discovery_stops_iterating_at_the_declared_limit():
+    class CountingChildren:
+        def __init__(self):
+            self.yielded = 0
+
+        def __iter__(self):
+            while True:
+                self.yielded += 1
+                yield _Node(
+                    f"Component {self.yielded}",
+                    f"comp{self.yielded}",
+                    "Component",
+                )
+
+    children = CountingChildren()
+    model = _Model()
+    model.groups["components"] = children
+
+    with pytest.raises(ValueError, match="component count exceeds"):
+        discover_field_datasets(model, max_components=2)
+
+    assert children.yielded == 3
 
 
 def test_discovery_rejects_duplicate_names_tags_and_invalid_clientapi_tags():
