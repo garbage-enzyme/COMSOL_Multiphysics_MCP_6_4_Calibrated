@@ -196,6 +196,16 @@ class _WorkerServer(socketserver.ThreadingTCPServer):
     def process_request(self, request: Any, client_address: Any) -> None:
         if not self.state.capacity.acquire(blocking=False):
             try:
+                # Windows resets a TCP connection closed with unread request bytes,
+                # which can discard the bounded busy response. Drain one bounded
+                # line without parsing or authenticating it before replying.
+                request.settimeout(0.1)
+                remaining = MAXIMUM_REQUEST_BYTES + 1
+                while remaining > 0:
+                    block = request.recv(min(4096, remaining))
+                    if not block or b"\n" in block:
+                        break
+                    remaining -= len(block)
                 request.sendall(
                     json.dumps(
                         _response(
@@ -207,6 +217,8 @@ class _WorkerServer(socketserver.ThreadingTCPServer):
                     ).encode("utf-8")
                     + b"\n"
                 )
+            except OSError:
+                pass
             finally:
                 self.shutdown_request(request)
             return

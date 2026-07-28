@@ -166,6 +166,16 @@ def test_queue_capacity_is_reserved_before_handler_thread_creation():
     class Request:
         def __init__(self):
             self.payload = b""
+            self.timeout = None
+            self.request = b'{"request_id":"rejected"}\n'
+
+        def settimeout(self, timeout):
+            self.timeout = timeout
+
+        def recv(self, maximum):
+            block = self.request[:maximum]
+            self.request = self.request[maximum:]
+            return block
 
         def sendall(self, payload):
             self.payload += payload
@@ -174,6 +184,8 @@ def test_queue_capacity_is_reserved_before_handler_thread_creation():
     server.process_request(request, ("127.0.0.1", 1))
 
     assert json.loads(request.payload)["error"]["code"] == "busy"
+    assert request.timeout == 0.1
+    assert request.request == b""
 
 
 def test_unserializable_worker_response_uses_stable_json_fallback():
