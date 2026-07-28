@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+from importlib import import_module
 from importlib.metadata import version
 import json
 import math
@@ -17,11 +18,18 @@ import uuid
 
 import psutil
 
-from comsol_mcp.jobs.store import atomic_write_json
-from comsol_mcp.tools.ownership import SolverOwnership, _command_signature
-
-
 ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) in sys.path:
+    sys.path.remove(str(ROOT))
+sys.path.insert(0, str(ROOT))
+
+lifecycle_module = import_module("comsol_mcp.shared_session.lifecycle")
+atomic_write_json = import_module("comsol_mcp.jobs.store").atomic_write_json
+ownership_module = import_module("comsol_mcp.tools.ownership")
+SolverOwnership = ownership_module.SolverOwnership
+_command_signature = ownership_module._command_signature
+
+
 EXPECTED_BACKEND = {"major": 6, "minor": 4, "patch": 0, "build": 293}
 
 
@@ -273,6 +281,42 @@ def _run_worker(output: Path, cores: int) -> int:
         study = jm.study().create("std1")
         study.create("step1", "Stationary")
         study.run()
+
+        revision_source = Path(lifecycle_module.__file__).resolve()
+        try:
+            revision_source_relative = str(revision_source.relative_to(ROOT))
+        except ValueError as exc:
+            raise RuntimeError(
+                "licensed revision reader was not imported from the bound repository"
+            ) from exc
+        revision_structural, revision_state = (
+            lifecycle_module._default_model_revision_reader(
+                client, str(jm.tag())
+            )
+        )
+        required_revision_groups = {
+            "geometries",
+            "physics",
+            "materials",
+            "meshes",
+            "studies",
+            "solutions",
+        }
+        result["shared_model_revision"] = {
+            "structural": revision_structural,
+            "state": revision_state,
+            "required_groups": sorted(required_revision_groups),
+            "model_wrapper_module": model.__class__.__module__,
+            "reader_source": revision_source_relative,
+            "verified": False,
+        }
+        if not required_revision_groups.issubset(
+            revision_structural.get("model_tree", {})
+        ) or not required_revision_groups.issubset(
+            revision_state.get("model_tree", {})
+        ):
+            raise RuntimeError("licensed model revision tree is incomplete")
+        result["shared_model_revision"]["verified"] = True
 
         measured = float(model.evaluate("2*es.intWe/(1[V])^2", "pF").reshape(-1)[0])
         theory = 8.8541878128e-12 * 2.1 * math.pow(0.01, 2) / 0.001 * 1e12

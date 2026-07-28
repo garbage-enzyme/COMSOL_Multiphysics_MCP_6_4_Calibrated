@@ -302,14 +302,17 @@ def build_shared_model_lock(
         raise ValueError("shared model collaboration mode is unsupported")
     process = _normalize_process_identity(mcp_process)
     source = _normalize_immutable_source(immutable_source)
+    normalized_session_acquisition_id = session_acquisition_id.casefold()
     body = {
         "schema_name": SHARED_MODEL_LOCK_SCHEMA,
         "schema_version": SHARED_MODEL_LOCK_VERSION,
         "lock_id": hashlib.sha256(
-            f"{session_acquisition_id}:{model.identity_sha256}".encode("ascii")
+            f"{normalized_session_acquisition_id}:{model.identity_sha256}".encode(
+                "ascii"
+            )
         ).hexdigest()[:32],
         "attached_server": attached_server.to_dict(),
-        "session_acquisition_id": session_acquisition_id.casefold(),
+        "session_acquisition_id": normalized_session_acquisition_id,
         "model": model.to_dict(),
         "revision": revision.to_dict(),
         "collaboration_mode": collaboration_mode,

@@ -7,11 +7,13 @@ import json
 from pathlib import Path
 
 import pytest
+import src.shared_session.lifecycle as lifecycle_module
 
 from src.shared_session.contracts import SHARED_SERVER_FEATURE_ENV
 from src.shared_session.lifecycle import (
     SharedSessionManager,
     _default_model_inventory_reader,
+    _default_model_revision_reader,
     _default_save_copy_writer,
 )
 from src.tools.ownership import _command_signature
@@ -128,6 +130,74 @@ class InventoryClient:
         return self._models
 
 
+class RevisionNode:
+    def __init__(self, path, tag, node_type, properties=None, children=None):
+        self.path = path
+        self._tag = tag
+        self._type = node_type
+        self._properties = properties or {}
+        self._children = children or []
+
+    def __str__(self):
+        return self.path
+
+    def tag(self):
+        return self._tag
+
+    def type(self):
+        return self._type
+
+    def properties(self):
+        return self._properties
+
+    def children(self):
+        return self._children
+
+
+class RevisionModel:
+    __module__ = "mph.model"
+
+    def __init__(self):
+        self.java = FakeJavaModel("Model_1", "Shared", "")
+        self.groups = {
+            group: RevisionNode(group, None, None)
+            for group in lifecycle_module.REVISION_TREE_GROUPS
+        }
+        self._parameters = {"gap": "period/10"}
+        self._descriptions = {"gap": "geometry dependency"}
+
+    def __truediv__(self, group):
+        return self.groups[group]
+
+    def parameters(self, evaluate=False):
+        assert evaluate is False
+        return dict(self._parameters)
+
+    def descriptions(self):
+        return dict(self._descriptions)
+
+
+def _revision_tree_model():
+    model = RevisionModel()
+    for group, node_type in (
+        ("geometries", "Block"),
+        ("physics", "ElectromagneticWaves"),
+        ("materials", "Common"),
+        ("meshes", "FreeTri"),
+        ("studies", "Frequency"),
+        ("solutions", "SolverSequence"),
+    ):
+        model.groups[group]._children = [
+            RevisionNode(
+                f"{group}/{group[:-1]}1",
+                f"{group[:3]}1",
+                node_type,
+                {"dependency": "gap", "setting": "baseline"},
+            )
+        ]
+    return model
+
+
 def _inventory(models=None):
     return models if models is not None else [
         {"tag": "Model_1", "label": "Shared", "file_path": None, "unsaved": True}
@@ -215,6 +285,57 @@ def test_default_snapshot_writer_uses_clientapi_save_copy_overload(tmp_path):
     )
 
     assert model.java.save_calls == [(str(target), True)]
+
+
+def test_default_revision_reader_hashes_consequential_model_tree_state():
+    baseline_model = _revision_tree_model()
+    baseline_structural, baseline_state = _default_model_revision_reader(
+        InventoryClient([baseline_model]), "Model_1"
+    )
+
+    for group in (
+        "geometries",
+        "physics",
+        "materials",
+        "meshes",
+        "studies",
+        "solutions",
+    ):
+        changed_model = _revision_tree_model()
+        changed_model.groups[group]._children[0]._properties["setting"] = "changed"
+        changed_structural, changed_state = _default_model_revision_reader(
+            InventoryClient([changed_model]), "Model_1"
+        )
+        assert changed_structural == baseline_structural
+        assert changed_state["model_tree"][group] != (
+            baseline_state["model_tree"][group]
+        )
+
+    structural_model = _revision_tree_model()
+    structural_model.groups["physics"]._children.append(
+        RevisionNode("physics/ewfd2", "ewfd2", "ElectromagneticWaves")
+    )
+    changed_structural, _changed_state = _default_model_revision_reader(
+        InventoryClient([structural_model]), "Model_1"
+    )
+    assert changed_structural["model_tree"]["physics"] != (
+        baseline_structural["model_tree"]["physics"]
+    )
+
+    parameter_model = _revision_tree_model()
+    parameter_model._parameters["gap"] = "period/20"
+    _structural, parameter_state = _default_model_revision_reader(
+        InventoryClient([parameter_model]), "Model_1"
+    )
+    assert parameter_state != baseline_state
+
+
+def test_default_revision_reader_fails_closed_at_tree_node_limit(monkeypatch):
+    model = _revision_tree_model()
+    monkeypatch.setattr(lifecycle_module, "MAX_REVISION_TREE_NODES", 1)
+
+    with pytest.raises(ValueError, match="revision tree exceeds 1 nodes"):
+        _default_model_revision_reader(InventoryClient([model]), "Model_1")
 
 
 def test_attached_inventory_is_bounded_sorted_and_keeps_duplicate_metadata(tmp_path):

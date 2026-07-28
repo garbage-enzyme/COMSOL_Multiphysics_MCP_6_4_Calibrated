@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 import os
 from pathlib import Path
 import threading
@@ -10,7 +11,11 @@ import time
 from typing import Any, Callable, Mapping
 import uuid
 
-from comsol_mcp.durable import atomic_write_json, canonical_sha256_v1
+from comsol_mcp.durable import (
+    atomic_write_json,
+    canonical_json_v1,
+    canonical_sha256_v1,
+)
 
 from .attach_request import normalize_shared_server_attach_request
 from .cleanup import evaluate_attached_detach
@@ -36,9 +41,29 @@ from .process_probe import collect_shared_preflight_snapshot
 MAX_SERVER_MODELS = 32
 MAX_UNLOCK_REASON_CHARACTERS = 512
 SOURCE_HASH_CHUNK_BYTES = 1024 * 1024
+MAX_REVISION_TREE_NODES = 4096
+MAX_REVISION_TREE_BYTES = 4 * 1024 * 1024
+MAX_REVISION_PROPERTY_ITEMS = 4096
+MAX_REVISION_PROPERTY_TEXT_CHARACTERS = 65536
 MAX_SNAPSHOT_BYTES = 32 * 1024 * 1024 * 1024
 SHARED_MODEL_SNAPSHOT_SCHEMA = "comsol_mcp.shared_model_snapshot"
 SHARED_MODEL_SNAPSHOT_VERSION = "1.0.0"
+REVISION_TREE_GROUPS = (
+    "functions",
+    "components",
+    "geometries",
+    "selections",
+    "variables",
+    "couplings",
+    "physics",
+    "multiphysics",
+    "materials",
+    "meshes",
+    "studies",
+    "solutions",
+    "batches",
+    "datasets",
+)
 
 
 def _default_ownership_factory():
@@ -77,6 +102,113 @@ def _default_model_inventory_reader(client: Any) -> list[dict[str, Any]]:
     return inventory
 
 
+def _revision_json_value(
+    value: Any, remaining_items: list[int] | None = None
+) -> Any:
+    if remaining_items is None:
+        remaining_items = [MAX_REVISION_PROPERTY_ITEMS]
+    remaining_items[0] -= 1
+    if remaining_items[0] < 0:
+        raise ValueError("model-tree property exceeds the aggregate item limit")
+    if value is None or isinstance(value, (bool, int)):
+        return value
+    if isinstance(value, str):
+        if len(value) > MAX_REVISION_PROPERTY_TEXT_CHARACTERS:
+            raise ValueError("model-tree property contains oversized text")
+        return value
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError("model-tree property contains a non-finite number")
+        return value
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, Mapping):
+        if len(value) > MAX_REVISION_PROPERTY_ITEMS:
+            raise ValueError("model-tree property contains an oversized object")
+        return {
+            str(key): _revision_json_value(item, remaining_items)
+            for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))
+        }
+    if isinstance(value, (list, tuple)):
+        if len(value) > MAX_REVISION_PROPERTY_ITEMS:
+            raise ValueError("model-tree property contains an oversized collection")
+        return [_revision_json_value(item, remaining_items) for item in value]
+    if value.__class__.__module__.startswith("numpy") and hasattr(value, "tolist"):
+        if getattr(value, "size", MAX_REVISION_PROPERTY_ITEMS + 1) > (
+            MAX_REVISION_PROPERTY_ITEMS
+        ):
+            raise ValueError("model-tree property contains an oversized array")
+        return _revision_json_value(value.tolist(), remaining_items)
+    if value.__class__.__module__.startswith("mph.") and hasattr(value, "tag"):
+        return {
+            "node_path": str(value),
+            "node_tag": value.tag(),
+        }
+    raise ValueError(
+        f"model-tree property type is unsupported: {type(value).__name__}"
+    )
+
+
+def _hash_revision_tree_group(
+    root: Any,
+    *,
+    remaining_nodes: list[int],
+    remaining_bytes: list[int],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    structural_digest = hashlib.sha256()
+    state_digest = hashlib.sha256()
+    root_children = root.children()
+    if len(root_children) > remaining_nodes[0]:
+        raise ValueError(
+            f"model revision tree exceeds {MAX_REVISION_TREE_NODES} nodes"
+        )
+    nodes = sorted(root_children, key=lambda node: (str(node), node.tag() or ""))
+    count = 0
+    while nodes:
+        node = nodes.pop(0)
+        remaining_nodes[0] -= 1
+        if remaining_nodes[0] < 0:
+            raise ValueError(
+                f"model revision tree exceeds {MAX_REVISION_TREE_NODES} nodes"
+            )
+        path = str(node)
+        structural = {
+            "path": path,
+            "tag": node.tag(),
+            "type": node.type(),
+        }
+        state = {
+            "path": path,
+            "properties": _revision_json_value(node.properties()),
+        }
+        for digest, record in (
+            (structural_digest, structural),
+            (state_digest, state),
+        ):
+            encoded = canonical_json_v1(record)
+            remaining_bytes[0] -= len(encoded)
+            if remaining_bytes[0] < 0:
+                raise ValueError(
+                    "model revision tree exceeds the bounded canonical byte budget"
+                )
+            digest.update(len(encoded).to_bytes(8, "big"))
+            digest.update(encoded)
+        count += 1
+        children = sorted(
+            node.children(), key=lambda child: (str(child), child.tag() or "")
+        )
+        if len(children) > remaining_nodes[0]:
+            raise ValueError(
+                f"model revision tree exceeds {MAX_REVISION_TREE_NODES} nodes"
+            )
+        nodes.extend(children)
+        nodes.sort(key=lambda child: (str(child), child.tag() or ""))
+    return (
+        {"node_count": count, "tree_sha256": structural_digest.hexdigest()},
+        {"node_count": count, "tree_sha256": state_digest.hexdigest()},
+    )
+
+
 def _default_model_revision_reader(
     client: Any, model_tag: str
 ) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -87,6 +219,35 @@ def _default_model_revision_reader(
     if len(matches) != 1:
         raise ValueError("adopted server model is no longer uniquely available")
     model = matches[0]
+    if model.__class__.__module__.startswith("mph."):
+        structural_groups = {}
+        state_groups = {}
+        remaining_nodes = [MAX_REVISION_TREE_NODES]
+        remaining_bytes = [MAX_REVISION_TREE_BYTES]
+        for group in REVISION_TREE_GROUPS:
+            structural_groups[group], state_groups[group] = (
+                _hash_revision_tree_group(
+                    model / group,
+                    remaining_nodes=remaining_nodes,
+                    remaining_bytes=remaining_bytes,
+                )
+            )
+        parameters = {
+            str(name): str(value)
+            for name, value in sorted(model.parameters(evaluate=False).items())
+        }
+        descriptions = {
+            str(name): str(value)
+            for name, value in sorted(model.descriptions().items())
+        }
+        return (
+            {"model_tree": structural_groups},
+            {
+                "parameters": parameters,
+                "parameter_descriptions": descriptions,
+                "model_tree": state_groups,
+            },
+        )
     structural = {
         "components": sorted(str(value) for value in model.components()),
         "studies": sorted(str(value) for value in model.studies()),

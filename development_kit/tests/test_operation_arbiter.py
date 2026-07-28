@@ -258,6 +258,17 @@ def test_expected_model_revision_is_checked_after_lock_and_advances(
     )
     monkeypatch.setattr("src.operation_arbiter.get_operation_arbiter", lambda: arbiter)
     calls = []
+    revision_checks = []
+    original_get_model_revision = session_manager.get_model_revision
+
+    def get_model_revision_after_lock(model_name):
+        assert arbiter.lock_path.is_file()
+        revision_checks.append(model_name)
+        return original_get_model_revision(model_name)
+
+    monkeypatch.setattr(
+        session_manager, "get_model_revision", get_model_revision_after_lock
+    )
 
     def param_set(name: str, value: str, model_name: str | None = None):
         calls.append((name, value, model_name))
@@ -293,6 +304,7 @@ def test_expected_model_revision_is_checked_after_lock_and_advances(
         )
         assert replay["success"] is False
         assert calls == [("p", "1", None)]
+        assert revision_checks == ["model"] * 4
     finally:
         session_manager._models = original["models"]
         session_manager._model_paths = original["paths"]

@@ -590,6 +590,62 @@ def test_attached_model_selection_accepts_last_durable_revision_on_resume():
     assert selected.java.tag() == "Model1"
 
 
+@pytest.mark.parametrize(
+    ("changed_part", "components", "gap"),
+    [
+        ("stale", ["comp1"], "10[nm]"),
+        ("advanced", ["comp1"], "12[nm]"),
+        ("structural", ["comp1", "comp2"], "11[nm]"),
+    ],
+)
+def test_attached_resume_rejects_stale_advanced_or_structural_revision(
+    changed_part, components, gap
+):
+    target = normalize_attached_execution_target(_backend())
+    expected = build_shared_model_revision(
+        target.model,
+        sequence=1,
+        structural_readback={
+            "components": ["comp1"],
+            "studies": ["std1"],
+            "datasets": [],
+        },
+        state_readback={"parameters": {"gap": "11[nm]"}},
+    ).to_dict()
+
+    class Java:
+        def tag(self):
+            return "Model1"
+
+        def label(self):
+            return "working.mph"
+
+        def getFilePath(self):
+            return "D:/models/working.mph"
+
+    class Model:
+        java = Java()
+
+        def components(self):
+            return components
+
+        def studies(self):
+            return ["std1"]
+
+        def datasets(self):
+            return []
+
+        def parameters(self):
+            return {"gap": gap}
+
+    class Client:
+        def models(self):
+            return [Model()]
+
+    with pytest.raises(ValueError, match="attached model revision changed"):
+        production_worker._select_attached_model(Client(), target, expected)
+
+
 def test_attached_manager_preflight_is_process_only_and_binds_server_identity(
     ascii_job_root, monkeypatch
 ):
