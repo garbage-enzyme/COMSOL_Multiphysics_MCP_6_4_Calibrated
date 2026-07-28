@@ -11,7 +11,6 @@ from ..utils.versioning import (
     generate_version_path, 
     generate_latest_path,
     parse_version_info,
-    list_model_versions,
 )
 
 
@@ -436,13 +435,6 @@ def register_model_tools(mcp: FastMCP) -> None:
         Returns:
             Confirmation or error message
         """
-        if model_name == session_manager.current_model:
-            new_current = None
-            for name in session_manager.models.keys():
-                if name != model_name:
-                    new_current = name
-                    break
-        
         if session_manager.remove_model(model_name):
             return {
                 "success": True,

@@ -9,7 +9,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import math
 import os
 from pathlib import Path
 import re
@@ -17,7 +16,7 @@ import shutil
 import sqlite3
 import sys
 import time
-from typing import Any, Iterable, Iterator, Mapping, Protocol, Sequence
+from typing import Any, Iterator, Mapping, Protocol, Sequence
 import unicodedata
 import uuid
 

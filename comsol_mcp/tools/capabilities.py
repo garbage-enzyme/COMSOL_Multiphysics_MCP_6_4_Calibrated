@@ -6,7 +6,6 @@ from importlib.metadata import PackageNotFoundError, version
 import json
 from pathlib import Path
 import time
-import os
 
 from mcp.server.fastmcp import FastMCP
 

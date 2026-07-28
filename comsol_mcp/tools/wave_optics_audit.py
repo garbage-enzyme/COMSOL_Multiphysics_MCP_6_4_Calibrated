@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import csv
 import hashlib
 import json
 import math
-import os
 from pathlib import Path
 import re
 import sys
@@ -191,16 +189,6 @@ def _single_complex(value: Any, expression: str) -> complex:
     if not _finite_complex(result):
         raise FloatingPointError(f"Expression {expression!r} returned nonfinite data")
     return result
-
-
-def _scalar_record(value: complex, expression: str, unit: str | None = None) -> dict[str, Any]:
-    return {
-        "expression": expression,
-        "unit": unit,
-        "raw": _json_number(value),
-        "real": float(value.real),
-        "imag": float(value.imag),
-    }
 
 
 def _validate_ascii_dir(path_text: str | None) -> Path:

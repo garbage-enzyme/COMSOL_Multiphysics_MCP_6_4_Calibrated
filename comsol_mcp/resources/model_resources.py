@@ -2,7 +2,6 @@
 
 import logging
 
-from typing import Optional
 from mcp.server.fastmcp import FastMCP
 
 from ..tools.session import session_manager

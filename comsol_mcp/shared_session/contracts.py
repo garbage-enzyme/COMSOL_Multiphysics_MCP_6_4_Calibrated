@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 import ipaddress
-import os
 from typing import Any, Iterable, Mapping
 
 from comsol_mcp.settings import settings_environment

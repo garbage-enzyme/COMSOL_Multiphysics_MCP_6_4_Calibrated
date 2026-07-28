@@ -13,12 +13,8 @@ except Exception: pass
 def jarr(v, d=jpype.JDouble): return jpype.JArray(d)(v)
 
 Px=0.6e-6; Py=0.6e-6; t_al2o3=30e-9; H_air=0.83e-6; t_au=30e-9
-au_drude = "1-(1.37e16)^2/((2*pi*ewfd.freq)*((2*pi*ewfd.freq)+i*4.1e13))"
 # Parametric Drude using wl parameter (avoids ewfd.freq singularity in sweep)
 au_drude_param = "1-(1.37e16)^2/((2*pi*c_const/wl)*((2*pi*c_const/wl)+i*4.1e13))"
-# Fixed freq for testing (wl=5µm: f=6e13 Hz)
-f_fix = 6e13
-au_drude_fix = f"1-(1.37e16)^2/((2*pi*{f_fix})*((2*pi*{f_fix})+i*4.1e13))"
 
 client = mph.Client(cores=4, version='6.4')
 print('Connected', client.version, flush=True)
