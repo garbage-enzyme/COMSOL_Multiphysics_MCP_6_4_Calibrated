@@ -33,10 +33,14 @@ Optics、材料与边界、durable jobs、物理证据、资源安全和故障�
 
 ## Client 兼容性与部署
 
-安装后的 FastMCP stdio server 已通过 Codex CLI 和 opencode 验证。按照标准 stdio
-配置，它在理论上兼容 Claude Code 和 Hermes Agent，但本项目尚未对这两个 client
-完成端到端测试；欢迎提交测试结果和 PR。全新安装、精确配置路径、profile 选择、
-重启规则和 solver-free 验证请阅读独立指南：
+安装后的 FastMCP stdio server 已通过 Codex CLI 和 opencode 验证。Windows 11 上的
+Claude Code 2.1.220 验收已完成 stdio 初始化，发现测试所用 `wave_optics` profile 的
+全部 67 个工具，并成功调用 `capabilities`、`comsol_status` 和 `solver_status`；server
+干净退出，未创建 solver lease，也未启动 COMSOL 进程。该结论只覆盖 client transport、
+schema、discovery 和非启动 status 兼容性，不是 licensed runtime 验收：Claude 未调用
+`comsol_start`、未运行模型、未覆盖完整错误界面，也未证明 start/solve/cleanup。
+Hermes Agent 仍只有配置层指导，尚无端到端 client 测试。全新安装、精确配置路径、
+profile 选择、重启规则和 solver-free 验证请阅读独立指南：
 
 - [部署指南](DEPLOYMENT_CN.md)
 
@@ -45,13 +49,14 @@ Optics、材料与边界、durable jobs、物理证据、资源安全和故障�
 client；保持 COMSOL 工具串行。调用 `capabilities` 可在不启动 COMSOL 的情况下
 验证实际部署的 profile。
 
-未经测试的 client 配置依据 Claude Code 官方
+仓库内的 client 示例依据 Claude Code 官方
 [MCP 文档](https://code.claude.com/docs/en/mcp)、Hermes 官方
 [MCP 文档](https://github.com/NousResearch/hermes-agent/blob/main/website/docs/user-guide/features/mcp.md)
 和 [client 源码](https://github.com/NousResearch/hermes-agent/blob/main/tools/mcp_tool.py)
-编写。这只表示配置层面的理论兼容，不构成验证声明。真实 client acceptance 报告应
-至少包含不启动 COMSOL 的 `initialize`、`list_tools` 和 `capabilities` 回读。
-已安装工具界面以实时 discovery 为准，不以文档中复制的数量为准。
+编写。一个示例在其精确 client 路径被实际执行前只属于配置指导。真实 client
+acceptance 报告应至少包含不启动 COMSOL 的 `initialize`、实时 `list_tools` 和
+`capabilities` 回读，并把 licensed start/solve/cleanup 覆盖单独标注。已安装工具界面
+以实时 discovery 为准，不以文档中复制的数量为准。
 
 ## 主要能力
 
