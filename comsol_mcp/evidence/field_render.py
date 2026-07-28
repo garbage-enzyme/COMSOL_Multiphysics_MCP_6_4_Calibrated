@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import re
 import subprocess
@@ -31,6 +32,43 @@ def _mapping(value: object, label: str) -> dict[str, Any]:
     if not isinstance(value, Mapping) or not all(isinstance(key, str) for key in value):
         raise ValueError(f"{label} must be an object with string keys")
     return dict(value)
+
+
+def _validate_worker_response(
+    value: object, *, expected_view_ids: list[str]
+) -> dict[str, list[float]]:
+    if not isinstance(value, Mapping) or set(value) != {"success", "views"}:
+        raise RuntimeError("field plot worker response is invalid")
+    if value["success"] is not True or not isinstance(value["views"], list):
+        raise RuntimeError("field plot worker response is invalid")
+    if len(value["views"]) != len(expected_view_ids):
+        raise RuntimeError("field plot worker response view count is invalid")
+    limits_by_view: dict[str, list[float]] = {}
+    for item in value["views"]:
+        if not isinstance(item, Mapping) or set(item) != {"view_id", "color_limits"}:
+            raise RuntimeError("field plot worker response view is invalid")
+        view_id = item["view_id"]
+        limits = item["color_limits"]
+        if (
+            not isinstance(view_id, str)
+            or view_id in limits_by_view
+            or not isinstance(limits, list)
+            or len(limits) != 2
+            or any(
+                isinstance(limit, bool)
+                or not isinstance(limit, (int, float))
+                or not math.isfinite(float(limit))
+                for limit in limits
+            )
+        ):
+            raise RuntimeError("field plot worker response view is invalid")
+        normalized_limits = [float(limits[0]), float(limits[1])]
+        if normalized_limits[0] >= normalized_limits[1]:
+            raise RuntimeError("field plot worker response color limits are invalid")
+        limits_by_view[view_id] = normalized_limits
+    if list(limits_by_view) != expected_view_ids:
+        raise RuntimeError("field plot worker response view identities do not match")
+    return limits_by_view
 
 
 def render_field_png_bundle(
@@ -135,18 +173,20 @@ def render_field_png_bundle(
             or len(stderr_bytes) > MAX_RENDER_RESPONSE_BYTES
         ):
             raise RuntimeError("field plot worker response exceeded its bound")
-        stdout = stdout_bytes.decode("utf-8")
+        try:
+            stdout = stdout_bytes.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise RuntimeError("field plot worker response is not UTF-8") from exc
         stderr = stderr_bytes.decode("utf-8", errors="replace")
         if process.returncode != 0:
-            raise RuntimeError(
-                f"field plot worker failed: {stderr.strip()[:2000]}"
-            )
-        response = json.loads(stdout)
-        if response.get("success") is not True:
-            raise RuntimeError("field plot worker did not report success")
-        limits_by_view = {
-            item["view_id"]: item["color_limits"] for item in response["views"]
-        }
+            raise RuntimeError(f"field plot worker failed: {stderr.strip()[:2000]}")
+        try:
+            response = json.loads(stdout)
+        except (json.JSONDecodeError, RecursionError) as exc:
+            raise RuntimeError("field plot worker response is not valid JSON") from exc
+        limits_by_view = _validate_worker_response(
+            response, expected_view_ids=[item["view_id"] for item in normalized]
+        )
         descriptors = []
         for view in normalized:
             path = Path(view["png_path"])

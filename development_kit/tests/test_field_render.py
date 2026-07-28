@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 
 import numpy as np
@@ -75,9 +76,7 @@ def test_renderer_uses_windows_safe_filename_for_portable_view_id(tmp_path):
 
     descriptor = result["views"][0]
     assert descriptor["view_id"] == "off:res"
-    assert descriptor["relative_path"] == (
-        hashlib.sha256(b"off:res").hexdigest()[:16] + ".png"
-    )
+    assert descriptor["relative_path"] == (hashlib.sha256(b"off:res").hexdigest()[:16] + ".png")
     assert ":" not in descriptor["relative_path"]
 
 
@@ -171,4 +170,74 @@ def test_worker_output_is_redirected_and_read_with_a_hard_bound(tmp_path, monkey
             color_scale="linear",
             shared_color_limits=False,
             output_root=tmp_path / "output",
+        )
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        [],
+        {"success": True, "views": [{"view_id": "wrong", "color_limits": [0, 1]}]},
+        {
+            "success": True,
+            "views": [{"view_id": "target", "color_limits": [0, 1], "extra": True}],
+        },
+        {"success": True, "views": [{"view_id": "target", "color_limits": [0]}]},
+        {"success": True, "views": [{"view_id": "target", "color_limits": [0, float("inf")]}]},
+    ],
+    ids=["non_object", "wrong_view", "extra_field", "short_limits", "nonfinite"],
+)
+def test_renderer_rejects_unbounded_or_mismatched_worker_responses(tmp_path, monkeypatch, response):
+    array = tmp_path / "response.npz"
+    digest = _array(array)
+
+    class FakeProcess:
+        returncode = 0
+
+        def __init__(self, _command, **kwargs):
+            self.stdout = kwargs["stdout"]
+
+        def communicate(self, *, input, timeout):
+            assert input and timeout > 0
+            self.stdout.write(json.dumps(response).encode("utf-8"))
+
+    monkeypatch.setattr(field_render_module.subprocess, "Popen", FakeProcess)
+
+    with pytest.raises(RuntimeError, match="worker response"):
+        render_field_png_bundle(
+            views=[_view("target", array, digest)],
+            quantity_name="abs_ex",
+            quantity_unit="V/m",
+            coordinate_unit="um",
+            color_scale="linear",
+            shared_color_limits=False,
+            output_root=tmp_path / "response-output",
+        )
+
+
+def test_renderer_converts_invalid_worker_encoding_to_a_stable_error(tmp_path, monkeypatch):
+    array = tmp_path / "encoding.npz"
+    digest = _array(array)
+
+    class FakeProcess:
+        returncode = 0
+
+        def __init__(self, _command, **kwargs):
+            self.stdout = kwargs["stdout"]
+
+        def communicate(self, *, input, timeout):
+            assert input and timeout > 0
+            self.stdout.write(b"\xff")
+
+    monkeypatch.setattr(field_render_module.subprocess, "Popen", FakeProcess)
+
+    with pytest.raises(RuntimeError, match="not UTF-8"):
+        render_field_png_bundle(
+            views=[_view("target", array, digest)],
+            quantity_name="abs_ex",
+            quantity_unit="V/m",
+            coordinate_unit="um",
+            color_scale="linear",
+            shared_color_limits=False,
+            output_root=tmp_path / "encoding-output",
         )

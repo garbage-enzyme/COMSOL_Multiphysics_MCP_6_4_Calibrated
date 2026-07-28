@@ -6,14 +6,13 @@ import hashlib
 import json
 import math
 import os
-from pathlib import Path
 import time
-from typing import Any, Mapping
 import uuid
+from pathlib import Path
+from typing import Any, Mapping
 
 from .field_bundle import validate_field_evidence_request
 from .field_manifest import build_field_evidence_manifest
-
 
 _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
@@ -175,9 +174,7 @@ def write_field_evidence_artifacts(
     for axis, expected_length in ((column_axis, columns), (row_axis, rows)):
         values = np.asarray(axis_coordinates[axis])
         if values.ndim != 1 or values.shape[0] != expected_length:
-            raise ValueError(
-                f"axis_coordinates.{axis} must have length {expected_length}"
-            )
+            raise ValueError(f"axis_coordinates.{axis} must have length {expected_length}")
         if values.dtype.kind not in "fiu" or not np.all(np.isfinite(values)):
             raise ValueError(f"axis_coordinates.{axis} must be finite numeric values")
         values = values.astype(np.float64, copy=False)
@@ -215,13 +212,15 @@ def write_field_evidence_artifacts(
             raise ValueError(f"quantity_grids.{name} must contain at least one finite value")
         raw_array_bytes += values.nbytes
         normalized_grids[name] = values
+        scale = float(np.max(np.abs(finite)))
+        rms = 0.0 if scale == 0.0 else scale * math.sqrt(float(np.mean(np.square(finite / scale))))
         summaries.append(
             {
                 "name": name,
                 "unit": expression["unit"],
                 "minimum": float(np.min(finite)),
                 "maximum": float(np.max(finite)),
-                "rms": float(math.sqrt(float(np.mean(np.square(finite))))),
+                "rms": rms,
                 "finite_count": int(finite.size),
                 "missing_count": int(current_missing.sum()),
             }
@@ -259,14 +258,8 @@ def write_field_evidence_artifacts(
         with temporary.open("xb") as handle:
             np.savez_compressed(
                 handle,
-                **{
-                    f"coordinate_{axis}": coordinate_arrays[axis]
-                    for axis in plane_axes
-                },
-                **{
-                    f"quantity_{name}": normalized_grids[name]
-                    for name in expected_expressions
-                },
+                **{f"coordinate_{axis}": coordinate_arrays[axis] for axis in plane_axes},
+                **{f"quantity_{name}": normalized_grids[name] for name in expected_expressions},
             )
             handle.flush()
             os.fsync(handle.fileno())
@@ -323,9 +316,7 @@ def write_field_evidence_artifacts(
             "selected_point_count": manifest["selected_point_count"],
             "grid_point_count": request_value["grid_point_count"],
             "unique_point_count": manifest["unique_point_count"],
-            "collapsed_duplicate_point_count": manifest[
-                "collapsed_duplicate_point_count"
-            ],
+            "collapsed_duplicate_point_count": manifest["collapsed_duplicate_point_count"],
             "covered_grid_point_count": covered_count,
             "missing_grid_point_count": missing_count,
             "quantity_summaries": summaries,

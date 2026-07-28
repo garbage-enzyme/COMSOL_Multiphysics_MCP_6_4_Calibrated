@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-from copy import deepcopy
 import hashlib
 import json
+from copy import deepcopy
 
 import numpy as np
 import pytest
-
 from src.evidence.field_artifacts import write_field_evidence_artifacts
 from src.evidence.field_bundle import normalize_field_evidence_request
 from src.evidence.field_manifest import validate_field_evidence_manifest
+
 from development_kit.tests.test_field_bundle import _request
 
 
@@ -57,7 +57,9 @@ def test_writer_creates_compressed_arrays_and_hash_bound_manifest(tmp_path):
 
     with np.load(array_path, allow_pickle=False) as archive:
         assert set(archive.files) == {
-            "coordinate_x", "coordinate_y", "quantity_electric_norm",
+            "coordinate_x",
+            "coordinate_y",
+            "quantity_electric_norm",
             "quantity_magnetic_norm",
         }
         assert archive["quantity_electric_norm"].shape == tuple(request["grid"]["shape"])
@@ -91,6 +93,18 @@ def test_writer_rejects_shape_infinity_and_mismatched_missing_masks(tmp_path):
         write_field_evidence_artifacts(**infinity)
     with pytest.raises(ValueError, match="same missing-cell mask"):
         write_field_evidence_artifacts(**mismatched)
+
+
+def test_writer_computes_finite_rms_for_large_finite_values_before_publication(tmp_path):
+    _, kwargs = _inputs(tmp_path)
+    for name in kwargs["quantity_grids"]:
+        kwargs["quantity_grids"][name].fill(1.0e200)
+
+    result = write_field_evidence_artifacts(**kwargs)
+
+    assert all(item["rms"] == pytest.approx(1.0e200) for item in result["quantity_summaries"])
+    assert list(tmp_path.rglob("field_arrays.npz"))
+    assert list(tmp_path.rglob("field_manifest.json"))
 
 
 def test_writer_rejects_bad_coordinates_and_expression_set(tmp_path):
