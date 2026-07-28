@@ -363,6 +363,9 @@ def normalize_codex_capability(
 def validate_reviewer_capability(value: Any) -> dict[str, Any]:
     item = _mapping(value, "reviewer_capability")
     _unknown(item, _CAPABILITY_FIELDS, "reviewer_capability")
+    if set(item) != _CAPABILITY_FIELDS:
+        missing = sorted(_CAPABILITY_FIELDS - set(item))
+        raise ValueError(f"reviewer_capability is missing {missing}")
     if item.get("schema_name") != VISUAL_CAPABILITY_SCHEMA or item.get("schema_version") != VISUAL_REVIEW_SCHEMA_VERSION:
         raise ValueError("reviewer_capability schema is unsupported")
     client = _text(item.get("client"), "reviewer_capability.client", identifier=True)
@@ -402,6 +405,55 @@ def validate_reviewer_capability(value: Any) -> dict[str, Any]:
         raise ValueError("reviewer_capability.delivered_artifacts is oversized or duplicated")
     host_evidence = _mapping(item.get("host_evidence"), "reviewer_capability.host_evidence")
     _unknown(host_evidence, _HOST_EVIDENCE_FIELDS, "reviewer_capability.host_evidence")
+    if set(host_evidence) != _HOST_EVIDENCE_FIELDS:
+        raise ValueError("reviewer_capability host evidence fields are incomplete")
+    evidence_kind = _text(
+        host_evidence.get("evidence_kind"),
+        "reviewer_capability.host_evidence.evidence_kind",
+        identifier=True,
+    )
+    metadata_image_input = host_evidence.get("metadata_image_input")
+    if metadata_image_input is not None and not isinstance(metadata_image_input, bool):
+        raise ValueError("reviewer_capability host evidence metadata flag is invalid")
+    for field in (
+        "transport_available",
+        "image_content_results_confirmed",
+        "model_identity_confirmed",
+    ):
+        if not isinstance(host_evidence.get(field), bool):
+            raise ValueError(f"reviewer_capability host evidence {field} must be boolean")
+    if evidence_kind == "opencode_provider_metadata_and_input_part":
+        if client != "opencode" or transport != "file_attachment":
+            raise ValueError("reviewer_capability host evidence kind conflicts with transport")
+        if not isinstance(metadata_image_input, bool):
+            raise ValueError("opencode host evidence requires a metadata image-input flag")
+        expected_host_confirmed = bool(
+            metadata_image_input
+            and host_evidence["transport_available"]
+            and host_evidence["model_identity_confirmed"]
+        )
+        if item["image_input"] != metadata_image_input:
+            raise ValueError("reviewer_capability image input conflicts with host evidence")
+    elif evidence_kind == "codex_view_image_tool_result":
+        if client != "codex" or transport != "view_image_tool":
+            raise ValueError("reviewer_capability host evidence kind conflicts with transport")
+        if metadata_image_input is not None or not host_evidence["model_identity_confirmed"]:
+            raise ValueError("codex host evidence identity fields are inconsistent")
+        expected_host_confirmed = host_evidence["transport_available"]
+        if item["image_input"] != expected_host_confirmed:
+            raise ValueError("reviewer_capability image input conflicts with host evidence")
+    else:
+        raise ValueError("reviewer_capability host evidence kind is unsupported")
+    expected_delivery = bool(
+        expected_host_confirmed
+        and host_evidence["image_content_results_confirmed"]
+        and refs
+    )
+    if (
+        item["host_capability_confirmed"] != expected_host_confirmed
+        or item["delivery_confirmed"] != expected_delivery
+    ):
+        raise ValueError("reviewer_capability top-level claims conflict with host evidence")
     if item.get("delivery_confirmed") and (not item.get("host_capability_confirmed") or not refs):
         raise ValueError("delivery_confirmed requires host capability and delivered artifacts")
     calibration = _calibration(item.get("calibration"))
@@ -441,6 +493,9 @@ def _view(value: Any, label: str) -> dict[str, Any]:
     color_scale = item.get("color_scale")
     if color_scale not in {"linear", "log"}:
         raise ValueError(f"{label}.color_scale must be linear or log")
+    color_limits = pair("color_limits", ordered=True)
+    if color_scale == "log" and any(limit <= 0.0 for limit in color_limits):
+        raise ValueError(f"{label}.color_limits must be positive for a log scale")
     return {
         "artifact_id": _text(item.get("artifact_id"), f"{label}.artifact_id", identifier=True),
         "slice_axis": item["slice_axis"],
@@ -450,7 +505,7 @@ def _view(value: Any, label: str) -> dict[str, Any]:
         "x_range": pair("x_range", ordered=True),
         "y_range": pair("y_range", ordered=True),
         "coordinate_unit": _text(item.get("coordinate_unit"), f"{label}.coordinate_unit"),
-        "color_limits": pair("color_limits", ordered=True),
+        "color_limits": color_limits,
         "color_scale": color_scale,
         "quantity": _text(item.get("quantity"), f"{label}.quantity"),
         "quantity_unit": _text(item.get("quantity_unit"), f"{label}.quantity_unit"),
@@ -648,10 +703,33 @@ def build_visual_review_receipt(
 def validate_visual_review_receipt(value: Any) -> dict[str, Any]:
     item = _mapping(value, "visual_review_receipt")
     _unknown(item, _RECEIPT_FIELDS, "visual_review_receipt")
+    if set(item) != _RECEIPT_FIELDS:
+        raise ValueError("visual_review_receipt fields are incomplete")
     if item.get("schema_name") != VISUAL_RECEIPT_SCHEMA or item.get("schema_version") != VISUAL_REVIEW_SCHEMA_VERSION:
         raise ValueError("visual_review_receipt schema is unsupported")
     reviewer = _mapping(item.get("reviewer"), "visual_review_receipt.reviewer")
     _unknown(reviewer, _REVIEWER_FIELDS, "visual_review_receipt.reviewer")
+    if set(reviewer) != _REVIEWER_FIELDS:
+        missing = sorted(_REVIEWER_FIELDS - set(reviewer))
+        raise ValueError(f"visual_review_receipt.reviewer is missing {missing}")
+    reviewer_client = _text(
+        reviewer.get("client"), "visual_review_receipt.reviewer.client", identifier=True
+    )
+    _text(
+        reviewer.get("session_id"),
+        "visual_review_receipt.reviewer.session_id",
+        identifier=True,
+    )
+    if reviewer_client == "codex":
+        if reviewer.get("provider") is not None or reviewer.get("model") is not None:
+            raise ValueError("codex visual reviewer provider and model must be null")
+    else:
+        _text(
+            reviewer.get("provider"),
+            "visual_review_receipt.reviewer.provider",
+            identifier=True,
+        )
+        _text(reviewer.get("model"), "visual_review_receipt.reviewer.model")
     for field in ("visual_inspection_performed", "prior_review_exposure"):
         if not isinstance(item.get(field), bool):
             raise ValueError(f"visual_review_receipt.{field} must be boolean")
@@ -662,18 +740,67 @@ def validate_visual_review_receipt(value: Any) -> dict[str, Any]:
         raise ValueError("visual_review_receipt.status is unsupported")
     _hash(item.get("request_sha256"), "visual_review_receipt.request_sha256")
     _hash(item.get("capability_sha256"), "visual_review_receipt.capability_sha256")
-    [_artifact_ref(ref, f"visual_review_receipt.received_artifacts[{index}]") for index, ref in enumerate(item.get("received_artifacts", []))]
-    [_finding(finding, f"visual_review_receipt.findings[{index}]") for index, finding in enumerate(item.get("findings", []))]
+    received_raw = item.get("received_artifacts")
+    if not isinstance(received_raw, list) or len(received_raw) > MAX_ARTIFACTS:
+        raise ValueError("visual_review_receipt.received_artifacts is oversized")
+    received = [
+        _artifact_ref(ref, f"visual_review_receipt.received_artifacts[{index}]")
+        for index, ref in enumerate(received_raw)
+    ]
+    if len({ref["artifact_id"] for ref in received}) != len(received):
+        raise ValueError("visual_review_receipt.received_artifacts is duplicated")
+    findings_raw = item.get("findings")
+    if not isinstance(findings_raw, list) or len(findings_raw) > MAX_FINDINGS:
+        raise ValueError("visual_review_receipt.findings is oversized")
+    findings = [
+        _finding(finding, f"visual_review_receipt.findings[{index}]")
+        for index, finding in enumerate(findings_raw)
+    ]
     _strings(item.get("uncertainties"), "visual_review_receipt.uncertainties", MAX_FINDINGS)
     _strings(item.get("rejected_claims"), "visual_review_receipt.rejected_claims", MAX_FINDINGS)
     _strings(item.get("incomplete_reasons"), "visual_review_receipt.incomplete_reasons", 16)
     host = _mapping(item.get("host_capability_evidence"), "visual_review_receipt.host_capability_evidence")
     _unknown(host, _RECEIPT_HOST_FIELDS, "visual_review_receipt.host_capability_evidence")
+    if set(host) != _RECEIPT_HOST_FIELDS:
+        raise ValueError("visual_review_receipt host capability evidence is incomplete")
     if not isinstance(host.get("delivery_confirmed"), bool) or not isinstance(host.get("scientific_review_eligible"), bool):
         raise ValueError("visual_review_receipt host capability booleans are invalid")
-    [_artifact_ref(ref, f"visual_review_receipt.host_capability_evidence.delivered_artifacts[{index}]") for index, ref in enumerate(host.get("delivered_artifacts", []))]
-    if item.get("status") == "visual_review_complete" and item.get("incomplete_reasons"):
-        raise ValueError("complete visual review cannot contain incomplete reasons")
+    if host.get("capability_state") not in {
+        "unavailable", "host_capability_confirmed", "delivery_confirmed"
+    } or host.get("transport") not in {"file_attachment", "view_image_tool"}:
+        raise ValueError("visual_review_receipt host capability state is invalid")
+    delivered_raw = host.get("delivered_artifacts")
+    if not isinstance(delivered_raw, list) or len(delivered_raw) > MAX_ARTIFACTS:
+        raise ValueError("visual_review_receipt host delivered artifacts are oversized")
+    delivered = [
+        _artifact_ref(
+            ref,
+            f"visual_review_receipt.host_capability_evidence.delivered_artifacts[{index}]",
+        )
+        for index, ref in enumerate(delivered_raw)
+    ]
+    if len({ref["artifact_id"] for ref in delivered}) != len(delivered):
+        raise ValueError("visual_review_receipt host delivered artifacts are duplicated")
+    expected_inspection = (
+        "performed" if item["visual_inspection_performed"] else "not_performed"
+    )
+    if item.get("inspection_status") != expected_inspection:
+        raise ValueError("visual_review_receipt inspection status is inconsistent")
+    if item.get("status") == "visual_review_complete":
+        delivered_by_id = {ref["artifact_id"]: ref["sha256"] for ref in delivered}
+        prerequisites = bool(
+            item["visual_inspection_performed"]
+            and host["capability_state"] == "delivery_confirmed"
+            and host["delivery_confirmed"]
+            and host["scientific_review_eligible"]
+            and received
+            and findings
+            and isinstance(host.get("calibration_id"), str)
+            and host["calibration_id"]
+            and all(delivered_by_id.get(ref["artifact_id"]) == ref["sha256"] for ref in received)
+        )
+        if not prerequisites or item.get("incomplete_reasons"):
+            raise ValueError("complete visual review does not satisfy its prerequisites")
     supplied = _hash(item.get("contract_sha256"), "visual_review_receipt.contract_sha256")
     unhashed = dict(item); unhashed.pop("contract_sha256", None)
     if supplied != _visual_contract_sha256(unhashed):
@@ -713,6 +840,18 @@ def evaluate_dual_visual_review(
     }
     if first_artifacts != second_artifacts:
         reasons.append("artifact_sets_differ")
+    expected_artifacts = {
+        (item["artifact_id"], item["sha256"]) for item in request["artifacts"]
+    }
+    if first_artifacts != expected_artifacts or second_artifacts != expected_artifacts:
+        reasons.append("receipt_artifacts_do_not_match_request")
+    expected_questions = set(request["questions"])
+    if any(
+        {finding["question"] for finding in receipt["findings"]}
+        != expected_questions
+        for receipt in (first, second)
+    ):
+        reasons.append("receipt_findings_do_not_cover_request")
     if first["status"] != "visual_review_complete" or second["status"] != "visual_review_complete":
         reasons.append("one_or_more_reviews_incomplete")
     if reasons:

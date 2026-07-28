@@ -103,6 +103,21 @@ def _refs():
     ]
 
 
+def _rehash_visual_contract(value):
+    def json_stable(item):
+        if isinstance(item, float) and item.is_integer():
+            return int(item)
+        if isinstance(item, list):
+            return [json_stable(child) for child in item]
+        if isinstance(item, dict):
+            return {key: json_stable(child) for key, child in item.items()}
+        return item
+
+    value.pop("contract_sha256", None)
+    value["contract_sha256"] = canonical_sha256(json_stable(value))
+    return value
+
+
 def _codex(*, delivered: bool = True, calibrated: bool = True):
     results = [
         {**reference, "image_content_returned": delivered}
@@ -249,6 +264,15 @@ def test_capability_requires_explicit_transport_identity_fields(field):
         validate_reviewer_capability(capability)
 
 
+def test_capability_reconciles_typed_host_evidence_with_top_level_claims():
+    capability = deepcopy(_codex())
+    capability["host_evidence"]["transport_available"] = False
+    _rehash_visual_contract(capability)
+
+    with pytest.raises(ValueError, match="host evidence"):
+        validate_reviewer_capability(capability)
+
+
 def test_review_request_is_deterministic_bounded_and_contains_shared_view_evidence():
     first = _request()
     second = _request()
@@ -283,6 +307,23 @@ def test_request_rejects_absolute_paths_mismatched_views_and_hash_tampering():
         validate_visual_review_request(tampered)
 
 
+def test_logarithmic_visual_views_require_positive_color_limits():
+    views = _views()
+    for view in views:
+        view["color_scale"] = "log"
+        view["color_limits"] = [0.0, 1.0e8]
+
+    with pytest.raises(ValueError, match="positive"):
+        build_visual_review_request(
+            request_id="invalid-log-limits",
+            configuration_sha256=CONFIG_HASH,
+            artifacts=_artifacts(),
+            views=views,
+            numerical_summary={},
+            questions=["Question?"],
+        )
+
+
 def test_complete_receipt_requires_calibration_delivery_hashes_inspection_and_findings():
     complete = _receipt(_codex())
     no_delivery = _receipt(_codex(delivered=False))
@@ -297,6 +338,58 @@ def test_complete_receipt_requires_calibration_delivery_hashes_inspection_and_fi
     assert "known_answer_calibration_incomplete" in no_calibration["incomplete_reasons"]
     assert "received_artifacts_incomplete_or_mismatched" in missing_artifact["incomplete_reasons"]
     assert "visual_inspection_not_performed" in no_inspection["incomplete_reasons"]
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda value: value.update(
+            {"visual_inspection_performed": False, "inspection_status": "not_performed"}
+        ),
+        lambda value: value["host_capability_evidence"].update(
+            {"delivery_confirmed": False, "capability_state": "host_capability_confirmed"}
+        ),
+        lambda value: value["host_capability_evidence"].update(
+            {"scientific_review_eligible": False}
+        ),
+        lambda value: value.update({"received_artifacts": []}),
+        lambda value: value.update({"findings": []}),
+        lambda value: value["host_capability_evidence"].update({"calibration_id": None}),
+    ],
+)
+def test_hash_valid_complete_receipt_cannot_bypass_prerequisites(mutation):
+    receipt = deepcopy(_receipt(_codex()))
+    mutation(receipt)
+    _rehash_visual_contract(receipt)
+
+    with pytest.raises(ValueError, match="complete visual review"):
+        validate_visual_review_receipt(receipt)
+
+
+def test_receipt_rejects_duplicate_artifacts():
+    duplicate = deepcopy(_receipt(_codex()))
+    duplicate["received_artifacts"].append(deepcopy(duplicate["received_artifacts"][0]))
+    _rehash_visual_contract(duplicate)
+    with pytest.raises(ValueError, match="duplicated"):
+        validate_visual_review_receipt(duplicate)
+
+
+def test_receipt_rejects_oversized_finding_lists():
+    oversized = deepcopy(_receipt(_codex()))
+    oversized["findings"] = [deepcopy(oversized["findings"][0]) for _ in range(65)]
+    _rehash_visual_contract(oversized)
+    with pytest.raises(ValueError, match="findings"):
+        validate_visual_review_receipt(oversized)
+
+
+@pytest.mark.parametrize("field", ["client", "session_id"])
+def test_receipt_requires_complete_typed_reviewer_identity(field):
+    receipt = deepcopy(_receipt(_codex()))
+    receipt["reviewer"].pop(field)
+    _rehash_visual_contract(receipt)
+
+    with pytest.raises(ValueError, match=field):
+        validate_visual_review_receipt(receipt)
 
 
 def test_receipt_rejects_impossible_utc_timestamp():
