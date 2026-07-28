@@ -25,12 +25,12 @@
     {
       "path": "development_kit/tests/test_reference_power_acceptance.py",
       "match_count": 1,
-      "match_sha256": "e173140109bcdfa12c46089045f94d8e1f5d5332dbe69268c60f54b57c57f5b4"
+      "match_sha256": "9056bba1570062fae6f7a91ed0f73d2e937b9a41431243259abf909c32ed8fd9"
     },
     {
       "path": "development_kit/tests/test_reference_power_runner.py",
       "match_count": 1,
-      "match_sha256": "b3c34326a3fbaa3d7dbdc2d6ae7889800c76973a15756110b73e63dcdc7f0646"
+      "match_sha256": "153ce1c19f642d15ecb64aba691f064bceddf2184276b50ff3bb1ea33cb68d73"
     },
     {
       "path": "comsol_mcp/evidence/reference_power_acceptance.py",

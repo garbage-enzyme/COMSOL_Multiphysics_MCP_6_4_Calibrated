@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 import shutil
 import tempfile
 import unicodedata
+from pathlib import Path
 
 import pytest
-
 from src.operation_arbiter import guard_tool_call
 from src.path_policy import (
     ARTIFACT_WRITE_ROOT_ENV,
@@ -20,12 +19,16 @@ from src.path_policy import (
 from src.tools.capabilities import get_capabilities
 from src.tools.profiles import ProfileSelection
 
+from development_kit.tests.conftest import _create_ascii_temp_dir
+
 
 @pytest.fixture
 def ascii_root():
-    base = Path("D:/comsol_runtime") if Path("D:/").exists() else Path(
-        os.environ.get("SystemRoot", "C:/Windows")
-    ) / "Temp"
+    base = (
+        Path("D:/comsol_runtime")
+        if Path("D:/").exists()
+        else Path(os.environ.get("SystemRoot", "C:/Windows")) / "Temp"
+    )
     root = Path(tempfile.mkdtemp(prefix="comsol_mcp_path_policy_", dir=base))
     try:
         yield root
@@ -37,10 +40,16 @@ def _policy(tmp_path, ascii_root):
     read_root = tmp_path / "models"
     write_root = ascii_root / "artifacts"
     read_root.mkdir()
-    return PathPolicy.from_environment({
-        MODEL_READ_ROOTS_ENV: str(read_root),
-        ARTIFACT_WRITE_ROOT_ENV: str(write_root),
-    }), read_root, write_root
+    return (
+        PathPolicy.from_environment(
+            {
+                MODEL_READ_ROOTS_ENV: str(read_root),
+                ARTIFACT_WRITE_ROOT_ENV: str(write_root),
+            }
+        ),
+        read_root,
+        write_root,
+    )
 
 
 def _selection(name):
@@ -82,9 +91,7 @@ def test_symlink_or_junction_escape_fails_closed(tmp_path, ascii_root):
         policy.validate_model_read(str(link / "source.mph"))
 
 
-def test_unicode_alias_reserved_name_and_device_paths_are_rejected(
-    tmp_path, ascii_root
-):
+def test_unicode_alias_reserved_name_and_device_paths_are_rejected(tmp_path, ascii_root):
     policy, read_root, _ = _policy(tmp_path, ascii_root)
     decomposed = unicodedata.normalize("NFD", str(read_root / "café.mph"))
     with pytest.raises(ValueError, match="NFC"):
@@ -107,6 +114,17 @@ def test_artifact_writes_are_ascii_new_and_contained(tmp_path, ascii_root):
         policy.validate_artifact_write(str(write_root / "结果.json"))
     with pytest.raises(ValueError, match="escapes"):
         policy.validate_artifact_write(str(write_root / ".." / "outside.json"))
+
+
+def test_ascii_temp_directory_skips_unusable_candidate(ascii_tmp_path):
+    blocked = ascii_tmp_path / "not-a-directory"
+    blocked.write_text("blocked", encoding="utf-8")
+    fallback = ascii_tmp_path / "fallback"
+
+    created = _create_ascii_temp_dir(candidates=(blocked, fallback))
+
+    assert created.parent == fallback
+    assert str(created).isascii()
 
 
 def test_evidence_artifact_roots_are_existing_owned_directories(tmp_path, ascii_root):
@@ -211,9 +229,7 @@ def test_shared_source_and_fixed_snapshot_root_reuse_containment(tmp_path, ascii
     assert policy.shared_snapshot_root == write_root / "shared_snapshots"
 
 
-def test_shared_model_lock_wrapper_normalizes_immutable_source(
-    tmp_path, ascii_root, monkeypatch
-):
+def test_shared_model_lock_wrapper_normalizes_immutable_source(tmp_path, ascii_root, monkeypatch):
     _policy_value, read_root, write_root = _policy(tmp_path, ascii_root)
     source = read_root / "shared.mph"
     source.write_bytes(b"immutable")
@@ -275,7 +291,9 @@ def test_configured_reparse_root_is_rejected(tmp_path, ascii_root):
         pytest.skip(f"symlink creation unavailable: {exc}")
 
     with pytest.raises(ValueError, match="symlink or junction"):
-        PathPolicy.from_environment({
-            MODEL_READ_ROOTS_ENV: str(linked_root),
-            ARTIFACT_WRITE_ROOT_ENV: str(ascii_root / "artifacts"),
-        })
+        PathPolicy.from_environment(
+            {
+                MODEL_READ_ROOTS_ENV: str(linked_root),
+                ARTIFACT_WRITE_ROOT_ENV: str(ascii_root / "artifacts"),
+            }
+        )

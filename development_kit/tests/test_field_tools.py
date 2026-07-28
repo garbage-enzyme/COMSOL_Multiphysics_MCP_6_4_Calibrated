@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import shutil
-import uuid
 from pathlib import Path
 
 import pytest
@@ -69,7 +67,9 @@ def test_public_field_dataset_discovery_is_locale_safe_and_read_only(monkeypatch
 
     model = _Model()
     monkeypatch.setattr(field_evidence.session_manager, "get_model", lambda name: model)
-    monkeypatch.setattr(field_evidence.session_manager, "preflight_long_operation", lambda: {"ready": True})
+    monkeypatch.setattr(
+        field_evidence.session_manager, "preflight_long_operation", lambda: {"ready": True}
+    )
 
     result = _tool()(model_name="fixture", max_datasets=4, max_components=2)
 
@@ -109,7 +109,9 @@ def test_public_field_dataset_discovery_rejects_missing_model_and_limits(monkeyp
     }
 
     monkeypatch.setattr(field_evidence.session_manager, "get_model", lambda name: _Model())
-    monkeypatch.setattr(field_evidence.session_manager, "preflight_long_operation", lambda: {"ready": True})
+    monkeypatch.setattr(
+        field_evidence.session_manager, "preflight_long_operation", lambda: {"ready": True}
+    )
     invalid = _tool()(model_name="fixture", max_datasets=0)
     assert invalid["success"] is False
     assert "max_datasets" in invalid["error"]
@@ -133,7 +135,7 @@ def _extraction_request(source: Path):
 
 @pytest.mark.parametrize("canonical_transport", [False, True])
 def test_public_field_extract_binds_source_and_owned_runtime(
-    tmp_path, monkeypatch, canonical_transport
+    tmp_path, ascii_tmp_path, monkeypatch, canonical_transport
 ):
     from src.tools import field_evidence
 
@@ -144,9 +146,11 @@ def test_public_field_extract_binds_source_and_owned_runtime(
     request = canonical_request if canonical_transport else raw_request
     model = _DatasetModel()
     model.file = lambda: str(source)
-    runtime = Path(r"D:\r") / uuid.uuid4().hex[:8]
+    runtime = ascii_tmp_path / "runtime"
     monkeypatch.setattr(field_evidence.session_manager, "get_model", lambda name: model)
-    monkeypatch.setattr(field_evidence.session_manager, "preflight_long_operation", lambda: {"ready": True})
+    monkeypatch.setattr(
+        field_evidence.session_manager, "preflight_long_operation", lambda: {"ready": True}
+    )
     monkeypatch.setattr(field_evidence.ownership_manager, "runtime_dir", runtime)
 
     result = _tool("wave_optics_field_extract")(
@@ -155,19 +159,16 @@ def test_public_field_extract_binds_source_and_owned_runtime(
         view_id="on",
     )
 
-    try:
-        assert result["success"] is True, result
-        assert result["source_unchanged"] is True
-        assert result["study_run"] is False
-        assert result["model_mutated"] is False
-        assert result["artifact_root_id"] == (
-            f"field_evidence/{canonical_request['request_fingerprint']}"
-        )
-        root = runtime / Path(result["artifact_root_id"])
-        assert (root / result["array_artifact"]["relative_path"]).is_file()
-        assert (root / result["manifest_artifact"]["relative_path"]).is_file()
-    finally:
-        shutil.rmtree(runtime, ignore_errors=True)
+    assert result["success"] is True, result
+    assert result["source_unchanged"] is True
+    assert result["study_run"] is False
+    assert result["model_mutated"] is False
+    assert result["artifact_root_id"] == (
+        f"field_evidence/{canonical_request['request_fingerprint']}"
+    )
+    root = runtime / Path(result["artifact_root_id"])
+    assert (root / result["array_artifact"]["relative_path"]).is_file()
+    assert (root / result["manifest_artifact"]["relative_path"]).is_file()
 
 
 def test_public_field_extract_rejects_source_mismatch_before_evaluation(tmp_path, monkeypatch):
@@ -191,7 +192,9 @@ def test_public_field_extract_rejects_source_mismatch_before_evaluation(tmp_path
     model = _DatasetModel()
     model.file = lambda: str(source)
     monkeypatch.setattr(field_evidence.session_manager, "get_model", lambda name: model)
-    monkeypatch.setattr(field_evidence.session_manager, "preflight_long_operation", lambda: {"ready": True})
+    monkeypatch.setattr(
+        field_evidence.session_manager, "preflight_long_operation", lambda: {"ready": True}
+    )
 
     result = _tool("wave_optics_field_extract")(
         model_name="fixture",
@@ -205,9 +208,7 @@ def test_public_field_extract_rejects_source_mismatch_before_evaluation(tmp_path
 
 
 @pytest.mark.parametrize("tamper", ["fingerprint", "schema"])
-def test_public_field_extract_rejects_tampered_canonical_request(
-    tmp_path, monkeypatch, tamper
-):
+def test_public_field_extract_rejects_tampered_canonical_request(tmp_path, monkeypatch, tamper):
     from src.tools import field_evidence
 
     source = tmp_path / "fixture.mph"
@@ -221,9 +222,7 @@ def test_public_field_extract_rejects_tampered_canonical_request(
     model.file = lambda: str(source)
     monkeypatch.setattr(field_evidence.session_manager, "get_model", lambda name: model)
 
-    result = _tool("wave_optics_field_extract")(
-        model_name="fixture", request=request, view_id="on"
-    )
+    result = _tool("wave_optics_field_extract")(model_name="fixture", request=request, view_id="on")
 
     assert result["success"] is False
     assert model.calls == []

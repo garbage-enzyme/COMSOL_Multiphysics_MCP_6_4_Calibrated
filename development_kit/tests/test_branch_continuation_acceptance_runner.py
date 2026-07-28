@@ -3,9 +3,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
-import shutil
-import uuid
 
 import pytest
 
@@ -15,23 +12,11 @@ from development_kit.tests.integration.branch_continuation_campaign_acceptance i
 from development_kit.tests.test_branch_continuation_campaign_job import _raw_campaign
 
 
-@pytest.fixture
-def ascii_root():
-    root = Path("D:/comsol_runtime_test") / f"continuation-acceptance-{uuid.uuid4().hex}"
-    root.mkdir(parents=True)
-    try:
-        yield root
-    finally:
-        shutil.rmtree(root, ignore_errors=True)
-
-
-def test_dry_run_binds_every_source_and_readback_without_starting_worker(
-    tmp_path, ascii_root
-):
+def test_dry_run_binds_every_source_and_readback_without_starting_worker(tmp_path, ascii_tmp_path):
     output = tmp_path / "dry-run.json"
     receipt = run_acceptance(
         raw_spec=_raw_campaign(tmp_path / "sources"),
-        runtime_root=ascii_root,
+        runtime_root=ascii_tmp_path,
         output=output,
         dry_run=True,
         worker_runner=lambda *_args, **_kwargs: pytest.fail("worker must not start"),
@@ -43,13 +28,13 @@ def test_dry_run_binds_every_source_and_readback_without_starting_worker(
     assert json.loads(output.read_text(encoding="utf-8")) == receipt
 
 
-def test_receipt_is_never_overwritten(tmp_path, ascii_root):
+def test_receipt_is_never_overwritten(tmp_path, ascii_tmp_path):
     output = tmp_path / "existing.json"
     output.write_text("{}", encoding="utf-8")
     with pytest.raises(FileExistsError, match="overwrite"):
         run_acceptance(
             raw_spec=_raw_campaign(tmp_path / "sources"),
-            runtime_root=ascii_root,
+            runtime_root=ascii_tmp_path,
             output=output,
             dry_run=True,
         )

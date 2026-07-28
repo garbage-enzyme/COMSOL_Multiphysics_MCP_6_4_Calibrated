@@ -3,20 +3,17 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
-import shutil
 import time
-import uuid
+from pathlib import Path
 
-import pytest
-
-from development_kit.tests.spectral_job_fixtures import write_fake_point_audit
-from development_kit.tests.test_convergence_campaign_job import _raw_campaign
 from src.jobs.convergence_campaign import normalize_convergence_campaign_spec
 from src.jobs.convergence_campaign_rows import read_convergence_campaign_levels
 from src.jobs.convergence_campaign_worker import _run
 from src.jobs.manager import JobManager
 from src.jobs.store import JobStore, process_identity
+
+from development_kit.tests.spectral_job_fixtures import write_fake_point_audit
+from development_kit.tests.test_convergence_campaign_job import _raw_campaign
 
 
 class _Model:
@@ -72,28 +69,21 @@ def _telemetry(stage, point_id, model, directory, elapsed):
     }
 
 
-@pytest.fixture
-def ascii_root():
-    root = Path("D:/comsol_runtime_test") / f"convergence-worker-{uuid.uuid4().hex}"
-    root.mkdir(parents=True)
-    try:
-        yield root
-    finally:
-        shutil.rmtree(root, ignore_errors=True)
-
-
-def _created_job(tmp_path, ascii_root):
+def _created_job(tmp_path, ascii_tmp_path):
     raw = _raw_campaign(tmp_path / "sources")
     raw["convergence_policy"]["minimum_level_count"] = 2
     raw["convergence_policy"]["declared_cap_reached"] = False
     raw["stop_policy"]["minimum_completed_levels"] = 2
     spec = normalize_convergence_campaign_spec(raw)
-    store = JobStore(ascii_root / "runtime" / "jobs")
+    store = JobStore(ascii_tmp_path / "runtime" / "jobs")
     now = time.time()
     identity = process_identity(os.getpid())
     state = {
-        "schema_version": "2", "status": "submitted", "attempt": 1,
-        "created_at_epoch": now, "updated_at_epoch": now,
+        "schema_version": "2",
+        "status": "submitted",
+        "attempt": 1,
+        "created_at_epoch": now,
+        "updated_at_epoch": now,
         "worker_pid": identity["pid"],
         "worker_process_create_time": identity["process_create_time"],
         "worker_command_signature": identity["command_signature"],
@@ -106,8 +96,7 @@ def _created_job(tmp_path, ascii_root):
 
 def _collector_for(spec, *, fail_configuration=None):
     by_configuration = {
-        level["spectral_job"]["configuration_sha256"]: level
-        for level in spec["levels"]
+        level["spectral_job"]["configuration_sha256"]: level for level in spec["levels"]
     }
 
     def collect(point, _collector, artifact_dir):
@@ -126,8 +115,8 @@ def _collector_for(spec, *, fail_configuration=None):
     return collect
 
 
-def test_worker_uses_one_owner_and_client_for_all_exact_levels(tmp_path, ascii_root):
-    store, spec, job_id = _created_job(tmp_path, ascii_root)
+def test_worker_uses_one_owner_and_client_for_all_exact_levels(tmp_path, ascii_tmp_path):
+    store, spec, job_id = _created_job(tmp_path, ascii_tmp_path)
     ownership = _Ownership()
     client = _Client()
     code = _run(
@@ -154,8 +143,8 @@ def test_worker_uses_one_owner_and_client_for_all_exact_levels(tmp_path, ascii_r
     )
 
 
-def test_failed_later_level_resumes_without_rerunning_completed_level(tmp_path, ascii_root):
-    store, spec, job_id = _created_job(tmp_path, ascii_root)
+def test_failed_later_level_resumes_without_rerunning_completed_level(tmp_path, ascii_tmp_path):
+    store, spec, job_id = _created_job(tmp_path, ascii_tmp_path)
     second_configuration = spec["levels"][1]["spectral_job"]["configuration_sha256"]
     first_client = _Client()
     first = _run(
@@ -210,8 +199,8 @@ def test_failed_later_level_resumes_without_rerunning_completed_level(tmp_path, 
     assert [row["level_id"] for row in rows] == ["mesh-0", "mesh-1", "mesh-2"]
 
 
-def test_cleanup_failure_prevents_false_completed_state(tmp_path, ascii_root):
-    store, spec, job_id = _created_job(tmp_path, ascii_root)
+def test_cleanup_failure_prevents_false_completed_state(tmp_path, ascii_tmp_path):
+    store, spec, job_id = _created_job(tmp_path, ascii_tmp_path)
     code = _run(
         str(store.root),
         job_id,
@@ -227,11 +216,13 @@ def test_cleanup_failure_prevents_false_completed_state(tmp_path, ascii_root):
     assert "lease_release" in state["last_error"]["message"]
 
 
-def test_manager_exact_resubmission_observes_existing_campaign(tmp_path, ascii_root, monkeypatch):
+def test_manager_exact_resubmission_observes_existing_campaign(
+    tmp_path, ascii_tmp_path, monkeypatch
+):
     raw = _raw_campaign(tmp_path / "sources")
     raw["convergence_policy"]["declared_cap_reached"] = False
     manager = JobManager(
-        ascii_root / "manager" / "jobs",
+        ascii_tmp_path / "manager" / "jobs",
         preflight=lambda **_kwargs: {"ready": True},
         reconcile_on_start=False,
     )

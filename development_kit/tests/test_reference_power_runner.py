@@ -2,20 +2,18 @@
 
 from __future__ import annotations
 
-import json
 import hashlib
-from pathlib import Path
+import json
 import subprocess
 import sys
 import time
-import uuid
+from pathlib import Path
 
 from development_kit.tests.integration.reference_power_acceptance import (
     _admit_lightweight_status,
     _redacted_status,
     _worker_summary,
 )
-
 
 ROOT = Path(__file__).parents[2]
 RUNNER = ROOT / "development_kit" / "tests" / "integration" / "reference_power_acceptance.py"
@@ -121,7 +119,7 @@ def test_real_mode_requires_explicit_authority_and_resource_limits():
     assert "--timeout-seconds" in source
 
 
-def test_coordinator_refuses_collision_before_starting_worker(tmp_path):
+def test_coordinator_refuses_collision_before_starting_worker(tmp_path, ascii_tmp_path):
     source = tmp_path / "dummy.mph"
     source.write_bytes(b"not-a-real-model")
     blocker_script = tmp_path / "owned_solver.py"
@@ -129,7 +127,7 @@ def test_coordinator_refuses_collision_before_starting_worker(tmp_path):
         "# mph.Client collision marker for the lightweight scanner\nimport time\ntime.sleep(30)\n",
         encoding="utf-8",
     )
-    artifact_dir = Path(f"D:/comsol_runtime_test/reference_power_collision_{uuid.uuid4().hex}")
+    artifact_dir = ascii_tmp_path / "reference_power_collision"
     spec_path = tmp_path / "spec.json"
     output_path = tmp_path / "receipt.json"
     spec = {
@@ -140,8 +138,11 @@ def test_coordinator_refuses_collision_before_starting_worker(tmp_path):
         "expected_source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
         "artifact_dir": str(artifact_dir),
         "model": {
-            "component_tag": "comp1", "physics_tag": "ewfd", "study_tag": "std1",
-            "study_step_tag": "wl_step", "study_step_property": "plist",
+            "component_tag": "comp1",
+            "physics_tag": "ewfd",
+            "study_tag": "std1",
+            "study_step_tag": "wl_step",
+            "study_step_property": "plist",
         },
         "wavelength": {"value": 4.37, "unit": "um", "parameter": "wl"},
         "reference_air": {
@@ -149,21 +150,35 @@ def test_coordinator_refuses_collision_before_starting_worker(tmp_path):
             "all_domain_ids": [1, 2],
             "top_air_domain_ids": [2],
             "top_air_coordinate_range": {"x": [0, 1], "y": [0, 1], "z": [0.8, 1]},
-            "target_axis": "x", "aggregation": "rms_abs",
-            "r_expression": "ewfd.Rtotal", "t_expression": "ewfd.Ttotal",
+            "target_axis": "x",
+            "aggregation": "rms_abs",
+            "r_expression": "ewfd.Rtotal",
+            "t_expression": "ewfd.Ttotal",
         },
         "declared_plane_flux": {
             "incident": {
-                "expression": "inc", "selection_ids": [10], "plane_coordinate_m": 1e-6,
-                "normal": [0, 0, -1], "medium_id": "air", "positive_power_sign": -1,
+                "expression": "inc",
+                "selection_ids": [10],
+                "plane_coordinate_m": 1e-6,
+                "normal": [0, 0, -1],
+                "medium_id": "air",
+                "positive_power_sign": -1,
             },
             "reflected": {
-                "expression": "ref", "selection_ids": [11], "plane_coordinate_m": 1e-6,
-                "normal": [0, 0, 1], "medium_id": "air", "positive_power_sign": 1,
+                "expression": "ref",
+                "selection_ids": [11],
+                "plane_coordinate_m": 1e-6,
+                "normal": [0, 0, 1],
+                "medium_id": "air",
+                "positive_power_sign": 1,
             },
             "transmitted": {
-                "expression": "trn", "selection_ids": [12], "plane_coordinate_m": -1e-6,
-                "normal": [0, 0, -1], "medium_id": "air", "positive_power_sign": -1,
+                "expression": "trn",
+                "selection_ids": [12],
+                "plane_coordinate_m": -1e-6,
+                "normal": [0, 0, -1],
+                "medium_id": "air",
+                "positive_power_sign": -1,
             },
         },
     }
@@ -177,12 +192,18 @@ def test_coordinator_refuses_collision_before_starting_worker(tmp_path):
         time.sleep(0.25)
         completed = subprocess.run(
             [
-                sys.executable, str(RUNNER),
-                "--confirm", "RUN_REAL_COMSOL",
-                "--spec", str(spec_path),
-                "--output", str(output_path),
-                "--cores", "1",
-                "--timeout-seconds", "30",
+                sys.executable,
+                str(RUNNER),
+                "--confirm",
+                "RUN_REAL_COMSOL",
+                "--spec",
+                str(spec_path),
+                "--output",
+                str(output_path),
+                "--cores",
+                "1",
+                "--timeout-seconds",
+                "30",
             ],
             cwd=ROOT,
             text=True,
@@ -198,7 +219,9 @@ def test_coordinator_refuses_collision_before_starting_worker(tmp_path):
     assert completed.returncode == 2
     assert receipt["worker_started"] is False
     assert receipt["pre_import_admission"]["admitted"] is False
-    assert "external COMSOL/MPh solver process detected" in receipt["pre_import_admission"]["blockers"]
+    assert (
+        "external COMSOL/MPh solver process detected" in receipt["pre_import_admission"]["blockers"]
+    )
     assert not (artifact_dir / "worker_result.json").exists()
     if artifact_dir.exists():
         artifact_dir.rmdir()
