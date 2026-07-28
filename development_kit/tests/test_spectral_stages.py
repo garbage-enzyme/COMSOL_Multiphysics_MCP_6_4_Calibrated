@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
-from concurrent.futures import ThreadPoolExecutor
 import json
 import math
+from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
 
 import pytest
-
+import src.jobs.spectral_stages as spectral_stages_module
 from src.jobs.spectral_characterization import normalize_spectral_characterization_job_spec
 from src.jobs.spectral_stages import (
     build_initial_spectral_stage,
@@ -106,6 +106,20 @@ def test_initial_grid_and_stage_are_deterministic_and_inclusive(tmp_path):
     assert validate_spectral_stage_plan(
         plan, spec, expected_index=0, previous_stage_sha256=None
     ) == plan
+
+
+def test_initial_grid_rejects_oversized_count_before_allocation(tmp_path, monkeypatch):
+    spec = _spec(tmp_path)
+    spec["initial_grid"]["point_count"] = 10**9
+    spec["maximum_points"] = 10**9
+    monkeypatch.setattr(
+        spectral_stages_module,
+        "inclusive_wavelength_grid",
+        lambda *_args: pytest.fail("grid allocation must not start"),
+    )
+
+    with pytest.raises(ValueError, match="point_count"):
+        build_initial_spectral_stage(spec)
 
 
 def test_stage_is_atomically_frozen_and_exact_replay_is_idempotent(tmp_path):

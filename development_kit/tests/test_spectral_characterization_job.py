@@ -5,7 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 
 import pytest
-
+import src.jobs.spectral_characterization as spectral_job_module
 from src.jobs.spectral_characterization import (
     MAX_REFINEMENT_STAGES,
     current_spectral_driver_identity,
@@ -162,3 +162,17 @@ def test_changed_driver_identity_cannot_resume_existing_rows(tmp_path):
     spec["driver_identity"]["package_content_sha256"] = "0" * 64
     with pytest.raises(ValueError, match="driver identity"):
         validate_spectral_driver_identity(spec)
+
+
+def test_spec_byte_limit_includes_added_fingerprint(tmp_path, monkeypatch):
+    raw = _raw_spec(tmp_path)
+    normalized = normalize_spectral_characterization_job_spec(raw)
+    body = dict(normalized)
+    body.pop("spec_fingerprint")
+    pre_fingerprint_size = len(spectral_job_module._canonical_bytes(body))
+    monkeypatch.setattr(
+        spectral_job_module, "MAX_SPECTRAL_JOB_SPEC_BYTES", pre_fingerprint_size
+    )
+
+    with pytest.raises(ValueError, match="job exceeds"):
+        normalize_spectral_characterization_job_spec(raw)

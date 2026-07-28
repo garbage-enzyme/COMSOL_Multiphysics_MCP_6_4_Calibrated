@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
-
 import pytest
-
+import src.shared_session.locking as locking_module
 from src.shared_session.identity import normalize_attached_server_identity
 from src.shared_session.locking import (
     build_shared_model_lock,
@@ -132,6 +130,18 @@ def test_revision_rejects_missing_nonfinite_or_unbounded_readback(structural, st
             sequence=0,
             structural_readback=structural,
             state_readback=state,
+        )
+
+
+def test_revision_rejects_aggregate_node_budget_before_serialization(monkeypatch):
+    monkeypatch.setattr(locking_module, "MAX_REVISION_NODES", 4)
+
+    with pytest.raises(ValueError, match="aggregate node limit"):
+        build_shared_model_revision(
+            _model(),
+            sequence=0,
+            structural_readback={"branch": [1, 2]},
+            state_readback={"state": "ready"},
         )
 
 

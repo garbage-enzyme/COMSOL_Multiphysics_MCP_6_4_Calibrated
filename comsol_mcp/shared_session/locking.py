@@ -2,29 +2,28 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
 import hashlib
 import math
 import re
+from dataclasses import asdict, dataclass
 from typing import Any, Mapping
 
+from comsol_mcp.durable import canonical_json_v1, canonical_sha256_v1
 from comsol_mcp.utils.immutability import deep_freeze, deep_thaw
 
-from comsol_mcp.durable import canonical_json_v1, canonical_sha256_v1
-
 from .identity import (
-    AttachedServerIdentity,
     MAX_MODEL_LABEL_CHARACTERS,
     MAX_MODEL_TAG_CHARACTERS,
+    AttachedServerIdentity,
     _normalize_confirmed_model_path,
 )
-
 
 SHARED_MODEL_LOCK_SCHEMA = "comsol_mcp.shared_model_lock"
 SHARED_MODEL_LOCK_VERSION = "1.0.0"
 MAX_REVISION_READBACK_BYTES = 64 * 1024
 MAX_REVISION_COLLECTION_ITEMS = 256
 MAX_REVISION_DEPTH = 8
+MAX_REVISION_NODES = 4096
 MAX_REVISION_TEXT_CHARACTERS = 4096
 
 _MODEL_IDENTITY_FIELDS = frozenset({"tag", "label", "file_path", "unsaved"})
@@ -94,7 +93,17 @@ def _hex64(value: Any, label: str) -> str:
     return value.casefold()
 
 
-def _normalize_json_value(value: Any, label: str, depth: int = 0) -> Any:
+def _normalize_json_value(
+    value: Any,
+    label: str,
+    depth: int = 0,
+    remaining: list[int] | None = None,
+) -> Any:
+    if remaining is None:
+        remaining = [MAX_REVISION_NODES]
+    remaining[0] -= 1
+    if remaining[0] < 0:
+        raise ValueError(f"{label} exceeds the aggregate node limit")
     if depth > MAX_REVISION_DEPTH:
         raise ValueError(f"{label} exceeds the maximum nesting depth")
     if value is None or isinstance(value, bool) or isinstance(value, int):
@@ -113,16 +122,19 @@ def _normalize_json_value(value: Any, label: str, depth: int = 0) -> Any:
         if len(value) > MAX_REVISION_COLLECTION_ITEMS:
             raise ValueError(f"{label} contains an oversized list")
         return [
-            _normalize_json_value(item, f"{label}[{index}]", depth + 1)
+            _normalize_json_value(item, f"{label}[{index}]", depth + 1, remaining)
             for index, item in enumerate(value)
         ]
     if isinstance(value, Mapping) and all(isinstance(key, str) for key in value):
         if len(value) > MAX_REVISION_COLLECTION_ITEMS:
             raise ValueError(f"{label} contains an oversized object")
-        return {
-            key: _normalize_json_value(item, f"{label}.{key}", depth + 1)
-            for key, item in sorted(value.items())
-        }
+        normalized = {}
+        for key, item in sorted(value.items()):
+            _normalize_json_value(key, f"{label}.<key>", depth + 1, remaining)
+            normalized[key] = _normalize_json_value(
+                item, f"{label}.{key}", depth + 1, remaining
+            )
+        return normalized
     raise ValueError(f"{label} must contain only bounded JSON values")
 
 
@@ -313,6 +325,7 @@ def build_shared_model_lock(
 __all__ = [
     "MAX_REVISION_COLLECTION_ITEMS",
     "MAX_REVISION_DEPTH",
+    "MAX_REVISION_NODES",
     "MAX_REVISION_READBACK_BYTES",
     "SHARED_MODEL_LOCK_SCHEMA",
     "SHARED_MODEL_LOCK_VERSION",

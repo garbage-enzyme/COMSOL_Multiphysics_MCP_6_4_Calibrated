@@ -17,6 +17,25 @@ MAX_PUBLIC_NUMBER_MAGNITUDE = 1.0e308
 
 def bounded_public_schema(value: dict[str, Any]) -> dict[str, Any]:
     """Return a bounded closed-object discovery schema without mutating input."""
+    active: set[int] = set()
+
+    def validate_graph(node: Any, depth: int) -> None:
+        if depth > MAX_PUBLIC_NESTING_DEPTH:
+            raise ValueError("public schema exceeds the nesting limit")
+        if not isinstance(node, (dict, list)):
+            return
+        identity = id(node)
+        if identity in active:
+            raise ValueError("public schema contains a cycle")
+        active.add(identity)
+        try:
+            nested = node.values() if isinstance(node, dict) else node
+            for item in nested:
+                validate_graph(item, depth + 1)
+        finally:
+            active.remove(identity)
+
+    validate_graph(value, 0)
     schema = deepcopy(value)
 
     def visit(node: Any) -> None:

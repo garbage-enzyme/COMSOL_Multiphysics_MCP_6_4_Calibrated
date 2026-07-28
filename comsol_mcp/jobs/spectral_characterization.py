@@ -5,8 +5,8 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-from pathlib import Path, PurePosixPath
 import re
+from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
 
 from comsol_mcp.build_identity import get_build_identity
@@ -19,7 +19,6 @@ from comsol_mcp.evidence.spectral_characterization import (
 
 from .resource_admission import normalize_resource_policy
 from .store import JOB_SCHEMA_VERSION
-
 
 MAX_INITIAL_GRID_POINTS = 257
 MAX_STAGE_POINTS = 257
@@ -503,12 +502,12 @@ def normalize_spectral_characterization_job_spec(raw_spec: object) -> dict[str, 
         "continue_on_error": continue_on_error,
         "driver_identity": current_spectral_driver_identity(),
     }
+    spec["spec_fingerprint"] = _fingerprint(spec)
     encoded = _canonical_bytes(spec)
     if len(encoded) > MAX_SPECTRAL_JOB_SPEC_BYTES:
         raise ValueError(
             f"spectral characterization job exceeds {MAX_SPECTRAL_JOB_SPEC_BYTES} bytes"
         )
-    spec["spec_fingerprint"] = _fingerprint(spec)
     return spec
 
 

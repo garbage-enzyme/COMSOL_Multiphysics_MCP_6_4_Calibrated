@@ -127,6 +127,20 @@ def test_finite_json_limits_fail_closed(monkeypatch: pytest.MonkeyPatch) -> None
     with pytest.raises(ValueError, match="nesting limit"):
         canonical.validate_finite_json([None])
 
+    monkeypatch.setattr(canonical, "MAX_CANONICAL_DEPTH", 64)
+    monkeypatch.setattr(canonical, "MAX_CANONICAL_STRING_BYTES", 3)
+    with pytest.raises(ValueError, match="string.*byte limit"):
+        canonical.validate_finite_json("éé")
+    with pytest.raises(ValueError, match="string.*byte limit"):
+        canonical.validate_finite_json({"éé": None})
+    with pytest.raises(ValueError, match="valid UTF-8"):
+        canonical.validate_finite_json("\ud800")
+
+    monkeypatch.setattr(canonical, "MAX_CANONICAL_STRING_BYTES", 1024)
+    monkeypatch.setattr(canonical, "MAX_CANONICAL_INTEGER_BITS", 3)
+    with pytest.raises(ValueError, match="integer.*bit limit"):
+        canonical.validate_finite_json(8)
+
 
 @pytest.mark.parametrize("domain", [None, "", "x" * 129, "thermal.µm"])
 def test_domain_identity_rejects_invalid_names(domain: object) -> None:
@@ -174,6 +188,22 @@ def test_public_schema_adds_limits_without_overwriting_explicit_policy() -> None
         "minimum": 0,
         "maximum": 9,
     }
+
+
+def test_public_schema_rejects_cycles_and_overdeep_graphs() -> None:
+    cyclic: dict[str, object] = {"type": "object"}
+    cyclic["properties"] = {"self": cyclic}
+    with pytest.raises(ValueError, match="cycle"):
+        bounded_public_schema(cyclic)
+
+    overdeep: dict[str, object] = {"type": "object"}
+    cursor = overdeep
+    for _ in range(MAX_PUBLIC_NESTING_DEPTH + 1):
+        nested: dict[str, object] = {"type": "object"}
+        cursor["properties"] = {"nested": nested}
+        cursor = nested
+    with pytest.raises(ValueError, match="nesting limit"):
+        bounded_public_schema(overdeep)
 
 
 def _overdeep_value() -> list[object]:

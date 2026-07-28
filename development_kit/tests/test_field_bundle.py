@@ -3,7 +3,7 @@ from __future__ import annotations
 import builtins
 
 import pytest
-
+import src.evidence.field_bundle as field_bundle_module
 from src.evidence.field_bundle import (
     MAX_FIELD_ARTIFACT_BYTES,
     MAX_GRID_FIELD_POINTS,
@@ -121,6 +121,20 @@ def test_source_or_extraction_changes_change_request_identity():
 
     assert first["request_fingerprint"] != second["request_fingerprint"]
     assert first["views"][0]["source"]["source_fingerprint"] != third["views"][0]["source"]["source_fingerprint"]
+
+
+def test_request_byte_limit_includes_added_fingerprint(monkeypatch):
+    raw = _request()
+    normalized = normalize_field_evidence_request(raw)
+    body = dict(normalized)
+    body.pop("request_fingerprint")
+    pre_fingerprint_size = len(field_bundle_module._canonical_bytes(body))
+    monkeypatch.setattr(
+        field_bundle_module, "MAX_FIELD_REQUEST_BYTES", pre_fingerprint_size
+    )
+
+    with pytest.raises(ValueError, match="request exceeds"):
+        normalize_field_evidence_request(raw)
 
 
 def test_single_view_without_png_is_supported_and_has_no_png_artifact():

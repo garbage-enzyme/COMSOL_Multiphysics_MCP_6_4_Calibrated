@@ -2,22 +2,21 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
-from decimal import Decimal, localcontext
 import hashlib
 import json
 import math
+from copy import deepcopy
+from decimal import Decimal, localcontext
 from pathlib import Path
 from typing import Any, Mapping
 
+from .spectral_characterization import MAX_INITIAL_GRID_POINTS
 from .spectral_rows import (
     SPECTRAL_STAGE_KINDS,
     normalize_spectral_wavelength_m,
     spectral_point_identity,
 )
-from .store import atomic_write_json, read_json
-from .store import JobLock
-
+from .store import JobLock, atomic_write_json, read_json
 
 SPECTRAL_STAGE_SCHEMA_NAME = "comsol_mcp.spectral_stage_plan"
 SPECTRAL_STAGE_SCHEMA_VERSION = "1.0.0"
@@ -171,8 +170,25 @@ def build_spectral_stage_plan(
 def build_initial_spectral_stage(spec: Mapping[str, Any]) -> dict[str, Any]:
     """Build the exact initial locator request from the immutable job spec."""
     grid = _mapping(spec.get("initial_grid"), "initial_grid")
+    point_count = grid.get("point_count")
+    maximum_points = spec.get("maximum_points")
+    if (
+        isinstance(point_count, bool)
+        or not isinstance(point_count, int)
+        or point_count < 2
+        or point_count > MAX_INITIAL_GRID_POINTS
+    ):
+        raise ValueError(
+            f"initial_grid.point_count must be an integer from 2 to {MAX_INITIAL_GRID_POINTS}"
+        )
+    if (
+        isinstance(maximum_points, bool)
+        or not isinstance(maximum_points, int)
+        or maximum_points < point_count
+    ):
+        raise ValueError("maximum_points must cover the initial grid")
     wavelengths = inclusive_wavelength_grid(
-        grid.get("lower_m"), grid.get("upper_m"), grid.get("point_count")
+        grid.get("lower_m"), grid.get("upper_m"), point_count
     )
     return build_spectral_stage_plan(
         spec,
