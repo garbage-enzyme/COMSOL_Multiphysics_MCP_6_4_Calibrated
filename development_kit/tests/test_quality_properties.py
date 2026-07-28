@@ -7,6 +7,7 @@ import json
 import math
 import os
 import tempfile
+from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -175,9 +176,10 @@ def test_public_schema_adds_limits_without_overwriting_explicit_policy() -> None
         },
     }
 
+    original = deepcopy(source)
     result = bounded_public_schema(source)
 
-    assert "additionalProperties" not in source
+    assert source == original
     assert result["additionalProperties"] is False
     assert result["maxProperties"] == MAX_PUBLIC_OBJECT_FIELDS
     assert result["properties"]["text"]["maxLength"] == MAX_PUBLIC_STRING_LENGTH

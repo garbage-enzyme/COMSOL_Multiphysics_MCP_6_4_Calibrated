@@ -54,7 +54,13 @@ def _row(index: int, wavelength: float, absorption: float) -> dict:
 
 
 def _bundle(values: list[float], wavelengths: list[float] | None = None):
-    wavelengths = wavelengths or [4.0e-6 + index * 0.1e-6 for index in range(len(values))]
+    wavelengths = (
+        [4.0e-6 + index * 0.1e-6 for index in range(len(values))]
+        if wavelengths is None
+        else wavelengths
+    )
+    if len(wavelengths) != len(values):
+        raise ValueError("wavelengths and values must have equal lengths")
     return build_spectral_point_bundle(
         bundle_id="bounded-spectrum",
         source_model={"relative_identity": "fixtures/source.mph", "sha256": "b" * 64},
@@ -501,6 +507,31 @@ def test_public_tool_returns_three_separate_hash_bound_artifacts():
     assert result["candidate_measurements"]["decision_sha256"] == result["analysis_decision"]["decision_sha256"]
     assert result["solver_started"] is False
     assert result["filesystem_modified"] is False
+
+
+@pytest.mark.parametrize("mode", ["both", "neither"])
+def test_public_tool_requires_exactly_one_spectral_input_form(mode):
+    bundle = _bundle([0.1, 0.5, 0.9, 0.5, 0.1])
+    server = FastMCP("spectral-input-form-test")
+    register_spectral_characterization_tools(server)
+    arguments = {
+        "analysis_policy": _policy(),
+        "measurement_configuration": _measurement(),
+    }
+    if mode == "both":
+        arguments.update(bundle_spec=_bundle_spec(bundle), spectral_bundle=bundle)
+
+    result = server._tool_manager._tools["spectral_characterize"].fn(**arguments)
+
+    assert result["success"] is False
+    assert result["reason_code"] == "spectral_input_rejected"
+    assert "exactly one" in result["error"]
+
+
+@pytest.mark.parametrize("wavelengths", [[], [4.0e-6]])
+def test_spectral_fixture_rejects_empty_or_mismatched_wavelength_lists(wavelengths):
+    with pytest.raises(ValueError, match="equal lengths"):
+        _bundle([0.1, 0.2], wavelengths=wavelengths)
 
 
 def test_public_tool_classifies_nonfinite_rows_without_serializing_invalid_numbers():

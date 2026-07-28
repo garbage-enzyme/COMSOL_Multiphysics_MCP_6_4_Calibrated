@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from copy import deepcopy
 import hashlib
 import json
@@ -518,6 +519,28 @@ def test_public_tool_accepts_canonical_ladder_and_rejects_ambiguous_input():
     assert rejected["scientific_disposition"] == "invalid_evidence"
     assert "exactly one" in rejected["error"]
     assert rejected["solver_started"] is False
+
+
+def test_public_convergence_contract_runs_through_fastmcp_transport():
+    server = FastMCP("convergence-transport-test")
+    register_convergence_evaluation_tools(server)
+    tool = server._tool_manager._tools["convergence_evaluate"]
+
+    result = asyncio.run(
+        tool.run(
+            {
+                "ladder_spec": {
+                    "ladder_id": "transport-ladder",
+                    "levels": _levels(),
+                },
+                "convergence_policy": _policy(),
+            }
+        )
+    )
+
+    assert result["success"] is True
+    assert result["convergence_ladder"]["ladder_id"] == "transport-ladder"
+    assert result["solver_started"] is False
 
 
 def test_public_tool_structures_extreme_integer_rejection():

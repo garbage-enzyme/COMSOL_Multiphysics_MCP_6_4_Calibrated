@@ -22,7 +22,7 @@ class _Node:
         self._name = name
         self._tag = tag
         self._type = node_type
-        self._properties = properties or {}
+        self._properties = {} if properties is None else properties
         self.java = _JavaSolution(empty=empty, fail=fail)
 
     def name(self):
@@ -44,10 +44,21 @@ class _Node:
 class _Model:
     def __init__(self, *, components=None, datasets=None, solutions=None):
         self.groups = {
-            "components": components or [_Node("组件 1", "comp1", "Component")],
-            "datasets": datasets
-            or [_Node("研究 1//解 1", "dset1", "Solution", {"solution": "sol1"})],
-            "solutions": solutions or [_Node("解 1", "sol1", "Solution", empty=False)],
+            "components": (
+                [_Node("组件 1", "comp1", "Component")]
+                if components is None
+                else components
+            ),
+            "datasets": (
+                [_Node("研究 1//解 1", "dset1", "Solution", {"solution": "sol1"})]
+                if datasets is None
+                else datasets
+            ),
+            "solutions": (
+                [_Node("解 1", "sol1", "Solution", empty=False)]
+                if solutions is None
+                else solutions
+            ),
         }
 
     def __truediv__(self, group):
@@ -99,6 +110,18 @@ def test_discovery_handles_english_names_empty_unknown_and_non_solution_datasets
     assert result["datasets"][0]["field_evaluation_eligible"] is False
     assert result["datasets"][1]["computed_state"] == "not_solution"
     assert result["datasets"][2]["solution_reference_kind"] is None
+    assert result["eligible_dataset_count"] == 0
+
+
+def test_discovery_fixture_preserves_explicit_empty_collections():
+    result = discover_field_datasets(
+        _Model(components=[], datasets=[], solutions=[])
+    )
+
+    assert result["components"] == []
+    assert result["datasets"] == []
+    assert result["component_count"] == 0
+    assert result["dataset_count"] == 0
     assert result["eligible_dataset_count"] == 0
 
 
