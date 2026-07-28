@@ -220,7 +220,36 @@ class SharedSessionManager:
         self._inventory_sha256 = None
         self._session_acquisition_id = None
         self._model_lock = None
+        self._client_disconnected = False
+        self._attach_cleanup_pending = False
+        self._detach_inventory_after = None
+        self._detach_inventory_error = None
         self._unlock_audit: list[dict[str, Any]] = []
+
+    def _reset_session_state(self) -> None:
+        self._client = None
+        self._ownership = None
+        self._server_identity = None
+        self._selector = None
+        self._selected_model = None
+        self._inventory_sha256 = None
+        self._session_acquisition_id = None
+        self._model_lock = None
+        self._client_disconnected = False
+        self._attach_cleanup_pending = False
+        self._detach_inventory_after = None
+        self._detach_inventory_error = None
+
+    def _unlock_record(self, *, reason: str) -> dict[str, Any]:
+        if self._model_lock is None:
+            raise RuntimeError("shared model is not locked")
+        body = {
+            "lock_id": self._model_lock.lock_id,
+            "lock_sha256": self._model_lock.lock_sha256,
+            "reason": reason,
+            "unlocked_at_epoch": self._clock(),
+        }
+        return {**body, "audit_sha256": canonical_sha256_v1(body)}
 
     @staticmethod
     def _inventory(reader: Callable[[Any], list[dict[str, Any]]], client: Any):
@@ -294,11 +323,19 @@ class SharedSessionManager:
             request, profile=profile, environ=environ
         )
         with self._lock:
-            if self._client is not None:
+            if self._client is not None or self._ownership is not None:
                 return {
                     "success": False,
-                    "state": "already_attached",
-                    "error": "A shared server is already attached.",
+                    "state": (
+                        "cleanup_pending"
+                        if self._client_disconnected or self._attach_cleanup_pending
+                        else "already_attached"
+                    ),
+                    "error": (
+                        "Complete retained shared-session cleanup before attaching."
+                        if self._client_disconnected or self._attach_cleanup_pending
+                        else "A shared server is already attached."
+                    ),
                 }
             first = self._snapshot_provider()
             second = self._snapshot_provider()
@@ -383,14 +420,41 @@ class SharedSessionManager:
                         disconnected = True
                     except Exception:
                         disconnected = False
-                release = ownership.release() if disconnected else {
-                    "success": False,
-                    "released": False,
-                    "error": "Client disconnect could not be verified.",
-                }
+                if disconnected:
+                    try:
+                        release = ownership.release()
+                    except Exception as cleanup_exc:
+                        release = {
+                            "success": False,
+                            "released": False,
+                            "error": (
+                                f"{type(cleanup_exc).__name__}: {cleanup_exc}"
+                            ),
+                        }
+                else:
+                    release = {
+                        "success": False,
+                        "released": False,
+                        "error": "Client disconnect could not be verified.",
+                    }
+                lease_released = bool(
+                    release.get("success") and not ownership.lease_path.exists()
+                )
+                if not disconnected or not lease_released:
+                    self._client = client
+                    self._ownership = ownership
+                    self._server_identity = server_identity
+                    self._inventory_sha256 = None
+                    self._session_acquisition_id = lease["lease"]["acquisition_id"]
+                    self._client_disconnected = disconnected
+                    self._attach_cleanup_pending = True
                 return {
                     "success": False,
-                    "state": "attach_failed",
+                    "state": (
+                        "attach_cleanup_pending"
+                        if not disconnected or not lease_released
+                        else "attach_failed"
+                    ),
                     "error": f"{type(exc).__name__}: {exc}",
                     "client_disconnected": disconnected,
                     "lease_release": release,
@@ -403,6 +467,10 @@ class SharedSessionManager:
             self._selected_model = None
             self._inventory_sha256 = inventory_sha256
             self._session_acquisition_id = lease["lease"]["acquisition_id"]
+            self._client_disconnected = False
+            self._attach_cleanup_pending = False
+            self._detach_inventory_after = None
+            self._detach_inventory_error = None
             return {
                 "success": True,
                 "state": "attached_model_pending_adoption",
@@ -422,15 +490,23 @@ class SharedSessionManager:
                 "success": True,
                 "attached": self._client is not None,
                 "state": (
-                    "attached_model_locked"
-                    if self._model_lock is not None
+                    "attach_cleanup_pending"
+                    if self._attach_cleanup_pending
                     else (
-                        "attached_model_pending_lock"
-                        if self._selected_model is not None
+                        "detach_cleanup_pending"
+                        if self._client_disconnected and self._ownership is not None
                         else (
-                            "attached_model_pending_adoption"
-                            if self._client is not None
-                            else "detached"
+                            "attached_model_locked"
+                            if self._model_lock is not None
+                            else (
+                                "attached_model_pending_lock"
+                                if self._selected_model is not None
+                                else (
+                                    "attached_model_pending_adoption"
+                                    if self._client is not None
+                                    else "detached"
+                                )
+                            )
                         )
                     )
                 ),
@@ -443,7 +519,7 @@ class SharedSessionManager:
                 "model_inventory_sha256": self._inventory_sha256,
                 "ownership": (
                     "external_user_owned_server"
-                    if self._client is not None
+                    if self._ownership is not None
                     else None
                 ),
                 "can_start_comsol": False,
@@ -682,13 +758,7 @@ class SharedSessionManager:
             normalized_reason = reason.strip()
             if len(normalized_reason) > MAX_UNLOCK_REASON_CHARACTERS:
                 return {"success": False, "state": "unlock_reason_too_long"}
-            body = {
-                "lock_id": self._model_lock.lock_id,
-                "lock_sha256": self._model_lock.lock_sha256,
-                "reason": normalized_reason,
-                "unlocked_at_epoch": self._clock(),
-            }
-            audit = {**body, "audit_sha256": canonical_sha256_v1(body)}
+            audit = self._unlock_record(reason=normalized_reason)
             self._unlock_audit.append(audit)
             self._unlock_audit = self._unlock_audit[-32:]
             self._model_lock = None
@@ -726,6 +796,8 @@ class SharedSessionManager:
                 }
             target = None
             manifest_path = None
+            target_owned = False
+            manifest_owned = False
             try:
                 target = self._snapshot_target_factory(self._selected_model.tag)
                 if target.exists():
@@ -733,6 +805,7 @@ class SharedSessionManager:
                 manifest_path = target.with_suffix(".manifest.json")
                 if manifest_path.exists():
                     raise FileExistsError("shared snapshot manifest already exists")
+                target_owned = True
                 self._save_copy_writer(
                     self._client, self._selected_model.tag, target
                 )
@@ -771,6 +844,7 @@ class SharedSessionManager:
                     "identity_preserved": True,
                     "complete": True,
                 }
+                manifest_owned = True
                 self._manifest_writer(manifest_path, body)
                 manifest_sha256 = _hash_file(manifest_path)
                 return {
@@ -785,17 +859,45 @@ class SharedSessionManager:
                     "identity_preserved": True,
                 }
             except Exception as exc:
+                cleanup_errors = []
+                for artifact, owned in (
+                    (manifest_path, manifest_owned),
+                    (target, target_owned),
+                ):
+                    if artifact is None or not owned:
+                        continue
+                    try:
+                        artifact.unlink(missing_ok=True)
+                    except OSError as cleanup_exc:
+                        cleanup_errors.append(
+                            f"{artifact.name}: {type(cleanup_exc).__name__}: "
+                            f"{cleanup_exc}"
+                        )
                 return {
                     "success": False,
                     "state": "snapshot_incomplete",
                     "error": f"{type(exc).__name__}: {exc}",
                     "snapshot_path": None if target is None else str(target),
                     "partial_snapshot_exists": bool(
-                        target is not None and target.is_file()
+                        target_owned and target is not None and target.is_file()
                     ),
                     "complete_manifest_exists": bool(
-                        manifest_path is not None and manifest_path.is_file()
+                        manifest_owned
+                        and manifest_path is not None
+                        and manifest_path.is_file()
                     ),
+                    "artifacts_removed": (
+                        not cleanup_errors
+                        and not bool(
+                            target_owned and target is not None and target.exists()
+                        )
+                        and not bool(
+                            manifest_owned
+                            and manifest_path is not None
+                            and manifest_path.exists()
+                        )
+                    ),
+                    "cleanup_errors": cleanup_errors,
                 }
 
     def prepare_attached_job_handoff(
@@ -866,24 +968,18 @@ class SharedSessionManager:
                     "state": "handoff_target_rejected",
                     "error": f"{type(exc).__name__}: {exc}",
                 }
-            unlocked = self.unlock_model(
-                expected_lock_sha256=expected_lock_sha256,
-                reason="durable attached job handoff",
-            )
-            if not unlocked.get("success"):
-                return {
-                    "success": False,
-                    "state": "handoff_unlock_failed",
-                    "unlock": unlocked,
-                }
-            detached = self.detach()
+            unlocked = self._unlock_record(reason="durable attached job handoff")
+            detached = self._detach(allow_model_lock=True)
             if not detached.get("success"):
                 return {
                     "success": False,
                     "state": "handoff_detach_failed",
                     "execution_backend": backend,
                     "detach": detached,
+                    "model_guard_preserved": self._model_lock is not None,
                 }
+            self._unlock_audit.append(unlocked)
+            self._unlock_audit = self._unlock_audit[-32:]
             return {
                 "success": True,
                 "state": "attached_job_handoff_ready",
@@ -894,62 +990,109 @@ class SharedSessionManager:
 
     def detach(self) -> dict[str, Any]:
         """Disconnect only the MCP client and prove external preservation."""
+        return self._detach(allow_model_lock=False)
+
+    def _detach(self, *, allow_model_lock: bool) -> dict[str, Any]:
         with self._lock:
-            if self._client is None:
+            if self._client is None and self._ownership is None:
                 return {"success": True, "state": "detached", "detached": False}
-            if self._model_lock is not None:
+            if self._model_lock is not None and not allow_model_lock:
                 return {
                     "success": False,
                     "state": "model_lock_active",
                     "error": "Unlock the shared model before detaching.",
                 }
+            if (
+                not self._attach_cleanup_pending
+                and self._detach_inventory_after is None
+                and self._detach_inventory_error is None
+            ):
+                try:
+                    _models, self._detach_inventory_after = self._inventory(
+                        self._model_inventory_reader, self._client
+                    )
+                except Exception as exc:
+                    self._detach_inventory_error = f"{type(exc).__name__}: {exc}"
+            if not self._client_disconnected:
+                try:
+                    self._client.disconnect()
+                    self._client_disconnected = True
+                except Exception as exc:
+                    return {
+                        "success": False,
+                        "state": "detach_uncertain",
+                        "error": f"{type(exc).__name__}: {exc}",
+                        "client_disconnected": False,
+                        "lease_released": False,
+                        "model_guard_preserved": self._model_lock is not None,
+                    }
             try:
-                _models, inventory_after = self._inventory(
-                    self._model_inventory_reader, self._client
-                )
-                self._client.disconnect()
+                release = self._ownership.release()
             except Exception as exc:
+                release = {
+                    "success": False,
+                    "released": False,
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+            lease_released = bool(
+                release.get("success") and not self._ownership.lease_path.exists()
+            )
+            if not lease_released:
                 return {
                     "success": False,
-                    "state": "detach_uncertain",
-                    "error": f"{type(exc).__name__}: {exc}",
+                    "state": "detach_cleanup_pending",
+                    "error": release.get(
+                        "error", "Attached lease release was not verified."
+                    ),
+                    "client_disconnected": True,
                     "lease_released": False,
+                    "detach_release": release,
+                    "model_guard_preserved": self._model_lock is not None,
                 }
-            release = self._ownership.release()
-            snapshot = self._snapshot_provider()
+            if self._attach_cleanup_pending:
+                self._reset_session_state()
+                return {
+                    "success": True,
+                    "state": "detached",
+                    "detached": True,
+                    "client_disconnected": True,
+                    "lease_released": True,
+                    "attach_cleanup_completed": True,
+                    "detach_release": release,
+                }
+            try:
+                snapshot = self._snapshot_provider()
+            except Exception:
+                snapshot = {"processes": [], "listeners": []}
             try:
                 server_after = self._server_identity_from_snapshot(
                     self._server_identity.endpoint, snapshot
                 )
                 listener_active = True
-            except ValueError:
+            except (KeyError, TypeError, ValueError):
                 server_after = None
                 listener_active = False
             outcome = evaluate_attached_detach(
                 server_before=self._server_identity,
                 server_after=server_after,
                 model_inventory_before_sha256=self._inventory_sha256,
-                model_inventory_after_sha256=inventory_after,
+                model_inventory_after_sha256=self._detach_inventory_after,
                 client_disconnected=True,
-                lease_released=bool(release.get("success") and not self._ownership.lease_path.exists()),
+                lease_released=lease_released,
                 listener_active_after=listener_active,
                 model_clear_attempted=False,
                 external_server_shutdown_attempted=False,
                 external_server_termination_attempted=False,
             )
-            self._client = None
-            self._ownership = None
-            self._server_identity = None
-            self._selector = None
-            self._selected_model = None
-            self._inventory_sha256 = None
-            self._session_acquisition_id = None
-            self._model_lock = None
-            return {
+            result = {
                 **outcome.to_dict(),
                 "state": "detached" if outcome.success else "detached_preservation_failed",
                 "detach_release": release,
             }
+            if self._detach_inventory_error is not None:
+                result["inventory_error"] = self._detach_inventory_error
+            self._reset_session_state()
+            return result
 
 
 __all__ = ["SharedSessionManager"]
