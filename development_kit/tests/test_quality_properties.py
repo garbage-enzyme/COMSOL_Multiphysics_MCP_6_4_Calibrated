@@ -236,6 +236,24 @@ def test_public_structure_rejects_every_unbounded_shape(value: object) -> None:
         validate_public_structure(value)
 
 
+def test_public_structure_accepts_every_exact_documented_boundary() -> None:
+    exact_depth: object = None
+    for _ in range(MAX_PUBLIC_NESTING_DEPTH):
+        exact_depth = [exact_depth]
+
+    accepted = [
+        "x" * MAX_PUBLIC_STRING_LENGTH,
+        [None] * MAX_PUBLIC_COLLECTION_ITEMS,
+        {str(index): None for index in range(MAX_PUBLIC_OBJECT_FIELDS)},
+        MAX_PUBLIC_NUMBER_MAGNITUDE,
+        -MAX_PUBLIC_NUMBER_MAGNITUDE,
+        exact_depth,
+    ]
+
+    for value in accepted:
+        validate_public_structure(value)
+
+
 def test_structural_guard_executes_after_successful_validation() -> None:
     @structurally_guarded
     def operation(value: str, *, enabled: bool) -> tuple[str, bool]:

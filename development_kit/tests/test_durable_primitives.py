@@ -64,6 +64,7 @@ def test_bounded_reader_refuses_oversized_and_nonregular_inputs(tmp_path):
     path = tmp_path / "input.bin"
     path.write_bytes(b"limit-plus-one")
 
+    assert read_file_bytes_bounded(path, max_bytes=len(b"limit-plus-one")) == b"limit-plus-one"
     with pytest.raises(ValueError, match="reading limit"):
         read_file_bytes_bounded(path, max_bytes=len(b"limit-plus-one") - 1)
     with pytest.raises(ValueError, match="regular"):

@@ -141,6 +141,49 @@ def test_declared_point_time_and_resource_bounds_fail_closed_before_runtime(
         normalize_validation_matrix_spec(spec)
 
 
+def test_matrix_accepts_the_exact_maximum_point_count(tmp_path):
+    source = tmp_path / "fixture.mph"
+    source.write_bytes(b"model")
+    points = [
+        _point(f"point-{index}", wavelength=5.0 + index / 100.0)
+        for index in range(MAX_VALIDATION_MATRIX_POINTS)
+    ]
+    spec = _spec(
+        source,
+        points=points,
+        point_limit=MAX_VALIDATION_MATRIX_POINTS,
+        resource_policy={
+            "wall_time_budget_seconds": 2_000,
+            "minimum_next_point_seconds": 30,
+            "max_mesh_elements": 100_000,
+        },
+    )
+
+    normalized = normalize_validation_matrix_spec(spec)
+
+    assert len(normalized["points"]) == MAX_VALIDATION_MATRIX_POINTS
+    assert normalized["point_limit"] == MAX_VALIDATION_MATRIX_POINTS
+
+
+def test_matrix_accepts_wall_budget_equal_to_declared_minimum(tmp_path):
+    source = tmp_path / "fixture.mph"
+    source.write_bytes(b"model")
+    spec = _spec(
+        source,
+        points=[_point("one"), _point("two", 5.2)],
+        point_limit=2,
+        resource_policy={
+            "wall_time_budget_seconds": 60,
+            "minimum_next_point_seconds": 30,
+            "max_mesh_elements": 100_000,
+        },
+    )
+
+    normalized = normalize_validation_matrix_spec(spec)
+
+    assert normalized["resource_policy"]["rules"]["wall_time_budget_seconds"] == 60
+
+
 @pytest.mark.parametrize("field", ["wavelength", "theta_degrees", "phi_degrees"])
 def test_matrix_numeric_fields_reject_integer_overflow_as_validation_error(tmp_path, field):
     source = tmp_path / "fixture.mph"

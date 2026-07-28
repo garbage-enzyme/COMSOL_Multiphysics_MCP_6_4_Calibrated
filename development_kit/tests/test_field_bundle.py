@@ -6,6 +6,8 @@ import pytest
 import src.evidence.field_bundle as field_bundle_module
 from src.evidence.field_bundle import (
     MAX_FIELD_ARTIFACT_BYTES,
+    MAX_FIELD_EXPRESSIONS,
+    MAX_FIELD_VIEWS,
     MAX_GRID_FIELD_POINTS,
     MAX_INLINE_FIELD_SAMPLES,
     MAX_RAW_FIELD_POINTS,
@@ -143,6 +145,19 @@ def test_request_byte_limit_includes_added_fingerprint(monkeypatch):
         normalize_field_evidence_request(raw)
 
 
+def test_request_accepts_the_exact_final_byte_limit(monkeypatch):
+    raw = _request()
+    expected = normalize_field_evidence_request(raw)
+    exact_size = len(field_bundle_module._canonical_bytes(expected))
+    monkeypatch.setattr(field_bundle_module, "MAX_FIELD_REQUEST_BYTES", exact_size)
+
+    assert normalize_field_evidence_request(raw) == expected
+
+    monkeypatch.setattr(field_bundle_module, "MAX_FIELD_REQUEST_BYTES", exact_size - 1)
+    with pytest.raises(ValueError, match="request exceeds"):
+        normalize_field_evidence_request(raw)
+
+
 def test_single_view_without_png_is_supported_and_has_no_png_artifact():
     result = normalize_field_evidence_request(_request(paired=False, png=False))
 
@@ -170,6 +185,58 @@ def test_hard_limits_fail_closed(field, value, message):
 
     with pytest.raises(ValueError, match=message):
         normalize_field_evidence_request(request)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("max_raw_points", MAX_RAW_FIELD_POINTS),
+        ("max_grid_points", MAX_GRID_FIELD_POINTS),
+        ("max_artifact_bytes", MAX_FIELD_ARTIFACT_BYTES),
+        ("max_inline_samples", MAX_INLINE_FIELD_SAMPLES),
+    ],
+)
+def test_hard_limits_accept_the_exact_documented_maximum(field, value):
+    request = _request()
+    request["limits"][field] = value
+
+    assert normalize_field_evidence_request(request)["limits"][field] == value
+
+
+def test_expression_view_and_grid_limits_accept_the_exact_maximum():
+    request = _request()
+    request["expressions"] = [
+        {"name": f"field_{index}", "expression": f"ewfd.field{index}", "unit": "1"}
+        for index in range(MAX_FIELD_EXPRESSIONS)
+    ]
+    assert len(request["views"]) == MAX_FIELD_VIEWS
+    request["grid"]["shape"] = [1024, 1024]
+    request["limits"]["max_grid_points"] = MAX_GRID_FIELD_POINTS
+
+    normalized = normalize_field_evidence_request(request)
+
+    assert len(normalized["expressions"]) == MAX_FIELD_EXPRESSIONS
+    assert len(normalized["views"]) == MAX_FIELD_VIEWS
+    assert normalized["grid_point_count"] == MAX_GRID_FIELD_POINTS
+
+    too_many_expressions = _request()
+    too_many_expressions["expressions"] = [
+        {"name": f"field_{index}", "expression": f"ewfd.field{index}", "unit": "1"}
+        for index in range(MAX_FIELD_EXPRESSIONS + 1)
+    ]
+    with pytest.raises(ValueError, match="expressions must contain"):
+        normalize_field_evidence_request(too_many_expressions)
+
+    too_many_views = _request()
+    too_many_views["views"].append(_view("third"))
+    with pytest.raises(ValueError, match="views must contain"):
+        normalize_field_evidence_request(too_many_views)
+
+    too_many_grid_points = _request()
+    too_many_grid_points["grid"]["shape"] = [1024, 1025]
+    too_many_grid_points["limits"]["max_grid_points"] = MAX_GRID_FIELD_POINTS
+    with pytest.raises(ValueError, match="caller-declared max_grid_points"):
+        normalize_field_evidence_request(too_many_grid_points)
 
 
 def test_grid_product_must_fit_caller_declared_limit():
