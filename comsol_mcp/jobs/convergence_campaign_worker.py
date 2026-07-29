@@ -61,34 +61,9 @@ def _run(
     worker_started = time.monotonic()
     store = JobStore(Path(root))
     directory = store.job_dir(job_id)
-    spec = store.read_spec(job_id)
-    if spec.get("job_type") != "convergence_campaign":
-        raise ValueError("Convergence worker accepts only convergence_campaign jobs")
-    validate_convergence_campaign_driver_identity(spec)
-    identity = process_identity(os.getpid())
-    store.bind_worker_identity(job_id, identity)
-    contained = contain_current_process_tree()
-    store.update_state(
-        job_id,
-        patch={"process_tree_contained": bool(contained)},
-        event="worker_containment_recorded",
-        event_data={"process_tree_contained": bool(contained)},
-    )
-    state = store.read_state(job_id)
-    attempt = int(state.get("attempt", 1))
-    if state["status"] == "cancel_requested" or cancel_request_targets_attempt(
-        store.read_control(job_id), attempt
-    ):
-        store.record_cooperative_cancel_observed(
-            job_id, attempt=attempt, message="Stopped before campaign startup"
-        )
-        return 0
-    if state["status"] == "submitted":
-        store.update_state(job_id, "starting", event="worker_started")
-    elif state["status"] != "starting":
-        raise ValueError(f"Convergence worker cannot start from {state['status']}")
-
-    sources = [Path(level["spectral_job"]["source_model_path"]) for level in spec["levels"]]
+    spec: dict[str, Any] = {}
+    sources: list[Path] = []
+    attempt = 1
     client = None
     ownership = None
     lease_acquired = False
@@ -101,6 +76,34 @@ def _run(
     latest_resource_decision: dict[str, Any] | None = None
     source_pins = ExitStack()
     try:
+        spec = store.read_spec(job_id)
+        state = store.read_state(job_id)
+        attempt = int(state.get("attempt", 1))
+        if spec.get("job_type") != "convergence_campaign":
+            raise ValueError("Convergence worker accepts only convergence_campaign jobs")
+        validate_convergence_campaign_driver_identity(spec)
+        identity = process_identity(os.getpid())
+        store.bind_worker_identity(job_id, identity)
+        contained = contain_current_process_tree()
+        store.update_state(
+            job_id,
+            patch={"process_tree_contained": bool(contained)},
+            event="worker_containment_recorded",
+            event_data={"process_tree_contained": bool(contained)},
+        )
+        state = store.read_state(job_id)
+        if state["status"] == "cancel_requested" or cancel_request_targets_attempt(
+            store.read_control(job_id), attempt
+        ):
+            raise _CooperativeCancellation("Stopped before campaign startup")
+        if state["status"] == "submitted":
+            store.update_state(job_id, "starting", event="worker_started")
+        elif state["status"] != "starting":
+            raise ValueError(f"Convergence worker cannot start from {state['status']}")
+
+        sources = [
+            Path(level["spectral_job"]["source_model_path"]) for level in spec["levels"]
+        ]
         source_pins.enter_context(
             pin_validated_reads(
                 tuple(validated_read_pin(source, source.parent) for source in sources)
@@ -363,7 +366,13 @@ def _run(
         return 0
     if pending_terminal is not None:
         current = store.read_state(job_id)["status"]
-        if current not in {"cancel_requested", "cancelling"}:
+        if current in {"cancel_requested", "cancelling"}:
+            store.record_cooperative_cancel_observed(
+                job_id,
+                attempt=attempt,
+                message="Stopped before terminal state publication",
+            )
+        else:
             if current == "smoke_running" and pending_terminal["status"] == "completed":
                 store.update_state(job_id, "smoke_validated", event="durable_rows_revalidated")
             store.update_state(

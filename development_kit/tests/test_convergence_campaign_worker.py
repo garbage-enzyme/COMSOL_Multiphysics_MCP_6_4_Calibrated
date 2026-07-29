@@ -7,12 +7,12 @@ import threading
 import time
 from pathlib import Path
 
+import src.jobs.convergence_campaign_worker as worker_module
 from src.jobs.convergence_campaign import normalize_convergence_campaign_spec
 from src.jobs.convergence_campaign_rows import read_convergence_campaign_levels
 from src.jobs.convergence_campaign_worker import _run
-import src.jobs.convergence_campaign_worker as worker_module
 from src.jobs.manager import JobManager
-from src.jobs.store import JobStore, process_identity
+from src.jobs.store import JobStore, atomic_write_json, process_identity
 
 from development_kit.tests.spectral_job_fixtures import write_fake_point_audit
 from development_kit.tests.test_convergence_campaign_job import _raw_campaign
@@ -377,3 +377,55 @@ def test_native_cancel_timeout_blocks_client_and_lease_cleanup(
     assert ownership.released is False
     assert client.clear_count == 1
     assert "native_cancel_thread" in state["cancel"]["worker_error"]["message"]
+
+
+def test_invalid_driver_identity_becomes_durable_startup_failure(tmp_path, ascii_tmp_path):
+    store, spec, job_id = _created_job(tmp_path, ascii_tmp_path)
+    spec["driver_identity"]["package_content_sha256"] = "0" * 64
+    atomic_write_json(store.job_dir(job_id) / "spec.json", spec)
+    calls = []
+
+    code = _run(
+        str(store.root),
+        job_id,
+        ownership_factory=lambda *_args: calls.append("ownership"),
+        client_factory=lambda _spec: calls.append("client"),
+        collector_executor=_collector_for(spec),
+        telemetry_provider=_telemetry,
+        native_cancel_enabled=False,
+    )
+
+    state = store.read_state(job_id)
+    assert code == 1
+    assert state["status"] == "failed"
+    assert state["last_error"]["type"] == "ValueError"
+    assert calls == []
+
+
+def test_cancel_during_cleanup_is_durably_observed(tmp_path, ascii_tmp_path):
+    store, spec, job_id = _created_job(tmp_path, ascii_tmp_path)
+    requested = False
+
+    def cancel_during_cleanup(phase, _context):
+        nonlocal requested
+        if phase == "during_cleanup" and not requested:
+            requested = True
+            store.request_cancel(job_id, requester_identity=process_identity(os.getpid()))
+
+    code = _run(
+        str(store.root),
+        job_id,
+        ownership_factory=lambda *_args: _Ownership(),
+        client_factory=lambda _spec: _Client(),
+        collector_executor=_collector_for(spec),
+        telemetry_provider=_telemetry,
+        native_cancel_enabled=False,
+        fault_hook=cancel_during_cleanup,
+    )
+
+    state = store.read_state(job_id)
+    assert code == 0
+    assert state["status"] == "cancel_requested"
+    assert state["cancel"]["cooperative_observation"]["message"] == (
+        "Stopped before terminal state publication"
+    )

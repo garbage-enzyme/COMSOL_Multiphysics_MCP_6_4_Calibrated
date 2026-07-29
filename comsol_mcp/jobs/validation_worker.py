@@ -280,11 +280,18 @@ def _run(
         return 0
     except Exception as exc:
         current = store.read_state(job_id)["status"]
-        if current == "cancel_requested":
+        if current in {"cancel_requested", "cancelling"}:
             store.record_cooperative_cancel_observed(
-                job_id, attempt=attempt, message="Stopped between blocking operations"
+                job_id,
+                attempt=attempt,
+                message="Stopped between blocking operations",
+                worker_error={
+                    "type": type(exc).__name__,
+                    "message": str(exc),
+                    "cleanup_errors": [],
+                },
             )
-        elif current != "cancelling" and current not in {"completed", "interrupted"}:
+        elif current not in {"completed", "interrupted"}:
             store.update_state(
                 job_id,
                 "failed",

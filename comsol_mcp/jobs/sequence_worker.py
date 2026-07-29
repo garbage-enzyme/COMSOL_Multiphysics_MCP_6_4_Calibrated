@@ -113,16 +113,21 @@ def _run(root: str, job_id: str) -> int:
 def run(root: str, job_id: str) -> int:
     try:
         return _run(root, job_id)
-    except ValueError:
+    except ValueError as exc:
         store = JobStore(Path(root))
         state = store.read_state(job_id)
-        if state.get("status") == "cancel_requested":
+        if state.get("status") in {"cancel_requested", "cancelling"}:
             store.record_cooperative_cancel_observed(
                 job_id,
                 attempt=int(state.get("attempt", 1)),
                 message="Stopped between state transitions",
+                worker_error={
+                    "type": type(exc).__name__,
+                    "message": str(exc),
+                    "cleanup_errors": [],
+                },
             )
-            return 0
+            return 1
         raise
 
 

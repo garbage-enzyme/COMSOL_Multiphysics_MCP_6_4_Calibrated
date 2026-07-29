@@ -1452,3 +1452,70 @@ def test_hidden_job_staging_directory_is_not_visible_to_manager_scans(jobs_root,
 
     assert manager.reconcile_cancellations() == 0
     assert manager.summaries()["count_returned"] == 0
+
+
+def test_sequence_worker_refuses_mismatched_exact_identity_before_state_change(
+    jobs_root, monkeypatch
+):
+    store = JobStore(jobs_root)
+    identity = process_identity(os.getpid())
+    now = time.time()
+    job_id = store.create(
+        {"job_type": "test_sequence", "delays": [0.01]},
+        {
+            "schema_version": "2",
+            "status": "submitted",
+            "attempt": 1,
+            "created_at_epoch": now,
+            "updated_at_epoch": now,
+            "worker_pid": identity["pid"],
+            "worker_process_create_time": identity["process_create_time"] - 1000.0,
+            "worker_command_signature": identity["command_signature"],
+            "progress": {"completed": 0, "total": 1},
+            "last_error": None,
+        },
+    )
+    monkeypatch.setattr(sequence_worker, "contain_current_process_tree", lambda: True)
+
+    with pytest.raises(RuntimeError, match="another worker"):
+        sequence_worker._run(str(store.root), job_id)
+
+    state = store.read_state(job_id)
+    assert state["status"] == "submitted"
+    assert not (store.job_dir(job_id) / "results.csv").exists()
+
+
+def test_sequence_transition_error_remains_bound_to_concurrent_cancel(jobs_root, monkeypatch):
+    store = JobStore(jobs_root)
+    identity = process_identity(os.getpid())
+    now = time.time()
+    job_id = store.create(
+        {"job_type": "test_sequence", "delays": [0.01]},
+        {
+            "schema_version": "2",
+            "status": "starting",
+            "attempt": 1,
+            "created_at_epoch": now,
+            "updated_at_epoch": now,
+            "worker_pid": identity["pid"],
+            "worker_process_create_time": identity["process_create_time"],
+            "worker_command_signature": identity["command_signature"],
+            "progress": {"completed": 0, "total": 1},
+            "last_error": None,
+        },
+    )
+    real_update = JobStore.update_state
+
+    def cancel_before_smoke(self, target_job_id, *args, **kwargs):
+        if target_job_id == job_id and kwargs.get("event") == "smoke_started":
+            self.request_cancel(job_id, requester_identity=identity)
+        return real_update(self, target_job_id, *args, **kwargs)
+
+    monkeypatch.setattr(JobStore, "update_state", cancel_before_smoke)
+    code = sequence_worker.run(str(store.root), job_id)
+
+    state = store.read_state(job_id)
+    assert code == 1
+    assert state["status"] == "cancel_requested"
+    assert state["cancel"]["worker_error"]["type"] == "ValueError"
+    assert "Invalid job state transition" in state["cancel"]["worker_error"]["message"]

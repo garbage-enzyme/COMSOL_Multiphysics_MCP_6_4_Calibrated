@@ -347,11 +347,18 @@ def _run(
         worker_error = RuntimeError("; ".join(cleanup_errors)[:2000])
     current = store.read_state(job_id)["status"]
     if worker_error is not None:
-        if current == "cancel_requested":
+        if current in {"cancel_requested", "cancelling"}:
             store.record_cooperative_cancel_observed(
-                job_id, attempt=attempt, message="Stopped between blocking operations"
+                job_id,
+                attempt=attempt,
+                message="Stopped between blocking operations",
+                worker_error={
+                    "type": type(worker_error).__name__,
+                    "message": str(worker_error),
+                    "cleanup_errors": cleanup_errors,
+                },
             )
-        elif current != "cancelling" and current not in {
+        elif current not in {
             "completed",
             "interrupted",
         }:
@@ -375,7 +382,13 @@ def _run(
         return 1
     if pending_terminal is not None:
         current = store.read_state(job_id)["status"]
-        if current not in {"cancel_requested", "cancelling"}:
+        if current in {"cancel_requested", "cancelling"}:
+            store.record_cooperative_cancel_observed(
+                job_id,
+                attempt=attempt,
+                message="Stopped before terminal state publication",
+            )
+        else:
             if current == "smoke_running" and pending_terminal["status"] == "completed":
                 store.update_state(job_id, "smoke_validated", event="durable_rows_revalidated")
             store.update_state(

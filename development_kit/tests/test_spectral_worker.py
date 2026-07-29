@@ -248,6 +248,33 @@ def test_cleanup_fault_fails_attempt_but_still_releases_lease(tmp_path, ascii_ro
     assert (store.job_dir(job_id) / "analysis" / "summary.json").is_file()
 
 
+def test_spectral_error_remains_bound_while_cancellation_is_coordinating(
+    tmp_path, ascii_root
+):
+    store, spec, job_id = _created_job(tmp_path, ascii_root)
+
+    def fail_after_cancel(_spec):
+        store.request_cancel(job_id, requester_identity=process_identity(os.getpid()))
+        store.update_state(job_id, "cancelling", event="test_coordinator_claimed")
+        raise RuntimeError("independent spectral failure")
+
+    code = _run(
+        str(store.root),
+        job_id,
+        ownership_factory=lambda _root, _owner: _Ownership(),
+        client_factory=fail_after_cancel,
+        collector_executor=lambda *_args: None,
+        telemetry_provider=_telemetry,
+        native_cancel_enabled=False,
+    )
+
+    state = store.read_state(job_id)
+    assert code == 1
+    assert state["status"] == "cancelling"
+    assert state["cancel"]["worker_error"]["type"] == "RuntimeError"
+    assert state["cancel"]["worker_error"]["message"] == "independent spectral failure"
+
+
 def test_manager_routes_exact_spectral_submissions_and_changed_specs(
     tmp_path, ascii_root, monkeypatch
 ):
