@@ -7,6 +7,7 @@ import json
 import threading
 import time
 import uuid
+from copy import deepcopy
 from pathlib import Path
 from typing import Optional
 
@@ -90,6 +91,8 @@ class SessionManager:
             if cls._instance is None:
                 instance = super().__new__(cls)
                 instance._client = None
+                instance._client_status = None
+                instance._client_status_client = None
                 instance._models = {}
                 instance._model_paths = {}
                 instance._model_revisions = {}
@@ -123,19 +126,43 @@ class SessionManager:
 
     @property
     def client(self) -> Optional[mph.Client]:
-        return self._client
+        with self._start_lock:
+            return self._client
 
     @property
     def is_connected(self) -> bool:
-        return self._client is not None
+        with self._start_lock:
+            return self._client is not None
 
     @property
     def current_model(self) -> Optional[str]:
-        return self._current_model
+        with self._start_lock:
+            return self._current_model
 
     @property
     def models(self) -> dict[str, mph.Model]:
-        return self._models.copy()
+        with self._start_lock:
+            return self._models.copy()
+
+    @staticmethod
+    def _client_status_snapshot(client) -> dict:
+        def read(name: str, default):
+            try:
+                return getattr(client, name)
+            except Exception:
+                return default
+
+        return {
+            "version": read("version", None),
+            "cores": read("cores", None),
+            "standalone": bool(read("standalone", False)),
+        }
+
+    def _publish_control_plane_status_locked(self) -> None:
+        set_session_status(
+            connected=self._client is not None,
+            starting=self._starting,
+        )
 
     def _startup_path(self) -> Path:
         runtime_dir = getattr(self._ownership, "runtime_dir", None)
@@ -184,13 +211,20 @@ class SessionManager:
         record["connected"] = self._client is not None
         record["cleanup_pending"] = self._start_cleanup_pending
         record["owns_solver_lease"] = self._owns_solver_lease
+        self._publish_control_plane_status_locked()
         self._write_startup_record_locked()
 
     def _startup_summary_locked(self) -> Optional[dict]:
         if self._startup_record is None:
             return None
         record = self._startup_record
-        return {key: value for key, value in record.items() if key != "started_monotonic"}
+        return deepcopy(
+            {
+                key: value
+                for key, value in record.items()
+                if key != "started_monotonic"
+            }
+        )
 
     def _begin_startup_record_locked(
         self,
@@ -277,7 +311,11 @@ class SessionManager:
     def _rollback_remote_activation(self, client, *, error: str) -> dict:
         reusable, cleanup_errors = self._retire_client(client, clear_models=False)
         if cleanup_errors:
-            self._client = client
+            with self._start_lock:
+                self._client = client
+                self._client_status = self._client_status_snapshot(client)
+                self._client_status_client = client
+                self._publish_control_plane_status_locked()
             return {
                 "success": False,
                 "cleanup_pending": True,
@@ -286,7 +324,11 @@ class SessionManager:
                 "cleanup_errors": cleanup_errors,
             }
 
-        self._client = None
+        with self._start_lock:
+            self._client = None
+            self._client_status = None
+            self._client_status_client = None
+            self._publish_control_plane_status_locked()
         release = self._release_owned_lease()
         result = {
             "success": False,
@@ -314,10 +356,14 @@ class SessionManager:
         except Exception as exc:
             return self._rollback_remote_activation(client, error=str(exc))
 
-        self._client = client
-        if self._reusable_client is client:
-            self._reusable_client = None
-            self._reusable_client_kind = None
+        with self._start_lock:
+            self._client = client
+            self._client_status = self._client_status_snapshot(client)
+            self._client_status_client = client
+            if self._reusable_client is client:
+                self._reusable_client = None
+                self._reusable_client_kind = None
+            self._publish_control_plane_status_locked()
         result = {
             "success": True,
             "version": version,
@@ -436,6 +482,7 @@ class SessionManager:
                 self._starting = False
                 self._start_error = f"Cannot persist COMSOL startup state: {exc}"
                 self._start_message = self._start_error
+                self._publish_control_plane_status_locked()
                 return {
                     "success": False,
                     "starting": False,
@@ -581,6 +628,8 @@ class SessionManager:
                     self._start_message = "Start cancelled; releasing client."
                 else:
                     self._client = client
+                    self._client_status = self._client_status_snapshot(client)
+                    self._client_status_client = client
                     self._reusable_client = None
                     self._reusable_client_kind = None
                     self._start_message = "Client ready."
@@ -605,6 +654,8 @@ class SessionManager:
                     jvm_started_without_client = True
             with self._start_lock:
                 self._client = None
+                self._client_status = None
+                self._client_status_client = None
                 self._host_restart_required = jvm_started_without_client
                 self._start_error = str(e)
                 self._start_message = f"Start failed: {e}"
@@ -653,11 +704,14 @@ class SessionManager:
                     client_reusable, cleanup_errors = self._retire_client(client)
                 with self._start_lock:
                     self._client = None
+                    self._client_status = None
+                    self._client_status_client = None
                     if not client_reusable:
                         self._reusable_client = None
                     if release_result is None:
                         release_result = self._release_owned_lease()
                     self._start_cleanup_pending = False
+                    self._starting = False
                     state = "timed_out" if timed_out else "cancelled"
                     self._record_startup_phase_locked(
                         "cleanup_completed",
@@ -675,6 +729,7 @@ class SessionManager:
                 with self._start_lock:
                     release_result = self._release_owned_lease()
                     self._start_cleanup_pending = False
+                    self._starting = False
                     self._record_startup_phase_locked(
                         "cleanup_completed",
                         state="timed_out" if timed_out else "cancelled",
@@ -806,6 +861,8 @@ class SessionManager:
             self._start_message = ""
         if self._client is None:
             release = self._release_owned_lease()
+            with self._start_lock:
+                self._publish_control_plane_status_locked()
             result = {"success": True, "message": "No active session."}
             if release is not None:
                 result["lease_release"] = release
@@ -824,13 +881,17 @@ class SessionManager:
                     "solver lease remain retained for a cleanup retry."
                 ),
             }
-        self._client = None
-        for name in list(self._model_cleanup_paths):
-            self._cleanup_model_artifact(name)
-        self._models.clear()
-        self._model_paths.clear()
-        self._model_revisions.clear()
-        self._current_model = None
+        with self._start_lock:
+            self._client = None
+            self._client_status = None
+            self._client_status_client = None
+            for name in list(self._model_cleanup_paths):
+                self._cleanup_model_artifact(name)
+            self._models.clear()
+            self._model_paths.clear()
+            self._model_revisions.clear()
+            self._current_model = None
+            self._publish_control_plane_status_locked()
         release = self._release_owned_lease()
         with self._start_lock:
             if self._startup_record is not None:
@@ -868,7 +929,31 @@ class SessionManager:
             cleanup_pending = self._start_cleanup_pending
             owns_solver_lease = self._owns_solver_lease
             host_restart_required = self._host_restart_required
-        set_session_status(connected=connected, starting=starting)
+            start_error = self._start_error
+            start_message = self._start_message
+            current_model = self._current_model
+            client_status = None
+            model_list = []
+            if connected:
+                if self._client_status_client is not self._client:
+                    self._client_status = self._client_status_snapshot(self._client)
+                    self._client_status_client = self._client
+                client_status = dict(self._client_status)
+                for name in self._models:
+                    model_info = {"name": name}
+                    model_path = self._model_paths.get(name)
+                    if model_path is not None:
+                        model_info["file"] = model_path
+                    revision = self._model_revisions.get(name)
+                    if revision is None:
+                        revision = self._initialize_model_revision(
+                            name,
+                            self._model_paths.get(name),
+                        )
+                    model_info["revision_sha256"] = revision["revision_sha256"]
+                    model_info["revision_sequence"] = revision["sequence"]
+                    model_list.append(model_info)
+            self._publish_control_plane_status_locked()
         # Background start in flight and not yet ready.
         if not connected and starting:
             result = {
@@ -877,22 +962,22 @@ class SessionManager:
                 "cleanup_pending": cleanup_pending,
                 "owns_solver_lease": owns_solver_lease,
                 "host_restart_required": host_restart_required,
-                "message": self._start_message
+                "message": start_message
                 or "COMSOL is starting in background. Poll again shortly.",
             }
             if startup is not None:
                 result["startup"] = startup
             return result
         # Previous background start failed.
-        if not connected and self._start_error:
+        if not connected and start_error:
             result = {
                 "connected": False,
                 "starting": False,
                 "cleanup_pending": cleanup_pending,
                 "owns_solver_lease": owns_solver_lease,
                 "host_restart_required": host_restart_required,
-                "error": self._start_error,
-                "message": self._start_message,
+                "error": start_error,
+                "message": start_message,
             }
             if startup is not None:
                 result["startup"] = startup
@@ -910,31 +995,19 @@ class SessionManager:
                 result["startup"] = startup
             return result
 
-        # Status must remain responsive while a COMSOL call is blocked. Do not
-        # invoke clientapi or model methods here; report only locally tracked state.
-        model_list = []
-        for name in self._models:
-            model_info = {"name": name}
-            model_path = self._model_paths.get(name)
-            if model_path is not None:
-                model_info["file"] = model_path
-            revision = self.get_model_revision(name)
-            if revision is not None:
-                model_info["revision_sha256"] = revision["revision_sha256"]
-                model_info["revision_sequence"] = revision["sequence"]
-            model_list.append(model_info)
-
+        # The connected response uses only the lock-bound local snapshot above;
+        # it never dereferences an MPh client or model after releasing the lock.
+        if client_status is None:
+            raise RuntimeError("connected session metadata snapshot is unavailable")
         result = {
             "connected": True,
             "starting": False,
             "cleanup_pending": False,
             "owns_solver_lease": owns_solver_lease,
             "host_restart_required": host_restart_required,
-            "version": self._client.version,
-            "cores": self._client.cores,
-            "standalone": self._client.standalone,
+            **client_status,
             "models": model_list,
-            "current_model": self._current_model,
+            "current_model": current_model,
         }
         if startup is not None:
             result["startup"] = startup
@@ -949,7 +1022,8 @@ class SessionManager:
                     "error": "Cannot clear models while COMSOL is starting.",
                 }
 
-        names = list(self._models)
+        with self._start_lock:
+            names = list(self._models)
         failed = []
         for name in names:
             if not self.remove_model(name):
@@ -965,7 +1039,7 @@ class SessionManager:
         return {
             "success": True,
             "removed": len(names),
-            "connected": self._client is not None,
+            "connected": self.is_connected,
             "message": "All tracked models were removed; the client was preserved.",
         }
 
@@ -984,22 +1058,26 @@ class SessionManager:
     def add_model(self, model: mph.Model, cleanup_path: Optional[str] = None) -> str:
         """Add a model to tracking."""
         name = model.name()
-        if name in self._model_cleanup_paths:
-            self._cleanup_model_artifact(name)
-        self._model_revisions.pop(name, None)
-        self._models[name] = model
-        if cleanup_path:
-            self._model_cleanup_paths[name] = str(cleanup_path)
-        if self._current_model is None:
-            self._current_model = name
         try:
             model_path = model.file() if hasattr(model, "file") else None
+        except Exception:
+            model_path = None
+        with self._start_lock:
+            if name in self._model_cleanup_paths:
+                self._cleanup_model_artifact(name)
+            self._model_revisions.pop(name, None)
+            self._models[name] = model
+            if cleanup_path:
+                self._model_cleanup_paths[name] = str(cleanup_path)
+            if self._current_model is None:
+                self._current_model = name
             if model_path is not None:
                 self._model_paths[name] = str(model_path)
             self._initialize_model_revision(name, self._model_paths.get(name))
+        try:
             self._ownership.heartbeat(model_path=str(model_path) if model_path else None)
         except Exception:
-            self._initialize_model_revision(name, self._model_paths.get(name))
+            pass
         return name
 
     @staticmethod
@@ -1010,45 +1088,51 @@ class SessionManager:
         return hashlib.sha256(canonical).hexdigest()
 
     def _initialize_model_revision(self, name: str, source_path: Optional[str]) -> dict:
-        existing = self._model_revisions.get(name)
-        if existing is not None:
-            return dict(existing)
-        body = {
-            "model_name": name,
-            "sequence": 0,
-            "previous_revision_sha256": None,
-            "operation": "model_registered",
-            "source_path_present": source_path is not None,
-        }
-        revision = {**body, "revision_sha256": self._revision_hash(body)}
-        self._model_revisions[name] = revision
-        return dict(revision)
+        with self._start_lock:
+            existing = self._model_revisions.get(name)
+            if existing is not None:
+                return dict(existing)
+            body = {
+                "model_name": name,
+                "sequence": 0,
+                "previous_revision_sha256": None,
+                "operation": "model_registered",
+                "source_path_present": source_path is not None,
+            }
+            revision = {**body, "revision_sha256": self._revision_hash(body)}
+            self._model_revisions[name] = revision
+            return dict(revision)
 
     def get_model_revision(self, name: Optional[str] = None) -> Optional[dict]:
         """Return the local optimistic-concurrency token without clientapi calls."""
-        model_name = name or self._current_model
-        if model_name is None or model_name not in self._models:
-            return None
-        return dict(
-            self._model_revisions.get(model_name)
-            or self._initialize_model_revision(model_name, self._model_paths.get(model_name))
-        )
+        with self._start_lock:
+            model_name = name or self._current_model
+            if model_name is None or model_name not in self._models:
+                return None
+            return dict(
+                self._model_revisions.get(model_name)
+                or self._initialize_model_revision(
+                    model_name,
+                    self._model_paths.get(model_name),
+                )
+            )
 
     def advance_model_revision(self, name: str, operation: str) -> dict:
         """Advance one model token after a serialized successful mutation."""
-        current = self.get_model_revision(name)
-        if current is None:
-            raise ValueError(f"Model revision unavailable: {name}")
-        body = {
-            "model_name": name,
-            "sequence": int(current["sequence"]) + 1,
-            "previous_revision_sha256": current["revision_sha256"],
-            "operation": operation,
-            "source_path_present": self._model_paths.get(name) is not None,
-        }
-        revision = {**body, "revision_sha256": self._revision_hash(body)}
-        self._model_revisions[name] = revision
-        return dict(revision)
+        with self._start_lock:
+            current = self.get_model_revision(name)
+            if current is None:
+                raise ValueError(f"Model revision unavailable: {name}")
+            body = {
+                "model_name": name,
+                "sequence": int(current["sequence"]) + 1,
+                "previous_revision_sha256": current["revision_sha256"],
+                "operation": operation,
+                "source_path_present": self._model_paths.get(name) is not None,
+            }
+            revision = {**body, "revision_sha256": self._revision_hash(body)}
+            self._model_revisions[name] = revision
+            return dict(revision)
 
     def preflight_long_operation(
         self, *, model_path: Optional[str] = None, output_path: Optional[str] = None
@@ -1071,7 +1155,8 @@ class SessionManager:
 
     def _cleanup_model_artifact(self, name: str) -> None:
         """Remove a tracked clone backing file after COMSOL releases it."""
-        cleanup_path = self._model_cleanup_paths.pop(name, None)
+        with self._start_lock:
+            cleanup_path = self._model_cleanup_paths.pop(name, None)
         if not cleanup_path:
             return
         path = Path(cleanup_path)
@@ -1087,28 +1172,36 @@ class SessionManager:
 
     def get_model(self, name: Optional[str] = None) -> Optional[mph.Model]:
         """Get a model by name or current model."""
-        if name is None:
-            name = self._current_model
-        return self._models.get(name)
+        with self._start_lock:
+            if name is None:
+                name = self._current_model
+            return self._models.get(name)
 
     def set_current_model(self, name: str) -> bool:
         """Set the current active model."""
-        if name in self._models:
-            self._current_model = name
-            return True
-        return False
+        with self._start_lock:
+            if name in self._models:
+                self._current_model = name
+                return True
+            return False
 
     def remove_model(self, name: str) -> bool:
         """Remove a model from tracking and client."""
-        if name in self._models and self._client is not None:
+        with self._start_lock:
+            client = self._client
+            model = self._models.get(name)
+        if model is not None and client is not None:
             try:
-                self._client.remove(self._models[name])
-                del self._models[name]
-                self._model_paths.pop(name, None)
-                self._model_revisions.pop(name, None)
-                self._cleanup_model_artifact(name)
-                if self._current_model == name:
-                    self._current_model = next(iter(self._models.keys()), None)
+                client.remove(model)
+                with self._start_lock:
+                    if self._client is not client or self._models.get(name) is not model:
+                        return False
+                    del self._models[name]
+                    self._model_paths.pop(name, None)
+                    self._model_revisions.pop(name, None)
+                    self._cleanup_model_artifact(name)
+                    if self._current_model == name:
+                        self._current_model = next(iter(self._models.keys()), None)
                 return True
             except Exception:
                 pass

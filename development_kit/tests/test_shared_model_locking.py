@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
 
 import pytest
 import src.shared_session.locking as locking_module
@@ -278,6 +279,39 @@ def test_lock_rejects_revision_from_a_different_model():
             session_acquisition_id="b" * 32,
             model=second,
             revision=_revision(first),
+            collaboration_mode="interactive_inspection",
+            lock_created_at_epoch=3456.7,
+            mcp_process={
+                "pid": 5000,
+                "process_create_time": 3000.0,
+                "command_signature": "d" * 64,
+            },
+        )
+
+
+@pytest.mark.parametrize("forged_identity", ["server", "model", "revision"])
+def test_lock_builder_rejects_directly_fabricated_identity_dataclasses(
+    forged_identity,
+):
+    server = _server()
+    model = _model()
+    revision = _revision(model)
+    if forged_identity == "server":
+        server = replace(server, server_pid=server.server_pid + 1)
+        match = "server identity"
+    elif forged_identity == "model":
+        model = replace(model, label="Forged label")
+        match = "model identity"
+    else:
+        revision = replace(revision, sequence=revision.sequence + 1)
+        match = "revision identity"
+
+    with pytest.raises(ValueError, match=match):
+        build_shared_model_lock(
+            attached_server=server,
+            session_acquisition_id="b" * 32,
+            model=model,
+            revision=revision,
             collaboration_mode="interactive_inspection",
             lock_created_at_epoch=3456.7,
             mcp_process={

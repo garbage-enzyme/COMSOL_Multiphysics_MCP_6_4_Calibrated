@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
 from src.server import create_server
+from src.shared_session.attach_request import normalize_shared_server_attach_request
 from src.shared_session.contracts import SHARED_SERVER_FEATURE_ENV
+from src.shared_session.lifecycle import SharedSessionManager
 
 
 def test_shared_profile_capabilities_and_tools_are_explicit(monkeypatch):
@@ -69,11 +73,11 @@ def test_shared_status_uses_manager_without_constructing_client(monkeypatch):
     server = create_server("shared-status", profile="desktop_shared")
     import src.tools.shared_session as module
 
-    monkeypatch.setattr(
-        module.shared_session_manager,
-        "status",
-        lambda: {"success": True, "attached": False, "sentinel": "status-only"},
+    client_constructions = []
+    manager = SharedSessionManager(
+        client_factory=lambda *_args: client_constructions.append(True),
     )
+    monkeypatch.setattr(module, "shared_session_manager", manager)
     monkeypatch.setattr(
         module,
         "get_operation_status",
@@ -82,8 +86,59 @@ def test_shared_status_uses_manager_without_constructing_client(monkeypatch):
 
     result = server._tool_manager._tools["shared_server_status"].fn()
 
-    assert result["sentinel"] == "status-only"
+    assert result["success"] is True
+    assert result["state"] == "detached"
+    assert result["attached"] is False
     assert result["operation"]["state"] == "idle"
+    assert client_constructions == []
+
+
+def test_shared_attach_adapter_propagates_and_enforces_confirmation(monkeypatch):
+    monkeypatch.setenv(SHARED_SERVER_FEATURE_ENV, "true")
+    server = create_server("shared-confirmation", profile="desktop_shared")
+    import src.tools.shared_session as module
+
+    calls = []
+
+    class ValidatingManager:
+        def attach(self, request, *, profile):
+            calls.append((request, profile))
+            normalized = normalize_shared_server_attach_request(
+                request,
+                profile=profile,
+                environ={SHARED_SERVER_FEATURE_ENV: "true"},
+            )
+            return {
+                "success": True,
+                "user_confirmed": normalized.user_confirmed,
+            }
+
+    monkeypatch.setattr(module, "shared_session_manager", ValidatingManager())
+    attach = server._tool_manager._tools["shared_server_attach"].fn
+
+    with pytest.raises(ValueError, match="user_confirmed=true"):
+        attach("127.0.0.1", 2036, False)
+    accepted = attach("127.0.0.1", 2036, True)
+
+    assert accepted["success"] is True
+    assert accepted["user_confirmed"] is True
+    assert accepted["operation_gate"]["release"]["released"] is True
+    assert calls == [
+        (
+            {
+                "endpoint": {"host": "127.0.0.1", "port": 2036},
+                "user_confirmed": False,
+            },
+            "desktop_shared",
+        ),
+        (
+            {
+                "endpoint": {"host": "127.0.0.1", "port": 2036},
+                "user_confirmed": True,
+            },
+            "desktop_shared",
+        ),
+    ]
 
 
 def test_shared_model_guard_tools_delegate_exact_caller_evidence(monkeypatch):

@@ -52,6 +52,8 @@ class AsyncSolver:
         self._cancel_flag: bool = False
         self._progress_callback: Optional[Callable[[float, str], None]] = None
         self._lock: threading.Lock = threading.Lock()
+        self._launch_gate: Optional[threading.Event] = None
+        self._launch_owner_ident: Optional[int] = None
     
     @property
     def progress(self) -> SolverProgress:
@@ -84,27 +86,10 @@ class AsyncSolver:
         Returns:
             True if solving started, False if already running
         """
-        with self._lock:
-            if (
-                self._progress.status == SolverStatus.RUNNING
-                or self._thread is not None
-                and self._thread.is_alive()
-            ):
-                return False
-            
-            self._cancel_flag = False
-            self._progress_callback = progress_callback
-            self._progress = SolverProgress(
-                status=SolverStatus.RUNNING,
-                progress=0.0,
-                message="Starting solver...",
-                start_time=datetime.now(),
-                study_name=study_name,
-                model_name=model.name() if hasattr(model, 'name') else None,
-            )
-        self._notify_progress(progress_callback, 0.0, "Starting solver...")
-        
+        launch_gate = threading.Event()
+
         def solve_thread():
+            launch_gate.wait()
             try:
                 with self._lock:
                     self._progress.message = "Building geometry..."
@@ -114,16 +99,16 @@ class AsyncSolver:
                 if self._cancel_requested():
                     self._set_cancelled()
                     return
-                
+
                 with self._lock:
                     self._progress.message = "Creating mesh..."
                     self._progress.progress = 0.2
                 self._notify_progress(progress_callback, 0.2, "Creating mesh...")
-                
+
                 if self._cancel_requested():
                     self._set_cancelled()
                     return
-                
+
                 with self._lock:
                     self._progress.message = f"Solving study: {study_name or 'all'}..."
                     self._progress.progress = 0.3
@@ -132,11 +117,11 @@ class AsyncSolver:
                     0.3,
                     f"Solving study: {study_name or 'all'}...",
                 )
-                
+
                 if self._cancel_requested():
                     self._set_cancelled()
                     return
-                
+
                 # Use the Java API directly so we can run by *tag* (the
                 # canonical identifier). mph's ``model.solve(name)`` only
                 # accepts the study *label*, but callers now pass a tag
@@ -150,7 +135,7 @@ class AsyncSolver:
                         jm.study(t).run()
                 else:
                     jm.study(study_name).run()
-                
+
                 with self._lock:
                     self._progress.status = SolverStatus.COMPLETED
                     self._progress.progress = 1.0
@@ -162,26 +147,54 @@ class AsyncSolver:
                     else:
                         self._progress.message = "Solving completed successfully."
                     self._progress.end_time = datetime.now()
-                
+
                 self._notify_progress(progress_callback, 1.0, "Completed")
-                    
+
             except Exception as e:
                 error_msg = str(e)
-                
+
                 with self._lock:
                     self._progress.status = SolverStatus.FAILED
                     self._progress.error = error_msg
                     self._progress.message = f"Solving failed: {error_msg}"
                     self._progress.end_time = datetime.now()
-                
+
                 self._notify_progress(
                     progress_callback,
                     -1.0,
                     f"Error: {error_msg}",
                 )
-        
-        self._thread = threading.Thread(target=solve_thread, daemon=True)
-        self._thread.start()
+
+        with self._lock:
+            if (
+                self._progress.status == SolverStatus.RUNNING
+                or self._thread is not None
+                and self._thread.is_alive()
+            ):
+                return False
+
+            self._cancel_flag = False
+            self._progress_callback = progress_callback
+            self._progress = SolverProgress(
+                status=SolverStatus.RUNNING,
+                progress=0.0,
+                message="Starting solver...",
+                start_time=datetime.now(),
+                study_name=study_name,
+                model_name=model.name() if hasattr(model, 'name') else None,
+            )
+            self._thread = threading.Thread(target=solve_thread, daemon=True)
+            self._launch_gate = launch_gate
+            self._launch_owner_ident = threading.get_ident()
+            self._thread.start()
+        try:
+            self._notify_progress(progress_callback, 0.0, "Starting solver...")
+        finally:
+            launch_gate.set()
+            with self._lock:
+                if self._launch_gate is launch_gate:
+                    self._launch_gate = None
+                    self._launch_owner_ident = None
         return True
 
     @staticmethod
@@ -241,11 +254,21 @@ class AsyncSolver:
         Returns:
             True if solving completed, False if timeout reached
         """
-        if self._thread is None:
+        with self._lock:
+            thread = self._thread
+            launch_gate = self._launch_gate
+            launch_owner_ident = self._launch_owner_ident
+        if thread is None:
             return True
-        
-        self._thread.join(timeout=timeout)
-        return not self._thread.is_alive()
+        if (
+            launch_gate is not None
+            and not launch_gate.is_set()
+            and launch_owner_ident == threading.get_ident()
+        ):
+            return False
+
+        thread.join(timeout=timeout)
+        return not thread.is_alive()
     
     def get_progress(self) -> dict:
         """Get current solving progress as a dictionary."""

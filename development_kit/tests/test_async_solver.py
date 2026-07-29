@@ -86,6 +86,24 @@ def test_progress_callback_observes_intermediate_and_terminal_transitions():
     ]
 
 
+def test_running_state_always_has_a_started_waitable_thread():
+    solver = AsyncSolver()
+    startup_wait_results = []
+
+    assert solver.start_solve(
+        FakeModel(FakeStudy()),
+        "std1",
+        progress_callback=lambda _progress, message: (
+            startup_wait_results.append(solver.wait(timeout=0))
+            if message == "Starting solver..."
+            else None
+        ),
+    )
+
+    assert startup_wait_results == [False]
+    assert solver.wait(timeout=2) is True
+
+
 def test_progress_property_returns_snapshot():
     solver = AsyncSolver()
 

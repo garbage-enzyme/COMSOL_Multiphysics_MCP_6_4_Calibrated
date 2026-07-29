@@ -16,6 +16,7 @@ from .identity import (
     MAX_MODEL_TAG_CHARACTERS,
     AttachedServerIdentity,
     _normalize_confirmed_model_path,
+    normalize_attached_server_identity,
 )
 
 SHARED_MODEL_LOCK_SCHEMA = "comsol_mcp.shared_model_lock"
@@ -280,6 +281,88 @@ def _normalize_immutable_source(value: Any) -> dict[str, str] | None:
     }
 
 
+def _normalize_lock_server_identity(
+    value: AttachedServerIdentity,
+) -> AttachedServerIdentity:
+    if not isinstance(value, AttachedServerIdentity):
+        raise ValueError("attached server must be a normalized server identity")
+    normalized = normalize_attached_server_identity(
+        {
+            "endpoint": {
+                "host": value.endpoint.host,
+                "port": value.endpoint.port,
+            },
+            "server_pid": value.server_pid,
+            "server_process_create_time": value.server_process_create_time,
+            "server_command_signature": value.server_command_signature,
+            "listener_bind_scope": value.listener_bind_scope,
+            "listener_observed_at_epoch": value.listener_observed_at_epoch,
+        }
+    )
+    if value.ownership != "external_user_owned" or (
+        _hex64(value.identity_sha256, "attached server identity SHA-256")
+        != normalized.identity_sha256
+    ):
+        raise ValueError("attached server identity does not match its fields")
+    return normalized
+
+
+def _normalize_lock_model_identity(value: SharedModelIdentity) -> SharedModelIdentity:
+    if not isinstance(value, SharedModelIdentity):
+        raise ValueError("model must be a normalized shared model identity")
+    normalized = normalize_shared_model_identity(
+        {
+            "tag": value.tag,
+            "label": value.label,
+            "file_path": value.file_path,
+            "unsaved": value.unsaved,
+        }
+    )
+    if _hex64(value.identity_sha256, "shared model identity SHA-256") != (
+        normalized.identity_sha256
+    ):
+        raise ValueError("shared model identity does not match its fields")
+    return normalized
+
+
+def _normalize_lock_revision_identity(
+    value: SharedModelRevision,
+    *,
+    model_identity_sha256: str,
+) -> SharedModelRevision:
+    if not isinstance(value, SharedModelRevision):
+        raise ValueError("revision must be a normalized shared model revision")
+    if (
+        isinstance(value.sequence, bool)
+        or not isinstance(value.sequence, int)
+        or value.sequence < 0
+    ):
+        raise ValueError("shared model revision sequence must be a nonnegative integer")
+    body = {
+        "sequence": value.sequence,
+        "model_identity_sha256": _hex64(
+            value.model_identity_sha256,
+            "revision model identity SHA-256",
+        ),
+        "structural_sha256": _hex64(
+            value.structural_sha256,
+            "revision structural SHA-256",
+        ),
+        "readback_sha256": _hex64(
+            value.readback_sha256,
+            "revision readback SHA-256",
+        ),
+    }
+    if body["model_identity_sha256"] != model_identity_sha256:
+        raise ValueError("shared model revision belongs to a different model identity")
+    revision_sha256 = _sha256(body)
+    if _hex64(value.revision_sha256, "shared model revision SHA-256") != (
+        revision_sha256
+    ):
+        raise ValueError("shared model revision identity does not match its fields")
+    return SharedModelRevision(**body, revision_sha256=revision_sha256)
+
+
 def build_shared_model_lock(
     *,
     attached_server: AttachedServerIdentity,
@@ -296,8 +379,12 @@ def build_shared_model_lock(
         session_acquisition_id
     ):
         raise ValueError("session acquisition ID must be exactly 32 hexadecimal characters")
-    if revision.model_identity_sha256 != model.identity_sha256:
-        raise ValueError("shared model revision belongs to a different model identity")
+    server = _normalize_lock_server_identity(attached_server)
+    normalized_model = _normalize_lock_model_identity(model)
+    normalized_revision = _normalize_lock_revision_identity(
+        revision,
+        model_identity_sha256=normalized_model.identity_sha256,
+    )
     if collaboration_mode not in _COLLABORATION_MODES:
         raise ValueError("shared model collaboration mode is unsupported")
     process = _normalize_process_identity(mcp_process)
@@ -307,14 +394,15 @@ def build_shared_model_lock(
         "schema_name": SHARED_MODEL_LOCK_SCHEMA,
         "schema_version": SHARED_MODEL_LOCK_VERSION,
         "lock_id": hashlib.sha256(
-            f"{normalized_session_acquisition_id}:{model.identity_sha256}".encode(
-                "ascii"
-            )
+            (
+                f"{normalized_session_acquisition_id}:"
+                f"{normalized_model.identity_sha256}"
+            ).encode("ascii")
         ).hexdigest()[:32],
-        "attached_server": attached_server.to_dict(),
+        "attached_server": server.to_dict(),
         "session_acquisition_id": normalized_session_acquisition_id,
-        "model": model.to_dict(),
-        "revision": revision.to_dict(),
+        "model": normalized_model.to_dict(),
+        "revision": normalized_revision.to_dict(),
         "collaboration_mode": collaboration_mode,
         "immutable_source": source,
         "lock_created_at_epoch": _positive_finite(

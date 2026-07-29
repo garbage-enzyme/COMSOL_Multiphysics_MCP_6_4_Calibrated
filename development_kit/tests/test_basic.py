@@ -52,6 +52,8 @@ def permissive_session_ownership(monkeypatch, tmp_path):
     ownership = PermissiveOwnership()
     monkeypatch.setattr(manager, "_ownership", ownership)
     manager._client = None
+    manager._client_status = None
+    manager._client_status_client = None
     manager._reusable_client = None
     manager._reusable_client_kind = None
     manager._models = {}
@@ -218,6 +220,45 @@ class TestSessionManager:
         status = sm.get_status()
         assert status["connected"] is False
 
+    def test_lifecycle_transitions_publish_fresh_control_plane_status(
+        self,
+        monkeypatch,
+        permissive_session_ownership,
+    ):
+        import src.tools.session as session_module
+        from src.tools.session_status import get_session_status
+
+        sm = session_module.SessionManager()
+        entered = threading.Event()
+        release = threading.Event()
+
+        class FakeClient:
+            version = "6.4"
+            cores = 2
+            standalone = True
+
+            def clear(self):
+                return None
+
+        def create_client(**_kwargs):
+            entered.set()
+            assert release.wait(timeout=2)
+            return FakeClient()
+
+        monkeypatch.setattr(session_module.mph, "Client", create_client)
+        monkeypatch.setattr(session_module.mph_session, "client", None)
+
+        assert sm.start(cores=2)["starting"] is True
+        assert entered.wait(timeout=2)
+        assert get_session_status() == {"connected": False, "starting": True}
+
+        release.set()
+        sm._start_thread.join(timeout=2)
+        assert get_session_status() == {"connected": True, "starting": False}
+
+        assert sm.disconnect()["success"] is True
+        assert get_session_status() == {"connected": False, "starting": False}
+
     def test_get_status_normalizes_model_paths_for_mcp_json(self, tmp_path):
         import json
 
@@ -252,6 +293,107 @@ class TestSessionManager:
             sm._model_paths = {}
             sm._model_revisions = {}
             sm._current_model = None
+
+    def test_status_snapshots_model_state_under_the_lifecycle_lock(self):
+        from src.tools.session import SessionManager
+
+        entered = threading.Event()
+        release = threading.Event()
+        mutation_done = threading.Event()
+
+        class FakeClient:
+            version = "6.4"
+            cores = 4
+            standalone = True
+
+        class BlockingModels(dict):
+            def __iter__(self):
+                entered.set()
+                assert release.wait(timeout=2)
+                return super().__iter__()
+
+        sm = SessionManager()
+        client = FakeClient()
+        with sm._start_lock:
+            sm._client = client
+            sm._client_status = sm._client_status_snapshot(client)
+            sm._client_status_client = client
+            sm._models = BlockingModels({"first": object(), "second": object()})
+            sm._model_paths = {}
+            sm._model_revisions = {}
+            sm._current_model = "first"
+        status_result = {}
+
+        status_thread = threading.Thread(
+            target=lambda: status_result.update(sm.get_status()),
+        )
+        status_thread.start()
+        assert entered.wait(timeout=2)
+
+        mutation_thread = threading.Thread(
+            target=lambda: (
+                sm.set_current_model("second"),
+                mutation_done.set(),
+            )
+        )
+        mutation_thread.start()
+        assert mutation_done.wait(timeout=0.05) is False
+
+        release.set()
+        status_thread.join(timeout=2)
+        mutation_thread.join(timeout=2)
+
+        assert not status_thread.is_alive()
+        assert not mutation_thread.is_alive()
+        assert status_result["current_model"] == "first"
+        assert [item["name"] for item in status_result["models"]] == [
+            "first",
+            "second",
+        ]
+        assert sm.current_model == "second"
+        with sm._start_lock:
+            sm._client = None
+            sm._client_status = None
+            sm._client_status_client = None
+            sm._models = {}
+            sm._model_paths = {}
+            sm._model_revisions = {}
+            sm._current_model = None
+
+    def test_connected_status_uses_cached_client_metadata_only(self):
+        from src.tools.session import SessionManager
+
+        class PoisonClient:
+            def __getattribute__(self, name):
+                if name in {"version", "cores", "standalone"}:
+                    raise AssertionError("status must not dereference the live client")
+                return super().__getattribute__(name)
+
+        sm = SessionManager()
+        client = PoisonClient()
+        with sm._start_lock:
+            sm._client = client
+            sm._client_status = {
+                "version": "6.4",
+                "cores": 4,
+                "standalone": True,
+            }
+            sm._client_status_client = client
+            sm._models = {}
+            sm._model_paths = {}
+            sm._model_revisions = {}
+            sm._current_model = None
+
+        status = sm.get_status()
+
+        assert status["connected"] is True
+        assert status["version"] == "6.4"
+        assert status["cores"] == 4
+        assert status["standalone"] is True
+        with sm._start_lock:
+            sm._client = None
+            sm._client_status = None
+            sm._client_status_client = None
 
     def test_disconnect_releases_client(self):
         from src.tools.session import SessionManager
