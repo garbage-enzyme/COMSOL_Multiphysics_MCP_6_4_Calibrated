@@ -37,12 +37,12 @@ def jobs_root():
     try:
         yield root
     finally:
-        shutil.rmtree(root, ignore_errors=True)
+        fixture_clean(root, ignore_errors=True)
 
 
 def wait_for(manager: JobManager, job_id: str, statuses: set[str], timeout: float = 5.0):
-    deadline = time.time() + timeout
-    while time.time() < deadline:
+    deadline = monoclock() + timeout
+    while monoclock() < deadline:
         state = manager.status(job_id)
         if state["status"] in statuses:
             return state
@@ -1552,3 +1552,115 @@ def test_default_reconciliation_includes_an_older_accepted_cancellation(
 
     assert manager.reconcile_cancellations() == 1
     assert launches == [(old_job_id, request["control"]["request_id"])]
+
+
+def test_fixture_cleanup_terminates_an_exact_detached_worker(jobs_root):
+    worker = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    coordinator = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    try:
+        identity = process_identity(worker.pid)
+        coordinator_identity = process_identity(coordinator.pid)
+        JobStore(jobs_root).create(
+            {"schema_version": "2", "job_type": "test"},
+            {
+                "schema_version": "2",
+                "status": "running",
+                "attempt": 1,
+                "worker_pid": identity["pid"],
+                "worker_process_create_time": identity["process_create_time"],
+                "worker_command_signature": identity["command_signature"],
+                "cancel": {"coordinator": coordinator_identity},
+            },
+        )
+
+        verification = _cleanup_fixture_processes(jobs_root)
+
+        worker.wait(timeout=5)
+        coordinator.wait(timeout=5)
+        assert verification["absent"] is True
+    finally:
+        for process in (worker, coordinator):
+            if process.poll() is None:
+                process.kill()
+                process.wait(timeout=5)
+
+
+def test_wait_for_uses_only_a_monotonic_deadline(monkeypatch):
+    class Manager:
+        def status(self, _job_id):
+            return {"status": "completed"}
+
+        def tail(self, _job_id, _limit):
+            raise AssertionError("completed status must return before tail")
+
+    monkeypatch.setattr(
+        time,
+        "time",
+        lambda: (_ for _ in ()).throw(AssertionError("wall clock used for timeout")),
+    )
+
+    assert wait_for(Manager(), "job", {"completed"})["status"] == "completed"
+
+
+def _cleanup_fixture_processes(root: Path) -> dict[str, object]:
+    from src.jobs.process_control import (
+        capture_owned_descendants,
+        terminate_exact,
+        verify_absent,
+    )
+
+    targets: list[dict[str, object]] = []
+    for state_path in root.glob("job-*/state.json"):
+        try:
+            state = read_json(state_path)
+        except RuntimeError:
+            continue
+        pid = state.get("worker_pid")
+        if not isinstance(pid, bool) and isinstance(pid, int) and pid != os.getpid():
+            identity = {
+                "pid": pid,
+                "process_create_time": state.get("worker_process_create_time"),
+                "command_signature": state.get("worker_command_signature"),
+            }
+            captured = capture_owned_descendants(identity)
+            targets.extend(captured.get("descendants", []))
+            targets.append(identity)
+        cancel = state.get("cancel")
+        coordinator = cancel.get("coordinator") if isinstance(cancel, dict) else None
+        if isinstance(coordinator, dict) and coordinator.get("pid") != os.getpid():
+            targets.append(coordinator)
+
+    unique: dict[tuple[object, object, object], dict[str, object]] = {}
+    for identity in targets:
+        key = (
+            identity.get("pid"),
+            identity.get("process_create_time"),
+            identity.get("command_signature"),
+        )
+        unique[key] = identity
+    identities = list(unique.values())
+    for identity in reversed(identities):
+        terminate_exact(identity, force=True)
+
+    deadline = time.monotonic() + 5.0
+    verification = verify_absent(identities)
+    while not verification["absent"] and time.monotonic() < deadline:
+        if any(item.get("state") == "uncertain" for item in verification["verdicts"]):
+            break
+        time.sleep(0.025)
+        verification = verify_absent(identities)
+    return verification
+
+
+def fixture_clean(root: Path, *, ignore_errors: bool) -> None:
+    _cleanup_fixture_processes(root)
+    shutil.rmtree(root, ignore_errors=ignore_errors)
+
+
+monoclock = time.monotonic

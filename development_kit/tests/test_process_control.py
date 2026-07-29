@@ -48,13 +48,23 @@ def test_detached_process_tracker_reaps_completed_child_without_wait():
 
 
 def test_exact_termination_refuses_a_reused_identity():
-    identity = process_identity(os.getpid())
-    identity["process_create_time"] -= 10
+    child = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        creationflags=_HIDDEN_PROCESS_FLAGS,
+    )
+    try:
+        identity = process_identity(child.pid)
+        identity["process_create_time"] -= 10
 
-    result = terminate_exact(identity)
+        result = terminate_exact(identity)
 
-    assert result["acted"] is False
-    assert result["reason"] == "identity_not_active"
+        assert result["acted"] is False
+        assert result["reason"] == "identity_not_active"
+        assert child.poll() is None
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.wait(timeout=5)
 
 
 def test_capture_and_terminate_only_owned_child_process():
@@ -97,6 +107,7 @@ def test_owned_tree_capture_excludes_unrelated_sentinel():
         [sys.executable, "-c", "import time; time.sleep(30)"],
         creationflags=_HIDDEN_PROCESS_FLAGS,
     )
+    descendants = []
     try:
         identity = process_identity(root.pid)
         deadline = time.monotonic() + 5
@@ -104,8 +115,8 @@ def test_owned_tree_capture_excludes_unrelated_sentinel():
         while len(captured["descendants"]) < 2 and time.monotonic() < deadline:
             time.sleep(0.05)
             captured = capture_owned_descendants(identity)
-        assert len(captured["descendants"]) >= 2
         descendants = captured["descendants"]
+        assert len(captured["descendants"]) >= 2
 
         assert terminate_exact(identity)["acted"] is True
         for descendant in descendants:
@@ -115,6 +126,10 @@ def test_owned_tree_capture_excludes_unrelated_sentinel():
         assert _wait_absent([identity, *descendants])["absent"] is True
         assert sentinel.poll() is None
     finally:
+        for descendant in descendants:
+            terminate_exact(descendant, force=True)
+        if descendants:
+            _wait_absent(descendants)
         for process in (root, sentinel):
             if process.poll() is None:
                 process.kill()
@@ -138,12 +153,39 @@ def test_worker_job_object_kills_inherited_child_on_worker_exit_windows_only():
         text=True,
         creationflags=_HIDDEN_PROCESS_FLAGS,
     )
-    stdout, _stderr = worker.communicate(timeout=5)
-    child_pid = int(stdout.strip())
-    deadline = time.monotonic() + 5
-    while time.monotonic() < deadline and psutil.pid_exists(child_pid):
-        time.sleep(0.05)
-    assert not psutil.pid_exists(child_pid)
+    child_identity = None
+    timeout_descendants = []
+    try:
+        stdout, _stderr = worker.communicate(timeout=5)
+        child_pid = int(stdout.strip())
+        try:
+            child_identity = process_identity(child_pid)
+        except psutil.NoSuchProcess:
+            pass
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and psutil.pid_exists(child_pid):
+            time.sleep(0.05)
+        assert not psutil.pid_exists(child_pid)
+    finally:
+        if worker.poll() is None:
+            try:
+                timeout_descendants = capture_owned_descendants(
+                    process_identity(worker.pid)
+                ).get("descendants", [])
+            except psutil.NoSuchProcess:
+                pass
+            worker.kill()
+            worker.wait(timeout=5)
+        for identity in [*timeout_descendants, child_identity]:
+            if isinstance(identity, dict):
+                terminate_exact(identity, force=True)
+        cleanup_identities = [
+            identity
+            for identity in [*timeout_descendants, child_identity]
+            if isinstance(identity, dict)
+        ]
+        if cleanup_identities:
+            _wait_absent(cleanup_identities)
 
 
 def test_attached_server_is_never_returned_as_an_owned_termination_identity():
