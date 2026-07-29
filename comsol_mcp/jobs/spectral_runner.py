@@ -13,7 +13,6 @@ from .spectral_rows import append_spectral_row, read_spectral_rows
 from .spectral_stages import read_spectral_stage_plans, write_spectral_stage_plan
 from .store import atomic_write_json, read_json
 
-
 SPECTRAL_SUMMARY_SCHEMA_NAME = "comsol_mcp.durable_spectral_summary"
 SPECTRAL_SUMMARY_SCHEMA_VERSION = "1.0.0"
 
@@ -96,9 +95,7 @@ def write_spectral_summary(
         },
     )
     atomic_write_json(paths["spectral_progress"], values["spectral_progress"])
-    descriptors = {
-        name: _artifact_descriptor(path, root) for name, path in paths.items()
-    }
+    descriptors = {name: _artifact_descriptor(path, root) for name, path in paths.items()}
     body = {
         "schema_name": SPECTRAL_SUMMARY_SCHEMA_NAME,
         "schema_version": SPECTRAL_SUMMARY_SCHEMA_VERSION,
@@ -159,9 +156,7 @@ def run_spectral_characterization(
     root.mkdir(parents=True, exist_ok=True)
     rows_path = root / "spectral_rows.jsonl"
     solved_this_attempt = 0
-    skipped_complete = len(
-        read_spectral_rows(rows_path, spec, artifact_root=root)
-    )
+    skipped_complete = len(read_spectral_rows(rows_path, spec, artifact_root=root))
     while True:
         plans = read_spectral_stage_plans(root, spec)
         rows = read_spectral_rows(rows_path, spec, artifact_root=root)
@@ -248,12 +243,15 @@ def run_spectral_characterization(
         _invoke_hook(fault_hook, "after_raw_row", row)
         after = _hook_action(after_durable_row_hook, row)
         if after["action"] != "continue":
+            current_plans = read_spectral_stage_plans(root, spec)
+            current_rows = read_spectral_rows(rows_path, spec, artifact_root=root)
+            current_progress = build_spectral_progress(spec, current_plans, current_rows)
             return {
                 "completed": False,
                 "stop_reason": f"after_durable_row_{after['action']}",
                 "solved_this_attempt": solved_this_attempt,
                 "skipped_complete": skipped_complete,
-                "progress": progress,
+                "progress": current_progress,
             }
 
 

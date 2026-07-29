@@ -8,8 +8,8 @@ from typing import Any, Callable, Mapping
 
 from .validation_rows import append_validation_row, completed_point_fingerprints
 
-
 MAX_MANIFEST_BYTES = 16 * 1024 * 1024
+MAX_ATTEMPT_ARTIFACT_RETRIES = 64
 _HOOK_ACTIONS = frozenset(
     {"start_point", "skip_completed", "await_confirmation", "checkpoint_no_start"}
 )
@@ -177,17 +177,22 @@ def run_pending_validation_points(
                     raise InterruptedError("matching control request observed between collectors")
                 collector = dict(collector_value)
                 artifact_id = str(artifact_ids[index])
-                artifact_directory = (
-                    directory
-                    / "artifacts"
-                    / artifact_id
-                    / f"attempt-{attempt}"
-                )
-                if artifact_directory.exists():
-                    if any(artifact_directory.iterdir()):
-                        raise ValueError("attempt artifact directory is not empty")
-                    artifact_directory.rmdir()
-                artifact_directory.mkdir(parents=True, exist_ok=False)
+                artifact_base = directory / "artifacts" / artifact_id
+                artifact_directory = artifact_base / f"attempt-{attempt}"
+                for retry in range(MAX_ATTEMPT_ARTIFACT_RETRIES + 1):
+                    candidate = (
+                        artifact_directory
+                        if retry == 0
+                        else artifact_base / f"attempt-{attempt}-retry-{retry}"
+                    )
+                    try:
+                        candidate.mkdir(parents=True, exist_ok=False)
+                    except FileExistsError:
+                        continue
+                    artifact_directory = candidate
+                    break
+                else:
+                    raise RuntimeError("attempt artifact retry directory limit exceeded")
                 result = collector_executor(point, collector, artifact_directory)
                 summaries.append(
                     summarize_collector_result(
@@ -219,6 +224,7 @@ def run_pending_validation_points(
             }
         except Exception as exc:
             errors += 1
+            message = str(exc)[:2000] or f"{type(exc).__name__} raised without a message"
             row = append_validation_row(
                 rows_path,
                 spec,
@@ -226,7 +232,7 @@ def run_pending_validation_points(
                 point_id=point_id,
                 status="error",
                 collector_summaries=summaries,
-                error={"type": type(exc).__name__, "message": str(exc)[:2000]},
+                error={"type": type(exc).__name__, "message": message},
             )
         processed += 1
         last_row_sha256 = row["row_sha256"]

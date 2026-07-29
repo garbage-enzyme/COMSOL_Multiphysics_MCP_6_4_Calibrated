@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 from src.jobs.manager import JobManager
 from src.jobs.spectral_worker import _run
-from src.jobs.store import JobStore, process_identity
+from src.jobs.store import JobStore, atomic_write_json, process_identity
 
 from development_kit.tests.spectral_job_fixtures import (
     spectral_job_spec,
@@ -159,6 +159,62 @@ def test_injected_worker_reuses_ownership_resource_and_cleanup_paths(tmp_path, a
     assert client.mutation_blocked is True
     assert ownership.released is True
     assert len(store.read_resource_journal(job_id)) > 0
+
+
+def test_all_durable_rows_can_complete_from_smoke_state_on_resume(tmp_path, ascii_root):
+    store, spec, job_id = _created_job(tmp_path, ascii_root)
+    collected = 0
+
+    def collect(point, _collector, artifact_dir):
+        nonlocal collected
+        collected += 1
+        wavelength = point["wavelength"]["value"]
+        absorption = 0.1 + 0.8 / (1.0 + ((wavelength - 5e-6) / 0.18e-6) ** 2)
+        return write_fake_point_audit(artifact_dir, spec, point, absorption=absorption)
+
+    assert (
+        _run(
+            str(store.root),
+            job_id,
+            ownership_factory=lambda _root, _owner: _Ownership(),
+            client_factory=lambda _spec: _Client(spec["source_model_path"]),
+            collector_executor=collect,
+            telemetry_provider=_telemetry,
+            native_cancel_enabled=False,
+        )
+        == 0
+    )
+    first_count = collected
+    state = store.read_state(job_id)
+    state.update(
+        {
+            "status": "starting",
+            "attempt": 2,
+            "progress": {"completed": 0, "total": spec["maximum_points"]},
+            "last_error": None,
+        }
+    )
+    atomic_write_json(store.job_dir(job_id) / "state.json", state)
+
+    assert (
+        _run(
+            str(store.root),
+            job_id,
+            ownership_factory=lambda _root, _owner: _Ownership(),
+            client_factory=lambda _spec: _Client(spec["source_model_path"]),
+            collector_executor=lambda *_args: (_ for _ in ()).throw(
+                AssertionError("durable rows must be reused")
+            ),
+            telemetry_provider=_telemetry,
+            native_cancel_enabled=False,
+        )
+        == 0
+    )
+
+    resumed = store.read_state(job_id)
+    assert resumed["status"] == "completed"
+    assert resumed["progress"]["completed"] == first_count
+    assert collected == first_count
 
 
 def test_cleanup_fault_fails_attempt_but_still_releases_lease(tmp_path, ascii_root):

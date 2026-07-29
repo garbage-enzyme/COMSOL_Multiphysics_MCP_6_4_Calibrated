@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import json
 import csv
-from concurrent.futures import ThreadPoolExecutor
+import json
 import os
 import shutil
 import subprocess
@@ -12,16 +11,23 @@ import sys
 import time
 import types
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import psutil
 import pytest
-
-from src.jobs.manager import JobManager, validate_staged_sweep_spec
-from src.jobs.store import JobLock, JobStore, atomic_write_json, process_identity, process_identity_state, read_json
 import src.jobs.store as store_module
+from src.jobs import cancel_worker, sequence_worker
 from src.jobs import worker as production_worker
-from src.jobs import cancel_worker
+from src.jobs.manager import JobManager, validate_staged_sweep_spec
+from src.jobs.store import (
+    JobLock,
+    JobStore,
+    atomic_write_json,
+    process_identity,
+    process_identity_state,
+    read_json,
+)
 
 
 @pytest.fixture()
@@ -42,9 +48,36 @@ def wait_for(manager: JobManager, job_id: str, statuses: set[str], timeout: floa
             return state
         time.sleep(0.025)
     raise AssertionError(
-        f"Job did not reach {statuses}: {manager.status(job_id)}; "
-        f"tail={manager.tail(job_id, 50)}"
+        f"Job did not reach {statuses}: {manager.status(job_id)}; tail={manager.tail(job_id, 50)}"
     )
+
+
+def test_sequence_resume_reconciles_progress_from_all_durable_rows(jobs_root):
+    store = JobStore(jobs_root)
+    identity = process_identity(os.getpid())
+    now = time.time()
+    spec = {"job_type": "test_sequence", "delays": [0.01, 0.01]}
+    state = {
+        "schema_version": "2",
+        "status": "starting",
+        "attempt": 2,
+        "created_at_epoch": now,
+        "updated_at_epoch": now,
+        "worker_pid": identity["pid"],
+        "worker_process_create_time": identity["process_create_time"],
+        "worker_command_signature": identity["command_signature"],
+        "progress": {"completed": 0, "total": 2},
+        "last_error": None,
+    }
+    job_id = store.create(spec, state)
+    (store.job_dir(job_id) / "results.csv").write_text(
+        "index,status\n0,ok\n1,ok\n", encoding="utf-8"
+    )
+
+    assert sequence_worker._run(str(store.root), job_id) == 0
+    final = store.read_state(job_id)
+    assert final["status"] == "completed"
+    assert final["progress"] == {"completed": 2, "total": 2}
 
 
 def test_submit_returns_promptly_and_second_manager_observes_completion(jobs_root):
@@ -90,7 +123,9 @@ def test_killed_worker_is_reconciled_as_interrupted(jobs_root):
     worker.terminate()
     worker.wait(timeout=5)
 
-    interrupted = wait_for(JobManager(jobs_root, allow_test_jobs=True), result["job_id"], {"interrupted"})
+    interrupted = wait_for(
+        JobManager(jobs_root, allow_test_jobs=True), result["job_id"], {"interrupted"}
+    )
 
     assert interrupted["last_error"]["type"] == "WorkerInterrupted"
     assert interrupted["progress"]["completed"] == 1
@@ -129,7 +164,13 @@ def test_cooperative_cancel_is_truthful_and_resumable(jobs_root):
     assert terminal["cancel"]["verification"]["absent"] is True
     assert terminal["cancel"]["cooperative_observation"]["target_attempt"] == 1
     timestamps = terminal["cancel"]["phase_timestamps"]
-    assert set(timestamps) >= {"requested", "native_grace", "verifying", "verified", "terminal_commit"}
+    assert set(timestamps) >= {
+        "requested",
+        "native_grace",
+        "verifying",
+        "verified",
+        "terminal_commit",
+    }
     assert timestamps["requested"] <= timestamps["native_grace"] <= timestamps["terminal_commit"]
     assert terminal["cancel"]["timing_policy"] == {
         "native_grace_budget_s": 10.0,
@@ -446,7 +487,9 @@ def test_detached_coordinator_force_stops_exact_test_worker_and_allows_resume(jo
     wait_for(manager, result["job_id"], {"completed"}, timeout=10)
 
 
-def test_startup_reconciliation_relaunches_only_existing_stale_cancel_request(jobs_root, monkeypatch):
+def test_startup_reconciliation_relaunches_only_existing_stale_cancel_request(
+    jobs_root, monkeypatch
+):
     manager = JobManager(jobs_root, allow_test_jobs=True)
     job_id = manager.store.create(
         {"schema_version": "2", "job_type": "test"},
@@ -458,7 +501,9 @@ def test_startup_reconciliation_relaunches_only_existing_stale_cancel_request(jo
         fields={"request_id": "cancel-existing", "target_attempt": 1},
     )
     calls = []
-    monkeypatch.setattr(manager, "_launch_cancel_coordinator", lambda jid, rid: calls.append((jid, rid)))
+    monkeypatch.setattr(
+        manager, "_launch_cancel_coordinator", lambda jid, rid: calls.append((jid, rid))
+    )
 
     assert manager.reconcile_cancellations() == 1
     assert calls == [(job_id, "cancel-existing")]
@@ -486,7 +531,11 @@ def test_orphan_reconciliation_commits_only_from_complete_cleanup_proof(jobs_roo
                 "coordinator": stale_coordinator,
                 "descendants": [],
                 "descendant_capture": {
-                    "worker": {"identity": identity, "state": "active", "reason": "captured while active"},
+                    "worker": {
+                        "identity": identity,
+                        "state": "active",
+                        "reason": "captured while active",
+                    },
                     "descendants": [],
                     "captured_at_epoch": time.time() - 0.5,
                 },
@@ -565,7 +614,11 @@ def test_orphan_reconciliation_fails_closed_on_uncertain_identity(jobs_root, mon
                 "coordinator": identity,
                 "descendants": [],
                 "descendant_capture": {
-                    "worker": {"identity": identity, "state": "active", "reason": "captured while active"},
+                    "worker": {
+                        "identity": identity,
+                        "state": "active",
+                        "reason": "captured while active",
+                    },
                     "descendants": [],
                 },
             },
@@ -596,7 +649,9 @@ def test_orphan_reconciliation_fails_closed_on_uncertain_identity(jobs_root, mon
 
 
 @pytest.mark.parametrize("crash_phase", ["native_grace", "terminate", "force_kill", "verifying"])
-def test_coordinator_loss_at_each_durable_phase_reconciles_safely(jobs_root, monkeypatch, crash_phase):
+def test_coordinator_loss_at_each_durable_phase_reconciles_safely(
+    jobs_root, monkeypatch, crash_phase
+):
     manager = JobManager(
         jobs_root,
         allow_test_jobs=True,
@@ -657,7 +712,9 @@ def test_read_only_manager_construction_skips_startup_reconciliation(jobs_root, 
 def test_thirty_cancel_status_polling_races_have_no_false_terminal_state(jobs_root):
     iterations = int(os.environ.get("COMSOL_cancellation determinism_SOAK_ITERATIONS", "30"))
     if iterations < 1 or iterations > 100:
-        raise ValueError("COMSOL_cancellation determinism_SOAK_ITERATIONS must be between 1 and 100")
+        raise ValueError(
+            "COMSOL_cancellation determinism_SOAK_ITERATIONS must be between 1 and 100"
+        )
     manager = JobManager(
         jobs_root,
         allow_test_jobs=True,
@@ -706,7 +763,9 @@ def test_thirty_cancel_status_polling_races_have_no_false_terminal_state(jobs_ro
             "maximum_observed_latency_s": max(latencies),
             "records": records,
         }
-        summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        summary_path.write_text(
+            json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
         artifact_root_value = os.environ.get("COMSOL_cancellation determinism_SOAK_ARTIFACT_ROOT")
         if artifact_root_value:
             artifact_root = Path(artifact_root_value)
@@ -727,9 +786,14 @@ def test_thirty_cancel_status_polling_races_have_no_false_terminal_state(jobs_ro
             "active_state": manager.status(active_job_id) if active_job_id else None,
             "active_tail": manager.tail(active_job_id, 100) if active_job_id else None,
         }
-        summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        summary_path.write_text(
+            json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
         archive_root = Path(
-            os.environ.get("COMSOL_cancellation determinism_FAILURE_ROOT", "D:/comsol_runtime_test/cancellation_failures")
+            os.environ.get(
+                "COMSOL_cancellation determinism_FAILURE_ROOT",
+                "D:/comsol_runtime_test/cancellation_failures",
+            )
         )
         archive_root.mkdir(parents=True, exist_ok=True)
         archive = archive_root / f"{jobs_root.name}-{int(time.time())}"
@@ -742,9 +806,11 @@ def test_thirty_cancel_status_polling_races_have_no_false_terminal_state(jobs_ro
                 f"{type(archive_exc).__name__}: {archive_exc}\n",
                 encoding="utf-8",
             )
-        raise AssertionError(
-            f"cancellation determinism cancellation soak failed; durable evidence archived at {archive}"
-        ) from exc
+        message = (
+            "cancellation determinism cancellation soak failed; "
+            f"durable evidence archived at {archive}"
+        )
+        raise AssertionError(message) from exc
 
 
 def test_completed_state_is_immutable(jobs_root):

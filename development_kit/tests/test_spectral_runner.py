@@ -5,14 +5,14 @@ from __future__ import annotations
 from collections import Counter
 
 import pytest
+from src.jobs.spectral_rows import read_spectral_rows
+from src.jobs.spectral_runner import run_spectral_characterization
+from src.jobs.spectral_stages import read_spectral_stage_plans
 
 from development_kit.tests.spectral_job_fixtures import (
     spectral_job_spec,
     write_fake_point_audit,
 )
-from src.jobs.spectral_rows import read_spectral_rows
-from src.jobs.spectral_runner import run_spectral_characterization
-from src.jobs.spectral_stages import read_spectral_stage_plans
 
 
 def _absorption(wavelength: float) -> float:
@@ -53,7 +53,9 @@ def test_runner_completes_full_bundle_one_durable_point_at_a_time(tmp_path):
     assert result["summary"]["artifacts"]["spectral_bundle"]["sha256"]
 
 
-@pytest.mark.parametrize("phase", ["before_solve", "after_raw_row", "during_refinement_planning", "during_summary_write"])
+@pytest.mark.parametrize(
+    "phase", ["before_solve", "after_raw_row", "during_refinement_planning", "during_summary_write"]
+)
 def test_faults_resume_without_duplicate_complete_points(tmp_path, phase):
     spec = spectral_job_spec(tmp_path)
     job = tmp_path / f"job-{phase}"
@@ -137,6 +139,8 @@ def test_control_stop_occurs_only_at_a_safe_point_boundary(tmp_path):
     )
     assert result["completed"] is False
     assert result["stop_reason"] == "after_durable_row_stop"
+    assert result["progress"]["row_count"] == 1
+    assert result["progress"]["last_row_sha256"] is not None
     assert len(read_spectral_rows(job / "spectral_rows.jsonl", spec, artifact_root=job)) == 1
     resumed = run_spectral_characterization(
         spec, job, attempt=2, point_executor=_executor(spec, calls)

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 import hashlib
 import json
 import math
+from copy import deepcopy
 from typing import Any, Mapping
 
 from comsol_mcp.evidence.spectral_characterization import (
@@ -20,7 +20,6 @@ from .spectral_stages import (
     build_spectral_stage_plan,
     inclusive_wavelength_grid,
 )
-
 
 SPECTRAL_PROGRESS_SCHEMA_NAME = "comsol_mcp.spectral_progress"
 SPECTRAL_PROGRESS_SCHEMA_VERSION = "1.0.0"
@@ -48,7 +47,9 @@ def _mapping(value: object, name: str) -> dict[str, Any]:
 
 def _analysis_artifacts(spec: Mapping[str, Any], rows: list[Mapping[str, Any]]) -> dict[str, Any]:
     ordered = sorted(rows, key=lambda row: float(row["requested_wavelength_m"]))
-    inputs = _mapping(_mapping(spec.get("collector"), "collector").get("inputs"), "collector.inputs")
+    inputs = _mapping(
+        _mapping(spec.get("collector"), "collector").get("inputs"), "collector.inputs"
+    )
     bundle = build_spectral_point_bundle(
         bundle_id=f"spectrum-{str(spec['spec_fingerprint'])[:20]}",
         source_model={
@@ -117,7 +118,9 @@ def _validate_stage_row_membership(
         if fingerprint not in planned:
             raise ValueError("spectral row was not requested by a frozen stage")
         plan = planned[fingerprint]
-        if row.get("stage_index") != plan.get("stage_index") or row.get("stage_kind") != plan.get("stage_kind"):
+        if row.get("stage_index") != plan.get("stage_index") or row.get("stage_kind") != plan.get(
+            "stage_kind"
+        ):
             raise ValueError("spectral row stage identity differs from its frozen plan")
         if fingerprint in observed:
             raise ValueError("duplicate complete spectral row identity")
@@ -133,12 +136,12 @@ def _validate_stage_row_membership(
     return planned, observed
 
 
-def _pending_points(plan: Mapping[str, Any], observed: Mapping[str, Mapping[str, Any]]) -> list[dict[str, Any]]:
+def _pending_points(
+    plan: Mapping[str, Any], observed: Mapping[str, Mapping[str, Any]]
+) -> list[dict[str, Any]]:
     by_fingerprint = {
         point["point_fingerprint"]: wavelength
-        for point, wavelength in zip(
-            plan["requested_points"], plan["requested_wavelengths_m"]
-        )
+        for point, wavelength in zip(plan["requested_points"], plan["requested_wavelengths_m"])
     }
     return [
         {
@@ -164,8 +167,7 @@ def _fit_support_is_stable(
         return True, "fit_support_sensitivity_not_requested"
     measurements = sensitivity.get("measurements")
     if not isinstance(measurements, list) or any(
-        not isinstance(item, Mapping) or item.get("state") != "measured"
-        for item in measurements
+        not isinstance(item, Mapping) or item.get("state") != "measured" for item in measurements
     ):
         return False, "fit_support_measurement_failed"
     spans = _mapping(sensitivity.get("spans"), "fit support spans")
@@ -202,11 +204,7 @@ def _new_targets(
     plans: list[Mapping[str, Any]],
     wavelengths: list[float],
 ) -> list[float]:
-    existing = {
-        point["point_fingerprint"]
-        for plan in plans
-        for point in plan["requested_points"]
-    }
+    existing = {point["point_fingerprint"] for plan in plans for point in plan["requested_points"]}
     return [
         wavelength
         for wavelength in wavelengths
@@ -239,7 +237,10 @@ def _expansion_plan(
     }
     maximum = max(oriented.values())
     sides = {
-        "lower" if next(row for row in bundle_rows if row["row_id"] == row_id)["requested_wavelength_m"] == lower else "upper"
+        "lower"
+        if next(row for row in bundle_rows if row["row_id"] == row_id)["requested_wavelength_m"]
+        == lower
+        else "upper"
         for row_id, value in oriented.items()
         if value == maximum
     }
@@ -253,9 +254,7 @@ def _expansion_plan(
     new_upper = min(float(policy["absolute_upper_m"]), upper + upper_extra)
     if new_lower == lower and new_upper == upper:
         return None, "window_expansion_absolute_bound_reached"
-    grid = inclusive_wavelength_grid(
-        new_lower, new_upper, int(policy["points_per_expansion"])
-    )
+    grid = inclusive_wavelength_grid(new_lower, new_upper, int(policy["points_per_expansion"]))
     targets = _new_targets(spec, plans, grid)
     planned_count = sum(len(plan["requested_points"]) for plan in plans)
     if not targets:
@@ -279,7 +278,9 @@ def _expansion_plan(
 def _candidate_peak(artifacts: Mapping[str, Any]) -> float | None:
     characterization = artifacts["characterization"]
     candidate = characterization.get("candidate")
-    if characterization.get("measurement_state") != "measured" or not isinstance(candidate, Mapping):
+    if characterization.get("measurement_state") != "measured" or not isinstance(
+        candidate, Mapping
+    ):
         return None
     peak = candidate.get("peak")
     if not isinstance(peak, Mapping):
@@ -343,7 +344,9 @@ def _final_candidate_disposition(
 ) -> dict[str, Any]:
     characterization = artifacts["characterization"]
     candidate = characterization.get("candidate")
-    if characterization.get("measurement_state") != "measured" or not isinstance(candidate, Mapping):
+    if characterization.get("measurement_state") != "measured" or not isinstance(
+        candidate, Mapping
+    ):
         return _completion(
             reason_code=characterization.get("reason_code", "candidate_not_measured"),
             disposition="residual",
@@ -363,9 +366,7 @@ def _final_candidate_disposition(
             disposition="residual",
             declared_cap_reached=True,
         )
-    fit_stable, fit_reason = _fit_support_is_stable(
-        characterization, spec["refinement_policy"]
-    )
+    fit_stable, fit_reason = _fit_support_is_stable(characterization, spec["refinement_policy"])
     if not fit_stable:
         return _completion(
             reason_code=fit_reason,
@@ -436,9 +437,7 @@ def _action_after_completed_stage(
         refinement_count = sum(plan["stage_kind"] == "refinement" for plan in plans)
         converged = False
         if refinement_count:
-            previous_rows = [
-                row for row in rows if int(row["stage_index"]) < len(plans) - 1
-            ]
+            previous_rows = [row for row in rows if int(row["stage_index"]) < len(plans) - 1]
             previous_peak = _candidate_peak(_analysis_artifacts(spec, previous_rows))
             current_peak = _candidate_peak(artifacts)
             converged = (
@@ -491,20 +490,14 @@ def _validate_adaptive_stage_history(
     for index in range(1, len(plans)):
         prior_plans = plans[:index]
         prior_fingerprints = {
-            point["point_fingerprint"]
-            for plan in prior_plans
-            for point in plan["requested_points"]
+            point["point_fingerprint"] for plan in prior_plans for point in plan["requested_points"]
         }
-        prior_rows = [
-            row for row in rows if row.get("point_fingerprint") in prior_fingerprints
-        ]
+        prior_rows = [row for row in rows if row.get("point_fingerprint") in prior_fingerprints]
         _planned, observed = _validate_stage_row_membership(prior_plans, prior_rows)
         if _pending_points(prior_plans[-1], observed):
             raise ValueError("adaptive spectral stage was frozen before its evidence completed")
         artifacts = _analysis_artifacts(spec, prior_rows)
-        expected_action = _action_after_completed_stage(
-            spec, prior_plans, prior_rows, artifacts
-        )
+        expected_action = _action_after_completed_stage(spec, prior_plans, prior_rows, artifacts)
         if expected_action["action"] != "schedule_next_stage":
             raise ValueError("adaptive spectral stage exists after a terminal scientific decision")
         if expected_action["next_stage_plan"] != plans[index]:
@@ -522,6 +515,8 @@ def build_spectral_progress(
     plans = [deepcopy(_mapping(plan, "stage plan")) for plan in stage_plans]
     normalized_rows = [deepcopy(_mapping(row, "spectral row")) for row in rows]
     if not plans:
+        if normalized_rows:
+            raise ValueError("spectral rows exist without a frozen stage plan")
         action = {
             "action": "schedule_next_stage",
             "reason_code": "initial_locator_required",
@@ -547,9 +542,7 @@ def build_spectral_progress(
             artifacts = None
         else:
             artifacts = _analysis_artifacts(spec, normalized_rows)
-            action = _action_after_completed_stage(
-                spec, plans, normalized_rows, artifacts
-            )
+            action = _action_after_completed_stage(spec, plans, normalized_rows, artifacts)
 
     body = {
         "schema_name": SPECTRAL_PROGRESS_SCHEMA_NAME,

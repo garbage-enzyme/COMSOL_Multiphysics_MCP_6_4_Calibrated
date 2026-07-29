@@ -5,9 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
-from development_kit.tests.spectral_job_fixtures import write_fake_point_audit
-from development_kit.tests.test_branch_continuation_campaign_job import _raw_campaign
+import src.jobs.branch_continuation_campaign_runner as runner_module
 from src.jobs.branch_continuation_campaign import normalize_branch_continuation_campaign_spec
 from src.jobs.branch_continuation_campaign_rows import (
     read_branch_continuation_campaign_states,
@@ -17,6 +15,9 @@ from src.jobs.branch_continuation_campaign_runner import (
     run_branch_continuation_campaign,
 )
 from src.jobs.spectral_runner import run_spectral_characterization
+
+from development_kit.tests.spectral_job_fixtures import write_fake_point_audit
+from development_kit.tests.test_branch_continuation_campaign_job import _raw_campaign
 
 
 def _spec(
@@ -32,9 +33,7 @@ def _spec(
     if single_boundary_expansion:
         raw["continuation_policy"]["max_expansions"] = 1
         for index, state in enumerate(raw["states"]):
-            state["spectral_job"]["expansion_policy"]["maximum_expansions"] = (
-                1 if index == 1 else 0
-            )
+            state["spectral_job"]["expansion_policy"]["maximum_expansions"] = 1 if index == 1 else 0
     for state in raw["states"]:
         state["spectral_job"]["measurement_configuration"]["peak_method"] = (
             "quadratic_interpolation"
@@ -125,9 +124,7 @@ def test_boundary_state_completes_as_unresolved_at_declared_cap(tmp_path):
     assert transition["expansion_required"] is True
     assert result["summary"]["observed_expansion_count"] == 1
     assert result["summary"]["remaining_expansion_count"] == 0
-    assert result["summary"]["reason_code"] == (
-        "expansion_count_exceeded_at_declared_cap"
-    )
+    assert result["summary"]["reason_code"] == ("expansion_count_exceeded_at_declared_cap")
     assert result["summary"]["branch_disappearance_claimed"] is False
 
 
@@ -166,9 +163,7 @@ def test_fault_after_state_row_resumes_without_duplicate_spectrum(tmp_path):
         )
     assert calls == ["angle-0"]
 
-    result = run_branch_continuation_campaign(
-        spec, root, attempt=2, state_executor=execute
-    )
+    result = run_branch_continuation_campaign(spec, root, attempt=2, state_executor=execute)
     assert result["completed"] is True
     assert calls == ["angle-0", "angle-1", "angle-2"]
     rows = read_branch_continuation_campaign_states(
@@ -177,11 +172,41 @@ def test_fault_after_state_row_resumes_without_duplicate_spectrum(tmp_path):
     assert [row["state_id"] for row in rows] == ["angle-0", "angle-1", "angle-2"]
 
 
+def test_complete_state_artifacts_close_executor_to_row_gap_without_reexecution(
+    tmp_path, monkeypatch
+):
+    spec = _spec(tmp_path)
+    root = tmp_path / "campaign-row-gap"
+    calls = []
+    real_append = runner_module.append_branch_continuation_campaign_state
+
+    def execute(state, directory):
+        calls.append(state["state_id"])
+        return _executor([5.0e-6, 5.08e-6, 5.16e-6])(state, directory)
+
+    monkeypatch.setattr(
+        runner_module,
+        "append_branch_continuation_campaign_state",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("row gap")),
+    )
+    with pytest.raises(RuntimeError, match="row gap"):
+        run_branch_continuation_campaign(spec, root, attempt=1, state_executor=execute)
+
+    monkeypatch.setattr(runner_module, "append_branch_continuation_campaign_state", real_append)
+    result = run_branch_continuation_campaign(spec, root, attempt=2, state_executor=execute)
+
+    assert result["completed"] is True
+    assert calls.count("angle-0") == 1
+
+
 def test_state_directory_stays_inside_the_windows_legacy_path_budget():
     root = Path("D:/comsol_runtime/jobs") / ("job-" + "a" * 32)
     directory = branch_continuation_state_directory(root, 7)
     suffix = (
-        "point_artifacts/" + "b" * 64 + "/" + "b" * 64
+        "point_artifacts/"
+        + "b" * 64
+        + "/"
+        + "b" * 64
         + "/1784320847805-afba0aeb/manifest.json.tmp-33728"
     )
     assert directory.name == "s7"

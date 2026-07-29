@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import os
-from pathlib import Path
 import csv
+import os
 import sys
 import time
+from pathlib import Path
 
 from .process_control import contain_current_process_tree
 from .store import JobStore, cancel_request_targets_attempt, process_identity
@@ -33,7 +33,9 @@ def _run(root: str, job_id: str) -> int:
     initial_state = store.read_state(job_id)
     attempt = int(initial_state.get("attempt", 1))
     current = initial_state["status"]
-    if current == "cancel_requested" or cancel_request_targets_attempt(store.read_control(job_id), attempt):
+    if current == "cancel_requested" or cancel_request_targets_attempt(
+        store.read_control(job_id), attempt
+    ):
         store.record_cooperative_cancel_observed(
             job_id,
             attempt=attempt,
@@ -58,14 +60,18 @@ def _run(root: str, job_id: str) -> int:
     if results_path.is_file() and results_path.stat().st_size:
         with results_path.open(newline="", encoding="utf-8") as handle:
             completed = {
-                int(row["index"])
-                for row in csv.DictReader(handle)
-                if row.get("status") == "ok"
+                int(row["index"]) for row in csv.DictReader(handle) if row.get("status") == "ok"
             }
     if 0 in completed:
         store.update_state(job_id, "smoke_validated", event="smoke_revalidated")
         if len(delays) > 1:
             store.update_state(job_id, "running", event="broad_phase_resumed")
+    if completed:
+        store.update_state(
+            job_id,
+            patch={"progress": {"completed": len(completed), "total": len(delays)}},
+            event="durable_results_reconciled",
+        )
     for index, delay in enumerate(delays):
         if index in completed:
             continue

@@ -6,7 +6,6 @@ import hashlib
 import json
 
 import pytest
-
 from src.jobs.spectral_characterization import normalize_spectral_characterization_job_spec
 from src.jobs.spectral_progress import build_spectral_progress
 from src.jobs.spectral_stages import build_initial_spectral_stage
@@ -54,7 +53,11 @@ def _spec(tmp_path, *, maximum_points=20, maximum_expansions=1, absolute_upper=7
                     "t_expression": "T_expr",
                     "a_expression": "A_expr",
                     "top_air_domain_ids": [1],
-                    "top_air_coordinate_range": {"x": [-1.0, 1.0], "y": [-1.0, 1.0], "z": [-1.0, 1.0]},
+                    "top_air_coordinate_range": {
+                        "x": [-1.0, 1.0],
+                        "y": [-1.0, 1.0],
+                        "z": [-1.0, 1.0],
+                    },
                 },
             },
             "analysis_policy": {
@@ -145,9 +148,7 @@ def test_interior_candidate_schedules_refinement_then_accepts_own_peak(tmp_path)
     refined_rows = _rows(spec, refinement, refinement_values)
     for offset, row in enumerate(refined_rows, len(initial_rows) + 1):
         row["sequence"] = offset
-    completed = build_spectral_progress(
-        spec, [initial, refinement], initial_rows + refined_rows
-    )
+    completed = build_spectral_progress(spec, [initial, refinement], initial_rows + refined_rows)
     assert completed["action"] == "complete"
     assert completed["scientific_disposition"] == "accepted"
     candidate = completed["analysis"]["characterization"]["candidate"]
@@ -166,7 +167,11 @@ def test_boundary_high_schedules_bounded_expansion(tmp_path):
     expansion = progress["next_stage_plan"]
     assert expansion["stage_kind"] == "window_expansion"
     assert expansion["window"]["upper_m"] == 7e-6
-    assert all(point["point_fingerprint"] not in {item["point_fingerprint"] for item in initial["requested_points"]} for point in expansion["requested_points"])
+    assert all(
+        point["point_fingerprint"]
+        not in {item["point_fingerprint"] for item in initial["requested_points"]}
+        for point in expansion["requested_points"]
+    )
 
 
 def test_boundary_at_absolute_bound_completes_unresolved_without_execution_failure(tmp_path):
@@ -216,6 +221,15 @@ def test_unplanned_or_wrong_stage_row_fails_closed(tmp_path):
     rows[0]["stage_index"] = 2
     with pytest.raises(ValueError, match="stage identity"):
         build_spectral_progress(spec, [initial], rows)
+
+
+def test_rows_without_a_frozen_stage_plan_fail_closed(tmp_path):
+    spec = _spec(tmp_path)
+    initial = build_initial_spectral_stage(spec)
+    rows = _rows(spec, initial, [0.1, 0.3, 0.9, 0.3, 0.1])
+
+    with pytest.raises(ValueError, match="without a frozen stage plan"):
+        build_spectral_progress(spec, [], rows)
 
 
 def test_rehashed_adaptive_stage_with_changed_targets_fails_replay(tmp_path):

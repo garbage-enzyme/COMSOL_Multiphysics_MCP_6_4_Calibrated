@@ -380,6 +380,8 @@ def _run(
     if pending_terminal is not None:
         current = store.read_state(job_id)["status"]
         if current not in {"cancel_requested", "cancelling"}:
+            if current == "smoke_running" and pending_terminal["status"] == "completed":
+                store.update_state(job_id, "smoke_validated", event="durable_rows_revalidated")
             store.update_state(
                 job_id,
                 pending_terminal["status"],
