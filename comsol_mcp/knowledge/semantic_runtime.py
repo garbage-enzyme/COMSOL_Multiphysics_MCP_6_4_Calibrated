@@ -20,9 +20,10 @@ DEFAULT_LEXICAL_INDEX = Path("D:/comsol_docs_fts/manuals.sqlite3")
 
 
 def _ascii_absolute(value: str | Path, label: str) -> Path:
-    path = Path(value).expanduser().resolve()
+    path = Path(value).expanduser()
     if not path.is_absolute():
         raise ValueError(f"{label} must be absolute")
+    path = path.resolve()
     try:
         str(path).encode("ascii")
     except UnicodeEncodeError as exc:
@@ -67,13 +68,20 @@ def _lightweight_deployment_identity(configuration: Mapping[str, Any]) -> dict[s
         pointer = json.loads((root / "current.json").read_text(encoding="utf-8"))
         if not isinstance(pointer, dict):
             raise TypeError("current pointer must be a JSON object")
-        manifest = json.loads((Path(pointer["index_path"]) / "manifest.json").read_text(encoding="utf-8"))
+        index = _ascii_absolute(pointer["index_path"], "current pointer index path")
+        try:
+            index.relative_to((root / "indexes").resolve())
+        except ValueError as exc:
+            raise ValueError(
+                "current pointer index path is outside the deployment index root"
+            ) from exc
+        manifest = json.loads((index / "manifest.json").read_text(encoding="utf-8"))
         if not isinstance(manifest, dict):
             raise TypeError("index manifest must be a JSON object")
         model = json.loads((Path(str(configuration["model_path"])) / "model_manifest.json").read_text(encoding="utf-8"))
         if not isinstance(model, dict):
             raise TypeError("model manifest must be a JSON object")
-    except (OSError, KeyError, TypeError, json.JSONDecodeError) as exc:
+    except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
         return {"readable": False, "error": f"{type(exc).__name__}: {exc}"}
     matches = (
         pointer.get("manifest_sha256")

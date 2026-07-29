@@ -69,6 +69,8 @@ def test_configuration_is_ascii_static_and_missing_model_degrades(lightweight_de
     assert "model_path_configuration" in missing["missing"]
     with pytest.raises(ValueError, match="ASCII"):
         semantic_configuration({"COMSOL_SEMANTIC_ROOT": "C:/Users/陆星/semantic"})
+    with pytest.raises(ValueError, match="must be absolute"):
+        semantic_configuration({"COMSOL_SEMANTIC_ROOT": "relative/semantic"})
 
 
 def test_cold_status_is_solver_free_and_does_not_start_worker(lightweight_deployment):
@@ -83,6 +85,21 @@ def test_cold_status_is_solver_free_and_does_not_start_worker(lightweight_deploy
     assert status["available"] is False
     assert status["solver_free"] is True
     assert service._manager is None
+
+
+def test_cold_status_does_not_follow_current_pointer_outside_deployment(
+    lightweight_deployment, tmp_path
+):
+    root = Path(lightweight_deployment["COMSOL_SEMANTIC_ROOT"])
+    pointer_path = root / "current.json"
+    pointer = json.loads(pointer_path.read_text(encoding="utf-8"))
+    pointer["index_path"] = str((tmp_path / "outside-index").resolve())
+    pointer_path.write_text(json.dumps(pointer), encoding="utf-8")
+
+    status = SemanticService(lightweight_deployment).status(warm=False)
+
+    assert status["deployment"]["readable"] is False
+    assert status["worker"] == {"state": "stopped", "health": None}
 
 
 def test_failed_warm_health_degrades_without_leaving_worker(lightweight_deployment):

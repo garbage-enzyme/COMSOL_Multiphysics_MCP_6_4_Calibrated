@@ -49,9 +49,10 @@ class Encoder(Protocol):
 
 
 def _require_ascii_absolute(path: str | Path, label: str) -> Path:
-    value = Path(path).expanduser().resolve()
+    value = Path(path).expanduser()
     if not value.is_absolute():
         raise ValueError(f"{label} must be absolute")
+    value = value.resolve()
     try:
         str(value).encode("ascii")
     except UnicodeEncodeError as exc:
@@ -566,7 +567,12 @@ def read_current(deployment_root: str | Path) -> dict[str, Any]:
     pointer = json.loads(pointer_path.read_text(encoding="utf-8"))
     if pointer.get("schema_version") != CURRENT_POINTER_SCHEMA_VERSION:
         raise ValueError("unsupported current pointer schema")
-    validated = validate_index_directory(pointer["index_path"])
+    index = _require_ascii_absolute(pointer["index_path"], "current pointer index_path")
+    try:
+        index.relative_to((root / "indexes").resolve())
+    except ValueError as exc:
+        raise ValueError("current pointer index path is outside the deployment index root") from exc
+    validated = validate_index_directory(index)
     if validated["manifest_sha256"] != pointer.get("manifest_sha256"):
         raise ValueError("current pointer manifest identity mismatch")
     manifest = validated["manifest"]

@@ -14,6 +14,7 @@ import platform
 import subprocess
 import sys
 import time
+from typing import Any
 import uuid
 
 import psutil
@@ -24,13 +25,19 @@ if str(ROOT) in sys.path:
 sys.path.insert(0, str(ROOT))
 
 lifecycle_module = import_module("comsol_mcp.shared_session.lifecycle")
-atomic_write_json = import_module("comsol_mcp.jobs.store").atomic_write_json
+atomic_write_json_exclusive = import_module(
+    "comsol_mcp.durable.io"
+).atomic_write_json_exclusive
 ownership_module = import_module("comsol_mcp.tools.ownership")
 SolverOwnership = ownership_module.SolverOwnership
 _command_signature = ownership_module._command_signature
 
 
 EXPECTED_BACKEND = {"major": 6, "minor": 4, "patch": 0, "build": 293}
+
+
+def _write_receipt(path: Path, value: dict[str, Any]) -> None:
+    atomic_write_json_exclusive(path, value)
 
 
 def _sha256_file(path: Path) -> str:
@@ -347,7 +354,7 @@ def _run_worker(output: Path, cores: int) -> int:
             except Exception as exc:
                 result["client_clear_error"] = f"{type(exc).__name__}: {exc}"
         result["duration_seconds"] = round(time.monotonic() - started, 3)
-        atomic_write_json(output, result)
+        _write_receipt(output, result)
     return 0 if result["success"] else 1
 
 
@@ -507,8 +514,10 @@ def _run_parent(args) -> int:
         receipt["success"] = returncode == 0 and cleanup_passed
         if not receipt["success"]:
             returncode = 1
-        atomic_write_json(output, receipt)
-        worker_output.unlink(missing_ok=True)
+        try:
+            _write_receipt(output, receipt)
+        finally:
+            worker_output.unlink(missing_ok=True)
     print(output)
     return returncode
 

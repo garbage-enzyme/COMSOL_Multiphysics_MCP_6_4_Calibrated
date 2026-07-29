@@ -164,6 +164,17 @@ def test_build_validates_then_atomically_publishes_current(semantic_index_assets
     assert not list(semantic_index_assets["root"].rglob("*.tmp"))
 
 
+def test_read_current_rejects_pointer_outside_deployment_indexes(semantic_index_assets):
+    _build(semantic_index_assets, "outside-pointer")
+    pointer_path = semantic_index_assets["root"] / "current.json"
+    pointer = json.loads(pointer_path.read_text(encoding="utf-8"))
+    pointer["index_path"] = str(semantic_index_assets["root"].parent / "outside-index")
+    pointer_path.write_text(json.dumps(pointer), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="outside the deployment index root"):
+        read_current(semantic_index_assets["root"])
+
+
 def test_read_only_semantic_connections_close_deterministically(
     semantic_index_assets, monkeypatch
 ):

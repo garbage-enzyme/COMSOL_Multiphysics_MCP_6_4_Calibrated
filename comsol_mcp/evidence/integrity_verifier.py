@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from copy import deepcopy
+from pathlib import Path
 from typing import Any, Mapping
 
 from comsol_mcp.evidence.contracts import canonical_sha256
@@ -141,6 +142,8 @@ def verify_evidence_integrity(
         isinstance(key, str) and isinstance(value, str)
         for key, value in artifact_roots.items()
     ):
+        raise ValueError("artifact_roots must map case IDs to absolute directory strings")
+    if any(not value or not Path(value).is_absolute() for value in artifact_roots.values()):
         raise ValueError("artifact_roots must map case IDs to absolute directory strings")
 
     status = _validated_settings_status(

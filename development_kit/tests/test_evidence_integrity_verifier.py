@@ -234,6 +234,16 @@ def test_degraded_project_settings_status_remains_a_blocked_receipt():
     assert result["verification_state"] == "blocked"
 
 
+@pytest.mark.parametrize("artifact_root", ["", "relative/artifacts"])
+def test_direct_verifier_rejects_non_absolute_artifact_roots(artifact_root):
+    with pytest.raises(ValueError, match="absolute directory strings"):
+        verify_evidence_integrity(
+            portfolio_request={},
+            artifact_roots={"case-one": artifact_root},
+            settings_status=load_evidence_integrity_status({}),
+        )
+
+
 def test_mcp_verify_tool_enforces_owned_artifact_root_and_returns_no_path(
     ascii_artifact_root, monkeypatch
 ):

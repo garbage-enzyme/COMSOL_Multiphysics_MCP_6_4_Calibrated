@@ -107,11 +107,17 @@ def _spec(args: argparse.Namespace) -> dict[str, Any]:
         if (
             not args.immutable_source_path.is_absolute()
             or not str(args.immutable_source_path).isascii()
-            or args.immutable_source_path == args.expected_file_path
         ):
             raise ValueError(
                 "immutable source must be a distinct absolute ASCII path"
             )
+        working_path = args.expected_file_path.expanduser().resolve(strict=False)
+        source_path = args.immutable_source_path.expanduser().resolve(strict=False)
+        if source_path == working_path:
+            raise ValueError("immutable source must be a distinct absolute ASCII path")
+    else:
+        working_path = None
+        source_path = None
     if not args.receipt.is_absolute() or not str(args.receipt).isascii():
         raise ValueError("receipt must be an absolute ASCII path")
     selector = {
@@ -119,7 +125,7 @@ def _spec(args: argparse.Namespace) -> dict[str, Any]:
         "expected_label": args.expected_label,
     }
     if args.mode in {"saved", "saved_readback"}:
-        selector["expected_file_path"] = str(args.expected_file_path)
+        selector["expected_file_path"] = str(working_path)
     else:
         selector["expected_unsaved"] = True
     return {
@@ -129,13 +135,13 @@ def _spec(args: argparse.Namespace) -> dict[str, Any]:
         "expected_desktop_value": args.expected_desktop_value,
         "expected_file_path": (
             None
-            if args.expected_file_path is None
-            else str(args.expected_file_path)
+            if working_path is None
+            else str(working_path)
         ),
         "immutable_source_path": (
             None
-            if args.immutable_source_path is None
-            else str(args.immutable_source_path)
+            if source_path is None
+            else str(source_path)
         ),
         "mcp_parameter": {"name": MCP_PARAMETER, "value": MCP_PARAMETER_VALUE},
         "desktop_parameter": {

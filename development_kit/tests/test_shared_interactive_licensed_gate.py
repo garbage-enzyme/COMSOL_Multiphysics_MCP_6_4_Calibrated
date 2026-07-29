@@ -176,3 +176,37 @@ def test_saved_readback_mode_uses_distinct_source_and_working_paths():
     assert result["spec"]["selector"]["expected_file_path"] == str(
         Path(_ascii_working_model())
     )
+
+
+def test_saved_mode_rejects_lexically_distinct_aliases_of_one_path():
+    source = Path(_ascii_source())
+    aliased_working = source.parent / "unused" / ".." / source.name
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--mode",
+            "saved",
+            "--model-tag",
+            "Model1",
+            "--expected-label",
+            source.name,
+            "--expected-desktop-value",
+            "29[mm]",
+            "--expected-file-path",
+            str(aliased_working),
+            "--immutable-source-path",
+            str(source),
+            "--receipt",
+            _ascii_receipt(),
+            "--dry-run",
+        ],
+        cwd=Path(__file__).parents[2],
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+
+    assert completed.returncode == 2
+    assert "distinct absolute ASCII path" in completed.stderr

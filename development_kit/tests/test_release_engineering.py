@@ -12,8 +12,11 @@ import sys
 import tomllib
 import zipfile
 from pathlib import Path, PurePosixPath, PureWindowsPath
+from types import SimpleNamespace
 
 import pytest
+
+from development_kit.scripts import python_compatibility_licensed_gate as compatibility_gate
 
 from development_kit.scripts.generate_release_lock import _render_lock
 from development_kit.scripts.planning_code_gate import (
@@ -24,6 +27,7 @@ from development_kit.scripts.planning_code_gate import (
 from development_kit.scripts.python_compatibility_licensed_gate import (
     _select_expected_backend,
     _status_is_clean,
+    _write_receipt,
 )
 from development_kit.scripts.release_gate import (
     PLANNING_CODE_ALLOWLIST,
@@ -38,6 +42,62 @@ ROOT = Path(__file__).parents[2]
 RELEASE = ROOT / "development_kit" / "release"
 FIXTURES = RELEASE / "integration_fixtures"
 SNAPSHOTS = ROOT / "development_kit" / "tests" / "snapshots"
+
+
+def test_python_compatibility_receipt_publication_preserves_existing_output(tmp_path):
+    output = tmp_path / "receipt.json"
+    output.write_text('{"owner":"competitor"}\n', encoding="utf-8")
+
+    with pytest.raises(FileExistsError):
+        _write_receipt(output, {"owner": "gate"})
+
+    assert json.loads(output.read_text(encoding="utf-8")) == {"owner": "competitor"}
+
+
+def test_python_compatibility_parent_cleans_worker_path_after_output_collision(
+    tmp_path, monkeypatch
+):
+    output = tmp_path / "receipt.json"
+    clean = {
+        "process_inventory": {"complete": True, "fresh": True},
+        "collision": False,
+        "lease": {"state": "absent"},
+        "durable_jobs": {"available": True, "active_count": 0, "active": []},
+    }
+    waits = 0
+
+    def wait_clean(_owner, timeout_seconds=30.0):
+        nonlocal waits
+        waits += 1
+        if waits == 1:
+            output.write_text('{"owner":"competitor"}\n', encoding="utf-8")
+        return clean
+
+    class Owner:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def preflight(self, **_kwargs):
+            return {"ready": False, "blockers": ["injected"]}
+
+    monkeypatch.setattr(compatibility_gate, "_git_identity", lambda: {"dirty_entry_count": 0})
+    monkeypatch.setattr(compatibility_gate, "_wait_clean", wait_clean)
+    monkeypatch.setattr(compatibility_gate, "_descendant_identities", lambda _pid: [])
+    monkeypatch.setattr(compatibility_gate, "SolverOwnership", Owner)
+
+    with pytest.raises(FileExistsError):
+        compatibility_gate._run_parent(
+            SimpleNamespace(
+                output=output,
+                runtime_root=tmp_path / "runtime",
+                minimum_free_gb=0.0,
+                cores=1,
+                timeout_seconds=1.0,
+            )
+        )
+
+    assert json.loads(output.read_text(encoding="utf-8")) == {"owner": "competitor"}
+    assert list(tmp_path.glob(".receipt.worker.*.json")) == []
 
 
 def test_production_runtime_guards_survive_python_optimization():
