@@ -97,6 +97,7 @@ class SessionManager:
                 instance._model_paths = {}
                 instance._model_revisions = {}
                 instance._model_cleanup_paths = {}
+                instance._model_removal_listeners = []
                 instance._current_model = None
                 # comsol_start runs mph.Client() in this background thread.
                 instance._starting = False
@@ -887,6 +888,8 @@ class SessionManager:
             self._client_status_client = None
             for name in list(self._model_cleanup_paths):
                 self._cleanup_model_artifact(name)
+            for name in list(self._models):
+                self._notify_model_removed_locked(name)
             self._models.clear()
             self._model_paths.clear()
             self._model_revisions.clear()
@@ -1063,6 +1066,8 @@ class SessionManager:
         except Exception:
             model_path = None
         with self._start_lock:
+            if name in self._models:
+                self._notify_model_removed_locked(name)
             if name in self._model_cleanup_paths:
                 self._cleanup_model_artifact(name)
             self._model_revisions.pop(name, None)
@@ -1079,6 +1084,16 @@ class SessionManager:
         except Exception:
             pass
         return name
+
+    def add_model_removal_listener(self, listener) -> None:
+        """Register an idempotent in-process callback for model retirement."""
+        with self._start_lock:
+            if listener not in self._model_removal_listeners:
+                self._model_removal_listeners.append(listener)
+
+    def _notify_model_removed_locked(self, name: str) -> None:
+        for listener in tuple(self._model_removal_listeners):
+            listener(name)
 
     @staticmethod
     def _revision_hash(body: dict) -> str:
@@ -1197,6 +1212,7 @@ class SessionManager:
                     if self._client is not client or self._models.get(name) is not model:
                         return False
                     del self._models[name]
+                    self._notify_model_removed_locked(name)
                     self._model_paths.pop(name, None)
                     self._model_revisions.pop(name, None)
                     self._cleanup_model_artifact(name)

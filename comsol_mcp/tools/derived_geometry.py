@@ -2,21 +2,21 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import hashlib
 import json
 import math
-from pathlib import Path
 import re
 import tempfile
-from typing import Any, Literal, Optional
 import uuid
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Literal
 
 from mcp.server.fastmcp import FastMCP
 
 from .ownership import ownership_manager
+from .properties import _read_property
 from .session import session_manager
-
 
 _NUMBER_WITH_UNIT = re.compile(
     r"^\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)\s*\[([^\]]+)\]\s*$"
@@ -58,29 +58,6 @@ def _get(container: Any, tag: str) -> Any:
         return container(tag)
 
 
-def _text_property(feature: Any, name: str) -> str | None:
-    for getter in ("getString", "get"):
-        try:
-            value = getattr(feature, getter)(name)
-            return None if value is None else str(value)
-        except Exception:
-            continue
-    return None
-
-
-def _vector_property(feature: Any, name: str) -> list[str]:
-    try:
-        return [str(value) for value in list(feature.getStringArray(name))]
-    except Exception:
-        raw = _text_property(feature, name)
-    if raw is None:
-        raise ValueError(f"property {name!r} is unavailable")
-    values = [item for item in re.split(r"[\s,]+", raw.strip("[]() ")) if item]
-    if len(values) != 3:
-        raise ValueError(f"property {name!r} is not a complete 3-vector: {raw!r}")
-    return values
-
-
 def _feature_type(feature: Any) -> str:
     for getter in ("getType", "type"):
         try:
@@ -91,6 +68,32 @@ def _feature_type(feature: Any) -> str:
         return str(feature.label())
     except Exception:
         return "unknown"
+
+
+def _feature_snapshot(feature: Any, tag: str) -> dict[str, Any]:
+    try:
+        property_names = sorted({str(name) for name in feature.properties()})
+    except Exception as exc:
+        raise ValueError(f"cannot inventory geometry feature {tag!r}: {exc}") from exc
+    properties = {}
+    for name in property_names:
+        try:
+            value, value_type = _read_property(feature, name)
+        except Exception as exc:
+            raise ValueError(
+                f"cannot snapshot geometry feature {tag!r} property {name!r}: {exc}"
+            ) from exc
+        properties[name] = {"value_type": value_type, "value": value}
+    try:
+        label = str(feature.label())
+    except Exception as exc:
+        raise ValueError(f"cannot snapshot geometry feature {tag!r} label: {exc}") from exc
+    return {
+        "tag": tag,
+        "type": _feature_type(feature),
+        "label": label,
+        "properties": properties,
+    }
 
 
 def _set_vector(feature: Any, name: str, values: list[str]) -> None:
@@ -119,29 +122,34 @@ def _snapshot(model: Any, component_tag: str, geometry_tag: str) -> dict[str, An
     geom = _geometry(model, component_tag, geometry_tag)
     features = geom.feature()
     tags = _tags(features)
+    feature_snapshots = {
+        tag: _feature_snapshot(_get(features, tag), tag) for tag in tags
+    }
     fin = None
-    if "fin" in tags:
-        node = _get(features, "fin")
+    if "fin" in feature_snapshots:
+        properties = feature_snapshots["fin"]["properties"]
         fin = {
-            "action": _text_property(node, "action"),
-            "imprint": _text_property(node, "imprint"),
-            "createpairs": _text_property(node, "createpairs"),
+            name: properties.get(name, {}).get("value")
+            for name in ("action", "imprint", "createpairs")
         }
     blocks = {}
-    for tag in tags:
-        node = _get(features, tag)
-        kind = _feature_type(node)
-        if "block" in f"{tag} {kind}".casefold():
+    for tag, feature_snapshot in feature_snapshots.items():
+        kind = feature_snapshot["type"]
+        if kind.casefold() == "block":
+            properties = feature_snapshot["properties"]
+            if "size" not in properties or "pos" not in properties:
+                raise ValueError(f"Block feature {tag!r} lacks complete size/pos properties")
             blocks[tag] = {
                 "type": kind,
-                "size": _vector_property(node, "size"),
-                "pos": _vector_property(node, "pos"),
+                "size": list(properties["size"]["value"]),
+                "pos": list(properties["pos"]["value"]),
             }
     return {
         "component_tag": component_tag,
         "geometry_tag": geometry_tag,
         "fin": fin,
         "blocks": blocks,
+        "features": feature_snapshots,
     }
 
 
@@ -217,13 +225,27 @@ def create_derived_geometry_clone(
     root.mkdir(parents=True, exist_ok=True)
     directory = Path(tempfile.mkdtemp(prefix="comsol_mcp_clone_geometry_", dir=root))
     clone_path = directory / "clone.mph"
+    clone = None
     try:
         source_model.java.save(str(clone_path), True)
         clone = client.load(str(clone_path))
         clone.java.label(new_name)
-    except Exception:
-        clone_path.unlink(missing_ok=True)
-        directory.rmdir()
+    except Exception as exc:
+        cleanup_errors = []
+        if clone is not None:
+            try:
+                client.remove(clone)
+            except Exception as cleanup_exc:
+                cleanup_errors.append(f"clone_remove: {cleanup_exc}")
+        try:
+            clone_path.unlink(missing_ok=True)
+            directory.rmdir()
+        except Exception as cleanup_exc:
+            cleanup_errors.append(f"backing_remove: {cleanup_exc}")
+        if cleanup_errors:
+            raise RuntimeError(
+                f"{exc}; clone cleanup failed: {'; '.join(cleanup_errors)}"
+            ) from exc
         raise
     record = DerivedGeometryRecord(
         derived_model_id=f"derived-{uuid.uuid4().hex}",
@@ -233,8 +255,65 @@ def create_derived_geometry_clone(
         backing_path=str(clone_path),
         backing_sha256=_sha256(clone_path),
     )
-    _DERIVED[record.derived_model_id] = record
     return clone, record
+
+
+def _discard_derived_model(model_name: str) -> None:
+    for derived_model_id, record in list(_DERIVED.items()):
+        if record.model_name == model_name:
+            _DERIVED.pop(derived_model_id, None)
+
+
+session_manager.add_model_removal_listener(_discard_derived_model)
+
+
+def _cleanup_clone_artifact(path_value: str) -> None:
+    path = Path(path_value)
+    path.unlink(missing_ok=True)
+    path.parent.rmdir()
+
+
+def _create_registered_derived_geometry_clone(
+    source_model: Any,
+    client: Any,
+    *,
+    new_name: str,
+) -> tuple[Any, DerivedGeometryRecord, dict[str, Any]]:
+    clone, record = create_derived_geometry_clone(
+        source_model, client, new_name=new_name
+    )
+    registered_name = None
+    try:
+        registered_name = session_manager.add_model(
+            clone, cleanup_path=record.backing_path
+        )
+        record.model_name = registered_name
+        _DERIVED[record.derived_model_id] = record
+        snapshot = _snapshot(clone, "comp1", "geom1")
+        return clone, record, snapshot
+    except Exception as exc:
+        _DERIVED.pop(record.derived_model_id, None)
+        cleanup_errors = []
+        removed = False
+        if registered_name is not None:
+            try:
+                removed = session_manager.remove_model(registered_name)
+            except Exception as cleanup_exc:
+                cleanup_errors.append(f"session_remove: {cleanup_exc}")
+        if not removed:
+            try:
+                client.remove(clone)
+            except Exception as cleanup_exc:
+                cleanup_errors.append(f"clone_remove: {cleanup_exc}")
+            try:
+                _cleanup_clone_artifact(record.backing_path)
+            except Exception as cleanup_exc:
+                cleanup_errors.append(f"backing_remove: {cleanup_exc}")
+        if cleanup_errors:
+            raise RuntimeError(
+                f"{exc}; clone transaction cleanup failed: {'; '.join(cleanup_errors)}"
+            ) from exc
+        raise
 
 
 def derived_model_validation_status(model_name: str) -> dict[str, Any]:
@@ -342,6 +421,7 @@ def apply_fin(model: Any, record: DerivedGeometryRecord, preview: dict[str, Any]
         for key, value in preview["planned"].items():
             fin.set(key, value == "on" if key in {"imprint", "createpairs"} else value)
         geom.run()
+        after = _snapshot(model, component_tag, geometry_tag)
     except Exception as exc:
         for key, value in current["fin"].items():
             if value is None:
@@ -354,6 +434,14 @@ def apply_fin(model: Any, record: DerivedGeometryRecord, preview: dict[str, Any]
             geom.run()
         except Exception as rollback_exc:
             rollback_errors.append(f"geometry: {rollback_exc}")
+        try:
+            rollback_snapshot = _snapshot(model, component_tag, geometry_tag)
+            if rollback_snapshot != current:
+                rollback_errors.append("restored geometry does not match the complete pre-state")
+            if _topology(geom) != before_topology:
+                rollback_errors.append("restored topology does not match the pre-state")
+        except Exception as rollback_exc:
+            rollback_errors.append(f"rollback_snapshot: {rollback_exc}")
         if rollback_errors:
             record.dirty = True
             record.dirty_reason = "; ".join(rollback_errors)[:500]
@@ -364,7 +452,6 @@ def apply_fin(model: Any, record: DerivedGeometryRecord, preview: dict[str, Any]
             "rollback_errors": rollback_errors,
             "derived_model_dirty": record.dirty,
         }
-    after = _snapshot(model, component_tag, geometry_tag)
     return {
         "success": True,
         "derived_model_id": record.derived_model_id,
@@ -392,6 +479,7 @@ def apply_blocks(model: Any, record: DerivedGeometryRecord, preview: dict[str, A
             node = _get(geom.feature(), edit["block_tag"])
             _set_vector(node, "size", edit["size"])
             _set_vector(node, "pos", edit["pos"])
+        after = _snapshot(model, component_tag, geometry_tag)
     except Exception as exc:
         for tag, values in captured.items():
             node = _get(geom.feature(), tag)
@@ -400,6 +488,12 @@ def apply_blocks(model: Any, record: DerivedGeometryRecord, preview: dict[str, A
                     _set_vector(node, key, values[key])
                 except Exception as rollback_exc:
                     rollback_errors.append(f"{tag}.{key}: {rollback_exc}")
+        try:
+            rollback_snapshot = _snapshot(model, component_tag, geometry_tag)
+            if rollback_snapshot != current:
+                rollback_errors.append("restored geometry does not match the complete pre-state")
+        except Exception as rollback_exc:
+            rollback_errors.append(f"rollback_snapshot: {rollback_exc}")
         if rollback_errors:
             record.dirty = True
             record.dirty_reason = "; ".join(rollback_errors)[:500]
@@ -410,7 +504,6 @@ def apply_blocks(model: Any, record: DerivedGeometryRecord, preview: dict[str, A
             "rollback_errors": rollback_errors,
             "derived_model_dirty": record.dirty,
         }
-    after = _snapshot(model, component_tag, geometry_tag)
     return {
         "success": True,
         "derived_model_id": record.derived_model_id,
@@ -434,10 +527,10 @@ def register_derived_geometry_tools(mcp: FastMCP) -> None:
         if source is None or client is None:
             return {"success": False, "error": "source model or COMSOL client unavailable"}
         try:
-            clone, record = create_derived_geometry_clone(source, client, new_name=new_name)
-            model_name = session_manager.add_model(clone, cleanup_path=record.backing_path)
-            record.model_name = model_name
-            snapshot = _snapshot(clone, "comp1", "geom1")
+            clone, record, snapshot = _create_registered_derived_geometry_clone(
+                source, client, new_name=new_name
+            )
+            model_name = record.model_name
             return {
                 "success": True,
                 "derived_model_id": record.derived_model_id,
