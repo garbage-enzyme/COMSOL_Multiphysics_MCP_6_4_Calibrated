@@ -463,6 +463,7 @@ class _BoundedProcessInventory:
     def collect(self, *, require_fresh: bool, timeout: float) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         requested = time.monotonic()
         timeout = max(0.01, float(timeout))
+        deadline = requested + timeout
         with self._lock:
             cache_age = (
                 requested - self._cache_completed_monotonic
@@ -495,7 +496,7 @@ class _BoundedProcessInventory:
             thread = self._thread
         if thread is None:
             raise RuntimeError("process inventory thread failed to initialize")
-        thread.join(timeout=timeout)
+        thread.join(timeout=max(0.0, deadline - time.monotonic()))
         completed = time.monotonic()
         with self._lock:
             fresh_complete = (
@@ -503,7 +504,7 @@ class _BoundedProcessInventory:
                 and self._cache_started_monotonic is not None
                 and self._cache_completed_monotonic is not None
                 and self._cache_started_monotonic >= requested
-                and self._cache_completed_monotonic <= completed
+                and self._cache_completed_monotonic <= deadline
             )
             if fresh_complete:
                 return list(self._cache_records or []), {

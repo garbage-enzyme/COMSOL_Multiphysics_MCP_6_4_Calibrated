@@ -11,6 +11,7 @@ import shutil
 import statistics
 import subprocess
 import sys
+import threading
 import time
 import uuid
 
@@ -170,6 +171,30 @@ def test_bounded_inventory_timeout_fails_closed_and_cache_cannot_authorize_acqui
     assert preflight["ready"] is False
     assert "host process inventory is incomplete" in preflight["blockers"]
     assert not manager.lease_path.exists()
+
+
+def test_bounded_inventory_rejects_scan_completed_after_request_deadline(monkeypatch):
+    original_start = threading.Thread.start
+
+    def delayed_return_from_start(thread):
+        original_start(thread)
+        time.sleep(0.1)
+
+    def scan_finishing_after_deadline():
+        time.sleep(0.08)
+        return []
+
+    monkeypatch.setattr(threading.Thread, "start", delayed_return_from_start)
+    inventory = ownership_module._BoundedProcessInventory(
+        scan_finishing_after_deadline
+    )
+
+    records, evidence = inventory.collect(require_fresh=True, timeout=0.05)
+
+    assert records == []
+    assert evidence["complete"] is False
+    assert evidence["fresh"] is False
+    assert evidence["source"] == "stale_cache_after_timeout"
 
 
 def test_read_only_recheck_accepts_scan_that_was_already_in_flight(
