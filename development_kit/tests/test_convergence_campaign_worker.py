@@ -128,11 +128,21 @@ def test_worker_uses_one_owner_and_client_for_all_exact_levels(tmp_path, ascii_t
     store, spec, job_id = _created_job(tmp_path, ascii_tmp_path)
     ownership = _Ownership()
     client = _Client(attempt_mutation=True)
+    factory_calls = {"ownership": 0, "client": 0}
+
+    def ownership_factory(*_args):
+        factory_calls["ownership"] += 1
+        return ownership
+
+    def client_factory(_spec):
+        factory_calls["client"] += 1
+        return client
+
     code = _run(
         str(store.root),
         job_id,
-        ownership_factory=lambda *_args: ownership,
-        client_factory=lambda _spec: client,
+        ownership_factory=ownership_factory,
+        client_factory=client_factory,
         collector_executor=_collector_for(spec),
         telemetry_provider=_telemetry,
         native_cancel_enabled=False,
@@ -144,6 +154,7 @@ def test_worker_uses_one_owner_and_client_for_all_exact_levels(tmp_path, ascii_t
     assert state["completed_levels"] == 3
     assert state["convergence_summary"]["scientific_disposition"] == "accepted"
     assert ownership.acquired is True and ownership.released is True
+    assert factory_calls == {"ownership": 1, "client": 1}
     assert len(client.loaded) == 3
     assert client.mutation_blocked == 3
     assert client.clear_count == 4
@@ -236,7 +247,13 @@ def test_manager_exact_resubmission_observes_existing_campaign(
         preflight=lambda **_kwargs: {"ready": True},
         reconcile_on_start=False,
     )
-    monkeypatch.setattr(manager, "_launch_worker", lambda *_args: process_identity(os.getpid()))
+    launches = []
+
+    def launch_once(*_args):
+        launches.append(True)
+        return process_identity(os.getpid())
+
+    monkeypatch.setattr(manager, "_launch_worker", launch_once)
 
     first = manager.submit(raw)
     second = manager.submit(raw)
@@ -249,6 +266,7 @@ def test_manager_exact_resubmission_observes_existing_campaign(
         "duplicate": True,
         "action": "observe_existing",
     }
+    assert launches == [True]
     assert status["convergence_progress"] == {
         "declared_levels": 3,
         "completed_levels": 0,

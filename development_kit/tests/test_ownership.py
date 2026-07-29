@@ -91,6 +91,82 @@ def test_two_simultaneous_claims_produce_one_owner(runtime_dir):
     assert sum(result.get("acquired", False) for result in results) == 1
 
 
+def test_independent_processes_produce_one_owner(runtime_dir):
+    child = r"""
+import json
+import os
+from pathlib import Path
+import sys
+import time
+
+import psutil
+
+from comsol_mcp.tools.ownership import SolverOwnership
+
+runtime = Path(sys.argv[1])
+token = sys.argv[2]
+process = psutil.Process(os.getpid())
+command = list(process.cmdline())
+record = {
+    "pid": process.pid,
+    "parent_pid": process.ppid(),
+    "name": process.name(),
+    "create_time": process.create_time(),
+    "command_line": command,
+    "executable": process.exe(),
+}
+(runtime / f"ready-{token}").write_text("ready", encoding="ascii")
+deadline = time.monotonic() + 10.0
+while not (runtime / "start").is_file():
+    if time.monotonic() >= deadline:
+        raise TimeoutError("parent did not release acquisition barrier")
+    time.sleep(0.01)
+manager = SolverOwnership(
+    runtime,
+    process_provider=lambda: [record],
+    pid=record["pid"],
+    parent_pid=record["parent_pid"],
+    create_time=record["create_time"],
+    command_line=command,
+    owner=f"process-{token}",
+)
+result = manager.acquire(mode="cross-process-test")
+print(json.dumps(result), flush=True)
+time.sleep(1.0)
+if result.get("success"):
+    manager.release()
+"""
+    processes = [
+        subprocess.Popen(
+            [sys.executable, "-c", child, str(runtime_dir), token],
+            cwd=Path(__file__).resolve().parents[2],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        for token in ("first", "second")
+    ]
+    try:
+        deadline = time.monotonic() + 10.0
+        while not all((runtime_dir / f"ready-{token}").is_file() for token in ("first", "second")):
+            if time.monotonic() >= deadline:
+                raise TimeoutError("child acquisition processes did not reach barrier")
+            time.sleep(0.01)
+        (runtime_dir / "start").write_text("start", encoding="ascii")
+        completed = [process.communicate(timeout=15) for process in processes]
+    finally:
+        for process in processes:
+            if process.poll() is None:
+                process.terminate()
+                process.wait(timeout=5)
+
+    assert all(process.returncode == 0 for process in processes), completed
+    results = [json.loads(stdout.strip().splitlines()[-1]) for stdout, _stderr in completed]
+    assert sum(result["success"] for result in results) == 1
+    assert sum(result.get("acquired", False) for result in results) == 1
+
+
 def test_lease_mutations_hold_one_cross_process_operation_lock(runtime_dir, monkeypatch):
     command = ["python.exe", "server"]
     own_process = process(13, 103.0, command)

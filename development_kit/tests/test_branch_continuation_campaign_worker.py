@@ -145,11 +145,21 @@ def test_worker_uses_one_owner_and_client_for_all_exact_states(tmp_path, ascii_r
     store, spec, job_id = _created_job(tmp_path, ascii_root)
     ownership = _Ownership()
     client = _Client(attempt_mutation=True)
+    factory_calls = {"ownership": 0, "client": 0}
+
+    def ownership_factory(*_args):
+        factory_calls["ownership"] += 1
+        return ownership
+
+    def client_factory(_spec):
+        factory_calls["client"] += 1
+        return client
+
     code = _run(
         str(store.root),
         job_id,
-        ownership_factory=lambda *_args: ownership,
-        client_factory=lambda _spec: client,
+        ownership_factory=ownership_factory,
+        client_factory=client_factory,
         collector_executor=_collector_for(spec),
         telemetry_provider=_telemetry,
         native_cancel_enabled=False,
@@ -161,6 +171,7 @@ def test_worker_uses_one_owner_and_client_for_all_exact_states(tmp_path, ascii_r
     assert state["completed_states"] == 3
     assert state["branch_continuation_summary"]["scientific_disposition"] == "accepted"
     assert ownership.acquired is True and ownership.released is True
+    assert factory_calls == {"ownership": 1, "client": 1}
     assert len(client.loaded) == 3
     assert client.mutation_blocked == 3
     assert client.clear_count == 4

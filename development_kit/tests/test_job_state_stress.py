@@ -119,7 +119,7 @@ def test_concurrent_state_readers_writers_survive_sharing_violations(monkeypatch
                 future.result(timeout=20)
         finally:
             stop.set()
-            executor.shutdown(wait=False, cancel_futures=True)
+            executor.shutdown(wait=True, cancel_futures=True)
         elapsed = time.monotonic() - started
 
         with pytest.raises(ValueError, match="Completed job state is immutable"):
@@ -211,7 +211,8 @@ def test_real_windows_exclusive_reader_does_not_corrupt_durable_state(ascii_tmp_
                 try:
                     time.sleep(0.008)
                 finally:
-                    assert close_handle(handle)
+                    if not close_handle(handle):
+                        raise ctypes.WinError(ctypes.get_last_error())
                 time.sleep(0.002)
 
         def writer() -> None:

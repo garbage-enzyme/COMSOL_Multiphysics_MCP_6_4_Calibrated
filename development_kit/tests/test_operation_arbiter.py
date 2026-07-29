@@ -42,13 +42,25 @@ def test_concurrent_comsol_bound_calls_fail_fast_with_retry_evidence(tmp_path, m
         concurrency_class="comsol_bound",
     )
     first_result = {}
-    thread = threading.Thread(target=lambda: first_result.update(first_tool()))
-    thread.start()
-    assert entered.wait(1.0)
+    thread_errors = []
 
-    busy = second_tool()
-    release.set()
-    thread.join(2.0)
+    def run_first():
+        try:
+            first_result.update(first_tool())
+        except BaseException as exc:
+            thread_errors.append(exc)
+
+    thread = threading.Thread(target=run_first)
+    thread.start()
+    try:
+        assert entered.wait(1.0)
+        busy = second_tool()
+    finally:
+        release.set()
+        thread.join(2.0)
+        assert not thread.is_alive()
+    if thread_errors:
+        raise thread_errors[0]
 
     assert busy["success"] is False
     assert busy["operation_gate"]["state"] == "active"
