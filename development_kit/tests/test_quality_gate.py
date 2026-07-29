@@ -13,10 +13,23 @@ import pytest
 
 from development_kit.scripts.quality_gate import (
     POLICY_PATH,
+    _main_pytest_command,
     evaluate_coverage,
     load_coverage_policy,
     run_quality_gate,
 )
+
+
+def test_hosted_quality_main_suite_is_serial_but_local_suite_keeps_four_workers(
+    tmp_path: Path,
+) -> None:
+    hosted = _main_pytest_command(tmp_path, hosted_ci=True)
+    local = _main_pytest_command(tmp_path, hosted_ci=False)
+
+    assert "-n" not in hosted
+    assert "--dist" not in hosted
+    assert local[local.index("-n") + 1] == "4"
+    assert local[local.index("--dist") + 1] == "loadscope"
 
 
 def _passing_report() -> dict:

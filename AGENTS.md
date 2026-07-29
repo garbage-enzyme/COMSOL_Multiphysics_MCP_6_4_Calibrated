@@ -100,8 +100,12 @@ Use a provisional 10-minute timeout for complete solver-free test, coverage,
 quality, and release-gate runs. Reassess that timeout when the collected test
 count exceeds 2,000; focused test commands should retain narrower proportional
 timeouts. The quality gate uses four pytest workers for the isolated main suite
-and runs process-inventory discovery tests serially; do not replace the bounded
-worker count with `-n auto` without a new timing and isolation benchmark.
+locally and runs process-inventory discovery tests serially. GitHub-hosted
+Python 3.14 uses serial pytest because upstream pytest-xdist issue #1313 can
+intermittently deadlock worker shutdown or `loadscope` dispatch; do not restore
+hosted xdist without an upstream fix and a new stability benchmark. Do not
+replace the local bounded worker count with `-n auto` without a new timing and
+isolation benchmark.
 
 For a release candidate, use the locked dependency lane from a clean tree:
 

@@ -79,6 +79,24 @@ class QualityCommandError(RuntimeError):
         self.returncode = returncode
 
 
+def _main_pytest_command(pytest_root: Path, *, hosted_ci: bool) -> list[str]:
+    """Build the main-suite command, keeping hosted Python 3.14 execution serial."""
+    command = [sys.executable, "-m", "pytest", "-q"]
+    if not hosted_ci:
+        command.extend(["-n", str(PARALLEL_TEST_WORKERS), "--dist", "loadscope"])
+    command.extend(
+        [
+            "--basetemp",
+            str(pytest_root / "main"),
+            *(argument for target in SERIAL_TEST_TARGETS for argument in ("--ignore", target)),
+            "--cov=comsol_mcp",
+            "--cov-branch",
+            "--cov-report=",
+        ]
+    )
+    return command
+
+
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes(), usedforsecurity=False).hexdigest()
 
@@ -326,22 +344,10 @@ def run_quality_gate(artifact_root: Path, *, as_of: date) -> dict[str, Any]:
             environment=environment,
         )
         _run(
-            [
-                sys.executable,
-                "-m",
-                "pytest",
-                "-q",
-                "-n",
-                str(PARALLEL_TEST_WORKERS),
-                "--dist",
-                "loadscope",
-                "--basetemp",
-                str(pytest_root / "parallel"),
-                *(argument for target in SERIAL_TEST_TARGETS for argument in ("--ignore", target)),
-                "--cov=comsol_mcp",
-                "--cov-branch",
-                "--cov-report=",
-            ],
+            _main_pytest_command(
+                pytest_root,
+                hosted_ci=os.environ.get("GITHUB_ACTIONS", "").casefold() == "true",
+            ),
             stage="parallel_tests",
             environment=environment,
         )

@@ -423,8 +423,13 @@ def test_hosted_ci_is_dependency_only_and_real_gate_is_explicit():
     real_gate = (
         ROOT / "development_kit" / "scripts" / "run_real_release_gate.py"
     ).read_text(encoding="utf-8")
+    quality_gate = (
+        ROOT / "development_kit" / "scripts" / "quality_gate.py"
+    ).read_text(encoding="utf-8")
 
     assert "python -m pytest -q" in workflow
+    assert "python -m pytest -q -n" not in workflow
+    assert 'os.environ.get("GITHUB_ACTIONS", "").casefold() == "true"' in quality_gate
     assert "python -m build" in workflow
     assert "release_gate.py --skip-tests" in workflow
     action_references = re.findall(
@@ -440,7 +445,7 @@ def test_hosted_ci_is_dependency_only_and_real_gate_is_explicit():
     assert "continue-on-error" not in workflow
     assert "Python 3.14, default production lane" in workflow
     assert "dependency compatibility (${{ matrix.lane }}, Python 3.14)" in workflow
-    assert "python -m pytest -q -n 4 --dist loadscope" in workflow
+    assert "python -m pytest -q --basetemp D:\\comsol_pytest\\dependency-main" in workflow
     assert "New-Item -ItemType Directory -Force -Path D:\\comsol_pytest" in workflow
     assert "--ignore development_kit/tests/test_control_plane_startup.py" in workflow
     assert "test_control_plane_startup.py --basetemp" in workflow
