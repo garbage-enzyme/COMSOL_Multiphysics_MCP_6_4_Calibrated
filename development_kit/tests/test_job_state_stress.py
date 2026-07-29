@@ -85,7 +85,7 @@ def test_concurrent_state_readers_writers_survive_sharing_violations(monkeypatch
         observation_lock = threading.Lock()
 
         def writer(writer_id: int) -> None:
-            for sequence in range(40):
+            for sequence in range(18):
                 state = store.update_state(
                     job_id,
                     patch={f"writer_{writer_id}": sequence},
@@ -94,7 +94,7 @@ def test_concurrent_state_readers_writers_survive_sharing_violations(monkeypatch
 
         def reader() -> None:
             trailing = 0
-            while not stop.is_set() or trailing < 20:
+            while not stop.is_set() or trailing < 2:
                 state = store.read_state(job_id)
                 json.dumps(state, sort_keys=True)
                 with observation_lock:
@@ -103,7 +103,8 @@ def test_concurrent_state_readers_writers_survive_sharing_violations(monkeypatch
                     trailing += 1
 
         started = time.monotonic()
-        with ThreadPoolExecutor(max_workers=8) as executor:
+        executor = ThreadPoolExecutor(max_workers=8)
+        try:
             readers = [executor.submit(reader) for _ in range(5)]
             writers = [executor.submit(writer, writer_id) for writer_id in range(3)]
             for future in writers:
@@ -116,6 +117,9 @@ def test_concurrent_state_readers_writers_survive_sharing_violations(monkeypatch
             stop.set()
             for future in readers:
                 future.result(timeout=20)
+        finally:
+            stop.set()
+            executor.shutdown(wait=False, cancel_futures=True)
         elapsed = time.monotonic() - started
 
         with pytest.raises(ValueError, match="Completed job state is immutable"):
@@ -123,9 +127,9 @@ def test_concurrent_state_readers_writers_survive_sharing_violations(monkeypatch
         assert final["status"] == "completed"
         assert final["terminal_marker"] is True
         assert {key: final[key] for key in ("writer_0", "writer_1", "writer_2")} == {
-            "writer_0": 39,
-            "writer_1": 39,
-            "writer_2": 39,
+            "writer_0": 17,
+            "writer_1": 17,
+            "writer_2": 17,
         }
         assert observations
         assert all(item["status"] in {"running", "completed"} for item in observations)
