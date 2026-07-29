@@ -21,7 +21,7 @@ def test_recipe_output_uses_declared_runtime_root(monkeypatch, ascii_tmp_path):
 
     output = module.recipe_output_dir()
 
-    assert output == ascii_tmp_path / "recipes"
+    assert output == ascii_tmp_path.resolve() / "recipes"
     assert output.is_dir()
 
 
