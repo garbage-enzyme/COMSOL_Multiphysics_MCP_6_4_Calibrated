@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import json
 import inspect
+import json
 import threading
 
 import psutil
-
+import src.operation_arbiter as arbiter_module
 from src.operation_arbiter import OperationArbiter, get_operation_status, guard_tool_call
 from src.tools.catalog import TOOL_METADATA
 
@@ -214,6 +214,92 @@ def test_malformed_lock_fails_closed(tmp_path):
     assert evidence["state"] == "uncertain"
     assert evidence["retryable"] is False
     assert (tmp_path / "operation.lock").read_bytes() == b"not-json"
+
+
+def test_operation_lock_retries_short_writes_until_publication_is_exact(
+    tmp_path, monkeypatch
+):
+    arbiter = OperationArbiter(
+        tmp_path,
+        pid=201,
+        process_create_time=20.1,
+        process_probe=lambda _pid: 20.1,
+    )
+    original_write = arbiter_module.os.write
+    writes = []
+
+    def short_write(descriptor, payload):
+        writes.append(len(payload))
+        return original_write(descriptor, payload[:1])
+
+    monkeypatch.setattr(arbiter_module.os, "write", short_write)
+
+    claim, evidence = arbiter.try_acquire(
+        tool_name="study_solve", side_effect_class="solver_execution"
+    )
+
+    assert claim is not None
+    assert evidence["state"] == "acquired"
+    assert len(writes) == len(claim.lock_bytes)
+    assert arbiter.lock_path.read_bytes() == claim.lock_bytes
+    assert arbiter.release(claim)["verified"] is True
+
+
+def test_non_mapping_result_becomes_failure_when_release_is_unverified(
+    tmp_path, monkeypatch
+):
+    arbiter = OperationArbiter(
+        tmp_path,
+        pid=202,
+        process_create_time=20.2,
+        process_probe=lambda _pid: 20.2,
+    )
+    monkeypatch.setattr(arbiter_module, "get_operation_arbiter", lambda: arbiter)
+    monkeypatch.setattr(
+        arbiter,
+        "release",
+        lambda _claim: {
+            "released": False,
+            "verified": False,
+            "reason": "simulated_unverified_release",
+        },
+    )
+    guarded = guard_tool_call(
+        lambda: "raw-result",
+        tool_name="study_solve",
+        side_effect_class="solver_execution",
+        concurrency_class="comsol_bound",
+    )
+
+    result = guarded()
+
+    assert result["success"] is False
+    assert result["result"] == "raw-result"
+    assert result["operation_gate"]["release"]["verified"] is False
+
+
+def test_cached_arbiter_is_rebound_after_process_identity_change(tmp_path, monkeypatch):
+    arbiter_module._ARBITERS.clear()
+    process = {"pid": 301}
+    monkeypatch.setattr(arbiter_module, "default_runtime_dir", lambda: tmp_path)
+    monkeypatch.setattr(arbiter_module.os, "getpid", lambda: process["pid"])
+    monkeypatch.setattr(
+        arbiter_module,
+        "_process_create_time",
+        lambda pid: {301: 30.1, 302: 30.2}[pid],
+    )
+    try:
+        first = arbiter_module.get_operation_arbiter()
+        repeated = arbiter_module.get_operation_arbiter()
+        process["pid"] = 302
+        rebound = arbiter_module.get_operation_arbiter()
+    finally:
+        arbiter_module._ARBITERS.clear()
+
+    assert repeated is first
+    assert rebound is not first
+    assert rebound.pid == 302
+    assert rebound.process_create_time == 30.2
 
 
 def test_metadata_keeps_required_tools_outside_comsol_mutex():

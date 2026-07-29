@@ -33,6 +33,16 @@ def _process_create_time(pid: int) -> float:
     return float(psutil.Process(pid).create_time())
 
 
+def _write_all(descriptor: int, payload: bytes) -> int:
+    written = 0
+    while written < len(payload):
+        count = os.write(descriptor, payload[written:])
+        if not isinstance(count, int) or isinstance(count, bool) or count <= 0:
+            raise OSError("operation lock write made no progress")
+        written += count
+    return written
+
+
 @dataclass(frozen=True)
 class OperationClaim:
     """One exact operation-lock claim owned by this process."""
@@ -221,11 +231,52 @@ class OperationArbiter:
                         "error": f"operation lock cannot be created: {type(exc).__name__}",
                     }
                 else:
+                    written = 0
+                    write_error: OSError | None = None
                     try:
-                        os.write(descriptor, payload)
+                        written = _write_all(descriptor, payload)
                         os.fsync(descriptor)
+                    except OSError as exc:
+                        write_error = exc
                     finally:
                         os.close(descriptor)
+                    if write_error is not None:
+                        try:
+                            partial = self.lock_path.read_bytes()
+                            if len(partial) <= len(payload) and payload.startswith(partial):
+                                self.lock_path.unlink()
+                        except OSError:
+                            pass
+                        return None, {
+                            "state": "uncertain",
+                            "retryable": False,
+                            "retry_after_ms": None,
+                            "error": (
+                                "operation lock cannot be written: "
+                                f"{type(write_error).__name__}"
+                            ),
+                        }
+                    try:
+                        published = self.lock_path.read_bytes()
+                    except OSError as exc:
+                        return None, {
+                            "state": "uncertain",
+                            "retryable": False,
+                            "retry_after_ms": None,
+                            "error": f"operation lock cannot be verified: {type(exc).__name__}",
+                        }
+                    if written != len(payload) or published != payload:
+                        try:
+                            if len(published) <= len(payload) and payload.startswith(published):
+                                self.lock_path.unlink()
+                        except OSError:
+                            pass
+                        return None, {
+                            "state": "uncertain",
+                            "retryable": False,
+                            "retry_after_ms": None,
+                            "error": "operation lock publication is incomplete",
+                        }
                     claim = OperationClaim(operation_id, tool_name, payload)
                     return claim, {
                         "state": "acquired",
@@ -265,18 +316,25 @@ class OperationArbiter:
             return {"released": True, "verified": True}
 
 
-_ARBITERS: dict[str, OperationArbiter] = {}
+_ARBITERS: dict[tuple[str, int, float], OperationArbiter] = {}
 _ARBITERS_LOCK = threading.Lock()
 
 
 def get_operation_arbiter() -> OperationArbiter:
     """Return one process-local facade for the configured durable lock root."""
     root = str(default_runtime_dir().resolve()).casefold()
+    pid = os.getpid()
+    process_create_time = _process_create_time(pid)
+    key = (root, pid, process_create_time)
     with _ARBITERS_LOCK:
-        arbiter = _ARBITERS.get(root)
+        arbiter = _ARBITERS.get(key)
         if arbiter is None:
-            arbiter = OperationArbiter(default_runtime_dir())
-            _ARBITERS[root] = arbiter
+            arbiter = OperationArbiter(
+                default_runtime_dir(),
+                pid=pid,
+                process_create_time=process_create_time,
+            )
+            _ARBITERS[key] = arbiter
         return arbiter
 
 
@@ -444,6 +502,17 @@ def guard_tool_call(
             if not release["verified"]:
                 result["success"] = False
                 result["error"] = "Operation completed but lock release could not be verified."
+        elif not release["verified"]:
+            result = {
+                "success": False,
+                "error": "Operation completed but lock release could not be verified.",
+                "result": result,
+                "operation_gate": {
+                    **acquisition,
+                    "release": release,
+                },
+                "path_policy": {**path_evidence, "accepted": not pin_failed},
+            }
         return finalize(result)
 
     if requires_model_revision:

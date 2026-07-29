@@ -942,6 +942,62 @@ def test_job_lock_acquire_retries_transient_windows_sharing_violation(jobs_root,
     assert not lock_path.exists()
 
 
+def test_job_lock_guard_prevents_replacement_during_release(jobs_root, monkeypatch):
+    from threading import Event, Thread
+
+    lock_path = jobs_root / ".state.lock"
+    first = JobLock(lock_path, timeout=0.5)
+    second = JobLock(lock_path, timeout=0.5)
+    first.acquire()
+    entered_unlink = Event()
+    allow_unlink = Event()
+    second_acquired = Event()
+    release_second = Event()
+    original_unlink = Path.unlink
+
+    def paused_unlink(path, *args, **kwargs):
+        if path == lock_path and not entered_unlink.is_set():
+            entered_unlink.set()
+            assert allow_unlink.wait(timeout=1)
+        return original_unlink(path, *args, **kwargs)
+
+    def acquire_second():
+        second.acquire()
+        second_acquired.set()
+        assert release_second.wait(timeout=1)
+        second.release()
+
+    monkeypatch.setattr(Path, "unlink", paused_unlink)
+    first_release = Thread(target=first.release)
+    second_thread = Thread(target=acquire_second)
+    first_release.start()
+    assert entered_unlink.wait(timeout=1)
+    second_thread.start()
+    assert not second_acquired.wait(timeout=0.05)
+    allow_unlink.set()
+    first_release.join(timeout=2)
+    assert second_acquired.wait(timeout=1)
+    assert json.loads(lock_path.read_text(encoding="utf-8"))["pid"] == second.identity["pid"]
+    release_second.set()
+    second_thread.join(timeout=2)
+
+    assert not lock_path.exists()
+
+
+def test_live_pid_lock_with_malformed_creation_time_stays_bounded(jobs_root):
+    lock_path = jobs_root / ".state.lock"
+    malformed = process_identity(os.getpid())
+    malformed["process_create_time"] = "not-a-time"
+    atomic_write_json(lock_path, malformed)
+    started = time.monotonic()
+
+    with pytest.raises(TimeoutError, match="Timed out waiting"):
+        JobLock(lock_path, timeout=0.08, poll_interval=0.005).acquire()
+
+    assert time.monotonic() - started < 0.5
+    assert lock_path.exists()
+
+
 def test_tail_is_bounded(jobs_root):
     store = JobStore(jobs_root)
     job_id = store.create(

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
+import msvcrt
 import os
 import shutil
 import time
@@ -114,12 +116,13 @@ def process_identity_state(identity: dict[str, Any]) -> tuple[str, str]:
     except (psutil.AccessDenied, psutil.ZombieProcess, OSError) as exc:
         return "uncertain", f"worker identity cannot be inspected: {exc}"
     expected_time = identity.get("process_create_time")
-    if expected_time is None:
-        return "uncertain", "worker creation time is missing"
     if (
-        abs(float(actual["process_create_time"]) - float(expected_time))
-        > CREATE_TIME_TOLERANCE_SECONDS
+        isinstance(expected_time, bool)
+        or not isinstance(expected_time, (int, float))
+        or not math.isfinite(float(expected_time))
     ):
+        return "uncertain", "worker creation time is missing or invalid"
+    if abs(float(actual["process_create_time"]) - float(expected_time)) > CREATE_TIME_TOLERANCE_SECONDS:
         return "stale", "worker PID was reused"
     expected_signature = identity.get("command_signature")
     if expected_signature and actual["command_signature"] != expected_signature:
@@ -150,42 +153,81 @@ class JobLock:
         self.identity = process_identity(os.getpid())
         self.identity["created_at_epoch"] = time.time()
         self._owned_bytes: bytes | None = None
+        self._guard_path = self.path.with_name(f".{self.path.name}.guard")
+        self._guard_handle = None
+
+    def _acquire_guard(self, *, deadline: float) -> None:
+        self._guard_path.parent.mkdir(parents=True, exist_ok=True)
+        handle = self._guard_path.open("a+b")
+        try:
+            handle.seek(0, os.SEEK_END)
+            if handle.tell() == 0:
+                handle.write(b"\0")
+                handle.flush()
+                os.fsync(handle.fileno())
+            while True:
+                handle.seek(0)
+                try:
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                    self._guard_handle = handle
+                    return
+                except OSError as exc:
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError(
+                            f"Timed out waiting for durable job lock guard: {self.path}"
+                        ) from exc
+                    time.sleep(self.poll_interval)
+        except Exception:
+            handle.close()
+            raise
+
+    def _release_guard(self) -> None:
+        handle = self._guard_handle
+        self._guard_handle = None
+        if handle is None:
+            return
+        try:
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        finally:
+            handle.close()
 
     def acquire(self) -> None:
         deadline = time.monotonic() + self.timeout
         payload = _json_bytes(self.identity)
-        while True:
-            try:
-                descriptor = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
-            except PermissionError:
-                # Windows may report a sharing violation as PermissionError
-                # while another process or scanner briefly opens the lock path.
-                # Ownership cannot be established safely in that state, so
-                # wait without inspecting or removing the unknown lock.
-                if time.monotonic() >= deadline:
-                    raise
-                time.sleep(self.poll_interval)
-                continue
-            except FileExistsError:
+        self._acquire_guard(deadline=deadline)
+        try:
+            while True:
                 try:
-                    observed = self.path.read_bytes()
-                    existing = json.loads(observed.decode("utf-8"))
-                    state, _ = process_identity_state(existing)
-                    if state == "stale" and self.path.read_bytes() == observed:
-                        self._unlink_with_retry(expected=observed)
-                        continue
-                except OSError, UnicodeDecodeError, json.JSONDecodeError:
-                    pass
-                if time.monotonic() >= deadline:
-                    raise TimeoutError(f"Timed out waiting for durable job lock: {self.path}")
-                time.sleep(self.poll_interval)
-                continue
-            with os.fdopen(descriptor, "wb") as handle:
-                handle.write(payload)
-                handle.flush()
-                os.fsync(handle.fileno())
-            self._owned_bytes = payload
-            return
+                    descriptor = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
+                except PermissionError:
+                    if time.monotonic() >= deadline:
+                        raise
+                    time.sleep(self.poll_interval)
+                    continue
+                except FileExistsError:
+                    try:
+                        observed = self.path.read_bytes()
+                        existing = json.loads(observed.decode("utf-8"))
+                        state, _ = process_identity_state(existing)
+                        if state == "stale" and self.path.read_bytes() == observed:
+                            self._unlink_with_retry(expected=observed)
+                            continue
+                    except OSError, UnicodeDecodeError, json.JSONDecodeError:
+                        pass
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError(f"Timed out waiting for durable job lock: {self.path}")
+                    time.sleep(self.poll_interval)
+                    continue
+                with os.fdopen(descriptor, "wb") as handle:
+                    handle.write(payload)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                self._owned_bytes = payload
+                return
+        except Exception:
+            self._release_guard()
+            raise
 
     def _unlink_with_retry(self, *, expected: bytes) -> bool:
         deadline = time.monotonic() + 2.0
@@ -212,6 +254,7 @@ class JobLock:
             self._unlink_with_retry(expected=self._owned_bytes)
         finally:
             self._owned_bytes = None
+            self._release_guard()
 
     def __enter__(self) -> "JobLock":
         self.acquire()
