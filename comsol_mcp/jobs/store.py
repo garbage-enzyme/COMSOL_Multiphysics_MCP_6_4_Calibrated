@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-import msvcrt
 import os
 import shutil
 import time
@@ -157,6 +156,10 @@ class JobLock:
         self._guard_handle = None
 
     def _acquire_guard(self, *, deadline: float) -> None:
+        if os.name != "nt":
+            raise RuntimeError("durable job mutation requires supported Windows locking")
+        import msvcrt
+
         self._guard_path.parent.mkdir(parents=True, exist_ok=True)
         handle = self._guard_path.open("a+b")
         try:
@@ -182,6 +185,8 @@ class JobLock:
             raise
 
     def _release_guard(self) -> None:
+        import msvcrt
+
         handle = self._guard_handle
         self._guard_handle = None
         if handle is None:

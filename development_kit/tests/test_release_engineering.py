@@ -17,7 +17,6 @@ from types import SimpleNamespace
 import pytest
 
 from development_kit.scripts import python_compatibility_licensed_gate as compatibility_gate
-
 from development_kit.scripts.generate_release_lock import _render_lock
 from development_kit.scripts.planning_code_gate import (
     TEXT_SUFFIXES,
@@ -42,6 +41,22 @@ ROOT = Path(__file__).parents[2]
 RELEASE = ROOT / "development_kit" / "release"
 FIXTURES = RELEASE / "integration_fixtures"
 SNAPSHOTS = ROOT / "development_kit" / "tests" / "snapshots"
+
+
+@pytest.mark.parametrize(
+    "relative_path",
+    ["comsol_mcp/tools/ownership.py", "comsol_mcp/jobs/store.py"],
+)
+def test_windows_lock_backend_is_not_imported_at_module_scope(relative_path):
+    tree = ast.parse((ROOT / relative_path).read_text(encoding="utf-8"))
+    imported = {
+        alias.name
+        for node in tree.body
+        if isinstance(node, ast.Import)
+        for alias in node.names
+    }
+
+    assert "msvcrt" not in imported
 
 
 def test_python_compatibility_receipt_publication_preserves_existing_output(tmp_path):

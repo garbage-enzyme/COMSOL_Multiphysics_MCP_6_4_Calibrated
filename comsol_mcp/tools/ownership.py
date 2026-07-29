@@ -8,7 +8,6 @@ import hashlib
 import importlib.metadata
 import json
 import math
-import msvcrt
 import os
 import platform
 import re
@@ -211,6 +210,10 @@ def _lease_io_deadline() -> float:
 @contextmanager
 def _lease_operation_lock(path: Path):
     """Serialize cooperating lease mutations with a crash-released Windows lock."""
+    if os.name != "nt":
+        raise RuntimeError("solver lease mutation requires supported Windows locking")
+    import msvcrt
+
     path.parent.mkdir(parents=True, exist_ok=True)
     handle = path.open("a+b")
     acquired = False
