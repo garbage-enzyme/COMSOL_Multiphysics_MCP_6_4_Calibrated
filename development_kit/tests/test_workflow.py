@@ -8,10 +8,9 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-
 from src.tools.workflow import (
-    _model_identity,
     _csv_value,
+    _model_identity,
     _scalarize,
     _sweep_point_id,
     run_mesh_convergence,
@@ -179,6 +178,7 @@ def test_staged_sweep_retries_and_checkpoints(tmp_path):
     assert "rows" not in result
     assert len(model.java.saved) == 2
     assert all(saved[1] is False for saved in model.java.saved)
+    assert {Path(saved[0]) for saved in model.java.saved} == {checkpoint.resolve()}
 
 
 def test_staged_sweep_can_checkpoint_through_save_copy_overload(tmp_path):
@@ -198,6 +198,7 @@ def test_staged_sweep_can_checkpoint_through_save_copy_overload(tmp_path):
     assert result["success"] is True
     assert len(model.java.saved) == 2
     assert all(saved[1] is True for saved in model.java.saved)
+    assert {Path(saved[0]) for saved in model.java.saved} == {checkpoint.resolve()}
 
 
 def test_staged_sweep_resumes_legacy_csv(tmp_path):

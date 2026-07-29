@@ -186,7 +186,16 @@ def test_tampered_rows_fail_closed(tmp_path, field, value, message):
         read_validation_rows(path, spec)
 
 
-def test_blank_malformed_and_absolute_artifact_paths_are_rejected(tmp_path):
+@pytest.mark.parametrize(
+    "unsafe_path",
+    [
+        "C:/private/manifest.json",
+        "/private/manifest.json",
+        "../manifest.json",
+        "nested/../manifest.json",
+    ],
+)
+def test_blank_malformed_and_absolute_artifact_paths_are_rejected(tmp_path, unsafe_path):
     spec = _spec(tmp_path)
     path = tmp_path / "rows.jsonl"
     path.write_text("\n", encoding="utf-8")
@@ -196,7 +205,7 @@ def test_blank_malformed_and_absolute_artifact_paths_are_rejected(tmp_path):
     with pytest.raises(ValueError, match="malformed JSON"):
         read_validation_rows(path, spec)
     unsafe = _summary("off")
-    unsafe["manifest_relative_path"] = "C:/private/manifest.json"
+    unsafe["manifest_relative_path"] = unsafe_path
     with pytest.raises(ValueError, match="portable relative path"):
         append_validation_row(
             tmp_path / "fresh.jsonl",
@@ -298,8 +307,6 @@ def test_concurrent_validation_appends_form_one_contiguous_chain(tmp_path):
         rows = list(pool.map(append, ["off", "target"]))
 
     replayed = read_validation_rows(path, spec)
-    assert {row["row_sha256"] for row in replayed} == {
-        row["row_sha256"] for row in rows
-    }
+    assert {row["row_sha256"] for row in replayed} == {row["row_sha256"] for row in rows}
     assert [row["sequence"] for row in replayed] == [1, 2]
     assert replayed[1]["previous_row_sha256"] == replayed[0]["row_sha256"]

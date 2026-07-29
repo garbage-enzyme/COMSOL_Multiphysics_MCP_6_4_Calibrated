@@ -1,10 +1,11 @@
 """Geometry tools for COMSOL MCP Server."""
 
 import math
-from pathlib import Path
 from typing import Optional, Sequence
 
 from mcp.server.fastmcp import FastMCP
+
+from comsol_mcp.path_policy import PathPolicy
 
 from .property_transport import JSONValue, validate_properties
 from .session import session_manager
@@ -362,9 +363,10 @@ def add_import_feature(
     feature_name: Optional[str] = None,
 ) -> dict:
     """Create a geometry Import feature with an absolute source path."""
-    path = Path(file_path).expanduser().resolve()
-    if not path.is_file():
-        return {"success": False, "error": f"Import file not found: {path}"}
+    try:
+        path = PathPolicy.from_environment().validate_model_read(file_path).normalized_path
+    except ValueError as exc:
+        return {"success": False, "error": f"Import file is not allowed: {exc}"}
 
     geom, error = _get_geometry_node(model, geometry_name, component_name)
     if error:

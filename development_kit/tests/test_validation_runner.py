@@ -22,9 +22,7 @@ def _spec(tmp_path, *, continue_on_error=False):
                     "unit": "um",
                     "parameter": "wl",
                 },
-                "collectors": [
-                    {"name": "wave_optics_point_audit", "inputs": {"tag": point_id}}
-                ],
+                "collectors": [{"name": "wave_optics_point_audit", "inputs": {"tag": point_id}}],
                 "expected_artifact_ids": [f"audit-{point_id}"],
             }
         )
@@ -142,7 +140,9 @@ def test_continue_on_error_preserves_failure_and_runs_later_points(tmp_path):
     assert result["success"] is False
     assert result["processed"] == 2
     assert result["errors"] == 1
-    assert [row["status"] for row in read_validation_rows(directory / "matrix_rows.jsonl", spec)] == [
+    assert [
+        row["status"] for row in read_validation_rows(directory / "matrix_rows.jsonl", spec)
+    ] == [
         "error",
         "ok",
     ]
@@ -197,6 +197,28 @@ def test_manifest_must_exist_inside_the_exact_attempt_artifact_root(tmp_path):
     row = read_validation_rows(directory / "matrix_rows.jsonl", spec)[0]
     assert row["status"] == "error"
     assert "escapes" in row["error"]["message"]
+
+
+def test_manifest_from_sibling_attempt_is_rejected(tmp_path):
+    spec = _spec(tmp_path)
+    directory = tmp_path / "job"
+
+    def sibling_attempt(point, collector, _artifact_directory):
+        wrong = directory / "artifacts" / "audit-off" / "attempt-2"
+        wrong.mkdir(parents=True)
+        return _complete_executor(point, collector, wrong)
+
+    result = run_pending_validation_points(
+        spec,
+        directory,
+        attempt=1,
+        collector_executor=sibling_attempt,
+    )
+
+    assert result["success"] is False
+    row = read_validation_rows(directory / "matrix_rows.jsonl", spec)[0]
+    assert row["status"] == "error"
+    assert "expected artifact directory" in row["error"]["message"]
 
 
 def test_resource_refusal_before_point_writes_no_false_error_row(tmp_path):

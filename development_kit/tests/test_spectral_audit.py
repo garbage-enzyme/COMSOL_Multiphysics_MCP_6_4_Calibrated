@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 import hashlib
 import json
 
 import pytest
-
 from src.evidence.contracts import build_physical_evidence
 from src.jobs.spectral_audit import build_spectral_audit_point, extract_spectral_audit_result
 from src.jobs.spectral_characterization import normalize_spectral_characterization_job_spec
@@ -55,7 +53,11 @@ def _spec(tmp_path):
                     "t_expression": "T",
                     "a_expression": "A",
                     "top_air_domain_ids": [1],
-                    "top_air_coordinate_range": {"x": [-1.0, 1.0], "y": [-1.0, 1.0], "z": [-1.0, 1.0]},
+                    "top_air_coordinate_range": {
+                        "x": [-1.0, 1.0],
+                        "y": [-1.0, 1.0],
+                        "z": [-1.0, 1.0],
+                    },
                 },
             },
             "analysis_policy": {
@@ -212,7 +214,9 @@ def test_incomplete_audit_is_not_projected(tmp_path):
     artifact, result = _result(job, spec, point)
     result["audit_status"] = "measurement_partial"
     with pytest.raises(ValueError, match="incomplete"):
-        extract_spectral_audit_result(job_dir=job, artifact_dir=artifact, spec=spec, point=point, result=result)
+        extract_spectral_audit_result(
+            job_dir=job, artifact_dir=artifact, spec=spec, point=point, result=result
+        )
 
 
 def test_wrapper_and_inner_tampering_fail_closed(tmp_path):
@@ -225,7 +229,9 @@ def test_wrapper_and_inner_tampering_fail_closed(tmp_path):
     wrapper["point"]["configuration_sha256"] = "c" * 64
     wrapper_path.write_text(json.dumps(wrapper), encoding="utf-8")
     with pytest.raises(ValueError, match="configuration_sha256"):
-        extract_spectral_audit_result(job_dir=job, artifact_dir=artifact, spec=spec, point=point, result=result)
+        extract_spectral_audit_result(
+            job_dir=job, artifact_dir=artifact, spec=spec, point=point, result=result
+        )
 
     artifact, result = _result(job, spec, point)
     inner = next((artifact / "audit").glob("manifest.json"))
@@ -233,7 +239,9 @@ def test_wrapper_and_inner_tampering_fail_closed(tmp_path):
     document["measurement"]["power"]["A"] = 0.5
     inner.write_text(json.dumps(document), encoding="utf-8")
     with pytest.raises(ValueError, match="size|hash"):
-        extract_spectral_audit_result(job_dir=job, artifact_dir=artifact, spec=spec, point=point, result=result)
+        extract_spectral_audit_result(
+            job_dir=job, artifact_dir=artifact, spec=spec, point=point, result=result
+        )
 
 
 def test_artifact_must_remain_inside_job_directory(tmp_path):
@@ -248,4 +256,22 @@ def test_artifact_must_remain_inside_job_directory(tmp_path):
     moved.write_bytes(wrapper.read_bytes())
     result["artifacts"]["manifest"] = str(moved)
     with pytest.raises(ValueError, match="assigned artifact"):
-        extract_spectral_audit_result(job_dir=job, artifact_dir=artifact, spec=spec, point=point, result=result)
+        extract_spectral_audit_result(
+            job_dir=job, artifact_dir=artifact, spec=spec, point=point, result=result
+        )
+
+
+def test_assigned_artifact_root_must_remain_inside_durable_job(tmp_path):
+    spec = _spec(tmp_path)
+    job = tmp_path / "job"
+    point = build_spectral_audit_point(spec, 5e-6)
+    artifact, result = _result(tmp_path / "other-job", spec, point)
+
+    with pytest.raises(ValueError, match="escapes the durable job"):
+        extract_spectral_audit_result(
+            job_dir=job,
+            artifact_dir=artifact,
+            spec=spec,
+            point=point,
+            result=result,
+        )

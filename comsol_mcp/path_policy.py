@@ -528,7 +528,7 @@ def validate_tool_paths(
     tuple[ValidatedWritePin, ...],
 ]:
     """Validate and normalize known caller-selected path arguments."""
-    if profile_name == "full":
+    if profile_name == "full" and tool_name != "geometry_import":
         return (
             args,
             kwargs,

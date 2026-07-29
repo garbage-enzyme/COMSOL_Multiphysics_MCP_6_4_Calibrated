@@ -285,9 +285,10 @@ def test_add_union_feature_requires_inputs():
     assert result["success"] is False
 
 
-def test_add_import_feature_sets_absolute_filename(tmp_path):
+def test_add_import_feature_sets_absolute_filename(tmp_path, monkeypatch):
     source = tmp_path / "part.step"
     source.write_text("dummy", encoding="utf-8")
+    monkeypatch.setenv("COMSOL_MCP_MODEL_READ_ROOTS", str(tmp_path))
     geometry = FakeGeometry()
 
     result = add_import_feature(
@@ -302,7 +303,8 @@ def test_add_import_feature_sets_absolute_filename(tmp_path):
     assert result["feature"]["file"] == str(source.resolve())
 
 
-def test_add_import_feature_requires_existing_file(tmp_path):
+def test_add_import_feature_requires_existing_file(tmp_path, monkeypatch):
+    monkeypatch.setenv("COMSOL_MCP_MODEL_READ_ROOTS", str(tmp_path))
     result = add_import_feature(
         FakeModel(FakeGeometry()),
         str(tmp_path / "missing.step"),
@@ -372,9 +374,10 @@ def test_difference_validates_inputs_before_creation_and_rolls_back_selection():
     assert not any(tag.startswith("dif") for tag in geometry.features.features)
 
 
-def test_import_filename_failure_removes_created_feature(tmp_path):
+def test_import_filename_failure_removes_created_feature(tmp_path, monkeypatch):
     source = tmp_path / "part.step"
     source.write_text("dummy", encoding="utf-8")
+    monkeypatch.setenv("COMSOL_MCP_MODEL_READ_ROOTS", str(tmp_path))
     geometry = FakeGeometry(failing_property="filename")
 
     result = add_import_feature(FakeModel(geometry), str(source))
@@ -382,3 +385,16 @@ def test_import_filename_failure_removes_created_feature(tmp_path):
     assert result["success"] is False
     assert result["rolled_back"] is True
     assert geometry.features.features == {}
+
+
+def test_add_import_feature_rejects_file_outside_configured_root(tmp_path, monkeypatch):
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    source = tmp_path / "outside.step"
+    source.write_bytes(b"part")
+    monkeypatch.setenv("COMSOL_MCP_MODEL_READ_ROOTS", str(allowed))
+
+    result = add_import_feature(FakeModel(FakeGeometry()), str(source))
+
+    assert result["success"] is False
+    assert "allowed" in result["error"]

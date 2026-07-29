@@ -361,6 +361,30 @@ def test_full_profile_visibly_preserves_legacy_path_compatibility(tmp_path):
     assert result["path_policy"]["compatibility_mode"] == "legacy_broad_paths"
 
 
+def test_full_profile_still_confines_geometry_import(monkeypatch, tmp_path, ascii_root):
+    model_root = tmp_path / "models"
+    model_root.mkdir()
+    source = model_root / "part.step"
+    source.write_bytes(b"part")
+    monkeypatch.setenv(MODEL_READ_ROOTS_ENV, str(model_root))
+    monkeypatch.setenv(ARTIFACT_WRITE_ROOT_ENV, str(ascii_root / "artifacts"))
+
+    guarded = guard_tool_call(
+        lambda file_path: {"success": True, "file_path": file_path},
+        tool_name="geometry_import",
+        side_effect_class="filesystem_read_model_mutation",
+        concurrency_class="solver_free",
+        profile_name="full",
+    )
+
+    accepted = guarded(file_path=str(source))
+    rejected = guarded(file_path=str(tmp_path / "outside.step"))
+
+    assert accepted["success"] is True
+    assert accepted["path_policy"]["enforced"] is True
+    assert rejected["success"] is False
+
+
 def test_capabilities_redact_roots_and_report_weaker_compatibility(
     tmp_path, ascii_root, monkeypatch
 ):
