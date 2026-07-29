@@ -5,11 +5,14 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from pathlib import Path
 import sys
 import threading
 import time
+from contextlib import ExitStack
+from pathlib import Path
 from typing import Any, Callable, Mapping
+
+from comsol_mcp.path_policy import pin_validated_reads, validated_read_pin
 
 from .branch_continuation_campaign import (
     validate_branch_continuation_campaign_driver_identity,
@@ -46,7 +49,8 @@ def _run(
     *,
     ownership_factory: Callable[[Path, str], Any] = _default_ownership_factory,
     client_factory: Callable[[Mapping[str, Any]], Any] = _default_client_factory,
-    collector_executor: Callable[[dict[str, Any], dict[str, Any], Path], Mapping[str, Any]] | None = None,
+    collector_executor: Callable[[dict[str, Any], dict[str, Any], Path], Mapping[str, Any]]
+    | None = None,
     telemetry_provider: Callable[[str, str, Any, Path, float], dict[str, Any]] | None = None,
     native_cancel_enabled: bool = True,
     fault_hook: Callable[[str, Mapping[str, Any]], Any] | None = None,
@@ -98,10 +102,18 @@ def _run(
     worker_error: Exception | None = None
     cleanup_errors: list[str] = []
     latest_resource_decision: dict[str, Any] | None = None
+    source_pins = ExitStack()
     try:
+        source_pins.enter_context(
+            pin_validated_reads(
+                tuple(validated_read_pin(source, source.parent) for source in sources)
+            )
+        )
         for source, campaign_state in zip(sources, spec["states"]):
             if _sha256_file(source) != campaign_state["spectral_job"]["source_model_sha256"]:
-                raise RuntimeError("Immutable continuation source hash changed before client startup")
+                raise RuntimeError(
+                    "Immutable continuation source hash changed before client startup"
+                )
         ownership = ownership_factory(store.root.parent, f"job:{job_id}")
         first = spec["states"][0]["spectral_job"]
         preflight = ownership.preflight(
@@ -145,9 +157,7 @@ def _run(
 
         completed_points = int(store.read_state(job_id).get("progress", {}).get("completed", 0))
 
-        def point_persisted(
-            campaign_state: Mapping[str, Any], row: Mapping[str, Any]
-        ) -> None:
+        def point_persisted(campaign_state: Mapping[str, Any], row: Mapping[str, Any]) -> None:
             nonlocal completed_points
             completed_points += 1
             current = store.read_state(job_id)["status"]
@@ -157,7 +167,10 @@ def _run(
             store.update_state(
                 job_id,
                 patch={
-                    "progress": {"completed": completed_points, "total": spec["maximum_total_points"]},
+                    "progress": {
+                        "completed": completed_points,
+                        "total": spec["maximum_total_points"],
+                    },
                     "current_state": {
                         "state_id": campaign_state["state_id"],
                         "ordinal": campaign_state["ordinal"],
@@ -171,9 +184,7 @@ def _run(
                 },
             )
 
-        def execute_state(
-            campaign_state: Mapping[str, Any], state_dir: Path
-        ) -> Mapping[str, Any]:
+        def execute_state(campaign_state: Mapping[str, Any], state_dir: Path) -> Mapping[str, Any]:
             nonlocal latest_resource_decision
             child = campaign_state["spectral_job"]
             source = Path(child["source_model_path"])
@@ -236,7 +247,9 @@ def _run(
             fault_hook=fault_hook,
         )
         if should_stop() or result.get("stop_reason") in {
-            "before_state_cancel", "before_solve_cancel", "after_durable_row_cancel"
+            "before_state_cancel",
+            "before_solve_cancel",
+            "after_durable_row_cancel",
         }:
             store.record_cooperative_cancel_observed(
                 job_id, attempt=attempt, message="Stopped between continuation operations"
@@ -301,13 +314,17 @@ def _run(
                     )
             except Exception as exc:
                 cleanup_errors.append(f"lease_release:{type(exc).__name__}:{exc}")
-
-    for source, campaign_state in zip(sources, spec["states"]):
-        if (
-            _sha256_file(source) != campaign_state["spectral_job"]["source_model_sha256"]
-            and worker_error is None
-        ):
-            worker_error = RuntimeError("Immutable continuation source changed after execution")
+        try:
+            for source, campaign_state in zip(sources, spec["states"]):
+                if (
+                    _sha256_file(source) != campaign_state["spectral_job"]["source_model_sha256"]
+                    and worker_error is None
+                ):
+                    worker_error = RuntimeError(
+                        "Immutable continuation source changed after execution"
+                    )
+        finally:
+            source_pins.close()
     if cleanup_errors and worker_error is None:
         worker_error = RuntimeError("; ".join(cleanup_errors)[:2000])
     current = store.read_state(job_id)["status"]

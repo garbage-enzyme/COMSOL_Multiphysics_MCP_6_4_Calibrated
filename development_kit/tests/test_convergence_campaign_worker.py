@@ -27,11 +27,18 @@ class _Model:
 class _Client:
     port = None
 
-    def __init__(self):
+    def __init__(self, *, attempt_mutation=False):
         self.loaded = []
         self.clear_count = 0
+        self.attempt_mutation = attempt_mutation
+        self.mutation_blocked = 0
 
     def load(self, path):
+        if self.attempt_mutation:
+            try:
+                Path(path).write_bytes(b"replacement")
+            except PermissionError:
+                self.mutation_blocked += 1
         self.loaded.append(path)
         return _Model(f"model-{len(self.loaded)}")
 
@@ -118,7 +125,7 @@ def _collector_for(spec, *, fail_configuration=None):
 def test_worker_uses_one_owner_and_client_for_all_exact_levels(tmp_path, ascii_tmp_path):
     store, spec, job_id = _created_job(tmp_path, ascii_tmp_path)
     ownership = _Ownership()
-    client = _Client()
+    client = _Client(attempt_mutation=True)
     code = _run(
         str(store.root),
         job_id,
@@ -136,6 +143,7 @@ def test_worker_uses_one_owner_and_client_for_all_exact_levels(tmp_path, ascii_t
     assert state["convergence_summary"]["scientific_disposition"] == "accepted"
     assert ownership.acquired is True and ownership.released is True
     assert len(client.loaded) == 3
+    assert client.mutation_blocked == 3
     assert client.clear_count == 4
     assert all(
         Path(level["spectral_job"]["source_model_path"]).read_bytes().startswith(b"model-level-")

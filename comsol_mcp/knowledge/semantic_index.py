@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Iterator, Mapping, Protocol, Sequence
 
 from comsol_mcp.durable import atomic_write_json, sha256_file_bounded
+from comsol_mcp.path_policy import pin_validated_reads, validated_read_pin
 
 from .semantic_contracts import (
     INDEX_MANIFEST_SCHEMA_VERSION,
@@ -95,7 +96,12 @@ def _normalize_text(text: str) -> str:
     return " ".join(normalized.split())
 
 
-def chunk_page(text: str, *, maximum_characters: int = DEFAULT_CHUNK_CHARACTERS, overlap: int = DEFAULT_CHUNK_OVERLAP) -> list[str]:
+def chunk_page(
+    text: str,
+    *,
+    maximum_characters: int = DEFAULT_CHUNK_CHARACTERS,
+    overlap: int = DEFAULT_CHUNK_OVERLAP,
+) -> list[str]:
     """Split normalized text deterministically without crossing a page."""
     if maximum_characters < 200:
         raise ValueError("maximum_characters must be at least 200")
@@ -111,7 +117,9 @@ def chunk_page(text: str, *, maximum_characters: int = DEFAULT_CHUNK_CHARACTERS,
         end = hard_end
         if hard_end < len(value):
             minimum_break = start + maximum_characters // 2
-            candidates = [value.rfind(marker, minimum_break, hard_end) for marker in (". ", "; ", ": ", " ")]
+            candidates = [
+                value.rfind(marker, minimum_break, hard_end) for marker in (". ", "; ", ": ", " ")
+            ]
             best = max(candidates)
             if best >= minimum_break:
                 end = best + 1
@@ -127,37 +135,63 @@ def chunk_page(text: str, *, maximum_characters: int = DEFAULT_CHUNK_CHARACTERS,
     return chunks
 
 
-def _chunk_id(corpus_fingerprint: str, source: str, page: int, ordinal: int, text_sha256: str) -> str:
-    identity = f"{CHUNK_SCHEMA_VERSION}\0{corpus_fingerprint}\0{source}\0{page}\0{ordinal}\0{text_sha256}"
+def _chunk_id(
+    corpus_fingerprint: str, source: str, page: int, ordinal: int, text_sha256: str
+) -> str:
+    identity = (
+        f"{CHUNK_SCHEMA_VERSION}\0{corpus_fingerprint}\0{source}\0{page}\0{ordinal}\0{text_sha256}"
+    )
     return hashlib.sha256(identity.encode("utf-8")).hexdigest()
 
 
 def _lexical_identity(index_path: Path) -> dict[str, Any]:
-    uri = index_path.resolve().as_uri() + "?mode=ro"
-    with closing(sqlite3.connect(uri, uri=True, timeout=0.25)) as connection:
-        metadata = dict(connection.execute("SELECT key, value FROM metadata"))
-        actual_count = int(connection.execute("SELECT COUNT(*) FROM pages").fetchone()[0])
+    pin = validated_read_pin(index_path, index_path.parent)
+    with pin_validated_reads((pin,)):
+        if any(Path(str(index_path) + suffix).exists() for suffix in ("-wal", "-shm")):
+            raise ValueError("lexical index must not have active WAL state")
+        uri = index_path.resolve().as_uri() + "?mode=ro"
+        with closing(sqlite3.connect(uri, uri=True, timeout=0.25)) as connection:
+            metadata = dict(connection.execute("SELECT key, value FROM metadata"))
+            actual_count = int(connection.execute("SELECT COUNT(*) FROM pages").fetchone()[0])
+        snapshot_sha256 = _sha256_file(index_path)
+        snapshot_size = index_path.stat().st_size
+        snapshot_mtime_ns = index_path.stat().st_mtime_ns
     declared_count = int(metadata.get("page_count", "0"))
     if actual_count != declared_count:
         raise ValueError("lexical page count does not match its metadata")
     return {
         "path": str(index_path),
-        "sha256": _sha256_file(index_path),
-        "size": index_path.stat().st_size,
-        "mtime_ns": index_path.stat().st_mtime_ns,
+        "sha256": snapshot_sha256,
+        "size": snapshot_size,
+        "mtime_ns": snapshot_mtime_ns,
         "schema_version": metadata.get("schema_version"),
         "corpus_fingerprint": metadata.get("corpus_fingerprint"),
         "page_count": actual_count,
     }
 
 
-def _iter_pages(index_path: Path) -> Iterator[tuple[str, str, int, str, str]]:
-    uri = index_path.resolve().as_uri() + "?mode=ro"
-    with closing(sqlite3.connect(uri, uri=True, timeout=0.25)) as connection:
-        for source, module, page, heading, text in connection.execute(
-            "SELECT source, module, page, heading, text FROM pages ORDER BY source, page"
+def _iter_pages(
+    index_path: Path,
+    expected_identity: Mapping[str, Any] | None = None,
+) -> Iterator[tuple[str, str, int, str, str]]:
+    pin = validated_read_pin(index_path, index_path.parent)
+    with pin_validated_reads((pin,)):
+        if expected_identity is not None and _sha256_file(index_path) != expected_identity.get(
+            "sha256"
         ):
-            yield str(source).replace("\\", "/"), str(module), int(page), str(heading), str(text)
+            raise RuntimeError("lexical index changed before page extraction")
+        uri = index_path.resolve().as_uri() + "?mode=ro"
+        with closing(sqlite3.connect(uri, uri=True, timeout=0.25)) as connection:
+            for source, module, page, heading, text in connection.execute(
+                "SELECT source, module, page, heading, text FROM pages ORDER BY source, page"
+            ):
+                yield (
+                    str(source).replace("\\", "/"),
+                    str(module),
+                    int(page),
+                    str(heading),
+                    str(text),
+                )
 
 
 def pin_model_snapshot(
@@ -180,7 +214,11 @@ def pin_model_snapshot(
     staging.parent.mkdir(parents=True, exist_ok=True)
     try:
         shutil.copytree(source, staging, symlinks=False)
-        files = [_file_record(path, staging) for path in sorted(staging.rglob("*")) if path.is_file()]
+        files = [
+            _file_record(path, staging)
+            for path in sorted(staging.rglob("*"))
+            if path.is_file() and path.relative_to(staging).as_posix() != "model_manifest.json"
+        ]
         if not files:
             raise ValueError("model snapshot is empty")
         model_sha256 = _file_set_sha256(files)
@@ -215,6 +253,14 @@ def validate_pinned_model(model_path: str | Path) -> dict[str, Any]:
     expected = manifest.get("files")
     if not isinstance(expected, list) or not expected:
         raise ValueError("model manifest file list is missing")
+    expected_paths = {str(record["path"]) for record in expected}
+    actual_paths = {
+        path.relative_to(root).as_posix()
+        for path in root.rglob("*")
+        if path.is_file() and path != manifest_path
+    }
+    if actual_paths != expected_paths:
+        raise ValueError("model file set differs from its manifest")
     actual = []
     for record in expected:
         path = root / str(record["path"])
@@ -255,14 +301,27 @@ class SentenceTransformerEncoder:
         )
 
 
-def _write_chunks(index_path: Path, output: Path, lexical: Mapping[str, Any], *, maximum_characters: int, overlap: int) -> int:
+def _write_chunks(
+    index_path: Path,
+    output: Path,
+    lexical: Mapping[str, Any],
+    *,
+    maximum_characters: int,
+    overlap: int,
+) -> int:
     count = 0
     seen: set[str] = set()
     with output.open("wb") as handle:
-        for source, module, page, heading, text in _iter_pages(index_path):
-            for ordinal, chunk in enumerate(chunk_page(text, maximum_characters=maximum_characters, overlap=overlap)):
+        for source, module, page, heading, text in _iter_pages(
+            index_path, expected_identity=lexical
+        ):
+            for ordinal, chunk in enumerate(
+                chunk_page(text, maximum_characters=maximum_characters, overlap=overlap)
+            ):
                 text_sha256 = hashlib.sha256(chunk.encode("utf-8")).hexdigest()
-                chunk_id = _chunk_id(str(lexical["corpus_fingerprint"]), source, page, ordinal, text_sha256)
+                chunk_id = _chunk_id(
+                    str(lexical["corpus_fingerprint"]), source, page, ordinal, text_sha256
+                )
                 if chunk_id in seen:
                     raise ValueError(f"duplicate chunk ID: {chunk_id}")
                 seen.add(chunk_id)
@@ -325,7 +384,10 @@ def build_index(
     if batch_size < 1 or batch_size > 1024:
         raise ValueError("batch_size must be between 1 and 1024")
     lexical_before = _lexical_identity(lexical_path)
-    if expected_corpus_fingerprint and lexical_before["corpus_fingerprint"] != expected_corpus_fingerprint:
+    if (
+        expected_corpus_fingerprint
+        and lexical_before["corpus_fingerprint"] != expected_corpus_fingerprint
+    ):
         raise ValueError("lexical corpus fingerprint does not match the requested corpus")
     model = validate_pinned_model(model_root)
     if int(model["dimension"]) != int(encoder.dimension):
@@ -342,15 +404,24 @@ def build_index(
     embeddings_path = staging / "embeddings.npy"
     try:
         chunk_count = _write_chunks(
-            lexical_path, chunks_path, lexical_before,
-            maximum_characters=maximum_characters, overlap=overlap,
+            lexical_path,
+            chunks_path,
+            lexical_before,
+            maximum_characters=maximum_characters,
+            overlap=overlap,
         )
         if progress:
-            print(json.dumps({"phase": "chunks_complete", "chunk_count": chunk_count}), file=sys.stderr, flush=True)
+            print(
+                json.dumps({"phase": "chunks_complete", "chunk_count": chunk_count}),
+                file=sys.stderr,
+                flush=True,
+            )
         if fault_injection == "after_chunks":
             raise RuntimeError("injected interruption after chunks")
         matrix = np.lib.format.open_memmap(
-            embeddings_path, mode="w+", dtype=np.float32,
+            embeddings_path,
+            mode="w+",
+            dtype=np.float32,
             shape=(chunk_count, int(encoder.dimension)),
         )
         offset = 0
@@ -363,17 +434,23 @@ def build_index(
                 raise ValueError(f"encoder returned {values.shape}, expected {expected_shape}")
             if not np.isfinite(values).all():
                 raise ValueError("encoder returned non-finite vectors")
-            matrix[offset:offset + len(texts)] = values
+            matrix[offset : offset + len(texts)] = values
             offset += len(texts)
             batch_number += 1
             if progress and (batch_number == 1 or batch_number % 25 == 0 or offset == chunk_count):
                 elapsed = time.perf_counter() - encode_started
-                print(json.dumps({
-                    "phase": "encoding",
-                    "completed": offset,
-                    "total": chunk_count,
-                    "chunks_per_second": offset / elapsed if elapsed else None,
-                }), file=sys.stderr, flush=True)
+                print(
+                    json.dumps(
+                        {
+                            "phase": "encoding",
+                            "completed": offset,
+                            "total": chunk_count,
+                            "chunks_per_second": offset / elapsed if elapsed else None,
+                        }
+                    ),
+                    file=sys.stderr,
+                    flush=True,
+                )
         matrix.flush()
         del matrix
         if offset != chunk_count:
@@ -406,7 +483,9 @@ def build_index(
             "files": files,
             "file_set_sha256": _file_set_sha256(files),
             "dependencies": {"python": sys.version.split()[0], "numpy": np.__version__},
-            "build_command": "python -m comsol_mcp.knowledge.semantic_index build <deployment-config>",
+            "build_command": (
+                "python -m comsol_mcp.knowledge.semantic_index build <deployment-config>"
+            ),
             "built_at_epoch": time.time(),
         }
         validate_index_manifest(manifest)
@@ -428,7 +507,9 @@ def build_index(
         raise
 
 
-def validate_index_directory(index_path: str | Path, *, expected_final_path: str | Path | None = None) -> dict[str, Any]:
+def validate_index_directory(
+    index_path: str | Path, *, expected_final_path: str | Path | None = None
+) -> dict[str, Any]:
     import numpy as np
 
     root = _require_ascii_absolute(index_path, "index_path")
@@ -440,7 +521,10 @@ def validate_index_directory(index_path: str | Path, *, expected_final_path: str
     if declared_path != expected:
         raise ValueError("index manifest path identity mismatch")
     files = manifest.get("files")
-    if not isinstance(files, list) or {item.get("path") for item in files} != {"chunks.jsonl", "embeddings.npy"}:
+    if not isinstance(files, list) or {item.get("path") for item in files} != {
+        "chunks.jsonl",
+        "embeddings.npy",
+    }:
         raise ValueError("index manifest file list is invalid")
     actual = [_file_record(root / str(item["path"]), root) for item in files]
     if actual != files or _file_set_sha256(actual) != manifest["file_set_sha256"]:
@@ -475,7 +559,9 @@ def validate_index_directory(index_path: str | Path, *, expected_final_path: str
             text_sha256 = hashlib.sha256(str(record.get("text", "")).encode("utf-8")).hexdigest()
             if text_sha256 != record.get("text_sha256"):
                 raise ValueError("chunk text hash mismatch")
-            expected_id = _chunk_id(str(manifest["corpus_fingerprint"]), source, page, ordinal, text_sha256)
+            expected_id = _chunk_id(
+                str(manifest["corpus_fingerprint"]), source, page, ordinal, text_sha256
+            )
             if chunk_id != expected_id:
                 raise ValueError("chunk stable ID mismatch")
             count += 1
@@ -484,7 +570,7 @@ def validate_index_directory(index_path: str | Path, *, expected_final_path: str
     if matrix.shape != expected_shape or count != expected_shape[0]:
         raise ValueError("partial or mismatched chunk/vector counts")
     for start in range(0, matrix.shape[0], 4096):
-        if not np.isfinite(matrix[start:start + 4096]).all():
+        if not np.isfinite(matrix[start : start + 4096]).all():
             raise ValueError("index contains non-finite vectors")
     return {
         "path": str(root),
@@ -586,7 +672,8 @@ def index_file_snapshot(index_path: str | Path) -> list[dict[str, Any]]:
     root = _require_ascii_absolute(index_path, "index_path")
     return [
         {**_file_record(path, root), "mtime_ns": path.stat().st_mtime_ns}
-        for path in sorted(root.rglob("*")) if path.is_file()
+        for path in sorted(root.rglob("*"))
+        if path.is_file()
     ]
 
 
@@ -610,11 +697,26 @@ def main() -> None:
     validate.add_argument("--deployment-root", required=True)
     args = parser.parse_args()
     if args.command == "pin-model":
-        result = pin_model_snapshot(args.source, args.destination, model_id=args.model_id, revision=args.revision, dimension=args.dimension, license_name=args.license_name)
+        result = pin_model_snapshot(
+            args.source,
+            args.destination,
+            model_id=args.model_id,
+            revision=args.revision,
+            dimension=args.dimension,
+            license_name=args.license_name,
+        )
     elif args.command == "build":
         model = validate_pinned_model(args.model_path)
         encoder = SentenceTransformerEncoder(args.model_path, dimension=int(model["dimension"]))
-        result = build_index(deployment_root=args.deployment_root, lexical_index=args.lexical_index, model_path=args.model_path, encoder=encoder, build_id=args.build_id, batch_size=args.batch_size, progress=True)
+        result = build_index(
+            deployment_root=args.deployment_root,
+            lexical_index=args.lexical_index,
+            model_path=args.model_path,
+            encoder=encoder,
+            build_id=args.build_id,
+            batch_size=args.batch_size,
+            progress=True,
+        )
     else:
         result = read_current(args.deployment_root)
     print(json.dumps(result, ensure_ascii=False, allow_nan=False, indent=2))
@@ -625,8 +727,14 @@ if __name__ == "__main__":
 
 
 __all__ = [
-    "SentenceTransformerEncoder", "build_index", "chunk_page",
-    "index_file_snapshot", "pin_model_snapshot", "read_current",
-    "switch_current", "validate_index_directory", "validate_pinned_model",
+    "SentenceTransformerEncoder",
+    "build_index",
+    "chunk_page",
+    "index_file_snapshot",
+    "pin_model_snapshot",
+    "read_current",
+    "switch_current",
+    "validate_index_directory",
+    "validate_pinned_model",
     "validate_index_against_lexical",
 ]

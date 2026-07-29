@@ -11,6 +11,7 @@ from copy import deepcopy
 from pathlib import Path
 
 import pytest
+import src.evidence.integrity_verifier as integrity_verifier_module
 from mcp.server.fastmcp import FastMCP
 from src.evidence.integrity_controls import (
     DISABLED_CHECK_WARNING,
@@ -179,14 +180,23 @@ def test_resume_requires_exact_producer_and_driver_identity(tmp_path):
     assert rejected["check_results"]["producer_driver_compatibility"]["state"] == "failed"
 
 
-def test_invalid_settings_block_formal_verification_before_artifact_reads(tmp_path):
+def test_invalid_settings_block_formal_verification_before_artifact_reads(tmp_path, monkeypatch):
     path = tmp_path / "bad.json"
     path.write_text("{", encoding="utf-8")
     status = load_evidence_integrity_status({EVIDENCE_SETTINGS_ENV: str(path)})
+    artifact = tmp_path / "must-not-read.json"
+    artifact.write_text('{"evidence":true}', encoding="utf-8")
+    monkeypatch.setattr(
+        integrity_verifier_module,
+        "verify_portfolio_evidence_checks",
+        lambda *_args, **_kwargs: pytest.fail(
+            "invalid settings must block before artifact verification"
+        ),
+    )
 
     result = verify_evidence_integrity(
-        portfolio_request={},
-        artifact_roots={},
+        portfolio_request={"nonempty": True},
+        artifact_roots={"case-one": str(tmp_path)},
         settings_status=status,
     )
 

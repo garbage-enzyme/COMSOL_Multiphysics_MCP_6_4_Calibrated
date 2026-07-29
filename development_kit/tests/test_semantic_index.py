@@ -35,7 +35,9 @@ class FakeEncoder:
         rows = []
         for text in texts:
             digest = hashlib.sha256(text.encode("utf-8")).digest()
-            row = np.asarray([digest[index] + 1 for index in range(self.dimension)], dtype=np.float32)
+            row = np.asarray(
+                [digest[index] + 1 for index in range(self.dimension)], dtype=np.float32
+            )
             rows.append(row / np.linalg.norm(row))
         return np.stack(rows)
 
@@ -81,7 +83,9 @@ def semantic_index_assets(semantic_index_root):
                 "module": "Wave_Optics_Module",
                 "page": 2,
                 "heading": "Periodic ports",
-                "text": "Periodic ports require homogeneous adjacent media and Floquet phase settings.",
+                "text": (
+                    "Periodic ports require homogeneous adjacent media and Floquet phase settings."
+                ),
             },
         ],
         lexical,
@@ -143,6 +147,36 @@ def test_model_pin_is_ascii_immutable_and_revision_bound(semantic_index_assets):
         validate_pinned_model(semantic_index_assets["model"])
 
 
+def test_model_pin_replaces_source_manifest_and_rejects_unlisted_files(
+    semantic_index_root,
+):
+    source = semantic_index_root / "source-with-manifest"
+    source.mkdir()
+    (source / "model.bin").write_bytes(b"model")
+    (source / "model_manifest.json").write_text('{"stale":true}', encoding="utf-8")
+    target = semantic_index_root / "pinned-model"
+
+    pin_model_snapshot(
+        source,
+        target,
+        model_id="test/model",
+        revision="revision-2",
+        dimension=4,
+        license_name="test-only",
+    )
+
+    assert validate_pinned_model(target)["revision"] == "revision-2"
+    (target / "unlisted.bin").write_bytes(b"unlisted")
+    with pytest.raises(ValueError, match="file set"):
+        validate_pinned_model(target)
+    (target / "unlisted.bin").unlink()
+    nested = target / "nested"
+    nested.mkdir()
+    (nested / "model_manifest.json").write_text("{}", encoding="utf-8")
+    with pytest.raises(ValueError, match="file set"):
+        validate_pinned_model(target)
+
+
 def test_build_validates_then_atomically_publishes_current(semantic_index_assets):
     result = _build(semantic_index_assets, "build-001")
     current = read_current(semantic_index_assets["root"])
@@ -175,9 +209,7 @@ def test_read_current_rejects_pointer_outside_deployment_indexes(semantic_index_
         read_current(semantic_index_assets["root"])
 
 
-def test_read_only_semantic_connections_close_deterministically(
-    semantic_index_assets, monkeypatch
-):
+def test_read_only_semantic_connections_close_deterministically(semantic_index_assets, monkeypatch):
     result = _build(semantic_index_assets, "connection-close")
     index = Path(result["index"]["path"])
     real_connect = index_module.sqlite3.connect
@@ -210,6 +242,28 @@ def test_read_only_semantic_connections_close_deterministically(
     assert all(connection.closed for connection in tracked)
 
 
+def test_lexical_page_extraction_requires_the_exact_identity_snapshot(
+    semantic_index_assets,
+):
+    lexical = semantic_index_assets["lexical"]
+    identity = index_module._lexical_identity(lexical)
+    original = lexical.read_bytes()
+    lexical.write_bytes(original + b"changed")
+    try:
+        with pytest.raises(RuntimeError, match="changed before page extraction"):
+            list(index_module._iter_pages(lexical, expected_identity=identity))
+    finally:
+        lexical.write_bytes(original)
+
+    wal = Path(str(lexical) + "-wal")
+    wal.write_bytes(b"active")
+    try:
+        with pytest.raises(ValueError, match="active WAL"):
+            index_module._lexical_identity(lexical)
+    finally:
+        wal.unlink()
+
+
 @pytest.mark.parametrize("fault", ["after_chunks", "after_embeddings", "before_publish"])
 def test_interrupted_build_never_changes_active_pointer(semantic_index_assets, fault):
     _build(semantic_index_assets, "accepted")
@@ -234,7 +288,9 @@ def test_interrupted_build_never_changes_active_pointer(semantic_index_assets, f
     assert list(semantic_index_assets["root"].rglob("*.building"))
 
 
-def test_validation_rejects_corrupt_manifest_duplicate_ids_and_partial_vectors(semantic_index_assets):
+def test_validation_rejects_corrupt_manifest_duplicate_ids_and_partial_vectors(
+    semantic_index_assets,
+):
     _build(semantic_index_assets, "good")
     good = Path(read_current(semantic_index_assets["root"])["pointer"]["index_path"])
 
@@ -276,8 +332,11 @@ def test_validation_rejects_corrupt_manifest_duplicate_ids_and_partial_vectors(s
     record = json.loads(lines[0])
     record["source"] = "missing/NotInCorpus.pdf"
     record["id"] = index_module._chunk_id(
-        record["corpus_fingerprint"], record["source"], record["page"],
-        record["ordinal"], record["text_sha256"],
+        record["corpus_fingerprint"],
+        record["source"],
+        record["page"],
+        record["ordinal"],
+        record["text_sha256"],
     )
     lines[0] = json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     (missing_citation / "chunks.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -290,8 +349,11 @@ def test_validation_rejects_corrupt_manifest_duplicate_ids_and_partial_vectors(s
 def test_mismatch_non_ascii_and_pointer_rollback_gates(semantic_index_assets):
     with pytest.raises(ValueError, match="corpus fingerprint"):
         build_index(
-            deployment_root=semantic_index_assets["root"], lexical_index=semantic_index_assets["lexical"],
-            model_path=semantic_index_assets["model"], encoder=FakeEncoder(), build_id="wrong-corpus",
+            deployment_root=semantic_index_assets["root"],
+            lexical_index=semantic_index_assets["lexical"],
+            model_path=semantic_index_assets["model"],
+            encoder=FakeEncoder(),
+            build_id="wrong-corpus",
             expected_corpus_fingerprint="0" * 64,
         )
 
@@ -299,14 +361,20 @@ def test_mismatch_non_ascii_and_pointer_rollback_gates(semantic_index_assets):
     wrong_encoder.dimension = 5
     with pytest.raises(ValueError, match="dimension"):
         build_index(
-            deployment_root=semantic_index_assets["root"], lexical_index=semantic_index_assets["lexical"],
-            model_path=semantic_index_assets["model"], encoder=wrong_encoder, build_id="wrong-model",
+            deployment_root=semantic_index_assets["root"],
+            lexical_index=semantic_index_assets["lexical"],
+            model_path=semantic_index_assets["model"],
+            encoder=wrong_encoder,
+            build_id="wrong-model",
         )
 
     with pytest.raises(ValueError, match="ASCII"):
         build_index(
-            deployment_root="C:/Users/陆星/semantic", lexical_index=semantic_index_assets["lexical"],
-            model_path=semantic_index_assets["model"], encoder=FakeEncoder(), build_id="unicode-root",
+            deployment_root="C:/Users/陆星/semantic",
+            lexical_index=semantic_index_assets["lexical"],
+            model_path=semantic_index_assets["model"],
+            encoder=FakeEncoder(),
+            build_id="unicode-root",
         )
 
     _build(semantic_index_assets, "rollback-a")

@@ -2,22 +2,23 @@
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
+import _winapi
 import hashlib
 import json
-from pathlib import Path
 import subprocess
 import sys
 import tomllib
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
+import pytest
 import src.tools.capabilities as capabilities_module
-from src import __version__
 from src.build_identity import get_build_identity, package_content_sha256
 from src.compatibility import load_runtime_compatibility
-from src.tools.capabilities import get_capabilities
-from src.tools.capabilities import startup_capability_summary
+from src.tools.capabilities import get_capabilities, startup_capability_summary
 from src.tools.profiles import ProfileSelection
 
+from src import __version__
 
 ROOT = Path(__file__).parents[2]
 SNAPSHOTS = ROOT / "development_kit" / "tests" / "snapshots"
@@ -104,6 +105,22 @@ def test_build_identity_ignores_generated_files_and_changes_with_package_bytes(t
     assert str(tmp_path) not in json.dumps(identity)
 
 
+def test_build_identity_rejects_package_junctions(tmp_path):
+    package = tmp_path / "package"
+    package.mkdir()
+    (package / "module.py").write_text("value = 1\n", encoding="utf-8")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "hidden.py").write_text("hidden = True\n", encoding="utf-8")
+    junction = package / "linked"
+    _winapi.CreateJunction(str(outside), str(junction))
+    try:
+        with pytest.raises(ValueError, match="symlinks or junctions"):
+            package_content_sha256(package)
+    finally:
+        junction.rmdir()
+
+
 def test_package_version_has_one_authoritative_source():
     project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     manifest = json.loads(
@@ -114,9 +131,10 @@ def test_package_version_has_one_authoritative_source():
     assert "version" not in project["project"]
     assert project["tool"]["hatch"]["version"]["path"] == "comsol_mcp/__init__.py"
     assert "package_version" not in manifest
-    assert get_capabilities(_selection("core"))["deployment_identity"][
-        "package_version"
-    ] == __version__
+    assert (
+        get_capabilities(_selection("core"))["deployment_identity"]["package_version"]
+        == __version__
+    )
 
 
 def test_deployment_identity_is_profile_independent():

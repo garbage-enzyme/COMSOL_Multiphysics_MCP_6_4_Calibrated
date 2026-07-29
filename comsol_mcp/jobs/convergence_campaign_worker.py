@@ -5,11 +5,14 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from pathlib import Path
 import sys
 import threading
 import time
+from contextlib import ExitStack
+from pathlib import Path
 from typing import Any, Callable, Mapping
+
+from comsol_mcp.path_policy import pin_validated_reads, validated_read_pin
 
 from .convergence_campaign import validate_convergence_campaign_driver_identity
 from .process_control import contain_current_process_tree
@@ -44,7 +47,8 @@ def _run(
     *,
     ownership_factory: Callable[[Path, str], Any] = _default_ownership_factory,
     client_factory: Callable[[Mapping[str, Any]], Any] = _default_client_factory,
-    collector_executor: Callable[[dict[str, Any], dict[str, Any], Path], Mapping[str, Any]] | None = None,
+    collector_executor: Callable[[dict[str, Any], dict[str, Any], Path], Mapping[str, Any]]
+    | None = None,
     telemetry_provider: Callable[[str, str, Any, Path, float], dict[str, Any]] | None = None,
     native_cancel_enabled: bool = True,
     fault_hook: Callable[[str, Mapping[str, Any]], Any] | None = None,
@@ -94,10 +98,18 @@ def _run(
     worker_error: Exception | None = None
     cleanup_errors: list[str] = []
     latest_resource_decision: dict[str, Any] | None = None
+    source_pins = ExitStack()
     try:
+        source_pins.enter_context(
+            pin_validated_reads(
+                tuple(validated_read_pin(source, source.parent) for source in sources)
+            )
+        )
         for source, level in zip(sources, spec["levels"]):
             if _sha256_file(source) != level["spectral_job"]["source_model_sha256"]:
-                raise RuntimeError("Immutable convergence source hash changed before client startup")
+                raise RuntimeError(
+                    "Immutable convergence source hash changed before client startup"
+                )
         ownership = ownership_factory(store.root.parent, f"job:{job_id}")
         first = spec["levels"][0]["spectral_job"]
         preflight = ownership.preflight(
@@ -149,7 +161,10 @@ def _run(
             store.update_state(
                 job_id,
                 patch={
-                    "progress": {"completed": completed_points, "total": spec["maximum_total_points"]},
+                    "progress": {
+                        "completed": completed_points,
+                        "total": spec["maximum_total_points"],
+                    },
                     "current_level": {"level_id": level["level_id"], "ordinal": level["ordinal"]},
                     "last_point": {"point_id": row["point_id"], "row_sha256": row["row_sha256"]},
                 },
@@ -220,7 +235,9 @@ def _run(
             fault_hook=fault_hook,
         )
         if should_stop() or result.get("stop_reason") in {
-            "before_level_cancel", "before_solve_cancel", "after_durable_row_cancel"
+            "before_level_cancel",
+            "before_solve_cancel",
+            "after_durable_row_cancel",
         }:
             store.record_cooperative_cancel_observed(
                 job_id, attempt=attempt, message="Stopped between convergence operations"
@@ -279,13 +296,22 @@ def _run(
             try:
                 release = ownership.release()
                 if not release.get("success"):
-                    cleanup_errors.append(f"lease_release:{json.dumps(release, ensure_ascii=False)}")
+                    cleanup_errors.append(
+                        f"lease_release:{json.dumps(release, ensure_ascii=False)}"
+                    )
             except Exception as exc:
                 cleanup_errors.append(f"lease_release:{type(exc).__name__}:{exc}")
-
-    for source, level in zip(sources, spec["levels"]):
-        if _sha256_file(source) != level["spectral_job"]["source_model_sha256"] and worker_error is None:
-            worker_error = RuntimeError("Immutable convergence source changed after execution")
+        try:
+            for source, level in zip(sources, spec["levels"]):
+                if (
+                    _sha256_file(source) != level["spectral_job"]["source_model_sha256"]
+                    and worker_error is None
+                ):
+                    worker_error = RuntimeError(
+                        "Immutable convergence source changed after execution"
+                    )
+        finally:
+            source_pins.close()
     if cleanup_errors and worker_error is None:
         worker_error = RuntimeError("; ".join(cleanup_errors)[:2000])
     current = store.read_state(job_id)["status"]
@@ -299,7 +325,10 @@ def _run(
                 job_id,
                 "failed",
                 patch={
-                    "last_error": {"type": type(worker_error).__name__, "message": str(worker_error)[:2000]},
+                    "last_error": {
+                        "type": type(worker_error).__name__,
+                        "message": str(worker_error)[:2000],
+                    },
                     "cleanup_errors": cleanup_errors,
                 },
                 event="worker_failed",

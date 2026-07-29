@@ -3,15 +3,12 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 import shutil
 import time
 import uuid
+from pathlib import Path
 
 import pytest
-
-from development_kit.tests.spectral_job_fixtures import write_fake_point_audit
-from development_kit.tests.test_branch_continuation_campaign_job import _raw_campaign
 from src.jobs.branch_continuation_campaign import normalize_branch_continuation_campaign_spec
 from src.jobs.branch_continuation_campaign_rows import (
     read_branch_continuation_campaign_states,
@@ -19,6 +16,9 @@ from src.jobs.branch_continuation_campaign_rows import (
 from src.jobs.branch_continuation_campaign_worker import _run
 from src.jobs.manager import JobManager
 from src.jobs.store import JobStore, process_identity
+
+from development_kit.tests.spectral_job_fixtures import write_fake_point_audit
+from development_kit.tests.test_branch_continuation_campaign_job import _raw_campaign
 
 
 class _Model:
@@ -32,11 +32,18 @@ class _Model:
 class _Client:
     port = None
 
-    def __init__(self):
+    def __init__(self, *, attempt_mutation=False):
         self.loaded = []
         self.clear_count = 0
+        self.attempt_mutation = attempt_mutation
+        self.mutation_blocked = 0
 
     def load(self, path):
+        if self.attempt_mutation:
+            try:
+                Path(path).write_bytes(b"replacement")
+            except PermissionError:
+                self.mutation_blocked += 1
         self.loaded.append(path)
         return _Model(f"model-{len(self.loaded)}")
 
@@ -96,8 +103,11 @@ def _created_job(tmp_path, ascii_root):
     now = time.time()
     identity = process_identity(os.getpid())
     state = {
-        "schema_version": "2", "status": "submitted", "attempt": 1,
-        "created_at_epoch": now, "updated_at_epoch": now,
+        "schema_version": "2",
+        "status": "submitted",
+        "attempt": 1,
+        "created_at_epoch": now,
+        "updated_at_epoch": now,
         "worker_pid": identity["pid"],
         "worker_process_create_time": identity["process_create_time"],
         "worker_command_signature": identity["command_signature"],
@@ -132,7 +142,7 @@ def _collector_for(spec, *, fail_configuration=None):
 def test_worker_uses_one_owner_and_client_for_all_exact_states(tmp_path, ascii_root):
     store, spec, job_id = _created_job(tmp_path, ascii_root)
     ownership = _Ownership()
-    client = _Client()
+    client = _Client(attempt_mutation=True)
     code = _run(
         str(store.root),
         job_id,
@@ -150,6 +160,7 @@ def test_worker_uses_one_owner_and_client_for_all_exact_states(tmp_path, ascii_r
     assert state["branch_continuation_summary"]["scientific_disposition"] == "accepted"
     assert ownership.acquired is True and ownership.released is True
     assert len(client.loaded) == 3
+    assert client.mutation_blocked == 3
     assert client.clear_count == 4
 
 
@@ -220,9 +231,7 @@ def test_cleanup_failure_prevents_false_completed_state(tmp_path, ascii_root):
     assert "lease_release" in state["last_error"]["message"]
 
 
-def test_manager_exact_resubmission_observes_existing_campaign(
-    tmp_path, ascii_root, monkeypatch
-):
+def test_manager_exact_resubmission_observes_existing_campaign(tmp_path, ascii_root, monkeypatch):
     raw = _raw_campaign(tmp_path / "sources")
     manager = JobManager(
         ascii_root / "manager" / "jobs",
