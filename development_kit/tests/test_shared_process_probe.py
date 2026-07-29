@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import sys
+from contextlib import nullcontext
 from types import SimpleNamespace
 
 import psutil
-
 from src.shared_session.preflight import classify_shared_server_preflight
 from src.shared_session.process_probe import (
     _is_primary_desktop_window,
     _listener_records,
+    _process_records,
     collect_shared_preflight_snapshot,
 )
 
@@ -42,9 +43,7 @@ def test_collector_redacts_paths_and_ignores_declared_process_children():
         clock=lambda: 1000.0,
     )
 
-    assert [item["kind"] for item in snapshot["processes"]] == [
-        "comsol_desktop", "comsol_server"
-    ]
+    assert [item["kind"] for item in snapshot["processes"]] == ["comsol_desktop", "comsol_server"]
     assert all("executable" not in item for item in snapshot["processes"])
     assert all("command_line" not in item for item in snapshot["processes"])
     serialized = str(snapshot)
@@ -73,7 +72,9 @@ def test_collector_exposes_external_mph_as_a_collision_without_version_requireme
     )
 
     assert [item["kind"] for item in snapshot["processes"]] == [
-        "comsol_desktop", "comsol_server", "mph_client"
+        "comsol_desktop",
+        "comsol_server",
+        "mph_client",
     ]
     assert result["state"] == "unclassified_comsol_or_mph_collision"
 
@@ -114,6 +115,61 @@ def test_collector_excludes_current_mcp_process_identity():
     )
 
     assert snapshot["processes"] == []
+
+
+def test_collector_keeps_excluded_comsol_roots_for_descendant_filtering():
+    records = [
+        _record(20, 0, "comsolmphserver.exe", ["comsolmphserver.exe"]),
+        _record(21, 20, "comsolhelper.exe", ["comsolhelper.exe"]),
+    ]
+
+    snapshot = collect_shared_preflight_snapshot(
+        process_provider=lambda: records,
+        listener_provider=list,
+        window_provider=dict,
+        version_provider=lambda path: "6.4.0.293",
+        exclude_pids={20},
+        clock=lambda: 1000.0,
+    )
+
+    assert snapshot["processes"] == []
+
+
+def test_access_denied_process_metadata_marks_inventory_incomplete(monkeypatch):
+    class InaccessibleServer:
+        pid = 20
+
+        def oneshot(self):
+            return nullcontext()
+
+        def cmdline(self):
+            raise psutil.AccessDenied(pid=self.pid)
+
+        def exe(self):
+            raise psutil.AccessDenied(pid=self.pid)
+
+        def ppid(self):
+            return 0
+
+        def name(self):
+            return "comsolmphserver.exe"
+
+        def create_time(self):
+            return 20.0
+
+    monkeypatch.setattr(psutil, "process_iter", lambda: [InaccessibleServer()])
+
+    records, complete = _process_records()
+    snapshot = collect_shared_preflight_snapshot(
+        process_provider=lambda: (records, complete),
+        listener_provider=list,
+        window_provider=dict,
+        version_provider=lambda path: "6.4.0.293",
+        clock=lambda: 1000.0,
+    )
+
+    assert snapshot["inventory_complete"] is False
+    assert [item["kind"] for item in snapshot["processes"]] == ["comsol_server"]
 
 
 def test_repository_path_text_does_not_impersonate_comsol_processes():

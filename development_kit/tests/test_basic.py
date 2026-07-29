@@ -3,6 +3,7 @@
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -28,7 +29,7 @@ def permissive_session_ownership(monkeypatch, tmp_path):
             }
 
         def heartbeat(self, **_kwargs):
-            return {"success": True}
+            return True
 
         def release(self):
             self.releases += 1
@@ -804,6 +805,155 @@ class TestSessionManager:
         assert result["success"] is False
         assert "still starting" in result["error"]
         assert called is False
+
+    def test_connect_rejects_pending_local_start_cleanup_before_loading_mph(
+        self, monkeypatch, permissive_session_ownership
+    ):
+        import src.tools.session as session_module
+
+        sm = session_module.SessionManager()
+        sm._start_cleanup_pending = True
+        monkeypatch.setattr(
+            session_module,
+            "_load_mph",
+            lambda: pytest.fail("pending cleanup must be rejected before loading MPh"),
+        )
+        try:
+            result = sm.connect(port=2036)
+        finally:
+            sm._start_cleanup_pending = False
+
+        assert result["success"] is False
+        assert result["cleanup_pending"] is True
+
+    def test_connect_rolls_back_client_when_lease_heartbeat_is_unverified(
+        self, monkeypatch, permissive_session_ownership
+    ):
+        import src.tools.session as session_module
+
+        sm = session_module.SessionManager()
+
+        class RemoteClient:
+            standalone = False
+            version = "6.4"
+
+            def __init__(self):
+                self.calls = []
+
+            def clear(self):
+                self.calls.append("clear")
+
+            def disconnect(self):
+                self.calls.append("disconnect")
+
+        client = RemoteClient()
+        monkeypatch.setattr(sm._ownership, "heartbeat", lambda **_kwargs: False)
+        monkeypatch.setattr(
+            session_module,
+            "_load_mph",
+            lambda: (
+                SimpleNamespace(Client=lambda **_kwargs: client),
+                SimpleNamespace(client=None),
+            ),
+        )
+
+        result = sm.connect(port=2036)
+
+        assert result["success"] is False
+        assert "heartbeat" in result["error"]
+        assert client.calls == ["disconnect"]
+        assert sm.client is None
+        assert sm._reusable_client is client
+        assert sm._owns_solver_lease is False
+        assert permissive_session_ownership._ownership.releases == 1
+
+    def test_disconnect_retains_client_and_lease_until_retirement_is_verified(
+        self, permissive_session_ownership
+    ):
+        import src.tools.session as session_module
+
+        sm = session_module.SessionManager()
+
+        class RemoteClient:
+            standalone = False
+
+            def __init__(self):
+                self.calls = []
+                self.fail_disconnect = True
+
+            def clear(self):
+                self.calls.append("clear")
+
+            def disconnect(self):
+                self.calls.append("disconnect")
+                if self.fail_disconnect:
+                    raise RuntimeError("disconnect uncertain")
+
+        client = RemoteClient()
+        sm._client = client
+        sm._owns_solver_lease = True
+
+        first = sm.disconnect()
+
+        assert first["success"] is False
+        assert first["cleanup_pending"] is True
+        assert sm.client is client
+        assert sm._owns_solver_lease is True
+        assert permissive_session_ownership._ownership.releases == 0
+
+        client.fail_disconnect = False
+        second = sm.disconnect()
+
+        assert second["success"] is True
+        assert client.calls == ["clear", "disconnect", "clear", "disconnect"]
+        assert sm.client is None
+        assert sm._owns_solver_lease is False
+        assert permissive_session_ownership._ownership.releases == 1
+
+    def test_cancelled_start_retires_exact_client_only_once_after_failure(
+        self, monkeypatch, permissive_session_ownership
+    ):
+        import src.tools.session as session_module
+
+        sm = session_module.SessionManager()
+
+        class RemoteClient:
+            standalone = False
+            version = "6.4"
+
+            def __init__(self):
+                self.calls = []
+
+            def clear(self):
+                self.calls.append("clear")
+
+            def disconnect(self):
+                self.calls.append("disconnect")
+
+        client = RemoteClient()
+        monkeypatch.setattr(
+            session_module,
+            "_load_mph",
+            lambda: (
+                SimpleNamespace(Client=lambda **_kwargs: client),
+                SimpleNamespace(client=None),
+            ),
+        )
+
+        def fail_heartbeat(**_kwargs):
+            sm._start_cancel_requested = True
+            raise RuntimeError("heartbeat failed")
+
+        monkeypatch.setattr(sm._ownership, "heartbeat", fail_heartbeat)
+        sm._start_attempt_id = "test-attempt"
+        sm._starting = True
+
+        sm._start_worker("test-attempt", {})
+
+        assert client.calls == ["clear", "disconnect"]
+        assert sm.client is None
+        assert sm._owns_solver_lease is False
+        assert permissive_session_ownership._ownership.releases == 1
 
     def test_start_preflight_refusal_is_terminal_without_mph_client(
         self, monkeypatch, permissive_session_ownership

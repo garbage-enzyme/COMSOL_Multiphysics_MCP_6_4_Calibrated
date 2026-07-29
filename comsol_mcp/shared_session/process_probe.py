@@ -3,34 +3,38 @@
 from __future__ import annotations
 
 import ctypes
-from ctypes import wintypes
 import hashlib
-import os
-from pathlib import Path
 import platform
 import time
+from ctypes import wintypes
+from pathlib import Path
 from typing import Any, Callable, Iterable
 
 import psutil
 
 from .contracts import normalize_shared_listener_bind_host
 
-
 MAX_COMMAND_PARTS = 64
 MAX_PROCESS_RECORDS = 4096
-_DESKTOP_EXECUTABLES = frozenset({
-    "comsol.exe",
-    "comsolmphclient.exe",
-    "comsolui.exe",
-})
-_SERVER_EXECUTABLES = frozenset({
-    "comsolmphserver.exe",
-    "comsolserver.exe",
-})
-_AUXILIARY_WINDOW_CLASSES = frozenset({
-    "actiprowindowchromeshadow",
-    "pseudoconsolewindow",
-})
+_DESKTOP_EXECUTABLES = frozenset(
+    {
+        "comsol.exe",
+        "comsolmphclient.exe",
+        "comsolui.exe",
+    }
+)
+_SERVER_EXECUTABLES = frozenset(
+    {
+        "comsolmphserver.exe",
+        "comsolserver.exe",
+    }
+)
+_AUXILIARY_WINDOW_CLASSES = frozenset(
+    {
+        "actiprowindowchromeshadow",
+        "pseudoconsolewindow",
+    }
+)
 _MAX_WINDOW_CLASS_CHARACTERS = 256
 
 
@@ -39,32 +43,44 @@ def _command_signature(command_line: Iterable[Any]) -> str:
     return hashlib.sha256(canonical.encode("utf-8", errors="replace")).hexdigest()
 
 
-def _process_records() -> list[dict[str, Any]]:
+def _process_records() -> tuple[list[dict[str, Any]], bool]:
     records: list[dict[str, Any]] = []
+    complete = True
     for process in psutil.process_iter():
         try:
             with process.oneshot():
                 try:
                     command_line = list(process.cmdline())[:MAX_COMMAND_PARTS]
-                except (psutil.AccessDenied, psutil.ZombieProcess):
+                except psutil.AccessDenied:
+                    command_line = []
+                    complete = False
+                except psutil.ZombieProcess:
                     command_line = []
                 try:
                     executable = process.exe()
-                except (psutil.AccessDenied, psutil.ZombieProcess):
+                except psutil.AccessDenied:
                     executable = None
-                records.append({
-                    "pid": process.pid,
-                    "parent_pid": process.ppid(),
-                    "name": process.name(),
-                    "create_time": process.create_time(),
-                    "command_line": command_line,
-                    "executable": executable,
-                })
-        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    complete = False
+                except psutil.ZombieProcess:
+                    executable = None
+                records.append(
+                    {
+                        "pid": process.pid,
+                        "parent_pid": process.ppid(),
+                        "name": process.name(),
+                        "create_time": process.create_time(),
+                        "command_line": command_line,
+                        "executable": executable,
+                    }
+                )
+        except psutil.AccessDenied:
+            complete = False
+            continue
+        except psutil.NoSuchProcess, psutil.ZombieProcess:
             continue
         if len(records) >= MAX_PROCESS_RECORDS:
             raise RuntimeError("process inventory exceeds the bounded maximum")
-    return records
+    return records, complete
 
 
 def _listener_records() -> list[dict[str, Any]]:
@@ -80,11 +96,13 @@ def _listener_records() -> list[dict[str, Any]]:
             normalized_host, _bind_scope = normalize_shared_listener_bind_host(host)
         except ValueError:
             continue
-        listeners.append({
-            "host": normalized_host,
-            "port": int(port),
-            "pid": int(connection.pid),
-        })
+        listeners.append(
+            {
+                "host": normalized_host,
+                "port": int(port),
+                "pid": int(connection.pid),
+            }
+        )
     return listeners
 
 
@@ -121,9 +139,7 @@ def _window_state_by_pid() -> dict[int, dict[str, Any]]:
         user32.GetWindowThreadProcessId(window, ctypes.byref(pid))
         if not pid.value:
             return True
-        state = states.setdefault(
-            int(pid.value), {"window_count": 0, "responding": True}
-        )
+        state = states.setdefault(int(pid.value), {"window_count": 0, "responding": True})
         state["window_count"] += 1
         if user32.IsHungAppWindow(window):
             state["responding"] = False
@@ -191,9 +207,7 @@ def _kind(record: dict[str, Any], window_count: int) -> str | None:
     name = str(record.get("name") or "").casefold()
     executable_name = Path(str(record.get("executable") or "")).name.casefold()
     process_names = {name, executable_name} - {""}
-    command_parts = [
-        str(part).casefold() for part in record.get("command_line") or []
-    ]
+    command_parts = [str(part).casefold() for part in record.get("command_line") or []]
     command = " ".join(command_parts)
     command_basenames = {Path(part).name.casefold() for part in command_parts}
     explicit_server_command = bool(command_basenames & _SERVER_EXECUTABLES)
@@ -212,7 +226,9 @@ def _kind(record: dict[str, Any], window_count: int) -> str | None:
 
 def collect_shared_preflight_snapshot(
     *,
-    process_provider: Callable[[], list[dict[str, Any]]] = _process_records,
+    process_provider: Callable[
+        [], list[dict[str, Any]] | tuple[list[dict[str, Any]], bool]
+    ] = _process_records,
     listener_provider: Callable[[], list[dict[str, Any]]] = _listener_records,
     window_provider: Callable[[], dict[int, dict[str, Any]]] = _window_state_by_pid,
     version_provider: Callable[[str | None], str | None] = _windows_file_version,
@@ -220,7 +236,12 @@ def collect_shared_preflight_snapshot(
     exclude_pids: Iterable[int] = (),
 ) -> dict[str, Any]:
     """Collect one bounded redacted snapshot without importing or starting MPh."""
-    records = process_provider()
+    provided_records = process_provider()
+    if isinstance(provided_records, tuple):
+        records, inventory_complete = provided_records
+    else:
+        records = provided_records
+        inventory_complete = True
     listeners = listener_provider()
     windows = window_provider()
     excluded = {int(pid) for pid in exclude_pids}
@@ -235,11 +256,13 @@ def collect_shared_preflight_snapshot(
         pid = int(record["pid"])
         state = windows.get(pid, {"window_count": 0, "responding": True})
         kind = _kind(record, int(state["window_count"]))
-        if kind is None or pid in excluded:
+        if kind is None:
             continue
-        preliminary.append((record, kind))
         if kind in {"comsol_desktop", "comsol_server"}:
             allowed_roots.add(pid)
+        if pid in excluded:
+            continue
+        preliminary.append((record, kind))
 
     candidates: list[dict[str, Any]] = []
     for record, kind in preliminary:
@@ -248,18 +271,20 @@ def collect_shared_preflight_snapshot(
             continue
         state = windows.get(pid, {"window_count": 0, "responding": True})
         version = None if kind == "mph_client" else version_provider(record.get("executable"))
-        candidates.append({
-            "pid": pid,
-            "parent_pid": int(record.get("parent_pid") or 0),
-            "kind": kind,
-            "create_time": float(record["create_time"]),
-            "command_signature": _command_signature(record.get("command_line") or []),
-            "file_version": version or "unreadable",
-            "window_count": int(state["window_count"]),
-            "responding": bool(state["responding"]),
-        })
+        candidates.append(
+            {
+                "pid": pid,
+                "parent_pid": int(record.get("parent_pid") or 0),
+                "kind": kind,
+                "create_time": float(record["create_time"]),
+                "command_signature": _command_signature(record.get("command_line") or []),
+                "file_version": version or "unreadable",
+                "window_count": int(state["window_count"]),
+                "responding": bool(state["responding"]),
+            }
+        )
     return {
-        "inventory_complete": True,
+        "inventory_complete": inventory_complete,
         "observed_at_epoch": float(clock()),
         "processes": sorted(candidates, key=lambda item: item["pid"]),
         "listeners": sorted(

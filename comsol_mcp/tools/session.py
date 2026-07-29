@@ -120,19 +120,19 @@ class SessionManager:
                 )
                 cls._instance = instance
         return cls._instance
-    
+
     @property
     def client(self) -> Optional[mph.Client]:
         return self._client
-    
+
     @property
     def is_connected(self) -> bool:
         return self._client is not None
-    
+
     @property
     def current_model(self) -> Optional[str]:
         return self._current_model
-    
+
     @property
     def models(self) -> dict[str, mph.Model]:
         return self._models.copy()
@@ -147,9 +147,7 @@ class SessionManager:
         if self._startup_record is None:
             return
         payload = {
-            key: value
-            for key, value in self._startup_record.items()
-            if key != "started_monotonic"
+            key: value for key, value in self._startup_record.items() if key != "started_monotonic"
         }
         atomic_write_json(self._startup_path(), payload)
 
@@ -169,9 +167,7 @@ class SessionManager:
         phase_record = {
             "phase": phase,
             "timestamp_epoch": now_epoch,
-            "elapsed_seconds": round(
-                now_monotonic - float(record["started_monotonic"]), 6
-            ),
+            "elapsed_seconds": round(now_monotonic - float(record["started_monotonic"]), 6),
         }
         if details:
             phase_record["details"] = details
@@ -194,11 +190,7 @@ class SessionManager:
         if self._startup_record is None:
             return None
         record = self._startup_record
-        return {
-            key: value
-            for key, value in record.items()
-            if key != "started_monotonic"
-        }
+        return {key: value for key, value in record.items() if key != "started_monotonic"}
 
     def _begin_startup_record_locked(
         self,
@@ -263,11 +255,11 @@ class SessionManager:
             errors.append(f"client_clear:{type(exc).__name__}:{exc}")
         return errors
 
-    def _retire_client(self, client) -> tuple[bool, list[str]]:
+    def _retire_client(self, client, *, clear_models: bool = True) -> tuple[bool, list[str]]:
         """Deactivate one exact client without constructing a second JVM client."""
         self._reusable_client = None
         self._reusable_client_kind = None
-        errors = self._clear_client_models(client)
+        errors = self._clear_client_models(client) if clear_models else []
         reusable = bool(getattr(client, "standalone", False))
         if reusable:
             self._reusable_client = client
@@ -282,6 +274,60 @@ class SessionManager:
                 self._reusable_client_kind = "remote"
         return reusable or not errors, errors
 
+    def _rollback_remote_activation(self, client, *, error: str) -> dict:
+        reusable, cleanup_errors = self._retire_client(client, clear_models=False)
+        if cleanup_errors:
+            self._client = client
+            return {
+                "success": False,
+                "cleanup_pending": True,
+                "connected_uncertain": True,
+                "error": error,
+                "cleanup_errors": cleanup_errors,
+            }
+
+        self._client = None
+        release = self._release_owned_lease()
+        result = {
+            "success": False,
+            "client_reusable": reusable,
+            "error": error,
+        }
+        if release is not None:
+            result["lease_release"] = release
+            if not release.get("success"):
+                result["cleanup_pending"] = True
+        return result
+
+    def _publish_remote_client(
+        self,
+        client,
+        *,
+        port: int,
+        host: str,
+        message: Optional[str] = None,
+    ) -> dict:
+        try:
+            if self._ownership.heartbeat(refresh_server_processes=True) is not True:
+                raise RuntimeError("solver ownership heartbeat could not be verified")
+            version = client.version
+        except Exception as exc:
+            return self._rollback_remote_activation(client, error=str(exc))
+
+        self._client = client
+        if self._reusable_client is client:
+            self._reusable_client = None
+            self._reusable_client_kind = None
+        result = {
+            "success": True,
+            "version": version,
+            "port": port,
+            "host": host,
+        }
+        if message is not None:
+            result["message"] = message
+        return result
+
     def _release_owned_lease(self) -> Optional[dict]:
         if not self._owns_solver_lease:
             return None
@@ -289,7 +335,7 @@ class SessionManager:
         if result.get("success"):
             self._owns_solver_lease = False
         return result
-    
+
     def start(
         self,
         cores: Optional[int] = None,
@@ -337,8 +383,7 @@ class SessionManager:
                     "reset_required": True,
                     "error": self._start_error,
                     "message": (
-                        "The previous COMSOL start failed. Call session_reset "
-                        "before retrying."
+                        "The previous COMSOL start failed. Call session_reset before retrying."
                     ),
                 }
             if self._host_restart_required:
@@ -351,10 +396,7 @@ class SessionManager:
                         "Restart the MCP host before another COMSOL start."
                     ),
                 }
-            if (
-                self._reusable_client is not None
-                and self._reusable_client_kind != "standalone"
-            ):
+            if self._reusable_client is not None and self._reusable_client_kind != "standalone":
                 return {
                     "success": False,
                     "starting": False,
@@ -429,7 +471,7 @@ class SessionManager:
                 "COMSOL is starting in the background (JVM + back-end). "
                 "This takes 30-90s. Poll comsol_status until 'connected' is true; "
                 "do NOT retry comsol_start."
-            )
+            ),
         }
         if products:
             result["warning"] = (
@@ -444,6 +486,9 @@ class SessionManager:
         mph_session_module = None
         client = None
         release_result = None
+        client_reusable = False
+        cleanup_errors: list[str] = []
+        client_retirement_attempted = False
         try:
             with self._start_lock:
                 if attempt_id != self._start_attempt_id:
@@ -460,9 +505,7 @@ class SessionManager:
             )
             if not preflight.get("ready"):
                 blockers = preflight.get("blockers") or ["unknown preflight refusal"]
-                raise RuntimeError(
-                    "COMSOL start preflight failed: " + "; ".join(blockers[:8])
-                )
+                raise RuntimeError("COMSOL start preflight failed: " + "; ".join(blockers[:8]))
             with self._start_lock:
                 if self._start_cancel_requested:
                     self._start_cleanup_pending = True
@@ -488,9 +531,9 @@ class SessionManager:
             with self._start_lock:
                 self._owns_solver_lease = True
                 if self._startup_record is not None:
-                    self._startup_record["lease_acquisition_id"] = (
-                        claim.get("lease") or {}
-                    ).get("acquisition_id")
+                    self._startup_record["lease_acquisition_id"] = (claim.get("lease") or {}).get(
+                        "acquisition_id"
+                    )
                 self._record_startup_phase_locked(
                     "lease_acquired",
                     state="loading_mph",
@@ -549,9 +592,8 @@ class SessionManager:
                         terminal=True,
                     )
         except Exception as e:
-            client_reusable = False
-            cleanup_errors = []
             if client is not None:
+                client_retirement_attempted = True
                 client_reusable, cleanup_errors = self._retire_client(client)
             jvm_started_without_client = False
             if client is None and mph_module is not None:
@@ -606,10 +648,12 @@ class SessionManager:
                 watchdog.cancel()
 
             if cancelled and client is not None and mph_session_module is not None:
-                reusable, cleanup_errors = self._retire_client(client)
+                if not client_retirement_attempted:
+                    client_retirement_attempted = True
+                    client_reusable, cleanup_errors = self._retire_client(client)
                 with self._start_lock:
                     self._client = None
-                    if not reusable:
+                    if not client_reusable:
                         self._reusable_client = None
                     if release_result is None:
                         release_result = self._release_owned_lease()
@@ -620,7 +664,7 @@ class SessionManager:
                         state=state,
                         terminal=True,
                         details={
-                            "client_reusable": reusable,
+                            "client_reusable": client_reusable,
                             "cleanup_errors": cleanup_errors,
                             "lease_release_success": bool(
                                 release_result and release_result.get("success")
@@ -643,10 +687,9 @@ class SessionManager:
                             ),
                         },
                     )
-    
+
     def connect(self, port: int, host: str = "localhost") -> dict:
         """Connect to a remote COMSOL server."""
-        mph, mph_session = _load_mph()
         with self._start_lock:
             if self._starting:
                 return {
@@ -656,15 +699,19 @@ class SessionManager:
                         "comsol_status before connecting to another server."
                     ),
                 }
+            if self._start_cleanup_pending:
+                return {
+                    "success": False,
+                    "cleanup_pending": True,
+                    "error": (
+                        "A timed-out local COMSOL start still owns cleanup. Wait "
+                        "for cleanup to finish before connecting to another server."
+                    ),
+                }
+        mph, mph_session = _load_mph()
         if self._client is not None:
-            return {
-                "success": False,
-                "error": "COMSOL session already running. Disconnect first."
-            }
-        if (
-            self._reusable_client is not None
-            and self._reusable_client_kind == "standalone"
-        ):
+            return {"success": False, "error": "COMSOL session already running. Disconnect first."}
+        if self._reusable_client is not None and self._reusable_client_kind == "standalone":
             return {
                 "success": False,
                 "host_restart_required": True,
@@ -684,67 +731,50 @@ class SessionManager:
         if not claim["success"]:
             return {"success": False, "error": claim["error"], "ownership": claim.get("status")}
         self._owns_solver_lease = True
-        if (
-            self._reusable_client is not None
-            and self._reusable_client_kind == "remote"
-        ):
+        if self._reusable_client is not None and self._reusable_client_kind == "remote":
             try:
-                self._reusable_client.connect(port, host)
-                self._client = self._reusable_client
-                self._reusable_client = None
-                self._reusable_client_kind = None
-                self._ownership.heartbeat(refresh_server_processes=True)
-                return {
-                    "success": True,
-                    "version": self._client.version,
-                    "port": port,
-                    "host": host,
-                    "message": "Reused the process-global MPh client.",
-                }
+                candidate = self._reusable_client
+                candidate.connect(port, host)
             except Exception as exc:
-                self._release_owned_lease()
-                return {"success": False, "error": str(exc)}
-        try:
-            if mph_session.client is not None:
-                candidate = mph_session.client
-                if getattr(candidate, "standalone", False):
-                    raise RuntimeError(
+                return self._rollback_remote_activation(candidate, error=str(exc))
+            return self._publish_remote_client(
+                candidate,
+                port=port,
+                host=host,
+                message="Reused the process-global MPh client.",
+            )
+        if mph_session.client is not None:
+            candidate = mph_session.client
+            if getattr(candidate, "standalone", False):
+                release = self._release_owned_lease()
+                return {
+                    "success": False,
+                    "host_restart_required": True,
+                    "error": (
                         "Existing process-global MPh client is stand-alone; "
                         "restart the MCP host before remote connection."
-                    )
+                    ),
+                    "lease_release": release,
+                }
+            try:
                 if getattr(candidate, "port", None) is None:
                     candidate.connect(port, host)
-                self._client = candidate
-                self._ownership.heartbeat(refresh_server_processes=True)
-                return {
-                    "success": True,
-                    "version": self._client.version,
-                    "port": port,
-                    "host": host,
-                    "message": "Reused existing client from MPh session."
-                }
-        except Exception:
-            self._release_owned_lease()
-            return {
-                "success": False,
-                "host_restart_required": True,
-                "error": (
-                    "An incompatible process-global MPh client already exists."
-                ),
-            }
+            except Exception as exc:
+                return self._rollback_remote_activation(candidate, error=str(exc))
+            return self._publish_remote_client(
+                candidate,
+                port=port,
+                host=host,
+                message="Reused existing client from MPh session.",
+            )
+        candidate = None
         try:
-            self._client = mph.Client(port=port, host=host)
-            self._ownership.heartbeat(refresh_server_processes=True)
-            return {
-                "success": True,
-                "version": self._client.version,
-                "port": port,
-                "host": host,
-            }
+            candidate = mph.Client(port=port, host=host)
         except Exception as e:
             self._release_owned_lease()
             return {"success": False, "error": str(e)}
-    
+        return self._publish_remote_client(candidate, port=port, host=host)
+
     def disconnect(self) -> dict:
         """Disconnect and clear the session."""
         # A blocking mph.Client() construction cannot be interrupted safely.
@@ -783,6 +813,17 @@ class SessionManager:
 
         client = self._client
         reusable, cleanup_errors = self._retire_client(client)
+        if cleanup_errors:
+            return {
+                "success": False,
+                "cleanup_pending": True,
+                "connected_uncertain": True,
+                "cleanup_errors": cleanup_errors,
+                "message": (
+                    "Client retirement was not verified; the exact client and "
+                    "solver lease remain retained for a cleanup retry."
+                ),
+            }
         self._client = None
         for name in list(self._model_cleanup_paths):
             self._cleanup_model_artifact(name)
@@ -799,9 +840,7 @@ class SessionManager:
                     terminal=True,
                     details={
                         "client_reusable": reusable,
-                        "lease_release_success": bool(
-                            release is None or release.get("success")
-                        ),
+                        "lease_release_success": bool(release is None or release.get("success")),
                     },
                 )
         result = {
@@ -819,7 +858,7 @@ class SessionManager:
         if release is not None:
             result["lease_release"] = release
         return result
-    
+
     def get_status(self) -> dict:
         """Get current session status."""
         with self._start_lock:
@@ -865,12 +904,12 @@ class SessionManager:
                 "cleanup_pending": False,
                 "owns_solver_lease": owns_solver_lease,
                 "host_restart_required": host_restart_required,
-                "message": "No active COMSOL session."
+                "message": "No active COMSOL session.",
             }
             if startup is not None:
                 result["startup"] = startup
             return result
-        
+
         # Status must remain responsive while a COMSOL call is blocked. Do not
         # invoke clientapi or model methods here; report only locally tracked state.
         model_list = []
@@ -884,7 +923,7 @@ class SessionManager:
                 model_info["revision_sha256"] = revision["revision_sha256"]
                 model_info["revision_sequence"] = revision["sequence"]
             model_list.append(model_info)
-        
+
         result = {
             "connected": True,
             "starting": False,
@@ -941,7 +980,7 @@ class SessionManager:
                 "owned client is disconnected or discarded after startup returns."
             ),
         }
-    
+
     def add_model(self, model: mph.Model, cleanup_path: Optional[str] = None) -> str:
         """Add a model to tracking."""
         name = model.name()
@@ -970,9 +1009,7 @@ class SessionManager:
         ).encode("utf-8")
         return hashlib.sha256(canonical).hexdigest()
 
-    def _initialize_model_revision(
-        self, name: str, source_path: Optional[str]
-    ) -> dict:
+    def _initialize_model_revision(self, name: str, source_path: Optional[str]) -> dict:
         existing = self._model_revisions.get(name)
         if existing is not None:
             return dict(existing)
@@ -994,9 +1031,7 @@ class SessionManager:
             return None
         return dict(
             self._model_revisions.get(model_name)
-            or self._initialize_model_revision(
-                model_name, self._model_paths.get(model_name)
-            )
+            or self._initialize_model_revision(model_name, self._model_paths.get(model_name))
         )
 
     def advance_model_revision(self, name: str, operation: str) -> dict:
@@ -1049,20 +1084,20 @@ class SessionManager:
                 path.parent.rmdir()
         except OSError:
             pass
-    
+
     def get_model(self, name: Optional[str] = None) -> Optional[mph.Model]:
         """Get a model by name or current model."""
         if name is None:
             name = self._current_model
         return self._models.get(name)
-    
+
     def set_current_model(self, name: str) -> bool:
         """Set the current active model."""
         if name in self._models:
             self._current_model = name
             return True
         return False
-    
+
     def remove_model(self, name: str) -> bool:
         """Remove a model from tracking and client."""
         if name in self._models and self._client is not None:
@@ -1085,7 +1120,7 @@ session_manager = SessionManager()
 
 def register_session_tools(mcp: FastMCP) -> None:
     """Register session management tools with the MCP server."""
-    
+
     @mcp.tool()
     def comsol_start(
         cores: Optional[int] = None,
@@ -1101,32 +1136,32 @@ def register_session_tools(mcp: FastMCP) -> None:
         other COMSOL tool. Status includes durable startup phases and a
         terminal timeout. Do NOT retry ``comsol_start`` while a start is in
         flight; the second call reports the existing attempt.
-        
+
         Args:
             cores: Number of processor cores to use (default: all available)
             version: COMSOL version to use, e.g., '6.0' (default: latest installed)
             products: Compatibility hint only. MPh 1.3.1 cannot preload a
                      product list; COMSOL checks out licensed products on demand.
-        
+
         Returns:
             Session info including version and core count, or error message
         """
         return session_manager.start(cores=cores, version=version, products=products)
-    
+
     @mcp.tool()
     def comsol_connect(port: int, host: str = "localhost") -> dict:
         """
         Connect to a remote COMSOL server.
-        
+
         Args:
             port: Port number the COMSOL server is listening on
             host: Server hostname or IP address (default: 'localhost')
-        
+
         Returns:
             Connection info or error message
         """
         return session_manager.connect(port=port, host=host)
-    
+
     @mcp.tool()
     def comsol_disconnect() -> dict:
         """
@@ -1134,17 +1169,17 @@ def register_session_tools(mcp: FastMCP) -> None:
 
         A stand-alone MPh client owns the process-global JVM and is retained
         for exact same-host reuse after its solver lease is released.
-        
+
         Returns:
             Success status and message
         """
         return session_manager.disconnect()
-    
+
     @mcp.tool()
     def comsol_status() -> dict:
         """
         Get the current COMSOL session status.
-        
+
         Returns:
             Session information including connection status, version, and loaded models
         """
