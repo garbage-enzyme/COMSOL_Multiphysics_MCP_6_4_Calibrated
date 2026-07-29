@@ -1343,3 +1343,106 @@ def test_production_worker_resource_gate_interrupts_before_second_solve(jobs_roo
     assert len(journal) == 10
     assert [entry["attempt"] for entry in journal] == [1] * 6 + [2] * 4
     assert lease_events == ["acquired", "released", "acquired", "released"]
+
+
+def test_worker_can_bind_its_own_identity_before_manager_acknowledgement(jobs_root):
+    store = JobStore(jobs_root)
+    job_id = store.create(
+        {"schema_version": "2", "job_type": "test"},
+        {
+            "schema_version": "2",
+            "status": "submitted",
+            "attempt": 1,
+            "worker_pid": None,
+            "worker_process_create_time": None,
+            "worker_command_signature": None,
+        },
+    )
+    identity = process_identity(os.getpid())
+
+    first = store.bind_worker_identity(job_id, identity)
+    second = store.bind_worker_identity(job_id, identity)
+
+    assert first["idempotent"] is False
+    assert second["idempotent"] is True
+    state = store.read_state(job_id)
+    assert state["worker_pid"] == identity["pid"]
+    with pytest.raises(RuntimeError, match="another worker"):
+        store.bind_worker_identity(job_id, {**identity, "pid": identity["pid"] + 1})
+
+
+def test_failed_job_initialization_never_publishes_a_partial_job_directory(jobs_root, monkeypatch):
+    store = JobStore(jobs_root)
+    real_write = store_module.atomic_write_json
+    calls = 0
+
+    def fail_second_write(path, value):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise OSError("injected initialization failure")
+        real_write(path, value)
+
+    monkeypatch.setattr(store_module, "atomic_write_json", fail_second_write)
+    with pytest.raises(OSError, match="initialization failure"):
+        store.create({}, {"status": "submitted"}, job_id="job-incomplete")
+
+    assert not store.job_dir("job-incomplete").exists()
+    assert not list(jobs_root.glob(".job-incomplete.*.tmp"))
+
+
+def test_worker_observation_reconciles_control_first_cancel_crash(jobs_root, monkeypatch):
+    store = JobStore(jobs_root)
+    identity = process_identity(os.getpid())
+    job_id = store.create(
+        {},
+        {
+            "schema_version": "2",
+            "status": "running",
+            "attempt": 1,
+            "worker_pid": identity["pid"],
+            "worker_process_create_time": identity["process_create_time"],
+            "worker_command_signature": identity["command_signature"],
+        },
+    )
+    real_write = store_module.atomic_write_json
+    failed = False
+
+    def fail_cancel_state(path, value):
+        nonlocal failed
+        if path.name == "state.json" and value.get("status") == "cancel_requested" and not failed:
+            failed = True
+            raise OSError("injected state projection failure")
+        real_write(path, value)
+
+    monkeypatch.setattr(store_module, "atomic_write_json", fail_cancel_state)
+    with pytest.raises(OSError, match="state projection failure"):
+        store.request_cancel(job_id, requester_identity=identity)
+    monkeypatch.setattr(store_module, "atomic_write_json", real_write)
+
+    assert store.read_state(job_id)["status"] == "running"
+    assert store.read_control(job_id)["request"] == "cancel_requested"
+    observed = store.record_cooperative_cancel_observed(
+        job_id, attempt=1, message="worker observed recovered request"
+    )
+    assert observed["recorded"] is True
+    assert observed["state"]["status"] == "cancel_requested"
+
+
+def test_hidden_job_staging_directory_is_not_visible_to_manager_scans(jobs_root, monkeypatch):
+    staging = jobs_root / ".job-unpublished.injected.tmp"
+    staging.mkdir()
+    atomic_write_json(staging / "state.json", {"status": "cancel_requested"})
+    atomic_write_json(
+        staging / "control.json",
+        {"request": "cancel_requested", "request_id": "cancel-unpublished"},
+    )
+    manager = JobManager(jobs_root, allow_test_jobs=True, reconcile_on_start=False)
+
+    def fail_if_locked(*_args, **_kwargs):
+        raise AssertionError("unpublished staging directory was treated as a job")
+
+    monkeypatch.setattr(manager.store, "lock", fail_if_locked)
+
+    assert manager.reconcile_cancellations() == 0
+    assert manager.summaries()["count_returned"] == 0

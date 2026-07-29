@@ -5,10 +5,10 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from pathlib import Path
 import sys
 import threading
 import time
+from pathlib import Path
 from typing import Any, Callable
 
 from .process_control import contain_current_process_tree
@@ -88,11 +88,7 @@ def _run(
     if spec.get("job_type") != "validation_matrix":
         raise ValueError("Validation worker accepts only validation_matrix jobs")
     identity = process_identity(os.getpid())
-    deadline = time.monotonic() + 3.0
-    while store.read_state(job_id).get("worker_pid") != identity["pid"]:
-        if time.monotonic() >= deadline:
-            raise RuntimeError("Control plane did not durably record the worker identity")
-        time.sleep(0.01)
+    store.bind_worker_identity(job_id, identity)
     contained = contain_current_process_tree()
     store.update_state(
         job_id,
@@ -105,7 +101,9 @@ def _run(
     if state["status"] == "cancel_requested" or cancel_request_targets_attempt(
         store.read_control(job_id), attempt
     ):
-        store.record_cooperative_cancel_observed(job_id, attempt=attempt, message="Stopped before startup")
+        store.record_cooperative_cancel_observed(
+            job_id, attempt=attempt, message="Stopped before startup"
+        )
         return 0
     if state["status"] == "submitted":
         store.update_state(job_id, "starting", event="worker_started")
@@ -139,11 +137,14 @@ def _run(
         model = client.load(str(source))
         model_name = str(model.name())
 
-        from comsol_mcp.jobs.resource_admission import ResourceStageAdapter, collect_resource_telemetry
+        from comsol_mcp.jobs.resource_admission import (
+            ResourceStageAdapter,
+            collect_resource_telemetry,
+        )
         from comsol_mcp.jobs.validation_collectors import execute_validation_collector
         from comsol_mcp.jobs.validation_runner import run_pending_validation_points
-        from comsol_mcp.tools.mesh import get_mesh_info
         from comsol_mcp.jobs.worker import _record_native_cancel
+        from comsol_mcp.tools.mesh import get_mesh_info
 
         rows_path = directory / "matrix_rows.jsonl"
 
@@ -152,7 +153,9 @@ def _run(
 
         def sample(stage: str, point_id: str) -> dict[str, Any]:
             if telemetry_provider is not None:
-                return telemetry_provider(stage, point_id, model, directory, time.monotonic() - worker_started)
+                return telemetry_provider(
+                    stage, point_id, model, directory, time.monotonic() - worker_started
+                )
             mesh_elements = None
             try:
                 mesh = get_mesh_info(model)
@@ -196,7 +199,9 @@ def _run(
                 return
 
         if native_cancel_enabled:
-            cancel_thread = threading.Thread(target=native_monitor, name="comsol-native-cancel", daemon=True)
+            cancel_thread = threading.Thread(
+                target=native_monitor, name="comsol-native-cancel", daemon=True
+            )
             cancel_thread.start()
 
         def execute(point: dict[str, Any], collector: dict[str, Any], artifact_dir: Path):
@@ -234,7 +239,9 @@ def _run(
             ownership.heartbeat(model_path=str(source), refresh_server_processes=True)
 
         if should_stop():
-            store.record_cooperative_cancel_observed(job_id, attempt=attempt, message="Stopped before matrix")
+            store.record_cooperative_cancel_observed(
+                job_id, attempt=attempt, message="Stopped before matrix"
+            )
             return 0
         store.update_state(job_id, "smoke_running", event="matrix_started")
         result = run_pending_validation_points(
@@ -248,7 +255,9 @@ def _run(
             after_durable_row_hook=resource_hook,
         )
         if should_stop() or result.get("stop_reason") == "control_request":
-            store.record_cooperative_cancel_observed(job_id, attempt=attempt, message="Stopped between matrix operations")
+            store.record_cooperative_cancel_observed(
+                job_id, attempt=attempt, message="Stopped between matrix operations"
+            )
             return 0
         if _resource_stop(store, job_id, result):
             return 0
@@ -272,7 +281,9 @@ def _run(
     except Exception as exc:
         current = store.read_state(job_id)["status"]
         if current == "cancel_requested":
-            store.record_cooperative_cancel_observed(job_id, attempt=attempt, message="Stopped between blocking operations")
+            store.record_cooperative_cancel_observed(
+                job_id, attempt=attempt, message="Stopped between blocking operations"
+            )
         elif current != "cancelling" and current not in {"completed", "interrupted"}:
             store.update_state(
                 job_id,

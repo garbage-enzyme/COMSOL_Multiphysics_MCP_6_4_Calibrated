@@ -62,11 +62,7 @@ def _run(
         raise ValueError("Spectral worker accepts only spectral_characterization jobs")
     validate_spectral_driver_identity(spec)
     identity = process_identity(os.getpid())
-    deadline = time.monotonic() + 3.0
-    while store.read_state(job_id).get("worker_pid") != identity["pid"]:
-        if time.monotonic() >= deadline:
-            raise RuntimeError("Control plane did not durably record the worker identity")
-        time.sleep(0.01)
+    store.bind_worker_identity(job_id, identity)
     contained = contain_current_process_tree()
     store.update_state(
         job_id,

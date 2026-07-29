@@ -2,20 +2,21 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 import csv
-from dataclasses import replace
 import hashlib
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import sys
 import tempfile
 import types
+from copy import deepcopy
+from dataclasses import replace
+from pathlib import Path
 
 import pytest
-
+import src.jobs.worker as production_worker
+from src.jobs import cancel_worker
 from src.jobs.attached_backend import (
     normalize_attached_execution_backend,
     normalize_attached_execution_request,
@@ -28,14 +29,12 @@ from src.jobs.attached_runtime import (
 )
 from src.jobs.manager import JobManager, validate_staged_sweep_spec
 from src.jobs.store import JobStore, process_identity
-import src.jobs.worker as production_worker
-from src.jobs import cancel_worker
-from src.tools.jobs import _submit_job
 from src.shared_session.identity import normalize_attached_server_identity
 from src.shared_session.locking import (
     build_shared_model_revision,
     normalize_shared_model_identity,
 )
+from src.tools.jobs import _submit_job
 
 
 @pytest.fixture
@@ -117,9 +116,7 @@ def test_attached_target_nested_snapshots_are_immutable():
         lambda value: value["attached_server"].update(ownership="owned"),
         lambda value: value["attached_server"].update(identity_sha256="0" * 64),
         lambda value: value["model"].update(identity_sha256="0" * 64),
-        lambda value: value["expected_revision"].update(
-            model_identity_sha256="0" * 64
-        ),
+        lambda value: value["expected_revision"].update(model_identity_sha256="0" * 64),
         lambda value: value["expected_revision"].update(revision_sha256="0" * 64),
     ],
 )
@@ -196,16 +193,19 @@ def test_staged_sweep_fingerprint_binds_normalized_attached_backend(tmp_path):
 
     assert spec["execution_backend"]["kind"] == "attached_shared_server"
     assert len(spec["execution_backend"]["backend_identity_sha256"]) == 64
-    assert spec["spec_fingerprint"] == validate_staged_sweep_spec(
-        {
-            "job_type": "staged_sweep",
-            "source_model_path": str(source),
-            "parameter_name": "gap",
-            "parameter_values": [10.0, 11.0],
-            "expressions": ["A"],
-            "execution_backend": _backend(),
-        }
-    )["spec_fingerprint"]
+    assert (
+        spec["spec_fingerprint"]
+        == validate_staged_sweep_spec(
+            {
+                "job_type": "staged_sweep",
+                "source_model_path": str(source),
+                "parameter_name": "gap",
+                "parameter_values": [10.0, 11.0],
+                "expressions": ["A"],
+                "execution_backend": _backend(),
+            }
+        )["spec_fingerprint"]
+    )
 
 
 def test_attached_runtime_restores_exact_target_and_accepts_unchanged_readback():
@@ -213,12 +213,15 @@ def test_attached_runtime_restores_exact_target_and_accepts_unchanged_readback()
 
     selected = verify_attached_model_inventory(
         target,
-        [target.model.to_dict(), {
-            "tag": "Other",
-            "label": "other.mph",
-            "file_path": "D:/models/other.mph",
-            "unsaved": False,
-        }],
+        [
+            target.model.to_dict(),
+            {
+                "tag": "Other",
+                "label": "other.mph",
+                "file_path": "D:/models/other.mph",
+                "unsaved": False,
+            },
+        ],
     )
     revision = verify_attached_model_revision(
         target,
@@ -239,12 +242,14 @@ def test_attached_runtime_restores_exact_target_and_accepts_unchanged_readback()
     "inventory",
     [
         [],
-        [{
-            "tag": "Model1",
-            "label": "different.mph",
-            "file_path": "D:/models/different.mph",
-            "unsaved": False,
-        }],
+        [
+            {
+                "tag": "Model1",
+                "label": "different.mph",
+                "file_path": "D:/models/different.mph",
+                "unsaved": False,
+            }
+        ],
         [
             {
                 "tag": "Model1",
@@ -303,8 +308,9 @@ def test_attached_revision_verifier_rejects_coercive_sequence_values(sequence):
         )
 
 
+@pytest.mark.parametrize("projection_gap", [False, True])
 def test_attached_production_worker_uses_existing_model_and_never_clears_server(
-    ascii_job_root, monkeypatch
+    ascii_job_root, monkeypatch, projection_gap
 ):
     import src.tools.ownership as ownership_module
     import src.tools.workflow as workflow_module
@@ -337,6 +343,7 @@ def test_attached_production_worker_uses_existing_model_and_never_clears_server(
     )
     events = []
     runner_save_copy = []
+    projection_gap_injected = False
 
     class FakeOwnership:
         def __init__(self, *_args, **_kwargs):
@@ -404,17 +411,14 @@ def test_attached_production_worker_uses_existing_model_and_never_clears_server(
             events.append(("disconnect", None))
 
     def fake_runner(_model, _parameter, values, _expressions, **kwargs):
+        nonlocal projection_gap_injected
         runner_save_copy.append(kwargs["save_model_copy"])
         output = Path(kwargs["csv_path"])
         existing = []
         if output.is_file() and output.stat().st_size:
             with output.open(newline="", encoding="utf-8") as handle:
                 existing = list(csv.DictReader(handle))
-        completed = {
-            row["parameter_value"]
-            for row in existing
-            if row.get("status") == "ok"
-        }
+        completed = {row["parameter_value"] for row in existing if row.get("status") == "ok"}
         added = 0
         limit = kwargs.get("max_new_points")
         for value in values:
@@ -447,6 +451,9 @@ def test_attached_production_worker_uses_existing_model_and_never_clears_server(
                 writer.writerow(row)
                 handle.flush()
                 os.fsync(handle.fileno())
+            if projection_gap and not projection_gap_injected:
+                projection_gap_injected = True
+                raise RuntimeError("injected row-to-projection gap")
             kwargs["on_durable_row"](row)
             completed.add(token)
             added += 1
@@ -468,25 +475,41 @@ def test_attached_production_worker_uses_existing_model_and_never_clears_server(
 
     code = production_worker.run(str(store.root), job_id)
 
+    if projection_gap:
+        failed = store.read_state(job_id)
+        assert code == 1
+        assert failed["status"] == "failed"
+        assert failed["progress"] == {"completed": 0, "total": 2}
+        assert failed["attached_execution"]["current_revision"]["sequence"] == 0
+        store.update_state(
+            job_id,
+            "starting",
+            patch={
+                "attempt": 2,
+                "worker_pid": identity["pid"],
+                "worker_process_create_time": identity["process_create_time"],
+                "worker_command_signature": identity["command_signature"],
+                "last_error": None,
+            },
+            event="test_resume",
+        )
+        code = production_worker.run(str(store.root), job_id)
+
     state = store.read_state(job_id)
     assert code == 0
     assert state["status"] == "completed"
     assert state["progress"] == {"completed": 2, "total": 2}
-    assert state["attached_execution"]["resource_ownership"] == (
-        "external_user_owned_server"
-    )
+    assert state["attached_execution"]["resource_ownership"] == ("external_user_owned_server")
     assert state["attached_cleanup"]["success"] is True
     assert state["attached_cleanup"]["model_identity_preserved"] is True
     assert state["attached_cleanup"]["model_clear_attempted"] is False
     assert state["attached_cleanup"]["external_server_termination_attempted"] is False
     assert state["attached_execution"]["current_revision"]["sequence"] == 2
-    assert runner_save_copy == [True, True]
+    assert runner_save_copy == ([True, True, True] if projection_gap else [True, True])
     assert events[0][0] == "acquire_attached"
     assert ("client", {"host": "127.0.0.1", "port": 2036}) in events
     assert events[-2:] == [("disconnect", None), ("release", None)]
-    assert hashlib.sha256(source.read_bytes()).hexdigest() == spec[
-        "source_model_sha256"
-    ]
+    assert hashlib.sha256(source.read_bytes()).hexdigest() == spec["source_model_sha256"]
 
 
 def _attached_process_snapshot(*, server_pid=4200, server_created=1234.5):
@@ -583,9 +606,7 @@ def test_attached_model_selection_accepts_last_durable_revision_on_resume():
         def models(self):
             return [Model()]
 
-    selected = production_worker._select_attached_model(
-        Client(), target, expected
-    )
+    selected = production_worker._select_attached_model(Client(), target, expected)
 
     assert selected.java.tag() == "Model1"
 
@@ -679,16 +700,15 @@ def test_attached_manager_preflight_is_process_only_and_binds_server_identity(
     assert preflight["success"] is True
     assert preflight["ready"] is True
     assert preflight["state"] == "ready_for_attached_worker"
-    assert preflight["server_identity_sha256"] == spec["execution_backend"][
-        "attached_server"
-    ]["identity_sha256"]
+    assert (
+        preflight["server_identity_sha256"]
+        == spec["execution_backend"]["attached_server"]["identity_sha256"]
+    )
     assert preflight["mph_imported"] is False
     assert preflight["client_constructed"] is False
 
 
-def test_attached_manager_preflight_rejects_changed_server_process(
-    ascii_job_root, monkeypatch
-):
+def test_attached_manager_preflight_rejects_changed_server_process(ascii_job_root, monkeypatch):
     import src.shared_session.process_probe as process_probe
 
     source = ascii_job_root / "immutable-source.mph"
@@ -769,8 +789,9 @@ def test_public_job_submit_resolves_live_handoff_before_manager_submit(
     assert calls[0][0] == "handoff"
     assert calls[0][1]["source_model_path"] == str(source.resolve())
     assert calls[1][0] == "submit"
-    assert calls[1][1]["execution_backend"]["backend_identity_sha256"] == (
-        result["attached_handoff"]["backend_identity_sha256"]
+    assert (
+        calls[1][1]["execution_backend"]["backend_identity_sha256"]
+        == (result["attached_handoff"]["backend_identity_sha256"])
     )
 
 
@@ -818,9 +839,7 @@ def test_public_job_submit_does_not_launch_after_handoff_failure(ascii_job_root)
     }
 
 
-def test_attached_cancel_cleanup_requires_external_server_preservation(
-    ascii_job_root, monkeypatch
-):
+def test_attached_cancel_cleanup_requires_external_server_preservation(ascii_job_root, monkeypatch):
     import src.shared_session.process_probe as process_probe
 
     source = ascii_job_root / "immutable-source.mph"
@@ -867,8 +886,8 @@ def test_attached_cancel_cleanup_requires_external_server_preservation(
     assert preserved["attached_external_resources"]["model_preservation_status"] == (
         "verified_before_cooperative_disconnect"
     )
-    assert preserved["attached_external_resources"][
-        "external_server_termination_attempted"
-    ] is False
+    assert (
+        preserved["attached_external_resources"]["external_server_termination_attempted"] is False
+    )
     assert changed["ok"] is False
     assert changed["attached_external_resources"]["success"] is False

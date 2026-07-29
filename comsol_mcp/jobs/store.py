@@ -2,25 +2,32 @@
 
 from __future__ import annotations
 
-from collections import deque
-from contextlib import contextmanager
 import hashlib
 import json
 import os
-from pathlib import Path
+import shutil
 import time
-from typing import Any, Iterator
 import uuid
+from collections import deque
+from contextlib import contextmanager
+from pathlib import Path
+from typing import Any, Iterator
 
 import psutil
 
 from comsol_mcp.durable import (
+    atomic_write_bytes as _durable_atomic_write_bytes,
+)
+from comsol_mcp.durable import (
     atomic_write_json as _durable_atomic_write_json,
+)
+from comsol_mcp.durable import (
     fsync_directory as _fsync_directory,
+)
+from comsol_mcp.durable import (
     json_document_bytes as _json_bytes,
 )
 from comsol_mcp.utils.runtime_paths import default_jobs_root as _shared_default_jobs_root
-
 
 JOB_SCHEMA_VERSION = "2"
 CREATE_TIME_TOLERANCE_SECONDS = 0.05
@@ -100,7 +107,7 @@ def process_identity(pid: int) -> dict[str, Any]:
 def process_identity_state(identity: dict[str, Any]) -> tuple[str, str]:
     try:
         actual = process_identity(int(identity["pid"]))
-    except (KeyError, TypeError, ValueError):
+    except KeyError, TypeError, ValueError:
         return "uncertain", "process identity fields are missing or invalid"
     except psutil.NoSuchProcess:
         return "stale", "worker PID no longer exists"
@@ -109,7 +116,10 @@ def process_identity_state(identity: dict[str, Any]) -> tuple[str, str]:
     expected_time = identity.get("process_create_time")
     if expected_time is None:
         return "uncertain", "worker creation time is missing"
-    if abs(float(actual["process_create_time"]) - float(expected_time)) > CREATE_TIME_TOLERANCE_SECONDS:
+    if (
+        abs(float(actual["process_create_time"]) - float(expected_time))
+        > CREATE_TIME_TOLERANCE_SECONDS
+    ):
         return "stale", "worker PID was reused"
     expected_signature = identity.get("command_signature")
     if expected_signature and actual["command_signature"] != expected_signature:
@@ -164,7 +174,7 @@ class JobLock:
                     if state == "stale" and self.path.read_bytes() == observed:
                         self._unlink_with_retry(expected=observed)
                         continue
-                except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                except OSError, UnicodeDecodeError, json.JSONDecodeError:
                     pass
                 if time.monotonic() >= deadline:
                     raise TimeoutError(f"Timed out waiting for durable job lock: {self.path}")
@@ -220,7 +230,9 @@ class JobStore:
         self.root.mkdir(parents=True, exist_ok=True)
 
     def job_dir(self, job_id: str) -> Path:
-        if not job_id or any(character not in "abcdefghijklmnopqrstuvwxyz0123456789-" for character in job_id):
+        if not job_id or any(
+            character not in "abcdefghijklmnopqrstuvwxyz0123456789-" for character in job_id
+        ):
             raise ValueError("Invalid job ID")
         path = self.root / job_id
         if path.parent.resolve() != self.root.resolve():
@@ -230,18 +242,67 @@ class JobStore:
     def create(self, spec: dict[str, Any], state: dict[str, Any], job_id: str | None = None) -> str:
         job_id = job_id or f"job-{uuid.uuid4().hex}"
         directory = self.job_dir(job_id)
-        directory.mkdir(parents=False, exist_ok=False)
-        atomic_write_json(directory / "spec.json", spec)
-        atomic_write_json(directory / "state.json", state)
-        atomic_write_json(
-            directory / "control.json",
-            {"schema_version": JOB_SCHEMA_VERSION, "request": None, "updated_at_epoch": time.time()},
-        )
-        (directory / "events.jsonl").touch(exist_ok=False)
-        (directory / "resource.jsonl").touch(exist_ok=False)
-        (directory / "worker.log").touch(exist_ok=False)
-        _fsync_directory(directory)
+        if directory.exists():
+            raise FileExistsError(f"Job directory already exists: {directory}")
+        staging = self.root / f".{job_id}.{uuid.uuid4().hex}.tmp"
+        staging.mkdir(parents=False, exist_ok=False)
+        published = False
+        try:
+            atomic_write_json(staging / "spec.json", spec)
+            atomic_write_json(staging / "state.json", state)
+            atomic_write_json(
+                staging / "control.json",
+                {
+                    "schema_version": JOB_SCHEMA_VERSION,
+                    "request": None,
+                    "updated_at_epoch": time.time(),
+                },
+            )
+            (staging / "events.jsonl").touch(exist_ok=False)
+            (staging / "resource.jsonl").touch(exist_ok=False)
+            (staging / "worker.log").touch(exist_ok=False)
+            _fsync_directory(staging)
+            os.rename(staging, directory)
+            published = True
+            _fsync_directory(self.root)
+        finally:
+            if not published:
+                shutil.rmtree(staging, ignore_errors=True)
         return job_id
+
+    def bind_worker_identity(self, job_id: str, identity: dict[str, Any]) -> dict[str, Any]:
+        """Let a launched worker durably bind itself before any side effect."""
+        required = {"pid", "process_create_time", "command_signature"}
+        if not isinstance(identity, dict) or not required <= set(identity):
+            raise ValueError("worker identity is incomplete")
+        with self.lock(job_id):
+            state = self.read_state(job_id)
+            observed = {
+                "pid": state.get("worker_pid"),
+                "process_create_time": state.get("worker_process_create_time"),
+                "command_signature": state.get("worker_command_signature"),
+            }
+            expected = {key: identity[key] for key in required}
+            if observed["pid"] is not None:
+                if observed != expected:
+                    raise RuntimeError("durable job is already bound to another worker")
+                return {"bound": True, "idempotent": True, "state": state}
+            state.update(
+                {
+                    "worker_pid": expected["pid"],
+                    "worker_process_create_time": expected["process_create_time"],
+                    "worker_command_signature": expected["command_signature"],
+                    "updated_at_epoch": time.time(),
+                }
+            )
+            atomic_write_json(self.job_dir(job_id) / "state.json", state)
+            self._append_event_unlocked(
+                job_id,
+                "worker_identity_bound",
+                {"pid": expected["pid"]},
+                str(state["status"]),
+            )
+            return {"bound": True, "idempotent": False, "state": state}
 
     def read_spec(self, job_id: str) -> dict[str, Any]:
         return read_json(self.job_dir(job_id) / "spec.json")
@@ -412,7 +473,36 @@ class JobStore:
             if not cancel_request_targets_attempt(control, attempt):
                 return {"recorded": False, "reason": "no_matching_cancel_request", "state": state}
             if state.get("status") not in {"cancel_requested", "cancelling"}:
-                return {"recorded": False, "reason": "state_not_cancelling", "state": state}
+                status = str(state.get("status"))
+                if "cancel_requested" not in TRANSITIONS.get(status, set()):
+                    return {
+                        "recorded": False,
+                        "reason": "state_not_cancelling",
+                        "state": state,
+                    }
+                requested_at = float(control.get("requested_at_epoch", time.time()))
+                state["status"] = "cancel_requested"
+                state["cancel"] = {
+                    "request_id": control.get("request_id"),
+                    "target_attempt": int(attempt),
+                    "requested_at_epoch": requested_at,
+                    "requester_identity": control.get("requester_identity"),
+                    "phase": "requested",
+                    "phase_timestamps": {"requested": requested_at},
+                    "native": {"candidate": None, "supported": None, "attempted": False},
+                    "worker": {"exact_identity": control.get("target_worker")},
+                }
+                state["updated_at_epoch"] = time.time()
+                atomic_write_json(self.job_dir(job_id) / "state.json", state)
+                self._append_event_unlocked(
+                    job_id,
+                    "cancel_request_reconciled",
+                    {
+                        "request_id": control.get("request_id"),
+                        "target_attempt": int(attempt),
+                    },
+                    "cancel_requested",
+                )
 
             cancel = dict(state.get("cancel") or {})
             request_id = control.get("request_id")
@@ -527,18 +617,18 @@ class JobStore:
             attempt = int(state.get("attempt", 1))
             replay = replay_resource_journal(current + entries, attempt=attempt)
             path = self.job_dir(job_id) / "resource.jsonl"
-            with path.open("ab") as handle:
-                for entry in entries:
-                    payload = json.dumps(
-                        entry,
-                        ensure_ascii=False,
-                        sort_keys=True,
-                        separators=(",", ":"),
-                        allow_nan=False,
-                    ).encode("utf-8")
-                    handle.write(payload + b"\n")
-                    handle.flush()
-                    os.fsync(handle.fileno())
+            payload = b"".join(
+                json.dumps(
+                    entry,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    allow_nan=False,
+                ).encode("utf-8")
+                + b"\n"
+                for entry in current + entries
+            )
+            _durable_atomic_write_bytes(path, payload, replace_fn=os.replace)
             return replay
 
     def _append_event_unlocked(
@@ -552,7 +642,9 @@ class JobStore:
             "data": data,
         }
         with (self.job_dir(job_id) / "events.jsonl").open("ab") as handle:
-            handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True).encode("utf-8") + b"\n")
+            handle.write(
+                json.dumps(record, ensure_ascii=False, sort_keys=True).encode("utf-8") + b"\n"
+            )
             handle.flush()
             os.fsync(handle.fileno())
 

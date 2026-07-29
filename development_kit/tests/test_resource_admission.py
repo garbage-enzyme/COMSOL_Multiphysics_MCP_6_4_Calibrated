@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import shutil
 import uuid
+from pathlib import Path
 
 import pytest
-
+import src.jobs.worker as production_worker
 from src.jobs.manager import validate_staged_sweep_spec
 from src.jobs.resource_admission import (
     ResourceStageAdapter,
@@ -21,11 +21,9 @@ from src.jobs.resource_admission import (
     replay_resource_journal,
 )
 from src.jobs.store import JobStore
-import src.jobs.worker as production_worker
-from src.tools.workflow import _sweep_point_id, run_staged_parametric_sweep
-from src.tools.workflow import _run_bounded_sweep_hook
-from development_kit.tests.test_workflow import FakeModel, read_csv
+from src.tools.workflow import _run_bounded_sweep_hook, _sweep_point_id, run_staged_parametric_sweep
 
+from development_kit.tests.test_workflow import FakeModel, read_csv
 
 POLICY = {
     "available_memory_warn_fraction": 0.25,
@@ -87,8 +85,14 @@ def test_explicit_policy_and_sample_are_deterministic_without_host_defaults():
         ({}, "at least one"),
         ({"unknown": 1}, "unknown"),
         ({"available_memory_warn_fraction": 1.1}, "between 0 and 1"),
-        ({"available_memory_warn_fraction": 0.1, "available_memory_refuse_fraction": 0.2}, "must not exceed"),
-        ({"runtime_free_space_warn_bytes": 100, "runtime_free_space_refuse_bytes": 200}, "must not exceed"),
+        (
+            {"available_memory_warn_fraction": 0.1, "available_memory_refuse_fraction": 0.2},
+            "must not exceed",
+        ),
+        (
+            {"runtime_free_space_warn_bytes": 100, "runtime_free_space_refuse_bytes": 200},
+            "must not exceed",
+        ),
         ({"max_mesh_elements": 1.5}, "positive integer"),
         ({"wall_time_budget_seconds": 10}, "declared together"),
         ({"wall_time_budget_seconds": 10, "minimum_next_point_seconds": 20}, "must not exceed"),
@@ -228,7 +232,9 @@ def test_staged_sweep_spec_normalizes_policy_into_immutable_fingerprint(tmp_path
         staged_spec(source, {**POLICY, "max_mesh_elements": 349_999})
     )
 
-    assert first["resource_policy"]["policy_sha256"] == reordered["resource_policy"]["policy_sha256"]
+    assert (
+        first["resource_policy"]["policy_sha256"] == reordered["resource_policy"]["policy_sha256"]
+    )
     assert first["spec_fingerprint"] == reordered["spec_fingerprint"]
     assert changed["spec_fingerprint"] != first["spec_fingerprint"]
     assert first["resource_policy"]["host_defaults_applied"] is False
@@ -385,7 +391,15 @@ def test_calibration_is_deterministic_and_marks_missing_metrics_unavailable():
         ({"baseline_status": "assumed_safe"}, "exactly known_safe"),
         ({"candidates": []}, "non-empty list"),
         ({"candidates": [{"sample_id": "safe", "telemetry": {"stage": "post_solve"}}]}, "unique"),
-        ({"candidates": [{"sample_id": "x", "telemetry": {"stage": "post_solve"}}, {"sample_id": "x", "telemetry": {"stage": "post_solve"}}]}, "unique"),
+        (
+            {
+                "candidates": [
+                    {"sample_id": "x", "telemetry": {"stage": "post_solve"}},
+                    {"sample_id": "x", "telemetry": {"stage": "post_solve"}},
+                ]
+            },
+            "unique",
+        ),
     ],
 )
 def test_invalid_calibration_contract_fails_closed(changes, match):
@@ -569,6 +583,27 @@ def test_job_store_persists_validated_resource_journal_with_fsync_contract(ascii
     assert final["points"]["wl:4.25"]["action"] == "start_point"
     assert store.read_resource_journal(job_id) == warning + [continuation]
     assert (store.job_dir(job_id) / "resource.jsonl").read_bytes().endswith(b"\n")
+
+
+def test_resource_transition_batch_failure_cannot_publish_a_prefix(ascii_jobs_root, monkeypatch):
+    store = JobStore(ascii_jobs_root / "jobs")
+    job_id = store.create({}, {"attempt": 1, "status": "submitted"}, job_id="job-batch")
+    entries = build_resource_admission_entries(
+        attempt=1,
+        point_id="wl:4.25",
+        attempt_sequence=0,
+        policy=POLICY,
+        sample=sample(available_memory_bytes=20),
+    )
+    monkeypatch.setattr(
+        "src.jobs.store._durable_atomic_write_bytes",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("injected batch failure")),
+    )
+
+    with pytest.raises(OSError, match="batch failure"):
+        store.append_resource_journal(job_id, entries)
+    assert store.read_resource_journal(job_id) == []
+    assert (store.job_dir(job_id) / "resource.jsonl").read_bytes() == b""
 
 
 def test_job_store_rejects_wrong_attempt_before_appending(ascii_jobs_root):
@@ -756,13 +791,16 @@ def test_attached_revision_gate_matches_bounded_sweep_hook_contract():
 
     result = production_worker._attached_point_start_result(context)
 
-    assert _run_bounded_sweep_hook(
-        lambda _context: result,
-        phase="before_point",
-        stage="pre_solve",
-        point_id="point:30",
-        parameter_name="saved_model_agent_value",
-        parameter_value="30[mm]",
-        config_id="config-30",
-    ) == "start_point"
+    assert (
+        _run_bounded_sweep_hook(
+            lambda _context: result,
+            phase="before_point",
+            stage="pre_solve",
+            point_id="point:30",
+            parameter_name="saved_model_agent_value",
+            parameter_value="30[mm]",
+            config_id="config-30",
+        )
+        == "start_point"
+    )
     assert "config_id" not in result

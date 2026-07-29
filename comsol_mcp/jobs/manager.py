@@ -129,11 +129,17 @@ def validate_staged_sweep_spec(raw: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(values, list) or not values:
         raise ValueError("parameter_values must be a nonempty list")
     for value in values:
-        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(float(value))
+        ):
             raise ValueError("parameter_values must contain only finite numbers")
     expressions = spec.get("expressions")
-    if not isinstance(expressions, list) or not expressions or not all(
-        isinstance(item, str) and item.strip() for item in expressions
+    if (
+        not isinstance(expressions, list)
+        or not expressions
+        or not all(isinstance(item, str) and item.strip() for item in expressions)
     ):
         raise ValueError("expressions must be a nonempty string list")
     if len(set(expressions)) != len(expressions):
@@ -146,12 +152,24 @@ def validate_staged_sweep_spec(raw: dict[str, Any]) -> dict[str, Any]:
         if isinstance(value, bool) or not isinstance(value, int) or value < 0:
             raise ValueError(f"{key} must be a non-negative integer")
     checkpoint_every = spec.get("checkpoint_every", 1)
-    if isinstance(checkpoint_every, bool) or not isinstance(checkpoint_every, int) or checkpoint_every < 1:
+    if (
+        isinstance(checkpoint_every, bool)
+        or not isinstance(checkpoint_every, int)
+        or checkpoint_every < 1
+    ):
         raise ValueError("checkpoint_every must be a positive integer")
     cores = spec.get("cores")
     if cores is not None and (isinstance(cores, bool) or not isinstance(cores, int) or cores < 1):
         raise ValueError("cores must be a positive integer")
-    for key in ("parameter_unit", "study_name", "study_step_tag", "study_step_property", "study_step_unit", "study_step_unit_property", "version"):
+    for key in (
+        "parameter_unit",
+        "study_name",
+        "study_step_tag",
+        "study_step_property",
+        "study_step_unit",
+        "study_step_unit_property",
+        "version",
+    ):
         if key in spec and spec[key] is not None and not isinstance(spec[key], str):
             raise ValueError(f"{key} must be a string when provided")
     bounds = spec.get("physical_bounds")
@@ -159,9 +177,20 @@ def validate_staged_sweep_spec(raw: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(bounds, dict):
             raise ValueError("physical_bounds must be an expression-to-[minimum, maximum] object")
         for expression, limits in bounds.items():
-            if expression not in expressions or not isinstance(limits, (list, tuple)) or len(limits) != 2:
-                raise ValueError("physical_bounds keys must be requested expressions with two limits")
-            if any(isinstance(item, bool) or not isinstance(item, (int, float)) or not math.isfinite(float(item)) for item in limits):
+            if (
+                expression not in expressions
+                or not isinstance(limits, (list, tuple))
+                or len(limits) != 2
+            ):
+                raise ValueError(
+                    "physical_bounds keys must be requested expressions with two limits"
+                )
+            if any(
+                isinstance(item, bool)
+                or not isinstance(item, (int, float))
+                or not math.isfinite(float(item))
+                for item in limits
+            ):
                 raise ValueError("physical_bounds limits must be finite numbers")
             if float(limits[0]) > float(limits[1]):
                 raise ValueError("physical_bounds minimum must not exceed maximum")
@@ -178,12 +207,12 @@ def validate_staged_sweep_spec(raw: dict[str, Any]) -> dict[str, Any]:
             digest.update(block)
     spec["source_model_sha256"] = digest.hexdigest()
     if "execution_backend" in spec:
-        spec["execution_backend"] = normalize_attached_execution_backend(
-            spec["execution_backend"]
-        )
+        spec["execution_backend"] = normalize_attached_execution_backend(spec["execution_backend"])
     spec["smoke_points"] = smoke_points
     spec["schema_version"] = JOB_SCHEMA_VERSION
-    spec["spec_fingerprint"] = _fingerprint({k: v for k, v in spec.items() if k != "spec_fingerprint"})
+    spec["spec_fingerprint"] = _fingerprint(
+        {k: v for k, v in spec.items() if k != "spec_fingerprint"}
+    )
     return spec
 
 
@@ -192,13 +221,17 @@ def _validate_test_spec(raw: dict[str, Any]) -> dict[str, Any]:
     if spec.get("job_type") != "test_sequence":
         raise ValueError("Injected test manager accepts only job_type='test_sequence'")
     delays = spec.get("delays", [0.05])
-    if not isinstance(delays, list) or not delays or any(
-        isinstance(value, bool)
-        or not isinstance(value, (int, float))
-        or not math.isfinite(float(value))
-        or float(value) < 0
-        or float(value) > 30
-        for value in delays
+    if (
+        not isinstance(delays, list)
+        or not delays
+        or any(
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(float(value))
+            or float(value) < 0
+            or float(value) > 30
+            for value in delays
+        )
     ):
         raise ValueError("test_sequence delays must be finite values between 0 and 30 seconds")
     spec = {"job_type": "test_sequence", "delays": [float(value) for value in delays]}
@@ -277,7 +310,9 @@ class JobManager:
         if spec["job_type"] != "test_sequence":
             preflight = self._run_preflight(spec)
             if not preflight.get("ready", preflight.get("success", False)):
-                raise RuntimeError(f"Job preflight failed: {preflight.get('blockers') or preflight}")
+                raise RuntimeError(
+                    f"Job preflight failed: {preflight.get('blockers') or preflight}"
+                )
         now = time.time()
         total_points = _point_count(spec)
         state = {
@@ -293,13 +328,13 @@ class JobManager:
             "last_error": None,
         }
         if spec["job_type"] in {
-            "validation_matrix", "spectral_characterization", "convergence_campaign",
+            "validation_matrix",
+            "spectral_characterization",
+            "convergence_campaign",
             "branch_continuation_campaign",
         }:
             with JobLock(self.store.root / ".submit.lock"):
-                duplicate = self._find_exact_duplicate(
-                    spec["job_type"], spec["spec_fingerprint"]
-                )
+                duplicate = self._find_exact_duplicate(spec["job_type"], spec["spec_fingerprint"])
                 if duplicate is not None:
                     existing_state = self.store.read_state(duplicate)
                     return {
@@ -319,16 +354,7 @@ class JobManager:
         self.store.append_event(job_id, "submitted", {"spec_fingerprint": spec["spec_fingerprint"]})
         try:
             identity = self._launch_worker(job_id, worker_module)
-            self.store.update_state(
-                job_id,
-                patch={
-                    "worker_pid": identity["pid"],
-                    "worker_process_create_time": identity["process_create_time"],
-                    "worker_command_signature": identity["command_signature"],
-                },
-                event="worker_launched",
-                event_data={"pid": identity["pid"]},
-            )
+            self.store.bind_worker_identity(job_id, identity)
         except Exception as exc:
             self.store.update_state(
                 job_id,
@@ -342,9 +368,7 @@ class JobManager:
     def _find_validation_duplicate(self, spec_fingerprint: str) -> str | None:
         return self._find_exact_duplicate("validation_matrix", spec_fingerprint)
 
-    def _find_exact_duplicate(
-        self, job_type: str, spec_fingerprint: str
-    ) -> str | None:
+    def _find_exact_duplicate(self, job_type: str, spec_fingerprint: str) -> str | None:
         directories = sorted(
             path
             for path in self.store.root.iterdir()
@@ -428,9 +452,7 @@ class JobManager:
                     "ready": False,
                     "state": "attached_server_identity_changed",
                     "blockers": ["attached_server_identity_changed"],
-                    "expected_server_identity_sha256": (
-                        target.server.identity_sha256
-                    ),
+                    "expected_server_identity_sha256": (target.server.identity_sha256),
                     "observed_server_identity_sha256": observed.identity_sha256,
                     "execution_backend": "attached_shared_server",
                 }
@@ -481,7 +503,9 @@ class JobManager:
                 return process_identity(process.pid)
             except psutil.NoSuchProcess:
                 if time.monotonic() >= deadline:
-                    raise RuntimeError("Detached test worker exited before its identity was recorded")
+                    raise RuntimeError(
+                        "Detached test worker exited before its identity was recorded"
+                    )
                 time.sleep(0.01)
 
     def cancel(self, job_id: str) -> dict[str, Any]:
@@ -510,7 +534,12 @@ class JobManager:
             except Exception as exc:
                 self.store.update_state(
                     job_id,
-                    patch={"cancel": {**state.get("cancel", {}), "coordinator_launch_error": f"{type(exc).__name__}: {exc}"}},
+                    patch={
+                        "cancel": {
+                            **state.get("cancel", {}),
+                            "coordinator_launch_error": f"{type(exc).__name__}: {exc}",
+                        }
+                    },
                     event="cancel_coordinator_launch_failed",
                 )
         return {
@@ -536,7 +565,9 @@ class JobManager:
         ]
         flags = 0
         if os.name == "nt":
-            flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "DETACHED_PROCESS", 0)
+            flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(
+                subprocess, "DETACHED_PROCESS", 0
+            )
         with (directory / "worker.log").open("ab", buffering=0) as log:
             process = subprocess.Popen(
                 command,
@@ -556,7 +587,13 @@ class JobManager:
             return 0
         count = max(1, min(int(limit), 100))
         directories = sorted(
-            (path for path in self.store.root.iterdir() if path.is_dir() and (path / "state.json").is_file()),
+            (
+                path
+                for path in self.store.root.iterdir()
+                if path.is_dir()
+                and path.name.startswith("job-")
+                and (path / "state.json").is_file()
+            ),
             key=lambda path: path.stat().st_mtime_ns,
             reverse=True,
         )[:count]
@@ -569,7 +606,9 @@ class JobManager:
                     control = self.store.read_control(job_id)
                     if state.get("status") not in {"cancel_requested", "cancelling"}:
                         continue
-                    if control.get("request") != "cancel_requested" or not control.get("request_id"):
+                    if control.get("request") != "cancel_requested" or not control.get(
+                        "request_id"
+                    ):
                         continue
                     attempt = int(state.get("attempt", 1))
                     if not cancel_request_targets_attempt(control, attempt):
@@ -581,7 +620,11 @@ class JobManager:
                     coordinator_verdict = (
                         inspect_identity(coordinator)
                         if isinstance(coordinator, dict)
-                        else {"identity": coordinator, "state": "missing", "reason": "coordinator identity is missing"}
+                        else {
+                            "identity": coordinator,
+                            "state": "missing",
+                            "reason": "coordinator identity is missing",
+                        }
                     )
                     if coordinator_verdict["state"] == "active":
                         continue
@@ -591,7 +634,11 @@ class JobManager:
                     worker_verdict = (
                         inspect_identity(worker)
                         if isinstance(worker, dict)
-                        else {"identity": worker, "state": "missing", "reason": "worker identity is missing"}
+                        else {
+                            "identity": worker,
+                            "state": "missing",
+                            "reason": "worker identity is missing",
+                        }
                     )
                     capture = cancel.get("descendant_capture")
                     capture_proved = (
@@ -601,7 +648,8 @@ class JobManager:
                             (
                                 isinstance(capture.get("worker"), dict)
                                 and capture["worker"].get("state") == "active"
-                                and capture.get("capture_method", "live_enumeration") == "live_enumeration"
+                                and capture.get("capture_method", "live_enumeration")
+                                == "live_enumeration"
                             )
                             or (
                                 capture.get("capture_method") == "contained_worker_exit"
@@ -700,7 +748,7 @@ class JobManager:
                 else:
                     self._launch_cancel_coordinator(job_id, payload["request_id"])
                     reconciled += 1
-            except (FileNotFoundError, TimeoutError, ValueError, OSError):
+            except FileNotFoundError, TimeoutError, ValueError, OSError:
                 continue
         return reconciled
 
@@ -713,7 +761,9 @@ class JobManager:
             if spec["job_type"] == "test_sequence" and not self.allow_test_jobs:
                 raise ValueError("test_sequence jobs are disabled")
             expected = spec.get("spec_fingerprint")
-            actual = _fingerprint({key: value for key, value in spec.items() if key != "spec_fingerprint"})
+            actual = _fingerprint(
+                {key: value for key, value in spec.items() if key != "spec_fingerprint"}
+            )
             if expected != actual:
                 raise ValueError("Refusing resume because immutable spec fingerprint changed")
 
@@ -735,13 +785,17 @@ class JobManager:
                 if lease["state"] == "stale":
                     payload = lease.get("lease") or {}
                     if payload.get("owner") != f"job:{job_id}":
-                        raise RuntimeError("Refusing to recover a stale lease that does not belong to this job")
+                        raise RuntimeError(
+                            "Refusing to recover a stale lease that does not belong to this job"
+                        )
                     recovered = ownership.recover_stale()
                     if not recovered.get("success"):
                         raise RuntimeError(f"Cannot recover this job's stale lease: {recovered}")
             preflight = self._run_preflight(spec)
             if not preflight.get("ready", preflight.get("success", False)):
-                raise RuntimeError(f"Resume preflight failed: {preflight.get('blockers') or preflight}")
+                raise RuntimeError(
+                    f"Resume preflight failed: {preflight.get('blockers') or preflight}"
+                )
 
         with self.store.lock(job_id):
             state = self.store.read_state(job_id)
@@ -772,20 +826,13 @@ class JobManager:
                 None,
                 fields={"cleared_for_attempt": state["attempt"]},
             )
-            self.store._append_event_unlocked(job_id, "resume_requested", {"attempt": state["attempt"]}, "starting")
+            self.store._append_event_unlocked(
+                job_id, "resume_requested", {"attempt": state["attempt"]}, "starting"
+            )
         module = _worker_module(current_spec["job_type"])
         try:
             identity = self._launch_worker(job_id, module)
-            self.store.update_state(
-                job_id,
-                patch={
-                    "worker_pid": identity["pid"],
-                    "worker_process_create_time": identity["process_create_time"],
-                    "worker_command_signature": identity["command_signature"],
-                },
-                event="worker_relaunched",
-                event_data={"pid": identity["pid"]},
-            )
+            self.store.bind_worker_identity(job_id, identity)
         except Exception as exc:
             self.store.update_state(
                 job_id,
@@ -794,7 +841,12 @@ class JobManager:
                 event="resume_launch_failed",
             )
             raise
-        return {"success": True, "job_id": job_id, "status": "starting", "attempt": state["attempt"]}
+        return {
+            "success": True,
+            "job_id": job_id,
+            "status": "starting",
+            "attempt": state["attempt"],
+        }
 
     def status(self, job_id: str) -> dict[str, Any]:
         # A cancellation coordinator must be able to acquire the durable lock
@@ -820,7 +872,9 @@ class JobManager:
                 if process_state == "stale" and current != "cancelling":
                     control = self.store.read_control(job_id)
                     attempt = int(state.get("attempt", 1))
-                    if current == "cancel_requested" and cancel_request_targets_attempt(control, attempt):
+                    if current == "cancel_requested" and cancel_request_targets_attempt(
+                        control, attempt
+                    ):
                         # A matching cancellation owns this attempt's terminal
                         # outcome.  Preserve the nonterminal state so the
                         # coordinator can prove process/port/lease cleanup.
@@ -833,7 +887,9 @@ class JobManager:
                         state["last_error"] = {"type": "WorkerInterrupted", "message": reason}
                         state["updated_at_epoch"] = time.time()
                         atomic_write_json(self.store.job_dir(job_id) / "state.json", state)
-                        self.store._append_event_unlocked(job_id, "worker_interrupted", {"reason": reason}, "interrupted")
+                        self.store._append_event_unlocked(
+                            job_id, "worker_interrupted", {"reason": reason}, "interrupted"
+                        )
                 else:
                     state["worker_process_state"] = process_state
                     state["worker_process_reason"] = reason
@@ -918,7 +974,13 @@ class JobManager:
     def summaries(self, limit: int = 20) -> dict[str, Any]:
         count = max(1, min(int(limit), 100))
         directories = sorted(
-            (path for path in self.store.root.iterdir() if path.is_dir() and (path / "state.json").is_file()),
+            (
+                path
+                for path in self.store.root.iterdir()
+                if path.is_dir()
+                and path.name.startswith("job-")
+                and (path / "state.json").is_file()
+            ),
             key=lambda path: path.stat().st_mtime_ns,
             reverse=True,
         )[:count]

@@ -19,11 +19,7 @@ def _run(root: str, job_id: str) -> int:
     if spec.get("job_type") != "test_sequence":
         raise ValueError("Sequence worker refuses non-test jobs")
     identity = process_identity(os.getpid())
-    deadline = time.monotonic() + 2.0
-    while store.read_state(job_id).get("worker_pid") != identity["pid"]:
-        if time.monotonic() >= deadline:
-            raise RuntimeError("Control plane did not durably record the worker identity")
-        time.sleep(0.01)
+    store.bind_worker_identity(job_id, identity)
     store.update_state(
         job_id,
         patch={"process_tree_contained": bool(process_tree_contained)},
