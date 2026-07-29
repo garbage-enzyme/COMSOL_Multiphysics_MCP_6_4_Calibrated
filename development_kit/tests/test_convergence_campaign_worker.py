@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import os
+import threading
 import time
 from pathlib import Path
 
 from src.jobs.convergence_campaign import normalize_convergence_campaign_spec
 from src.jobs.convergence_campaign_rows import read_convergence_campaign_levels
 from src.jobs.convergence_campaign_worker import _run
+import src.jobs.convergence_campaign_worker as worker_module
 from src.jobs.manager import JobManager
 from src.jobs.store import JobStore, process_identity
 
@@ -255,3 +257,123 @@ def test_manager_exact_resubmission_observes_existing_campaign(
         "last_level_row_sha256": None,
         "maximum_total_points": 30,
     }
+
+
+def test_early_cancellation_reconciles_cleanup_failure(tmp_path, ascii_tmp_path):
+    store, spec, job_id = _created_job(tmp_path, ascii_tmp_path)
+    ownership = _Ownership(release_success=False)
+    client = _Client()
+
+    def cancelling_client(_spec):
+        store.request_cancel(job_id, requester_identity=process_identity(os.getpid()))
+        return client
+
+    code = _run(
+        str(store.root),
+        job_id,
+        ownership_factory=lambda *_args: ownership,
+        client_factory=cancelling_client,
+        collector_executor=_collector_for(spec),
+        telemetry_provider=_telemetry,
+        native_cancel_enabled=False,
+    )
+
+    state = store.read_state(job_id)
+    assert code == 1
+    assert state["status"] == "cancel_requested"
+    assert state["cancel"]["cooperative_observation"]["request_id"] == state["cancel"]["request_id"]
+    assert "lease_release" in state["cancel"]["worker_error"]["message"]
+
+
+def test_final_source_hash_error_becomes_durable_failure(tmp_path, ascii_tmp_path, monkeypatch):
+    store, spec, job_id = _created_job(tmp_path, ascii_tmp_path)
+    final_verification = False
+    real_hash = worker_module._sha256_file
+
+    def controlled_hash(path):
+        if final_verification:
+            raise OSError("injected final convergence hash failure")
+        return real_hash(path)
+
+    def fault_hook(phase, _context):
+        nonlocal final_verification
+        if phase == "during_cleanup":
+            final_verification = True
+
+    monkeypatch.setattr(worker_module, "_sha256_file", controlled_hash)
+    code = _run(
+        str(store.root),
+        job_id,
+        ownership_factory=lambda *_args: _Ownership(),
+        client_factory=lambda _spec: _Client(),
+        collector_executor=_collector_for(spec),
+        telemetry_provider=_telemetry,
+        native_cancel_enabled=False,
+        fault_hook=fault_hook,
+    )
+
+    state = store.read_state(job_id)
+    assert code == 1
+    assert state["status"] == "failed"
+    assert state["last_error"]["type"] == "OSError"
+    assert "final convergence hash failure" in state["last_error"]["message"]
+
+
+def test_native_cancel_timeout_blocks_client_and_lease_cleanup(
+    tmp_path, ascii_tmp_path, monkeypatch
+):
+    from src.jobs import native_cancel_probe
+    from src.jobs import worker as production_worker
+
+    store, spec, job_id = _created_job(tmp_path, ascii_tmp_path)
+    ownership = _Ownership()
+    client = _Client()
+    native_started = threading.Event()
+    native_release = threading.Event()
+    native_finished = threading.Event()
+    base_collector = _collector_for(spec)
+    cancellation_requested = False
+
+    def blocked_native_cancel():
+        native_started.set()
+        native_release.wait(timeout=5)
+        return {"attempted": True, "supported": False}
+
+    real_record = production_worker._record_native_cancel
+
+    def tracked_record(*args, **kwargs):
+        try:
+            return real_record(*args, **kwargs)
+        finally:
+            native_finished.set()
+
+    def cancelling_collector(point, collector, artifact_dir):
+        nonlocal cancellation_requested
+        result = base_collector(point, collector, artifact_dir)
+        if not cancellation_requested:
+            cancellation_requested = True
+            store.request_cancel(job_id, requester_identity=process_identity(os.getpid()))
+            assert native_started.wait(timeout=2)
+        return result
+
+    monkeypatch.setattr(native_cancel_probe, "request_native_cancel_once", blocked_native_cancel)
+    monkeypatch.setattr(production_worker, "_record_native_cancel", tracked_record)
+    try:
+        code = _run(
+            str(store.root),
+            job_id,
+            ownership_factory=lambda *_args: ownership,
+            client_factory=lambda _spec: client,
+            collector_executor=cancelling_collector,
+            telemetry_provider=_telemetry,
+            native_cancel_enabled=True,
+        )
+    finally:
+        native_release.set()
+        assert native_finished.wait(timeout=2)
+
+    state = store.read_state(job_id)
+    assert code == 1
+    assert ownership.released is False
+    assert client.clear_count == 1
+    assert "native_cancel_thread" in state["cancel"]["worker_error"]["message"]

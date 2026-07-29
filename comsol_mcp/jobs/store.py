@@ -457,6 +457,7 @@ class JobStore:
         *,
         attempt: int,
         message: str,
+        worker_error: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Record that the target worker observed its matching cancel request.
 
@@ -508,8 +509,47 @@ class JobStore:
             request_id = control.get("request_id")
             if cancel.get("request_id") not in (None, request_id):
                 return {"recorded": False, "reason": "state_request_mismatch", "state": state}
+            normalized_error = None
+            if worker_error is not None:
+                if not isinstance(worker_error, dict):
+                    raise ValueError("worker cancellation error must be an object")
+                error_type = worker_error.get("type")
+                error_message = worker_error.get("message")
+                cleanup_errors = worker_error.get("cleanup_errors", [])
+                if not isinstance(error_type, str) or not error_type:
+                    raise ValueError("worker cancellation error type is required")
+                if not isinstance(error_message, str) or not error_message:
+                    raise ValueError("worker cancellation error message is required")
+                if not isinstance(cleanup_errors, list) or not all(
+                    isinstance(item, str) for item in cleanup_errors
+                ):
+                    raise ValueError("worker cancellation cleanup errors must be a string list")
+                normalized_error = {
+                    "type": error_type[:128],
+                    "message": error_message[:2000],
+                    "cleanup_errors": [item[:500] for item in cleanup_errors[:20]],
+                }
+            error_changed = bool(
+                normalized_error is not None and cancel.get("worker_error") != normalized_error
+            )
+            if normalized_error is not None:
+                cancel["worker_error"] = normalized_error
             existing = cancel.get("cooperative_observation")
             if isinstance(existing, dict) and existing.get("request_id") == request_id:
+                if error_changed:
+                    state["cancel"] = cancel
+                    state["updated_at_epoch"] = time.time()
+                    atomic_write_json(self.job_dir(job_id) / "state.json", state)
+                    self._append_event_unlocked(
+                        job_id,
+                        "cancel_worker_error_recorded",
+                        {
+                            "request_id": request_id,
+                            "target_attempt": int(attempt),
+                            "error_type": normalized_error["type"],
+                        },
+                        str(state["status"]),
+                    )
                 return {"recorded": True, "idempotent": True, "state": state}
 
             observed_at = time.time()
@@ -530,7 +570,13 @@ class JobStore:
             self._append_event_unlocked(
                 job_id,
                 "cooperative_cancel_observed",
-                {"request_id": request_id, "target_attempt": int(attempt)},
+                {
+                    "request_id": request_id,
+                    "target_attempt": int(attempt),
+                    "worker_error_type": (
+                        normalized_error["type"] if normalized_error is not None else None
+                    ),
+                },
                 str(state["status"]),
             )
             return {"recorded": True, "idempotent": False, "state": state}

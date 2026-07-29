@@ -19,6 +19,10 @@ from .process_control import contain_current_process_tree
 from .store import JobStore, cancel_request_targets_attempt, process_identity
 
 
+class _CooperativeCancellation(Exception):
+    pass
+
+
 def _sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -91,6 +95,7 @@ def _run(
     cancel_stop = threading.Event()
     cancel_thread: threading.Thread | None = None
     pending_terminal: dict[str, Any] | None = None
+    cancel_observation_message: str | None = None
     worker_error: Exception | None = None
     cleanup_errors: list[str] = []
     latest_resource_decision: dict[str, Any] | None = None
@@ -216,10 +221,7 @@ def _run(
             )
 
         if should_stop():
-            store.record_cooperative_cancel_observed(
-                job_id, attempt=attempt, message="Stopped before campaign"
-            )
-            return 0
+            raise _CooperativeCancellation("Stopped before campaign")
         store.update_state(job_id, "smoke_running", event="convergence_campaign_worker_started")
         result = run_convergence_campaign(
             spec,
@@ -235,9 +237,7 @@ def _run(
             "before_solve_cancel",
             "after_durable_row_cancel",
         }:
-            store.record_cooperative_cancel_observed(
-                job_id, attempt=attempt, message="Stopped between convergence operations"
-            )
+            cancel_observation_message = "Stopped between convergence operations"
         elif not result.get("completed"):
             pending_terminal = {
                 "status": "interrupted",
@@ -267,13 +267,19 @@ def _run(
                     },
                 },
             }
+    except _CooperativeCancellation as exc:
+        cancel_observation_message = str(exc)
     except Exception as exc:
         worker_error = exc
     finally:
         cancel_stop.set()
+        native_cancel_inflight = False
         if cancel_thread is not None:
             cancel_thread.join(timeout=1.0)
-        if client is not None:
+            native_cancel_inflight = cancel_thread.is_alive()
+            if native_cancel_inflight:
+                cleanup_errors.append("native_cancel_thread:still_active_after_join_timeout")
+        if client is not None and not native_cancel_inflight:
             try:
                 client.clear()
             except Exception as exc:
@@ -288,7 +294,7 @@ def _run(
                 fault_hook("during_cleanup", {"job_id": job_id, "attempt": attempt})
             except Exception as exc:
                 cleanup_errors.append(f"cleanup_hook:{type(exc).__name__}:{exc}")
-        if ownership is not None and lease_acquired:
+        if ownership is not None and lease_acquired and not native_cancel_inflight:
             try:
                 release = ownership.release()
                 if not release.get("success"):
@@ -306,17 +312,32 @@ def _run(
                     worker_error = RuntimeError(
                         "Immutable convergence source changed after execution"
                     )
+        except Exception as exc:
+            if worker_error is None:
+                worker_error = exc
+            else:
+                cleanup_errors.append(f"final_source_verification:{type(exc).__name__}:{exc}")
         finally:
-            source_pins.close()
+            try:
+                source_pins.close()
+            except Exception as exc:
+                cleanup_errors.append(f"source_pin_close:{type(exc).__name__}:{exc}")
     if cleanup_errors and worker_error is None:
         worker_error = RuntimeError("; ".join(cleanup_errors)[:2000])
     current = store.read_state(job_id)["status"]
     if worker_error is not None:
-        if current == "cancel_requested":
+        if current in {"cancel_requested", "cancelling"}:
             store.record_cooperative_cancel_observed(
-                job_id, attempt=attempt, message="Stopped between blocking operations"
+                job_id,
+                attempt=attempt,
+                message=(cancel_observation_message or "Stopped between blocking operations"),
+                worker_error={
+                    "type": type(worker_error).__name__,
+                    "message": str(worker_error),
+                    "cleanup_errors": cleanup_errors,
+                },
             )
-        elif current != "cancelling" and current not in {"completed", "interrupted"}:
+        elif current not in {"completed", "interrupted"}:
             store.update_state(
                 job_id,
                 "failed",
@@ -331,6 +352,15 @@ def _run(
             )
         print(f"{type(worker_error).__name__}: {worker_error}", file=sys.stderr, flush=True)
         return 1
+    if cancel_observation_message is not None:
+        current = store.read_state(job_id)["status"]
+        if current in {"cancel_requested", "cancelling"}:
+            store.record_cooperative_cancel_observed(
+                job_id,
+                attempt=attempt,
+                message=cancel_observation_message,
+            )
+        return 0
     if pending_terminal is not None:
         current = store.read_state(job_id)["status"]
         if current not in {"cancel_requested", "cancelling"}:
