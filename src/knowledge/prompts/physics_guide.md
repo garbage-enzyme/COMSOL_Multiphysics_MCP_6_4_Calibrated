@@ -150,6 +150,202 @@ physics_configure_boundary("Laminar Flow", "Outlet", [2], {"p0": "0[Pa]"})
 - `spf.U` - Velocity magnitude
 - `spf.rho` - Density
 
+## Acoustics Module
+
+### Pressure Acoustics (acpr)
+
+For frequency-domain propagation of pressure waves in fluids.
+
+**Key Features:**
+- Acoustic pressure and sound pressure level
+- Radiation and impedance boundaries
+- Prescribed pressure, velocity, and acceleration sources
+- Domain restriction through explicit domain selections
+
+**Add the Interface:**
+```
+physics_add_pressure_acoustics(
+    physics_tag="acpr",
+    domain_selection=[1]
+)
+```
+
+Use `physics_add_acoustics` when an installed Acoustics Module interface does
+not have a dedicated MCP tool. Pass the exact COMSOL Java API physics type:
+
+```
+physics_add_acoustics(
+    physics_type="ThermoacousticsSinglePhysics",
+    physics_tag="ta"
+)
+```
+
+Availability depends on the installed COMSOL products, licenses, and version.
+
+**Common Boundary Features and Properties:**
+
+| Feature Type | Purpose | Common Properties |
+|--------------|---------|-------------------|
+| `SoundHard` | Rigid wall | None |
+| `SoundSoft` | Zero acoustic pressure | None |
+| `Pressure` | Prescribed acoustic pressure | `p0` |
+| `Impedance` | Specific acoustic impedance | `Zn` |
+| `NormalAcceleration` | Prescribed normal acceleration | `nacc` |
+| `NormalVelocity` | Prescribed normal velocity | `nvel` |
+| `PlaneWaveRadiation` | Plane-wave radiation boundary | None |
+| `SphericalWaveRadiation` | Spherical-wave radiation boundary | None |
+
+Use `physics_get_acoustic_boundary_conditions` to retrieve this reference
+programmatically. Version-specific feature types can still be passed through
+the specialized configuration tools.
+
+**Configure One Boundary:**
+```
+physics_configure_acoustic_boundary(
+    physics_name="acpr",
+    boundary_condition="Impedance",
+    selection_name="duct_outlet",
+    properties={"Zn": "rho0*c0"}
+)
+```
+
+`selection_name` binds the feature to a stable named COMSOL selection.
+Alternatively, provide `boundary_selection=[3]` with explicit entity numbers.
+
+**Configure Multiple Boundaries:**
+```
+physics_setup_acoustic_boundaries(
+    physics_name="acpr",
+    boundary_conditions=[
+        {
+            "type": "NormalVelocity",
+            "selection_name": "duct_inlet",
+            "properties": {"nvel": "inlet_velocity"}
+        },
+        {
+            "type": "PlaneWaveRadiation",
+            "selection_name": "duct_outlet"
+        },
+        {
+            "type": "SoundHard",
+            "selection_name": "duct_walls"
+        }
+    ]
+)
+```
+
+**Useful Expressions:**
+- `acpr.p_t` - Total acoustic pressure
+- `acpr.Lp_t` - Total sound pressure level
+- `acpr.Ix` - Acoustic intensity component in the x direction
+
+Expression names can vary with the acoustic interface and COMSOL version.
+
+## Mathematics Interfaces
+
+The PDE tools create geometry-based Coefficient Form, General Form, and Weak
+Form PDE interfaces. Dependent-variable names are user-defined and default to
+`u`. Scalar, vector, or matrix equation properties may be required when more
+than one dependent variable is used.
+
+### Coefficient Form PDE (c)
+
+For equations expressed using mass, damping, diffusion, convection, absorption,
+and source coefficients.
+
+```
+physics_add_coefficient_form_pde(
+    dependent_variables=["u"],
+    equation_properties={
+        "c": "1",
+        "a": "0",
+        "f": "source",
+        "da": "0",
+        "ea": "0"
+    },
+    physics_tag="c"
+)
+```
+
+Common equation properties are `c`, `a`, `f`, `da`, `ea`, `al`, `be`, and
+`ga`.
+
+### General Form PDE (g)
+
+For equations defined by a conservative flux and source terms.
+
+```
+physics_add_general_form_pde(
+    dependent_variables=["u"],
+    equation_properties={
+        "Ga": "-D*grad(u)",
+        "f": "source",
+        "da": "0",
+        "ea": "0"
+    },
+    physics_tag="g"
+)
+```
+
+Common equation properties are `Ga`, `f`, `da`, and `ea`.
+
+### Weak Form PDE (w)
+
+For equations specified directly as weak expressions.
+
+```
+physics_add_weak_form_pde(
+    dependent_variables=["u"],
+    equation_properties={"weak": "test(u)*(source-u)"},
+    physics_tag="w"
+)
+```
+
+The common equation property is `weak`.
+
+### PDE Boundary Conditions
+
+| Feature Type | Purpose | Common Properties |
+|--------------|---------|-------------------|
+| `DirichletBoundary` | Prescribed dependent-variable value | `r` |
+| `FluxBoundary` | Generalized inward flux or source | `g`, `q` |
+| `ZeroFluxBoundary` | Zero inward flux | None |
+| `WeakContribution` | Additional weak boundary contribution | `weak` |
+| `PeriodicCondition` | Periodic boundary condition | None |
+
+The aliases `dirichlet`, `flux`, `neumann`, `zero_flux`, `no_flux`, `wall`,
+`weak`, and `periodic` are accepted by the PDE boundary tools. Use
+`physics_get_pde_boundary_conditions` to retrieve the current feature,
+property, and alias reference.
+
+**Configure PDE Boundaries:**
+```
+physics_setup_pde_boundaries(
+    physics_name="c",
+    boundary_conditions=[
+        {
+            "type": "dirichlet",
+            "selection_name": "domain_left",
+            "properties": {"r": "0"}
+        },
+        {
+            "type": "flux",
+            "selection_name": "domain_right",
+            "properties": {"g": "boundary_source", "q": "0"}
+        },
+        {
+            "type": "zero_flux",
+            "selection_name": "domain_top"
+        }
+    ]
+)
+```
+
+For both acoustics and PDE tools, inspect `property_errors`,
+`failed_boundaries`, and `failed_count` in the returned result. A feature can
+be created successfully while one or more version-specific properties are
+rejected by COMSOL.
+
 ## Multiphysics Couplings
 
 ### Thermal Stress (ts)
@@ -209,6 +405,13 @@ Common material properties needed for different physics:
 | Heat Transfer | Thermal conductivity (k), Specific heat (Cp), Density (ρ) |
 | Laminar Flow | Density (ρ), Dynamic viscosity (μ) |
 
+Additional requirements for the newly supported interfaces:
+
+| Physics | Required Properties |
+|---------|---------------------|
+| Pressure Acoustics | Density, Speed of sound |
+| PDE Interfaces | Coefficients defined by the governing equation |
+
 ## Selection of Physics Interface
 
 When choosing physics interfaces, consider:
@@ -229,4 +432,8 @@ Different physics require appropriate study types:
 | Solid Mechanics | Stationary, Eigenfrequency |
 | Heat Transfer | Stationary, Time Dependent |
 | Fluid Flow | Stationary, Time Dependent |
+| Pressure Acoustics | Frequency |
+| Coefficient Form PDE | Stationary, Time Dependent, Eigenfrequency |
+| General Form PDE | Stationary, Time Dependent |
+| Weak Form PDE | Depends on the weak equation |
 | Multiphysics | Depends on coupling |
