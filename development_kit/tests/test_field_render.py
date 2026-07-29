@@ -173,6 +173,42 @@ def test_worker_output_is_redirected_and_read_with_a_hard_bound(tmp_path, monkey
         )
 
 
+def test_array_cannot_change_while_render_worker_consumes_it(tmp_path, monkeypatch):
+    array = tmp_path / "pinned.npz"
+    digest = _array(array)
+    blocked = []
+
+    class FakeProcess:
+        returncode = 1
+
+        def __init__(self, _command, **kwargs):
+            self.stderr = kwargs["stderr"]
+            try:
+                array.write_bytes(b"replacement")
+            except PermissionError:
+                blocked.append(True)
+
+        def communicate(self, *, input, timeout):
+            assert input and timeout > 0
+            self.stderr.write(b"controlled worker failure")
+
+    monkeypatch.setattr(field_render_module.subprocess, "Popen", FakeProcess)
+
+    with pytest.raises(RuntimeError, match="worker failed"):
+        render_field_png_bundle(
+            views=[_view("target", array, digest)],
+            quantity_name="abs_ex",
+            quantity_unit="V/m",
+            coordinate_unit="um",
+            color_scale="linear",
+            shared_color_limits=False,
+            output_root=tmp_path / "output",
+        )
+
+    assert blocked == [True]
+    assert hashlib.sha256(array.read_bytes()).hexdigest() == digest
+
+
 @pytest.mark.parametrize(
     "response",
     [

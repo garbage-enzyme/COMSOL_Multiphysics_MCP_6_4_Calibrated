@@ -111,6 +111,48 @@ def test_chain_rejects_tampered_artifact_bytes(tmp_path):
         verify_artifact_chain(manifest, artifact_root=tmp_path)
 
 
+def test_chain_rejects_equal_length_digest_tampering(tmp_path):
+    manifest = _chain(tmp_path)
+    path = tmp_path / "spectrum.json"
+    original = path.read_bytes()
+    replacement = original.replace(b'"spectrum"', b'"spectruN"')
+    assert len(replacement) == len(original)
+    path.write_bytes(replacement)
+
+    with pytest.raises(ValueError, match="SHA-256"):
+        verify_artifact_chain(manifest, artifact_root=tmp_path)
+
+
+def test_chain_schema_parsing_reuses_the_hashed_snapshot(tmp_path, monkeypatch):
+    manifest = _chain(tmp_path)
+    original_reader = artifact_chain_module.read_contained_file_snapshot
+    changed = []
+
+    def replace_after_snapshot(path, **kwargs):
+        snapshot = original_reader(path, **kwargs)
+        if Path(path).name == "raw.json":
+            payload = snapshot["payload"].replace(b'"raw"', b'"raW"')
+            assert len(payload) == snapshot["byte_count"]
+            Path(path).write_bytes(payload)
+            changed.append(True)
+        return snapshot
+
+    monkeypatch.setattr(
+        artifact_chain_module,
+        "read_contained_file_snapshot",
+        replace_after_snapshot,
+    )
+
+    receipt, documents = artifact_chain_module._verify_artifact_chain_snapshot(
+        manifest,
+        artifact_root=tmp_path,
+    )
+
+    assert receipt["verification_state"] == "verified"
+    assert documents["raw"]["artifact_id"] == "raw"
+    assert changed == [True]
+
+
 def test_chain_rejects_parent_hash_mismatch_cycle_or_orphan(tmp_path):
     manifest = _chain(tmp_path)
     artifacts = deepcopy(manifest["artifacts"])

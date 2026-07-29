@@ -11,7 +11,7 @@ import unicodedata
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Iterator, Mapping
 
 from comsol_mcp.settings import settings_environment
 from comsol_mcp.utils.runtime_paths import default_runtime_dir
@@ -86,6 +86,39 @@ def _read_pin(path: Path, root: Path) -> ValidatedReadPin:
     )
 
 
+def validated_read_pin(path: str | Path, root: str | Path) -> ValidatedReadPin:
+    """Build one contained read pin for an existing regular file."""
+    resolved_root = Path(root).resolve(strict=True)
+    resolved_path = Path(path).resolve(strict=True)
+    try:
+        resolved_path.relative_to(resolved_root)
+    except ValueError as exc:
+        raise ValueError("validated read path escapes its root") from exc
+    if not resolved_root.is_dir() or not resolved_path.is_file():
+        raise ValueError("validated read pin requires a directory root and regular file")
+    return _read_pin(resolved_path, resolved_root)
+
+
+def read_contained_file_snapshot(
+    path: str | Path,
+    *,
+    root: str | Path,
+    max_bytes: int,
+) -> dict[str, Any]:
+    """Read one contained immutable snapshot with its exact size and digest."""
+    from comsol_mcp.durable.io import read_file_bytes_bounded
+
+    pin = validated_read_pin(path, root)
+    with pin_validated_reads((pin,)):
+        payload = read_file_bytes_bounded(pin.path, max_bytes=max_bytes)
+    return {
+        "path": pin.path,
+        "payload": payload,
+        "byte_count": len(payload),
+        "sha256": hashlib.sha256(payload).hexdigest(),
+    }
+
+
 def _open_windows_read_pin(
     path: Path,
     *,
@@ -129,7 +162,7 @@ def _close_windows_handle(handle: int) -> None:
 
 
 @contextmanager
-def pin_validated_reads(pins: tuple[ValidatedReadPin, ...]):
+def pin_validated_reads(pins: tuple[ValidatedReadPin, ...]) -> Iterator[None]:
     """Deny mutation or ancestor replacement while validated files are consumed."""
     handles: list[int] = []
     opened: set[Path] = set()
@@ -173,7 +206,7 @@ def pin_validated_reads(pins: tuple[ValidatedReadPin, ...]):
 
 
 @contextmanager
-def pin_validated_writes(pins: tuple[ValidatedWritePin, ...]):
+def pin_validated_writes(pins: tuple[ValidatedWritePin, ...]) -> Iterator[None]:
     """Prevent replacement of validated write ancestors during native writes."""
     handles: list[int] = []
     opened: set[Path] = set()
@@ -604,6 +637,8 @@ __all__ = [
     "ReadPinError",
     "ValidatedReadPin",
     "ValidatedWritePin",
+    "validated_read_pin",
+    "read_contained_file_snapshot",
     "pin_validated_reads",
     "pin_validated_writes",
     "PathPolicy",

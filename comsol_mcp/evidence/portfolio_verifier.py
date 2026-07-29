@@ -2,17 +2,19 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 import hashlib
 import json
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, Mapping
 
-from comsol_mcp.artifact_chain import validate_artifact_chain_manifest, verify_artifact_chain
+from comsol_mcp.artifact_chain import (
+    _verify_artifact_chain_snapshot,
+    validate_artifact_chain_manifest,
+)
 
 from .contracts import canonical_json_bytes, canonical_sha256
 from .outcome_contract import validate_outcome_contract
-
 
 PORTFOLIO_REQUEST_SCHEMA_NAME = "comsol_mcp.portfolio_evidence_request"
 PORTFOLIO_VERIFICATION_SCHEMA_NAME = "comsol_mcp.portfolio_evidence_verification"
@@ -35,9 +37,7 @@ _REQUEST_FIELDS = {
 _CASE_FIELDS = {"case_id", "outcome", "artifact_chain", "summary_claims"}
 _CLAIM_FIELDS = {"claim_id", "dimension", "value", "citation"}
 _CITATION_FIELDS = {"artifact_id", "artifact_sha256", "json_pointer"}
-_IDENTIFIER_CHARS = frozenset(
-    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.:-/"
-)
+_IDENTIFIER_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.:-/")
 _MAX_CASES = 64
 _MAX_CLAIMS_PER_CASE = 256
 _MAX_IDENTIFIER_LENGTH = 192
@@ -137,9 +137,7 @@ def _validate_claim(value: Any, case_index: int, claim_index: int) -> dict[str, 
     _hash64(citation["artifact_sha256"], f"{label}.citation.artifact_sha256")
     tokens = _decode_json_pointer(citation["json_pointer"], f"{label}.citation.json_pointer")
     pointer_identity = "/".join(tokens).casefold().replace("-", "_")
-    if not any(
-        keyword in pointer_identity for keyword in _DIMENSION_POINTER_KEYWORDS[dimension]
-    ):
+    if not any(keyword in pointer_identity for keyword in _DIMENSION_POINTER_KEYWORDS[dimension]):
         raise ValueError(f"{label} JSON Pointer does not identify its declared dimension")
     return claim
 
@@ -210,13 +208,9 @@ def build_portfolio_evidence_request(value: Mapping[str, Any]) -> dict[str, Any]
         for case in cases:
             if isinstance(case, dict) and isinstance(case.get("summary_claims"), list):
                 case["summary_claims"].sort(
-                    key=lambda claim: claim.get("claim_id", "")
-                    if isinstance(claim, dict)
-                    else ""
+                    key=lambda claim: claim.get("claim_id", "") if isinstance(claim, dict) else ""
                 )
-        cases.sort(
-            key=lambda case: case.get("case_id", "") if isinstance(case, dict) else ""
-        )
+        cases.sort(key=lambda case: case.get("case_id", "") if isinstance(case, dict) else "")
     request["request_sha256"] = canonical_sha256(request)
     return validate_portfolio_evidence_request(request)
 
@@ -263,7 +257,7 @@ def verify_portfolio_evidence(
         outcome = validate_outcome_contract(case["outcome"])
         chain = validate_artifact_chain_manifest(case["artifact_chain"])
         root = Path(artifact_roots[case_id]).resolve(strict=True)
-        chain_receipt = verify_artifact_chain(chain, artifact_root=root)
+        chain_receipt, documents = _verify_artifact_chain_snapshot(chain, artifact_root=root)
         by_id = {artifact["artifact_id"]: artifact for artifact in chain["artifacts"]}
         chain_raw_ids = sorted(
             artifact["artifact_id"]
@@ -275,7 +269,6 @@ def verify_portfolio_evidence(
                 f"case {case_id} outcome raw artifact IDs do not match the evidence chain"
             )
 
-        documents: dict[str, dict[str, Any]] = {}
         for claim in case["summary_claims"]:
             citation = claim["citation"]
             artifact = by_id.get(citation["artifact_id"])
@@ -287,10 +280,7 @@ def verify_portfolio_evidence(
                 raise ValueError(
                     f"case {case_id} claim {claim['claim_id']} cites the wrong artifact hash"
                 )
-            document = documents.get(artifact["artifact_id"])
-            if document is None:
-                document = _read_cited_artifact(root=root, artifact=artifact)
-                documents[artifact["artifact_id"]] = document
+            document = documents[artifact["artifact_id"]]
             tokens = _decode_json_pointer(
                 citation["json_pointer"],
                 f"case {case_id} claim {claim['claim_id']} JSON Pointer",
@@ -368,26 +358,18 @@ def verify_portfolio_evidence_checks(
     total_artifacts = 0
     for case in request["cases"]:
         case_id = case["case_id"]
-        outcome = (
-            validate_outcome_contract(case["outcome"])
-            if check_outcome_contract
-            else None
-        )
+        outcome = validate_outcome_contract(case["outcome"]) if check_outcome_contract else None
         chain = (
-            validate_artifact_chain_manifest(case["artifact_chain"])
-            if filesystem_checks
-            else None
+            validate_artifact_chain_manifest(case["artifact_chain"]) if filesystem_checks else None
         )
-        root = (
-            Path(artifact_roots[case_id]).resolve(strict=True)
-            if filesystem_checks
-            else None
-        )
-        chain_receipt = (
-            verify_artifact_chain(chain, artifact_root=root)
-            if check_artifact_chain
-            else None
-        )
+        root = Path(artifact_roots[case_id]).resolve(strict=True) if filesystem_checks else None
+        verified_documents = None
+        if check_artifact_chain:
+            chain_receipt, verified_documents = _verify_artifact_chain_snapshot(
+                chain, artifact_root=root
+            )
+        else:
+            chain_receipt = None
 
         if check_outcome_contract and check_artifact_chain:
             chain_raw_ids = sorted(
@@ -402,7 +384,7 @@ def verify_portfolio_evidence_checks(
 
         if check_summary_claims:
             by_id = {artifact["artifact_id"]: artifact for artifact in chain["artifacts"]}
-            documents: dict[str, dict[str, Any]] = {}
+            documents: dict[str, dict[str, Any]] = verified_documents or {}
             for claim in case["summary_claims"]:
                 citation = claim["citation"]
                 artifact = by_id.get(citation["artifact_id"])
@@ -429,7 +411,8 @@ def verify_portfolio_evidence_checks(
                 )
                 if canonical_json_bytes(measured) != canonical_json_bytes(claim["value"]):
                     raise ValueError(
-                        f"case {case_id} claim {claim['claim_id']} is absent from the cited evidence"
+                        f"case {case_id} claim {claim['claim_id']} is absent "
+                        "from the cited evidence"
                     )
             total_claims += len(case["summary_claims"])
 

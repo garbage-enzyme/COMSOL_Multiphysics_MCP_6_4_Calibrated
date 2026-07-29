@@ -191,7 +191,20 @@ def test_point_identity_and_complete_audit_projection(tmp_path):
     assert projected["A"] == 0.85
     assert projected["mesh_element_count"] == 12
     assert projected["mesh_vertex_count"] == 8
-    assert projected["audit_artifact"]["physical_evidence_sha256"]
+    audit = projected["audit_artifact"]
+    wrapper = artifact / "matrix_collector.json"
+    inner = next((artifact / "audit").glob("manifest.json"))
+    assert audit == {
+        "wrapper_relative_path": wrapper.relative_to(job).as_posix(),
+        "wrapper_sha256": hashlib.sha256(wrapper.read_bytes()).hexdigest(),
+        "wrapper_size_bytes": wrapper.stat().st_size,
+        "inner_relative_path": inner.relative_to(job).as_posix(),
+        "inner_sha256": hashlib.sha256(inner.read_bytes()).hexdigest(),
+        "inner_size_bytes": inner.stat().st_size,
+        "physical_evidence_sha256": audit["physical_evidence_sha256"],
+        "audit_status": "measurement_complete",
+    }
+    assert audit["physical_evidence_sha256"]
 
 
 def test_point_incidence_is_detached_from_the_normalized_spec(tmp_path):

@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 import hashlib
 import json
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
-
+import src.evidence.portfolio_verifier as portfolio_verifier_module
 from src.artifact_chain import build_artifact_chain_manifest
 from src.evidence.outcome_contract import (
     OUTCOME_SCHEMA_NAME,
@@ -182,6 +182,22 @@ def test_exact_configuration_mesh_fit_and_wavelength_claims_verify(tmp_path):
     assert before == {path.name: path.read_bytes() for path in tmp_path.iterdir()}
 
 
+def test_summary_claims_reuse_artifact_chain_snapshots(tmp_path, monkeypatch):
+    request, _raw, _fit = _fixture(tmp_path)
+    monkeypatch.setattr(
+        portfolio_verifier_module,
+        "_read_cited_artifact",
+        lambda **_kwargs: pytest.fail("verified artifact must not be reopened"),
+    )
+
+    receipt = verify_portfolio_evidence(
+        request,
+        artifact_roots={"case-one": tmp_path},
+    )
+
+    assert receipt["claim_count"] == 4
+
+
 @pytest.mark.parametrize("claim_id", ["configuration", "mesh", "fit", "wavelength"])
 def test_summary_value_absent_from_cited_chain_is_rejected(tmp_path, claim_id):
     request, _raw, _fit = _fixture(tmp_path)
@@ -202,9 +218,7 @@ def test_missing_artifact_wrong_hash_pointer_or_dimension_fails_closed(tmp_path)
     missing = deepcopy(request)
     missing["cases"][0]["summary_claims"][0]["citation"]["artifact_id"] = "absent"
     with pytest.raises(ValueError, match="missing artifact"):
-        verify_portfolio_evidence(
-            _rehash_request(missing), artifact_roots={"case-one": tmp_path}
-        )
+        verify_portfolio_evidence(_rehash_request(missing), artifact_roots={"case-one": tmp_path})
 
     wrong_hash = deepcopy(request)
     wrong_hash["cases"][0]["summary_claims"][0]["citation"]["artifact_sha256"] = "0" * 64
@@ -214,7 +228,9 @@ def test_missing_artifact_wrong_hash_pointer_or_dimension_fails_closed(tmp_path)
         )
 
     missing_pointer = deepcopy(request)
-    missing_pointer["cases"][0]["summary_claims"][0]["citation"]["json_pointer"] = "/identity/config_missing"
+    missing_pointer["cases"][0]["summary_claims"][0]["citation"]["json_pointer"] = (
+        "/identity/config_missing"
+    )
     with pytest.raises(ValueError, match="does not exist"):
         verify_portfolio_evidence(
             _rehash_request(missing_pointer), artifact_roots={"case-one": tmp_path}
@@ -237,9 +253,7 @@ def test_outcome_raw_ids_must_exactly_match_chain_roots(tmp_path):
     request["cases"][0]["outcome"] = build_outcome_contract(outcome)
 
     with pytest.raises(ValueError, match="raw artifact IDs do not match"):
-        verify_portfolio_evidence(
-            _rehash_request(request), artifact_roots={"case-one": tmp_path}
-        )
+        verify_portfolio_evidence(_rehash_request(request), artifact_roots={"case-one": tmp_path})
 
 
 def test_artifact_byte_tampering_and_unrequested_policy_fields_are_rejected(tmp_path):

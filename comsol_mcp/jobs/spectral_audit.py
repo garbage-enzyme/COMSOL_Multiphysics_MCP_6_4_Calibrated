@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import math
 from copy import deepcopy
@@ -10,6 +9,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from comsol_mcp.evidence.contracts import validate_physical_evidence
+from comsol_mcp.path_policy import read_contained_file_snapshot
 
 from .spectral_rows import spectral_point_identity
 
@@ -20,12 +20,7 @@ def _mapping(value: object, name: str) -> dict[str, Any]:
     return dict(value)
 
 
-def _sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for block in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
+MAX_AUDIT_MANIFEST_BYTES = 16 * 1024 * 1024
 
 
 def _contained_file(path: Path, root: Path, name: str) -> Path:
@@ -57,9 +52,7 @@ def _optional_count(value: object, name: str) -> int | None:
     return value
 
 
-def build_spectral_audit_point(
-    spec: Mapping[str, Any], wavelength_m: object
-) -> dict[str, Any]:
+def build_spectral_audit_point(spec: Mapping[str, Any], wavelength_m: object) -> dict[str, Any]:
     """Build one validation-collector point from an immutable spectral identity."""
     identity = spectral_point_identity(spec, wavelength_m)
     collector = _mapping(spec.get("collector"), "collector")
@@ -100,8 +93,13 @@ def extract_spectral_audit_result(
     job_root = Path(job_dir).resolve()
     assigned_root = Path(artifact_dir).resolve()
     wrapper_path = _contained_file(Path(manifest_value), assigned_root, "point audit wrapper")
+    wrapper_snapshot = read_contained_file_snapshot(
+        wrapper_path,
+        root=assigned_root,
+        max_bytes=MAX_AUDIT_MANIFEST_BYTES,
+    )
     try:
-        wrapper = json.loads(wrapper_path.read_text(encoding="utf-8"))
+        wrapper = json.loads(wrapper_snapshot["payload"].decode("utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValueError("point audit wrapper is not valid JSON") from exc
     wrapper = _mapping(wrapper, "point audit wrapper")
@@ -123,13 +121,20 @@ def extract_spectral_audit_result(
     relative = inner_descriptor["relative_path"]
     if not isinstance(relative, str) or not relative:
         raise ValueError("inner manifest relative path is unavailable")
-    inner_path = _contained_file(assigned_root / relative, assigned_root, "point audit inner manifest")
-    if inner_path.stat().st_size != inner_descriptor["size_bytes"]:
+    inner_path = _contained_file(
+        assigned_root / relative, assigned_root, "point audit inner manifest"
+    )
+    inner_snapshot = read_contained_file_snapshot(
+        inner_path,
+        root=assigned_root,
+        max_bytes=MAX_AUDIT_MANIFEST_BYTES,
+    )
+    if inner_snapshot["byte_count"] != inner_descriptor["size_bytes"]:
         raise ValueError("point audit inner manifest size differs from its wrapper")
-    if _sha256_file(inner_path) != inner_descriptor["sha256"]:
+    if inner_snapshot["sha256"] != inner_descriptor["sha256"]:
         raise ValueError("point audit inner manifest hash differs from its wrapper")
     try:
-        inner = json.loads(inner_path.read_text(encoding="utf-8"))
+        inner = json.loads(inner_snapshot["payload"].decode("utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValueError("point audit inner manifest is not valid JSON") from exc
     inner = _mapping(inner, "point audit inner manifest")
@@ -183,11 +188,11 @@ def extract_spectral_audit_result(
         "solve_seconds": _finite(solve.get("seconds"), "solve seconds"),
         "audit_artifact": {
             "wrapper_relative_path": wrapper_path.relative_to(job_root).as_posix(),
-            "wrapper_sha256": _sha256_file(wrapper_path),
-            "wrapper_size_bytes": wrapper_path.stat().st_size,
+            "wrapper_sha256": wrapper_snapshot["sha256"],
+            "wrapper_size_bytes": wrapper_snapshot["byte_count"],
             "inner_relative_path": inner_path.relative_to(job_root).as_posix(),
-            "inner_sha256": _sha256_file(inner_path),
-            "inner_size_bytes": inner_path.stat().st_size,
+            "inner_sha256": inner_snapshot["sha256"],
+            "inner_size_bytes": inner_snapshot["byte_count"],
             "physical_evidence_sha256": physical["contract_sha256"],
             "audit_status": response["audit_status"],
         },

@@ -13,6 +13,8 @@ import tempfile
 from pathlib import Path
 from typing import Any, Mapping
 
+from comsol_mcp.path_policy import pin_validated_reads, validated_read_pin
+
 MAX_RENDER_VIEWS = 2
 MAX_RENDER_ARRAY_BYTES = 256 * 1024 * 1024
 MAX_RENDER_OUTPUT_BYTES = 32 * 1024 * 1024
@@ -104,6 +106,7 @@ def render_field_png_bundle(
     root = Path(output_root).expanduser().resolve()
     root.mkdir(parents=True, exist_ok=True)
     normalized = []
+    array_pins = []
     seen_ids = set()
     for index, value in enumerate(views):
         item = _mapping(value, f"views[{index}]")
@@ -121,8 +124,7 @@ def render_field_png_bundle(
         array_path = Path(item["array_path"]).expanduser().resolve()
         if not array_path.is_file() or not 0 < array_path.stat().st_size <= MAX_RENDER_ARRAY_BYTES:
             raise ValueError(f"views[{index}].array_path is missing or oversized")
-        if _sha256_file(array_path) != str(item["array_sha256"]).lower():
-            raise ValueError(f"views[{index}] array SHA-256 does not match")
+        array_pins.append(validated_read_pin(array_path, array_path.parent))
         safe_name = hashlib.sha256(view_id.encode("utf-8")).hexdigest()[:16]
         png_path = root / f"{safe_name}.png"
         if png_path.exists():
@@ -146,28 +148,32 @@ def render_field_png_bundle(
         "views": normalized,
     }
     try:
-        command = [sys.executable, "-m", "comsol_mcp.evidence.field_plot_worker"]
-        encoded_input = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        with tempfile.TemporaryFile() as stdout_file, tempfile.TemporaryFile() as stderr_file:
-            process = subprocess.Popen(
-                command,
-                stdin=subprocess.PIPE,
-                stdout=stdout_file,
-                stderr=stderr_file,
-                creationflags=(
-                    getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
-                ),
-            )
-            try:
-                process.communicate(input=encoded_input, timeout=float(timeout_seconds))
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait()
-                raise
-            stdout_file.seek(0)
-            stderr_file.seek(0)
-            stdout_bytes = stdout_file.read(MAX_RENDER_RESPONSE_BYTES + 1)
-            stderr_bytes = stderr_file.read(MAX_RENDER_RESPONSE_BYTES + 1)
+        with pin_validated_reads(tuple(array_pins)):
+            for index, view in enumerate(normalized):
+                if _sha256_file(Path(view["array_path"])) != view["array_sha256"]:
+                    raise ValueError(f"views[{index}] array SHA-256 does not match")
+            command = [sys.executable, "-m", "comsol_mcp.evidence.field_plot_worker"]
+            encoded_input = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            with tempfile.TemporaryFile() as stdout_file, tempfile.TemporaryFile() as stderr_file:
+                process = subprocess.Popen(  # noqa: S603
+                    command,
+                    stdin=subprocess.PIPE,
+                    stdout=stdout_file,
+                    stderr=stderr_file,
+                    creationflags=(
+                        getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
+                    ),
+                )
+                try:
+                    process.communicate(input=encoded_input, timeout=float(timeout_seconds))
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
+                    raise
+                stdout_file.seek(0)
+                stderr_file.seek(0)
+                stdout_bytes = stdout_file.read(MAX_RENDER_RESPONSE_BYTES + 1)
+                stderr_bytes = stderr_file.read(MAX_RENDER_RESPONSE_BYTES + 1)
         if (
             len(stdout_bytes) > MAX_RENDER_RESPONSE_BYTES
             or len(stderr_bytes) > MAX_RENDER_RESPONSE_BYTES
