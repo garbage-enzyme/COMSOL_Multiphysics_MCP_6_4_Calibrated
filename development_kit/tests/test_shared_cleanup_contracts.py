@@ -8,14 +8,22 @@ from src.shared_session.cleanup import evaluate_attached_detach, evaluate_owned_
 from src.shared_session.identity import normalize_attached_server_identity
 
 
-def _server(*, pid=4200, observed=2000.0):
+def _server(
+    *,
+    pid=4200,
+    observed=2000.0,
+    port=2036,
+    created=1000.0,
+    command_signature="a" * 64,
+    bind_scope="loopback",
+):
     return normalize_attached_server_identity(
         {
-            "endpoint": {"host": "127.0.0.1", "port": 2036},
+            "endpoint": {"host": "127.0.0.1", "port": port},
             "server_pid": pid,
-            "server_process_create_time": 1000.0,
-            "server_command_signature": "a" * 64,
-            "listener_bind_scope": "loopback",
+            "server_process_create_time": created,
+            "server_command_signature": command_signature,
+            "listener_bind_scope": bind_scope,
             "listener_observed_at_epoch": observed,
         }
     )
@@ -76,6 +84,22 @@ def test_attached_detach_fails_closed_on_preservation_gaps(overrides, violation)
     assert violation in outcome.violations
 
 
+@pytest.mark.parametrize(
+    "identity_change",
+    [
+        {"port": 2037},
+        {"created": 1001.0},
+        {"command_signature": "c" * 64},
+        {"bind_scope": "wildcard"},
+    ],
+)
+def test_attached_detach_binds_every_server_identity_field(identity_change):
+    outcome = _detach(server_after=_server(observed=3000.0, **identity_change))
+
+    assert outcome.success is False
+    assert "external_server_identity_changed" in outcome.violations
+
+
 def test_owned_cleanup_requires_owned_resources_to_be_absent():
     outcome = evaluate_owned_cleanup(
         client_disconnected=True,
@@ -109,6 +133,41 @@ def test_owned_cleanup_does_not_misclassify_lingering_resources_as_success():
     }
 
 
-def test_cleanup_contract_rejects_non_boolean_evidence():
+@pytest.mark.parametrize(
+    "field",
+    [
+        "client_disconnected",
+        "lease_released",
+        "listener_active_after",
+        "model_clear_attempted",
+        "external_server_shutdown_attempted",
+        "external_server_termination_attempted",
+    ],
+)
+def test_attached_cleanup_contract_rejects_non_boolean_evidence(field):
     with pytest.raises(ValueError, match="must be boolean"):
-        _detach(listener_active_after=1)
+        _detach(**{field: 1})
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "client_disconnected",
+        "lease_released",
+        "owned_server_process_active_after",
+        "owned_listener_active_after",
+        "owned_models_present_after",
+    ],
+)
+def test_owned_cleanup_contract_rejects_non_boolean_evidence(field):
+    values = {
+        "client_disconnected": True,
+        "lease_released": True,
+        "owned_server_process_active_after": False,
+        "owned_listener_active_after": False,
+        "owned_models_present_after": False,
+    }
+    values[field] = 1
+
+    with pytest.raises(ValueError, match="must be boolean"):
+        evaluate_owned_cleanup(**values)

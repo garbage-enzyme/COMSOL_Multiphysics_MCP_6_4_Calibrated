@@ -305,6 +305,54 @@ def test_legacy_h1_cancel_control_migrates_to_an_idempotent_request(jobs_root):
     assert migrated["control"]["request_id"].startswith("cancel-")
 
 
+def test_post_create_launch_failure_retains_durable_job_identity(jobs_root, monkeypatch):
+    from src.jobs.manager import JobLaunchError
+
+    manager = JobManager(jobs_root, allow_test_jobs=True, reconcile_on_start=False)
+    monkeypatch.setattr(
+        manager,
+        "_launch_worker",
+        lambda *_args: (_ for _ in ()).throw(RuntimeError("launch refused")),
+    )
+
+    with pytest.raises(JobLaunchError, match="launch refused") as caught:
+        manager.submit({"job_type": "test_sequence", "delays": [0.01]})
+
+    assert caught.value.cause_type == "RuntimeError"
+    assert caught.value.state_record_error is None
+    state = manager.store.read_state(caught.value.job_id)
+    assert state["status"] == "failed"
+    assert state["last_error"] == {
+        "type": "RuntimeError",
+        "message": "launch refused",
+    }
+
+
+def test_post_create_failure_keeps_job_identity_when_failure_recording_breaks(
+    jobs_root,
+    monkeypatch,
+):
+    from src.jobs.manager import JobLaunchError
+
+    manager = JobManager(jobs_root, allow_test_jobs=True, reconcile_on_start=False)
+    monkeypatch.setattr(
+        manager,
+        "_launch_worker",
+        lambda *_args: (_ for _ in ()).throw(RuntimeError("launch refused")),
+    )
+    monkeypatch.setattr(
+        manager.store,
+        "update_state",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("state write refused")),
+    )
+
+    with pytest.raises(JobLaunchError, match="launch refused") as caught:
+        manager.submit({"job_type": "test_sequence", "delays": [0.01]})
+
+    assert caught.value.state_record_error == "OSError: state write refused"
+    assert manager.store.job_dir(caught.value.job_id).is_dir()
+
+
 def test_unknown_control_request_fails_closed(jobs_root):
     store = JobStore(jobs_root)
     job_id = store.create(
@@ -716,11 +764,12 @@ def test_read_only_manager_construction_skips_startup_reconciliation(jobs_root, 
 
 
 def test_thirty_cancel_status_polling_races_have_no_false_terminal_state(jobs_root):
-    iterations = int(os.environ.get("COMSOL_cancellation determinism_SOAK_ITERATIONS", "30"))
+    iterations_env = "COMSOL_MCP_CANCELLATION_DETERMINISM_SOAK_ITERATIONS"
+    artifact_root_env = "COMSOL_MCP_CANCELLATION_DETERMINISM_SOAK_ARTIFACT_ROOT"
+    failure_root_env = "COMSOL_MCP_CANCELLATION_DETERMINISM_FAILURE_ROOT"
+    iterations = int(os.environ.get(iterations_env, "30"))
     if iterations < 1 or iterations > 100:
-        raise ValueError(
-            "COMSOL_cancellation determinism_SOAK_ITERATIONS must be between 1 and 100"
-        )
+        raise ValueError(f"{iterations_env} must be between 1 and 100")
     manager = JobManager(
         jobs_root,
         allow_test_jobs=True,
@@ -772,7 +821,7 @@ def test_thirty_cancel_status_polling_races_have_no_false_terminal_state(jobs_ro
         summary_path.write_text(
             json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
-        artifact_root_value = os.environ.get("COMSOL_cancellation determinism_SOAK_ARTIFACT_ROOT")
+        artifact_root_value = os.environ.get(artifact_root_env)
         if artifact_root_value:
             artifact_root = Path(artifact_root_value)
             artifact_root.mkdir(parents=True, exist_ok=True)
@@ -796,10 +845,7 @@ def test_thirty_cancel_status_polling_races_have_no_false_terminal_state(jobs_ro
             json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
         archive_root = Path(
-            os.environ.get(
-                "COMSOL_cancellation determinism_FAILURE_ROOT",
-                "D:/comsol_runtime_test/cancellation_failures",
-            )
+            os.environ.get(failure_root_env, "D:/comsol_runtime_test/cancellation_failures")
         )
         archive_root.mkdir(parents=True, exist_ok=True)
         archive = archive_root / f"{jobs_root.name}-{int(time.time())}"

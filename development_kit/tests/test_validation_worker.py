@@ -173,12 +173,13 @@ def test_validation_worker_resource_refusal_is_resumable_without_false_row(tmp_p
     spec = normalize_validation_matrix_spec(_raw_spec(source, points=1))
     store, job_id = _create_job(ascii_root / "jobs", spec)
     ownership = FakeOwnership()
+    client = FakeClient()
 
     code = _run(
         str(store.root),
         job_id,
         ownership_factory=lambda *_args: ownership,
-        client_factory=lambda _spec: FakeClient(),
+        client_factory=lambda _spec: client,
         collector_executor=lambda *_args: (_ for _ in ()).throw(AssertionError("must not solve")),
         telemetry_provider=_telemetry(mesh_elements=101),
         native_cancel_enabled=False,
@@ -190,6 +191,7 @@ def test_validation_worker_resource_refusal_is_resumable_without_false_row(tmp_p
     assert state["last_error"]["type"] == "ResourceAdmissionStop"
     assert not (store.job_dir(job_id) / "matrix_rows.jsonl").exists()
     assert ownership.released
+    assert client.cleared
 
 
 def test_manager_routes_validation_submit_and_resume_to_dedicated_worker(tmp_path, ascii_root, monkeypatch):

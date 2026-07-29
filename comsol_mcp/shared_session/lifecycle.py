@@ -19,7 +19,11 @@ from comsol_mcp.durable import (
 
 from .attach_request import normalize_shared_server_attach_request
 from .cleanup import evaluate_attached_detach
-from .contracts import summarize_shared_listener_bindings
+from .contracts import (
+    SHARED_SERVER_FEATURE_ENV,
+    SHARED_SERVER_PROFILE,
+    summarize_shared_listener_bindings,
+)
 from .identity import (
     normalize_attached_server_identity,
     normalize_shared_model_selector,
@@ -1156,6 +1160,76 @@ class SharedSessionManager:
                 "execution_backend": backend,
                 "unlock": unlocked,
                 "detach": detached,
+            }
+
+    def recover_attached_job_handoff(
+        self, execution_backend: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """Reattach and re-adopt an exact target after a pre-launch submit failure."""
+        from comsol_mcp.jobs.attached_backend import (
+            normalize_attached_execution_backend,
+        )
+
+        with self._lock:
+            backend = normalize_attached_execution_backend(execution_backend)
+            server = backend["attached_server"]
+            model = backend["model"]
+            attached = self.attach(
+                {
+                    "endpoint": {
+                        "host": server["endpoint"]["host"],
+                        "port": server["endpoint"]["port"],
+                    },
+                    "user_confirmed": True,
+                },
+                profile=SHARED_SERVER_PROFILE,
+                environ={SHARED_SERVER_FEATURE_ENV: "true"},
+            )
+            if not attached.get("success"):
+                return {
+                    "success": False,
+                    "state": "attached_handoff_reattach_failed",
+                    "attach": attached,
+                }
+            if attached.get("server_identity_sha256") != server["identity_sha256"]:
+                cleanup = self.detach()
+                return {
+                    "success": False,
+                    "state": "attached_handoff_server_identity_changed",
+                    "attach": attached,
+                    "cleanup": cleanup,
+                }
+            selector = {
+                "tag": model["tag"],
+                "expected_label": model["label"],
+                "expected_file_path": (
+                    None if model["unsaved"] else model["file_path"]
+                ),
+                "expected_unsaved": True if model["unsaved"] else None,
+            }
+            adoption = self.adopt_model(selector)
+            selected = adoption.get("selected_model") or {}
+            if (
+                not adoption.get("success")
+                or selected.get("identity_sha256") != model["identity_sha256"]
+            ):
+                cleanup = self.detach()
+                return {
+                    "success": False,
+                    "state": "attached_handoff_model_recovery_failed",
+                    "attach": attached,
+                    "adoption": adoption,
+                    "cleanup": cleanup,
+                }
+            return {
+                "success": True,
+                "state": "attached_handoff_reclaimed_pending_lock",
+                "server_identity_sha256": server["identity_sha256"],
+                "model_identity_sha256": model["identity_sha256"],
+                "model_lock_restored": False,
+                "next_action": (
+                    "lock the adopted model before further mutation or execution"
+                ),
             }
 
     def detach(self) -> dict[str, Any]:

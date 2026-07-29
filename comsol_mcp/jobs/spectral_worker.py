@@ -92,6 +92,8 @@ def _run(
     pending_terminal: dict[str, Any] | None = None
     worker_error: Exception | None = None
     cleanup_errors: list[str] = []
+    client_cleared = False
+    lease_released = False
     source = Path(spec["source_model_path"])
     source_pins = ExitStack()
     try:
@@ -315,6 +317,7 @@ def _run(
         if client is not None:
             try:
                 client.clear()
+                client_cleared = True
             except Exception as exc:
                 cleanup_errors.append(f"client_clear:{type(exc).__name__}:{exc}")
             if getattr(client, "port", None):
@@ -330,7 +333,8 @@ def _run(
         if ownership is not None and lease_acquired:
             try:
                 release = ownership.release()
-                if not release.get("success"):
+                lease_released = bool(release.get("success"))
+                if not lease_released:
                     cleanup_errors.append(
                         f"lease_release:{json.dumps(release, ensure_ascii=False)}"
                     )
@@ -371,6 +375,11 @@ def _run(
                         "message": str(worker_error)[:2000],
                     },
                     "cleanup_errors": cleanup_errors,
+                    "cleanup": {
+                        "client_cleared": client_cleared,
+                        "lease_released": lease_released,
+                        "errors": cleanup_errors,
+                    },
                 },
                 event="worker_failed",
             )
@@ -397,8 +406,8 @@ def _run(
                 patch={
                     **pending_terminal["patch"],
                     "cleanup": {
-                        "client_cleared": client is not None,
-                        "lease_released": lease_acquired,
+                        "client_cleared": client_cleared,
+                        "lease_released": lease_released,
                         "errors": [],
                     },
                 },

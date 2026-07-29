@@ -28,6 +28,8 @@ from src.jobs.native_cancel_probe import (  # noqa
     reflect_candidate_signatures,
 )
 
+NATIVE_CANCEL_PROBE_MODEL_ENV = "COMSOL_MCP_NATIVE_CANCEL_PROBE_MODEL"
+
 
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
@@ -112,7 +114,7 @@ def _progress_context_cancel_gate(
 
 def main() -> int:
     manifest: dict = {}
-    configured_model = os.environ.get("COMSOL_durable cancellationA_PROBE_MODEL")
+    configured_model = os.environ.get(NATIVE_CANCEL_PROBE_MODEL_ENV)
     model_path = Path(configured_model).resolve() if configured_model else None
     client = None
     cleanup_safe = True

@@ -78,7 +78,7 @@ def _submit_job(
             "attached execution is currently supported only for staged_sweep jobs"
         )
     from comsol_mcp.jobs.attached_backend import normalize_attached_execution_request
-    from comsol_mcp.jobs.manager import validate_staged_sweep_spec
+    from comsol_mcp.jobs.manager import JobLaunchError, validate_staged_sweep_spec
     from comsol_mcp.tools.shared_session import shared_session_manager
 
     request = normalize_attached_execution_request(execution_request)
@@ -105,12 +105,39 @@ def _submit_job(
     try:
         submitted = manager.submit(expanded)
     except Exception as exc:
+        if isinstance(exc, JobLaunchError):
+            recovery = {
+                "success": False,
+                "state": "durable_job_requires_reconciliation",
+                "job_id": exc.job_id,
+                "action": "inspect_job_status_before_reclaiming_attached_session",
+            }
+            if exc.state_record_error is not None:
+                recovery["state_record_error"] = exc.state_record_error
+        else:
+            recover = getattr(session_manager, "recover_attached_job_handoff", None)
+            if callable(recover):
+                try:
+                    recovery = recover(handoff["execution_backend"])
+                except Exception as recovery_exc:
+                    recovery = {
+                        "success": False,
+                        "state": "attached_handoff_recovery_failed",
+                        "error_type": type(recovery_exc).__name__,
+                        "error": str(recovery_exc),
+                    }
+            else:
+                recovery = {
+                    "success": False,
+                    "state": "attached_handoff_recovery_unavailable",
+                }
         return {
             "success": False,
             "state": "job_submit_failed_after_attached_handoff",
             "error_type": type(exc).__name__,
             "error": str(exc),
             "attached_handoff": _attached_handoff_summary(handoff),
+            "handoff_recovery": recovery,
         }
     return {
         **submitted,

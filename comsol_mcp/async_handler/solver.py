@@ -62,6 +62,10 @@ class AsyncSolver:
     def is_running(self) -> bool:
         with self._lock:
             return self._progress.status == SolverStatus.RUNNING
+
+    def _cancel_requested(self) -> bool:
+        with self._lock:
+            return self._cancel_flag
     
     def start_solve(
         self,
@@ -107,7 +111,7 @@ class AsyncSolver:
                     self._progress.progress = 0.1
                 self._notify_progress(progress_callback, 0.1, "Building geometry...")
 
-                if self._cancel_flag:
+                if self._cancel_requested():
                     self._set_cancelled()
                     return
                 
@@ -116,7 +120,7 @@ class AsyncSolver:
                     self._progress.progress = 0.2
                 self._notify_progress(progress_callback, 0.2, "Creating mesh...")
                 
-                if self._cancel_flag:
+                if self._cancel_requested():
                     self._set_cancelled()
                     return
                 
@@ -129,7 +133,7 @@ class AsyncSolver:
                     f"Solving study: {study_name or 'all'}...",
                 )
                 
-                if self._cancel_flag:
+                if self._cancel_requested():
                     self._set_cancelled()
                     return
                 
@@ -140,7 +144,7 @@ class AsyncSolver:
                 jm = model.java
                 if study_name is None:
                     for t in jm.study().tags():
-                        if self._cancel_flag:
+                        if self._cancel_requested():
                             self._set_cancelled()
                             return
                         jm.study(t).run()

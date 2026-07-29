@@ -27,7 +27,7 @@ from src.jobs.attached_runtime import (
     verify_attached_model_revision,
     verify_attached_process_preservation,
 )
-from src.jobs.manager import JobManager, validate_staged_sweep_spec
+from src.jobs.manager import JobLaunchError, JobManager, validate_staged_sweep_spec
 from src.jobs.store import JobStore, process_identity
 from src.shared_session.identity import normalize_attached_server_identity
 from src.shared_session.locking import (
@@ -935,6 +935,112 @@ def test_public_job_submit_does_not_launch_after_handoff_failure(ascii_job_root)
             "external_resources_preserved": None,
             "detach_state": None,
         },
+    }
+
+
+def test_public_job_submit_recovers_handoff_after_prelaunch_failure(ascii_job_root):
+    source = ascii_job_root / "immutable-source.mph"
+    source.write_bytes(b"immutable source")
+    backend = normalize_attached_execution_backend(_backend())
+    recovered = []
+
+    class RecoveringSessionManager:
+        def prepare_attached_job_handoff(self, **_kwargs):
+            return {
+                "success": True,
+                "state": "attached_job_handoff_ready",
+                "execution_backend": backend,
+                "detach": {
+                    "state": "detached",
+                    "external_resources_preserved": True,
+                },
+            }
+
+        def recover_attached_job_handoff(self, execution_backend):
+            recovered.append(execution_backend)
+            return {
+                "success": True,
+                "state": "attached_handoff_reclaimed_pending_lock",
+            }
+
+    class PreflightFailingJobManager:
+        def submit(self, _spec):
+            raise RuntimeError("preflight refused")
+
+    result = _submit_job(
+        {
+            "job_type": "staged_sweep",
+            "source_model_path": str(source),
+            "parameter_name": "gap",
+            "parameter_values": [10.0],
+            "expressions": ["A"],
+            "execution_backend": {
+                "kind": "attached_shared_server",
+                "expected_lock_sha256": "a" * 64,
+                "expected_revision_sha256": "b" * 64,
+                "user_confirmed_automation_exclusive": True,
+            },
+        },
+        manager=PreflightFailingJobManager(),
+        session_manager=RecoveringSessionManager(),
+    )
+
+    assert result["success"] is False
+    assert result["state"] == "job_submit_failed_after_attached_handoff"
+    assert result["handoff_recovery"]["success"] is True
+    assert recovered == [backend]
+
+
+def test_public_job_submit_reconciles_durable_launch_failure_without_reclaim(
+    ascii_job_root,
+):
+    source = ascii_job_root / "immutable-source.mph"
+    source.write_bytes(b"immutable source")
+    backend = normalize_attached_execution_backend(_backend())
+
+    class UnreachableRecoverySessionManager:
+        def prepare_attached_job_handoff(self, **_kwargs):
+            return {
+                "success": True,
+                "state": "attached_job_handoff_ready",
+                "execution_backend": backend,
+                "detach": {
+                    "state": "detached",
+                    "external_resources_preserved": True,
+                },
+            }
+
+        def recover_attached_job_handoff(self, _execution_backend):
+            raise AssertionError("durable launch failures must not reclaim the session")
+
+    class DurableFailingJobManager:
+        def submit(self, _spec):
+            raise JobLaunchError("job-durable", RuntimeError("launch refused"))
+
+    result = _submit_job(
+        {
+            "job_type": "staged_sweep",
+            "source_model_path": str(source),
+            "parameter_name": "gap",
+            "parameter_values": [10.0],
+            "expressions": ["A"],
+            "execution_backend": {
+                "kind": "attached_shared_server",
+                "expected_lock_sha256": "a" * 64,
+                "expected_revision_sha256": "b" * 64,
+                "user_confirmed_automation_exclusive": True,
+            },
+        },
+        manager=DurableFailingJobManager(),
+        session_manager=UnreachableRecoverySessionManager(),
+    )
+
+    assert result["success"] is False
+    assert result["handoff_recovery"] == {
+        "success": False,
+        "state": "durable_job_requires_reconciliation",
+        "job_id": "job-durable",
+        "action": "inspect_job_status_before_reclaiming_attached_session",
     }
 
 

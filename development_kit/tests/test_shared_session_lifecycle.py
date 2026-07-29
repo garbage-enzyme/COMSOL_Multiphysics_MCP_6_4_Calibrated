@@ -482,6 +482,97 @@ def _attach_saved_and_lock(manager, source, *, collaboration_mode):
     return locked["model_lock"]
 
 
+def _prepare_saved_handoff(manager, source):
+    model_lock = _attach_saved_and_lock(
+        manager,
+        source,
+        collaboration_mode="automation_exclusive",
+    )
+    handoff = manager.prepare_attached_job_handoff(
+        expected_lock_sha256=model_lock["lock_sha256"],
+        expected_revision_sha256=model_lock["revision"]["revision_sha256"],
+        source_model_path=str(source),
+        user_confirmed_automation_exclusive=True,
+    )
+    assert handoff["success"] is True
+    return handoff
+
+
+def test_attached_job_handoff_recovery_reattaches_and_re_adopts_exact_model(tmp_path):
+    source = tmp_path / "immutable-source.mph"
+    source.write_bytes(b"immutable source")
+    models = [
+        {
+            "tag": "Model_1",
+            "label": "Working",
+            "file_path": "D:/models/working.mph",
+            "unsaved": False,
+        }
+    ]
+    manager, ownership, client = _manager(tmp_path, models=models)
+    handoff = _prepare_saved_handoff(manager, source)
+
+    recovered = manager.recover_attached_job_handoff(
+        handoff["execution_backend"]
+    )
+
+    assert recovered["success"] is True
+    assert recovered["state"] == "attached_handoff_reclaimed_pending_lock"
+    assert recovered["server_identity_sha256"] == (
+        handoff["execution_backend"]["attached_server"]["identity_sha256"]
+    )
+    assert recovered["model_identity_sha256"] == (
+        handoff["execution_backend"]["model"]["identity_sha256"]
+    )
+    assert recovered["model_lock_restored"] is False
+    assert manager.status()["state"] == "attached_model_pending_lock"
+    assert client.calls == ["disconnect"]
+    assert ownership.releases == 1
+
+
+@pytest.mark.parametrize("changed_identity", ["server", "model"])
+def test_attached_job_handoff_recovery_fails_closed_and_detaches_changed_target(
+    tmp_path,
+    changed_identity,
+):
+    source = tmp_path / "immutable-source.mph"
+    source.write_bytes(b"immutable source")
+    models = [
+        {
+            "tag": "Model_1",
+            "label": "Working",
+            "file_path": "D:/models/working.mph",
+            "unsaved": False,
+        }
+    ]
+    manager, ownership, client = _manager(tmp_path, models=models)
+    handoff = _prepare_saved_handoff(manager, source)
+    if changed_identity == "server":
+        manager._snapshot_provider = lambda: _snapshot(server_created=21.0)
+        expected_state = "attached_handoff_server_identity_changed"
+    else:
+        manager._model_inventory_reader = lambda _client: [
+            {
+                "tag": "Model_1",
+                "label": "Changed",
+                "file_path": "D:/models/working.mph",
+                "unsaved": False,
+            }
+        ]
+        expected_state = "attached_handoff_model_recovery_failed"
+
+    recovered = manager.recover_attached_job_handoff(
+        handoff["execution_backend"]
+    )
+
+    assert recovered["success"] is False
+    assert recovered["state"] == expected_state
+    assert recovered["cleanup"]["success"] is True
+    assert manager.status()["state"] == "detached"
+    assert client.calls == ["disconnect", "disconnect"]
+    assert ownership.releases == 2
+
+
 def test_model_lock_binds_fresh_server_model_revision_and_process(tmp_path):
     manager, _ownership, _client = _manager(tmp_path)
 

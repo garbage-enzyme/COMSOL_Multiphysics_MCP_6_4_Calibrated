@@ -16,6 +16,7 @@ PROBE = ROOT / "development_kit" / "tests" / "integration" / "native_cancel_sign
 SYSTEM32 = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32"
 POWERSHELL = SYSTEM32 / "WindowsPowerShell" / "v1.0" / "powershell.exe"
 TASKKILL = SYSTEM32 / "taskkill.exe"
+NATIVE_CANCEL_PROBE_MODEL_ENV = "COMSOL_MCP_NATIVE_CANCEL_PROBE_MODEL"
 
 
 def _comsol_pids() -> set[int]:
@@ -98,10 +99,10 @@ def _run_probe(environment: dict[str, str], *, timeout_seconds: float = 180.0) -
 
 @pytest.mark.integration
 def test_progress_context_cancel_stops_real_study_in_three_fresh_processes():
-    model_path = os.environ.get("COMSOL_durable cancellationA_PROBE_MODEL")
+    model_path = os.environ.get(NATIVE_CANCEL_PROBE_MODEL_ENV)
     if not model_path:
         pytest.skip(
-            "set COMSOL_durable cancellationA_PROBE_MODEL to run the real native cancellation gate"
+            f"set {NATIVE_CANCEL_PROBE_MODEL_ENV} to run the real native cancellation gate"
         )
     assert Path(model_path).is_file(), model_path
 
@@ -111,7 +112,7 @@ def test_progress_context_cancel_stops_real_study_in_three_fresh_processes():
     try:
         for _index in range(3):
             environment = os.environ.copy()
-            environment["COMSOL_durable cancellationA_PROBE_MODEL"] = model_path
+            environment[NATIVE_CANCEL_PROBE_MODEL_ENV] = model_path
             execution = _run_probe(environment)
             if execution["timed_out"]:
                 failures.append("native cancellation probe timed out")

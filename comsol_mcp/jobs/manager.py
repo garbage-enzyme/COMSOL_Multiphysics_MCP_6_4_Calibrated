@@ -43,6 +43,28 @@ class _PollableProcess(Protocol):
 _DETACHED_PROCESS_LOCK = threading.Lock()
 _DETACHED_PROCESS_WAKE = threading.Event()
 _DETACHED_PROCESSES: set[_PollableProcess] = set()
+
+
+class JobLaunchError(RuntimeError):
+    """Bind a failed worker launch to the durable job that records its state."""
+
+    def __init__(
+        self,
+        job_id: str,
+        cause: Exception,
+        *,
+        state_record_error: Exception | None = None,
+    ):
+        super().__init__(str(cause))
+        self.job_id = job_id
+        self.cause_type = type(cause).__name__
+        self.state_record_error = (
+            None
+            if state_record_error is None
+            else f"{type(state_record_error).__name__}: {state_record_error}"
+        )
+
+
 _DETACHED_REAPER_STARTED = False
 
 
@@ -351,18 +373,35 @@ class JobManager:
                 job_id = self.store.create(spec, state)
         else:
             job_id = self.store.create(spec, state)
-        self.store.append_event(job_id, "submitted", {"spec_fingerprint": spec["spec_fingerprint"]})
         try:
+            self.store.append_event(
+                job_id,
+                "submitted",
+                {"spec_fingerprint": spec["spec_fingerprint"]},
+            )
             identity = self._launch_worker(job_id, worker_module)
             self.store.bind_worker_identity(job_id, identity)
         except Exception as exc:
-            self.store.update_state(
+            state_record_error = None
+            try:
+                self.store.update_state(
+                    job_id,
+                    "failed",
+                    patch={
+                        "last_error": {
+                            "type": type(exc).__name__,
+                            "message": str(exc),
+                        }
+                    },
+                    event="launch_failed",
+                )
+            except Exception as record_exc:
+                state_record_error = record_exc
+            raise JobLaunchError(
                 job_id,
-                "failed",
-                patch={"last_error": {"type": type(exc).__name__, "message": str(exc)}},
-                event="launch_failed",
-            )
-            raise
+                exc,
+                state_record_error=state_record_error,
+            ) from exc
         return {"success": True, "job_id": job_id, "status": "submitted"}
 
     def _find_validation_duplicate(self, spec_fingerprint: str) -> str | None:

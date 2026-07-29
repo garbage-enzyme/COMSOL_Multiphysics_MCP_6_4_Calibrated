@@ -245,6 +245,7 @@ def test_cleanup_fault_fails_attempt_but_still_releases_lease(tmp_path, ascii_ro
     assert state["status"] == "failed"
     assert "cleanup_hook" in state["last_error"]["message"]
     assert ownership.released is True
+    assert state["cleanup"]["lease_released"] is True
     assert (store.job_dir(job_id) / "analysis" / "summary.json").is_file()
 
 

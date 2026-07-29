@@ -387,7 +387,7 @@ def test_probe_main_reports_client_cleanup_failure(monkeypatch, capsys):
         def clear(self):
             raise RuntimeError("clear failed")
 
-    monkeypatch.delenv("COMSOL_durable cancellationA_PROBE_MODEL", raising=False)
+    monkeypatch.delenv(acceptance_test.NATIVE_CANCEL_PROBE_MODEL_ENV, raising=False)
     monkeypatch.setattr(acceptance_probe, "discover_environment", lambda: {"backend": {}})
     monkeypatch.setattr(acceptance_probe, "reflect_candidate_signatures", lambda: {})
     monkeypatch.setattr(acceptance_probe.mph, "Client", lambda cores: FakeClient())
@@ -438,7 +438,7 @@ def test_parent_rechecks_global_process_inventory_after_timeout(monkeypatch, tmp
         inventories.append(True)
         return {99}
 
-    monkeypatch.setenv("COMSOL_durable cancellationA_PROBE_MODEL", str(model))
+    monkeypatch.setenv(acceptance_test.NATIVE_CANCEL_PROBE_MODEL_ENV, str(model))
     monkeypatch.setattr(acceptance_test, "_comsol_pids", inventory)
     monkeypatch.setattr(acceptance_test.time, "sleep", lambda _seconds: None)
     monkeypatch.setattr(
