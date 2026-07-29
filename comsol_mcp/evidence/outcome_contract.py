@@ -313,7 +313,7 @@ def execution_from_terminal_job_state(value: Mapping[str, Any]) -> dict[str, Any
         supplied_cleanup = state.get("cleanup_verification")
         if supplied_cleanup is None:
             cleanup = {
-                "processes_absent": status == "interrupted",
+                "processes_absent": False,
                 "descendants_absent": False,
                 "port_closed": False,
                 "lease_absent": False,

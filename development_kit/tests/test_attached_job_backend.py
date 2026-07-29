@@ -667,6 +667,105 @@ def test_attached_resume_rejects_stale_advanced_or_structural_revision(
         production_worker._select_attached_model(Client(), target, expected)
 
 
+def test_attached_resume_skips_unrelated_local_owned_lease_recovery(
+    ascii_job_root, monkeypatch
+):
+    import src.tools.ownership as ownership_module
+
+    source = ascii_job_root / "immutable-source.mph"
+    source.write_bytes(b"immutable source")
+    spec = validate_staged_sweep_spec(
+        {
+            "job_type": "staged_sweep",
+            "source_model_path": str(source),
+            "parameter_name": "gap",
+            "parameter_values": [10.0],
+            "expressions": ["A"],
+            "execution_backend": _backend(),
+        }
+    )
+    store = JobStore(ascii_job_root / "resume-runtime" / "jobs")
+    job_id = store.create(
+        spec,
+        {
+            "schema_version": "2",
+            "status": "interrupted",
+            "attempt": 1,
+            "worker_pid": None,
+            "worker_process_create_time": None,
+            "worker_command_signature": None,
+            "progress": {"completed": 0, "total": 1},
+        },
+    )
+    manager = JobManager(store.root, reconcile_on_start=False)
+    monkeypatch.setattr(manager, "_run_preflight", lambda _spec: {"ready": True})
+    monkeypatch.setattr(manager, "_launch_worker", lambda *_args: process_identity(os.getpid()))
+    monkeypatch.setattr(
+        ownership_module,
+        "SolverOwnership",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("attached resume inspected an unrelated local owned lease")
+        ),
+    )
+
+    resumed = manager.resume(job_id)
+
+    assert resumed["success"] is True
+    assert resumed["attempt"] == 2
+
+
+def test_attached_cleanup_retains_release_failure_and_preservation_evidence(monkeypatch):
+    import src.shared_session.lifecycle as lifecycle_module
+
+    target = normalize_attached_execution_target(_backend())
+    disconnected = []
+
+    class Client:
+        def disconnect(self):
+            disconnected.append(True)
+
+    class Ownership:
+        lease_path = None
+
+        def release(self):
+            raise RuntimeError("injected attached release failure")
+
+    monkeypatch.setattr(
+        lifecycle_module,
+        "_default_model_inventory_reader",
+        lambda _client: [
+            {
+                "tag": "Model1",
+                "label": "working.mph",
+                "file_path": "D:/models/working.mph",
+                "unsaved": False,
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        production_worker,
+        "_collect_attached_process_preservation",
+        lambda _target: {"success": True, "state": "preserved"},
+    )
+
+    cleanup = production_worker._cleanup_attached_execution(
+        client=Client(),
+        ownership=Ownership(),
+        lease_acquired=True,
+        target=target,
+    )
+
+    assert disconnected == [True]
+    assert cleanup["success"] is False
+    assert cleanup["lease_absent"] is False
+    assert cleanup["lease_release"] == {
+        "success": False,
+        "released": False,
+        "error": "RuntimeError: injected attached release failure",
+    }
+    assert cleanup["external_resources"] == {"success": True, "state": "preserved"}
+
+
 def test_attached_manager_preflight_is_process_only_and_binds_server_identity(
     ascii_job_root, monkeypatch
 ):

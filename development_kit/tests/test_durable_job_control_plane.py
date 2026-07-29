@@ -1519,3 +1519,36 @@ def test_sequence_transition_error_remains_bound_to_concurrent_cancel(jobs_root,
     assert state["status"] == "cancel_requested"
     assert state["cancel"]["worker_error"]["type"] == "ValueError"
     assert "Invalid job state transition" in state["cancel"]["worker_error"]["message"]
+
+
+def test_default_reconciliation_includes_an_older_accepted_cancellation(
+    jobs_root, monkeypatch
+):
+    manager = JobManager(jobs_root, reconcile_on_start=False)
+    identity = process_identity(os.getpid())
+    old_job_id = manager.store.create(
+        {"schema_version": "2", "job_type": "test"},
+        {
+            "schema_version": "2",
+            "status": "running",
+            "attempt": 1,
+            "worker_pid": identity["pid"],
+            "worker_process_create_time": identity["process_create_time"],
+            "worker_command_signature": identity["command_signature"],
+        },
+    )
+    request = manager.store.request_cancel(old_job_id, requester_identity=identity)
+    for index in range(21):
+        manager.store.create(
+            {"schema_version": "2", "job_type": "test", "ordinal": index},
+            {"schema_version": "2", "status": "completed", "attempt": 1},
+        )
+    launches = []
+    monkeypatch.setattr(
+        manager,
+        "_launch_cancel_coordinator",
+        lambda job_id, request_id: launches.append((job_id, request_id)),
+    )
+
+    assert manager.reconcile_cancellations() == 1
+    assert launches == [(old_job_id, request["control"]["request_id"])]

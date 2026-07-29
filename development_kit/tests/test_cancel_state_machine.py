@@ -614,3 +614,98 @@ def test_coordinator_helper_writes_evidence_when_identity_action_raises(
         "type": "ValueError",
         "message": "malformed coordinator",
     }
+
+
+def test_cancel_acceptance_waits_use_independent_phase_deadlines():
+    from development_kit.tests.integration import durable_cancel_acceptance
+
+    clock = FakeClock()
+    verified_cancelled = {
+        "status": "cancelled",
+        "cancel": {
+            "verification": {
+                "absent": True,
+                "verdicts": [],
+                "solver": {
+                    "ok": True,
+                    "lease_state": "absent",
+                    "recorded_port_closed": True,
+                },
+            }
+        },
+    }
+
+    class Manager:
+        def __init__(self):
+            self.statuses = (
+                [{"status": "starting"}] * 4
+                + [{"status": "running"}]
+                + [{"status": "cancel_requested"}] * 4
+                + [verified_cancelled]
+            )
+
+        def status(self, _job_id):
+            return self.statuses.pop(0)
+
+    manager = Manager()
+    running = durable_cancel_acceptance._wait_for_running(
+        manager,
+        "job",
+        timeout_seconds=1.0,
+        monotonic=clock.monotonic,
+        sleep=clock.sleep,
+    )
+    cancelled = durable_cancel_acceptance._wait_for_verified_cancelled(
+        manager,
+        "job",
+        timeout_seconds=1.0,
+        monotonic=clock.monotonic,
+        sleep=clock.sleep,
+    )
+
+    assert running["status"] == "running"
+    assert cancelled == verified_cancelled
+    assert clock.elapsed == pytest.approx(1.6)
+
+
+def test_cancel_acceptance_rejects_early_wrong_and_unverified_terminal_states():
+    from development_kit.tests.integration import durable_cancel_acceptance
+
+    class Manager:
+        def __init__(self, status):
+            self.value = status
+
+        def status(self, _job_id):
+            return self.value
+
+    with pytest.raises(RuntimeError, match="before cancellation"):
+        durable_cancel_acceptance._wait_for_running(
+            Manager({"status": "failed"}),
+            "job",
+            timeout_seconds=1.0,
+        )
+    with pytest.raises(RuntimeError, match="instead of verified cancellation"):
+        durable_cancel_acceptance._wait_for_verified_cancelled(
+            Manager({"status": "completed"}),
+            "job",
+            timeout_seconds=1.0,
+        )
+    with pytest.raises(RuntimeError, match="lacks verified cleanup"):
+        durable_cancel_acceptance._wait_for_verified_cancelled(
+            Manager(
+                {
+                    "status": "cancelled",
+                    "cancel": {
+                        "verification": {
+                            "absent": False,
+                            "solver": {
+                                "lease_state": "absent",
+                                "recorded_port_closed": True,
+                            },
+                        }
+                    },
+                }
+            ),
+            "job",
+            timeout_seconds=1.0,
+        )

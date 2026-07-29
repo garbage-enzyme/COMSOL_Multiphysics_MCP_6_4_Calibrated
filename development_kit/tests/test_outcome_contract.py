@@ -198,6 +198,13 @@ def test_process_loss_maps_to_interrupted_and_never_claims_cleanup_or_acceptance
     assert execution["state"] == "interrupted"
     assert execution["completed_requested_work"] is False
     assert execution["cleanup"]["verified"] is False
+    assert execution["cleanup"] == {
+        "processes_absent": False,
+        "descendants_absent": False,
+        "port_closed": False,
+        "lease_absent": False,
+        "verified": False,
+    }
 
     payload = _payload("interrupted", "incomplete", "not_evaluated")
     payload["execution"] = execution

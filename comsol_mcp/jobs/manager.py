@@ -580,12 +580,12 @@ class JobManager:
             )
         _track_detached_process(process)
 
-    def reconcile_cancellations(self, *, limit: int = 20) -> int:
+    def reconcile_cancellations(self, *, limit: int | None = None) -> int:
         """Reconcile orphaned cancellation attempts without weakening cleanup proof."""
         reconciled = 0
         if not self.store.root.is_dir():
             return 0
-        count = max(1, min(int(limit), 100))
+        count = None if limit is None else max(1, min(int(limit), 100))
         directories = sorted(
             (
                 path
@@ -596,7 +596,9 @@ class JobManager:
             ),
             key=lambda path: path.stat().st_mtime_ns,
             reverse=True,
-        )[:count]
+        )
+        if count is not None:
+            directories = directories[:count]
         for directory in directories:
             job_id = directory.name
             try:
@@ -742,7 +744,7 @@ class JobManager:
             "convergence_campaign",
             "branch_continuation_campaign",
         }:
-            if self._preflight is None:
+            if self._preflight is None and spec.get("execution_backend") is None:
                 from comsol_mcp.tools.ownership import SolverOwnership
 
                 ownership = SolverOwnership(self.store.root.parent)

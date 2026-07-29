@@ -234,7 +234,14 @@ def _cleanup_attached_execution(
         "message": "No attached lease was acquired.",
     }
     if lease_acquired and client_disconnected:
-        release = ownership.release()
+        try:
+            release = ownership.release()
+        except Exception as exc:
+            release = {
+                "success": False,
+                "released": False,
+                "error": f"{type(exc).__name__}: {exc}",
+            }
     elif lease_acquired:
         release = {
             "success": False,
