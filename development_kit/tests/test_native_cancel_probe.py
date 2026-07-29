@@ -1,8 +1,13 @@
 import json
 import re
+import subprocess
 from pathlib import Path
 
+import pytest
 from src.jobs import native_cancel_probe as probe
+
+from development_kit.tests.integration import native_cancel_signature_probe as acceptance_probe
+from development_kit.tests.integration import test_native_cancel_candidate as acceptance_test
 
 
 def test_discover_environment_records_build_and_hashes(monkeypatch, tmp_path):
@@ -264,3 +269,190 @@ def test_running_jvm_rejects_candidate_loaded_from_another_jar(monkeypatch):
         False,
         "jvm_candidate_origin_mismatch",
     )
+
+
+class _FakeParameterNode:
+    def set(self, _name, _value):
+        return None
+
+
+class _FakeStudy:
+    def run(self):
+        return None
+
+
+class _FakeJavaModel:
+    def param(self):
+        return _FakeParameterNode()
+
+    def study(self, _tag):
+        return _FakeStudy()
+
+
+class _FakeModel:
+    java = _FakeJavaModel()
+
+
+def test_cancel_gate_preserves_resources_while_solve_thread_is_alive(monkeypatch, tmp_path):
+    source = tmp_path / "source.mph"
+    source.write_bytes(b"model")
+    temporary_root = tmp_path / "runtime"
+    temporary_root.mkdir()
+    removed = []
+
+    class FakeClient:
+        def load(self, _path):
+            return _FakeModel()
+
+        def remove(self, model):
+            removed.append(model)
+
+    class FakeThread:
+        def __init__(self, **_kwargs):
+            pass
+
+        def start(self):
+            return None
+
+        def is_alive(self):
+            return True
+
+        def join(self, timeout):
+            assert timeout == 0.01
+
+    class FakeContext:
+        def cancel(self):
+            return None
+
+    monkeypatch.setattr(acceptance_probe.threading, "Thread", FakeThread)
+    monkeypatch.setattr(acceptance_probe.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr("jpype.JClass", lambda _name: FakeContext)
+
+    result = acceptance_probe._progress_context_cancel_gate(
+        FakeClient(),
+        source,
+        temporary_root,
+        startup_wait_seconds=0.0,
+        join_timeout_seconds=0.01,
+    )
+
+    assert result["cleanup_safe"] is False
+    assert result["model_remove"] == "skipped_solve_thread_active"
+    assert removed == []
+    assert temporary_root.is_dir()
+
+
+def test_cancel_gate_does_not_convert_base_exception_to_candidate_outcome(monkeypatch, tmp_path):
+    source = tmp_path / "source.mph"
+    source.write_bytes(b"model")
+    temporary_root = tmp_path / "runtime"
+    temporary_root.mkdir()
+
+    class FakeClient:
+        def load(self, _path):
+            return _FakeModel()
+
+    class FakeThread:
+        def __init__(self, target, **_kwargs):
+            self.target = target
+
+        def start(self):
+            self.target()
+
+        def is_alive(self):
+            return False
+
+        def join(self, timeout):
+            return None
+
+    class FakeContext:
+        def cancel(self):
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(acceptance_probe.threading, "Thread", FakeThread)
+    monkeypatch.setattr(acceptance_probe.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr("jpype.JClass", lambda _name: FakeContext)
+
+    with pytest.raises(KeyboardInterrupt):
+        acceptance_probe._progress_context_cancel_gate(
+            FakeClient(), source, temporary_root, startup_wait_seconds=0.0
+        )
+
+
+def test_probe_main_reports_client_cleanup_failure(monkeypatch, capsys):
+    class FakeClient:
+        standalone = True
+        port = None
+
+        def clear(self):
+            raise RuntimeError("clear failed")
+
+    monkeypatch.delenv("COMSOL_durable cancellationA_PROBE_MODEL", raising=False)
+    monkeypatch.setattr(acceptance_probe, "discover_environment", lambda: {"backend": {}})
+    monkeypatch.setattr(acceptance_probe, "reflect_candidate_signatures", lambda: {})
+    monkeypatch.setattr(acceptance_probe.mph, "Client", lambda cores: FakeClient())
+
+    returncode = acceptance_probe.main()
+    manifest = json.loads(capsys.readouterr().out)
+
+    assert returncode == 1
+    assert manifest["cleanup"]["client_clear"] == "failed: RuntimeError: clear failed"
+
+
+def test_parent_timeout_terminates_the_owned_probe_tree(monkeypatch):
+    class FakeProcess:
+        pid = 1234
+        returncode = 1
+
+        def __init__(self):
+            self.communications = 0
+
+        def communicate(self, timeout):
+            self.communications += 1
+            if self.communications == 1:
+                raise subprocess.TimeoutExpired("probe", timeout, output=b"partial")
+            return ("tail", "error")
+
+    process = FakeProcess()
+    terminated = []
+    monkeypatch.setattr(acceptance_test.subprocess, "Popen", lambda *args, **kwargs: process)
+    monkeypatch.setattr(
+        acceptance_test,
+        "_terminate_owned_process_tree",
+        lambda owned: terminated.append(owned.pid),
+    )
+
+    result = acceptance_test._run_probe({}, timeout_seconds=0.01)
+
+    assert result["timed_out"] is True
+    assert result["stdout"] == "partialtail"
+    assert terminated == [1234, 1234]
+
+
+def test_parent_rechecks_global_process_inventory_after_timeout(monkeypatch, tmp_path):
+    model = tmp_path / "model.mph"
+    model.write_bytes(b"model")
+    inventories = []
+
+    def inventory():
+        inventories.append(True)
+        return {99}
+
+    monkeypatch.setenv("COMSOL_durable cancellationA_PROBE_MODEL", str(model))
+    monkeypatch.setattr(acceptance_test, "_comsol_pids", inventory)
+    monkeypatch.setattr(acceptance_test.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(
+        acceptance_test,
+        "_run_probe",
+        lambda _environment: {
+            "timed_out": True,
+            "returncode": 1,
+            "stdout": "",
+            "stderr": "",
+        },
+    )
+
+    with pytest.raises(AssertionError, match="timed out"):
+        acceptance_test.test_progress_context_cancel_stops_real_study_in_three_fresh_processes()
+
+    assert len(inventories) == 2
