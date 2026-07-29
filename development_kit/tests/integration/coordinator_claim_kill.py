@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 import sys
 import time
@@ -10,7 +9,7 @@ import time
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
 
-from src.jobs.process_control import inspect_identity, terminate_exact
+from src.jobs.process_control import terminate_exact
 from src.jobs.store import JobStore, atomic_write_json
 
 
@@ -21,25 +20,39 @@ def main(root: str, job_id: str, timeout_seconds: float = 30.0) -> int:
     while time.monotonic() < deadline:
         try:
             state = store.read_state(job_id)
-        except (FileNotFoundError, json.JSONDecodeError, PermissionError):
+        except RuntimeError:
             time.sleep(0.005)
             continue
         cancel = state.get("cancel") if isinstance(state.get("cancel"), dict) else {}
         coordinator = cancel.get("coordinator")
         if state.get("status") == "cancelling" and isinstance(coordinator, dict):
-            before = inspect_identity(coordinator)
-            action = terminate_exact(coordinator)
-            evidence = {
-                "job_id": job_id,
-                "observed_status": state.get("status"),
-                "observed_phase": cancel.get("phase"),
-                "coordinator": coordinator,
-                "before": before,
-                "action": action,
-                "timestamp_epoch": time.time(),
-            }
+            try:
+                action = terminate_exact(coordinator)
+                evidence = {
+                    "job_id": job_id,
+                    "observed_status": state.get("status"),
+                    "observed_phase": cancel.get("phase"),
+                    "coordinator": coordinator,
+                    "before": action.get("before"),
+                    "action": action,
+                    "timestamp_epoch": time.time(),
+                }
+                exit_code = 0 if action.get("acted") else 2
+            except Exception as exc:
+                evidence = {
+                    "job_id": job_id,
+                    "observed_status": state.get("status"),
+                    "observed_phase": cancel.get("phase"),
+                    "coordinator": coordinator,
+                    "error": {
+                        "type": type(exc).__name__,
+                        "message": str(exc),
+                    },
+                    "timestamp_epoch": time.time(),
+                }
+                exit_code = 2
             atomic_write_json(evidence_path, evidence)
-            return 0 if action.get("acted") else 2
+            return exit_code
         time.sleep(0.005)
     atomic_write_json(
         evidence_path,

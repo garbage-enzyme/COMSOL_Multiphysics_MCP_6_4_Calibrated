@@ -11,7 +11,7 @@ import uuid
 import pytest
 
 from src.jobs import cancel_worker
-from src.jobs.store import JobStore, process_identity
+from src.jobs.store import JobStore, process_identity, read_json
 
 
 class FakeClock:
@@ -171,7 +171,8 @@ def _install_fakes(
         "_verify_solver_cleanup",
         lambda _store, _job_id: (
             solver_cleanup
-            or {
+            if solver_cleanup is not None
+            else {
                 "ok": True,
                 "lease_state": "absent",
                 "lease_recovered": False,
@@ -431,6 +432,7 @@ def test_resumed_native_grace_uses_only_remaining_budget(jobs_root, monkeypatch)
     store = JobStore(jobs_root)
     job_id, request_id = _prepare_cancel(store, processes)
     requested = store.read_state(job_id)["cancel"]
+    original_grace_at = clock.time() - 0.75
     store.update_state(
         job_id,
         "cancelling",
@@ -440,7 +442,7 @@ def test_resumed_native_grace_uses_only_remaining_budget(jobs_root, monkeypatch)
                 "phase": "native_grace",
                 "phase_timestamps": {
                     **requested["phase_timestamps"],
-                    "native_grace": clock.time() - 0.75,
+                    "native_grace": original_grace_at,
                 },
                 "timing_policy": {
                     "native_grace_budget_s": 1.0,
@@ -454,7 +456,9 @@ def test_resumed_native_grace_uses_only_remaining_budget(jobs_root, monkeypatch)
 
     assert cancel_worker.run(str(jobs_root), job_id, request_id, 100.0, 100.0) == 0
 
-    assert store.read_state(job_id)["status"] == "cancelled"
+    state = store.read_state(job_id)
+    assert state["status"] == "cancelled"
+    assert state["cancel"]["phase_timestamps"]["native_grace"] == original_grace_at
     assert clock.elapsed == pytest.approx(0.25)
 
 
@@ -501,4 +505,112 @@ def test_later_descendant_capture_is_merged_before_terminal_commit(jobs_root, mo
     assert verified_pids == {
         processes.worker["pid"],
         *(item["pid"] for item in processes.descendants),
+    }
+
+
+def test_fake_cleanup_preserves_an_explicit_empty_mapping(monkeypatch):
+    clock = FakeClock()
+    processes = FakeProcesses(clock)
+    _install_fakes(monkeypatch, clock, processes, solver_cleanup={})
+
+    assert cancel_worker._verify_solver_cleanup(None, "job-empty-cleanup") == {}
+
+
+def test_cleanup_verification_poll_reaches_the_always_active_timeout(monkeypatch):
+    clock = FakeClock()
+    identity = FakeProcesses._identity(45001, "always-active")
+    calls = 0
+
+    def active_verify(_identities):
+        nonlocal calls
+        calls += 1
+        return {
+            "absent": False,
+            "verdicts": [{"identity": identity, "state": "active", "reason": "active"}],
+        }
+
+    monkeypatch.setattr(cancel_worker.time, "monotonic", clock.monotonic)
+    monkeypatch.setattr(cancel_worker.time, "sleep", clock.sleep)
+    monkeypatch.setattr(cancel_worker, "verify_absent", active_verify)
+
+    verified = cancel_worker._wait_for_process_absence([identity], 0.1)
+
+    assert verified["absent"] is False
+    assert verified["verdicts"][0]["state"] == "active"
+    assert calls == 5
+    assert clock.elapsed == pytest.approx(0.1)
+
+
+def test_coordinator_helper_retries_wrapped_reads_and_uses_action_verdict(
+    jobs_root, monkeypatch
+):
+    from development_kit.tests.integration import coordinator_claim_kill
+
+    coordinator = FakeProcesses._identity(45101, "restart-coordinator")
+    store = JobStore(jobs_root)
+    job_id = store.create(
+        {},
+        {
+            "status": "cancelling",
+            "cancel": {"phase": "terminate", "coordinator": coordinator},
+        },
+    )
+    real_read = JobStore.read_state
+    reads = 0
+    action_before = {
+        "identity": coordinator,
+        "state": "active",
+        "reason": "same process object",
+    }
+
+    def transient_read(self, target_job_id):
+        nonlocal reads
+        reads += 1
+        if reads == 1:
+            raise RuntimeError("transient durable read")
+        return real_read(self, target_job_id)
+
+    monkeypatch.setattr(JobStore, "read_state", transient_read)
+    monkeypatch.setattr(coordinator_claim_kill.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(
+        coordinator_claim_kill,
+        "terminate_exact",
+        lambda _identity: {"acted": True, "action": "terminate", "before": action_before},
+    )
+
+    assert coordinator_claim_kill.main(str(jobs_root), job_id, 0.5) == 0
+
+    probe = read_json(store.job_dir(job_id) / "coordinator_restart_probe.json")
+    assert reads == 2
+    assert probe["before"] == action_before
+    assert probe["action"]["acted"] is True
+
+
+def test_coordinator_helper_writes_evidence_when_identity_action_raises(
+    jobs_root, monkeypatch
+):
+    from development_kit.tests.integration import coordinator_claim_kill
+
+    coordinator = {"pid": "malformed"}
+    store = JobStore(jobs_root)
+    job_id = store.create(
+        {},
+        {
+            "status": "cancelling",
+            "cancel": {"phase": "terminate", "coordinator": coordinator},
+        },
+    )
+    monkeypatch.setattr(
+        coordinator_claim_kill,
+        "terminate_exact",
+        lambda _identity: (_ for _ in ()).throw(ValueError("malformed coordinator")),
+    )
+
+    assert coordinator_claim_kill.main(str(jobs_root), job_id, 0.5) == 2
+
+    probe = read_json(store.job_dir(job_id) / "coordinator_restart_probe.json")
+    assert probe["coordinator"] == coordinator
+    assert probe["error"] == {
+        "type": "ValueError",
+        "message": "malformed coordinator",
     }
