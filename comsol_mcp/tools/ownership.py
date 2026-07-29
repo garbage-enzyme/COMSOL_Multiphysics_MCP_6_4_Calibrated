@@ -163,7 +163,9 @@ def _lightweight_job_summaries(root: Path, limit: int = 20) -> dict[str, Any]:
         (path for path in root.iterdir() if path.is_dir() and (path / "state.json").is_file()),
         key=lambda path: path.stat().st_mtime_ns,
         reverse=True,
-    )[:count]
+    )
+    if len(directories) > 1000:
+        raise RuntimeError("durable job status inventory exceeds the bounded maximum")
     jobs = []
     for directory in directories:
         try:
@@ -193,13 +195,14 @@ def _lightweight_job_summaries(root: Path, limit: int = 20) -> dict[str, Any]:
                 }
             )
     active = [job for job in jobs if job["status"] in DURABLE_ACTIVE_STATES]
+    recent = jobs[:count]
     return {
         "available": True,
         "root": str(root),
-        "count_returned": len(jobs),
+        "count_returned": len(recent),
         "active_count": len(active),
         "active": active,
-        "recent": jobs,
+        "recent": recent,
     }
 
 

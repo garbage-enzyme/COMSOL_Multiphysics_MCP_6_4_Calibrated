@@ -8,6 +8,17 @@ from types import SimpleNamespace
 import pytest
 
 
+def _cancel_and_join_thread(thread, *, timeout: float = 2.0) -> None:
+    if thread is None:
+        return
+    cancel = getattr(thread, "cancel", None)
+    if callable(cancel):
+        cancel()
+    if thread.ident is not None and thread is not threading.current_thread():
+        thread.join(timeout=timeout)
+        assert not thread.is_alive(), f"session worker {thread.name!r} did not stop"
+
+
 @pytest.fixture()
 def permissive_session_ownership(monkeypatch, tmp_path):
     """Keep session lifecycle tests independent of host-wide solver state."""
@@ -61,10 +72,26 @@ def permissive_session_ownership(monkeypatch, tmp_path):
     manager._start_watchdog = None
     manager._owns_solver_lease = False
     yield manager
-    if manager._start_thread is not None:
-        manager._start_thread.cancel()
-    if manager._start_watchdog is not None:
-        manager._start_watchdog.cancel()
+    _cancel_and_join_thread(manager._start_watchdog)
+    _cancel_and_join_thread(manager._start_thread)
+
+
+def test_session_thread_cleanup_waits_for_an_entered_timer_callback():
+    entered = threading.Event()
+    release = threading.Event()
+
+    def callback():
+        entered.set()
+        assert release.wait(timeout=1)
+
+    timer = threading.Timer(0, callback)
+    timer.start()
+    assert entered.wait(timeout=1)
+    release.set()
+
+    _cancel_and_join_thread(timer)
+
+    assert not timer.is_alive()
 
 
 class TestVersioning:

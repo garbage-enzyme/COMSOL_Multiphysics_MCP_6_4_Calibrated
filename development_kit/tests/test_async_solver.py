@@ -63,6 +63,29 @@ def test_callback_failure_does_not_change_completed_solve():
     assert study.run_count == 1
 
 
+def test_progress_callback_observes_intermediate_and_terminal_transitions():
+    study = FakeStudy()
+    solver = AsyncSolver()
+    observations = []
+
+    assert solver.start_solve(
+        FakeModel(study),
+        "std1",
+        progress_callback=lambda progress, message: observations.append(
+            (progress, message)
+        ),
+    )
+    assert solver.wait(timeout=2)
+
+    assert observations == [
+        (0.0, "Starting solver..."),
+        (0.1, "Building geometry..."),
+        (0.2, "Creating mesh..."),
+        (0.3, "Solving study: std1..."),
+        (1.0, "Completed"),
+    ]
+
+
 def test_progress_property_returns_snapshot():
     solver = AsyncSolver()
 
@@ -97,3 +120,56 @@ def test_cancel_during_blocking_run_reports_completed_truthfully():
     assert progress["status"] == SolverStatus.COMPLETED.value
     assert progress["progress"] == 1.0
     assert "could not interrupt" in progress["message"]
+
+
+def test_running_solve_cannot_be_reset_or_restarted():
+    started = threading.Event()
+    release = threading.Event()
+
+    class BlockingStudy(FakeStudy):
+        def run(self):
+            self.run_count += 1
+            started.set()
+            assert release.wait(timeout=2)
+
+    study = BlockingStudy()
+    solver = AsyncSolver()
+
+    assert solver.start_solve(FakeModel(study), "std1") is True
+    assert started.wait(timeout=2)
+    assert solver.reset() is False
+    assert solver.progress.status is SolverStatus.RUNNING
+    assert solver.start_solve(FakeModel(study), "std1") is False
+
+    release.set()
+    assert solver.wait(timeout=2)
+    assert solver.reset() is True
+    assert solver.progress.status is SolverStatus.IDLE
+
+
+def test_cancellation_request_is_reported_to_progress_callback():
+    started = threading.Event()
+    release = threading.Event()
+    observations = []
+
+    class BlockingStudy(FakeStudy):
+        def run(self):
+            self.run_count += 1
+            started.set()
+            assert release.wait(timeout=2)
+
+    solver = AsyncSolver()
+    assert solver.start_solve(
+        FakeModel(BlockingStudy()),
+        "std1",
+        progress_callback=lambda progress, message: observations.append(
+            (progress, message)
+        ),
+    )
+    assert started.wait(timeout=2)
+
+    assert solver.cancel() is True
+    assert observations[-1] == (0.3, "Cancellation requested")
+
+    release.set()
+    assert solver.wait(timeout=2)

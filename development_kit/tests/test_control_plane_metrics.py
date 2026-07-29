@@ -380,6 +380,32 @@ def test_lightweight_job_summaries_avoid_campaign_imports(tmp_path):
     assert unreadable["error"].startswith("JSONDecodeError:")
 
 
+def test_lightweight_job_summaries_find_active_jobs_older_than_recent_limit(tmp_path):
+    jobs_root = tmp_path / "jobs"
+    active = jobs_root / "active-oldest"
+    active.mkdir(parents=True)
+    (active / "state.json").write_text(
+        json.dumps({"status": "running", "updated_at_epoch": 1.0}),
+        encoding="utf-8",
+    )
+    for index in range(21):
+        completed = jobs_root / f"completed-{index:02d}"
+        completed.mkdir()
+        state_path = completed / "state.json"
+        state_path.write_text(
+            json.dumps({"status": "completed", "updated_at_epoch": index + 2.0}),
+            encoding="utf-8",
+        )
+        state_path.touch()
+
+    result = ownership_module._lightweight_job_summaries(jobs_root, limit=20)
+
+    assert result["count_returned"] == 20
+    assert len(result["recent"]) == 20
+    assert result["active_count"] == 1
+    assert [item["job_id"] for item in result["active"]] == ["active-oldest"]
+
+
 def test_standard_library_comsol_discovery_matches_mph_windows_shape(
     tmp_path, monkeypatch
 ):

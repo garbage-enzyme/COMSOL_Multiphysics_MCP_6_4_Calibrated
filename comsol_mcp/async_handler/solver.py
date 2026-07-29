@@ -50,6 +50,7 @@ class AsyncSolver:
         self._thread: Optional[threading.Thread] = None
         self._progress: SolverProgress = SolverProgress()
         self._cancel_flag: bool = False
+        self._progress_callback: Optional[Callable[[float, str], None]] = None
         self._lock: threading.Lock = threading.Lock()
     
     @property
@@ -80,10 +81,15 @@ class AsyncSolver:
             True if solving started, False if already running
         """
         with self._lock:
-            if self._progress.status == SolverStatus.RUNNING:
+            if (
+                self._progress.status == SolverStatus.RUNNING
+                or self._thread is not None
+                and self._thread.is_alive()
+            ):
                 return False
             
             self._cancel_flag = False
+            self._progress_callback = progress_callback
             self._progress = SolverProgress(
                 status=SolverStatus.RUNNING,
                 progress=0.0,
@@ -92,13 +98,15 @@ class AsyncSolver:
                 study_name=study_name,
                 model_name=model.name() if hasattr(model, 'name') else None,
             )
+        self._notify_progress(progress_callback, 0.0, "Starting solver...")
         
         def solve_thread():
             try:
                 with self._lock:
                     self._progress.message = "Building geometry..."
                     self._progress.progress = 0.1
-                
+                self._notify_progress(progress_callback, 0.1, "Building geometry...")
+
                 if self._cancel_flag:
                     self._set_cancelled()
                     return
@@ -106,6 +114,7 @@ class AsyncSolver:
                 with self._lock:
                     self._progress.message = "Creating mesh..."
                     self._progress.progress = 0.2
+                self._notify_progress(progress_callback, 0.2, "Creating mesh...")
                 
                 if self._cancel_flag:
                     self._set_cancelled()
@@ -114,6 +123,11 @@ class AsyncSolver:
                 with self._lock:
                     self._progress.message = f"Solving study: {study_name or 'all'}..."
                     self._progress.progress = 0.3
+                self._notify_progress(
+                    progress_callback,
+                    0.3,
+                    f"Solving study: {study_name or 'all'}...",
+                )
                 
                 if self._cancel_flag:
                     self._set_cancelled()
@@ -186,6 +200,9 @@ class AsyncSolver:
             self._progress.status = SolverStatus.CANCELLED
             self._progress.message = "Solving was cancelled by user."
             self._progress.end_time = datetime.now()
+            progress = self._progress.progress
+            callback = self._progress_callback
+        self._notify_progress(callback, progress, "Cancelled")
     
     def cancel(self) -> bool:
         """
@@ -205,7 +222,10 @@ class AsyncSolver:
                 "Cancellation requested. A blocking COMSOL study.run() cannot "
                 "be interrupted by this flag."
             )
-            return True
+            progress = self._progress.progress
+            callback = self._progress_callback
+        self._notify_progress(callback, progress, "Cancellation requested")
+        return True
     
     def wait(self, timeout: Optional[float] = None) -> bool:
         """
@@ -228,11 +248,16 @@ class AsyncSolver:
         with self._lock:
             return self._progress.to_dict()
     
-    def reset(self):
+    def reset(self) -> bool:
         """Reset the solver state."""
         with self._lock:
+            if self._thread is not None and self._thread.is_alive():
+                return False
             self._progress = SolverProgress()
             self._cancel_flag = False
+            self._progress_callback = None
+            self._thread = None
+            return True
 
 
 async_solver = AsyncSolver()

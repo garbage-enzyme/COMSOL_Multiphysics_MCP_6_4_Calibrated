@@ -341,11 +341,14 @@ def _verify_solver_cleanup(store: JobStore, job_id: str) -> dict[str, Any]:
         )
         state = store.read_state(job_id)
         cleanup = state.get("attached_cleanup")
+        model_identity_preserved = bool(
+            isinstance(cleanup, dict)
+            and cleanup.get("success") is True
+            and cleanup.get("model_identity_preserved") is True
+        )
         model_status = (
             "verified_before_cooperative_disconnect"
-            if isinstance(cleanup, dict)
-            and cleanup.get("success")
-            and cleanup.get("model_identity_preserved")
+            if model_identity_preserved
             else "not_automatically_rechecked_after_worker_exit"
         )
         attached = {
@@ -356,7 +359,11 @@ def _verify_solver_cleanup(store: JobStore, job_id: str) -> dict[str, Any]:
         }
         return {
             **result,
-            "ok": bool(result.get("ok") and preservation.get("success")),
+            "ok": bool(
+                result.get("ok")
+                and preservation.get("success")
+                and model_identity_preserved
+            ),
             "attached_external_resources": attached,
         }
 
