@@ -11,6 +11,8 @@ import time
 from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
 
+from comsol_mcp.durable.io import fsync_directory
+
 from .journal import locked_journal, recover_jsonl_tail
 
 VALIDATION_ROW_SCHEMA_VERSION = "1.0.0"
@@ -84,9 +86,7 @@ def _point_map(spec: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
         if not isinstance(collectors, list) or not 1 <= len(collectors) <= 4:
             raise ValueError(f"{name}.collectors must be a bounded nonempty list")
         if not isinstance(artifacts, list) or not 1 <= len(artifacts) <= 16:
-            raise ValueError(
-                f"{name}.expected_artifact_ids must be a bounded nonempty list"
-            )
+            raise ValueError(f"{name}.expected_artifact_ids must be a bounded nonempty list")
         if len(collectors) != len(artifacts):
             raise ValueError(f"{name} requires one expected artifact per collector")
         for collector_index, collector in enumerate(collectors):
@@ -212,7 +212,11 @@ def _normalize_row(
     if isinstance(attempt, bool) or not isinstance(attempt, int) or attempt <= 0:
         raise ValueError("validation row attempt must be a positive integer")
     created = raw.get("created_at_epoch")
-    if isinstance(created, bool) or not isinstance(created, (int, float)) or not math.isfinite(float(created)):
+    if (
+        isinstance(created, bool)
+        or not isinstance(created, (int, float))
+        or not math.isfinite(float(created))
+    ):
         raise ValueError("validation row timestamp must be finite")
     if raw.get("previous_row_sha256") != previous_row_sha256:
         raise ValueError("validation row hash chain is discontinuous")
@@ -306,9 +310,7 @@ def read_validation_rows(path: str | Path, spec: Mapping[str, Any]) -> list[dict
         return _read_validation_rows_unlocked(journal, spec)
 
 
-def completed_point_fingerprints(
-    path: str | Path, spec: Mapping[str, Any]
-) -> set[str]:
+def completed_point_fingerprints(path: str | Path, spec: Mapping[str, Any]) -> set[str]:
     """Return only exact valid point identities with one complete durable row."""
     return {
         row["point_fingerprint"]
@@ -332,6 +334,7 @@ def append_validation_row(
     if isinstance(attempt, bool) or not isinstance(attempt, int) or attempt <= 0:
         raise ValueError("attempt must be a positive integer")
     with locked_journal(path) as journal:
+        journal_existed = journal.exists()
         rows = _read_validation_rows_unlocked(journal, spec)
         points = _point_map(spec)
         if point_id not in points:
@@ -342,19 +345,21 @@ def append_validation_row(
         }:
             raise ValueError("an exact complete validation row already exists")
         row = {
-        "schema_version": VALIDATION_ROW_SCHEMA_VERSION,
-        "sequence": len(rows) + 1,
-        "attempt": attempt,
-        "created_at_epoch": float(created_at_epoch if created_at_epoch is not None else time.time()),
-        "spec_fingerprint": spec["spec_fingerprint"],
-        "source_model_sha256": spec["source_model_sha256"],
-        "point_id": point_id,
-        "point_fingerprint": point["point_fingerprint"],
-        "configuration_sha256": point["configuration_sha256"],
-        "status": status,
-        "collector_summaries": list(collector_summaries or []),
-        "error": error,
-        "previous_row_sha256": rows[-1]["row_sha256"] if rows else None,
+            "schema_version": VALIDATION_ROW_SCHEMA_VERSION,
+            "sequence": len(rows) + 1,
+            "attempt": attempt,
+            "created_at_epoch": float(
+                created_at_epoch if created_at_epoch is not None else time.time()
+            ),
+            "spec_fingerprint": spec["spec_fingerprint"],
+            "source_model_sha256": spec["source_model_sha256"],
+            "point_id": point_id,
+            "point_fingerprint": point["point_fingerprint"],
+            "configuration_sha256": point["configuration_sha256"],
+            "status": status,
+            "collector_summaries": list(collector_summaries or []),
+            "error": error,
+            "previous_row_sha256": rows[-1]["row_sha256"] if rows else None,
         }
         row["row_sha256"] = _fingerprint(row)
         normalized = _normalize_row(
@@ -372,6 +377,8 @@ def append_validation_row(
             handle.write(payload)
             handle.flush()
             os.fsync(handle.fileno())
+        if not journal_existed:
+            fsync_directory(journal.parent)
         return normalized
 
 

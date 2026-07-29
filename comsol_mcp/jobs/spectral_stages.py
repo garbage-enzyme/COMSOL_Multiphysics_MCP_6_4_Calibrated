@@ -154,12 +154,8 @@ def build_spectral_stage_plan(
             }
             for point in points
         ],
-        "previous_stage_sha256": _hex_or_none(
-            previous_stage_sha256, "previous_stage_sha256"
-        ),
-        "evidence_row_sha256": _hex_or_none(
-            evidence_row_sha256, "evidence_row_sha256"
-        ),
+        "previous_stage_sha256": _hex_or_none(previous_stage_sha256, "previous_stage_sha256"),
+        "evidence_row_sha256": _hex_or_none(evidence_row_sha256, "evidence_row_sha256"),
     }
     encoded = _canonical_bytes(body)
     if len(encoded) > MAX_SPECTRAL_STAGE_PLAN_BYTES:
@@ -187,9 +183,7 @@ def build_initial_spectral_stage(spec: Mapping[str, Any]) -> dict[str, Any]:
         or maximum_points < point_count
     ):
         raise ValueError("maximum_points must cover the initial grid")
-    wavelengths = inclusive_wavelength_grid(
-        grid.get("lower_m"), grid.get("upper_m"), point_count
-    )
+    wavelengths = inclusive_wavelength_grid(grid.get("lower_m"), grid.get("upper_m"), point_count)
     return build_spectral_stage_plan(
         spec,
         stage_index=0,
@@ -228,7 +222,10 @@ def validate_spectral_stage_plan(
     }
     if set(raw) != fields:
         raise ValueError("spectral stage plan has missing or unsupported fields")
-    if raw["schema_name"] != SPECTRAL_STAGE_SCHEMA_NAME or raw["schema_version"] != SPECTRAL_STAGE_SCHEMA_VERSION:
+    if (
+        raw["schema_name"] != SPECTRAL_STAGE_SCHEMA_NAME
+        or raw["schema_version"] != SPECTRAL_STAGE_SCHEMA_VERSION
+    ):
         raise ValueError("spectral stage plan schema is unsupported")
     if raw["stage_index"] != expected_index:
         raise ValueError("spectral stage indices are not contiguous")
@@ -280,9 +277,7 @@ def _read_spectral_stage_plans_unlocked(
         )
         if index == 0 and plan != build_initial_spectral_stage(spec):
             raise ValueError("first spectral stage differs from the immutable initial grid")
-        fingerprints = {
-            point["point_fingerprint"] for point in plan["requested_points"]
-        }
+        fingerprints = {point["point_fingerprint"] for point in plan["requested_points"]}
         if fingerprints & seen_points:
             raise ValueError("spectral stage plans request a duplicate exact point")
         seen_points.update(fingerprints)
@@ -316,11 +311,7 @@ def write_spectral_stage_plan(
             raise ValueError("spectral stage index is invalid")
         if requested_index > len(existing):
             raise ValueError("spectral stage index is not contiguous")
-        previous = (
-            existing[requested_index - 1]["stage_sha256"]
-            if requested_index > 0
-            else None
-        )
+        previous = existing[requested_index - 1]["stage_sha256"] if requested_index > 0 else None
         normalized = validate_spectral_stage_plan(
             plan,
             spec,
@@ -332,6 +323,11 @@ def write_spectral_stage_plan(
             if observed != normalized:
                 raise ValueError("existing spectral stage bytes differ from the requested plan")
             return normalized
+        from .spectral_progress import build_spectral_progress
+        from .spectral_rows import read_spectral_rows
+
+        rows = read_spectral_rows(root / "spectral_rows.jsonl", spec, artifact_root=root)
+        build_spectral_progress(spec, [*existing, normalized], rows)
         target = root / "stage_plans" / f"{requested_index:03d}.json"
         atomic_write_json(target, normalized)
         replayed = _read_spectral_stage_plans_unlocked(root, spec)

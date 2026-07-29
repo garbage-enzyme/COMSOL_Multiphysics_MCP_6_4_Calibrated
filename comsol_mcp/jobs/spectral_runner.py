@@ -123,6 +123,60 @@ def write_spectral_summary(
     }
 
 
+def validate_spectral_completion(job_dir: str | Path, spec: Mapping[str, Any]) -> dict[str, Any]:
+    """Rebuild one completed spectrum from its durable rows and frozen stages."""
+    root = Path(job_dir).resolve()
+    analysis_root = root / "analysis"
+    paths = {
+        "spectral_bundle": analysis_root / "spectral_point_bundle.json",
+        "spectral_decision": analysis_root / "spectral_analysis_decision.json",
+        "spectral_characterization": analysis_root / "spectral_characterization.json",
+        "spectral_progress": analysis_root / "spectral_progress.json",
+    }
+    plans = read_spectral_stage_plans(root, spec)
+    rows = read_spectral_rows(root / "spectral_rows.jsonl", spec, artifact_root=root)
+    progress = build_spectral_progress(spec, plans, rows)
+    if progress.get("action") != "complete" or not isinstance(progress.get("analysis"), Mapping):
+        raise ValueError("spectral completion is not derivable from durable rows")
+    expected_values = {
+        "spectral_bundle": progress["analysis"]["bundle"],
+        "spectral_decision": progress["analysis"]["decision"],
+        "spectral_characterization": progress["analysis"]["characterization"],
+        "spectral_progress": progress,
+    }
+    for name, expected in expected_values.items():
+        if read_json(paths[name]) != expected:
+            raise ValueError(f"{name} differs from durable spectral replay")
+    descriptors = {name: _artifact_descriptor(path, root) for name, path in paths.items()}
+    body = {
+        "schema_name": SPECTRAL_SUMMARY_SCHEMA_NAME,
+        "schema_version": SPECTRAL_SUMMARY_SCHEMA_VERSION,
+        "spec_fingerprint": spec["spec_fingerprint"],
+        "source_model_sha256": spec["source_model_sha256"],
+        "configuration_sha256": spec["configuration_sha256"],
+        "execution_state": "completed",
+        "scientific_disposition": progress["scientific_disposition"],
+        "reason_code": progress["reason_code"],
+        "declared_cap_reached": progress["declared_cap_reached"],
+        "stage_count": progress["stage_count"],
+        "row_count": progress["row_count"],
+        "last_stage_sha256": progress["last_stage_sha256"],
+        "last_row_sha256": progress["last_row_sha256"],
+        "artifacts": descriptors,
+    }
+    expected_summary = {**body, "summary_sha256": _fingerprint(body)}
+    if read_json(analysis_root / "summary.json") != expected_summary:
+        raise ValueError("spectral summary differs from durable spectral replay")
+    return {
+        "summary": expected_summary,
+        "progress": progress,
+        "rows": rows,
+        "bundle": expected_values["spectral_bundle"],
+        "decision": expected_values["spectral_decision"],
+        "characterization": expected_values["spectral_characterization"],
+    }
+
+
 def _hook_action(
     hook: Callable[[Mapping[str, Any]], Mapping[str, Any]] | None,
     payload: Mapping[str, Any],
@@ -259,5 +313,6 @@ __all__ = [
     "SPECTRAL_SUMMARY_SCHEMA_NAME",
     "SPECTRAL_SUMMARY_SCHEMA_VERSION",
     "run_spectral_characterization",
+    "validate_spectral_completion",
     "write_spectral_summary",
 ]

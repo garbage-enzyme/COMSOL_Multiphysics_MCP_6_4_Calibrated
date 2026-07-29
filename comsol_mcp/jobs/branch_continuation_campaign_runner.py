@@ -123,6 +123,7 @@ def build_branch_continuation_campaign_progress(
         }
     if completed == 1:
         last = rows[-1]
+        observed_expansion_count = int(last["expansion_count"])
         if last["scientific_disposition"] != "accepted":
             return {
                 "action": "complete",
@@ -133,6 +134,12 @@ def build_branch_continuation_campaign_progress(
                 ),
                 "completed_state_count": completed,
                 "declared_state_count": total,
+                "declared_expansion_count": spec["continuation_policy"]["max_expansions"],
+                "observed_expansion_count": observed_expansion_count,
+                "remaining_expansion_count": max(
+                    0,
+                    spec["continuation_policy"]["max_expansions"] - observed_expansion_count,
+                ),
                 "continuation_states": None,
                 "continuation_plan": None,
             }

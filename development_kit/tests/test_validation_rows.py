@@ -61,7 +61,12 @@ def test_append_fsync_journal_replays_exact_complete_identities(tmp_path, monkey
     spec = _spec(tmp_path)
     path = tmp_path / "rows.jsonl"
     fsync_calls = []
+    directory_fsync_calls = []
     monkeypatch.setattr("src.jobs.validation_rows.os.fsync", lambda fd: fsync_calls.append(fd))
+    monkeypatch.setattr(
+        "src.jobs.validation_rows.fsync_directory",
+        lambda path: directory_fsync_calls.append(path),
+    )
 
     first = append_validation_row(
         path,
@@ -83,6 +88,7 @@ def test_append_fsync_journal_replays_exact_complete_identities(tmp_path, monkey
     )
 
     assert fsync_calls
+    assert directory_fsync_calls == [path.parent]
     assert second["previous_row_sha256"] == first["row_sha256"]
     assert read_validation_rows(path, spec) == [first, second]
     assert completed_point_fingerprints(path, spec) == {

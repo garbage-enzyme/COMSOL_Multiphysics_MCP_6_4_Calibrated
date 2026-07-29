@@ -62,7 +62,11 @@ def _spec(tmp_path) -> dict:
                     "t_expression": "ewfd.Ttotal",
                     "a_expression": "ewfd.Atotal",
                     "top_air_domain_ids": [1],
-                    "top_air_coordinate_range": {"x": [-1.0, 1.0], "y": [-1.0, 1.0], "z": [-1.0, 1.0]},
+                    "top_air_coordinate_range": {
+                        "x": [-1.0, 1.0],
+                        "y": [-1.0, 1.0],
+                        "z": [-1.0, 1.0],
+                    },
                 },
             },
             "analysis_policy": {
@@ -103,9 +107,10 @@ def test_initial_grid_and_stage_are_deterministic_and_inclusive(tmp_path):
     assert plan["stage_kind"] == "initial_locator"
     assert plan["previous_stage_sha256"] is None
     assert plan["evidence_row_sha256"] is None
-    assert validate_spectral_stage_plan(
-        plan, spec, expected_index=0, previous_stage_sha256=None
-    ) == plan
+    assert (
+        validate_spectral_stage_plan(plan, spec, expected_index=0, previous_stage_sha256=None)
+        == plan
+    )
 
 
 def test_initial_grid_rejects_oversized_count_before_allocation(tmp_path, monkeypatch):
@@ -225,10 +230,14 @@ def test_stage_window_and_endpoint_share_the_same_canonical_precision(tmp_path):
     assert plan["window"]["upper_m"] == plan["requested_wavelengths_m"][0]
 
 
-def test_concurrent_different_next_stages_cannot_overwrite(tmp_path):
+def test_concurrent_different_next_stages_cannot_overwrite(tmp_path, monkeypatch):
     spec = _spec(tmp_path)
     job = tmp_path / "job"
     initial = write_spectral_stage_plan(job, spec, build_initial_spectral_stage(spec))
+    monkeypatch.setattr(
+        "src.jobs.spectral_progress.build_spectral_progress",
+        lambda *_args: {"action": "solve_current_stage"},
+    )
 
     def candidate(wavelength):
         return build_spectral_stage_plan(
@@ -245,10 +254,7 @@ def test_concurrent_different_next_stages_cannot_overwrite(tmp_path):
 
     candidates = [candidate(4.1e-6), candidate(4.2e-6)]
     with ThreadPoolExecutor(max_workers=2) as pool:
-        futures = [
-            pool.submit(write_spectral_stage_plan, job, spec, plan)
-            for plan in candidates
-        ]
+        futures = [pool.submit(write_spectral_stage_plan, job, spec, plan) for plan in candidates]
     outcomes = []
     for future in futures:
         try:
@@ -260,3 +266,24 @@ def test_concurrent_different_next_stages_cannot_overwrite(tmp_path):
     assert len(outcomes) == 1
     assert replayed == [initial, outcomes[0]]
     assert not (job / ".stage_plans.lock").exists()
+
+
+def test_invalid_next_stage_is_rejected_before_publication(tmp_path):
+    spec = _spec(tmp_path)
+    job = tmp_path / "prepublication-validation"
+    initial = write_spectral_stage_plan(job, spec, build_initial_spectral_stage(spec))
+    premature = build_spectral_stage_plan(
+        spec,
+        stage_index=1,
+        stage_kind="refinement",
+        planning_reason="premature_stage",
+        window_lower_m=4.1e-6,
+        window_upper_m=4.3e-6,
+        requested_wavelengths_m=[4.2e-6],
+        previous_stage_sha256=initial["stage_sha256"],
+        evidence_row_sha256="b" * 64,
+    )
+
+    with pytest.raises(ValueError, match="before its predecessor completed"):
+        write_spectral_stage_plan(job, spec, premature)
+    assert not (job / "stage_plans" / "001.json").exists()

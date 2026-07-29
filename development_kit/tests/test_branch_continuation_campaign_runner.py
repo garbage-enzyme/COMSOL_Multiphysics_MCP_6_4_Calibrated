@@ -12,6 +12,7 @@ from src.jobs.branch_continuation_campaign_rows import (
 )
 from src.jobs.branch_continuation_campaign_runner import (
     branch_continuation_state_directory,
+    build_branch_continuation_campaign_progress,
     run_branch_continuation_campaign,
 )
 from src.jobs.spectral_runner import run_spectral_characterization
@@ -211,3 +212,24 @@ def test_state_directory_stays_inside_the_windows_legacy_path_budget():
     )
     assert directory.name == "s7"
     assert len(str(directory / suffix)) <= 259
+
+
+def test_initial_terminal_state_preserves_row_derived_expansion_counts(tmp_path):
+    spec = _spec(tmp_path)
+    progress = build_branch_continuation_campaign_progress(
+        spec,
+        [
+            {
+                "scientific_disposition": "unresolved_at_declared_cap",
+                "reason_code": "window_expansion_count_cap_reached",
+                "expansion_count": 1,
+            }
+        ],
+        artifact_root=tmp_path,
+    )
+
+    assert progress["action"] == "complete"
+    assert progress["observed_expansion_count"] == 1
+    assert progress["remaining_expansion_count"] == max(
+        0, spec["continuation_policy"]["max_expansions"] - 1
+    )
