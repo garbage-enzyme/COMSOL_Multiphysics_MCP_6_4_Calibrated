@@ -6,9 +6,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from mcp.server.fastmcp import FastMCP
-
 from src.tools import incidence_config
-from src.tools.derived_geometry import DerivedGeometryRecord, _DERIVED
+from src.tools.derived_geometry import _DERIVED, DerivedGeometryRecord
 from src.tools.incidence_config import (
     _incidence_snapshot,
     apply_incidence,
@@ -170,8 +169,11 @@ def parent_and_ports(model):
 
 def test_linear_preview_evaluates_parameters_and_is_read_only():
     model, record = fixture()
+    before = _incidence_snapshot(model, "comp1", "ewfd")
     result = preview(model, record)
+    after = _incidence_snapshot(model, "comp1", "ewfd")
 
+    assert after == before
     assert result["mutated"] is False
     assert result["solver_started"] is False
     assert result["evaluated_angles"] == {
@@ -199,6 +201,65 @@ def test_linear_preview_evaluates_parameters_and_is_read_only():
     assert result["physical_polarization_evidence"] == "label_only"
     assert result["request"]["caller_physical_polarization_target"] == "laboratory x-linear"
     assert len(result["pre_state_sha256"]) == 64
+    assert len(result["preview_sha256"]) == 64
+
+
+def test_parameter_definition_change_invalidates_incidence_preview():
+    model, record = fixture()
+    request = preview(model, record)
+    model.values["theta"] = 20.0
+
+    original_parameters = model.parameters
+    model.parameters = lambda evaluate=False: {
+        **original_parameters(evaluate=evaluate),
+        "theta": "20[deg]",
+    }
+
+    with pytest.raises(ValueError, match="stale incidence pre-state"):
+        apply_incidence(
+            model,
+            record,
+            request,
+            expected_state_sha256=request["pre_state_sha256"],
+        )
+
+
+def test_direct_apply_rejects_mutated_or_malformed_preview_before_writes():
+    model, record = fixture()
+    request = preview(model, record)
+    parent, port1, port2 = parent_and_ports(model)
+    before = [dict(node.props) for node in (parent, port1, port2)]
+    request["planned"]["periodic_ports"][0]["settings"]["alpha1_inc"] = "other"
+
+    with pytest.raises(ValueError, match="preview identity mismatch"):
+        apply_incidence(
+            model,
+            record,
+            request,
+            expected_state_sha256=request["pre_state_sha256"],
+        )
+    with pytest.raises(ValueError, match="preview identity is missing"):
+        apply_incidence(
+            model,
+            record,
+            {"before": {}},
+            expected_state_sha256="0" * 64,
+        )
+    assert [node.props for node in (parent, port1, port2)] == before
+
+
+def test_direct_apply_rejects_dirty_record_before_preview_access():
+    model, record = fixture()
+    record.dirty = True
+    record.dirty_reason = "rollback unproven"
+
+    with pytest.raises(ValueError, match="dirty"):
+        apply_incidence(
+            model,
+            record,
+            object(),
+            expected_state_sha256="0" * 64,
+        )
 
 
 @pytest.mark.parametrize("polarization", ["rhcp", "lhcp"])
