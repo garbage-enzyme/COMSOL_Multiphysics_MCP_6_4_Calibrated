@@ -18,7 +18,7 @@ import psutil
 from .attached_backend import normalize_attached_execution_backend
 from .branch_continuation_campaign import normalize_branch_continuation_campaign_spec
 from .convergence_campaign import normalize_convergence_campaign_spec
-from .process_control import inspect_identity, verify_absent
+from .process_control import inspect_identity
 from .resource_admission import normalize_resource_policy
 from .spectral_characterization import normalize_spectral_characterization_job_spec
 from .store import (
@@ -665,14 +665,7 @@ class JobManager:
                         and worker_verdict["state"] == "stale"
                         and capture_proved
                     ):
-                        action = (
-                            "finalize",
-                            {
-                                "request_id": request_id,
-                                "identities": [worker, *cancel["descendants"], coordinator],
-                                "worker_actions": list(cancel.get("worker_actions") or []),
-                            },
-                        )
+                        action = ("relaunch", {"request_id": request_id})
                     elif "uncertain" in {coordinator_verdict["state"], worker_verdict["state"]}:
                         now = time.time()
                         cancel["reconciliation"] = {
@@ -717,37 +710,9 @@ class JobManager:
 
                 if action is None:
                     continue
-                kind, payload = action
-                if kind == "finalize":
-                    from .cancel_worker import _commit_cancelled, _record_blocker, _verified_cancel
-
-                    verification = _verified_cancel(
-                        self.store,
-                        job_id,
-                        verify_absent(payload["identities"]),
-                    )
-                    if verification["absent"]:
-                        if _commit_cancelled(
-                            self.store,
-                            job_id,
-                            payload["request_id"],
-                            verification,
-                            payload["worker_actions"],
-                        ):
-                            reconciled += 1
-                    else:
-                        _record_blocker(
-                            self.store,
-                            job_id,
-                            payload["request_id"],
-                            str(
-                                verification.get("solver", {}).get("reason")
-                                or "orphan reconciliation cleanup is not proven"
-                            ),
-                        )
-                else:
-                    self._launch_cancel_coordinator(job_id, payload["request_id"])
-                    reconciled += 1
+                _kind, payload = action
+                self._launch_cancel_coordinator(job_id, payload["request_id"])
+                reconciled += 1
             except FileNotFoundError, TimeoutError, ValueError, OSError:
                 continue
         return reconciled

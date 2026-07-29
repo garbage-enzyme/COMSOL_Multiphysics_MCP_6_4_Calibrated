@@ -553,11 +553,11 @@ def test_orphan_reconciliation_commits_only_from_complete_cleanup_proof(jobs_roo
     )
 
     assert manager.reconcile_cancellations() == 1
-    terminal = manager.store.read_state(job_id)
+    terminal = wait_for(manager, job_id, {"cancelled"}, timeout=10)
 
     assert terminal["status"] == "cancelled"
     assert terminal["cancel"]["verification"]["absent"] is True
-    assert len(terminal["cancel"]["verification"]["verdicts"]) == 2
+    assert len(terminal["cancel"]["verification"]["verdicts"]) == 1
 
 
 def test_orphan_reconciliation_fails_closed_without_descendant_capture(jobs_root, monkeypatch):
@@ -691,7 +691,13 @@ def test_coordinator_loss_at_each_durable_phase_reconciles_safely(
     entered_at = phase_state["cancel"]["phase_timestamps"][crash_phase]
     assert process_identity_state(phase_state["cancel"]["coordinator"])[0] == "stale"
 
-    assert manager.reconcile_cancellations() == 1
+    reconciliation_deadline = time.monotonic() + 5
+    reconciled = 0
+    while not reconciled and time.monotonic() < reconciliation_deadline:
+        reconciled = manager.reconcile_cancellations()
+        if not reconciled:
+            time.sleep(0.025)
+    assert reconciled == 1
     cancelled = wait_for(manager, result["job_id"], {"cancelled"}, timeout=10)
 
     assert process_identity_state(worker_identity)[0] == "stale"

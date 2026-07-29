@@ -46,8 +46,7 @@ class FakeProcesses:
         self.worker = self._identity(41001, "worker")
         self.coordinator = self._identity(41002, "coordinator")
         self.descendants = [
-            self._identity(41100 + index, f"descendant-{index}")
-            for index in range(descendants)
+            self._identity(41100 + index, f"descendant-{index}") for index in range(descendants)
         ]
         self.descendant_states = {item["pid"]: "active" for item in self.descendants}
         self.actions: list[dict[str, Any]] = []
@@ -71,10 +70,18 @@ class FakeProcesses:
             reason = "worker PID was reused" if state == "stale" else "worker identity matches"
         elif identity.get("pid") in self.descendant_states:
             state = self.descendant_states[int(identity["pid"])]
-            reason = "descendant identity is absent" if state == "stale" else "descendant identity matches"
+            reason = (
+                "descendant identity is absent"
+                if state == "stale"
+                else "descendant identity matches"
+            )
         else:
             state = self.coordinator_state
-            reason = "coordinator identity matches" if state == "active" else "coordinator identity is absent"
+            reason = (
+                "coordinator identity matches"
+                if state == "active"
+                else "coordinator identity is absent"
+            )
         return {"identity": identity, "state": state, "reason": reason}
 
     def capture(self, identity: dict[str, Any]) -> dict[str, Any]:
@@ -84,9 +91,7 @@ class FakeProcesses:
             "descendants": list(self.descendants) if verdict["state"] == "active" else [],
             "capture_complete": verdict["state"] == "active",
             "reason": (
-                None
-                if verdict["state"] == "active"
-                else "worker exited during descendant capture"
+                None if verdict["state"] == "active" else "worker exited during descendant capture"
             ),
         }
 
@@ -164,13 +169,15 @@ def _install_fakes(
     monkeypatch.setattr(
         cancel_worker,
         "_verify_solver_cleanup",
-        lambda _store, _job_id: solver_cleanup
-        or {
-            "ok": True,
-            "lease_state": "absent",
-            "lease_recovered": False,
-            "recorded_port_closed": True,
-        },
+        lambda _store, _job_id: (
+            solver_cleanup
+            or {
+                "ok": True,
+                "lease_state": "absent",
+                "lease_recovered": False,
+                "recorded_port_closed": True,
+            }
+        ),
     )
 
 
@@ -314,6 +321,7 @@ def test_stale_coordinator_resumes_from_persisted_terminate_phase(jobs_root, mon
     assert state["status"] == "cancelled"
     assert state["cancel"]["phase_timestamps"]["terminate"] == original_terminate_at
     assert "native_grace" not in state["cancel"]["phase_timestamps"]
+    assert clock.elapsed == pytest.approx(0.0)
 
 
 def test_cleanup_verification_poll_is_bounded_and_waits_for_exit(monkeypatch):
@@ -339,3 +347,158 @@ def test_cleanup_verification_poll_is_bounded_and_waits_for_exit(monkeypatch):
     assert verified["absent"] is True
     assert calls == 3
     assert clock.elapsed == pytest.approx(0.05)
+
+
+def test_uncertain_prior_coordinator_cannot_be_replaced(jobs_root, monkeypatch):
+    store = JobStore(jobs_root)
+    processes = FakeProcesses(FakeClock())
+    job_id, request_id = _prepare_cancel(store, processes)
+    prior = FakeProcesses._identity(43001, "prior-coordinator")
+    requested = store.read_state(job_id)["cancel"]
+    store.update_state(
+        job_id,
+        "cancelling",
+        patch={"cancel": {**requested, "coordinator": prior}},
+    )
+    replacement = FakeProcesses._identity(43002, "replacement-coordinator")
+    monkeypatch.setattr(
+        cancel_worker,
+        "inspect_identity",
+        lambda value: {
+            "identity": value,
+            "state": "uncertain",
+            "reason": "access denied",
+        },
+    )
+
+    claimed = cancel_worker._claim(
+        store,
+        job_id,
+        request_id,
+        replacement,
+        grace_seconds=1.0,
+        terminate_seconds=1.0,
+    )
+
+    assert claimed is None
+    assert store.read_state(job_id)["cancel"]["coordinator"] == prior
+
+
+def test_superseded_coordinator_cannot_checkpoint_block_or_commit(jobs_root):
+    store = JobStore(jobs_root)
+    processes = FakeProcesses(FakeClock())
+    job_id, request_id = _prepare_cancel(store, processes)
+    first = FakeProcesses._identity(43101, "first-coordinator")
+    second = FakeProcesses._identity(43102, "second-coordinator")
+    requested = store.read_state(job_id)["cancel"]
+    store.update_state(
+        job_id,
+        "cancelling",
+        patch={"cancel": {**requested, "coordinator": second}},
+    )
+
+    assert cancel_worker._checkpoint(store, job_id, request_id, first, "terminate") is False
+    assert (
+        cancel_worker._record_blocker(
+            store,
+            job_id,
+            request_id,
+            first,
+            "stale coordinator blocker",
+        )
+        is False
+    )
+    assert (
+        cancel_worker._commit_cancelled(
+            store,
+            job_id,
+            request_id,
+            first,
+            {"absent": True, "verdicts": []},
+            [],
+        )
+        is False
+    )
+    state = store.read_state(job_id)
+    assert state["status"] == "cancelling"
+    assert state["cancel"]["coordinator"] == second
+    assert "blocker" not in state["cancel"]
+
+
+def test_resumed_native_grace_uses_only_remaining_budget(jobs_root, monkeypatch):
+    clock = FakeClock()
+    processes = FakeProcesses(clock)
+    store = JobStore(jobs_root)
+    job_id, request_id = _prepare_cancel(store, processes)
+    requested = store.read_state(job_id)["cancel"]
+    store.update_state(
+        job_id,
+        "cancelling",
+        patch={
+            "cancel": {
+                **requested,
+                "phase": "native_grace",
+                "phase_timestamps": {
+                    **requested["phase_timestamps"],
+                    "native_grace": clock.time() - 0.75,
+                },
+                "timing_policy": {
+                    "native_grace_budget_s": 1.0,
+                    "terminate_budget_s": 0.0,
+                },
+                "coordinator": processes.coordinator,
+            }
+        },
+    )
+    _install_fakes(monkeypatch, clock, processes)
+
+    assert cancel_worker.run(str(jobs_root), job_id, request_id, 100.0, 100.0) == 0
+
+    assert store.read_state(job_id)["status"] == "cancelled"
+    assert clock.elapsed == pytest.approx(0.25)
+
+
+def test_later_descendant_capture_is_merged_before_terminal_commit(jobs_root, monkeypatch):
+    clock = FakeClock()
+    processes = FakeProcesses(clock, descendants=2)
+    store = JobStore(jobs_root)
+    job_id, request_id = _prepare_cancel(store, processes)
+    requested = store.read_state(job_id)["cancel"]
+    first_descendant = processes.descendants[0]
+    store.update_state(
+        job_id,
+        "cancelling",
+        patch={
+            "cancel": {
+                **requested,
+                "phase": "force_kill",
+                "phase_timestamps": {
+                    **requested["phase_timestamps"],
+                    "force_kill": clock.time(),
+                },
+                "coordinator": processes.coordinator,
+                "descendants": [first_descendant],
+                "descendant_capture": {
+                    "worker": processes.inspect(processes.worker),
+                    "descendants": [first_descendant],
+                    "capture_complete": True,
+                    "capture_method": "live_enumeration",
+                },
+            }
+        },
+    )
+    _install_fakes(monkeypatch, clock, processes)
+
+    assert cancel_worker.run(str(jobs_root), job_id, request_id, 0.0, 0.0) == 0
+
+    state = store.read_state(job_id)
+    assert state["status"] == "cancelled"
+    assert state["cancel"]["descendants"] == processes.descendants
+    assert all(value == "stale" for value in processes.descendant_states.values())
+    verified_pids = {
+        item["identity"]["pid"] for item in state["cancel"]["verification"]["verdicts"]
+    }
+    assert verified_pids == {
+        processes.worker["pid"],
+        *(item["pid"] for item in processes.descendants),
+    }

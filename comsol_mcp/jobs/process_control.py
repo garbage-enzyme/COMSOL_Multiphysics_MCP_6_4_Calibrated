@@ -4,28 +4,60 @@ from __future__ import annotations
 
 import ctypes
 from ctypes import wintypes
+import hashlib
+import math
 import os
 from typing import Any
 
 import psutil
 
-from .store import process_identity, process_identity_state
+from .store import (
+    CREATE_TIME_TOLERANCE_SECONDS,
+    process_identity,
+    process_identity_state,
+)
 
 
 def owned_solver_identities_from_lease(lease: dict[str, Any]) -> list[dict[str, Any]]:
     """Return only termination-eligible solver identities from one lease."""
+    if not isinstance(lease, dict):
+        raise ValueError("solver lease must be an object")
     servers = lease.get("comsol_server_processes")
     if not isinstance(servers, list):
         raise ValueError("lease server identities are missing")
+    normalized: list[dict[str, Any]] = []
+    for index, item in enumerate(servers):
+        if not isinstance(item, dict):
+            raise ValueError(f"lease server identity {index} must be an object")
+        pid = item.get("pid")
+        created = item.get("process_create_time")
+        signature = item.get("command_signature")
+        if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0:
+            raise ValueError(f"lease server identity {index} has an invalid PID")
+        if (
+            isinstance(created, bool)
+            or not isinstance(created, (int, float))
+            or not math.isfinite(float(created))
+        ):
+            raise ValueError(f"lease server identity {index} has an invalid creation time")
+        if not isinstance(signature, str) or len(signature) != 64:
+            raise ValueError(f"lease server identity {index} has an invalid command signature")
+        try:
+            int(signature, 16)
+        except ValueError as exc:
+            raise ValueError(
+                f"lease server identity {index} has an invalid command signature"
+            ) from exc
+        normalized.append(dict(item))
     attached = lease.get("attached_server")
     attached_pid = (
         attached.get("server_pid")
         if isinstance(attached, dict) and attached.get("owned") is False
         else None
     )
-    if any(item.get("pid") == attached_pid for item in servers):
+    if any(item["pid"] == attached_pid for item in normalized):
         raise ValueError("non-owned attached server appears in owned termination identities")
-    return servers
+    return normalized
 
 
 class OwnedJobObject:
@@ -57,7 +89,12 @@ class OwnedJobObject:
         kernel32.OpenProcess.restype = wintypes.HANDLE
         kernel32.AssignProcessToJobObject.argtypes = (wintypes.HANDLE, wintypes.HANDLE)
         kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
-        kernel32.SetInformationJobObject.argtypes = (wintypes.HANDLE, wintypes.INT, wintypes.LPVOID, wintypes.DWORD)
+        kernel32.SetInformationJobObject.argtypes = (
+            wintypes.HANDLE,
+            wintypes.INT,
+            wintypes.LPVOID,
+            wintypes.DWORD,
+        )
         kernel32.SetInformationJobObject.restype = wintypes.BOOL
         kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
         kernel32.CloseHandle.restype = wintypes.BOOL
@@ -79,7 +116,17 @@ class OwnedJobObject:
             ]
 
         class _IoCounters(ctypes.Structure):
-            _fields_ = [(name, ctypes.c_ulonglong) for name in ("ReadOperationCount", "WriteOperationCount", "OtherOperationCount", "ReadTransferCount", "WriteTransferCount", "OtherTransferCount")]
+            _fields_ = [
+                (name, ctypes.c_ulonglong)
+                for name in (
+                    "ReadOperationCount",
+                    "WriteOperationCount",
+                    "OtherOperationCount",
+                    "ReadTransferCount",
+                    "WriteTransferCount",
+                    "OtherTransferCount",
+                )
+            ]
 
         class _ExtendedLimitInformation(ctypes.Structure):
             _fields_ = [
@@ -102,8 +149,12 @@ class OwnedJobObject:
             if not process:
                 return None
             limits = _ExtendedLimitInformation()
-            limits.BasicLimitInformation.LimitFlags = 0x00002000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-            if not kernel32.SetInformationJobObject(job, 9, ctypes.byref(limits), ctypes.sizeof(limits)):
+            limits.BasicLimitInformation.LimitFlags = (
+                0x00002000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+            )
+            if not kernel32.SetInformationJobObject(
+                job, 9, ctypes.byref(limits), ctypes.sizeof(limits)
+            ):
                 return None
             if not kernel32.AssignProcessToJobObject(job, process):
                 return None
@@ -117,7 +168,9 @@ class OwnedJobObject:
 
     def close(self) -> None:
         if self._handle and os.name == "nt":
-            ctypes.WinDLL("kernel32", use_last_error=True).CloseHandle(wintypes.HANDLE(self._handle))
+            ctypes.WinDLL("kernel32", use_last_error=True).CloseHandle(
+                wintypes.HANDLE(self._handle)
+            )
             self._handle = 0
 
 
@@ -151,10 +204,10 @@ def capture_owned_descendants(worker_identity: dict[str, Any]) -> dict[str, Any]
     """Capture only descendants of a worker whose full identity still matches."""
     verdict = inspect_identity(worker_identity)
     if verdict["state"] != "active":
-        return {"worker": verdict, "descendants": []}
+        return {"worker": verdict, "descendants": [], "capture_complete": False}
     try:
         worker = psutil.Process(int(worker_identity["pid"]))
-        descendants = [process_identity(item.pid) for item in worker.children(recursive=True)]
+        children = worker.children(recursive=True)
     except psutil.NoSuchProcess as exc:
         # The worker can exit between the exact identity check and children().
         # Re-inspect so callers can distinguish proven exit from inspection
@@ -169,20 +222,101 @@ def capture_owned_descendants(worker_identity: dict[str, Any]) -> dict[str, Any]
         }
     except (psutil.AccessDenied, psutil.ZombieProcess, OSError) as exc:
         return {
-            "worker": {**verdict, "state": "uncertain", "reason": f"cannot inspect descendants: {exc}"},
+            "worker": {
+                **verdict,
+                "state": "uncertain",
+                "reason": f"cannot inspect descendants: {exc}",
+            },
             "descendants": [],
             "capture_complete": False,
         }
+    descendants: list[dict[str, Any]] = []
+    for child in children:
+        try:
+            descendants.append(process_identity(child.pid))
+        except psutil.NoSuchProcess:
+            # A child that exits while the stable list is converted is already
+            # absent. Preserve identities captured before and after it.
+            continue
+        except (psutil.AccessDenied, psutil.ZombieProcess, OSError) as exc:
+            return {
+                "worker": {
+                    **verdict,
+                    "state": "uncertain",
+                    "reason": f"cannot inspect descendant identity: {exc}",
+                },
+                "descendants": descendants,
+                "capture_complete": False,
+            }
     return {"worker": verdict, "descendants": descendants, "capture_complete": True}
 
 
+def _inspect_open_process(
+    process: psutil.Process,
+    identity: dict[str, Any],
+) -> dict[str, Any]:
+    """Validate exact identity through the same process object used to act."""
+    try:
+        expected_pid = int(identity["pid"])
+        expected_created = float(identity["process_create_time"])
+    except KeyError, TypeError, ValueError, OverflowError:
+        return {
+            "identity": identity,
+            "state": "uncertain",
+            "reason": "process identity fields are missing or invalid",
+        }
+    try:
+        with process.oneshot():
+            actual_pid = int(process.pid)
+            actual_created = float(process.create_time())
+            command = list(process.cmdline())
+    except psutil.NoSuchProcess:
+        return {"identity": identity, "state": "stale", "reason": "worker PID no longer exists"}
+    except (psutil.AccessDenied, psutil.ZombieProcess, OSError) as exc:
+        return {
+            "identity": identity,
+            "state": "uncertain",
+            "reason": f"worker identity cannot be inspected: {exc}",
+        }
+    if actual_pid != expected_pid:
+        return {"identity": identity, "state": "stale", "reason": "worker PID was reused"}
+    if abs(actual_created - expected_created) > CREATE_TIME_TOLERANCE_SECONDS:
+        return {"identity": identity, "state": "stale", "reason": "worker PID was reused"}
+    expected_signature = identity.get("command_signature")
+    actual_signature = hashlib.sha256(
+        "\0".join(command).encode("utf-8", errors="replace")
+    ).hexdigest()
+    if expected_signature and actual_signature != expected_signature:
+        return {
+            "identity": identity,
+            "state": "stale",
+            "reason": "worker command line no longer matches",
+        }
+    return {
+        "identity": identity,
+        "state": "active",
+        "reason": "worker PID, creation time, and command line match",
+    }
+
+
 def terminate_exact(identity: dict[str, Any], *, force: bool = False) -> dict[str, Any]:
-    """Terminate one process only after immediate full-identity revalidation."""
-    before = inspect_identity(identity)
+    """Validate and terminate through one process object with reuse protection."""
+    try:
+        process = psutil.Process(int(identity["pid"]))
+    except KeyError, TypeError, ValueError, OverflowError:
+        before = {
+            "identity": identity,
+            "state": "uncertain",
+            "reason": "process identity fields are missing or invalid",
+        }
+        return {"acted": False, "before": before, "reason": "identity_not_active"}
+    except psutil.NoSuchProcess:
+        before = {"identity": identity, "state": "stale", "reason": "worker PID no longer exists"}
+        return {"acted": False, "before": before, "reason": "identity_not_active"}
+    before = _inspect_open_process(process, identity)
     if before["state"] != "active":
         return {"acted": False, "before": before, "reason": "identity_not_active"}
     try:
-        process = psutil.Process(int(identity["pid"]))
         if force:
             process.kill()
             action = "kill"
