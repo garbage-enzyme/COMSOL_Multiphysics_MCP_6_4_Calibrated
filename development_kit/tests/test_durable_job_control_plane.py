@@ -1030,6 +1030,27 @@ def test_job_lock_guard_prevents_replacement_during_release(jobs_root, monkeypat
     assert not lock_path.exists()
 
 
+def test_job_lock_queues_same_process_contenders_before_file_guard(jobs_root):
+    lock_path = jobs_root / ".state.lock"
+    other_path = jobs_root / ".other.lock"
+    first = JobLock(lock_path, timeout=0.5)
+    contender = JobLock(lock_path, timeout=0.08, poll_interval=0.005)
+
+    first.acquire()
+    try:
+        with JobLock(other_path, timeout=0.08):
+            assert other_path.exists()
+        with pytest.raises(TimeoutError, match="in-process durable job lock guard"):
+            contender.acquire()
+    finally:
+        first.release()
+
+    with contender:
+        assert lock_path.exists()
+    assert not lock_path.exists()
+    assert not other_path.exists()
+
+
 def test_live_pid_lock_with_malformed_creation_time_stays_bounded(jobs_root):
     lock_path = jobs_root / ".state.lock"
     malformed = process_identity(os.getpid())

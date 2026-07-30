@@ -7,12 +7,14 @@ import json
 import math
 import os
 import shutil
+import threading
 import time
 import uuid
 from collections import deque
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
+from weakref import WeakValueDictionary
 
 import psutil
 
@@ -55,6 +57,19 @@ TRANSITIONS = {
     "cancelled": {"starting"},
     "completed": set(),
 }
+
+_PROCESS_GUARD_REGISTRY_LOCK = threading.Lock()
+_PROCESS_GUARDS: WeakValueDictionary[str, Any] = WeakValueDictionary()
+
+
+def _process_guard(path: Path) -> Any:
+    key = os.path.normcase(str(path.resolve(strict=False)))
+    with _PROCESS_GUARD_REGISTRY_LOCK:
+        guard = _PROCESS_GUARDS.get(key)
+        if guard is None:
+            guard = threading.Lock()
+            _PROCESS_GUARDS[key] = guard
+        return guard
 
 
 def default_jobs_root() -> Path:
@@ -121,7 +136,10 @@ def process_identity_state(identity: dict[str, Any]) -> tuple[str, str]:
         or not math.isfinite(float(expected_time))
     ):
         return "uncertain", "worker creation time is missing or invalid"
-    if abs(float(actual["process_create_time"]) - float(expected_time)) > CREATE_TIME_TOLERANCE_SECONDS:
+    if (
+        abs(float(actual["process_create_time"]) - float(expected_time))
+        > CREATE_TIME_TOLERANCE_SECONDS
+    ):
         return "stale", "worker PID was reused"
     expected_signature = identity.get("command_signature")
     if expected_signature and actual["command_signature"] != expected_signature:
@@ -154,15 +172,24 @@ class JobLock:
         self._owned_bytes: bytes | None = None
         self._guard_path = self.path.with_name(f".{self.path.name}.guard")
         self._guard_handle = None
+        self._process_guard = _process_guard(self.path)
+        self._process_guard_owned = False
 
     def _acquire_guard(self, *, deadline: float) -> None:
         if os.name != "nt":
             raise RuntimeError("durable job mutation requires supported Windows locking")
         import msvcrt
 
+        remaining = max(0.0, deadline - time.monotonic())
+        if not self._process_guard.acquire(timeout=remaining):
+            raise TimeoutError(
+                f"Timed out waiting for in-process durable job lock guard: {self.path}"
+            )
+        self._process_guard_owned = True
         self._guard_path.parent.mkdir(parents=True, exist_ok=True)
-        handle = self._guard_path.open("a+b")
+        handle = None
         try:
+            handle = self._guard_path.open("a+b")
             handle.seek(0, os.SEEK_END)
             if handle.tell() == 0:
                 handle.write(b"\0")
@@ -181,7 +208,10 @@ class JobLock:
                         ) from exc
                     time.sleep(self.poll_interval)
         except Exception:
-            handle.close()
+            if handle is not None:
+                handle.close()
+            self._process_guard_owned = False
+            self._process_guard.release()
             raise
 
     def _release_guard(self) -> None:
@@ -189,13 +219,16 @@ class JobLock:
 
         handle = self._guard_handle
         self._guard_handle = None
-        if handle is None:
-            return
         try:
-            handle.seek(0)
-            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            if handle is not None:
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
         finally:
-            handle.close()
+            if handle is not None:
+                handle.close()
+            if self._process_guard_owned:
+                self._process_guard_owned = False
+                self._process_guard.release()
 
     def acquire(self) -> None:
         deadline = time.monotonic() + self.timeout
