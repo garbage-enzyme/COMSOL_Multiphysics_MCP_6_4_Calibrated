@@ -147,6 +147,34 @@ def test_unknown_fields_and_hash_tampering_fail_closed():
     with pytest.raises(ValueError, match="does not match"):
         validate_outcome_contract(contract)
 
+    malformed_hash = build_outcome_contract(
+        _payload("completed", "complete", "accepted")
+    )
+    malformed_hash["outcome_sha256"] = "g" * 64
+    with pytest.raises(ValueError, match="lowercase SHA-256"):
+        validate_outcome_contract(malformed_hash)
+
+    with pytest.raises(TypeError, match="verify_hash"):
+        validate_outcome_contract(contract, verify_hash=False)
+
+
+def test_scientific_disposition_rejects_contradictory_caps_and_actions():
+    residual_at_cap = _payload("completed", "complete", "residual")
+    residual_at_cap["scientific"]["declared_cap_reached"] = True
+    invalid_at_cap = _payload("failed", "invalid", "invalid_evidence")
+    invalid_at_cap["scientific"]["declared_cap_reached"] = True
+
+    for action in ("declare_larger_cap", "revise_scientific_policy", "retry_execution"):
+        invalid_action = _payload("failed", "invalid", "invalid_evidence")
+        invalid_action["scientific"]["next_eligible_action"] = action
+        with pytest.raises(ValueError, match="evidence-remediation"):
+            build_outcome_contract(invalid_action)
+
+    with pytest.raises(ValueError, match="residual disposition cannot reach"):
+        build_outcome_contract(residual_at_cap)
+    with pytest.raises(ValueError, match="invalid_evidence disposition cannot reach"):
+        build_outcome_contract(invalid_at_cap)
+
 
 def test_verified_cancelled_job_maps_to_terminal_execution_without_losing_diagnostic_rows():
     job_state = {
@@ -175,9 +203,31 @@ def test_verified_cancelled_job_maps_to_terminal_execution_without_losing_diagno
 
 def test_cancelled_mapping_fails_closed_without_process_port_or_lease_proof():
     for verification in (
-        {"absent": False, "solver": {"lease_state": "absent", "recorded_port_closed": True}},
-        {"absent": True, "solver": {"lease_state": "uncertain", "recorded_port_closed": True}},
-        {"absent": True, "solver": {"lease_state": "absent", "recorded_port_closed": False}},
+        {
+            "absent": False,
+            "verdicts": [],
+            "solver": {"ok": True, "lease_state": "absent", "recorded_port_closed": True},
+        },
+        {
+            "absent": True,
+            "verdicts": [{"state": "uncertain"}],
+            "solver": {"ok": True, "lease_state": "absent", "recorded_port_closed": True},
+        },
+        {
+            "absent": True,
+            "verdicts": [],
+            "solver": {"ok": False, "lease_state": "absent", "recorded_port_closed": True},
+        },
+        {
+            "absent": True,
+            "verdicts": [],
+            "solver": {"ok": True, "lease_state": "uncertain", "recorded_port_closed": True},
+        },
+        {
+            "absent": True,
+            "verdicts": [],
+            "solver": {"ok": True, "lease_state": "absent", "recorded_port_closed": False},
+        },
     ):
         with pytest.raises(ValueError, match="cancelled execution requires verified cleanup"):
             execution_from_terminal_job_state(
@@ -229,3 +279,16 @@ def test_nonterminal_or_completed_without_cleanup_proof_cannot_be_summarized():
     assert execution_from_terminal_job_state(
         {"status": "completed", "cleanup_verification": cleanup}
     )["state"] == "completed"
+
+    for field in (
+        "processes_absent",
+        "descendants_absent",
+        "port_closed",
+        "lease_absent",
+    ):
+        incomplete = deepcopy(cleanup)
+        incomplete[field] = False
+        with pytest.raises(ValueError, match="verified must equal all cleanup proofs"):
+            execution_from_terminal_job_state(
+                {"status": "completed", "cleanup_verification": incomplete}
+            )

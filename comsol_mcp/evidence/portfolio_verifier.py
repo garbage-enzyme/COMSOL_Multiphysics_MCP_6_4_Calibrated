@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import hashlib
-import json
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Mapping
 
 from comsol_mcp.artifact_chain import (
+    _decode_strict_json_object,
     _verify_artifact_chain_snapshot,
     validate_artifact_chain_manifest,
 )
@@ -21,11 +21,49 @@ PORTFOLIO_VERIFICATION_SCHEMA_NAME = "comsol_mcp.portfolio_evidence_verification
 PORTFOLIO_SCHEMA_VERSION = "1.0.0"
 
 CLAIM_DIMENSIONS = frozenset({"configuration", "mesh", "fit", "wavelength"})
-_DIMENSION_POINTER_KEYWORDS = {
-    "configuration": ("config", "configuration"),
-    "mesh": ("mesh",),
-    "fit": ("fit", "fwhm", "quality_factor", "q_factor"),
-    "wavelength": ("wavelength", "frequency"),
+_DIMENSION_POINTER_FIELDS = {
+    "configuration": frozenset(
+        {
+            "config",
+            "configuration",
+            "config_id",
+            "configuration_id",
+            "config_sha256",
+            "configuration_sha256",
+        }
+    ),
+    "mesh": frozenset(
+        {
+            "mesh",
+            "mesh_id",
+            "mesh_tag",
+            "mesh_sha256",
+            "mesh_counts",
+            "mesh_element_count",
+            "mesh_vertex_count",
+        }
+    ),
+    "fit": frozenset(
+        {
+            "fit",
+            "fwhm",
+            "fwhm_m",
+            "quality_factor",
+            "q_factor",
+            "fit_parameters",
+            "fit_support_points",
+        }
+    ),
+    "wavelength": frozenset(
+        {
+            "wavelength",
+            "wavelength_m",
+            "requested_wavelength_m",
+            "evaluated_wavelength_m",
+            "frequency",
+            "frequency_hz",
+        }
+    ),
 }
 _REQUEST_FIELDS = {
     "schema_name",
@@ -136,8 +174,8 @@ def _validate_claim(value: Any, case_index: int, claim_index: int) -> dict[str, 
     _identifier(citation["artifact_id"], f"{label}.citation.artifact_id")
     _hash64(citation["artifact_sha256"], f"{label}.citation.artifact_sha256")
     tokens = _decode_json_pointer(citation["json_pointer"], f"{label}.citation.json_pointer")
-    pointer_identity = "/".join(tokens).casefold().replace("-", "_")
-    if not any(keyword in pointer_identity for keyword in _DIMENSION_POINTER_KEYWORDS[dimension]):
+    pointer_fields = {token.casefold().replace("-", "_") for token in tokens}
+    if pointer_fields.isdisjoint(_DIMENSION_POINTER_FIELDS[dimension]):
         raise ValueError(f"{label} JSON Pointer does not identify its declared dimension")
     return claim
 
@@ -171,7 +209,9 @@ def validate_portfolio_evidence_request(
             raise ValueError(f"{label} fields are incomplete")
         case_ids.append(_identifier(case["case_id"], f"{label}.case_id"))
         if validate_outcomes:
-            validate_outcome_contract(case["outcome"])
+            outcome = validate_outcome_contract(case["outcome"])
+            if outcome["subject_id"] != case["case_id"]:
+                raise ValueError(f"{label} outcome subject ID does not match case_id")
         else:
             _mapping(case["outcome"], f"{label}.outcome")
         if validate_artifact_chains:
@@ -232,11 +272,7 @@ def _read_cited_artifact(
         raise ValueError("cited artifact byte count changed after chain verification")
     if hashlib.sha256(payload).hexdigest() != artifact["sha256"]:
         raise ValueError("cited artifact hash changed after chain verification")
-    try:
-        document = json.loads(payload)
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise ValueError("cited artifact must contain UTF-8 JSON") from exc
-    return _mapping(document, "cited artifact")
+    return _decode_strict_json_object(payload, "cited artifact")
 
 
 def verify_portfolio_evidence(

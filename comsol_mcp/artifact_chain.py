@@ -62,6 +62,34 @@ def _mapping(value: Any, label: str) -> dict[str, Any]:
     return dict(value)
 
 
+class _DuplicateJsonKey(ValueError):
+    pass
+
+
+def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise _DuplicateJsonKey(key)
+        result[key] = value
+    return result
+
+
+def _decode_strict_json_object(payload: bytes, label: str) -> dict[str, Any]:
+    try:
+        document = json.loads(
+            payload.decode("utf-8"),
+            object_pairs_hook=_unique_json_object,
+        )
+    except _DuplicateJsonKey as exc:
+        raise ValueError(f"{label} contains duplicate JSON key {exc.args[0]!r}") from exc
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"{label} must contain UTF-8 JSON") from exc
+    if not isinstance(document, dict):
+        raise ValueError(f"{label} JSON must contain one object")
+    return document
+
+
 def _identifier(value: Any, label: str) -> str:
     if not isinstance(value, str) or not _IDENTIFIER.fullmatch(value):
         raise ValueError(f"{label} must be a bounded portable identifier")
@@ -280,12 +308,7 @@ def _verify_artifact_chain_snapshot(
             raise ValueError("artifact byte count does not match")
         if snapshot["sha256"] != item["sha256"]:
             raise ValueError("artifact SHA-256 does not match")
-        try:
-            document = json.loads(snapshot["payload"].decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise ValueError("artifact must be UTF-8 JSON") from exc
-        if not isinstance(document, dict):
-            raise ValueError("artifact JSON must contain one object")
+        document = _decode_strict_json_object(snapshot["payload"], "artifact")
         if (
             document.get("schema_name") != item["schema_name"]
             or document.get("schema_version") != item["schema_version"]

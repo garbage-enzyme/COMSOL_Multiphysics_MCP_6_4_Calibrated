@@ -229,7 +229,7 @@ def test_missing_artifact_wrong_hash_pointer_or_dimension_fails_closed(tmp_path)
 
     missing_pointer = deepcopy(request)
     missing_pointer["cases"][0]["summary_claims"][0]["citation"]["json_pointer"] = (
-        "/identity/config_missing"
+        "/identity/config_missing/config_sha256"
     )
     with pytest.raises(ValueError, match="does not exist"):
         verify_portfolio_evidence(
@@ -243,6 +243,78 @@ def test_missing_artifact_wrong_hash_pointer_or_dimension_fails_closed(tmp_path)
     }
     with pytest.raises(ValueError, match="does not identify"):
         _rehash_request(wrong_dimension)
+
+
+@pytest.mark.parametrize(
+    "dimension,pointer",
+    [
+        ("fit", "/benefits/value"),
+        ("mesh", "/metadata/meshless_method"),
+        ("configuration", "/metadata/reconfiguration_count"),
+        ("wavelength", "/metadata/wavelengthless_mode"),
+    ],
+)
+def test_dimension_binding_rejects_substring_only_pointer_names(
+    tmp_path, dimension, pointer
+):
+    request, _raw, _fit = _fixture(tmp_path)
+    claim = request["cases"][0]["summary_claims"][0]
+    claim["dimension"] = dimension
+    claim["citation"]["json_pointer"] = pointer
+
+    with pytest.raises(ValueError, match="does not identify"):
+        _rehash_request(request)
+
+
+def test_portfolio_case_id_must_match_outcome_subject_id(tmp_path):
+    request, _raw, _fit = _fixture(tmp_path)
+    outcome = request["cases"][0]["outcome"]
+    outcome.pop("outcome_sha256")
+    outcome["subject_id"] = "case-other"
+    request["cases"][0]["outcome"] = build_outcome_contract(outcome)
+
+    with pytest.raises(ValueError, match="subject ID does not match case_id"):
+        _rehash_request(request)
+
+
+def test_duplicate_json_keys_are_rejected_before_cited_value_use(tmp_path):
+    request, raw, fit = _fixture(tmp_path)
+    duplicate_payload = (
+        b'{"schema_name":"comsol_mcp.runtime_compatibility",'
+        b'"schema_version":"1.0.0","fit":{"quality_factor":1.0},'
+        b'"fit":{"quality_factor":425.5}}'
+    )
+    fit_path = tmp_path / fit["relative_path"]
+    fit_path.write_bytes(duplicate_payload)
+    duplicate_fit = {
+        **fit,
+        "sha256": hashlib.sha256(duplicate_payload).hexdigest(),
+        "byte_count": len(duplicate_payload),
+    }
+    request["cases"][0]["artifact_chain"] = build_artifact_chain_manifest(
+        chain_id="case-chain",
+        artifacts=[
+            {**raw, "role": "raw_evidence", "parents": []},
+            {
+                **duplicate_fit,
+                "role": "derived_spectral",
+                "parents": [
+                    {"artifact_id": raw["artifact_id"], "sha256": raw["sha256"]}
+                ],
+            },
+        ],
+        terminal_artifact_ids=[duplicate_fit["artifact_id"]],
+    )
+    fit_claim = next(
+        claim
+        for claim in request["cases"][0]["summary_claims"]
+        if claim["claim_id"] == "fit"
+    )
+    fit_claim["citation"]["artifact_sha256"] = duplicate_fit["sha256"]
+    request = _rehash_request(request)
+
+    with pytest.raises(ValueError, match="duplicate JSON key"):
+        verify_portfolio_evidence(request, artifact_roots={"case-one": tmp_path})
 
 
 def test_outcome_raw_ids_must_exactly_match_chain_roots(tmp_path):
