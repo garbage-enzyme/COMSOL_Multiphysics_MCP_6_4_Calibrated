@@ -196,6 +196,7 @@ def test_fin_geometry_failure_restores_properties_but_reports_unproven_build():
 
 def test_dirty_derived_record_is_forbidden_from_validation():
     record = DerivedGeometryRecord("derived-dirty", "dirty-clone", "source.mph", "a" * 64, "clone.mph", "b" * 64, dirty=True, dirty_reason="rollback unproven")
+    previous = _DERIVED.get(record.derived_model_id)
     _DERIVED[record.derived_model_id] = record
     try:
         status = derived_model_validation_status("dirty-clone")
@@ -203,7 +204,10 @@ def test_dirty_derived_record_is_forbidden_from_validation():
         assert status["validation_allowed"] is False
         assert status["dirty_reason"] == "rollback unproven"
     finally:
-        _DERIVED.pop(record.derived_model_id, None)
+        if previous is None:
+            _DERIVED.pop(record.derived_model_id, None)
+        else:
+            _DERIVED[record.derived_model_id] = previous
 
 
 def test_snapshot_covers_every_feature_and_property_and_hashes_their_values():

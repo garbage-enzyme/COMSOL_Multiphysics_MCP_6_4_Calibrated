@@ -332,16 +332,38 @@ def add_union_feature(
     feature_name: Optional[str] = None,
 ) -> dict:
     """Add a Boolean Union and its input-object selection through clientapi."""
-    objects = [str(item) for item in input_objects]
-    if not objects:
+    if isinstance(input_objects, (str, bytes)):
+        objects = []
+    else:
+        objects = [str(item) for item in input_objects]
+    if not objects or any(not item for item in objects) or len(objects) != len(set(objects)):
         return {"success": False, "error": "input_objects must not be empty."}
 
     geom, error = _get_geometry_node(model, geometry_name, component_name)
     if error:
         return {"success": False, "error": error}
-    tag = feature_name or f"uni{geom.feature().size() + 1}"
-    union = geom.feature().create(tag, "Union")
-    union.selection("input").set(objects)
+    feature_list = geom.feature()
+    existing = {str(item) for item in list(feature_list.tags())}
+    missing = sorted(set(objects) - existing)
+    if missing:
+        return {"success": False, "error": f"union inputs are missing: {missing}"}
+    try:
+        tag = _next_feature_tag(feature_list, "uni", feature_name)
+    except ValueError as exc:
+        return {"success": False, "error": str(exc)}
+    union = feature_list.create(tag, "Union")
+    try:
+        union.selection("input").set(objects)
+    except Exception:
+        try:
+            feature_list.remove(tag)
+        except Exception:
+            return {
+                "success": False,
+                "error": "Union setup failed and rollback was incomplete.",
+                "rolled_back": False,
+            }
+        return {"success": False, "error": "Union setup failed.", "rolled_back": True}
     return {
         "success": True,
         "feature": {
@@ -361,8 +383,12 @@ def add_import_feature(
     geometry_name: Optional[str] = None,
     component_name: str = "comp1",
     feature_name: Optional[str] = None,
+    import_type: str = "CAD",
 ) -> dict:
     """Create a geometry Import feature with an absolute source path."""
+    normalized_import_type = import_type.strip().casefold()
+    if normalized_import_type not in {"cad", "mesh"}:
+        return {"success": False, "error": "import_type must be CAD or mesh."}
     try:
         path = PathPolicy.from_environment().validate_model_read(file_path).normalized_path
     except ValueError as exc:
@@ -378,6 +404,7 @@ def add_import_feature(
         return {"success": False, "error": str(exc)}
     feature = feature_list.create(tag, "Import")
     try:
+        feature.set("type", normalized_import_type)
         feature.set("filename", str(path))
     except Exception:
         try:
@@ -401,7 +428,49 @@ def add_import_feature(
             "geometry": geometry_name or str(geom.tag()),
             "component": component_name,
             "file": str(path),
+            "import_type": normalized_import_type,
         },
+    }
+
+
+def build_geometry_sequences(
+    model,
+    *,
+    geometry_name: Optional[str],
+    component_name: str,
+) -> dict:
+    """Build one named geometry or every geometry when no name is supplied."""
+    if geometry_name:
+        geom, error = _get_geometry_node(model, geometry_name, component_name)
+        if error:
+            return {"success": False, "error": error}
+        geometries = [(geometry_name, geom)]
+    else:
+        component = model.java.component(component_name)
+        if component is None:
+            return {"success": False, "error": f"Component '{component_name}' not found."}
+        geometry_list = component.geom()
+        tags = [str(tag) for tag in geometry_list.tags()]
+        if not tags:
+            return {"success": False, "error": "No geometry sequences found."}
+        geometries = [(tag, geometry_list.get(tag)) for tag in tags]
+    built = []
+    for tag, geometry in geometries:
+        try:
+            geometry.run()
+        except Exception as exc:
+            return {
+                "success": False,
+                "error": f"Failed to build geometry {tag}: {str(exc)}",
+                "built": built,
+                "failed_geometry": tag,
+            }
+        built.append(tag)
+    return {
+        "success": True,
+        "geometries": built,
+        "count": len(built),
+        "message": "Geometry build completed.",
     }
 
 
@@ -880,9 +949,8 @@ def register_geometry_tools(mcp: FastMCP) -> None:
                 geometry_name=geometry_name,
                 component_name=component_name,
                 feature_name=feature_name,
+                import_type=import_type,
             )
-            if result["success"]:
-                result["feature"]["import_type"] = import_type
             return result
         except Exception as e:
             return {"success": False, "error": f"Failed to import geometry: {str(e)}"}
@@ -914,17 +982,11 @@ def register_geometry_tools(mcp: FastMCP) -> None:
             }
 
         try:
-            geom, error = _get_geometry_node(model, geometry_name, component_name)
-            if error:
-                return {"success": False, "error": error}
-
-            geom.run()
-
-            return {
-                "success": True,
-                "geometry": geometry_name or "first",
-                "message": "Geometry built successfully.",
-            }
+            return build_geometry_sequences(
+                model,
+                geometry_name=geometry_name,
+                component_name=component_name,
+            )
         except Exception as e:
             return {"success": False, "error": f"Failed to build geometry: {str(e)}"}
 
