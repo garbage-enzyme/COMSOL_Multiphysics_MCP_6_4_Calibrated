@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import math
 import re
 import sys
 import time
 import uuid
+from contextvars import ContextVar
+from functools import wraps
 from pathlib import Path
 from typing import Any, Callable, Literal, Optional
 
@@ -44,6 +47,30 @@ MAX_REFERENCE_BYTES = 1024 * 1024
 MAX_LOSS_ITEMS = 64
 MAX_DOMAIN_IDS = 512
 _TAG = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
+logger = logging.getLogger(__name__)
+_ACTIVE_POINT_AUDIT_MANIFEST: ContextVar[Path | None] = ContextVar(
+    "active_point_audit_manifest", default=None
+)
+
+
+def _terminalize_running_point_audit(path: Path, error: Exception) -> None:
+    try:
+        current = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(current, dict) or current.get("audit_status") != "running":
+            return
+        failed = {
+            **current,
+            "audit_status": "runtime_failed",
+            "completed_at_epoch": time.time(),
+            "runtime_failure": {
+                "code": "point_audit_runtime_failed",
+                "error_type": type(error).__name__,
+                "details_included": False,
+            },
+        }
+        _atomic_write_json(path, failed)
+    except Exception:
+        logger.exception("Failed to terminalize Wave Optics point-audit manifest")
 
 
 class CoordinateLimits(TypedDict):
@@ -808,7 +835,7 @@ def _evaluate_internal_absorption(model: Any, declaration: dict[str, Any]) -> di
     )
 
 
-def run_wave_optics_point_audit(
+def _run_wave_optics_point_audit_impl(
     model: Any,
     *,
     model_name: str,
@@ -1000,6 +1027,7 @@ def run_wave_optics_point_audit(
             "artifacts": {"csv": str(csv_path), "manifest": str(manifest_path)},
         },
     )
+    _ACTIVE_POINT_AUDIT_MANIFEST.set(manifest_path)
     parameter_value = f"{wavelength_value}[{wavelength_unit}]"
     jm.param().set(wavelength_parameter, parameter_value)
     study.feature().get(study_step_tag).set(study_step_property, wavelength_parameter)
@@ -1297,6 +1325,20 @@ def run_wave_optics_point_audit(
         "physical_evidence": physical_evidence,
         "artifacts": {"directory": str(directory), "csv": str(csv_path), "manifest": str(manifest_path)},
     }
+
+
+@wraps(_run_wave_optics_point_audit_impl)
+def run_wave_optics_point_audit(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    token = _ACTIVE_POINT_AUDIT_MANIFEST.set(None)
+    try:
+        return _run_wave_optics_point_audit_impl(*args, **kwargs)
+    except Exception as exc:
+        manifest_path = _ACTIVE_POINT_AUDIT_MANIFEST.get()
+        if manifest_path is not None:
+            _terminalize_running_point_audit(manifest_path, exc)
+        raise
+    finally:
+        _ACTIVE_POINT_AUDIT_MANIFEST.reset(token)
 
 
 def _replace_clone_materials_with_air(

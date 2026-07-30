@@ -546,6 +546,25 @@ def test_source_hash_drift_after_solve_is_an_integrity_blocker(tmp_path, monkeyp
     assert _hash(source) == result["measurement"]["provenance"]["source_sha256_after"]
 
 
+def test_unhandled_point_audit_failure_terminalizes_running_manifest(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "src.tools.wave_optics_audit.build_point_audit_physical_evidence",
+        lambda _value: (_ for _ in ()).throw(RuntimeError("injected contract failure")),
+    )
+    with pytest.raises(RuntimeError, match="contract failure"):
+        _run(tmp_path, monkeypatch)
+
+    manifests = list((tmp_path / "artifacts").rglob("manifest.json"))
+    assert len(manifests) == 1
+    manifest = json.loads(manifests[0].read_text(encoding="utf-8"))
+    assert manifest["audit_status"] == "runtime_failed"
+    assert manifest["runtime_failure"] == {
+        "code": "point_audit_runtime_failed",
+        "error_type": "RuntimeError",
+        "details_included": False,
+    }
+
+
 class MaterialSelection:
     def __init__(self):
         self.values = []

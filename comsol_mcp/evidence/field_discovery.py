@@ -91,6 +91,7 @@ def discover_field_datasets(
         raise ValueError("component tags must be unique")
 
     solution_by_tag: dict[str, dict[str, Any]] = {}
+    solution_diagnostics: list[dict[str, str]] = []
     for index, node in enumerate(solutions):
         tag = _tag(node.tag(), f"solutions[{index}].tag")
         if tag in solution_by_tag:
@@ -98,8 +99,13 @@ def discover_field_datasets(
         try:
             empty = bool(node.java.isEmpty())
             computed_state = "verified_empty" if empty else "verified_computed"
-        except Exception:
+        except Exception as exc:
             computed_state = "unknown"
+            solution_diagnostics.append({
+                "code": "solution_state_unavailable",
+                "solution_tag": tag,
+                "error_type": type(exc).__name__,
+            })
         solution_by_tag[tag] = {
             "solution_tag": tag,
             "solution_name": _bounded_text(node.name(), f"solutions[{index}].name"),
@@ -151,8 +157,11 @@ def discover_field_datasets(
         raise ValueError("dataset tags must be unique")
 
     result = {
+        "success": not solution_diagnostics,
         "schema_name": FIELD_DATASET_DISCOVERY_SCHEMA,
         "schema_version": FIELD_DATASET_DISCOVERY_VERSION,
+        "discovery_state": "partial" if solution_diagnostics else "complete",
+        "solution_diagnostics": solution_diagnostics,
         "components": component_rows,
         "datasets": dataset_rows,
         "component_count": len(component_rows),

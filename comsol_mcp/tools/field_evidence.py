@@ -147,15 +147,19 @@ def register_field_evidence_tools(mcp: FastMCP) -> None:
 
             relative_root = Path("field_evidence") / normalized["request_fingerprint"]
             artifact_root = ownership_manager.runtime_dir / relative_root
-            result = collect_existing_dataset_field_evidence(
-                model=model,
-                request=normalized,
-                view_id=view_id,
-                artifact_root=artifact_root,
-            )
-            source_after = _sha256_file(source_path)
-            if source_after != source_before:
-                raise RuntimeError("loaded source changed during read-only field extraction")
+            try:
+                result = collect_existing_dataset_field_evidence(
+                    model=model,
+                    request=normalized,
+                    view_id=view_id,
+                    artifact_root=artifact_root,
+                )
+            finally:
+                source_after = _sha256_file(source_path)
+                if source_after != source_before:
+                    raise RuntimeError(
+                        "loaded source changed during read-only field extraction"
+                    )
             return {
                 "success": True,
                 "model_name": model_name,

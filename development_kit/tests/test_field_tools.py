@@ -211,6 +211,47 @@ def test_public_field_extract_rejects_source_mismatch_before_evaluation(tmp_path
     assert model.calls == []
 
 
+def test_public_field_extract_rehashes_source_after_collection_failure(
+    tmp_path, ascii_tmp_path, monkeypatch
+):
+    from src.tools import field_evidence
+
+    source = tmp_path / "fixture.mph"
+    source.write_bytes(b"immutable-mph-fixture")
+    request = normalize_field_evidence_request(_extraction_request(source))
+    model = _DatasetModel()
+    model.file = lambda: str(source)
+    runtime = ascii_tmp_path / "runtime"
+    real_hash = field_evidence._sha256_file
+    hash_calls = []
+
+    def observed_hash(path):
+        hash_calls.append(Path(path))
+        return real_hash(path)
+
+    def fail_collection(**_kwargs):
+        source.write_bytes(b"mutated-during-failed-collection")
+        raise RuntimeError("injected collection failure")
+
+    monkeypatch.setattr(field_evidence, "_sha256_file", observed_hash)
+    monkeypatch.setattr(
+        field_evidence, "collect_existing_dataset_field_evidence", fail_collection
+    )
+    monkeypatch.setattr(field_evidence.session_manager, "get_model", lambda _name: model)
+    monkeypatch.setattr(
+        field_evidence.session_manager, "preflight_long_operation", lambda: {"ready": True}
+    )
+    monkeypatch.setattr(field_evidence.ownership_manager, "runtime_dir", runtime)
+
+    result = _tool("wave_optics_field_extract")(
+        model_name="fixture", request=request, view_id="on"
+    )
+
+    assert result["success"] is False
+    assert result["reason_code"] == "field_extraction_failed"
+    assert hash_calls == [source.resolve(), source.resolve()]
+
+
 @pytest.mark.parametrize("tamper", ["fingerprint", "schema"])
 def test_public_field_extract_rejects_tampered_canonical_request(tmp_path, monkeypatch, tamper):
     from src.tools import field_evidence

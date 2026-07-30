@@ -168,7 +168,9 @@ def test_resume_replays_durable_level_notification_before_new_execution(tmp_path
 
     assert result["completed"] is True
     assert notifications[0] == "mesh-0"
+    assert notifications == ["mesh-0", "mesh-1", "mesh-2"]
     assert calls.count("mesh-0") == 1
+    assert result["summary"]["completed_level_count"] == 3
 
 
 def test_unresolved_level_is_scientific_completion_not_execution_failure(tmp_path):

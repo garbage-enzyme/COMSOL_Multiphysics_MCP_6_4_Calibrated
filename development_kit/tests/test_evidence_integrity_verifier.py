@@ -244,6 +244,28 @@ def test_degraded_project_settings_status_remains_a_blocked_receipt():
     assert result["verification_state"] == "blocked"
 
 
+def test_malformed_portfolio_receipt_becomes_a_failed_check(tmp_path, monkeypatch):
+    request, _raw, _fit = _fixture(tmp_path)
+    monkeypatch.setattr(
+        integrity_verifier_module,
+        "verify_portfolio_evidence_checks",
+        lambda *_args, **_kwargs: {},
+    )
+
+    result = verify_evidence_integrity(
+        portfolio_request=request,
+        artifact_roots={"case-one": str(tmp_path.resolve())},
+        settings_status=load_evidence_integrity_status({}),
+    )
+
+    assert result["success"] is False
+    assert result["verification_state"] == "failed"
+    assert {
+        item["error_type"] for item in result["check_results"].values()
+        if item["state"] == "failed"
+    } == {"KeyError"}
+
+
 @pytest.mark.parametrize("artifact_root", ["", "relative/artifacts"])
 def test_direct_verifier_rejects_non_absolute_artifact_roots(artifact_root):
     with pytest.raises(ValueError, match="absolute directory strings"):
@@ -275,6 +297,37 @@ def test_mcp_verify_tool_enforces_owned_artifact_root_and_returns_no_path(
     assert result["artifact_root_validation"]["validated_root_count"] == 1
     assert result["artifact_root_validation"]["paths_included"] is False
     assert str(ascii_artifact_root) not in json.dumps(result)
+
+
+@pytest.mark.parametrize(
+    ("error", "reason_code"),
+    [
+        (ValueError("bad portfolio"), "integrity_verification_rejected"),
+        (RuntimeError("verifier failure"), "integrity_verification_failed"),
+    ],
+)
+def test_mcp_verify_tool_distinguishes_verifier_failures_from_root_rejection(
+    ascii_artifact_root, monkeypatch, error, reason_code
+):
+    artifact_root = ascii_artifact_root / "case"
+    artifact_root.mkdir()
+    monkeypatch.delenv(EVIDENCE_SETTINGS_ENV, raising=False)
+    monkeypatch.setenv(ARTIFACT_WRITE_ROOT_ENV, str(ascii_artifact_root))
+    monkeypatch.setattr(
+        integrity_verifier_module,
+        "verify_evidence_integrity",
+        lambda **_kwargs: (_ for _ in ()).throw(error),
+    )
+    server = FastMCP("evidence-integrity-verifier-failure-test")
+    register_evidence_integrity_tools(server)
+
+    result = server._tool_manager._tools["evidence_integrity_verify"].fn(
+        {}, {"case-one": str(artifact_root)}
+    )
+
+    assert result["success"] is False
+    assert result["reason_code"] == reason_code
+    assert result["artifact_root_validation"]["accepted"] is True
 
 
 def test_mcp_verify_tool_rejects_external_and_junction_artifact_roots(

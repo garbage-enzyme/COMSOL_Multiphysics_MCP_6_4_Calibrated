@@ -1196,6 +1196,27 @@ def test_public_tool_accepts_canonical_states_and_rejects_ambiguous_input():
     assert rejected["solver_started"] is False
 
 
+def test_public_tool_does_not_misclassify_internal_type_error_as_caller_rejection(
+    monkeypatch,
+):
+    import src.evidence.branch_continuation as branch_continuation_module
+
+    monkeypatch.setattr(
+        branch_continuation_module,
+        "build_continuation_states",
+        lambda **_kwargs: (_ for _ in ()).throw(TypeError("programming defect")),
+    )
+    server = FastMCP("branch-continuation-internal-error-test")
+    register_branch_continuation_tools(server)
+    result = server._tool_manager._tools["branch_continuation_plan"].fn(
+        continuation_policy={}, states_spec={}
+    )
+
+    assert result["success"] is False
+    assert result["reason_code"] == "continuation_planning_failed"
+    assert "programming defect" not in json.dumps(result)
+
+
 def test_public_branch_continuation_tool_never_constructs_a_comsol_client():
     code = """
 import mph

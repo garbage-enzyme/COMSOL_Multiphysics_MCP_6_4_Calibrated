@@ -210,7 +210,7 @@ def verify_evidence_integrity(
                 "verification_sha256": receipt["verification_sha256"],
                 "case_count": receipt["case_count"],
             }
-        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        except (KeyError, OSError, RuntimeError, TypeError, ValueError) as exc:
             check_results[check_name] = {
                 "state": "failed",
                 "reason_code": "deterministic_check_failed",

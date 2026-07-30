@@ -118,6 +118,32 @@ def test_malformed_ambiguous_or_unknown_settings_fail_closed(tmp_path, payload, 
     assert status["settings_path_included"] is False
 
 
+def test_degraded_project_settings_disable_strict_verification_and_emit_warning(monkeypatch):
+    import src.evidence.integrity_controls as integrity_controls_module
+
+    project = integrity_controls_module.load_settings({})
+    monkeypatch.delenv(EVIDENCE_SETTINGS_ENV, raising=False)
+    monkeypatch.setattr(integrity_controls_module, "load_settings", lambda: project)
+    monkeypatch.setattr(
+        integrity_controls_module,
+        "settings_status",
+        lambda: {
+            "success": True,
+            "configuration_state": "degraded",
+            "reason_code": "settings_invalid",
+            "settings_errors": [{"reason_code": "settings_invalid"}],
+        },
+    )
+
+    status = load_evidence_integrity_status()
+
+    assert status["success"] is False
+    assert status["configuration_state"] == "degraded"
+    assert status["strict_verification_active"] is False
+    assert status["warning_codes"] == [INVALID_SETTINGS_WARNING_CODE]
+    assert warning_fields(status)["strictly_verified"] is False
+
+
 def test_capabilities_report_effective_checks_without_exposing_settings_path(tmp_path, monkeypatch):
     path = tmp_path / "private-name-settings.json"
     _write_settings(path, {"summary_claim_verification": False})

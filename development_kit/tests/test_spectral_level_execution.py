@@ -108,3 +108,33 @@ def test_loaded_level_stops_before_collector_when_control_requests_cancel(tmp_pa
     assert output["result"]["completed"] is False
     assert output["result"]["stop_reason"] == "before_solve_cancel"
     assert called == []
+
+
+def test_loaded_level_reports_mesh_telemetry_failure_that_blocks_admission(
+    tmp_path, ascii_jobs_root, monkeypatch
+):
+    from src.tools import mesh as mesh_module
+
+    source_root = tmp_path / "source"
+    source_root.mkdir()
+    spec = spectral_job_spec(source_root, maximum_points=10)
+    store = JobStore(ascii_jobs_root)
+    job_id = store.create(spec, _state(10))
+    monkeypatch.setattr(
+        mesh_module,
+        "get_mesh_info",
+        lambda _model: (_ for _ in ()).throw(RuntimeError("backend unavailable")),
+    )
+    output = execute_loaded_spectral_level(
+        store=store, job_id=job_id, spec=spec,
+        directory=store.job_dir(job_id) / "level", attempt=1,
+        model=object(), client=object(), model_name="fixture", ownership=_Ownership(),
+        preflight={"ready": True}, worker_started=time.monotonic(),
+        should_stop=lambda: False, on_durable_row=lambda _row: None,
+        collector_executor=lambda *_args: pytest.fail("collector must not start"),
+    )
+
+    assert output["result"]["completed"] is False
+    assert output["telemetry_diagnostics"][0]["code"] == "mesh_telemetry_failed"
+    assert output["telemetry_diagnostics"][0]["error_type"] == "RuntimeError"
+    assert output["latest_resource_decision"]["telemetry_diagnostics"]

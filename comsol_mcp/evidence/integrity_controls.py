@@ -223,9 +223,13 @@ def load_evidence_integrity_status(
             fingerprint=settings_fingerprint(project),
         )
         if project_status.get("settings_errors"):
+            result["success"] = False
             result["configuration_state"] = "degraded"
+            result["strict_verification_active"] = False
             result["reason_code"] = project_status.get("reason_code")
             result["settings_errors"] = project_status["settings_errors"]
+            result["warning_codes"] = [INVALID_SETTINGS_WARNING_CODE]
+            result["warning_messages"] = [INVALID_SETTINGS_WARNING]
         return result
 
     environment = environ

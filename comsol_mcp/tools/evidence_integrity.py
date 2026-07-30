@@ -68,6 +68,25 @@ def register_evidence_integrity_tools(mcp: FastMCP) -> None:
                 raise ValueError(
                     "artifact_roots must be empty when filesystem checks are disabled"
                 )
+        except (OSError, RuntimeError, TypeError, ValueError):
+            logger.exception("Evidence artifact-root validation failed")
+            result = {
+                **public_error(
+                    "artifact_root_rejected",
+                    "Artifact-root validation failed.",
+                ),
+                "verification_state": "blocked",
+                "strictly_verified": False,
+                "artifact_root_validation": {
+                    "enforced": True,
+                    "accepted": False,
+                    "paths_included": False,
+                },
+            }
+            result.update(warning_fields(status))
+            return result
+
+        try:
             result = verify_evidence_integrity(
                 portfolio_request=portfolio_request,
                 artifact_roots=normalized_roots,
@@ -82,23 +101,28 @@ def register_evidence_integrity_tools(mcp: FastMCP) -> None:
                 "paths_included": False,
             }
             return result
-        except (OSError, RuntimeError, TypeError, ValueError):
+        except (TypeError, ValueError):
+            logger.exception("Evidence integrity request was rejected")
+            reason_code = "integrity_verification_rejected"
+            message = "Evidence integrity request was rejected."
+        except (OSError, RuntimeError):
             logger.exception("Evidence integrity verification failed")
-            result = {
-                **public_error(
-                    "artifact_root_rejected",
-                    "Artifact-root validation or integrity verification failed.",
-                ),
-                "verification_state": "blocked",
-                "strictly_verified": False,
-                "artifact_root_validation": {
-                    "enforced": True,
-                    "accepted": False,
-                    "paths_included": False,
-                },
-            }
-            result.update(warning_fields(status))
-            return result
+            reason_code = "integrity_verification_failed"
+            message = "Evidence integrity verification failed safely."
+        result = {
+            **public_error(reason_code, message),
+            "verification_state": "blocked",
+            "strictly_verified": False,
+            "artifact_root_validation": {
+                "enforced": True,
+                "accepted": True,
+                "validated_root_count": len(normalized_roots),
+                "root_ids": sorted(root_ids),
+                "paths_included": False,
+            },
+        }
+        result.update(warning_fields(status))
+        return result
 
 
 __all__ = ["register_evidence_integrity_tools"]

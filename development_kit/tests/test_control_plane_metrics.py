@@ -23,7 +23,7 @@ from src.jobs.store import JOB_SCHEMA_VERSION, JobStore
 from src.tools.capabilities import get_capabilities
 from src.tools.ownership import SolverOwnership
 from src.tools.profiles import ProfileSelection, register_profiled
-from src.utils.control_plane import ControlPlaneMetrics, control_plane_metrics
+from src.utils.control_plane import ControlPlaneMetrics, control_plane_metrics, measured_call
 
 
 @pytest.fixture(autouse=True)
@@ -318,6 +318,25 @@ def test_metrics_require_explicit_boolean_success(result):
     metrics.record("callback", 0.1, result)
 
     assert metrics.summary("callback")["outcomes"] == {
+        "success": 0,
+        "busy": 0,
+        "timeout": 0,
+        "error": 1,
+    }
+
+
+def test_measured_call_records_callback_exception_before_reraising():
+    metrics = ControlPlaneMetrics(window_size=8)
+    with pytest.raises(RuntimeError, match="callback failed"):
+        measured_call(
+            "callback",
+            lambda: (_ for _ in ()).throw(RuntimeError("callback failed")),
+            metrics=metrics,
+        )
+
+    summary = metrics.summary("callback")
+    assert summary["total_recorded"] == 1
+    assert summary["outcomes"] == {
         "success": 0,
         "busy": 0,
         "timeout": 0,

@@ -238,3 +238,21 @@ def test_public_tool_returns_bounded_validation_error_without_starting_solver():
 
     assert result["success"] is False
     assert "finite" in result["error"]
+
+
+def test_public_tool_contains_tiny_wavelength_arithmetic_as_validation_error():
+    server = FastMCP("material-expression-tiny-wavelength-test")
+    register_material_expression_tools(server)
+    tool = server._tool_manager._tools["wave_optics_material_expression_preview"]
+    result = tool.fn(
+        model_kind="constant",
+        parameters={"epsilon_real": 2.0, "epsilon_imag": 0.1},
+        test_wavelengths=[5e-324],
+        wavelength_unit="nm",
+        harmonic_convention="exp(+i*omega*t)",
+        imaginary_sign="positive",
+        formulation="volumetric_material",
+    )
+
+    assert result["success"] is False
+    assert "converted wavelength" in result["error"]

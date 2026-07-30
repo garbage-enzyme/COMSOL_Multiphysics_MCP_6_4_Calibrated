@@ -111,6 +111,13 @@ def test_discovery_handles_english_names_empty_unknown_and_non_solution_datasets
     assert result["datasets"][1]["computed_state"] == "not_solution"
     assert result["datasets"][2]["solution_reference_kind"] is None
     assert result["eligible_dataset_count"] == 0
+    assert result["success"] is False
+    assert result["discovery_state"] == "partial"
+    assert result["solution_diagnostics"] == [{
+        "code": "solution_state_unavailable",
+        "solution_tag": "sol2",
+        "error_type": "RuntimeError",
+    }]
 
 
 def test_discovery_fixture_preserves_explicit_empty_collections():
