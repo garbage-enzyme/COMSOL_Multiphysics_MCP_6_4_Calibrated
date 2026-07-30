@@ -1,7 +1,9 @@
 """Model management tools for COMSOL MCP Server."""
 
+import json
 import logging
 import os
+import shutil
 import uuid
 from pathlib import Path
 from tempfile import mkdtemp
@@ -40,7 +42,7 @@ def _save_model_file(
         if normalized_format not in {"comsol", "mph"}:
             model.save(path=str(staging), format=format)
         else:
-            model.java.save(str(staging))
+            model.java.save(str(staging), True)
         if not staging.is_file():
             raise RuntimeError("model save did not create the staging artifact")
         if overwrite:
@@ -58,22 +60,133 @@ def _clone_model(
     new_name: Optional[str] = None,
     *,
     clone_root: Optional[Path] = None,
+    existing_names=(),
 ):
     """Clone a standalone client model through clientapi Save Copy + load."""
     clone_name = new_name or f"{model.name()}_copy"
+    if clone_name in {str(name) for name in existing_names}:
+        raise ValueError(f"clone name already exists: {clone_name}")
     root = clone_root or (default_runtime_dir() / "model_clones")
     root.mkdir(parents=True, exist_ok=True)
     temp_dir = Path(mkdtemp(prefix="comsol_mcp_clone_", dir=str(root)))
     copy_path = temp_dir / "clone.mph"
+    cloned_model = None
     try:
         model.java.save(str(copy_path), True)
         cloned_model = client.load(str(copy_path))
-    except Exception:
-        copy_path.unlink(missing_ok=True)
-        temp_dir.rmdir()
+        cloned_model.java.label(clone_name)
+    except Exception as exc:
+        cleanup_errors = []
+        if cloned_model is not None:
+            try:
+                client.remove(cloned_model)
+            except Exception as cleanup_exc:
+                cleanup_errors.append(f"clone_remove: {cleanup_exc}")
+        try:
+            copy_path.unlink(missing_ok=True)
+            temp_dir.rmdir()
+        except Exception as cleanup_exc:
+            cleanup_errors.append(f"backing_remove: {cleanup_exc}")
+        if cleanup_errors:
+            raise RuntimeError(
+                f"{exc}; clone cleanup failed: {'; '.join(cleanup_errors)}"
+            ) from exc
         raise
-    cloned_model.java.label(clone_name)
     return cloned_model, str(copy_path)
+
+
+def _metadata_path(model_path: Path) -> Path:
+    return model_path.with_suffix(".metadata.json")
+
+
+def _save_model_version_bundle(
+    model,
+    versioned_path: str,
+    latest_path: str,
+    *,
+    description: Optional[str],
+) -> dict[str, str]:
+    """Publish one Save Copy snapshot as a rollback-capable version/latest bundle."""
+    version = Path(versioned_path).resolve()
+    latest = Path(latest_path).resolve()
+    if version.parent != latest.parent:
+        raise ValueError("versioned and latest model paths must share one directory")
+    version_metadata = _metadata_path(version)
+    latest_metadata = _metadata_path(latest)
+    if version.exists() or version_metadata.exists():
+        raise FileExistsError("versioned model or metadata already exists")
+    version.parent.mkdir(parents=True, exist_ok=True)
+    token = uuid.uuid4().hex
+    stages = {
+        version: version.with_name(f".{version.name}.{token}.stage"),
+        version_metadata: version_metadata.with_name(
+            f".{version_metadata.name}.{token}.stage"
+        ),
+        latest: latest.with_name(f".{latest.name}.{token}.stage"),
+        latest_metadata: latest_metadata.with_name(
+            f".{latest_metadata.name}.{token}.stage"
+        ),
+    }
+    backups = {
+        target: target.with_name(f".{target.name}.{token}.backup")
+        for target in (latest, latest_metadata)
+        if target.exists()
+    }
+    published = []
+    committed = False
+    try:
+        model.java.save(str(stages[version]), True)
+        if not stages[version].is_file():
+            raise RuntimeError("model Save Copy did not create version staging")
+        shutil.copyfile(stages[version], stages[latest])
+        metadata = {
+            "schema_name": "comsol_mcp.model_version_metadata",
+            "schema_version": "1.0.0",
+            "description": description,
+            "model_name": str(model.name()),
+            "snapshot_role": "versioned_and_latest_copy",
+        }
+        encoded = json.dumps(
+            metadata, ensure_ascii=False, indent=2, sort_keys=True
+        ) + "\n"
+        stages[version_metadata].write_text(encoded, encoding="utf-8")
+        stages[latest_metadata].write_text(encoded, encoding="utf-8")
+        for target, backup in backups.items():
+            os.replace(target, backup)
+        for target in (version, version_metadata, latest, latest_metadata):
+            publish_file_exclusive(stages[target], target)
+            published.append(target)
+        committed = True
+    except Exception as exc:
+        rollback_errors = []
+        for target in reversed(published):
+            try:
+                target.unlink(missing_ok=True)
+            except OSError as rollback_exc:
+                rollback_errors.append(f"remove {target.name}: {rollback_exc}")
+        for target, backup in backups.items():
+            if backup.exists():
+                try:
+                    os.replace(backup, target)
+                except OSError as rollback_exc:
+                    rollback_errors.append(f"restore {target.name}: {rollback_exc}")
+        if rollback_errors:
+            raise RuntimeError(
+                f"{exc}; version bundle rollback failed: {'; '.join(rollback_errors)}"
+            ) from exc
+        raise
+    finally:
+        for stage in stages.values():
+            stage.unlink(missing_ok=True)
+        if committed:
+            for backup in backups.values():
+                backup.unlink(missing_ok=True)
+    return {
+        "version_path": str(version),
+        "latest_path": str(latest),
+        "version_metadata_path": str(version_metadata),
+        "latest_metadata_path": str(latest_metadata),
+    }
 
 
 def _list_model_components(model) -> list[dict[str, str]]:
@@ -305,12 +418,12 @@ def register_model_tools(mcp: FastMCP) -> None:
 
         Args:
             model_name: Name of the model to save (default: current model)
-            description: Optional description for this version (stored in metadata)
+            description: Optional description persisted in version/latest JSON sidecars
             base_path: Optional model-storage root. Defaults to the runtime
                 directory's ``models`` subdirectory.
 
         Returns:
-            Save confirmation with versioned file path, or error message
+            Save confirmation with version/latest model and metadata paths, or error message
         """
         model = session_manager.get_model(model_name)
         if model is None:
@@ -326,18 +439,18 @@ def register_model_tools(mcp: FastMCP) -> None:
             # Generate versioned path using new structure
             versioned_path = generate_version_path(name, base_path=base_path)
 
-            # Save versioned copy
-            _save_model_file(model, versioned_path)
-
-            # Also save as 'latest'
             latest_path = generate_latest_path(name, base_path=base_path)
-            _save_model_file(model, latest_path)
+            published = _save_model_version_bundle(
+                model,
+                versioned_path,
+                latest_path,
+                description=description,
+            )
 
             return {
                 "success": True,
                 "model": name,
-                "version_path": versioned_path,
-                "latest_path": latest_path,
+                **published,
                 "description": description,
             }
         except Exception as e:
@@ -422,7 +535,12 @@ def register_model_tools(mcp: FastMCP) -> None:
             if client is None:
                 return {"success": False, "error": "Client not available."}
 
-            cloned_model, cleanup_path = _clone_model(client, model, new_name)
+            cloned_model, cleanup_path = _clone_model(
+                client,
+                model,
+                new_name,
+                existing_names=session_manager.models,
+            )
             clone_name = session_manager.add_model(
                 cloned_model,
                 cleanup_path=cleanup_path,
