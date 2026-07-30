@@ -30,7 +30,7 @@
     {
       "path": "development_kit/tests/test_reference_power_runner.py",
       "match_count": 1,
-      "match_sha256": "f0a8d5b27842a0ee968141bc45116ce631fe1fe9f328f13e102af5c88a52d62f"
+      "match_sha256": "e12eecaa40f395bcf1157d709adce4149a165935d22b9424173cfc8b1962a84e"
     },
     {
       "path": "comsol_mcp/evidence/reference_power_acceptance.py",

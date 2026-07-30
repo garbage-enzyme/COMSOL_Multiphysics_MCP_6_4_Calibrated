@@ -6,11 +6,13 @@ import hashlib
 import json
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import psutil
 
 from development_kit.tests.integration import reference_power_acceptance as runner_module
 from development_kit.tests.integration.reference_power_acceptance import (
@@ -23,8 +25,54 @@ ROOT = Path(__file__).parents[2]
 RUNNER = ROOT / "development_kit" / "tests" / "integration" / "reference_power_acceptance.py"
 
 
+def _solver_process_identities():
+    identities = set()
+    for process in psutil.process_iter(["pid", "create_time", "name", "cmdline"]):
+        try:
+            executable_names = {
+                Path(value).name.casefold()
+                for value in [process.info.get("name") or "", *(process.info.get("cmdline") or [])]
+                if value
+            }
+            if any(
+                name.startswith("comsol") or name.startswith("mphserver")
+                for name in executable_names
+            ):
+                identities.add((process.info["pid"], process.info["create_time"]))
+        except psutil.Error, OSError:
+            continue
+    return identities
+
+
+def _run_with_solver_observer(command):
+    baseline = _solver_process_identities()
+    observed = set(baseline)
+    stop = threading.Event()
+
+    def observe():
+        while not stop.wait(0.01):
+            observed.update(_solver_process_identities())
+
+    observer = threading.Thread(target=observe, daemon=True)
+    observer.start()
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=30,
+        )
+    finally:
+        observed.update(_solver_process_identities())
+        stop.set()
+        observer.join(timeout=2)
+    return completed, observed - baseline
+
+
 def test_runner_import_and_dry_run_do_not_import_mph_or_start_comsol():
-    import_probe = subprocess.run(
+    import_probe, import_solver_starts = _run_with_solver_observer(
         [
             sys.executable,
             "-c",
@@ -33,24 +81,16 @@ def test_runner_import_and_dry_run_do_not_import_mph_or_start_comsol():
                 "print('true' if 'mph' in sys.modules else 'false')"
             ),
         ],
-        cwd=ROOT,
-        text=True,
-        capture_output=True,
-        check=False,
-        timeout=30,
     )
-    dry_run = subprocess.run(
-        [sys.executable, str(RUNNER), "--dry-run"],
-        cwd=ROOT,
-        text=True,
-        capture_output=True,
-        check=False,
-        timeout=30,
+    dry_run, dry_run_solver_starts = _run_with_solver_observer(
+        [sys.executable, str(RUNNER), "--dry-run"]
     )
 
     assert import_probe.returncode == 0, import_probe.stderr
     assert import_probe.stdout.strip() == "false"
+    assert import_solver_starts == set()
     assert dry_run.returncode == 0, dry_run.stderr
+    assert dry_run_solver_starts == set()
     receipt = json.loads(dry_run.stdout)
     assert receipt["real_comsol_started"] is False
     assert receipt["contract_valid"] is True
