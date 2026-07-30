@@ -20,7 +20,7 @@ import pytest
 from src.jobs.manager import JobManager
 from src.knowledge.lexical_manual import build_index_from_records, search_index
 from src.knowledge.semantic_contracts import PUBLIC_LIMITS, WORKER_PROTOCOL_SCHEMA_VERSION
-from src.knowledge.semantic_process import SemanticWorkerManager
+from src.knowledge.semantic_process import SemanticWorkerManager, _command_signature
 from src.knowledge.semantic_runtime import _lightweight_deployment_identity
 from src.knowledge.semantic_worker import _RequestHandler, _WorkerServer, _WorkerState
 from src.tools.capabilities import get_capabilities
@@ -87,21 +87,23 @@ def test_happy_path_reuses_one_worker_and_reset_verifies_absence():
     "crash_before_response",
 ])
 def test_query_protocol_faults_are_contained_without_retry(fault: str):
-    manager = SemanticWorkerManager(startup_deadline=2.0, query_deadline=0.25, fault=fault)
-    result = manager.query("bounded fault probe")
+    with SemanticWorkerManager(
+        startup_deadline=2.0, query_deadline=0.25, fault=fault
+    ) as manager:
+        result = manager.query("bounded fault probe")
 
-    assert result["success"] is False
-    assert result["error"]["code"] == "worker_protocol_failure"
-    assert result["retried"] is False
-    assert result["cleanup"]["absent"] is True
-    assert manager.status()["state"] == "stopped"
+        assert result["success"] is False
+        assert result["error"]["code"] == "worker_protocol_failure"
+        assert result["retried"] is False
+        assert result["cleanup"]["absent"] is True
+        assert manager.status()["state"] == "stopped"
 
 
 def test_startup_hang_and_port_collision_are_contained():
-    hanging = SemanticWorkerManager(startup_deadline=0.2, fault="startup_hang")
-    result = hanging.start()
-    assert result["success"] is False
-    assert result["cleanup"]["absent"] is True
+    with SemanticWorkerManager(startup_deadline=0.2, fault="startup_hang") as hanging:
+        result = hanging.start()
+        assert result["success"] is False
+        assert result["cleanup"]["absent"] is True
 
 
 def test_non_object_startup_handshake_is_contained_and_reaped(monkeypatch):
@@ -221,8 +223,10 @@ def test_lightweight_identity_rejects_non_object_model_manifest(tmp_path):
     with socket.socket() as occupied:
         occupied.bind(("127.0.0.1", 0))
         occupied.listen()
-        collision = SemanticWorkerManager(startup_deadline=1.0, forced_port=occupied.getsockname()[1])
-        result = collision.start()
+        with SemanticWorkerManager(
+            startup_deadline=1.0, forced_port=occupied.getsockname()[1]
+        ) as collision:
+            result = collision.start()
     assert result["success"] is False
     assert result["cleanup"]["absent"] is True
 
@@ -507,40 +511,142 @@ def test_request_uses_one_monotonic_deadline_across_trickled_receives(monkeypatc
 
 
 def test_stale_identity_refuses_action_until_exact_record_is_restored():
-    manager = SemanticWorkerManager(startup_deadline=2.0)
-    assert manager.start()["success"] is True
-    original = dict(manager._identity)
-    manager._identity["process_create_time"] -= 10.0
+    with SemanticWorkerManager(startup_deadline=2.0) as manager:
+        assert manager.start()["success"] is True
+        original = dict(manager._identity)
+        manager._identity["process_create_time"] -= 10.0
 
-    refused = manager.reset()
-    assert refused["success"] is False
-    assert refused["reset"]["refused"] is True
-    assert manager._process is not None and manager._process.poll() is None
-    restart = manager.start()
-    assert restart["success"] is False
-    assert restart["error"]["code"] == "worker_identity_uncertain"
-    assert manager._process is not None and manager._process.pid == original["pid"]
+        refused = manager.reset()
+        assert refused["success"] is False
+        assert refused["reset"]["refused"] is True
+        assert manager._process is not None and manager._process.poll() is None
+        restart = manager.start()
+        assert restart["success"] is False
+        assert restart["error"]["code"] == "worker_identity_uncertain"
+        assert manager._process is not None and manager._process.pid == original["pid"]
 
-    manager._identity = original
-    assert manager.reset()["success"] is True
+        manager._identity = original
+        assert manager.reset()["success"] is True
 
 
 def test_crash_after_response_is_observed_without_process_leak():
-    manager = SemanticWorkerManager(startup_deadline=2.0, fault="crash_after_response")
-    response = manager.query("respond then crash")
-    assert response["success"] is True
-    deadline = time.monotonic() + 2.0
-    while manager._process is not None and manager._process.poll() is None and time.monotonic() < deadline:
-        time.sleep(0.02)
-    assert manager._process is not None and manager._process.poll() is not None
-    assert manager.reset()["success"] is True
+    with SemanticWorkerManager(
+        startup_deadline=2.0, fault="crash_after_response"
+    ) as manager:
+        response = manager.query("respond then crash")
+        assert response["success"] is True
+        deadline = time.monotonic() + 2.0
+        while (
+            manager._process is not None
+            and manager._process.poll() is None
+            and time.monotonic() < deadline
+        ):
+            time.sleep(0.02)
+        assert manager._process is not None and manager._process.poll() is not None
+        assert manager.reset()["success"] is True
 
 
 def test_idle_ttl_stops_worker_lazily():
-    manager = SemanticWorkerManager(startup_deadline=2.0, idle_ttl=0.05)
-    assert manager.health()["success"] is True
-    time.sleep(0.08)
-    assert manager.status()["state"] == "stopped"
+    with SemanticWorkerManager(startup_deadline=2.0, idle_ttl=0.05) as manager:
+        assert manager.health()["success"] is True
+        time.sleep(0.08)
+        assert manager.status()["state"] == "stopped"
+
+
+def test_worker_pipes_are_drained_after_startup_handshake():
+    with SemanticWorkerManager(
+        startup_deadline=2.0, query_deadline=2.0, fault="stderr_flood"
+    ) as manager:
+        response = manager.query("CopyFace")
+
+        assert response["success"] is True
+        assert len(manager._pipe_threads) == 2
+
+
+def test_context_manager_reaps_worker_when_test_body_raises():
+    manager = SemanticWorkerManager(startup_deadline=2.0)
+    process = None
+    with pytest.raises(RuntimeError, match="injected polling failure"):
+        with manager:
+            assert manager.start()["success"] is True
+            process = manager._process
+            raise RuntimeError("injected polling failure")
+
+    assert process is not None and process.poll() is not None
+    assert manager.status(probe=False)["state"] == "stopped"
+    assert process.stdout is not None and process.stdout.closed is True
+    assert process.stderr is not None and process.stderr.closed is True
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows process identity gate")
+def test_missing_process_create_time_rejects_and_reaps_spawn(monkeypatch):
+    monkeypatch.setattr(
+        "src.knowledge.semantic_process._windows_process_create_time",
+        lambda _handle: None,
+    )
+    with SemanticWorkerManager(startup_deadline=2.0) as manager:
+        result = manager.start()
+
+        assert result["success"] is False
+        assert result["error"]["code"] == "startup_failed"
+        assert result["cleanup"]["absent"] is True
+        assert manager.status(probe=False)["state"] == "stopped"
+
+
+def test_termination_exceptions_still_clear_finished_process_resources(monkeypatch):
+    class Process:
+        pid = 123
+        _handle = 456
+
+        def __init__(self):
+            self.stdout = BytesIO(b"stdout")
+            self.stderr = BytesIO(b"stderr")
+            self.ended = False
+
+        def poll(self):
+            return 0 if self.ended else None
+
+        def terminate(self):
+            raise OSError("injected terminate failure")
+
+        def wait(self, timeout):
+            if not self.ended:
+                raise subprocess.TimeoutExpired("semantic", timeout)
+            return 0
+
+        def kill(self):
+            self.ended = True
+
+    class Job:
+        handle = 1
+
+        def close(self):
+            raise OSError("injected job close failure")
+
+    manager = SemanticWorkerManager()
+    process = Process()
+    manager._process = process
+    manager._identity = {
+        "pid": process.pid,
+        "process_create_time": 10.0,
+        "command_signature": _command_signature(manager._command()),
+    }
+    manager._job = Job()
+    manager._token = "0" * 64
+    manager._port = 1
+    monkeypatch.setattr(
+        "src.knowledge.semantic_process._windows_process_create_time",
+        lambda _handle: 10.0,
+    )
+
+    result = manager.reset()
+
+    assert result["success"] is True
+    assert result["reset"]["absent"] is True
+    assert result["reset"]["cleanup_errors"]
+    assert process.stdout.closed is True
+    assert process.stderr.closed is True
+    assert manager._process is manager._identity is manager._job is None
 
 
 def test_hanging_semantic_worker_does_not_delay_control_plane_or_lexical_search():
@@ -551,53 +657,57 @@ def test_hanging_semantic_worker_does_not_delay_control_plane_or_lexical_search(
         "source": "fake/manual.pdf", "module": "fake", "page": 1,
         "heading": "CopyFace", "text": "CopyFace source destination mesh",
     }], index, corpus_fingerprint="semantic-worker-test")
-    manager = SemanticWorkerManager(startup_deadline=2.0, query_deadline=0.5, fault="query_hang")
-    result: dict = {}
+    try:
+        with SemanticWorkerManager(
+            startup_deadline=2.0, query_deadline=0.5, fault="query_hang"
+        ) as manager:
+            result: dict = {}
 
-    job_manager = JobManager(root / "jobs", reconcile_on_start=False)
-    job_id = job_manager.store.create(
-        {"schema_version": "2", "job_type": "test_sequence"},
-        {"schema_version": "2", "status": "completed", "worker_pid": None},
-    )
-    baseline_started = time.perf_counter()
-    assert get_capabilities()["success"] is True
-    assert SolverOwnership(runtime_dir=runtime).status()["lease"]["state"] == "absent"
-    assert job_manager.status(job_id)["status"] == "completed"
-    baseline_elapsed = time.perf_counter() - baseline_started
+            job_manager = JobManager(root / "jobs", reconcile_on_start=False)
+            job_id = job_manager.store.create(
+                {"schema_version": "2", "job_type": "test_sequence"},
+                {"schema_version": "2", "status": "completed", "worker_pid": None},
+            )
+            baseline_started = time.perf_counter()
+            assert get_capabilities()["success"] is True
+            assert SolverOwnership(runtime_dir=runtime).status()["lease"]["state"] == "absent"
+            assert job_manager.status(job_id)["status"] == "completed"
+            baseline_elapsed = time.perf_counter() - baseline_started
 
-    thread = threading.Thread(target=lambda: result.update(manager.query("hang")), daemon=True)
-    thread.start()
-    time.sleep(0.1)
-    control_started = time.perf_counter()
-    capabilities = get_capabilities()
-    ownership = SolverOwnership(runtime_dir=runtime).status()
-    job_status = job_manager.status(job_id)
-    control_elapsed = time.perf_counter() - control_started
-    lexical_started = time.perf_counter()
-    lexical = search_index("CopyFace", index_path=index)
-    lexical_elapsed = time.perf_counter() - lexical_started
-    join_budget = min(8.0, max(4.0, baseline_elapsed * 2.0 + 1.0))
-    thread.join(timeout=join_budget)
+            thread = threading.Thread(
+                target=lambda: result.update(manager.query("hang")), daemon=True
+            )
+            thread.start()
+            time.sleep(0.1)
+            control_started = time.perf_counter()
+            capabilities = get_capabilities()
+            ownership = SolverOwnership(runtime_dir=runtime).status()
+            job_status = job_manager.status(job_id)
+            control_elapsed = time.perf_counter() - control_started
+            lexical_started = time.perf_counter()
+            lexical = search_index("CopyFace", index_path=index)
+            lexical_elapsed = time.perf_counter() - lexical_started
+            join_budget = min(8.0, max(4.0, baseline_elapsed * 2.0 + 1.0))
+            thread.join(timeout=join_budget)
 
-    assert capabilities["success"] is True
-    assert ownership["lease"]["state"] == "absent"
-    # External solver discovery is host-wide. A user-owned standalone solve may
-    # legitimately be present; this containment test requires responsiveness
-    # and lease isolation, not an otherwise idle host.
-    assert isinstance(ownership["external_solver_processes"], list)
-    assert job_status["success"] is True and job_status["status"] == "completed"
-    assert lexical["success"] is True and lexical["results"]
-    # Host-wide process inventory latency changes when a user-owned solver is
-    # factorizing. Compare against an immediately measured no-hang baseline and
-    # retain an absolute containment ceiling.
-    assert control_elapsed < 8.0
-    assert control_elapsed < max(4.0, baseline_elapsed * 2.0 + 0.5)
-    assert lexical_elapsed < 4.0
-    assert not thread.is_alive()
-    assert result["success"] is False and result["cleanup"]["absent"] is True
-    assert not (runtime / "solver_owner.json").exists()
-    if root.exists():
-        import shutil
+            assert capabilities["success"] is True
+            assert ownership["lease"]["state"] == "absent"
+            # External solver discovery is host-wide. A user-owned standalone solve may
+            # legitimately be present; this containment test requires responsiveness
+            # and lease isolation, not an otherwise idle host.
+            assert isinstance(ownership["external_solver_processes"], list)
+            assert job_status["success"] is True and job_status["status"] == "completed"
+            assert lexical["success"] is True and lexical["results"]
+            # Host-wide process inventory latency changes when a user-owned solver is
+            # factorizing. Compare against an immediately measured no-hang baseline and
+            # retain an absolute containment ceiling.
+            assert control_elapsed < 8.0
+            assert control_elapsed < max(4.0, baseline_elapsed * 2.0 + 0.5)
+            assert lexical_elapsed < 4.0
+            assert not thread.is_alive()
+            assert result["success"] is False and result["cleanup"]["absent"] is True
+            assert not (runtime / "solver_owner.json").exists()
+    finally:
         shutil.rmtree(root, ignore_errors=True)
 
 

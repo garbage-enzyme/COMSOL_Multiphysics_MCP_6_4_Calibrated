@@ -7,6 +7,7 @@ import json
 import os
 import secrets
 import socketserver
+import sys
 import threading
 import time
 from typing import Any
@@ -246,6 +247,7 @@ def main() -> None:
     parser.add_argument("--fault", choices=[
         "startup_hang", "query_hang", "invalid_json", "oversized_json",
         "wrong_request_id", "crash_before_response", "crash_after_response",
+        "stderr_flood",
     ])
     parser.add_argument("--query-delay", type=float, default=0.0)
     parser.add_argument("--backend", choices=["fake", "hybrid"], default="fake")
@@ -279,6 +281,9 @@ def main() -> None:
             "port": int(server.server_address[1]),
         }
         print(json.dumps(handshake, separators=(",", ":")), flush=True)
+        if args.fault == "stderr_flood":
+            sys.stderr.buffer.write(b"x" * (1024 * 1024))
+            sys.stderr.buffer.flush()
         server.serve_forever(poll_interval=0.1)
 
 

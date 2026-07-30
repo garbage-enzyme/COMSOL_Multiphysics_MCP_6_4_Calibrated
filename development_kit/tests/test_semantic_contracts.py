@@ -8,6 +8,7 @@ import subprocess
 import sys
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from src.knowledge.lexical_manual import build_index_from_records
@@ -26,6 +27,8 @@ from development_kit.benchmarks.semantic_benchmark import (
     _query_metrics,
     evaluate_lexical_baseline,
 )
+from development_kit.tests.integration import semantic_benchmark_soak as soak_module
+from development_kit.tests.integration import semantic_worker_containment as containment_module
 from development_kit.tests.integration.semantic_benchmark_soak import _promotion
 
 ROOT = Path(__file__).parents[2]
@@ -230,6 +233,45 @@ def test_rank_metrics_validate_and_deduplicate_citations_before_dcg():
         _query_metrics(
             [("invented.pdf", 99)], {citation}, valid_citations={citation}
         )
+
+
+def test_semantic_benchmark_installs_cleanup_before_process_inspection(monkeypatch):
+    class Manager:
+        def __init__(self):
+            self.reset_called = False
+
+        def start(self):
+            return {"success": True, "identity": {"pid": 123}}
+
+        def reset(self):
+            self.reset_called = True
+            return {"success": True, "reset": {"absent": True}}
+
+    manager = Manager()
+    monkeypatch.setattr(soak_module, "_manager", lambda: manager)
+    monkeypatch.setattr(
+        soak_module.psutil,
+        "Process",
+        lambda _pid: (_ for _ in ()).throw(RuntimeError("injected RSS failure")),
+    )
+
+    with pytest.raises(RuntimeError, match="RSS failure"):
+        with soak_module._managed_worker("benchmark"):
+            pass
+
+    assert manager.reset_called is True
+
+
+def test_semantic_worker_inventory_matches_actual_module_command(monkeypatch):
+    processes = [
+        SimpleNamespace(info={"pid": 1, "cmdline": ["python", "-m", "comsol_mcp.knowledge.semantic_worker", "--serve"]}),
+        SimpleNamespace(info={"pid": 2, "cmdline": ["python", "-m", "src.knowledge.semantic_worker", "--serve"]}),
+    ]
+    monkeypatch.setattr(
+        containment_module.psutil, "process_iter", lambda _fields: processes
+    )
+
+    assert containment_module._semantic_worker_pids() == [1]
 
 
 def test_semantic_contract_imports_do_not_load_heavy_semantic_or_comsol_modules():

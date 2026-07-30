@@ -13,7 +13,7 @@ import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import closing
+from contextlib import closing, contextmanager
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
@@ -120,6 +120,20 @@ def _manager() -> SemanticWorkerManager:
         query_deadline=5.0,
         idle_ttl=600.0,
     )
+
+
+@contextmanager
+def _managed_worker(label: str):
+    manager = _manager()
+    lifecycle: dict[str, Any] = {}
+    try:
+        startup = manager.start()
+        if not startup.get("success"):
+            raise RuntimeError(f"{label} worker failed to start: {startup}")
+        process = psutil.Process(int(startup["identity"]["pid"]))
+        yield manager, process, lifecycle
+    finally:
+        lifecycle["reset"] = manager.reset()
 
 
 def _corpus_citations() -> set[tuple[str, int]]:
@@ -247,20 +261,15 @@ def _raw_request(manager: SemanticWorkerManager, request_id: str, query: str) ->
 
 
 def _soak(evaluation: Mapping[str, Any], index_path: Path) -> dict[str, Any]:
-    manager = _manager()
     before = index_file_snapshot(index_path)
     startup_started = time.perf_counter()
-    startup = manager.start()
-    cold = time.perf_counter() - startup_started
-    if not startup.get("success"):
-        raise RuntimeError(f"soak worker failed to start: {startup}")
-    process = psutil.Process(int(startup["identity"]["pid"]))
-    rss_start = process.memory_info().rss
-    latencies = []
-    sizes = []
-    errors = []
-    samples = []
-    try:
+    with _managed_worker("soak") as (manager, process, lifecycle):
+        cold = time.perf_counter() - startup_started
+        rss_start = process.memory_info().rss
+        latencies = []
+        sizes = []
+        errors = []
+        samples = []
         for number in range(500):
             item = evaluation["queries"][number % len(evaluation["queries"])]
             started = time.perf_counter()
@@ -292,8 +301,7 @@ def _soak(evaluation: Mapping[str, Any], index_path: Path) -> dict[str, Any]:
             burst_responses = list(pool.map(burst, range(12)))
         health = manager.health()
         rss_end = process.memory_info().rss
-    finally:
-        reset = manager.reset()
+    reset = lifecycle["reset"]
     after = index_file_snapshot(index_path)
     busy = sum(
         1 for response in burst_responses
@@ -358,19 +366,17 @@ def main() -> None:
         "citation_validity": lexical_full["summary"]["citation_validity"],
         "wall_seconds": time.perf_counter() - lexical_started,
     }
-    benchmark_manager = _manager()
-    benchmark_start = benchmark_manager.start()
-    if not benchmark_start.get("success"):
-        raise RuntimeError(f"benchmark worker failed to start: {benchmark_start}")
-    benchmark_process = psutil.Process(int(benchmark_start["identity"]["pid"]))
-    rss_before = benchmark_process.memory_info().rss
-    try:
+    with _managed_worker("benchmark") as (
+        benchmark_manager,
+        benchmark_process,
+        benchmark_lifecycle,
+    ):
+        rss_before = benchmark_process.memory_info().rss
         vector = _evaluate_mode(benchmark_manager, evaluation, "vector", corpus)
         hybrid = _evaluate_mode(benchmark_manager, evaluation, "hybrid", corpus)
         benchmark_health = benchmark_manager.health()
         rss_after = benchmark_process.memory_info().rss
-    finally:
-        benchmark_reset = benchmark_manager.reset()
+    benchmark_reset = benchmark_lifecycle["reset"]
     promotion = _promotion(lexical, hybrid)
     soak = _soak(evaluation, index_path)
     output = {

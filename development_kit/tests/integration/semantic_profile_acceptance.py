@@ -2,19 +2,18 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
 import json
 import os
-from pathlib import Path
 import sys
 import time
-from typing import Any
 import uuid
+from datetime import timedelta
+from pathlib import Path
+from typing import Any
 
 import anyio
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
-
 
 ROOT = Path(__file__).parents[3]
 PYTHON = Path(sys.executable)
@@ -89,16 +88,18 @@ async def _semantic_flow() -> dict[str, Any]:
     async with stdio_client(_server("semantic_docs")) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
-            solver_before = await _call(session, "solver_status", {})
-            cold = await _call(session, "semantic_status", {"warm": False})
-            warm = await _call(session, "semantic_status", {"warm": True})
-            search = await _call(session, "semantic_search", {
-                "query": "How can periodic boundary faces use identical discretization?",
-                "module": "Wave_Optics_Module",
-                "limit": 5,
-            })
-            capabilities = await _call(session, "capabilities", {})
-            reset = await _call(session, "semantic_worker_reset", {})
+            try:
+                solver_before = await _call(session, "solver_status", {})
+                cold = await _call(session, "semantic_status", {"warm": False})
+                warm = await _call(session, "semantic_status", {"warm": True})
+                search = await _call(session, "semantic_search", {
+                    "query": "How can periodic boundary faces use identical discretization?",
+                    "module": "Wave_Optics_Module",
+                    "limit": 5,
+                })
+                capabilities = await _call(session, "capabilities", {})
+            finally:
+                reset = await _call(session, "semantic_worker_reset", {})
             stopped = await _call(session, "semantic_status", {"warm": False})
             lexical = await _call(session, "manual_search", {
                 "query": "CopyFace source destination",

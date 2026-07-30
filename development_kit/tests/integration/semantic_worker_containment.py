@@ -4,19 +4,18 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
+import shutil
 import threading
 import time
 import uuid
+from pathlib import Path
 
 import psutil
-
 from src.jobs.manager import JobManager
 from src.knowledge.lexical_manual import run_bounded
 from src.knowledge.semantic_process import SemanticWorkerManager
 from src.tools.capabilities import get_capabilities
 from src.tools.ownership import SolverOwnership
-
 
 ROOT = Path("D:/comsol_runtime/semantic_soak")
 MODEL = "D:/comsol_semantic/models/all-MiniLM-L6-v2/1110a243fdf4706b3f48f1d95db1a4f5529b4d41"
@@ -39,8 +38,12 @@ def _semantic_worker_pids() -> list[int]:
     found = []
     for process in psutil.process_iter(["pid", "name", "cmdline"]):
         try:
-            command = " ".join(process.info.get("cmdline") or [])
-            if "src.knowledge.semantic_worker" in command:
+            command = process.info.get("cmdline") or []
+            if any(
+                command[index:index + 2]
+                == ["-m", "comsol_mcp.knowledge.semantic_worker"]
+                for index in range(max(0, len(command) - 1))
+            ):
                 found.append(int(process.info["pid"]))
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
             continue
@@ -96,76 +99,82 @@ def main() -> None:
         {"schema_version": "2", "job_type": "test_sequence"},
         {"schema_version": "2", "status": "completed", "worker_pid": None},
     )
-    hanging = _manager(fault="query_hang", deadline=30.0)
-    result: dict = {}
-    query_started = time.perf_counter()
-    thread = threading.Thread(
-        target=lambda: result.update(hanging.query("forced thirty second hang")),
-        daemon=True,
-    )
-    thread.start()
-    deadline = time.monotonic() + 15.0
-    while (hanging._process is None or hanging._port is None) and time.monotonic() < deadline:
-        time.sleep(0.05)
-    if hanging._process is None or hanging._port is None:
-        raise RuntimeError("hanging worker did not become ready")
-    hang_pid = hanging._process.pid
-    polls = []
-    for index in range(4):
-        polls.append({"poll": index + 1, **_poll_controls(jobs, job_id, ownership)})
-        if index < 3:
-            time.sleep(5.0)
-    thread.join(timeout=20.0)
-    hang_wall = time.perf_counter() - query_started
-    if thread.is_alive():
-        hanging.reset()
-        raise RuntimeError("30-second semantic hang did not terminate")
-    assert result["success"] is False
-    assert result["retried"] is False
-    assert result["cleanup"]["absent"] is True
-    assert not psutil.pid_exists(hang_pid)
+    try:
+        result: dict = {}
+        query_started = time.perf_counter()
+        with _manager(fault="query_hang", deadline=30.0) as hanging:
+            thread = threading.Thread(
+                target=lambda: result.update(hanging.query("forced thirty second hang")),
+                daemon=True,
+            )
+            try:
+                thread.start()
+                deadline = time.monotonic() + 15.0
+                while (
+                    hanging._process is None or hanging._port is None
+                ) and time.monotonic() < deadline:
+                    time.sleep(0.05)
+                if hanging._process is None or hanging._port is None:
+                    raise RuntimeError("hanging worker did not become ready")
+                hang_pid = hanging._process.pid
+                polls = []
+                for index in range(4):
+                    polls.append({"poll": index + 1, **_poll_controls(jobs, job_id, ownership)})
+                    if index < 3:
+                        time.sleep(5.0)
+            finally:
+                thread.join(timeout=35.0)
+            hang_wall = time.perf_counter() - query_started
+            if thread.is_alive():
+                raise RuntimeError("30-second semantic hang did not terminate")
+            assert result["success"] is False
+            assert result["retried"] is False
+            assert result["cleanup"]["absent"] is True
+            assert not psutil.pid_exists(hang_pid)
 
-    crashing = _manager(fault="crash_before_response", deadline=5.0)
-    crash_started = time.perf_counter()
-    crash = crashing.query("forced crash")
-    crash_wall = time.perf_counter() - crash_started
-    assert crash["success"] is False
-    assert crash["cleanup"]["absent"] is True
-    final_solver = ownership.status()
-    assert final_solver["lease"]["state"] == "absent"
-    assert final_solver["external_solver_processes"] == []
-    assert not _semantic_worker_pids()
-    output = {
-        "schema_version": "1",
-        "success": True,
-        "hang": {
-            "worker_pid": hang_pid,
-            "wall_seconds": hang_wall,
-            "result": result,
-            "control_polls": polls,
-        },
-        "crash": {"wall_seconds": crash_wall, "result": crash},
-        "final": {
-            "semantic_worker_pids": _semantic_worker_pids(),
-            "solver_lease": final_solver["lease"]["state"],
-            "external_solver_processes": final_solver["external_solver_processes"],
-            "collision": final_solver["collision"],
-        },
-    }
-    _atomic_write(ROOT / "containment.json", output)
-    print(json.dumps({
-        "success": True,
-        "hang_wall_seconds": hang_wall,
-        "crash_wall_seconds": crash_wall,
-        "poll_max_seconds": {
-            key: max(poll["timings"][key] for poll in polls)
-            for key in polls[0]["timings"]
-        },
-        "hang_cleanup_absent": result["cleanup"]["absent"],
-        "crash_cleanup_absent": crash["cleanup"]["absent"],
-        "final": output["final"],
-        "artifact": str(ROOT / "containment.json"),
-    }, indent=2))
+        with _manager(fault="crash_before_response", deadline=5.0) as crashing:
+            crash_started = time.perf_counter()
+            crash = crashing.query("forced crash")
+            crash_wall = time.perf_counter() - crash_started
+            assert crash["success"] is False
+            assert crash["cleanup"]["absent"] is True
+        final_solver = ownership.status()
+        assert final_solver["lease"]["state"] == "absent"
+        assert final_solver["external_solver_processes"] == []
+        assert not _semantic_worker_pids()
+        output = {
+            "schema_version": "1",
+            "success": True,
+            "hang": {
+                "worker_pid": hang_pid,
+                "wall_seconds": hang_wall,
+                "result": result,
+                "control_polls": polls,
+            },
+            "crash": {"wall_seconds": crash_wall, "result": crash},
+            "final": {
+                "semantic_worker_pids": _semantic_worker_pids(),
+                "solver_lease": final_solver["lease"]["state"],
+                "external_solver_processes": final_solver["external_solver_processes"],
+                "collision": final_solver["collision"],
+            },
+        }
+        _atomic_write(ROOT / "containment.json", output)
+        print(json.dumps({
+            "success": True,
+            "hang_wall_seconds": hang_wall,
+            "crash_wall_seconds": crash_wall,
+            "poll_max_seconds": {
+                key: max(poll["timings"][key] for poll in polls)
+                for key in polls[0]["timings"]
+            },
+            "hang_cleanup_absent": result["cleanup"]["absent"],
+            "crash_cleanup_absent": crash["cleanup"]["absent"],
+            "final": output["final"],
+            "artifact": str(ROOT / "containment.json"),
+        }, indent=2))
+    finally:
+        shutil.rmtree(runtime, ignore_errors=True)
 
 
 if __name__ == "__main__":
