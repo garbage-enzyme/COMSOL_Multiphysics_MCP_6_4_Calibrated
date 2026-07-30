@@ -23,7 +23,7 @@ from comsol_mcp.shared_session.lifecycle import SharedSessionManager
 
 
 SCHEMA_NAME = "comsol_mcp.shared_interactive_licensed_gate"
-SCHEMA_VERSION = "1.0.0"
+SCHEMA_VERSION = "1.1.0"
 MCP_PARAMETER = "mcp_shared_value"
 DESKTOP_PARAMETER = "desktop_shared_value"
 MCP_PARAMETER_VALUE = "17[mm]"
@@ -64,34 +64,92 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _git_head() -> str | None:
-    completed = subprocess.run(
-        ["git", "rev-parse", "HEAD"],
-        cwd=REPOSITORY_ROOT,
-        capture_output=True,
-        text=True,
-        timeout=10,
-        check=False,
-    )
-    return completed.stdout.strip() if completed.returncode == 0 else None
+def _git_head() -> dict[str, Any]:
+    try:
+        completed = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=REPOSITORY_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {
+            "success": False,
+            "commit": None,
+            "error_type": type(exc).__name__,
+            "returncode": None,
+        }
+    commit = completed.stdout.strip()
+    return {
+        "success": completed.returncode == 0 and bool(commit),
+        "commit": commit if completed.returncode == 0 and commit else None,
+        "error_type": None if completed.returncode == 0 and commit else "GitCommandFailed",
+        "returncode": completed.returncode,
+    }
+
+
+def _cleanup_shared_resources(
+    manager: Any,
+    *,
+    active_lock_sha256: str | None,
+    operation_claim: Any,
+    attached: bool,
+) -> dict[str, Any]:
+    steps = {}
+    results = {}
+
+    def run(name, operation, passed):
+        try:
+            value = operation()
+            step_passed = bool(passed(value))
+            detail = {"passed": step_passed}
+        except Exception as exc:
+            value = None
+            detail = {"passed": False, "error_type": type(exc).__name__}
+        steps[name] = detail
+        results[name] = value
+
+    if active_lock_sha256 is not None:
+        run(
+            "unlock",
+            lambda: manager.unlock_model(
+                expected_lock_sha256=active_lock_sha256,
+                reason="Licensed shared gate failure cleanup",
+            ),
+            lambda value: isinstance(value, dict) and value.get("success") is True,
+        )
+    if operation_claim is not None:
+        run(
+            "operation_release",
+            lambda: get_operation_arbiter().release(operation_claim),
+            lambda value: isinstance(value, dict) and value.get("verified") is True,
+        )
+    if attached:
+        run(
+            "detach",
+            manager.detach,
+            lambda value: isinstance(value, dict) and value.get("success") is True,
+        )
+    return {
+        "steps": steps,
+        "results": results,
+        "passed": all(step.get("passed") is True for step in steps.values()),
+    }
 
 
 def _spec(args: argparse.Namespace) -> dict[str, Any]:
-    if args.mode in {"readback", "saved", "saved_readback"} and not (
-        args.expected_desktop_value
-    ):
+    if args.mode in {"readback", "saved", "saved_readback"} and not (args.expected_desktop_value):
         raise ValueError(f"{args.mode} mode requires --expected-desktop-value")
     if args.mode == "prepare" and (
         args.expected_desktop_value is not None
         or args.expected_file_path is not None
         or args.immutable_source_path is not None
     ):
-        raise ValueError(
-            "prepare mode does not accept saved-model confirmation inputs"
-        )
+        raise ValueError("prepare mode does not accept saved-model confirmation inputs")
     if args.mode == "readback" and (
-        args.expected_file_path is not None
-        or args.immutable_source_path is not None
+        args.expected_file_path is not None or args.immutable_source_path is not None
     ):
         raise ValueError("readback mode does not accept saved-model paths")
     if args.mode in {"saved", "saved_readback"}:
@@ -99,18 +157,13 @@ def _spec(args: argparse.Namespace) -> dict[str, Any]:
             raise ValueError("saved mode requires --expected-file-path")
         if args.immutable_source_path is None:
             raise ValueError("saved mode requires --immutable-source-path")
-        if (
-            not args.expected_file_path.is_absolute()
-            or not str(args.expected_file_path).isascii()
-        ):
+        if not args.expected_file_path.is_absolute() or not str(args.expected_file_path).isascii():
             raise ValueError("saved working-model path must be absolute and ASCII")
         if (
             not args.immutable_source_path.is_absolute()
             or not str(args.immutable_source_path).isascii()
         ):
-            raise ValueError(
-                "immutable source must be a distinct absolute ASCII path"
-            )
+            raise ValueError("immutable source must be a distinct absolute ASCII path")
         working_path = args.expected_file_path.expanduser().resolve(strict=False)
         source_path = args.immutable_source_path.expanduser().resolve(strict=False)
         if source_path == working_path:
@@ -133,16 +186,8 @@ def _spec(args: argparse.Namespace) -> dict[str, Any]:
         "endpoint": {"host": args.host, "port": args.port},
         "selector": selector,
         "expected_desktop_value": args.expected_desktop_value,
-        "expected_file_path": (
-            None
-            if working_path is None
-            else str(working_path)
-        ),
-        "immutable_source_path": (
-            None
-            if source_path is None
-            else str(source_path)
-        ),
+        "expected_file_path": (None if working_path is None else str(working_path)),
+        "immutable_source_path": (None if source_path is None else str(source_path)),
         "mcp_parameter": {"name": MCP_PARAMETER, "value": MCP_PARAMETER_VALUE},
         "desktop_parameter": {
             "name": DESKTOP_PARAMETER,
@@ -162,21 +207,14 @@ def _spec(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def _exact_model(manager: SharedSessionManager, tag: str) -> Any:
-    matches = [
-        model
-        for model in list(manager._client.models())
-        if str(model.java.tag()) == tag
-    ]
+    matches = [model for model in list(manager._client.models()) if str(model.java.tag()) == tag]
     if len(matches) != 1:
         raise RuntimeError("locked model tag is no longer unique")
     return matches[0]
 
 
 def _parameter_expressions(model: Any) -> dict[str, str]:
-    return {
-        str(name): str(value)
-        for name, value in sorted(model.parameters().items())
-    }
+    return {str(name): str(value) for name, value in sorted(model.parameters().items())}
 
 
 def _prepare_capacitor(model: Any) -> dict[str, Any]:
@@ -208,9 +246,7 @@ def _prepare_capacitor(model: Any) -> dict[str, Any]:
 
     dimension = str(geometry.getSDim())
     electrostatics = component.physics().create("es", "Electrostatics", dimension)
-    conservation = electrostatics.feature().create(
-        "ccn1", "ChargeConservation", int(dimension)
-    )
+    conservation = electrostatics.feature().create("ccn1", "ChargeConservation", int(dimension))
     conservation.selection().set([1])
     conservation.set("materialType", "from_mat")
     material = component.material().create("mat1", "Common")
@@ -231,9 +267,7 @@ def _prepare_capacitor(model: Any) -> dict[str, Any]:
     study.run()
     solve_seconds = time.monotonic() - solve_started
 
-    measured = float(
-        model.evaluate(CAPACITANCE_EXPRESSION, CAPACITANCE_UNIT).reshape(-1)[0]
-    )
+    measured = float(model.evaluate(CAPACITANCE_EXPRESSION, CAPACITANCE_UNIT).reshape(-1)[0])
     theory = 8.8541878128e-12 * 2.1 * math.pow(0.01, 2) / 0.001 * 1e12
     relative_error = abs(measured - theory) / theory
     if not math.isfinite(measured) or relative_error > 1e-8:
@@ -277,9 +311,7 @@ def _readback(model: Any, expected_desktop_value: str) -> dict[str, Any]:
         raise RuntimeError("MCP-written parameter is not preserved")
     if parameters.get(DESKTOP_PARAMETER) != expected_desktop_value:
         raise RuntimeError("Desktop-edited parameter does not match the declared value")
-    measured = float(
-        model.evaluate(CAPACITANCE_EXPRESSION, CAPACITANCE_UNIT).reshape(-1)[0]
-    )
+    measured = float(model.evaluate(CAPACITANCE_EXPRESSION, CAPACITANCE_UNIT).reshape(-1)[0])
     if not math.isfinite(measured):
         raise RuntimeError("persisted controlled result is non-finite")
     return {
@@ -344,11 +376,13 @@ def _saved_model_readback(model: Any, expected_desktop_value: str) -> dict[str, 
 
 def _run(args: argparse.Namespace) -> dict[str, Any]:
     spec = _spec(args)
+    revision_probe = _git_head()
     result: dict[str, Any] = {
         "schema_name": SCHEMA_NAME,
         "schema_version": SCHEMA_VERSION,
         "success": False,
-        "source_revision": _git_head(),
+        "source_revision": revision_probe["commit"],
+        "source_revision_probe": revision_probe,
         "spec": spec,
         "started_at_epoch": time.time(),
     }
@@ -358,6 +392,8 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
     attached = False
     immutable_source = None
     try:
+        if revision_probe["success"] is not True:
+            raise RuntimeError("source revision probe failed")
         if args.mode in {"saved", "saved_readback"}:
             source_path = Path(spec["immutable_source_path"])
             if not source_path.is_file():
@@ -421,13 +457,9 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
         if args.mode == "prepare":
             result["phase"] = _prepare_capacitor(model)
         elif args.mode == "saved":
-            result["phase"] = _saved_model_edit(
-                model, args.expected_desktop_value
-            )
+            result["phase"] = _saved_model_edit(model, args.expected_desktop_value)
         elif args.mode == "saved_readback":
-            result["phase"] = _saved_model_readback(
-                model, args.expected_desktop_value
-            )
+            result["phase"] = _saved_model_readback(model, args.expected_desktop_value)
         else:
             result["phase"] = _readback(model, args.expected_desktop_value)
 
@@ -477,12 +509,8 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
             if not snapshot.get("success"):
                 raise RuntimeError("identity-preserving Save Copy failed")
             if immutable_source is not None:
-                source_sha256_after_snapshot = _sha256(
-                    Path(immutable_source["path"])
-                )
-                result["immutable_source_after_snapshot_sha256"] = (
-                    source_sha256_after_snapshot
-                )
+                source_sha256_after_snapshot = _sha256(Path(immutable_source["path"]))
+                result["immutable_source_after_snapshot_sha256"] = source_sha256_after_snapshot
                 if source_sha256_after_snapshot != immutable_source["sha256"]:
                     raise RuntimeError("saved source bytes changed during Save Copy")
         unlocked = manager.unlock_model(
@@ -506,27 +534,23 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
         attached = False
         if immutable_source is not None:
             source_sha256_after_detach = _sha256(Path(immutable_source["path"]))
-            result["immutable_source_after_detach_sha256"] = (
-                source_sha256_after_detach
-            )
+            result["immutable_source_after_detach_sha256"] = source_sha256_after_detach
             if source_sha256_after_detach != immutable_source["sha256"]:
                 raise RuntimeError("saved source bytes changed during detach")
         result["success"] = True
     except Exception as exc:
         result["error"] = f"{type(exc).__name__}: {exc}"
     finally:
-        if active_lock_sha256 is not None:
-            result["cleanup_unlock"] = manager.unlock_model(
-                expected_lock_sha256=active_lock_sha256,
-                reason="Licensed shared gate failure cleanup",
-            )
-            active_lock_sha256 = None
-        if operation_claim is not None:
-            result["cleanup_operation_release"] = get_operation_arbiter().release(
-                operation_claim
-            )
-        if attached:
-            result["cleanup_detach"] = manager.detach()
+        cleanup = _cleanup_shared_resources(
+            manager,
+            active_lock_sha256=active_lock_sha256,
+            operation_claim=operation_claim,
+            attached=attached,
+        )
+        result["cleanup"] = cleanup
+        for name, value in cleanup["results"].items():
+            result[f"cleanup_{name}"] = value
+        result["success"] = result.get("success") is True and cleanup["passed"] is True
         result["finished_at_epoch"] = time.time()
         result["duration_seconds"] = round(
             result["finished_at_epoch"] - result["started_at_epoch"], 6
@@ -548,12 +572,18 @@ def main() -> int:
     result = _run(args)
     args.receipt.parent.mkdir(parents=True, exist_ok=True)
     atomic_write_json(args.receipt, result)
-    print(json.dumps({
-        "success": result["success"],
-        "receipt": str(args.receipt),
-        "receipt_sha256": _sha256(args.receipt),
-        "error": result.get("error"),
-    }, ensure_ascii=False, indent=2))
+    print(
+        json.dumps(
+            {
+                "success": result["success"],
+                "receipt": str(args.receipt),
+                "receipt_sha256": _sha256(args.receipt),
+                "error": result.get("error"),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
     return 0 if result["success"] else 1
 
 
