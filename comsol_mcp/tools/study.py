@@ -2,10 +2,11 @@
 
 import math
 from typing import Optional, Sequence
+
 from mcp.server.fastmcp import FastMCP
 
-from .session import session_manager
 from ..async_handler.solver import async_solver
+from .session import session_manager
 
 
 def create_study(
@@ -95,12 +96,19 @@ def _resolve_study_tag(model, study_name: Optional[str]) -> Optional[str]:
     tags = [str(tag) for tag in study_list.tags()]
     if study_name in tags:
         return study_name
+    matches = []
     for tag in tags:
         try:
-            if study_list.get(tag).label() == study_name:
-                return tag
+            if str(study_list.get(tag).label()) == study_name:
+                matches.append(tag)
         except Exception:
             pass
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        raise ValueError(
+            f"Study label {study_name!r} is ambiguous across tags: {matches}"
+        )
     raise ValueError(
         f"Study '{study_name}' not found. Available tags: {tags}"
     )

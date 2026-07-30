@@ -1,7 +1,6 @@
 """Unit tests for study helpers without a COMSOL client."""
 
 import pytest
-
 from src.tools.study import _resolve_study_tag, create_study, list_studies
 
 
@@ -126,6 +125,16 @@ def test_study_helpers_normalize_java_string_tags():
     assert result["studies"][0]["tag"] == "std1"
     assert result["studies"][0]["steps"][0]["tag"] == "step1"
     assert _resolve_study_tag(model, "研究 1") == "std1"
+
+
+def test_resolve_study_tag_normalizes_java_labels_and_rejects_duplicates():
+    first = FakeEntity(JavaStringLike("Shared"))
+    model = FakeModel({"std1": first})
+    assert _resolve_study_tag(model, "Shared") == "std1"
+
+    model.java.studies["std2"] = FakeEntity(JavaStringLike("Shared"))
+    with pytest.raises(ValueError, match="ambiguous"):
+        _resolve_study_tag(model, "Shared")
 
 
 class MutableStudyStep:
