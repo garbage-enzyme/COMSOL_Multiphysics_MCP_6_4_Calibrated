@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
+import sqlite3
 import subprocess
 import sys
 import uuid
@@ -46,6 +48,23 @@ SHA_C = "c" * 64
 
 def _absent_ownership():
     return {"lease": {"state": "absent"}, "external_solver_processes": [], "collision": False}
+
+
+def test_semantic_benchmark_citations_and_digest_share_one_sqlite_snapshot(tmp_path):
+    source = tmp_path / "source.sqlite3"
+    snapshot = tmp_path / "snapshot.sqlite3"
+    with sqlite3.connect(source) as connection:
+        connection.execute("CREATE TABLE pages (source TEXT NOT NULL, page INTEGER NOT NULL)")
+        connection.execute("INSERT INTO pages VALUES ('manual.pdf', 7)")
+
+    receipt = soak_module._sqlite_snapshot(source, snapshot)
+    with sqlite3.connect(source) as connection:
+        connection.execute("DELETE FROM pages")
+        connection.execute("INSERT INTO pages VALUES ('replacement.pdf', 9)")
+
+    assert soak_module._corpus_citations(snapshot) == {("manual.pdf", 7)}
+    assert receipt["byte_count"] == snapshot.stat().st_size
+    assert receipt["sha256"] == hashlib.sha256(snapshot.read_bytes()).hexdigest()
 
 
 def test_frozen_evaluation_has_sixty_reviewed_queries_and_declared_slices():
@@ -252,7 +271,7 @@ def test_semantic_benchmark_installs_cleanup_before_process_inspection(monkeypat
             return {"success": True, "reset": {"absent": True}}
 
     manager = Manager()
-    monkeypatch.setattr(soak_module, "_manager", lambda: manager)
+    monkeypatch.setattr(soak_module, "_manager", lambda _lexical_path: manager)
     monkeypatch.setattr(
         soak_module.psutil,
         "Process",
@@ -440,9 +459,7 @@ def test_retrieval_acceptance_rejects_unsuccessful_worker_reset(tmp_path):
 
         def query(self, query, **_kwargs):
             self.query_count += 1
-            expected = next(
-                item[3] for item in retrieval_module.QUERIES if item[1] == query
-            )
+            expected = next(item[3] for item in retrieval_module.QUERIES if item[1] == query)
             return {
                 "success": True,
                 "count": 1,

@@ -17,6 +17,7 @@ from src.durable import (
     read_complete_jsonl,
     read_file_bytes_bounded,
     sha256_file_bounded,
+    snapshot_file_bounded,
 )
 
 import comsol_mcp.durable.io as durable_io
@@ -58,6 +59,57 @@ def test_bounded_file_hash_reports_exact_bytes_and_refuses_overflow(tmp_path):
     }
     with pytest.raises(ValueError, match="hashing limit"):
         sha256_file_bounded(path, max_bytes=16)
+
+
+def test_bounded_snapshot_binds_prefix_size_and_hash_to_one_descriptor(tmp_path):
+    path = tmp_path / "artifact.bin"
+    payload = b"prefix-and-complete-payload"
+    path.write_bytes(payload)
+
+    receipt = snapshot_file_bounded(path, max_bytes=len(payload), prefix_bytes=6)
+
+    assert receipt == {
+        "sha256": hashlib.sha256(payload).hexdigest(),
+        "byte_count": len(payload),
+        "prefix": b"prefix",
+    }
+    with pytest.raises(ValueError, match="snapshot limit"):
+        snapshot_file_bounded(path, max_bytes=len(payload) - 1)
+
+
+@pytest.mark.parametrize(
+    ("options", "match"),
+    [
+        ({"max_bytes": True}, "max_bytes"),
+        ({"max_bytes": 64, "prefix_bytes": -1}, "prefix_bytes"),
+        ({"max_bytes": 64, "chunk_bytes": 0}, "chunk_bytes"),
+    ],
+)
+def test_bounded_snapshot_rejects_invalid_limits(tmp_path, options, match):
+    path = tmp_path / "artifact.bin"
+    path.write_bytes(b"artifact")
+
+    with pytest.raises(ValueError, match=match):
+        snapshot_file_bounded(path, **options)
+
+
+def test_bounded_snapshot_detects_growth_after_open(tmp_path, monkeypatch):
+    path = tmp_path / "growing.bin"
+    path.write_bytes(b"ab")
+    opened = os.stat(path)
+    monkeypatch.setattr(
+        durable_io.os,
+        "fstat",
+        lambda _descriptor: SimpleNamespace(
+            st_mode=opened.st_mode,
+            st_dev=opened.st_dev,
+            st_ino=opened.st_ino,
+            st_size=1,
+        ),
+    )
+
+    with pytest.raises(ValueError, match="grew"):
+        snapshot_file_bounded(path, max_bytes=1)
 
 
 def test_bounded_reader_refuses_oversized_and_nonregular_inputs(tmp_path):

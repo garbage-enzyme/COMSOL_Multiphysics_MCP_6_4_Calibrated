@@ -63,6 +63,44 @@ def read_file_bytes_bounded(path: str | Path, *, max_bytes: int) -> bytes:
         os.close(descriptor)
 
 
+def snapshot_file_bounded(
+    path: str | Path,
+    *,
+    max_bytes: int,
+    prefix_bytes: int = 0,
+    chunk_bytes: int = 1024 * 1024,
+) -> dict[str, Any]:
+    """Hash and size one regular file from one descriptor, retaining a prefix."""
+    if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or max_bytes < 0:
+        raise ValueError("max_bytes must be a non-negative integer")
+    if isinstance(prefix_bytes, bool) or not isinstance(prefix_bytes, int) or prefix_bytes < 0:
+        raise ValueError("prefix_bytes must be a non-negative integer")
+    if isinstance(chunk_bytes, bool) or not isinstance(chunk_bytes, int) or chunk_bytes < 1:
+        raise ValueError("chunk_bytes must be a positive integer")
+    descriptor, opened = _open_regular_file_descriptor(path)
+    digest = hashlib.sha256()
+    observed = 0
+    prefix = bytearray()
+    try:
+        if opened.st_size > max_bytes:
+            raise ValueError("file exceeds the declared snapshot limit")
+        with os.fdopen(descriptor, "rb", closefd=False) as handle:
+            while block := handle.read(min(chunk_bytes, max_bytes - observed + 1)):
+                observed += len(block)
+                if observed > max_bytes:
+                    raise ValueError("file grew beyond the declared snapshot limit")
+                digest.update(block)
+                if len(prefix) < prefix_bytes:
+                    prefix.extend(block[: prefix_bytes - len(prefix)])
+    finally:
+        os.close(descriptor)
+    return {
+        "sha256": digest.hexdigest(),
+        "byte_count": observed,
+        "prefix": bytes(prefix),
+    }
+
+
 def _notify(hook: WriteStageHook | None, stage: str, path: Path) -> None:
     if hook is not None:
         hook(stage, path)

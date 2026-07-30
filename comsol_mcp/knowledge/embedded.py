@@ -2,9 +2,13 @@
 
 from pathlib import Path
 from typing import Optional
+
 from mcp.server.fastmcp import FastMCP
 
+from comsol_mcp.durable import read_file_bytes_bounded
+
 KNOWLEDGE_DIR = Path(__file__).parent / "prompts"
+MAX_EMBEDDED_KNOWLEDGE_BYTES = 1024 * 1024
 
 KNOWLEDGE_FILES = {
     "mph_api": {
@@ -227,12 +231,17 @@ def _load_knowledge_file(name: str) -> str:
     """Load content from a knowledge file."""
     if name not in KNOWLEDGE_FILES:
         return ""
-    
+
     file_path = KNOWLEDGE_DIR / KNOWLEDGE_FILES[name]["file"]
-    if not file_path.exists():
+    try:
+        payload = read_file_bytes_bounded(
+            file_path,
+            max_bytes=MAX_EMBEDDED_KNOWLEDGE_BYTES,
+        )
+    except FileNotFoundError:
         return ""
-    
-    return file_path.read_text(encoding="utf-8")
+
+    return payload.decode("utf-8")
 
 
 # Module-level functions for testing and direct use

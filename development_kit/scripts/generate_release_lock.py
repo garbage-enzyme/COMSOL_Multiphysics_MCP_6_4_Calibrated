@@ -5,12 +5,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import os
-from pathlib import Path
 import subprocess
 import tempfile
+from pathlib import Path
 
 from packaging.utils import canonicalize_name, parse_wheel_filename
-
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -61,6 +60,64 @@ def _wheel_hashes(download_dir: Path) -> dict[tuple[str, str], list[str]]:
     return result
 
 
+def _downloaded_root_wheel(source: Path, download_dir: Path) -> Path:
+    source_name, source_version, _build, _tags = parse_wheel_filename(source.name)
+    matches = []
+    for candidate in sorted(download_dir.glob("*.whl")):
+        name, version, _candidate_build, _candidate_tags = parse_wheel_filename(candidate.name)
+        if canonicalize_name(name) == canonicalize_name(source_name) and version == source_version:
+            matches.append(candidate)
+    if len(matches) != 1:
+        raise RuntimeError("downloaded wheelhouse does not contain one exact root wheel")
+    return matches[0]
+
+
+def _resolve_and_install_wheelhouse(
+    target_python: Path,
+    wheel: Path,
+    temporary: Path,
+) -> tuple[Path, Path, str]:
+    """Resolve once, then install the exact wheel bytes whose hashes are locked."""
+    venv_dir = temporary / "venv"
+    download_dir = temporary / "downloads"
+    download_dir.mkdir()
+    _run(
+        [
+            str(target_python),
+            "-m",
+            "pip",
+            "download",
+            "--only-binary=:all:",
+            "--dest",
+            str(download_dir),
+            str(wheel),
+        ],
+        cwd=temporary,
+    )
+    downloaded_root = _downloaded_root_wheel(wheel, download_dir)
+    _run([str(target_python), "-m", "venv", str(venv_dir)])
+    python = _venv_python(venv_dir)
+    _run(
+        [
+            str(python),
+            "-m",
+            "pip",
+            "install",
+            "--no-index",
+            "--find-links",
+            str(download_dir),
+            str(downloaded_root),
+        ],
+        cwd=temporary,
+    )
+    freeze = _run(
+        [str(python), "-m", "pip", "freeze", "--all"],
+        cwd=temporary,
+        capture=True,
+    )
+    return python, download_dir, freeze
+
+
 def _render_lock(*, lane: str, python_version: str, pins: list[str], hashes: dict) -> str:
     lines = [
         "# Complete hash-pinned runtime dependency lock for a Windows release lane.",
@@ -105,34 +162,12 @@ def main() -> int:
 
     with tempfile.TemporaryDirectory(prefix="comsol-lock-") as temporary_text:
         temporary = Path(temporary_text)
-        venv_dir = temporary / "venv"
-        download_dir = temporary / "downloads"
-        pins_file = temporary / "pins.txt"
-        download_dir.mkdir()
-        _run([str(target_python), "-m", "venv", str(venv_dir)])
-        python = _venv_python(venv_dir)
-        _run([str(python), "-m", "pip", "install", str(wheel)], cwd=temporary)
-        freeze = _run(
-            [str(python), "-m", "pip", "freeze", "--all"],
-            cwd=temporary,
-            capture=True,
+        python, download_dir, freeze = _resolve_and_install_wheelhouse(
+            target_python,
+            wheel,
+            temporary,
         )
         pins = _runtime_pins(freeze)
-        pins_file.write_text("\n".join(pins) + "\n", encoding="utf-8")
-        _run(
-            [
-                str(python),
-                "-m",
-                "pip",
-                "download",
-                "--only-binary=:all:",
-                "--dest",
-                str(download_dir),
-                "-r",
-                str(pins_file),
-            ],
-            cwd=temporary,
-        )
         version_text = _run(
             [str(python), "-c", "import platform; print(platform.python_version())"],
             cwd=temporary,

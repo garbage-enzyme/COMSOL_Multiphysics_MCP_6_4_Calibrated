@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
-import hashlib
 import math
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, Mapping
+
+from comsol_mcp.durable import snapshot_file_bounded
 
 from .contracts import (
     build_physical_evidence,
@@ -132,9 +133,7 @@ def evaluate_reference_power_results(
     reference_checks = {
         "audit_complete": reference_result.get("audit_status") == "measurement_complete",
         "policy_pass": reference_result.get("assessment", {}).get("overall") == "pass",
-        "reflection": _at_most(
-            reference.get("R"), acceptance["reference_air"]["reflection_max"]
-        ),
+        "reflection": _at_most(reference.get("R"), acceptance["reference_air"]["reflection_max"]),
         "r_plus_t_residual": _at_most(
             reference.get("R_plus_T_residual_abs"),
             acceptance["reference_air"]["r_plus_t_residual_max"],
@@ -160,7 +159,9 @@ def evaluate_reference_power_results(
     }
     negative_checks = {
         "reversed_sign_rejected": negative["reversed_sign"]["passed_rejection_gate"],
-        "internal_substitution_rejected": negative["internal_consistency_substitution"]["passed_rejection_gate"],
+        "internal_substitution_rejected": negative["internal_consistency_substitution"][
+            "passed_rejection_gate"
+        ],
     }
     checks = {
         "reference_air": reference_checks,
@@ -192,17 +193,30 @@ def inventory_reference_power_artifacts(root: Path, limits: Mapping[str, Any]) -
     files = sorted(path for path in resolved.rglob("*") if path.is_file())
     if len(files) > int(limits["max_artifact_files"]):
         raise ValueError("reference-power artifact file count exceeds the contract")
-    total = sum(path.stat().st_size for path in files)
-    if total > int(limits["max_artifact_bytes"]):
-        raise ValueError("reference-power artifact bytes exceed the contract")
+    maximum_bytes = int(limits["max_artifact_bytes"])
+    total = 0
     entries = []
     for path in files:
-        relative = path.resolve().relative_to(resolved).as_posix()
+        current = path.resolve(strict=True)
+        try:
+            relative = current.relative_to(resolved).as_posix()
+        except ValueError as exc:
+            raise ValueError("reference-power artifact escapes its root") from exc
+        try:
+            snapshot = snapshot_file_bounded(
+                current,
+                max_bytes=maximum_bytes - total,
+            )
+        except ValueError as exc:
+            if "snapshot limit" in str(exc):
+                raise ValueError("reference-power artifact bytes exceed the contract") from exc
+            raise
+        total += int(snapshot["byte_count"])
         entries.append(
             {
                 "relative_path": relative,
-                "bytes": path.stat().st_size,
-                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                "bytes": snapshot["byte_count"],
+                "sha256": snapshot["sha256"],
             }
         )
     return {"file_count": len(entries), "total_bytes": total, "files": entries}

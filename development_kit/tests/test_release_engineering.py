@@ -19,6 +19,7 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
+from development_kit.scripts import generate_release_lock as lock_generator
 from development_kit.scripts import python_compatibility_licensed_gate as compatibility_gate
 from development_kit.scripts.generate_release_lock import _render_lock
 from development_kit.scripts.planning_code_gate import (
@@ -752,6 +753,40 @@ def test_release_dependency_lock_is_complete_and_matches_current_lane(tmp_path):
     assert len(requirement_lines) >= 40
     assert all(re.fullmatch(r"[a-z0-9-]+==[^ ]+ \\", line) for line in requirement_lines)
     assert lock_text.count("--hash=sha256:") >= len(requirement_lines)
+
+
+def test_release_lock_installs_from_the_exact_downloaded_wheelhouse(tmp_path, monkeypatch):
+    source = tmp_path / "comsol_mcp-0.2.0-py3-none-any.whl"
+    source.write_bytes(b"root-wheel")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    commands = []
+
+    def fake_run(command, *, cwd=lock_generator.ROOT, capture=False):
+        commands.append(list(command))
+        if "download" in command:
+            destination = Path(command[command.index("--dest") + 1])
+            (destination / source.name).write_bytes(source.read_bytes())
+            (destination / "example-1.0-py3-none-any.whl").write_bytes(b"dependency-wheel")
+        if "freeze" in command:
+            return "comsol-mcp==0.2.0\nexample==1.0\n"
+        return ""
+
+    monkeypatch.setattr(lock_generator, "_run", fake_run)
+
+    _python, download_dir, freeze = lock_generator._resolve_and_install_wheelhouse(
+        Path("C:/Python314/python.exe"), source, workspace
+    )
+
+    download_index = next(index for index, command in enumerate(commands) if "download" in command)
+    install_index = next(index for index, command in enumerate(commands) if "install" in command)
+    install = commands[install_index]
+    assert download_index < install_index
+    assert "--no-index" in install
+    assert install[install.index("--find-links") + 1] == str(download_dir)
+    assert Path(install[-1]).parent == download_dir
+    assert Path(install[-1]).read_bytes() == source.read_bytes()
+    assert freeze == "comsol-mcp==0.2.0\nexample==1.0\n"
 
 
 def test_minimum_supported_lane_matches_reviewed_manifest_and_package_ranges():

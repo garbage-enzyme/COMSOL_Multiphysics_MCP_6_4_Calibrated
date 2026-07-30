@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 from mcp.server.fastmcp import FastMCP
+from src.knowledge import embedded as embedded_module
 from src.knowledge.embedded import register_knowledge_tools
 from src.knowledge.lexical_manual import register_lexical_manual_tools
 from src.server import create_server
@@ -170,6 +171,19 @@ def test_unknown_tool_metadata_fails_closed():
         assert "No canonical metadata" in str(exc)
     else:
         raise AssertionError("unknown tools must not receive implicit metadata")
+
+
+def test_embedded_knowledge_uses_one_bounded_regular_file_read(tmp_path, monkeypatch):
+    prompt = tmp_path / "mph_api.md"
+    prompt.write_text("bounded guidance", encoding="utf-8")
+    monkeypatch.setattr(embedded_module, "KNOWLEDGE_DIR", tmp_path)
+    monkeypatch.setattr(
+        Path,
+        "exists",
+        lambda _path: pytest.fail("embedded knowledge must not pre-check existence"),
+    )
+
+    assert embedded_module._load_knowledge_file("mph_api") == "bounded guidance"
 
 
 def test_metadata_registrars_match_actual_registration():

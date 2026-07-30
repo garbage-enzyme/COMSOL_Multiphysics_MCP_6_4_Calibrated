@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from copy import deepcopy
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -14,8 +15,8 @@ from src.evidence.field_manifest import validate_field_evidence_manifest
 from development_kit.tests.test_field_bundle import _request
 
 
-def _inputs(tmp_path, *, missing: bool = False):
-    request = normalize_field_evidence_request(_request(paired=False, png=False))
+def _inputs(tmp_path, *, missing: bool = False, png: bool = False):
+    request = normalize_field_evidence_request(_request(paired=False, png=png))
     rows, columns = request["grid"]["shape"]
     x = np.linspace(-0.9, 0.9, columns)
     y = np.linspace(-1.4, 1.4, rows)
@@ -65,7 +66,39 @@ def test_writer_creates_compressed_arrays_and_hash_bound_manifest(tmp_path):
         }
         assert archive["quantity_electric_norm"].shape == tuple(request["grid"]["shape"])
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    array_bytes = array_path.read_bytes()
+    assert manifest["artifacts"]["array"] == result["array_artifact"]
+    assert manifest["artifacts"]["array"]["sha256"] == hashlib.sha256(array_bytes).hexdigest()
+    assert manifest["artifacts"]["array"]["byte_count"] == len(array_bytes)
     assert validate_field_evidence_manifest(manifest, request=request) == manifest
+
+
+def test_png_signature_size_and_hash_come_from_one_bounded_snapshot(tmp_path, monkeypatch):
+    _, kwargs = _inputs(tmp_path, png=True)
+    png_path = tmp_path / "render.png"
+    png_bytes = b"\x89PNG\r\n\x1a\ncomplete-image"
+    png_path.write_bytes(png_bytes)
+    kwargs["png_path"] = png_path
+    real_snapshot = field_artifacts_module.snapshot_file_bounded
+    calls = []
+
+    def observed_snapshot(path, **options):
+        calls.append((Path(path), options))
+        return real_snapshot(path, **options)
+
+    monkeypatch.setattr(
+        field_artifacts_module,
+        "snapshot_file_bounded",
+        observed_snapshot,
+    )
+
+    result = write_field_evidence_artifacts(**kwargs)
+
+    png_calls = [item for item in calls if item[0] == png_path]
+    assert len(png_calls) == 1
+    assert png_calls[0][1]["prefix_bytes"] == 8
+    assert result["png_artifact"]["byte_count"] == len(png_bytes)
+    assert result["png_artifact"]["sha256"] == hashlib.sha256(png_bytes).hexdigest()
 
 
 def test_writer_preserves_shared_missing_mask_as_partial_evidence(tmp_path):

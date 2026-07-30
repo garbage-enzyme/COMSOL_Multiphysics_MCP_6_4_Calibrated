@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import math
 import os
 import uuid
@@ -12,6 +11,7 @@ from typing import Any, Mapping
 from comsol_mcp.durable.io import (
     atomic_write_json_exclusive,
     publish_file_exclusive,
+    snapshot_file_bounded,
     unlink_if_identity,
 )
 
@@ -19,14 +19,6 @@ from .field_bundle import validate_field_evidence_request
 from .field_manifest import build_field_evidence_manifest
 
 _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
-
-
-def _sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for block in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
 
 
 def _resolve_root(value: object) -> Path:
@@ -45,21 +37,29 @@ def _descriptor(
     root: Path,
     artifact_id: str,
     media_type: str,
+    max_bytes: int,
+    required_prefix: bytes | None = None,
 ) -> dict[str, Any]:
-    resolved = path.resolve()
+    resolved = path.resolve(strict=True)
     try:
         relative = resolved.relative_to(root).as_posix()
     except ValueError as exc:
         raise ValueError("artifact path escapes artifact_root") from exc
-    size = resolved.stat().st_size
-    if size <= 0:
+    snapshot = snapshot_file_bounded(
+        resolved,
+        max_bytes=max_bytes,
+        prefix_bytes=len(required_prefix) if required_prefix is not None else 0,
+    )
+    if snapshot["byte_count"] <= 0:
         raise ValueError("field artifact must not be empty")
+    if required_prefix is not None and snapshot["prefix"] != required_prefix:
+        raise ValueError("png_path does not contain a PNG signature")
     return {
         "artifact_id": artifact_id,
         "relative_path": relative,
         "media_type": media_type,
-        "sha256": _sha256_file(resolved),
-        "byte_count": size,
+        "sha256": snapshot["sha256"],
+        "byte_count": snapshot["byte_count"],
     }
 
 
@@ -68,6 +68,7 @@ def _png_descriptor(
     *,
     root: Path,
     artifact_id: str | None,
+    max_bytes: int,
 ) -> dict[str, Any] | None:
     if artifact_id is None:
         if value is not None:
@@ -76,16 +77,21 @@ def _png_descriptor(
     if not isinstance(value, (str, os.PathLike)):
         raise ValueError("png_path is required when PNG rendering was requested")
     path = Path(value).expanduser().resolve()
-    if not path.is_file():
-        raise ValueError("png_path must name an existing PNG file")
     try:
         path.relative_to(root)
     except ValueError as exc:
         raise ValueError("png_path must remain inside artifact_root") from exc
-    with path.open("rb") as handle:
-        if handle.read(len(_PNG_SIGNATURE)) != _PNG_SIGNATURE:
-            raise ValueError("png_path does not contain a PNG signature")
-    return _descriptor(path, root=root, artifact_id=artifact_id, media_type="image/png")
+    try:
+        return _descriptor(
+            path,
+            root=root,
+            artifact_id=artifact_id,
+            media_type="image/png",
+            max_bytes=max_bytes,
+            required_prefix=_PNG_SIGNATURE,
+        )
+    except FileNotFoundError as exc:
+        raise ValueError("png_path must name an existing PNG file") from exc
 
 
 def write_field_evidence_artifacts(
@@ -227,11 +233,13 @@ def write_field_evidence_artifacts(
             root=root,
             artifact_id=view["outputs"]["array_artifact_id"],
             media_type="application/x-npz",
+            max_bytes=request_value["limits"]["max_artifact_bytes"],
         )
         png_descriptor = _png_descriptor(
             png_path,
             root=root,
             artifact_id=view["outputs"]["png_artifact_id"],
+            max_bytes=request_value["limits"]["max_artifact_bytes"],
         )
         manifest = build_field_evidence_manifest(
             request=request_value,
@@ -253,6 +261,7 @@ def write_field_evidence_artifacts(
             root=root,
             artifact_id=view["outputs"]["manifest_artifact_id"],
             media_type="application/json",
+            max_bytes=request_value["limits"]["max_artifact_bytes"],
         )
         total_bytes = (
             array_descriptor["byte_count"]

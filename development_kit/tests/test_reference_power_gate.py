@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -314,3 +315,28 @@ def test_artifact_inventory_is_relative_hashed_and_bounded(tmp_path):
     byte_limited = {**CONTRACT["limits"], "max_artifact_bytes": 2}
     with pytest.raises(ValueError, match="artifact bytes"):
         inventory_reference_power_artifacts(tmp_path, byte_limited)
+
+
+def test_artifact_inventory_size_and_hash_share_one_file_snapshot(tmp_path, monkeypatch):
+    path = tmp_path / "artifact.json"
+    original = b'{"state":"original"}\n'
+    path.write_bytes(original)
+    real_snapshot = gate_module.snapshot_file_bounded
+
+    def snapshot_then_replace(candidate, **kwargs):
+        snapshot = real_snapshot(candidate, **kwargs)
+        Path(candidate).write_bytes(b'{"state":"replacement-with-other-size"}\n')
+        return snapshot
+
+    monkeypatch.setattr(gate_module, "snapshot_file_bounded", snapshot_then_replace)
+
+    result = inventory_reference_power_artifacts(tmp_path, CONTRACT["limits"])
+
+    assert result["total_bytes"] == len(original)
+    assert result["files"] == [
+        {
+            "relative_path": "artifact.json",
+            "bytes": len(original),
+            "sha256": hashlib.sha256(original).hexdigest(),
+        }
+    ]

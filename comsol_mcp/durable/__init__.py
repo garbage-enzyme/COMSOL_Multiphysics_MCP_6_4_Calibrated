@@ -16,6 +16,7 @@ from .io import (
     read_complete_jsonl,
     read_file_bytes_bounded,
     sha256_file_bounded,
+    snapshot_file_bounded,
 )
 
 __all__ = [
@@ -31,5 +32,6 @@ __all__ = [
     "read_complete_jsonl",
     "read_file_bytes_bounded",
     "sha256_file_bounded",
+    "snapshot_file_bounded",
     "validate_finite_json",
 ]

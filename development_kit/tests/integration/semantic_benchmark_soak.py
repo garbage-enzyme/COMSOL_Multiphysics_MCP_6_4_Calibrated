@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 import psutil
+from src.durable.io import snapshot_file_bounded
 from src.jobs.store import JobLock
 from src.knowledge.semantic_contracts import (
     SEMANTIC_PROMOTION_GATE,
@@ -36,6 +37,7 @@ DEPLOYMENT = Path("D:/comsol_semantic")
 LEXICAL = Path("D:/comsol_docs_fts/manuals.sqlite3")
 MODEL = DEPLOYMENT / "models" / "all-MiniLM-L6-v2" / "1110a243fdf4706b3f48f1d95db1a4f5529b4d41"
 RUN_LOCK = Path("D:/comsol_runtime/semantic_soak/acceptance.lock")
+MAX_LEXICAL_SNAPSHOT_BYTES = 2 * 1024 * 1024 * 1024
 
 
 def _percentile(values: list[float], fraction: float) -> float:
@@ -112,11 +114,11 @@ def _summaries(rows: list[Mapping[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _manager() -> SemanticWorkerManager:
+def _manager(lexical_path: Path = LEXICAL) -> SemanticWorkerManager:
     return SemanticWorkerManager(
         backend="hybrid",
         deployment_root=str(DEPLOYMENT),
-        lexical_index=str(LEXICAL),
+        lexical_index=str(lexical_path),
         model_path=str(MODEL),
         startup_deadline=20.0,
         query_deadline=5.0,
@@ -125,8 +127,8 @@ def _manager() -> SemanticWorkerManager:
 
 
 @contextmanager
-def _managed_worker(label: str):
-    manager = _manager()
+def _managed_worker(label: str, lexical_path: Path = LEXICAL):
+    manager = _manager(lexical_path)
     lifecycle: dict[str, Any] = {}
     try:
         startup = manager.start()
@@ -138,9 +140,21 @@ def _managed_worker(label: str):
         lifecycle["reset"] = manager.reset()
 
 
-def _corpus_citations() -> set[tuple[str, int]]:
+def _sqlite_snapshot(source: Path, destination: Path) -> dict[str, Any]:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    source_uri = source.resolve().as_uri() + "?mode=ro"
+    with closing(sqlite3.connect(source_uri, uri=True)) as source_connection:
+        with closing(sqlite3.connect(destination)) as destination_connection:
+            source_connection.backup(destination_connection)
+    return snapshot_file_bounded(
+        destination,
+        max_bytes=MAX_LEXICAL_SNAPSHOT_BYTES,
+    )
+
+
+def _corpus_citations(lexical_path: Path = LEXICAL) -> set[tuple[str, int]]:
     with closing(
-        sqlite3.connect(LEXICAL.resolve().as_uri() + "?mode=ro", uri=True)
+        sqlite3.connect(lexical_path.resolve().as_uri() + "?mode=ro", uri=True)
     ) as connection:
         return {(str(source), int(page)) for source, page in connection.execute("SELECT source, page FROM pages")}
 
@@ -278,10 +292,14 @@ def _classify_burst(responses: list[Mapping[str, Any]]) -> dict[str, int]:
     }
 
 
-def _soak(evaluation: Mapping[str, Any], index_path: Path) -> dict[str, Any]:
+def _soak(
+    evaluation: Mapping[str, Any],
+    index_path: Path,
+    lexical_path: Path = LEXICAL,
+) -> dict[str, Any]:
     before = index_file_snapshot(index_path)
     startup_started = time.perf_counter()
-    with _managed_worker("soak") as (manager, process, lifecycle):
+    with _managed_worker("soak", lexical_path) as (manager, process, lifecycle):
         cold = time.perf_counter() - startup_started
         rss_start = process.memory_info().rss
         latencies = []
@@ -356,42 +374,61 @@ def _atomic_write(path: Path, value: Mapping[str, Any]) -> None:
 
 def _run_benchmark(output_path: Path) -> None:
     evaluation = validate_evaluation_set(json.loads(EVALUATION_PATH.read_text(encoding="utf-8")))
-    corpus = _corpus_citations()
-    current = read_current(DEPLOYMENT)
-    index_path = Path(current["pointer"]["index_path"])
-    lexical_started = time.perf_counter()
-    lexical_full = evaluate_lexical_baseline(evaluation, index_path=LEXICAL)
-    lexical = {
-        "mode": "lexical",
-        "summary": {
-            **lexical_full["summary"],
-            "paraphrase_multi": _aggregate([
-                row for row in lexical_full["queries"]
-                if row["style"] in {"paraphrase", "multi_concept"}
-            ]),
-        },
-        "latency_seconds": lexical_full["summary"]["latency_seconds"],
-        "citation_validity": lexical_full["summary"]["citation_validity"],
-        "wall_seconds": time.perf_counter() - lexical_started,
-    }
-    with _managed_worker("benchmark") as (
-        benchmark_manager,
-        benchmark_process,
-        benchmark_lifecycle,
-    ):
-        rss_before = benchmark_process.memory_info().rss
-        vector = _evaluate_mode(benchmark_manager, evaluation, "vector", corpus)
-        hybrid = _evaluate_mode(benchmark_manager, evaluation, "hybrid", corpus)
-        benchmark_health = benchmark_manager.health()
-        rss_after = benchmark_process.memory_info().rss
-    benchmark_reset = benchmark_lifecycle["reset"]
-    promotion = _promotion(lexical, hybrid)
-    soak = _soak(evaluation, index_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    lexical_snapshot = output_path.parent / f".semantic-lexical-{uuid.uuid4().hex}.sqlite3"
+    try:
+        snapshot = _sqlite_snapshot(LEXICAL, lexical_snapshot)
+        corpus = _corpus_citations(lexical_snapshot)
+        current = read_current(DEPLOYMENT)
+        index_path = Path(current["pointer"]["index_path"])
+        lexical_started = time.perf_counter()
+        lexical_full = evaluate_lexical_baseline(evaluation, index_path=lexical_snapshot)
+        lexical = {
+            "mode": "lexical",
+            "summary": {
+                **lexical_full["summary"],
+                "paraphrase_multi": _aggregate([
+                    row for row in lexical_full["queries"]
+                    if row["style"] in {"paraphrase", "multi_concept"}
+                ]),
+            },
+            "latency_seconds": lexical_full["summary"]["latency_seconds"],
+            "citation_validity": lexical_full["summary"]["citation_validity"],
+            "wall_seconds": time.perf_counter() - lexical_started,
+        }
+        with _managed_worker("benchmark", lexical_snapshot) as (
+            benchmark_manager,
+            benchmark_process,
+            benchmark_lifecycle,
+        ):
+            rss_before = benchmark_process.memory_info().rss
+            vector = _evaluate_mode(benchmark_manager, evaluation, "vector", corpus)
+            hybrid = _evaluate_mode(benchmark_manager, evaluation, "hybrid", corpus)
+            benchmark_health = benchmark_manager.health()
+            rss_after = benchmark_process.memory_info().rss
+        benchmark_reset = benchmark_lifecycle["reset"]
+        promotion = _promotion(lexical, hybrid)
+        soak = _soak(evaluation, index_path, lexical_snapshot)
+        snapshot_after = snapshot_file_bounded(
+            lexical_snapshot,
+            max_bytes=MAX_LEXICAL_SNAPSHOT_BYTES,
+        )
+        if snapshot_after != snapshot:
+            raise RuntimeError("semantic lexical snapshot changed during benchmark")
+    finally:
+        for suffix in ("", "-shm", "-wal"):
+            lexical_snapshot.with_name(lexical_snapshot.name + suffix).unlink(
+                missing_ok=True
+            )
     output = {
         "schema_version": "1",
         "phase": "semantic soak",
         "evaluation_sha256": object_sha256(evaluation),
         "evaluation_query_count": len(evaluation["queries"]),
+        "lexical_snapshot": {
+            "sha256": snapshot["sha256"],
+            "byte_count": snapshot["byte_count"],
+        },
         "lexical": lexical,
         "vector": vector,
         "hybrid": hybrid,
