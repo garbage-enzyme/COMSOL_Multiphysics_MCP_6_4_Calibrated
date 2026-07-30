@@ -14,11 +14,10 @@ topology-mismatch issue that occurs when a patch domain changes the cross-sectio
 """
 
 from typing import Optional, Sequence
+
 from mcp.server.fastmcp import FastMCP
 
 from .session import session_manager
-from .physics import _first_component
-
 
 # ---------------------------------------------------------------------------
 # helpers
@@ -169,6 +168,87 @@ def _find_air_block_tag(geom) -> Optional[str]:
     return None
 
 
+def _require_mim_selections(
+    patch_footprint: Sequence[int],
+    bottom: Sequence[int],
+    top: Sequence[int],
+    side_pairs: dict,
+) -> None:
+    """Require every selection needed by the patch boundary and mesh contract."""
+    required = {
+        "patch_footprint": patch_footprint,
+        "bottom": bottom,
+        "top": top,
+        "x_src": side_pairs.get("x_src", []),
+        "x_dst": side_pairs.get("x_dst", []),
+        "y_src": side_pairs.get("y_src", []),
+        "y_dst": side_pairs.get("y_dst", []),
+    }
+    missing = [name for name, values in required.items() if not values]
+    if missing:
+        raise ValueError(
+            "MIM patch build is missing required selections: " + ", ".join(missing)
+        )
+
+
+def _build_periodic_mesh(comp, side_pairs: dict):
+    """Build a new periodic mesh without deleting pre-existing mesh sequences."""
+    mesh_list = comp.mesh()
+    preserved_tags = [str(value) for value in list(mesh_list.tags())]
+    existing = set(preserved_tags)
+    index = 1
+    mesh_tag = f"mesh{index}"
+    while mesh_tag in existing:
+        index += 1
+        mesh_tag = f"mesh{index}"
+
+    mesh = mesh_list.create(mesh_tag)
+    try:
+        x_src = side_pairs["x_src"]
+        y_src = side_pairs["y_src"]
+        x_dst = side_pairs["x_dst"]
+        y_dst = side_pairs["y_dst"]
+
+        ftx = mesh.feature().create("ftri_x", "FreeTri")
+        ftx.selection().set(x_src)
+        fty = mesh.feature().create("ftri_y", "FreeTri")
+        fty.selection().set(y_src)
+
+        cpx = mesh.feature().create("cp_x", "CopyFace")
+        try:
+            cpx.selection("source").set(x_src)
+            cpx.selection("destination").set(x_dst)
+        except Exception:
+            try:
+                cpx.selection("src").set(x_src)
+                cpx.selection("dst").set(x_dst)
+            except Exception:
+                cpx.selection().set(x_src + x_dst)
+
+        cpy = mesh.feature().create("cp_y", "CopyFace")
+        try:
+            cpy.selection("source").set(y_src)
+            cpy.selection("destination").set(y_dst)
+        except Exception:
+            try:
+                cpy.selection("src").set(y_src)
+                cpy.selection("dst").set(y_dst)
+            except Exception:
+                cpy.selection().set(y_src + y_dst)
+
+        mesh.feature().create("ft1", "FreeTet")
+        mesh.run()
+    except Exception:
+        try:
+            mesh_list.remove(mesh_tag)
+        except Exception as rollback_exc:
+            raise RuntimeError(
+                "MIM mesh setup failed and new-mesh rollback was incomplete"
+            ) from rollback_exc
+        raise
+    return mesh, mesh_tag, preserved_tags
+
+
 # ---------------------------------------------------------------------------
 # tool registration
 # ---------------------------------------------------------------------------
@@ -302,7 +382,6 @@ def register_mim_patch_tools(mcp: FastMCP) -> None:
             return {"success": False, "error": f"Model not found: {model_name or 'no current model'}"}
 
         try:
-            import jpype as _jp
             jm = model.java
             comp = jm.component(component_name)
             if comp is None:
@@ -379,98 +458,66 @@ def register_mim_patch_tools(mcp: FastMCP) -> None:
             report["top"] = top
             report["side_pairs"] = side_pairs
 
+            _require_mim_selections(
+                patch_footprint,
+                bottom,
+                top,
+                side_pairs,
+            )
+
             # ---- Step 6: update BCs ----
             phys = comp.physics()
             ewfd = phys.get(ewfd_tag)
             if ewfd is None:
-                report["steps"].append(f"WARNING: ewfd physics '{ewfd_tag}' not found, skipping BC update")
-            else:
-                # LayeredTransition → patch footprint
-                if patch_footprint:
-                    try:
-                        ltr = ewfd.feature().get(layered_transition_tag)
-                        ltr.selection().set(patch_footprint)
-                        report["steps"].append(f"LayeredTransition {layered_transition_tag} → boundaries {patch_footprint}")
-                    except Exception as e:
-                        report["steps"].append(f"WARNING: Could not update LayeredTransition: {e}")
+                raise ValueError(f"EWFD physics not found: {ewfd_tag}")
 
-                # LayeredImpedance → bottom
-                if bottom:
-                    try:
-                        lib = ewfd.feature().get(layered_impedance_tag)
-                        lib.selection().set(bottom)
-                        report["steps"].append(f"LayeredImpedance {layered_impedance_tag} → boundaries {bottom}")
-                    except Exception as e:
-                        report["steps"].append(f"WARNING: Could not update LayeredImpedance: {e}")
+            ltr = ewfd.feature().get(layered_transition_tag)
+            if ltr is None:
+                raise ValueError(
+                    f"LayeredTransition feature not found: {layered_transition_tag}"
+                )
+            ltr.selection().set(patch_footprint)
+            report["steps"].append(
+                f"LayeredTransition {layered_transition_tag} → boundaries {patch_footprint}"
+            )
 
-                # PeriodicStructure excitedPort → top
-                if top:
-                    try:
-                        ps = ewfd.feature().get("ps1")
-                        ps.selection("excitedPortSelection").set(top)
-                        report["steps"].append(f"PeriodicStructure excitedPort → boundaries {top}")
-                    except Exception as e:
-                        report["steps"].append(f"WARNING: Could not update PeriodicStructure port: {e}")
+            lib = ewfd.feature().get(layered_impedance_tag)
+            if lib is None:
+                raise ValueError(
+                    f"LayeredImpedance feature not found: {layered_impedance_tag}"
+                )
+            lib.selection().set(bottom)
+            report["steps"].append(
+                f"LayeredImpedance {layered_impedance_tag} → boundaries {bottom}"
+            )
+
+            ps = ewfd.feature().get("ps1")
+            if ps is None:
+                raise ValueError("PeriodicStructure feature not found: ps1")
+            ps.selection("excitedPortSelection").set(top)
+            report["steps"].append(
+                f"PeriodicStructure excitedPort → boundaries {top}"
+            )
 
             # ---- Step 7: assign air material to patch domain ----
             mat_list = comp.material()
-            try:
-                air_mat = mat_list.get(air_material_tag)
-                cur = list(air_mat.selection().entities())
-                if patch_dom not in cur:
-                    air_mat.selection().set(cur + [patch_dom])
-                    report["steps"].append(f"Air material {air_material_tag} → domains {cur + [patch_dom]}")
-            except Exception as e:
-                report["steps"].append(f"WARNING: Could not assign air material to dom {patch_dom}: {e}")
+            air_mat = mat_list.get(air_material_tag)
+            if air_mat is None:
+                raise ValueError(f"Air material not found: {air_material_tag}")
+            cur = list(air_mat.selection().entities())
+            if patch_dom not in cur:
+                air_mat.selection().set(cur + [patch_dom])
+            report["steps"].append(
+                f"Air material {air_material_tag} → domains {cur + [patch_dom]}"
+            )
 
             # ---- Step 8: create periodic-compatible mesh ----
-            # Delete old mesh sequences
-            for mt in list(comp.mesh().tags()):
-                comp.mesh().remove(mt)
-
-            mesh = comp.mesh().create("mesh1")
-
-            # FreeTri on source side faces
-            x_src = side_pairs.get("x_src", [])
-            y_src = side_pairs.get("y_src", [])
-            x_dst = side_pairs.get("x_dst", [])
-            y_dst = side_pairs.get("y_dst", [])
-
-            if x_src:
-                ftx = mesh.feature().create("ftri_x", "FreeTri")
-                ftx.selection().set(x_src)
-            if y_src:
-                fty = mesh.feature().create("ftri_y", "FreeTri")
-                fty.selection().set(y_src)
-
-            # CopyFace: source → destination (ensures identical periodic meshes)
-            if x_src and x_dst:
-                cpx = mesh.feature().create("cp_x", "CopyFace")
-                try:
-                    cpx.selection("source").set(x_src)
-                    cpx.selection("destination").set(x_dst)
-                except Exception:
-                    try:
-                        cpx.selection("src").set(x_src)
-                        cpx.selection("dst").set(x_dst)
-                    except Exception:
-                        cpx.selection().set(x_src + x_dst)
-            if y_src and y_dst:
-                cpy = mesh.feature().create("cp_y", "CopyFace")
-                try:
-                    cpy.selection("source").set(y_src)
-                    cpy.selection("destination").set(y_dst)
-                except Exception:
-                    try:
-                        cpy.selection("src").set(y_src)
-                        cpy.selection("dst").set(y_dst)
-                    except Exception:
-                        cpy.selection().set(y_src + y_dst)
-
-            # FreeTet for volume
-            ft = mesh.feature().create("ft1", "FreeTet")
-
-            mesh.run()
+            mesh, mesh_tag, preserved_mesh_tags = _build_periodic_mesh(
+                comp,
+                side_pairs,
+            )
+            report["mesh_tag"] = mesh_tag
+            report["preserved_mesh_tags"] = preserved_mesh_tags
             try:
                 report["mesh_elements"] = int(mesh.getNumElem())
                 report["mesh_vertices"] = int(mesh.getNumVertex())

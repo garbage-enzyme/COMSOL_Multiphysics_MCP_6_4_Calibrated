@@ -114,6 +114,17 @@ def test_resolve_study_tag_reports_available_tags():
         _resolve_study_tag(make_model(), "missing")
 
 
+def test_resolve_study_tag_propagates_backend_label_failure():
+    class FailingLabelEntity(FakeEntity):
+        def label(self):
+            raise RuntimeError("label backend unavailable")
+
+    model = FakeModel({"std1": FailingLabelEntity("unused")})
+
+    with pytest.raises(RuntimeError, match="std1.*label backend unavailable"):
+        _resolve_study_tag(model, "Study 1")
+
+
 def test_study_helpers_normalize_java_string_tags():
     model = FakeModel(
         {"std1": JavaEntity("研究 1", {"step1": FakeEntity("稳态 1")})}
@@ -125,6 +136,17 @@ def test_study_helpers_normalize_java_string_tags():
     assert result["studies"][0]["tag"] == "std1"
     assert result["studies"][0]["steps"][0]["tag"] == "step1"
     assert _resolve_study_tag(model, "研究 1") == "std1"
+
+
+def test_list_studies_propagates_step_inventory_failure():
+    class FailingFeatureInventory(FakeEntity):
+        def feature(self):
+            raise RuntimeError("step inventory unavailable")
+
+    model = FakeModel({"std1": FailingFeatureInventory("Study 1")})
+
+    with pytest.raises(RuntimeError, match="step inventory unavailable"):
+        list_studies(model)
 
 
 def test_resolve_study_tag_normalizes_java_labels_and_rejects_duplicates():
@@ -223,3 +245,16 @@ def test_create_study_validates_before_creation_and_uses_first_free_tag():
     assert invalid["success"] is False
     assert list(studies.studies) == ["std1", "std3", "std2"]
     assert created["study"] == "std2"
+
+
+def test_create_study_never_uses_collection_size_for_default_tag():
+    class SizeTrapStudyList(MutableStudyList):
+        def size(self):
+            raise AssertionError("collection size must not select a study tag")
+
+    studies = SizeTrapStudyList(existing=("std1", "std3"))
+
+    result = create_study(MutableStudyModel(studies))
+
+    assert result["success"] is True
+    assert result["study"] == "std2"

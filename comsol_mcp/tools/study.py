@@ -101,8 +101,8 @@ def _resolve_study_tag(model, study_name: Optional[str]) -> Optional[str]:
         try:
             if str(study_list.get(tag).label()) == study_name:
                 matches.append(tag)
-        except Exception:
-            pass
+        except Exception as exc:
+            raise RuntimeError(f"Cannot read label for study {tag!r}: {exc}") from exc
     if len(matches) == 1:
         return matches[0]
     if len(matches) > 1:
@@ -128,19 +128,16 @@ def list_studies(model) -> dict:
             info["label"] = tag
 
         steps = []
-        try:
-            feature_list = study.feature()
-            for raw_step_tag in list(feature_list.tags()):
-                step_tag = str(raw_step_tag)
-                step = feature_list.get(step_tag)
-                step_info = {"tag": step_tag}
-                try:
-                    step_info["label"] = str(step.label())
-                except Exception:
-                    step_info["label"] = step_tag
-                steps.append(step_info)
-        except Exception:
-            pass
+        feature_list = study.feature()
+        for raw_step_tag in list(feature_list.tags()):
+            step_tag = str(raw_step_tag)
+            step = feature_list.get(step_tag)
+            step_info = {"tag": step_tag}
+            try:
+                step_info["label"] = str(step.label())
+            except Exception:
+                step_info["label"] = step_tag
+            steps.append(step_info)
         info["steps"] = steps
         studies.append(info)
     return {"success": True, "studies": studies, "count": len(studies)}
