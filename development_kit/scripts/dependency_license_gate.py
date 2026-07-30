@@ -13,12 +13,16 @@ from importlib.metadata import Distribution, PackageNotFoundError, distribution
 from pathlib import Path
 from typing import Any
 
-_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}")
+from packaging.requirements import InvalidRequirement, Requirement
+
+_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 _SIGNAL = re.compile(r"^[a-z-]+:.{1,512}$")
+MAXIMUM_LICENSE_SIGNAL_CHARACTERS = 512
+MAXIMUM_LICENSE_CLASSIFIERS = 128
 
 
-def _sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+def _sha256_bytes(value: bytes) -> str:
+    return hashlib.sha256(value).hexdigest()
 
 
 def _normalize_name(value: object) -> str:
@@ -27,27 +31,39 @@ def _normalize_name(value: object) -> str:
     return re.sub(r"[-_.]+", "-", value).casefold()
 
 
-def declared_runtime_dependencies(path: str | Path) -> tuple[str, ...]:
-    """Return normalized direct runtime dependency names from one pyproject."""
-    value = tomllib.loads(Path(path).read_text(encoding="utf-8"))
+def _declared_runtime_dependencies(value_bytes: bytes) -> tuple[str, ...]:
+    try:
+        value = tomllib.loads(value_bytes.decode("utf-8"))
+    except UnicodeDecodeError as exc:
+        raise ValueError("pyproject must be valid UTF-8") from exc
     project = value.get("project") if isinstance(value, dict) else None
     requirements = project.get("dependencies") if isinstance(project, dict) else None
     if not isinstance(requirements, list) or not requirements:
         raise ValueError("pyproject runtime dependencies are missing")
     names = []
     for requirement in requirements:
-        match = _NAME.match(requirement) if isinstance(requirement, str) else None
-        if match is None:
+        if not isinstance(requirement, str):
             raise ValueError("pyproject runtime dependency is invalid")
-        names.append(_normalize_name(match.group(0)))
+        try:
+            parsed = Requirement(requirement)
+        except InvalidRequirement as exc:
+            raise ValueError("pyproject runtime dependency is invalid") from exc
+        names.append(_normalize_name(parsed.name))
     if len(names) != len(set(names)):
         raise ValueError("pyproject runtime dependencies contain duplicate names")
     return tuple(sorted(names))
 
 
-def load_license_review(path: str | Path) -> dict[str, Any]:
-    """Load one exact, bounded dependency-license review policy."""
-    value = json.loads(Path(path).read_text(encoding="utf-8"))
+def declared_runtime_dependencies(path: str | Path) -> tuple[str, ...]:
+    """Return normalized direct runtime dependency names from one pyproject."""
+    return _declared_runtime_dependencies(Path(path).read_bytes())
+
+
+def _load_license_review(value_bytes: bytes) -> dict[str, Any]:
+    try:
+        value = json.loads(value_bytes.decode("utf-8"))
+    except UnicodeDecodeError as exc:
+        raise ValueError("dependency license review must be valid UTF-8") from exc
     if not isinstance(value, dict) or set(value) != {
         "schema_name",
         "schema_version",
@@ -104,6 +120,23 @@ def load_license_review(path: str | Path) -> dict[str, Any]:
     }
 
 
+def load_license_review(path: str | Path) -> dict[str, Any]:
+    """Load one exact, bounded dependency-license review policy."""
+    return _load_license_review(Path(path).read_bytes())
+
+
+def _license_signal(prefix: str, value: object, label: str) -> str | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    normalized = value.strip()
+    signal = f"{prefix}:{normalized}"
+    if len(signal) > MAXIMUM_LICENSE_SIGNAL_CHARACTERS or any(
+        character in normalized for character in "\r\n\0"
+    ):
+        raise ValueError(f"installed dependency {label} is unbounded")
+    return signal
+
+
 def distribution_license_record(item: Distribution) -> dict[str, Any]:
     """Extract bounded license signals without copying full license text."""
     metadata = item.metadata
@@ -112,20 +145,28 @@ def distribution_license_record(item: Distribution) -> dict[str, Any]:
     if not isinstance(version, str) or not version or len(version) > 128:
         raise ValueError(f"installed dependency version is invalid for {name}")
     signals = set()
-    expression = metadata.get("License-Expression")
-    if isinstance(expression, str) and expression.strip():
-        signals.add(f"license-expression:{expression.strip()}")
+    expression = _license_signal(
+        "license-expression", metadata.get("License-Expression"), "license expression"
+    )
+    if expression is not None:
+        signals.add(expression)
     license_value = metadata.get("License")
-    if (
-        isinstance(license_value, str)
-        and license_value.strip()
-        and "\n" not in license_value
-        and len(license_value.strip()) <= 256
-    ):
-        signals.add(f"license:{license_value.strip()}")
-    for classifier in metadata.get_all("Classifier", []):
+    if isinstance(license_value, str):
+        normalized_license = license_value.strip()
+        if (
+            normalized_license
+            and len(normalized_license) <= 256
+            and not any(character in normalized_license for character in "\r\n\0")
+        ):
+            signals.add(f"license:{normalized_license}")
+    classifiers = metadata.get_all("Classifier", [])
+    if len(classifiers) > MAXIMUM_LICENSE_CLASSIFIERS:
+        raise ValueError("installed dependency classifiers are unbounded")
+    for classifier in classifiers:
         if isinstance(classifier, str) and classifier.startswith("License ::"):
-            signals.add(f"classifier:{classifier}")
+            signal = _license_signal("classifier", classifier, "classifier")
+            if signal is not None:
+                signals.add(signal)
     return {
         "dependency": name,
         "version": version,
@@ -143,10 +184,14 @@ def build_license_receipt(
     """Evaluate installed metadata against exact declared dependency reviews."""
     pyproject = Path(pyproject_path)
     review_file = Path(review_path)
-    declared = declared_runtime_dependencies(pyproject)
-    review = load_license_review(review_file)
+    pyproject_bytes = pyproject.read_bytes()
+    review_bytes = review_file.read_bytes()
+    declared = _declared_runtime_dependencies(pyproject_bytes)
+    review = _load_license_review(review_bytes)
     reviewed = tuple(sorted(review["entries"]))
     failures = []
+    if review["reviewed_on"] > as_of:
+        failures.append({"reason_code": "review_date_in_future"})
     if review["expires_on"] < as_of:
         failures.append({"reason_code": "review_expired"})
     for name in sorted(set(declared) - set(reviewed)):
@@ -193,8 +238,8 @@ def build_license_receipt(
         "failures": failures,
         "reviewed_on": review["reviewed_on"].isoformat(),
         "expires_on": review["expires_on"].isoformat(),
-        "pyproject_sha256": _sha256(pyproject),
-        "review_sha256": _sha256(review_file),
+        "pyproject_sha256": _sha256_bytes(pyproject_bytes),
+        "review_sha256": _sha256_bytes(review_bytes),
         "policy": "every direct runtime dependency requires an exact unexpired license review",
     }
 

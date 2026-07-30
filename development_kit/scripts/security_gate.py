@@ -3,24 +3,25 @@
 from __future__ import annotations
 
 import argparse
-from datetime import date
 import hashlib
 import json
-from pathlib import Path
+import os
 import re
+from datetime import date
+from pathlib import Path
 from typing import Any
 
+from comsol_mcp.durable import atomic_write_json
 
 _NAME = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
 _ID = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
 
 
-def _sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+def _sha256_bytes(value: bytes) -> str:
+    return hashlib.sha256(value).hexdigest()
 
 
-def load_vulnerability_allowlist(path: str | Path) -> list[dict[str, Any]]:
-    value = json.loads(Path(path).read_text(encoding="utf-8"))
+def _load_vulnerability_allowlist_value(value: Any) -> list[dict[str, Any]]:
     if (
         not isinstance(value, dict)
         or value.get("schema_name") != "comsol_mcp.vulnerability_allowlist"
@@ -68,6 +69,15 @@ def load_vulnerability_allowlist(path: str | Path) -> list[dict[str, Any]]:
             }
         )
     return entries
+
+
+def load_vulnerability_allowlist(path: str | Path) -> list[dict[str, Any]]:
+    value_bytes = Path(path).read_bytes()
+    try:
+        value = json.loads(value_bytes.decode("utf-8"))
+    except UnicodeDecodeError as exc:
+        raise ValueError("vulnerability allowlist must be valid UTF-8") from exc
+    return _load_vulnerability_allowlist_value(value)
 
 
 def _findings(report: Any) -> list[dict[str, str]]:
@@ -118,15 +128,12 @@ def evaluate_security_report(
 ) -> dict[str, Any]:
     findings = _findings(report)
     allowed_by_id = {
-        (item["dependency"], item["vulnerability_id"].casefold()): item
-        for item in allowlist
+        (item["dependency"], item["vulnerability_id"].casefold()): item for item in allowlist
     }
     blocked = []
     allowed = []
     for finding in findings:
-        entry = allowed_by_id.get(
-            (finding["dependency"], finding["vulnerability_id"].casefold())
-        )
+        entry = allowed_by_id.get((finding["dependency"], finding["vulnerability_id"].casefold()))
         if entry is None:
             blocked.append({**finding, "reason_code": "not_allowlisted"})
         elif entry["expires_on"] < as_of:
@@ -139,15 +146,14 @@ def evaluate_security_report(
                     "reason": entry["reason"],
                 }
             )
+    allowed_identities = {
+        (item["dependency"].casefold(), item["vulnerability_id"].casefold()) for item in allowed
+    }
     unused = sorted(
-        {
-            f"{item['dependency']}:{item['vulnerability_id']}"
-            for item in allowlist
-        }
-        - {
-            f"{item['dependency']}:{item['vulnerability_id']}"
-            for item in allowed
-        }
+        f"{item['dependency']}:{item['vulnerability_id']}"
+        for item in allowlist
+        if (item["dependency"].casefold(), item["vulnerability_id"].casefold())
+        not in allowed_identities
     )
     return {
         "schema_name": "comsol_mcp.security_gate_receipt",
@@ -164,6 +170,37 @@ def evaluate_security_report(
     }
 
 
+def build_security_receipt(
+    report_path: str | Path,
+    allowlist_path: str | Path,
+    *,
+    as_of: date,
+) -> dict[str, Any]:
+    report_file = Path(report_path)
+    allowlist_file = Path(allowlist_path)
+    report_bytes = report_file.read_bytes()
+    allowlist_bytes = allowlist_file.read_bytes()
+    report = json.loads(report_bytes.decode("utf-8"))
+    allowlist_value = json.loads(allowlist_bytes.decode("utf-8"))
+    # Reuse the public validator without re-reading the policy path.
+    allowlist = _load_vulnerability_allowlist_value(allowlist_value)
+    receipt = evaluate_security_report(report, allowlist, as_of=as_of)
+    receipt["report_sha256"] = _sha256_bytes(report_bytes)
+    receipt["allowlist_sha256"] = _sha256_bytes(allowlist_bytes)
+    return receipt
+
+
+def write_security_receipt(
+    path: str | Path,
+    receipt: dict[str, Any],
+    *,
+    replace_fn=os.replace,
+) -> None:
+    output = Path(path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_json(output, receipt, replace_fn=replace_fn)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--report", type=Path, required=True)
@@ -172,15 +209,12 @@ def main() -> int:
     parser.add_argument("--as-of", type=date.fromisoformat, default=date.today())
     args = parser.parse_args()
 
-    report = json.loads(args.report.read_text(encoding="utf-8"))
-    allowlist = load_vulnerability_allowlist(args.allowlist)
-    receipt = evaluate_security_report(report, allowlist, as_of=args.as_of)
-    receipt["report_sha256"] = _sha256(args.report)
-    receipt["allowlist_sha256"] = _sha256(args.allowlist)
-    args.output.write_text(
-        json.dumps(receipt, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
+    receipt = build_security_receipt(
+        args.report,
+        args.allowlist,
+        as_of=args.as_of,
     )
+    write_security_receipt(args.output, receipt)
     print(json.dumps(receipt, sort_keys=True))
     return 0 if receipt["status"] == "passed" else 1
 
