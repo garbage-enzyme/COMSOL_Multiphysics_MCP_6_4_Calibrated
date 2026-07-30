@@ -52,7 +52,7 @@ class FakeComponentList:
         return ["comp1"]
 
     def get(self, tag):
-        return self.component
+        return self.component if str(tag) == "comp1" else None
 
 
 class FakeJava:
@@ -62,7 +62,7 @@ class FakeJava:
     def component(self, tag=None):
         if tag is None:
             return FakeComponentList(self.component_node)
-        return self.component_node
+        return self.component_node if str(tag) == "comp1" else None
 
 
 class FakeModel:
@@ -113,8 +113,21 @@ def test_get_mesh_info_uses_clientapi_counts():
             "label": "Physics-controlled mesh",
             "num_elements": 18837,
             "num_vertices": 4120,
+            "statistics_complete": True,
         },
     }
+
+
+def test_get_mesh_info_fails_when_backend_statistics_are_unavailable():
+    class FailingMesh(FakeMesh):
+        def getNumElem(self):
+            raise RuntimeError("session unavailable")
+
+    result = get_mesh_info(FakeModel({"mesh1": FailingMesh()}))
+
+    assert result["success"] is False
+    assert result["statistics_complete"] is False
+    assert "session unavailable" in result["error"]
 
 
 def test_get_mesh_info_resolves_label():
@@ -132,6 +145,15 @@ def test_get_mesh_info_reports_available_tags():
 
     assert result["success"] is False
     assert "mesh1" in result["error"]
+
+
+def test_get_mesh_info_rejects_wrong_component_tag():
+    result = get_mesh_info(
+        FakeModel({"mesh1": FakeMesh()}), component_name="missing"
+    )
+
+    assert result["success"] is False
+    assert "component" in result["error"].lower()
 
 
 def test_get_mesh_info_normalizes_java_string_tags():

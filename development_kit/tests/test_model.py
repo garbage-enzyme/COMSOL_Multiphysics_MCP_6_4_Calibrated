@@ -9,6 +9,7 @@ from src.tools.model import (
     _list_model_components,
     _save_model_file,
     _save_model_version_bundle,
+    create_model_component,
 )
 
 
@@ -307,3 +308,28 @@ def test_list_components_normalizes_clientapi_strings_for_json():
 
     assert components == [{"name": "comp1", "label": "Component 1"}]
     assert json.loads(json.dumps(components)) == components
+
+
+class MutableComponentCollection:
+    def __init__(self):
+        self.created = []
+
+    def tags(self):
+        return [name for name, _flag in self.created]
+
+    def create(self, name, flag):
+        self.created.append((name, flag))
+
+
+def test_component_creation_does_not_claim_geometry_dimension_was_applied():
+    components = MutableComponentCollection()
+    java = type("Java", (), {"component": lambda _self: components})()
+    model = type("Model", (), {"java": java})()
+
+    result = create_model_component(model, "comp1", 3)
+
+    assert components.created == [("comp1", True)]
+    assert result["success"] is True
+    assert result["requested_geometry_space_dimension"] == 3
+    assert result["space_dimension_applied"] is False
+    assert "space_dimension" not in result

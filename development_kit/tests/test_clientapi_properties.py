@@ -81,13 +81,13 @@ class FakeComponent:
         self.feature = feature
 
     def geom(self, tag):
-        return FakeParent(self.feature)
+        return FakeParent(self.feature) if tag == "parent1" else None
 
     def physics(self, tag):
-        return FakeParent(self.feature)
+        return FakeParent(self.feature) if tag == "parent1" else None
 
     def mesh(self, tag):
-        return FakeParent(self.feature)
+        return FakeParent(self.feature) if tag == "parent1" else None
 
 
 class FakeJava:
@@ -189,6 +189,15 @@ def test_property_access_rejects_unknown_targets_and_properties(feature):
     assert "unknown property" in result["error"]
 
 
+@pytest.mark.parametrize("container", ["geometry_feature", "physics_feature", "mesh_feature"])
+def test_property_access_rejects_missing_parent_tag(feature, container):
+    result = get_existing_property(
+        FakeModel(feature), "comp1", container, "missing/child1", "label"
+    )
+
+    assert result["success"] is False
+
+
 @pytest.mark.parametrize(
     "value",
     [
@@ -228,6 +237,20 @@ def test_property_access_rejects_file_and_callable_property_names(feature):
             "geometry_feature",
             "parent1/child1",
             property_name,
+        )
+        assert result["success"] is False
+        assert not feature.set_calls
+
+
+def test_property_set_independently_rejects_file_and_callable_names(feature):
+    for property_name in ("filename", "method", "run()"):
+        result = set_existing_property(
+            FakeModel(feature),
+            "comp1",
+            "geometry_feature",
+            "parent1/child1",
+            property_name,
+            "unsafe",
         )
         assert result["success"] is False
         assert not feature.set_calls

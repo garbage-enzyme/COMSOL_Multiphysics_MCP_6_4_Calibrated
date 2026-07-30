@@ -203,6 +203,25 @@ def _list_model_components(model) -> list[dict[str, str]]:
     return components
 
 
+def create_model_component(model, component_name: str, space_dimension: int) -> dict:
+    """Create a component without claiming its later geometry dimension is applied."""
+    if not isinstance(component_name, str) or not component_name.strip():
+        return {"success": False, "error": "component_name must be nonempty"}
+    if isinstance(space_dimension, bool) or space_dimension not in {0, 1, 2, 3, 20, 30}:
+        return {"success": False, "error": "space_dimension is unsupported"}
+    components = model.java.component()
+    if component_name in {str(tag) for tag in components.tags()}:
+        return {"success": False, "error": f"Component already exists: {component_name}"}
+    components.create(component_name, True)
+    return {
+        "success": True,
+        "component": component_name,
+        "requested_geometry_space_dimension": space_dimension,
+        "space_dimension_applied": False,
+        "next_step": "Create a geometry sequence with geometry_create to apply the dimension.",
+    }
+
+
 def register_model_tools(mcp: FastMCP) -> None:
     """Register model management tools with the MCP server."""
 
@@ -307,8 +326,9 @@ def register_model_tools(mcp: FastMCP) -> None:
 
         Args:
             component_name: Name for the component (default: 'comp1')
-            space_dimension: Space dimension - 0=0D, 1=1D, 2=2D, 3=3D,
-                20=2D axisymmetric, 30=3D axisymmetric (default: 3)
+            space_dimension: Requested dimension for the later geometry sequence.
+                Components themselves have no applied space dimension; pass this
+                value to geometry_create (0, 1, 2, 3, 20, or 30).
             model_name: Model name (default: current model)
 
         Returns:
@@ -322,15 +342,10 @@ def register_model_tools(mcp: FastMCP) -> None:
             }
 
         try:
-            jm = model.java
-            jm.component().create(component_name, True)
-
-            return {
-                "success": True,
-                "component": component_name,
-                "space_dimension": space_dimension,
-                "model": model.name(),
-            }
+            result = create_model_component(model, component_name, space_dimension)
+            if result.get("success"):
+                result["model"] = model.name()
+            return result
         except Exception as e:
             return {"success": False, "error": f"Failed to create component: {str(e)}"}
 

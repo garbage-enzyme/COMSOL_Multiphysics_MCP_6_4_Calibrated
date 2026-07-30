@@ -1,6 +1,7 @@
 """Mesh tools for COMSOL MCP Server."""
 
 from typing import Optional
+
 from mcp.server.fastmcp import FastMCP
 
 from .session import session_manager
@@ -110,12 +111,15 @@ def get_mesh_info(
         pass
     try:
         info["num_elements"] = int(mesh.getNumElem())
-    except Exception:
-        info["num_elements"] = None
-    try:
         info["num_vertices"] = int(mesh.getNumVertex())
-    except Exception:
-        info["num_vertices"] = None
+    except Exception as exc:
+        return {
+            "success": False,
+            "error": f"Mesh statistics are unavailable: {str(exc)[:300]}",
+            "mesh": info,
+            "statistics_complete": False,
+        }
+    info["statistics_complete"] = True
     return {"success": True, "mesh": info}
 
 
