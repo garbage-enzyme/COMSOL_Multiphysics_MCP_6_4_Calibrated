@@ -305,19 +305,46 @@ def test_periodic_mesh_allocates_model_artifacts_only_after_lease(tmp_path):
     assert first.parent == second.parent == tmp_path
 
 
+def test_periodic_mesh_cleanup_fails_if_a_loaded_model_cannot_be_removed(tmp_path):
+    broken_path = tmp_path / "derived.mph"
+    broken_path.write_bytes(b"derived")
+    broken = object()
+    source = object()
+
+    class Client:
+        @staticmethod
+        def remove(model):
+            if model is broken:
+                raise RuntimeError("injected model retention")
+
+        @staticmethod
+        def clear():
+            return None
+
+    cleanup = periodic_mesh_gate._cleanup_periodic_session(
+        Client(),
+        {"broken": broken, "source": source},
+        broken_path,
+    )
+
+    assert cleanup["passed"] is False
+    assert cleanup["model_removals"] == {"broken": False, "source": True}
+    assert cleanup["derived_file_removed"] is True
+    assert cleanup["errors"] == [{"stage": "remove_broken", "type": "RuntimeError"}]
+
+
 def test_point_audit_uses_caller_bound_source_hash(tmp_path):
     source = tmp_path / "source.mph"
     source.write_bytes(b"source")
     expected = __import__("hashlib").sha256(source.read_bytes()).hexdigest()
 
-    assert point_gate._bound_source_sha256(
-        {"source": source, "expected_source_sha256": expected}
-    ) == expected
+    assert (
+        point_gate._bound_source_sha256({"source": source, "expected_source_sha256": expected})
+        == expected
+    )
     source.write_bytes(b"changed")
     with pytest.raises(AssertionError, match="caller-bound identity"):
-        point_gate._bound_source_sha256(
-            {"source": source, "expected_source_sha256": expected}
-        )
+        point_gate._bound_source_sha256({"source": source, "expected_source_sha256": expected})
 
 
 def test_preflight_fixture_prerequisites_fail_with_explicit_errors():

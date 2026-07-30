@@ -209,6 +209,40 @@ def test_array_cannot_change_while_render_worker_consumes_it(tmp_path, monkeypat
     assert hashlib.sha256(array.read_bytes()).hexdigest() == digest
 
 
+def test_worker_failure_removes_every_owned_partial_png(tmp_path, monkeypatch):
+    array = tmp_path / "partial.npz"
+    digest = _array(array)
+    output = tmp_path / "partial-output"
+
+    class FakeProcess:
+        returncode = 1
+
+        def __init__(self, _command, **kwargs):
+            self.stderr = kwargs["stderr"]
+
+        def communicate(self, *, input, timeout):
+            assert timeout > 0
+            payload = json.loads(input)
+            for view in payload["views"]:
+                Path(view["png_path"]).write_bytes(b"partial")
+            self.stderr.write(b"controlled worker failure")
+
+    monkeypatch.setattr(field_render_module.subprocess, "Popen", FakeProcess)
+
+    with pytest.raises(RuntimeError, match="worker failed"):
+        render_field_png_bundle(
+            views=[_view("target", array, digest)],
+            quantity_name="abs_ex",
+            quantity_unit="V/m",
+            coordinate_unit="um",
+            color_scale="linear",
+            shared_color_limits=False,
+            output_root=output,
+        )
+
+    assert not list(output.glob("*.png"))
+
+
 @pytest.mark.parametrize(
     "response",
     [

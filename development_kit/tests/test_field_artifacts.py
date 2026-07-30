@@ -79,26 +79,27 @@ def test_png_signature_size_and_hash_come_from_one_bounded_snapshot(tmp_path, mo
     png_bytes = b"\x89PNG\r\n\x1a\ncomplete-image"
     png_path.write_bytes(png_bytes)
     kwargs["png_path"] = png_path
-    real_snapshot = field_artifacts_module.snapshot_file_bounded
+    real_read = field_artifacts_module.read_file_bytes_bounded
     calls = []
 
-    def observed_snapshot(path, **options):
+    def observed_read(path, **options):
         calls.append((Path(path), options))
-        return real_snapshot(path, **options)
+        return real_read(path, **options)
 
     monkeypatch.setattr(
         field_artifacts_module,
-        "snapshot_file_bounded",
-        observed_snapshot,
+        "read_file_bytes_bounded",
+        observed_read,
     )
 
     result = write_field_evidence_artifacts(**kwargs)
 
     png_calls = [item for item in calls if item[0] == png_path]
     assert len(png_calls) == 1
-    assert png_calls[0][1]["prefix_bytes"] == 8
     assert result["png_artifact"]["byte_count"] == len(png_bytes)
     assert result["png_artifact"]["sha256"] == hashlib.sha256(png_bytes).hexdigest()
+    assert result["png_artifact"]["relative_path"].endswith("/field_render.png")
+    assert png_path.read_bytes() == png_bytes
 
 
 def test_writer_preserves_shared_missing_mask_as_partial_evidence(tmp_path):
@@ -182,8 +183,10 @@ def test_writer_cleans_owned_partial_files_when_manifest_build_fails(tmp_path):
     assert not list(tmp_path.rglob("*.tmp"))
 
 
-def test_writer_never_overwrites_or_cleans_a_competing_array(tmp_path, monkeypatch):
+def test_staging_array_collision_leaves_no_partial_bundle_or_neighbor_damage(tmp_path, monkeypatch):
     _, kwargs = _inputs(tmp_path)
+    neighbor = tmp_path / "unrelated.txt"
+    neighbor.write_bytes(b"unrelated")
     real_publish = field_artifacts_module.publish_file_exclusive
 
     def competing_publish(temporary, destination):
@@ -200,12 +203,13 @@ def test_writer_never_overwrites_or_cleans_a_competing_array(tmp_path, monkeypat
     with pytest.raises(FileExistsError):
         write_field_evidence_artifacts(**kwargs)
 
-    assert next(tmp_path.rglob("field_arrays.npz")).read_bytes() == b"competitor"
+    assert neighbor.read_bytes() == b"unrelated"
+    assert not list(tmp_path.rglob("field_arrays.npz"))
     assert not list(tmp_path.rglob("field_manifest.json"))
     assert not list(tmp_path.rglob("*.tmp"))
 
 
-def test_manifest_collision_preserves_competitor_and_cleans_only_owned_array(tmp_path, monkeypatch):
+def test_staging_manifest_collision_cleans_the_complete_owned_staging_bundle(tmp_path, monkeypatch):
     _, kwargs = _inputs(tmp_path)
     real_publish = field_artifacts_module.atomic_write_json_exclusive
 
@@ -222,9 +226,29 @@ def test_manifest_collision_preserves_competitor_and_cleans_only_owned_array(tmp
     with pytest.raises(FileExistsError):
         write_field_evidence_artifacts(**kwargs)
 
-    assert next(tmp_path.rglob("field_manifest.json")).read_bytes() == b"competitor"
+    assert not list(tmp_path.rglob("field_manifest.json"))
     assert not list(tmp_path.rglob("field_arrays.npz"))
     assert not list(tmp_path.rglob("*.tmp"))
+
+
+def test_bundle_commit_collision_preserves_the_competing_directory(tmp_path, monkeypatch):
+    request, kwargs = _inputs(tmp_path)
+    destination = tmp_path / request["views"][0]["view_fingerprint"]
+    real_rename = field_artifacts_module.os.rename
+
+    def competing_commit(source, target):
+        assert Path(target) == destination
+        destination.mkdir()
+        (destination / "competitor.txt").write_bytes(b"competitor")
+        return real_rename(source, target)
+
+    monkeypatch.setattr(field_artifacts_module.os, "rename", competing_commit)
+
+    with pytest.raises(FileExistsError, match="already exist"):
+        write_field_evidence_artifacts(**kwargs)
+
+    assert (destination / "competitor.txt").read_bytes() == b"competitor"
+    assert not list(tmp_path.glob(".*.tmp"))
 
 
 def test_writer_supports_unicode_artifact_root_for_portable_development(tmp_path):

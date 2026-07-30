@@ -5,12 +5,12 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-from pathlib import Path
 import re
 import sys
 import time
-from typing import Any, Callable, Literal, Optional
 import uuid
+from pathlib import Path
+from typing import Any, Callable, Literal, Optional
 
 import numpy as np
 from mcp.server.fastmcp import FastMCP
@@ -31,12 +31,12 @@ from comsol_mcp.evidence.power_audit import (
     normalize_internal_absorption_consistency,
 )
 from comsol_mcp.utils.runtime_paths import default_runtime_dir
-from .ownership import ownership_manager
+
 from .derived_geometry import create_derived_geometry_clone
+from .ownership import ownership_manager
 from .session import session_manager
 from .wave_optics_preflight import collect_wave_optics_preflight
 from .workflow import _atomic_write_json, _write_rows_csv
-
 
 AUDIT_SCHEMA_VERSION = "1"
 MAX_POLICY_BYTES = 64 * 1024
@@ -1470,7 +1470,12 @@ def run_wave_optics_reference_audit(
     reference = None
     measurement_errors: list[dict[str, Any]] = []
     integrity_errors: list[dict[str, Any]] = []
-    cleanup = {"attempted": False, "removed": False}
+    cleanup = {
+        "attempted": False,
+        "removed": False,
+        "client_model_removed": False,
+        "backing_file_removed": False,
+    }
     started = time.perf_counter()
     try:
         clone, record = factory(source_model, client, f"reference_air_clone_{uuid.uuid4().hex[:8]}")
@@ -1549,24 +1554,36 @@ def run_wave_optics_reference_audit(
     except Exception as exc:
         measurement_errors.append({"code": "reference_audit_failed", "error": str(exc)[:1000]})
     finally:
-        if clone is not None and clone_name is not None:
+        if clone is not None:
             cleanup["attempted"] = True
-            try:
-                if clone_cleanup is not None:
-                    cleanup["removed"] = bool(clone_cleanup(clone_name))
-                else:
+            if clone_cleanup is not None and clone_name is not None:
+                try:
+                    cleanup["client_model_removed"] = bool(clone_cleanup(clone_name))
+                except Exception as exc:
+                    cleanup["registered_remove_error"] = str(exc)[:500]
+            if not cleanup["client_model_removed"]:
+                try:
                     client.remove(clone)
-                    cleanup["removed"] = True
-                    backing = clone_record.get("backing_path")
-                    if backing:
-                        path = Path(backing)
-                        path.unlink(missing_ok=True)
-                        try:
-                            path.parent.rmdir()
-                        except OSError:
-                            pass
-            except Exception as exc:
-                cleanup["error"] = str(exc)[:500]
+                    cleanup["client_model_removed"] = True
+                except Exception as exc:
+                    cleanup["direct_remove_error"] = str(exc)[:500]
+            backing = clone_record.get("backing_path")
+            if backing:
+                path = Path(backing)
+                try:
+                    path.unlink(missing_ok=True)
+                    cleanup["backing_file_removed"] = not path.exists()
+                except OSError as exc:
+                    cleanup["backing_file_error"] = str(exc)[:500]
+                try:
+                    path.parent.rmdir()
+                except OSError:
+                    pass
+            else:
+                cleanup["backing_file_removed"] = True
+            cleanup["removed"] = bool(
+                cleanup["client_model_removed"] and cleanup["backing_file_removed"]
+            )
         if clone is not None and not cleanup["removed"]:
             integrity_errors.append({"code": "reference_clone_cleanup_unproved", "cleanup": cleanup})
 

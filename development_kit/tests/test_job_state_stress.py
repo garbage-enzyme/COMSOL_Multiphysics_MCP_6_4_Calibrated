@@ -32,6 +32,30 @@ def _archive_failure(root: Path) -> Path:
     return archive
 
 
+def _raise_stress_failure(root: Path, message: str, primary: BaseException) -> None:
+    try:
+        archive = _archive_failure(root)
+    except Exception as archive_error:
+        failure = AssertionError(
+            f"{message}; evidence archive failed ({type(archive_error).__name__})"
+        )
+        raise failure from primary
+    raise AssertionError(f"{message}; evidence archived at {archive}") from primary
+
+
+def test_archive_failure_preserves_the_primary_stress_exception(tmp_path, monkeypatch):
+    primary = RuntimeError("primary stress failure")
+    monkeypatch.setattr(
+        f"{__name__}._archive_failure",
+        lambda _root: (_ for _ in ()).throw(OSError("archive failure")),
+    )
+
+    with pytest.raises(AssertionError, match="archive failed") as caught:
+        _raise_stress_failure(tmp_path, "stress failed", primary)
+
+    assert caught.value.__cause__ is primary
+
+
 def test_concurrent_state_readers_writers_survive_sharing_violations(monkeypatch, ascii_tmp_path):
     root = _stress_root(ascii_tmp_path)
     try:
@@ -145,10 +169,7 @@ def test_concurrent_state_readers_writers_survive_sharing_violations(monkeypatch
         assert not (store.job_dir(job_id) / ".state.lock").exists()
         assert store.read_state(job_id) == final
     except BaseException as exc:
-        archive = _archive_failure(root)
-        raise AssertionError(
-            f"durable-state durable-state stress failed; evidence archived at {archive}"
-        ) from exc
+        _raise_stress_failure(root, "durable-state stress failed", exc)
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
@@ -259,9 +280,6 @@ def test_real_windows_exclusive_reader_does_not_corrupt_durable_state(ascii_tmp_
         assert not list(store.job_dir(job_id).glob(".*.tmp"))
         assert not (store.job_dir(job_id) / ".state.lock").exists()
     except BaseException as exc:
-        archive = _archive_failure(root)
-        raise AssertionError(
-            f"durable-state Windows sharing stress failed; evidence archived at {archive}"
-        ) from exc
+        _raise_stress_failure(root, "durable-state Windows sharing stress failed", exc)
     finally:
         shutil.rmtree(root, ignore_errors=True)

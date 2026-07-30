@@ -6,12 +6,12 @@ import hashlib
 from pathlib import Path
 
 import pytest
-
 from src.tools.periodic_mesh_audit import (
     _periodic_groups,
     collect_periodic_mesh_audit,
     run_clone_mesh_smoke,
 )
+
 from development_kit.tests.test_wave_optics_preflight import FullFakeModel
 
 
@@ -43,7 +43,9 @@ def _audit(tmp_path, monkeypatch, **fixture):
     return result
 
 
-def test_valid_rectangular_recipe_is_reported_without_compatibility_overclaim(tmp_path, monkeypatch):
+def test_valid_rectangular_recipe_is_reported_without_compatibility_overclaim(
+    tmp_path, monkeypatch
+):
     result = _audit(tmp_path, monkeypatch)
 
     assert len(result["periodic_groups"]) == 2
@@ -55,7 +57,11 @@ def test_valid_rectangular_recipe_is_reported_without_compatibility_overclaim(tm
         "node_by_node_mesh_equality": "not_evaluated",
     }
     assert [item["tag"] for item in result["mesh_sequence"]["features_in_execution_order"]] == [
-        "ft_x", "cp_x", "ft_y", "cp_y", "ftet1"
+        "ft_x",
+        "cp_x",
+        "ft_y",
+        "cp_y",
+        "ftet1",
     ]
     assert all(item["order_verified"] for item in result["group_recipes"])
 
@@ -103,12 +109,12 @@ def test_segmented_oblique_group_reports_balanced_translation_without_axis_guess
         ({"mismatched_floquet": True}, "repair_periodic_geometry_group_before_meshing"),
     ],
 )
-def test_smallest_actionable_periodic_mesh_mismatch_is_reported(tmp_path, monkeypatch, fixture, expected):
+def test_smallest_actionable_periodic_mesh_mismatch_is_reported(
+    tmp_path, monkeypatch, fixture, expected
+):
     result = _audit(tmp_path, monkeypatch, **fixture)
     mismatches = {
-        mismatch
-        for item in result["actionable_mismatches"]
-        for mismatch in item["mismatches"]
+        mismatch for item in result["actionable_mismatches"] for mismatch in item["mismatches"]
     }
 
     assert expected in mismatches
@@ -214,6 +220,36 @@ def test_clone_only_native_mesh_smoke_preserves_source_and_cleans_artifact(tmp_p
     assert result["native_mesh_build"] == "passed"
     assert result["counts"]["element_count"] == 250
     assert result["source_integrity"]["unchanged"] is True
+    assert result["cleanup"] == {
+        "client_model_removed": True,
+        "clone_file_removed": True,
+        "clone_dir_removed": True,
+    }
+    assert client.removed == [clone]
+    assert not list(tmp_path.glob("periodic_mesh_smoke_*"))
+
+
+def test_clone_mesh_smoke_cleans_loaded_clone_after_post_creation_failure(tmp_path):
+    class FailingMesh(SmokeMesh):
+        def run(self):
+            raise RuntimeError("injected mesh failure")
+
+    source = tmp_path / "source.mph"
+    source.write_bytes(b"source bytes")
+    clone = SmokeModel(source, SmokeComponent(FailingMesh()))
+    client = SmokeClient(clone)
+
+    result = run_clone_mesh_smoke(
+        SmokeModel(source),
+        client,
+        expected_source_sha256=_hash(source),
+        expected_component_tag="comp1",
+        expected_mesh_tag="mesh1",
+        runtime_dir=tmp_path,
+    )
+
+    assert result["success"] is False
+    assert result["native_mesh_build"] == "failed"
     assert result["cleanup"] == {
         "client_model_removed": True,
         "clone_file_removed": True,

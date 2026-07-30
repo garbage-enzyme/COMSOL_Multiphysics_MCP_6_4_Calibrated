@@ -10,6 +10,7 @@ import subprocess
 import sys
 import uuid
 from concurrent.futures import Future
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -48,6 +49,15 @@ SHA_C = "c" * 64
 
 def _absent_ownership():
     return {"lease": {"state": "absent"}, "external_solver_processes": [], "collision": False}
+
+
+@contextmanager
+def _lexical_test_root():
+    root = Path("D:/comsol_semantic_contract_test") / uuid.uuid4().hex
+    try:
+        yield root
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
 
 
 def test_semantic_benchmark_citations_and_digest_share_one_sqlite_snapshot(tmp_path):
@@ -204,11 +214,10 @@ def test_zero_lexical_baseline_cannot_create_infinite_promotion_gain():
 
 
 def test_lexical_baseline_computes_rank_metrics_without_semantic_dependencies():
-    root = Path("D:/comsol_semantic_contract_test") / uuid.uuid4().hex
-    index = root / "manuals.sqlite3"
     corpus = "d" * 64
     source = "COMSOL_Multiphysics/COMSOL_ReferenceManual.pdf"
-    try:
+    with _lexical_test_root() as root:
+        index = root / "manuals.sqlite3"
         build_index_from_records(
             [
                 {
@@ -240,13 +249,24 @@ def test_lexical_baseline_computes_rank_metrics_without_semantic_dependencies():
             ],
         }
         result = evaluate_lexical_baseline(evaluation, index_path=index)
-    finally:
-        shutil.rmtree(root, ignore_errors=True)
 
     assert result["query_count"] == 60
     assert result["summary"]["overall"]["recall_at_5"] == 1.0
     assert result["summary"]["overall"]["mrr_at_10"] == 1.0
     assert result["continuation_gate"]["continue_to_semantic_worker"] is False
+
+
+def test_lexical_fixture_cleanup_covers_setup_failure():
+    captured = None
+
+    with pytest.raises(RuntimeError, match="injected setup failure"):
+        with _lexical_test_root() as root:
+            captured = root
+            root.mkdir(parents=True)
+            (root / "partial.sqlite3").write_bytes(b"partial")
+            raise RuntimeError("injected setup failure")
+
+    assert captured is not None and not captured.exists()
 
 
 def test_rank_metrics_validate_and_deduplicate_citations_before_dcg():

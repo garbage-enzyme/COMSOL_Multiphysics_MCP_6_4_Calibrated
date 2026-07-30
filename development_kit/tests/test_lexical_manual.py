@@ -113,9 +113,7 @@ def test_read_pages_reports_missing_pages(manual_index: Path):
     assert result["missing_pages"] == [2034]
 
 
-def test_read_only_lexical_connections_close_deterministically(
-    manual_index: Path, monkeypatch
-):
+def test_read_only_lexical_connections_close_deterministically(manual_index: Path, monkeypatch):
     real_open = manual_module._open_index
     tracked = []
 
@@ -178,3 +176,32 @@ def test_bounded_worker_enforces_deadline(manual_index: Path):
 def test_non_ascii_index_path_is_rejected(tmp_path: Path):
     with pytest.raises(ValueError, match="ASCII"):
         build_index_from_records([], tmp_path / "中文" / "manuals.sqlite3")
+
+
+def test_index_replacement_failure_removes_completed_temporary_database(
+    ascii_tmp_path, monkeypatch
+):
+    target = ascii_tmp_path / "manuals.sqlite3"
+
+    def fail_replace(_source, destination):
+        assert Path(destination) == target
+        raise PermissionError("injected replacement failure")
+
+    monkeypatch.setattr(manual_module.os, "replace", fail_replace)
+
+    with pytest.raises(PermissionError, match="replacement failure"):
+        build_index_from_records(
+            [
+                {
+                    "source": "manual.pdf",
+                    "module": "manual",
+                    "page": 1,
+                    "heading": "Heading",
+                    "text": "Searchable content",
+                }
+            ],
+            target,
+        )
+
+    assert not target.exists()
+    assert not list(ascii_tmp_path.glob("manuals.sqlite3.tmp-*"))

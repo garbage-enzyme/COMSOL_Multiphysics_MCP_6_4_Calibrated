@@ -162,7 +162,10 @@ def build_index_from_records(
         raise
     else:
         connection.close()
-    os.replace(temporary, target)
+    try:
+        os.replace(temporary, target)
+    finally:
+        temporary.unlink(missing_ok=True)
     return {
         "success": True,
         "index_path": str(target),

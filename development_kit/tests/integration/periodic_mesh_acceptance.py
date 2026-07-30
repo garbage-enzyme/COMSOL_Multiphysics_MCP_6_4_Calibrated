@@ -5,10 +5,10 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from pathlib import Path
 import sys
 import traceback
 import uuid
+from pathlib import Path
 
 ROOT = Path(__file__).parents[3]
 if str(ROOT) not in sys.path:
@@ -31,6 +31,50 @@ def _owned_model_path(artifact_dir: Path, *, lease_acquired: bool) -> Path:
 
 def _result_path(artifact_dir: Path) -> Path:
     return artifact_dir / f"periodic_mesh_gate_result-{uuid.uuid4().hex}.json"
+
+
+def _cleanup_periodic_session(
+    client,
+    models: dict[str, object | None],
+    broken_path: Path | None,
+) -> dict[str, object]:
+    cleanup: dict[str, object] = {
+        "model_removals": {},
+        "client_clear": client is None,
+        "errors": [],
+    }
+    removals = cleanup["model_removals"]
+    errors = cleanup["errors"]
+    if client is not None:
+        for label, model in models.items():
+            if model is not None:
+                try:
+                    client.remove(model)
+                    removals[label] = True
+                except Exception as exc:
+                    removals[label] = False
+                    errors.append(
+                        {"stage": f"remove_{label}", "type": type(exc).__name__}
+                    )
+        try:
+            client.clear()
+            cleanup["client_clear"] = True
+        except Exception as exc:
+            cleanup["client_clear"] = False
+            errors.append({"stage": "client_clear", "type": type(exc).__name__})
+    if broken_path is not None:
+        try:
+            broken_path.unlink(missing_ok=True)
+        except OSError as exc:
+            errors.append({"stage": "derived_unlink", "type": type(exc).__name__})
+    cleanup["derived_file_removed"] = broken_path is None or not broken_path.exists()
+    cleanup["passed"] = bool(
+        cleanup["client_clear"]
+        and all(removals.values())
+        and cleanup["derived_file_removed"]
+        and not errors
+    )
+    return cleanup
 
 
 def _sha256(path: Path) -> str:
@@ -196,21 +240,17 @@ def main() -> None:
         result["error"] = str(exc)
         result["traceback"] = traceback.format_exc(limit=10)
     finally:
-        if client is not None:
-            for model in (broken_model, source_model):
-                if model is not None:
-                    try:
-                        client.remove(model)
-                    except Exception:
-                        pass
-            try:
-                client.clear()
-            except Exception:
-                pass
-        if broken_path is not None:
-            broken_path.unlink(missing_ok=True)
-        result["derived_cleanup"] = broken_path is None or not broken_path.exists()
+        cleanup = _cleanup_periodic_session(
+            client,
+            {"broken": broken_model, "source": source_model},
+            broken_path,
+        )
+        result["derived_cleanup"] = cleanup["derived_file_removed"]
         result["lease_release"] = owner.release()
+        cleanup["passed"] = bool(cleanup["passed"] and result["lease_release"].get("success"))
+        result["cleanup"] = cleanup
+        result["success"] = bool(result.get("success") and cleanup["passed"])
+        exit_code = 0 if result["success"] else 1
         artifact_dir.mkdir(parents=True, exist_ok=True)
         result_path = result_path or _result_path(artifact_dir)
         result["receipt_name"] = result_path.name

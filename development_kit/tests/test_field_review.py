@@ -358,6 +358,9 @@ def test_pair_assembler_rejects_windows_device_bundle_name(tmp_path):
 
 def test_pair_assembler_cleans_owned_output_if_bundle_commit_fails(tmp_path, monkeypatch):
     directory = _create_job(tmp_path)
+    neighbor = directory / "artifacts" / "visual-review" / "neighbor.txt"
+    neighbor.parent.mkdir(parents=True, exist_ok=True)
+    neighbor.write_bytes(b"unrelated")
 
     def fail_bundle_write(*_args, **_kwargs):
         raise OSError("injected bundle write failure")
@@ -373,3 +376,4 @@ def test_pair_assembler_cleans_owned_output_if_bundle_commit_fails(tmp_path, mon
             coordinate_unit="um",
         )
     assert not (directory / "artifacts" / "visual-review" / "write-failed").exists()
+    assert neighbor.read_bytes() == b"unrelated"

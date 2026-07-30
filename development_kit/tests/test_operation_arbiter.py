@@ -291,7 +291,7 @@ def test_non_mapping_result_becomes_failure_when_release_is_unverified(
 
 
 def test_cached_arbiter_is_rebound_after_process_identity_change(tmp_path, monkeypatch):
-    arbiter_module._ARBITERS.clear()
+    original_arbiters = dict(arbiter_module._ARBITERS)
     process = {"pid": 301}
     monkeypatch.setattr(arbiter_module, "default_runtime_dir", lambda: tmp_path)
     monkeypatch.setattr(arbiter_module.os, "getpid", lambda: process["pid"])
@@ -301,12 +301,14 @@ def test_cached_arbiter_is_rebound_after_process_identity_change(tmp_path, monke
         lambda pid: {301: 30.1, 302: 30.2}[pid],
     )
     try:
+        arbiter_module._ARBITERS.clear()
         first = arbiter_module.get_operation_arbiter()
         repeated = arbiter_module.get_operation_arbiter()
         process["pid"] = 302
         rebound = arbiter_module.get_operation_arbiter()
     finally:
         arbiter_module._ARBITERS.clear()
+        arbiter_module._ARBITERS.update(original_arbiters)
 
     assert repeated is first
     assert rebound is not first

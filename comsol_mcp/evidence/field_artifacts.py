@@ -4,15 +4,18 @@ from __future__ import annotations
 
 import math
 import os
+import shutil
 import uuid
 from pathlib import Path
 from typing import Any, Mapping
 
 from comsol_mcp.durable.io import (
+    atomic_write_bytes_exclusive,
     atomic_write_json_exclusive,
+    fsync_directory,
     publish_file_exclusive,
+    read_file_bytes_bounded,
     snapshot_file_bounded,
-    unlink_if_identity,
 )
 
 from .field_bundle import validate_field_evidence_request
@@ -39,6 +42,7 @@ def _descriptor(
     media_type: str,
     max_bytes: int,
     required_prefix: bytes | None = None,
+    relative_path: str | None = None,
 ) -> dict[str, Any]:
     resolved = path.resolve(strict=True)
     try:
@@ -56,7 +60,7 @@ def _descriptor(
         raise ValueError("png_path does not contain a PNG signature")
     return {
         "artifact_id": artifact_id,
-        "relative_path": relative,
+        "relative_path": relative_path or relative,
         "media_type": media_type,
         "sha256": snapshot["sha256"],
         "byte_count": snapshot["byte_count"],
@@ -69,6 +73,8 @@ def _png_descriptor(
     root: Path,
     artifact_id: str | None,
     max_bytes: int,
+    destination: Path,
+    relative_path: str,
 ) -> dict[str, Any] | None:
     if artifact_id is None:
         if value is not None:
@@ -82,13 +88,18 @@ def _png_descriptor(
     except ValueError as exc:
         raise ValueError("png_path must remain inside artifact_root") from exc
     try:
+        payload = read_file_bytes_bounded(path, max_bytes=max_bytes)
+        if not payload.startswith(_PNG_SIGNATURE):
+            raise ValueError("png_path does not contain a PNG signature")
+        atomic_write_bytes_exclusive(destination, payload)
         return _descriptor(
-            path,
+            destination,
             root=root,
             artifact_id=artifact_id,
             media_type="image/png",
             max_bytes=max_bytes,
             required_prefix=_PNG_SIGNATURE,
+            relative_path=relative_path,
         )
     except FileNotFoundError as exc:
         raise ValueError("png_path must name an existing PNG file") from exc
@@ -210,14 +221,16 @@ def write_field_evidence_artifacts(
     coordinate_ranges["unit"] = request_value["coordinate_bounds"]["unit"]
 
     view_directory = root / view["view_fingerprint"]
-    view_directory.mkdir(parents=True, exist_ok=True)
-    array_path = view_directory / "field_arrays.npz"
-    manifest_path = view_directory / "field_manifest.json"
-    if array_path.exists() or manifest_path.exists():
+    if view_directory.exists():
         raise FileExistsError("field evidence artifacts already exist for this view")
-    temporary = view_directory / f".field_arrays.{os.getpid()}.{uuid.uuid4().hex}.tmp"
-    array_identity: tuple[int, int] | None = None
-    manifest_identity: tuple[int, int] | None = None
+    staging_directory = root / f".fb-{uuid.uuid4().hex[:8]}"
+    staging_directory.mkdir(parents=False, exist_ok=False)
+    array_path = staging_directory / "field_arrays.npz"
+    manifest_path = staging_directory / "field_manifest.json"
+    png_destination = staging_directory / "field_render.png"
+    temporary = staging_directory / ".a.tmp"
+    published = False
+    final_prefix = view["view_fingerprint"]
     try:
         with temporary.open("xb") as handle:
             np.savez_compressed(
@@ -227,19 +240,22 @@ def write_field_evidence_artifacts(
             )
             handle.flush()
             os.fsync(handle.fileno())
-        array_identity = publish_file_exclusive(temporary, array_path)
+        publish_file_exclusive(temporary, array_path)
         array_descriptor = _descriptor(
             array_path,
             root=root,
             artifact_id=view["outputs"]["array_artifact_id"],
             media_type="application/x-npz",
             max_bytes=request_value["limits"]["max_artifact_bytes"],
+            relative_path=f"{final_prefix}/field_arrays.npz",
         )
         png_descriptor = _png_descriptor(
             png_path,
             root=root,
             artifact_id=view["outputs"]["png_artifact_id"],
             max_bytes=request_value["limits"]["max_artifact_bytes"],
+            destination=png_destination,
+            relative_path=f"{final_prefix}/field_render.png",
         )
         manifest = build_field_evidence_manifest(
             request=request_value,
@@ -255,13 +271,14 @@ def write_field_evidence_artifacts(
             array_artifact=array_descriptor,
             png_artifact=png_descriptor,
         )
-        manifest_identity = atomic_write_json_exclusive(manifest_path, manifest)
+        atomic_write_json_exclusive(manifest_path, manifest)
         manifest_descriptor = _descriptor(
             manifest_path,
             root=root,
             artifact_id=view["outputs"]["manifest_artifact_id"],
             media_type="application/json",
             max_bytes=request_value["limits"]["max_artifact_bytes"],
+            relative_path=f"{final_prefix}/field_manifest.json",
         )
         total_bytes = (
             array_descriptor["byte_count"]
@@ -270,6 +287,12 @@ def write_field_evidence_artifacts(
         )
         if total_bytes > request_value["limits"]["max_artifact_bytes"]:
             raise ValueError("complete field bundle exceeds the caller-declared byte limit")
+        try:
+            os.rename(staging_directory, view_directory)
+        except FileExistsError as exc:
+            raise FileExistsError("field evidence artifacts already exist for this view") from exc
+        fsync_directory(root)
+        published = True
         return {
             "request_id": request_value["request_id"],
             "request_fingerprint": request_value["request_fingerprint"],
@@ -289,14 +312,10 @@ def write_field_evidence_artifacts(
             "visual_review_state": "visual_review_required",
             "semantic_mode_label": "not_assigned",
         }
-    except Exception:
-        if manifest_identity is not None:
-            unlink_if_identity(manifest_path, manifest_identity)
-        if array_identity is not None:
-            unlink_if_identity(array_path, array_identity)
-        raise
     finally:
         temporary.unlink(missing_ok=True)
+        if not published:
+            shutil.rmtree(staging_directory, ignore_errors=True)
 
 
 __all__ = ["write_field_evidence_artifacts"]
