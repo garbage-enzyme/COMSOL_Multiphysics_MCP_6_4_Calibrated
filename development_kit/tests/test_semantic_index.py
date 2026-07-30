@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import shutil
 import subprocess
 import sys
@@ -26,6 +25,8 @@ from src.knowledge.semantic_index import (
     validate_index_directory,
     validate_pinned_model,
 )
+
+from development_kit.tests.semantic_test_support import isolated_semantic_environment
 
 
 class FakeEncoder:
@@ -405,14 +406,20 @@ def test_mismatch_non_ascii_and_pointer_rollback_gates(semantic_index_assets):
 def test_semantic_index_import_does_not_load_ml_or_spawn(semantic_index_root):
     code = """
 import json, sys
+process_launch_events = []
+sys.addaudithook(
+    lambda event, args: process_launch_events.append(event)
+    if event in {'os.system', 'os.startfile', 'os.spawn', 'os.posix_spawn', 'subprocess.Popen'} else None
+)
 import src.knowledge.semantic_index
 for name in ('numpy', 'chromadb', 'torch', 'sentence_transformers', 'mph', 'psutil'):
     if name in sys.modules:
         raise RuntimeError(f'forbidden eager import: {name}')
+if process_launch_events:
+    raise RuntimeError(f'import launched a process: {process_launch_events}')
 print(json.dumps({'ok': True}))
 """
-    environment = os.environ.copy()
-    environment["PYTHONOPTIMIZE"] = "1"
+    environment = isolated_semantic_environment({"PYTHONOPTIMIZE": "1"})
     completed = subprocess.run(
         [sys.executable, "-c", code],
         cwd=Path(__file__).parents[2],

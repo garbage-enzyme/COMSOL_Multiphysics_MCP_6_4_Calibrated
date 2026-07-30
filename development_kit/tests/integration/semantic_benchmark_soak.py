@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 import psutil
+from src.jobs.store import JobLock
 from src.knowledge.semantic_contracts import (
     SEMANTIC_PROMOTION_GATE,
     WORKER_PROTOCOL_SCHEMA_VERSION,
@@ -34,6 +35,7 @@ EVALUATION_PATH = ROOT / "development_kit" / "tests" / "fixtures" / "semantic_re
 DEPLOYMENT = Path("D:/comsol_semantic")
 LEXICAL = Path("D:/comsol_docs_fts/manuals.sqlite3")
 MODEL = DEPLOYMENT / "models" / "all-MiniLM-L6-v2" / "1110a243fdf4706b3f48f1d95db1a4f5529b4d41"
+RUN_LOCK = Path("D:/comsol_runtime/semantic_soak/acceptance.lock")
 
 
 def _percentile(values: list[float], fraction: float) -> float:
@@ -260,6 +262,22 @@ def _raw_request(manager: SemanticWorkerManager, request_id: str, query: str) ->
     return json.loads(bytes(data).decode("utf-8"))
 
 
+def _classify_burst(responses: list[Mapping[str, Any]]) -> dict[str, int]:
+    successes = sum(1 for response in responses if response.get("success") is True)
+    busy = sum(
+        1
+        for response in responses
+        if response.get("success") is False
+        and response.get("error", {}).get("code") == "busy"
+    )
+    return {
+        "requests": len(responses),
+        "successes": successes,
+        "busy": busy,
+        "unexpected_failures": len(responses) - successes - busy,
+    }
+
+
 def _soak(evaluation: Mapping[str, Any], index_path: Path) -> dict[str, Any]:
     before = index_file_snapshot(index_path)
     startup_started = time.perf_counter()
@@ -303,10 +321,7 @@ def _soak(evaluation: Mapping[str, Any], index_path: Path) -> dict[str, Any]:
         rss_end = process.memory_info().rss
     reset = lifecycle["reset"]
     after = index_file_snapshot(index_path)
-    busy = sum(
-        1 for response in burst_responses
-        if not response.get("success") and response.get("error", {}).get("code") == "busy"
-    )
+    burst = _classify_burst(burst_responses)
     return {
         "cold_start_seconds": cold,
         "sequential_queries": 500,
@@ -320,11 +335,7 @@ def _soak(evaluation: Mapping[str, Any], index_path: Path) -> dict[str, Any]:
         "rss_bytes": {"start": rss_start, "end": rss_end, "growth": rss_end - rss_start},
         "load_count": health["status"]["load_count"],
         "query_count": health["status"]["query_count"],
-        "burst": {
-            "requests": len(burst_responses),
-            "successes": sum(1 for response in burst_responses if response.get("success")),
-            "busy": busy,
-        },
+        "burst": burst,
         "reset": reset,
         "index_immutable": before == after,
     }
@@ -343,10 +354,7 @@ def _atomic_write(path: Path, value: Mapping[str, Any]) -> None:
         temporary.unlink(missing_ok=True)
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output", default="D:/comsol_runtime/semantic_soak/benchmark_soak.json")
-    args = parser.parse_args()
+def _run_benchmark(output_path: Path) -> None:
     evaluation = validate_evaluation_set(json.loads(EVALUATION_PATH.read_text(encoding="utf-8")))
     corpus = _corpus_citations()
     current = read_current(DEPLOYMENT)
@@ -402,9 +410,15 @@ def main() -> None:
         raise RuntimeError("model load-count gate failed")
     if soak["errors"] or not soak["index_immutable"] or not soak["reset"]["reset"]["absent"]:
         raise RuntimeError("soak containment or immutability gate failed")
-    if soak["burst"]["busy"] < 1:
-        raise RuntimeError("concurrent burst did not exercise bounded busy rejection")
-    _atomic_write(Path(args.output), output)
+    burst = soak["burst"]
+    if (
+        burst["successes"] < 1
+        or burst["busy"] < 1
+        or burst["unexpected_failures"] != 0
+        or burst["successes"] + burst["busy"] != burst["requests"]
+    ):
+        raise RuntimeError("concurrent burst result classification gate failed")
+    _atomic_write(output_path, output)
     print(json.dumps({
         "success": True,
         "promotion": promotion,
@@ -416,8 +430,16 @@ def main() -> None:
             "sequential_queries", "latency_seconds", "response_bytes", "rss_bytes",
             "load_count", "query_count", "burst", "index_immutable",
         )},
-        "artifact": str(Path(args.output)),
+        "artifact": str(output_path),
     }, ensure_ascii=False, allow_nan=False, indent=2))
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--output", default="D:/comsol_runtime/semantic_soak/benchmark_soak.json")
+    args = parser.parse_args()
+    with JobLock(RUN_LOCK, timeout=5.0):
+        _run_benchmark(Path(args.output))
 
 
 if __name__ == "__main__":

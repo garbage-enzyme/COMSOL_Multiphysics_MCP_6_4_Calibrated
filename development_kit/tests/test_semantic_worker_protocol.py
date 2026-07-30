@@ -26,6 +26,8 @@ from src.knowledge.semantic_worker import _RequestHandler, _WorkerServer, _Worke
 from src.tools.capabilities import get_capabilities
 from src.tools.ownership import SolverOwnership
 
+from development_kit.tests.semantic_test_support import isolated_semantic_environment
+
 
 def _raw_request(
     port: int,
@@ -514,19 +516,21 @@ def test_stale_identity_refuses_action_until_exact_record_is_restored():
     with SemanticWorkerManager(startup_deadline=2.0) as manager:
         assert manager.start()["success"] is True
         original = dict(manager._identity)
-        manager._identity["process_create_time"] -= 10.0
+        try:
+            manager._identity["process_create_time"] -= 10.0
 
-        refused = manager.reset()
-        assert refused["success"] is False
-        assert refused["reset"]["refused"] is True
-        assert manager._process is not None and manager._process.poll() is None
-        restart = manager.start()
-        assert restart["success"] is False
-        assert restart["error"]["code"] == "worker_identity_uncertain"
-        assert manager._process is not None and manager._process.pid == original["pid"]
-
-        manager._identity = original
-        assert manager.reset()["success"] is True
+            refused = manager.reset()
+            assert refused["success"] is False
+            assert refused["reset"]["refused"] is True
+            assert manager._process is not None and manager._process.poll() is None
+            restart = manager.start()
+            assert restart["success"] is False
+            assert restart["error"]["code"] == "worker_identity_uncertain"
+            assert manager._process is not None and manager._process.pid == original["pid"]
+        finally:
+            manager._identity = original
+            cleanup = manager.reset()
+        assert cleanup["success"] is True
 
 
 def test_crash_after_response_is_observed_without_process_leak():
@@ -546,10 +550,11 @@ def test_crash_after_response_is_observed_without_process_leak():
         assert manager.reset()["success"] is True
 
 
-def test_idle_ttl_stops_worker_lazily():
-    with SemanticWorkerManager(startup_deadline=2.0, idle_ttl=0.05) as manager:
+def test_idle_ttl_stops_worker_lazily_without_wall_clock_margin():
+    with SemanticWorkerManager(startup_deadline=2.0, idle_ttl=300.0) as manager:
         assert manager.health()["success"] is True
-        time.sleep(0.08)
+        manager.idle_ttl = 1.0
+        manager._last_activity = float(manager._last_activity) - manager.idle_ttl
         assert manager.status()["state"] == "stopped"
 
 
@@ -714,11 +719,23 @@ def test_hanging_semantic_worker_does_not_delay_control_plane_or_lexical_search(
 def test_parent_import_is_stdlib_only_and_spawns_nothing():
     code = """
 import json, sys
+process_launch_events = []
+sys.addaudithook(
+    lambda event, args: process_launch_events.append(event)
+    if event in {'os.system', 'os.startfile', 'os.spawn', 'os.posix_spawn', 'subprocess.Popen'} else None
+)
 import src.knowledge.semantic_process
 for name in ('chromadb', 'torch', 'sentence_transformers', 'mph', 'psutil'):
     assert name not in sys.modules, name
-print(json.dumps({'ok': True}))
+assert process_launch_events == [], process_launch_events
+print(json.dumps({'ok': True, 'launches': process_launch_events}))
 """
-    completed = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=10)
+    completed = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        env=isolated_semantic_environment(),
+    )
     assert completed.returncode == 0, completed.stderr
     assert json.loads(completed.stdout)["ok"] is True

@@ -5,13 +5,17 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import threading
+import subprocess
+import sys
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeout
 from pathlib import Path
 
 import psutil
 from src.jobs.manager import JobManager
+from src.jobs.store import JobLock
 from src.knowledge.lexical_manual import run_bounded
 from src.knowledge.semantic_process import SemanticWorkerManager
 from src.tools.capabilities import get_capabilities
@@ -19,6 +23,8 @@ from src.tools.ownership import SolverOwnership
 
 ROOT = Path("D:/comsol_runtime/semantic_soak")
 MODEL = "D:/comsol_semantic/models/all-MiniLM-L6-v2/1110a243fdf4706b3f48f1d95db1a4f5529b4d41"
+RUN_LOCK = ROOT / "containment.acceptance.lock"
+CONTROL_WATCHDOG_SECONDS = 10.0
 
 
 def _manager(*, fault: str, deadline: float) -> SemanticWorkerManager:
@@ -50,7 +56,9 @@ def _semantic_worker_pids() -> list[int]:
     return found
 
 
-def _poll_controls(job_manager: JobManager, job_id: str, ownership: SolverOwnership) -> dict:
+def _collect_controls(runtime: Path, job_id: str) -> dict:
+    job_manager = JobManager(runtime / "jobs", reconcile_on_start=False)
+    ownership = SolverOwnership(runtime_dir=runtime / "solver-runtime")
     timings = {}
     started = time.perf_counter()
     capabilities = get_capabilities()
@@ -69,13 +77,61 @@ def _poll_controls(job_manager: JobManager, job_id: str, ownership: SolverOwners
         "mode": "auto",
     }, timeout=2.0)
     timings["manual_search"] = time.perf_counter() - started
-    assert capabilities["success"] is True
-    assert solver["lease"]["state"] == "absent"
-    assert solver["external_solver_processes"] == []
-    assert solver["collision"] is False
-    assert job["success"] is True and job["status"] == "completed"
-    assert lexical["success"] is True and lexical["results"]
+    if capabilities.get("success") is not True:
+        raise RuntimeError("capabilities control probe failed")
+    if (
+        solver["lease"]["state"] != "absent"
+        or solver["external_solver_processes"] != []
+        or solver["collision"] is not False
+    ):
+        raise RuntimeError("solver control probe changed or found ownership")
+    if job.get("success") is not True or job.get("status") != "completed":
+        raise RuntimeError("job control probe failed")
+    if lexical.get("success") is not True or not lexical.get("results"):
+        raise RuntimeError("manual-search control probe failed")
     return {"timings": timings, "lexical_count": lexical["count"]}
+
+
+def _poll_controls(runtime: Path, job_id: str) -> dict:
+    command = [
+        sys.executable,
+        "-m",
+        "development_kit.tests.integration.semantic_worker_containment",
+        "--control-probe",
+        "--runtime",
+        str(runtime),
+        "--job-id",
+        job_id,
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=Path(__file__).parents[3],
+        capture_output=True,
+        text=True,
+        timeout=CONTROL_WATCHDOG_SECONDS,
+        creationflags=(
+            getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
+        ),
+    )
+    if completed.returncode != 0:
+        raise RuntimeError("control-plane watchdog subprocess failed")
+    lines = [line for line in completed.stdout.splitlines() if line.strip()]
+    if len(lines) != 1:
+        raise RuntimeError("control-plane watchdog returned malformed output")
+    payload = json.loads(lines[0])
+    if not isinstance(payload, dict):
+        raise RuntimeError("control-plane watchdog returned a non-object")
+    return payload
+
+
+def _require_future_result(future, timeout: float) -> dict:
+    try:
+        result = future.result(timeout=timeout)
+    except FutureTimeout as exc:
+        raise RuntimeError("semantic query did not terminate before its deadline") from exc
+    if not isinstance(result, dict):
+        raise RuntimeError("semantic query thread returned a non-object")
+    return result
 
 
 def _atomic_write(path: Path, value: dict) -> None:
@@ -91,7 +147,7 @@ def _atomic_write(path: Path, value: dict) -> None:
         temporary.unlink(missing_ok=True)
 
 
-def main() -> None:
+def _run_containment() -> None:
     runtime = ROOT / f"containment-{uuid.uuid4().hex}"
     ownership = SolverOwnership(runtime_dir=runtime / "solver-runtime")
     jobs = JobManager(runtime / "jobs", reconcile_on_start=False)
@@ -100,15 +156,10 @@ def main() -> None:
         {"schema_version": "2", "status": "completed", "worker_pid": None},
     )
     try:
-        result: dict = {}
         query_started = time.perf_counter()
         with _manager(fault="query_hang", deadline=30.0) as hanging:
-            thread = threading.Thread(
-                target=lambda: result.update(hanging.query("forced thirty second hang")),
-                daemon=True,
-            )
-            try:
-                thread.start()
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(hanging.query, "forced thirty second hang")
                 deadline = time.monotonic() + 15.0
                 while (
                     hanging._process is None or hanging._port is None
@@ -119,14 +170,11 @@ def main() -> None:
                 hang_pid = hanging._process.pid
                 polls = []
                 for index in range(4):
-                    polls.append({"poll": index + 1, **_poll_controls(jobs, job_id, ownership)})
+                    polls.append({"poll": index + 1, **_poll_controls(runtime, job_id)})
                     if index < 3:
                         time.sleep(5.0)
-            finally:
-                thread.join(timeout=35.0)
+                result = _require_future_result(future, 35.0)
             hang_wall = time.perf_counter() - query_started
-            if thread.is_alive():
-                raise RuntimeError("30-second semantic hang did not terminate")
             assert result["success"] is False
             assert result["retried"] is False
             assert result["cleanup"]["absent"] is True
@@ -175,6 +223,23 @@ def main() -> None:
         }, indent=2))
     finally:
         shutil.rmtree(runtime, ignore_errors=True)
+
+
+def main() -> None:
+    import argparse
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--control-probe", action="store_true")
+    parser.add_argument("--runtime")
+    parser.add_argument("--job-id")
+    args = parser.parse_args()
+    if args.control_probe:
+        if not args.runtime or not args.job_id:
+            raise SystemExit("control probe requires --runtime and --job-id")
+        print(json.dumps(_collect_controls(Path(args.runtime), args.job_id)))
+        return
+    with JobLock(RUN_LOCK, timeout=5.0):
+        _run_containment()
 
 
 if __name__ == "__main__":

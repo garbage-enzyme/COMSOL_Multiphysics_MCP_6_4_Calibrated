@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sys
 import time
 import uuid
@@ -14,10 +15,12 @@ from typing import Any
 import anyio
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
+from src.jobs.store import JobLock
 
 ROOT = Path(__file__).parents[3]
 PYTHON = Path(sys.executable)
 OUTPUT = Path("D:/comsol_runtime/semantic_profile/live_profile.json")
+RUN_LOCK = OUTPUT.parent / "acceptance.lock"
 MODEL = Path("D:/comsol_semantic/models/all-MiniLM-L6-v2/1110a243fdf4706b3f48f1d95db1a4f5529b4d41")
 PROFILE_COUNTS = {
     "core": 43,
@@ -46,11 +49,11 @@ def _decode(result: Any) -> dict[str, Any]:
     raise ValueError("MCP result did not contain an object")
 
 
-def _server(profile: str) -> StdioServerParameters:
+def _server(profile: str, runtime_dir: Path) -> StdioServerParameters:
     environment = os.environ.copy()
     environment.update({
         "COMSOL_MCP_PROFILE": profile,
-        "COMSOL_MCP_RUNTIME_DIR": "D:/comsol_runtime",
+        "COMSOL_MCP_RUNTIME_DIR": str(runtime_dir),
         "COMSOL_SEMANTIC_ROOT": "D:/comsol_semantic",
         "COMSOL_SEMANTIC_LEXICAL_INDEX": "D:/comsol_docs_fts/manuals.sqlite3",
         "COMSOL_SEMANTIC_MODEL_PATH": str(MODEL),
@@ -71,8 +74,8 @@ async def _call(session: ClientSession, name: str, arguments: dict[str, Any]) ->
     }
 
 
-async def _discover(profile: str) -> dict[str, Any]:
-    async with stdio_client(_server(profile)) as (read, write):
+async def _discover(profile: str, runtime_dir: Path) -> dict[str, Any]:
+    async with stdio_client(_server(profile, runtime_dir)) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
             listed = await session.list_tools()
@@ -84,8 +87,8 @@ async def _discover(profile: str) -> dict[str, Any]:
     return {"profile": profile, "tool_count": len(names), "tools": names}
 
 
-async def _semantic_flow() -> dict[str, Any]:
-    async with stdio_client(_server("semantic_docs")) as (read, write):
+async def _semantic_flow(runtime_dir: Path) -> dict[str, Any]:
+    async with stdio_client(_server("semantic_docs", runtime_dir)) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
             try:
@@ -135,26 +138,32 @@ async def _semantic_flow() -> dict[str, Any]:
     }
 
 
-async def _run() -> dict[str, Any]:
+async def _run(runtime_dir: Path) -> dict[str, Any]:
     discovery = []
     for profile in PROFILE_COUNTS:
-        discovery.append(await _discover(profile))
-    semantic = await _semantic_flow()
+        discovery.append(await _discover(profile, runtime_dir))
+    semantic = await _semantic_flow(runtime_dir)
     return {"schema_version": "1", "success": True, "discovery": discovery, "semantic": semantic}
 
 
 def main() -> None:
-    output = anyio.run(_run)
-    OUTPUT.parent.mkdir(parents=True, exist_ok=True)
-    temporary = OUTPUT.with_name(f".tmp-{uuid.uuid4().hex[:8]}")
-    try:
-        with temporary.open("wb") as handle:
-            handle.write(json.dumps(output, ensure_ascii=False, allow_nan=False, indent=2).encode("utf-8") + b"\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, OUTPUT)
-    finally:
-        temporary.unlink(missing_ok=True)
+    run_id = uuid.uuid4().hex
+    runtime_dir = OUTPUT.parent / "runs" / run_id
+    with JobLock(RUN_LOCK, timeout=5.0):
+        try:
+            output = anyio.run(_run, runtime_dir)
+            OUTPUT.parent.mkdir(parents=True, exist_ok=True)
+            temporary = OUTPUT.with_name(f".tmp-{run_id[:8]}")
+            try:
+                with temporary.open("wb") as handle:
+                    handle.write(json.dumps(output, ensure_ascii=False, allow_nan=False, indent=2).encode("utf-8") + b"\n")
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                os.replace(temporary, OUTPUT)
+            finally:
+                temporary.unlink(missing_ok=True)
+        finally:
+            shutil.rmtree(runtime_dir, ignore_errors=True)
     print(json.dumps({
         "success": True,
         "profiles": {item["profile"]: item["tool_count"] for item in output["discovery"]},

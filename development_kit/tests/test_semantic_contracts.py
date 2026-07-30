@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import uuid
+from concurrent.futures import Future
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -28,8 +29,10 @@ from development_kit.benchmarks.semantic_benchmark import (
     evaluate_lexical_baseline,
 )
 from development_kit.tests.integration import semantic_benchmark_soak as soak_module
+from development_kit.tests.integration import semantic_profile_acceptance as profile_module
 from development_kit.tests.integration import semantic_worker_containment as containment_module
 from development_kit.tests.integration.semantic_benchmark_soak import _promotion
+from development_kit.tests.semantic_test_support import isolated_semantic_environment
 
 ROOT = Path(__file__).parents[2]
 EVALUATION_PATH = (
@@ -274,20 +277,111 @@ def test_semantic_worker_inventory_matches_actual_module_command(monkeypatch):
     assert containment_module._semantic_worker_pids() == [1]
 
 
+def test_semantic_acceptance_uses_isolated_runtime_and_run_lock():
+    runtime = Path("D:/comsol_runtime/semantic_profile/runs/test-run")
+    parameters = profile_module._server("semantic_docs", runtime)
+
+    assert parameters.env["COMSOL_MCP_RUNTIME_DIR"] == str(runtime)
+    assert profile_module.RUN_LOCK.name == "acceptance.lock"
+    assert profile_module.RUN_LOCK.is_absolute()
+
+
+def test_concurrent_burst_requires_success_busy_and_no_unexpected_failures():
+    responses = [
+        {"success": True},
+        {"success": False, "error": {"code": "busy"}},
+        {"success": False, "error": {"code": "backend_failure"}},
+    ]
+
+    assert soak_module._classify_burst(responses) == {
+        "requests": 3,
+        "successes": 1,
+        "busy": 1,
+        "unexpected_failures": 1,
+    }
+
+
+def test_control_probe_watchdog_and_query_future_propagate_failures(monkeypatch):
+    monkeypatch.setattr(
+        containment_module.subprocess,
+        "run",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            subprocess.TimeoutExpired("control-probe", 10)
+        ),
+    )
+    with pytest.raises(subprocess.TimeoutExpired):
+        containment_module._poll_controls(Path("D:/runtime"), "job-test")
+
+    future = Future()
+    future.set_exception(RuntimeError("query thread failed"))
+    with pytest.raises(RuntimeError, match="query thread failed"):
+        containment_module._require_future_result(future, 1.0)
+
+
+def test_semantic_subprocess_environment_removes_host_overrides(monkeypatch):
+    monkeypatch.setenv("COMSOL_SEMANTIC_ROOT", "D:/host-state")
+    monkeypatch.setenv("COMSOL_SEMANTIC_MODEL_PATH", "D:/host-model")
+    monkeypatch.setenv("PYTHONPATH", "D:/host-python")
+    monkeypatch.setenv("PYTHONHOME", "D:/host-home")
+
+    environment = isolated_semantic_environment()
+
+    assert "COMSOL_SEMANTIC_ROOT" not in environment
+    assert "COMSOL_SEMANTIC_MODEL_PATH" not in environment
+    assert "PYTHONPATH" not in environment
+    assert "PYTHONHOME" not in environment
+    assert environment["PYTHONNOUSERSITE"] == "1"
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows detached process audit")
+def test_import_audit_hook_observes_a_detached_subprocess():
+    code = r"""
+import json, subprocess, sys
+events = []
+sys.addaudithook(
+    lambda event, args: events.append(event)
+    if event in {'os.system', 'os.startfile', 'os.spawn', 'os.posix_spawn', 'subprocess.Popen'} else None
+)
+process = subprocess.Popen(
+    [sys.executable, '-c', 'pass'],
+    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS,
+)
+process.wait(timeout=10)
+print(json.dumps(events))
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        timeout=20,
+        env=isolated_semantic_environment(),
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "subprocess.Popen" in json.loads(completed.stdout)
+
+
 def test_semantic_contract_imports_do_not_load_heavy_semantic_or_comsol_modules():
     code = """
 import json, sys
+process_launch_events = []
+sys.addaudithook(
+    lambda event, args: process_launch_events.append(event)
+    if event in {'os.system', 'os.startfile', 'os.spawn', 'os.posix_spawn', 'subprocess.Popen'} else None
+)
 import src.knowledge.semantic_contracts
 import development_kit.benchmarks.semantic_benchmark
 import psutil
 for name in ('chromadb', 'torch', 'sentence_transformers', 'mph'):
     assert name not in sys.modules, name
 assert psutil.Process().children(recursive=True) == []
-print(json.dumps({'ok': True, 'children': 0}))
+assert process_launch_events == [], process_launch_events
+print(json.dumps({'ok': True, 'children': 0, 'launches': process_launch_events}))
 """
     completed = subprocess.run(
         [sys.executable, "-c", code],
         cwd=ROOT,
+        env=isolated_semantic_environment(),
         capture_output=True,
         text=True,
         timeout=20,

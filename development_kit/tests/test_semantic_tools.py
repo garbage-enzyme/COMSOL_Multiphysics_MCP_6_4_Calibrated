@@ -5,18 +5,31 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-from pathlib import Path
 import shutil
 import subprocess
 import sys
 import uuid
+from pathlib import Path
 
-from mcp.server.fastmcp import FastMCP
 import pytest
-
+from mcp.server.fastmcp import FastMCP
 from src.knowledge.semantic_runtime import SemanticService, semantic_configuration
 from src.server import create_server
 from src.tools.semantic_docs import register_semantic_doc_tools
+
+from development_kit.tests.semantic_test_support import isolated_semantic_environment
+
+
+def _decode_public_tool_result(result):
+    if isinstance(result, dict):
+        return result
+    for block in result:
+        text = getattr(block, "text", None)
+        if isinstance(text, str):
+            value = json.loads(text)
+            if isinstance(value, dict):
+                return value
+    raise ValueError("public FastMCP result did not contain a JSON object")
 
 
 @pytest.fixture
@@ -106,15 +119,19 @@ def test_cold_status_does_not_follow_current_pointer_outside_deployment(
 
 def test_failed_warm_health_degrades_without_leaving_worker(lightweight_deployment):
     service = SemanticService(lightweight_deployment)
-    status = service.status(warm=True)
+    try:
+        status = service.status(warm=True)
 
-    assert status["success"] is True
-    assert status["available"] is False
-    assert status["health_gate_passed"] is False
-    assert status["worker"]["health"]["success"] is False
-    assert status["worker"]["state"] == "stopped"
-    assert service._manager is not None
-    assert service._manager.status()["state"] == "stopped"
+        assert status["success"] is True
+        assert status["available"] is False
+        assert status["health_gate_passed"] is False
+        assert status["worker"]["health"]["success"] is False
+        assert status["worker"]["state"] == "stopped"
+        assert service._manager is not None
+        assert service._manager.status()["state"] == "stopped"
+    finally:
+        cleanup = service.reset()
+    assert cleanup["success"] is True
 
 
 def test_unconfigured_search_returns_explicit_lexical_fallback(tmp_path):
@@ -151,15 +168,26 @@ def test_public_tool_schemas_expose_queries_filters_and_controls_but_no_paths(mo
     monkeypatch.setattr(module, "get_semantic_service", lambda: FakeService())
     server = FastMCP("semantic-tools-test")
     register_semantic_doc_tools(server)
-    tools = server._tool_manager._tools
 
-    result = tools["semantic_search"].fn(
-        "periodic port", module="Wave_Optics_Module", limit=3,
-        source=None, page_start=10, page_end=20,
-    )
-    status = tools["semantic_status"].fn(warm=True)
-    reset = tools["semantic_worker_reset"].fn()
-    schemas = {tool.name: tool.inputSchema for tool in asyncio.run(server.list_tools())}
+    async def exercise():
+        listed = await server.list_tools()
+        result = await server.call_tool("semantic_search", {
+            "query": "periodic port",
+            "module": "Wave_Optics_Module",
+            "limit": 3,
+            "source": None,
+            "page_start": 10,
+            "page_end": 20,
+        })
+        status = await server.call_tool("semantic_status", {"warm": True})
+        reset = await server.call_tool("semantic_worker_reset", {})
+        return listed, result, status, reset
+
+    listed, result, status, reset = asyncio.run(exercise())
+    result = _decode_public_tool_result(result)
+    status = _decode_public_tool_result(status)
+    reset = _decode_public_tool_result(reset)
+    schemas = {tool.name: tool.inputSchema for tool in listed}
     serialized = json.dumps(schemas, sort_keys=True)
 
     assert result["success"] is status["success"] is reset["success"] is True
@@ -176,13 +204,22 @@ def test_semantic_profile_discovery_is_static_and_parent_imports_no_ml_stack():
     code = """
 import asyncio, json, sys
 from src.server import create_server
+def decode(result):
+    for block in result:
+        text = getattr(block, 'text', None)
+        if isinstance(text, str):
+            value = json.loads(text)
+            if isinstance(value, dict):
+                return value
+    raise RuntimeError('public FastMCP result did not contain a JSON object')
 server = create_server('semantic-profile-subprocess', profile='semantic_docs')
-names = sorted(tool.name for tool in asyncio.run(server.list_tools()))
+tools = asyncio.run(server.list_tools())
+names = sorted(tool.name for tool in tools)
 assert len(names) == 46
 assert {'semantic_search','semantic_status','semantic_worker_reset'} <= set(names)
 for name in ('chromadb','torch','sentence_transformers'):
     assert name not in sys.modules, name
-status = server._tool_manager._tools['semantic_status'].fn(False)
+status = decode(asyncio.run(server.call_tool('semantic_status', {'warm': False})))
 assert status['worker']['state'] == 'stopped'
 print(json.dumps({'count': len(names), 'configured': status['configured']}))
 """
@@ -192,6 +229,7 @@ print(json.dumps({'count': len(names), 'configured': status['configured']}))
         capture_output=True,
         text=True,
         timeout=20,
+        env=isolated_semantic_environment(),
     )
 
     assert completed.returncode == 0, completed.stderr
