@@ -15,6 +15,7 @@ from comsol_mcp.evidence.field_matrix import (
     MATRIX_FIELD_COLLECTOR,
     bind_validation_matrix_field_request,
 )
+from comsol_mcp.evidence.field_manifest import validate_field_evidence_manifest
 
 _LOCKED_INPUTS = frozenset(
     {
@@ -306,7 +307,15 @@ def execute_field_evidence_collector(
 
     manifest_path = resolve_descriptor(manifest_descriptor, "field manifest")
     resolve_descriptor(array_descriptor, "field array")
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest = validate_field_evidence_manifest(
+        json.loads(manifest_path.read_text(encoding="utf-8")),
+        request=request,
+    )
+    view = request["views"][0]
+    if manifest_descriptor.get("artifact_id") != view["outputs"]["manifest_artifact_id"]:
+        raise ValueError("field manifest descriptor identity does not match the request")
+    if dict(array_descriptor) != manifest["artifacts"]["array"]:
+        raise ValueError("field array descriptor differs from the canonical manifest")
     if manifest.get("measurement_status") != "measurement_complete":
         return {
             "success": False,

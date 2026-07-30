@@ -54,6 +54,19 @@ _VIEW_FIELDS = {
     "x_range", "y_range", "coordinate_unit", "color_limits", "color_scale",
     "quantity", "quantity_unit", "wavelength_m", "config_sha256",
 }
+_SHARED_VIEW_FIELDS = (
+    "slice_axis",
+    "slice_value",
+    "slice_unit",
+    "grid_shape",
+    "x_range",
+    "y_range",
+    "coordinate_unit",
+    "color_limits",
+    "color_scale",
+    "quantity",
+    "quantity_unit",
+)
 _REQUEST_FIELDS = {
     "schema_name", "schema_version", "request_id", "configuration_sha256",
     "artifacts", "views", "required_artifact_ids", "numerical_summary",
@@ -537,6 +550,13 @@ def build_visual_review_request(
     normalized_views = [_view(item, f"views[{index}]") for index, item in enumerate(views)]
     if {item["artifact_id"] for item in normalized_views} != set(ids):
         raise ValueError("views must describe every artifact exactly once")
+    if len(normalized_views) > 1:
+        reference = normalized_views[0]
+        for field in _SHARED_VIEW_FIELDS:
+            if any(view[field] != reference[field] for view in normalized_views[1:]):
+                raise ValueError(
+                    f"paired visual views must share comparison field {field}"
+                )
     normalized_config = _hash(configuration_sha256, "configuration_sha256")
     if any(view["config_sha256"] != normalized_config for view in normalized_views):
         raise ValueError("every view must reference the request configuration_sha256")
@@ -586,6 +606,13 @@ def validate_visual_review_request(value: Any) -> dict[str, Any]:
     normalized_views = [_view(value, f"visual_review_request.views[{index}]") for index, value in enumerate(views)]
     if len(normalized_views) != len(ids) or {view["artifact_id"] for view in normalized_views} != set(ids):
         raise ValueError("visual_review_request.views must describe every artifact exactly once")
+    if len(normalized_views) > 1:
+        reference = normalized_views[0]
+        for field in _SHARED_VIEW_FIELDS:
+            if any(view[field] != reference[field] for view in normalized_views[1:]):
+                raise ValueError(
+                    f"visual_review_request paired views differ in comparison field {field}"
+                )
     if any(view["config_sha256"] != item.get("configuration_sha256") for view in normalized_views):
         raise ValueError("visual_review_request view configuration does not match the request")
     if item.get("required_artifact_ids") != ids:

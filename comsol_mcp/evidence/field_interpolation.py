@@ -63,7 +63,9 @@ def interpolate_field_slice(
         or isinstance(rejected_count, bool)
         or not all(isinstance(value, int) for value in (raw_count, selected_count, rejected_count))
         or selected_count <= 0
+        or rejected_count < 0
         or raw_count != selected_count + rejected_count
+        or raw_count > request_value["limits"]["max_raw_points"]
     ):
         raise ValueError("selection point counts are invalid")
 
@@ -84,7 +86,43 @@ def interpolate_field_slice(
             or not np.all(np.isfinite(values))
         ):
             raise ValueError(f"selection coordinates.{axis} are invalid")
-        coordinate_arrays[axis] = values.astype(np.float64, copy=False)
+        values = values.astype(np.float64, copy=False)
+        lower, upper = request_value["coordinate_bounds"][axis]
+        if np.any(values < lower) or np.any(values > upper):
+            raise ValueError(f"selection coordinates.{axis} escape the requested bounds")
+        coordinate_arrays[axis] = values
+
+    slice_spec = request_value["slice"]
+    if np.any(
+        np.abs(coordinate_arrays[slice_spec["axis"]] - slice_spec["value"])
+        > slice_spec["tolerance"]
+    ):
+        raise ValueError("selection coordinates do not lie on the requested slice")
+    ranges = selection_value["coordinate_ranges"]
+    if not isinstance(ranges, Mapping) or set(ranges) != {"x", "y", "z", "unit"}:
+        raise ValueError("selection coordinate_ranges are invalid")
+    if ranges["unit"] != request_value["coordinate_bounds"]["unit"]:
+        raise ValueError("selection coordinate_ranges unit does not match the request")
+    for axis in ("x", "y", "z"):
+        values = ranges[axis]
+        if (
+            not isinstance(values, list)
+            or len(values) != 2
+            or any(
+                isinstance(value, bool) or not isinstance(value, (int, float))
+                for value in values
+            )
+            or not np.all(np.isfinite(values))
+        ):
+            raise ValueError(f"selection coordinate_ranges.{axis} are invalid")
+        actual = [
+            float(np.min(coordinate_arrays[axis])),
+            float(np.max(coordinate_arrays[axis])),
+        ]
+        if [float(value) for value in values] != actual:
+            raise ValueError(
+                f"selection coordinate_ranges.{axis} do not match the selected coordinates"
+            )
 
     expressions = [item["name"] for item in request_value["expressions"]]
     quantities = selection_value["quantities"]
