@@ -55,8 +55,8 @@ def get_build_identity(package_root: str | Path | None = None) -> dict[str, Any]
         "package_name": "comsol-mcp",
         "package_version": __version__,
         "package_content_sha256": package_content_sha256(package_root),
-        "content_scope": "sorted_relative_package_paths_and_file_bytes",
-        "generated_files_included": False,
+        "content_scope": "sorted_relative_non_cache_package_paths_and_file_bytes",
+        "generated_files_included": True,
         "paths_included": False,
     }
     return {**body, "build_identity_sha256": canonical_sha256_v1(body)}

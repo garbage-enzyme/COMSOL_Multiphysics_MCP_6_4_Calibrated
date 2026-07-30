@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import os
 import time
+from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from .resource_admission import ResourceStageAdapter, collect_resource_telemetry
@@ -28,7 +28,8 @@ def execute_loaded_spectral_level(
     worker_started: float,
     should_stop: Callable[[], bool],
     on_durable_row: Callable[[Mapping[str, Any]], None],
-    collector_executor: Callable[[dict[str, Any], dict[str, Any], Path], Mapping[str, Any]] | None = None,
+    collector_executor: Callable[[dict[str, Any], dict[str, Any], Path], Mapping[str, Any]]
+    | None = None,
     telemetry_provider: Callable[[str, str, Any, Path, float], dict[str, Any]] | None = None,
     fault_hook: Callable[[str, Mapping[str, Any]], Any] | None = None,
 ) -> dict[str, Any]:
@@ -53,19 +54,23 @@ def execute_loaded_spectral_level(
             if mesh.get("success"):
                 mesh_elements = mesh.get("mesh", {}).get("num_elements")
             else:
-                mesh_telemetry_diagnostics.append({
-                    "code": "mesh_telemetry_unavailable",
+                mesh_telemetry_diagnostics.append(
+                    {
+                        "code": "mesh_telemetry_unavailable",
+                        "stage": stage,
+                        "point_id": point_id,
+                        "error_type": "MeshInfoUnavailable",
+                    }
+                )
+        except Exception as exc:
+            mesh_telemetry_diagnostics.append(
+                {
+                    "code": "mesh_telemetry_failed",
                     "stage": stage,
                     "point_id": point_id,
-                    "error_type": "MeshInfoUnavailable",
-                })
-        except Exception as exc:
-            mesh_telemetry_diagnostics.append({
-                "code": "mesh_telemetry_failed",
-                "stage": stage,
-                "point_id": point_id,
-                "error_type": type(exc).__name__,
-            })
+                    "error_type": type(exc).__name__,
+                }
+            )
         del mesh_telemetry_diagnostics[:-16]
         telemetry = collect_resource_telemetry(
             stage=stage,
@@ -74,11 +79,8 @@ def execute_loaded_spectral_level(
             mesh_elements=mesh_elements,
             elapsed_wall_seconds=time.monotonic() - worker_started,
             durable_result_epoch=rows_path.stat().st_mtime if rows_path.is_file() else None,
+            collection_errors=mesh_telemetry_diagnostics[-1:],
         )
-        if mesh_telemetry_diagnostics:
-            telemetry["collection_errors"] = (
-                telemetry["collection_errors"] + [mesh_telemetry_diagnostics[-1]]
-            )[-10:]
         return telemetry
 
     def with_telemetry_diagnostics(decision: dict[str, Any]) -> dict[str, Any]:
@@ -141,9 +143,7 @@ def execute_loaded_spectral_level(
 
     def persisted(row: Mapping[str, Any]) -> None:
         on_durable_row(row)
-        ownership.heartbeat(
-            model_path=spec["source_model_path"], refresh_server_processes=True
-        )
+        ownership.heartbeat(model_path=spec["source_model_path"], refresh_server_processes=True)
 
     result = run_spectral_characterization(
         spec,

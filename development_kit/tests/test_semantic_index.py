@@ -184,6 +184,21 @@ def test_model_pin_replaces_source_manifest_and_rejects_unlisted_files(
         validate_pinned_model(target)
 
 
+@pytest.mark.parametrize("field,value", [("model_id", None), ("revision", []), ("license", {})])
+def test_model_manifest_rejects_coerced_identity_values(
+    semantic_index_assets,
+    field,
+    value,
+):
+    manifest_path = semantic_index_assets["model"] / "model_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest[field] = value
+    index_module._atomic_write_json(manifest_path, manifest)
+
+    with pytest.raises(ValueError, match=field):
+        validate_pinned_model(semantic_index_assets["model"])
+
+
 def test_build_validates_then_atomically_publishes_current(semantic_index_assets):
     result = _build(semantic_index_assets, "build-001")
     current = read_current(semantic_index_assets["root"])
@@ -353,6 +368,55 @@ def test_validation_rejects_corrupt_manifest_duplicate_ids_and_partial_vectors(
         validate_index_against_lexical(missing_citation, semantic_index_assets["lexical"])
 
 
+@pytest.mark.parametrize("build_id", [None, [], "Uppercase", "contains space"])
+def test_index_manifest_rejects_invalid_build_identity(semantic_index_assets, build_id):
+    _build(semantic_index_assets, "valid-build")
+    index = Path(read_current(semantic_index_assets["root"])["pointer"]["index_path"])
+    manifest = json.loads((index / "manifest.json").read_text(encoding="utf-8"))
+    manifest["build_id"] = build_id
+    index_module._atomic_write_json(index / "manifest.json", manifest)
+
+    with pytest.raises(ValueError, match="build_id"):
+        validate_index_directory(index)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "C:/manual.pdf",
+        "/manual.pdf",
+        "../manual.pdf",
+        "module/../manual.pdf",
+        "module\\manual.pdf",
+        "module//manual.pdf",
+        "module/manual.PDF",
+    ],
+)
+def test_semantic_citations_require_canonical_relative_pdf_paths(
+    semantic_index_assets,
+    source,
+):
+    _build(semantic_index_assets, "citation-path")
+    index = Path(read_current(semantic_index_assets["root"])["pointer"]["index_path"])
+    manifest = json.loads((index / "manifest.json").read_text(encoding="utf-8"))
+    lines = (index / "chunks.jsonl").read_text(encoding="utf-8").splitlines()
+    record = json.loads(lines[0])
+    record["source"] = source
+    record["id"] = index_module._chunk_id(
+        record["corpus_fingerprint"],
+        source,
+        record["page"],
+        record["ordinal"],
+        record["text_sha256"],
+    )
+    lines[0] = json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    (index / "chunks.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    _rewrite_data_identity(index, manifest)
+
+    with pytest.raises(ValueError, match="citation"):
+        validate_index_directory(index)
+
+
 def test_mismatch_non_ascii_and_pointer_rollback_gates(semantic_index_assets):
     with pytest.raises(ValueError, match="corpus fingerprint"):
         build_index(
@@ -409,7 +473,10 @@ import json, sys
 process_launch_events = []
 sys.addaudithook(
     lambda event, args: process_launch_events.append(event)
-    if event in {'os.system', 'os.startfile', 'os.spawn', 'os.posix_spawn', 'subprocess.Popen'} else None
+    if event in {
+        'os.system', 'os.startfile', 'os.spawn', 'os.posix_spawn',
+        'subprocess.Popen'
+    } else None
 )
 import src.knowledge.semantic_index
 for name in ('numpy', 'chromadb', 'torch', 'sentence_transformers', 'mph', 'psutil'):

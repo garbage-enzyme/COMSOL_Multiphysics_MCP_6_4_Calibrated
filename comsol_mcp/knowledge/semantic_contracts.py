@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import math
-from pathlib import Path
+import re
+import unicodedata
+from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
 
 from comsol_mcp.durable import canonical_json_v1, canonical_sha256_v1
-
 
 CONTRACT_VERSION = "1"
 EVALUATION_SCHEMA_VERSION = "1"
@@ -15,20 +16,25 @@ INDEX_MANIFEST_SCHEMA_VERSION = "1"
 MODEL_MANIFEST_SCHEMA_VERSION = "1"
 WORKER_PROTOCOL_SCHEMA_VERSION = "1"
 DEFAULT_DEPLOYMENT_ROOT = Path("D:/comsol_semantic")
+SEMANTIC_BUILD_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{0,79}$")
 
-ALLOWED_CATEGORIES = frozenset({
-    "exact_clientapi",
-    "wave_optics",
-    "conventional_fem",
-    "troubleshooting",
-    "negative",
-})
-ALLOWED_STYLES = frozenset({
-    "exact",
-    "paraphrase",
-    "multi_concept",
-    "zh_cross_language",
-})
+ALLOWED_CATEGORIES = frozenset(
+    {
+        "exact_clientapi",
+        "wave_optics",
+        "conventional_fem",
+        "troubleshooting",
+        "negative",
+    }
+)
+ALLOWED_STYLES = frozenset(
+    {
+        "exact",
+        "paraphrase",
+        "multi_concept",
+        "zh_cross_language",
+    }
+)
 
 PUBLIC_LIMITS = {
     "status_deadline_seconds": 1.0,
@@ -108,9 +114,7 @@ def validate_semantic_filters(filters: Mapping[str, Any] | None) -> dict[str, An
             value[field] = item.strip()
     for field in ("page_start", "page_end"):
         item = value.get(field)
-        if item is not None and (
-            not isinstance(item, int) or isinstance(item, bool) or item < 1
-        ):
+        if item is not None and (not isinstance(item, int) or isinstance(item, bool) or item < 1):
             raise ValueError(f"{field} must be a positive integer")
     if (
         value.get("page_start") is not None
@@ -141,15 +145,48 @@ def _require_sha256(value: Any, label: str) -> str:
     return value
 
 
-def validate_evaluation_set(payload: Mapping[str, Any], *, minimum_queries: int = 60) -> dict[str, Any]:
+def _require_identity_text(value: Any, label: str, *, maximum: int = 256) -> str:
+    if not isinstance(value, str) or not value or len(value) > maximum:
+        raise ValueError(f"{label} must be a non-empty string of at most {maximum} characters")
+    if value != value.strip() or unicodedata.normalize("NFKC", value) != value:
+        raise ValueError(f"{label} must be canonical text without surrounding whitespace")
+    if any(ord(char) < 32 or ord(char) == 127 for char in value):
+        raise ValueError(f"{label} must not contain control characters")
+    return value
+
+
+def validate_semantic_build_id(value: Any) -> str:
+    """Require the canonical immutable semantic-index build identifier."""
+    if not isinstance(value, str) or not SEMANTIC_BUILD_ID_PATTERN.fullmatch(value):
+        raise ValueError("build_id is invalid")
+    return value
+
+
+def validate_citation_source(value: Any) -> str:
+    """Require one canonical relative POSIX PDF citation identity."""
+    source = _require_identity_text(value, "citation source", maximum=512)
+    if "\\" in source or "//" in source or ":" in source:
+        raise ValueError("citation source must be a canonical relative POSIX PDF path")
+    path = PurePosixPath(source)
+    if (
+        path.is_absolute()
+        or source != path.as_posix()
+        or any(part in {"", ".", ".."} for part in path.parts)
+        or path.suffix != ".pdf"
+    ):
+        raise ValueError("citation source must be a canonical relative POSIX PDF path")
+    return source
+
+
+def validate_evaluation_set(
+    payload: Mapping[str, Any], *, minimum_queries: int = 60
+) -> dict[str, Any]:
     """Validate and normalize the frozen semantic-retrieval evaluation set."""
     if not isinstance(payload, Mapping):
         raise ValueError("evaluation set must be an object")
     if payload.get("schema_version") != EVALUATION_SCHEMA_VERSION:
         raise ValueError("unsupported evaluation schema_version")
-    corpus_fingerprint = _require_sha256(
-        payload.get("corpus_fingerprint"), "corpus_fingerprint"
-    )
+    corpus_fingerprint = _require_sha256(payload.get("corpus_fingerprint"), "corpus_fingerprint")
     queries = payload.get("queries")
     if not isinstance(queries, list) or len(queries) < minimum_queries:
         raise ValueError(f"evaluation set must contain at least {minimum_queries} queries")
@@ -187,7 +224,9 @@ def validate_evaluation_set(payload: Mapping[str, Any], *, minimum_queries: int 
                 f"queries[{index}] must declare expected_no_relevant exactly when relevant is empty"
             )
         if expected_no_relevant and category != "negative":
-            raise ValueError(f"queries[{index}] empty relevance is restricted to the negative category")
+            raise ValueError(
+                f"queries[{index}] empty relevance is restricted to the negative category"
+            )
         if not expected_no_relevant and category == "negative":
             raise ValueError(f"queries[{index}] negative category must have empty relevance")
         normalized_relevant = []
@@ -197,9 +236,10 @@ def validate_evaluation_set(payload: Mapping[str, Any], *, minimum_queries: int 
                 raise ValueError(f"queries[{index}] has an invalid citation")
             source = citation.get("source")
             page = citation.get("page")
-            if not isinstance(source, str) or not source.endswith(".pdf"):
-                raise ValueError(f"queries[{index}] citation source is invalid")
-            source = source.replace("\\", "/")
+            try:
+                source = validate_citation_source(source)
+            except ValueError as exc:
+                raise ValueError(f"queries[{index}] citation source is invalid") from exc
             if not isinstance(page, int) or isinstance(page, bool) or page < 1:
                 raise ValueError(f"queries[{index}] citation page is invalid")
             key = (source, page)
@@ -209,15 +249,17 @@ def validate_evaluation_set(payload: Mapping[str, Any], *, minimum_queries: int 
         judge_note = item.get("judge_note")
         if not isinstance(judge_note, str) or not judge_note.strip():
             raise ValueError(f"queries[{index}].judge_note is required")
-        normalized_queries.append({
-            "id": qid,
-            "query": query.strip(),
-            "category": category,
-            "style": style,
-            "relevant": normalized_relevant,
-            "expected_no_relevant": expected_no_relevant,
-            "judge_note": judge_note.strip(),
-        })
+        normalized_queries.append(
+            {
+                "id": qid,
+                "query": query.strip(),
+                "category": category,
+                "style": style,
+                "relevant": normalized_relevant,
+                "expected_no_relevant": expected_no_relevant,
+                "judge_note": judge_note.strip(),
+            }
+        )
 
     return {
         "schema_version": EVALUATION_SCHEMA_VERSION,
@@ -239,29 +281,38 @@ def validate_model_manifest(payload: Mapping[str, Any]) -> dict[str, Any]:
     dimension = payload["dimension"]
     if not isinstance(dimension, int) or isinstance(dimension, bool) or dimension < 1:
         raise ValueError("dimension must be a positive integer")
+    license_value = payload["license"] if "license" in payload else "unknown"
     return {
         "schema_version": MODEL_MANIFEST_SCHEMA_VERSION,
-        "model_id": str(payload["model_id"]),
-        "revision": str(payload["revision"]),
+        "model_id": _require_identity_text(payload["model_id"], "model_id"),
+        "revision": _require_identity_text(payload["revision"], "revision"),
         "model_path": _require_ascii_absolute_path(payload["model_path"], "model_path"),
         "model_sha256": _require_sha256(payload["model_sha256"], "model_sha256"),
         "dimension": dimension,
-        "license": str(payload.get("license") or "unknown"),
+        "license": _require_identity_text(license_value, "license"),
     }
 
 
 def validate_index_manifest(payload: Mapping[str, Any]) -> dict[str, Any]:
     """Validate the versioned read-only semantic-index identity contract."""
     required = {
-        "schema_version", "build_id", "index_path", "corpus_fingerprint",
-        "lexical_index_sha256", "model_manifest_sha256", "chunk_count",
-        "vector_dimension", "distance_metric", "file_set_sha256",
+        "schema_version",
+        "build_id",
+        "index_path",
+        "corpus_fingerprint",
+        "lexical_index_sha256",
+        "model_manifest_sha256",
+        "chunk_count",
+        "vector_dimension",
+        "distance_metric",
+        "file_set_sha256",
     }
     missing = sorted(required - set(payload))
     if missing:
         raise ValueError(f"index manifest missing fields: {missing}")
     if payload["schema_version"] != INDEX_MANIFEST_SCHEMA_VERSION:
         raise ValueError("unsupported index manifest schema_version")
+    validate_semantic_build_id(payload["build_id"])
     for field in ("chunk_count", "vector_dimension"):
         value = payload[field]
         if not isinstance(value, int) or isinstance(value, bool) or value < 1:
@@ -270,7 +321,9 @@ def validate_index_manifest(payload: Mapping[str, Any]) -> dict[str, Any]:
     if metric not in {"cosine", "l2", "inner_product"}:
         raise ValueError("distance_metric is unsupported")
     for field in (
-        "corpus_fingerprint", "lexical_index_sha256", "model_manifest_sha256",
+        "corpus_fingerprint",
+        "lexical_index_sha256",
+        "model_manifest_sha256",
         "file_set_sha256",
     ):
         _require_sha256(payload[field], field)
@@ -290,11 +343,7 @@ def evaluate_semantic_continuation(baseline: Mapping[str, Any]) -> dict[str, Any
     query_count = target.get("query_count")
     recall_at_5 = target.get("recall_at_5")
     misses_at_5 = target.get("misses_at_5")
-    if (
-        not isinstance(query_count, int)
-        or isinstance(query_count, bool)
-        or query_count < 0
-    ):
+    if not isinstance(query_count, int) or isinstance(query_count, bool) or query_count < 0:
         raise ValueError("baseline target_styles.query_count must be a non-negative integer")
     if (
         isinstance(recall_at_5, bool)
@@ -308,9 +357,7 @@ def evaluate_semantic_continuation(baseline: Mapping[str, Any]) -> dict[str, Any
         or isinstance(misses_at_5, bool)
         or not 0 <= misses_at_5 <= query_count
     ):
-        raise ValueError(
-            "baseline target_styles.misses_at_5 must be an integer in 0..query_count"
-        )
+        raise ValueError("baseline target_styles.misses_at_5 must be an integer in 0..query_count")
     recall_at_5 = float(recall_at_5)
     passed = (
         query_count >= SEMANTIC_CONTINUATION_GATE["minimum_target_queries"]
@@ -326,7 +373,8 @@ def evaluate_semantic_continuation(baseline: Mapping[str, Any]) -> dict[str, Any
         },
         "thresholds": SEMANTIC_CONTINUATION_GATE,
         "reason": (
-            "material_lexical_gap_demonstrated" if passed
+            "material_lexical_gap_demonstrated"
+            if passed
             else "material_lexical_gap_not_demonstrated"
         ),
     }
@@ -345,8 +393,10 @@ __all__ = [
     "canonical_json_bytes",
     "evaluate_semantic_continuation",
     "object_sha256",
+    "validate_citation_source",
     "validate_semantic_filters",
     "validate_evaluation_set",
     "validate_index_manifest",
     "validate_model_manifest",
+    "validate_semantic_build_id",
 ]

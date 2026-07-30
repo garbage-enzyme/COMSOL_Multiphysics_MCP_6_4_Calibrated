@@ -84,7 +84,7 @@ def test_snapshot_identity_is_invariant_to_checkout_line_endings(tmp_path):
     assert _snapshot_sha256(lf) == _snapshot_sha256(crlf)
 
 
-def test_build_identity_ignores_generated_files_and_changes_with_package_bytes(tmp_path):
+def test_build_identity_ignores_interpreter_caches_and_covers_generated_package_bytes(tmp_path):
     package = tmp_path / "src"
     package.mkdir()
     (package / "alpha.py").write_text("value = 1\n", encoding="utf-8")
@@ -98,9 +98,16 @@ def test_build_identity_ignores_generated_files_and_changes_with_package_bytes(t
     (cache / "alpha.pyc").write_bytes(b"generated")
     assert package_content_sha256(package) == first
 
+    generated = package / "generated_manifest.json"
+    generated.write_text('{"generated":true}\n', encoding="utf-8")
+    generated_digest = package_content_sha256(package)
+    assert generated_digest != first
+
     (package / "alpha.py").write_text("value = 2\n", encoding="utf-8")
-    assert package_content_sha256(package) != first
+    assert package_content_sha256(package) != generated_digest
     identity = get_build_identity(package)
+    assert identity["generated_files_included"] is True
+    assert identity["content_scope"] == ("sorted_relative_non_cache_package_paths_and_file_bytes")
     assert identity["paths_included"] is False
     assert str(tmp_path) not in json.dumps(identity)
 

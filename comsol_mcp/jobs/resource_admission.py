@@ -6,14 +6,13 @@ import hashlib
 import json
 import math
 import os
-from pathlib import Path
 import re
 import shutil
 import time
+from pathlib import Path
 from typing import Any, Callable, Mapping
 
 import psutil
-
 
 _FRACTION_RULES = (
     ("available_memory", "available_memory_bytes", "total_memory_bytes"),
@@ -54,6 +53,15 @@ _SAMPLE_FIELDS = frozenset(
     }
 )
 _STAGES = frozenset({"pre_mesh", "post_mesh", "pre_solve", "post_solve", "recovery"})
+_COLLECTOR_FIELDS = frozenset(
+    {
+        "process_id",
+        "metric_sources",
+        "runtime_volume",
+        "collection_errors",
+        "solver_started",
+    }
+)
 RESOURCE_JOURNAL_MAX_ENTRIES = 4096
 RESOURCE_JOURNAL_MAX_ENTRY_BYTES = 64 * 1024
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
@@ -81,6 +89,32 @@ def _finite_number(value: object, name: str, *, positive: bool = False) -> float
         qualifier = "positive and finite" if positive else "nonnegative and finite"
         raise ValueError(f"{name} must be {qualifier}")
     return number
+
+
+def _normalize_collection_errors(value: object) -> list[dict[str, Any]]:
+    if not isinstance(value, list) or len(value) > 10:
+        raise ValueError("telemetry collection_errors must be a bounded list")
+    normalized = []
+    for item in value:
+        if not isinstance(item, Mapping) or not 1 <= len(item) <= 8 or "code" not in item:
+            raise ValueError("telemetry collection_errors entries are invalid")
+        record: dict[str, Any] = {}
+        for key, field_value in item.items():
+            if not isinstance(key, str) or not key or len(key) > 64:
+                raise ValueError("telemetry collection_errors entries are invalid")
+            if isinstance(field_value, str):
+                if len(field_value) > 200:
+                    raise ValueError("telemetry collection_errors entries are invalid")
+            elif field_value is not None and not isinstance(field_value, (bool, int, float)):
+                raise ValueError("telemetry collection_errors entries are invalid")
+            if isinstance(field_value, float) and not math.isfinite(field_value):
+                raise ValueError("telemetry collection_errors entries are invalid")
+            record[key] = field_value
+        code = record["code"]
+        if not isinstance(code, str) or not _IDENTIFIER.fullmatch(code):
+            raise ValueError("telemetry collection_errors entries are invalid")
+        normalized.append(record)
+    return normalized
 
 
 def _positive_integer(value: object, name: str) -> int:
@@ -183,24 +217,65 @@ def normalize_telemetry_sample(sample: object) -> dict[str, Any]:
             "unavailable",
             "sample_sha256",
         }
-        collector_fields = {
-            "process_id",
-            "metric_sources",
-            "runtime_volume",
-            "collection_errors",
-            "solver_started",
-        }
-        if not normalized_fields <= set(raw) or set(raw) - normalized_fields - collector_fields:
+        if not normalized_fields <= set(raw) or set(raw) - normalized_fields - _COLLECTOR_FIELDS:
             raise ValueError("normalized telemetry_sample has invalid fields")
         if raw.get("schema_version") != "1.0.0":
             raise ValueError("unsupported normalized telemetry_sample schema_version")
+        present_collector_fields = set(raw) & _COLLECTOR_FIELDS
+        if present_collector_fields and present_collector_fields != _COLLECTOR_FIELDS:
+            raise ValueError("normalized telemetry_sample has incomplete collector fields")
         normalized = normalize_telemetry_sample(raw.get("values"))
+        collector: dict[str, Any] = {}
+        if present_collector_fields:
+            process_id = raw.get("process_id")
+            if isinstance(process_id, bool) or not isinstance(process_id, int) or process_id <= 0:
+                raise ValueError("telemetry process_id must be a positive integer")
+            metric_sources = raw.get("metric_sources")
+            if not isinstance(metric_sources, Mapping) or not 1 <= len(metric_sources) <= 32:
+                raise ValueError("telemetry metric_sources must be a bounded non-empty object")
+            normalized_sources: dict[str, str] = {}
+            for key, value in metric_sources.items():
+                if (
+                    not isinstance(key, str)
+                    or not key
+                    or len(key) > 64
+                    or not isinstance(value, str)
+                    or not value
+                    or len(value) > 128
+                ):
+                    raise ValueError("telemetry metric_sources entries are invalid")
+                normalized_sources[key] = value
+            runtime_volume = raw.get("runtime_volume")
+            if (
+                not isinstance(runtime_volume, Mapping)
+                or set(runtime_volume) != {"path_class", "absolute_path_redacted"}
+                or runtime_volume.get("path_class") not in {"ascii", "non_ascii"}
+                or runtime_volume.get("absolute_path_redacted") is not True
+            ):
+                raise ValueError("telemetry runtime_volume metadata is invalid")
+            normalized_errors = _normalize_collection_errors(raw.get("collection_errors"))
+            if raw.get("solver_started") is not False:
+                raise ValueError("resource telemetry collector must not start the solver")
+            collector = {
+                "process_id": process_id,
+                "metric_sources": normalized_sources,
+                "runtime_volume": {
+                    "path_class": runtime_volume["path_class"],
+                    "absolute_path_redacted": True,
+                },
+                "collection_errors": normalized_errors,
+                "solver_started": False,
+            }
+        sample_preimage: object = normalized["values"]
+        if collector:
+            sample_preimage = {"values": normalized["values"], "collector": collector}
+        expected_sha256 = _sha256(sample_preimage)
         if (
             raw.get("unavailable") != normalized["unavailable"]
-            or raw.get("sample_sha256") != normalized["sample_sha256"]
+            or raw.get("sample_sha256") != expected_sha256
         ):
             raise ValueError("normalized telemetry_sample integrity check failed")
-        return normalized
+        return {**normalized, **collector, "sample_sha256": expected_sha256}
     unknown = sorted(set(raw) - _SAMPLE_FIELDS)
     if unknown:
         raise ValueError(f"unknown telemetry_sample fields: {', '.join(unknown)}")
@@ -283,6 +358,7 @@ def collect_resource_telemetry(
     dof: int | None = None,
     elapsed_wall_seconds: float | None = None,
     durable_result_epoch: float | None = None,
+    collection_errors: object = (),
 ) -> dict[str, Any]:
     """Collect one bounded, solver-free host/process/runtime observation."""
     root = Path(runtime_path).expanduser().resolve()
@@ -302,7 +378,7 @@ def collect_resource_telemetry(
         "durable_result_epoch": durable_result_epoch,
     }
     values.update({name: value for name, value in optional.items() if value is not None})
-    errors: list[dict[str, str]] = []
+    errors: list[dict[str, Any]] = []
 
     try:
         memory = psutil.virtual_memory()
@@ -344,7 +420,7 @@ def collect_resource_telemetry(
         errors.append({"code": "pagefile_io_unavailable", "error": str(exc)[:200]})
 
     telemetry = normalize_telemetry_sample(values)
-    return {
+    collected = {
         **telemetry,
         "process_id": pid,
         "metric_sources": {
@@ -360,13 +436,23 @@ def collect_resource_telemetry(
             "path_class": "ascii" if str(root).isascii() else "non_ascii",
             "absolute_path_redacted": True,
         },
-        "collection_errors": errors[:10],
+        "collection_errors": (errors + _normalize_collection_errors(list(collection_errors)))[-10:],
         "solver_started": False,
     }
+    collected["sample_sha256"] = _sha256(
+        {
+            "values": telemetry["values"],
+            "collector": {name: collected[name] for name in sorted(_COLLECTOR_FIELDS)},
+        }
+    )
+    return normalize_telemetry_sample(collected)
 
 
 def _sample_values(sample: object) -> dict[str, Any]:
-    if isinstance(sample, Mapping) and sample.get("schema_name") == "comsol_mcp.resource_telemetry_sample":
+    if (
+        isinstance(sample, Mapping)
+        and sample.get("schema_name") == "comsol_mcp.resource_telemetry_sample"
+    ):
         values = sample.get("values")
         if not isinstance(values, Mapping):
             raise ValueError("normalized telemetry sample has no values object")
@@ -539,12 +625,33 @@ def evaluate_resource_admission(
         warn = rules.get(f"{prefix}_warn_fraction")
         if refuse is not None and fraction < refuse:
             red = True
-            _rule(evidence, code=f"{prefix}_refuse", actual=fraction, threshold=refuse, comparison="<", outcome="refuse")
+            _rule(
+                evidence,
+                code=f"{prefix}_refuse",
+                actual=fraction,
+                threshold=refuse,
+                comparison="<",
+                outcome="refuse",
+            )
         elif warn is not None and fraction < warn:
             warning = True
-            _rule(evidence, code=f"{prefix}_warning", actual=fraction, threshold=warn, comparison="<", outcome="warning")
+            _rule(
+                evidence,
+                code=f"{prefix}_warning",
+                actual=fraction,
+                threshold=warn,
+                comparison="<",
+                outcome="warning",
+            )
         else:
-            _rule(evidence, code=f"{prefix}_ok", actual=fraction, threshold=warn if warn is not None else refuse, comparison=">=", outcome="ok")
+            _rule(
+                evidence,
+                code=f"{prefix}_ok",
+                actual=fraction,
+                threshold=warn if warn is not None else refuse,
+                comparison=">=",
+                outcome="ok",
+            )
 
     disk_rules = {
         name: rules[name]
@@ -555,16 +662,52 @@ def evaluate_resource_admission(
         actual = values.get("runtime_free_bytes")
         if actual is None:
             red = True
-            _rule(evidence, code="runtime_free_space_unavailable", actual=None, threshold=min(disk_rules.values()), comparison="required telemetry", outcome="refuse")
-        elif "runtime_free_space_refuse_bytes" in rules and actual < rules["runtime_free_space_refuse_bytes"]:
+            _rule(
+                evidence,
+                code="runtime_free_space_unavailable",
+                actual=None,
+                threshold=min(disk_rules.values()),
+                comparison="required telemetry",
+                outcome="refuse",
+            )
+        elif (
+            "runtime_free_space_refuse_bytes" in rules
+            and actual < rules["runtime_free_space_refuse_bytes"]
+        ):
             red = True
-            _rule(evidence, code="runtime_free_space_refuse", actual=actual, threshold=rules["runtime_free_space_refuse_bytes"], comparison="<", outcome="refuse")
-        elif "runtime_free_space_warn_bytes" in rules and actual < rules["runtime_free_space_warn_bytes"]:
+            _rule(
+                evidence,
+                code="runtime_free_space_refuse",
+                actual=actual,
+                threshold=rules["runtime_free_space_refuse_bytes"],
+                comparison="<",
+                outcome="refuse",
+            )
+        elif (
+            "runtime_free_space_warn_bytes" in rules
+            and actual < rules["runtime_free_space_warn_bytes"]
+        ):
             warning = True
-            _rule(evidence, code="runtime_free_space_warning", actual=actual, threshold=rules["runtime_free_space_warn_bytes"], comparison="<", outcome="warning")
+            _rule(
+                evidence,
+                code="runtime_free_space_warning",
+                actual=actual,
+                threshold=rules["runtime_free_space_warn_bytes"],
+                comparison="<",
+                outcome="warning",
+            )
         else:
-            threshold = rules.get("runtime_free_space_warn_bytes", rules.get("runtime_free_space_refuse_bytes"))
-            _rule(evidence, code="runtime_free_space_ok", actual=actual, threshold=threshold, comparison=">=", outcome="ok")
+            threshold = rules.get(
+                "runtime_free_space_warn_bytes", rules.get("runtime_free_space_refuse_bytes")
+            )
+            _rule(
+                evidence,
+                code="runtime_free_space_ok",
+                actual=actual,
+                threshold=threshold,
+                comparison=">=",
+                outcome="ok",
+            )
 
     for policy_name, sample_name, code in (
         ("max_mesh_elements", "mesh_elements", "mesh_elements"),
@@ -575,25 +718,67 @@ def evaluate_resource_admission(
         actual = values.get(sample_name)
         if actual is None:
             red = True
-            _rule(evidence, code=f"{code}_unavailable", actual=None, threshold=rules[policy_name], comparison="required telemetry", outcome="refuse")
+            _rule(
+                evidence,
+                code=f"{code}_unavailable",
+                actual=None,
+                threshold=rules[policy_name],
+                comparison="required telemetry",
+                outcome="refuse",
+            )
         elif actual > rules[policy_name]:
             red = True
-            _rule(evidence, code=f"{code}_refuse", actual=actual, threshold=rules[policy_name], comparison=">", outcome="refuse")
+            _rule(
+                evidence,
+                code=f"{code}_refuse",
+                actual=actual,
+                threshold=rules[policy_name],
+                comparison=">",
+                outcome="refuse",
+            )
         else:
-            _rule(evidence, code=f"{code}_ok", actual=actual, threshold=rules[policy_name], comparison="<=", outcome="ok")
+            _rule(
+                evidence,
+                code=f"{code}_ok",
+                actual=actual,
+                threshold=rules[policy_name],
+                comparison="<=",
+                outcome="ok",
+            )
 
     if "wall_time_budget_seconds" in rules:
         elapsed = values.get("elapsed_wall_seconds")
         if elapsed is None:
             red = True
-            _rule(evidence, code="wall_time_unavailable", actual=None, threshold=rules["minimum_next_point_seconds"], comparison="required telemetry", outcome="refuse")
+            _rule(
+                evidence,
+                code="wall_time_unavailable",
+                actual=None,
+                threshold=rules["minimum_next_point_seconds"],
+                comparison="required telemetry",
+                outcome="refuse",
+            )
         else:
             remaining = max(0.0, rules["wall_time_budget_seconds"] - elapsed)
             if remaining < rules["minimum_next_point_seconds"]:
                 red = True
-                _rule(evidence, code="wall_time_refuse", actual=remaining, threshold=rules["minimum_next_point_seconds"], comparison="<", outcome="refuse")
+                _rule(
+                    evidence,
+                    code="wall_time_refuse",
+                    actual=remaining,
+                    threshold=rules["minimum_next_point_seconds"],
+                    comparison="<",
+                    outcome="refuse",
+                )
             else:
-                _rule(evidence, code="wall_time_ok", actual=remaining, threshold=rules["minimum_next_point_seconds"], comparison=">=", outcome="ok")
+                _rule(
+                    evidence,
+                    code="wall_time_ok",
+                    actual=remaining,
+                    threshold=rules["minimum_next_point_seconds"],
+                    comparison=">=",
+                    outcome="ok",
+                )
 
     if red:
         state, decision = "red", "refuse"
@@ -686,6 +871,7 @@ def build_resource_admission_entries(
             "entry_type": "admission",
             "telemetry_entry_sha256": telemetry_entry["entry_sha256"],
             "sample_sha256": telemetry["sample_sha256"],
+            "policy": normalized_policy,
             "policy_sha256": (
                 normalized_policy["policy_sha256"] if normalized_policy is not None else None
             ),
@@ -752,6 +938,7 @@ def _validate_resource_journal_entry(entry: object) -> dict[str, Any]:
         | {
             "telemetry_entry_sha256",
             "sample_sha256",
+            "policy",
             "policy_sha256",
             "state",
             "decision",
@@ -797,6 +984,7 @@ def _validate_resource_journal_entry(entry: object) -> dict[str, Any]:
         if raw["telemetry"]["values"]["stage"] != raw["stage"]:
             raise ValueError("resource telemetry entry stage mismatch")
     elif entry_type == "admission":
+        raw["policy"] = normalize_resource_policy(raw.get("policy"))
         if raw.get("state") not in {"disabled", "green", "warning", "red"}:
             raise ValueError("resource admission entry has an invalid state")
         expected_decision = {
@@ -807,10 +995,11 @@ def _validate_resource_journal_entry(entry: object) -> dict[str, Any]:
         }[raw["state"]]
         if raw.get("decision") != expected_decision:
             raise ValueError("resource admission state and decision are inconsistent")
-        if (
-            raw["state"] == "disabled" and raw.get("policy_sha256") is not None
-        ) or (
-            raw["state"] != "disabled" and raw.get("policy_sha256") is None
+        expected_policy_sha256 = (
+            raw["policy"]["policy_sha256"] if raw["policy"] is not None else None
+        )
+        if raw.get("policy_sha256") != expected_policy_sha256 or (raw["state"] == "disabled") != (
+            raw["policy"] is None
         ):
             raise ValueError("resource admission policy identity is inconsistent")
         if not isinstance(raw.get("evidence_codes"), list) or not all(
@@ -842,6 +1031,9 @@ def _validate_resource_journal_entry(entry: object) -> dict[str, Any]:
         if name in raw and raw[name] is not None:
             if not isinstance(raw[name], str) or not re.fullmatch(r"[0-9a-f]{64}", raw[name]):
                 raise ValueError(f"{name} must be a SHA-256 hex digest or null")
+    normalized_body = {name: value for name, value in raw.items() if name != "entry_sha256"}
+    if supplied_hash != _sha256(normalized_body):
+        raise ValueError("resource journal entry normalization changed hashed content")
     return raw
 
 
@@ -849,10 +1041,12 @@ def replay_resource_journal(
     entries: object,
     *,
     attempt: int,
+    expected_policy: object,
     completed_point_ids: object = (),
 ) -> dict[str, Any]:
     """Validate journal ordering and derive fail-closed resume actions for the latest attempt."""
     attempt = _attempt(attempt)
+    normalized_expected_policy = normalize_resource_policy(expected_policy)
     if not isinstance(entries, list):
         raise ValueError("resource journal entries must be a list")
     if len(entries) > RESOURCE_JOURNAL_MAX_ENTRIES:
@@ -890,10 +1084,27 @@ def replay_resource_journal(
                 or telemetry["point_id"] != entry["point_id"]
                 or telemetry["stage"] != entry["stage"]
                 or telemetry["telemetry"]["sample_sha256"] != entry["sample_sha256"]
-                or latest_by_point.get(key, {}).get("entry_sha256")
-                != telemetry["entry_sha256"]
+                or latest_by_point.get(key, {}).get("entry_sha256") != telemetry["entry_sha256"]
             ):
                 raise ValueError("resource admission does not match the latest telemetry entry")
+            if entry["policy"] != normalized_expected_policy:
+                raise ValueError("resource admission policy does not match the bound job policy")
+            expected_decision = evaluate_resource_admission(
+                normalized_expected_policy,
+                telemetry["telemetry"],
+            )
+            expected_evidence_codes = [item["code"] for item in expected_decision["evidence"]]
+            if (
+                entry["state"] != expected_decision["state"]
+                or entry["decision"] != expected_decision["decision"]
+                or entry["evidence_codes"] != expected_evidence_codes
+                or entry["start_authorized"] is not (expected_decision["decision"] == "allow")
+                or entry["checkpoint_required"]
+                is not (expected_decision["decision"] in {"refuse", "require_confirmation"})
+            ):
+                raise ValueError(
+                    "resource admission decision does not match bound policy telemetry"
+                )
             admission_by_hash[entry["entry_sha256"]] = entry
             latest_by_point[key] = entry
         else:
@@ -907,8 +1118,7 @@ def replay_resource_journal(
                 or admission["decision"] != "require_confirmation"
                 or admission["sample_sha256"] != entry["sample_sha256"]
                 or admission["policy_sha256"] != entry["policy_sha256"]
-                or latest_by_point.get(key, {}).get("entry_sha256")
-                != admission["entry_sha256"]
+                or latest_by_point.get(key, {}).get("entry_sha256") != admission["entry_sha256"]
             ):
                 raise ValueError("warning continuation is stale or mismatched")
             latest_by_point[key] = entry
@@ -989,7 +1199,11 @@ class ResourceStageAdapter:
             raise ValueError("resource adapter attempt is stale")
         if latest_attempt < self.attempt:
             return 0
-        return replay_resource_journal(entries, attempt=self.attempt)["next_attempt_sequence"]
+        return replay_resource_journal(
+            entries,
+            attempt=self.attempt,
+            expected_policy=self.policy,
+        )["next_attempt_sequence"]
 
     def evaluate(self, *, stage: str, point_id: str) -> dict[str, Any]:
         """Persist one stage sample/decision and return a bounded worker action."""
@@ -1017,11 +1231,16 @@ class ResourceStageAdapter:
             policy=self.policy,
             sample=sample,
         )
-        self.store.append_resource_journal(self.job_id, new_entries)
+        self.store.append_resource_journal(
+            self.job_id,
+            new_entries,
+            expected_policy=self.policy,
+        )
         combined = current + new_entries
         replay = replay_resource_journal(
             combined,
             attempt=self.attempt,
+            expected_policy=self.policy,
             completed_point_ids=completed,
         )
         point = replay["points"][point_id]
@@ -1043,6 +1262,7 @@ class ResourceStageAdapter:
         replay = replay_resource_journal(
             current,
             attempt=self.attempt,
+            expected_policy=self.policy,
             completed_point_ids=completed,
         )
         point = replay["points"].get(point_id)
@@ -1058,10 +1278,15 @@ class ResourceStageAdapter:
             attempt_sequence=replay["next_attempt_sequence"],
             confirmation_id=confirmation_id,
         )
-        self.store.append_resource_journal(self.job_id, [continuation])
+        self.store.append_resource_journal(
+            self.job_id,
+            [continuation],
+            expected_policy=self.policy,
+        )
         final = replay_resource_journal(
             current + [continuation],
             attempt=self.attempt,
+            expected_policy=self.policy,
             completed_point_ids=completed,
         )["points"][point_id]
         return {

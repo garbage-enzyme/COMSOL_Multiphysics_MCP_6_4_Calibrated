@@ -722,9 +722,15 @@ class JobStore:
         with self.lock(job_id):
             entries = self._read_resource_journal_unlocked(job_id)
             if entries:
+                admission = next(
+                    (item for item in entries if item.get("entry_type") == "admission"),
+                    None,
+                )
+                expected_policy = admission.get("policy") if admission is not None else None
                 replay_resource_journal(
                     entries,
                     attempt=max(int(item.get("attempt", 0)) for item in entries),
+                    expected_policy=expected_policy,
                 )
             return entries
 
@@ -732,6 +738,8 @@ class JobStore:
         self,
         job_id: str,
         entries: list[dict[str, Any]],
+        *,
+        expected_policy: object,
     ) -> dict[str, Any]:
         """Durably append validated resource transitions for the active attempt."""
         from .resource_admission import replay_resource_journal
@@ -742,7 +750,11 @@ class JobStore:
             current = self._read_resource_journal_unlocked(job_id)
             state = self.read_state(job_id)
             attempt = int(state.get("attempt", 1))
-            replay = replay_resource_journal(current + entries, attempt=attempt)
+            replay = replay_resource_journal(
+                current + entries,
+                attempt=attempt,
+                expected_policy=expected_policy,
+            )
             path = self.job_dir(job_id) / "resource.jsonl"
             payload = b"".join(
                 json.dumps(

@@ -10,7 +10,6 @@ import argparse
 import hashlib
 import json
 import os
-import re
 import shutil
 import sqlite3
 import sys
@@ -29,8 +28,10 @@ from .semantic_contracts import (
     MODEL_MANIFEST_SCHEMA_VERSION,
     canonical_json_bytes,
     object_sha256,
+    validate_citation_source,
     validate_index_manifest,
     validate_model_manifest,
+    validate_semantic_build_id,
 )
 
 CHUNK_SCHEMA_VERSION = "1"
@@ -38,7 +39,6 @@ CURRENT_POINTER_SCHEMA_VERSION = "1"
 DEFAULT_CHUNK_CHARACTERS = 1_200
 DEFAULT_CHUNK_OVERLAP = 120
 DEFAULT_BATCH_SIZE = 64
-BUILD_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{0,79}$")
 MAX_SEMANTIC_ARTIFACT_BYTES = 8 * 1024 * 1024 * 1024
 
 
@@ -189,7 +189,7 @@ def _iter_pages(
                 "SELECT source, module, page, heading, text FROM pages ORDER BY source, page"
             ):
                 yield (
-                    str(source).replace("\\", "/"),
+                    validate_citation_source(source),
                     str(module),
                     int(page),
                     str(heading),
@@ -397,8 +397,7 @@ def build_index(
     root = _require_ascii_absolute(deployment_root, "deployment_root")
     lexical_path = _require_ascii_absolute(lexical_index, "lexical_index")
     model_root = _require_ascii_absolute(model_path, "model_path")
-    if not BUILD_ID_PATTERN.fullmatch(build_id):
-        raise ValueError("build_id is invalid")
+    build_id = validate_semantic_build_id(build_id)
     if batch_size < 1 or batch_size > 1024:
         raise ValueError("batch_size must be between 1 and 1024")
     lexical_before = _lexical_identity(lexical_path)
@@ -565,8 +564,10 @@ def validate_index_directory(
             source = record.get("source")
             page = record.get("page")
             ordinal = record.get("ordinal")
-            if not isinstance(source, str) or not source.endswith(".pdf"):
-                raise ValueError("chunk source citation is invalid")
+            try:
+                source = validate_citation_source(source)
+            except ValueError as exc:
+                raise ValueError("chunk source citation is invalid") from exc
             if not isinstance(page, int) or isinstance(page, bool) or page < 1:
                 raise ValueError("chunk page citation is invalid")
             if not isinstance(ordinal, int) or isinstance(ordinal, bool) or ordinal < 0:
@@ -622,7 +623,7 @@ def validate_index_against_lexical(
     uri = lexical_path.resolve().as_uri() + "?mode=ro"
     with closing(sqlite3.connect(uri, uri=True, timeout=0.25)) as connection:
         citations = {
-            (str(source).replace("\\", "/"), int(page))
+            (validate_citation_source(source), int(page))
             for source, page in connection.execute("SELECT source, page FROM pages")
         }
     semantic_citations: set[tuple[str, int]] = set()
