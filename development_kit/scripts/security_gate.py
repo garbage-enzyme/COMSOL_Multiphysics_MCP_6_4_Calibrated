@@ -7,11 +7,10 @@ import hashlib
 import json
 import os
 import re
+import tempfile
 from datetime import date
 from pathlib import Path
 from typing import Any
-
-from comsol_mcp.durable import atomic_write_json
 
 _NAME = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
 _ID = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
@@ -198,7 +197,25 @@ def write_security_receipt(
 ) -> None:
     output = Path(path)
     output.parent.mkdir(parents=True, exist_ok=True)
-    atomic_write_json(output, receipt, replace_fn=replace_fn)
+    payload = (json.dumps(receipt, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="xb",
+            prefix=f".{output.name}.",
+            suffix=".tmp",
+            dir=output.parent,
+            delete=False,
+        ) as handle:
+            temporary = Path(handle.name)
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        replace_fn(temporary, output)
+        temporary = None
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def main() -> int:

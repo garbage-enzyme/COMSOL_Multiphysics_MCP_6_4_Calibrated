@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from datetime import date
 from pathlib import Path
 
@@ -14,6 +16,8 @@ from development_kit.scripts.security_gate import (
     load_vulnerability_allowlist,
     write_security_receipt,
 )
+
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def _report(vulnerabilities=()):
@@ -175,3 +179,45 @@ def test_security_receipt_atomic_failure_preserves_prior_evidence(tmp_path):
 
     assert output.read_bytes() == b"prior-valid-evidence"
     assert list(tmp_path.iterdir()) == [output]
+
+
+def test_security_gate_runs_without_the_project_package_on_sys_path(tmp_path):
+    report = tmp_path / "report.json"
+    report.write_text(json.dumps(_report()), encoding="utf-8")
+    allowlist = tmp_path / "allowlist.json"
+    allowlist.write_text(
+        json.dumps(
+            {
+                "schema_name": "comsol_mcp.vulnerability_allowlist",
+                "schema_version": "1.0.0",
+                "entries": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    output = tmp_path / "security-receipt.json"
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            str(ROOT / "development_kit" / "scripts" / "security_gate.py"),
+            "--report",
+            str(report),
+            "--allowlist",
+            str(allowlist),
+            "--output",
+            str(output),
+            "--as-of",
+            "2026-07-30",
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    receipt = json.loads(output.read_text(encoding="utf-8"))
+    assert receipt["status"] == "passed"
+    assert receipt["finding_count"] == 0
