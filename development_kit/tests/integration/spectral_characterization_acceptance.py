@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import sys
 import time
@@ -76,6 +77,68 @@ def _row_receipt(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _scientific_acceptance(
+    rows: list[dict[str, Any]],
+    stages: list[dict[str, Any]],
+    spec: dict[str, Any],
+) -> dict[str, Any]:
+    policy = spec["analysis_policy"]
+    passivity_tolerance = float(policy["passivity_abs_tolerance"])
+    closure_tolerance = float(policy["closure_abs_tolerance"])
+    wavelength_tolerance = float(policy["wavelength_sync_abs_m"])
+    row_receipts = [_row_receipt(row) for row in rows]
+    point_ids = [str(row["point_id"]) for row in rows]
+    finite = all(
+        math.isfinite(float(value))
+        for row in row_receipts
+        for value in (
+            row["R"],
+            row["T"],
+            row["A"],
+            row["closure_abs"],
+            row["wavelength_sync_abs_m"],
+            row["solve_seconds"],
+        )
+    )
+    checks = {
+        "stage_plan_present": bool(stages),
+        "minimum_point_count": len(rows) >= int(policy["minimum_point_count"]),
+        "point_ids_unique": len(point_ids) == len(set(point_ids)),
+        "finite_values": finite,
+        "passive_quantity_bounds": finite
+        and all(
+            -passivity_tolerance <= float(row[key]) <= 1.0 + passivity_tolerance
+            for row in row_receipts
+            for key in ("R", "T", "A")
+        ),
+        "power_closure": finite
+        and all(float(row["closure_abs"]) <= closure_tolerance for row in row_receipts),
+        "wavelength_synchronized": finite
+        and all(
+            float(row["wavelength_sync_abs_m"]) <= wavelength_tolerance
+            for row in row_receipts
+        ),
+        "mesh_positive": all(
+            int(row["mesh_element_count"]) > 0 and int(row["mesh_vertex_count"]) > 0
+            for row in row_receipts
+        ),
+        "solve_duration_nonnegative": finite
+        and all(float(row["solve_seconds"]) >= 0.0 for row in row_receipts),
+    }
+    return {
+        "passed": all(checks.values()),
+        "checks": checks,
+        "observed_point_count": len(rows),
+        "required_point_count": int(policy["minimum_point_count"]),
+        "maximum_closure_abs": max(
+            (float(row["closure_abs"]) for row in row_receipts), default=None
+        ),
+        "maximum_wavelength_sync_abs_m": max(
+            (float(row["wavelength_sync_abs_m"]) for row in row_receipts), default=None
+        ),
+    }
+
+
 def run_acceptance(
     *,
     raw_spec: dict[str, Any],
@@ -126,6 +189,7 @@ def run_acceptance(
     state = store.read_state(job_id)
     rows = read_spectral_rows(directory / "spectral_rows.jsonl", spec, artifact_root=directory)
     stages = read_spectral_stage_plans(directory, spec)
+    scientific_acceptance = _scientific_acceptance(rows, stages, spec)
     source_after = _sha256_file(source)
     lease_absent = not (runtime / "solver_owner.json").exists()
     receipt = {
@@ -133,6 +197,7 @@ def run_acceptance(
         and state["status"] == "completed"
         and source_after == source_before
         and lease_absent,
+        "scientific_acceptance": scientific_acceptance,
         "dry_run": False,
         "job_id": job_id,
         "worker_exit_code": exit_code,
@@ -160,6 +225,7 @@ def run_acceptance(
             "external_process_absence": "parent_must_verify_after_runner_exit",
         },
     }
+    receipt["success"] = receipt["success"] and scientific_acceptance["passed"] is True
     _write_json(output, receipt)
     return receipt
 

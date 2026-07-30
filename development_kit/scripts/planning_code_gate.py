@@ -28,7 +28,7 @@ _LEGACY_TOKENS = (
     "e" + "4r",
 )
 _PATTERN = re.compile(
-    r"(?<![A-Za-z0-9_])(?:[EMH][0-9]+[A-Za-z]?|P(?:3|4|9|10|11|12))(?![A-Za-z0-9_])"
+    r"(?<![A-Za-z0-9])(?:[EMH][0-9]+[A-Za-z]?|P(?:3|4|9|10|11|12))(?![A-Za-z0-9])"
     r"|(?<![A-Za-z0-9])(?:" + "|".join(_LEGACY_TOKENS) + r")(?![A-Za-z0-9])"
 )
 

@@ -493,6 +493,16 @@ def test_active_implementation_has_only_enumerated_legacy_phase_codes():
     assert crlf_receipt == receipt
 
 
+def test_planning_code_gate_detects_codes_inside_underscore_identifiers():
+    text = "prefix_" + "H" + "1" + "_suffix = 1"
+    with pytest.raises(RuntimeError, match=r"unexpected=\['sample.py'\]"):
+        verify_planning_code_texts(
+            {"sample.py": text},
+            allowlist={},
+            require_all_allowlisted=True,
+        )
+
+
 def test_public_tracked_text_has_no_user_profile_paths():
     text_suffixes = {".json", ".md", ".py", ".toml", ".yaml", ".yml"}
     for _mode, path_text in _tracked_entries():

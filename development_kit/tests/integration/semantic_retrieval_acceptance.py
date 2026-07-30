@@ -21,17 +21,29 @@ DEFAULT_MODEL = (
     DEFAULT_ROOT / "models" / "all-MiniLM-L6-v2" / "1110a243fdf4706b3f48f1d95db1a4f5529b4d41"
 )
 QUERIES = (
-    ("exact", "CopyFace source destination mesh", "hybrid"),
+    (
+        "exact",
+        "CopyFace source destination mesh selection",
+        "hybrid",
+        ("COMSOL_Multiphysics/COMSOL_ProgrammingReferenceManual.pdf", 469),
+    ),
     (
         "paraphrase",
-        "How can periodic boundary faces be forced to use identical discretization?",
+        "Make the opposite periodic surface reuse exactly the same triangular elements before filling tetrahedra",
         "hybrid",
+        ("COMSOL_Multiphysics/COMSOL_ProgrammingReferenceManual.pdf", 469),
     ),
-    ("chinese", "周期端口的相邻介质为什么必须均匀", "hybrid"),
+    (
+        "chinese",
+        "如何用一个单元模拟无限重复的光学阵列并计算反射透射？",
+        "hybrid",
+        ("Wave_Optics_Module/WaveOpticsModuleUsersGuide.pdf", 33),
+    ),
     (
         "vector_only",
-        "homogeneous medium next to a Floquet excitation boundary",
+        "Wave Excitation at this Port input power listener port boundary mode analysis",
         "vector",
+        ("Wave_Optics_Module/WaveOpticsModuleUsersGuide.pdf", 144),
     ),
 )
 
@@ -64,7 +76,7 @@ def run_acceptance(
         cold_seconds = time.perf_counter() - started
         if not startup.get("success"):
             raise RuntimeError(f"semantic worker startup failed: {startup}")
-        for label, query, mode in QUERIES:
+        for label, query, mode, expected_relevant in QUERIES:
             query_started = time.perf_counter()
             response = manager.query(query, limit=5, retrieval_mode=mode)
             elapsed = time.perf_counter() - query_started
@@ -76,6 +88,22 @@ def run_acceptance(
                 allow_nan=False,
                 separators=(",", ":"),
             ).encode("utf-8")
+            ranked = [
+                (str(item.get("source")), int(item.get("page")))
+                for item in response["results"][:5]
+                if isinstance(item, dict)
+                and isinstance(item.get("source"), str)
+                and isinstance(item.get("page"), int)
+                and not isinstance(item.get("page"), bool)
+            ]
+            relevant_rank = next(
+                (
+                    index + 1
+                    for index, citation in enumerate(ranked)
+                    if citation == expected_relevant
+                ),
+                None,
+            )
             query_results.append(
                 {
                     "label": label,
@@ -88,6 +116,11 @@ def run_acceptance(
                     "ranker": response["ranker"],
                     "load_count": response["load_count"],
                     "query_count": response["query_count"],
+                    "expected_relevant": {
+                        "source": expected_relevant[0],
+                        "page": expected_relevant[1],
+                    },
+                    "relevant_rank_at_5": relevant_rank,
                 }
             )
         repeat = manager.query(QUERIES[0][1], limit=5, retrieval_mode="hybrid")
@@ -143,6 +176,8 @@ def run_acceptance(
                 raise RuntimeError("a real query exceeded the hard deadline")
             if max(item["response_bytes"] for item in query_results) > 65_536:
                 raise RuntimeError("a real response exceeded the public byte limit")
+            if any(item["relevant_rank_at_5"] is None for item in query_results):
+                raise RuntimeError("one or more judged queries missed relevant evidence at rank 5")
             if result["ownership_after"] != {
                 "lease": "absent",
                 "external_solver_processes": 0,

@@ -8,19 +8,29 @@ import os
 from pathlib import Path
 import sys
 import traceback
-
-import mph
+import uuid
 
 ROOT = Path(__file__).parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from src.durable.io import atomic_write_json_exclusive
+from src.evidence.real_fixture import controlled_fixture_from_environment
 from src.tools.ownership import SolverOwnership
 from src.tools.periodic_mesh_audit import (
     collect_periodic_mesh_audit,
     run_clone_mesh_smoke,
 )
-from src.evidence.real_fixture import controlled_fixture_from_environment
+
+
+def _owned_model_path(artifact_dir: Path, *, lease_acquired: bool) -> Path:
+    if lease_acquired is not True:
+        raise RuntimeError("periodic-mesh artifact allocation requires solver lease ownership")
+    return artifact_dir / f"derived_missing_copyface-{uuid.uuid4().hex}.mph"
+
+
+def _result_path(artifact_dir: Path) -> Path:
+    return artifact_dir / f"periodic_mesh_gate_result-{uuid.uuid4().hex}.json"
 
 
 def _sha256(path: Path) -> str:
@@ -58,9 +68,8 @@ def _copyface_tags(mesh) -> list[str]:
 def main() -> None:
     runtime = Path(os.environ.get("COMSOL_MCP_RUNTIME_DIR", "D:/comsol_runtime"))
     artifact_dir = runtime / "periodic_mesh"
-    artifact_dir.mkdir(parents=True, exist_ok=True)
-    result_path = artifact_dir / "periodic_mesh_gate_result.json"
-    broken_path = artifact_dir / "derived_missing_copyface.mph"
+    result_path = None
+    broken_path = None
     owner = SolverOwnership(owner="periodic-mesh-gate")
     client = None
     source_model = None
@@ -74,6 +83,11 @@ def main() -> None:
         claim = owner.acquire(mode="periodic_mesh_audit", model_path=str(source_path))
         if not claim.get("acquired"):
             raise RuntimeError(f"solver lease unavailable: {claim}")
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        result_path = _result_path(artifact_dir)
+        broken_path = _owned_model_path(artifact_dir, lease_acquired=True)
+        import mph
+
         client = mph.Client(cores=1)
         source_model = client.load(str(source_path))
         component_tag = _first_tag(source_model.java.component().tags(), "comp1")
@@ -193,10 +207,14 @@ def main() -> None:
                 client.clear()
             except Exception:
                 pass
-        broken_path.unlink(missing_ok=True)
-        result["derived_cleanup"] = not broken_path.exists()
+        if broken_path is not None:
+            broken_path.unlink(missing_ok=True)
+        result["derived_cleanup"] = broken_path is None or not broken_path.exists()
         result["lease_release"] = owner.release()
-        result_path.write_text(json.dumps(result, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        result_path = result_path or _result_path(artifact_dir)
+        result["receipt_name"] = result_path.name
+        atomic_write_json_exclusive(result_path, result)
         print(json.dumps(result, ensure_ascii=False), flush=True)
         os._exit(exit_code)
 

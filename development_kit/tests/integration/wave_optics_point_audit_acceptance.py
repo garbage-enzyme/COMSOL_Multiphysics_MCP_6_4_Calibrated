@@ -47,6 +47,15 @@ def _study_step(study):
     return tags[0]
 
 
+def _bound_source_sha256(case: dict) -> str:
+    expected = case.get("expected_source_sha256")
+    if not isinstance(expected, str) or len(expected) != 64:
+        raise ValueError("controlled fixture expected source SHA-256 is missing")
+    if _sha256(case["source"]) != expected:
+        raise AssertionError("controlled fixture hash differs from caller-bound identity")
+    return expected
+
+
 def main() -> None:
     default_artifact_dir = Path(os.environ.get("COMSOL_MCP_RUNTIME_DIR", "D:/comsol_runtime")) / "wave_optics_point_audit"
     artifact_dir = Path(
@@ -56,32 +65,38 @@ def main() -> None:
     result_path = artifact_dir / "point_audit_gate_result.json"
     owner = SolverOwnership(owner="wave-optics-point-audit")
     client = None
-    fixture = controlled_fixture_from_environment()
-    fixture["policy"] = {
-        "assumptions": {"passive": True, "port_power_normalized": True},
-        "required_evidence": [
-            "wavelength_controls", "flux_RTA", "top_air_region", "source_integrity"
-        ],
-        "tolerances": {
-            "closure_abs": 1e-3,
-            "quantity_bounds_margin": 1e-3,
-            "wavelength_abs_m": 1e-12,
-        },
-    }
-    active_cases = (fixture,)
-    output = {"success": False, "solve_count": 0, "selected_cases": [case["name"] for case in active_cases], "cases": []}
+    active_cases = ()
+    output = {"success": False, "solve_count": 0, "selected_cases": [], "cases": []}
     exit_code = 1
     try:
+        fixture = controlled_fixture_from_environment()
+        fixture["policy"] = {
+            "assumptions": {"passive": True, "port_power_normalized": True},
+            "required_evidence": [
+                "wavelength_controls",
+                "flux_RTA",
+                "top_air_region",
+                "source_integrity",
+            ],
+            "tolerances": {
+                "closure_abs": 1e-3,
+                "quantity_bounds_margin": 1e-3,
+                "wavelength_abs_m": 1e-12,
+            },
+        }
+        active_cases = (fixture,)
+        output["selected_cases"] = [case["name"] for case in active_cases]
         for case in active_cases:
             if not case["source"].is_file():
                 raise FileNotFoundError(case["source"])
+            _bound_source_sha256(case)
         claim = owner.acquire(mode="wave_optics_point_audit_matrix", model_path=str(active_cases[0]["source"]))
         if not claim.get("success"):
             raise RuntimeError(f"solver lease unavailable: {claim}")
         client = mph.Client(cores=8)
         for case in active_cases:
             source = case["source"]
-            source_hash = _sha256(source)
+            source_hash = _bound_source_sha256(case)
             source_stat = source.stat()
             model = client.load(str(source))
             jm = model.java

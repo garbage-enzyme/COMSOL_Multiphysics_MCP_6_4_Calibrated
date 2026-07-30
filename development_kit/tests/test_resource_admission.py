@@ -23,6 +23,7 @@ from src.jobs.resource_admission import (
 from src.jobs.store import JobStore
 from src.tools.workflow import _run_bounded_sweep_hook, _sweep_point_id, run_staged_parametric_sweep
 
+from development_kit.tests.integration import resource_admission_acceptance as acceptance
 from development_kit.tests.test_workflow import FakeModel, read_csv
 
 POLICY = {
@@ -37,6 +38,112 @@ POLICY = {
     "wall_time_budget_seconds": 3600.0,
     "minimum_next_point_seconds": 600.0,
 }
+
+
+def test_acceptance_requires_both_telemetry_and_admission_stages():
+    empty = acceptance._resource_journal_acceptance([])
+    complete = acceptance._resource_journal_acceptance(
+        [
+            {"entry_type": "telemetry", "stage": "pre_solve"},
+            {"entry_type": "admission", "stage": "pre_solve", "decision": "allow"},
+            {"entry_type": "telemetry", "stage": "post_solve"},
+            {"entry_type": "admission", "stage": "post_solve", "decision": "allow"},
+        ]
+    )
+
+    assert empty["passed"] is False
+    assert empty["checks"]["admission_stages_complete"] is False
+    assert complete["passed"] is True
+
+
+def test_post_submit_recovery_requests_cancel_and_waits_for_cleanup(monkeypatch):
+    calls = []
+
+    class Manager:
+        @staticmethod
+        def status(job_id):
+            calls.append(("status", job_id))
+            return {"status": "running"}
+
+        @staticmethod
+        def cancel(job_id):
+            calls.append(("cancel", job_id))
+            return {"success": True, "status": "cancel_requested"}
+
+    monkeypatch.setattr(
+        acceptance,
+        "_poll_terminal",
+        lambda _manager, job_id, _timeout: calls.append(("terminal", job_id))
+        or {"status": "cancelled"},
+    )
+    monkeypatch.setattr(
+        acceptance,
+        "_poll_cleanup",
+        lambda _runtime, _timeout: calls.append(("cleanup", "job-test"))
+        or {"collision": False, "lease": {"state": "absent"}},
+    )
+
+    recovery = acceptance._recover_submitted_job(
+        Manager(), "job-test", Path("D:/runtime")
+    )
+
+    assert recovery["passed"] is True
+    assert calls == [
+        ("status", "job-test"),
+        ("cancel", "job-test"),
+        ("terminal", "job-test"),
+        ("cleanup", "job-test"),
+    ]
+
+
+def test_builder_timeout_closes_required_process_tree_containment(monkeypatch):
+    class Process:
+        pid = 44001
+
+        def __init__(self):
+            self.returncode = None
+            self.communications = 0
+
+        def communicate(self, *, timeout):
+            self.communications += 1
+            if self.communications == 1:
+                raise acceptance.subprocess.TimeoutExpired("builder", timeout)
+            return "", ""
+
+        def poll(self):
+            return self.returncode
+
+        def wait(self, *, timeout):
+            self.returncode = 1
+            return 1
+
+        def kill(self):
+            self.returncode = 1
+
+    class Containment:
+        closed = False
+
+        def close(self):
+            self.closed = True
+
+    process = Process()
+    containment = Containment()
+    monkeypatch.setattr(acceptance.subprocess, "Popen", lambda *_args, **_kwargs: process)
+    monkeypatch.setattr(
+        acceptance.OwnedJobObject, "assign", lambda _pid: containment
+    )
+    monkeypatch.setattr(
+        acceptance.subprocess,
+        "run",
+        lambda *_args, **_kwargs: type("Completed", (), {"returncode": 0})(),
+    )
+
+    result = acceptance._run_builder_process(["python", "builder.py"])
+
+    assert result["success"] is False
+    assert result["timed_out"] is True
+    assert result["cleanup"]["passed"] is True
+    assert containment.closed is True
 
 
 @pytest.fixture

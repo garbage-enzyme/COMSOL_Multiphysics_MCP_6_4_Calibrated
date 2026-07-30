@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 import subprocess
@@ -23,6 +24,7 @@ def _args(tmp_path, **overrides):
         json.dumps(
             {
                 "source_model_path": str(source),
+                "expected_source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
                 "wavelength": {"value": 5.292, "unit": "um"},
                 "reference_air": {
                     "top_air_domain_ids": [6],

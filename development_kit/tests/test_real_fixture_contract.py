@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -10,6 +11,7 @@ from src.evidence.real_fixture import (
     DOMAINS_ENV,
     MODEL_ENV,
     RANGE_ENV,
+    SOURCE_SHA256_ENV,
     WAVELENGTH_ENV,
     controlled_fixture_environment_from_reference_power_spec,
     controlled_fixture_from_environment,
@@ -26,6 +28,7 @@ def _spec(tmp_path: Path) -> Path:
         json.dumps(
             {
                 "source_model_path": str(source),
+                "expected_source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
                 "wavelength": {"value": 5.292, "unit": "um"},
                 "reference_air": {
                     "top_air_domain_ids": [6],
@@ -50,6 +53,7 @@ def test_reference_power_spec_translates_to_explicit_subprocess_only_fixture_env
 
     assert environment["PRESERVED"] == "yes"
     assert fixture["source"].name == "controlled.mph"
+    assert fixture["expected_source_sha256"] == hashlib.sha256(b"fixture").hexdigest()
     assert fixture["wavelength_um"] == 5.292
     assert fixture["top_air_domain_ids"] == [6]
     assert fixture["top_air_coordinate_range"]["z"] == [2.25e-6, 2.55e-6]
@@ -59,6 +63,7 @@ def test_reference_power_spec_translates_to_explicit_subprocess_only_fixture_env
     "mutation,match",
     [
         (lambda env: env.pop(MODEL_ENV), "incomplete"),
+        (lambda env: env.pop(SOURCE_SHA256_ENV), "incomplete"),
         (lambda env: env.update({WAVELENGTH_ENV: "nan"}), "finite and positive"),
         (lambda env: env.update({DOMAINS_ENV: "[0]"}), "positive integers"),
         (lambda env: env.update({RANGE_ENV: '{"x":[0,1]}'}), "exactly x, y, and z"),
@@ -92,6 +97,16 @@ def test_reference_power_spec_rejects_malformed_json(tmp_path):
 
     with pytest.raises(json.JSONDecodeError):
         controlled_fixture_environment_from_reference_power_spec(path, base_environment={})
+
+
+def test_fixture_rejects_source_bytes_that_differ_from_caller_bound_hash(tmp_path):
+    environment = controlled_fixture_environment_from_reference_power_spec(
+        _spec(tmp_path), base_environment={}
+    )
+    Path(environment[MODEL_ENV]).write_bytes(b"changed")
+
+    with pytest.raises(ValueError, match="source SHA-256 mismatch"):
+        controlled_fixture_from_environment(environment)
 
 
 @pytest.mark.parametrize(

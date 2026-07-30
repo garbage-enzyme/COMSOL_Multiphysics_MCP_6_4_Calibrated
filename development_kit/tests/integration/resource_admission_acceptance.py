@@ -17,12 +17,125 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from src.jobs.manager import JobManager
+from src.jobs.process_control import OwnedJobObject
 from src.jobs.resource_admission import (
     collect_resource_telemetry,
     evaluate_resource_admission,
 )
 from src.jobs.store import TERMINAL_STATES
 from src.tools.ownership import SolverOwnership
+
+
+def _timeout_text(value: str | bytes | None) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value
+
+
+def _terminate_builder_tree(
+    process: subprocess.Popen,
+    containment: OwnedJobObject | None,
+) -> dict[str, object]:
+    errors = []
+    if containment is not None:
+        try:
+            containment.close()
+        except Exception as exc:
+            errors.append({"stage": "job_object_close", "type": type(exc).__name__})
+    if process.poll() is None:
+        taskkill = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "taskkill.exe"
+        try:
+            subprocess.run(
+                [str(taskkill), "/PID", str(process.pid), "/T", "/F"],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            errors.append({"stage": "taskkill", "type": type(exc).__name__})
+    try:
+        process.wait(timeout=20)
+    except subprocess.TimeoutExpired:
+        try:
+            process.kill()
+            process.wait(timeout=20)
+        except (OSError, subprocess.SubprocessError) as exc:
+            errors.append({"stage": "direct_kill", "type": type(exc).__name__})
+    except (OSError, subprocess.SubprocessError) as exc:
+        errors.append({"stage": "wait", "type": type(exc).__name__})
+    root_absent = process.poll() is not None
+    return {
+        "passed": root_absent and containment is not None and not errors,
+        "root_absent": root_absent,
+        "job_object_contained": containment is not None,
+        "errors": errors,
+    }
+
+
+def _run_builder_process(command: list[str]) -> dict[str, object]:
+    creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(
+        subprocess, "CREATE_NEW_PROCESS_GROUP", 0
+    )
+    process = subprocess.Popen(
+        command,
+        cwd=ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        creationflags=creation_flags,
+    )
+    containment = OwnedJobObject.assign(process.pid)
+    timed_out = False
+    communication_errors = []
+    stdout = ""
+    stderr = ""
+    try:
+        stdout, stderr = process.communicate(timeout=120)
+    except subprocess.TimeoutExpired as exc:
+        timed_out = True
+        stdout = _timeout_text(exc.stdout)
+        stderr = _timeout_text(exc.stderr)
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        communication_errors.append(type(exc).__name__)
+    finally:
+        cleanup = _terminate_builder_tree(process, containment)
+    if timed_out or communication_errors:
+        try:
+            tail_stdout, tail_stderr = process.communicate(timeout=30)
+            stdout += tail_stdout or ""
+            stderr += tail_stderr or ""
+        except (OSError, ValueError, subprocess.SubprocessError) as exc:
+            communication_errors.append(type(exc).__name__)
+    return {
+        "success": not timed_out
+        and process.returncode == 0
+        and cleanup["passed"] is True
+        and not communication_errors,
+        "returncode": process.returncode,
+        "timed_out": timed_out,
+        "communication_errors": communication_errors,
+        "stdout_tail": stdout[-2000:],
+        "stderr_tail": stderr[-2000:],
+        "cleanup": cleanup,
+    }
+
+
+def _resource_journal_acceptance(journal: list[dict]) -> dict[str, object]:
+    telemetry = [entry for entry in journal if entry.get("entry_type") == "telemetry"]
+    admissions = [entry for entry in journal if entry.get("entry_type") == "admission"]
+    expected_stages = ["pre_solve", "post_solve"]
+    checks = {
+        "telemetry_stages_complete": [entry.get("stage") for entry in telemetry]
+        == expected_stages,
+        "admission_stages_complete": [entry.get("stage") for entry in admissions]
+        == expected_stages,
+        "admissions_allow": bool(admissions)
+        and all(entry.get("decision") == "allow" for entry in admissions),
+    }
+    return {"passed": all(checks.values()), "checks": checks}
 
 
 def _sha256(path: Path) -> str:
@@ -173,6 +286,43 @@ def _poll_cleanup(runtime: Path, timeout_seconds: float) -> dict:
     raise TimeoutError(f"resource admission detached worker cleanup did not complete: {latest}")
 
 
+def _recover_submitted_job(manager: JobManager, job_id: str, runtime: Path) -> dict:
+    recovery: dict[str, object] = {"job_id": job_id, "passed": False}
+    status = None
+    try:
+        status = manager.status(job_id)
+        recovery["status_before"] = status
+    except Exception as exc:
+        recovery["status_error"] = type(exc).__name__
+    if not isinstance(status, dict) or status.get("status") not in TERMINAL_STATES:
+        try:
+            recovery["cancel"] = manager.cancel(job_id)
+        except Exception as exc:
+            recovery["cancel_error"] = type(exc).__name__
+    else:
+        recovery["cancel"] = {"requested": False, "reason": "already_terminal"}
+    try:
+        terminal = _poll_terminal(manager, job_id, 30.0)
+        recovery["terminal"] = terminal
+    except Exception as exc:
+        terminal = None
+        recovery["terminal_error"] = type(exc).__name__
+    try:
+        cleanup = _poll_cleanup(runtime, 30.0)
+        recovery["cleanup"] = cleanup
+    except Exception as exc:
+        cleanup = None
+        recovery["cleanup_error"] = type(exc).__name__
+    recovery["passed"] = (
+        isinstance(terminal, dict)
+        and terminal.get("status") in TERMINAL_STATES
+        and isinstance(cleanup, dict)
+        and cleanup.get("collision") is False
+        and cleanup.get("lease", {}).get("state") == "absent"
+    )
+    return recovery
+
+
 def _run_gate() -> None:
     runtime = Path(os.environ.get("COMSOL_MCP_RUNTIME_DIR", "D:/comsol_runtime"))
     artifact_dir = runtime / "resource_admission"
@@ -182,6 +332,8 @@ def _run_gate() -> None:
     result_path = artifact_dir / "resource_gate_result.json"
     result = {"success": False}
     exit_code = 1
+    manager = None
+    job_id = None
     try:
         command = [
             sys.executable,
@@ -191,18 +343,15 @@ def _run_gate() -> None:
             str(source_path),
             str(mesh_receipt_path),
         ]
-        completed = subprocess.run(
-            command,
-            cwd=ROOT,
-            text=True,
-            capture_output=True,
-            timeout=120,
-            check=False,
-        )
-        if completed.returncode != 0:
+        builder = _run_builder_process(command)
+        result["builder_process"] = builder
+        if builder["success"] is not True:
+            result["builder_lease_recovery"] = SolverOwnership(
+                runtime, owner="resource-admission-builder-recovery"
+            ).recover_stale()
             raise RuntimeError(
                 "resource admission source builder failed: "
-                + (completed.stdout + completed.stderr)[-2000:]
+                + str(builder)[-2000:]
             )
         mesh_receipt = json.loads(mesh_receipt_path.read_text(encoding="utf-8"))
         if not mesh_receipt.get("success") or not mesh_receipt.get("lease_release", {}).get("success"):
@@ -210,7 +359,7 @@ def _run_gate() -> None:
         source_hash = _sha256(source_path)
         source_stat = source_path.stat()
 
-        clean = _poll_cleanup(runtime, 30.0)
+        _poll_cleanup(runtime, 30.0)
         manager = JobManager(runtime / "jobs")
         submitted = manager.submit(
             {
@@ -249,12 +398,11 @@ def _run_gate() -> None:
         if not 0.0 < capacitance < 1.0e-9:
             raise AssertionError(f"resource admission capacitance is outside bounds: {capacitance}")
         journal = manager.store.read_resource_journal(job_id)
-        telemetry = [entry for entry in journal if entry["entry_type"] == "telemetry"]
-        admissions = [entry for entry in journal if entry["entry_type"] == "admission"]
-        if [entry["stage"] for entry in telemetry] != ["pre_solve", "post_solve"]:
-            raise AssertionError(f"resource admission telemetry stages mismatch: {telemetry}")
-        if any(entry["decision"] != "allow" for entry in admissions):
-            raise AssertionError(f"resource admission did not stay green: {admissions}")
+        journal_acceptance = _resource_journal_acceptance(journal)
+        if journal_acceptance["passed"] is not True:
+            raise AssertionError(
+                f"resource admission journal evidence is incomplete: {journal_acceptance}"
+            )
         final_stat = source_path.stat()
         source_unchanged = (
             _sha256(source_path) == source_hash
@@ -273,6 +421,7 @@ def _run_gate() -> None:
             job_state=terminal,
             result_row=rows[0],
             resource_journal=journal,
+            resource_journal_acceptance=journal_acceptance,
             cleanup_status=final_status,
             recovery_stage="not_applicable_no_refusal_or_interruption",
         )
@@ -280,6 +429,10 @@ def _run_gate() -> None:
     except Exception as exc:
         result["error"] = str(exc)
         result["traceback"] = traceback.format_exc(limit=10)
+        if manager is not None and job_id is not None:
+            result["post_submit_recovery"] = _recover_submitted_job(
+                manager, job_id, runtime
+            )
     finally:
         result_path.write_text(
             json.dumps(result, indent=2, ensure_ascii=False) + "\n",

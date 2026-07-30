@@ -13,7 +13,10 @@ import pytest
 from development_kit.tests.integration import clientapi_property_acceptance as property_gate
 from development_kit.tests.integration import derived_geometry_acceptance as derived_gate
 from development_kit.tests.integration import live_profile_acceptance as live_profile_gate
+from development_kit.tests.integration import periodic_mesh_acceptance as periodic_mesh_gate
 from development_kit.tests.integration import test_real_comsol as real_comsol_gate
+from development_kit.tests.integration import wave_optics_point_audit_acceptance as point_gate
+from development_kit.tests.integration import wave_optics_preflight_acceptance as preflight_gate
 
 
 def test_clientapi_property_acceptance_uses_explicit_runtime_checks():
@@ -289,3 +292,40 @@ def test_real_probe_closes_tree_containment_after_normal_parent_exit(monkeypatch
         "job_object_contained": True,
         "errors": [],
     }
+
+
+def test_periodic_mesh_allocates_model_artifacts_only_after_lease(tmp_path):
+    with pytest.raises(RuntimeError, match="requires solver lease ownership"):
+        periodic_mesh_gate._owned_model_path(tmp_path, lease_acquired=False)
+
+    first = periodic_mesh_gate._owned_model_path(tmp_path, lease_acquired=True)
+    second = periodic_mesh_gate._owned_model_path(tmp_path, lease_acquired=True)
+
+    assert first != second
+    assert first.parent == second.parent == tmp_path
+
+
+def test_point_audit_uses_caller_bound_source_hash(tmp_path):
+    source = tmp_path / "source.mph"
+    source.write_bytes(b"source")
+    expected = __import__("hashlib").sha256(source.read_bytes()).hexdigest()
+
+    assert point_gate._bound_source_sha256(
+        {"source": source, "expected_source_sha256": expected}
+    ) == expected
+    source.write_bytes(b"changed")
+    with pytest.raises(AssertionError, match="caller-bound identity"):
+        point_gate._bound_source_sha256(
+            {"source": source, "expected_source_sha256": expected}
+        )
+
+
+def test_preflight_fixture_prerequisites_fail_with_explicit_errors():
+    with pytest.raises(ValueError, match="no component"):
+        preflight_gate._select_preflight_tags([], [], [])
+    with pytest.raises(ValueError, match="no physics"):
+        preflight_gate._select_preflight_tags(["comp1"], [], [])
+
+    assert preflight_gate._select_preflight_tags(
+        ["other", "comp1"], ["emw", "ewfd"], ["other", "std1"]
+    ) == ("comp1", "ewfd", "std1")

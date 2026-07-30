@@ -70,6 +70,29 @@ def test_non_ascii_runtime_fails_before_worker(tmp_path):
         )
 
 
+def test_runtime_rejection_precedes_spec_normalization_and_source_hashing(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        acceptance,
+        "normalize_branch_continuation_campaign_spec",
+        lambda _raw: pytest.fail("spec normalization must not run"),
+    )
+    monkeypatch.setattr(
+        acceptance,
+        "_sha256_file",
+        lambda _path: pytest.fail("source hashing must not run"),
+    )
+
+    with pytest.raises(ValueError, match="ASCII"):
+        run_acceptance(
+            raw_spec={"invalid": True},
+            runtime_root=tmp_path / "runtime-nonascii-测试",
+            output=tmp_path / "receipt.json",
+            dry_run=True,
+        )
+
+
 def test_receipt_publication_is_exclusive_under_concurrency(tmp_path):
     output = tmp_path / "receipt.json"
 

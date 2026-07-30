@@ -438,12 +438,15 @@ def test_retrieval_acceptance_rejects_unsuccessful_worker_reset(tmp_path):
         def start():
             return {"success": True}
 
-        def query(self, *_args, **_kwargs):
+        def query(self, query, **_kwargs):
             self.query_count += 1
+            expected = next(
+                item[3] for item in retrieval_module.QUERIES if item[1] == query
+            )
             return {
                 "success": True,
                 "count": 1,
-                "results": [{"source": "manual.pdf", "page": 1}],
+                "results": [{"source": expected[0], "page": expected[1]}],
                 "ranker": {"mode": "hybrid"},
                 "load_count": 1,
                 "query_count": self.query_count,
@@ -471,3 +474,47 @@ def test_retrieval_acceptance_rejects_unsuccessful_worker_reset(tmp_path):
     assert result["success"] is False
     assert result["worker_reset"]["success"] is False
     assert result["cleanup"]["steps"]["worker_reset"]["passed"] is False
+
+
+def test_retrieval_acceptance_rejects_successful_but_irrelevant_results(tmp_path):
+    class Manager:
+        def __init__(self):
+            self.query_count = 0
+
+        @staticmethod
+        def start():
+            return {"success": True}
+
+        def query(self, *_args, **_kwargs):
+            self.query_count += 1
+            return {
+                "success": True,
+                "count": 1,
+                "results": [{"source": "unrelated.pdf", "page": 999}],
+                "ranker": {"mode": "hybrid"},
+                "load_count": 1,
+                "query_count": self.query_count,
+            }
+
+        @staticmethod
+        def health():
+            return {"success": True, "status": {"load_count": 1, "query_count": 5}}
+
+        @staticmethod
+        def reset():
+            return {"success": True, "reset": {"absent": True}}
+
+    result, exit_code = retrieval_module.run_acceptance(
+        manager=Manager(),
+        index_path=tmp_path / "index",
+        before={"sha256": SHA_A},
+        ownership_before=_absent_ownership(),
+        output_path=tmp_path / "irrelevant.json",
+        snapshot=lambda _path: {"sha256": SHA_A},
+        ownership_status=_absent_ownership,
+    )
+
+    assert exit_code == 1
+    assert result["success"] is False
+    assert "missed relevant evidence" in result["error"]["message"]
+    assert all(item["relevant_rank_at_5"] is None for item in result["queries"])

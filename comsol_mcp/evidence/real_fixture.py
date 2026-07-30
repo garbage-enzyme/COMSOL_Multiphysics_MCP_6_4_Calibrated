@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import re
 from typing import Any, Mapping
 
 from comsol_mcp.utils.validation import strict_json_number
@@ -14,6 +15,23 @@ MODEL_ENV = "COMSOL_REAL_TEST_MODEL"
 WAVELENGTH_ENV = "COMSOL_REAL_TEST_WAVELENGTH_UM"
 DOMAINS_ENV = "COMSOL_REAL_TEST_TOP_AIR_DOMAIN_IDS"
 RANGE_ENV = "COMSOL_REAL_TEST_TOP_AIR_COORDINATE_RANGE"
+SOURCE_SHA256_ENV = "COMSOL_REAL_TEST_SOURCE_SHA256"
+
+
+def _sha256_file(path: Path) -> str:
+    import hashlib
+
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _source_sha256(value: Any) -> str:
+    if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
+        raise ValueError(f"{SOURCE_SHA256_ENV} must be a lowercase SHA-256 digest")
+    return value
 
 
 def _positive_wavelength(value: Any) -> float:
@@ -63,12 +81,19 @@ def controlled_fixture_from_environment(
 ) -> dict[str, Any]:
     """Read one explicit local real-test fixture; never infer a private path."""
     values = environment if environment is not None else os.environ
-    missing = [name for name in (MODEL_ENV, WAVELENGTH_ENV, DOMAINS_ENV, RANGE_ENV) if not values.get(name)]
+    missing = [
+        name
+        for name in (MODEL_ENV, SOURCE_SHA256_ENV, WAVELENGTH_ENV, DOMAINS_ENV, RANGE_ENV)
+        if not values.get(name)
+    ]
     if missing:
         raise ValueError(f"controlled licensed fixture environment is incomplete: {missing}")
     source = Path(values[MODEL_ENV]).expanduser().resolve()
     if verify_file and not source.is_file():
         raise FileNotFoundError(source)
+    expected_source_sha256 = _source_sha256(values[SOURCE_SHA256_ENV])
+    if verify_file and _sha256_file(source) != expected_source_sha256:
+        raise ValueError("controlled licensed fixture source SHA-256 mismatch")
     try:
         domains_raw = json.loads(values[DOMAINS_ENV])
         range_raw = json.loads(values[RANGE_ENV])
@@ -77,6 +102,7 @@ def controlled_fixture_from_environment(
     return {
         "name": "current_controlled_fixture",
         "source": source,
+        "expected_source_sha256": expected_source_sha256,
         "wavelength_um": _environment_wavelength(values[WAVELENGTH_ENV]),
         "top_air_domain_ids": _domains(domains_raw),
         "top_air_coordinate_range": _coordinate_range(range_raw),
@@ -100,6 +126,7 @@ def controlled_fixture_environment_from_reference_power_spec(
     environment.update(
         {
             MODEL_ENV: str(Path(str(raw.get("source_model_path", ""))).expanduser().resolve()),
+            SOURCE_SHA256_ENV: _source_sha256(raw.get("expected_source_sha256")),
             WAVELENGTH_ENV: format(_positive_wavelength(wavelength.get("value")), ".17g"),
             DOMAINS_ENV: json.dumps(_domains(reference.get("top_air_domain_ids")), separators=(",", ":")),
             RANGE_ENV: json.dumps(
@@ -117,6 +144,7 @@ __all__ = [
     "DOMAINS_ENV",
     "MODEL_ENV",
     "RANGE_ENV",
+    "SOURCE_SHA256_ENV",
     "WAVELENGTH_ENV",
     "controlled_fixture_environment_from_reference_power_spec",
     "controlled_fixture_from_environment",
