@@ -169,6 +169,35 @@ def test_property_set_returns_normalized_old_and_new_values(feature, property_na
     assert feature.set_calls == [(property_name, new_value)]
 
 
+def test_property_set_readback_failure_restores_old_value():
+    class OneShotReadbackFailure(FakeFeature):
+        def __init__(self):
+            super().__init__({"label": "old"}, {"label": "String"})
+            self.read_count = 0
+
+        def getString(self, name):
+            self.read_count += 1
+            if self.read_count == 2:
+                raise RuntimeError("injected readback failure")
+            return super().getString(name)
+
+    target = OneShotReadbackFailure()
+
+    result = set_existing_property(
+        FakeModel(target),
+        "comp1",
+        "geometry_feature",
+        "parent1/child1",
+        "label",
+        "new",
+    )
+
+    assert result["success"] is False
+    assert result["rolled_back"] is True
+    assert target.values["label"] == "old"
+    assert target.set_calls == [("label", "new"), ("label", "old")]
+
+
 def test_property_access_rejects_unknown_targets_and_properties(feature):
     model = FakeModel(feature)
 

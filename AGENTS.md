@@ -90,7 +90,11 @@ Run commands from the repository root in the declared development environment:
 
 ```powershell
 python -m pytest -q development_kit/tests/test_<area>.py
-python -m pytest -q
+python -m pytest -q -n 4 --dist loadscope `
+  --basetemp D:\comsol_pytest\local-main `
+  --ignore development_kit/tests/test_control_plane_startup.py
+python -m pytest -q development_kit/tests/test_control_plane_startup.py `
+  --basetemp D:\comsol_pytest\local-serial
 python -m compileall -q comsol_mcp src development_kit
 python development_kit/scripts/quality_gate.py --artifact-root <artifact-root>
 python development_kit/scripts/release_gate.py
@@ -99,13 +103,22 @@ python development_kit/scripts/release_gate.py
 Use a provisional 10-minute timeout for complete solver-free test, coverage,
 quality, and release-gate runs. Reassess that timeout when the collected test
 count exceeds 2,000; focused test commands should retain narrower proportional
-timeouts. The quality gate uses four pytest workers for the isolated main suite
-locally and runs process-inventory discovery tests serially. GitHub-hosted
-Python 3.14 uses serial pytest because upstream pytest-xdist issue #1313 can
-intermittently deadlock worker shutdown or `loadscope` dispatch; do not restore
-hosted xdist without an upstream fix and a new stability benchmark. Do not
-replace the local bounded worker count with `-n auto` without a new timing and
-isolation benchmark.
+timeouts. Focused and broader area suites use ordinary serial pytest unless a
+measured run justifies parallel execution. A local complete suite must use the
+explicit four-worker main command above, followed by the startup/process-
+inventory file as a serial tail; do not use bare `python -m pytest -q` as the
+local complete-suite command.
+
+The quality gate applies the same local split while collecting coverage: four
+workers for the isolated main suite and a serial startup/process-inventory
+tail. The release gate currently runs its embedded complete pytest stage
+serially. GitHub-hosted Python 3.14 also uses serial pytest because two observed
+Windows Actions runs stalled without progress under xdist in different jobs,
+consistent with upstream pytest-xdist issue #1313 around worker shutdown or
+`loadscope` dispatch. Hosted serial execution trades speed for deterministic
+termination; do not restore hosted xdist without an upstream fix and a new
+stability benchmark. Do not replace the local bounded worker count with
+`-n auto` without a new timing and isolation benchmark.
 
 For a release candidate, use the locked dependency lane from a clean tree:
 

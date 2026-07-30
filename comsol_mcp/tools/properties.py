@@ -161,8 +161,21 @@ def set_existing_property(
         target.set(property_name, normalized_value)
         try:
             new_value, new_value_type = _read_property(target, property_name)
-        except Exception:
-            new_value, new_value_type = normalized_value, value_type
+        except Exception as readback_exc:
+            rolled_back = False
+            try:
+                target.set(property_name, old_value)
+                restored_value, restored_type = _read_property(target, property_name)
+                rolled_back = (
+                    restored_value == old_value and restored_type == value_type
+                )
+            except Exception:
+                rolled_back = False
+            return {
+                "success": False,
+                "error": f"clientapi property readback failed: {readback_exc}",
+                "rolled_back": rolled_back,
+            }
         return {
             "success": True,
             "target": f"{component_name}/{container}/{feature_tag}/{property_name}",

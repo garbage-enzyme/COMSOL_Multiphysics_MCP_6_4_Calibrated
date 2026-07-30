@@ -1,5 +1,8 @@
 """Unit tests for physics helpers without a COMSOL client."""
 
+import pytest
+import src.tools.physics as physics_module
+from mcp.server.fastmcp import FastMCP
 from src.tools.physics import (
     _resolve_geometry_tag,
     add_boundary_condition,
@@ -9,6 +12,7 @@ from src.tools.physics import (
     add_physics_interface,
     assign_material,
     list_physics_features,
+    register_physics_tools,
     remove_physics_interface,
     setup_flow_boundaries,
     setup_heat_boundaries,
@@ -18,23 +22,39 @@ from src.tools.physics import (
 class FakePhysics:
     def __init__(self, label):
         self._label = label
+        self.selected = None
 
     def label(self):
         return self._label
+
+    def selection(self):
+        return self
+
+    def set(self, value):
+        self.selected = value
 
 
 class FakePhysicsList:
     def __init__(self, existing=()):
         self.existing = list(existing)
         self.created = []
+        self.nodes = {}
 
     def tags(self):
         return list(self.existing)
 
     def create(self, tag, interface_type, dimension):
+        if tag in self.existing:
+            raise RuntimeError(f"duplicate physics tag: {tag}")
         self.created.append((tag, interface_type, dimension))
         self.existing.append(tag)
-        return FakePhysics(interface_type)
+        node = FakePhysics(interface_type)
+        self.nodes[tag] = node
+        return node
+
+    def remove(self, tag):
+        self.existing.remove(tag)
+        self.nodes.pop(tag, None)
 
 
 class JavaTagPhysicsList(FakePhysicsList):
@@ -137,6 +157,46 @@ def test_add_physics_interface_validates_type():
     result = add_physics_interface(FakeModel(FakeComponent()), "  ")
 
     assert result["success"] is False
+
+
+def test_add_physics_interface_rolls_back_rejected_named_selection():
+    component = FakeComponent()
+
+    class RejectingPhysics(FakePhysics):
+        def set(self, value):
+            raise RuntimeError(f"selection rejected: {value}")
+
+    def create(tag, interface_type, dimension):
+        component.physics_list.created.append((tag, interface_type, dimension))
+        component.physics_list.existing.append(tag)
+        return RejectingPhysics(interface_type)
+
+    component.physics_list.create = create
+
+    result = add_physics_interface(
+        FakeModel(component),
+        "SolidMechanics",
+        domain_selection="domains_hot",
+    )
+
+    assert result["success"] is False
+    assert result["rolled_back"] is True
+    assert component.physics_list.existing == []
+
+
+def test_specialized_solid_adder_allocates_live_unique_tags(monkeypatch):
+    component = FakeComponent(existing=["solid"])
+    model = FakeModel(component)
+    server = FastMCP("physics-specialized-test")
+    register_physics_tools(server)
+    monkeypatch.setattr(physics_module.session_manager, "get_model", lambda name: model)
+    tool = server._tool_manager._tools["physics_add_solid_mechanics"]
+
+    result = tool.fn(model_name="model-a")
+
+    assert result["success"] is True
+    assert result["physics"]["tag"] == "solid2"
+    assert component.physics_list.created == [("solid2", "SolidMechanics", "3")]
 
 
 def test_resolve_geometry_tag_normalizes_java_string():
@@ -392,6 +452,8 @@ class BoundaryFeatureList:
         return [item[0] for item in self.created]
 
     def create(self, tag, feature_type, entity_dimension):
+        if tag in self.tags():
+            raise RuntimeError(f"duplicate feature tag: {tag}")
         feature = BoundaryFeature()
         self.created.append((tag, feature_type, entity_dimension, feature))
         return feature
@@ -543,6 +605,26 @@ class FailingBoundaryFeatureList(BoundaryFeatureList):
         return feature
 
 
+class FailingPropertyBoundaryFeature(BoundaryFeature):
+    def set(self, name, value):
+        raise RuntimeError(f"property failure: {name}={value}")
+
+
+class FailingPropertyBoundaryFeatureList(BoundaryFeatureList):
+    def __init__(self, fail_on_create_number):
+        super().__init__()
+        self.fail_on_create_number = fail_on_create_number
+
+    def create(self, tag, feature_type, entity_dimension):
+        feature = (
+            FailingPropertyBoundaryFeature()
+            if len(self.created) + 1 == self.fail_on_create_number
+            else BoundaryFeature()
+        )
+        self.created.append((tag, feature_type, entity_dimension, feature))
+        return feature
+
+
 def test_boundary_failure_removes_current_feature():
     physics = BoundaryPhysics()
     physics.features = FailingBoundaryFeatureList(1)
@@ -640,6 +722,52 @@ def test_add_domain_feature_uses_owning_component_dimension():
     assert result["domain_feature"]["sdim"] == 2
 
 
+def test_add_domain_feature_rejects_ambiguous_cross_component_physics():
+    first = BoundaryPhysics()
+    second = BoundaryPhysics()
+    model = FakeModel(FakeComponent())
+    model.java = MultiComponentJava(
+        {
+            "comp1": DimensionComponent(3, "ht", first),
+            "comp2": DimensionComponent(2, "ht", second),
+        }
+    )
+
+    result = add_domain_feature(model, "ht", "Solid", [1])
+
+    assert result["success"] is False
+    assert "ambiguous" in result["error"]
+    assert first.features.created == []
+    assert second.features.created == []
+
+
+def test_add_domain_feature_property_failure_removes_created_node():
+    class RejectingPropertyFeature(BoundaryFeature):
+        def set(self, name, value):
+            raise RuntimeError(f"property rejected: {name}={value}")
+
+    class RejectingPropertyFeatureList(BoundaryFeatureList):
+        def create(self, tag, feature_type, entity_dimension):
+            feature = RejectingPropertyFeature()
+            self.created.append((tag, feature_type, entity_dimension, feature))
+            return feature
+
+    physics = BoundaryPhysics()
+    physics.features = RejectingPropertyFeatureList()
+
+    result = add_domain_feature(
+        FakeModel(BoundaryComponent(physics)),
+        "ht",
+        "Solid",
+        [1],
+        properties={"k": "10[W/(m*K)]"},
+    )
+
+    assert result["success"] is False
+    assert result["rolled_back"] is True
+    assert physics.features.created == []
+
+
 class MaterialSelection:
     def __init__(self):
         self.domains = None
@@ -678,7 +806,7 @@ class MaterialNode:
 
 class MaterialList:
     def __init__(self, nodes=None):
-        self.nodes = nodes or {}
+        self.nodes = {} if nodes is None else nodes
         self.created = []
 
     def tags(self):
@@ -692,6 +820,9 @@ class MaterialList:
         self.nodes[tag] = node
         self.created.append((tag, material_type))
         return node
+
+    def remove(self, tag):
+        self.nodes.pop(tag)
 
 
 class MaterialComponent(DimensionComponent):
@@ -731,17 +862,77 @@ def test_assign_material_reuses_existing_material_in_physics_component():
     assert existing.group.properties["density"] == ["2329[kg/m^3]"]
 
 
+def test_assign_material_refuses_to_fabricate_empty_named_material():
+    materials = MaterialList()
+    target = MaterialComponent(2, "ht", BoundaryPhysics(), materials)
+    model = FakeModel(FakeComponent())
+    model.java = MultiComponentJava({"comp2": target})
+
+    result = assign_material(model, "ht", "Copper")
+
+    assert result["success"] is False
+    assert "properties are required" in result["error"]
+    assert materials.created == []
+
+
+def test_assign_material_creates_collision_free_explicit_common_material():
+    existing = MaterialNode("Copper_Alloy", "Unrelated")
+    materials = MaterialList({"Copper_Alloy": existing})
+    target = MaterialComponent(2, "ht", BoundaryPhysics(), materials)
+    model = FakeModel(FakeComponent())
+    model.java = MultiComponentJava({"comp2": target})
+
+    result = assign_material(
+        model,
+        "ht",
+        "Copper Alloy",
+        domain_selection=[2],
+        properties={"electricconductivity": "5.8e7[S/m]"},
+    )
+
+    assert result["success"] is True
+    assert result["created"] is True
+    assert result["material_tag"] == "Copper_Alloy2"
+    created = materials.nodes["Copper_Alloy2"]
+    assert created.label() == "Copper Alloy"
+    assert created.selection_node.domains == [2]
+    assert created.group.properties == {
+        "electricconductivity": ["5.8e7[S/m]"]
+    }
+
+
 class CouplingList:
     def __init__(self):
         self.created = []
+        self.nodes = {}
 
     def tags(self):
         return []
 
     def create(self, tag, coupling_type, dimension):
-        coupling = FakePhysics(coupling_type)
+        coupling = CouplingNode(coupling_type)
         self.created.append((tag, coupling_type, dimension))
+        self.nodes[tag] = coupling
         return coupling
+
+    def remove(self, tag):
+        self.created = [item for item in self.created if item[0] != tag]
+        self.nodes.pop(tag, None)
+
+
+class CouplingNode:
+    def __init__(self, label):
+        self._label = label
+        self.values = {}
+
+    def label(self):
+        return self._label
+
+    def set(self, name, value):
+        self.values[name] = value
+
+    def getString(self, name):
+        return self.values[name]
 
 
 class CoupledPhysicsList:
@@ -800,6 +991,53 @@ def test_add_multiphysics_coupling_uses_component_clientapi():
     assert result["success"] is True
     assert component.couplings.created == [("mp1", "ThermalExpansion", 3)]
     assert result["coupling"]["physics"] == ["solid", "ht"]
+    assert component.couplings.nodes["mp1"].values == {
+        "Solid_physics": "solid",
+        "Heat_physics": "ht",
+    }
+    assert result["coupling"]["physics_references"] == {
+        "Solid_physics": "solid",
+        "Heat_physics": "ht",
+    }
+
+
+def test_add_multiphysics_coupling_rolls_back_failed_reference_readback():
+    component = CouplingComponent()
+
+    class MismatchingNode(CouplingNode):
+        def getString(self, name):
+            return "wrong"
+
+    component.couplings.create = lambda tag, coupling_type, dimension: (
+        component.couplings.nodes.setdefault(tag, MismatchingNode(coupling_type))
+    )
+    model = FakeModel(FakeComponent())
+    model.java = MultiComponentJava({"comp1": component})
+
+    result = add_multiphysics_coupling(
+        model,
+        "ThermalExpansion",
+        ["solid", "ht"],
+    )
+
+    assert result["success"] is False
+    assert result["rolled_back"] is True
+    assert component.couplings.nodes == {}
+
+
+def test_add_multiphysics_coupling_rejects_unmapped_type_before_creation():
+    component = CouplingComponent()
+    model = FakeModel(FakeComponent())
+    model.java = MultiComponentJava({"comp1": component})
+
+    result = add_multiphysics_coupling(
+        model,
+        "UnknownCoupling",
+        ["solid", "ht"],
+    )
+
+    assert result["success"] is False
+    assert component.couplings.created == []
 
 
 def test_setup_flow_boundaries_uses_clientapi_features():
@@ -837,6 +1075,19 @@ def test_setup_flow_boundaries_rolls_back_earlier_features():
     assert physics.features.created == []
 
 
+def test_setup_flow_boundaries_rolls_back_partial_property_failure():
+    physics = BoundaryPhysics()
+    physics.features = FailingPropertyBoundaryFeatureList(2)
+
+    result = setup_flow_boundaries(
+        FakeModel(BoundaryComponent(physics)), "ht", [1], [2]
+    )
+
+    assert result["success"] is False
+    assert result["composite_rolled_back"] is True
+    assert physics.features.created == []
+
+
 def test_setup_heat_boundaries_creates_all_requested_types():
     physics = BoundaryPhysics()
     model = FakeModel(BoundaryComponent(physics))
@@ -859,6 +1110,84 @@ def test_setup_heat_boundaries_creates_all_requested_types():
         "TemperatureBoundary",
         "ConvectiveHeatFlux",
     ]
+
+
+def test_setup_heat_boundaries_rolls_back_partial_property_failure():
+    physics = BoundaryPhysics()
+    physics.features = FailingPropertyBoundaryFeatureList(3)
+
+    result = setup_heat_boundaries(
+        FakeModel(BoundaryComponent(physics)),
+        "ht",
+        heat_flux_boundaries=[1],
+        temperature_boundaries=[2],
+        convection_boundaries=[3],
+    )
+
+    assert result["success"] is False
+    assert result["composite_rolled_back"] is True
+    assert physics.features.created == []
+
+
+class WizardGeometry(FakeGeometry):
+    def run(self):
+        return None
+
+    def getNBoundaries(self):
+        return 2
+
+    def getNDomains(self):
+        return 1
+
+    def getSDim(self):
+        return 1
+
+    def getBoundingBox(self):
+        return [0.0, 1.0]
+
+
+class WizardGeometryList:
+    def __init__(self):
+        self.geometry = WizardGeometry()
+
+    def size(self):
+        return 1
+
+    def tags(self):
+        return ["geom1"]
+
+
+class WizardComponent(FakeComponent):
+    def __init__(self):
+        super().__init__()
+        self.geometry_list = WizardGeometryList()
+
+    def geom(self, tag=None):
+        return self.geometry_list if tag is None else self.geometry_list.geometry
+
+
+@pytest.mark.parametrize(
+    "tool_name",
+    ["physics_interactive_setup_flow", "physics_interactive_setup_heat"],
+)
+def test_interactive_setup_forwards_model_name_by_keyword(monkeypatch, tool_name):
+    model = FakeModel(WizardComponent())
+    requested_models = []
+    server = FastMCP(f"{tool_name}-test")
+    register_physics_tools(server)
+
+    def get_model(name):
+        requested_models.append(name)
+        return model
+
+    monkeypatch.setattr(physics_module.session_manager, "get_model", get_model)
+    tool = server._tool_manager._tools[tool_name]
+
+    result = tool.fn(model_name="model-b")
+
+    assert result["success"] is True
+    assert result["available_boundaries"] == 2
+    assert requested_models == ["model-b", "model-b"]
 
 
 class ElectrostaticsPhysics(BoundaryPhysics):
