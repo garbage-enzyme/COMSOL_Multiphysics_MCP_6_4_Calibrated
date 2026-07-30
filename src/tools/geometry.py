@@ -695,3 +695,200 @@ def register_geometry_tools(mcp: FastMCP) -> None:
             }
         except Exception as e:
             return {"success": False, "error": f"Failed to list features: {str(e)}"}
+
+    @mcp.tool()
+    def geometry_create_box_selection(
+        selection_name: str,
+        x_min: str,
+        x_max: str,
+        y_min: str,
+        y_max: str,
+        z_min: Optional[str] = None,
+        z_max: Optional[str] = None,
+        entity_dimension: int = 1,
+        condition: str = "intersects",
+        geometry_name: Optional[str] = None,
+        component_name: str = "comp1",
+        model_name: Optional[str] = None
+    ) -> dict:
+        """
+        Create a named Box selection for geometry entities by position.
+
+        For a 2D model, use entity_dimension=1 to select boundaries. For a 3D
+        model, use entity_dimension=2 to select boundary faces.
+
+        Args:
+            selection_name: Stable selection tag
+            x_min: Minimum x-coordinate expression
+            x_max: Maximum x-coordinate expression
+            y_min: Minimum y-coordinate expression
+            y_max: Maximum y-coordinate expression
+            z_min: Optional minimum z-coordinate expression
+            z_max: Optional maximum z-coordinate expression
+            entity_dimension: Entity dimension (default: 1)
+            condition: Box condition, usually "intersects" or "inside"
+            geometry_name: Geometry sequence tag (default: first geometry)
+            component_name: Component name (default: "comp1")
+            model_name: Model name (default: current model)
+
+        Returns:
+            Created named selection and matched entity numbers when available
+        """
+        model = session_manager.get_model(model_name)
+        if model is None:
+            return {
+                "success": False,
+                "error": f"Model not found: {model_name or 'no current model'}"
+            }
+
+        try:
+            jm = model.java
+            comp = jm.component(component_name)
+            if comp is None:
+                return {
+                    "success": False,
+                    "error": f"Component not found: {component_name}"
+                }
+
+            if geometry_name:
+                geom_tag = geometry_name
+            else:
+                geometries = comp.geom()
+                if geometries.size() == 0:
+                    return {
+                        "success": False,
+                        "error": "No geometry sequences found."
+                    }
+                geom_tag = str(geometries.tags()[0])
+
+            selection = comp.selection().create(selection_name, "Box")
+            selection.geom(geom_tag, int(entity_dimension))
+            selection.set("xmin", x_min)
+            selection.set("xmax", x_max)
+            selection.set("ymin", y_min)
+            selection.set("ymax", y_max)
+            if z_min is not None:
+                selection.set("zmin", z_min)
+            if z_max is not None:
+                selection.set("zmax", z_max)
+            selection.set("condition", condition)
+
+            result = {
+                "success": True,
+                "selection": {
+                    "tag": selection_name,
+                    "type": "Box",
+                    "component": component_name,
+                    "geometry": geom_tag,
+                    "entity_dimension": int(entity_dimension),
+                    "condition": condition,
+                    "bounds": {
+                        "x_min": x_min,
+                        "x_max": x_max,
+                        "y_min": y_min,
+                        "y_max": y_max,
+                    },
+                },
+            }
+            if z_min is not None or z_max is not None:
+                result["selection"]["bounds"].update({
+                    "z_min": z_min,
+                    "z_max": z_max,
+                })
+
+            try:
+                result["selection"]["entities"] = [
+                    int(entity) for entity in selection.entities()
+                ]
+            except Exception as e:
+                result["selection"]["entities"] = []
+                result["warning"] = (
+                    "Selection created, but entities could not be evaluated. "
+                    f"Build the geometry first. Details: {str(e)}"
+                )
+
+            return result
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"Failed to create box selection: {str(e)}"
+            }
+
+    @mcp.tool()
+    def geometry_create_side_selections(
+        x_min: str,
+        x_max: str,
+        y_min: str,
+        y_max: str,
+        prefix: str = "side",
+        tolerance: str = "1e-9[m]",
+        entity_dimension: int = 1,
+        geometry_name: Optional[str] = None,
+        component_name: str = "comp1",
+        model_name: Optional[str] = None
+    ) -> dict:
+        """
+        Create named left, right, bottom, and top Box selections.
+
+        This is intended for rectangular 2D domains such as waveguides and
+        water-wave tanks. The resulting tags are <prefix>_left,
+        <prefix>_right, <prefix>_bottom, and <prefix>_top.
+        """
+        expanded_x_min = f"({x_min})-({tolerance})"
+        expanded_x_max = f"({x_max})+({tolerance})"
+        expanded_y_min = f"({y_min})-({tolerance})"
+        expanded_y_max = f"({y_max})+({tolerance})"
+
+        definitions = {
+            "left": {
+                "x_min": expanded_x_min,
+                "x_max": f"({x_min})+({tolerance})",
+                "y_min": expanded_y_min,
+                "y_max": expanded_y_max,
+            },
+            "right": {
+                "x_min": f"({x_max})-({tolerance})",
+                "x_max": expanded_x_max,
+                "y_min": expanded_y_min,
+                "y_max": expanded_y_max,
+            },
+            "bottom": {
+                "x_min": expanded_x_min,
+                "x_max": expanded_x_max,
+                "y_min": expanded_y_min,
+                "y_max": f"({y_min})+({tolerance})",
+            },
+            "top": {
+                "x_min": expanded_x_min,
+                "x_max": expanded_x_max,
+                "y_min": f"({y_max})-({tolerance})",
+                "y_max": expanded_y_max,
+            },
+        }
+
+        created = {}
+        failed = {}
+        for side, bounds in definitions.items():
+            selection_tag = f"{prefix}_{side}"
+            result = geometry_create_box_selection(
+                selection_name=selection_tag,
+                entity_dimension=entity_dimension,
+                condition="intersects",
+                geometry_name=geometry_name,
+                component_name=component_name,
+                model_name=model_name,
+                **bounds,
+            )
+            if result.get("success"):
+                created[side] = result["selection"]
+            else:
+                failed[side] = result.get("error", "Unknown error")
+
+        return {
+            "success": not failed,
+            "prefix": prefix,
+            "selections": created,
+            "failed_selections": failed,
+            "created_count": len(created),
+            "failed_count": len(failed),
+        }

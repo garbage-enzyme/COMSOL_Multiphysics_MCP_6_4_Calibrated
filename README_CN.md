@@ -180,7 +180,7 @@ COMSOL_Multiphysics_MCP/
 | `param_sweep_setup` | 设置参数扫描 |
 | `param_description` | 获取/设置参数描述 |
 
-### 几何建模（14 个）
+### 几何建模（16 个）
 
 | 工具 | 说明 |
 |------|------|
@@ -198,8 +198,10 @@ COMSOL_Multiphysics_MCP/
 | `geometry_build` | 构建几何 |
 | `geometry_list_features` | 列出特征 |
 | `geometry_get_boundaries` | 获取边界编号 |
+| `geometry_create_box_selection` | 按位置创建命名选择 |
+| `geometry_create_side_selections` | 创建左/右/上/下边界选择 |
 
-### 物理场配置（16 个）
+### 物理场配置（28 个）
 
 | 工具 | 说明 |
 |------|------|
@@ -210,7 +212,18 @@ COMSOL_Multiphysics_MCP/
 | `physics_add_solid_mechanics` | 添加固体力学 |
 | `physics_add_heat_transfer` | 添加传热 |
 | `physics_add_laminar_flow` | 添加层流 |
+| `physics_add_acoustics` | 按 COMSOL 类型添加基于几何的声学接口 |
+| `physics_add_pressure_acoustics` | 添加压力声学 |
+| `physics_add_coefficient_form_pde` | 添加系数形式 PDE |
+| `physics_add_general_form_pde` | 添加一般形式 PDE |
+| `physics_add_weak_form_pde` | 添加弱形式 PDE |
 | `physics_configure_boundary` | 配置边界条件 |
+| `physics_configure_acoustic_boundary` | 配置单个声学边界条件 |
+| `physics_setup_acoustic_boundaries` | 批量配置声学边界条件 |
+| `physics_configure_pde_boundary` | 配置单个 PDE 边界条件 |
+| `physics_setup_pde_boundaries` | 批量配置 PDE 边界条件 |
+| `physics_get_acoustic_boundary_conditions` | 列出常用声学边界 feature 类型 |
+| `physics_get_pde_boundary_conditions` | 列出常用 PDE 边界 feature 类型 |
 | `physics_set_material` | 分配材料 |
 | `physics_list_features` | 列出物理场特征 |
 | `physics_remove` | 删除物理场 |
@@ -220,11 +233,12 @@ COMSOL_Multiphysics_MCP/
 | `physics_interactive_setup_flow` | 交互式流体设置 |
 | `physics_boundary_selection` | 通用边界设置 |
 
-### 网格划分（3 个）
+### 网格划分（4 个）
 
 | 工具 | 说明 |
 |------|------|
 | `mesh_list` | 列出网格序列 |
+| `mesh_create_sequence` | 创建网格序列 |
 | `mesh_create` | 生成网格 |
 | `mesh_info` | 获取网格统计 |
 
@@ -340,6 +354,19 @@ bc.set('q0', '1e6[W/m^2]')
 | 层流 | OutletBoundary | `p0` |
 | 固体力学 | Fixed | 无额外属性 |
 | 固体力学 | BoundaryLoad | `Fx`，`Fy`，`Fz` |
+| 压力声学 | SoundHard | 无额外属性 |
+| 压力声学 | SoundSoft | 无额外属性 |
+| 压力声学 | Pressure | `p0` |
+| 压力声学 | Impedance | `Zn` |
+| 压力声学 | NormalAcceleration | `nacc` |
+| 压力声学 | NormalVelocity | `nvel` |
+| 压力声学 | PlaneWaveRadiation | 无额外属性 |
+| 压力声学 | SphericalWaveRadiation | 无额外属性 |
+| PDE | DirichletBoundary | `r` |
+| PDE | FluxBoundary | `g`，`q` |
+| PDE | ZeroFluxBoundary | 无额外属性 |
+| PDE | WeakContribution | `weak` |
+| PDE | PeriodicCondition | 无额外属性 |
 
 ### 离线嵌入模型
 

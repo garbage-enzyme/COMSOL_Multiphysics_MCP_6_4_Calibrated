@@ -8,14 +8,30 @@ from .session import session_manager
 _tag_counter = {}
 
 
+def _get_component_java(java_model, component_name=None):
+    """Return an explicit component or the model's first component by tag."""
+    if component_name:
+        return java_model.component(component_name)
+    components = java_model.component()
+    if components.size() == 0:
+        raise ValueError("No components defined in the model.")
+    return java_model.component(str(components.tags()[0]))
+
+
 def _find_physics_java(jm, physics_name):
     """Look up a physics node by label or tag across all components."""
-    for i in range(jm.component().size()):
-        comp = jm.component().get(i)
-        for j in range(comp.physics().size()):
-            p = comp.physics().get(j)
+    context = _find_physics_context(jm, physics_name)
+    return context[1] if context else None
+
+
+def _find_physics_context(jm, physics_name):
+    """Look up the component and physics node by label or tag."""
+    for component_tag in jm.component().tags():
+        comp = jm.component(str(component_tag))
+        for physics_tag in comp.physics().tags():
+            p = comp.physics(str(physics_tag))
             if p.label() == physics_name or p.tag() == physics_name:
-                return p
+                return comp, p
     return None
 
 
@@ -23,6 +39,126 @@ def _make_tag(prefix="bc"):
     """Generate a unique tag using a monotonic counter."""
     _tag_counter[prefix] = _tag_counter.get(prefix, 0) + 1
     return f"{prefix}_{_tag_counter[prefix]}"
+
+
+def _set_feature_properties(feature, properties):
+    """Set feature properties and return any failures without hiding them."""
+    failures = {}
+    for prop_name, prop_value in properties.items():
+        try:
+            feature.set(prop_name, prop_value)
+        except Exception as e:
+            failures[prop_name] = str(e)
+    return failures
+
+
+def _set_domain_selection(physics_java, domain_selection):
+    """Apply an optional explicit domain selection to a physics interface."""
+    if domain_selection:
+        physics_java.selection().set([int(d) for d in domain_selection])
+
+
+def _get_geometry_tag(component, geometry_name=None):
+    """Resolve an explicit geometry tag or the component's first geometry."""
+    if geometry_name:
+        return geometry_name
+    geometries = component.geom()
+    if geometries.size() == 0:
+        raise ValueError("No geometry found in component.")
+    return str(geometries.tags()[0])
+
+
+def _get_boundary_dimension(component, boundary_dimension=None):
+    """Resolve a boundary dimension from input or the first component geometry."""
+    if boundary_dimension is not None:
+        return int(boundary_dimension)
+    geometries = component.geom()
+    if geometries.size() == 0:
+        raise ValueError("No geometry found in component.")
+    geom_tag = str(geometries.tags()[0])
+    return int(component.geom(geom_tag).getSDim()) - 1
+
+
+def _create_boundary_features(
+    physics_java,
+    physics_name,
+    boundary_conditions,
+    boundary_dimension,
+):
+    """Create a batch of boundary features from a common configuration format."""
+    created = []
+    failed = []
+
+    for index, condition in enumerate(boundary_conditions):
+        condition_type = condition.get("type") or condition.get("boundary_condition")
+        boundaries = condition.get("boundaries") or condition.get("boundary_selection")
+        selection_name = condition.get("selection_name")
+        properties = condition.get("properties") or {}
+
+        if not condition_type:
+            failed.append({"index": index, "error": "Missing boundary condition type."})
+            continue
+        if not boundaries and not selection_name:
+            failed.append({
+                "index": index,
+                "type": condition_type,
+                "error": "Missing boundary selection or selection name.",
+            })
+            continue
+
+        tag = condition.get("tag") or _make_tag(condition_type.lower())
+        dimension = condition.get("dimension", boundary_dimension)
+        try:
+            feature = physics_java.create(tag, condition_type, int(dimension))
+            if selection_name:
+                feature.selection().named(selection_name)
+            else:
+                feature.selection().set([int(b) for b in boundaries])
+            property_failures = _set_feature_properties(feature, properties)
+            label = condition.get("label")
+            if label:
+                feature.label(label)
+            elif selection_name:
+                feature.label(f'{condition_type} (Selection {selection_name})')
+            else:
+                feature.label(f'{condition_type} (Boundaries {list(boundaries)})')
+
+            result = {
+                "tag": tag,
+                "type": condition_type,
+                "dimension": int(dimension),
+                "properties": properties,
+            }
+            if selection_name:
+                result["selection_name"] = selection_name
+            else:
+                result["boundaries"] = list(boundaries)
+            if property_failures:
+                result["property_errors"] = property_failures
+                failed.append(result)
+            else:
+                created.append(result)
+        except Exception as e:
+            failed.append({
+                "index": index,
+                "tag": tag,
+                "type": condition_type,
+                "dimension": int(dimension),
+                "error": str(e),
+            })
+            if selection_name:
+                failed[-1]["selection_name"] = selection_name
+            elif boundaries:
+                failed[-1]["boundaries"] = list(boundaries)
+
+    return {
+        "success": not failed,
+        "physics": physics_name,
+        "configured_boundaries": created,
+        "failed_boundaries": failed,
+        "configured_count": len(created),
+        "failed_count": len(failed),
+    }
 
 
 PHYSICS_INTERFACES = {
@@ -52,6 +188,11 @@ PHYSICS_INTERFACES = {
         "pressure_acoustics": "Pressure Acoustics (acpr)",
         "thermoacoustics": "Thermoacoustics (ta)",
     },
+    "Mathematics": {
+        "coefficient_form_pde": "Coefficient Form PDE (c)",
+        "general_form_pde": "General Form PDE (g)",
+        "weak_form_pde": "Weak Form PDE (w)",
+    },
     "Chemical": {
         "transport_diluted": "Transport of Diluted Species (tds)",
         "reaction_engineering": "Reaction Engineering (re)",
@@ -66,6 +207,75 @@ PHYSICS_INTERFACES = {
         "electromechanical": "Electromechanical Forces",
         "joule_heating": "Joule Heating (jh)",
     },
+}
+
+ACOUSTIC_BOUNDARY_CONDITIONS = {
+    "SoundHard": {
+        "description": "Sound hard wall; no user property is normally required.",
+        "properties": [],
+    },
+    "SoundSoft": {
+        "description": "Sound soft boundary with zero acoustic pressure.",
+        "properties": [],
+    },
+    "Pressure": {
+        "description": "Prescribed acoustic pressure.",
+        "properties": ["p0"],
+    },
+    "Impedance": {
+        "description": "Specific acoustic impedance boundary.",
+        "properties": ["Zn"],
+    },
+    "NormalAcceleration": {
+        "description": "Prescribed normal acceleration source.",
+        "properties": ["nacc"],
+    },
+    "NormalVelocity": {
+        "description": "Prescribed normal velocity source.",
+        "properties": ["nvel"],
+    },
+    "PlaneWaveRadiation": {
+        "description": "Nonreflecting plane-wave radiation boundary.",
+        "properties": [],
+    },
+    "SphericalWaveRadiation": {
+        "description": "Nonreflecting spherical-wave radiation boundary.",
+        "properties": [],
+    },
+}
+
+PDE_BOUNDARY_CONDITIONS = {
+    "DirichletBoundary": {
+        "description": "Prescribed dependent-variable value.",
+        "properties": ["r"],
+    },
+    "FluxBoundary": {
+        "description": "Prescribed generalized inward flux/source.",
+        "properties": ["g", "q"],
+    },
+    "ZeroFluxBoundary": {
+        "description": "Zero inward flux boundary condition.",
+        "properties": [],
+    },
+    "WeakContribution": {
+        "description": "Weak contribution on selected boundaries.",
+        "properties": ["weak"],
+    },
+    "PeriodicCondition": {
+        "description": "Periodic boundary condition.",
+        "properties": [],
+    },
+}
+
+PDE_BOUNDARY_ALIASES = {
+    "dirichlet": "DirichletBoundary",
+    "flux": "FluxBoundary",
+    "neumann": "FluxBoundary",
+    "zero_flux": "ZeroFluxBoundary",
+    "no_flux": "ZeroFluxBoundary",
+    "wall": "ZeroFluxBoundary",
+    "weak": "WeakContribution",
+    "periodic": "PeriodicCondition",
 }
 
 
@@ -117,6 +327,43 @@ def register_physics_tools(mcp: FastMCP) -> None:
             "interfaces": PHYSICS_INTERFACES,
             "note": "Interface identifiers (in parentheses) are used when adding physics.",
         }
+
+    @mcp.tool()
+    def physics_get_acoustic_boundary_conditions() -> dict:
+        """
+        Get common Pressure Acoustics boundary feature types and properties.
+
+        Returns:
+            Acoustic boundary condition reference
+        """
+        return {
+            "success": True,
+            "boundary_conditions": ACOUSTIC_BOUNDARY_CONDITIONS,
+            "note": (
+                "Feature types and properties can vary by acoustic interface and "
+                "COMSOL version. Custom feature types remain available through "
+                "physics_configure_acoustic_boundary."
+            ),
+        }
+
+    @mcp.tool()
+    def physics_get_pde_boundary_conditions() -> dict:
+        """
+        Get common PDE boundary feature types and properties.
+
+        Returns:
+            PDE boundary condition reference
+        """
+        return {
+            "success": True,
+            "boundary_conditions": PDE_BOUNDARY_CONDITIONS,
+            "aliases": PDE_BOUNDARY_ALIASES,
+            "note": (
+                "PDE property values can be scalars, vectors, or matrices depending "
+                "on the number of dependent variables. Custom feature types remain "
+                "available through physics_configure_pde_boundary."
+            ),
+        }
     
     @mcp.tool()
     def physics_add(
@@ -155,7 +402,7 @@ def register_physics_tools(mcp: FastMCP) -> None:
             if component_name:
                 comp = jm.component(component_name)
             else:
-                comp = jm.component().get(0)
+                comp = _get_component_java(jm)
 
             if comp is None:
                 return {"success": False, "error": f"Component not found: {component_name}"}
@@ -199,7 +446,7 @@ def register_physics_tools(mcp: FastMCP) -> None:
 
         try:
             jm = model.java
-            comp = jm.component().get(0)
+            comp = _get_component_java(jm)
             physics_java = comp.physics().create("es", "Electrostatics")
 
             if domain_selection:
@@ -244,7 +491,7 @@ def register_physics_tools(mcp: FastMCP) -> None:
 
         try:
             jm = model.java
-            comp = jm.component().get(0)
+            comp = _get_component_java(jm)
             physics_java = comp.physics().create("solid", "SolidMechanics")
 
             if domain_selection:
@@ -289,7 +536,7 @@ def register_physics_tools(mcp: FastMCP) -> None:
 
         try:
             jm = model.java
-            comp = jm.component().get(0)
+            comp = _get_component_java(jm)
             physics_java = comp.physics().create("ht", "HeatTransfer")
 
             if domain_selection:
@@ -334,7 +581,7 @@ def register_physics_tools(mcp: FastMCP) -> None:
 
         try:
             jm = model.java
-            comp = jm.component().get(0)
+            comp = _get_component_java(jm)
             physics_java = comp.physics().create("spf", "LaminarFlow")
 
             if domain_selection:
@@ -354,6 +601,286 @@ def register_physics_tools(mcp: FastMCP) -> None:
             }
         except Exception as e:
             return {"success": False, "error": f"Failed to add Laminar Flow: {str(e)}"}
+
+    @mcp.tool()
+    def physics_add_pressure_acoustics(
+        domain_selection: Optional[Sequence[int]] = None,
+        component_name: Optional[str] = None,
+        geometry_name: Optional[str] = None,
+        physics_tag: str = "acpr",
+        model_name: Optional[str] = None
+    ) -> dict:
+        """
+        Add Pressure Acoustics physics for frequency-domain acoustic analysis.
+
+        Args:
+            domain_selection: Domain numbers (default: all domains)
+            component_name: Component to add physics to (default: first component)
+            geometry_name: Geometry sequence tag (default: first geometry)
+            physics_tag: Physics interface tag (default: "acpr")
+            model_name: Model name (default: current model)
+
+        Returns:
+            Created physics info
+        """
+        model = session_manager.get_model(model_name)
+        if model is None:
+            return {
+                "success": False,
+                "error": f"Model not found: {model_name or 'no current model'}"
+            }
+
+        try:
+            jm = model.java
+            comp = _get_component_java(jm, component_name)
+            geom_tag = _get_geometry_tag(comp, geometry_name)
+            physics_java = comp.physics().create(
+                physics_tag,
+                "PressureAcoustics",
+                geom_tag,
+            )
+            _set_domain_selection(physics_java, domain_selection)
+
+            return {
+                "success": True,
+                "physics": {
+                    "name": (
+                        physics_java.label()
+                        if hasattr(physics_java, 'label')
+                        else "Pressure Acoustics"
+                    ),
+                    "type": "PressureAcoustics",
+                    "tag": physics_tag,
+                    "component": comp.tag(),
+                    "geometry": geom_tag,
+                    "domain_selection": (
+                        list(domain_selection) if domain_selection else "all"
+                    ),
+                }
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"Failed to add Pressure Acoustics: {str(e)}"
+            }
+
+    @mcp.tool()
+    def physics_add_acoustics(
+        physics_type: str,
+        physics_tag: Optional[str] = None,
+        domain_selection: Optional[Sequence[int]] = None,
+        component_name: Optional[str] = None,
+        geometry_name: Optional[str] = None,
+        model_name: Optional[str] = None
+    ) -> dict:
+        """
+        Add a geometry-based Acoustics Module physics interface.
+
+        Use the exact COMSOL physics type for the installed version. Confirmed
+        COMSOL 6.3 examples include PressureAcoustics and
+        ThermoacousticsSinglePhysics. This tool also supports other acoustic
+        interface types without maintaining a hard-coded allowlist.
+
+        Args:
+            physics_type: Exact COMSOL acoustic physics type
+            physics_tag: Physics interface tag (default: generated from type)
+            domain_selection: Domain numbers (default: all domains)
+            component_name: Component to add physics to (default: first component)
+            geometry_name: Geometry sequence tag (default: first geometry)
+            model_name: Model name (default: current model)
+
+        Returns:
+            Created physics info
+        """
+        model = session_manager.get_model(model_name)
+        if model is None:
+            return {
+                "success": False,
+                "error": f"Model not found: {model_name or 'no current model'}"
+            }
+
+        tag = physics_tag or physics_type.replace(" ", "_").lower()
+
+        try:
+            jm = model.java
+            comp = _get_component_java(jm, component_name)
+            geom_tag = _get_geometry_tag(comp, geometry_name)
+            physics_java = comp.physics().create(tag, physics_type, geom_tag)
+            _set_domain_selection(physics_java, domain_selection)
+
+            return {
+                "success": True,
+                "physics": {
+                    "name": (
+                        physics_java.label()
+                        if hasattr(physics_java, 'label')
+                        else physics_type
+                    ),
+                    "type": physics_type,
+                    "tag": tag,
+                    "component": comp.tag(),
+                    "geometry": geom_tag,
+                    "domain_selection": (
+                        list(domain_selection) if domain_selection else "all"
+                    ),
+                },
+                "note": (
+                    "The physics type is passed directly to the COMSOL Java API; "
+                    "availability depends on installed products and licenses."
+                ),
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"Failed to add acoustic physics '{physics_type}': {str(e)}"
+            }
+
+    def _add_pde_interface(
+        physics_type,
+        default_tag,
+        equation_feature,
+        dependent_variables,
+        equation_properties,
+        domain_selection,
+        component_name,
+        physics_tag,
+        model_name,
+    ):
+        """Create and optionally configure a PDE interface."""
+        model = session_manager.get_model(model_name)
+        if model is None:
+            return {
+                "success": False,
+                "error": f"Model not found: {model_name or 'no current model'}"
+            }
+
+        variables = list(dependent_variables) if dependent_variables else ["u"]
+        tag = physics_tag or default_tag
+
+        try:
+            jm = model.java
+            comp = _get_component_java(jm, component_name)
+            physics_java = comp.physics().create(tag, physics_type, variables)
+            _set_domain_selection(physics_java, domain_selection)
+
+            property_failures = {}
+            if equation_properties:
+                equation = physics_java.feature(equation_feature)
+                property_failures = _set_feature_properties(
+                    equation,
+                    equation_properties,
+                )
+
+            result = {
+                "success": not property_failures,
+                "physics": {
+                    "name": (
+                        physics_java.label()
+                        if hasattr(physics_java, 'label')
+                        else physics_type
+                    ),
+                    "type": physics_type,
+                    "tag": tag,
+                    "component": comp.tag(),
+                    "dependent_variables": variables,
+                    "domain_selection": (
+                        list(domain_selection) if domain_selection else "all"
+                    ),
+                    "equation_properties": equation_properties or {},
+                }
+            }
+            if property_failures:
+                result["error"] = "One or more PDE equation properties were rejected."
+                result["property_errors"] = property_failures
+            return result
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"Failed to add {physics_type}: {str(e)}"
+            }
+
+    @mcp.tool()
+    def physics_add_coefficient_form_pde(
+        dependent_variables: Sequence[str] = ("u",),
+        equation_properties: Optional[dict] = None,
+        domain_selection: Optional[Sequence[int]] = None,
+        component_name: Optional[str] = None,
+        physics_tag: str = "c",
+        model_name: Optional[str] = None
+    ) -> dict:
+        """
+        Add a Coefficient Form PDE interface.
+
+        Common equation properties include c, a, f, da, ea, al, be, and
+        ga. Values can be scalar, vector, or matrix expressions.
+        Rejected properties are returned explicitly.
+        """
+        return _add_pde_interface(
+            "CoefficientFormPDE",
+            "c",
+            "cfeq1",
+            dependent_variables,
+            equation_properties,
+            domain_selection,
+            component_name,
+            physics_tag,
+            model_name,
+        )
+
+    @mcp.tool()
+    def physics_add_general_form_pde(
+        dependent_variables: Sequence[str] = ("u",),
+        equation_properties: Optional[dict] = None,
+        domain_selection: Optional[Sequence[int]] = None,
+        component_name: Optional[str] = None,
+        physics_tag: str = "g",
+        model_name: Optional[str] = None
+    ) -> dict:
+        """
+        Add a General Form PDE interface.
+
+        Common equation properties include Ga, f, da, and ea. Values can be
+        scalar, vector, or matrix expressions. Rejected properties are returned
+        explicitly.
+        """
+        return _add_pde_interface(
+            "GeneralFormPDE",
+            "g",
+            "gfeq1",
+            dependent_variables,
+            equation_properties,
+            domain_selection,
+            component_name,
+            physics_tag,
+            model_name,
+        )
+
+    @mcp.tool()
+    def physics_add_weak_form_pde(
+        dependent_variables: Sequence[str] = ("u",),
+        equation_properties: Optional[dict] = None,
+        domain_selection: Optional[Sequence[int]] = None,
+        component_name: Optional[str] = None,
+        physics_tag: str = "w",
+        model_name: Optional[str] = None
+    ) -> dict:
+        """
+        Add a Weak Form PDE interface.
+
+        Set the weak expression with equation_properties={"weak": "..."}.
+        Rejected properties are returned explicitly.
+        """
+        return _add_pde_interface(
+            "WeakFormPDE",
+            "w",
+            "wfeq1",
+            dependent_variables,
+            equation_properties,
+            domain_selection,
+            component_name,
+            physics_tag,
+            model_name,
+        )
     
     @mcp.tool()
     def physics_configure_boundary(
@@ -436,6 +963,209 @@ def register_physics_tools(mcp: FastMCP) -> None:
             }
         except Exception as e:
             return {"success": False, "error": f"Failed to configure boundary: {str(e)}"}
+
+    def _setup_specialized_boundaries(
+        physics_name,
+        boundary_conditions,
+        condition_reference,
+        boundary_dimension,
+        model_name,
+    ):
+        """Find a physics interface and create specialized boundary features."""
+        model = session_manager.get_model(model_name)
+        if model is None:
+            return {
+                "success": False,
+                "error": f"Model not found: {model_name or 'no current model'}"
+            }
+
+        try:
+            context = _find_physics_context(model.java, physics_name)
+            if context is None:
+                return {
+                    "success": False,
+                    "error": f"Physics interface not found: {physics_name}"
+                }
+            comp, physics_java = context
+            dimension = _get_boundary_dimension(comp, boundary_dimension)
+
+            result = _create_boundary_features(
+                physics_java,
+                physics_name,
+                boundary_conditions,
+                dimension,
+            )
+            custom_types = sorted({
+                condition_type
+                for condition in boundary_conditions
+                for condition_type in [
+                    condition.get("type") or condition.get("boundary_condition")
+                ]
+                if condition_type and condition_type not in condition_reference
+            })
+            if custom_types:
+                result["custom_condition_types"] = custom_types
+                result["note"] = (
+                    "Custom condition types were passed directly to the COMSOL "
+                    "Java API. Their availability depends on the selected physics "
+                    "interface, installed products, and COMSOL version."
+                )
+            return result
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"Failed to setup boundaries: {str(e)}"
+            }
+
+    @mcp.tool()
+    def physics_configure_acoustic_boundary(
+        physics_name: str,
+        boundary_condition: str,
+        boundary_selection: Optional[Sequence[int]] = None,
+        properties: Optional[dict] = None,
+        selection_name: Optional[str] = None,
+        boundary_dimension: Optional[int] = None,
+        model_name: Optional[str] = None
+    ) -> dict:
+        """
+        Configure one Pressure Acoustics boundary condition.
+
+        Common types are SoundHard, SoundSoft, Pressure, Impedance,
+        NormalAcceleration, NormalVelocity, PlaneWaveRadiation, and
+        SphericalWaveRadiation. Unknown types are passed through for other
+        acoustic interfaces and versions. Property-setting errors are returned
+        instead of being ignored.
+        """
+        return _setup_specialized_boundaries(
+            physics_name,
+            [{
+                "type": boundary_condition,
+                "boundaries": (
+                    list(boundary_selection) if boundary_selection else None
+                ),
+                "selection_name": selection_name,
+                "properties": properties or {},
+            }],
+            ACOUSTIC_BOUNDARY_CONDITIONS,
+            boundary_dimension,
+            model_name,
+        )
+
+    @mcp.tool()
+    def physics_setup_acoustic_boundaries(
+        physics_name: str,
+        boundary_conditions: Sequence[dict],
+        boundary_dimension: Optional[int] = None,
+        model_name: Optional[str] = None
+    ) -> dict:
+        """
+        Configure multiple acoustic boundary conditions in one call.
+
+        Each item accepts:
+        - type: COMSOL boundary feature type
+        - boundaries: List of boundary numbers
+        - selection_name: Optional named COMSOL selection instead of numbers
+        - properties: Optional COMSOL property dictionary
+        - dimension: Optional geometric entity dimension override
+        - tag: Optional explicit feature tag
+        - label: Optional display label
+
+        Example:
+            [
+                {"type": "SoundHard", "boundaries": [1, 2]},
+                {
+                    "type": "Impedance",
+                    "boundaries": [3],
+                    "properties": {"Zn": "rho0*c0"}
+                }
+            ]
+        """
+        return _setup_specialized_boundaries(
+            physics_name,
+            boundary_conditions,
+            ACOUSTIC_BOUNDARY_CONDITIONS,
+            boundary_dimension,
+            model_name,
+        )
+
+    @mcp.tool()
+    def physics_configure_pde_boundary(
+        physics_name: str,
+        boundary_condition: str,
+        boundary_selection: Optional[Sequence[int]] = None,
+        properties: Optional[dict] = None,
+        selection_name: Optional[str] = None,
+        boundary_dimension: Optional[int] = None,
+        model_name: Optional[str] = None
+    ) -> dict:
+        """
+        Configure one Coefficient, General, or Weak Form PDE boundary condition.
+
+        Common types are DirichletBoundary, FluxBoundary, ZeroFluxBoundary,
+        WeakContribution, and PeriodicCondition. Unknown types are passed
+        through for version-specific PDE features. Use selection_name to bind
+        the condition to a named geometric selection instead of entity numbers.
+        Property-setting errors are returned instead of being ignored.
+        """
+        condition_type = PDE_BOUNDARY_ALIASES.get(
+            boundary_condition.lower(),
+            boundary_condition,
+        )
+        return _setup_specialized_boundaries(
+            physics_name,
+            [{
+                "type": condition_type,
+                "boundaries": (
+                    list(boundary_selection) if boundary_selection else None
+                ),
+                "selection_name": selection_name,
+                "properties": properties or {},
+            }],
+            PDE_BOUNDARY_CONDITIONS,
+            boundary_dimension,
+            model_name,
+        )
+
+    @mcp.tool()
+    def physics_setup_pde_boundaries(
+        physics_name: str,
+        boundary_conditions: Sequence[dict],
+        boundary_dimension: Optional[int] = None,
+        model_name: Optional[str] = None
+    ) -> dict:
+        """
+        Configure multiple PDE boundary conditions in one call.
+
+        Each item accepts:
+        - type: COMSOL boundary feature type
+        - boundaries: List of boundary numbers
+        - selection_name: Optional named COMSOL selection instead of numbers
+        - properties: Optional scalar, vector, or matrix property dictionary
+        - dimension: Optional geometric entity dimension override
+        - tag: Optional explicit feature tag
+        - label: Optional display label
+        """
+        normalized_conditions = []
+        for condition in boundary_conditions:
+            normalized = dict(condition)
+            condition_type = (
+                normalized.get("type")
+                or normalized.get("boundary_condition")
+            )
+            if condition_type:
+                normalized["type"] = PDE_BOUNDARY_ALIASES.get(
+                    condition_type.lower(),
+                    condition_type,
+                )
+            normalized_conditions.append(normalized)
+
+        return _setup_specialized_boundaries(
+            physics_name,
+            normalized_conditions,
+            PDE_BOUNDARY_CONDITIONS,
+            boundary_dimension,
+            model_name,
+        )
     
     @mcp.tool()
     def physics_set_material(
@@ -472,7 +1202,7 @@ def register_physics_tools(mcp: FastMCP) -> None:
             tag = material_name.replace(" ", "_").replace("-", "_")
 
             if material_name not in materials:
-                comp = jm.component().get(0)
+                comp = _get_component_java(jm)
                 try:
                     mat = comp.material().create(tag, "Common")
                     mat.label(material_name)
