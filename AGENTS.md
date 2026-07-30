@@ -101,13 +101,16 @@ python development_kit/scripts/release_gate.py
 ```
 
 Use a provisional 10-minute timeout for complete solver-free test, coverage,
-quality, and release-gate runs. Reassess that timeout when the collected test
-count exceeds 2,000; focused test commands should retain narrower proportional
-timeouts. Focused and broader area suites use ordinary serial pytest unless a
-measured run justifies parallel execution. A local complete suite must use the
-explicit four-worker main command above, followed by the startup/process-
-inventory file as a serial tail; do not use bare `python -m pytest -q` as the
-local complete-suite command.
+quality, and release-gate runs. The 2,000-test reassessment retained that
+timeout and the local four-worker split: seven consecutive main-suite runs from
+1,965 through 2,000 tests completed without a stall in 125.00-131.94 seconds
+(median 128.86 seconds). Focused and broader area suites use ordinary serial
+pytest unless a measured run justifies parallel execution. A local complete
+suite must use the explicit four-worker main command above, followed by the
+startup/process-inventory file as a serial tail; do not use bare
+`python -m pytest -q` as the local complete-suite command. Reassess local xdist,
+hosted CI execution, and these timeouts together when collected tests reach
+2,750 or after the next execution stall is repaired, whichever happens first.
 
 The quality gate applies the same local split while collecting coverage: four
 workers for the isolated main suite and a serial startup/process-inventory
@@ -118,7 +121,12 @@ consistent with upstream pytest-xdist issue #1313 around worker shutdown or
 `loadscope` dispatch. Hosted serial execution trades speed for deterministic
 termination; do not restore hosted xdist without an upstream fix and a new
 stability benchmark. Do not replace the local bounded worker count with
-`-n auto` without a new timing and isolation benchmark.
+`-n auto` without a new timing and isolation benchmark. At the 2,000-test
+reassessment, the latest ten hosted serial runs had no execution stall; one
+failed fast for a deterministic standalone-script import regression and passed
+after correction. A 17-minute workflow elapsed time in another run was runner
+queue delay before the unit job, whose actual execution remained about seven
+minutes. Keep hosted pytest serial and the 15-minute per-job workflow timeout.
 
 For a release candidate, use the locked dependency lane from a clean tree:
 

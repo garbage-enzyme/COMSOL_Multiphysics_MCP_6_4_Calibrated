@@ -58,6 +58,7 @@ The licensed gate is explicit and serial:
 python development_kit/scripts/run_real_release_gate.py `
   --confirm RUN_REAL_COMSOL `
   --fixture-spec <controlled-spec.json> `
+  --licensed-regression-timeout-seconds 900 `
   --output <new-receipt.json>
 ```
 

@@ -24,8 +24,10 @@ from development_kit.scripts.planning_code_gate import (
     verify_planning_code_texts,
 )
 from development_kit.scripts.python_compatibility_licensed_gate import (
+    _runtime_process_evidence,
     _select_expected_backend,
     _status_is_clean,
+    _terminate_owned_tree,
     _write_receipt,
 )
 from development_kit.scripts.release_gate import (
@@ -50,10 +52,7 @@ SNAPSHOTS = ROOT / "development_kit" / "tests" / "snapshots"
 def test_windows_lock_backend_is_not_imported_at_module_scope(relative_path):
     tree = ast.parse((ROOT / relative_path).read_text(encoding="utf-8"))
     imported = {
-        alias.name
-        for node in tree.body
-        if isinstance(node, ast.Import)
-        for alias in node.names
+        alias.name for node in tree.body if isinstance(node, ast.Import) for alias in node.names
     }
 
     assert "msvcrt" not in imported
@@ -113,6 +112,166 @@ def test_python_compatibility_parent_cleans_worker_path_after_output_collision(
 
     assert json.loads(output.read_text(encoding="utf-8")) == {"owner": "competitor"}
     assert list(tmp_path.glob(".receipt.worker.*.json")) == []
+
+
+def test_compatibility_cleanup_terminates_captured_descendants_after_worker_exit(
+    monkeypatch,
+):
+    actions = []
+    identities = [
+        {
+            "pid": 41002,
+            "process_create_time": 20.0,
+            "command_signature": "b" * 64,
+        }
+    ]
+
+    class ExitedProcess:
+        pid = 41001
+
+        @staticmethod
+        def poll():
+            return 0
+
+    monkeypatch.setattr(
+        compatibility_gate,
+        "terminate_exact",
+        lambda identity, force: actions.append((identity, force)) or {"acted": True},
+    )
+    monkeypatch.setattr(
+        compatibility_gate,
+        "verify_absent",
+        lambda captured: {"absent": captured == identities, "verdicts": []},
+    )
+
+    result = _terminate_owned_tree(ExitedProcess(), identities)
+
+    assert actions == [(identities[0], True)]
+    assert result["direct_was_running"] is False
+    assert result["passed"] is True
+
+
+def test_compatibility_cleanup_preserves_primary_error_and_continues_after_release_error(
+    tmp_path, monkeypatch
+):
+    output = tmp_path / "receipt.json"
+    clean = {
+        "process_inventory": {"complete": True, "fresh": True},
+        "collision": False,
+        "lease": {"state": "absent"},
+        "durable_jobs": {"available": True, "active_count": 0, "active": []},
+    }
+    waits = []
+
+    class Owner:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def preflight(self, **_kwargs):
+            return {"ready": True}
+
+        def acquire(self, **_kwargs):
+            return {"success": True}
+
+        def release(self):
+            raise OSError("injected release failure")
+
+    monkeypatch.setattr(compatibility_gate, "_git_identity", lambda: {"dirty_entry_count": 0})
+    monkeypatch.setattr(
+        compatibility_gate,
+        "_wait_clean",
+        lambda _owner, timeout_seconds=30.0: waits.append(timeout_seconds) or clean,
+    )
+    monkeypatch.setattr(compatibility_gate, "SolverOwnership", Owner)
+    monkeypatch.setattr(
+        compatibility_gate.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("injected launch failure")),
+    )
+    monkeypatch.setattr(compatibility_gate, "_descendant_identities", lambda _pid: [])
+    monkeypatch.setattr(
+        compatibility_gate,
+        "_listener_inventory",
+        lambda _pids: {"complete": True, "error": None, "listeners": []},
+    )
+
+    returncode = compatibility_gate._run_parent(
+        SimpleNamespace(
+            output=output,
+            runtime_root=tmp_path / "runtime",
+            minimum_free_gb=0.0,
+            cores=1,
+            timeout_seconds=1.0,
+        )
+    )
+    receipt = json.loads(output.read_text(encoding="utf-8"))
+
+    assert returncode == 1
+    assert receipt["schema_version"] == "1.1.0"
+    assert receipt["error"].startswith("OSError: injected launch failure")
+    assert {item["stage"] for item in receipt["cleanup"]["errors"]} == {"lease_release"}
+    assert receipt["ownership_after"] is not None
+    assert len(waits) == 2
+
+
+def test_compatibility_final_descendant_snapshot_is_recorded_once(tmp_path, monkeypatch):
+    output = tmp_path / "receipt.json"
+    clean = {
+        "process_inventory": {"complete": True, "fresh": True},
+        "collision": False,
+        "lease": {"state": "absent"},
+        "durable_jobs": {"available": True, "active_count": 0, "active": []},
+    }
+    descendant = {"pid": 42001, "process_create_time": 30.0}
+    snapshots = []
+
+    class Owner:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def preflight(self, **_kwargs):
+            return {"ready": False, "blockers": ["injected"]}
+
+    monkeypatch.setattr(compatibility_gate, "_git_identity", lambda: {"dirty_entry_count": 0})
+    monkeypatch.setattr(compatibility_gate, "_wait_clean", lambda *_args, **_kwargs: clean)
+    monkeypatch.setattr(compatibility_gate, "SolverOwnership", Owner)
+    monkeypatch.setattr(
+        compatibility_gate,
+        "_descendant_identities",
+        lambda _pid: snapshots.append(True) or [descendant],
+    )
+    monkeypatch.setattr(
+        compatibility_gate,
+        "_listener_inventory",
+        lambda _pids: {"complete": True, "error": None, "listeners": []},
+    )
+
+    assert (
+        compatibility_gate._run_parent(
+            SimpleNamespace(
+                output=output,
+                runtime_root=tmp_path / "runtime",
+                minimum_free_gb=0.0,
+                cores=1,
+                timeout_seconds=1.0,
+            )
+        )
+        == 1
+    )
+    receipt = json.loads(output.read_text(encoding="utf-8"))
+
+    assert snapshots == [True]
+    assert receipt["cleanup"]["owned_descendants"] == [descendant]
+    assert receipt["cleanup"]["owned_descendants_absent"] is False
+
+
+def test_compatibility_listener_evidence_is_explicitly_sampled_not_exhaustive():
+    evidence = _runtime_process_evidence({}, {}, {})
+
+    assert evidence["owned_listeners"] == []
+    assert evidence["listener_inventory_samples_complete"] is True
+    assert evidence["listener_sampling_exhaustive"] is False
+    assert evidence["listener_evidence_scope"] == "observed_samples_only"
 
 
 def test_production_runtime_guards_survive_python_optimization():
@@ -238,11 +397,11 @@ def test_support_matrix_matches_frozen_profile_counts_and_declared_dependencies(
     dependencies = "\n".join(pyproject["project"]["dependencies"])
     for package in ("matplotlib", "mcp", "mph", "numpy", "pydantic", "psutil", "scipy"):
         assert re.search(rf"(?m)^{package}(?:[<>=]|$)", dependencies)
-    assert any(item.startswith("build>=") for item in pyproject["project"]["optional-dependencies"]["dev"])
+    assert any(
+        item.startswith("build>=") for item in pyproject["project"]["optional-dependencies"]["dev"]
+    )
     assert pyproject["build-system"]["requires"] == ["hatchling==1.31.0"]
-    assert pyproject["project"]["optional-dependencies"]["manuals"] == [
-        "pymupdf>=1.24.0,<2"
-    ]
+    assert pyproject["project"]["optional-dependencies"]["manuals"] == ["pymupdf>=1.24.0,<2"]
     assert pyproject["project"]["requires-python"] == ">=3.14,<3.15"
     assert pyproject["tool"]["hatch"]["build"]["targets"]["sdist"]["exclude"] == [
         "/development_kit",
@@ -255,17 +414,13 @@ def test_recommended_profile_migration_records_the_exact_discovery_diff():
     assert migration["profile"] == "wave_optics"
     assert migration["before"] == {
         "tool_count": 68,
-        "tools_removed_from_recommended_surface": [
-            "study_staged_parametric_sweep"
-        ],
+        "tools_removed_from_recommended_surface": ["study_staged_parametric_sweep"],
     }
     assert migration["after"] == {
         "tool_count": 67,
         "tools_added_to_recommended_surface": [],
     }
-    assert migration["replacement"] == (
-        "job_submit/job_status/job_tail/job_cancel/job_resume"
-    )
+    assert migration["replacement"] == ("job_submit/job_status/job_tail/job_cancel/job_resume")
     assert migration["restart_required"] is True
 
 
@@ -407,9 +562,7 @@ def test_distribution_inventory_enforces_frozen_planning_codes_and_private_paths
             "comsol_mcp/evidence/reference_power_acceptance.py",
             (ROOT / "comsol_mcp" / "evidence" / "reference_power_acceptance.py").read_bytes(),
         )
-    assert _distribution_inventory(legacy)["planning_code_gate"][
-        "matched_occurrence_count"
-    ] == 31
+    assert _distribution_inventory(legacy)["planning_code_gate"]["matched_occurrence_count"] == 31
 
     unexpected = tmp_path / "unexpected.whl"
     with zipfile.ZipFile(unexpected, "w") as archive:
@@ -432,15 +585,15 @@ def test_distribution_inventory_enforces_frozen_planning_codes_and_private_paths
 
 def test_hosted_ci_is_dependency_only_and_real_gate_is_explicit():
     workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-    dependency_report = (
-        ROOT / ".github" / "workflows" / "dependency_report.yml"
-    ).read_text(encoding="utf-8")
-    real_gate = (
-        ROOT / "development_kit" / "scripts" / "run_real_release_gate.py"
-    ).read_text(encoding="utf-8")
-    quality_gate = (
-        ROOT / "development_kit" / "scripts" / "quality_gate.py"
-    ).read_text(encoding="utf-8")
+    dependency_report = (ROOT / ".github" / "workflows" / "dependency_report.yml").read_text(
+        encoding="utf-8"
+    )
+    real_gate = (ROOT / "development_kit" / "scripts" / "run_real_release_gate.py").read_text(
+        encoding="utf-8"
+    )
+    quality_gate = (ROOT / "development_kit" / "scripts" / "quality_gate.py").read_text(
+        encoding="utf-8"
+    )
 
     assert "python -m pytest -q" in workflow
     assert "python -m pytest -q -n" not in workflow
@@ -473,7 +626,7 @@ def test_hosted_ci_is_dependency_only_and_real_gate_is_explicit():
     assert "constraints/minimum_supported_py314.txt" in workflow
     assert "--upgrade-strategy eager" in workflow
     assert "locked runtime vulnerability policy" in workflow
-    assert 'pip-audit==2.10.1' in workflow
+    assert "pip-audit==2.10.1" in workflow
     assert "constraints/release_locked_py314.txt --no-deps --format json" in workflow
     assert "vulnerability_allowlist.json" in workflow
     assert "security_gate.py" in workflow
@@ -490,8 +643,7 @@ def test_release_dependency_lock_is_complete_and_matches_current_lane(tmp_path):
     lane = f"{__import__('sys').version_info.major}.{__import__('sys').version_info.minor}"
     lock = tmp_path / "lock.txt"
     lock.write_text(
-        f"# Python-Lane: {lane}\nexample==1.0 \\\n"
-        "    --hash=sha256:" + "a" * 64 + "\n",
+        f"# Python-Lane: {lane}\nexample==1.0 \\\n    --hash=sha256:" + "a" * 64 + "\n",
         encoding="utf-8",
     )
     assert _lock_lane(lock) == lane
@@ -573,9 +725,9 @@ def test_python_compatibility_gate_requires_exact_backend_and_clean_control_plan
 
 
 def test_installed_probe_checks_every_profile_without_solver_or_heavy_imports():
-    probe = (
-        ROOT / "development_kit" / "scripts" / "installed_package_probe.py"
-    ).read_text(encoding="utf-8")
+    probe = (ROOT / "development_kit" / "scripts" / "installed_package_probe.py").read_text(
+        encoding="utf-8"
+    )
 
     assert "for profile in PROFILE_NAMES" in probe
     assert "snapshot_tool_schemas" in probe
@@ -583,12 +735,10 @@ def test_installed_probe_checks_every_profile_without_solver_or_heavy_imports():
     assert "release_inventories" in probe
     assert "installed_site_package" in probe
     assert "installed-package discovery must not start COMSOL" in probe
-    assert {"chromadb", "sentence_transformers", "torch"} <= set(
-        re.findall(r'"([a-z_]+)"', probe)
+    assert {"chromadb", "sentence_transformers", "torch"} <= set(re.findall(r'"([a-z_]+)"', probe))
+    release_gate = (ROOT / "development_kit" / "scripts" / "release_gate.py").read_text(
+        encoding="utf-8"
     )
-    release_gate = (
-        ROOT / "development_kit" / "scripts" / "release_gate.py"
-    ).read_text(encoding="utf-8")
     assert "sbom.cdx.json" in release_gate
     assert "release_gate_receipt" in release_gate
     assert "receipt_sha256" in release_gate
@@ -598,9 +748,9 @@ def test_installed_probe_checks_every_profile_without_solver_or_heavy_imports():
 
 
 def test_release_documentation_requires_restart_and_clean_tree():
-    checklist = (
-        ROOT / "development_kit" / "docs" / "release_checklist.md"
-    ).read_text(encoding="utf-8")
+    checklist = (ROOT / "development_kit" / "docs" / "release_checklist.md").read_text(
+        encoding="utf-8"
+    )
     migration = (ROOT / "docs" / "profile_migration.md").read_text(encoding="utf-8")
 
     assert "clean tree" in checklist
