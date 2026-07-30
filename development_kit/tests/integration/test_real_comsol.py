@@ -1,12 +1,12 @@
 """Opt-in COMSOL integration probes, each isolated in a fresh process."""
 
-from pathlib import Path
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 import pytest
-
+from src.jobs.process_control import OwnedJobObject
 
 ROOT = Path(__file__).parents[3]
 PROBES = (
@@ -43,22 +43,45 @@ def _comsol_pids() -> set[int]:
     return {int(value) for value in output.split(",") if value}
 
 
-def _terminate_owned_process_tree(process: subprocess.Popen) -> None:
+def _terminate_owned_process_tree(
+    process: subprocess.Popen,
+    containment: OwnedJobObject | None,
+) -> dict[str, object]:
     """Terminate only the exact subprocess tree created by this test."""
-    if process.poll() is not None:
-        return
-    subprocess.run(
-        ["taskkill", "/PID", str(process.pid), "/T", "/F"],
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=15,
-    )
+    errors = []
+    if containment is not None:
+        try:
+            containment.close()
+        except Exception as exc:
+            errors.append({"stage": "job_object_close", "type": type(exc).__name__})
+    if process.poll() is None:
+        try:
+            subprocess.run(
+                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            errors.append({"stage": "taskkill", "type": type(exc).__name__})
     try:
         process.wait(timeout=15)
     except subprocess.TimeoutExpired:
-        process.kill()
-        process.wait(timeout=15)
+        try:
+            process.kill()
+            process.wait(timeout=15)
+        except (OSError, subprocess.SubprocessError) as exc:
+            errors.append({"stage": "direct_kill", "type": type(exc).__name__})
+    except (OSError, subprocess.SubprocessError) as exc:
+        errors.append({"stage": "wait", "type": type(exc).__name__})
+    root_absent = process.poll() is not None
+    return {
+        "passed": root_absent and not errors and containment is not None,
+        "root_absent": root_absent,
+        "job_object_contained": containment is not None,
+        "errors": errors,
+    }
 
 
 @pytest.mark.integration
@@ -74,17 +97,24 @@ def test_real_comsol_probe_in_fresh_process(probe):
         text=True,
         creationflags=creation_flags,
     )
+    containment = OwnedJobObject.assign(process.pid)
+    cleanup = None
+    if containment is None:
+        _terminate_owned_process_tree(process, None)
+        pytest.fail(f"Integration probe could not contain its process tree: {probe}")
     try:
         output, _ = process.communicate(timeout=180)
     except subprocess.TimeoutExpired:
-        _terminate_owned_process_tree(process)
+        _terminate_owned_process_tree(process, containment)
+        containment = None
         pytest.fail(f"Integration probe timed out: {probe}")
     finally:
-        _terminate_owned_process_tree(process)
+        cleanup = _terminate_owned_process_tree(process, containment)
 
     time.sleep(2)
     after = _comsol_pids()
     leaked = after - before
 
     assert process.returncode == 0, output
+    assert cleanup["passed"] is True, cleanup
     assert not leaked, f"Integration probe leaked COMSOL PIDs {sorted(leaked)}\n{output}"

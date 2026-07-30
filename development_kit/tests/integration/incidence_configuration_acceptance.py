@@ -5,20 +5,21 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from pathlib import Path
 import sys
 import traceback
-
-import mph
+import uuid
+from pathlib import Path
 
 ROOT = Path(__file__).parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from src.durable.io import atomic_write_json_exclusive
+from src.evidence.real_fixture import controlled_fixture_from_environment
 from src.tools.derived_geometry import create_derived_geometry_clone
 from src.tools.incidence_config import apply_incidence, preview_incidence
 from src.tools.ownership import SolverOwnership
-from src.evidence.real_fixture import controlled_fixture_from_environment
+
 from development_kit.scripts.acceptance_cleanup import CleanupRecorder, lease_released
 
 
@@ -37,11 +38,19 @@ def _first_tag(tags, preferred: str) -> str | None:
     return preferred if preferred in values else values[0]
 
 
+def _new_result_path(artifact_dir: Path) -> Path:
+    return artifact_dir / f"incidence_gate_result-{uuid.uuid4().hex}.json"
+
+
+def _publish_result(path: Path, result: dict) -> None:
+    atomic_write_json_exclusive(path, result)
+
+
 def main() -> None:
     runtime = Path(os.environ.get("COMSOL_MCP_RUNTIME_DIR", "D:/comsol_runtime"))
     artifact_dir = runtime / "incidence_configuration"
     artifact_dir.mkdir(parents=True, exist_ok=True)
-    result_path = artifact_dir / "incidence_gate_result.json"
+    result_path = _new_result_path(artifact_dir)
     owner = SolverOwnership(owner="incidence-configuration-gate")
     client = None
     source = None
@@ -56,6 +65,8 @@ def main() -> None:
         claim = owner.acquire(mode="incidence_configuration", model_path=str(source_path))
         if not claim.get("acquired"):
             raise RuntimeError(f"solver lease unavailable: {claim}")
+        import mph
+
         client = mph.Client(cores=1, version="6.4")
         source = client.load(str(source_path))
         component_tag = _first_tag(source.java.component().tags(), "comp1")
@@ -143,13 +154,9 @@ def main() -> None:
         cleanup = CleanupRecorder(result)
         if client is not None:
             if clone is not None:
-                cleanup.run(
-                    "clone_remove", lambda: client.remove(clone), expose_result=False
-                )
+                cleanup.run("clone_remove", lambda: client.remove(clone), expose_result=False)
             if source is not None:
-                cleanup.run(
-                    "source_remove", lambda: client.remove(source), expose_result=False
-                )
+                cleanup.run("source_remove", lambda: client.remove(source), expose_result=False)
             cleanup.run("client_clear", client.clear, expose_result=False)
         if record is not None:
             backing = Path(record.backing_path)
@@ -162,10 +169,8 @@ def main() -> None:
             cleanup.run("derived_cleanup", remove_backing, passed=lambda value: value is True)
         cleanup.run("lease_release", owner.release, passed=lease_released)
         exit_code = cleanup.finalize()
-        result_path.write_text(
-            json.dumps(result, indent=2, ensure_ascii=False) + "\n",
-            encoding="utf-8",
-        )
+        result["receipt_name"] = result_path.name
+        _publish_result(result_path, result)
         print(json.dumps(result, ensure_ascii=False), flush=True)
         os._exit(exit_code)
 

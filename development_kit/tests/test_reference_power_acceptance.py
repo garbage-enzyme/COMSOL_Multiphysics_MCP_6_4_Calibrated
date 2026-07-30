@@ -159,3 +159,27 @@ def test_preflight_cli_validates_fixture_without_importing_mph():
     assert "mph" not in (
         ROOT / "development_kit" / "scripts" / "reference_power_gate_preflight.py"
     ).read_text(encoding="utf-8")
+
+
+def test_preflight_cli_never_truncates_an_existing_receipt(tmp_path):
+    output = tmp_path / "existing-receipt.json"
+    original = b'{"preserved":true}\n'
+    output.write_bytes(original)
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "development_kit/scripts/reference_power_gate_preflight.py",
+            "--output",
+            str(output),
+        ],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+
+    assert completed.returncode != 0
+    assert output.read_bytes() == original
+    assert not list(tmp_path.glob(".*.tmp"))

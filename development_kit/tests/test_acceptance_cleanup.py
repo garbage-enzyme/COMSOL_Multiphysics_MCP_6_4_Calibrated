@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from development_kit.scripts.acceptance_cleanup import CleanupRecorder, lease_released
-
+from development_kit.tests.integration import incidence_configuration_acceptance as incidence_gate
 
 ROOT = Path(__file__).parents[2]
 
@@ -71,3 +71,20 @@ def test_target_acceptance_scripts_finalize_after_cleanup():
         assert "cleanup = CleanupRecorder(result)" in source
         assert "exit_code = cleanup.finalize()" in source
         assert "exit_code = 0" not in source
+
+
+def test_incidence_receipts_are_unique_and_use_exclusive_publication(tmp_path, monkeypatch):
+    first = incidence_gate._new_result_path(tmp_path)
+    second = incidence_gate._new_result_path(tmp_path)
+    calls = []
+    monkeypatch.setattr(
+        incidence_gate,
+        "atomic_write_json_exclusive",
+        lambda path, value: calls.append((path, value)),
+    )
+
+    incidence_gate._publish_result(first, {"success": True})
+
+    assert first != second
+    assert first.parent == second.parent == tmp_path
+    assert calls == [(first, {"success": True})]

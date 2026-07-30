@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import shutil
 import uuid
+from pathlib import Path
 
 import pytest
 
+from development_kit.tests.integration import spectral_characterization_acceptance as runner
 from development_kit.tests.integration.spectral_characterization_acceptance import (
     run_acceptance,
 )
@@ -27,11 +28,24 @@ def ascii_root():
 
 def _raw_spec(spec: dict) -> dict:
     allowed = {
-        "job_type", "source_model_path", "source_model_relative_identity",
-        "configuration_sha256", "parameter_state", "wavelength_parameter",
-        "initial_grid", "refinement_policy", "expansion_policy", "maximum_points",
-        "collector", "analysis_policy", "measurement_configuration", "resource_policy",
-        "cores", "version", "max_retries", "continue_on_error",
+        "job_type",
+        "source_model_path",
+        "source_model_relative_identity",
+        "configuration_sha256",
+        "parameter_state",
+        "wavelength_parameter",
+        "initial_grid",
+        "refinement_policy",
+        "expansion_policy",
+        "maximum_points",
+        "collector",
+        "analysis_policy",
+        "measurement_configuration",
+        "resource_policy",
+        "cores",
+        "version",
+        "max_retries",
+        "continue_on_error",
     }
     return {key: value for key, value in spec.items() if key in allowed}
 
@@ -74,3 +88,17 @@ def test_non_ascii_runtime_root_fails_before_worker_start(tmp_path):
             output=tmp_path / "receipt.json",
             dry_run=True,
         )
+
+
+def test_receipt_publication_uses_the_directory_durable_exclusive_primitive(tmp_path, monkeypatch):
+    output = tmp_path / "receipt.json"
+    calls = []
+
+    def publish(path, value):
+        calls.append((Path(path), value))
+        output.write_text(json.dumps(value), encoding="utf-8")
+
+    monkeypatch.setattr(runner, "atomic_write_json_exclusive", publish)
+    runner._write_json(output, {"success": True})
+
+    assert calls == [(output, {"success": True})]

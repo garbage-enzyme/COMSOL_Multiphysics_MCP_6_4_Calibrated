@@ -11,12 +11,14 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
 import psutil
+import pytest
 
 from development_kit.tests.integration import reference_power_acceptance as runner_module
 from development_kit.tests.integration.reference_power_acceptance import (
     _admit_lightweight_status,
+    _communicate_worker,
+    _load_worker_payload,
     _redacted_status,
     _worker_summary,
 )
@@ -25,50 +27,63 @@ ROOT = Path(__file__).parents[2]
 RUNNER = ROOT / "development_kit" / "tests" / "integration" / "reference_power_acceptance.py"
 
 
-def _solver_process_identities():
+def _solver_descendant_identities(root_pid: int):
     identities = set()
-    for process in psutil.process_iter(["pid", "create_time", "name", "cmdline"]):
+    try:
+        processes = psutil.Process(root_pid).children(recursive=True)
+    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+        return identities
+    for process in processes:
         try:
             executable_names = {
                 Path(value).name.casefold()
-                for value in [process.info.get("name") or "", *(process.info.get("cmdline") or [])]
+                for value in [process.name(), *process.cmdline()]
                 if value
             }
             if any(
                 name.startswith("comsol") or name.startswith("mphserver")
                 for name in executable_names
             ):
-                identities.add((process.info["pid"], process.info["create_time"]))
+                identities.add((process.pid, process.create_time()))
         except psutil.Error, OSError:
             continue
     return identities
 
 
 def _run_with_solver_observer(command):
-    baseline = _solver_process_identities()
-    observed = set(baseline)
+    process = subprocess.Popen(
+        command,
+        cwd=ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    observed = set()
     stop = threading.Event()
 
     def observe():
         while not stop.wait(0.01):
-            observed.update(_solver_process_identities())
+            observed.update(_solver_descendant_identities(process.pid))
 
     observer = threading.Thread(target=observe, daemon=True)
     observer.start()
     try:
-        completed = subprocess.run(
-            command,
-            cwd=ROOT,
-            text=True,
-            capture_output=True,
-            check=False,
-            timeout=30,
-        )
+        stdout, stderr = process.communicate(timeout=30)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        stdout, stderr = process.communicate(timeout=10)
+        raise
     finally:
-        observed.update(_solver_process_identities())
+        observed.update(_solver_descendant_identities(process.pid))
         stop.set()
         observer.join(timeout=2)
-    return completed, observed - baseline
+    completed = subprocess.CompletedProcess(
+        command,
+        process.returncode,
+        stdout,
+        stderr,
+    )
+    return completed, observed
 
 
 def test_runner_import_and_dry_run_do_not_import_mph_or_start_comsol():
@@ -94,6 +109,23 @@ def test_runner_import_and_dry_run_do_not_import_mph_or_start_comsol():
     receipt = json.loads(dry_run.stdout)
     assert receipt["real_comsol_started"] is False
     assert receipt["contract_valid"] is True
+
+
+def test_solver_observer_attributes_only_transitive_child_launches():
+    command = [
+        sys.executable,
+        "-c",
+        (
+            "import subprocess,sys,time; "
+            "subprocess.Popen([sys.executable,'-c','import time; time.sleep(0.5)',"
+            "'comsol-child-marker']); time.sleep(0.25)"
+        ),
+    ]
+
+    completed, observed = _run_with_solver_observer(command)
+
+    assert completed.returncode == 0, completed.stderr
+    assert len(observed) == 1
 
 
 def test_lightweight_admission_fails_closed_without_exposing_commands_or_paths():
@@ -291,3 +323,132 @@ def test_coordinator_refuses_collision_before_starting_worker(tmp_path, ascii_tm
     assert not (artifact_dir / "worker_result.json").exists()
     if artifact_dir.exists():
         artifact_dir.rmdir()
+
+
+def test_timeout_cleanup_contains_taskkill_and_repeat_communication_failures(monkeypatch):
+    class Process:
+        pid = 41001
+
+        def __init__(self):
+            self.returncode = None
+            self.communications = 0
+
+        def communicate(self, *, timeout):
+            self.communications += 1
+            if self.communications == 1:
+                raise subprocess.TimeoutExpired("worker", timeout, output=b"partial\xff")
+            raise subprocess.TimeoutExpired("worker", timeout)
+
+        def poll(self):
+            return self.returncode
+
+        def wait(self, *, timeout):
+            self.returncode = 1
+            return self.returncode
+
+        def kill(self):
+            self.returncode = 1
+
+    class Containment:
+        closed = False
+
+        def close(self):
+            self.closed = True
+
+    monkeypatch.setattr(
+        runner_module.subprocess,
+        "run",
+        lambda *_args, **kwargs: (_ for _ in ()).throw(
+            subprocess.TimeoutExpired("taskkill", kwargs["timeout"])
+        ),
+    )
+    containment = Containment()
+
+    result = _communicate_worker(Process(), timeout_seconds=0.1, containment=containment)
+
+    assert result["timed_out"] is True
+    assert result["errors"] == ["TimeoutExpired"]
+    assert result["stdout"] == "partial�"
+    assert result["cleanup"]["passed"] is False
+    assert result["cleanup"]["errors"] == [{"stage": "taskkill", "type": "TimeoutExpired"}]
+    assert containment.closed is True
+
+
+def test_malformed_worker_result_becomes_structured_failure(tmp_path):
+    worker_result = tmp_path / "worker-result.json"
+    worker_result.write_bytes(b'{"success":')
+
+    payload, error = _load_worker_payload(worker_result, 1024)
+
+    assert payload == {
+        "success": False,
+        "error": "worker result artifact is unreadable or invalid",
+    }
+    assert error == "JSONDecodeError"
+
+
+def test_coordinator_publishes_failure_receipt_for_malformed_worker_result(
+    tmp_path, monkeypatch
+):
+    artifact_root = tmp_path / "artifacts"
+    output = tmp_path / "receipt.json"
+    spec = {
+        "artifact_dir": str(artifact_root),
+        "expected_source_sha256": "a" * 64,
+        "config_id": "malformed-worker-result",
+    }
+    contract = {"limits": {"max_artifact_bytes": 4096}}
+    clean_status = {
+        "complete": True,
+        "error": None,
+        "lease_state": "absent",
+        "lease_sha256": None,
+        "collision": False,
+        "external_solver_processes": [],
+    }
+
+    class Process:
+        pid = 43001
+        returncode = 1
+
+        def __init__(self, command, **_kwargs):
+            result_path = Path(command[command.index("--worker-result") + 1])
+            result_path.write_bytes(b'{"success":')
+
+    monkeypatch.setattr(
+        runner_module, "_load_inputs", lambda *_args, **_kwargs: (contract, spec)
+    )
+    monkeypatch.setattr(runner_module, "_lightweight_solver_status", lambda: clean_status)
+    monkeypatch.setattr(runner_module, "_comsol_pids", lambda: set())
+    monkeypatch.setattr(runner_module.subprocess, "Popen", Process)
+    monkeypatch.setattr(runner_module.OwnedJobObject, "assign", lambda _pid: object())
+    monkeypatch.setattr(
+        runner_module,
+        "_communicate_worker",
+        lambda *_args, **_kwargs: {
+            "timed_out": False,
+            "errors": [],
+            "stdout": "",
+            "cleanup": {"passed": True},
+        },
+    )
+    monkeypatch.setattr(runner_module, "_wait_lightweight_clean", lambda: clean_status)
+    monkeypatch.setattr(runner_module, "inventory_reference_power_artifacts", lambda *_args: {})
+
+    exit_code = runner_module._run_coordinator(
+        SimpleNamespace(
+            contract=tmp_path / "contract.json",
+            spec=tmp_path / "spec.json",
+            output=output,
+            cores=1,
+            timeout_seconds=30.0,
+        )
+    )
+    receipt = json.loads(output.read_text(encoding="utf-8"))
+
+    assert exit_code == 1
+    assert receipt["success"] is False
+    assert receipt["worker_result_error"] == "JSONDecodeError"
+    assert receipt["worker_result"]["error"] == (
+        "worker result artifact is unreadable or invalid"
+    )

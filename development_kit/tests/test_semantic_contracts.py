@@ -30,6 +30,7 @@ from development_kit.benchmarks.semantic_benchmark import (
 )
 from development_kit.tests.integration import semantic_benchmark_soak as soak_module
 from development_kit.tests.integration import semantic_profile_acceptance as profile_module
+from development_kit.tests.integration import semantic_retrieval_acceptance as retrieval_module
 from development_kit.tests.integration import semantic_worker_containment as containment_module
 from development_kit.tests.integration.semantic_benchmark_soak import _promotion
 from development_kit.tests.semantic_test_support import isolated_semantic_environment
@@ -41,6 +42,10 @@ EVALUATION_PATH = (
 SHA_A = "a" * 64
 SHA_B = "b" * 64
 SHA_C = "c" * 64
+
+
+def _absent_ownership():
+    return {"lease": {"state": "absent"}, "external_solver_processes": [], "collision": False}
 
 
 def test_frozen_evaluation_has_sixty_reviewed_queries_and_declared_slices():
@@ -227,15 +232,11 @@ def test_lexical_baseline_computes_rank_metrics_without_semantic_dependencies():
 
 def test_rank_metrics_validate_and_deduplicate_citations_before_dcg():
     citation = ("manual.pdf", 7)
-    metrics = _query_metrics(
-        [citation, citation], {citation}, valid_citations={citation}
-    )
+    metrics = _query_metrics([citation, citation], {citation}, valid_citations={citation})
 
     assert metrics["ndcg_at_10"] == 1.0
     with pytest.raises(ValueError, match="pinned corpus"):
-        _query_metrics(
-            [("invented.pdf", 99)], {citation}, valid_citations={citation}
-        )
+        _query_metrics([("invented.pdf", 99)], {citation}, valid_citations={citation})
 
 
 def test_semantic_benchmark_installs_cleanup_before_process_inspection(monkeypatch):
@@ -267,12 +268,17 @@ def test_semantic_benchmark_installs_cleanup_before_process_inspection(monkeypat
 
 def test_semantic_worker_inventory_matches_actual_module_command(monkeypatch):
     processes = [
-        SimpleNamespace(info={"pid": 1, "cmdline": ["python", "-m", "comsol_mcp.knowledge.semantic_worker", "--serve"]}),
-        SimpleNamespace(info={"pid": 2, "cmdline": ["python", "-m", "src.knowledge.semantic_worker", "--serve"]}),
+        SimpleNamespace(
+            info={
+                "pid": 1,
+                "cmdline": ["python", "-m", "comsol_mcp.knowledge.semantic_worker", "--serve"],
+            }
+        ),
+        SimpleNamespace(
+            info={"pid": 2, "cmdline": ["python", "-m", "src.knowledge.semantic_worker", "--serve"]}
+        ),
     ]
-    monkeypatch.setattr(
-        containment_module.psutil, "process_iter", lambda _fields: processes
-    )
+    monkeypatch.setattr(containment_module.psutil, "process_iter", lambda _fields: processes)
 
     assert containment_module._semantic_worker_pids() == [1]
 
@@ -390,3 +396,78 @@ print(json.dumps({'ok': True, 'children': 0, 'launches': process_launch_events})
     assert completed.returncode == 0, completed.stderr
     assert json.loads(completed.stdout)["ok"] is True
     assert json.loads(completed.stdout)["children"] == 0
+
+
+def test_retrieval_acceptance_preserves_primary_failure_through_reset_failure(tmp_path):
+    class Manager:
+        @staticmethod
+        def start():
+            return {"success": True}
+
+        @staticmethod
+        def query(*_args, **_kwargs):
+            raise RuntimeError("primary retrieval failure")
+
+        @staticmethod
+        def reset():
+            raise OSError("cleanup reset failure")
+
+    output = tmp_path / "failed.json"
+    result, exit_code = retrieval_module.run_acceptance(
+        manager=Manager(),
+        index_path=tmp_path / "index",
+        before={"sha256": SHA_A},
+        ownership_before=_absent_ownership(),
+        output_path=output,
+        snapshot=lambda _path: {"sha256": SHA_A},
+        ownership_status=_absent_ownership,
+    )
+
+    assert exit_code == 1
+    assert result["error"]["message"] == "primary retrieval failure"
+    assert result["cleanup"]["steps"]["worker_reset"]["error_type"] == "OSError"
+    assert json.loads(output.read_text(encoding="utf-8")) == result
+
+
+def test_retrieval_acceptance_rejects_unsuccessful_worker_reset(tmp_path):
+    class Manager:
+        def __init__(self):
+            self.query_count = 0
+
+        @staticmethod
+        def start():
+            return {"success": True}
+
+        def query(self, *_args, **_kwargs):
+            self.query_count += 1
+            return {
+                "success": True,
+                "count": 1,
+                "results": [{"source": "manual.pdf", "page": 1}],
+                "ranker": {"mode": "hybrid"},
+                "load_count": 1,
+                "query_count": self.query_count,
+            }
+
+        @staticmethod
+        def health():
+            return {"success": True, "status": {"load_count": 1, "query_count": 5}}
+
+        @staticmethod
+        def reset():
+            return {"success": False, "reset": {"absent": False}}
+
+    result, exit_code = retrieval_module.run_acceptance(
+        manager=Manager(),
+        index_path=tmp_path / "index",
+        before={"sha256": SHA_A},
+        ownership_before=_absent_ownership(),
+        output_path=tmp_path / "reset-failed.json",
+        snapshot=lambda _path: {"sha256": SHA_A},
+        ownership_status=_absent_ownership,
+    )
+
+    assert exit_code == 1
+    assert result["success"] is False
+    assert result["worker_reset"]["success"] is False
+    assert result["cleanup"]["steps"]["worker_reset"]["passed"] is False

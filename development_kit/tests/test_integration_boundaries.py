@@ -13,6 +13,7 @@ import pytest
 from development_kit.tests.integration import clientapi_property_acceptance as property_gate
 from development_kit.tests.integration import derived_geometry_acceptance as derived_gate
 from development_kit.tests.integration import live_profile_acceptance as live_profile_gate
+from development_kit.tests.integration import test_real_comsol as real_comsol_gate
 
 
 def test_clientapi_property_acceptance_uses_explicit_runtime_checks():
@@ -252,3 +253,39 @@ def test_loading_standalone_probe_does_not_create_client(monkeypatch, script_pat
     namespace = runpy.run_path(str(full_path), run_name="probe_import_test")
 
     assert callable(namespace["main"])
+
+
+def test_real_probe_closes_tree_containment_after_normal_parent_exit(monkeypatch):
+    class Process:
+        pid = 42001
+
+        @staticmethod
+        def poll():
+            return 0
+
+        @staticmethod
+        def wait(*, timeout):
+            return 0
+
+    class Containment:
+        closed = False
+
+        def close(self):
+            self.closed = True
+
+    monkeypatch.setattr(
+        real_comsol_gate.subprocess,
+        "run",
+        lambda *_args, **_kwargs: pytest.fail("taskkill is unnecessary for an exited root"),
+    )
+    containment = Containment()
+
+    cleanup = real_comsol_gate._terminate_owned_process_tree(Process(), containment)
+
+    assert containment.closed is True
+    assert cleanup == {
+        "passed": True,
+        "root_absent": True,
+        "job_object_contained": True,
+        "errors": [],
+    }

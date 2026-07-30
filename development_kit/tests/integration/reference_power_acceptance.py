@@ -17,10 +17,12 @@ from typing import Any
 import psutil
 
 ROOT = Path(__file__).parents[3]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+ROOT_TEXT = str(ROOT)
+sys.path[:] = [ROOT_TEXT, *(item for item in sys.path if item != ROOT_TEXT)]
 
-_durable_io = import_module("src.durable.io")
+from comsol_mcp.jobs.process_control import OwnedJobObject
+
+_durable_io = import_module("comsol_mcp.durable.io")
 _reference_power_acceptance = import_module("src.evidence.reference_power_acceptance")
 _reference_power_gate = import_module("src.evidence.reference_power_gate")
 
@@ -349,17 +351,106 @@ def _run_worker(args: argparse.Namespace) -> int:
         os._exit(exit_code)
 
 
-def _terminate_owned_tree(process: subprocess.Popen) -> None:
-    if process.poll() is not None:
-        return
+def _timeout_text(value: str | bytes | None) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value
+
+
+def _terminate_owned_tree(
+    process: subprocess.Popen,
+    containment: OwnedJobObject | None,
+) -> dict[str, Any]:
+    errors: list[dict[str, str]] = []
+    if containment is not None:
+        try:
+            containment.close()
+        except Exception as exc:
+            errors.append({"stage": "job_object_close", "type": type(exc).__name__})
     taskkill = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "taskkill.exe"
-    subprocess.run(
-        [str(taskkill), "/PID", str(process.pid), "/T", "/F"],
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=20,
-    )
+    if process.poll() is None:
+        try:
+            subprocess.run(
+                [str(taskkill), "/PID", str(process.pid), "/T", "/F"],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            errors.append({"stage": "taskkill", "type": type(exc).__name__})
+    try:
+        process.wait(timeout=20)
+    except subprocess.TimeoutExpired:
+        try:
+            process.kill()
+            process.wait(timeout=20)
+        except (OSError, subprocess.SubprocessError) as exc:
+            errors.append({"stage": "direct_kill", "type": type(exc).__name__})
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        errors.append({"stage": "wait", "type": type(exc).__name__})
+    root_absent = process.poll() is not None
+    return {
+        "passed": root_absent and not errors,
+        "root_absent": root_absent,
+        "job_object_contained": containment is not None,
+        "errors": errors,
+    }
+
+
+def _load_worker_payload(path: Path, max_bytes: int) -> tuple[dict[str, Any], str | None]:
+    if not path.is_file():
+        return {"success": False, "error": "worker result artifact is missing"}, "missing"
+    try:
+        return load_bounded_json(path, max_bytes), None
+    except Exception as exc:
+        return (
+            {
+                "success": False,
+                "error": "worker result artifact is unreadable or invalid",
+            },
+            type(exc).__name__,
+        )
+
+
+def _communicate_worker(
+    process: subprocess.Popen,
+    *,
+    timeout_seconds: float,
+    containment: OwnedJobObject | None,
+) -> dict[str, Any]:
+    timed_out = False
+    communication_errors: list[str] = []
+    stdout = ""
+    try:
+        stdout, _ = process.communicate(timeout=timeout_seconds)
+    except subprocess.TimeoutExpired as exc:
+        timed_out = True
+        stdout = _timeout_text(exc.stdout)
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        communication_errors.append(type(exc).__name__)
+    finally:
+        process_cleanup = _terminate_owned_tree(process, containment)
+    if timed_out or communication_errors:
+        try:
+            tail, _ = process.communicate(timeout=30)
+            stdout += tail or ""
+        except (OSError, ValueError, subprocess.SubprocessError) as exc:
+            communication_errors.append(type(exc).__name__)
+            repeated_cleanup = _terminate_owned_tree(process, None)
+            process_cleanup = {
+                **process_cleanup,
+                "passed": process_cleanup["passed"] and repeated_cleanup["passed"],
+                "repeat_cleanup": repeated_cleanup,
+            }
+    return {
+        "timed_out": timed_out,
+        "errors": communication_errors,
+        "stdout": stdout,
+        "cleanup": process_cleanup,
+    }
 
 
 def _run_coordinator(args: argparse.Namespace) -> int:
@@ -432,26 +523,43 @@ def _run_coordinator(args: argparse.Namespace) -> int:
         text=True,
         creationflags=creation_flags,
     )
-    timed_out = False
+    containment = OwnedJobObject.assign(process.pid)
+    communication = _communicate_worker(
+        process,
+        timeout_seconds=args.timeout_seconds,
+        containment=containment,
+    )
+    timed_out = communication["timed_out"]
+    communication_errors = communication["errors"]
+    stdout = communication["stdout"]
+    process_cleanup = communication["cleanup"]
     try:
-        stdout, _ = process.communicate(timeout=args.timeout_seconds)
-    except subprocess.TimeoutExpired:
-        timed_out = True
-        _terminate_owned_tree(process)
-        stdout, _ = process.communicate(timeout=30)
-    finally:
-        _terminate_owned_tree(process)
-    cleanup_status = _wait_lightweight_clean()
-    after_pids = _comsol_pids()
+        cleanup_status = _wait_lightweight_clean()
+    except Exception as exc:
+        cleanup_status = {
+            "complete": False,
+            "error": type(exc).__name__,
+            "lease_state": "uncertain",
+            "collision": True,
+            "external_solver_processes": [],
+        }
+    try:
+        after_pids = _comsol_pids()
+        pid_inventory_error = None
+    except Exception as exc:
+        after_pids = set()
+        pid_inventory_error = type(exc).__name__
     cleanup_passed = (
         cleanup_status["collision"] is False
         and before_pids == after_pids
         and cleanup_status["lease_state"] == "absent"
+        and process_cleanup["passed"] is True
+        and not communication_errors
+        and pid_inventory_error is None
     )
-    worker_payload = (
-        json.loads(worker_result.read_text(encoding="utf-8"))
-        if worker_result.is_file()
-        else {"success": False, "error": "worker result artifact is missing"}
+    worker_payload, worker_result_error = _load_worker_payload(
+        worker_result,
+        int(contract["limits"]["max_artifact_bytes"]),
     )
     try:
         artifacts = inventory_reference_power_artifacts(artifact_root, contract["limits"])
@@ -465,6 +573,7 @@ def _run_coordinator(args: argparse.Namespace) -> int:
         and worker_payload.get("success") is True
         and cleanup_passed
         and artifact_error is None
+        and worker_result_error is None
     )
     receipt.update(
         {
@@ -473,11 +582,15 @@ def _run_coordinator(args: argparse.Namespace) -> int:
             "worker_pid": process.pid,
             "worker_returncode": process.returncode,
             "worker_timed_out": timed_out,
+            "worker_communication_errors": communication_errors,
             "worker_stdout_tail": stdout[-4000:],
             "worker_result": _worker_summary(worker_payload),
+            "worker_result_error": worker_result_error,
             "cleanup": {
                 "status": _redacted_status(cleanup_status),
                 "comsol_pid_set_unchanged": before_pids == after_pids,
+                "pid_inventory_error": pid_inventory_error,
+                "process": process_cleanup,
                 "passed": cleanup_passed,
             },
             "artifact_inventory": artifacts,
