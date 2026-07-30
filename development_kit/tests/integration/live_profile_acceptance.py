@@ -33,6 +33,8 @@ PROFILE_COUNTS = {
     "full": 135,
 }
 COLD_START_RESPONSE_LIMIT_SECONDS = 5.0
+CONTROL_PLANE_READ_LIMIT_SECONDS = 15.0
+LIVE_CLEANUP_LIMIT_SECONDS = 30.0
 
 
 def _controlled_cases() -> tuple[dict[str, Any], ...]:
@@ -40,7 +42,10 @@ def _controlled_cases() -> tuple[dict[str, Any], ...]:
     fixture["validation_policy"] = {
         "assumptions": {"passive": True, "port_power_normalized": True},
         "required_evidence": [
-            "wavelength_controls", "flux_RTA", "top_air_region", "source_integrity"
+            "wavelength_controls",
+            "flux_RTA",
+            "top_air_region",
+            "source_integrity",
         ],
         "tolerances": {
             "closure_abs": 1e-3,
@@ -89,18 +94,35 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-async def _call(session: ClientSession, name: str, arguments: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+async def _call(
+    session: ClientSession, name: str, arguments: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    return await _call_before(session, name, arguments, deadline=None)
+
+
+async def _call_before(
+    session: ClientSession,
+    name: str,
+    arguments: dict[str, Any],
+    *,
+    deadline: float | None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
     started = time.perf_counter()
+    timeout_seconds = 300.0 if deadline is None else deadline - time.monotonic()
+    if timeout_seconds <= 0.0:
+        raise TimeoutError(f"{name} exceeded its absolute deadline")
     result = await session.call_tool(
         name,
         arguments,
-        read_timeout_seconds=timedelta(minutes=5),
+        read_timeout_seconds=timedelta(seconds=timeout_seconds),
     )
     payload = _decode(result)
     return payload, {
         "tool": name,
         "elapsed_seconds": time.perf_counter() - started,
-        "response_bytes": len(json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")),
+        "response_bytes": len(
+            json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        ),
     }
 
 
@@ -133,7 +155,7 @@ async def _wait_for_comsol(session: ClientSession) -> list[dict[str, Any]]:
     polls: list[dict[str, Any]] = []
     deadline = time.monotonic() + 120
     while time.monotonic() < deadline:
-        status, timing = await _call(session, "comsol_status", {})
+        status, timing = await _call_before(session, "comsol_status", {}, deadline=deadline)
         polls.append({"status": status, **timing})
         if status.get("connected"):
             return polls
@@ -141,6 +163,92 @@ async def _wait_for_comsol(session: ClientSession) -> list[dict[str, Any]]:
             raise RuntimeError(f"COMSOL start stopped before connection: {status}")
         await anyio.sleep(2)
     raise TimeoutError("COMSOL did not connect within 120 seconds")
+
+
+async def _setup_live_session(session: ClientSession, output: dict[str, Any]) -> None:
+    start_result, start_timing = await _call_before(
+        session,
+        "comsol_start",
+        {"cores": 8, "version": "6.4"},
+        deadline=time.monotonic() + COLD_START_RESPONSE_LIMIT_SECONDS,
+    )
+    assert start_result.get("success"), start_result
+    assert start_timing["elapsed_seconds"] <= COLD_START_RESPONSE_LIMIT_SECONDS, start_timing
+    output["setup"]["comsol_start"] = {"result": start_result, **start_timing}
+    output["setup"]["status_polls"] = await _wait_for_comsol(session)
+
+    first_disconnect, first_disconnect_timing = await _call_before(
+        session,
+        "comsol_disconnect",
+        {},
+        deadline=time.monotonic() + CONTROL_PLANE_READ_LIMIT_SECONDS,
+    )
+    assert first_disconnect.get("success"), first_disconnect
+    assert first_disconnect.get("client_reusable") is True, first_disconnect
+    between_status, between_status_timing = await _call_before(
+        session,
+        "solver_status",
+        {},
+        deadline=time.monotonic() + CONTROL_PLANE_READ_LIMIT_SECONDS,
+    )
+    assert between_status.get("lease", {}).get("state") == "absent", between_status
+    restart_result, restart_timing = await _call_before(
+        session,
+        "comsol_start",
+        {"cores": 8, "version": "6.4"},
+        deadline=time.monotonic() + COLD_START_RESPONSE_LIMIT_SECONDS,
+    )
+    assert restart_result.get("success"), restart_result
+    assert restart_timing["elapsed_seconds"] <= COLD_START_RESPONSE_LIMIT_SECONDS, restart_timing
+    restart_polls = await _wait_for_comsol(session)
+    output["setup"]["same_host_start_disconnect_start"] = {
+        "response_limit_seconds": COLD_START_RESPONSE_LIMIT_SECONDS,
+        "first_disconnect": {"result": first_disconnect, **first_disconnect_timing},
+        "between_status": {"result": between_status, **between_status_timing},
+        "restart": {"result": restart_result, **restart_timing},
+        "restart_status_polls": restart_polls,
+    }
+
+
+async def _cleanup_live_session(session: ClientSession, model_names: list[str]) -> dict[str, Any]:
+    steps: dict[str, Any] = {}
+    passed = True
+    deadline = time.monotonic() + LIVE_CLEANUP_LIMIT_SECONDS
+    for model_name in reversed(model_names):
+        try:
+            result, timing = await _call_before(
+                session,
+                "model_remove",
+                {"model_name": model_name},
+                deadline=deadline,
+            )
+            step_passed = result.get("success") is True
+            steps[f"model_remove:{model_name}"] = {
+                "passed": step_passed,
+                "result": result,
+                **timing,
+            }
+            passed = passed and step_passed
+        except Exception as exc:
+            passed = False
+            steps[f"model_remove:{model_name}"] = {
+                "passed": False,
+                "error_type": type(exc).__name__,
+            }
+    try:
+        result, timing = await _call_before(
+            session, "comsol_disconnect", {}, deadline=deadline
+        )
+        step_passed = result.get("success") is True
+        steps["comsol_disconnect"] = {"passed": step_passed, "result": result, **timing}
+        passed = passed and step_passed
+    except Exception as exc:
+        passed = False
+        steps["comsol_disconnect"] = {
+            "passed": False,
+            "error_type": type(exc).__name__,
+        }
+    return {"passed": passed, "steps": steps}
 
 
 def _agent_reasoning(case: dict[str, Any], audit: dict[str, Any]) -> dict[str, Any]:
@@ -168,130 +276,128 @@ async def _live_three_call_matrix() -> dict[str, Any]:
     started = time.perf_counter()
     cases = _controlled_cases()
     output: dict[str, Any] = {"profile": "wave_optics", "setup": {}, "cases": []}
+    loaded_model_names: list[str] = []
     async with stdio_client(_server("wave_optics")) as (read, write):
         async with ClientSession(read, write, read_timeout_seconds=timedelta(minutes=5)) as session:
             await session.initialize()
-            start_result, start_timing = await _call(session, "comsol_start", {"cores": 8, "version": "6.4"})
-            assert start_result.get("success"), start_result
-            assert start_timing["elapsed_seconds"] <= COLD_START_RESPONSE_LIMIT_SECONDS, start_timing
-            output["setup"]["comsol_start"] = {"result": start_result, **start_timing}
-            output["setup"]["status_polls"] = await _wait_for_comsol(session)
-
-            first_disconnect, first_disconnect_timing = await _call(
-                session, "comsol_disconnect", {}
-            )
-            assert first_disconnect.get("success"), first_disconnect
-            assert first_disconnect.get("client_reusable") is True, first_disconnect
-            between_status, between_status_timing = await _call(
-                session, "solver_status", {}
-            )
-            assert between_status.get("lease", {}).get("state") == "absent", between_status
-            restart_result, restart_timing = await _call(
-                session, "comsol_start", {"cores": 8, "version": "6.4"}
-            )
-            assert restart_result.get("success"), restart_result
-            assert restart_timing["elapsed_seconds"] <= COLD_START_RESPONSE_LIMIT_SECONDS, restart_timing
-            restart_polls = await _wait_for_comsol(session)
-            output["setup"]["same_host_start_disconnect_start"] = {
-                "response_limit_seconds": COLD_START_RESPONSE_LIMIT_SECONDS,
-                "first_disconnect": {
-                    "result": first_disconnect,
-                    **first_disconnect_timing,
-                },
-                "between_status": {
-                    "result": between_status,
-                    **between_status_timing,
-                },
-                "restart": {"result": restart_result, **restart_timing},
-                "restart_status_polls": restart_polls,
-            }
-
             try:
+                await _setup_live_session(session, output)
                 for case in cases:
                     source = case["source"]
                     if not source.is_file():
                         raise FileNotFoundError(source)
                     source_hash = _sha256(source)
                     source_stat = source.stat()
-                    loaded, load_timing = await _call(session, "model_load", {"file_path": str(source)})
+                    loaded, load_timing = await _call(
+                        session, "model_load", {"file_path": str(source)}
+                    )
                     assert loaded.get("success"), loaded
                     model_name = loaded["model"]["name"]
+                    loaded_model_names.append(model_name)
 
                     calls: list[dict[str, Any]] = []
                     ownership, timing = await _call(session, "solver_status", {})
                     calls.append({"summary": ownership, **timing})
                     assert ownership.get("success") and not ownership.get("collision"), ownership
 
-                    preflight, timing = await _call(session, "wave_optics_preflight", {
-                        "model_name": model_name,
-                        "expected_component_tag": "comp1",
-                        "expected_physics_tag": "ewfd",
-                        "expected_study_tag": "std1",
-                        "expected_source_path": str(source),
-                        "expected_source_sha256": source_hash,
-                        "target_wavelength_parameter": "wl",
-                    })
-                    calls.append({
-                        "summary": {
-                            "success": preflight.get("success"),
-                            "inspection_status": preflight.get("inspection_status"),
-                            "evidence_codes": {
-                                key: [item.get("code") for item in preflight.get("evidence", {}).get(key, [])]
-                                for key in ("observations", "warnings", "unknowns", "integrity_errors")
-                            },
+                    preflight, timing = await _call(
+                        session,
+                        "wave_optics_preflight",
+                        {
+                            "model_name": model_name,
+                            "expected_component_tag": "comp1",
+                            "expected_physics_tag": "ewfd",
+                            "expected_study_tag": "std1",
+                            "expected_source_path": str(source),
+                            "expected_source_sha256": source_hash,
+                            "target_wavelength_parameter": "wl",
                         },
-                        **timing,
-                    })
+                    )
+                    calls.append(
+                        {
+                            "summary": {
+                                "success": preflight.get("success"),
+                                "inspection_status": preflight.get("inspection_status"),
+                                "evidence_codes": {
+                                    key: [
+                                        item.get("code")
+                                        for item in preflight.get("evidence", {}).get(key, [])
+                                    ]
+                                    for key in (
+                                        "observations",
+                                        "warnings",
+                                        "unknowns",
+                                        "integrity_errors",
+                                    )
+                                },
+                            },
+                            **timing,
+                        }
+                    )
                     assert preflight.get("success"), preflight
 
-                    audit, timing = await _call(session, "wave_optics_point_audit", {
-                        "model_name": model_name,
-                        "component_tag": "comp1",
-                        "physics_tag": "ewfd",
-                        "study_tag": "std1",
-                        "wavelength_value": case["wavelength_um"],
-                        "wavelength_unit": "um",
-                        "wavelength_parameter": "wl",
-                        "study_step_tag": "wl_step",
-                        "study_step_property": "plist",
-                        "expected_source_sha256": source_hash,
-                        "config_id": f"live-profile-{case['name']}",
-                        "artifact_dir": str(ARTIFACT_DIR / "audits"),
-                        "top_air_domain_ids": case["top_air_domain_ids"],
-                        "top_air_coordinate_range": case["top_air_coordinate_range"],
-                        "validation_policy": case["validation_policy"],
-                    })
-                    calls.append({
-                        "summary": {
-                            "success": audit.get("success"),
-                            "audit_status": audit.get("audit_status"),
-                            "assessment": audit.get("assessment"),
-                            "power": audit.get("measurement", {}).get("power"),
-                            "wavelength": audit.get("measurement", {}).get("wavelength"),
-                            "polarization_evidence_level": audit.get("measurement", {}).get("polarization", {}).get("evidence_level"),
-                            "artifacts": audit.get("artifacts"),
+                    audit, timing = await _call(
+                        session,
+                        "wave_optics_point_audit",
+                        {
+                            "model_name": model_name,
+                            "component_tag": "comp1",
+                            "physics_tag": "ewfd",
+                            "study_tag": "std1",
+                            "wavelength_value": case["wavelength_um"],
+                            "wavelength_unit": "um",
+                            "wavelength_parameter": "wl",
+                            "study_step_tag": "wl_step",
+                            "study_step_property": "plist",
+                            "expected_source_sha256": source_hash,
+                            "config_id": f"live-profile-{case['name']}",
+                            "artifact_dir": str(ARTIFACT_DIR / "audits"),
+                            "top_air_domain_ids": case["top_air_domain_ids"],
+                            "top_air_coordinate_range": case["top_air_coordinate_range"],
+                            "validation_policy": case["validation_policy"],
                         },
-                        **timing,
-                    })
+                    )
+                    calls.append(
+                        {
+                            "summary": {
+                                "success": audit.get("success"),
+                                "audit_status": audit.get("audit_status"),
+                                "assessment": audit.get("assessment"),
+                                "power": audit.get("measurement", {}).get("power"),
+                                "wavelength": audit.get("measurement", {}).get("wavelength"),
+                                "polarization_evidence_level": audit.get("measurement", {})
+                                .get("polarization", {})
+                                .get("evidence_level"),
+                                "artifacts": audit.get("artifacts"),
+                            },
+                            **timing,
+                        }
+                    )
                     assert audit.get("success"), audit
                     assert _sha256(source) == source_hash
                     final_stat = source.stat()
                     assert final_stat.st_mtime_ns == source_stat.st_mtime_ns
                     assert final_stat.st_size == source_stat.st_size
-                    output["cases"].append({
-                        "name": case["name"],
-                        "source": str(source),
-                        "source_sha256": source_hash,
-                        "setup_model_load": {"model_name": model_name, **load_timing},
-                        "exact_three_calls": calls,
-                        "agent_reasoning": _agent_reasoning(case, audit),
-                    })
-                    removed, remove_timing = await _call(session, "model_remove", {"model_name": model_name})
+                    output["cases"].append(
+                        {
+                            "name": case["name"],
+                            "source": str(source),
+                            "source_sha256": source_hash,
+                            "setup_model_load": {"model_name": model_name, **load_timing},
+                            "exact_three_calls": calls,
+                            "agent_reasoning": _agent_reasoning(case, audit),
+                        }
+                    )
+                    removed, remove_timing = await _call(
+                        session, "model_remove", {"model_name": model_name}
+                    )
                     assert removed.get("success"), removed
+                    loaded_model_names.remove(model_name)
                     output["cases"][-1]["cleanup"] = {"model_remove": removed, **remove_timing}
             finally:
-                disconnected, disconnect_timing = await _call(session, "comsol_disconnect", {})
-                output["cleanup"] = {"comsol_disconnect": disconnected, **disconnect_timing}
+                output["cleanup"] = await _cleanup_live_session(session, loaded_model_names)
+            if output["cleanup"]["passed"] is not True:
+                raise RuntimeError("live-profile cleanup did not complete")
     output["elapsed_seconds"] = time.perf_counter() - started
     assert len(output["cases"]) == len(cases)
     return output

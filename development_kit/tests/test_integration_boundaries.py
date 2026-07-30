@@ -1,13 +1,18 @@
 """Safety tests for standalone integration probe boundaries."""
 
 import ast
+import asyncio
+import inspect
 import runpy
 from pathlib import Path
+from types import SimpleNamespace
 
 import mph
 import pytest
 
 from development_kit.tests.integration import clientapi_property_acceptance as property_gate
+from development_kit.tests.integration import derived_geometry_acceptance as derived_gate
+from development_kit.tests.integration import live_profile_acceptance as live_profile_gate
 
 
 def test_clientapi_property_acceptance_uses_explicit_runtime_checks():
@@ -101,6 +106,132 @@ def test_property_acceptance_verifies_exact_runtime_and_observes_solution_tags()
         {"sol": lambda _self: type("Solutions", (), {"tags": lambda _self: ["sol2", "sol1"]})()},
     )()
     assert property_gate._solution_tags(java_model) == ["sol1", "sol2"]
+
+
+def test_live_profile_cleanup_continues_and_reports_every_failure():
+    class Session:
+        def __init__(self):
+            self.calls = []
+
+        async def call_tool(self, name, arguments, **_kwargs):
+            self.calls.append((name, arguments))
+            if name == "model_remove" and arguments["model_name"] == "first":
+                raise OSError("injected removal failure")
+            payload = {"success": name != "comsol_disconnect"}
+            return SimpleNamespace(isError=False, structuredContent=payload)
+
+    session = Session()
+    cleanup = asyncio.run(live_profile_gate._cleanup_live_session(session, ["first", "second"]))
+
+    assert session.calls == [
+        ("model_remove", {"model_name": "second"}),
+        ("model_remove", {"model_name": "first"}),
+        ("comsol_disconnect", {}),
+    ]
+    assert cleanup["passed"] is False
+    assert cleanup["steps"]["model_remove:first"]["error_type"] == "OSError"
+    assert cleanup["steps"]["comsol_disconnect"]["passed"] is False
+
+
+def test_live_profile_call_timeout_is_bounded_by_absolute_deadline(monkeypatch):
+    observed = []
+
+    class Session:
+        async def call_tool(self, _name, _arguments, **kwargs):
+            observed.append(kwargs["read_timeout_seconds"].total_seconds())
+            return SimpleNamespace(isError=False, structuredContent={"connected": False})
+
+    monkeypatch.setattr(live_profile_gate.time, "monotonic", lambda: 90.0)
+    asyncio.run(live_profile_gate._call_before(Session(), "comsol_status", {}, deadline=100.0))
+    assert observed == [10.0]
+
+    with pytest.raises(TimeoutError, match="absolute deadline"):
+        asyncio.run(live_profile_gate._call_before(Session(), "comsol_status", {}, deadline=89.0))
+
+
+def test_live_profile_setup_is_inside_the_cleanup_boundary():
+    tree = ast.parse(inspect.getsource(live_profile_gate._live_three_call_matrix))
+    setup_calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "_setup_live_session"
+    ]
+    cleanup_calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "_cleanup_live_session"
+    ]
+    assert len(setup_calls) == 1
+    assert len(cleanup_calls) == 1
+    assert any(
+        any(setup_calls[0] in list(ast.walk(statement)) for statement in node.body)
+        and any(cleanup_calls[0] in list(ast.walk(statement)) for statement in node.finalbody)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Try)
+    )
+
+
+def test_derived_gate_distinguishes_acquired_and_reused_leases():
+    assert derived_gate._lease_disposition(
+        {"success": True, "acquired": True, "reused": False}
+    ) == (True, False)
+    assert derived_gate._lease_disposition(
+        {"success": True, "acquired": False, "reused": True}
+    ) == (False, True)
+    with pytest.raises(RuntimeError, match="lease unavailable"):
+        derived_gate._lease_disposition({"success": False, "acquired": False, "reused": False})
+
+
+def test_derived_gate_requires_exact_explicit_build_semantics():
+    fin = {"geometry_run": True, "mesh_run": False}
+    blocks = {"geometry_run": False, "mesh_run": False}
+    counts = {"domains": 1, "boundaries": 2, "elements": 3, "vertices": 4}
+    assert derived_gate._build_acceptance(fin, blocks, counts) is True
+
+    for mutated in (
+        ({"geometry_run": False, "mesh_run": False}, blocks, counts),
+        (fin, {"geometry_run": True, "mesh_run": False}, counts),
+        (fin, blocks, {**counts, "domains": 0}),
+        (fin, blocks, {**counts, "vertices": 0}),
+    ):
+        assert derived_gate._build_acceptance(*mutated) is False
+
+
+def test_unicode_cleanup_continues_after_unlink_failure():
+    namespace = runpy.run_path(
+        str(Path(__file__).parents[2] / "development_kit/tests/integration/probes/unicode_save.py"),
+        run_name="unicode_cleanup_test",
+    )
+    calls = []
+
+    class Client:
+        def clear(self):
+            calls.append("clear")
+
+        def disconnect(self):
+            calls.append("disconnect")
+
+    class Output:
+        def unlink(self, *, missing_ok):
+            assert missing_ok is True
+            calls.append("unlink")
+            raise OSError("injected unlink failure")
+
+    class Directory:
+        def rmdir(self):
+            calls.append("rmdir")
+
+    result = {"success": True}
+    exit_code = namespace["_cleanup_probe"](Client(), Output(), Directory(), result)
+
+    assert calls == ["clear", "disconnect", "unlink", "rmdir"]
+    assert exit_code == 1
+    assert result["success"] is False
+    assert result["cleanup"]["steps"]["output_unlink"]["error_type"] == "OSError"
 
 
 @pytest.mark.parametrize(
