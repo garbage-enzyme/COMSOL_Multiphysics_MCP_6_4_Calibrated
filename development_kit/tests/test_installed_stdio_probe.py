@@ -37,6 +37,15 @@ def test_tool_payload_accepts_structured_or_text_json_objects():
     assert _tool_payload(structured_with_metadata) == {"value": 4}
 
 
+def test_structured_payload_precedes_text_and_result_wrappers_are_unwrapped():
+    result = SimpleNamespace(
+        structuredContent={"result": {"value": "structured"}},
+        content=[SimpleNamespace(text=json.dumps({"value": "text"}))],
+    )
+
+    assert _tool_payload(result) == {"value": "structured"}
+
+
 def test_tool_payload_rejects_non_object_results():
     result = SimpleNamespace(
         structuredContent=None,
@@ -56,6 +65,21 @@ def test_tool_payload_rejects_ambiguous_text_objects():
     )
 
     with pytest.raises(RuntimeError, match="multiple"):
+        _tool_payload(result)
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        [SimpleNamespace(text="{")],
+        [SimpleNamespace()],
+        [SimpleNamespace(text=None)],
+    ],
+)
+def test_tool_payload_rejects_malformed_or_missing_text_content(content):
+    result = SimpleNamespace(structuredContent=None, content=content)
+
+    with pytest.raises(RuntimeError, match="does not contain one JSON object"):
         _tool_payload(result)
 
 
@@ -155,4 +179,5 @@ def test_installed_spectral_probe_arguments_are_bounded_and_passive():
     assert len(rows) == 5
     assert len({row["raw_row_sha256"] for row in rows}) == 5
     assert all(abs(row["R"] + row["T"] + row["A"] - 1.0) < 1.0e-12 for row in rows)
+    assert all(0.0 <= row[quantity] <= 1.0 for row in rows for quantity in ("R", "T", "A"))
     assert arguments["measurement_configuration"]["peak_method"] == "measured_grid"

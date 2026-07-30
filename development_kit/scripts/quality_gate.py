@@ -66,6 +66,9 @@ MYPY_GROUPS = (
         "src/__init__.py",
     ),
 )
+PRODUCTION_ROOTS = ("comsol_mcp", "src")
+LINT_EXCLUSIONS_SHA256 = "c3306e6115cbe533a5317054ce1af85cab33bff2147ec1b7feff990cf4ed9fe8"
+MYPY_EXCLUSIONS_SHA256 = "6f5a47e2bd72ccf5f5daed69e51849fd9a63f5c279817d88cd3534c1b61e7946"
 PARALLEL_TEST_WORKERS = 4
 SERIAL_TEST_TARGETS = ("development_kit/tests/test_control_plane_startup.py",)
 
@@ -77,6 +80,52 @@ class QualityCommandError(RuntimeError):
         super().__init__(stage)
         self.stage = stage
         self.returncode = returncode
+
+
+def _targeted_production_modules(targets: tuple[str, ...], modules: set[str]) -> set[str]:
+    configured = [target for target in targets if target.split("/", 1)[0] in PRODUCTION_ROOTS]
+    return {
+        module
+        for module in modules
+        if any(
+            module == target or module.startswith(target.rstrip("/") + "/") for target in configured
+        )
+    }
+
+
+def _exclusion_digest(modules: set[str]) -> str:
+    payload = json.dumps(sorted(modules), separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(payload, usedforsecurity=False).hexdigest()
+
+
+def validate_quality_target_inventory(root: Path = ROOT) -> dict[str, Any]:
+    """Fail when a production module bypasses the frozen lint/type classification."""
+    modules = {
+        path.relative_to(root).as_posix()
+        for production_root in PRODUCTION_ROOTS
+        for path in (root / production_root).rglob("*.py")
+    }
+    mypy_targets = tuple(
+        target for group in MYPY_GROUPS for target in group if not target.startswith("-")
+    )
+    lint_exclusions = modules - _targeted_production_modules(LINT_TARGETS, modules)
+    mypy_exclusions = modules - _targeted_production_modules(mypy_targets, modules)
+    observed = {
+        "lint": _exclusion_digest(lint_exclusions),
+        "typing": _exclusion_digest(mypy_exclusions),
+    }
+    expected = {
+        "lint": LINT_EXCLUSIONS_SHA256,
+        "typing": MYPY_EXCLUSIONS_SHA256,
+    }
+    if observed != expected:
+        raise ValueError("production quality-target classification changed")
+    return {
+        "production_module_count": len(modules),
+        "lint_targeted_count": len(modules - lint_exclusions),
+        "typing_targeted_count": len(modules - mypy_exclusions),
+        "exclusion_digests": observed,
+    }
 
 
 def _main_pytest_command(pytest_root: Path, *, hosted_ci: bool) -> list[str]:
@@ -320,6 +369,7 @@ def run_quality_gate(artifact_root: Path, *, as_of: date) -> dict[str, Any]:
     run_id = run_root.name
 
     try:
+        validate_quality_target_inventory()
         _run([sys.executable, "-m", "ruff", "check", *LINT_TARGETS], stage="lint")
         _run(
             [sys.executable, "-m", "ruff", "format", "--check", *LINT_TARGETS],

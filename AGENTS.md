@@ -110,7 +110,8 @@ suite must use the explicit four-worker main command above, followed by the
 startup/process-inventory file as a serial tail; do not use bare
 `python -m pytest -q` as the local complete-suite command. Reassess local xdist,
 hosted CI execution, and these timeouts together when collected tests reach
-2,750 or after the next execution stall is repaired, whichever happens first.
+2,750, or after another execution stall occurs and that stall's cause has been
+repaired, whichever happens first.
 
 The quality gate applies the same local split while collecting coverage: four
 workers for the isolated main suite and a serial startup/process-inventory

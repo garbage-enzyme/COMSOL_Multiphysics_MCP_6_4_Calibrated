@@ -29,9 +29,7 @@ else:
 
 
 ROOT = Path(__file__).resolve().parents[2]
-PLANNING_CODE_ALLOWLIST = (
-    ROOT / "development_kit" / "release" / "planning_code_allowlist.json"
-)
+PLANNING_CODE_ALLOWLIST = ROOT / "development_kit" / "release" / "planning_code_allowlist.json"
 _FORBIDDEN_PARTS = {
     ".claude",
     "comsol_models",
@@ -55,9 +53,7 @@ def _run(
         cwd=cwd,
         env=env,
         check=True,
-        creationflags=(
-            getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
-        ),
+        creationflags=(getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0),
     )
 
 
@@ -68,9 +64,7 @@ def _git_status() -> list[str]:
         check=True,
         capture_output=True,
         text=True,
-        creationflags=(
-            getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
-        ),
+        creationflags=(getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0),
     )
     return [line for line in completed.stdout.splitlines() if line]
 
@@ -141,10 +135,15 @@ def _normalized_archive_path(name: str) -> str:
 def _distribution_files(path: Path) -> tuple[list[str], dict[str, bytes]]:
     if path.suffix == ".whl":
         with zipfile.ZipFile(path) as archive:
-            members = archive.namelist()
+            infos = archive.infolist()
+            members = [info.filename for info in infos]
+            for info in infos:
+                unix_mode = (info.external_attr >> 16) & 0o170000
+                if unix_mode == 0o120000:
+                    raise RuntimeError(f"distribution contains link member: {info.filename}")
             files = {
                 _normalized_archive_path(info.filename): archive.read(info)
-                for info in archive.infolist()
+                for info in infos
                 if not info.is_dir()
             }
     elif path.name.endswith(".tar.gz"):
@@ -152,6 +151,10 @@ def _distribution_files(path: Path) -> tuple[list[str], dict[str, bytes]]:
             members = archive.getnames()
             files = {}
             for member in archive.getmembers():
+                if member.issym() or member.islnk():
+                    raise RuntimeError(f"distribution contains link member: {member.name}")
+                if not member.isfile() and not member.isdir():
+                    raise RuntimeError(f"distribution contains special member: {member.name}")
                 if not member.isfile():
                     continue
                 stream = archive.extractfile(member)
@@ -160,7 +163,22 @@ def _distribution_files(path: Path) -> tuple[list[str], dict[str, bytes]]:
                 files[_normalized_archive_path(member.name)] = stream.read()
     else:
         raise ValueError(f"unsupported distribution artifact: {path.name}")
+    normalized = [_normalized_archive_path(name) for name in members]
+    if len(normalized) != len(set(normalized)):
+        raise RuntimeError("distribution contains duplicate normalized paths")
     return members, files
+
+
+def _distribution_artifacts(dist_dir: Path) -> list[Path]:
+    artifacts = sorted(path for path in dist_dir.iterdir() if path.is_file())
+    wheels = [path for path in artifacts if path.suffix == ".whl"]
+    sdists = [path for path in artifacts if path.name.endswith(".tar.gz")]
+    if len(wheels) != 1 or len(sdists) != 1 or len(artifacts) != 2:
+        raise RuntimeError(
+            "expected exactly one wheel and one sdist, "
+            f"found wheels={len(wheels)}, sdists={len(sdists)}, artifacts={len(artifacts)}"
+        )
+    return [wheels[0], sdists[0]]
 
 
 def _distribution_inventory(path: Path) -> dict:
@@ -177,9 +195,7 @@ def _distribution_inventory(path: Path) -> dict:
         ):
             offenders.append(name)
     if offenders:
-        raise RuntimeError(
-            f"ordinary distribution contains forbidden members: {offenders[:5]}"
-        )
+        raise RuntimeError(f"ordinary distribution contains forbidden members: {offenders[:5]}")
     texts = {}
     for name, payload in files.items():
         if PurePosixPath(name).suffix.casefold() not in TEXT_SUFFIXES:
@@ -252,21 +268,14 @@ def main() -> int:
     if not args.skip_tests:
         _run([sys.executable, "-m", "pytest", "-q"])
     _run([sys.executable, "-m", "build", "--outdir", str(dist_dir)])
-    distributions = [
-        _distribution_inventory(path)
-        for path in sorted(dist_dir.iterdir())
-        if path.suffix == ".whl" or path.name.endswith(".tar.gz")
-    ]
-    if len(distributions) != 2:
-        raise RuntimeError(f"expected wheel and sdist, found {distributions}")
+    distribution_paths = _distribution_artifacts(dist_dir)
+    distributions = [_distribution_inventory(path) for path in distribution_paths]
 
     if not args.skip_install:
         venv_dir = run_root / "venv"
         _run([sys.executable, "-m", "venv", str(venv_dir)])
         python = _venv_python(venv_dir)
-        wheels = sorted(dist_dir.glob("*.whl"))
-        if len(wheels) != 1:
-            raise RuntimeError(f"expected one wheel, found {wheels}")
+        wheels = [path for path in distribution_paths if path.suffix == ".whl"]
         if dependency_lock is not None:
             _run(
                 [
@@ -330,9 +339,7 @@ def main() -> int:
         )
 
     installed_probe = (
-        json.loads(probe_result.read_text(encoding="utf-8"))
-        if probe_result.is_file()
-        else None
+        json.loads(probe_result.read_text(encoding="utf-8")) if probe_result.is_file() else None
     )
     sbom = json.loads(sbom_result.read_text(encoding="utf-8")) if sbom_result.is_file() else None
     stdio_probe = (
@@ -368,9 +375,7 @@ def main() -> int:
         ),
         "installed_probe": installed_probe,
         "installed_stdio_probe": stdio_probe,
-        "inventory_hashes": (
-            installed_probe["release_inventories"] if installed_probe else None
-        ),
+        "inventory_hashes": (installed_probe["release_inventories"] if installed_probe else None),
         "sbom": (
             {
                 "filename": sbom_result.name,

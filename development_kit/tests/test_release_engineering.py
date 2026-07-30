@@ -4,17 +4,20 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import io
 import json
 import os
 import re
 import subprocess
 import sys
+import tarfile
 import tomllib
 import zipfile
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from types import SimpleNamespace
 
 import pytest
+import yaml
 
 from development_kit.scripts import python_compatibility_licensed_gate as compatibility_gate
 from development_kit.scripts.generate_release_lock import _render_lock
@@ -32,6 +35,7 @@ from development_kit.scripts.python_compatibility_licensed_gate import (
 )
 from development_kit.scripts.release_gate import (
     PLANNING_CODE_ALLOWLIST,
+    _distribution_artifacts,
     _distribution_inventory,
     _lock_lane,
     _run,
@@ -276,13 +280,14 @@ def test_compatibility_listener_evidence_is_explicitly_sampled_not_exhaustive():
 
 def test_production_runtime_guards_survive_python_optimization():
     assert_statements = []
-    for path in (ROOT / "src").rglob("*.py"):
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        assert_statements.extend(
-            f"{path.relative_to(ROOT)}:{node.lineno}"
-            for node in ast.walk(tree)
-            if isinstance(node, ast.Assert)
-        )
+    for package in ("comsol_mcp", "src"):
+        for path in (ROOT / package).rglob("*.py"):
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            assert_statements.extend(
+                f"{path.relative_to(ROOT)}:{node.lineno}"
+                for node in ast.walk(tree)
+                if isinstance(node, ast.Assert)
+            )
     assert assert_statements == []
 
     code = """
@@ -512,7 +517,9 @@ def test_release_integration_fixture_manifest_is_complete_and_sanitized():
         "lexical_manual_retrieval",
     }
     entries = manifest["fixtures"]
-    assert {entry["fixture_id"] for entry in entries} == expected
+    fixture_ids = [entry["fixture_id"] for entry in entries]
+    assert len(fixture_ids) == len(set(fixture_ids))
+    assert set(fixture_ids) == expected
 
     for entry in entries:
         contract_path = FIXTURES / entry["contract"]
@@ -555,6 +562,42 @@ def test_distribution_inventory_rejects_development_kit_members(tmp_path):
         _distribution_inventory(agent_config)
 
 
+def test_distribution_artifacts_require_one_wheel_and_one_sdist(tmp_path):
+    wheel = tmp_path / "package-1-py3-none-any.whl"
+    sdist = tmp_path / "package-1.tar.gz"
+    wheel.touch()
+    sdist.touch()
+    assert _distribution_artifacts(tmp_path) == [wheel, sdist]
+
+    (tmp_path / "package-2-py3-none-any.whl").touch()
+    with pytest.raises(RuntimeError, match="exactly one wheel and one sdist"):
+        _distribution_artifacts(tmp_path)
+
+
+def test_distribution_inventory_rejects_archive_links(tmp_path):
+    symlink_wheel = tmp_path / "linked.whl"
+    with zipfile.ZipFile(symlink_wheel, "w") as archive:
+        info = zipfile.ZipInfo("comsol_mcp/alias.py")
+        info.create_system = 3
+        info.external_attr = 0o120777 << 16
+        archive.writestr(info, "target.py")
+    with pytest.raises(RuntimeError, match="link member"):
+        _distribution_inventory(symlink_wheel)
+
+    hardlink_sdist = tmp_path / "linked.tar.gz"
+    with tarfile.open(hardlink_sdist, "w:gz") as archive:
+        payload = b"pass\n"
+        source = tarfile.TarInfo("package-1/comsol_mcp/source.py")
+        source.size = len(payload)
+        archive.addfile(source, io.BytesIO(payload))
+        link = tarfile.TarInfo("package-1/comsol_mcp/alias.py")
+        link.type = tarfile.LNKTYPE
+        link.linkname = source.name
+        archive.addfile(link)
+    with pytest.raises(RuntimeError, match="link member"):
+        _distribution_inventory(hardlink_sdist)
+
+
 def test_distribution_inventory_enforces_frozen_planning_codes_and_private_paths(tmp_path):
     legacy = tmp_path / "legacy.whl"
     with zipfile.ZipFile(legacy, "w") as archive:
@@ -584,10 +627,13 @@ def test_distribution_inventory_enforces_frozen_planning_codes_and_private_paths
 
 
 def test_hosted_ci_is_dependency_only_and_real_gate_is_explicit():
-    workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    workflow_path = ROOT / ".github" / "workflows" / "ci.yml"
+    workflow = workflow_path.read_text(encoding="utf-8")
+    workflow_data = yaml.safe_load(workflow)
     dependency_report = (ROOT / ".github" / "workflows" / "dependency_report.yml").read_text(
         encoding="utf-8"
     )
+    dependency_report_data = yaml.safe_load(dependency_report)
     real_gate = (ROOT / "development_kit" / "scripts" / "run_real_release_gate.py").read_text(
         encoding="utf-8"
     )
@@ -595,46 +641,74 @@ def test_hosted_ci_is_dependency_only_and_real_gate_is_explicit():
         encoding="utf-8"
     )
 
-    assert "python -m pytest -q" in workflow
-    assert "python -m pytest -q -n" not in workflow
-    assert 'os.environ.get("GITHUB_ACTIONS", "").casefold() == "true"' in quality_gate
-    assert "python -m build" in workflow
-    assert "release_gate.py --skip-tests" in workflow
-    action_references = re.findall(
-        r"(?m)^\s*- uses: (actions/(?:checkout|setup-python))@([^\s]+)$",
-        workflow + "\n" + dependency_report,
+    jobs = workflow_data["jobs"]
+    dependency_job = jobs["dependency-compatibility"]
+    unit_job = jobs["unit-and-package-py314"]
+    dependency_steps = dependency_job["steps"]
+    dependency_commands = "\n".join(
+        str(step.get("run", "")) for step in dependency_steps if isinstance(step, dict)
     )
+    unit_commands = "\n".join(
+        str(step.get("run", "")) for step in unit_job["steps"] if isinstance(step, dict)
+    )
+    security_job = jobs["locked-runtime-security"]
+    security_commands = "\n".join(
+        str(step.get("run", "")) for step in security_job["steps"] if isinstance(step, dict)
+    )
+    all_commands = "\n".join(
+        str(step.get("run", ""))
+        for job in jobs.values()
+        for step in job["steps"]
+        if isinstance(step, dict)
+    )
+
+    assert "python -u -m pytest -vv" in dependency_commands
+    assert " -n " not in dependency_commands
+    assert 'os.environ.get("GITHUB_ACTIONS", "").casefold() == "true"' in quality_gate
+    assert "python -m build" in unit_commands
+    assert "release_gate.py --skip-tests" in unit_commands
+    action_references = [
+        step["uses"].split("@", 1)
+        for document in (workflow_data, dependency_report_data)
+        for job in document["jobs"].values()
+        for step in job["steps"]
+        if "uses" in step
+    ]
     assert len(action_references) == 10
     assert all(re.fullmatch(r"[0-9a-f]{40}", revision) for _action, revision in action_references)
     assert "# actions/checkout v7.0.0" in workflow
     assert "# actions/setup-python v6.2.0" in workflow
     assert "# actions/checkout v7.0.0" in dependency_report
     assert "# actions/setup-python v6.2.0" in dependency_report
-    assert "continue-on-error" not in workflow
-    assert "Python 3.14, default production lane" in workflow
-    assert "dependency compatibility (${{ matrix.lane }}, Python 3.14)" in workflow
-    assert "timeout-minutes: 15" in workflow
-    assert "PYTHONUNBUFFERED" in workflow
-    assert "python -u -m pytest -vv -o faulthandler_timeout=120" in workflow
-    assert "--basetemp D:\\comsol_pytest\\dependency-main" in workflow
-    assert "New-Item -ItemType Directory -Force -Path D:\\comsol_pytest" in workflow
-    assert "--ignore development_kit/tests/test_control_plane_startup.py" in workflow
-    assert "test_control_plane_startup.py --basetemp" in workflow
-    assert "matrix:" in workflow
-    assert "minimum-supported" in workflow
-    assert "current-compatible" in workflow
-    assert "constraints/minimum_supported_py314.txt" in workflow
-    assert "--upgrade-strategy eager" in workflow
-    assert "locked runtime vulnerability policy" in workflow
-    assert "pip-audit==2.10.1" in workflow
-    assert "constraints/release_locked_py314.txt --no-deps --format json" in workflow
-    assert "vulnerability_allowlist.json" in workflow
-    assert "security_gate.py" in workflow
-    assert "dependency_license_gate.py" in workflow
-    assert "dependency_license_review.json" in workflow
-    assert "quality_gate.py" in workflow
-    assert "release_locked_py314.txt" in workflow
-    assert "-m integration" not in workflow
+    assert all("continue-on-error" not in step for job in jobs.values() for step in job["steps"])
+    assert unit_job["name"] == "unit-and-package (Python 3.14, default production lane)"
+    assert dependency_job["name"] == ("dependency compatibility (${{ matrix.lane }}, Python 3.14)")
+    assert dependency_job["timeout-minutes"] == 15
+    assert dependency_job["strategy"]["matrix"]["lane"] == [
+        "minimum-supported",
+        "current-compatible",
+    ]
+    assert dependency_steps[-1]["env"]["PYTHONUNBUFFERED"] == "1"
+    assert "-o faulthandler_timeout=120" in dependency_commands
+    assert "--basetemp D:\\comsol_pytest\\dependency-main" in dependency_commands
+    assert "New-Item -ItemType Directory -Force -Path D:\\comsol_pytest" in dependency_commands
+    assert "--ignore development_kit/tests/test_control_plane_startup.py" in dependency_commands
+    assert "test_control_plane_startup.py --basetemp" in dependency_commands
+    assert any(
+        "constraints/minimum_supported_py314.txt" in str(step.get("run", ""))
+        for step in dependency_steps
+    )
+    assert "--upgrade-strategy eager" in dependency_commands
+    assert security_job["name"] == "locked runtime vulnerability policy"
+    assert "pip-audit==2.10.1" in security_commands
+    assert "constraints/release_locked_py314.txt --no-deps --format json" in security_commands
+    assert "vulnerability_allowlist.json" in security_commands
+    assert "security_gate.py" in security_commands
+    assert "dependency_license_gate.py" in dependency_commands
+    assert "dependency_license_review.json" in dependency_commands
+    assert "quality_gate.py" in unit_commands
+    assert "release_locked_py314.txt" in unit_commands
+    assert "-m integration" not in all_commands
     assert "RUN_REAL_COMSOL" in real_gate
     assert 'choices=["RUN_REAL_COMSOL"]' in real_gate
 

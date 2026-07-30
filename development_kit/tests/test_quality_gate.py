@@ -17,6 +17,7 @@ from development_kit.scripts.quality_gate import (
     evaluate_coverage,
     load_coverage_policy,
     run_quality_gate,
+    validate_quality_target_inventory,
 )
 
 
@@ -36,16 +37,14 @@ def _passing_report() -> dict:
     policy = load_coverage_policy(POLICY_PATH)
     return {
         "totals": {
-            "percent_covered": policy["global"]["minimum_percent_covered"],
+            "percent_covered": 100.0,
             "covered_lines": 100,
             "num_statements": 120,
             "covered_branches": 40,
             "num_branches": 50,
         },
         "files": {
-            target["path"].replace("/", "\\"): {
-                "summary": {"percent_covered": target["minimum_percent_covered"]}
-            }
+            target["path"].replace("/", "\\"): {"summary": {"percent_covered": 100.0}}
             for target in policy["targets"]
         },
     }
@@ -61,12 +60,26 @@ def test_committed_coverage_policy_is_exact_and_passes_at_its_floors() -> None:
     assert all(item["owner"] and item["removal_gate"] for item in receipt["targets"])
 
 
+def test_quality_target_inventory_covers_every_production_module(tmp_path: Path) -> None:
+    receipt = validate_quality_target_inventory()
+    assert receipt["production_module_count"] >= receipt["lint_targeted_count"]
+    assert receipt["production_module_count"] >= receipt["typing_targeted_count"]
+
+    (tmp_path / "comsol_mcp").mkdir()
+    (tmp_path / "src").mkdir()
+    (tmp_path / "comsol_mcp" / "unclassified.py").write_text("pass\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="classification changed"):
+        validate_quality_target_inventory(tmp_path)
+
+
 def test_global_and_safety_file_regressions_fail_closed() -> None:
     policy = load_coverage_policy(POLICY_PATH)
     report = _passing_report()
-    report["totals"]["percent_covered"] -= 0.01
+    report["totals"]["percent_covered"] = policy["global"]["minimum_percent_covered"] - 0.01
     first_path = policy["targets"][0]["path"].replace("/", "\\")
-    report["files"][first_path]["summary"]["percent_covered"] -= 0.01
+    report["files"][first_path]["summary"]["percent_covered"] = (
+        policy["targets"][0]["minimum_percent_covered"] - 0.01
+    )
 
     receipt = evaluate_coverage(report, policy)
 
@@ -98,6 +111,25 @@ def test_coverage_policy_rejects_unowned_exclusions(tmp_path: Path) -> None:
 
     path.write_text(json.dumps(invalid), encoding="utf-8")
     with pytest.raises(ValueError, match="values"):
+        load_coverage_policy(path)
+
+
+@pytest.mark.parametrize("scope", ["global", "target"])
+@pytest.mark.parametrize("field", ["owner", "rationale", "removal_gate"])
+@pytest.mark.parametrize("mutation", ["missing", "blank"])
+def test_coverage_policy_requires_complete_metadata(
+    tmp_path: Path, scope: str, field: str, mutation: str
+) -> None:
+    policy = load_coverage_policy(POLICY_PATH)
+    item = policy["global"] if scope == "global" else policy["targets"][0]
+    if mutation == "missing":
+        del item[field]
+    else:
+        item[field] = " "
+    path = tmp_path / "coverage-policy.json"
+    path.write_text(json.dumps(policy), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="global coverage policy|values"):
         load_coverage_policy(path)
 
 
