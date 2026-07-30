@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 from pathlib import Path
 import shutil
@@ -35,13 +36,14 @@ def lightweight_deployment():
         "model_revision": "r1",
         "model_fingerprint": "b" * 64,
     }
-    (index / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    manifest_bytes = json.dumps(manifest).encode("utf-8")
+    (index / "manifest.json").write_bytes(manifest_bytes)
     (model / "model_manifest.json").write_text(json.dumps({
         "model_sha256": "b" * 64,
     }), encoding="utf-8")
     (root / "current.json").write_text(json.dumps({
         "index_path": str(index),
-        "manifest_sha256": "c" * 64,
+        "manifest_sha256": hashlib.sha256(manifest_bytes).hexdigest(),
         "build_id": "build-1",
         "model_fingerprint": "b" * 64,
     }), encoding="utf-8")

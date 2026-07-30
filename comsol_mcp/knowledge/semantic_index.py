@@ -44,6 +44,9 @@ MAX_SEMANTIC_ARTIFACT_BYTES = 8 * 1024 * 1024 * 1024
 
 class Encoder(Protocol):
     dimension: int
+    model_id: str
+    model_revision: str
+    model_fingerprint: str
 
     def encode(self, texts: Sequence[str]) -> Any:
         """Return a finite float32-compatible matrix with one row per text."""
@@ -277,6 +280,7 @@ class SentenceTransformerEncoder:
 
     def __init__(self, model_path: str | Path, *, dimension: int):
         path = _require_ascii_absolute(model_path, "model_path")
+        pinned_model = validate_pinned_model(path)
         os.environ["HF_HUB_OFFLINE"] = "1"
         os.environ["TRANSFORMERS_OFFLINE"] = "1"
         import sentence_transformers
@@ -285,6 +289,9 @@ class SentenceTransformerEncoder:
 
         self._model = SentenceTransformer(str(path), local_files_only=True, device="cpu")
         self.dimension = int(dimension)
+        self.model_id = str(pinned_model["model_id"])
+        self.model_revision = str(pinned_model["revision"])
+        self.model_fingerprint = str(pinned_model["model_sha256"])
         self.device = str(self._model.device)
         self.dependency_versions = {
             "sentence_transformers": sentence_transformers.__version__,
@@ -299,6 +306,17 @@ class SentenceTransformerEncoder:
             normalize_embeddings=True,
             show_progress_bar=False,
         )
+
+
+def _validate_encoder_identity(encoder: Encoder, model: Mapping[str, Any]) -> None:
+    expected = {
+        "model_id": str(model["model_id"]),
+        "model_revision": str(model["revision"]),
+        "model_fingerprint": str(model["model_sha256"]),
+    }
+    observed = {name: getattr(encoder, name, None) for name in expected}
+    if observed != expected:
+        raise ValueError("encoder identity does not match the pinned model")
 
 
 def _write_chunks(
@@ -392,6 +410,7 @@ def build_index(
     model = validate_pinned_model(model_root)
     if int(model["dimension"]) != int(encoder.dimension):
         raise ValueError("encoder dimension does not match the pinned model")
+    _validate_encoder_identity(encoder, model)
     corpus = str(lexical_before["corpus_fingerprint"])
     model_fingerprint = str(model["model_sha256"])
     family = root / "indexes" / corpus / model_fingerprint

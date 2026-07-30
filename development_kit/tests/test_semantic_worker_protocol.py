@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import shutil
 import socket
 import subprocess
 import sys
@@ -223,6 +225,51 @@ def test_lightweight_identity_rejects_non_object_model_manifest(tmp_path):
         result = collision.start()
     assert result["success"] is False
     assert result["cleanup"]["absent"] is True
+
+
+def test_lightweight_identity_hashes_loaded_manifest_and_contains_invalid_utf8(request):
+    root = Path("D:/comsol_semantic_worker_test") / uuid.uuid4().hex
+    request.addfinalizer(lambda: shutil.rmtree(root, ignore_errors=True))
+    index = root / "indexes" / "corpus" / "model" / "build"
+    model = root / "model"
+    index.mkdir(parents=True)
+    model.mkdir()
+    manifest = {
+        "build_id": "build",
+        "corpus_fingerprint": "c" * 64,
+        "model_id": "test/model",
+        "model_revision": "r1",
+        "model_fingerprint": "b" * 64,
+    }
+    manifest_bytes = json.dumps(manifest, sort_keys=True).encode("utf-8")
+    (index / "manifest.json").write_bytes(manifest_bytes)
+    (model / "model_manifest.json").write_text(
+        json.dumps({"model_sha256": "b" * 64}), encoding="utf-8"
+    )
+    (root / "current.json").write_text(
+        json.dumps({
+            "index_path": str(index),
+            "manifest_sha256": hashlib.sha256(manifest_bytes).hexdigest(),
+            "build_id": "build",
+            "model_fingerprint": "b" * 64,
+        }),
+        encoding="utf-8",
+    )
+    configuration = {
+        "configured": True,
+        "root": str(root),
+        "model_path": str(model),
+    }
+
+    assert _lightweight_deployment_identity(configuration)[
+        "lightweight_identity_match"
+    ] is True
+    (index / "manifest.json").write_bytes(manifest_bytes + b" ")
+    assert _lightweight_deployment_identity(configuration)[
+        "lightweight_identity_match"
+    ] is False
+    (index / "manifest.json").write_bytes(b"\xff")
+    assert _lightweight_deployment_identity(configuration)["readable"] is False
 
 
 def test_authentication_schema_and_message_bounds_do_not_kill_worker():

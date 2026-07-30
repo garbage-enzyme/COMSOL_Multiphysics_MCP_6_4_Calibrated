@@ -22,7 +22,10 @@ from src.knowledge.semantic_contracts import (
     validate_model_manifest,
 )
 
-from development_kit.benchmarks.semantic_benchmark import evaluate_lexical_baseline
+from development_kit.benchmarks.semantic_benchmark import (
+    _query_metrics,
+    evaluate_lexical_baseline,
+)
 from development_kit.tests.integration.semantic_benchmark_soak import _promotion
 
 ROOT = Path(__file__).parents[2]
@@ -214,6 +217,19 @@ def test_lexical_baseline_computes_rank_metrics_without_semantic_dependencies():
     assert result["summary"]["overall"]["recall_at_5"] == 1.0
     assert result["summary"]["overall"]["mrr_at_10"] == 1.0
     assert result["continuation_gate"]["continue_to_semantic_worker"] is False
+
+
+def test_rank_metrics_validate_and_deduplicate_citations_before_dcg():
+    citation = ("manual.pdf", 7)
+    metrics = _query_metrics(
+        [citation, citation], {citation}, valid_citations={citation}
+    )
+
+    assert metrics["ndcg_at_10"] == 1.0
+    with pytest.raises(ValueError, match="pinned corpus"):
+        _query_metrics(
+            [("invented.pdf", 99)], {citation}, valid_citations={citation}
+        )
 
 
 def test_semantic_contract_imports_do_not_load_heavy_semantic_or_comsol_modules():

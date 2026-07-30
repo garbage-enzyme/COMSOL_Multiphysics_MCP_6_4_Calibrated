@@ -26,6 +26,14 @@ from src.knowledge.semantic_retrieval import (
 class ControlledEncoder:
     dimension = 4
 
+    def __init__(self, model_path):
+        from src.knowledge.semantic_index import validate_pinned_model
+
+        model = validate_pinned_model(model_path)
+        self.model_id = model["model_id"]
+        self.model_revision = model["revision"]
+        self.model_fingerprint = model["model_sha256"]
+
     def encode(self, texts):
         rows = []
         for text in texts:
@@ -99,7 +107,7 @@ def retrieval_assets():
         deployment_root=deployment,
         lexical_index=lexical,
         model_path=model,
-        encoder=ControlledEncoder(),
+        encoder=ControlledEncoder(model),
         build_id="controlled-001",
         maximum_characters=220,
         overlap=20,
@@ -117,7 +125,7 @@ def _retriever(assets, encoder=ControlledEncoder):
         deployment_root=assets["deployment"],
         lexical_index=assets["lexical"],
         model_path=assets["model"],
-        encoder_factory=lambda _path, _dimension: encoder(),
+        encoder_factory=lambda path, _dimension: encoder(path),
         lexical_timeout_seconds=5.0,
     )
 
@@ -246,6 +254,39 @@ def test_exact_api_symbol_tier_outranks_loose_semantic_page():
     assert result[1]["exact_match_tier"] == 0
 
 
+def test_partial_technical_token_does_not_receive_exact_match_bonus():
+    lexical = [{
+        "source": "api.pdf",
+        "module": "api",
+        "page": 1,
+        "heading": "getUpDownstream helper",
+        "snippet": "This is not the requested API symbol.",
+        "rank": -1.0,
+        "coverage": 1.0,
+    }]
+    result = fuse_candidates(
+        "getUpDown",
+        lexical,
+        [],
+        limit=1,
+        retrieval_mode="lexical",
+        provenance={
+            "corpus_fingerprint": "c" * 64,
+            "index_build_id": "test",
+            "index_manifest_sha256": "d" * 64,
+            "model_id": "test",
+            "model_revision": "r1",
+            "model_fingerprint": "e" * 64,
+        },
+        pinned_chunks={
+            "chunk": {"source": "api.pdf", "page": 1, "ordinal": 0}
+        },
+    )
+
+    assert result[0]["matched_technical_tokens"] == []
+    assert result[0]["exact_match_tier"] == 0
+
+
 def test_page_dedup_abstention_and_nonfinite_scores_are_bounded():
     base_chunk = {
         "source": "one.pdf",
@@ -280,6 +321,23 @@ def test_page_dedup_abstention_and_nonfinite_scores_are_bounded():
         }
         for item in vector
     }
+
+    accepted = [
+        {**item, "similarity": 0.80 - index * 0.01, "distance": 0.20 + index * 0.01}
+        for index, item in enumerate(vector)
+    ]
+    accepted_result = fuse_candidates(
+        "one",
+        [],
+        accepted,
+        limit=5,
+        retrieval_mode="vector",
+        provenance=provenance,
+        pinned_chunks=pinned_chunks,
+    )
+    assert [(row["source"], row["page"]) for row in accepted_result] == [
+        ("one.pdf", 1)
+    ]
 
     assert (
         fuse_candidates(
@@ -358,6 +416,37 @@ def test_pointer_change_requires_restart_and_nonfinite_query_vector_is_rejected(
     bad = _retriever(retrieval_assets, encoder=NonFiniteEncoder)
     with pytest.raises(ValueError, match="non-finite"):
         bad.query("CopyFace", retrieval_mode="vector")
+
+
+def test_vector_cutoff_orders_all_ties_before_truncation():
+    class EqualEncoder:
+        def encode(self, _texts):
+            return np.asarray([[1.0, 0.0]], dtype=np.float32)
+
+    retriever = object.__new__(HybridRetriever)
+    retriever.encoder = EqualEncoder()
+    retriever.manifest = {"vector_dimension": 2}
+    retriever.embeddings = np.asarray(
+        [[1.0, 0.0], [1.0, 0.0], [1.0, 0.0]], dtype=np.float32
+    )
+    retriever.chunks = [
+        {"id": chunk_id, "page": page}
+        for chunk_id, page in (("c" * 64, 1), ("a" * 64, 2), ("b" * 64, 3))
+    ]
+
+    result = retriever._vector_candidates("tied", {}, 2)
+
+    assert [item["chunk"]["id"] for item in result] == ["a" * 64, "b" * 64]
+
+
+def test_query_encoder_must_match_pinned_model_identity(retrieval_assets):
+    class WrongIdentityEncoder(ControlledEncoder):
+        def __init__(self, model_path):
+            super().__init__(model_path)
+            self.model_revision = "different-revision"
+
+    with pytest.raises(ValueError, match="encoder identity"):
+        _retriever(retrieval_assets, encoder=WrongIdentityEncoder)
 
 
 def test_query_pins_lexical_model_and_vector_snapshots(retrieval_assets, monkeypatch):

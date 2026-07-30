@@ -49,7 +49,20 @@ def _dcg(relevance: Iterable[int]) -> float:
     return sum(value / math.log2(index + 2) for index, value in enumerate(relevance))
 
 
-def _metrics(ranked: list[tuple[str, int]], relevant: set[tuple[str, int]]) -> dict[str, Any]:
+def _metrics(
+    ranked: list[tuple[str, int]],
+    relevant: set[tuple[str, int]],
+    corpus: set[tuple[str, int]],
+) -> dict[str, Any]:
+    unique_ranked = []
+    seen = set()
+    for citation in ranked:
+        if citation not in corpus:
+            raise ValueError(f"ranked citation is absent from the pinned corpus: {citation}")
+        if citation not in seen:
+            unique_ranked.append(citation)
+            seen.add(citation)
+    ranked = unique_ranked
     if not relevant:
         return {"negative_abstained": not ranked}
     hits = [1 if item in relevant else 0 for item in ranked[:10]]
@@ -128,7 +141,15 @@ def _evaluate_mode(manager: SemanticWorkerManager, evaluation: Mapping[str, Any]
         elapsed = time.perf_counter() - started
         if not response.get("success"):
             raise RuntimeError(f"{mode} query failed for {item['id']}: {response}")
-        ranked = [(row["source"], int(row["page"])) for row in response["results"]]
+        ranked = []
+        seen = set()
+        for row in response["results"]:
+            citation = (row["source"], int(row["page"]))
+            if citation not in corpus:
+                raise ValueError(f"ranked citation is absent from the pinned corpus: {citation}")
+            if citation not in seen:
+                ranked.append(citation)
+                seen.add(citation)
         relevant = {(row["source"], int(row["page"])) for row in item["relevant"]}
         returned += len(ranked)
         valid += sum(1 for citation in ranked if citation in corpus)
@@ -139,7 +160,7 @@ def _evaluate_mode(manager: SemanticWorkerManager, evaluation: Mapping[str, Any]
             "id": item["id"], "category": item["category"], "style": item["style"],
             "relevant": item["relevant"],
             "ranked_citations": [{"source": source, "page": page} for source, page in ranked],
-            "metrics": _metrics(ranked, relevant),
+            "metrics": _metrics(ranked, relevant, corpus),
             "elapsed_seconds": elapsed,
             "response_bytes": encoded_size,
         })

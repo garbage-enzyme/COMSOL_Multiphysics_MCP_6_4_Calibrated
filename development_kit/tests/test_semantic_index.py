@@ -31,6 +31,12 @@ from src.knowledge.semantic_index import (
 class FakeEncoder:
     dimension = 4
 
+    def __init__(self, model_path):
+        model = validate_pinned_model(model_path)
+        self.model_id = model["model_id"]
+        self.model_revision = model["revision"]
+        self.model_fingerprint = model["model_sha256"]
+
     def encode(self, texts):
         rows = []
         for text in texts:
@@ -104,7 +110,7 @@ def _build(assets, build_id):
         deployment_root=assets["root"],
         lexical_index=assets["lexical"],
         model_path=assets["model"],
-        encoder=FakeEncoder(),
+        encoder=FakeEncoder(assets["model"]),
         build_id=build_id,
         maximum_characters=240,
         overlap=20,
@@ -275,7 +281,7 @@ def test_interrupted_build_never_changes_active_pointer(semantic_index_assets, f
             deployment_root=semantic_index_assets["root"],
             lexical_index=semantic_index_assets["lexical"],
             model_path=semantic_index_assets["model"],
-            encoder=FakeEncoder(),
+            encoder=FakeEncoder(semantic_index_assets["model"]),
             build_id=f"failed-{fault.replace('_', '-')}",
             maximum_characters=240,
             overlap=20,
@@ -352,12 +358,12 @@ def test_mismatch_non_ascii_and_pointer_rollback_gates(semantic_index_assets):
             deployment_root=semantic_index_assets["root"],
             lexical_index=semantic_index_assets["lexical"],
             model_path=semantic_index_assets["model"],
-            encoder=FakeEncoder(),
+            encoder=FakeEncoder(semantic_index_assets["model"]),
             build_id="wrong-corpus",
             expected_corpus_fingerprint="0" * 64,
         )
 
-    wrong_encoder = FakeEncoder()
+    wrong_encoder = FakeEncoder(semantic_index_assets["model"])
     wrong_encoder.dimension = 5
     with pytest.raises(ValueError, match="dimension"):
         build_index(
@@ -368,12 +374,23 @@ def test_mismatch_non_ascii_and_pointer_rollback_gates(semantic_index_assets):
             build_id="wrong-model",
         )
 
+    wrong_identity = FakeEncoder(semantic_index_assets["model"])
+    wrong_identity.model_fingerprint = "0" * 64
+    with pytest.raises(ValueError, match="encoder identity"):
+        build_index(
+            deployment_root=semantic_index_assets["root"],
+            lexical_index=semantic_index_assets["lexical"],
+            model_path=semantic_index_assets["model"],
+            encoder=wrong_identity,
+            build_id="wrong-encoder-identity",
+        )
+
     with pytest.raises(ValueError, match="ASCII"):
         build_index(
             deployment_root="C:/Users/陆星/semantic",
             lexical_index=semantic_index_assets["lexical"],
             model_path=semantic_index_assets["model"],
-            encoder=FakeEncoder(),
+            encoder=FakeEncoder(semantic_index_assets["model"]),
             build_id="unicode-root",
         )
 

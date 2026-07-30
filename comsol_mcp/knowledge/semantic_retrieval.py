@@ -66,6 +66,14 @@ def _quoted_phrases(query: str) -> list[str]:
     return [match.strip() for match in QUOTED_PHRASE_PATTERN.findall(query) if match.strip()]
 
 
+def _contains_technical_token(haystack: str, token: str) -> bool:
+    boundary = r"[A-Za-z0-9_.]"
+    return re.search(
+        rf"(?<!{boundary}){re.escape(token)}(?!{boundary})",
+        haystack,
+    ) is not None
+
+
 def _filters_match(record: Mapping[str, Any], filters: Mapping[str, Any]) -> bool:
     if filters.get("module") and record.get("module") != filters["module"]:
         return False
@@ -146,6 +154,18 @@ class HybridRetriever:
         self.encoder = factory(self.model_path, int(self.manifest["vector_dimension"]))
         if int(self.encoder.dimension) != int(self.manifest["vector_dimension"]):
             raise ValueError("query encoder dimension mismatch")
+        encoder_identity = {
+            "model_id": getattr(self.encoder, "model_id", None),
+            "model_revision": getattr(self.encoder, "model_revision", None),
+            "model_fingerprint": getattr(self.encoder, "model_fingerprint", None),
+        }
+        expected_encoder_identity = {
+            "model_id": str(model["model_id"]),
+            "model_revision": str(model["revision"]),
+            "model_fingerprint": str(model["model_sha256"]),
+        }
+        if encoder_identity != expected_encoder_identity:
+            raise ValueError("query encoder identity does not match the pinned model")
         self.load_count = 1
         self.device = str(getattr(self.encoder, "device", "cpu"))
         self.runtime_dependencies = dict(getattr(self.encoder, "dependency_versions", {}))
@@ -233,13 +253,10 @@ class HybridRetriever:
         if not len(indices):
             return []
         take = min(int(count), len(indices))
-        eligible_scores = scores[indices]
-        selected_local = np.argpartition(-eligible_scores, take - 1)[:take]
-        selected = indices[selected_local]
         ordered = sorted(
-            (int(index) for index in selected),
+            (int(index) for index in indices),
             key=lambda index: (-float(scores[index]), self.chunks[index]["id"]),
-        )
+        )[:take]
         return [
             {
                 "rank": rank,
@@ -495,7 +512,9 @@ def fuse_candidates(
         if vector_rank is not None:
             score += float(RANKER_CONFIG["vector_weight"]) / (k + int(vector_rank))
         haystack = "\n".join(str(page.get(field) or "") for field in ("heading", "snippet"))
-        matched_tokens = [token for token in technical if token in haystack]
+        matched_tokens = [
+            token for token in technical if _contains_technical_token(haystack, token)
+        ]
         token_bonus = min(
             len(matched_tokens) * float(RANKER_CONFIG["exact_technical_token_bonus"]),
             float(RANKER_CONFIG["maximum_technical_token_bonus"]),

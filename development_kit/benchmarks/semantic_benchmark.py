@@ -58,7 +58,27 @@ def _dcg(relevance: Iterable[int]) -> float:
     return sum(value / math.log2(index + 2) for index, value in enumerate(relevance))
 
 
-def _query_metrics(ranked: list[tuple[str, int]], relevant: set[tuple[str, int]]) -> dict[str, Any]:
+def _validated_unique_ranked(
+    ranked: Iterable[tuple[str, int]], valid_citations: set[tuple[str, int]]
+) -> list[tuple[str, int]]:
+    output = []
+    seen = set()
+    for citation in ranked:
+        if citation not in valid_citations:
+            raise ValueError(f"ranked citation is absent from the pinned corpus: {citation}")
+        if citation not in seen:
+            output.append(citation)
+            seen.add(citation)
+    return output
+
+
+def _query_metrics(
+    ranked: list[tuple[str, int]],
+    relevant: set[tuple[str, int]],
+    *,
+    valid_citations: set[tuple[str, int]],
+) -> dict[str, Any]:
+    ranked = _validated_unique_ranked(ranked, valid_citations)
     if not relevant:
         return {
             "recall_at_5": None,
@@ -165,7 +185,10 @@ def evaluate_lexical_baseline(
         started = time.perf_counter()
         result = search_index(item["query"], limit=10, index_path=index_path, mode="auto")
         elapsed = time.perf_counter() - started
-        ranked = [(row["source"], int(row["page"])) for row in result["results"]]
+        ranked = _validated_unique_ranked(
+            [(row["source"], int(row["page"])) for row in result["results"]],
+            index["citations"],
+        )
         relevant = {(row["source"], int(row["page"])) for row in item["relevant"]}
         rows.append({
             "id": item["id"],
@@ -177,7 +200,9 @@ def evaluate_lexical_baseline(
             "result_count": len(ranked),
             "strategy": result["strategy"],
             "elapsed_seconds": elapsed,
-            "metrics": _query_metrics(ranked, relevant),
+            "metrics": _query_metrics(
+                ranked, relevant, valid_citations=index["citations"]
+            ),
         })
 
     by_category = {
