@@ -6,11 +6,12 @@ import logging
 import math
 import threading
 import time
-from collections import Counter, deque
+from collections import Counter, OrderedDict, deque
 from typing import Any, Callable
 
 CONTROL_PLANE_SCHEMA_VERSION = "1.0.0"
 CONTROL_PLANE_WINDOW_SIZE = 256
+CONTROL_PLANE_MAX_OPERATIONS = 128
 logger = logging.getLogger(__name__)
 
 
@@ -43,15 +44,24 @@ def _percentile(values: list[float], fraction: float) -> float:
 class ControlPlaneMetrics:
     """Thread-safe rolling metrics with fixed memory per named operation."""
 
-    def __init__(self, window_size: int = CONTROL_PLANE_WINDOW_SIZE):
+    def __init__(
+        self,
+        window_size: int = CONTROL_PLANE_WINDOW_SIZE,
+        max_operations: int = CONTROL_PLANE_MAX_OPERATIONS,
+    ):
         if not 1 <= int(window_size) <= 4096:
             raise ValueError("control-plane window_size must be between 1 and 4096")
+        if not 1 <= int(max_operations) <= 4096:
+            raise ValueError("control-plane max_operations must be between 1 and 4096")
         self.window_size = int(window_size)
+        self.max_operations = int(max_operations)
         self._lock = threading.Lock()
-        self._samples: dict[str, deque[tuple[float, str]]] = {}
+        self._samples: OrderedDict[str, deque[tuple[float, str]]] = OrderedDict()
         self._totals: Counter[str] = Counter()
 
-    def record(self, operation: str, latency_seconds: float, result: dict[str, Any]) -> dict[str, Any]:
+    def record(
+        self, operation: str, latency_seconds: float, result: dict[str, Any]
+    ) -> dict[str, Any]:
         operation = str(operation)
         latency = float(latency_seconds)
         if not operation or len(operation) > 80:
@@ -60,10 +70,14 @@ class ControlPlaneMetrics:
             raise ValueError("control-plane latency must be finite and nonnegative")
         outcome = _outcome(result)
         with self._lock:
+            if operation not in self._samples and len(self._samples) >= self.max_operations:
+                evicted, _samples = self._samples.popitem(last=False)
+                self._totals.pop(evicted, None)
             samples = self._samples.setdefault(
                 operation,
                 deque(maxlen=self.window_size),
             )
+            self._samples.move_to_end(operation)
             samples.append((latency, outcome))
             self._totals[operation] += 1
             return self._summary_unlocked(operation)
@@ -159,6 +173,7 @@ def measured_call(
 
 
 __all__ = [
+    "CONTROL_PLANE_MAX_OPERATIONS",
     "CONTROL_PLANE_SCHEMA_VERSION",
     "CONTROL_PLANE_WINDOW_SIZE",
     "ControlPlaneMetrics",

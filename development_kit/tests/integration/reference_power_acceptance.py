@@ -197,9 +197,14 @@ def _redacted_status(status: dict[str, Any]) -> dict[str, Any]:
 
 
 def _worker_summary(payload: dict[str, Any]) -> dict[str, Any]:
+    public_error = (
+        payload.get("error")
+        if payload.get("success") is True
+        else "worker execution failed; see worker artifact"
+    )
     return {
         "success": payload.get("success"),
-        "error": payload.get("error"),
+        "error": public_error,
         "evaluation": payload.get("evaluation"),
         "client_clear": payload.get("client_clear"),
         "lease_release": payload.get("lease_release"),

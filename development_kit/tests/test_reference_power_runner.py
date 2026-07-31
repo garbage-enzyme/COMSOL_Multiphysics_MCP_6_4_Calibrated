@@ -218,7 +218,7 @@ def test_worker_acquires_operation_ownership_before_final_inventory(monkeypatch)
 def test_coordinator_summary_keeps_failure_details_in_worker_artifact_only():
     payload = {
         "success": False,
-        "error": "material readback mismatch",
+        "error": "material readback mismatch at C:/private/model.mph",
         "traceback": "C:/private/source.py:1",
         "reference_result": {"source_path": "C:/private/model.mph"},
         "evaluation": {"passed": False},
@@ -228,7 +228,7 @@ def test_coordinator_summary_keeps_failure_details_in_worker_artifact_only():
 
     summary = _worker_summary(payload)
 
-    assert summary["error"] == "material readback mismatch"
+    assert summary["error"] == "worker execution failed; see worker artifact"
     assert "traceback" not in summary
     assert "reference_result" not in summary
     assert "private" not in json.dumps(summary)
@@ -501,4 +501,4 @@ def test_coordinator_publishes_failure_receipt_for_malformed_worker_result(tmp_p
     assert exit_code == 1
     assert receipt["success"] is False
     assert receipt["worker_result_error"] == "JSONDecodeError"
-    assert receipt["worker_result"]["error"] == ("worker result artifact is unreadable or invalid")
+    assert receipt["worker_result"]["error"] == "worker execution failed; see worker artifact"

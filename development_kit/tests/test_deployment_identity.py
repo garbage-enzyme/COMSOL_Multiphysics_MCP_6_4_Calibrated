@@ -150,9 +150,23 @@ def test_build_identity_ignores_interpreter_caches_and_covers_generated_package_
     assert package_content_sha256(package) != package_data_digest
     identity = get_build_identity(package)
     assert identity["generated_files_included"] is True
-    assert identity["content_scope"] == ("sorted_relative_non_cache_package_paths_and_file_bytes")
+    assert identity["content_scope"] == (
+        "length_prefixed_sorted_relative_non_cache_package_paths_and_file_bytes"
+    )
     assert identity["paths_included"] is False
     assert str(tmp_path) not in json.dumps(identity)
+
+
+def test_build_identity_length_prefixes_paths_and_payloads(tmp_path):
+    single = tmp_path / "single"
+    multiple = tmp_path / "multiple"
+    single.mkdir()
+    multiple.mkdir()
+    (single / "a").write_bytes(b"X\0b\0Y")
+    (multiple / "a").write_bytes(b"X")
+    (multiple / "b").write_bytes(b"Y")
+
+    assert package_content_sha256(single) != package_content_sha256(multiple)
 
 
 def test_build_identity_rejects_package_junctions(tmp_path):

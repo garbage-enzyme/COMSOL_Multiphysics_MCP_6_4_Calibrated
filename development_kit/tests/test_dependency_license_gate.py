@@ -42,7 +42,7 @@ def test_committed_runtime_dependencies_have_a_live_license_review() -> None:
     receipt = build_license_receipt(
         PYPROJECT,
         REVIEW,
-        as_of=date(2026, 7, 18),
+        as_of=date.today(),
     )
 
     assert receipt["status"] == "passed"

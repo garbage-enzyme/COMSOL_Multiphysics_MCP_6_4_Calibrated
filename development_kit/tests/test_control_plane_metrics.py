@@ -65,6 +65,20 @@ def test_metrics_window_is_bounded_and_reports_nearest_rank_latency():
     }
 
 
+def test_metrics_bounds_operation_cardinality_and_evicts_matching_totals():
+    metrics = ControlPlaneMetrics(window_size=2, max_operations=3)
+    for operation in ("first", "second", "third"):
+        metrics.record(operation, 0.1, {"success": True})
+    metrics.record("first", 0.2, {"success": True})
+    metrics.record("fourth", 0.3, {"success": True})
+
+    assert metrics.summary("second")["window_samples"] == 0
+    assert metrics.summary("second")["total_recorded"] == 0
+    assert metrics.summary("first")["total_recorded"] == 2
+    assert metrics.summary("third")["total_recorded"] == 1
+    assert metrics.summary("fourth")["total_recorded"] == 1
+
+
 def test_metrics_classify_structured_busy_timeout_and_error():
     metrics = ControlPlaneMetrics(window_size=8)
     metrics.record(

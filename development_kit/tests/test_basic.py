@@ -167,6 +167,19 @@ class TestVersioning:
         assert set(result) == {str(older), str(newer)}
         assert str(latest) not in result
 
+    def test_list_versions_excludes_only_the_exact_latest_alias(self, tmp_path):
+        from src.utils.versioning import list_model_versions
+
+        model_name = "my_latest_model"
+        model_dir = tmp_path / model_name
+        model_dir.mkdir()
+        version = model_dir / "my_latest_model_20260101_000000.mph"
+        latest = model_dir / "my_latest_model_latest.mph"
+        version.touch()
+        latest.touch()
+
+        assert list_model_versions(model_name, base_path=tmp_path) == [str(version)]
+
     def test_parse_version_info_valid(self):
         from src.utils.versioning import parse_version_info
 

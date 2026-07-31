@@ -6,6 +6,7 @@ import asyncio
 import json
 import subprocess
 import sys
+from copy import deepcopy
 from dataclasses import replace
 from importlib import import_module
 from pathlib import Path
@@ -14,6 +15,7 @@ from types import SimpleNamespace
 import pytest
 import src.tools as tools_module
 from mcp.server.fastmcp import FastMCP
+from src.contracts.structural import bounded_public_schema
 from src.knowledge import embedded as embedded_module
 from src.knowledge.embedded import register_knowledge_tools
 from src.knowledge.lexical_manual import register_lexical_manual_tools
@@ -47,9 +49,30 @@ def test_pre_h3_compatibility_snapshot_is_preserved():
 
     assert len(legacy) == 96
     assert set(legacy) <= set(current)
-    assert legacy["geometry_add_feature"]["properties"]["kwargs"]["type"] == "string"
-    assert "kwargs" not in current["geometry_add_feature"]["properties"]
-    assert current["geometry_add_feature"]["properties"]["properties"]["anyOf"]
+    for name, legacy_schema in legacy.items():
+        expected = bounded_public_schema(legacy_schema)
+        observed = deepcopy(current[name])
+        allowed_additions = set()
+        if TOOL_METADATA[name].requires_model_revision:
+            allowed_additions.add("expected_model_revision")
+        if name == "mesh_convergence_study":
+            allowed_additions.update({"config_id", "manifest_path", "source_model_path"})
+        if name == "geometry_add_feature":
+            assert expected["properties"].pop("kwargs")["type"] == "string"
+            expected["required"].remove("kwargs")
+            allowed_additions.add("properties")
+        if name == "job_submit":
+            migrated_spec = observed["properties"]["spec"]
+            assert migrated_spec["discriminator"]["propertyName"] == "job_type"
+            assert migrated_spec["oneOf"]
+            assert observed.pop("$defs")
+            observed["properties"]["spec"] = expected["properties"]["spec"]
+
+        actual_additions = set(observed["properties"]) - set(expected["properties"])
+        assert actual_additions == allowed_additions, name
+        for field in allowed_additions:
+            observed["properties"].pop(field)
+        assert observed == expected, name
 
 
 def test_registered_tool_names_are_unique():
