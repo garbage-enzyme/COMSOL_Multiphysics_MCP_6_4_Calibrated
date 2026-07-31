@@ -87,7 +87,8 @@ def test_non_ascii_runtime_root_fails_before_worker_start(tmp_path):
             raw_spec=_raw_spec(spec),
             runtime_root=tmp_path / "运行时",
             output=tmp_path / "receipt.json",
-            dry_run=True,
+            dry_run=False,
+            worker_runner=lambda *_args, **_kwargs: pytest.fail("worker must not start"),
         )
 
 
@@ -145,9 +146,7 @@ def test_spectral_success_rejects_empty_or_incomplete_evidence(tmp_path):
     no_stage = _scientific_acceptance(rows, [], spec)
     insufficient = _scientific_acceptance(rows, [{"stage_index": 0}], spec)
     rows[0]["mesh_element_count"] = 0
-    bad_mesh = _scientific_acceptance(
-        [*rows, _scientific_row(4)], [{"stage_index": 0}], spec
-    )
+    bad_mesh = _scientific_acceptance([*rows, _scientific_row(4)], [{"stage_index": 0}], spec)
 
     assert no_stage["checks"]["stage_plan_present"] is False
     assert insufficient["checks"]["minimum_point_count"] is False

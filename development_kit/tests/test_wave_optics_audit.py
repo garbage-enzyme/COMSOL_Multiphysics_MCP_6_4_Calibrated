@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from copy import deepcopy
 from pathlib import Path
 
 import numpy as np
@@ -47,12 +48,13 @@ def _measurement(*, absorption=1.2, closure=0.5, evidence_level="label_only"):
 
 def test_same_evidence_can_fail_or_pass_two_declared_policies():
     evidence = _measurement(absorption=0.7, closure=0.05)
+    original = deepcopy(evidence)
     strict = evaluate_validation_policy(evidence, {"tolerances": {"closure_abs": 0.01}})
     permissive = evaluate_validation_policy(evidence, {"tolerances": {"closure_abs": 0.1}})
 
     assert strict["overall"] == "fail"
     assert permissive["overall"] == "pass"
-    assert evidence["power"]["closure_abs"] == 0.05
+    assert evidence == original
 
 
 def test_empty_legacy_policy_cannot_produce_a_pass_verdict():

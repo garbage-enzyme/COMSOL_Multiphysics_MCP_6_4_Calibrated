@@ -5,9 +5,12 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 from copy import deepcopy
+from pathlib import Path
 
 import pytest
+from comsol_mcp.durable import io as durable_io
 from src.evidence import contracts as contracts_module
 from src.evidence.contracts import (
     PHYSICAL_EVIDENCE_SCHEMA_NAME,
@@ -514,7 +517,9 @@ def test_legacy_declared_flux_state_cannot_substitute_for_nested_measurements():
         assert migrated["evidence"][f"flux.{name}"]["state"] == "unknown"
 
 
-def test_file_migration_writes_new_hash_bound_artifact_without_touching_source(tmp_path):
+def test_file_migration_writes_new_hash_bound_artifact_without_touching_source(
+    tmp_path, monkeypatch
+):
     legacy = {
         "schema_version": "1",
         "config_id": "legacy-config",
@@ -535,9 +540,21 @@ def test_file_migration_writes_new_hash_bound_artifact_without_touching_source(t
     source_bytes = json.dumps(legacy, indent=2).encode("utf-8")
     source.write_bytes(source_bytes)
     source_stat = source.stat()
+    source_open_flags = []
+    real_open = durable_io.os.open
+
+    def tracked_open(path, flags, *args, **kwargs):
+        if Path(path).resolve() == source.resolve():
+            source_open_flags.append(flags)
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(durable_io.os, "open", tracked_open)
 
     migrated = migrate_legacy_point_audit_file(source, output)
 
+    write_flags = os.O_WRONLY | os.O_RDWR | os.O_APPEND | os.O_CREAT | os.O_TRUNC
+    assert source_open_flags
+    assert all(flags & write_flags == 0 for flags in source_open_flags)
     assert source.read_bytes() == source_bytes
     assert source.stat().st_mtime_ns == source_stat.st_mtime_ns
     assert migrated["migration"]["source_hash_basis"] == "file_bytes"

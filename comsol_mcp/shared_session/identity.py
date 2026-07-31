@@ -41,9 +41,7 @@ _WINDOWS_DEVICE_PATH = re.compile(r"^(?:\\\\[?.]\\|//[?.]/)")
 
 
 def _mapping(value: Any, fields: frozenset[str], label: str) -> dict[str, Any]:
-    if not isinstance(value, Mapping) or not all(
-        isinstance(key, str) for key in value
-    ):
+    if not isinstance(value, Mapping) or not all(isinstance(key, str) for key in value):
         raise ValueError(f"{label} must be an object with string keys")
     unknown = sorted(set(value) - fields)
     if unknown:
@@ -132,9 +130,7 @@ def normalize_attached_server_identity(value: Any) -> AttachedServerIdentity:
         "listener_bind_scope": listener_bind_scope,
         "ownership": "external_user_owned",
     }
-    observed_at = _positive_finite(
-        raw["listener_observed_at_epoch"], "listener observation time"
-    )
+    observed_at = _positive_finite(raw["listener_observed_at_epoch"], "listener observation time")
     return AttachedServerIdentity(
         endpoint=endpoint,
         server_pid=identity_body["server_pid"],
@@ -147,9 +143,7 @@ def normalize_attached_server_identity(value: Any) -> AttachedServerIdentity:
 
 
 def _normalize_confirmed_model_path(value: Any) -> str:
-    path = _bounded_text(
-        value, "expected model file path", MAX_MODEL_PATH_CHARACTERS
-    )
+    path = _bounded_text(value, "expected model file path", MAX_MODEL_PATH_CHARACTERS)
     if _WINDOWS_DEVICE_PATH.match(path):
         raise ValueError("expected model file path cannot be a device path")
     if not ntpath.isabs(path):
@@ -185,9 +179,9 @@ def normalize_shared_model_selector(value: Any) -> SharedModelSelector:
             "expected_file_path and expected_unsaved are mutually exclusive confirmations"
         )
     if expected_unsaved is False:
-        raise ValueError(
-            "expected_unsaved=false is ambiguous; provide expected_file_path or omit it"
-        )
+        raise ValueError("expected_unsaved=false is ambiguous; provide expected_file_path")
+    if expected_file_path is None and expected_unsaved is not True:
+        raise ValueError("model selection requires expected_file_path or expected_unsaved=true")
     return SharedModelSelector(
         tag=tag,
         expected_label=expected_label,

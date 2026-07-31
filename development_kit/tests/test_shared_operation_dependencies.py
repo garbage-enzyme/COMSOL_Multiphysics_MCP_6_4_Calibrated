@@ -7,7 +7,6 @@ from pathlib import Path
 import shutil
 import tempfile
 import threading
-import time
 
 import pytest
 
@@ -17,9 +16,11 @@ from src.path_policy import ARTIFACT_WRITE_ROOT_ENV, MODEL_READ_ROOTS_ENV, PathP
 
 @pytest.fixture
 def ascii_root():
-    base = Path("D:/comsol_runtime") if Path("D:/").exists() else Path(
-        os.environ.get("SystemRoot", "C:/Windows")
-    ) / "Temp"
+    base = (
+        Path("D:/comsol_runtime")
+        if Path("D:/").exists()
+        else Path(os.environ.get("SystemRoot", "C:/Windows")) / "Temp"
+    )
     root = Path(tempfile.mkdtemp(prefix="comsol_mcp_shared_dependencies_", dir=base))
     try:
         yield root
@@ -137,10 +138,10 @@ def test_status_and_cancel_remain_responsive_during_shared_solve(tmp_path, monke
     worker.start()
     try:
         assert entered.wait(1.0)
-        started = time.perf_counter()
+        assert worker.is_alive()
         status = status_tool()
         cancel = cancel_tool()
-        elapsed = time.perf_counter() - started
+        assert worker.is_alive()
     finally:
         release.set()
         worker.join(2.0)
@@ -148,17 +149,27 @@ def test_status_and_cancel_remain_responsive_during_shared_solve(tmp_path, monke
     if worker_errors:
         raise worker_errors[0]
 
-    assert elapsed < 0.2
     assert status["success"] is True
     assert status["operation"]["state"] == "active"
-    assert status["operation"]["active_operation"]["tool_name"] == (
-        "shared_model_solve_fixture"
-    )
+    assert status["operation"]["active_operation"]["tool_name"] == ("shared_model_solve_fixture")
     assert cancel == {
         "success": True,
         "requested": True,
         "path_policy": {
-            **cancel["path_policy"],
+            "schema_name": "comsol_mcp.path_policy",
+            "schema_version": "1.1.0",
+            "enforced": True,
+            "accepted": True,
+            "validated_input_count": 0,
+            "validated_kinds": [],
+            "paths_included": False,
+            "model_read_roots_configured": 0,
+            "shared_source_roots_configured": 0,
+            "root_ids": [],
+            "artifact_write_root_ascii": True,
+            "shared_snapshot_root_owned": True,
+            "shared_snapshot_root_ascii": True,
+            "caller_selected_overwrite_allowed": False,
         },
     }
     assert cancel_calls == [True]
@@ -170,10 +181,12 @@ def test_shared_snapshot_path_stress_has_no_external_write(tmp_path, ascii_root)
     read_root = tmp_path / "models"
     read_root.mkdir()
     write_root = ascii_root / "owned"
-    policy = PathPolicy.from_environment({
-        MODEL_READ_ROOTS_ENV: str(read_root),
-        ARTIFACT_WRITE_ROOT_ENV: str(write_root),
-    })
+    policy = PathPolicy.from_environment(
+        {
+            MODEL_READ_ROOTS_ENV: str(read_root),
+            ARTIFACT_WRITE_ROOT_ENV: str(write_root),
+        }
+    )
     external = ascii_root / "external"
     external.mkdir()
     sentinel = external / "sentinel.mph"

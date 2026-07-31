@@ -156,8 +156,8 @@ Tell the assistant only the local port. The normal order is:
 3. after the user confirms that Desktop shows the same endpoint, call
    `shared_server_attach(..., user_confirmed=true)`;
 4. call `shared_server_models`;
-5. select one model and call `shared_model_adopt` with `model_tag` and, when
-   available, the expected label, path, or unsaved state;
+5. select one model and call `shared_model_adopt` with `model_tag`, plus either
+   its exact saved path or `expected_unsaved=true`; the label is optional;
 6. call
    `shared_model_lock(collaboration_mode="interactive_inspection", ...)`.
 

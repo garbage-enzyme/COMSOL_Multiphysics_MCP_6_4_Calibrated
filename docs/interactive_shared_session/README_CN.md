@@ -142,8 +142,8 @@ Server 地址填写 `localhost`，端口填写上一步记录的精确端口。�
 3. 用户确认 Desktop 显示同一地址后，调用
    `shared_server_attach(..., user_confirmed=true)`；
 4. 调用 `shared_server_models` 查看 Server 中的模型；
-5. 选定一个模型后调用 `shared_model_adopt`，提供 `model_tag`，并尽量同时提供预期的
-   标签、路径或未保存状态；
+5. 选定一个模型后调用 `shared_model_adopt`。除了 `model_tag`，已保存的模型必须提供
+   完整保存路径；未保存的模型必须提供 `expected_unsaved=true`。标签可以不填；
 6. 调用 `shared_model_lock(collaboration_mode="interactive_inspection", ...)`。
 
 `user_confirmed=true` 表示用户确实看到了相同的 Desktop 连接。智能助手不能仅根据进程

@@ -72,11 +72,40 @@ def test_properties_reject_callable_and_file_property_names(name):
         validate_property_name(name)
 
 
+@pytest.mark.parametrize(
+    "name",
+    [
+        "Command",
+        " FILEPATH ",
+        "file_path",
+        "file-path",
+        "class.name",
+        1,
+        None,
+    ],
+)
+def test_forbidden_property_names_reject_case_separator_whitespace_and_key_type(name):
+    with pytest.raises((TypeError, ValueError)):
+        validate_property_name(name)
+
+
 def test_properties_enforce_key_and_list_limits():
+    exact_keys = {f"key{i}": i for i in range(MAX_PROPERTY_KEYS)}
+    assert validate_properties(exact_keys) == exact_keys
+    assert normalize_property_value([0] * MAX_LIST_ITEMS) == [0] * MAX_LIST_ITEMS
+    assert normalize_property_value([[0] * 64 for _ in range(64)]) == [[0] * 64 for _ in range(64)]
     with pytest.raises(ValueError, match="at most 64 keys"):
         validate_properties({f"key{i}": i for i in range(MAX_PROPERTY_KEYS + 1)})
     with pytest.raises(ValueError, match="at most 4096 items"):
         validate_properties({"values": [0] * (MAX_LIST_ITEMS + 1)})
+    with pytest.raises(ValueError, match="at most 4096 scalar items"):
+        normalize_property_value([[0] * 65 for _ in range(64)])
+
+
+def test_empty_vector_is_supported_but_empty_matrix_rows_are_rejected():
+    assert normalize_property_value([]) == []
+    with pytest.raises(ValueError, match="rows must not be empty"):
+        normalize_property_value([[]])
 
 
 def test_property_scalars_are_bounded_before_aggregate_serialization():

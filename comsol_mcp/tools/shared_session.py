@@ -63,7 +63,7 @@ def register_shared_session_tools(mcp: FastMCP) -> None:
         expected_file_path: str | None = None,
         expected_unsaved: bool | None = None,
     ) -> dict[str, Any]:
-        """Adopt one exact tag from the fresh attached-server inventory."""
+        """Adopt one exact tag confirmed by its saved path or unsaved state."""
         selector: dict[str, Any] = {"tag": model_tag}
         if expected_label is not None:
             selector["expected_label"] = expected_label
@@ -120,9 +120,7 @@ def register_shared_session_tools(mcp: FastMCP) -> None:
         )
 
     @mcp.tool()
-    def shared_model_unlock(
-        expected_lock_sha256: str, reason: str
-    ) -> dict[str, Any]:
+    def shared_model_unlock(expected_lock_sha256: str, reason: str) -> dict[str, Any]:
         """Release only the MCP model guard and retain a bounded audit reason."""
         return shared_session_manager.unlock_model(
             expected_lock_sha256=expected_lock_sha256,

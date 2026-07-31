@@ -18,10 +18,21 @@ MAX_SCALAR_BYTES = 64 * 1024
 MAX_SERIALIZED_BYTES = 256 * 1024
 
 _PROPERTY_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
-_FORBIDDEN_PROPERTY_NAMES = frozenset({
-    "class", "classname", "cmd", "command", "executable", "file",
-    "filename", "filepath", "function", "method", "script",
-})
+_FORBIDDEN_PROPERTY_NAMES = frozenset(
+    {
+        "class",
+        "classname",
+        "cmd",
+        "command",
+        "executable",
+        "file",
+        "filename",
+        "filepath",
+        "function",
+        "method",
+        "script",
+    }
+)
 
 
 def validate_property_name(name: str) -> str:
@@ -29,12 +40,10 @@ def validate_property_name(name: str) -> str:
     if not isinstance(name, str):
         raise TypeError("property names must be strings")
     if not name or len(name) > MAX_PROPERTY_KEY_LENGTH:
-        raise ValueError(
-            f"property names must contain 1-{MAX_PROPERTY_KEY_LENGTH} characters"
-        )
+        raise ValueError(f"property names must contain 1-{MAX_PROPERTY_KEY_LENGTH} characters")
     if not _PROPERTY_NAME.fullmatch(name):
         raise ValueError(f"invalid clientapi property name: {name!r}")
-    if name.lower() in _FORBIDDEN_PROPERTY_NAMES:
+    if name.lower().replace("_", "") in _FORBIDDEN_PROPERTY_NAMES:
         raise ValueError(f"file/callable clientapi property is forbidden: {name!r}")
     return name
 
@@ -63,9 +72,7 @@ def _normalize_scalar(value: object) -> JSONScalar:
         if not math.isfinite(value):
             raise ValueError("property numbers must be finite")
         return value
-    raise TypeError(
-        "property values must be JSON scalars, scalar lists, or scalar matrices"
-    )
+    raise TypeError("property values must be JSON scalars, scalar lists, or scalar matrices")
 
 
 def normalize_property_value(value: object) -> JSONValue:
@@ -100,9 +107,7 @@ def normalize_property_value(value: object) -> JSONValue:
             raise ValueError("property matrices must be rectangular")
         item_count += len(row)
         if item_count > MAX_LIST_ITEMS:
-            raise ValueError(
-                f"property matrices may contain at most {MAX_LIST_ITEMS} scalar items"
-            )
+            raise ValueError(f"property matrices may contain at most {MAX_LIST_ITEMS} scalar items")
         rows.append([_normalize_scalar(item) for item in row])
     return rows
 
@@ -127,14 +132,19 @@ def validate_properties(properties: object | None) -> dict[str, JSONValue]:
         separators=(",", ":"),
     ).encode("utf-8")
     if len(payload) > MAX_SERIALIZED_BYTES:
-        raise ValueError(
-            f"serialized properties exceed {MAX_SERIALIZED_BYTES} bytes"
-        )
+        raise ValueError(f"serialized properties exceed {MAX_SERIALIZED_BYTES} bytes")
     return normalized
 
 
 __all__ = [
-    "JSONScalar", "JSONValue", "MAX_LIST_ITEMS", "MAX_PROPERTY_KEYS",
-    "MAX_PROPERTY_KEY_LENGTH", "MAX_SCALAR_BYTES", "MAX_SERIALIZED_BYTES",
-    "normalize_property_value", "validate_properties", "validate_property_name",
+    "JSONScalar",
+    "JSONValue",
+    "MAX_LIST_ITEMS",
+    "MAX_PROPERTY_KEYS",
+    "MAX_PROPERTY_KEY_LENGTH",
+    "MAX_SCALAR_BYTES",
+    "MAX_SERIALIZED_BYTES",
+    "normalize_property_value",
+    "validate_properties",
+    "validate_property_name",
 ]
