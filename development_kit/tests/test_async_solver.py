@@ -26,12 +26,12 @@ class FakeStudyList:
 
 class FakeJava:
     def __init__(self, study):
-        self.study_node = study
+        self.studies = {"std1": study}
 
     def study(self, tag=None):
         if tag is None:
-            return FakeStudyList({"std1": self.study_node})
-        return self.study_node
+            return FakeStudyList(self.studies)
+        return self.studies[tag]
 
 
 class FakeModel:
@@ -63,6 +63,18 @@ def test_callback_failure_does_not_change_completed_solve():
     assert study.run_count == 1
 
 
+def test_unknown_study_tag_fails_without_running_another_study():
+    study = FakeStudy()
+    solver = AsyncSolver()
+
+    assert solver.start_solve(FakeModel(study), "missing-study")
+    assert solver.wait(timeout=2)
+
+    progress = solver.get_progress()
+    assert progress["status"] == SolverStatus.FAILED.value
+    assert study.run_count == 0
+
+
 def test_progress_callback_observes_intermediate_and_terminal_transitions():
     study = FakeStudy()
     solver = AsyncSolver()
@@ -71,9 +83,7 @@ def test_progress_callback_observes_intermediate_and_terminal_transitions():
     assert solver.start_solve(
         FakeModel(study),
         "std1",
-        progress_callback=lambda progress, message: observations.append(
-            (progress, message)
-        ),
+        progress_callback=lambda progress, message: observations.append((progress, message)),
     )
     assert solver.wait(timeout=2)
 
@@ -180,9 +190,7 @@ def test_cancellation_request_is_reported_to_progress_callback():
     assert solver.start_solve(
         FakeModel(BlockingStudy()),
         "std1",
-        progress_callback=lambda progress, message: observations.append(
-            (progress, message)
-        ),
+        progress_callback=lambda progress, message: observations.append((progress, message)),
     )
     assert started.wait(timeout=2)
 

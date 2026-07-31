@@ -2,28 +2,39 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 import hashlib
 import json
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
-
-from development_kit.tests.spectral_job_fixtures import spectral_job_spec
 from src.jobs.branch_continuation_campaign import (
-    build_branch_continuation_coordinate_identity,
     current_branch_continuation_campaign_driver_identity,
     normalize_branch_continuation_campaign_spec,
     validate_branch_continuation_campaign_driver_identity,
 )
 
+from development_kit.tests.spectral_job_fixtures import spectral_job_spec
 
 _SPECTRAL_INPUT_FIELDS = {
-    "job_type", "source_model_path", "source_model_relative_identity",
-    "configuration_sha256", "parameter_state", "wavelength_parameter",
-    "initial_grid", "refinement_policy", "expansion_policy", "maximum_points",
-    "collector", "analysis_policy", "measurement_configuration", "resource_policy",
-    "cores", "version", "max_retries", "continue_on_error",
+    "job_type",
+    "source_model_path",
+    "source_model_relative_identity",
+    "configuration_sha256",
+    "parameter_state",
+    "wavelength_parameter",
+    "initial_grid",
+    "refinement_policy",
+    "expansion_policy",
+    "maximum_points",
+    "collector",
+    "analysis_policy",
+    "measurement_configuration",
+    "resource_policy",
+    "cores",
+    "version",
+    "max_retries",
+    "continue_on_error",
 }
 
 
@@ -40,7 +51,9 @@ def _raw_spectral(tmp_path, index: int) -> dict:
     root.mkdir(parents=True, exist_ok=True)
     normalized = spectral_job_spec(root, maximum_points=10)
     (root / "source.mph").write_bytes(f"model-state-{index}".encode("ascii"))
-    value = {key: deepcopy(item) for key, item in normalized.items() if key in _SPECTRAL_INPUT_FIELDS}
+    value = {
+        key: deepcopy(item) for key, item in normalized.items() if key in _SPECTRAL_INPUT_FIELDS
+    }
     value["source_model_relative_identity"] = f"fixtures/state-{index}.mph"
     value["configuration_sha256"] = f"{index + 1:x}" * 64
     return value
@@ -63,39 +76,46 @@ def _readback(alpha1_deg: float, spectral: dict) -> dict:
     return {**body, "evidence_sha256": _hash(body)}
 
 
+def _coordinate_identity(*, state: dict, readback: dict, spectral: dict) -> str:
+    coordinate = state["coordinate"]
+    return _hash(
+        {
+            "coordinate_name": coordinate["name"],
+            "coordinate_value": coordinate["value"],
+            "coordinate_unit": coordinate["unit"],
+            "polarization": state["polarization"],
+            "material_identity_sha256": state["material_identity_sha256"],
+            "source_model_sha256": readback["source_model_sha256"],
+            "configuration_sha256": spectral["configuration_sha256"],
+            "incidence_readback_sha256": readback["evidence_sha256"],
+        }
+    )
+
+
 def _raw_campaign(tmp_path) -> dict:
     states = []
     for index, angle in enumerate((0.0, 5.0, 10.0)):
         spectral = _raw_spectral(tmp_path, index)
         readback = _readback(angle, spectral)
-        coordinate_identity = build_branch_continuation_coordinate_identity(
-            coordinate_name="incidence_elevation",
-            coordinate_value=angle,
-            coordinate_unit="deg",
-            polarization="P",
-            material_identity_sha256="d" * 64,
-            source_model_sha256=readback["source_model_sha256"],
-            configuration_sha256=spectral["configuration_sha256"],
-            incidence_readback_sha256=readback["evidence_sha256"],
+        state = {
+            "state_id": f"angle-{index}",
+            "ordinal": index,
+            "declared_predecessor_state_id": None if index == 0 else f"angle-{index - 1}",
+            "model_preparation": {"mode": "exact_model"},
+            "coordinate": {
+                "name": "incidence_elevation",
+                "value": angle,
+                "unit": "deg",
+            },
+            "polarization": "P",
+            "material_identity_sha256": "d" * 64,
+            "incidence_readback": readback,
+            "spectral_job": spectral,
+        }
+        state["coordinate"]["identity_sha256"] = _coordinate_identity(
+            state=state, readback=readback, spectral=spectral
         )
-        states.append(
-            {
-                "state_id": f"angle-{index}",
-                "ordinal": index,
-                "declared_predecessor_state_id": None if index == 0 else f"angle-{index - 1}",
-                "model_preparation": {"mode": "exact_model"},
-                "coordinate": {
-                    "name": "incidence_elevation",
-                    "value": angle,
-                    "unit": "deg",
-                    "identity_sha256": coordinate_identity,
-                },
-                "polarization": "P",
-                "material_identity_sha256": "d" * 64,
-                "incidence_readback": readback,
-                "spectral_job": spectral,
-            }
-        )
+        states.append(state)
     return {
         "job_type": "branch_continuation_campaign",
         "campaign_id": "three-angle-campaign",
@@ -124,16 +144,8 @@ def _rebind_state(state: dict) -> None:
     readback_body = dict(readback)
     readback_body.pop("evidence_sha256")
     readback["evidence_sha256"] = _hash(readback_body)
-    coordinate = state["coordinate"]
-    coordinate["identity_sha256"] = build_branch_continuation_coordinate_identity(
-        coordinate_name=coordinate["name"],
-        coordinate_value=coordinate["value"],
-        coordinate_unit=coordinate["unit"],
-        polarization=state["polarization"],
-        material_identity_sha256=state["material_identity_sha256"],
-        source_model_sha256=readback["source_model_sha256"],
-        configuration_sha256=spectral["configuration_sha256"],
-        incidence_readback_sha256=readback["evidence_sha256"],
+    state["coordinate"]["identity_sha256"] = _coordinate_identity(
+        state=state, readback=readback, spectral=spectral
     )
 
 
@@ -155,13 +167,28 @@ def test_exact_model_sequence_is_canonical_bounded_and_hash_bound(tmp_path):
     assert [item["coordinate"]["value"] for item in first["states"]] == [0.0, 5.0, 10.0]
 
 
+def test_coordinate_identity_rejects_a_stale_bound_configuration(tmp_path):
+    raw = _raw_campaign(tmp_path)
+    state = raw["states"][1]
+    state["spectral_job"]["configuration_sha256"] = "f" * 64
+    state["incidence_readback"]["configuration_sha256"] = "f" * 64
+    readback_body = dict(state["incidence_readback"])
+    readback_body.pop("evidence_sha256")
+    state["incidence_readback"]["evidence_sha256"] = _hash(readback_body)
+
+    with pytest.raises(ValueError, match="coordinate.identity_sha256"):
+        normalize_branch_continuation_campaign_spec(raw)
+
+
 @pytest.mark.parametrize(
     "mutation,match",
     [
         (lambda value: value.__setitem__("automatic_state", True), "requires exactly"),
         (lambda value: value["states"][1].__setitem__("ordinal", 2), "ordinal"),
         (
-            lambda value: value["states"][2].__setitem__("declared_predecessor_state_id", "angle-0"),
+            lambda value: value["states"][2].__setitem__(
+                "declared_predecessor_state_id", "angle-0"
+            ),
             "adjacency",
         ),
         (
@@ -173,15 +200,21 @@ def test_exact_model_sequence_is_canonical_bounded_and_hash_bound(tmp_path):
             "polarization must be constant",
         ),
         (
-            lambda value: value["states"][1]["incidence_readback"]["parent"].__setitem__("alpha1_deg", 4.0),
+            lambda value: value["states"][1]["incidence_readback"]["parent"].__setitem__(
+                "alpha1_deg", 4.0
+            ),
             "exactly match",
         ),
         (
-            lambda value: value["states"][1]["incidence_readback"].__setitem__("evidence_sha256", "0" * 64),
+            lambda value: value["states"][1]["incidence_readback"].__setitem__(
+                "evidence_sha256", "0" * 64
+            ),
             "does not match",
         ),
         (
-            lambda value: value["states"][1]["spectral_job"]["expansion_policy"].__setitem__("absolute_lower_m", 2e-6),
+            lambda value: value["states"][1]["spectral_job"]["expansion_policy"].__setitem__(
+                "absolute_lower_m", 2e-6
+            ),
             "exceed the continuation policy",
         ),
         (lambda value: value.__setitem__("maximum_total_points", 29), "30 to"),
@@ -199,13 +232,17 @@ def test_invalid_sequence_hidden_work_and_unverified_readback_fail_closed(
 
 def test_duplicate_model_and_configuration_identities_fail_closed(tmp_path):
     raw = _raw_campaign(tmp_path)
-    raw["states"][1]["spectral_job"]["source_model_path"] = raw["states"][0]["spectral_job"]["source_model_path"]
+    raw["states"][1]["spectral_job"]["source_model_path"] = raw["states"][0]["spectral_job"][
+        "source_model_path"
+    ]
     _rebind_state(raw["states"][1])
     with pytest.raises(ValueError, match="distinct source model bytes"):
         normalize_branch_continuation_campaign_spec(raw)
 
     raw = _raw_campaign(tmp_path)
-    raw["states"][1]["spectral_job"]["configuration_sha256"] = raw["states"][0]["spectral_job"]["configuration_sha256"]
+    raw["states"][1]["spectral_job"]["configuration_sha256"] = raw["states"][0]["spectral_job"][
+        "configuration_sha256"
+    ]
     _rebind_state(raw["states"][1])
     with pytest.raises(ValueError, match="configuration identities"):
         normalize_branch_continuation_campaign_spec(raw)

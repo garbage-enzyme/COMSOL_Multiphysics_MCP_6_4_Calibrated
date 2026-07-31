@@ -44,6 +44,8 @@ def test_domain_separation_changes_new_identities_without_changing_legacy_bytes(
     first = domain_sha256_v2("job.state", value)
     second = domain_sha256_v2("artifact.state", value)
 
+    assert first == "a64634f02a0160aec6d4b60fd269cfdc56ad3b89c02ae38f2cd11ff8279201cf"
+    assert second == "7e6d322e8aa6c360a8386e1337ca4b4bfdf3e764a567693aa5723bb66a57ff53"
     assert first != second
     assert canonical_json_v1(value) == legacy
 

@@ -17,7 +17,9 @@ from development_kit.tests.integration.branch_continuation_campaign_acceptance i
 from development_kit.tests.test_branch_continuation_campaign_job import _raw_campaign
 
 
-def test_dry_run_binds_every_source_and_readback_without_starting_worker(tmp_path, ascii_tmp_path):
+def test_dry_run_binds_every_source_and_readback_without_starting_worker(
+    tmp_path, ascii_tmp_path, monkeypatch
+):
     output = tmp_path / "dry-run.json"
     raw_spec = _raw_campaign(tmp_path / "sources")
     expected_hashes = {
@@ -26,6 +28,19 @@ def test_dry_run_binds_every_source_and_readback_without_starting_worker(tmp_pat
         ).hexdigest()
         for state in raw_spec["states"]
     }
+    expected_readbacks = {
+        state["state_id"]: state["incidence_readback"] for state in raw_spec["states"]
+    }
+    monkeypatch.setattr(
+        acceptance,
+        "JobStore",
+        lambda *_args, **_kwargs: pytest.fail("dry run must not construct a job store"),
+    )
+    monkeypatch.setattr(
+        acceptance,
+        "process_identity",
+        lambda *_args, **_kwargs: pytest.fail("dry run must not inspect a worker"),
+    )
     receipt = run_acceptance(
         raw_spec=raw_spec,
         runtime_root=ascii_tmp_path,
@@ -38,11 +53,7 @@ def test_dry_run_binds_every_source_and_readback_without_starting_worker(tmp_pat
     assert receipt["source_model_sha256"] == expected_hashes
     assert receipt["incidence_evidence"]["source"] == "normalized_spec_declaration"
     assert receipt["incidence_evidence"]["observed_execution"] is False
-    assert set(receipt["incidence_evidence"]["declared_readbacks"]) == {
-        "angle-0",
-        "angle-1",
-        "angle-2",
-    }
+    assert receipt["incidence_evidence"]["declared_readbacks"] == expected_readbacks
     assert json.loads(output.read_text(encoding="utf-8")) == receipt
 
 
@@ -70,9 +81,7 @@ def test_non_ascii_runtime_fails_before_worker(tmp_path):
         )
 
 
-def test_runtime_rejection_precedes_spec_normalization_and_source_hashing(
-    tmp_path, monkeypatch
-):
+def test_runtime_rejection_precedes_spec_normalization_and_source_hashing(tmp_path, monkeypatch):
     monkeypatch.setattr(
         acceptance,
         "normalize_branch_continuation_campaign_spec",

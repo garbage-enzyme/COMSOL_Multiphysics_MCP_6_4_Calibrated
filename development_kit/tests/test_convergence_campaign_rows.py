@@ -105,6 +105,38 @@ def test_artifact_and_row_tampering_fail_closed(tmp_path, target):
         read_convergence_campaign_levels(journal, spec, artifact_root=root)
 
 
+@pytest.mark.parametrize("mutation", ["modify_first", "reorder", "remove_middle", "insert"])
+def test_multirow_hash_chain_rejects_cross_row_tampering(tmp_path, mutation):
+    spec = normalize_convergence_campaign_spec(_raw_campaign(tmp_path / "sources"))
+    root = tmp_path / "campaign-chain"
+    journal = root / "convergence_levels.jsonl"
+    for ordinal in range(3):
+        append_convergence_campaign_level(
+            journal,
+            spec,
+            attempt=1,
+            level_dir=_complete_level(spec, root, ordinal),
+            artifact_root=root,
+        )
+
+    rows = [json.loads(line) for line in journal.read_text(encoding="utf-8").splitlines()]
+    if mutation == "modify_first":
+        rows[0]["mesh_counts"]["element_count"] += 1
+    elif mutation == "reorder":
+        rows[0], rows[1] = rows[1], rows[0]
+    elif mutation == "remove_middle":
+        rows.pop(1)
+    else:
+        rows.insert(1, deepcopy(rows[0]))
+    journal.write_text(
+        "".join(json.dumps(row, sort_keys=True) + "\n" for row in rows),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="chain|ordinal|previous|row|replay"):
+        read_convergence_campaign_levels(journal, spec, artifact_root=root)
+
+
 def test_changed_campaign_identity_cannot_reuse_level_rows(tmp_path):
     raw = _raw_campaign(tmp_path / "sources")
     spec = normalize_convergence_campaign_spec(raw)

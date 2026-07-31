@@ -103,8 +103,12 @@ def test_build_identity_ignores_interpreter_caches_and_covers_generated_package_
     generated_digest = package_content_sha256(package)
     assert generated_digest != first
 
+    (nested / "manifest.json").write_text('{"value":2}\n', encoding="utf-8")
+    package_data_digest = package_content_sha256(package)
+    assert package_data_digest != generated_digest
+
     (package / "alpha.py").write_text("value = 2\n", encoding="utf-8")
-    assert package_content_sha256(package) != generated_digest
+    assert package_content_sha256(package) != package_data_digest
     identity = get_build_identity(package)
     assert identity["generated_files_included"] is True
     assert identity["content_scope"] == ("sorted_relative_non_cache_package_paths_and_file_bytes")
