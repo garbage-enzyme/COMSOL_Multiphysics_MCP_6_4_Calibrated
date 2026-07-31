@@ -9,8 +9,12 @@ import sys
 import threading
 from pathlib import Path
 
+import pytest
+import src.native_runtime as native_runtime_module
+
 from comsol_mcp.native_runtime import (
     NATIVE_RUNTIME_MANIFEST,
+    NativeRuntimeImport,
     preload_mcp_native_runtime,
 )
 
@@ -89,6 +93,40 @@ def test_native_runtime_preload_rejects_worker_thread() -> None:
     assert len(errors) == 1
     assert isinstance(errors[0], RuntimeError)
     assert "main thread" in str(errors[0])
+
+
+def test_native_runtime_preload_validates_every_scope_before_import(monkeypatch) -> None:
+    imports: list[str] = []
+    monkeypatch.setattr(
+        native_runtime_module,
+        "NATIVE_RUNTIME_MANIFEST",
+        (
+            NativeRuntimeImport(
+                module="numpy",
+                distribution="numpy",
+                scope="mcp_main_process",
+                preload_before_event_loop=True,
+                reason="test main-process preload",
+            ),
+            NativeRuntimeImport(
+                module="matplotlib.pyplot",
+                distribution="matplotlib",
+                scope="isolated_worker",
+                preload_before_event_loop=True,
+                reason="invalid worker preload",
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        native_runtime_module,
+        "import_module",
+        lambda name: imports.append(name),
+    )
+
+    with pytest.raises(RuntimeError, match="non-main-process scope"):
+        native_runtime_module.preload_mcp_native_runtime()
+
+    assert imports == []
 
 
 def test_fresh_main_thread_preload_covers_representative_lazy_native_calls() -> None:

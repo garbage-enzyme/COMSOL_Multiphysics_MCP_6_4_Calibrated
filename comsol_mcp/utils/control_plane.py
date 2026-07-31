@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
+import re
 import threading
 import time
 from collections import Counter, OrderedDict, deque
@@ -13,6 +14,8 @@ CONTROL_PLANE_SCHEMA_VERSION = "1.0.0"
 CONTROL_PLANE_WINDOW_SIZE = 256
 CONTROL_PLANE_MAX_OPERATIONS = 128
 logger = logging.getLogger(__name__)
+_BUSY_ERROR_CODES = frozenset({"busy", "queue_full", "resource_busy", "worker_queue_full"})
+_TIMEOUT_ERROR_CODES = frozenset({"deadline_exceeded", "timed_out", "timeout"})
 
 
 def _outcome(result: dict[str, Any]) -> str:
@@ -20,14 +23,19 @@ def _outcome(result: dict[str, Any]) -> str:
         return "success"
     error = result.get("error")
     error_code = error.get("code") if isinstance(error, dict) else None
-    text = " ".join(
-        str(value)
-        for value in (result.get("error_type"), error_code, error)
-        if value is not None
-    ).casefold()
-    if error_code == "busy" or "queue is full" in text or " busy" in f" {text}":
+    normalized_code = str(error_code).strip().casefold() if error_code is not None else None
+    if normalized_code in _BUSY_ERROR_CODES:
         return "busy"
-    if any(token in text for token in ("timeout", "timed out", "deadline", "exceeded")):
+    if normalized_code in _TIMEOUT_ERROR_CODES:
+        return "timeout"
+    if normalized_code is not None:
+        return "error"
+    text = " ".join(
+        str(value) for value in (result.get("error_type"), error) if value is not None
+    ).casefold()
+    if "queue is full" in text or "queue full" in text or re.search(r"\bbusy\b", text):
+        return "busy"
+    if any(token in text for token in ("timeout", "timed out", "deadline exceeded")):
         return "timeout"
     return "error"
 
@@ -106,8 +114,7 @@ class ControlPlaneMetrics:
             "window_samples": len(samples),
             "total_recorded": int(self._totals.get(operation, 0)),
             "outcomes": {
-                name: int(counts.get(name, 0))
-                for name in ("success", "busy", "timeout", "error")
+                name: int(counts.get(name, 0)) for name in ("success", "busy", "timeout", "error")
             },
             "latency": latency,
         }

@@ -115,14 +115,18 @@ def preload_mcp_native_runtime() -> dict[str, str]:
     if threading.current_thread() is not threading.main_thread():
         raise RuntimeError("MCP native runtime preload must run on the main thread")
 
+    preload_items = tuple(
+        item for item in NATIVE_RUNTIME_MANIFEST if item.preload_before_event_loop
+    )
+    if any(item.scope != "mcp_main_process" for item in preload_items):
+        raise RuntimeError("MCP native runtime preload contains a non-main-process scope")
+
     jpype: Any = import_module("jpype")
     if jpype.isJVMStarted():
         raise RuntimeError("MCP native runtime preload found an already-started JVM")
 
     loaded: dict[str, str] = {}
-    for item in NATIVE_RUNTIME_MANIFEST:
-        if not item.preload_before_event_loop:
-            continue
+    for item in preload_items:
         import_module(item.module)
         loaded[item.module] = version(item.distribution)
 

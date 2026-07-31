@@ -116,10 +116,26 @@ def test_support_resolution_accepts_current_and_rejects_future_without_mutation(
         "schema_name": "comsol_mcp.physical_evidence",
         "schema_version": "99.0.0",
         "supported_versions": ["1.0.0", "1.1.0"],
+        "migration_available": False,
+    }
+    assert unknown == {
+        "supported": False,
+        "reason_code": "unknown_schema_name",
+        "schema_name": "comsol_mcp.unknown_artifact",
+        "schema_version": "1.0.0",
+    }
+    assert check_schema_support("comsol_mcp.wave_optics_point_audit", "1", for_write=True) == {
+        "supported": False,
+        "reason_code": "unsupported_schema_version",
+        "schema_name": "comsol_mcp.wave_optics_point_audit",
+        "schema_version": "1",
+        "supported_versions": [],
         "migration_available": True,
     }
-    assert unknown["supported"] is False
-    assert unknown["reason_code"] == "unknown_schema_name"
+    assert (
+        check_schema_support("comsol_mcp.wave_optics_point_audit", "99")["migration_available"]
+        is False
+    )
     assert artifact == original
 
 

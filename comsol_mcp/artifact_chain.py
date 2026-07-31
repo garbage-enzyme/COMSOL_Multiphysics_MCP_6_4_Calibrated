@@ -201,6 +201,10 @@ def _validate_graph(artifacts: list[dict[str, Any]], terminal_artifact_ids: list
         visit(terminal)
     if visited != set(by_id):
         raise ValueError("artifact chain contains entries not reachable from a terminal")
+    parent_ids = {parent["artifact_id"] for item in artifacts for parent in item["parents"]}
+    sink_ids = set(by_id) - parent_ids
+    if set(terminal_artifact_ids) != sink_ids:
+        raise ValueError("terminal_artifact_ids must exactly match graph sink artifacts")
     roots = {artifact_id for artifact_id in visited if not by_id[artifact_id]["parents"]}
     if not roots or any(by_id[artifact_id]["role"] != "raw_evidence" for artifact_id in roots):
         raise ValueError("every artifact chain must resolve to raw evidence roots")
