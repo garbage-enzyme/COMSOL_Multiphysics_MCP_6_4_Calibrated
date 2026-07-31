@@ -11,7 +11,7 @@ import sys
 import threading
 import uuid
 from concurrent.futures import Future, ThreadPoolExecutor
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -64,14 +64,16 @@ def _lexical_test_root():
 def test_semantic_benchmark_citations_and_digest_share_one_sqlite_snapshot(tmp_path):
     source = tmp_path / "source.sqlite3"
     snapshot = tmp_path / "snapshot.sqlite3"
-    with sqlite3.connect(source) as connection:
+    with closing(sqlite3.connect(source)) as connection:
         connection.execute("CREATE TABLE pages (source TEXT NOT NULL, page INTEGER NOT NULL)")
         connection.execute("INSERT INTO pages VALUES ('manual.pdf', 7)")
+        connection.commit()
 
     receipt = soak_module._sqlite_snapshot(source, snapshot)
-    with sqlite3.connect(source) as connection:
+    with closing(sqlite3.connect(source)) as connection:
         connection.execute("DELETE FROM pages")
         connection.execute("INSERT INTO pages VALUES ('replacement.pdf', 9)")
+        connection.commit()
 
     assert soak_module._corpus_citations(snapshot) == {("manual.pdf", 7)}
     assert receipt["byte_count"] == snapshot.stat().st_size
@@ -333,9 +335,10 @@ def test_semantic_benchmark_receipts_publish_concurrently_without_temp_alias(tmp
         list(executor.map(publish, range(8)))
 
     for index in range(8):
-        assert json.loads((tmp_path / f"receipt-{index}.json").read_text(encoding="utf-8"))[
-            "index"
-        ] == index
+        assert (
+            json.loads((tmp_path / f"receipt-{index}.json").read_text(encoding="utf-8"))["index"]
+            == index
+        )
     assert not list(tmp_path.glob(".*.tmp"))
 
 

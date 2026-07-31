@@ -3,6 +3,7 @@ import sqlite3
 import subprocess
 import sys
 import uuid
+from contextlib import closing
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -118,7 +119,7 @@ def test_read_pages_reports_missing_pages(manual_index: Path):
 
 @pytest.mark.parametrize("operation", ["search", "read"])
 def test_readers_reject_an_obsolete_index_schema(manual_index: Path, operation):
-    with sqlite3.connect(manual_index) as connection:
+    with closing(sqlite3.connect(manual_index)) as connection:
         connection.execute("UPDATE metadata SET value = 'obsolete' WHERE key = 'schema_version'")
         connection.commit()
 
