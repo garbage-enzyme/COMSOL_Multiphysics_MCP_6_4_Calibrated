@@ -155,15 +155,13 @@ def test_canonical_implementation_has_no_legacy_imports():
     assert matches == []
 
 
-def test_packaging_declares_canonical_implementation_and_one_shim():
+def test_packaging_keeps_the_shim_source_only_and_distributes_canonical_implementation():
     project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
 
     assert project["project"]["scripts"]["comsol-mcp"] == "comsol_mcp.server:main"
     assert project["tool"]["hatch"]["version"]["path"] == "comsol_mcp/__init__.py"
-    assert project["tool"]["hatch"]["build"]["targets"]["wheel"]["packages"] == [
-        "comsol_mcp",
-        "src",
-    ]
+    assert project["tool"]["hatch"]["build"]["targets"]["wheel"]["packages"] == ["comsol_mcp"]
+    assert (ROOT / "src" / "__init__.py").is_file()
     assert [path.relative_to(ROOT).as_posix() for path in sorted((ROOT / "src").rglob("*.py"))] == [
         "src/__init__.py"
     ]

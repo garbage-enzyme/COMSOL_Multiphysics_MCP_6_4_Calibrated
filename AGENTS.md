@@ -15,7 +15,9 @@ interpretation as separate outcomes.
 ## Repository structure
 
 - `comsol_mcp/` contains the package entry point and packaged settings resource.
-- `src/` contains runtime implementation imported by the server.
+- `comsol_mcp/` contains the canonical runtime implementation.
+- `src/` is a repository-only legacy import compatibility layer and is not
+  distributed in wheels.
 - `development_kit/` contains repository-only tests, fixtures, scripts, and
   release documentation; it must not enter a wheel or sdist.
 - `config/` contains MCP client configuration examples.
@@ -57,11 +59,12 @@ removed.
 ## Implementation workflow
 
 1. Read the closest implementation, focused tests, and contract before editing.
-   For tool registration, start with `src/tools/catalog.py` and
-   `src/tools/profiles.py`.
+   For tool registration, start with `comsol_mcp/tools/catalog.py` and
+   `comsol_mcp/tools/profiles.py`.
 2. Prefer narrow, typed, profile-compatible interfaces over generic property
    escape hatches. Preserve stable JSON schemas and bounded response contracts.
-3. Keep runtime code under `src/`; do not import `development_kit/` or recipes.
+3. Keep runtime code under `comsol_mcp/`; do not import `development_kit/` or
+   recipes.
 4. Add deterministic tests for observable behavior, safety invariants,
    resume/cleanup/provenance regressions, and schema changes.
 5. Update user and developer documentation together with behavior or public

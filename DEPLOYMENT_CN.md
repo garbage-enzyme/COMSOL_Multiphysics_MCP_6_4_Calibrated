@@ -27,8 +27,8 @@ D:\path\to\python-env\python.exe -m pip install .
 Test-Path "D:\path\to\python-env\Scripts\comsol-mcp.exe"
 ```
 
-可移植部署不要依赖仓库 cwd 下的 `python -m src.server`，而应配置安装后的
-console entry point 绝对路径。
+wheel 只公开 canonical `comsol_mcp` package；仓库源码中的 `src` compatibility
+namespace 不会安装。可移植部署应配置安装后的 console entry point 绝对路径。
 
 ## 2. 配置统一 settings.json
 

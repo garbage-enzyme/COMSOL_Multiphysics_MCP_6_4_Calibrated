@@ -7,6 +7,7 @@ import asyncio
 import json
 import sys
 from importlib.metadata import requires, version
+from importlib.util import find_spec
 from pathlib import Path
 
 HEAVY_SEMANTIC_MODULES = {"chromadb", "sentence_transformers", "torch"}
@@ -120,6 +121,9 @@ def main() -> int:
         raise AssertionError("installed deployment identity reports source-tree shadowing")
     if deployment_identity.get("contains_local_path") is not False:
         raise AssertionError("installed deployment identity leaks a local path")
+
+    if find_spec("src") is not None:
+        raise AssertionError("installed wheel exposes a generic top-level src package")
 
     imported_heavy = sorted(HEAVY_SEMANTIC_MODULES.intersection(sys.modules))
     if imported_heavy:

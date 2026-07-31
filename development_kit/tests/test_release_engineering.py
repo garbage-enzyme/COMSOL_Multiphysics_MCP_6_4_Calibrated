@@ -333,6 +333,12 @@ else:
     assert completed.returncode == 0, completed.stderr
 
 
+def test_wheel_distributes_only_the_canonical_top_level_package():
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+
+    assert project["tool"]["hatch"]["build"]["targets"]["wheel"]["packages"] == ["comsol_mcp"]
+
+
 def _tracked_entries() -> list[tuple[str, str]]:
     completed = subprocess.run(
         ["git", "ls-files", "--stage"],

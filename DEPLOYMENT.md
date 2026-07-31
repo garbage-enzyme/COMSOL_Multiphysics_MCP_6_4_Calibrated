@@ -29,8 +29,9 @@ D:\path\to\python-env\python.exe -m pip install .
 Test-Path "D:\path\to\python-env\Scripts\comsol-mcp.exe"
 ```
 
-Do not depend on a repository-relative `python -m src.server` command for a
-portable deployment. Configure the absolute installed console entry point.
+The wheel intentionally exposes only the canonical `comsol_mcp` package; the
+repository-only `src` compatibility namespace is not installed. Configure the
+absolute installed console entry point for a portable deployment.
 
 ## 2. Configure the shared settings file
 

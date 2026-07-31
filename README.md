@@ -322,7 +322,7 @@ python -m pip install .
 
 # Recommended offline manual index; use an ASCII-only output path.
 python -m pip install ".[manuals]"
-python -m src.knowledge.lexical_manual build --index D:\comsol_docs_fts\manuals.sqlite3
+python -m comsol_mcp.knowledge.lexical_manual build --index D:\comsol_docs_fts\manuals.sqlite3
 ```
 
 For optional isolated semantic retrieval (sentence-transformers, not ChromaDB):

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
 from src.evidence.integrity_controls import (
@@ -20,6 +22,60 @@ SETTINGS_DOCS = ROOT / "docs" / "setting_guide"
 CHINESE_DISABLED_WARNING = (
     "严格证据检查已关闭；这些结果未经过完整验证，可能包含 AI 生成或幻觉内容。"
 )
+
+
+def _leaf_paths(value: object, prefix: str = "") -> set[str]:
+    if not isinstance(value, dict):
+        return {prefix}
+    paths: set[str] = set()
+    for key, item in value.items():
+        child = f"{prefix}.{key}" if prefix else key
+        paths.update(_leaf_paths(item, child))
+    return paths
+
+
+def _tracked_markdown_paths() -> list[Path]:
+    git = shutil.which("git")
+    if git is None:
+        raise RuntimeError("git is required to enumerate checked-in Markdown")
+    completed = subprocess.run(
+        [git, "ls-files", "--", "*.md"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=True,
+    )
+    return [ROOT / line for line in completed.stdout.splitlines() if line]
+
+
+def _json_fence_blocks(text: str) -> list[str]:
+    opening = re.compile(r"^ {0,3}(?P<fence>`{3,}|~{3,})[ \t]*(?P<info>.*?)[ \t]*$")
+    blocks: list[str] = []
+    active: tuple[str, int, bool] | None = None
+    body: list[str] = []
+    for line in text.splitlines():
+        if active is None:
+            match = opening.fullmatch(line)
+            if match is None:
+                continue
+            info = match.group("info").strip().casefold()
+            tokens = info.replace("{", " ").replace("}", " ").split()
+            is_json = bool(tokens) and (tokens[0] == "json" or ".json" in tokens)
+            active = (match.group("fence")[0], len(match.group("fence")), is_json)
+            body = []
+            continue
+        marker, minimum, is_json = active
+        if re.fullmatch(rf" {{0,3}}{re.escape(marker)}{{{minimum},}}[ \t]*", line):
+            if is_json:
+                blocks.append("\n".join(body))
+            active = None
+            body = []
+        else:
+            body.append(line)
+    if active is not None and active[2]:
+        raise AssertionError("unclosed JSON fence")
+    return blocks
 
 
 def test_documented_default_and_exploration_settings_are_executable():
@@ -104,10 +160,7 @@ def test_chinese_interactive_guide_is_complete_and_contract_equivalent():
     guide = (INTERACTIVE_DOCS / "README_CN.md").read_text(encoding="utf-8")
 
     assert "Ching-Chiang/comsol-mcp" in guide
-    assert all(
-        phrase in guide
-        for phrase in ("没有复制", "改写、翻译、挑选提交", "机械重写")
-    )
+    assert all(phrase in guide for phrase in ("没有复制", "改写、翻译、挑选提交", "机械重写"))
     assert '"profile": { "name": "desktop_shared" }' in guide
     assert '"shared_server": { "enabled": true }' in guide
     assert "COMSOL_MCP_SETTINGS_PATH=" in guide
@@ -169,26 +222,7 @@ def test_root_readmes_expose_same_language_feature_and_settings_guides():
 def test_settings_guides_cover_every_checked_in_setting_and_keep_languages_separate():
     english = (SETTINGS_DOCS / "README.md").read_text(encoding="utf-8")
     chinese = (SETTINGS_DOCS / "README_CN.md").read_text(encoding="utf-8")
-    fields = (
-        "schema_name",
-        "schema_version",
-        "profile.name",
-        "runtime.directory",
-        "runtime.jobs_directory",
-        "paths.model_read_roots",
-        "paths.artifact_write_root",
-        "shared_server.enabled",
-        "evidence_integrity.checks.outcome_contract_validation",
-        "evidence_integrity.checks.artifact_chain_verification",
-        "evidence_integrity.checks.summary_claim_verification",
-        "evidence_integrity.checks.producer_driver_compatibility",
-        "semantic_docs.root",
-        "semantic_docs.lexical_index",
-        "semantic_docs.model_path",
-        "ownership.owner",
-        "java.java_home",
-        "java.jdk_home",
-    )
+    fields = _leaf_paths(json.loads((ROOT / "settings.json").read_text(encoding="utf-8")))
 
     assert all(field in english for field in fields)
     assert all(field in chinese for field in fields)
@@ -248,18 +282,21 @@ def test_embedded_guidance_no_longer_denies_the_shared_profile():
 
 
 def test_every_documented_json_example_is_machine_parseable():
-    guides = [
-        EVIDENCE_DOCS / "README.md",
-        EVIDENCE_DOCS / "README_CN.md",
-        INTERACTIVE_DOCS / "README.md",
-        INTERACTIVE_DOCS / "README_CN.md",
-    ]
-
-    for path in guides:
-        blocks = re.findall(
-            r"(?ms)^```json\s*\n(.*?)\n```$",
-            path.read_text(encoding="utf-8"),
-        )
-        assert blocks, path
+    paths = _tracked_markdown_paths()
+    assert paths
+    block_count = 0
+    for path in paths:
+        blocks = _json_fence_blocks(path.read_text(encoding="utf-8"))
+        block_count += len(blocks)
         for block in blocks:
             assert isinstance(json.loads(block), dict), path
+    assert block_count > 0
+
+
+def test_json_fence_parser_accepts_commonmark_variants():
+    blocks = _json_fence_blocks(
+        '  ```JSON title=example  \n{"first": 1}\n  ```  \n'
+        '~~~{.json data-kind=fixture}\n{"second": 2}\n~~~~\n'
+    )
+
+    assert [json.loads(block) for block in blocks] == [{"first": 1}, {"second": 2}]

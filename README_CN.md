@@ -288,7 +288,7 @@ python -m pip install .
 
 # 推荐离线手册索引；输出目录必须只含 ASCII 字符。
 python -m pip install ".[manuals]"
-python -m src.knowledge.lexical_manual build --index D:\comsol_docs_fts\manuals.sqlite3
+python -m comsol_mcp.knowledge.lexical_manual build --index D:\comsol_docs_fts\manuals.sqlite3
 ```
 
 如需可选的隔离语义检索（sentence-transformers，不含 ChromaDB）：

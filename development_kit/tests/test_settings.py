@@ -29,13 +29,25 @@ def _settings_path(tmp_path: Path, payload: object) -> Path:
 
 def test_project_settings_is_grouped_and_contains_no_embedded_comments():
     root = Path(__file__).parents[2]
-    document = json.loads((root / "settings.json").read_text(encoding="utf-8"))
+    path = root / "settings.json"
+    document = json.loads(path.read_text(encoding="utf-8"))
 
     assert document["schema_name"] == SETTINGS_SCHEMA
     assert document["schema_version"] == SETTINGS_VERSION
     assert document["profile"]["name"] == "core"
     assert document["shared_server"]["enabled"] is False
     assert all(document["evidence_integrity"]["checks"].values())
+    loaded = load_settings({SETTINGS_PATH_ENV: str(path)})
+    assert loaded == load_settings({})
+    assert loaded.keys() == document.keys()
+    assert all(
+        loaded[section].keys() == value.keys()
+        for section, value in document.items()
+        if isinstance(value, dict)
+    )
+    status = settings_status({SETTINGS_PATH_ENV: str(path)})
+    assert status["configuration_state"] == "valid"
+    assert status["settings_errors"] == []
     assert all(not key.startswith("_comment") for key in _walk_keys(document))
 
 
