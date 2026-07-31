@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import subprocess
 import sys
@@ -119,10 +120,7 @@ def _rehash_visual_contract(value):
 
 
 def _codex(*, delivered: bool = True, calibrated: bool = True):
-    results = [
-        {**reference, "image_content_returned": delivered}
-        for reference in _refs()
-    ]
+    results = [{**reference, "image_content_returned": delivered} for reference in _refs()]
     return normalize_codex_capability(
         view_image_available=True,
         view_image_results=results,
@@ -202,14 +200,22 @@ def test_opencode_image_metadata_requires_a_confirmed_attachment_part():
         "attachment": True,
     }
     declared = normalize_opencode_capability(
-        provider="opencode-go", model="future-vision-model", provider_metadata=metadata,
-        cli_attachment_supported=True, attachment_part_confirmed=False,
-        delivered_artifacts=_refs(), calibration=_calibration(),
+        provider="opencode-go",
+        model="future-vision-model",
+        provider_metadata=metadata,
+        cli_attachment_supported=True,
+        attachment_part_confirmed=False,
+        delivered_artifacts=_refs(),
+        calibration=_calibration(),
     )
     delivered = normalize_opencode_capability(
-        provider="opencode-go", model="future-vision-model", provider_metadata=metadata,
-        cli_attachment_supported=True, attachment_part_confirmed=True,
-        delivered_artifacts=_refs(), calibration=_calibration(),
+        provider="opencode-go",
+        model="future-vision-model",
+        provider_metadata=metadata,
+        cli_attachment_supported=True,
+        attachment_part_confirmed=True,
+        delivered_artifacts=_refs(),
+        calibration=_calibration(),
     )
 
     assert declared["capability_state"] == "host_capability_confirmed"
@@ -218,9 +224,13 @@ def test_opencode_image_metadata_requires_a_confirmed_attachment_part():
     assert delivered["scientific_review_eligible"] is True
 
     mismatched = normalize_opencode_capability(
-        provider="opencode-go", model="different-model", provider_metadata=metadata,
-        cli_attachment_supported=True, attachment_part_confirmed=True,
-        delivered_artifacts=_refs(), calibration=_calibration(),
+        provider="opencode-go",
+        model="different-model",
+        provider_metadata=metadata,
+        cli_attachment_supported=True,
+        attachment_part_confirmed=True,
+        delivered_artifacts=_refs(),
+        calibration=_calibration(),
     )
     assert mismatched["host_capability_confirmed"] is False
     assert mismatched["host_evidence"]["model_identity_confirmed"] is False
@@ -324,15 +334,21 @@ def test_request_rejects_absolute_paths_mismatched_views_and_hash_tampering():
     artifacts[0]["relative_path"] = "C:/private/field.png"
     with pytest.raises(ValueError, match="relative"):
         build_visual_review_request(
-            request_id="bad", configuration_sha256=CONFIG_HASH,
-            artifacts=artifacts, views=_views(), numerical_summary={},
+            request_id="bad",
+            configuration_sha256=CONFIG_HASH,
+            artifacts=artifacts,
+            views=_views(),
+            numerical_summary={},
             questions=["Question?"],
         )
 
     with pytest.raises(ValueError, match="every artifact exactly once"):
         build_visual_review_request(
-            request_id="bad", configuration_sha256=CONFIG_HASH,
-            artifacts=_artifacts(), views=_views()[:1], numerical_summary={},
+            request_id="bad",
+            configuration_sha256=CONFIG_HASH,
+            artifacts=_artifacts(),
+            views=_views()[:1],
+            numerical_summary={},
             questions=["Question?"],
         )
 
@@ -471,7 +487,10 @@ def test_visual_contract_hashes_survive_json_number_round_trip():
     transported_request = json.loads(json.dumps(request))
     transported_capability = json.loads(json.dumps(_codex()))
 
-    assert validate_visual_review_request(transported_request)["contract_sha256"] == request["contract_sha256"]
+    assert (
+        validate_visual_review_request(transported_request)["contract_sha256"]
+        == request["contract_sha256"]
+    )
     receipt = build_visual_review_receipt(
         review_id="json-round-trip-review",
         request=transported_request,
@@ -494,13 +513,16 @@ def test_dual_blind_review_requires_two_independent_complete_receipts():
     request = _request("dual_blind")
     codex = _receipt(_codex(), session="codex-session")
     opencode_capability = normalize_opencode_capability(
-        provider="opencode-go", model="future-vision-model",
+        provider="opencode-go",
+        model="future-vision-model",
         provider_metadata={
             "id": "opencode-go/future-vision-model",
             "capabilities": {"input": {"image": True}},
         },
-        cli_attachment_supported=True, attachment_part_confirmed=True,
-        delivered_artifacts=_refs(), calibration=_calibration(),
+        cli_attachment_supported=True,
+        attachment_part_confirmed=True,
+        delivered_artifacts=_refs(),
+        calibration=_calibration(),
     )
     opencode = _receipt(opencode_capability, session="opencode-vision-session")
 
@@ -536,6 +558,13 @@ def test_dual_review_rejects_each_independence_and_request_binding_failure():
         session="opencode-independent",
         request=request,
     )
+    valid = evaluate_dual_visual_review(
+        request=request,
+        first_receipt=codex,
+        second_receipt=opencode,
+        comparison="agreement",
+    )
+    assert valid["state"] == "dual_review_complete"
 
     same_session = _receipt(
         opencode_capability,
@@ -621,7 +650,9 @@ def test_dual_review_remains_incomplete_after_prior_review_exposure():
     first = _receipt(_codex(), session="first")
     second = _receipt(_codex(), session="second", exposure=True)
     result = evaluate_dual_visual_review(
-        request=request, first_receipt=first, second_receipt=second,
+        request=request,
+        first_receipt=first,
+        second_receipt=second,
         comparison="agreement",
     )
 
@@ -652,19 +683,46 @@ def test_public_visual_review_tools_fail_closed_without_starting_comsol():
     server = FastMCP("visual-review-tools-test")
     register_visual_review_tools(server)
 
-    capability = server._tool_manager._tools["visual_review_capability_normalize"].fn(
-        adapter="codex",
-        view_image_available=False,
-        self_reported_image_input=True,
+    capability = asyncio.run(
+        server.call_tool(
+            "visual_review_capability_normalize",
+            {
+                "adapter": "codex",
+                "view_image_available": False,
+                "self_reported_image_input": True,
+            },
+        )
     )
-    invalid_request = server._tool_manager._tools["visual_review_request_create"].fn(
-        request_id="bad",
-        configuration_sha256=CONFIG_HASH,
-        artifacts=[],
-        views=[],
-        numerical_summary={},
-        questions=["Question?"],
+    invalid_request = asyncio.run(
+        server.call_tool(
+            "visual_review_request_create",
+            {
+                "request_id": "bad",
+                "configuration_sha256": CONFIG_HASH,
+                "artifacts": [],
+                "views": [],
+                "numerical_summary": {},
+                "questions": ["Question?"],
+            },
+        )
     )
+
+    def decode(result):
+        if isinstance(result, dict):
+            return result
+        if isinstance(result, tuple) and len(result) == 2 and isinstance(result[1], dict):
+            return result[1]
+        blocks = result[0] if isinstance(result, tuple) and len(result) == 2 else result
+        for block in blocks:
+            text = getattr(block, "text", None)
+            if isinstance(text, str):
+                value = json.loads(text)
+                if isinstance(value, dict):
+                    return value
+        raise ValueError("public FastMCP call did not return a JSON object")
+
+    capability = decode(capability)
+    invalid_request = decode(invalid_request)
 
     assert capability["capability_state"] == "unavailable"
     assert invalid_request["success"] is False

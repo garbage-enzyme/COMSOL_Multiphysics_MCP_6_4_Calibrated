@@ -1,6 +1,7 @@
 """Tests for MCP server construction without starting a transport."""
 
 import ast
+import asyncio
 import json
 import shutil
 import subprocess
@@ -15,10 +16,16 @@ from src.server import create_server, register_all_resources, register_all_tools
 from src.tools.capabilities import get_capabilities, startup_capability_summary
 
 
+def _public_tool_names(server) -> set[str]:
+    return {tool.name for tool in asyncio.run(server.list_tools())}
+
+
+def _public_resource_uris(server) -> set[str]:
+    return {str(resource.uri) for resource in asyncio.run(server.list_resources())}
+
+
 def test_server_module_configures_logging_only_in_main():
-    source = (Path(__file__).parents[2] / "comsol_mcp" / "server.py").read_text(
-        encoding="utf-8"
-    )
+    source = (Path(__file__).parents[2] / "comsol_mcp" / "server.py").read_text(encoding="utf-8")
     tree = ast.parse(source)
     assert not any(
         isinstance(node, ast.Expr)
@@ -28,9 +35,7 @@ def test_server_module_configures_logging_only_in_main():
         for node in tree.body
     )
     main = next(
-        node
-        for node in tree.body
-        if isinstance(node, ast.FunctionDef) and node.name == "main"
+        node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "main"
     )
     assert any(
         isinstance(node, ast.Call)
@@ -42,8 +47,8 @@ def test_server_module_configures_logging_only_in_main():
 
 def test_server_registration_is_idempotent():
     server = create_server("registration-test")
-    tool_names = set(server._tool_manager._tools)
-    resource_names = set(server._resource_manager._resources)
+    tool_names = _public_tool_names(server)
+    resource_uris = _public_resource_uris(server)
 
     assert "comsol_start" in tool_names
     assert "capabilities" in tool_names
@@ -61,13 +66,13 @@ def test_server_registration_is_idempotent():
     assert "docs_get" not in tool_names
     assert "wave_optics_preflight" not in tool_names
     assert "wave_optics_point_audit" not in tool_names
-    assert resource_names
+    assert resource_uris
 
     register_all_tools(server)
     register_all_resources(server)
 
-    assert set(server._tool_manager._tools) == tool_names
-    assert set(server._resource_manager._resources) == resource_names
+    assert _public_tool_names(server) == tool_names
+    assert _public_resource_uris(server) == resource_uris
 
 
 def test_partial_tool_registration_rolls_back_and_can_be_retried(monkeypatch):
@@ -81,7 +86,7 @@ def test_partial_tool_registration_rolls_back_and_can_be_retried(monkeypatch):
     def existing_tool() -> dict:
         return {"success": True}
 
-    original = dict(server._tool_manager._tools)
+    original = _public_tool_names(server)
 
     def fail_after_partial_registration(target, _selection):
         @target.tool(name="partial_tool")
@@ -97,7 +102,7 @@ def test_partial_tool_registration_rolls_back_and_can_be_retried(monkeypatch):
     with pytest.raises(RuntimeError, match="registrar failure"):
         register_all_tools(server, "core")
 
-    assert server._tool_manager._tools == original
+    assert _public_tool_names(server) == original
 
     def complete_registration(target, _selection):
         @target.tool(name="completed_tool")
@@ -109,7 +114,7 @@ def test_partial_tool_registration_rolls_back_and_can_be_retried(monkeypatch):
     selection = register_all_tools(server, "core")
 
     assert selection.name == "core"
-    assert set(server._tool_manager._tools) == {"existing_tool", "completed_tool"}
+    assert _public_tool_names(server) == {"existing_tool", "completed_tool"}
 
 
 def test_model_resources_escape_untrusted_markdown(monkeypatch):
@@ -177,12 +182,8 @@ def test_model_resources_escape_untrusted_markdown(monkeypatch):
 
     session = server._resource_manager._resources["comsol://session/info"].fn()
     tree = server._resource_manager._templates["comsol://model/{name}/tree"].fn("model")
-    parameters = server._resource_manager._templates[
-        "comsol://model/{name}/parameters"
-    ].fn("model")
-    physics = server._resource_manager._templates["comsol://model/{name}/physics"].fn(
-        "model"
-    )
+    parameters = server._resource_manager._templates["comsol://model/{name}/parameters"].fn("model")
+    physics = server._resource_manager._templates["comsol://model/{name}/physics"].fn("model")
 
     for document in (session, tree, parameters, physics):
         assert "\n## Injected" not in document
@@ -233,8 +234,13 @@ def test_capabilities_report_risky_operations_without_starting_comsol(monkeypatc
     assert result["tool_count"] == 43
     assert result["profile_source"]["default_used"] is True
     assert [item["name"] for item in result["available_profiles"]] == [
-        "core", "basic_fem", "wave_optics", "semantic_docs", "desktop_shared",
-        "experimental", "full"
+        "core",
+        "basic_fem",
+        "wave_optics",
+        "semantic_docs",
+        "desktop_shared",
+        "experimental",
+        "full",
     ]
     assert result["session"] == {"connected": False, "starting": False}
     assert result["long_jobs"]["real_cancellation"] is True
@@ -327,7 +333,11 @@ def test_job_read_tools_are_solver_free(monkeypatch):
     root = Path("D:/comsol_runtime_test/jobs") / uuid.uuid4().hex
     try:
         monkeypatch.setattr(jobs_module, "job_manager", JobManager(root))
-        monkeypatch.setattr(mph, "Client", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("must not start")))
+        monkeypatch.setattr(
+            mph,
+            "Client",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("must not start")),
+        )
         server = FastMCP("job-read-test")
         jobs_module.register_job_tools(server)
 

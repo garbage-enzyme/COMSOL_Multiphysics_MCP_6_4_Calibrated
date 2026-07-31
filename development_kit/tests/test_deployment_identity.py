@@ -18,7 +18,7 @@ import src.tools.capabilities as capabilities_module
 from src.build_identity import get_build_identity, package_content_sha256
 from src.compatibility import load_runtime_compatibility
 from src.tools.capabilities import get_capabilities, startup_capability_summary
-from src.tools.profiles import ProfileSelection
+from src.tools.profiles import PROFILE_NAMES, ProfileSelection
 
 from src import __version__
 
@@ -154,7 +154,19 @@ def test_build_identity_ignores_interpreter_caches_and_covers_generated_package_
         "length_prefixed_sorted_relative_non_cache_package_paths_and_file_bytes"
     )
     assert identity["paths_included"] is False
-    assert str(tmp_path) not in json.dumps(identity)
+    serialized = json.dumps(identity)
+    assert str(tmp_path) not in serialized
+    assert all(
+        private_component not in serialized
+        for private_component in (
+            tmp_path.name,
+            package.name,
+            "alpha.py",
+            nested.name,
+            "manifest.json",
+            generated.name,
+        )
+    )
 
 
 def test_build_identity_length_prefixes_paths_and_payloads(tmp_path):
@@ -203,8 +215,7 @@ def test_package_version_has_one_authoritative_source():
 
 def test_deployment_identity_is_profile_independent():
     identities = [
-        get_capabilities(_selection(profile))["deployment_identity"]
-        for profile in ("core", "basic_fem", "wave_optics", "semantic_docs", "full")
+        get_capabilities(_selection(profile))["deployment_identity"] for profile in PROFILE_NAMES
     ]
 
     assert identities
