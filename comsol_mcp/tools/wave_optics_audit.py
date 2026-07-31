@@ -187,7 +187,10 @@ def _sha256_file(path: Path) -> str:
 
 def _canonical_hash(value: Any) -> str:
     encoded = json.dumps(
-        value, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
     ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
 
@@ -210,12 +213,25 @@ def _single_complex(value: Any, expression: str) -> complex:
     array = np.asarray(value)
     if array.size != 1:
         raise ValueError(
-            f"Expression {expression!r} returned {array.size} values; one solved-point scalar was required"
+            f"Expression {expression!r} returned {array.size} values; "
+            "one solved-point scalar was required"
         )
     result = complex(array.reshape(-1)[0])
     if not _finite_complex(result):
         raise FloatingPointError(f"Expression {expression!r} returned nonfinite data")
     return result
+
+
+def _single_real(value: Any, expression: str) -> float:
+    """Return one finite scientific real, rejecting material imaginary content."""
+    result = _single_complex(value, expression)
+    imaginary_tolerance = max(1e-15, 1e-12 * abs(float(result.real)))
+    if abs(float(result.imag)) > imaginary_tolerance:
+        raise ValueError(
+            f"Expression {expression!r} returned materially complex data; "
+            "a real scientific scalar was required"
+        )
+    return float(result.real)
 
 
 def _validate_ascii_dir(path_text: str | None) -> Path:
@@ -252,7 +268,9 @@ def _validate_coordinate_range(value: dict[str, Any] | None) -> dict[str, list[f
     return result
 
 
-def _load_json_bounded(path_text: str, maximum_bytes: int, label: str) -> tuple[dict[str, Any], Path, str]:
+def _load_json_bounded(
+    path_text: str, maximum_bytes: int, label: str
+) -> tuple[dict[str, Any], Path, str]:
     path = Path(path_text).expanduser().resolve()
     if not path.is_file():
         raise FileNotFoundError(f"{label} does not exist: {path}")
@@ -304,8 +322,21 @@ def _load_policy(
             raise ValueError(f"validation_policy.{mapping_name} must be an object")
     nested_allowed = {
         "assumptions": {"passive", "linear", "port_power_normalized", "reciprocal", "target_basis"},
-        "tolerances": {"closure_abs", "quantity_bounds_margin", "wavelength_abs_m", "wavelength_rel", "loss_match_abs", "loss_match_rel"},
-        "polarization": {"basis", "target_vector", "max_cross_power_fraction", "max_ellipticity", "reference_config_id"},
+        "tolerances": {
+            "closure_abs",
+            "quantity_bounds_margin",
+            "wavelength_abs_m",
+            "wavelength_rel",
+            "loss_match_abs",
+            "loss_match_rel",
+        },
+        "polarization": {
+            "basis",
+            "target_vector",
+            "max_cross_power_fraction",
+            "max_ellipticity",
+            "reference_config_id",
+        },
         "mesh": {"minimum_elements", "require_unchanged", "convergence_artifact"},
     }
     for mapping_name, allowed_fields in nested_allowed.items():
@@ -325,7 +356,7 @@ def _load_policy(
     for name, value in policy.get("tolerances", {}).items():
         try:
             finite = math.isfinite(float(value))
-        except (TypeError, ValueError, OverflowError):
+        except TypeError, ValueError, OverflowError:
             finite = False
         if (
             isinstance(value, bool)
@@ -333,9 +364,7 @@ def _load_policy(
             or not finite
             or value < 0
         ):
-            raise ValueError(
-                f"validation_policy.tolerances.{name} must be finite and nonnegative"
-            )
+            raise ValueError(f"validation_policy.tolerances.{name} must be finite and nonnegative")
     required = policy.get("required_evidence", [])
     if not isinstance(required, list) or not all(isinstance(item, str) for item in required):
         raise ValueError("validation_policy.required_evidence must be a string list")
@@ -348,7 +377,14 @@ def _load_policy(
     return policy, provenance
 
 
-def _policy_rule(name: str, outcome: str, *, measured: Any = None, threshold: Any = None, reason: str | None = None) -> dict[str, Any]:
+def _policy_rule(
+    name: str,
+    outcome: str,
+    *,
+    measured: Any = None,
+    threshold: Any = None,
+    reason: str | None = None,
+) -> dict[str, Any]:
     result = {"rule": name, "outcome": outcome}
     if measured is not None:
         result["measured"] = measured
@@ -363,8 +399,14 @@ def _evidence_available(measurement: dict[str, Any], name: str) -> bool:
     mapping = {
         "wavelength_controls": bool(measurement.get("wavelength", {}).get("complete")),
         "flux_RTA": bool(measurement.get("power", {}).get("complete")),
-        "incident_polarization": measurement.get("polarization", {}).get("evidence_level") in {"incident_reference", "direct_incident_field"},
-        "top_air_region": bool(measurement.get("polarization", {}).get("structure_total_field", {}).get("complete")),
+        "incident_polarization": (
+            measurement.get("polarization", {}).get("evidence_level")
+            in {"incident_reference", "direct_incident_field"}
+            and _polarization_vector(measurement.get("polarization", {})) is not None
+        ),
+        "top_air_region": bool(
+            measurement.get("polarization", {}).get("structure_total_field", {}).get("complete")
+        ),
         "volume_loss": bool(measurement.get("losses", {}).get("items")),
         "source_integrity": bool(measurement.get("integrity", {}).get("source_unchanged")),
         "mesh_evidence": bool(measurement.get("mesh", {}).get("element_count") is not None),
@@ -376,30 +418,51 @@ def _polarization_vector(polarization: dict[str, Any]) -> list[complex] | None:
     reference = polarization.get("incident_reference")
     if not isinstance(reference, dict):
         return None
+    config_id = reference.get("config_id")
+    if not isinstance(config_id, str) or not config_id.strip() or len(config_id) > 128:
+        return None
     stats = reference.get("component_statistics") or reference.get("field_statistics")
     if not isinstance(stats, dict):
         return None
     vector = []
     for axis in ("x", "y", "z"):
-        component = stats.get(axis) or stats.get(axis.upper())
+        component = stats.get(axis)
         if not isinstance(component, dict):
             return None
         mean = component.get("complex_mean")
-        if not isinstance(mean, dict):
+        if not isinstance(mean, dict) or not {"real", "imag"} <= set(mean):
             return None
-        value = complex(float(mean.get("real", 0.0)), float(mean.get("imag", 0.0)))
+        real = mean.get("real")
+        imag = mean.get("imag")
+        if (
+            isinstance(real, bool)
+            or not isinstance(real, (int, float))
+            or isinstance(imag, bool)
+            or not isinstance(imag, (int, float))
+        ):
+            return None
+        value = complex(float(real), float(imag))
         if not _finite_complex(value):
             return None
         vector.append(value)
     return vector
 
 
-def evaluate_validation_policy(measurement: dict[str, Any], policy: dict[str, Any]) -> dict[str, Any]:
+def evaluate_validation_policy(
+    measurement: dict[str, Any], policy: dict[str, Any]
+) -> dict[str, Any]:
     """Evaluate declared project rules without changing immutable raw evidence."""
     rules: list[dict[str, Any]] = []
     for name in policy.get("required_evidence", []):
         available = _evidence_available(measurement, name)
-        rules.append(_policy_rule(f"required_evidence.{name}", "pass" if available else "missing", measured=available, threshold=True))
+        rules.append(
+            _policy_rule(
+                f"required_evidence.{name}",
+                "pass" if available else "missing",
+                measured=available,
+                threshold=True,
+            )
+        )
 
     assumptions = policy.get("assumptions", {})
     tolerances = policy.get("tolerances", {})
@@ -408,21 +471,54 @@ def evaluate_validation_policy(measurement: dict[str, Any], policy: dict[str, An
     if "closure_abs" in tolerances:
         measured = power.get("closure_abs")
         threshold = float(tolerances["closure_abs"])
-        rules.append(_policy_rule("tolerances.closure_abs", "missing" if measured is None else ("pass" if measured <= threshold else "fail"), measured=measured, threshold=threshold))
+        rules.append(
+            _policy_rule(
+                "tolerances.closure_abs",
+                "missing" if measured is None else ("pass" if measured <= threshold else "fail"),
+                measured=measured,
+                threshold=threshold,
+            )
+        )
     if "quantity_bounds_margin" in tolerances:
         margin = float(tolerances["quantity_bounds_margin"])
         if not assumptions.get("passive") or not assumptions.get("port_power_normalized"):
-            rules.append(_policy_rule("tolerances.quantity_bounds_margin", "not_applicable", threshold=margin, reason="requires passive and port_power_normalized assumptions"))
+            rules.append(
+                _policy_rule(
+                    "tolerances.quantity_bounds_margin",
+                    "not_applicable",
+                    threshold=margin,
+                    reason="requires passive and port_power_normalized assumptions",
+                )
+            )
         else:
             values = [power.get(name) for name in ("R", "T", "A")]
             complete = all(isinstance(value, (int, float)) for value in values)
             passed = complete and all(-margin <= float(value) <= 1.0 + margin for value in values)
-            rules.append(_policy_rule("tolerances.quantity_bounds_margin", "missing" if not complete else ("pass" if passed else "fail"), measured=values, threshold={"minimum": -margin, "maximum": 1.0 + margin}))
-    for key, measured_key in (("wavelength_abs_m", "absolute_difference_m"), ("wavelength_rel", "relative_difference")):
+            rules.append(
+                _policy_rule(
+                    "tolerances.quantity_bounds_margin",
+                    "missing" if not complete else ("pass" if passed else "fail"),
+                    measured=values,
+                    threshold={"minimum": -margin, "maximum": 1.0 + margin},
+                )
+            )
+    for key, measured_key in (
+        ("wavelength_abs_m", "absolute_difference_m"),
+        ("wavelength_rel", "relative_difference"),
+    ):
         if key in tolerances:
             measured = wavelength.get(measured_key)
             threshold = float(tolerances[key])
-            rules.append(_policy_rule(f"tolerances.{key}", "missing" if measured is None else ("pass" if measured <= threshold else "fail"), measured=measured, threshold=threshold))
+            rules.append(
+                _policy_rule(
+                    f"tolerances.{key}",
+                    "missing"
+                    if measured is None
+                    else ("pass" if measured <= threshold else "fail"),
+                    measured=measured,
+                    threshold=threshold,
+                )
+            )
     normalized_losses = [
         item.get("normalized_value")
         for item in measurement.get("losses", {}).get("items", [])
@@ -436,14 +532,33 @@ def evaluate_validation_policy(measurement: dict[str, Any], policy: dict[str, An
     )
     if "loss_match_abs" in tolerances:
         threshold = float(tolerances["loss_match_abs"])
-        rules.append(_policy_rule("tolerances.loss_match_abs", "missing" if loss_difference is None else ("pass" if loss_difference <= threshold else "fail"), measured=loss_difference, threshold=threshold, reason="sum(caller-normalized losses) versus 1-R-T"))
+        rules.append(
+            _policy_rule(
+                "tolerances.loss_match_abs",
+                "missing"
+                if loss_difference is None
+                else ("pass" if loss_difference <= threshold else "fail"),
+                measured=loss_difference,
+                threshold=threshold,
+                reason="sum(caller-normalized losses) versus 1-R-T",
+            )
+        )
     if "loss_match_rel" in tolerances:
         relative = (
-            None if loss_difference is None or loss_target in (None, 0)
+            None
+            if loss_difference is None or loss_target in (None, 0)
             else loss_difference / abs(float(loss_target))
         )
         threshold = float(tolerances["loss_match_rel"])
-        rules.append(_policy_rule("tolerances.loss_match_rel", "missing" if relative is None else ("pass" if relative <= threshold else "fail"), measured=relative, threshold=threshold, reason="sum(caller-normalized losses) versus 1-R-T"))
+        rules.append(
+            _policy_rule(
+                "tolerances.loss_match_rel",
+                "missing" if relative is None else ("pass" if relative <= threshold else "fail"),
+                measured=relative,
+                threshold=threshold,
+                reason="sum(caller-normalized losses) versus 1-R-T",
+            )
+        )
 
     polarization_policy = policy.get("polarization", {})
     if polarization_policy:
@@ -452,7 +567,14 @@ def evaluate_validation_policy(measurement: dict[str, Any], policy: dict[str, An
             measurement.get("polarization", {}).get("incident_reference") or {}
         ).get("config_id")
         if expected_reference is not None:
-            rules.append(_policy_rule("polarization.reference_config_id", "pass" if actual_reference == expected_reference else "fail", measured=actual_reference, threshold=expected_reference))
+            rules.append(
+                _policy_rule(
+                    "polarization.reference_config_id",
+                    "pass" if actual_reference == expected_reference else "fail",
+                    measured=actual_reference,
+                    threshold=expected_reference,
+                )
+            )
         target = polarization_policy.get("target_vector")
         maximum_cross = polarization_policy.get("max_cross_power_fraction")
         vector = _polarization_vector(measurement.get("polarization", {}))
@@ -460,30 +582,83 @@ def evaluate_validation_policy(measurement: dict[str, Any], policy: dict[str, An
             try:
                 target_vector = np.asarray(target, dtype=complex).reshape(-1)
                 measured_vector = np.asarray(vector, dtype=complex).reshape(-1) if vector else None
-                if measured_vector is None or measured_vector.size != target_vector.size or np.vdot(measured_vector, measured_vector).real == 0 or np.vdot(target_vector, target_vector).real == 0:
+                if (
+                    measured_vector is None
+                    or measured_vector.size != target_vector.size
+                    or np.vdot(measured_vector, measured_vector).real == 0
+                    or np.vdot(target_vector, target_vector).real == 0
+                ):
                     raise ValueError("vector unavailable")
-                target_vector = target_vector / math.sqrt(float(np.vdot(target_vector, target_vector).real))
-                cross = 1.0 - float(abs(np.vdot(target_vector, measured_vector)) ** 2 / np.vdot(measured_vector, measured_vector).real)
+                target_vector = target_vector / math.sqrt(
+                    float(np.vdot(target_vector, target_vector).real)
+                )
+                cross = 1.0 - float(
+                    abs(np.vdot(target_vector, measured_vector)) ** 2
+                    / np.vdot(measured_vector, measured_vector).real
+                )
                 cross = max(0.0, min(1.0, cross))
                 threshold = float(maximum_cross)
-                rules.append(_policy_rule("polarization.max_cross_power_fraction", "pass" if cross <= threshold else "fail", measured=cross, threshold=threshold))
+                rules.append(
+                    _policy_rule(
+                        "polarization.max_cross_power_fraction",
+                        "pass" if cross <= threshold else "fail",
+                        measured=cross,
+                        threshold=threshold,
+                    )
+                )
             except Exception:
-                rules.append(_policy_rule("polarization.max_cross_power_fraction", "missing", threshold=float(maximum_cross), reason="complex incident-reference vector unavailable"))
+                rules.append(
+                    _policy_rule(
+                        "polarization.max_cross_power_fraction",
+                        "missing",
+                        threshold=float(maximum_cross),
+                        reason="complex incident-reference vector unavailable",
+                    )
+                )
         if "max_ellipticity" in polarization_policy:
-            stokes = measurement.get("polarization", {}).get("incident_reference", {}).get("stokes_xy", {})
+            stokes = (
+                measurement.get("polarization", {})
+                .get("incident_reference", {})
+                .get("stokes_xy", {})
+            )
             s0, s3 = stokes.get("S0"), stokes.get("S3")
-            measured = abs(float(s3) / float(s0)) if s0 not in (None, 0) and s3 is not None else None
+            measured = (
+                abs(float(s3) / float(s0)) if s0 not in (None, 0) and s3 is not None else None
+            )
             threshold = float(polarization_policy["max_ellipticity"])
-            rules.append(_policy_rule("polarization.max_ellipticity", "missing" if measured is None else ("pass" if measured <= threshold else "fail"), measured=measured, threshold=threshold))
+            rules.append(
+                _policy_rule(
+                    "polarization.max_ellipticity",
+                    "missing"
+                    if measured is None
+                    else ("pass" if measured <= threshold else "fail"),
+                    measured=measured,
+                    threshold=threshold,
+                )
+            )
 
     mesh_policy = policy.get("mesh", {})
     if "minimum_elements" in mesh_policy:
         measured = measurement.get("mesh", {}).get("element_count")
         threshold = int(mesh_policy["minimum_elements"])
-        rules.append(_policy_rule("mesh.minimum_elements", "missing" if measured is None else ("pass" if measured >= threshold else "fail"), measured=measured, threshold=threshold))
+        rules.append(
+            _policy_rule(
+                "mesh.minimum_elements",
+                "missing" if measured is None else ("pass" if measured >= threshold else "fail"),
+                measured=measured,
+                threshold=threshold,
+            )
+        )
     if mesh_policy.get("require_unchanged"):
         measured = measurement.get("mesh", {}).get("unchanged_during_audit")
-        rules.append(_policy_rule("mesh.require_unchanged", "pass" if measured is True else ("fail" if measured is False else "missing"), measured=measured, threshold=True))
+        rules.append(
+            _policy_rule(
+                "mesh.require_unchanged",
+                "pass" if measured is True else ("fail" if measured is False else "missing"),
+                measured=measured,
+                threshold=True,
+            )
+        )
 
     outcomes = [rule["outcome"] for rule in rules]
     overall = (
@@ -495,7 +670,12 @@ def evaluate_validation_policy(measurement: dict[str, Any], policy: dict[str, An
         if "missing" in outcomes
         else "pass"
     )
-    return {"mode": "explicit_policy", "overall": overall, "rules": rules, "policy_sha256": _canonical_hash(policy)}
+    return {
+        "mode": "explicit_policy",
+        "overall": overall,
+        "rules": rules,
+        "policy_sha256": _canonical_hash(policy),
+    }
 
 
 def _component_statistics(values: np.ndarray) -> dict[str, Any]:
@@ -506,7 +686,7 @@ def _component_statistics(values: np.ndarray) -> dict[str, Any]:
     mean = complex(np.mean(values))
     return {
         "count": int(values.size),
-        "rms_abs": float(math.sqrt(float(np.mean(magnitudes ** 2)))),
+        "rms_abs": float(math.sqrt(float(np.mean(magnitudes**2)))),
         "median_abs": float(np.median(magnitudes)),
         "mean_abs": float(np.mean(magnitudes)),
         "complex_mean": _json_number(mean),
@@ -560,7 +740,7 @@ def _resolve_named_domains(component: Any, selection_tag: str) -> list[int]:
     for args in ((3,), tuple()):
         try:
             return sorted({int(value) for value in list(selection.entities(*args))})
-        except Exception:
+        except Exception:  # noqa: S112 - try each supported ClientAPI overload
             continue
     raise ValueError(f"named selection {selection_tag!r} has no readable domain entities")
 
@@ -575,8 +755,13 @@ def _sample_structure_field(
     named_selection: str | None,
 ) -> dict[str, Any]:
     expressions = [
-        f"{physics_tag}.Ex", f"{physics_tag}.Ey", f"{physics_tag}.Ez",
-        "x", "y", "z", "dom",
+        f"{physics_tag}.Ex",
+        f"{physics_tag}.Ey",
+        f"{physics_tag}.Ez",
+        "x",
+        "y",
+        "z",
+        "dom",
     ]
     values = model.evaluate(expressions)
     arrays = [np.asarray(value).reshape(-1) for value in values]
@@ -606,7 +791,10 @@ def _sample_structure_field(
         "complete": True,
         "evidence_level": "structure_total_field",
         "diagnostic_only": True,
-        "limitation": "The structure total field contains reflection and cannot verify the incident vector by itself.",
+        "limitation": (
+            "The structure total field contains reflection and cannot verify the incident "
+            "vector by itself."
+        ),
         "selection": {
             "named_selection": named_selection,
             "domain_ids": domain_ids,
@@ -618,14 +806,24 @@ def _sample_structure_field(
     }
 
 
-def _load_air_reference(path_text: str | None, expected_config_id: str | None) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+def _load_air_reference(
+    path_text: str | None, expected_config_id: str | None
+) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
     if path_text is None:
         return None, []
     warnings: list[dict[str, Any]] = []
-    payload, path, source_hash = _load_json_bounded(path_text, MAX_REFERENCE_BYTES, "air_reference_artifact_path")
+    payload, path, source_hash = _load_json_bounded(
+        path_text, MAX_REFERENCE_BYTES, "air_reference_artifact_path"
+    )
     config_id = payload.get("config_id")
     if expected_config_id is not None and config_id != expected_config_id:
-        warnings.append({"code": "air_reference_config_mismatch", "expected": expected_config_id, "actual": config_id})
+        warnings.append(
+            {
+                "code": "air_reference_config_mismatch",
+                "expected": expected_config_id,
+                "actual": config_id,
+            }
+        )
         return None, warnings
     stats = payload.get("component_statistics") or payload.get("field_statistics")
     if not isinstance(stats, dict):
@@ -639,6 +837,14 @@ def _load_air_reference(path_text: str | None, expected_config_id: str | None) -
         "stokes_xy": payload.get("stokes_xy", {}),
         "provenance": payload.get("provenance"),
     }
+    if (
+        _polarization_vector(
+            {"evidence_level": "incident_reference", "incident_reference": reference}
+        )
+        is None
+    ):
+        warnings.append({"code": "air_reference_identity_or_components_invalid"})
+        return None, warnings
     return reference, warnings
 
 
@@ -667,7 +873,12 @@ def _validate_loss_map(loss_map: list[dict[str, Any]] | None) -> list[dict[str, 
         label = item.get("label")
         expression = item.get("expression")
         domains = item.get("domains")
-        if not isinstance(label, str) or not label.strip() or not isinstance(expression, str) or not expression.strip():
+        if (
+            not isinstance(label, str)
+            or not label.strip()
+            or not isinstance(expression, str)
+            or not expression.strip()
+        ):
             raise ValueError(f"loss_map[{index}] requires non-empty label and expression")
         if len(label) > 128 or len(expression) > 1024:
             raise ValueError(f"loss_map[{index}] label/expression exceeds the bounded length")
@@ -683,13 +894,15 @@ def _validate_loss_map(loss_map: list[dict[str, Any]] | None) -> list[dict[str, 
             or len(normalization_expression) > 1024
         ):
             raise ValueError(f"loss_map[{index}].normalization_expression is invalid")
-        result.append({
-            "label": label,
-            "expression": expression,
-            "domains": normalized_domains,
-            "unit": item.get("unit"),
-            "normalization_expression": normalization_expression,
-        })
+        result.append(
+            {
+                "label": label,
+                "expression": expression,
+                "domains": normalized_domains,
+                "unit": item.get("unit"),
+                "normalization_expression": normalization_expression,
+            }
+        )
     return result
 
 
@@ -793,42 +1006,42 @@ def _validate_internal_absorption(value: dict[str, Any] | None) -> dict[str, Any
 def _evaluate_declared_plane_flux(model: Any, declaration: dict[str, Any]) -> dict[str, Any]:
     evaluated: dict[str, Any] = {}
     for name, plane in declaration.items():
-        value = _single_complex(model.evaluate(plane["expression"]), plane["expression"])
-        evaluated[name] = {**plane, "raw_power_w": float(value.real)}
+        value = _single_real(model.evaluate(plane["expression"]), plane["expression"])
+        evaluated[name] = {**plane, "raw_power_w": value}
     return normalize_declared_plane_flux(evaluated)
 
 
 def _evaluate_internal_absorption(model: Any, declaration: dict[str, Any]) -> dict[str, Any]:
-    cross_value = _single_complex(
+    cross_value = _single_real(
         model.evaluate(declaration["cross_section_expression"]),
         declaration["cross_section_expression"],
     )
-    area_value = _single_complex(
+    area_value = _single_real(
         model.evaluate(declaration["unit_cell_area_expression"]),
         declaration["unit_cell_area_expression"],
     )
-    volume_value = _single_complex(
+    volume_value = _single_real(
         model.evaluate(declaration["volume_loss_expression"]),
         declaration["volume_loss_expression"],
     )
-    incident_value = _single_complex(
+    incident_value = _single_real(
         model.evaluate(declaration["incident_power_expression"]),
         declaration["incident_power_expression"],
     )
-    incident_power = float(incident_value.real) * declaration["incident_power_sign"]
+    incident_power = incident_value * declaration["incident_power_sign"]
     return normalize_internal_absorption_consistency(
         {
             "expression": declaration["cross_section_expression"],
-            "value_m2": float(cross_value.real),
+            "value_m2": cross_value,
             "unit": declaration["cross_section_unit"],
             "unit_cell_area_expression": declaration["unit_cell_area_expression"],
-            "unit_cell_area_m2": float(area_value.real),
+            "unit_cell_area_m2": area_value,
             "source_feature": declaration["source_feature"],
         },
         {
             "expression": declaration["volume_loss_expression"],
             "selection_ids": declaration["volume_loss_selection_ids"],
-            "value_w": float(volume_value.real),
+            "value_w": volume_value,
             "incident_power_w": incident_power,
             "unit": declaration["volume_loss_unit"],
         },
@@ -878,12 +1091,18 @@ def _run_wave_optics_point_audit_impl(
         raise ValueError("study_step_property must be one exact property name")
     if not isinstance(config_id, str) or not config_id.strip() or len(config_id) > 128:
         raise ValueError("config_id must be non-empty and at most 128 characters")
-    if not isinstance(expected_source_sha256, str) or not re.fullmatch(r"[0-9A-Fa-f]{64}", expected_source_sha256.strip()):
+    if not isinstance(expected_source_sha256, str) or not re.fullmatch(
+        r"[0-9A-Fa-f]{64}", expected_source_sha256.strip()
+    ):
         raise ValueError("expected_source_sha256 must be exactly 64 hexadecimal characters")
     wavelength_value = float(wavelength_value)
     if not math.isfinite(wavelength_value) or wavelength_value <= 0:
         raise ValueError("wavelength_value must be finite and positive")
-    if not isinstance(wavelength_unit, str) or not wavelength_unit.strip() or len(wavelength_unit) > 32:
+    if (
+        not isinstance(wavelength_unit, str)
+        or not wavelength_unit.strip()
+        or len(wavelength_unit) > 32
+    ):
         raise ValueError("wavelength_unit must be non-empty")
     coordinate_range = _validate_coordinate_range(top_air_coordinate_range)
     explicit_domains = sorted({int(value) for value in (top_air_domain_ids or [])})
@@ -895,7 +1114,11 @@ def _run_wave_optics_point_audit_impl(
         raise ValueError("provide top_air_selection or top_air_domain_ids")
     if top_air_selection is not None:
         _validate_tag(top_air_selection, "top_air_selection")
-    for name, expression in (("r_expression", r_expression), ("t_expression", t_expression), ("a_expression", a_expression)):
+    for name, expression in (
+        ("r_expression", r_expression),
+        ("t_expression", t_expression),
+        ("a_expression", a_expression),
+    ):
         if expression is not None and (
             not isinstance(expression, str) or not expression.strip() or len(expression) > 1024
         ):
@@ -909,10 +1132,10 @@ def _run_wave_optics_point_audit_impl(
         allowed_power_provenance = {"normalization", "R_direction", "T_direction", "A_definition"}
         unknown_power_provenance = sorted(set(power_provenance) - allowed_power_provenance)
         if unknown_power_provenance:
-            raise ValueError(f"power_provenance contains unknown fields: {unknown_power_provenance}")
-        power_provenance = {
-            key: str(value)[:500] for key, value in power_provenance.items()
-        }
+            raise ValueError(
+                f"power_provenance contains unknown fields: {unknown_power_provenance}"
+            )
+        power_provenance = {key: str(value)[:500] for key, value in power_provenance.items()}
     else:
         power_provenance = {}
     policy, policy_provenance = _load_policy(validation_policy, validation_policy_path)
@@ -932,14 +1155,25 @@ def _run_wave_optics_point_audit_impl(
             "success": True,
             "audit_status": "integrity_blocked",
             "assessment": {"mode": "evidence_only", "project_verdict": None},
-            "integrity_errors": [{"code": "source_hash_mismatch", "expected": expected_hash, "actual": source_hash_before}],
+            "integrity_errors": [
+                {
+                    "code": "source_hash_mismatch",
+                    "expected": expected_hash,
+                    "actual": source_hash_before,
+                }
+            ],
         }
     if ownership_preflight is not None and not ownership_preflight.get("ready"):
         return {
             "success": True,
             "audit_status": "integrity_blocked",
             "assessment": {"mode": "evidence_only", "project_verdict": None},
-            "integrity_errors": [{"code": "solver_ownership_blocked", "blockers": ownership_preflight.get("blockers", [])}],
+            "integrity_errors": [
+                {
+                    "code": "solver_ownership_blocked",
+                    "blockers": ownership_preflight.get("blockers", []),
+                }
+            ],
         }
 
     preflight = collect_wave_optics_preflight(
@@ -964,7 +1198,9 @@ def _run_wave_optics_point_audit_impl(
 
     jm = model.java
     component = jm.component(component_tag)
-    if component is None or physics_tag not in [str(value) for value in list(component.physics().tags())]:
+    if component is None or physics_tag not in [
+        str(value) for value in list(component.physics().tags())
+    ]:
         raise ValueError("requested component/physics does not exist")
     if study_tag not in [str(value) for value in list(jm.study().tags())]:
         raise ValueError("requested study does not exist")
@@ -991,10 +1227,18 @@ def _run_wave_optics_point_audit_impl(
         "study_tag": study_tag,
         "study_step_tag": study_step_tag,
         "study_step_property": study_step_property,
-        "wavelength": {"value": wavelength_value, "unit": wavelength_unit, "parameter": wavelength_parameter},
+        "wavelength": {
+            "value": wavelength_value,
+            "unit": wavelength_unit,
+            "parameter": wavelength_parameter,
+        },
         "power_expressions": power_expressions,
         "power_provenance": power_provenance,
-        "top_air": {"selection": top_air_selection, "domains": domains, "coordinate_range": coordinate_range},
+        "top_air": {
+            "selection": top_air_selection,
+            "domains": domains,
+            "coordinate_range": coordinate_range,
+        },
         "loss_map": losses,
         "declared_plane_flux": flux_declaration,
         "internal_absorption": internal_absorption_declaration,
@@ -1050,10 +1294,17 @@ def _run_wave_optics_point_audit_impl(
                 "T": power_provenance.get("T_direction", "not_declared"),
             },
             "A_definition": power_provenance.get("A_definition", "not_declared"),
-            "limitation": "The audit preserves caller-declared sign/normalization provenance and does not infer it from variable names.",
+            "limitation": (
+                "The audit preserves caller-declared sign/normalization provenance and "
+                "does not infer it from variable names."
+            ),
         },
     }
-    wavelength: dict[str, Any] = {"requested_value": wavelength_value, "requested_unit": wavelength_unit, "parameter_expression": parameter_value}
+    wavelength: dict[str, Any] = {
+        "requested_value": wavelength_value,
+        "requested_unit": wavelength_unit,
+        "parameter_expression": parameter_value,
+    }
     field = None
     loss_result: list[dict[str, Any]] = []
     declared_flux_result: dict[str, Any] = {"state": "not_requested"}
@@ -1064,12 +1315,21 @@ def _run_wave_optics_point_audit_impl(
         for label, expression in power_expressions.items():
             try:
                 value = _single_complex(model.evaluate(expression), expression)
-                power[label] = float(value.real)
                 power[f"{label}_raw"] = _json_number(value)
+                power[label] = _single_real(value, expression)
             except FloatingPointError as exc:
-                integrity_errors.append({"code": "nonfinite_power", "quantity": label, "error": str(exc)})
+                integrity_errors.append(
+                    {"code": "nonfinite_power", "quantity": label, "error": str(exc)}
+                )
             except Exception as exc:
-                measurement_errors.append({"code": "power_expression_unavailable", "quantity": label, "expression": expression, "error": str(exc)[:500]})
+                measurement_errors.append(
+                    {
+                        "code": "power_expression_unavailable",
+                        "quantity": label,
+                        "expression": expression,
+                        "error": str(exc)[:500],
+                    }
+                )
         if all(name in power for name in ("R", "T", "A")):
             power["complete"] = True
             power["R_plus_T_plus_A"] = power["R"] + power["T"] + power["A"]
@@ -1079,45 +1339,66 @@ def _run_wave_optics_point_audit_impl(
         else:
             power["complete"] = False
         try:
-            requested_m = _single_complex(model.evaluate(parameter_value), parameter_value)
+            requested_m = _single_real(model.evaluate(parameter_value), parameter_value)
             controls = model.evaluate([wavelength_parameter, f"c_const/{physics_tag}.freq"])
-            evaluated_parameter = _single_complex(controls[0], wavelength_parameter)
-            solved_frequency_wavelength = _single_complex(controls[1], f"c_const/{physics_tag}.freq")
-            difference = float(evaluated_parameter.real - solved_frequency_wavelength.real)
-            wavelength.update({
-                "complete": True,
-                "requested_m": float(requested_m.real),
-                "evaluated_parameter_m": float(evaluated_parameter.real),
-                "solved_frequency_wavelength_m": float(solved_frequency_wavelength.real),
-                "signed_difference_m": difference,
-                "absolute_difference_m": abs(difference),
-                "relative_difference": None if solved_frequency_wavelength.real == 0 else abs(difference) / abs(float(solved_frequency_wavelength.real)),
-                "raw": {
-                    "evaluated_parameter": _json_number(evaluated_parameter),
-                    "solved_frequency_wavelength": _json_number(solved_frequency_wavelength),
-                },
-            })
+            evaluated_raw = _single_complex(controls[0], wavelength_parameter)
+            solved_raw = _single_complex(controls[1], f"c_const/{physics_tag}.freq")
+            evaluated_parameter = _single_real(evaluated_raw, wavelength_parameter)
+            solved_frequency_wavelength = _single_real(solved_raw, f"c_const/{physics_tag}.freq")
+            difference = evaluated_parameter - solved_frequency_wavelength
+            wavelength.update(
+                {
+                    "complete": True,
+                    "requested_m": requested_m,
+                    "evaluated_parameter_m": evaluated_parameter,
+                    "solved_frequency_wavelength_m": solved_frequency_wavelength,
+                    "signed_difference_m": difference,
+                    "absolute_difference_m": abs(difference),
+                    "relative_difference": (
+                        None
+                        if solved_frequency_wavelength == 0
+                        else abs(difference) / abs(solved_frequency_wavelength)
+                    ),
+                    "raw": {
+                        "evaluated_parameter": _json_number(evaluated_raw),
+                        "solved_frequency_wavelength": _json_number(solved_raw),
+                    },
+                }
+            )
         except FloatingPointError as exc:
             integrity_errors.append({"code": "nonfinite_wavelength_control", "error": str(exc)})
         except Exception as exc:
             wavelength["complete"] = False
-            measurement_errors.append({"code": "wavelength_controls_unavailable", "error": str(exc)[:500]})
+            measurement_errors.append(
+                {"code": "wavelength_controls_unavailable", "error": str(exc)[:500]}
+            )
         for item in losses:
             record = dict(item)
             try:
                 value = _single_complex(model.evaluate(item["expression"]), item["expression"])
                 record["raw"] = _json_number(value)
-                record["value"] = float(value.real)
+                record["value"] = _single_real(value, item["expression"])
                 normalization = item.get("normalization_expression")
                 if normalization:
                     normalizer = _single_complex(model.evaluate(normalization), normalization)
                     record["normalization_raw"] = _json_number(normalizer)
-                    record["normalized_value"] = None if normalizer.real == 0 else float(value.real / normalizer.real)
+                    normalizer_real = _single_real(normalizer, normalization)
+                    record["normalized_value"] = (
+                        None if normalizer_real == 0 else record["value"] / normalizer_real
+                    )
             except FloatingPointError as exc:
-                integrity_errors.append({"code": "nonfinite_loss", "label": item["label"], "error": str(exc)})
+                integrity_errors.append(
+                    {"code": "nonfinite_loss", "label": item["label"], "error": str(exc)}
+                )
             except Exception as exc:
                 record["error"] = str(exc)[:500]
-                measurement_errors.append({"code": "loss_expression_unavailable", "label": item["label"], "error": str(exc)[:500]})
+                measurement_errors.append(
+                    {
+                        "code": "loss_expression_unavailable",
+                        "label": item["label"],
+                        "error": str(exc)[:500],
+                    }
+                )
             loss_result.append(record)
         if flux_declaration is not None:
             try:
@@ -1128,7 +1409,9 @@ def _run_wave_optics_point_audit_impl(
                     "declaration": flux_declaration,
                     "error": str(exc),
                 }
-                integrity_errors.append({"code": "nonfinite_declared_plane_flux", "error": str(exc)})
+                integrity_errors.append(
+                    {"code": "nonfinite_declared_plane_flux", "error": str(exc)}
+                )
             except Exception as exc:
                 declared_flux_result = {
                     "state": "unknown",
@@ -1150,7 +1433,9 @@ def _run_wave_optics_point_audit_impl(
                     "error": str(exc),
                     "physical_flux_closure_eligible": False,
                 }
-                integrity_errors.append({"code": "nonfinite_internal_absorption", "error": str(exc)})
+                integrity_errors.append(
+                    {"code": "nonfinite_internal_absorption", "error": str(exc)}
+                )
             except Exception as exc:
                 internal_absorption_result = {
                     "state": "unknown",
@@ -1173,15 +1458,27 @@ def _run_wave_optics_point_audit_impl(
         except FloatingPointError as exc:
             integrity_errors.append({"code": "nonfinite_field", "error": str(exc)})
         except Exception as exc:
-            measurement_errors.append({"code": "top_air_field_unavailable", "error": str(exc)[:500]})
+            measurement_errors.append(
+                {"code": "top_air_field_unavailable", "error": str(exc)[:500]}
+            )
 
-    evidence_level = "incident_reference" if air_reference is not None else ("structure_total_field" if field else "label_only")
+    evidence_level = (
+        "incident_reference"
+        if air_reference is not None
+        else ("structure_total_field" if field else "label_only")
+    )
     mesh_after = _mesh_state(component)
-    mesh = {**mesh_after, "before": mesh_before, "unchanged_during_audit": mesh_before == mesh_after}
+    mesh = {
+        **mesh_after,
+        "before": mesh_before,
+        "unchanged_during_audit": mesh_before == mesh_after,
+    }
     source_hash_after = _sha256_file(source_path)
     source_unchanged = source_hash_after == source_hash_before
     if not source_unchanged:
-        integrity_errors.append({"code": "source_hash_drift", "before": source_hash_before, "after": source_hash_after})
+        integrity_errors.append(
+            {"code": "source_hash_drift", "before": source_hash_before, "after": source_hash_after}
+        )
     ownership_after = ownership_manager.status(session_state=session_state or {})
     if ownership_after.get("collision"):
         integrity_errors.append({"code": "cleanup_ownership_collision"})
@@ -1218,7 +1515,13 @@ def _run_wave_optics_point_audit_impl(
         "power": power,
         "declared_plane_flux": declared_flux_result,
         "internal_absorption_consistency": internal_absorption_result,
-        "losses": {"items": loss_result, "normalization_limitation": "Only caller-declared normalization expressions are used; no whole-model loss integration is inferred."},
+        "losses": {
+            "items": loss_result,
+            "normalization_limitation": (
+                "Only caller-declared normalization expressions are used; no whole-model "
+                "loss integration is inferred."
+            ),
+        },
         "polarization": {
             "evidence_level": evidence_level,
             "structure_total_field": field,
@@ -1232,7 +1535,9 @@ def _run_wave_optics_point_audit_impl(
                 "collision": bool(ownership_after.get("collision")),
                 "lease": ownership_after.get("lease"),
             },
-            "cleanup": "MCP session retained; ownership remains explicitly tracked by derived geometry.",
+            "cleanup": (
+                "MCP session retained; ownership remains explicitly tracked by derived geometry."
+            ),
         },
         "measurement_errors": measurement_errors,
         "integrity_errors": integrity_errors,
@@ -1253,7 +1558,11 @@ def _run_wave_optics_point_audit_impl(
     else:
         audit_status = "measurement_complete"
     if policy is None:
-        assessment = {"mode": "evidence_only", "project_verdict": None, "long_sweep_recommendation": None}
+        assessment = {
+            "mode": "evidence_only",
+            "project_verdict": None,
+            "long_sweep_recommendation": None,
+        }
     elif policy.get("schema_name") == VALIDATION_POLICY_SCHEMA_NAME:
         policy_evaluation = evaluate_physical_evidence_policy(physical_evidence, policy)
         assessment = {
@@ -1282,7 +1591,9 @@ def _run_wave_optics_point_audit_impl(
         "requested_wavelength_m": wavelength.get("requested_m"),
         "evaluated_wavelength_m": wavelength.get("evaluated_parameter_m"),
         "solved_frequency_wavelength_m": wavelength.get("solved_frequency_wavelength_m"),
-        "R": power.get("R"), "T": power.get("T"), "A": power.get("A"),
+        "R": power.get("R"),
+        "T": power.get("T"),
+        "A": power.get("A"),
         "R_plus_T_plus_A": power.get("R_plus_T_plus_A"),
         "one_minus_R_minus_T": power.get("one_minus_R_minus_T"),
         "polarization_evidence_level": evidence_level,
@@ -1323,7 +1634,11 @@ def _run_wave_optics_point_audit_impl(
         "assessment": assessment,
         "measurement": measurement,
         "physical_evidence": physical_evidence,
-        "artifacts": {"directory": str(directory), "csv": str(csv_path), "manifest": str(manifest_path)},
+        "artifacts": {
+            "directory": str(directory),
+            "csv": str(csv_path),
+            "manifest": str(manifest_path),
+        },
     }
 
 
@@ -1351,9 +1666,13 @@ def _replace_clone_materials_with_air(
     component = clone.java.component(component_tag)
     materials = component.material()
     before = sorted(str(value) for value in list(materials.tags()))
-    expected = sorted(_validate_tag(value, "expected_material_tags item") for value in expected_material_tags)
+    expected = sorted(
+        _validate_tag(value, "expected_material_tags item") for value in expected_material_tags
+    )
     if before != expected:
-        raise ValueError(f"clone material tags differ from the exact caller declaration: {before} != {expected}")
+        raise ValueError(
+            f"clone material tags differ from the exact caller declaration: {before} != {expected}"
+        )
     for tag in before:
         materials.remove(tag)
     if list(materials.tags()):
@@ -1369,7 +1688,9 @@ def _replace_clone_materials_with_air(
         raise ValueError(f"all-air clone material readback is unexpected: {after}")
     selected = sorted(int(value) for value in list(air.selection().entities()))
     if selected != all_domain_ids:
-        raise ValueError(f"all-air material selection readback differs: {selected} != {all_domain_ids}")
+        raise ValueError(
+            f"all-air material selection readback differs: {selected} != {all_domain_ids}"
+        )
     return {
         "method": "all_air_clone",
         "removed_material_tags": before,
@@ -1446,20 +1767,28 @@ def run_wave_optics_reference_audit(
     domains = sorted({int(value) for value in all_domain_ids})
     top_domains = sorted({int(value) for value in top_air_domain_ids})
     if not domains or not top_domains or any(value <= 0 for value in domains + top_domains):
-        raise ValueError("all_domain_ids and top_air_domain_ids must be non-empty positive integer lists")
+        raise ValueError(
+            "all_domain_ids and top_air_domain_ids must be non-empty positive integer lists"
+        )
     if not set(top_domains).issubset(domains):
         raise ValueError("top_air_domain_ids must be a subset of all_domain_ids")
     wavelength_value = float(wavelength_value)
     if not math.isfinite(wavelength_value) or wavelength_value <= 0.0:
         raise ValueError("wavelength_value must be finite and positive")
-    if not isinstance(wavelength_unit, str) or not wavelength_unit.strip() or len(wavelength_unit) > 32:
+    if (
+        not isinstance(wavelength_unit, str)
+        or not wavelength_unit.strip()
+        or len(wavelength_unit) > 32
+    ):
         raise ValueError("wavelength_unit must be non-empty")
     if not isinstance(config_id, str) or not config_id.strip() or len(config_id) > 128:
         raise ValueError("config_id must be non-empty and at most 128 characters")
     expected_hash = expected_source_sha256.strip().lower()
     if not re.fullmatch(r"[0-9a-f]{64}", expected_hash):
         raise ValueError("expected_source_sha256 must be exactly 64 hexadecimal characters")
-    policy = validate_validation_policy(validation_policy) if validation_policy is not None else None
+    policy = (
+        validate_validation_policy(validation_policy) if validation_policy is not None else None
+    )
     root = _validate_ascii_dir(artifact_dir)
     root.mkdir(parents=True, exist_ok=True)
     source_path = Path(str(source_model.file())).resolve()
@@ -1468,7 +1797,13 @@ def run_wave_optics_reference_audit(
         return {
             "success": True,
             "audit_status": "integrity_blocked",
-            "integrity_errors": [{"code": "source_hash_mismatch", "expected": expected_hash, "actual": source_hash_before}],
+            "integrity_errors": [
+                {
+                    "code": "source_hash_mismatch",
+                    "expected": expected_hash,
+                    "actual": source_hash_before,
+                }
+            ],
         }
     r_expression = r_expression or f"{physics_tag}.Rtotal"
     t_expression = t_expression or f"{physics_tag}.Ttotal"
@@ -1481,7 +1816,11 @@ def run_wave_optics_reference_audit(
         "study_tag": study_tag,
         "study_step_tag": study_step_tag,
         "study_step_property": study_step_property,
-        "wavelength": {"value": wavelength_value, "unit": wavelength_unit, "parameter": wavelength_parameter},
+        "wavelength": {
+            "value": wavelength_value,
+            "unit": wavelength_unit,
+            "parameter": wavelength_parameter,
+        },
         "reference_method": reference_method,
         "expected_material_tags": sorted(expected_material_tags),
         "all_domain_ids": domains,
@@ -1550,12 +1889,12 @@ def run_wave_optics_reference_audit(
         jm.param().set(wavelength_parameter, parameter_value)
         study.feature().get(study_step_tag).set(study_step_property, wavelength_parameter)
         study.run()
-        requested = _single_complex(clone.evaluate(parameter_value), parameter_value)
+        requested = _single_real(clone.evaluate(parameter_value), parameter_value)
         controls = clone.evaluate([wavelength_parameter, f"c_const/{physics_tag}.freq"])
-        evaluated = _single_complex(controls[0], wavelength_parameter)
-        solved = _single_complex(controls[1], f"c_const/{physics_tag}.freq")
-        r_value = float(_single_complex(clone.evaluate(r_expression), r_expression).real)
-        t_value = float(_single_complex(clone.evaluate(t_expression), t_expression).real)
+        evaluated = _single_real(controls[0], wavelength_parameter)
+        solved = _single_real(controls[1], f"c_const/{physics_tag}.freq")
+        r_value = _single_real(clone.evaluate(r_expression), r_expression)
+        t_value = _single_real(clone.evaluate(t_expression), t_expression)
         field = _sample_structure_field(
             clone,
             component=component,
@@ -1574,9 +1913,9 @@ def run_wave_optics_reference_audit(
             "config_id": config_id,
             "method": reference_method,
             "method_valid": True,
-            "requested_wavelength_m": float(requested.real),
-            "evaluated_wavelength_m": float(evaluated.real),
-            "solved_frequency_wavelength_m": float(solved.real),
+            "requested_wavelength_m": requested,
+            "evaluated_wavelength_m": evaluated,
+            "solved_frequency_wavelength_m": solved,
             "port_settings": {
                 "ports": preflight.get("ports"),
                 "incidence": preflight.get("incidence"),
@@ -1627,29 +1966,46 @@ def run_wave_optics_reference_audit(
                 cleanup["client_model_removed"] and cleanup["backing_file_removed"]
             )
         if clone is not None and not cleanup["removed"]:
-            integrity_errors.append({"code": "reference_clone_cleanup_unproved", "cleanup": cleanup})
+            integrity_errors.append(
+                {"code": "reference_clone_cleanup_unproved", "cleanup": cleanup}
+            )
 
     source_hash_after = _sha256_file(source_path)
     source_unchanged = source_hash_after == source_hash_before
     if not source_unchanged:
-        integrity_errors.append({"code": "source_hash_drift", "before": source_hash_before, "after": source_hash_after})
-    method_valid = bool(reference and reference.get("method_valid") and material_evidence and cleanup["removed"] and source_unchanged)
+        integrity_errors.append(
+            {"code": "source_hash_drift", "before": source_hash_before, "after": source_hash_after}
+        )
+    method_valid = bool(
+        reference
+        and reference.get("method_valid")
+        and material_evidence
+        and cleanup["removed"]
+        and source_unchanged
+    )
     evidence = {
         "polarization.reference_air_method_valid": (
             {"state": "measured", "value": method_valid, "source": "wave_optics_reference_audit"}
         ),
         "polarization.target_to_transverse_ratio": (
-            {"state": "measured", "value": reference["target_to_transverse_ratio"], "unit": "1", "source": "wave_optics_reference_audit"}
+            {
+                "state": "measured",
+                "value": reference["target_to_transverse_ratio"],
+                "unit": "1",
+                "source": "wave_optics_reference_audit",
+            }
             if reference is not None
             else {"state": "unknown", "limitations": ["Reference field sampling was incomplete."]}
         ),
         "reference_air.R": (
             {"state": "measured", "value": reference["R"], "unit": "1", "expression": r_expression}
-            if reference is not None else {"state": "unknown"}
+            if reference is not None
+            else {"state": "unknown"}
         ),
         "reference_air.T": (
             {"state": "measured", "value": reference["T"], "unit": "1", "expression": t_expression}
-            if reference is not None else {"state": "unknown"}
+            if reference is not None
+            else {"state": "unknown"}
         ),
         "integrity.source_unchanged": {"state": "measured", "value": source_unchanged},
         "integrity.clone_cleanup_proved": {"state": "measured", "value": cleanup["removed"]},
@@ -1660,17 +2016,34 @@ def run_wave_optics_reference_audit(
             "schema_version": PHYSICAL_EVIDENCE_SCHEMA_VERSION,
             "artifact_type": "wave_optics_reference_audit",
             "producer": {"tool": "wave_optics_reference_audit", "tool_schema_version": "1"},
-            "identity": {"config_id": config_id, "config_sha256": config_sha256, "source_sha256": source_hash_before},
-            "model": {"component_tag": component_tag, "physics_tag": physics_tag, "study_tag": study_tag, "study_step_tag": study_step_tag},
+            "identity": {
+                "config_id": config_id,
+                "config_sha256": config_sha256,
+                "source_sha256": source_hash_before,
+            },
+            "model": {
+                "component_tag": component_tag,
+                "physics_tag": physics_tag,
+                "study_tag": study_tag,
+                "study_step_tag": study_step_tag,
+            },
             "evidence": evidence,
-            "limitations": ["Physical classification requires caller policy; the all-air clone does not validate the target structure."],
+            "limitations": [
+                "Physical classification requires caller policy; the all-air clone does not "
+                "validate the target structure."
+            ],
         }
     )
     assessment = (
         evaluate_physical_evidence_policy(physical_evidence, policy)
-        if policy is not None else {"mode": "evidence_only", "overall": None}
+        if policy is not None
+        else {"mode": "evidence_only", "overall": None}
     )
-    audit_status = "integrity_blocked" if integrity_errors else ("measurement_partial" if measurement_errors else "measurement_complete")
+    audit_status = (
+        "integrity_blocked"
+        if integrity_errors
+        else ("measurement_partial" if measurement_errors else "measurement_complete")
+    )
     manifest = {
         "schema_version": "1",
         "audit_status": audit_status,
@@ -1734,7 +2107,7 @@ def register_wave_optics_audit_tools(mcp: FastMCP) -> None:
         validation_policy: Optional[ValidationPolicy | StrictValidationPolicy] = None,
         validation_policy_path: Optional[str] = None,
     ) -> dict[str, Any]:
-        """Solve one wavelength, journal raw evidence, then optionally evaluate a declared policy."""
+        """Solve one wavelength and optionally evaluate a declared policy."""
         if not isinstance(model_name, str) or not model_name.strip():
             return {"success": False, "error": "model_name must be exact and non-empty"}
         model = session_manager.get_model(model_name)
@@ -1790,7 +2163,10 @@ def register_wave_optics_audit_tools(mcp: FastMCP) -> None:
         except (ValueError, TypeError, FileNotFoundError, json.JSONDecodeError) as exc:
             return {"success": False, "error": str(exc)}
         except Exception as exc:
-            return {"success": False, "error": f"Wave Optics point audit failed safely: {str(exc)[:1000]}"}
+            return {
+                "success": False,
+                "error": f"Wave Optics point audit failed safely: {str(exc)[:1000]}",
+            }
 
     @mcp.tool()
     def wave_optics_reference_audit(
@@ -1870,7 +2246,10 @@ def register_wave_optics_audit_tools(mcp: FastMCP) -> None:
         except (ValueError, TypeError, FileNotFoundError, json.JSONDecodeError) as exc:
             return {"success": False, "error": str(exc)}
         except Exception as exc:
-            return {"success": False, "error": f"Wave Optics reference audit failed safely: {str(exc)[:1000]}"}
+            return {
+                "success": False,
+                "error": f"Wave Optics reference audit failed safely: {str(exc)[:1000]}",
+            }
 
 
 __all__ = [

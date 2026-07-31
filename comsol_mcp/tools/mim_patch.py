@@ -23,6 +23,7 @@ from .session import session_manager
 # helpers
 # ---------------------------------------------------------------------------
 
+
 def _get_geom_node(model, geometry_name: Optional[str], component_name: str = "comp1"):
     """Return (geom_node, error)."""
     jm = model.java
@@ -48,6 +49,7 @@ def _get_geom_node(model, geometry_name: Optional[str], component_name: str = "c
 def _probe_boundaries(geom):
     """Probe all boundaries: returns (list_of_dicts, n_domains, n_boundaries)."""
     import jpype as _jp
+
     n_bnd = geom.getNBoundaries()
     n_dom = geom.getNDomains()
     sdim = int(geom.getSDim())
@@ -98,7 +100,7 @@ def _identify_side_pairs(boundaries, P_val=None, bbox=None, tol=1e-12):
     if bbox is None:
         # Fall back to pure-normal classification (legacy behaviour, no filtering)
         bbox = None
-    xmin, xmax, ymin, ymax, zmin, zmax = (list(bbox) if bbox is not None else [None]*6)
+    xmin, xmax, ymin, ymax, zmin, zmax = list(bbox) if bbox is not None else [None] * 6
 
     def _on_edge(coord, edge, tol):
         if edge is None:
@@ -127,9 +129,12 @@ def _identify_side_pairs(boundaries, P_val=None, bbox=None, tol=1e-12):
         elif ny > 0.5 and _on_edge(cy, ymax, tol):  # y=ymax cell side
             y_dst.append(b["boundary_number"])
     return {
-        "x_src": x_src, "x_dst": x_dst,
-        "y_src": y_src, "y_dst": y_dst,
-        "bottom": bottom, "top": top,
+        "x_src": x_src,
+        "x_dst": x_dst,
+        "y_src": y_src,
+        "y_dst": y_dst,
+        "bottom": bottom,
+        "top": top,
     }
 
 
@@ -152,7 +157,8 @@ def _list_pair_metadata(comp) -> list[dict[str, str]]:
 
 
 def _find_air_block_tag(geom) -> Optional[str]:
-    """Find the first tall Block-like feature and return its Python tag."""
+    """Find the unique largest tall Block-like feature and return its Python tag."""
+    candidates: list[tuple[float, str]] = []
     for raw_tag in list(geom.feature().tags()):
         tag = str(raw_tag)
         if tag == "fin":
@@ -161,11 +167,50 @@ def _find_air_block_tag(geom) -> Optional[str]:
         try:
             size_text = str(feature.getString("size"))
             size = [float(value) for value in size_text.replace(",", " ").split()]
-            if size[2] > 1e-7:
-                return tag
-        except Exception:
+            if len(size) == 3 and all(value > 0 for value in size) and size[2] > 1e-7:
+                candidates.append((size[0] * size[1] * size[2], tag))
+        except Exception:  # noqa: S110 - unsupported geometry features are not candidates
             pass
-    return None
+    if not candidates:
+        return None
+    candidates.sort(reverse=True)
+    if len(candidates) > 1 and candidates[0][0] == candidates[1][0]:
+        return None
+    return candidates[0][1]
+
+
+def _set_copy_face_selections(feature, source: Sequence[int], destination: Sequence[int]) -> None:
+    """Set an explicit directed CopyFace pair or fail before mesh execution."""
+    failures = []
+    for source_name, destination_name in (("source", "destination"), ("src", "dst")):
+        try:
+            feature.selection(source_name).set(source)
+            feature.selection(destination_name).set(destination)
+            return
+        except Exception as exc:
+            failures.append(type(exc).__name__)
+    raise RuntimeError(
+        "CopyFace does not expose a supported directed source/destination selection contract "
+        f"({', '.join(failures)})"
+    )
+
+
+def _normalize_spectral_rows(results, expression_count: int) -> list[list[object]]:
+    """Convert MPh expression-major evaluation output into wavelength rows."""
+    import numpy as np
+
+    if isinstance(expression_count, bool) or not isinstance(expression_count, int):
+        raise ValueError("expression_count must be a positive integer")
+    if expression_count < 1:
+        raise ValueError("expression_count must be a positive integer")
+    array = np.asarray(results)
+    if array.ndim == 1:
+        if array.size != expression_count:
+            raise ValueError("spectral evaluation shape does not match the requested expressions")
+        return [array.tolist()]
+    if array.ndim != 2 or array.shape[0] != expression_count:
+        raise ValueError("spectral evaluation must be expression-major with one row per expression")
+    return array.T.tolist()
 
 
 def _require_mim_selections(
@@ -186,9 +231,7 @@ def _require_mim_selections(
     }
     missing = [name for name, values in required.items() if not values]
     if missing:
-        raise ValueError(
-            "MIM patch build is missing required selections: " + ", ".join(missing)
-        )
+        raise ValueError("MIM patch build is missing required selections: " + ", ".join(missing))
 
 
 def _build_periodic_mesh(comp, side_pairs: dict):
@@ -215,26 +258,10 @@ def _build_periodic_mesh(comp, side_pairs: dict):
         fty.selection().set(y_src)
 
         cpx = mesh.feature().create("cp_x", "CopyFace")
-        try:
-            cpx.selection("source").set(x_src)
-            cpx.selection("destination").set(x_dst)
-        except Exception:
-            try:
-                cpx.selection("src").set(x_src)
-                cpx.selection("dst").set(x_dst)
-            except Exception:
-                cpx.selection().set(x_src + x_dst)
+        _set_copy_face_selections(cpx, x_src, x_dst)
 
         cpy = mesh.feature().create("cp_y", "CopyFace")
-        try:
-            cpy.selection("source").set(y_src)
-            cpy.selection("destination").set(y_dst)
-        except Exception:
-            try:
-                cpy.selection("src").set(y_src)
-                cpy.selection("dst").set(y_dst)
-            except Exception:
-                cpy.selection().set(y_src + y_dst)
+        _set_copy_face_selections(cpy, y_src, y_dst)
 
         mesh.feature().create("ft1", "FreeTet")
         mesh.run()
@@ -252,6 +279,7 @@ def _build_periodic_mesh(comp, side_pairs: dict):
 # ---------------------------------------------------------------------------
 # tool registration
 # ---------------------------------------------------------------------------
+
 
 def register_mim_patch_tools(mcp: FastMCP) -> None:
     """Register MIM patch metasurface tools."""
@@ -284,7 +312,10 @@ def register_mim_patch_tools(mcp: FastMCP) -> None:
         """
         model = session_manager.get_model(model_name)
         if model is None:
-            return {"success": False, "error": f"Model not found: {model_name or 'no current model'}"}
+            return {
+                "success": False,
+                "error": f"Model not found: {model_name or 'no current model'}",
+            }
 
         try:
             jm = model.java
@@ -308,7 +339,7 @@ def register_mim_patch_tools(mcp: FastMCP) -> None:
             # identify side pairs (filter by coordinate so interior faces with
             # ±x/±y normals — e.g. patch side faces at x=L/2 — are NOT misread as
             # the Floquet periodic cell sides).
-            bbox6 = (tuple(bbox) if bbox is not None else None)
+            bbox6 = tuple(bbox) if bbox is not None else None
             side_pairs = _identify_side_pairs(boundaries, bbox=bbox6)
 
             # identify interior boundaries (up!=0 and down!=0 → FormUnion interior)
@@ -379,7 +410,10 @@ def register_mim_patch_tools(mcp: FastMCP) -> None:
         """
         model = session_manager.get_model(model_name)
         if model is None:
-            return {"success": False, "error": f"Model not found: {model_name or 'no current model'}"}
+            return {
+                "success": False,
+                "error": f"Model not found: {model_name or 'no current model'}",
+            }
 
         try:
             jm = model.java
@@ -397,14 +431,19 @@ def register_mim_patch_tools(mcp: FastMCP) -> None:
             if not air_block_tag:
                 air_block_tag = _find_air_block_tag(geom)
             if not air_block_tag:
-                return {"success": False, "error": "Could not auto-detect air block tag. Please specify air_block_tag."}
+                return {
+                    "success": False,
+                    "error": "Could not auto-detect air block tag. Please specify air_block_tag.",
+                }
             report["air_block_tag"] = air_block_tag
 
             # ---- Step 2: add patch block ----
             b_pat = geom.feature().create(patch_tag, "Block")
             b_pat.set("size", [str(s) for s in patch_size])
             b_pat.set("pos", [str(p) for p in patch_pos])
-            report["steps"].append(f"Added patch block {patch_tag}: size={list(patch_size)}, pos={list(patch_pos)}")
+            report["steps"].append(
+                f"Added patch block {patch_tag}: size={list(patch_size)}, pos={list(patch_pos)}"
+            )
 
             # ---- Step 3: add Difference (keepsubtract=True) ----
             dif = geom.feature().create(diff_tag, "Difference")
@@ -414,7 +453,10 @@ def register_mim_patch_tools(mcp: FastMCP) -> None:
                 dif.set("keepsubtract", True)
             except Exception:
                 dif.set("keep", True)
-            report["steps"].append(f"Added Difference {diff_tag}: input={air_block_tag}, subtract={patch_tag}, keep=True")
+            report["steps"].append(
+                f"Added Difference {diff_tag}: input={air_block_tag}, "
+                f"subtract={patch_tag}, keep=True"
+            )
 
             # ---- Step 4: build geometry (FormUnion = default) ----
             try:
@@ -422,7 +464,7 @@ def register_mim_patch_tools(mcp: FastMCP) -> None:
                 action = fin.getString("action")
                 if action and action != "union":
                     fin.set("action", "union")
-            except Exception:
+            except Exception:  # noqa: S110 - optional legacy fin action
                 pass
             geom.run()
 
@@ -436,8 +478,11 @@ def register_mim_patch_tools(mcp: FastMCP) -> None:
             # Al2O3/air baseline becomes dom 1+2 (al2o3 keeps its domain tag).
             patch_dom = n_dom  # last domain added
             al2_dom = 1
-            patch_footprint = [b["boundary_number"] for b in boundaries
-                               if b.get("up_domain") == patch_dom and b.get("down_domain") == al2_dom]
+            patch_footprint = [
+                b["boundary_number"]
+                for b in boundaries
+                if b.get("up_domain") == patch_dom and b.get("down_domain") == al2_dom
+            ]
 
             # Filter side/top/bottom by BOTH normal AND coordinate. Without the
             # coordinate filter, the patch side/top faces (interior interfaces with
@@ -445,8 +490,14 @@ def register_mim_patch_tools(mcp: FastMCP) -> None:
             # break Floquet CopyFace mesh compatibility.
             try:
                 bbox_vals = [float(x) for x in geom.getBoundingBox()]
-                bbox6 = (bbox_vals[0], bbox_vals[1], bbox_vals[2],
-                         bbox_vals[3], bbox_vals[4], bbox_vals[5])
+                bbox6 = (
+                    bbox_vals[0],
+                    bbox_vals[1],
+                    bbox_vals[2],
+                    bbox_vals[3],
+                    bbox_vals[4],
+                    bbox_vals[5],
+                )
             except Exception:
                 bbox6 = None
             side_pairs = _identify_side_pairs(boundaries, bbox=bbox6)
@@ -473,9 +524,7 @@ def register_mim_patch_tools(mcp: FastMCP) -> None:
 
             ltr = ewfd.feature().get(layered_transition_tag)
             if ltr is None:
-                raise ValueError(
-                    f"LayeredTransition feature not found: {layered_transition_tag}"
-                )
+                raise ValueError(f"LayeredTransition feature not found: {layered_transition_tag}")
             ltr.selection().set(patch_footprint)
             report["steps"].append(
                 f"LayeredTransition {layered_transition_tag} → boundaries {patch_footprint}"
@@ -483,9 +532,7 @@ def register_mim_patch_tools(mcp: FastMCP) -> None:
 
             lib = ewfd.feature().get(layered_impedance_tag)
             if lib is None:
-                raise ValueError(
-                    f"LayeredImpedance feature not found: {layered_impedance_tag}"
-                )
+                raise ValueError(f"LayeredImpedance feature not found: {layered_impedance_tag}")
             lib.selection().set(bottom)
             report["steps"].append(
                 f"LayeredImpedance {layered_impedance_tag} → boundaries {bottom}"
@@ -495,9 +542,7 @@ def register_mim_patch_tools(mcp: FastMCP) -> None:
             if ps is None:
                 raise ValueError("PeriodicStructure feature not found: ps1")
             ps.selection("excitedPortSelection").set(top)
-            report["steps"].append(
-                f"PeriodicStructure excitedPort → boundaries {top}"
-            )
+            report["steps"].append(f"PeriodicStructure excitedPort → boundaries {top}")
 
             # ---- Step 7: assign air material to patch domain ----
             mat_list = comp.material()
@@ -507,9 +552,7 @@ def register_mim_patch_tools(mcp: FastMCP) -> None:
             cur = list(air_mat.selection().entities())
             if patch_dom not in cur:
                 air_mat.selection().set(cur + [patch_dom])
-            report["steps"].append(
-                f"Air material {air_material_tag} → domains {cur + [patch_dom]}"
-            )
+            report["steps"].append(f"Air material {air_material_tag} → domains {cur + [patch_dom]}")
 
             # ---- Step 8: create periodic-compatible mesh ----
             mesh, mesh_tag, preserved_mesh_tags = _build_periodic_mesh(
@@ -521,9 +564,11 @@ def register_mim_patch_tools(mcp: FastMCP) -> None:
             try:
                 report["mesh_elements"] = int(mesh.getNumElem())
                 report["mesh_vertices"] = int(mesh.getNumVertex())
-            except Exception:
+            except Exception:  # noqa: S110 - mesh counts are optional diagnostics
                 pass
-            report["steps"].append(f"Mesh: FreeTri+CopyFace+FreeTet → {report.get('mesh_elements', '?')} elements")
+            report["steps"].append(
+                f"Mesh: FreeTri+CopyFace+FreeTet → {report.get('mesh_elements', '?')} elements"
+            )
 
             return report
 
@@ -553,7 +598,10 @@ def register_mim_patch_tools(mcp: FastMCP) -> None:
         """
         model = session_manager.get_model(model_name)
         if model is None:
-            return {"success": False, "error": f"Model not found: {model_name or 'no current model'}"}
+            return {
+                "success": False,
+                "error": f"Model not found: {model_name or 'no current model'}",
+            }
 
         if expressions is None:
             expressions = ["ewfd.Rtotal", "ewfd.Ttotal", "ewfd.Atotal", wl_parameter]
@@ -568,7 +616,7 @@ def register_mim_patch_tools(mcp: FastMCP) -> None:
 
             # Build clean output
             spectral = []
-            for row in results:
+            for row in _normalize_spectral_rows(results, len(expr_list)):
                 vals = [float(v) for v in row]
                 entry = {}
                 for i, expr in enumerate(expr_list):

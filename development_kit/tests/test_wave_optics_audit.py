@@ -13,6 +13,7 @@ from src.tools.wave_optics_audit import (
     _load_air_reference,
     _load_policy,
     _replace_clone_materials_with_air,
+    _single_real,
     evaluate_validation_policy,
     run_wave_optics_point_audit,
     run_wave_optics_reference_audit,
@@ -110,6 +111,56 @@ def test_label_only_polarization_is_missing_only_when_policy_requires_incident_e
 
     assert result["overall"] == "missing"
     assert result["rules"][0]["measured"] is False
+
+
+def test_incomplete_incident_reference_cannot_elevate_evidence_level():
+    evidence = _measurement(
+        absorption=0.3,
+        closure=0.0,
+        evidence_level="incident_reference",
+    )
+    evidence["polarization"]["incident_reference"] = {
+        "component_statistics": {
+            "x": {"complex_mean": {"real": 1.0}},
+        }
+    }
+
+    result = evaluate_validation_policy(
+        evidence,
+        {"required_evidence": ["incident_polarization"]},
+    )
+
+    assert result["overall"] == "missing"
+    assert result["rules"][0]["measured"] is False
+
+
+@pytest.mark.parametrize("value", [1.0 + 0.1j, np.asarray([2.0 - 0.2j])])
+def test_materially_complex_scientific_scalars_are_rejected(value):
+    with pytest.raises(ValueError, match="materially complex"):
+        _single_real(value, "ewfd.Atotal")
+
+
+def test_numerical_imaginary_noise_is_tolerated_for_real_scientific_scalars():
+    assert _single_real(1.0 + 1e-14j, "ewfd.Atotal") == pytest.approx(1.0)
+
+
+def test_point_audit_does_not_publish_materially_complex_power_as_real(
+    tmp_path,
+    monkeypatch,
+):
+    result, _source = _run(
+        tmp_path,
+        monkeypatch,
+        absorption=0.3 + 0.1j,
+    )
+
+    assert result["audit_status"] == "measurement_partial"
+    assert result["measurement"]["power"]["complete"] is False
+    assert "A" not in result["measurement"]["power"]
+    assert any(
+        item["code"] == "power_expression_unavailable" and item["quantity"] == "A"
+        for item in result["measurement"]["measurement_errors"]
+    )
 
 
 def test_wavelength_differences_remain_raw_until_policy_supplies_tolerances():

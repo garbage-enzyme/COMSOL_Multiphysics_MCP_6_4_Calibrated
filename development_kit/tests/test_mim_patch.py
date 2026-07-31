@@ -7,7 +7,9 @@ from src.tools.mim_patch import (
     _build_periodic_mesh,
     _find_air_block_tag,
     _list_pair_metadata,
+    _normalize_spectral_rows,
     _require_mim_selections,
+    _set_copy_face_selections,
 )
 
 
@@ -81,6 +83,29 @@ def test_air_block_detection_returns_python_string_tag():
     assert type(tag) is str
 
 
+def test_air_block_detection_selects_the_largest_candidate_not_the_first_tall_one():
+    features = GeometryFeatures()
+    features.nodes = {
+        "small_tall": GeometryFeature("1e-6, 1e-6, 5e-7"),
+        "largest": GeometryFeature("2e-6, 2e-6, 2e-6"),
+        "fin": GeometryFeature(""),
+    }
+    geometry = type("LargestGeometry", (), {"feature": lambda self: features})()
+
+    assert _find_air_block_tag(geometry) == "largest"
+
+
+def test_equal_largest_air_candidates_require_an_explicit_tag():
+    features = GeometryFeatures()
+    features.nodes = {
+        "first": GeometryFeature("2e-6, 2e-6, 2e-6"),
+        "second": GeometryFeature("2e-6, 2e-6, 2e-6"),
+    }
+    geometry = type("AmbiguousGeometry", (), {"feature": lambda self: features})()
+
+    assert _find_air_block_tag(geometry) is None
+
+
 def _side_pairs():
     return {"x_src": [1], "x_dst": [2], "y_src": [3], "y_dst": [4]}
 
@@ -121,6 +146,34 @@ class MeshFeature:
 
     def selection(self, name="default"):
         return self.selections.setdefault(name, MeshSelection())
+
+
+class UnsupportedCopyFace:
+    def selection(self, _name="default"):
+        raise RuntimeError("named directed selections unavailable")
+
+
+def test_copy_face_requires_explicit_source_and_destination_contract():
+    with pytest.raises(RuntimeError, match="directed source/destination"):
+        _set_copy_face_selections(UnsupportedCopyFace(), [1], [2])
+
+
+def test_expression_major_spectral_values_are_transposed_to_wavelength_rows():
+    rows = _normalize_spectral_rows(
+        [
+            [0.1, 0.2, 0.3],
+            [0.4, 0.5, 0.6],
+            [0.5, 0.3, 0.1],
+            [4.0e-6, 4.1e-6, 4.2e-6],
+        ],
+        4,
+    )
+
+    assert rows == [
+        [0.1, 0.4, 0.5, 4.0e-6],
+        [0.2, 0.5, 0.3, 4.1e-6],
+        [0.3, 0.6, 0.1, 4.2e-6],
+    ]
 
 
 class MeshFeatures:
