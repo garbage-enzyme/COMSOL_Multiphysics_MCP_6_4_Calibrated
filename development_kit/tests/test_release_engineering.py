@@ -994,7 +994,8 @@ def test_minimum_supported_lane_matches_reviewed_manifest_and_package_ranges():
     assert set(hosted["jobs"].values()) == {"passed"}
     release_lock = manifest["release_lock"]
     lock_path = ROOT / release_lock["path"]
-    assert hashlib.sha256(lock_path.read_bytes()).hexdigest() == release_lock["sha256"]
+    canonical_lock = lock_path.read_bytes().replace(b"\r\n", b"\n")
+    assert hashlib.sha256(canonical_lock).hexdigest() == release_lock["sha256"]
 
 
 def test_python_compatibility_gate_requires_exact_backend_and_clean_control_plane():

@@ -43,7 +43,14 @@ jobs:
           $installed = @(Get-Content -Raw installed-environment.json | ConvertFrom-Json)
           $outdated = @(Get-Content -Raw outdated-dependencies.json | ConvertFrom-Json)
           $testedHash = (Get-FileHash -Algorithm SHA256 $testedPath).Hash.ToLowerInvariant()
-          $lockHash = (Get-FileHash -Algorithm SHA256 $lockPath).Hash.ToLowerInvariant()
+          $lockText = (Get-Content -Raw $lockPath).Replace("`r`n", "`n")
+          $lockBytes = [Text.Encoding]::UTF8.GetBytes($lockText)
+          $lockDigest = [Security.Cryptography.SHA256]::Create()
+          try {
+            $lockHash = [BitConverter]::ToString($lockDigest.ComputeHash($lockBytes)).Replace("-", "").ToLowerInvariant()
+          } finally {
+            $lockDigest.Dispose()
+          }
           if ($tested.release_lock.path -ne $lockPath) { throw "reviewed release-lock path differs" }
           if ($tested.release_lock.sha256 -ne $lockHash) { throw "reviewed release-lock hash differs" }
           $installedByName = @{}
