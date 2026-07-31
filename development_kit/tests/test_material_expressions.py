@@ -286,6 +286,41 @@ def test_public_tool_returns_bounded_validation_error_without_starting_solver():
     assert "finite" in result["error"]
 
 
+def test_public_tool_registration_and_invocation_remain_solver_isolated():
+    code = r"""
+import math
+import sys
+from mcp.server.fastmcp import FastMCP
+from comsol_mcp.tools.material_expressions import register_material_expression_tools
+
+server = FastMCP("material-expression-isolation")
+register_material_expression_tools(server)
+tool = server._tool_manager._tools["wave_optics_material_expression_preview"]
+result = tool.fn(
+    model_kind="constant",
+    parameters={"epsilon_real": math.inf, "epsilon_imag": 0.0},
+    test_wavelengths=[1.0],
+    wavelength_unit="um",
+    harmonic_convention="exp(+i*omega*t)",
+    imaginary_sign="positive",
+    formulation="volumetric_material",
+)
+assert result["success"] is False
+assert "mph" not in sys.modules
+assert not any(name.startswith("jpype") for name in sys.modules)
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=Path(__file__).parents[2],
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+
+
 def test_public_tool_contains_tiny_wavelength_arithmetic_as_validation_error():
     server = FastMCP("material-expression-tiny-wavelength-test")
     register_material_expression_tools(server)

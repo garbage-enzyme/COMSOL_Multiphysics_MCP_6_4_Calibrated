@@ -31,6 +31,13 @@ NATIVE_RUNTIME_MANIFEST = (
         "Shared array runtime used by solver-free evidence and COMSOL adapters.",
     ),
     NativeRuntimeImport(
+        "scipy",
+        "scipy",
+        "mcp_main_process",
+        True,
+        "Spectral characterization imports the SciPy package before its numerical helpers.",
+    ),
+    NativeRuntimeImport(
         "scipy.optimize",
         "scipy",
         "mcp_main_process",
@@ -78,6 +85,20 @@ NATIVE_RUNTIME_MANIFEST = (
         "mcp_main_process",
         True,
         "FastMCP request validation loads Pydantic's native core before dispatch.",
+    ),
+    NativeRuntimeImport(
+        "matplotlib",
+        "matplotlib",
+        "isolated_worker",
+        False,
+        "Field PNG rendering selects the Matplotlib backend only in field_plot_worker.",
+    ),
+    NativeRuntimeImport(
+        "matplotlib.colors",
+        "matplotlib",
+        "isolated_worker",
+        False,
+        "Field PNG logarithmic normalization is isolated in field_plot_worker.",
     ),
     NativeRuntimeImport(
         "matplotlib.pyplot",
