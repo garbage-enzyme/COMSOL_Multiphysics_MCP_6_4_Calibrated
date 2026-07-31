@@ -78,7 +78,7 @@ def test_semantic_benchmark_citations_and_digest_share_one_sqlite_snapshot(tmp_p
     assert receipt["sha256"] == hashlib.sha256(snapshot.read_bytes()).hexdigest()
 
 
-def test_frozen_evaluation_has_sixty_reviewed_queries_and_declared_slices():
+def test_frozen_evaluation_has_sixty_six_reviewed_queries_and_declared_slices():
     payload = json.loads(EVALUATION_PATH.read_text(encoding="utf-8"))
     result = validate_evaluation_set(payload)
 

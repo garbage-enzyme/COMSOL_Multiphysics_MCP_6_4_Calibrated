@@ -37,7 +37,40 @@ def test_selection_applies_bounds_and_slice_tolerance_with_exact_counts():
     assert result["rejected_point_count"] == 3
     assert result["plane_axes"] == ["x", "y"]
     assert np.all(np.abs(result["coordinates"]["z"] - 0.5) <= 0.01)
+    np.testing.assert_allclose(result["coordinates"]["x"], [-0.8, 0.0, 0.8, -0.8, 0.8])
+    np.testing.assert_allclose(result["coordinates"]["y"], [-1.0, -1.0, -1.0, 1.0, 1.0])
+    np.testing.assert_allclose(result["coordinates"]["z"], [0.5] * 5)
+    np.testing.assert_allclose(result["quantities"]["electric_norm"], [1.64, 1.0, 1.64, 1.64, 1.64])
+    np.testing.assert_allclose(
+        result["quantities"]["magnetic_norm"],
+        [np.sqrt(2.64), np.sqrt(2.0), np.sqrt(2.64), np.sqrt(2.64), np.sqrt(2.64)],
+    )
     assert result["request_fingerprint"] == request["request_fingerprint"]
+
+
+def test_selection_includes_exact_spatial_and_slice_tolerance_boundaries():
+    _, kwargs = _samples(interpolation="nearest")
+    kwargs["coordinates"] = {
+        "x": np.array([-1.0, 1.0, 0.0, 0.0]),
+        "y": np.array([-1.5, 1.5, 0.0, 0.0]),
+        "z": np.array([0.5, 0.5, 0.49, 0.51]),
+    }
+    kwargs["quantities"] = {
+        "electric_norm": np.arange(4.0),
+        "magnetic_norm": np.arange(4.0) + 10.0,
+    }
+
+    result = select_field_slice_samples(**kwargs)
+
+    assert result["selected_point_count"] == 4
+    for axis in ("x", "y", "z"):
+        np.testing.assert_array_equal(
+            result["coordinates"][axis], kwargs["coordinates"][axis]
+        )
+    for name in ("electric_norm", "magnetic_norm"):
+        np.testing.assert_array_equal(
+            result["quantities"][name], kwargs["quantities"][name]
+        )
 
 
 def test_selection_rejects_empty_and_too_few_linear_samples():
@@ -141,16 +174,24 @@ def test_oversized_coordinate_is_rejected_before_array_conversion():
 
 def test_coordinate_and_quantity_keys_are_exact_and_view_is_bound():
     _, kwargs = _samples()
-    bad_coordinates = deepcopy(kwargs)
-    bad_coordinates["coordinates"]["r"] = np.zeros(8)
-    bad_quantities = deepcopy(kwargs)
-    bad_quantities["quantities"].pop("magnetic_norm")
     bad_view = deepcopy(kwargs)
     bad_view["view_id"] = "missing"
 
-    with pytest.raises(ValueError, match="exactly x, y, and z"):
-        select_field_slice_samples(**bad_coordinates)
-    with pytest.raises(ValueError, match="exactly the requested expressions"):
-        select_field_slice_samples(**bad_quantities)
+    for mutation in (
+        lambda value: value["coordinates"].__setitem__("r", np.zeros(8)),
+        lambda value: value["coordinates"].pop("z"),
+    ):
+        malformed = deepcopy(kwargs)
+        mutation(malformed)
+        with pytest.raises(ValueError, match="exactly x, y, and z"):
+            select_field_slice_samples(**malformed)
+    for mutation in (
+        lambda value: value["quantities"].pop("magnetic_norm"),
+        lambda value: value["quantities"].__setitem__("extra", np.zeros(8)),
+    ):
+        malformed = deepcopy(kwargs)
+        mutation(malformed)
+        with pytest.raises(ValueError, match="exactly the requested expressions"):
+            select_field_slice_samples(**malformed)
     with pytest.raises(ValueError, match="exactly one requested view"):
         select_field_slice_samples(**bad_view)

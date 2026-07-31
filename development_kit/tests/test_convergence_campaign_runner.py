@@ -205,7 +205,7 @@ def test_changed_stop_policy_has_a_distinct_campaign_identity(tmp_path):
 
 def test_level_directory_stays_inside_the_windows_legacy_path_budget():
     root = Path("D:/comsol_runtime/jobs") / ("job-" + "a" * 32)
-    directory = convergence_level_directory(root, 7)
+    directory = convergence_level_directory(root, 99)
     suffix = (
         "point_artifacts/"
         + "b" * 64
@@ -213,5 +213,5 @@ def test_level_directory_stays_inside_the_windows_legacy_path_budget():
         + "b" * 64
         + "/1784320847805-afba0aeb/manifest.json.tmp-33728"
     )
-    assert directory.name == "l7"
+    assert directory.name == "l99"
     assert len(str(directory / suffix)) <= 259
