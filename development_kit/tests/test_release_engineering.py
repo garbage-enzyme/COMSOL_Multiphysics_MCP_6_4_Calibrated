@@ -294,7 +294,7 @@ def test_compatibility_listener_evidence_is_explicitly_sampled_not_exhaustive():
 def test_production_runtime_guards_survive_python_optimization():
     assert_statements = []
     for package in ("comsol_mcp", "src"):
-        for path in (ROOT / package).rglob("*.py"):
+        for path in sorted((ROOT / package).rglob("*.py")):
             tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
             assert_statements.extend(
                 f"{path.relative_to(ROOT)}:{node.lineno}"

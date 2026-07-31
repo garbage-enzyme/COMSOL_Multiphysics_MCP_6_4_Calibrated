@@ -1,7 +1,9 @@
 """Tests for MCP server construction without starting a transport."""
 
 import ast
+import json
 import shutil
+import subprocess
 import sys
 import uuid
 from pathlib import Path
@@ -191,11 +193,27 @@ def test_model_resources_escape_untrusted_markdown(monkeypatch):
 
 
 def test_default_registration_does_not_import_semantic_stack():
-    create_server("no-semantic-import-test")
+    code = """
+import json
+import sys
+from comsol_mcp.server import create_server
 
-    assert "chromadb" not in sys.modules
-    assert "sentence_transformers" not in sys.modules
-    assert "torch" not in sys.modules
+create_server('no-semantic-import-test')
+print(json.dumps(sorted(
+    name for name in ('chromadb', 'sentence_transformers', 'torch') if name in sys.modules
+)))
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=Path(__file__).parents[2],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert json.loads(completed.stdout) == []
 
 
 def test_capabilities_report_risky_operations_without_starting_comsol(monkeypatch):
