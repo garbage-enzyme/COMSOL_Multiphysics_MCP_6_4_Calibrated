@@ -555,3 +555,43 @@ def test_retrieval_acceptance_rejects_successful_but_irrelevant_results(tmp_path
     assert result["success"] is False
     assert "missed relevant evidence" in result["error"]["message"]
     assert all(item["relevant_rank_at_5"] is None for item in result["queries"])
+
+
+def test_retrieval_acceptance_rejects_dirty_initial_ownership_before_worker_start(tmp_path):
+    class Manager:
+        started = False
+
+        def start(self):
+            self.started = True
+            return {"success": True}
+
+        @staticmethod
+        def reset():
+            return {"success": True, "reset": {"absent": True}}
+
+    manager = Manager()
+    dirty = _absent_ownership()
+    dirty["collision"] = True
+    result, exit_code = retrieval_module.run_acceptance(
+        manager=manager,
+        index_path=tmp_path / "index",
+        before={"sha256": SHA_A},
+        ownership_before=dirty,
+        output_path=tmp_path / "dirty.json",
+        snapshot=lambda _path: {"sha256": SHA_A},
+        ownership_status=_absent_ownership,
+    )
+
+    assert manager.started is False
+    assert exit_code == 1
+    assert result["success"] is False
+    assert "not clean before" in result["error"]["message"]
+
+
+def test_retrieval_acceptance_compares_before_and_after_ownership_snapshots():
+    before = _absent_ownership()
+    after = _absent_ownership()
+    after["lease"]["state"] = "present"
+
+    assert retrieval_module._ownership_summary(before) == retrieval_module.CLEAN_OWNERSHIP
+    assert retrieval_module._ownership_summary(after) != retrieval_module._ownership_summary(before)

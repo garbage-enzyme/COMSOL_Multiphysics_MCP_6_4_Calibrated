@@ -190,6 +190,23 @@ def test_drude_recipe_solves_and_retains_distinct_baseline_and_patch_spectra():
     assert "patch_reflection = solve_required('patch')" in source
 
 
+def test_drude_recipe_has_one_authoritative_dispersion_expression():
+    source = (Path(__file__).parents[2] / "recipes" / "mim_drude_sweep.py").read_text(
+        encoding="utf-8"
+    )
+    tree = ast.parse(source)
+    assigned_names = {
+        target.id
+        for node in tree.body
+        if isinstance(node, (ast.Assign, ast.AnnAssign))
+        for target in (node.targets if isinstance(node, ast.Assign) else [node.target])
+        if isinstance(target, ast.Name)
+    }
+
+    assert {name for name in assigned_names if name.startswith("au_drude")} == {"au_drude_param"}
+    assert "f_fix" not in assigned_names
+
+
 def test_partition_recipe_has_no_all_face_or_highest_boundary_fallback():
     source = (Path(__file__).parents[2] / "recipes" / "mim_patch_partition.py").read_text(
         encoding="utf-8"

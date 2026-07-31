@@ -21,6 +21,7 @@ ROOT_TEXT = str(ROOT)
 sys.path[:] = [ROOT_TEXT, *(item for item in sys.path if item != ROOT_TEXT)]
 
 from comsol_mcp.jobs.process_control import OwnedJobObject
+from comsol_mcp.operation_arbiter import get_operation_arbiter
 
 _durable_io = import_module("comsol_mcp.durable.io")
 _reference_power_acceptance = import_module("src.evidence.reference_power_acceptance")
@@ -75,6 +76,7 @@ def _lightweight_solver_status() -> dict[str, Any]:
     processes = []
     complete = True
     error = None
+    inspection_errors: list[dict[str, Any]] = []
     try:
         iterator = psutil.process_iter(["pid", "ppid", "name", "cmdline", "create_time"])
         for process in iterator:
@@ -118,8 +120,16 @@ def _lightweight_solver_status() -> dict[str, Any]:
                             "command_line": command_line[:32],
                         }
                     )
-            except psutil.NoSuchProcess, psutil.AccessDenied, OSError:
+            except psutil.NoSuchProcess:
                 continue
+            except (psutil.AccessDenied, OSError) as exc:
+                complete = False
+                inspection_errors.append(
+                    {
+                        "pid": getattr(process, "pid", None),
+                        "error_type": type(exc).__name__,
+                    }
+                )
     except Exception as exc:
         complete = False
         error = f"{type(exc).__name__}: {str(exc)[:300]}"
@@ -138,6 +148,8 @@ def _lightweight_solver_status() -> dict[str, Any]:
     return {
         "complete": complete,
         "error": error,
+        "inspection_error_count": len(inspection_errors),
+        "inspection_errors": inspection_errors[:32],
         "lease_path": str(lease_path),
         "lease_state": lease_state,
         "lease_sha256": lease_sha256,
@@ -161,6 +173,14 @@ def _redacted_status(status: dict[str, Any]) -> dict[str, Any]:
     return {
         "complete": status.get("complete"),
         "error": status.get("error"),
+        "inspection_error_count": status.get("inspection_error_count", 0),
+        "inspection_errors": [
+            {
+                "pid": item.get("pid"),
+                "error_type": item.get("error_type"),
+            }
+            for item in status.get("inspection_errors", [])
+        ],
         "lease_state": status.get("lease_state"),
         "lease_sha256": status.get("lease_sha256"),
         "collision": status.get("collision"),
@@ -224,25 +244,45 @@ def _load_inputs(contract_path: Path, spec_path: Path | None, *, verify_files: b
     return contract, spec
 
 
+def _prepare_worker_admission():
+    arbiter = get_operation_arbiter()
+    operation_claim, acquisition = arbiter.try_acquire(
+        tool_name="reference_power_acceptance",
+        side_effect_class="solver_execution",
+    )
+    evidence: dict[str, Any] = {"operation_acquisition": acquisition}
+    if operation_claim is None:
+        return arbiter, None, evidence
+    admission = _lightweight_solver_status()
+    admitted, blockers = _admit_lightweight_status(admission)
+    evidence["pre_import_admission"] = {
+        "admitted": admitted,
+        "blockers": blockers,
+        "status": _redacted_status(admission),
+    }
+    return arbiter, operation_claim, evidence
+
+
 def _run_worker(args: argparse.Namespace) -> int:
     result: dict[str, Any] = {"success": False, "mode": "worker", "started_at_epoch": time.time()}
     exit_code = 1
     owner = None
     client = None
     source_model = None
+    arbiter = None
+    operation_claim = None
     try:
         contract, spec = _load_inputs(args.contract, args.spec, verify_files=True)
         if spec is None:
             raise ValueError("worker requires an execution spec")
-        admission = _lightweight_solver_status()
-        admitted, blockers = _admit_lightweight_status(admission)
-        result["pre_import_admission"] = {
-            "admitted": admitted,
-            "blockers": blockers,
-            "status": _redacted_status(admission),
-        }
-        if not admitted:
-            raise RuntimeError(f"pre-import solver admission refused: {blockers}")
+        arbiter, operation_claim, admission_evidence = _prepare_worker_admission()
+        result.update(admission_evidence)
+        if operation_claim is None:
+            raise RuntimeError("reference-power worker could not acquire operation ownership")
+        if result["pre_import_admission"]["admitted"] is not True:
+            raise RuntimeError(
+                f"pre-import solver admission refused: {result['pre_import_admission']['blockers']}"
+            )
 
         import mph
         from src.tools.ownership import SolverOwnership
@@ -336,8 +376,26 @@ def _run_worker(args: argparse.Namespace) -> int:
                 exit_code = 1
                 result["success"] = False
         if owner is not None:
-            result["lease_release"] = owner.release()
+            try:
+                result["lease_release"] = owner.release()
+            except Exception as exc:
+                result["lease_release"] = {
+                    "success": False,
+                    "error_type": type(exc).__name__,
+                }
             if not result["lease_release"].get("success"):
+                exit_code = 1
+                result["success"] = False
+        if arbiter is not None and operation_claim is not None:
+            try:
+                result["operation_release"] = arbiter.release(operation_claim)
+            except Exception as exc:
+                result["operation_release"] = {
+                    "released": False,
+                    "verified": False,
+                    "error_type": type(exc).__name__,
+                }
+            if result["operation_release"].get("verified") is not True:
                 exit_code = 1
                 result["success"] = False
         result["finished_at_epoch"] = time.time()

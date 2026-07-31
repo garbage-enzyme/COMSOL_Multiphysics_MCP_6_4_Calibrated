@@ -43,14 +43,17 @@ def _strings(values):
 
 def _build_acceptance(fin_result: dict, block_result: dict, counts: dict[str, int]) -> bool:
     return (
-        fin_result.get("geometry_run") is True
-        and fin_result.get("mesh_run") is False
+        _fin_execution_contract(fin_result)
         and block_result.get("geometry_run") is False
         and block_result.get("mesh_run") is False
         and all(
             counts.get(name, 0) > 0 for name in ("domains", "boundaries", "elements", "vertices")
         )
     )
+
+
+def _fin_execution_contract(fin_result: dict) -> bool:
+    return fin_result.get("geometry_run") is True and fin_result.get("mesh_run") is False
 
 
 def _lease_disposition(claim: dict) -> tuple[bool, bool]:
@@ -116,6 +119,8 @@ def main() -> None:
         fin_result = apply_fin(clone, record, fin_preview, "comp1", "geom1")
         if not fin_result.get("success"):
             raise AssertionError(f"fin apply failed: {fin_result}")
+        if not _fin_execution_contract(fin_result):
+            raise AssertionError("fin apply did not run geometry exactly once without running mesh")
 
         block_edits = [
             {

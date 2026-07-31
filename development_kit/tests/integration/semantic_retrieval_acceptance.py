@@ -47,9 +47,23 @@ QUERIES = (
     ),
 )
 
+CLEAN_OWNERSHIP = {
+    "lease": "absent",
+    "external_solver_processes": 0,
+    "collision": False,
+}
+
 
 def _failure(exc: BaseException) -> dict[str, str]:
     return {"type": type(exc).__name__, "message": str(exc)[:1000]}
+
+
+def _ownership_summary(status: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "lease": status["lease"]["state"],
+        "external_solver_processes": len(status["external_solver_processes"]),
+        "collision": status["collision"],
+    }
 
 
 def run_acceptance(
@@ -70,7 +84,11 @@ def run_acceptance(
     query_results: list[dict[str, Any]] = []
     repeat: dict[str, Any] | None = None
     health: dict[str, Any] | None = None
+    ownership_before_summary = _ownership_summary(ownership_before)
+    result["ownership_before"] = ownership_before_summary
     try:
+        if ownership_before_summary != CLEAN_OWNERSHIP:
+            raise RuntimeError("solver ownership was not clean before semantic acceptance")
         started = time.perf_counter()
         startup = manager.start()
         cold_seconds = time.perf_counter() - started
@@ -152,19 +170,11 @@ def run_acceptance(
     try:
         after = snapshot(index_path)
         ownership_after = ownership_status()
+        ownership_after_summary = _ownership_summary(ownership_after)
         result.update(
             {
                 "index_immutable": before == after,
-                "ownership_before": {
-                    "lease": ownership_before["lease"]["state"],
-                    "external_solver_processes": len(ownership_before["external_solver_processes"]),
-                    "collision": ownership_before["collision"],
-                },
-                "ownership_after": {
-                    "lease": ownership_after["lease"]["state"],
-                    "external_solver_processes": len(ownership_after["external_solver_processes"]),
-                    "collision": ownership_after["collision"],
-                },
+                "ownership_after": ownership_after_summary,
             }
         )
         if result.get("success") is True:
@@ -178,11 +188,7 @@ def run_acceptance(
                 raise RuntimeError("a real response exceeded the public byte limit")
             if any(item["relevant_rank_at_5"] is None for item in query_results):
                 raise RuntimeError("one or more judged queries missed relevant evidence at rank 5")
-            if result["ownership_after"] != {
-                "lease": "absent",
-                "external_solver_processes": 0,
-                "collision": False,
-            }:
+            if ownership_after_summary != ownership_before_summary:
                 raise RuntimeError("solver ownership changed during semantic acceptance")
     except Exception as exc:
         result["success"] = False

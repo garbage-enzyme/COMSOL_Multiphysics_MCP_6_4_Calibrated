@@ -415,44 +415,53 @@ def test_parent_timeout_terminates_the_owned_probe_tree(monkeypatch):
 
     process = FakeProcess()
     terminated = []
+    containment = object()
     monkeypatch.setattr(acceptance_test.subprocess, "Popen", lambda *args, **kwargs: process)
+    monkeypatch.setattr(
+        acceptance_test.OwnedJobObject, "assign", lambda pid: containment if pid == 1234 else None
+    )
     monkeypatch.setattr(
         acceptance_test,
         "_terminate_owned_process_tree",
-        lambda owned: terminated.append(owned.pid),
+        lambda owned, observed_containment: (
+            terminated.append((owned.pid, observed_containment))
+            or {
+                "passed": True,
+                "root_absent": True,
+                "job_object_contained": True,
+                "errors": [],
+            }
+        ),
     )
 
     result = acceptance_test._run_probe({}, timeout_seconds=0.01)
 
     assert result["timed_out"] is True
     assert result["stdout"] == "partialtail"
-    assert terminated == [1234, 1234]
+    assert result["cleanup"]["passed"] is True
+    assert terminated == [(1234, containment)]
 
 
-def test_parent_rechecks_global_process_inventory_after_timeout(monkeypatch, tmp_path):
+def test_parent_rejects_unsuccessful_owned_tree_cleanup(monkeypatch, tmp_path):
     model = tmp_path / "model.mph"
     model.write_bytes(b"model")
-    inventories = []
-
-    def inventory():
-        inventories.append(True)
-        return {99}
-
     monkeypatch.setenv(acceptance_test.NATIVE_CANCEL_PROBE_MODEL_ENV, str(model))
-    monkeypatch.setattr(acceptance_test, "_comsol_pids", inventory)
-    monkeypatch.setattr(acceptance_test.time, "sleep", lambda _seconds: None)
     monkeypatch.setattr(
         acceptance_test,
         "_run_probe",
         lambda _environment: {
-            "timed_out": True,
-            "returncode": 1,
-            "stdout": "",
+            "timed_out": False,
+            "returncode": 0,
+            "stdout": "{}",
             "stderr": "",
+            "cleanup": {
+                "passed": False,
+                "root_absent": True,
+                "job_object_contained": True,
+                "errors": [{"stage": "job_object_close", "type": "OSError"}],
+            },
         },
     )
 
-    with pytest.raises(AssertionError, match="timed out"):
+    with pytest.raises(AssertionError, match="process cleanup failed"):
         acceptance_test.test_progress_context_cancel_stops_real_study_in_three_fresh_processes()
-
-    assert len(inventories) == 2

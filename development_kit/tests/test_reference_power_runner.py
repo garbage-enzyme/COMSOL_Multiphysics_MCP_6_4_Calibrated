@@ -31,7 +31,7 @@ def _solver_descendant_identities(root_pid: int):
     identities = set()
     try:
         processes = psutil.Process(root_pid).children(recursive=True)
-    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+    except psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess:
         return identities
     for process in processes:
         try:
@@ -157,6 +157,62 @@ def test_lightweight_admission_fails_closed_without_exposing_commands_or_paths()
     assert "private" not in serialized
     assert "command_line" not in serialized
     assert redacted["external_solver_processes"][0]["pid"] == 123
+
+
+def test_lightweight_inventory_marks_access_denied_as_incomplete(tmp_path, monkeypatch):
+    class Process:
+        pid = 44001
+
+        @property
+        def info(self):
+            raise psutil.AccessDenied(pid=self.pid)
+
+    monkeypatch.setattr(runner_module, "_ancestor_pids", lambda _pid: set())
+    monkeypatch.setattr(runner_module.psutil, "process_iter", lambda _attrs: [Process()])
+    monkeypatch.setattr(runner_module, "_runtime_root", lambda: tmp_path)
+
+    status = runner_module._lightweight_solver_status()
+    admitted, blockers = runner_module._admit_lightweight_status(status)
+
+    assert status["complete"] is False
+    assert status["inspection_error_count"] == 1
+    assert status["inspection_errors"] == [{"pid": 44001, "error_type": "AccessDenied"}]
+    assert admitted is False
+    assert "process inventory incomplete" in blockers
+
+
+def test_worker_acquires_operation_ownership_before_final_inventory(monkeypatch):
+    events = []
+    claim = object()
+
+    class Arbiter:
+        def try_acquire(self, **_kwargs):
+            events.append("acquire")
+            return claim, {"state": "acquired"}
+
+    clean = {
+        "complete": True,
+        "error": None,
+        "inspection_error_count": 0,
+        "inspection_errors": [],
+        "lease_state": "absent",
+        "lease_sha256": None,
+        "collision": False,
+        "external_solver_processes": [],
+    }
+    monkeypatch.setattr(runner_module, "get_operation_arbiter", lambda: Arbiter())
+    monkeypatch.setattr(
+        runner_module,
+        "_lightweight_solver_status",
+        lambda: events.append("inventory") or clean,
+    )
+
+    arbiter, observed_claim, evidence = runner_module._prepare_worker_admission()
+
+    assert isinstance(arbiter, Arbiter)
+    assert observed_claim is claim
+    assert events == ["acquire", "inventory"]
+    assert evidence["pre_import_admission"]["admitted"] is True
 
 
 def test_coordinator_summary_keeps_failure_details_in_worker_artifact_only():
@@ -387,9 +443,7 @@ def test_malformed_worker_result_becomes_structured_failure(tmp_path):
     assert error == "JSONDecodeError"
 
 
-def test_coordinator_publishes_failure_receipt_for_malformed_worker_result(
-    tmp_path, monkeypatch
-):
+def test_coordinator_publishes_failure_receipt_for_malformed_worker_result(tmp_path, monkeypatch):
     artifact_root = tmp_path / "artifacts"
     output = tmp_path / "receipt.json"
     spec = {
@@ -415,9 +469,7 @@ def test_coordinator_publishes_failure_receipt_for_malformed_worker_result(
             result_path = Path(command[command.index("--worker-result") + 1])
             result_path.write_bytes(b'{"success":')
 
-    monkeypatch.setattr(
-        runner_module, "_load_inputs", lambda *_args, **_kwargs: (contract, spec)
-    )
+    monkeypatch.setattr(runner_module, "_load_inputs", lambda *_args, **_kwargs: (contract, spec))
     monkeypatch.setattr(runner_module, "_lightweight_solver_status", lambda: clean_status)
     monkeypatch.setattr(runner_module, "_comsol_pids", lambda: set())
     monkeypatch.setattr(runner_module.subprocess, "Popen", Process)
@@ -449,6 +501,4 @@ def test_coordinator_publishes_failure_receipt_for_malformed_worker_result(
     assert exit_code == 1
     assert receipt["success"] is False
     assert receipt["worker_result_error"] == "JSONDecodeError"
-    assert receipt["worker_result"]["error"] == (
-        "worker result artifact is unreadable or invalid"
-    )
+    assert receipt["worker_result"]["error"] == ("worker result artifact is unreadable or invalid")

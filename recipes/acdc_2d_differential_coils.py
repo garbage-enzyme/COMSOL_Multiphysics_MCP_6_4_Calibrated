@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import math
 import os
 import sys
 import uuid
@@ -36,6 +37,7 @@ COIL_CENTER_X_MM = 6.0
 AIR_WIDTH_MM = 80.0
 AIR_HEIGHT_MM = 80.0
 DEFAULT_FREQUENCY_KHZ = 1.0
+REQUIRED_BASELINE_PHYSICS_FEATURES = frozenset({"fsp1", "mi1", "init1"})
 
 
 def parse_args() -> argparse.Namespace:
@@ -77,9 +79,13 @@ def require_baseline_contract(model: mph.Model) -> tuple[object, object, object]
 
 def replace_geometry(geometry: object) -> None:
     """Replace mutable geometry features with the two coils and an air domain."""
-    for tag in list(geometry.feature().tags()):
-        if str(tag) != "fin":
-            geometry.feature().remove(tag)
+    features = geometry.feature()
+    existing_tags = [str(tag) for tag in list(features.tags())]
+    if "fin" not in existing_tags:
+        raise ValueError("baseline geometry is missing its reserved fin feature")
+    for tag in existing_tags:
+        if tag != "fin":
+            features.remove(tag)
 
     rectangles = (
         ("coil_positive", COIL_CENTER_X_MM, "coil_positive"),
@@ -87,7 +93,7 @@ def replace_geometry(geometry: object) -> None:
         ("air", 0.0, "air"),
     )
     for tag, center_x, label in rectangles:
-        feature = geometry.feature().create(tag, "Rectangle")
+        feature = features.create(tag, "Rectangle")
         if tag == "air":
             feature.set("size", [AIR_WIDTH_MM, AIR_HEIGHT_MM])
         else:
@@ -96,6 +102,7 @@ def replace_geometry(geometry: object) -> None:
         feature.set("base", "center")
         feature.set("selresult", True)
         feature.label(label)
+    features.move("fin", int(features.size()) - 1)
     geometry.run()
 
 
@@ -108,7 +115,7 @@ def replace_physics(component: object, frequency_khz: float) -> None:
     """Configure differential copper coils and a linear-air Ampere law."""
     physics = component.physics().get("mf")
     for tag in list(physics.feature().tags()):
-        if str(tag).startswith("coil") or str(tag) == "ampere_air":
+        if str(tag) not in REQUIRED_BASELINE_PHYSICS_FEATURES:
             physics.feature().remove(tag)
 
     physics.feature().get("fsp1").set("f_typ", f"{frequency_khz}[kHz]")
@@ -212,13 +219,19 @@ def publish_staged_model(staging: Path, output: Path, *, overwrite: bool) -> Non
         raise
 
 
+def validate_frequency_khz(value: float) -> float:
+    """Reject non-finite and non-positive frequency values before model mutation."""
+    if not math.isfinite(value) or value <= 0:
+        raise ValueError("--frequency-khz must be finite and positive")
+    return value
+
+
 def main() -> None:
     """Build the derived model, optionally solve one point, and save it."""
     args = parse_args()
     baseline = args.baseline_model.resolve()
     output = args.output_model.resolve()
-    if args.frequency_khz <= 0:
-        raise ValueError("--frequency-khz must be positive")
+    validate_frequency_khz(args.frequency_khz)
     if not baseline.is_file():
         raise FileNotFoundError(f"baseline model does not exist: {baseline}")
     if baseline == output:

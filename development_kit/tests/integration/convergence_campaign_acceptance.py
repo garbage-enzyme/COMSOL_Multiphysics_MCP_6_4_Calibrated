@@ -66,6 +66,7 @@ def run_acceptance(
     runtime_root: Path,
     output: Path,
     dry_run: bool = False,
+    confirmation: str | None = None,
     worker_runner: Callable[..., int] = _run,
 ) -> dict[str, Any]:
     """Normalize, execute in the shared runtime, and write one bounded receipt."""
@@ -88,14 +89,20 @@ def run_acceptance(
         _write_json(output, receipt)
         return receipt
 
+    if confirmation != "RUN_REAL_COMSOL":
+        raise ValueError("licensed execution requires explicit RUN_REAL_COMSOL confirmation")
+
     store = JobStore(runtime / "jobs")
     identity = process_identity(os.getpid())
     now = time.time()
     job_id = store.create(
         spec,
         {
-            "schema_version": "2", "status": "submitted", "attempt": 1,
-            "created_at_epoch": now, "updated_at_epoch": now,
+            "schema_version": "2",
+            "status": "submitted",
+            "attempt": 1,
+            "created_at_epoch": now,
+            "updated_at_epoch": now,
             "worker_pid": identity["pid"],
             "worker_process_create_time": identity["process_create_time"],
             "worker_command_signature": identity["command_signature"],
@@ -117,8 +124,10 @@ def run_acceptance(
     lease_absent = not (runtime / "solver_owner.json").exists()
     receipt = {
         "success": (
-            exit_code == 0 and state["status"] == "completed"
-            and source_after == source_before and lease_absent
+            exit_code == 0
+            and state["status"] == "completed"
+            and source_after == source_before
+            and lease_absent
         ),
         "dry_run": False,
         "job_id": job_id,
@@ -152,10 +161,23 @@ def main() -> int:
     if not args.dry_run and args.confirm != "RUN_REAL_COMSOL":
         raise ValueError("licensed execution requires --confirm RUN_REAL_COMSOL")
     receipt = run_acceptance(
-        raw_spec=_load_json(args.spec), runtime_root=args.runtime_root,
-        output=args.output, dry_run=args.dry_run,
+        raw_spec=_load_json(args.spec),
+        runtime_root=args.runtime_root,
+        output=args.output,
+        dry_run=args.dry_run,
+        confirmation=args.confirm,
     )
-    print(json.dumps({"success": receipt["success"], "dry_run": receipt["dry_run"], "job_id": receipt.get("job_id")}, sort_keys=True), flush=True)
+    print(
+        json.dumps(
+            {
+                "success": receipt["success"],
+                "dry_run": receipt["dry_run"],
+                "job_id": receipt.get("job_id"),
+            },
+            sort_keys=True,
+        ),
+        flush=True,
+    )
     return 0 if receipt["success"] else 1
 
 

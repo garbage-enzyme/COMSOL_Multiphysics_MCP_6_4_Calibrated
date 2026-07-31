@@ -32,19 +32,25 @@ def _first_tag(container, preferred):
     tags = [str(value) for value in list(container.tags())]
     if not tags:
         raise ValueError(f"empty clientapi container for {preferred}")
-    return preferred if preferred in tags else tags[0]
+    if preferred not in tags:
+        raise ValueError(f"required clientapi tag is absent: {preferred}")
+    return preferred
 
 
 def _study_step(study):
     tags = [str(value) for value in list(study.feature().tags())]
+    if not tags:
+        raise ValueError("study contains no steps")
+    inspection_errors = []
     for tag in tags:
         feature = study.feature().get(tag)
         try:
             if "wavelength" in str(feature.getType()).casefold():
                 return tag
-        except Exception:
-            pass
-    return tags[0]
+        except Exception as exc:
+            inspection_errors.append(f"{tag}:{type(exc).__name__}")
+    suffix = f"; inspection errors: {inspection_errors}" if inspection_errors else ""
+    raise ValueError(f"study contains no identifiable Wavelength step{suffix}")
 
 
 def _bound_source_sha256(case: dict) -> str:
@@ -57,7 +63,10 @@ def _bound_source_sha256(case: dict) -> str:
 
 
 def main() -> None:
-    default_artifact_dir = Path(os.environ.get("COMSOL_MCP_RUNTIME_DIR", "D:/comsol_runtime")) / "wave_optics_point_audit"
+    default_artifact_dir = (
+        Path(os.environ.get("COMSOL_MCP_RUNTIME_DIR", "D:/comsol_runtime"))
+        / "wave_optics_point_audit"
+    )
     artifact_dir = Path(
         os.environ.get("COMSOL_POINT_AUDIT_ARTIFACT_DIR", str(default_artifact_dir))
     )
@@ -90,7 +99,9 @@ def main() -> None:
             if not case["source"].is_file():
                 raise FileNotFoundError(case["source"])
             _bound_source_sha256(case)
-        claim = owner.acquire(mode="wave_optics_point_audit_matrix", model_path=str(active_cases[0]["source"]))
+        claim = owner.acquire(
+            mode="wave_optics_point_audit_matrix", model_path=str(active_cases[0]["source"])
+        )
         if not claim.get("success"):
             raise RuntimeError(f"solver lease unavailable: {claim}")
         client = mph.Client(cores=8)
@@ -144,7 +155,9 @@ def main() -> None:
                 active_profile="wave_optics",
                 ownership_preflight={"ready": True},
             )
-            output["solve_count"] += int(audit.get("measurement", {}).get("solve", {}).get("ran", False))
+            output["solve_count"] += int(
+                audit.get("measurement", {}).get("solve", {}).get("ran", False)
+            )
             assert audit["success"], audit
             assert Path(audit["artifacts"]["csv"]).is_file()
             assert Path(audit["artifacts"]["manifest"]).is_file()
@@ -152,20 +165,26 @@ def main() -> None:
             final_stat = source.stat()
             assert final_stat.st_mtime_ns == source_stat.st_mtime_ns
             assert final_stat.st_size == source_stat.st_size
-            output["cases"].append({
-                "name": case["name"],
-                "source": str(source),
-                "source_sha256": source_hash,
-                "audit_status": audit["audit_status"],
-                "policy_overall": audit["assessment"].get("project_verdict"),
-                "power": audit["measurement"]["power"],
-                "wavelength": audit["measurement"]["wavelength"],
-                "polarization_evidence_level": audit["measurement"]["polarization"]["evidence_level"],
-                "field_statistics": audit["measurement"]["polarization"].get("structure_total_field"),
-                "measurement_errors": audit["measurement"]["measurement_errors"],
-                "integrity_errors": audit["measurement"]["integrity_errors"],
-                "artifacts": audit["artifacts"],
-            })
+            output["cases"].append(
+                {
+                    "name": case["name"],
+                    "source": str(source),
+                    "source_sha256": source_hash,
+                    "audit_status": audit["audit_status"],
+                    "policy_overall": audit["assessment"].get("project_verdict"),
+                    "power": audit["measurement"]["power"],
+                    "wavelength": audit["measurement"]["wavelength"],
+                    "polarization_evidence_level": audit["measurement"]["polarization"][
+                        "evidence_level"
+                    ],
+                    "field_statistics": audit["measurement"]["polarization"].get(
+                        "structure_total_field"
+                    ),
+                    "measurement_errors": audit["measurement"]["measurement_errors"],
+                    "integrity_errors": audit["measurement"]["integrity_errors"],
+                    "artifacts": audit["artifacts"],
+                }
+            )
             client.remove(model)
         assert output["solve_count"] == len(active_cases)
         output["success"] = True
@@ -180,7 +199,9 @@ def main() -> None:
             except Exception:
                 pass
         output["lease_release"] = owner.release()
-        result_path.write_text(json.dumps(output, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        result_path.write_text(
+            json.dumps(output, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+        )
         print(json.dumps(output, ensure_ascii=False), flush=True)
         os._exit(exit_code)
 

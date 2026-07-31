@@ -2,7 +2,6 @@
 
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 import pytest
@@ -23,24 +22,6 @@ PROBES = (
     "development_kit/tests/integration/wave_optics_point_audit_acceptance.py",
     "development_kit/tests/integration/live_profile_acceptance.py",
 )
-
-
-def _comsol_pids() -> set[int]:
-    """Return live COMSOL process IDs without starting COMSOL."""
-    command = (
-        "@(Get-Process -ErrorAction SilentlyContinue | "
-        "Where-Object { $_.ProcessName -like 'comsol*' } | "
-        "Select-Object -ExpandProperty Id) -join ','"
-    )
-    completed = subprocess.run(
-        ["powershell", "-NoProfile", "-Command", command],
-        check=True,
-        capture_output=True,
-        text=True,
-        timeout=15,
-    )
-    output = completed.stdout.strip()
-    return {int(value) for value in output.split(",") if value}
 
 
 def _terminate_owned_process_tree(
@@ -87,7 +68,6 @@ def _terminate_owned_process_tree(
 @pytest.mark.integration
 @pytest.mark.parametrize("probe", PROBES)
 def test_real_comsol_probe_in_fresh_process(probe):
-    before = _comsol_pids()
     creation_flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
     process = subprocess.Popen(
         [sys.executable, str(ROOT / probe)],
@@ -111,10 +91,5 @@ def test_real_comsol_probe_in_fresh_process(probe):
     finally:
         cleanup = _terminate_owned_process_tree(process, containment)
 
-    time.sleep(2)
-    after = _comsol_pids()
-    leaked = after - before
-
     assert process.returncode == 0, output
     assert cleanup["passed"] is True, cleanup
-    assert not leaked, f"Integration probe leaked COMSOL PIDs {sorted(leaked)}\n{output}"

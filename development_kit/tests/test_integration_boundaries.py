@@ -14,6 +14,7 @@ from development_kit.tests.integration import clientapi_property_acceptance as p
 from development_kit.tests.integration import derived_geometry_acceptance as derived_gate
 from development_kit.tests.integration import live_profile_acceptance as live_profile_gate
 from development_kit.tests.integration import periodic_mesh_acceptance as periodic_mesh_gate
+from development_kit.tests.integration import test_native_cancel_candidate as native_cancel_gate
 from development_kit.tests.integration import test_real_comsol as real_comsol_gate
 from development_kit.tests.integration import wave_optics_point_audit_acceptance as point_gate
 from development_kit.tests.integration import wave_optics_preflight_acceptance as preflight_gate
@@ -205,6 +206,12 @@ def test_derived_gate_requires_exact_explicit_build_semantics():
         assert derived_gate._build_acceptance(*mutated) is False
 
 
+def test_derived_gate_rejects_incorrect_finalization_execution_immediately():
+    assert derived_gate._fin_execution_contract({"geometry_run": True, "mesh_run": False}) is True
+    assert derived_gate._fin_execution_contract({"geometry_run": False, "mesh_run": False}) is False
+    assert derived_gate._fin_execution_contract({"geometry_run": True, "mesh_run": True}) is False
+
+
 def test_unicode_cleanup_continues_after_unlink_failure():
     namespace = runpy.run_path(
         str(Path(__file__).parents[2] / "development_kit/tests/integration/probes/unicode_save.py"),
@@ -258,6 +265,18 @@ def test_loading_standalone_probe_does_not_create_client(monkeypatch, script_pat
     assert callable(namespace["main"])
 
 
+def test_capacitor_probe_uses_one_parameterized_geometry_and_theory(monkeypatch):
+    monkeypatch.setattr(mph, "Client", lambda *_args, **_kwargs: pytest.fail("no client"))
+    namespace = runpy.run_path(
+        str(Path(__file__).parents[2] / "development_kit/tests/integration/probes/capacitor.py"),
+        run_name="capacitor_contract_test",
+    )
+
+    assert namespace["_geometry_size_expressions"]() == ("L", "L", "d")
+    expected = 8.8541878128e-12 * 2.1 * (0.01**2) / 0.001 * 1e12
+    assert namespace["_theoretical_capacitance_pf"]() == pytest.approx(expected)
+
+
 def test_real_probe_closes_tree_containment_after_normal_parent_exit(monkeypatch):
     class Process:
         pid = 42001
@@ -294,6 +313,38 @@ def test_real_probe_closes_tree_containment_after_normal_parent_exit(monkeypatch
     }
 
 
+def test_native_cancel_probe_closes_tree_containment_after_normal_parent_exit(monkeypatch):
+    class Process:
+        pid = 42002
+
+        @staticmethod
+        def poll():
+            return 0
+
+        @staticmethod
+        def wait(*, timeout):
+            return 0
+
+    class Containment:
+        closed = False
+
+        def close(self):
+            self.closed = True
+
+    monkeypatch.setattr(
+        native_cancel_gate.subprocess,
+        "run",
+        lambda *_args, **_kwargs: pytest.fail("taskkill is unnecessary for an exited root"),
+    )
+    containment = Containment()
+
+    cleanup = native_cancel_gate._terminate_owned_process_tree(Process(), containment)
+
+    assert containment.closed is True
+    assert cleanup["passed"] is True
+    assert cleanup["job_object_contained"] is True
+
+
 def test_periodic_mesh_allocates_model_artifacts_only_after_lease(tmp_path):
     with pytest.raises(RuntimeError, match="requires solver lease ownership"):
         periodic_mesh_gate._owned_model_path(tmp_path, lease_acquired=False)
@@ -303,6 +354,30 @@ def test_periodic_mesh_allocates_model_artifacts_only_after_lease(tmp_path):
 
     assert first != second
     assert first.parent == second.parent == tmp_path
+
+
+def test_periodic_mesh_negative_probe_uses_exact_audited_copyface_identity():
+    audit = {
+        "group_recipes": [
+            {
+                "group_id": "periodic-y",
+                "mesh_recipe_present": True,
+                "copy_face_tag": "copy-y",
+                "matching_copyface_tags": ["copy-y"],
+            },
+            {
+                "group_id": "periodic-x",
+                "mesh_recipe_present": True,
+                "copy_face_tag": "copy-x",
+                "matching_copyface_tags": ["copy-x"],
+            },
+        ]
+    }
+
+    assert periodic_mesh_gate._negative_copyface_recipe(audit) == ("periodic-x", "copy-x")
+    audit["group_recipes"][0]["matching_copyface_tags"] = ["copy-y", "other"]
+    with pytest.raises(AssertionError, match="exactly one CopyFace"):
+        periodic_mesh_gate._negative_copyface_recipe(audit)
 
 
 def test_periodic_mesh_cleanup_fails_if_a_loaded_model_cannot_be_removed(tmp_path):
@@ -345,6 +420,54 @@ def test_point_audit_uses_caller_bound_source_hash(tmp_path):
     source.write_bytes(b"changed")
     with pytest.raises(AssertionError, match="caller-bound identity"):
         point_gate._bound_source_sha256({"source": source, "expected_source_sha256": expected})
+
+
+def test_point_audit_requires_exact_component_physics_and_study_tags():
+    class Container:
+        @staticmethod
+        def tags():
+            return ["other"]
+
+    with pytest.raises(ValueError, match="required clientapi tag is absent: ewfd"):
+        point_gate._first_tag(Container(), "ewfd")
+
+
+def test_point_audit_requires_an_identifiable_wavelength_step():
+    class Feature:
+        def __init__(self, kind=None, error=None):
+            self.kind = kind
+            self.error = error
+
+        def getType(self):
+            if self.error is not None:
+                raise self.error
+            return self.kind
+
+    class Features:
+        def __init__(self, values):
+            self.values = values
+
+        def tags(self):
+            return list(self.values)
+
+        def get(self, tag):
+            return self.values[tag]
+
+    class Study:
+        def __init__(self, values):
+            self.values = values
+
+        def feature(self):
+            return Features(self.values)
+
+    assert (
+        point_gate._study_step(Study({"freq": Feature("Frequency"), "wave": Feature("Wavelength")}))
+        == "wave"
+    )
+    with pytest.raises(ValueError, match="no identifiable Wavelength step"):
+        point_gate._study_step(
+            Study({"freq": Feature("Frequency"), "broken": Feature(error=OSError())})
+        )
 
 
 def test_preflight_fixture_prerequisites_fail_with_explicit_errors():

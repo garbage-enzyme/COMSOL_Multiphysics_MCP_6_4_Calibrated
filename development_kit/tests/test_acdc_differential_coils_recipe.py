@@ -1,6 +1,7 @@
 """Behavioral and structural checks for the differential-coil recipe."""
 
 import ast
+import math
 import runpy
 import sys
 from pathlib import Path, PurePosixPath, PureWindowsPath
@@ -101,6 +102,153 @@ def test_recipe_structurally_binds_air_properties_and_frequency_study():
         and [getattr(argument, "value", None) for argument in node.args] == ["freq", "Frequency"]
         for node in ast.walk(_function(tree, "replace_mesh_and_study"))
     )
+
+
+def test_recipe_rebuilds_geometry_with_finalization_last(monkeypatch):
+    namespace = _behavior_namespace(monkeypatch)
+    events = []
+
+    class Feature:
+        def __init__(self, tag):
+            self.tag = tag
+
+        def set(self, *_args):
+            return None
+
+        def label(self, value):
+            events.append(("label", self.tag, value))
+
+    class Features:
+        def __init__(self):
+            self.values = ["old", "fin"]
+
+        def tags(self):
+            return list(self.values)
+
+        def remove(self, tag):
+            events.append(("remove", str(tag)))
+            self.values.remove(str(tag))
+
+        def create(self, tag, kind):
+            events.append(("create", tag, kind))
+            self.values.append(tag)
+            return Feature(tag)
+
+        def move(self, tag, position):
+            events.append(("move", tag, position))
+            self.values.remove(tag)
+            self.values.insert(position, tag)
+
+        def size(self):
+            return len(self.values)
+
+    class Geometry:
+        features = Features()
+
+        def feature(self):
+            return self.features
+
+        @staticmethod
+        def run():
+            events.append(("run",))
+
+    namespace["replace_geometry"](Geometry())
+
+    creates = [event for event in events if event[0] == "create"]
+    assert events[0] == ("remove", "old")
+    assert creates == [
+        ("create", "coil_positive", "Rectangle"),
+        ("create", "coil_negative", "Rectangle"),
+        ("create", "air", "Rectangle"),
+    ]
+    assert ("move", "fin", 3) in events
+    assert events[-1] == ("run",)
+
+
+def test_recipe_removes_every_nonrequired_baseline_physics_feature(monkeypatch):
+    namespace = _behavior_namespace(monkeypatch)
+    removed = []
+
+    class Selection:
+        @staticmethod
+        def named(_name):
+            return None
+
+    class Feature:
+        @staticmethod
+        def set(*_args):
+            return None
+
+        @staticmethod
+        def label(_value):
+            return None
+
+        @staticmethod
+        def selection():
+            return Selection()
+
+    class Features:
+        def __init__(self):
+            self.values = {
+                "fsp1": Feature(),
+                "mi1": Feature(),
+                "init1": Feature(),
+                "baseline_extra": Feature(),
+            }
+
+        def tags(self):
+            return list(self.values)
+
+        def remove(self, tag):
+            removed.append(str(tag))
+            del self.values[str(tag)]
+
+        def get(self, tag):
+            return self.values[tag]
+
+        def create(self, tag, _kind, _dimension):
+            feature = Feature()
+            self.values[tag] = feature
+            return feature
+
+    class Physics:
+        def __init__(self):
+            self.features = Features()
+
+        def feature(self):
+            return self.features
+
+    physics = Physics()
+
+    class PhysicsList:
+        @staticmethod
+        def get(tag):
+            assert tag == "mf"
+            return physics
+
+    class Component:
+        @staticmethod
+        def physics():
+            return PhysicsList()
+
+    namespace["replace_physics"](Component(), 1.0)
+
+    assert removed == ["baseline_extra"]
+    assert set(physics.features.values) == {
+        "fsp1",
+        "mi1",
+        "init1",
+        "ampere_air",
+        "coil_positive",
+        "coil_negative",
+    }
+
+
+@pytest.mark.parametrize("value", [math.nan, math.inf, -math.inf, 0.0, -1.0])
+def test_recipe_rejects_nonfinite_or_nonpositive_frequency(monkeypatch, value):
+    namespace = _behavior_namespace(monkeypatch)
+    with pytest.raises(ValueError, match="finite and positive"):
+        namespace["validate_frequency_khz"](value)
 
 
 def _behavior_namespace(monkeypatch):

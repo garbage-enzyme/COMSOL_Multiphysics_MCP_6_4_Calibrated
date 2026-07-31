@@ -9,6 +9,7 @@ import sys
 import traceback
 import uuid
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).parents[3]
 if str(ROOT) not in sys.path:
@@ -53,9 +54,7 @@ def _cleanup_periodic_session(
                     removals[label] = True
                 except Exception as exc:
                     removals[label] = False
-                    errors.append(
-                        {"stage": f"remove_{label}", "type": type(exc).__name__}
-                    )
+                    errors.append({"stage": f"remove_{label}", "type": type(exc).__name__})
         try:
             client.clear()
             cleanup["client_clear"] = True
@@ -92,21 +91,26 @@ def _first_tag(tags, preferred):
     return preferred if preferred in values else values[0]
 
 
-def _copyface_tags(mesh) -> list[str]:
-    result = []
-    for tag in [str(value) for value in list(mesh.feature().tags())]:
-        feature = mesh.feature().get(tag)
-        kind = None
-        for name in ("getType", "type"):
-            try:
-                kind = str(getattr(feature, name)())
-                break
-            except Exception:
-                continue
-        label = str(feature.label()) if hasattr(feature, "label") else ""
-        if "copyface" in f"{tag} {kind} {label}".replace(" ", "").lower():
-            result.append(tag)
-    return result
+def _negative_copyface_recipe(audit: dict) -> tuple[Any, str]:
+    recipes = audit.get("group_recipes")
+    if not isinstance(recipes, list) or not recipes:
+        raise AssertionError("compatible audit exposes no periodic mesh recipe")
+    candidates = []
+    for recipe in recipes:
+        if not isinstance(recipe, dict) or recipe.get("mesh_recipe_present") is not True:
+            raise AssertionError("compatible audit contains an incomplete periodic mesh recipe")
+        tag = recipe.get("copy_face_tag")
+        matching = recipe.get("matching_copyface_tags")
+        if not isinstance(tag, str) or not tag or matching != [tag]:
+            raise AssertionError("periodic group does not identify exactly one CopyFace feature")
+        candidates.append((recipe.get("group_id"), tag))
+    tags = [tag for _group_id, tag in candidates]
+    if len(set(tags)) != len(tags):
+        raise AssertionError("CopyFace feature identity is shared across periodic groups")
+    return sorted(
+        candidates,
+        key=lambda item: json.dumps(item[0], sort_keys=True, separators=(",", ":")),
+    )[0]
 
 
 def main() -> None:
@@ -168,9 +172,13 @@ def main() -> None:
             "actionable_mismatches": audit["actionable_mismatches"],
         }
         if not audit["summary"]["geometry_consistent"]:
-            raise AssertionError(f"compatible source geometry gate failed: {audit['actionable_mismatches']}")
+            raise AssertionError(
+                f"compatible source geometry gate failed: {audit['actionable_mismatches']}"
+            )
         if not audit["summary"]["mesh_recipe_present"]:
-            raise AssertionError(f"compatible source recipe gate failed: {audit['actionable_mismatches']}")
+            raise AssertionError(
+                f"compatible source recipe gate failed: {audit['actionable_mismatches']}"
+            )
         if audit["summary"]["compatibility_assessment"] != "compatibility_unproven":
             raise AssertionError("read-only audit overclaimed compatibility")
 
@@ -190,10 +198,8 @@ def main() -> None:
         broken_model = client.load(str(broken_path))
         broken_component = broken_model.java.component().get(component_tag)
         broken_mesh = broken_component.mesh().get(mesh_tag)
-        copy_tags = _copyface_tags(broken_mesh)
-        if not copy_tags:
-            raise AssertionError("real model exposes no CopyFace feature")
-        broken_mesh.feature().remove(copy_tags[-1])
+        target_group_id, copy_face_tag = _negative_copyface_recipe(audit)
+        broken_mesh.feature().remove(copy_face_tag)
         broken_audit = collect_periodic_mesh_audit(
             broken_model,
             model_name=broken_model.name(),
@@ -203,13 +209,18 @@ def main() -> None:
         )
         if broken_audit["summary"]["mesh_recipe_present"]:
             raise AssertionError("derived missing-CopyFace model was not rejected")
-        mismatches = [
-            mismatch
-            for item in broken_audit["actionable_mismatches"]
-            for mismatch in item["mismatches"]
-        ]
-        if "add_matching_copyface_source_destination" not in mismatches:
-            raise AssertionError(f"smallest mismatch was not reported: {mismatches}")
+        target_mismatches = next(
+            (
+                item["mismatches"]
+                for item in broken_audit["actionable_mismatches"]
+                if item.get("group_id") == target_group_id
+            ),
+            [],
+        )
+        if "add_matching_copyface_source_destination" not in target_mismatches:
+            raise AssertionError(
+                f"selected periodic group did not report the removed CopyFace: {target_mismatches}"
+            )
 
         final_stat = source_path.stat()
         source_unchanged = (
@@ -230,7 +241,8 @@ def main() -> None:
             },
             clone_smoke=smoke,
             incompatible_probe={
-                "removed_copyface_tag": copy_tags[-1],
+                "target_group_id": target_group_id,
+                "removed_copyface_tag": copy_face_tag,
                 "summary": broken_audit["summary"],
                 "actionable_mismatches": broken_audit["actionable_mismatches"],
             },
