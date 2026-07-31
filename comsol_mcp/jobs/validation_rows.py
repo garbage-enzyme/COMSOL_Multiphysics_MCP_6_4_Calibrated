@@ -6,15 +6,20 @@ import hashlib
 import json
 import math
 import os
-from pathlib import Path, PurePosixPath
+import re
 import time
+from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
 
+from comsol_mcp.durable.io import fsync_directory
+
+from .journal import locked_journal, recover_jsonl_tail
 
 VALIDATION_ROW_SCHEMA_VERSION = "1.0.0"
 MAX_VALIDATION_ROWS = 256
 MAX_VALIDATION_ROW_BYTES = 128 * 1024
 _COMPLETE_AUDIT_STATES = frozenset({"measurement_complete", "policy_evaluated"})
+_IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 
 
 def _canonical_bytes(value: object) -> bytes:
@@ -47,20 +52,57 @@ def _hex_digest(value: object, name: str) -> str:
     return value.lower()
 
 
+def _identifier(value: object, name: str) -> str:
+    if not isinstance(value, str) or not _IDENTIFIER.fullmatch(value):
+        raise ValueError(f"{name} must be a bounded portable identifier")
+    return value
+
+
 def _point_map(spec: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+    if not isinstance(spec, Mapping):
+        raise ValueError("validation_matrix specification must be an object")
     if spec.get("job_type") != "validation_matrix":
         raise ValueError("validation rows require a validation_matrix specification")
+    _hex_digest(spec.get("spec_fingerprint"), "validation_matrix spec_fingerprint")
+    _hex_digest(spec.get("source_model_sha256"), "validation_matrix source_model_sha256")
     points = spec.get("points")
-    if not isinstance(points, list) or not points:
+    if not isinstance(points, list) or not 1 <= len(points) <= 32:
         raise ValueError("validation_matrix points are unavailable")
     mapped: dict[str, dict[str, Any]] = {}
-    for point in points:
-        item = _mapping(point, "validation_matrix point")
-        point_id = item.get("point_id")
-        if not isinstance(point_id, str) or not point_id:
-            raise ValueError("validation_matrix point_id is invalid")
+    for index, point in enumerate(points):
+        name = f"validation_matrix points[{index}]"
+        item = _mapping(point, name)
+        point_id = _identifier(item.get("point_id"), f"{name}.point_id")
         if point_id in mapped:
             raise ValueError("validation_matrix point_id values must be unique")
+        item["point_fingerprint"] = _hex_digest(
+            item.get("point_fingerprint"), f"{name}.point_fingerprint"
+        )
+        item["configuration_sha256"] = _hex_digest(
+            item.get("configuration_sha256"), f"{name}.configuration_sha256"
+        )
+        collectors = item.get("collectors")
+        artifacts = item.get("expected_artifact_ids")
+        if not isinstance(collectors, list) or not 1 <= len(collectors) <= 4:
+            raise ValueError(f"{name}.collectors must be a bounded nonempty list")
+        if not isinstance(artifacts, list) or not 1 <= len(artifacts) <= 16:
+            raise ValueError(f"{name}.expected_artifact_ids must be a bounded nonempty list")
+        if len(collectors) != len(artifacts):
+            raise ValueError(f"{name} requires one expected artifact per collector")
+        for collector_index, collector in enumerate(collectors):
+            declared = _mapping(collector, f"{name}.collectors[{collector_index}]")
+            if set(declared) != {"name", "inputs"}:
+                raise ValueError(f"{name}.collectors[{collector_index}] fields are invalid")
+            _identifier(declared.get("name"), f"{name}.collectors[{collector_index}].name")
+            _mapping(declared.get("inputs"), f"{name}.collectors[{collector_index}].inputs")
+        artifact_ids = [
+            _identifier(artifact, f"{name}.expected_artifact_ids[{artifact_index}]")
+            for artifact_index, artifact in enumerate(artifacts)
+        ]
+        if len(set(artifact_ids)) != len(artifact_ids):
+            raise ValueError(f"{name}.expected_artifact_ids must be unique")
+        item["collectors"] = list(collectors)
+        item["expected_artifact_ids"] = artifact_ids
         mapped[point_id] = item
     return mapped
 
@@ -170,7 +212,11 @@ def _normalize_row(
     if isinstance(attempt, bool) or not isinstance(attempt, int) or attempt <= 0:
         raise ValueError("validation row attempt must be a positive integer")
     created = raw.get("created_at_epoch")
-    if isinstance(created, bool) or not isinstance(created, (int, float)) or not math.isfinite(float(created)):
+    if (
+        isinstance(created, bool)
+        or not isinstance(created, (int, float))
+        or not math.isfinite(float(created))
+    ):
         raise ValueError("validation row timestamp must be finite")
     if raw.get("previous_row_sha256") != previous_row_sha256:
         raise ValueError("validation row hash chain is discontinuous")
@@ -224,11 +270,15 @@ def _normalize_row(
     return normalized
 
 
-def read_validation_rows(path: str | Path, spec: Mapping[str, Any]) -> list[dict[str, Any]]:
+def _read_validation_rows_unlocked(
+    path: str | Path, spec: Mapping[str, Any]
+) -> list[dict[str, Any]]:
     """Read and validate the bounded row journal and its exact identity chain."""
+    _point_map(spec)
     journal = Path(path)
     if not journal.exists():
         return []
+    recover_jsonl_tail(journal, max_row_bytes=MAX_VALIDATION_ROW_BYTES)
     rows: list[dict[str, Any]] = []
     previous: str | None = None
     with journal.open("r", encoding="utf-8") as handle:
@@ -254,9 +304,13 @@ def read_validation_rows(path: str | Path, spec: Mapping[str, Any]) -> list[dict
     return rows
 
 
-def completed_point_fingerprints(
-    path: str | Path, spec: Mapping[str, Any]
-) -> set[str]:
+def read_validation_rows(path: str | Path, spec: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Read and validate the bounded row journal under its lock."""
+    with locked_journal(path) as journal:
+        return _read_validation_rows_unlocked(journal, spec)
+
+
+def completed_point_fingerprints(path: str | Path, spec: Mapping[str, Any]) -> set[str]:
     """Return only exact valid point identities with one complete durable row."""
     return {
         row["point_fingerprint"]
@@ -279,49 +333,53 @@ def append_validation_row(
     """Append one hashed row, flushing and fsyncing before it becomes resumable."""
     if isinstance(attempt, bool) or not isinstance(attempt, int) or attempt <= 0:
         raise ValueError("attempt must be a positive integer")
-    rows = read_validation_rows(path, spec)
-    points = _point_map(spec)
-    if point_id not in points:
-        raise ValueError("point_id is not declared by the immutable job")
-    point = points[point_id]
-    if status == "ok" and point["point_fingerprint"] in {
-        row["point_fingerprint"] for row in rows if row["status"] == "ok"
-    }:
-        raise ValueError("an exact complete validation row already exists")
-    row = {
-        "schema_version": VALIDATION_ROW_SCHEMA_VERSION,
-        "sequence": len(rows) + 1,
-        "attempt": attempt,
-        "created_at_epoch": float(created_at_epoch if created_at_epoch is not None else time.time()),
-        "spec_fingerprint": spec["spec_fingerprint"],
-        "source_model_sha256": spec["source_model_sha256"],
-        "point_id": point_id,
-        "point_fingerprint": point["point_fingerprint"],
-        "configuration_sha256": point["configuration_sha256"],
-        "status": status,
-        "collector_summaries": list(collector_summaries or []),
-        "error": error,
-        "previous_row_sha256": rows[-1]["row_sha256"] if rows else None,
-    }
-    row["row_sha256"] = _fingerprint(row)
-    normalized = _normalize_row(
-        row,
-        spec=spec,
-        sequence=row["sequence"],
-        previous_row_sha256=row["previous_row_sha256"],
-    )
-    payload = _canonical_bytes(normalized) + b"\n"
-    if len(payload) > MAX_VALIDATION_ROW_BYTES:
-        raise ValueError("validation row exceeds its byte limit")
-    if len(rows) >= MAX_VALIDATION_ROWS:
-        raise ValueError("validation row journal exceeds its entry limit")
-    journal = Path(path)
-    journal.parent.mkdir(parents=True, exist_ok=True)
-    with journal.open("ab") as handle:
-        handle.write(payload)
-        handle.flush()
-        os.fsync(handle.fileno())
-    return normalized
+    with locked_journal(path) as journal:
+        journal_existed = journal.exists()
+        rows = _read_validation_rows_unlocked(journal, spec)
+        points = _point_map(spec)
+        if point_id not in points:
+            raise ValueError("point_id is not declared by the immutable job")
+        point = points[point_id]
+        if status == "ok" and point["point_fingerprint"] in {
+            row["point_fingerprint"] for row in rows if row["status"] == "ok"
+        }:
+            raise ValueError("an exact complete validation row already exists")
+        row = {
+            "schema_version": VALIDATION_ROW_SCHEMA_VERSION,
+            "sequence": len(rows) + 1,
+            "attempt": attempt,
+            "created_at_epoch": float(
+                created_at_epoch if created_at_epoch is not None else time.time()
+            ),
+            "spec_fingerprint": spec["spec_fingerprint"],
+            "source_model_sha256": spec["source_model_sha256"],
+            "point_id": point_id,
+            "point_fingerprint": point["point_fingerprint"],
+            "configuration_sha256": point["configuration_sha256"],
+            "status": status,
+            "collector_summaries": list(collector_summaries or []),
+            "error": error,
+            "previous_row_sha256": rows[-1]["row_sha256"] if rows else None,
+        }
+        row["row_sha256"] = _fingerprint(row)
+        normalized = _normalize_row(
+            row,
+            spec=spec,
+            sequence=row["sequence"],
+            previous_row_sha256=row["previous_row_sha256"],
+        )
+        payload = _canonical_bytes(normalized) + b"\n"
+        if len(payload) > MAX_VALIDATION_ROW_BYTES:
+            raise ValueError("validation row exceeds its byte limit")
+        if len(rows) >= MAX_VALIDATION_ROWS:
+            raise ValueError("validation row journal exceeds its entry limit")
+        with journal.open("ab") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        if not journal_existed:
+            fsync_directory(journal.parent)
+        return normalized
 
 
 __all__ = [

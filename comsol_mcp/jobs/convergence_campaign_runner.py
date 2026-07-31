@@ -18,7 +18,6 @@ from .convergence_campaign_rows import (
 )
 from .store import atomic_write_json, read_json
 
-
 CONVERGENCE_CAMPAIGN_SUMMARY_SCHEMA_NAME = "comsol_mcp.convergence_campaign_summary"
 CONVERGENCE_CAMPAIGN_SUMMARY_SCHEMA_VERSION = "1.0.0"
 
@@ -61,9 +60,7 @@ def _level_input(root: Path, spec: Mapping[str, Any], row: Mapping[str, Any]) ->
     artifacts = row["artifacts"]
     bundle = read_json(root / artifacts["spectral_bundle"]["relative_path"])
     decision = read_json(root / artifacts["spectral_decision"]["relative_path"])
-    characterization = read_json(
-        root / artifacts["spectral_characterization"]["relative_path"]
-    )
+    characterization = read_json(root / artifacts["spectral_characterization"]["relative_path"])
     return {
         "level_id": level["level_id"],
         "ordinal": level["ordinal"],
@@ -140,9 +137,7 @@ def build_convergence_campaign_progress(
         return {
             "action": "complete",
             "scientific_disposition": evaluation["scientific_disposition"],
-            "reason_code": (
-                "early_acceptance_allowed" if early else evaluation["reason_code"]
-            ),
+            "reason_code": ("early_acceptance_allowed" if early else evaluation["reason_code"]),
             "completed_level_count": completed,
             "declared_level_count": total,
             "declared_cap_reached": evaluation["convergence_policy"]["declared_cap_reached"],
@@ -212,7 +207,9 @@ def _control_action(
         return "continue"
     result = hook(dict(payload))
     if not isinstance(result, Mapping) or result.get("action", "continue") not in {
-        "continue", "stop", "cancel"
+        "continue",
+        "stop",
+        "cancel",
     }:
         raise ValueError("campaign control hook returned an unsupported action")
     return str(result.get("action", "continue"))
@@ -234,18 +231,17 @@ def run_convergence_campaign(
     root = Path(artifact_root).resolve()
     journal = root / "convergence_levels.jsonl"
     solved_this_attempt = 0
-    skipped_complete = len(
-        read_convergence_campaign_levels(journal, spec, artifact_root=root)
-    )
+    skipped_complete = len(read_convergence_campaign_levels(journal, spec, artifact_root=root))
+    if on_durable_level is not None:
+        for durable_row in read_convergence_campaign_levels(journal, spec, artifact_root=root):
+            on_durable_level(dict(durable_row))
     while True:
         rows = read_convergence_campaign_levels(journal, spec, artifact_root=root)
         progress = build_convergence_campaign_progress(spec, rows, artifact_root=root)
         if progress["action"] == "complete":
             if fault_hook is not None:
                 fault_hook("during_summary_write", {"completed_levels": len(rows)})
-            receipt = write_convergence_campaign_summary(
-                spec, rows, progress, artifact_root=root
-            )
+            receipt = write_convergence_campaign_summary(spec, rows, progress, artifact_root=root)
             return {
                 "completed": True,
                 "stop_reason": "convergence_campaign_complete",
@@ -276,6 +272,23 @@ def run_convergence_campaign(
         if fault_hook is not None:
             fault_hook("before_level", {"level_id": level["level_id"]})
         level_dir = convergence_level_directory(root, level["ordinal"])
+        if level_dir.exists():
+            try:
+                row = append_convergence_campaign_level(
+                    journal,
+                    spec,
+                    attempt=attempt,
+                    level_dir=level_dir,
+                    artifact_root=root,
+                )
+            except OSError, ValueError:
+                pass
+            else:
+                if on_durable_level is not None:
+                    on_durable_level(dict(row))
+                if fault_hook is not None:
+                    fault_hook("after_level_row", row)
+                continue
         result = level_executor(level, level_dir)
         if not isinstance(result, Mapping):
             raise RuntimeError("spectral level executor returned an invalid result")

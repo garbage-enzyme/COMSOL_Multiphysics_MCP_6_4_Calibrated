@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Optional
 
 from mcp.server.fastmcp import FastMCP
+
+from comsol_mcp.utils.public_errors import public_error
+
+logger = logging.getLogger(__name__)
+
 
 def register_branch_continuation_tools(mcp: FastMCP) -> None:
     """Register one read-only branch-continuation planning tool."""
@@ -46,12 +52,25 @@ def register_branch_continuation_tools(mcp: FastMCP) -> None:
                 "solver_started": False,
                 "filesystem_modified": False,
             }
-        except (TypeError, ValueError) as exc:
+        except ValueError as exc:
             return {
                 "success": False,
                 "scientific_disposition": "invalid_evidence",
                 "reason_code": "continuation_input_rejected",
                 "error": str(exc)[:2048],
+                "branch_disappearance_claimed": False,
+                "undeclared_coordinate_started": False,
+                "solver_started": False,
+                "filesystem_modified": False,
+            }
+        except Exception:
+            logger.exception("Branch-continuation planning failed")
+            return {
+                **public_error(
+                    "continuation_planning_failed",
+                    "Branch-continuation planning failed safely.",
+                ),
+                "scientific_disposition": "invalid_evidence",
                 "branch_disappearance_claimed": False,
                 "undeclared_coordinate_started": False,
                 "solver_started": False,

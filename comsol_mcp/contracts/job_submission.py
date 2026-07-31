@@ -6,6 +6,8 @@ from typing import Annotated, Any, Literal, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
+from .structural import validate_public_structure
+
 MAX_PUBLIC_TEXT = 4096
 MAX_PUBLIC_PATH = 1024
 MAX_JOB_COLLECTION = 2048
@@ -131,7 +133,9 @@ def job_submission_dict(value: JobSubmissionSpec | dict[str, Any]) -> dict[str, 
 
 def validate_job_submission(value: object) -> dict[str, Any]:
     """Validate and normalize caller fields through the discovery contract."""
-    return job_submission_dict(_JOB_SUBMISSION_ADAPTER.validate_python(value))
+    normalized = job_submission_dict(_JOB_SUBMISSION_ADAPTER.validate_python(value))
+    validate_public_structure(normalized, path="job_submission")
+    return normalized
 
 
 __all__ = [

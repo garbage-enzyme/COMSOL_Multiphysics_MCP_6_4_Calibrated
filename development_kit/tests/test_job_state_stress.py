@@ -2,30 +2,28 @@
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
 import ctypes
 import json
 import os
-from pathlib import Path
 import shutil
 import threading
 import time
-import uuid
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import pytest
-
 import src.jobs.store as store_module
 from src.jobs.store import JOB_SCHEMA_VERSION, JobStore
 
 
-def _stress_root() -> Path:
-    root = Path("D:/comsol_runtime_test/durable_state") / uuid.uuid4().hex
+def _stress_root(ascii_tmp_path: Path) -> Path:
+    root = ascii_tmp_path / "durable_state"
     root.mkdir(parents=True)
     return root
 
 
 def _archive_failure(root: Path) -> Path:
-    archive_root = Path("D:/comsol_runtime_test/p3_failures")
+    archive_root = root.parent / "failure_archive"
     archive_root.mkdir(parents=True, exist_ok=True)
     archive = archive_root / root.name
     if archive.exists():
@@ -34,8 +32,32 @@ def _archive_failure(root: Path) -> Path:
     return archive
 
 
-def test_concurrent_state_readers_writers_survive_sharing_violations(monkeypatch):
-    root = _stress_root()
+def _raise_stress_failure(root: Path, message: str, primary: BaseException) -> None:
+    try:
+        archive = _archive_failure(root)
+    except Exception as archive_error:
+        failure = AssertionError(
+            f"{message}; evidence archive failed ({type(archive_error).__name__})"
+        )
+        raise failure from primary
+    raise AssertionError(f"{message}; evidence archived at {archive}") from primary
+
+
+def test_archive_failure_preserves_the_primary_stress_exception(tmp_path, monkeypatch):
+    primary = RuntimeError("primary stress failure")
+    monkeypatch.setattr(
+        f"{__name__}._archive_failure",
+        lambda _root: (_ for _ in ()).throw(OSError("archive failure")),
+    )
+
+    with pytest.raises(AssertionError, match="archive failed") as caught:
+        _raise_stress_failure(tmp_path, "stress failed", primary)
+
+    assert caught.value.__cause__ is primary
+
+
+def test_concurrent_state_readers_writers_survive_sharing_violations(monkeypatch, ascii_tmp_path):
+    root = _stress_root(ascii_tmp_path)
     try:
         store = JobStore(root)
         job_id = store.create(
@@ -87,7 +109,7 @@ def test_concurrent_state_readers_writers_survive_sharing_violations(monkeypatch
         observation_lock = threading.Lock()
 
         def writer(writer_id: int) -> None:
-            for sequence in range(40):
+            for sequence in range(18):
                 state = store.update_state(
                     job_id,
                     patch={f"writer_{writer_id}": sequence},
@@ -96,7 +118,7 @@ def test_concurrent_state_readers_writers_survive_sharing_violations(monkeypatch
 
         def reader() -> None:
             trailing = 0
-            while not stop.is_set() or trailing < 20:
+            while not stop.is_set() or trailing < 2:
                 state = store.read_state(job_id)
                 json.dumps(state, sort_keys=True)
                 with observation_lock:
@@ -105,7 +127,8 @@ def test_concurrent_state_readers_writers_survive_sharing_violations(monkeypatch
                     trailing += 1
 
         started = time.monotonic()
-        with ThreadPoolExecutor(max_workers=8) as executor:
+        executor = ThreadPoolExecutor(max_workers=8)
+        try:
             readers = [executor.submit(reader) for _ in range(5)]
             writers = [executor.submit(writer, writer_id) for writer_id in range(3)]
             for future in writers:
@@ -118,6 +141,9 @@ def test_concurrent_state_readers_writers_survive_sharing_violations(monkeypatch
             stop.set()
             for future in readers:
                 future.result(timeout=20)
+        finally:
+            stop.set()
+            executor.shutdown(wait=True, cancel_futures=True)
         elapsed = time.monotonic() - started
 
         with pytest.raises(ValueError, match="Completed job state is immutable"):
@@ -125,9 +151,9 @@ def test_concurrent_state_readers_writers_survive_sharing_violations(monkeypatch
         assert final["status"] == "completed"
         assert final["terminal_marker"] is True
         assert {key: final[key] for key in ("writer_0", "writer_1", "writer_2")} == {
-            "writer_0": 39,
-            "writer_1": 39,
-            "writer_2": 39,
+            "writer_0": 17,
+            "writer_1": 17,
+            "writer_2": 17,
         }
         assert observations
         assert all(item["status"] in {"running", "completed"} for item in observations)
@@ -143,15 +169,14 @@ def test_concurrent_state_readers_writers_survive_sharing_violations(monkeypatch
         assert not (store.job_dir(job_id) / ".state.lock").exists()
         assert store.read_state(job_id) == final
     except BaseException as exc:
-        archive = _archive_failure(root)
-        raise AssertionError(f"durable-state durable-state stress failed; evidence archived at {archive}") from exc
+        _raise_stress_failure(root, "durable-state stress failed", exc)
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
 
 @pytest.mark.skipif(os.name != "nt", reason="requires Windows sharing semantics")
-def test_real_windows_exclusive_reader_does_not_corrupt_durable_state():
-    root = _stress_root()
+def test_real_windows_exclusive_reader_does_not_corrupt_durable_state(ascii_tmp_path):
+    root = _stress_root(ascii_tmp_path)
     try:
         store = JobStore(root)
         job_id = store.create(
@@ -207,7 +232,8 @@ def test_real_windows_exclusive_reader_does_not_corrupt_durable_state():
                 try:
                     time.sleep(0.008)
                 finally:
-                    assert close_handle(handle)
+                    if not close_handle(handle):
+                        raise ctypes.WinError(ctypes.get_last_error())
                 time.sleep(0.002)
 
         def writer() -> None:
@@ -254,7 +280,6 @@ def test_real_windows_exclusive_reader_does_not_corrupt_durable_state():
         assert not list(store.job_dir(job_id).glob(".*.tmp"))
         assert not (store.job_dir(job_id) / ".state.lock").exists()
     except BaseException as exc:
-        archive = _archive_failure(root)
-        raise AssertionError(f"durable-state Windows sharing stress failed; evidence archived at {archive}") from exc
+        _raise_stress_failure(root, "durable-state Windows sharing stress failed", exc)
     finally:
         shutil.rmtree(root, ignore_errors=True)

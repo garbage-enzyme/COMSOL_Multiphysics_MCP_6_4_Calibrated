@@ -1,10 +1,15 @@
 """Knowledge base tools for COMSOL MCP Server."""
 
+from copy import deepcopy
 from pathlib import Path
 from typing import Optional
+
 from mcp.server.fastmcp import FastMCP
 
+from comsol_mcp.durable import read_file_bytes_bounded
+
 KNOWLEDGE_DIR = Path(__file__).parent / "prompts"
+MAX_EMBEDDED_KNOWLEDGE_BYTES = 1024 * 1024
 
 KNOWLEDGE_FILES = {
     "mph_api": {
@@ -17,7 +22,15 @@ KNOWLEDGE_FILES = {
         "file": "physics_guide.md",
         "description": "Guide to physics interfaces and boundary conditions",
         "title": "Physics Interfaces Guide",
-        "keywords": ["physics", "electrostatics", "heat", "solid", "fluid", "boundary", "condition"],
+        "keywords": [
+            "physics",
+            "electrostatics",
+            "heat",
+            "solid",
+            "fluid",
+            "boundary",
+            "condition",
+        ],
     },
     "workflow": {
         "file": "workflow.md",
@@ -227,12 +240,17 @@ def _load_knowledge_file(name: str) -> str:
     """Load content from a knowledge file."""
     if name not in KNOWLEDGE_FILES:
         return ""
-    
+
     file_path = KNOWLEDGE_DIR / KNOWLEDGE_FILES[name]["file"]
-    if not file_path.exists():
+    try:
+        payload = read_file_bytes_bounded(
+            file_path,
+            max_bytes=MAX_EMBEDDED_KNOWLEDGE_BYTES,
+        )
+    except FileNotFoundError:
         return ""
-    
-    return file_path.read_text(encoding="utf-8")
+
+    return payload.decode("utf-8")
 
 
 # Module-level functions for testing and direct use
@@ -245,14 +263,14 @@ def get_docs(topic: str) -> dict:
             "error": f"Unknown topic: {topic}",
             "available_topics": available,
         }
-    
+
     content = _load_knowledge_file(topic)
     if not content:
         return {
             "success": False,
             "error": f"Could not load documentation for: {topic}",
         }
-    
+
     info = KNOWLEDGE_FILES[topic]
     return {
         "success": True,
@@ -267,13 +285,15 @@ def list_docs() -> dict:
     """List all available documentation topics."""
     topics = []
     for name, info in KNOWLEDGE_FILES.items():
-        topics.append({
-            "name": name,
-            "title": info["title"],
-            "description": info["description"],
-            "keywords": info["keywords"],
-        })
-    
+        topics.append(
+            {
+                "name": name,
+                "title": info["title"],
+                "description": info["description"],
+                "keywords": list(info["keywords"]),
+            }
+        )
+
     return {
         "success": True,
         "topics": topics,
@@ -290,17 +310,17 @@ def get_physics_guide(physics_type: str) -> dict:
             "error": f"Unknown physics type: {physics_type}",
             "available_types": available,
         }
-    
+
     guide = TOPIC_GUIDES[physics_type]
-    
+
     return {
         "success": True,
         "physics_type": physics_type,
         "guide": {
             "tool_to_add": f"physics_add_{guide['physics']}",
-            "common_boundary_conditions": guide["boundary_conditions"],
-            "common_expressions": guide["common_expressions"],
-            "tips": guide["tips"],
+            "common_boundary_conditions": list(guide["boundary_conditions"]),
+            "common_expressions": list(guide["common_expressions"]),
+            "tips": list(guide["tips"]),
         },
     }
 
@@ -314,15 +334,15 @@ def get_troubleshoot(error_type: str, context: Optional[str] = None) -> dict:
             "error": f"Unknown error type: {error_type}",
             "available_types": available,
         }
-    
+
     info = TROUBLESHOOTING[error_type]
-    
+
     return {
         "success": True,
         "error_type": error_type,
         "context": context,
-        "causes": info["causes"],
-        "solutions": info["solutions"],
+        "causes": list(info["causes"]),
+        "solutions": list(info["solutions"]),
     }
 
 
@@ -335,11 +355,11 @@ def get_best_practices(category: str) -> dict:
             "error": f"Unknown category: {category}",
             "available_categories": available,
         }
-    
+
     return {
         "success": True,
         "category": category,
-        "best_practices": BEST_PRACTICES[category],
+        "best_practices": deepcopy(BEST_PRACTICES[category]),
     }
 
 
@@ -351,90 +371,90 @@ def register_knowledge_tools(
     These tools serve static prompt-based documentation and do not import
     ChromaDB, sentence-transformers, or any embedding backend.
     """
-    
+
     @mcp.tool()
     def docs_get(topic: str) -> dict:
         """
         Get documentation on a specific topic.
-        
+
         Available topics:
         - "mph_api": MPh Python API reference
         - "physics_guide": Physics interfaces and boundary conditions
         - "workflow": Step-by-step modeling workflows
-        
+
         Args:
             topic: Documentation topic to retrieve
-        
+
         Returns:
             Documentation content for the topic
         """
         return get_docs(topic)
-    
+
     @mcp.tool()
     def docs_list() -> dict:
         """
         List all available documentation topics.
-        
+
         Returns:
             List of available documentation topics with descriptions
         """
         return list_docs()
-    
+
     @mcp.tool()
     def physics_get_guide(physics_type: str) -> dict:
         """
         Get a quick guide for a specific physics type.
-        
+
         Available physics types:
         - "electrostatics": Electric field and capacitance
         - "heat_transfer": Thermal analysis
         - "solid_mechanics": Stress and deformation
         - "fluid_flow": CFD analysis
-        
+
         Args:
             physics_type: Type of physics to get guide for
-        
+
         Returns:
             Quick reference guide for the physics type
         """
         return get_physics_guide(physics_type)
-    
+
     @mcp.tool()
     def troubleshoot(error_type: str, context: Optional[str] = None) -> dict:
         """
         Get troubleshooting suggestions for common issues.
-        
+
         Common error types:
         - "geometry_build_failed": Geometry sequence failed to build
         - "mesh_failed": Mesh generation failed
         - "solver_no_convergence": Solver did not converge
         - "memory_error": Out of memory
         - "license_error": COMSOL license issues
-        
+
         Args:
             error_type: Type of error encountered
             context: Additional context about the error
-        
+
         Returns:
             Troubleshooting suggestions
         """
         return get_troubleshoot(error_type, context)
-    
+
     @mcp.tool()
     def modeling_best_practices(category: str) -> dict:
         """
         Get best practices for different modeling categories.
-        
+
         Categories:
         - "geometry": Geometry creation and import
         - "mesh": Mesh generation strategies
         - "physics": Physics interface configuration
         - "solver": Solver configuration and optimization
         - "results": Results evaluation and visualization
-        
+
         Args:
             category: Category to get best practices for
-        
+
         Returns:
             Best practices for the specified category
         """

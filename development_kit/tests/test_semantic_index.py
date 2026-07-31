@@ -4,17 +4,16 @@ from __future__ import annotations
 
 import hashlib
 import json
-from pathlib import Path
 import shutil
 import subprocess
 import sys
 import uuid
+from pathlib import Path
 
 import numpy as np
 import pytest
-
-from src.knowledge.lexical_manual import build_index_from_records
 from src.knowledge import semantic_index as index_module
+from src.knowledge.lexical_manual import build_index_from_records
 from src.knowledge.semantic_index import (
     build_index,
     chunk_page,
@@ -27,15 +26,25 @@ from src.knowledge.semantic_index import (
     validate_pinned_model,
 )
 
+from development_kit.tests.semantic_test_support import isolated_semantic_environment
+
 
 class FakeEncoder:
     dimension = 4
+
+    def __init__(self, model_path):
+        model = validate_pinned_model(model_path)
+        self.model_id = model["model_id"]
+        self.model_revision = model["revision"]
+        self.model_fingerprint = model["model_sha256"]
 
     def encode(self, texts):
         rows = []
         for text in texts:
             digest = hashlib.sha256(text.encode("utf-8")).digest()
-            row = np.asarray([digest[index] + 1 for index in range(self.dimension)], dtype=np.float32)
+            row = np.asarray(
+                [digest[index] + 1 for index in range(self.dimension)], dtype=np.float32
+            )
             rows.append(row / np.linalg.norm(row))
         return np.stack(rows)
 
@@ -81,7 +90,9 @@ def semantic_index_assets(semantic_index_root):
                 "module": "Wave_Optics_Module",
                 "page": 2,
                 "heading": "Periodic ports",
-                "text": "Periodic ports require homogeneous adjacent media and Floquet phase settings.",
+                "text": (
+                    "Periodic ports require homogeneous adjacent media and Floquet phase settings."
+                ),
             },
         ],
         lexical,
@@ -100,7 +111,7 @@ def _build(assets, build_id):
         deployment_root=assets["root"],
         lexical_index=assets["lexical"],
         model_path=assets["model"],
-        encoder=FakeEncoder(),
+        encoder=FakeEncoder(assets["model"]),
         build_id=build_id,
         maximum_characters=240,
         overlap=20,
@@ -143,6 +154,51 @@ def test_model_pin_is_ascii_immutable_and_revision_bound(semantic_index_assets):
         validate_pinned_model(semantic_index_assets["model"])
 
 
+def test_model_pin_replaces_source_manifest_and_rejects_unlisted_files(
+    semantic_index_root,
+):
+    source = semantic_index_root / "source-with-manifest"
+    source.mkdir()
+    (source / "model.bin").write_bytes(b"model")
+    (source / "model_manifest.json").write_text('{"stale":true}', encoding="utf-8")
+    target = semantic_index_root / "pinned-model"
+
+    pin_model_snapshot(
+        source,
+        target,
+        model_id="test/model",
+        revision="revision-2",
+        dimension=4,
+        license_name="test-only",
+    )
+
+    assert validate_pinned_model(target)["revision"] == "revision-2"
+    (target / "unlisted.bin").write_bytes(b"unlisted")
+    with pytest.raises(ValueError, match="file set"):
+        validate_pinned_model(target)
+    (target / "unlisted.bin").unlink()
+    nested = target / "nested"
+    nested.mkdir()
+    (nested / "model_manifest.json").write_text("{}", encoding="utf-8")
+    with pytest.raises(ValueError, match="file set"):
+        validate_pinned_model(target)
+
+
+@pytest.mark.parametrize("field,value", [("model_id", None), ("revision", []), ("license", {})])
+def test_model_manifest_rejects_coerced_identity_values(
+    semantic_index_assets,
+    field,
+    value,
+):
+    manifest_path = semantic_index_assets["model"] / "model_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest[field] = value
+    index_module._atomic_write_json(manifest_path, manifest)
+
+    with pytest.raises(ValueError, match=field):
+        validate_pinned_model(semantic_index_assets["model"])
+
+
 def test_build_validates_then_atomically_publishes_current(semantic_index_assets):
     result = _build(semantic_index_assets, "build-001")
     current = read_current(semantic_index_assets["root"])
@@ -164,6 +220,72 @@ def test_build_validates_then_atomically_publishes_current(semantic_index_assets
     assert not list(semantic_index_assets["root"].rglob("*.tmp"))
 
 
+def test_read_current_rejects_pointer_outside_deployment_indexes(semantic_index_assets):
+    _build(semantic_index_assets, "outside-pointer")
+    pointer_path = semantic_index_assets["root"] / "current.json"
+    pointer = json.loads(pointer_path.read_text(encoding="utf-8"))
+    pointer["index_path"] = str(semantic_index_assets["root"].parent / "outside-index")
+    pointer_path.write_text(json.dumps(pointer), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="outside the deployment index root"):
+        read_current(semantic_index_assets["root"])
+
+
+def test_read_only_semantic_connections_close_deterministically(semantic_index_assets, monkeypatch):
+    result = _build(semantic_index_assets, "connection-close")
+    index = Path(result["index"]["path"])
+    real_connect = index_module.sqlite3.connect
+    tracked = []
+
+    class TrackingConnection:
+        def __init__(self, connection):
+            self.connection = connection
+            self.closed = False
+
+        def __getattr__(self, name):
+            return getattr(self.connection, name)
+
+        def close(self):
+            self.connection.close()
+            self.closed = True
+
+    def tracking_connect(*args, **kwargs):
+        connection = TrackingConnection(real_connect(*args, **kwargs))
+        tracked.append(connection)
+        return connection
+
+    monkeypatch.setattr(index_module.sqlite3, "connect", tracking_connect)
+
+    index_module._lexical_identity(semantic_index_assets["lexical"])
+    list(index_module._iter_pages(semantic_index_assets["lexical"]))
+    validate_index_against_lexical(index, semantic_index_assets["lexical"])
+
+    assert len(tracked) == 4
+    assert all(connection.closed for connection in tracked)
+
+
+def test_lexical_page_extraction_requires_the_exact_identity_snapshot(
+    semantic_index_assets,
+):
+    lexical = semantic_index_assets["lexical"]
+    identity = index_module._lexical_identity(lexical)
+    original = lexical.read_bytes()
+    lexical.write_bytes(original + b"changed")
+    try:
+        with pytest.raises(RuntimeError, match="changed before page extraction"):
+            list(index_module._iter_pages(lexical, expected_identity=identity))
+    finally:
+        lexical.write_bytes(original)
+
+    wal = Path(str(lexical) + "-wal")
+    wal.write_bytes(b"active")
+    try:
+        with pytest.raises(ValueError, match="active WAL"):
+            index_module._lexical_identity(lexical)
+    finally:
+        wal.unlink()
+
+
 @pytest.mark.parametrize("fault", ["after_chunks", "after_embeddings", "before_publish"])
 def test_interrupted_build_never_changes_active_pointer(semantic_index_assets, fault):
     _build(semantic_index_assets, "accepted")
@@ -175,7 +297,7 @@ def test_interrupted_build_never_changes_active_pointer(semantic_index_assets, f
             deployment_root=semantic_index_assets["root"],
             lexical_index=semantic_index_assets["lexical"],
             model_path=semantic_index_assets["model"],
-            encoder=FakeEncoder(),
+            encoder=FakeEncoder(semantic_index_assets["model"]),
             build_id=f"failed-{fault.replace('_', '-')}",
             maximum_characters=240,
             overlap=20,
@@ -188,7 +310,9 @@ def test_interrupted_build_never_changes_active_pointer(semantic_index_assets, f
     assert list(semantic_index_assets["root"].rglob("*.building"))
 
 
-def test_validation_rejects_corrupt_manifest_duplicate_ids_and_partial_vectors(semantic_index_assets):
+def test_validation_rejects_corrupt_manifest_duplicate_ids_and_partial_vectors(
+    semantic_index_assets,
+):
     _build(semantic_index_assets, "good")
     good = Path(read_current(semantic_index_assets["root"])["pointer"]["index_path"])
 
@@ -230,8 +354,11 @@ def test_validation_rejects_corrupt_manifest_duplicate_ids_and_partial_vectors(s
     record = json.loads(lines[0])
     record["source"] = "missing/NotInCorpus.pdf"
     record["id"] = index_module._chunk_id(
-        record["corpus_fingerprint"], record["source"], record["page"],
-        record["ordinal"], record["text_sha256"],
+        record["corpus_fingerprint"],
+        record["source"],
+        record["page"],
+        record["ordinal"],
+        record["text_sha256"],
     )
     lines[0] = json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     (missing_citation / "chunks.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -241,26 +368,95 @@ def test_validation_rejects_corrupt_manifest_duplicate_ids_and_partial_vectors(s
         validate_index_against_lexical(missing_citation, semantic_index_assets["lexical"])
 
 
+@pytest.mark.parametrize("build_id", [None, [], "Uppercase", "contains space"])
+def test_index_manifest_rejects_invalid_build_identity(semantic_index_assets, build_id):
+    _build(semantic_index_assets, "valid-build")
+    index = Path(read_current(semantic_index_assets["root"])["pointer"]["index_path"])
+    manifest = json.loads((index / "manifest.json").read_text(encoding="utf-8"))
+    manifest["build_id"] = build_id
+    index_module._atomic_write_json(index / "manifest.json", manifest)
+
+    with pytest.raises(ValueError, match="build_id"):
+        validate_index_directory(index)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "C:/manual.pdf",
+        "/manual.pdf",
+        "../manual.pdf",
+        "module/../manual.pdf",
+        "module\\manual.pdf",
+        "module//manual.pdf",
+        "module/manual.PDF",
+    ],
+)
+def test_semantic_citations_require_canonical_relative_pdf_paths(
+    semantic_index_assets,
+    source,
+):
+    _build(semantic_index_assets, "citation-path")
+    index = Path(read_current(semantic_index_assets["root"])["pointer"]["index_path"])
+    manifest = json.loads((index / "manifest.json").read_text(encoding="utf-8"))
+    lines = (index / "chunks.jsonl").read_text(encoding="utf-8").splitlines()
+    record = json.loads(lines[0])
+    record["source"] = source
+    record["id"] = index_module._chunk_id(
+        record["corpus_fingerprint"],
+        source,
+        record["page"],
+        record["ordinal"],
+        record["text_sha256"],
+    )
+    lines[0] = json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    (index / "chunks.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    _rewrite_data_identity(index, manifest)
+
+    with pytest.raises(ValueError, match="citation"):
+        validate_index_directory(index)
+
+
 def test_mismatch_non_ascii_and_pointer_rollback_gates(semantic_index_assets):
     with pytest.raises(ValueError, match="corpus fingerprint"):
         build_index(
-            deployment_root=semantic_index_assets["root"], lexical_index=semantic_index_assets["lexical"],
-            model_path=semantic_index_assets["model"], encoder=FakeEncoder(), build_id="wrong-corpus",
+            deployment_root=semantic_index_assets["root"],
+            lexical_index=semantic_index_assets["lexical"],
+            model_path=semantic_index_assets["model"],
+            encoder=FakeEncoder(semantic_index_assets["model"]),
+            build_id="wrong-corpus",
             expected_corpus_fingerprint="0" * 64,
         )
 
-    wrong_encoder = FakeEncoder()
+    wrong_encoder = FakeEncoder(semantic_index_assets["model"])
     wrong_encoder.dimension = 5
     with pytest.raises(ValueError, match="dimension"):
         build_index(
-            deployment_root=semantic_index_assets["root"], lexical_index=semantic_index_assets["lexical"],
-            model_path=semantic_index_assets["model"], encoder=wrong_encoder, build_id="wrong-model",
+            deployment_root=semantic_index_assets["root"],
+            lexical_index=semantic_index_assets["lexical"],
+            model_path=semantic_index_assets["model"],
+            encoder=wrong_encoder,
+            build_id="wrong-model",
+        )
+
+    wrong_identity = FakeEncoder(semantic_index_assets["model"])
+    wrong_identity.model_fingerprint = "0" * 64
+    with pytest.raises(ValueError, match="encoder identity"):
+        build_index(
+            deployment_root=semantic_index_assets["root"],
+            lexical_index=semantic_index_assets["lexical"],
+            model_path=semantic_index_assets["model"],
+            encoder=wrong_identity,
+            build_id="wrong-encoder-identity",
         )
 
     with pytest.raises(ValueError, match="ASCII"):
         build_index(
-            deployment_root="C:/Users/陆星/semantic", lexical_index=semantic_index_assets["lexical"],
-            model_path=semantic_index_assets["model"], encoder=FakeEncoder(), build_id="unicode-root",
+            deployment_root="C:/Users/陆星/semantic",
+            lexical_index=semantic_index_assets["lexical"],
+            model_path=semantic_index_assets["model"],
+            encoder=FakeEncoder(semantic_index_assets["model"]),
+            build_id="unicode-root",
         )
 
     _build(semantic_index_assets, "rollback-a")
@@ -274,17 +470,30 @@ def test_mismatch_non_ascii_and_pointer_rollback_gates(semantic_index_assets):
 def test_semantic_index_import_does_not_load_ml_or_spawn(semantic_index_root):
     code = """
 import json, sys
+process_launch_events = []
+sys.addaudithook(
+    lambda event, args: process_launch_events.append(event)
+    if event in {
+        'os.system', 'os.startfile', 'os.spawn', 'os.posix_spawn',
+        'subprocess.Popen'
+    } else None
+)
 import src.knowledge.semantic_index
 for name in ('numpy', 'chromadb', 'torch', 'sentence_transformers', 'mph', 'psutil'):
-    assert name not in sys.modules, name
+    if name in sys.modules:
+        raise RuntimeError(f'forbidden eager import: {name}')
+if process_launch_events:
+    raise RuntimeError(f'import launched a process: {process_launch_events}')
 print(json.dumps({'ok': True}))
 """
+    environment = isolated_semantic_environment({"PYTHONOPTIMIZE": "1"})
     completed = subprocess.run(
         [sys.executable, "-c", code],
         cwd=Path(__file__).parents[2],
         capture_output=True,
         text=True,
         timeout=20,
+        env=environment,
     )
     assert completed.returncode == 0, completed.stderr
     assert json.loads(completed.stdout)["ok"] is True

@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 from src.settings import (
+    MAX_SETTINGS_BYTES,
     SETTINGS_PATH_ENV,
     SETTINGS_SCHEMA,
     SETTINGS_VERSION,
@@ -13,6 +14,11 @@ from src.settings import (
     settings_environment,
     settings_status,
 )
+
+
+def _safe_defaults() -> dict:
+    root = Path(__file__).parents[2]
+    return json.loads((root / "settings.json").read_text(encoding="utf-8"))
 
 
 def _settings_path(tmp_path: Path, payload: object) -> Path:
@@ -71,7 +77,10 @@ def test_invalid_value_keeps_only_that_setting_at_default_and_reports_it(tmp_pat
         tmp_path,
         {
             "profile": {"name": "wave\u0000optics"},
-            "runtime": {"directory": "D:/bad\npath"},
+            "runtime": {
+                "directory": "D:/bad\npath",
+                "jobs_directory": "D:/valid/jobs",
+            },
             "shared_server": {"enabled": "true"},
         },
     )
@@ -82,6 +91,7 @@ def test_invalid_value_keeps_only_that_setting_at_default_and_reports_it(tmp_pat
 
     assert settings["profile"]["name"] == "core"
     assert settings["runtime"]["directory"] is None
+    assert settings["runtime"]["jobs_directory"] == str(Path("D:/valid/jobs"))
     assert settings["shared_server"]["enabled"] is False
     assert status["configuration_state"] == "degraded"
     assert status["defaults_used_for_invalid_or_missing_entries"] is True
@@ -100,10 +110,65 @@ def test_malformed_json_falls_back_to_the_complete_safe_defaults(tmp_path):
     status = settings_status({SETTINGS_PATH_ENV: str(path)})
     settings = load_settings({SETTINGS_PATH_ENV: str(path)})
 
-    assert settings["profile"]["name"] == "core"
+    assert settings == _safe_defaults()
     assert status["configuration_state"] == "degraded"
     assert status["reason_code"] == "settings_json_invalid"
     assert status["settings_errors"][0]["path"] == "settings"
+
+
+def test_deeply_nested_json_falls_back_without_recursion_escape(tmp_path):
+    path = tmp_path / "deeply-nested.json"
+    path.write_text(
+        '{"unknown":' + "[" * 1500 + "0" + "]" * 1500 + "}",
+        encoding="utf-8",
+    )
+
+    environment = {SETTINGS_PATH_ENV: str(path)}
+    status = settings_status(environment)
+
+    assert load_settings(environment) == _safe_defaults()
+    assert status["configuration_state"] == "degraded"
+    assert status["settings_errors"][0]["error_type"] == "RecursionError"
+
+
+def test_expanduser_runtime_error_isolated_to_the_invalid_path(tmp_path, monkeypatch):
+    path = _settings_path(
+        tmp_path,
+        {
+            "profile": {"name": "wave_optics"},
+            "runtime": {"directory": "D:/trigger"},
+            "shared_server": {"enabled": True},
+        },
+    )
+    original_expanduser = Path.expanduser
+
+    def selective_expanduser(value):
+        if value.as_posix() == "D:/trigger":
+            raise RuntimeError("synthetic missing home")
+        return original_expanduser(value)
+
+    monkeypatch.setattr(Path, "expanduser", selective_expanduser)
+    environment = {SETTINGS_PATH_ENV: str(path)}
+
+    settings = load_settings(environment)
+    status = settings_status(environment)
+
+    assert settings["profile"]["name"] == "wave_optics"
+    assert settings["runtime"]["directory"] is None
+    assert settings["shared_server"]["enabled"] is True
+    assert [item["path"] for item in status["settings_errors"]] == [
+        "settings.runtime.directory"
+    ]
+
+
+def test_oversized_settings_fall_back_without_unbounded_read(tmp_path):
+    path = tmp_path / "oversized.json"
+    path.write_bytes(b"{" + b" " * MAX_SETTINGS_BYTES + b"}")
+
+    status = settings_status({SETTINGS_PATH_ENV: str(path)})
+
+    assert status["configuration_state"] == "degraded"
+    assert status["reason_code"] == "settings_size_invalid"
 
 
 def test_project_settings_fill_legacy_runtime_shape_for_existing_callers(tmp_path):

@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import json
 import csv
-from concurrent.futures import ThreadPoolExecutor
+import json
 import os
 import shutil
 import subprocess
@@ -12,16 +11,23 @@ import sys
 import time
 import types
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import psutil
 import pytest
-
-from src.jobs.manager import JobManager, validate_staged_sweep_spec
-from src.jobs.store import JobLock, JobStore, atomic_write_json, process_identity, process_identity_state, read_json
 import src.jobs.store as store_module
+from src.jobs import cancel_worker, sequence_worker
 from src.jobs import worker as production_worker
-from src.jobs import cancel_worker
+from src.jobs.manager import JobManager, validate_staged_sweep_spec
+from src.jobs.store import (
+    JobLock,
+    JobStore,
+    atomic_write_json,
+    process_identity,
+    process_identity_state,
+    read_json,
+)
 
 
 @pytest.fixture()
@@ -31,20 +37,47 @@ def jobs_root():
     try:
         yield root
     finally:
-        shutil.rmtree(root, ignore_errors=True)
+        fixture_clean(root, ignore_errors=True)
 
 
 def wait_for(manager: JobManager, job_id: str, statuses: set[str], timeout: float = 5.0):
-    deadline = time.time() + timeout
-    while time.time() < deadline:
+    deadline = monoclock() + timeout
+    while monoclock() < deadline:
         state = manager.status(job_id)
         if state["status"] in statuses:
             return state
         time.sleep(0.025)
     raise AssertionError(
-        f"Job did not reach {statuses}: {manager.status(job_id)}; "
-        f"tail={manager.tail(job_id, 50)}"
+        f"Job did not reach {statuses}: {manager.status(job_id)}; tail={manager.tail(job_id, 50)}"
     )
+
+
+def test_sequence_resume_reconciles_progress_from_all_durable_rows(jobs_root):
+    store = JobStore(jobs_root)
+    identity = process_identity(os.getpid())
+    now = time.time()
+    spec = {"job_type": "test_sequence", "delays": [0.01, 0.01]}
+    state = {
+        "schema_version": "2",
+        "status": "starting",
+        "attempt": 2,
+        "created_at_epoch": now,
+        "updated_at_epoch": now,
+        "worker_pid": identity["pid"],
+        "worker_process_create_time": identity["process_create_time"],
+        "worker_command_signature": identity["command_signature"],
+        "progress": {"completed": 0, "total": 2},
+        "last_error": None,
+    }
+    job_id = store.create(spec, state)
+    (store.job_dir(job_id) / "results.csv").write_text(
+        "index,status\n0,ok\n1,ok\n", encoding="utf-8"
+    )
+
+    assert sequence_worker._run(str(store.root), job_id) == 0
+    final = store.read_state(job_id)
+    assert final["status"] == "completed"
+    assert final["progress"] == {"completed": 2, "total": 2}
 
 
 def test_submit_returns_promptly_and_second_manager_observes_completion(jobs_root):
@@ -90,7 +123,9 @@ def test_killed_worker_is_reconciled_as_interrupted(jobs_root):
     worker.terminate()
     worker.wait(timeout=5)
 
-    interrupted = wait_for(JobManager(jobs_root, allow_test_jobs=True), result["job_id"], {"interrupted"})
+    interrupted = wait_for(
+        JobManager(jobs_root, allow_test_jobs=True), result["job_id"], {"interrupted"}
+    )
 
     assert interrupted["last_error"]["type"] == "WorkerInterrupted"
     assert interrupted["progress"]["completed"] == 1
@@ -129,7 +164,13 @@ def test_cooperative_cancel_is_truthful_and_resumable(jobs_root):
     assert terminal["cancel"]["verification"]["absent"] is True
     assert terminal["cancel"]["cooperative_observation"]["target_attempt"] == 1
     timestamps = terminal["cancel"]["phase_timestamps"]
-    assert set(timestamps) >= {"requested", "native_grace", "verifying", "verified", "terminal_commit"}
+    assert set(timestamps) >= {
+        "requested",
+        "native_grace",
+        "verifying",
+        "verified",
+        "terminal_commit",
+    }
     assert timestamps["requested"] <= timestamps["native_grace"] <= timestamps["terminal_commit"]
     assert terminal["cancel"]["timing_policy"] == {
         "native_grace_budget_s": 10.0,
@@ -262,6 +303,54 @@ def test_legacy_h1_cancel_control_migrates_to_an_idempotent_request(jobs_root):
     assert migrated["idempotent"] is True
     assert migrated["control"]["target_attempt"] == 1
     assert migrated["control"]["request_id"].startswith("cancel-")
+
+
+def test_post_create_launch_failure_retains_durable_job_identity(jobs_root, monkeypatch):
+    from src.jobs.manager import JobLaunchError
+
+    manager = JobManager(jobs_root, allow_test_jobs=True, reconcile_on_start=False)
+    monkeypatch.setattr(
+        manager,
+        "_launch_worker",
+        lambda *_args: (_ for _ in ()).throw(RuntimeError("launch refused")),
+    )
+
+    with pytest.raises(JobLaunchError, match="launch refused") as caught:
+        manager.submit({"job_type": "test_sequence", "delays": [0.01]})
+
+    assert caught.value.cause_type == "RuntimeError"
+    assert caught.value.state_record_error is None
+    state = manager.store.read_state(caught.value.job_id)
+    assert state["status"] == "failed"
+    assert state["last_error"] == {
+        "type": "RuntimeError",
+        "message": "launch refused",
+    }
+
+
+def test_post_create_failure_keeps_job_identity_when_failure_recording_breaks(
+    jobs_root,
+    monkeypatch,
+):
+    from src.jobs.manager import JobLaunchError
+
+    manager = JobManager(jobs_root, allow_test_jobs=True, reconcile_on_start=False)
+    monkeypatch.setattr(
+        manager,
+        "_launch_worker",
+        lambda *_args: (_ for _ in ()).throw(RuntimeError("launch refused")),
+    )
+    monkeypatch.setattr(
+        manager.store,
+        "update_state",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("state write refused")),
+    )
+
+    with pytest.raises(JobLaunchError, match="launch refused") as caught:
+        manager.submit({"job_type": "test_sequence", "delays": [0.01]})
+
+    assert caught.value.state_record_error == "OSError: state write refused"
+    assert manager.store.job_dir(caught.value.job_id).is_dir()
 
 
 def test_unknown_control_request_fails_closed(jobs_root):
@@ -446,7 +535,9 @@ def test_detached_coordinator_force_stops_exact_test_worker_and_allows_resume(jo
     wait_for(manager, result["job_id"], {"completed"}, timeout=10)
 
 
-def test_startup_reconciliation_relaunches_only_existing_stale_cancel_request(jobs_root, monkeypatch):
+def test_startup_reconciliation_relaunches_only_existing_stale_cancel_request(
+    jobs_root, monkeypatch
+):
     manager = JobManager(jobs_root, allow_test_jobs=True)
     job_id = manager.store.create(
         {"schema_version": "2", "job_type": "test"},
@@ -458,7 +549,9 @@ def test_startup_reconciliation_relaunches_only_existing_stale_cancel_request(jo
         fields={"request_id": "cancel-existing", "target_attempt": 1},
     )
     calls = []
-    monkeypatch.setattr(manager, "_launch_cancel_coordinator", lambda jid, rid: calls.append((jid, rid)))
+    monkeypatch.setattr(
+        manager, "_launch_cancel_coordinator", lambda jid, rid: calls.append((jid, rid))
+    )
 
     assert manager.reconcile_cancellations() == 1
     assert calls == [(job_id, "cancel-existing")]
@@ -486,7 +579,11 @@ def test_orphan_reconciliation_commits_only_from_complete_cleanup_proof(jobs_roo
                 "coordinator": stale_coordinator,
                 "descendants": [],
                 "descendant_capture": {
-                    "worker": {"identity": identity, "state": "active", "reason": "captured while active"},
+                    "worker": {
+                        "identity": identity,
+                        "state": "active",
+                        "reason": "captured while active",
+                    },
                     "descendants": [],
                     "captured_at_epoch": time.time() - 0.5,
                 },
@@ -504,11 +601,11 @@ def test_orphan_reconciliation_commits_only_from_complete_cleanup_proof(jobs_roo
     )
 
     assert manager.reconcile_cancellations() == 1
-    terminal = manager.store.read_state(job_id)
+    terminal = wait_for(manager, job_id, {"cancelled"}, timeout=10)
 
     assert terminal["status"] == "cancelled"
     assert terminal["cancel"]["verification"]["absent"] is True
-    assert len(terminal["cancel"]["verification"]["verdicts"]) == 2
+    assert len(terminal["cancel"]["verification"]["verdicts"]) == 1
 
 
 def test_orphan_reconciliation_fails_closed_without_descendant_capture(jobs_root, monkeypatch):
@@ -565,7 +662,11 @@ def test_orphan_reconciliation_fails_closed_on_uncertain_identity(jobs_root, mon
                 "coordinator": identity,
                 "descendants": [],
                 "descendant_capture": {
-                    "worker": {"identity": identity, "state": "active", "reason": "captured while active"},
+                    "worker": {
+                        "identity": identity,
+                        "state": "active",
+                        "reason": "captured while active",
+                    },
                     "descendants": [],
                 },
             },
@@ -596,7 +697,9 @@ def test_orphan_reconciliation_fails_closed_on_uncertain_identity(jobs_root, mon
 
 
 @pytest.mark.parametrize("crash_phase", ["native_grace", "terminate", "force_kill", "verifying"])
-def test_coordinator_loss_at_each_durable_phase_reconciles_safely(jobs_root, monkeypatch, crash_phase):
+def test_coordinator_loss_at_each_durable_phase_reconciles_safely(
+    jobs_root, monkeypatch, crash_phase
+):
     manager = JobManager(
         jobs_root,
         allow_test_jobs=True,
@@ -636,7 +739,13 @@ def test_coordinator_loss_at_each_durable_phase_reconciles_safely(jobs_root, mon
     entered_at = phase_state["cancel"]["phase_timestamps"][crash_phase]
     assert process_identity_state(phase_state["cancel"]["coordinator"])[0] == "stale"
 
-    assert manager.reconcile_cancellations() == 1
+    reconciliation_deadline = time.monotonic() + 5
+    reconciled = 0
+    while not reconciled and time.monotonic() < reconciliation_deadline:
+        reconciled = manager.reconcile_cancellations()
+        if not reconciled:
+            time.sleep(0.025)
+    assert reconciled == 1
     cancelled = wait_for(manager, result["job_id"], {"cancelled"}, timeout=10)
 
     assert process_identity_state(worker_identity)[0] == "stale"
@@ -655,9 +764,12 @@ def test_read_only_manager_construction_skips_startup_reconciliation(jobs_root, 
 
 
 def test_thirty_cancel_status_polling_races_have_no_false_terminal_state(jobs_root):
-    iterations = int(os.environ.get("COMSOL_cancellation determinism_SOAK_ITERATIONS", "30"))
+    iterations_env = "COMSOL_MCP_CANCELLATION_DETERMINISM_SOAK_ITERATIONS"
+    artifact_root_env = "COMSOL_MCP_CANCELLATION_DETERMINISM_SOAK_ARTIFACT_ROOT"
+    failure_root_env = "COMSOL_MCP_CANCELLATION_DETERMINISM_FAILURE_ROOT"
+    iterations = int(os.environ.get(iterations_env, "30"))
     if iterations < 1 or iterations > 100:
-        raise ValueError("COMSOL_cancellation determinism_SOAK_ITERATIONS must be between 1 and 100")
+        raise ValueError(f"{iterations_env} must be between 1 and 100")
     manager = JobManager(
         jobs_root,
         allow_test_jobs=True,
@@ -706,8 +818,10 @@ def test_thirty_cancel_status_polling_races_have_no_false_terminal_state(jobs_ro
             "maximum_observed_latency_s": max(latencies),
             "records": records,
         }
-        summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        artifact_root_value = os.environ.get("COMSOL_cancellation determinism_SOAK_ARTIFACT_ROOT")
+        summary_path.write_text(
+            json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        artifact_root_value = os.environ.get(artifact_root_env)
         if artifact_root_value:
             artifact_root = Path(artifact_root_value)
             artifact_root.mkdir(parents=True, exist_ok=True)
@@ -727,9 +841,11 @@ def test_thirty_cancel_status_polling_races_have_no_false_terminal_state(jobs_ro
             "active_state": manager.status(active_job_id) if active_job_id else None,
             "active_tail": manager.tail(active_job_id, 100) if active_job_id else None,
         }
-        summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        summary_path.write_text(
+            json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
         archive_root = Path(
-            os.environ.get("COMSOL_cancellation determinism_FAILURE_ROOT", "D:/comsol_runtime_test/cancellation_failures")
+            os.environ.get(failure_root_env, "D:/comsol_runtime_test/cancellation_failures")
         )
         archive_root.mkdir(parents=True, exist_ok=True)
         archive = archive_root / f"{jobs_root.name}-{int(time.time())}"
@@ -742,9 +858,11 @@ def test_thirty_cancel_status_polling_races_have_no_false_terminal_state(jobs_ro
                 f"{type(archive_exc).__name__}: {archive_exc}\n",
                 encoding="utf-8",
             )
-        raise AssertionError(
-            f"cancellation determinism cancellation soak failed; durable evidence archived at {archive}"
-        ) from exc
+        message = (
+            "cancellation determinism cancellation soak failed; "
+            f"durable evidence archived at {archive}"
+        )
+        raise AssertionError(message) from exc
 
 
 def test_completed_state_is_immutable(jobs_root):
@@ -756,6 +874,19 @@ def test_completed_state_is_immutable(jobs_root):
         manager.store.update_state(result["job_id"], "failed")
     with pytest.raises(ValueError, match="immutable"):
         manager.store.update_state(result["job_id"], patch={"last_error": {"message": "rewrite"}})
+
+
+def test_state_patch_cannot_bypass_transition_validation(jobs_root):
+    store = JobStore(jobs_root)
+    job_id = store.create(
+        {"schema_version": "1", "job_type": "test"},
+        {"schema_version": "1", "status": "submitted"},
+    )
+
+    with pytest.raises(ValueError, match="new_status"):
+        store.update_state(job_id, patch={"status": "completed"})
+
+    assert store.read_state(job_id)["status"] == "submitted"
 
 
 def test_lock_removes_only_proven_stale_identity(jobs_root):
@@ -855,6 +986,83 @@ def test_job_lock_acquire_retries_transient_windows_sharing_violation(jobs_root,
 
     assert calls == 2
     assert not lock_path.exists()
+
+
+def test_job_lock_guard_prevents_replacement_during_release(jobs_root, monkeypatch):
+    from threading import Event, Thread
+
+    lock_path = jobs_root / ".state.lock"
+    first = JobLock(lock_path, timeout=0.5)
+    second = JobLock(lock_path, timeout=0.5)
+    first.acquire()
+    entered_unlink = Event()
+    allow_unlink = Event()
+    second_acquired = Event()
+    release_second = Event()
+    original_unlink = Path.unlink
+
+    def paused_unlink(path, *args, **kwargs):
+        if path == lock_path and not entered_unlink.is_set():
+            entered_unlink.set()
+            assert allow_unlink.wait(timeout=1)
+        return original_unlink(path, *args, **kwargs)
+
+    def acquire_second():
+        second.acquire()
+        second_acquired.set()
+        assert release_second.wait(timeout=1)
+        second.release()
+
+    monkeypatch.setattr(Path, "unlink", paused_unlink)
+    first_release = Thread(target=first.release)
+    second_thread = Thread(target=acquire_second)
+    first_release.start()
+    assert entered_unlink.wait(timeout=1)
+    second_thread.start()
+    assert not second_acquired.wait(timeout=0.05)
+    allow_unlink.set()
+    first_release.join(timeout=2)
+    assert second_acquired.wait(timeout=1)
+    assert json.loads(lock_path.read_text(encoding="utf-8"))["pid"] == second.identity["pid"]
+    release_second.set()
+    second_thread.join(timeout=2)
+
+    assert not lock_path.exists()
+
+
+def test_job_lock_queues_same_process_contenders_before_file_guard(jobs_root):
+    lock_path = jobs_root / ".state.lock"
+    other_path = jobs_root / ".other.lock"
+    first = JobLock(lock_path, timeout=0.5)
+    contender = JobLock(lock_path, timeout=0.08, poll_interval=0.005)
+
+    first.acquire()
+    try:
+        with JobLock(other_path, timeout=0.08):
+            assert other_path.exists()
+        with pytest.raises(TimeoutError, match="in-process durable job lock guard"):
+            contender.acquire()
+    finally:
+        first.release()
+
+    with contender:
+        assert lock_path.exists()
+    assert not lock_path.exists()
+    assert not other_path.exists()
+
+
+def test_live_pid_lock_with_malformed_creation_time_stays_bounded(jobs_root):
+    lock_path = jobs_root / ".state.lock"
+    malformed = process_identity(os.getpid())
+    malformed["process_create_time"] = "not-a-time"
+    atomic_write_json(lock_path, malformed)
+    started = time.monotonic()
+
+    with pytest.raises(TimeoutError, match="Timed out waiting"):
+        JobLock(lock_path, timeout=0.08, poll_interval=0.005).acquire()
+
+    assert time.monotonic() - started < 0.5
+    assert lock_path.exists()
 
 
 def test_tail_is_bounded(jobs_root):
@@ -1264,3 +1472,318 @@ def test_production_worker_resource_gate_interrupts_before_second_solve(jobs_roo
     assert len(journal) == 10
     assert [entry["attempt"] for entry in journal] == [1] * 6 + [2] * 4
     assert lease_events == ["acquired", "released", "acquired", "released"]
+
+
+def test_worker_can_bind_its_own_identity_before_manager_acknowledgement(jobs_root):
+    store = JobStore(jobs_root)
+    job_id = store.create(
+        {"schema_version": "2", "job_type": "test"},
+        {
+            "schema_version": "2",
+            "status": "submitted",
+            "attempt": 1,
+            "worker_pid": None,
+            "worker_process_create_time": None,
+            "worker_command_signature": None,
+        },
+    )
+    identity = process_identity(os.getpid())
+
+    first = store.bind_worker_identity(job_id, identity)
+    second = store.bind_worker_identity(job_id, identity)
+
+    assert first["idempotent"] is False
+    assert second["idempotent"] is True
+    state = store.read_state(job_id)
+    assert state["worker_pid"] == identity["pid"]
+    with pytest.raises(RuntimeError, match="another worker"):
+        store.bind_worker_identity(job_id, {**identity, "pid": identity["pid"] + 1})
+
+
+def test_failed_job_initialization_never_publishes_a_partial_job_directory(jobs_root, monkeypatch):
+    store = JobStore(jobs_root)
+    real_write = store_module.atomic_write_json
+    calls = 0
+
+    def fail_second_write(path, value):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise OSError("injected initialization failure")
+        real_write(path, value)
+
+    monkeypatch.setattr(store_module, "atomic_write_json", fail_second_write)
+    with pytest.raises(OSError, match="initialization failure"):
+        store.create({}, {"status": "submitted"}, job_id="job-incomplete")
+
+    assert not store.job_dir("job-incomplete").exists()
+    assert not list(jobs_root.glob(".job-incomplete.*.tmp"))
+
+
+def test_worker_observation_reconciles_control_first_cancel_crash(jobs_root, monkeypatch):
+    store = JobStore(jobs_root)
+    identity = process_identity(os.getpid())
+    job_id = store.create(
+        {},
+        {
+            "schema_version": "2",
+            "status": "running",
+            "attempt": 1,
+            "worker_pid": identity["pid"],
+            "worker_process_create_time": identity["process_create_time"],
+            "worker_command_signature": identity["command_signature"],
+        },
+    )
+    real_write = store_module.atomic_write_json
+    failed = False
+
+    def fail_cancel_state(path, value):
+        nonlocal failed
+        if path.name == "state.json" and value.get("status") == "cancel_requested" and not failed:
+            failed = True
+            raise OSError("injected state projection failure")
+        real_write(path, value)
+
+    monkeypatch.setattr(store_module, "atomic_write_json", fail_cancel_state)
+    with pytest.raises(OSError, match="state projection failure"):
+        store.request_cancel(job_id, requester_identity=identity)
+    monkeypatch.setattr(store_module, "atomic_write_json", real_write)
+
+    assert store.read_state(job_id)["status"] == "running"
+    assert store.read_control(job_id)["request"] == "cancel_requested"
+    observed = store.record_cooperative_cancel_observed(
+        job_id, attempt=1, message="worker observed recovered request"
+    )
+    assert observed["recorded"] is True
+    assert observed["state"]["status"] == "cancel_requested"
+
+
+def test_hidden_job_staging_directory_is_not_visible_to_manager_scans(jobs_root, monkeypatch):
+    staging = jobs_root / ".job-unpublished.injected.tmp"
+    staging.mkdir()
+    atomic_write_json(staging / "state.json", {"status": "cancel_requested"})
+    atomic_write_json(
+        staging / "control.json",
+        {"request": "cancel_requested", "request_id": "cancel-unpublished"},
+    )
+    manager = JobManager(jobs_root, allow_test_jobs=True, reconcile_on_start=False)
+
+    def fail_if_locked(*_args, **_kwargs):
+        raise AssertionError("unpublished staging directory was treated as a job")
+
+    monkeypatch.setattr(manager.store, "lock", fail_if_locked)
+
+    assert manager.reconcile_cancellations() == 0
+    assert manager.summaries()["count_returned"] == 0
+
+
+def test_sequence_worker_refuses_mismatched_exact_identity_before_state_change(
+    jobs_root, monkeypatch
+):
+    store = JobStore(jobs_root)
+    identity = process_identity(os.getpid())
+    now = time.time()
+    job_id = store.create(
+        {"job_type": "test_sequence", "delays": [0.01]},
+        {
+            "schema_version": "2",
+            "status": "submitted",
+            "attempt": 1,
+            "created_at_epoch": now,
+            "updated_at_epoch": now,
+            "worker_pid": identity["pid"],
+            "worker_process_create_time": identity["process_create_time"] - 1000.0,
+            "worker_command_signature": identity["command_signature"],
+            "progress": {"completed": 0, "total": 1},
+            "last_error": None,
+        },
+    )
+    monkeypatch.setattr(sequence_worker, "contain_current_process_tree", lambda: True)
+
+    with pytest.raises(RuntimeError, match="another worker"):
+        sequence_worker._run(str(store.root), job_id)
+
+    state = store.read_state(job_id)
+    assert state["status"] == "submitted"
+    assert not (store.job_dir(job_id) / "results.csv").exists()
+
+
+def test_sequence_transition_error_remains_bound_to_concurrent_cancel(jobs_root, monkeypatch):
+    store = JobStore(jobs_root)
+    identity = process_identity(os.getpid())
+    now = time.time()
+    job_id = store.create(
+        {"job_type": "test_sequence", "delays": [0.01]},
+        {
+            "schema_version": "2",
+            "status": "starting",
+            "attempt": 1,
+            "created_at_epoch": now,
+            "updated_at_epoch": now,
+            "worker_pid": identity["pid"],
+            "worker_process_create_time": identity["process_create_time"],
+            "worker_command_signature": identity["command_signature"],
+            "progress": {"completed": 0, "total": 1},
+            "last_error": None,
+        },
+    )
+    real_update = JobStore.update_state
+
+    def cancel_before_smoke(self, target_job_id, *args, **kwargs):
+        if target_job_id == job_id and kwargs.get("event") == "smoke_started":
+            self.request_cancel(job_id, requester_identity=identity)
+        return real_update(self, target_job_id, *args, **kwargs)
+
+    monkeypatch.setattr(JobStore, "update_state", cancel_before_smoke)
+    code = sequence_worker.run(str(store.root), job_id)
+
+    state = store.read_state(job_id)
+    assert code == 1
+    assert state["status"] == "cancel_requested"
+    assert state["cancel"]["worker_error"]["type"] == "ValueError"
+    assert "Invalid job state transition" in state["cancel"]["worker_error"]["message"]
+
+
+def test_default_reconciliation_includes_an_older_accepted_cancellation(
+    jobs_root, monkeypatch
+):
+    manager = JobManager(jobs_root, reconcile_on_start=False)
+    identity = process_identity(os.getpid())
+    old_job_id = manager.store.create(
+        {"schema_version": "2", "job_type": "test"},
+        {
+            "schema_version": "2",
+            "status": "running",
+            "attempt": 1,
+            "worker_pid": identity["pid"],
+            "worker_process_create_time": identity["process_create_time"],
+            "worker_command_signature": identity["command_signature"],
+        },
+    )
+    request = manager.store.request_cancel(old_job_id, requester_identity=identity)
+    for index in range(21):
+        manager.store.create(
+            {"schema_version": "2", "job_type": "test", "ordinal": index},
+            {"schema_version": "2", "status": "completed", "attempt": 1},
+        )
+    launches = []
+    monkeypatch.setattr(
+        manager,
+        "_launch_cancel_coordinator",
+        lambda job_id, request_id: launches.append((job_id, request_id)),
+    )
+
+    assert manager.reconcile_cancellations() == 1
+    assert launches == [(old_job_id, request["control"]["request_id"])]
+
+
+def test_fixture_cleanup_terminates_an_exact_detached_worker(jobs_root):
+    worker = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    coordinator = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    try:
+        identity = process_identity(worker.pid)
+        coordinator_identity = process_identity(coordinator.pid)
+        JobStore(jobs_root).create(
+            {"schema_version": "2", "job_type": "test"},
+            {
+                "schema_version": "2",
+                "status": "running",
+                "attempt": 1,
+                "worker_pid": identity["pid"],
+                "worker_process_create_time": identity["process_create_time"],
+                "worker_command_signature": identity["command_signature"],
+                "cancel": {"coordinator": coordinator_identity},
+            },
+        )
+
+        verification = _cleanup_fixture_processes(jobs_root)
+
+        worker.wait(timeout=5)
+        coordinator.wait(timeout=5)
+        assert verification["absent"] is True
+    finally:
+        for process in (worker, coordinator):
+            if process.poll() is None:
+                process.kill()
+                process.wait(timeout=5)
+
+
+def test_wait_for_uses_only_a_monotonic_deadline(monkeypatch):
+    class Manager:
+        def status(self, _job_id):
+            return {"status": "completed"}
+
+        def tail(self, _job_id, _limit):
+            raise AssertionError("completed status must return before tail")
+
+    monkeypatch.setattr(
+        time,
+        "time",
+        lambda: (_ for _ in ()).throw(AssertionError("wall clock used for timeout")),
+    )
+
+    assert wait_for(Manager(), "job", {"completed"})["status"] == "completed"
+
+
+def _cleanup_fixture_processes(root: Path) -> dict[str, object]:
+    from src.jobs.process_control import (
+        capture_owned_descendants,
+        terminate_exact,
+        verify_absent,
+    )
+
+    targets: list[dict[str, object]] = []
+    for state_path in root.glob("job-*/state.json"):
+        try:
+            state = read_json(state_path)
+        except RuntimeError:
+            continue
+        pid = state.get("worker_pid")
+        if not isinstance(pid, bool) and isinstance(pid, int) and pid != os.getpid():
+            identity = {
+                "pid": pid,
+                "process_create_time": state.get("worker_process_create_time"),
+                "command_signature": state.get("worker_command_signature"),
+            }
+            captured = capture_owned_descendants(identity)
+            targets.extend(captured.get("descendants", []))
+            targets.append(identity)
+        cancel = state.get("cancel")
+        coordinator = cancel.get("coordinator") if isinstance(cancel, dict) else None
+        if isinstance(coordinator, dict) and coordinator.get("pid") != os.getpid():
+            targets.append(coordinator)
+
+    unique: dict[tuple[object, object, object], dict[str, object]] = {}
+    for identity in targets:
+        key = (
+            identity.get("pid"),
+            identity.get("process_create_time"),
+            identity.get("command_signature"),
+        )
+        unique[key] = identity
+    identities = list(unique.values())
+    for identity in reversed(identities):
+        terminate_exact(identity, force=True)
+
+    deadline = time.monotonic() + 5.0
+    verification = verify_absent(identities)
+    while not verification["absent"] and time.monotonic() < deadline:
+        if any(item.get("state") == "uncertain" for item in verification["verdicts"]):
+            break
+        time.sleep(0.025)
+        verification = verify_absent(identities)
+    return verification
+
+
+def fixture_clean(root: Path, *, ignore_errors: bool) -> None:
+    _cleanup_fixture_processes(root)
+    shutil.rmtree(root, ignore_errors=ignore_errors)
+
+
+monoclock = time.monotonic

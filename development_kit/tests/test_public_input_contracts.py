@@ -8,6 +8,11 @@ import pytest
 from pydantic import TypeAdapter, ValidationError
 from src.contracts import JobSubmissionSpec, structurally_guarded
 from src.contracts.job_submission import job_submission_dict, validate_job_submission
+from src.contracts.structural import (
+    MAX_PUBLIC_COLLECTION_ITEMS,
+    MAX_PUBLIC_NESTING_DEPTH,
+    MAX_PUBLIC_STRING_LENGTH,
+)
 from src.jobs.manager import validate_staged_sweep_spec
 from src.server import create_server
 
@@ -80,6 +85,52 @@ def test_unknown_job_fields_fail_at_the_contract_boundary():
 def test_runtime_job_validator_uses_the_same_discriminated_contract():
     with pytest.raises(ValidationError, match="union_tag_invalid"):
         validate_job_submission({"job_type": "unsupported"})
+
+
+def _validation_matrix_submission(nested_value):
+    return {
+        "job_type": "validation_matrix",
+        "source_model_path": "fixture.mph",
+        "points": [{"value": nested_value}],
+        "point_limit": 1,
+        "resource_policy": {},
+        "cores": 1,
+    }
+
+
+def _overdeep_job_value():
+    value = None
+    for _ in range(MAX_PUBLIC_NESTING_DEPTH + 2):
+        value = [value]
+    return value
+
+
+@pytest.mark.parametrize(
+    "nested_value",
+    [
+        _overdeep_job_value(),
+        [None] * (MAX_PUBLIC_COLLECTION_ITEMS + 1),
+        "x" * (MAX_PUBLIC_STRING_LENGTH + 1),
+        {1: None},
+        ("non-json",),
+        object(),
+        float("nan"),
+        float("inf"),
+    ],
+    ids=[
+        "overdeep",
+        "oversized_collection",
+        "oversized_string",
+        "non_string_key",
+        "tuple",
+        "arbitrary_object",
+        "nan",
+        "infinity",
+    ],
+)
+def test_runtime_job_validator_rejects_unbounded_or_non_json_nested_values(nested_value):
+    with pytest.raises((ValueError, ValidationError)):
+        validate_job_submission(_validation_matrix_submission(nested_value))
 
 
 def test_every_full_profile_schema_node_has_a_structural_limit():

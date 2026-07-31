@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 import hashlib
 import json
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
-
+import src.evidence.portfolio_verifier as portfolio_verifier_module
 from src.artifact_chain import build_artifact_chain_manifest
 from src.evidence.outcome_contract import (
     OUTCOME_SCHEMA_NAME,
@@ -21,6 +21,7 @@ from src.evidence.portfolio_verifier import (
     build_portfolio_evidence_request,
     validate_portfolio_evidence_request,
     verify_portfolio_evidence,
+    verify_portfolio_evidence_checks,
 )
 
 
@@ -182,6 +183,22 @@ def test_exact_configuration_mesh_fit_and_wavelength_claims_verify(tmp_path):
     assert before == {path.name: path.read_bytes() for path in tmp_path.iterdir()}
 
 
+def test_summary_claims_reuse_artifact_chain_snapshots(tmp_path, monkeypatch):
+    request, _raw, _fit = _fixture(tmp_path)
+    monkeypatch.setattr(
+        portfolio_verifier_module,
+        "_read_cited_artifact",
+        lambda **_kwargs: pytest.fail("verified artifact must not be reopened"),
+    )
+
+    receipt = verify_portfolio_evidence(
+        request,
+        artifact_roots={"case-one": tmp_path},
+    )
+
+    assert receipt["claim_count"] == 4
+
+
 @pytest.mark.parametrize("claim_id", ["configuration", "mesh", "fit", "wavelength"])
 def test_summary_value_absent_from_cited_chain_is_rejected(tmp_path, claim_id):
     request, _raw, _fit = _fixture(tmp_path)
@@ -202,9 +219,7 @@ def test_missing_artifact_wrong_hash_pointer_or_dimension_fails_closed(tmp_path)
     missing = deepcopy(request)
     missing["cases"][0]["summary_claims"][0]["citation"]["artifact_id"] = "absent"
     with pytest.raises(ValueError, match="missing artifact"):
-        verify_portfolio_evidence(
-            _rehash_request(missing), artifact_roots={"case-one": tmp_path}
-        )
+        verify_portfolio_evidence(_rehash_request(missing), artifact_roots={"case-one": tmp_path})
 
     wrong_hash = deepcopy(request)
     wrong_hash["cases"][0]["summary_claims"][0]["citation"]["artifact_sha256"] = "0" * 64
@@ -214,7 +229,9 @@ def test_missing_artifact_wrong_hash_pointer_or_dimension_fails_closed(tmp_path)
         )
 
     missing_pointer = deepcopy(request)
-    missing_pointer["cases"][0]["summary_claims"][0]["citation"]["json_pointer"] = "/identity/config_missing"
+    missing_pointer["cases"][0]["summary_claims"][0]["citation"]["json_pointer"] = (
+        "/identity/config_missing/config_sha256"
+    )
     with pytest.raises(ValueError, match="does not exist"):
         verify_portfolio_evidence(
             _rehash_request(missing_pointer), artifact_roots={"case-one": tmp_path}
@@ -229,6 +246,115 @@ def test_missing_artifact_wrong_hash_pointer_or_dimension_fails_closed(tmp_path)
         _rehash_request(wrong_dimension)
 
 
+@pytest.mark.parametrize(
+    "dimension,pointer",
+    [
+        ("fit", "/benefits/value"),
+        ("mesh", "/metadata/meshless_method"),
+        ("configuration", "/metadata/reconfiguration_count"),
+        ("wavelength", "/metadata/wavelengthless_mode"),
+    ],
+)
+def test_dimension_binding_rejects_substring_only_pointer_names(tmp_path, dimension, pointer):
+    request, _raw, _fit = _fixture(tmp_path)
+    claim = request["cases"][0]["summary_claims"][0]
+    claim["dimension"] = dimension
+    claim["citation"]["json_pointer"] = pointer
+
+    with pytest.raises(ValueError, match="does not identify"):
+        _rehash_request(request)
+
+
+def test_portfolio_case_id_must_match_outcome_subject_id(tmp_path):
+    request, _raw, _fit = _fixture(tmp_path)
+    outcome = request["cases"][0]["outcome"]
+    outcome.pop("outcome_sha256")
+    outcome["subject_id"] = "case-other"
+    request["cases"][0]["outcome"] = build_outcome_contract(outcome)
+
+    with pytest.raises(ValueError, match="subject ID does not match case_id"):
+        _rehash_request(request)
+
+
+def test_duplicate_json_keys_are_rejected_before_cited_value_use(tmp_path):
+    request, raw, fit = _fixture(tmp_path)
+    duplicate_payload = (
+        b'{"schema_name":"comsol_mcp.runtime_compatibility",'
+        b'"schema_version":"1.0.0","fit":{"quality_factor":1.0},'
+        b'"fit":{"quality_factor":425.5}}'
+    )
+    fit_path = tmp_path / fit["relative_path"]
+    fit_path.write_bytes(duplicate_payload)
+    duplicate_fit = {
+        **fit,
+        "sha256": hashlib.sha256(duplicate_payload).hexdigest(),
+        "byte_count": len(duplicate_payload),
+    }
+    request["cases"][0]["artifact_chain"] = build_artifact_chain_manifest(
+        chain_id="case-chain",
+        artifacts=[
+            {**raw, "role": "raw_evidence", "parents": []},
+            {
+                **duplicate_fit,
+                "role": "derived_spectral",
+                "parents": [{"artifact_id": raw["artifact_id"], "sha256": raw["sha256"]}],
+            },
+        ],
+        terminal_artifact_ids=[duplicate_fit["artifact_id"]],
+    )
+    fit_claim = next(
+        claim for claim in request["cases"][0]["summary_claims"] if claim["claim_id"] == "fit"
+    )
+    fit_claim["citation"]["artifact_sha256"] = duplicate_fit["sha256"]
+    request = _rehash_request(request)
+
+    with pytest.raises(ValueError, match="duplicate JSON key"):
+        verify_portfolio_evidence(request, artifact_roots={"case-one": tmp_path})
+
+
+def test_summary_only_cited_artifact_requires_utf8_json(tmp_path):
+    request, raw, fit = _fixture(tmp_path)
+    fit_value = {
+        "schema_name": fit["schema_name"],
+        "schema_version": fit["schema_version"],
+        "fit": {"quality_factor": 425.5},
+    }
+    payload = json.dumps(fit_value).encode("utf-16")
+    fit_path = tmp_path / fit["relative_path"]
+    fit_path.write_bytes(payload)
+    replacement = {
+        **fit,
+        "sha256": hashlib.sha256(payload).hexdigest(),
+        "byte_count": len(payload),
+    }
+    request["cases"][0]["artifact_chain"] = build_artifact_chain_manifest(
+        chain_id="case-chain",
+        artifacts=[
+            {**raw, "role": "raw_evidence", "parents": []},
+            {
+                **replacement,
+                "role": "derived_spectral",
+                "parents": [{"artifact_id": raw["artifact_id"], "sha256": raw["sha256"]}],
+            },
+        ],
+        terminal_artifact_ids=[replacement["artifact_id"]],
+    )
+    fit_claim = next(
+        claim for claim in request["cases"][0]["summary_claims"] if claim["claim_id"] == "fit"
+    )
+    fit_claim["citation"]["artifact_sha256"] = replacement["sha256"]
+    request = _rehash_request(request)
+
+    with pytest.raises(ValueError, match="UTF-8"):
+        verify_portfolio_evidence_checks(
+            request,
+            artifact_roots={"case-one": tmp_path},
+            check_outcome_contract=False,
+            check_artifact_chain=False,
+            check_summary_claims=True,
+        )
+
+
 def test_outcome_raw_ids_must_exactly_match_chain_roots(tmp_path):
     request, _raw, _fit = _fixture(tmp_path)
     request["cases"][0]["outcome"]["evidence"]["raw_artifact_ids"] = ["other-raw"]
@@ -237,9 +363,7 @@ def test_outcome_raw_ids_must_exactly_match_chain_roots(tmp_path):
     request["cases"][0]["outcome"] = build_outcome_contract(outcome)
 
     with pytest.raises(ValueError, match="raw artifact IDs do not match"):
-        verify_portfolio_evidence(
-            _rehash_request(request), artifact_roots={"case-one": tmp_path}
-        )
+        verify_portfolio_evidence(_rehash_request(request), artifact_roots={"case-one": tmp_path})
 
 
 def test_artifact_byte_tampering_and_unrequested_policy_fields_are_rejected(tmp_path):

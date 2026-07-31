@@ -18,6 +18,7 @@ if str(ROOT) not in sys.path:
 from src.tools.ownership import SolverOwnership
 from src.tools.wave_optics_preflight import collect_wave_optics_preflight
 from src.evidence.real_fixture import controlled_fixture_from_environment
+from development_kit.scripts.acceptance_cleanup import CleanupRecorder, lease_released
 
 
 def _sha256(path: Path) -> str:
@@ -49,6 +50,21 @@ def _model_state(model) -> dict:
     }
 
 
+def _select_preflight_tags(
+    component_tags: list[str],
+    physics_tags: list[str],
+    study_tags: list[str],
+) -> tuple[str, str, str | None]:
+    if not component_tags:
+        raise ValueError("fixture prerequisite missing: model exposes no component")
+    if not physics_tags:
+        raise ValueError("fixture prerequisite missing: selected component exposes no physics")
+    component_tag = "comp1" if "comp1" in component_tags else component_tags[0]
+    physics_tag = "ewfd" if "ewfd" in physics_tags else physics_tags[0]
+    study_tag = "std1" if "std1" in study_tags else (study_tags[0] if study_tags else None)
+    return component_tag, physics_tag, study_tag
+
+
 def main() -> None:
     artifact_dir = Path(os.environ.get("COMSOL_MCP_RUNTIME_DIR", "D:/comsol_runtime")) / "wave_optics_preflight"
     artifact_dir.mkdir(parents=True, exist_ok=True)
@@ -71,11 +87,20 @@ def main() -> None:
             source_stat = source.stat()
             model = client.load(str(source))
             before = _model_state(model)
-            component_tag = before["component_tags"][0]
-            physics_tags = [str(value) for value in list(model.java.component().get(component_tag).physics().tags())]
+            component_tags = before["component_tags"]
+            if not component_tags:
+                raise ValueError("fixture prerequisite missing: model exposes no component")
+            provisional_component = "comp1" if "comp1" in component_tags else component_tags[0]
+            physics_tags = [
+                str(value)
+                for value in list(
+                    model.java.component().get(provisional_component).physics().tags()
+                )
+            ]
             study_tags = [str(value) for value in list(model.java.study().tags())]
-            physics_tag = "ewfd" if "ewfd" in physics_tags else physics_tags[0]
-            study_tag = "std1" if "std1" in study_tags else (study_tags[0] if study_tags else None)
+            component_tag, physics_tag, study_tag = _select_preflight_tags(
+                component_tags, physics_tags, study_tags
+            )
             audit = collect_wave_optics_preflight(
                 model,
                 model_name=model.name(),
@@ -119,17 +144,15 @@ def main() -> None:
             })
             client.remove(model)
         result.update(success=True, client={"standalone": client.port is None, "cores": 1})
-        exit_code = 0
     except Exception as exc:
         result["error"] = str(exc)
         result["traceback"] = traceback.format_exc(limit=8)
     finally:
+        cleanup = CleanupRecorder(result)
         if client is not None:
-            try:
-                client.clear()
-            except Exception:
-                pass
-        result["lease_release"] = owner.release()
+            cleanup.run("client_clear", client.clear, expose_result=False)
+        cleanup.run("lease_release", owner.release, passed=lease_released)
+        exit_code = cleanup.finalize()
         manifest_path.write_text(json.dumps(result, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
         print(json.dumps(result, ensure_ascii=False), flush=True)
         os._exit(exit_code)

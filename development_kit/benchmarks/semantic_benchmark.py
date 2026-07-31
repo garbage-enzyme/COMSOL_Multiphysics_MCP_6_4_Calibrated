@@ -7,10 +7,11 @@ import hashlib
 import json
 import math
 import os
-from pathlib import Path
 import sqlite3
 import statistics
 import time
+from contextlib import closing
+from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from comsol_mcp.knowledge.lexical_manual import DEFAULT_INDEX_PATH, search_index
@@ -21,7 +22,6 @@ from comsol_mcp.knowledge.semantic_contracts import (
     object_sha256,
     validate_evaluation_set,
 )
-
 
 DEFAULT_EVALUATION_PATH = (
     Path(__file__).resolve().parents[2]
@@ -58,7 +58,27 @@ def _dcg(relevance: Iterable[int]) -> float:
     return sum(value / math.log2(index + 2) for index, value in enumerate(relevance))
 
 
-def _query_metrics(ranked: list[tuple[str, int]], relevant: set[tuple[str, int]]) -> dict[str, Any]:
+def _validated_unique_ranked(
+    ranked: Iterable[tuple[str, int]], valid_citations: set[tuple[str, int]]
+) -> list[tuple[str, int]]:
+    output = []
+    seen = set()
+    for citation in ranked:
+        if citation not in valid_citations:
+            raise ValueError(f"ranked citation is absent from the pinned corpus: {citation}")
+        if citation not in seen:
+            output.append(citation)
+            seen.add(citation)
+    return output
+
+
+def _query_metrics(
+    ranked: list[tuple[str, int]],
+    relevant: set[tuple[str, int]],
+    *,
+    valid_citations: set[tuple[str, int]],
+) -> dict[str, Any]:
+    ranked = _validated_unique_ranked(ranked, valid_citations)
     if not relevant:
         return {
             "recall_at_5": None,
@@ -124,7 +144,7 @@ def _aggregate(rows: list[Mapping[str, Any]]) -> dict[str, Any]:
 
 def _index_identity(index_path: Path) -> dict[str, Any]:
     uri = index_path.resolve().as_uri() + "?mode=ro"
-    with sqlite3.connect(uri, uri=True, timeout=0.25) as connection:
+    with closing(sqlite3.connect(uri, uri=True, timeout=0.25)) as connection:
         metadata = dict(connection.execute("SELECT key, value FROM metadata"))
         citations = {
             (str(source), int(page))
@@ -165,7 +185,10 @@ def evaluate_lexical_baseline(
         started = time.perf_counter()
         result = search_index(item["query"], limit=10, index_path=index_path, mode="auto")
         elapsed = time.perf_counter() - started
-        ranked = [(row["source"], int(row["page"])) for row in result["results"]]
+        ranked = _validated_unique_ranked(
+            [(row["source"], int(row["page"])) for row in result["results"]],
+            index["citations"],
+        )
         relevant = {(row["source"], int(row["page"])) for row in item["relevant"]}
         rows.append({
             "id": item["id"],
@@ -177,7 +200,9 @@ def evaluate_lexical_baseline(
             "result_count": len(ranked),
             "strategy": result["strategy"],
             "elapsed_seconds": elapsed,
-            "metrics": _query_metrics(ranked, relevant),
+            "metrics": _query_metrics(
+                ranked, relevant, valid_citations=index["citations"]
+            ),
         })
 
     by_category = {

@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import hashlib
 import json
+import os
 import time
 from datetime import timedelta
 from pathlib import Path
@@ -13,14 +14,22 @@ from typing import Any
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+from mcp.shared.exceptions import McpError
+
+
+def _object_payload(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    nested = value.get("result")
+    return nested if isinstance(nested, dict) else value
 
 
 def _tool_payload(result: Any) -> dict[str, Any]:
     structured = getattr(result, "structuredContent", None)
-    if isinstance(structured, dict):
-        if set(structured) == {"result"} and isinstance(structured["result"], dict):
-            return structured["result"]
-        return structured
+    payload = _object_payload(structured)
+    if payload is not None:
+        return payload
+    candidates = []
     for content in getattr(result, "content", []):
         text = getattr(content, "text", None)
         if isinstance(text, str):
@@ -28,9 +37,39 @@ def _tool_payload(result: Any) -> dict[str, Any]:
                 value = json.loads(text)
             except json.JSONDecodeError:
                 continue
-            if isinstance(value, dict):
-                return value
+            payload = _object_payload(value)
+            if payload is not None:
+                candidates.append(payload)
+    if len(candidates) == 1:
+        return candidates[0]
+    if len(candidates) > 1:
+        raise RuntimeError("tool result contains multiple JSON object payloads")
     raise RuntimeError("tool result does not contain one JSON object")
+
+
+def _stdio_environment(workdir: Path) -> dict[str, str]:
+    environment = os.environ.copy()
+    environment.pop("PYTHONPATH", None)
+    environment.update(
+        {
+            "COMSOL_MCP_PROFILE": "core",
+            "COMSOL_MCP_RUNTIME_DIR": str(workdir / "runtime"),
+        }
+    )
+    return environment
+
+
+def _validate_passive_evidence(capabilities: dict[str, Any], spectral: dict[str, Any]) -> bool:
+    session_state = capabilities.get("session")
+    if not isinstance(session_state, dict):
+        raise RuntimeError("installed stdio probe omitted session-state evidence")
+    if session_state.get("connected") is not False or session_state.get("starting") is not False:
+        raise RuntimeError("installed stdio probe unexpectedly started COMSOL")
+    if spectral.get("solver_started") is not False:
+        raise RuntimeError("installed native probe did not prove solver absence")
+    if spectral.get("filesystem_modified") is not False:
+        raise RuntimeError("installed native probe did not prove filesystem passivity")
+    return bool(session_state["connected"] or session_state["starting"])
 
 
 def _spectral_arguments() -> dict[str, Any]:
@@ -108,11 +147,18 @@ async def _expect_rejection(
             arguments,
             read_timeout_seconds=timedelta(seconds=10),
         )
-    except Exception as exc:
+    except McpError as exc:
         return {
             "case_id": case_id,
             "rejected": True,
-            "mode": "protocol_exception",
+            "mode": "protocol_error",
+            "exception_type": type(exc).__name__,
+        }
+    except Exception as exc:
+        return {
+            "case_id": case_id,
+            "rejected": False,
+            "mode": "client_or_transport_failure",
             "exception_type": type(exc).__name__,
         }
     rejected = bool(getattr(result, "isError", False))
@@ -125,10 +171,7 @@ async def _expect_rejection(
 
 
 async def _probe(command: Path, workdir: Path, stderr_path: Path) -> dict[str, Any]:
-    environment = {
-        "COMSOL_MCP_PROFILE": "core",
-        "COMSOL_MCP_RUNTIME_DIR": str(workdir / "runtime"),
-    }
+    environment = _stdio_environment(workdir)
     parameters = StdioServerParameters(
         command=str(command),
         args=[],
@@ -205,9 +248,7 @@ async def _probe(command: Path, workdir: Path, stderr_path: Path) -> dict[str, A
         raise RuntimeError("installed stdio probe did not activate the core profile")
     if preflight.get("control_plane", {}).get("operation") != "solver_preflight":
         raise RuntimeError("installed cold solver_preflight call omitted timing evidence")
-    session_state = capabilities.get("session", {})
-    if session_state.get("connected") or session_state.get("starting"):
-        raise RuntimeError("installed stdio probe unexpectedly started COMSOL")
+    comsol_client_started = _validate_passive_evidence(capabilities, spectral)
     names_payload = json.dumps(tool_names, separators=(",", ":")).encode("utf-8")
     return {
         "schema_name": "comsol_mcp.installed_stdio_probe",
@@ -248,7 +289,7 @@ async def _probe(command: Path, workdir: Path, stderr_path: Path) -> dict[str, A
             },
         },
         "malformed_request_matrix": malformed,
-        "comsol_client_started": False,
+        "comsol_client_started": comsol_client_started,
         "stderr_byte_count": stderr_path.stat().st_size,
         "paths_included": False,
     }

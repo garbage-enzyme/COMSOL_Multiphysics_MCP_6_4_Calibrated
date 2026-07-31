@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 from pathlib import Path
 import re
 from typing import Any, Mapping
@@ -15,6 +14,7 @@ from comsol_mcp.evidence.field_matrix import (
     MATRIX_FIELD_COLLECTOR,
     normalize_validation_matrix_field_inputs,
 )
+from comsol_mcp.utils.validation import strict_json_number
 
 
 MAX_VALIDATION_MATRIX_POINTS = 32
@@ -72,13 +72,7 @@ def _positive_integer(value: object, name: str, *, maximum: int | None = None) -
 
 
 def _finite_number(value: object, name: str, *, positive: bool = False) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError(f"{name} must be numeric")
-    number = float(value)
-    if not math.isfinite(number) or (positive and number <= 0):
-        qualifier = "positive and finite" if positive else "finite"
-        raise ValueError(f"{name} must be {qualifier}")
-    return number
+    return strict_json_number(value, name, positive=positive)
 
 
 def _identifier(value: object, name: str) -> str:

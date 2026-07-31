@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
 
 import pytest
-
+import src.shared_session.locking as locking_module
+from src.durable import canonical_sha256_v1
 from src.shared_session.identity import normalize_attached_server_identity
 from src.shared_session.locking import (
     build_shared_model_lock,
@@ -115,6 +117,19 @@ def test_revision_is_deterministic_for_mapping_order():
     assert first == second
 
 
+def test_revision_accepts_exact_collection_item_limit():
+    revision = build_shared_model_revision(
+        _model(),
+        sequence=0,
+        structural_readback={
+            "items": list(range(locking_module.MAX_REVISION_COLLECTION_ITEMS))
+        },
+        state_readback={"state": "ready"},
+    )
+
+    assert len(revision.revision_sha256) == 64
+
+
 @pytest.mark.parametrize(
     "structural,state",
     [
@@ -132,6 +147,18 @@ def test_revision_rejects_missing_nonfinite_or_unbounded_readback(structural, st
             sequence=0,
             structural_readback=structural,
             state_readback=state,
+        )
+
+
+def test_revision_rejects_aggregate_node_budget_before_serialization(monkeypatch):
+    monkeypatch.setattr(locking_module, "MAX_REVISION_NODES", 4)
+
+    with pytest.raises(ValueError, match="aggregate node limit"):
+        build_shared_model_revision(
+            _model(),
+            sequence=0,
+            structural_readback={"branch": [1, 2]},
+            state_readback={"state": "ready"},
         )
 
 
@@ -160,6 +187,84 @@ def test_lock_binds_server_session_model_revision_source_and_mcp_process():
     assert payload["revision"]["revision_sha256"] == revision.revision_sha256
     assert payload["immutable_source"]["sha256"] == "c" * 64
     assert len(payload["lock_sha256"]) == 64
+    with pytest.raises(TypeError, match="frozen"):
+        lock.revision["sequence"] = 1
+    payload["revision"]["sequence"] = 1
+    assert lock.revision["sequence"] == 0
+
+
+def test_lock_hash_binds_every_serialized_leaf_independently():
+    model = _model()
+    revision = _revision(model)
+    lock = build_shared_model_lock(
+        attached_server=_server(),
+        session_acquisition_id="b" * 32,
+        model=model,
+        revision=revision,
+        collaboration_mode="interactive_inspection",
+        immutable_source={"path": "C:/models/source.mph", "sha256": "c" * 64},
+        lock_created_at_epoch=3456.7,
+        mcp_process={
+            "pid": 5000,
+            "process_create_time": 3000.0,
+            "command_signature": "d" * 64,
+        },
+    )
+    body = lock.to_dict()
+    observed = body.pop("lock_sha256")
+
+    assert canonical_sha256_v1(body) == observed
+
+    def scalar_paths(value, path=()):
+        if isinstance(value, dict):
+            for key, child in value.items():
+                yield from scalar_paths(child, (*path, key))
+        else:
+            yield path
+
+    for path in scalar_paths(body):
+        changed = deepcopy(body)
+        parent = changed
+        for key in path[:-1]:
+            parent = parent[key]
+        value = parent[path[-1]]
+        if isinstance(value, bool):
+            parent[path[-1]] = not value
+        elif isinstance(value, (int, float)):
+            parent[path[-1]] = value + 1
+        elif value is None:
+            parent[path[-1]] = "present"
+        else:
+            parent[path[-1]] = f"{value}:changed"
+        assert canonical_sha256_v1(changed) != observed, path
+
+
+def test_lock_identity_normalizes_acquisition_id_case_before_derivation():
+    model = _model()
+    revision = _revision(model)
+    common = {
+        "attached_server": _server(),
+        "model": model,
+        "revision": revision,
+        "collaboration_mode": "interactive_inspection",
+        "lock_created_at_epoch": 3456.7,
+        "mcp_process": {
+            "pid": 5000,
+            "process_create_time": 3000.0,
+            "command_signature": "d" * 64,
+        },
+    }
+
+    lower = build_shared_model_lock(
+        session_acquisition_id="abcdef0123456789abcdef0123456789",
+        **common,
+    )
+    upper = build_shared_model_lock(
+        session_acquisition_id="ABCDEF0123456789ABCDEF0123456789",
+        **common,
+    )
+
+    assert lower == upper
 
 
 def test_lock_rejects_revision_from_a_different_model():
@@ -174,6 +279,39 @@ def test_lock_rejects_revision_from_a_different_model():
             session_acquisition_id="b" * 32,
             model=second,
             revision=_revision(first),
+            collaboration_mode="interactive_inspection",
+            lock_created_at_epoch=3456.7,
+            mcp_process={
+                "pid": 5000,
+                "process_create_time": 3000.0,
+                "command_signature": "d" * 64,
+            },
+        )
+
+
+@pytest.mark.parametrize("forged_identity", ["server", "model", "revision"])
+def test_lock_builder_rejects_directly_fabricated_identity_dataclasses(
+    forged_identity,
+):
+    server = _server()
+    model = _model()
+    revision = _revision(model)
+    if forged_identity == "server":
+        server = replace(server, server_pid=server.server_pid + 1)
+        match = "server identity"
+    elif forged_identity == "model":
+        model = replace(model, label="Forged label")
+        match = "model identity"
+    else:
+        revision = replace(revision, sequence=revision.sequence + 1)
+        match = "revision identity"
+
+    with pytest.raises(ValueError, match=match):
+        build_shared_model_lock(
+            attached_server=server,
+            session_acquisition_id="b" * 32,
+            model=model,
+            revision=revision,
             collaboration_mode="interactive_inspection",
             lock_created_at_epoch=3456.7,
             mcp_process={

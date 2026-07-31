@@ -84,6 +84,18 @@ def test_exact_duplicate_locations_are_averaged_before_interpolation():
 
     assert result["unique_point_count"] == 4
     assert result["collapsed_duplicate_point_count"] == 1
+    x_coordinates = result["axis_coordinates"]["x"]
+    y_coordinates = result["axis_coordinates"]["y"]
+    column = int(
+        np.flatnonzero(x_coordinates == selection["coordinates"]["x"][0])[0]
+    )
+    row = int(
+        np.flatnonzero(y_coordinates == selection["coordinates"]["y"][0])[0]
+    )
+    for name, values in selection["quantities"].items():
+        assert result["quantity_grids"][name][row, column] == pytest.approx(
+            (values[0] + values[-1]) / 2.0
+        )
 
 
 def test_selection_identity_shape_and_counts_fail_closed():
@@ -117,3 +129,40 @@ def test_linear_interpolation_rechecks_unique_geometry_after_duplicate_collapse(
 
     with pytest.raises(ValueError, match="unique points must not be collinear"):
         interpolate_field_slice(request=request, selection=selection)
+
+
+def test_interpolation_rejects_impossible_or_oversized_standalone_counts():
+    request, selection = _selection()
+    impossible = deepcopy(selection)
+    impossible["selected_point_count"] = 5
+    impossible["rejected_point_count"] = -1
+    oversized = deepcopy(selection)
+    oversized["raw_point_count"] = request["limits"]["max_raw_points"] + 1
+    oversized["rejected_point_count"] = (
+        oversized["raw_point_count"] - oversized["selected_point_count"]
+    )
+
+    for value in (impossible, oversized):
+        with pytest.raises(ValueError, match="point counts"):
+            interpolate_field_slice(request=request, selection=value)
+
+
+def test_interpolation_revalidates_bounds_slice_and_declared_ranges():
+    request, selection = _selection()
+    outside = deepcopy(selection)
+    outside["coordinates"]["x"][0] = -2.0
+    wrong_slice = deepcopy(selection)
+    wrong_slice["coordinates"]["z"][0] = 0.7
+    wrong_range = deepcopy(selection)
+    wrong_range["coordinate_ranges"]["x"][1] -= 0.25
+    wrong_unit = deepcopy(selection)
+    wrong_unit["coordinate_ranges"]["unit"] = "m"
+
+    for value, message in (
+        (outside, "requested bounds"),
+        (wrong_slice, "requested slice"),
+        (wrong_range, "selected coordinates"),
+        (wrong_unit, "unit does not match"),
+    ):
+        with pytest.raises(ValueError, match=message):
+            interpolate_field_slice(request=request, selection=value)

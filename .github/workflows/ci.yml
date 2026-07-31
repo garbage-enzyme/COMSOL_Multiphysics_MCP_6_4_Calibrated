@@ -12,7 +12,7 @@ jobs:
   dependency-compatibility:
     name: dependency compatibility (${{ matrix.lane }}, Python 3.14)
     runs-on: windows-latest
-    timeout-minutes: 25
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -41,7 +41,13 @@ jobs:
       - name: Compile Python sources
         run: python -m compileall -q comsol_mcp src development_kit
       - name: Run dependency and process regression suite
-        run: python -m pytest -q
+        env:
+          PYTHONUNBUFFERED: "1"
+        run: |
+          New-Item -ItemType Directory -Force -Path D:\comsol_pytest | Out-Null
+          python -u -m pytest -vv -o faulthandler_timeout=120 --basetemp D:\comsol_pytest\dependency-main --ignore development_kit/tests/test_control_plane_startup.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -u -m pytest -vv -o faulthandler_timeout=120 development_kit/tests/test_control_plane_startup.py --basetemp D:\comsol_pytest\dependency-serial
 
   unit-and-package-py314:
     name: unit-and-package (Python 3.14, default production lane)

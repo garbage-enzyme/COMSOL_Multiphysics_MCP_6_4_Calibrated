@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
+import ctypes
 import sys
+from contextlib import nullcontext
+from ctypes import wintypes
 from types import SimpleNamespace
 
 import psutil
-
+import pytest
+import src.shared_session.process_probe as process_probe
 from src.shared_session.preflight import classify_shared_server_preflight
 from src.shared_session.process_probe import (
     _is_primary_desktop_window,
     _listener_records,
+    _process_records,
     collect_shared_preflight_snapshot,
 )
 
@@ -42,9 +47,7 @@ def test_collector_redacts_paths_and_ignores_declared_process_children():
         clock=lambda: 1000.0,
     )
 
-    assert [item["kind"] for item in snapshot["processes"]] == [
-        "comsol_desktop", "comsol_server"
-    ]
+    assert [item["kind"] for item in snapshot["processes"]] == ["comsol_desktop", "comsol_server"]
     assert all("executable" not in item for item in snapshot["processes"])
     assert all("command_line" not in item for item in snapshot["processes"])
     serialized = str(snapshot)
@@ -69,11 +72,13 @@ def test_collector_exposes_external_mph_as_a_collision_without_version_requireme
     result = classify_shared_server_preflight(
         endpoint={"host": "localhost", "port": 2036},
         first_probe=snapshot,
-        second_probe=snapshot,
+        second_probe={**snapshot, "observed_at_epoch": 1001.0},
     )
 
     assert [item["kind"] for item in snapshot["processes"]] == [
-        "comsol_desktop", "comsol_server", "mph_client"
+        "comsol_desktop",
+        "comsol_server",
+        "mph_client",
     ]
     assert result["state"] == "unclassified_comsol_or_mph_collision"
 
@@ -94,7 +99,7 @@ def test_unreadable_comsol_file_version_reaches_explicit_classifier_state():
     result = classify_shared_server_preflight(
         endpoint={"host": "127.0.0.1", "port": 2036},
         first_probe=snapshot,
-        second_probe=snapshot,
+        second_probe={**snapshot, "observed_at_epoch": 1001.0},
     )
 
     assert result["state"] == "unsupported_or_ambiguous_comsol_version"
@@ -114,6 +119,101 @@ def test_collector_excludes_current_mcp_process_identity():
     )
 
     assert snapshot["processes"] == []
+
+
+def test_collector_keeps_excluded_comsol_roots_for_descendant_filtering():
+    records = [
+        _record(20, 0, "comsolmphserver.exe", ["comsolmphserver.exe"]),
+        _record(21, 20, "comsolhelper.exe", ["comsolhelper.exe"]),
+    ]
+
+    snapshot = collect_shared_preflight_snapshot(
+        process_provider=lambda: records,
+        listener_provider=list,
+        window_provider=dict,
+        version_provider=lambda path: "6.4.0.293",
+        exclude_pids={20},
+        clock=lambda: 1000.0,
+    )
+
+    assert snapshot["processes"] == []
+
+
+def test_access_denied_process_metadata_marks_inventory_incomplete(monkeypatch):
+    class InaccessibleServer:
+        pid = 20
+
+        def oneshot(self):
+            return nullcontext()
+
+        def cmdline(self):
+            raise psutil.AccessDenied(pid=self.pid)
+
+        def exe(self):
+            raise psutil.AccessDenied(pid=self.pid)
+
+        def ppid(self):
+            return 0
+
+        def name(self):
+            return "comsolmphserver.exe"
+
+        def create_time(self):
+            return 20.0
+
+    monkeypatch.setattr(psutil, "process_iter", lambda: [InaccessibleServer()])
+
+    records, complete = _process_records()
+    snapshot = collect_shared_preflight_snapshot(
+        process_provider=lambda: (records, complete),
+        listener_provider=list,
+        window_provider=dict,
+        version_provider=lambda path: "6.4.0.293",
+        clock=lambda: 1000.0,
+    )
+
+    assert snapshot["inventory_complete"] is False
+    assert [item["kind"] for item in snapshot["processes"]] == ["comsol_server"]
+
+
+def test_process_inventory_bound_is_inclusive(monkeypatch):
+    class Process:
+        def __init__(self, pid):
+            self.pid = pid
+
+        def oneshot(self):
+            return nullcontext()
+
+        def cmdline(self):
+            return ["python.exe"]
+
+        def exe(self):
+            return "C:/Python314/python.exe"
+
+        def ppid(self):
+            return 0
+
+        def name(self):
+            return "python.exe"
+
+        def create_time(self):
+            return float(self.pid)
+
+    monkeypatch.setattr(process_probe, "MAX_PROCESS_RECORDS", 2)
+    monkeypatch.setattr(psutil, "process_iter", lambda: [Process(1), Process(2)])
+
+    records, complete = _process_records()
+
+    assert len(records) == 2
+    assert complete is True
+
+    monkeypatch.setattr(
+        psutil,
+        "process_iter",
+        lambda: [Process(1), Process(2), Process(3)],
+    )
+    with pytest.raises(RuntimeError, match="process inventory exceeds"):
+        _process_records()
 
 
 def test_repository_path_text_does_not_impersonate_comsol_processes():
@@ -260,3 +360,156 @@ def test_listener_collector_preserves_wildcard_and_discards_remote_bind(monkeypa
     monkeypatch.setattr(psutil, "net_connections", lambda kind: connections)
 
     assert _listener_records() == [{"host": "::", "port": 2036, "pid": 20}]
+
+
+def test_listener_inventory_is_bounded_at_consumer_limit(monkeypatch):
+    def connection(pid):
+        return SimpleNamespace(
+            status=psutil.CONN_LISTEN,
+            pid=pid,
+            laddr=SimpleNamespace(ip="127.0.0.1", port=2000 + pid),
+        )
+
+    monkeypatch.setattr(process_probe, "MAX_LISTENER_RECORDS", 2)
+    monkeypatch.setattr(
+        psutil,
+        "net_connections",
+        lambda kind: [connection(1), connection(2)],
+    )
+    assert len(_listener_records()) == 2
+
+    monkeypatch.setattr(
+        psutil,
+        "net_connections",
+        lambda kind: [connection(1), connection(2), connection(3)],
+    )
+    with pytest.raises(RuntimeError, match="listener inventory exceeds"):
+        _listener_records()
+
+    with pytest.raises(RuntimeError, match="listener inventory exceeds"):
+        collect_shared_preflight_snapshot(
+            process_provider=list,
+            listener_provider=lambda: [
+                {"host": "127.0.0.1", "port": 2001 + index, "pid": index + 1}
+                for index in range(3)
+            ],
+            window_provider=dict,
+            version_provider=lambda _path: None,
+        )
+
+
+class _FakeWinFunction:
+    def __init__(self, implementation=lambda *_args: True):
+        self.implementation = implementation
+        self.argtypes = None
+        self.restype = None
+
+    def __call__(self, *args):
+        return self.implementation(*args)
+
+
+def test_user32_calls_declare_pointer_safe_signatures(monkeypatch):
+    api = SimpleNamespace(
+        EnumWindows=_FakeWinFunction(),
+        IsWindowVisible=_FakeWinFunction(),
+        GetWindowTextLengthW=_FakeWinFunction(),
+        GetWindowTextW=_FakeWinFunction(),
+        GetClassNameW=_FakeWinFunction(),
+        GetWindowThreadProcessId=_FakeWinFunction(),
+        IsHungAppWindow=_FakeWinFunction(),
+    )
+    monkeypatch.setattr(process_probe.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(
+        process_probe.ctypes,
+        "WinDLL",
+        lambda _name, use_last_error: api,
+    )
+
+    assert process_probe._window_state_by_pid() == {}
+    assert len(api.EnumWindows.argtypes) == 2
+    assert api.EnumWindows.restype is wintypes.BOOL
+    assert api.IsWindowVisible.argtypes == [wintypes.HWND]
+    assert api.GetWindowTextLengthW.restype is ctypes.c_int
+    assert api.GetWindowTextW.argtypes == [
+        wintypes.HWND,
+        wintypes.LPWSTR,
+        ctypes.c_int,
+    ]
+    assert api.GetClassNameW.argtypes == [
+        wintypes.HWND,
+        wintypes.LPWSTR,
+        ctypes.c_int,
+    ]
+    assert api.GetWindowThreadProcessId.argtypes == [
+        wintypes.HWND,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    assert api.IsHungAppWindow.restype is wintypes.BOOL
+
+
+class _FakeVersionApi:
+    def __init__(self, mode):
+        self.mode = mode
+        self.fixed = process_probe._VS_FIXEDFILEINFO()
+        self.fixed.dwSignature = 0 if mode == "bad_signature" else 0xFEEF04BD
+        self.fixed.dwFileVersionMS = (6 << 16) | 4
+        self.fixed.dwFileVersionLS = 293
+        self.GetFileVersionInfoSizeW = _FakeWinFunction(
+            lambda _path, _handle: ctypes.sizeof(self.fixed)
+        )
+        self.GetFileVersionInfoW = _FakeWinFunction(
+            lambda _path, _handle, _size, _buffer: True
+        )
+        self.VerQueryValueW = _FakeWinFunction(self._query)
+
+    def _query(self, _buffer, _subblock, pointer_out, length_out):
+        if self.mode != "null":
+            ctypes.cast(
+                pointer_out,
+                ctypes.POINTER(ctypes.c_void_p),
+            ).contents.value = ctypes.addressof(self.fixed)
+        ctypes.cast(
+            length_out,
+            ctypes.POINTER(wintypes.UINT),
+        ).contents.value = (
+            ctypes.sizeof(self.fixed) - 1
+            if self.mode == "short"
+            else ctypes.sizeof(self.fixed)
+        )
+        return True
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected"),
+    [
+        ("valid", "6.4.0.293"),
+        ("null", None),
+        ("short", None),
+        ("bad_signature", None),
+    ],
+)
+def test_windows_file_version_validates_pointer_length_signature_and_api_types(
+    monkeypatch,
+    mode,
+    expected,
+):
+    api = _FakeVersionApi(mode)
+    monkeypatch.setattr(process_probe.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(
+        process_probe.ctypes,
+        "WinDLL",
+        lambda _name, use_last_error: api,
+    )
+
+    assert process_probe._windows_file_version("C:/COMSOL/comsol.exe") == expected
+    assert api.GetFileVersionInfoSizeW.argtypes == [
+        wintypes.LPCWSTR,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    assert api.GetFileVersionInfoW.restype is wintypes.BOOL
+    assert api.VerQueryValueW.argtypes == [
+        wintypes.LPCVOID,
+        wintypes.LPCWSTR,
+        ctypes.POINTER(ctypes.c_void_p),
+        ctypes.POINTER(wintypes.UINT),
+    ]

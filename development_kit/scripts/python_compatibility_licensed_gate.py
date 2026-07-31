@@ -4,25 +4,41 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-from importlib.metadata import version
 import json
 import math
 import os
-from pathlib import Path
 import platform
 import subprocess
 import sys
 import time
 import uuid
+from importlib import import_module
+from importlib.metadata import version
+from pathlib import Path
+from typing import Any
 
 import psutil
 
-from comsol_mcp.jobs.store import atomic_write_json
-from comsol_mcp.tools.ownership import SolverOwnership, _command_signature
-
-
 ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) in sys.path:
+    sys.path.remove(str(ROOT))
+sys.path.insert(0, str(ROOT))
+
+lifecycle_module = import_module("comsol_mcp.shared_session.lifecycle")
+atomic_write_json_exclusive = import_module("comsol_mcp.durable.io").atomic_write_json_exclusive
+ownership_module = import_module("comsol_mcp.tools.ownership")
+SolverOwnership = ownership_module.SolverOwnership
+_command_signature = ownership_module._command_signature
+process_control_module = import_module("comsol_mcp.jobs.process_control")
+terminate_exact = process_control_module.terminate_exact
+verify_absent = process_control_module.verify_absent
+
+
 EXPECTED_BACKEND = {"major": 6, "minor": 4, "patch": 0, "build": 293}
+
+
+def _write_receipt(path: Path, value: dict[str, Any]) -> None:
+    atomic_write_json_exclusive(path, value)
 
 
 def _sha256_file(path: Path) -> str:
@@ -57,7 +73,7 @@ def _process_identity(pid: int) -> dict:
         command_line = list(process.cmdline())
         try:
             executable = process.exe()
-        except (psutil.AccessDenied, psutil.ZombieProcess):
+        except psutil.AccessDenied, psutil.ZombieProcess:
             executable = None
         return {
             "pid": process.pid,
@@ -73,13 +89,13 @@ def _process_identity(pid: int) -> dict:
 def _descendant_identities(pid: int) -> list[dict]:
     try:
         children = psutil.Process(pid).children(recursive=True)
-    except (psutil.NoSuchProcess, psutil.AccessDenied):
+    except psutil.NoSuchProcess, psutil.AccessDenied:
         return []
     identities = []
     for child in children:
         try:
             identities.append(_process_identity(child.pid))
-        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+        except psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess:
             continue
     return sorted(identities, key=lambda item: (item["process_create_time"], item["pid"]))
 
@@ -105,6 +121,25 @@ def _listener_inventory(pids: set[int]) -> dict:
         "complete": True,
         "error": None,
         "listeners": sorted(listeners, key=lambda item: (item["pid"], item["port"])),
+    }
+
+
+def _runtime_process_evidence(
+    child_identities: dict[tuple[int, float], dict],
+    listeners: dict[tuple[int, int], dict],
+    lease: dict,
+) -> dict:
+    return {
+        "descendants": sorted(
+            child_identities.values(),
+            key=lambda item: (item["process_create_time"], item["pid"]),
+        ),
+        "owned_listeners": sorted(listeners.values(), key=lambda item: (item["pid"], item["port"])),
+        "listener_inventory_samples_complete": True,
+        "listener_sampling_exhaustive": False,
+        "listener_evidence_scope": "observed_samples_only",
+        "lease_server_processes": lease.get("comsol_server_processes"),
+        "lease_server_port": lease.get("comsol_server_port"),
     }
 
 
@@ -145,26 +180,67 @@ def _wait_clean(owner: SolverOwnership, timeout_seconds: float = 30.0) -> dict:
         time.sleep(0.25)
 
 
-def _terminate_owned_tree(process: subprocess.Popen) -> None:
-    if process.poll() is not None:
-        return
-    if os.name == "nt":
-        subprocess.run(
-            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=15,
-        )
-    else:
-        for child in reversed(psutil.Process(process.pid).children(recursive=True)):
-            child.kill()
-        psutil.Process(process.pid).kill()
+def _terminate_owned_tree(
+    process: subprocess.Popen,
+    captured_descendants: list[dict] | tuple[dict, ...] = (),
+) -> dict:
+    errors = []
+    direct_was_running = process.poll() is None
+    if direct_was_running:
+        try:
+            if os.name == "nt":
+                subprocess.run(
+                    ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=15,
+                )
+            else:
+                for child in reversed(psutil.Process(process.pid).children(recursive=True)):
+                    child.kill()
+                psutil.Process(process.pid).kill()
+        except Exception as exc:
+            errors.append({"stage": "direct_tree", "type": type(exc).__name__})
+        try:
+            process.wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            try:
+                process.kill()
+                process.wait(timeout=15)
+            except Exception as exc:
+                errors.append({"stage": "direct_wait", "type": type(exc).__name__})
+        except Exception as exc:
+            errors.append({"stage": "direct_wait", "type": type(exc).__name__})
+
+    descendant_actions = []
+    for identity in reversed(list(captured_descendants)):
+        try:
+            descendant_actions.append(terminate_exact(identity, force=True))
+        except Exception as exc:
+            errors.append({"stage": "descendant", "type": type(exc).__name__})
     try:
-        process.wait(timeout=15)
-    except subprocess.TimeoutExpired:
-        process.kill()
-        process.wait(timeout=15)
+        deadline = time.monotonic() + 5.0
+        while True:
+            descendant_verification = verify_absent(list(captured_descendants))
+            if descendant_verification.get("absent") is True or time.monotonic() >= deadline:
+                break
+            time.sleep(0.05)
+    except Exception as exc:
+        errors.append({"stage": "descendant_verification", "type": type(exc).__name__})
+        descendant_verification = {"absent": False, "verdicts": []}
+    return {
+        "direct_was_running": direct_was_running,
+        "direct_exited": process.poll() is not None,
+        "descendant_actions": descendant_actions,
+        "descendant_verification": descendant_verification,
+        "errors": errors,
+        "passed": (
+            process.poll() is not None
+            and descendant_verification.get("absent") is True
+            and not errors
+        ),
+    }
 
 
 def _backend_identity(backend: dict) -> dict:
@@ -186,9 +262,7 @@ def _select_expected_backend(backends: list[dict]) -> dict:
         if all(int(backend.get(key, -1)) == value for key, value in EXPECTED_BACKEND.items())
     ]
     if len(matching) != 1:
-        raise RuntimeError(
-            f"expected exactly one COMSOL 6.4.0.293 backend, found {len(matching)}"
-        )
+        raise RuntimeError(f"expected exactly one COMSOL 6.4.0.293 backend, found {len(matching)}")
     return _backend_identity(matching[0])
 
 
@@ -220,7 +294,9 @@ def _run_worker(output: Path, cores: int) -> int:
             "jvm_started": bool(jpype.isJVMStarted()),
         }
         if not client.standalone or client.port is not None:
-            raise RuntimeError("compatibility probe requires a standalone client without a server port")
+            raise RuntimeError(
+                "compatibility probe requires a standalone client without a server port"
+            )
 
         java_system = jpype.JClass("java.lang.System")
         result["java"] = {
@@ -253,9 +329,7 @@ def _run_worker(output: Path, cores: int) -> int:
 
         dimension = str(geometry.getSDim())
         electrostatics = component.physics().create("es", "Electrostatics", dimension)
-        conservation = electrostatics.feature().create(
-            "ccn1", "ChargeConservation", int(dimension)
-        )
+        conservation = electrostatics.feature().create("ccn1", "ChargeConservation", int(dimension))
         conservation.selection().set([1])
         conservation.set("materialType", "from_mat")
         material = component.material().create("mat1", "Common")
@@ -273,6 +347,38 @@ def _run_worker(output: Path, cores: int) -> int:
         study = jm.study().create("std1")
         study.create("step1", "Stationary")
         study.run()
+
+        revision_source = Path(lifecycle_module.__file__).resolve()
+        try:
+            revision_source_relative = str(revision_source.relative_to(ROOT))
+        except ValueError as exc:
+            raise RuntimeError(
+                "licensed revision reader was not imported from the bound repository"
+            ) from exc
+        revision_structural, revision_state = lifecycle_module._default_model_revision_reader(
+            client, str(jm.tag())
+        )
+        required_revision_groups = {
+            "geometries",
+            "physics",
+            "materials",
+            "meshes",
+            "studies",
+            "solutions",
+        }
+        result["shared_model_revision"] = {
+            "structural": revision_structural,
+            "state": revision_state,
+            "required_groups": sorted(required_revision_groups),
+            "model_wrapper_module": model.__class__.__module__,
+            "reader_source": revision_source_relative,
+            "verified": False,
+        }
+        if not required_revision_groups.issubset(
+            revision_structural.get("model_tree", {})
+        ) or not required_revision_groups.issubset(revision_state.get("model_tree", {})):
+            raise RuntimeError("licensed model revision tree is incomplete")
+        result["shared_model_revision"]["verified"] = True
 
         measured = float(model.evaluate("2*es.intWe/(1[V])^2", "pF").reshape(-1)[0])
         theory = 8.8541878128e-12 * 2.1 * math.pow(0.01, 2) / 0.001 * 1e12
@@ -303,7 +409,7 @@ def _run_worker(output: Path, cores: int) -> int:
             except Exception as exc:
                 result["client_clear_error"] = f"{type(exc).__name__}: {exc}"
         result["duration_seconds"] = round(time.monotonic() - started, 3)
-        atomic_write_json(output, result)
+        _write_receipt(output, result)
     return 0 if result["success"] else 1
 
 
@@ -317,10 +423,12 @@ def _run_parent(args) -> int:
 
     output.parent.mkdir(parents=True, exist_ok=True)
     worker_output = output.with_name(f".{output.stem}.worker.{uuid.uuid4().hex}.json")
+    worker_stdout = worker_output.with_suffix(".stdout.log")
+    worker_stderr = worker_output.with_suffix(".stderr.log")
     owner = SolverOwnership(args.runtime_root, owner="python-compatibility-licensed-gate")
     receipt = {
         "schema_name": "comsol_mcp.python_compatibility_licensed_gate",
-        "schema_version": "1.0.0",
+        "schema_version": "1.1.0",
         "success": False,
         "source": {
             "git": git,
@@ -368,34 +476,36 @@ def _run_parent(args) -> int:
             "--cores",
             str(args.cores),
         ]
-        process = subprocess.Popen(
-            command,
-            cwd=ROOT,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
-        )
-        receipt["worker_process"] = _process_identity(process.pid)
-        deadline = time.monotonic() + args.timeout_seconds
-        timed_out = False
-        while process.poll() is None:
-            if time.monotonic() >= deadline:
-                timed_out = True
-                _terminate_owned_tree(process)
-                break
-            if not owner.heartbeat(refresh_server_processes=True):
-                raise RuntimeError("solver lease heartbeat failed")
-            descendants = _descendant_identities(os.getpid())
-            for identity in descendants:
-                child_identities[(identity["pid"], identity["process_create_time"])] = identity
-            ports = _listener_inventory({item["pid"] for item in descendants})
-            if not ports["complete"]:
-                raise RuntimeError(f"owned listener inventory failed: {ports['error']}")
-            for listener in ports["listeners"]:
-                listeners[(listener["pid"], listener["port"])] = listener
-            time.sleep(0.25)
-        stdout, stderr = process.communicate(timeout=15)
+        with worker_stdout.open("wb") as stdout_handle, worker_stderr.open("wb") as stderr_handle:
+            process = subprocess.Popen(
+                command,
+                cwd=ROOT,
+                stdout=stdout_handle,
+                stderr=stderr_handle,
+                creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
+            )
+            receipt["worker_process"] = _process_identity(process.pid)
+            deadline = time.monotonic() + args.timeout_seconds
+            timed_out = False
+            while process.poll() is None:
+                if time.monotonic() >= deadline:
+                    timed_out = True
+                    _terminate_owned_tree(process)
+                    break
+                if not owner.heartbeat(refresh_server_processes=True):
+                    raise RuntimeError("solver lease heartbeat failed")
+                descendants = _descendant_identities(os.getpid())
+                for identity in descendants:
+                    child_identities[(identity["pid"], identity["process_create_time"])] = identity
+                ports = _listener_inventory({item["pid"] for item in descendants})
+                if not ports["complete"]:
+                    raise RuntimeError(f"owned listener inventory failed: {ports['error']}")
+                for listener in ports["listeners"]:
+                    listeners[(listener["pid"], listener["port"])] = listener
+                time.sleep(0.25)
+            process.wait(timeout=15)
+        stdout = worker_stdout.read_bytes().decode("utf-8", errors="replace")
+        stderr = worker_stderr.read_bytes().decode("utf-8", errors="replace")
         receipt["worker_execution"] = {
             "returncode": process.returncode,
             "timed_out": timed_out,
@@ -413,18 +523,9 @@ def _run_parent(args) -> int:
         active = owner.status(require_fresh_inventory=True)
         receipt["ownership_during"] = _status_evidence(active)
         lease = active.get("lease", {}).get("lease") or {}
-        receipt["runtime_process_evidence"] = {
-            "descendants": sorted(
-                child_identities.values(),
-                key=lambda item: (item["process_create_time"], item["pid"]),
-            ),
-            "owned_listeners": sorted(
-                listeners.values(), key=lambda item: (item["pid"], item["port"])
-            ),
-            "listener_inventory_complete": True,
-            "lease_server_processes": lease.get("comsol_server_processes"),
-            "lease_server_port": lease.get("comsol_server_port"),
-        }
+        receipt["runtime_process_evidence"] = _runtime_process_evidence(
+            child_identities, listeners, lease
+        )
         worker_result = receipt.get("worker_result") or {}
         runtime_evidence = receipt["runtime_process_evidence"]
         phase_passed = (
@@ -435,7 +536,6 @@ def _run_parent(args) -> int:
             and worker_result.get("client", {}).get("standalone") is True
             and worker_result.get("client", {}).get("port") is None
             and worker_result.get("physics", {}).get("accepted") is True
-            and runtime_evidence["owned_listeners"] == []
             and runtime_evidence["lease_server_port"] is None
             and active.get("durable_jobs", {}).get("active_count") == 0
         )
@@ -445,26 +545,74 @@ def _run_parent(args) -> int:
     except Exception as exc:
         receipt["error"] = f"{type(exc).__name__}: {exc}"
     finally:
+        cleanup_errors = []
+        process_cleanup = None
         if process is not None:
-            _terminate_owned_tree(process)
+            try:
+                process_cleanup = _terminate_owned_tree(process, tuple(child_identities.values()))
+            except Exception as exc:
+                cleanup_errors.append({"stage": "process", "type": type(exc).__name__})
+        lease_release = None
         if lease_acquired:
-            receipt["lease_release"] = owner.release()
-        after = _wait_clean(owner)
-        receipt["ownership_after"] = _status_evidence(after)
-        cleanup_passed = _status_is_clean(after) and not _descendant_identities(os.getpid())
+            try:
+                lease_release = owner.release()
+            except Exception as exc:
+                cleanup_errors.append({"stage": "lease_release", "type": type(exc).__name__})
+        receipt["lease_release"] = lease_release
+        after = None
+        try:
+            after = _wait_clean(owner)
+            receipt["ownership_after"] = _status_evidence(after)
+        except Exception as exc:
+            cleanup_errors.append({"stage": "ownership_after", "type": type(exc).__name__})
+            receipt["ownership_after"] = None
+        remaining_descendants = []
+        try:
+            remaining_descendants = _descendant_identities(os.getpid())
+        except Exception as exc:
+            cleanup_errors.append({"stage": "descendants_after", "type": type(exc).__name__})
+        final_listener_snapshot = {"complete": False, "error": "not_collected", "listeners": []}
+        try:
+            final_listener_snapshot = _listener_inventory(
+                {item["pid"] for item in [*child_identities.values(), *remaining_descendants]}
+            )
+        except Exception as exc:
+            cleanup_errors.append({"stage": "listeners_after", "type": type(exc).__name__})
+        cleanup_passed = (
+            not cleanup_errors
+            and isinstance(after, dict)
+            and _status_is_clean(after)
+            and not remaining_descendants
+            and final_listener_snapshot.get("complete") is True
+            and final_listener_snapshot.get("listeners") == []
+            and (process_cleanup is None or process_cleanup.get("passed") is True)
+        )
         receipt["cleanup"] = {
-            "lease_absent": after.get("lease", {}).get("state") == "absent",
-            "collision_absent": after.get("collision") is False,
-            "active_job_count": after.get("durable_jobs", {}).get("active_count"),
-            "owned_descendants_absent": not _descendant_identities(os.getpid()),
+            "lease_absent": isinstance(after, dict)
+            and after.get("lease", {}).get("state") == "absent",
+            "collision_absent": isinstance(after, dict) and after.get("collision") is False,
+            "active_job_count": (
+                after.get("durable_jobs", {}).get("active_count")
+                if isinstance(after, dict)
+                else None
+            ),
+            "process_cleanup": process_cleanup,
+            "owned_descendants": remaining_descendants,
+            "owned_descendants_absent": not remaining_descendants,
+            "final_listener_snapshot": final_listener_snapshot,
+            "errors": cleanup_errors,
             "passed": cleanup_passed,
         }
         receipt["duration_seconds"] = round(time.monotonic() - started, 3)
         receipt["success"] = returncode == 0 and cleanup_passed
         if not receipt["success"]:
             returncode = 1
-        atomic_write_json(output, receipt)
-        worker_output.unlink(missing_ok=True)
+        try:
+            _write_receipt(output, receipt)
+        finally:
+            worker_output.unlink(missing_ok=True)
+            worker_stdout.unlink(missing_ok=True)
+            worker_stderr.unlink(missing_ok=True)
     print(output)
     return returncode
 

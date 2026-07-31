@@ -222,18 +222,25 @@ def _validate_scientific(
         raise ValueError(
             f"{disposition} requires completed execution and complete evidence"
         )
+    if disposition == "residual" and cap_reached:
+        raise ValueError("residual disposition cannot reach the declared cap")
     if disposition == "unresolved_at_declared_cap" and (
         not cap_reached or next_action != "declare_larger_cap"
     ):
         raise ValueError(
             "unresolved_at_declared_cap requires a reached cap and caller-declared expansion"
         )
-    if disposition == "invalid_evidence" and evidence_state == "complete":
-        raise ValueError("invalid_evidence disposition requires non-complete evidence")
+    if disposition == "invalid_evidence":
+        if evidence_state == "complete":
+            raise ValueError("invalid_evidence disposition requires non-complete evidence")
+        if cap_reached:
+            raise ValueError("invalid_evidence disposition cannot reach a scientific cap")
+        if next_action not in {"review_missing_evidence", "repair_evidence_chain"}:
+            raise ValueError("invalid_evidence requires an evidence-remediation action")
     return scientific
 
 
-def validate_outcome_contract(value: Any, *, verify_hash: bool = True) -> dict[str, Any]:
+def validate_outcome_contract(value: Any) -> dict[str, Any]:
     """Validate and detach one execution/evidence/scientific outcome."""
     outcome = _mapping(value, "outcome")
     _reject_unknown(outcome, _OUTCOME_FIELDS, "outcome")
@@ -252,11 +259,15 @@ def validate_outcome_contract(value: Any, *, verify_hash: bool = True) -> dict[s
         evidence_state=evidence["state"],
     )
     supplied_hash = outcome["outcome_sha256"]
-    if not isinstance(supplied_hash, str) or len(supplied_hash) != 64:
-        raise ValueError("outcome.outcome_sha256 must be a SHA-256 digest")
+    if (
+        not isinstance(supplied_hash, str)
+        or len(supplied_hash) != 64
+        or any(character not in "0123456789abcdef" for character in supplied_hash)
+    ):
+        raise ValueError("outcome.outcome_sha256 must be a lowercase SHA-256 digest")
     without_hash = dict(outcome)
     without_hash.pop("outcome_sha256")
-    if verify_hash and supplied_hash != canonical_sha256(without_hash):
+    if supplied_hash != canonical_sha256(without_hash):
         raise ValueError("outcome.outcome_sha256 does not match the canonical payload")
     canonical_json_bytes(outcome)
     return deepcopy(outcome)
@@ -286,12 +297,29 @@ def execution_from_terminal_job_state(value: Mapping[str, Any]) -> dict[str, Any
         solver = _mapping(
             verification.get("solver"), "job_state.cancel.verification.solver"
         )
-        processes_absent = verification.get("absent") is True
+        verdicts = verification.get("verdicts")
+        verdicts_absent = bool(
+            isinstance(verdicts, list)
+            and all(
+                isinstance(verdict, Mapping) and verdict.get("state") == "stale"
+                for verdict in verdicts
+            )
+        )
+        solver_verified = solver.get("ok") is True
+        processes_absent = bool(
+            verification.get("absent") is True
+            and verdicts_absent
+            and solver_verified
+        )
         cleanup = {
             "processes_absent": processes_absent,
             "descendants_absent": processes_absent,
-            "port_closed": solver.get("recorded_port_closed") is True,
-            "lease_absent": solver.get("lease_state") in {"absent", "recovered"},
+            "port_closed": bool(
+                solver_verified and solver.get("recorded_port_closed") is True
+            ),
+            "lease_absent": bool(
+                solver_verified and solver.get("lease_state") in {"absent", "recovered"}
+            ),
             "verified": False,
         }
         cleanup["verified"] = all(
@@ -313,7 +341,7 @@ def execution_from_terminal_job_state(value: Mapping[str, Any]) -> dict[str, Any
         supplied_cleanup = state.get("cleanup_verification")
         if supplied_cleanup is None:
             cleanup = {
-                "processes_absent": status == "interrupted",
+                "processes_absent": False,
                 "descendants_absent": False,
                 "port_closed": False,
                 "lease_absent": False,

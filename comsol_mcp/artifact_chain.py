@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 import json
-from pathlib import Path, PurePosixPath
 import re
+from copy import deepcopy
+from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
 
 from comsol_mcp import __version__
-from comsol_mcp.durable import canonical_json_v1, canonical_sha256_v1, sha256_file_bounded
+from comsol_mcp.durable import canonical_json_v1, canonical_sha256_v1
+from comsol_mcp.path_policy import read_contained_file_snapshot
 from comsol_mcp.schema_registry import check_schema_support
-
 
 ARTIFACT_CHAIN_SCHEMA = "comsol_mcp.artifact_chain"
 ARTIFACT_CHAIN_VERIFICATION_SCHEMA = "comsol_mcp.artifact_chain_verification"
@@ -41,6 +41,7 @@ _ARTIFACT_FIELDS = {
     "parents",
 }
 _PARENT_FIELDS = {"artifact_id", "sha256"}
+_MAX_PRODUCER_VERSION_LENGTH = 128
 
 
 def _canonical_bytes(value: Any) -> bytes:
@@ -59,6 +60,34 @@ def _mapping(value: Any, label: str) -> dict[str, Any]:
     if not isinstance(value, Mapping) or not all(isinstance(key, str) for key in value):
         raise ValueError(f"{label} must be an object with string keys")
     return dict(value)
+
+
+class _DuplicateJsonKey(ValueError):
+    pass
+
+
+def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise _DuplicateJsonKey(key)
+        result[key] = value
+    return result
+
+
+def _decode_strict_json_object(payload: bytes, label: str) -> dict[str, Any]:
+    try:
+        document = json.loads(
+            payload.decode("utf-8"),
+            object_pairs_hook=_unique_json_object,
+        )
+    except _DuplicateJsonKey as exc:
+        raise ValueError(f"{label} contains duplicate JSON key {exc.args[0]!r}") from exc
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"{label} must contain UTF-8 JSON") from exc
+    if not isinstance(document, dict):
+        raise ValueError(f"{label} JSON must contain one object")
+    return document
 
 
 def _identifier(value: Any, label: str) -> str:
@@ -103,9 +132,7 @@ def _normalize_artifact(value: Any, index: int) -> dict[str, Any]:
     schema_version = item["schema_version"]
     support = check_schema_support(schema_name, schema_version)
     if not support["supported"]:
-        raise ValueError(
-            f"{label} schema is unsupported: {support['reason_code']}"
-        )
+        raise ValueError(f"{label} schema is unsupported: {support['reason_code']}")
     parents = item["parents"]
     if not isinstance(parents, list) or len(parents) > MAX_CHAIN_ARTIFACTS:
         raise ValueError(f"{label}.parents must be a bounded list")
@@ -117,9 +144,7 @@ def _normalize_artifact(value: Any, index: int) -> dict[str, Any]:
             raise ValueError(f"{parent_label} fields are invalid")
         normalized_parents.append(
             {
-                "artifact_id": _identifier(
-                    parent["artifact_id"], f"{parent_label}.artifact_id"
-                ),
+                "artifact_id": _identifier(parent["artifact_id"], f"{parent_label}.artifact_id"),
                 "sha256": _hash(parent["sha256"], f"{parent_label}.sha256"),
             }
         )
@@ -142,9 +167,7 @@ def _normalize_artifact(value: Any, index: int) -> dict[str, Any]:
     }
 
 
-def _validate_graph(
-    artifacts: list[dict[str, Any]], terminal_artifact_ids: list[str]
-) -> None:
+def _validate_graph(artifacts: list[dict[str, Any]], terminal_artifact_ids: list[str]) -> None:
     by_id = {item["artifact_id"]: item for item in artifacts}
     if len(by_id) != len(artifacts):
         raise ValueError("artifact IDs must be unique")
@@ -232,7 +255,14 @@ def validate_artifact_chain_manifest(value: Any) -> dict[str, Any]:
     ):
         raise ValueError("artifact chain schema is unsupported")
     producer = _mapping(item["producer"], "artifact_chain.producer")
-    if set(producer) != {"package", "version"} or producer["package"] != "comsol-mcp":
+    producer_version = producer.get("version")
+    if (
+        set(producer) != {"package", "version"}
+        or producer.get("package") != "comsol-mcp"
+        or not isinstance(producer_version, str)
+        or not producer_version.strip()
+        or len(producer_version) > _MAX_PRODUCER_VERSION_LENGTH
+    ):
         raise ValueError("artifact chain producer is invalid")
     supplied_hash = _hash(item["manifest_sha256"], "artifact_chain.manifest_sha256")
     rebuilt = build_artifact_chain_manifest(
@@ -243,20 +273,24 @@ def validate_artifact_chain_manifest(value: Any) -> dict[str, Any]:
     rebuilt["producer"] = producer
     unhashed = dict(rebuilt)
     unhashed.pop("manifest_sha256")
+    if len(_canonical_bytes(unhashed)) > MAX_CHAIN_MANIFEST_BYTES:
+        raise ValueError("artifact chain manifest is oversized")
     rebuilt["manifest_sha256"] = _sha256(unhashed)
     if rebuilt["manifest_sha256"] != supplied_hash or rebuilt != item:
         raise ValueError("artifact chain is noncanonical or its hash does not match")
     return deepcopy(rebuilt)
 
 
-def verify_artifact_chain(value: Any, *, artifact_root: str | Path) -> dict[str, Any]:
-    """Verify exact bytes, schema identities, and graph closure under one root."""
+def _verify_artifact_chain_snapshot(
+    value: Any, *, artifact_root: str | Path
+) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
     manifest = validate_artifact_chain_manifest(value)
     root = Path(artifact_root).resolve(strict=True)
     if not root.is_dir():
         raise ValueError("artifact_root must be a directory")
     verified_bytes = 0
     verified_hashes = []
+    documents = {}
     for item in manifest["artifacts"]:
         candidate = root.joinpath(*PurePosixPath(item["relative_path"]).parts)
         resolved = candidate.resolve(strict=True)
@@ -266,29 +300,22 @@ def verify_artifact_chain(value: Any, *, artifact_root: str | Path) -> dict[str,
             raise ValueError("artifact path escapes artifact_root") from exc
         if candidate.is_symlink() or not resolved.is_file():
             raise ValueError("artifact path must be a regular non-symlink file")
-        receipt = sha256_file_bounded(resolved, max_bytes=MAX_ARTIFACT_BYTES)
-        verified_bytes += receipt["byte_count"]
+        snapshot = read_contained_file_snapshot(resolved, root=root, max_bytes=MAX_ARTIFACT_BYTES)
+        verified_bytes += snapshot["byte_count"]
         if verified_bytes > MAX_CHAIN_BYTES:
             raise ValueError("artifact chain exceeds the total byte limit")
-        if receipt["byte_count"] != item["byte_count"]:
+        if snapshot["byte_count"] != item["byte_count"]:
             raise ValueError("artifact byte count does not match")
-        if receipt["sha256"] != item["sha256"]:
+        if snapshot["sha256"] != item["sha256"]:
             raise ValueError("artifact SHA-256 does not match")
-        payload = resolved.read_bytes()
-        try:
-            document = json.loads(payload.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise ValueError("artifact must be UTF-8 JSON") from exc
-        if not isinstance(document, dict):
-            raise ValueError("artifact JSON must contain one object")
+        document = _decode_strict_json_object(snapshot["payload"], "artifact")
         if (
             document.get("schema_name") != item["schema_name"]
             or document.get("schema_version") != item["schema_version"]
         ):
             raise ValueError("artifact embedded schema identity does not match")
-        verified_hashes.append(
-            {"artifact_id": item["artifact_id"], "sha256": receipt["sha256"]}
-        )
+        documents[item["artifact_id"]] = document
+        verified_hashes.append({"artifact_id": item["artifact_id"], "sha256": snapshot["sha256"]})
 
     receipt_body = {
         "schema_name": ARTIFACT_CHAIN_VERIFICATION_SCHEMA,
@@ -303,7 +330,14 @@ def verify_artifact_chain(value: Any, *, artifact_root: str | Path) -> dict[str,
         "verified_artifacts": verified_hashes,
         "paths_included": False,
     }
-    return {**receipt_body, "receipt_sha256": _sha256(receipt_body)}
+    receipt = {**receipt_body, "receipt_sha256": _sha256(receipt_body)}
+    return receipt, documents
+
+
+def verify_artifact_chain(value: Any, *, artifact_root: str | Path) -> dict[str, Any]:
+    """Verify exact bytes, schema identities, and graph closure under one root."""
+    receipt, _documents = _verify_artifact_chain_snapshot(value, artifact_root=artifact_root)
+    return receipt
 
 
 __all__ = [

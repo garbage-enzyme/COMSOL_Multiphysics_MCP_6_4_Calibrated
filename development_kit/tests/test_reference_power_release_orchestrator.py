@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
-from pathlib import Path
 import subprocess
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-
-from development_kit.scripts.run_real_release_gate import run_release_gate
 from src.evidence.real_fixture import MODEL_ENV
+
+from development_kit.scripts import run_real_release_gate as release_orchestrator
+from development_kit.scripts.run_real_release_gate import run_release_gate
 
 
 def _args(tmp_path, **overrides):
@@ -22,12 +24,11 @@ def _args(tmp_path, **overrides):
         json.dumps(
             {
                 "source_model_path": str(source),
+                "expected_source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
                 "wavelength": {"value": 5.292, "unit": "um"},
                 "reference_air": {
                     "top_air_domain_ids": [6],
-                    "top_air_coordinate_range": {
-                        "x": [0.0, 1.0], "y": [0.0, 1.0], "z": [0.5, 1.0]
-                    },
+                    "top_air_coordinate_range": {"x": [0.0, 1.0], "y": [0.0, 1.0], "z": [0.5, 1.0]},
                 },
             }
         ),
@@ -40,18 +41,38 @@ def _args(tmp_path, **overrides):
         "fixture_spec": spec,
         "reference_power_cores": 8,
         "reference_power_timeout_seconds": 300.0,
+        "licensed_regression_timeout_seconds": 120.0,
     }
     values.update(overrides)
     return SimpleNamespace(**values)
 
 
 def _clean(_owner):
-    return {"collision": False, "lease": {"state": "absent"}}
+    return {
+        "process_inventory": {"complete": True, "fresh": True},
+        "collision": False,
+        "lease": {"state": "absent"},
+    }
 
 
 class FakeRunner:
-    def __init__(self, *, reference_power_success=True, suite_success=True):
+    def __init__(
+        self,
+        *,
+        reference_power_success=True,
+        reference_power_cleanup=None,
+        reference_power_returncode=None,
+        suite_success=True,
+    ):
         self.reference_power_success = reference_power_success
+        self.reference_power_cleanup = (
+            reference_power_success if reference_power_cleanup is None else reference_power_cleanup
+        )
+        self.reference_power_returncode = (
+            (0 if reference_power_success else 1)
+            if reference_power_returncode is None
+            else reference_power_returncode
+        )
         self.suite_success = suite_success
         self.commands = []
         self.kwargs = []
@@ -65,19 +86,22 @@ class FakeRunner:
                 json.dumps(
                     {
                         "success": self.reference_power_success,
-                        "cleanup": {"passed": self.reference_power_success},
+                        "cleanup": {"passed": self.reference_power_cleanup},
                     }
                 ),
                 encoding="utf-8",
             )
-            return subprocess.CompletedProcess(command, 0 if self.reference_power_success else 1, "reference-power", "")
+            return subprocess.CompletedProcess(
+                command, self.reference_power_returncode, "reference-power", ""
+            )
         return subprocess.CompletedProcess(command, 0 if self.suite_success else 1, "suite", "")
 
 
 def test_reference_power_runs_before_regression_and_both_receipts_are_required(tmp_path):
     runner = FakeRunner()
+    args = _args(tmp_path)
     receipt = run_release_gate(
-        _args(tmp_path),
+        args,
         command_runner=runner,
         owner=object(),
         pid_provider=lambda: {10},
@@ -85,14 +109,23 @@ def test_reference_power_runs_before_regression_and_both_receipts_are_required(t
     )
 
     assert receipt["returncode"] == 0
+    assert receipt["schema_version"] == "1.3.0"
     assert len(runner.commands) == 2
     assert "reference_power_acceptance.py" in " ".join(runner.commands[0])
     assert "development_kit/tests/integration/test_real_comsol.py" in runner.commands[1]
-    assert Path(runner.kwargs[1]["env"][MODEL_ENV]).name == "controlled.mph"
+    expected_model = (tmp_path / "controlled.mph").resolve()
+    assert Path(runner.kwargs[1]["env"][MODEL_ENV]).resolve() == expected_model
     assert receipt["phases"]["reference_power"]["passed"] is True
-    assert len(receipt["phases"]["reference_power"]["receipt_sha256"]) == 64
+    reference_output = Path(runner.commands[0][runner.commands[0].index("--output") + 1])
+    assert (
+        receipt["phases"]["reference_power"]["receipt_sha256"]
+        == hashlib.sha256(reference_output.read_bytes()).hexdigest()
+    )
     assert receipt["phases"]["licensed_regression"]["passed"] is True
-    assert len(receipt["phases"]["licensed_regression"]["fixture_spec_sha256"]) == 64
+    assert (
+        receipt["phases"]["licensed_regression"]["fixture_spec_sha256"]
+        == hashlib.sha256(args.fixture_spec.read_bytes()).hexdigest()
+    )
 
 
 def test_fixture_spec_configures_regression_without_rerunning_reference_power(tmp_path):
@@ -135,7 +168,60 @@ def test_reference_power_failure_skips_remaining_licensed_suite_and_release_fail
     assert len(runner.commands) == 1
     assert receipt["phases"]["reference_power"]["passed"] is False
     assert receipt["phases"]["licensed_regression"]["started"] is False
-    assert receipt["phases"]["licensed_regression"]["skipped_reason"] == "reference-power did not pass"
+    assert (
+        receipt["phases"]["licensed_regression"]["skipped_reason"] == "reference-power did not pass"
+    )
+
+
+@pytest.mark.parametrize(
+    "runner",
+    [
+        FakeRunner(
+            reference_power_success=False,
+            reference_power_cleanup=True,
+            reference_power_returncode=0,
+        ),
+        FakeRunner(
+            reference_power_success=True,
+            reference_power_cleanup=False,
+            reference_power_returncode=0,
+        ),
+        FakeRunner(
+            reference_power_success=True,
+            reference_power_cleanup=True,
+            reference_power_returncode=1,
+        ),
+    ],
+)
+def test_reference_power_signals_fail_closed_independently(tmp_path, runner):
+    receipt = run_release_gate(
+        _args(tmp_path),
+        command_runner=runner,
+        owner=object(),
+        pid_provider=lambda: set(),
+        wait_clean=_clean,
+    )
+
+    assert receipt["returncode"] == 1
+    assert len(runner.commands) == 1
+    assert receipt["phases"]["reference_power"]["passed"] is False
+    assert receipt["phases"]["licensed_regression"]["started"] is False
+
+
+def test_licensed_regression_failure_fails_release_after_reference_power(tmp_path):
+    runner = FakeRunner(suite_success=False)
+    receipt = run_release_gate(
+        _args(tmp_path),
+        command_runner=runner,
+        owner=object(),
+        pid_provider=lambda: set(),
+        wait_clean=_clean,
+    )
+
+    assert len(runner.commands) == 2
+    assert receipt["phases"]["reference_power"]["passed"] is True
+    assert receipt["phases"]["licensed_regression"]["passed"] is False
+    assert receipt["returncode"] == 1
 
 
 def test_missing_or_timed_out_reference_power_receipt_cannot_pass_release(tmp_path):
@@ -178,7 +264,9 @@ def test_missing_or_timed_out_reference_power_receipt_cannot_pass_release(tmp_pa
         ({"reference_power_timeout_seconds": 8000.0}, "1..7200"),
     ],
 )
-def test_mandatory_reference_power_mode_rejects_missing_or_unbounded_inputs(tmp_path, overrides, match):
+def test_mandatory_reference_power_mode_rejects_missing_or_unbounded_inputs(
+    tmp_path, overrides, match
+):
     with pytest.raises(ValueError, match=match):
         run_release_gate(
             _args(tmp_path, **overrides),
@@ -203,3 +291,113 @@ def test_outer_cleanup_uncertainty_blocks_release_even_after_both_phases_pass(tm
     assert receipt["returncode"] == 1
     assert receipt["cleanup"]["comsol_pid_set_unchanged"] is False
     assert receipt["cleanup"]["passed"] is False
+
+
+def test_stale_preflight_inventory_cannot_start_a_release_phase(tmp_path):
+    runner = FakeRunner()
+    stale = {
+        "process_inventory": {"complete": False, "fresh": False},
+        "collision": False,
+        "lease": {"state": "absent"},
+    }
+
+    receipt = run_release_gate(
+        _args(tmp_path),
+        command_runner=runner,
+        owner=object(),
+        pid_provider=lambda: set(),
+        wait_clean=lambda _owner: stale,
+    )
+
+    assert receipt["returncode"] == 1
+    assert runner.commands == []
+    assert receipt["phase_error"]["type"] == "RuntimeError"
+    assert receipt["cleanup"]["process_inventory_complete"] is False
+
+
+def test_phase_exception_still_runs_final_ownership_and_pid_assessment(tmp_path):
+    waits = []
+    pid_calls = []
+
+    def wait_clean(owner):
+        waits.append(owner)
+        return _clean(owner)
+
+    def pid_provider():
+        pid_calls.append(True)
+        return {10}
+
+    class FailingRunner:
+        def __call__(self, _command, **_kwargs):
+            raise OSError("injected launch failure")
+
+    receipt = run_release_gate(
+        _args(tmp_path),
+        command_runner=FailingRunner(),
+        owner=object(),
+        pid_provider=pid_provider,
+        wait_clean=wait_clean,
+    )
+
+    assert receipt["returncode"] == 1
+    assert receipt["phase_error"]["type"] == "OSError"
+    assert len(waits) == 2
+    assert len(pid_calls) == 2
+    assert receipt["cleanup"]["passed"] is True
+
+
+def test_fixture_interrupt_is_contained_until_final_assessment(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        release_orchestrator,
+        "controlled_fixture_environment_from_reference_power_spec",
+        lambda _path: (_ for _ in ()).throw(KeyboardInterrupt()),
+    )
+
+    receipt = run_release_gate(
+        _args(
+            tmp_path,
+            require_reference_power=False,
+            reference_power_spec=None,
+            reference_power_cores=None,
+            reference_power_timeout_seconds=None,
+        ),
+        command_runner=FakeRunner(),
+        owner=object(),
+        pid_provider=lambda: set(),
+        wait_clean=_clean,
+    )
+
+    assert receipt["returncode"] == 1
+    assert receipt["phase_error"]["type"] == "KeyboardInterrupt"
+    assert receipt["cleanup"]["passed"] is True
+
+
+def test_licensed_regression_timeout_is_bounded_and_byte_streams_are_serializable(tmp_path):
+    class LicensedTimeoutRunner(FakeRunner):
+        def __call__(self, command, **kwargs):
+            if "reference_power_acceptance.py" not in " ".join(command):
+                self.commands.append(list(command))
+                self.kwargs.append(kwargs)
+                raise subprocess.TimeoutExpired(
+                    command, kwargs["timeout"], output=b"partial-\xff", stderr=b"error-\xfe"
+                )
+            return super().__call__(command, **kwargs)
+
+    runner = LicensedTimeoutRunner()
+    receipt = run_release_gate(
+        _args(tmp_path, licensed_regression_timeout_seconds=12.0),
+        command_runner=runner,
+        owner=object(),
+        pid_provider=lambda: set(),
+        wait_clean=_clean,
+    )
+
+    phase = receipt["phases"]["licensed_regression"]
+    assert receipt["returncode"] == 1
+    assert phase["timed_out"] is True
+    assert phase["returncode"] == 124
+    assert phase["timeout_seconds"] == 12.0
+    assert runner.kwargs[-1]["timeout"] == 12.0
+    assert isinstance(phase["stdout_tail"], str)
+    assert isinstance(phase["stderr_tail"], str)
+    json.dumps(receipt)

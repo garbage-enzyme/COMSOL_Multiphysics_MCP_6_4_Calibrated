@@ -3,10 +3,10 @@ from __future__ import annotations
 import json
 
 import numpy as np
-
 from src.evidence.field_bundle import normalize_field_evidence_request
 from src.evidence.field_manifest import validate_field_evidence_manifest
 from src.evidence.field_pipeline import build_field_evidence_from_samples
+
 from development_kit.tests.test_field_bundle import _request
 
 
@@ -65,3 +65,14 @@ def test_pipeline_nearest_path_writes_complete_grid_without_inline_arrays(tmp_pa
     assert result["interpolation"] == "nearest"
     assert result["missing_grid_point_count"] == 0
     assert "quantity_grids" not in result and "coordinates" not in result
+    array_path = tmp_path / result["array_artifact"]["relative_path"]
+    with np.load(array_path, allow_pickle=False) as archive:
+        assert set(archive.files) == {
+            "coordinate_x",
+            "coordinate_y",
+            "quantity_electric_norm",
+            "quantity_magnetic_norm",
+        }
+        for name in ("quantity_electric_norm", "quantity_magnetic_norm"):
+            assert archive[name].shape == tuple(request["grid"]["shape"])
+            assert np.isfinite(archive[name]).all()

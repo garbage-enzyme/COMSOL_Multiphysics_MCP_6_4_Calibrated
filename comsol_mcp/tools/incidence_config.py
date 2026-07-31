@@ -23,7 +23,6 @@ from .wave_optics_preflight import (
     _tags,
 )
 
-
 _ANGLE_UNITS = frozenset({"deg", "rad"})
 _IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _SETTING_NAMES = (
@@ -69,11 +68,15 @@ def _real_scalar(value: Any, *, expression: str) -> float:
     return float(scalar.real)
 
 
-def _parameter_names(model: Any) -> set[str]:
+def _parameter_definitions(model: Any) -> dict[str, str]:
     try:
-        return {str(name) for name in dict(model.parameters(evaluate=False))}
-    except Exception:
-        return set()
+        parameters = dict(model.parameters(evaluate=False))
+    except Exception as exc:
+        raise ValueError(f"parameter definitions are unavailable: {exc}") from exc
+    return {
+        str(name): str(value)
+        for name, value in sorted(parameters.items(), key=lambda item: str(item[0]))
+    }
 
 
 def _evaluate_angle(model: Any, expression: str, unit: str, parameters: set[str]) -> dict[str, Any]:
@@ -146,6 +149,7 @@ def _incidence_snapshot(model: Any, component_tag: str, physics_tag: str) -> dic
     return {
         "component_tag": component_tag,
         "physics_tag": physics_tag,
+        "parameter_definitions": _parameter_definitions(model),
         "periodic_structure": {
             "tag": parent_tag,
             "settings": _properties(parent, _SETTING_NAMES),
@@ -167,6 +171,28 @@ def _incidence_state_hash(record: DerivedGeometryRecord, snapshot: dict[str, Any
     return hashlib.sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
+
+
+def _preview_hash(preview: dict[str, Any]) -> str:
+    return hashlib.sha256(
+        json.dumps(preview, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+def _validate_preview(preview: object) -> dict[str, Any]:
+    if not isinstance(preview, dict):
+        raise ValueError("incidence preview must be an exact mapping")
+    supplied_hash = preview.get("preview_sha256")
+    if not isinstance(supplied_hash, str):
+        raise ValueError("incidence preview identity is missing")
+    body = {key: value for key, value in preview.items() if key != "preview_sha256"}
+    try:
+        rebuilt_hash = _preview_hash(body)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"incidence preview is not canonical JSON: {exc}") from exc
+    if rebuilt_hash != supplied_hash:
+        raise ValueError("incidence preview identity mismatch")
+    return body
 
 
 def _append_event(record: DerivedGeometryRecord, event: dict[str, Any]) -> None:
@@ -203,7 +229,7 @@ def _preview_incidence_unlocked(
     if polarization not in {"S", "P", "rhcp", "lhcp"}:
         raise ValueError("polarization must be one of S, P, rhcp, or lhcp")
     snapshot = _incidence_snapshot(model, component, physics)
-    parameters = _parameter_names(model)
+    parameters = set(snapshot["parameter_definitions"])
     evaluated = {
         "alpha1_inc": _evaluate_angle(model, alpha1, alpha1_unit, parameters),
         "alpha2_inc": _evaluate_angle(model, alpha2, alpha2_unit, parameters),
@@ -213,7 +239,7 @@ def _preview_incidence_unlocked(
         parent_settings.update({"Polarization": "LinearPol", "LinearPol": polarization})
     else:
         parent_settings.update({"Polarization": "CircularPol", "CircularPol": polarization})
-    return {
+    body = {
         "operation": "periodic_structure_incidence",
         "derived_model_id": record.derived_model_id,
         "pre_state_sha256": _incidence_state_hash(record, snapshot),
@@ -253,6 +279,7 @@ def _preview_incidence_unlocked(
         "mutated": False,
         "solver_started": False,
     }
+    return {**body, "preview_sha256": _preview_hash(body)}
 
 
 def preview_incidence(
@@ -406,6 +433,11 @@ def _apply_incidence_unlocked(
     expected_state_sha256: str,
 ) -> dict[str, Any]:
     """Apply, read back, and atomically roll back one incidence preview."""
+    if record.dirty:
+        raise ValueError(
+            f"derived model is dirty and unusable for validation: {record.dirty_reason}"
+        )
+    preview = _validate_preview(preview)
     component_tag = preview["before"]["component_tag"]
     physics_tag = preview["before"]["physics_tag"]
     current = _incidence_snapshot(model, component_tag, physics_tag)

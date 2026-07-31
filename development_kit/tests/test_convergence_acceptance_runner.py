@@ -32,7 +32,10 @@ def _raw(tmp_path):
 def test_dry_run_binds_every_source_without_starting_worker(tmp_path, ascii_root):
     output = tmp_path / "dry-run.json"
     receipt = run_acceptance(
-        raw_spec=_raw(tmp_path), runtime_root=ascii_root, output=output, dry_run=True,
+        raw_spec=_raw(tmp_path),
+        runtime_root=ascii_root,
+        output=output,
+        dry_run=True,
         worker_runner=lambda *_args, **_kwargs: pytest.fail("worker must not start"),
     )
     assert receipt["success"] is True
@@ -53,6 +56,28 @@ def test_receipt_is_never_overwritten(tmp_path, ascii_root):
 def test_non_ascii_runtime_fails_before_worker(tmp_path):
     with pytest.raises(ValueError, match="ASCII"):
         run_acceptance(
-            raw_spec=_raw(tmp_path), runtime_root=tmp_path / "运行时",
-            output=tmp_path / "receipt.json", dry_run=True,
+            raw_spec=_raw(tmp_path),
+            runtime_root=tmp_path / "运行时",
+            output=tmp_path / "receipt.json",
+            dry_run=True,
         )
+
+
+def test_real_execution_requires_confirmation_at_importable_boundary(tmp_path, ascii_root):
+    worker_called = False
+
+    def worker(*_args, **_kwargs):
+        nonlocal worker_called
+        worker_called = True
+        return 0
+
+    with pytest.raises(ValueError, match="explicit RUN_REAL_COMSOL confirmation"):
+        run_acceptance(
+            raw_spec=_raw(tmp_path),
+            runtime_root=ascii_root,
+            output=tmp_path / "receipt.json",
+            worker_runner=worker,
+        )
+
+    assert worker_called is False
+    assert not (ascii_root / "jobs").exists()

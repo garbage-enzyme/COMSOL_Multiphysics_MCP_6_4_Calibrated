@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import math
 from copy import deepcopy
 from typing import Any, Mapping
 
 from .field_bundle import normalize_field_evidence_request
-
 
 MATRIX_FIELD_COLLECTOR = "wave_optics_field_evidence"
 _WAVELENGTH_TO_METERS = {
@@ -19,9 +19,7 @@ _WAVELENGTH_TO_METERS = {
 
 
 def _mapping(value: object, label: str) -> dict[str, Any]:
-    if not isinstance(value, Mapping) or not all(
-        isinstance(key, str) for key in value
-    ):
+    if not isinstance(value, Mapping) or not all(isinstance(key, str) for key in value):
         raise ValueError(f"{label} must be an object with string keys")
     return dict(value)
 
@@ -98,9 +96,7 @@ def normalize_validation_matrix_field_inputs(value: object) -> dict[str, Any]:
             "dataset_tag": normalized_view["source"]["dataset_tag"],
             "solution_tag": normalized_view["source"]["solution_tag"],
             "outputs": {
-                key: item
-                for key, item in normalized_view["outputs"].items()
-                if item is not None
+                key: item for key, item in normalized_view["outputs"].items() if item is not None
             },
         },
         "slice": dummy["slice"],
@@ -120,14 +116,32 @@ def bind_validation_matrix_field_request(
 ) -> dict[str, Any]:
     """Bind caller extraction settings to immutable job and point identities."""
     template = normalize_validation_matrix_field_inputs(inputs)
+    if not isinstance(point, Mapping):
+        raise ValueError("matrix point must be an object")
+    required_identities = {
+        "point_id",
+        "point_fingerprint",
+        "configuration_sha256",
+        "collectors",
+        "expected_artifact_ids",
+        "wavelength",
+    }
+    if not required_identities <= set(point):
+        raise ValueError("matrix point is missing required field identities")
     collectors = point.get("collectors")
     artifacts = point.get("expected_artifact_ids")
-    if not isinstance(collectors, list) or not isinstance(artifacts, list):
+    if (
+        not isinstance(collectors, list)
+        or not all(isinstance(item, Mapping) for item in collectors)
+        or not isinstance(artifacts, list)
+        or not all(isinstance(item, str) for item in artifacts)
+        or len(collectors) != len(artifacts)
+    ):
         raise ValueError("matrix point collector identities are unavailable")
     field_indices = [
         index
         for index, collector in enumerate(collectors)
-        if isinstance(collector, Mapping) and collector.get("name") == MATRIX_FIELD_COLLECTOR
+        if collector.get("name") == MATRIX_FIELD_COLLECTOR
     ]
     if len(field_indices) != 1:
         raise ValueError("matrix point must declare exactly one field collector")
@@ -147,7 +161,15 @@ def bind_validation_matrix_field_request(
     unit = wavelength.get("unit")
     if unit not in _WAVELENGTH_TO_METERS:
         raise ValueError("matrix point wavelength unit cannot be converted to meters")
-    wavelength_m = float(wavelength["value"]) * _WAVELENGTH_TO_METERS[str(unit)]
+    wavelength_value = wavelength.get("value")
+    if isinstance(wavelength_value, bool) or not isinstance(wavelength_value, (int, float)):
+        raise ValueError("matrix point wavelength value must be numeric")
+    try:
+        wavelength_m = float(wavelength_value) * _WAVELENGTH_TO_METERS[str(unit)]
+    except OverflowError as exc:
+        raise ValueError("matrix point wavelength value must be finite") from exc
+    if not math.isfinite(wavelength_m) or wavelength_m <= 0.0:
+        raise ValueError("matrix point wavelength value must be positive and finite")
     view = template["view"]
     request = normalize_field_evidence_request(
         {

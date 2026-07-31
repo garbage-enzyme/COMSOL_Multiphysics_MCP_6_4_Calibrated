@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
-from pathlib import Path
 import re
+from pathlib import Path
 from typing import Mapping
-
 
 TEXT_SUFFIXES = frozenset({".json", ".md", ".py", ".toml", ".yaml", ".yml"})
 _LEGACY_TOKENS = (
@@ -28,17 +27,14 @@ _LEGACY_TOKENS = (
     "e" + "4r",
 )
 _PATTERN = re.compile(
-    r"(?<![A-Za-z0-9_])(?:[EMH][0-9]+[A-Za-z]?|P(?:3|4|9|10|11|12))(?![A-Za-z0-9_])"
+    r"(?<![A-Za-z0-9])(?:[EMH][0-9]+[A-Za-z]?|P(?:3|4|9|10|11|12))(?![A-Za-z0-9])"
     r"|(?<![A-Za-z0-9])(?:" + "|".join(_LEGACY_TOKENS) + r")(?![A-Za-z0-9])"
 )
 
 
 def _matches(text: str) -> list[dict[str, object]]:
     text = text.replace("\r\n", "\n").replace("\r", "\n")
-    return [
-        {"token": match.group(), "start": match.start()}
-        for match in _PATTERN.finditer(text)
-    ]
+    return [{"token": match.group(), "start": match.start()} for match in _PATTERN.finditer(text)]
 
 
 def _fingerprint(matches: list[dict[str, object]]) -> str:
@@ -50,6 +46,7 @@ def load_planning_code_allowlist(path: str | Path) -> dict[str, dict[str, object
     value = json.loads(Path(path).read_text(encoding="utf-8"))
     if (
         not isinstance(value, dict)
+        or set(value) != {"schema_name", "schema_version", "entries"}
         or value.get("schema_name") != "comsol_mcp.planning_code_allowlist"
         or value.get("schema_version") != "1.0.0"
         or not isinstance(value.get("entries"), list)
@@ -94,9 +91,7 @@ def verify_planning_code_texts(
     unexpected = sorted(set(actual) - set(allowlist))
     missing = sorted(set(allowlist) - set(actual)) if require_all_allowlisted else []
     mismatched = sorted(
-        path
-        for path in set(actual) & set(allowlist)
-        if dict(actual[path]) != dict(allowlist[path])
+        path for path in set(actual) & set(allowlist) if dict(actual[path]) != dict(allowlist[path])
     )
     if unexpected or missing or mismatched:
         raise RuntimeError(
@@ -107,9 +102,7 @@ def verify_planning_code_texts(
         "verified": True,
         "scanned_text_file_count": len(texts),
         "matched_file_count": len(actual),
-        "matched_occurrence_count": sum(
-            int(item["match_count"]) for item in actual.values()
-        ),
+        "matched_occurrence_count": sum(int(item["match_count"]) for item in actual.values()),
         "exact_allowlist_required": require_all_allowlisted,
     }
     return receipt

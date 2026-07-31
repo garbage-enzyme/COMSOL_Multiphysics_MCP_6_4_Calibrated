@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import hashlib
+import logging
+import os
+import shutil
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -13,10 +17,16 @@ from comsol_mcp.evidence.field_bundle import (
     validate_field_evidence_request,
 )
 from comsol_mcp.evidence.field_dataset import collect_existing_dataset_field_evidence
-from comsol_mcp.evidence.field_discovery import discover_field_datasets
+from comsol_mcp.evidence.field_discovery import (
+    discover_field_datasets,
+    validate_field_discovery_limits,
+)
+from comsol_mcp.utils.public_errors import public_error
 
 from .ownership import ownership_manager
 from .session import session_manager
+
+logger = logging.getLogger(__name__)
 
 _NORMALIZED_REQUEST_MARKERS = frozenset(
     {
@@ -68,21 +78,28 @@ def register_field_evidence_tools(mcp: FastMCP) -> None:
         """Discover exact MPh dataset names and clientapi tags on one loaded model."""
         if not isinstance(model_name, str) or not model_name.strip():
             return {"success": False, "error": "model_name must be exact and non-empty"}
-        model = session_manager.get_model(model_name)
-        if model is None:
-            return {"success": False, "error": f"Model not found: {model_name}"}
         try:
+            dataset_limit, component_limit = validate_field_discovery_limits(
+                max_datasets=max_datasets,
+                max_components=max_components,
+            )
             ownership = session_manager.preflight_long_operation()
             if not ownership.get("ready"):
                 return {
                     "success": False,
-                    "error": "Complete owned-session preflight is required for field dataset discovery",
+                    "error": (
+                        "Complete owned-session preflight is required for field "
+                        "dataset discovery"
+                    ),
                     "blockers": ownership.get("blockers", []),
                 }
+            model = session_manager.get_model(model_name)
+            if model is None:
+                return {"success": False, "error": f"Model not found: {model_name}"}
             result = discover_field_datasets(
                 model,
-                max_datasets=max_datasets,
-                max_components=max_components,
+                max_datasets=dataset_limit,
+                max_components=component_limit,
             )
             return {
                 "success": True,
@@ -108,14 +125,9 @@ def register_field_evidence_tools(mcp: FastMCP) -> None:
         """Extract one existing solved dataset into an owned bounded NPZ manifest."""
         if not isinstance(model_name, str) or not model_name.strip():
             return {"success": False, "error": "model_name must be exact and non-empty"}
-        model = session_manager.get_model(model_name)
-        if model is None:
-            return {"success": False, "error": f"Model not found: {model_name}"}
         try:
             normalized = _normalize_public_field_request(request)
-            matches = [
-                view for view in normalized["views"] if view["view_id"] == view_id
-            ]
+            matches = [view for view in normalized["views"] if view["view_id"] == view_id]
             if len(matches) != 1:
                 raise ValueError("view_id must identify exactly one requested view")
             view = matches[0]
@@ -124,9 +136,7 @@ def register_field_evidence_tools(mcp: FastMCP) -> None:
                     "public existing-dataset extraction cannot read a validation-matrix source"
                 )
             if normalized["render"]["png"]:
-                raise ValueError(
-                    "PNG rendering is not yet public; request NPZ and manifest only"
-                )
+                raise ValueError("PNG rendering is not yet public; request NPZ and manifest only")
             ownership = session_manager.preflight_long_operation()
             if not ownership.get("ready"):
                 return {
@@ -134,6 +144,9 @@ def register_field_evidence_tools(mcp: FastMCP) -> None:
                     "error": "Complete owned-session preflight is required for field extraction",
                     "blockers": ownership.get("blockers", []),
                 }
+            model = session_manager.get_model(model_name)
+            if model is None:
+                return {"success": False, "error": f"Model not found: {model_name}"}
             source_path = _loaded_source_path(model)
             source_before = _sha256_file(source_path)
             expected_source = view["source"]["source_model_sha256"]
@@ -142,15 +155,46 @@ def register_field_evidence_tools(mcp: FastMCP) -> None:
 
             relative_root = Path("field_evidence") / normalized["request_fingerprint"]
             artifact_root = ownership_manager.runtime_dir / relative_root
-            result = collect_existing_dataset_field_evidence(
-                model=model,
-                request=normalized,
-                view_id=view_id,
-                artifact_root=artifact_root,
+            artifact_root.parent.mkdir(parents=True, exist_ok=True)
+            staging_root = Path(
+                tempfile.mkdtemp(
+                    prefix=f".{artifact_root.name}.stage-",
+                    dir=artifact_root.parent,
+                )
             )
-            source_after = _sha256_file(source_path)
-            if source_after != source_before:
-                raise RuntimeError("loaded source changed during read-only field extraction")
+            source_after = None
+            try:
+                result = collect_existing_dataset_field_evidence(
+                    model=model,
+                    request=normalized,
+                    view_id=view_id,
+                    artifact_root=staging_root,
+                )
+                source_after = _sha256_file(source_path)
+                if source_after != source_before:
+                    raise RuntimeError(
+                        "loaded source changed during read-only field extraction"
+                    )
+                os.rename(staging_root, artifact_root)
+            finally:
+                source_hash_error = None
+                if source_after is None:
+                    try:
+                        source_after = _sha256_file(source_path)
+                    except Exception as exc:
+                        source_hash_error = exc
+                try:
+                    if staging_root.exists():
+                        shutil.rmtree(staging_root)
+                finally:
+                    if source_hash_error is not None:
+                        raise RuntimeError(
+                            "loaded source could not be revalidated after field extraction"
+                        ) from source_hash_error
+                    if source_after != source_before:
+                        raise RuntimeError(
+                            "loaded source changed during read-only field extraction"
+                        )
             return {
                 "success": True,
                 "model_name": model_name,
@@ -161,12 +205,11 @@ def register_field_evidence_tools(mcp: FastMCP) -> None:
                 "solver_started_by_tool": False,
                 **result,
             }
-        except (ValueError, FileExistsError) as exc:
+        except ValueError as exc:
             return {"success": False, "error": str(exc)}
-        except Exception as exc:
-            return {
-                "success": False,
-                "error": f"Field extraction failed safely: {type(exc).__name__}: {exc}",
-            }
+        except Exception:
+            logger.exception("Field extraction backend failed")
+            return public_error("field_extraction_failed", "Field extraction failed safely.")
+
 
 __all__ = ["register_field_evidence_tools"]

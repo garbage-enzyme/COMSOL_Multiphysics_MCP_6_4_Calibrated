@@ -4,20 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 import os
 from pathlib import Path
 from typing import Any, Mapping
 
-from comsol_mcp.evidence.spectral_characterization import (
-    validate_spectral_analysis_decision,
-    validate_spectral_characterization,
-    validate_spectral_point_bundle,
-)
-
-from .spectral_rows import read_spectral_rows
-from .store import read_json
-
+from .spectral_runner import validate_spectral_completion
 
 CONVERGENCE_CAMPAIGN_LEVEL_SCHEMA_NAME = "comsol_mcp.convergence_campaign_level"
 CONVERGENCE_CAMPAIGN_LEVEL_SCHEMA_VERSION = "1.0.0"
@@ -77,7 +68,12 @@ def _verify_descriptor(value: object, root: Path, name: str) -> Path:
     if not path.is_file():
         raise ValueError(f"{name} artifact is missing")
     size = value["size_bytes"]
-    if isinstance(size, bool) or not isinstance(size, int) or size < 0 or path.stat().st_size != size:
+    if (
+        isinstance(size, bool)
+        or not isinstance(size, int)
+        or size < 0
+        or path.stat().st_size != size
+    ):
         raise ValueError(f"{name} artifact size does not match")
     if _sha256_file(path) != value["sha256"]:
         raise ValueError(f"{name} artifact hash does not match")
@@ -93,34 +89,20 @@ def _load_level_artifacts(
     paths = {name: level_dir / relative for name, relative in _ARTIFACT_PATHS.items()}
     if any(not path.is_file() for path in paths.values()):
         raise ValueError("completed convergence level is missing spectral artifacts")
-    summary = read_json(paths["spectral_summary"])
-    if (
-        summary.get("execution_state") != "completed"
-        or summary.get("spec_fingerprint") != spectral_spec["spec_fingerprint"]
-        or summary.get("source_model_sha256") != spectral_spec["source_model_sha256"]
-        or summary.get("configuration_sha256") != spectral_spec["configuration_sha256"]
-    ):
-        raise ValueError("spectral summary does not match the declared convergence level")
-    bundle = validate_spectral_point_bundle(read_json(paths["spectral_bundle"]))
-    decision = validate_spectral_analysis_decision(
-        read_json(paths["spectral_decision"]), bundle=bundle
-    )
-    characterization = validate_spectral_characterization(
-        read_json(paths["spectral_characterization"]), bundle=bundle, decision=decision
-    )
+    completion = validate_spectral_completion(level_dir, spectral_spec)
+    summary = completion["summary"]
+    bundle = completion["bundle"]
+    decision = completion["decision"]
+    characterization = completion["characterization"]
     if (
         bundle["source_model"]["sha256"] != spectral_spec["source_model_sha256"]
         or bundle["configuration_sha256"] != spectral_spec["configuration_sha256"]
     ):
         raise ValueError("spectral bundle identity does not match the convergence level")
-    rows = read_spectral_rows(
-        paths["spectral_rows"], spectral_spec, artifact_root=level_dir
-    )
+    rows = completion["rows"]
     if len(rows) != summary.get("row_count"):
         raise ValueError("spectral row count does not match the completed summary")
-    mesh_counts = {
-        (row["mesh_element_count"], row["mesh_vertex_count"]) for row in rows
-    }
+    mesh_counts = {(row["mesh_element_count"], row["mesh_vertex_count"]) for row in rows}
     if len(mesh_counts) != 1:
         raise ValueError("one convergence level must use one observed mesh")
     element_count, vertex_count = mesh_counts.pop()
@@ -133,9 +115,7 @@ def _load_level_artifacts(
             "element_count": element_count,
             "vertex_count": vertex_count,
         },
-        "artifacts": {
-            name: _descriptor(path, campaign_root) for name, path in paths.items()
-        },
+        "artifacts": {name: _descriptor(path, campaign_root) for name, path in paths.items()},
     }
 
 
@@ -151,11 +131,24 @@ def _validate_row(
         raise ValueError("convergence campaign level row must be an object")
     row = dict(value)
     expected_fields = {
-        "schema_name", "schema_version", "spec_fingerprint", "attempt",
-        "ordinal", "level_id", "child_spec_fingerprint", "source_model_sha256",
-        "configuration_sha256", "material_identity_sha256", "incidence_identity_sha256",
-        "execution_state", "scientific_disposition", "reason_code", "mesh_counts",
-        "artifacts", "previous_row_sha256", "row_sha256",
+        "schema_name",
+        "schema_version",
+        "spec_fingerprint",
+        "attempt",
+        "ordinal",
+        "level_id",
+        "child_spec_fingerprint",
+        "source_model_sha256",
+        "configuration_sha256",
+        "material_identity_sha256",
+        "incidence_identity_sha256",
+        "execution_state",
+        "scientific_disposition",
+        "reason_code",
+        "mesh_counts",
+        "artifacts",
+        "previous_row_sha256",
+        "row_sha256",
     }
     if set(row) != expected_fields:
         raise ValueError("convergence campaign level row fields are invalid")
@@ -167,7 +160,11 @@ def _validate_row(
         or row["previous_row_sha256"] != previous_row_sha256
     ):
         raise ValueError("convergence campaign level row chain identity is invalid")
-    if isinstance(row["attempt"], bool) or not isinstance(row["attempt"], int) or row["attempt"] <= 0:
+    if (
+        isinstance(row["attempt"], bool)
+        or not isinstance(row["attempt"], int)
+        or row["attempt"] <= 0
+    ):
         raise ValueError("convergence campaign level attempt is invalid")
     level = spec["levels"][expected_ordinal]
     spectral_spec = level["spectral_job"]
@@ -184,7 +181,10 @@ def _validate_row(
     if row["execution_state"] != "completed":
         raise ValueError("only completed spectral levels may enter the convergence row chain")
     if row["scientific_disposition"] not in {
-        "accepted", "residual", "unresolved_at_declared_cap", "invalid_evidence"
+        "accepted",
+        "residual",
+        "unresolved_at_declared_cap",
+        "invalid_evidence",
     }:
         raise ValueError("convergence campaign level scientific disposition is invalid")
     if not isinstance(row["reason_code"], str) or not row["reason_code"]:
@@ -232,9 +232,19 @@ def read_convergence_campaign_levels(
     if journal.stat().st_size > len(spec["levels"]) * MAX_CONVERGENCE_CAMPAIGN_ROW_BYTES:
         raise ValueError("convergence campaign level journal exceeds its bound")
     values = []
-    for line in journal.read_text(encoding="utf-8").splitlines():
-        if line.strip():
-            values.append(json.loads(line))
+    with journal.open("rb") as handle:
+        while True:
+            raw_line = handle.readline(MAX_CONVERGENCE_CAMPAIGN_ROW_BYTES + 1)
+            if not raw_line:
+                break
+            if len(raw_line) > MAX_CONVERGENCE_CAMPAIGN_ROW_BYTES:
+                raise ValueError("convergence campaign level row exceeds its bound")
+            try:
+                line = raw_line.decode("utf-8")
+            except UnicodeDecodeError as exc:
+                raise ValueError("convergence campaign level row is not UTF-8") from exc
+            if line.strip():
+                values.append(json.loads(line))
     if len(values) > len(spec["levels"]):
         raise ValueError("convergence campaign has more rows than declared levels")
     result = []
@@ -291,12 +301,13 @@ def append_convergence_campaign_level(
         "previous_row_sha256": existing[-1]["row_sha256"] if existing else None,
     }
     row = {**body, "row_sha256": _fingerprint(body)}
-    if len(_canonical_bytes(row)) > MAX_CONVERGENCE_CAMPAIGN_ROW_BYTES:
+    payload = _canonical_bytes(row) + b"\n"
+    if len(payload) > MAX_CONVERGENCE_CAMPAIGN_ROW_BYTES:
         raise ValueError("convergence campaign level row exceeds its bound")
     journal = Path(path)
     journal.parent.mkdir(parents=True, exist_ok=True)
     with journal.open("ab") as handle:
-        handle.write(_canonical_bytes(row) + b"\n")
+        handle.write(payload)
         handle.flush()
         os.fsync(handle.fileno())
     replayed = read_convergence_campaign_levels(path, spec, artifact_root=root)

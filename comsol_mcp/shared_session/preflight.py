@@ -230,12 +230,16 @@ def classify_shared_server_preflight(
         item for item in processes if item["kind"] in {"mph_client", "other_comsol"}
     ]
     first_by_pid = {item["pid"]: item for item in first["processes"]}
+    second_by_pid = {item["pid"]: item for item in processes}
     changed = [
         item
         for item in processes
         if item["pid"] not in first_by_pid
         or item["identity_sha256"] != first_by_pid[item["pid"]]["identity_sha256"]
     ]
+    changed.extend(
+        item for item in first["processes"] if item["pid"] not in second_by_pid
+    )
     first_listener = summarize_shared_listener_bindings(
         first["listeners"], endpoint=declared
     )
@@ -255,7 +259,11 @@ def classify_shared_server_preflight(
         for item in processes
         if item["kind"] != "mph_client"
     ]
-    if any(
+    if second["observed_at_epoch"] <= first["observed_at_epoch"]:
+        violations.append("probe_chronology_invalid")
+        state = "probe_chronology_invalid"
+        retryable = True
+    elif any(
         parts is None or parts[:3] != ACCEPTED_RELEASE_LINE
         for parts in comsol_versions
     ):
@@ -302,6 +310,10 @@ def classify_shared_server_preflight(
         if owner is None or len(servers) != 1:
             violations.append("unknown_or_multiple_candidate_servers")
             state = "unknown_or_multiple_candidate_servers"
+        elif not owner["responding"]:
+            violations.append("desktop_or_server_starting")
+            state = "desktop_or_server_starting"
+            retryable = True
         else:
             builds = {item["file_version"] for item in (*desktops, owner)}
             if len(builds) > 1:

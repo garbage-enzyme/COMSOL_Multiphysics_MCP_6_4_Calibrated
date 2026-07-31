@@ -35,6 +35,7 @@ Before a release:
    ```powershell
    python development_kit/scripts/run_real_release_gate.py --confirm RUN_REAL_COMSOL `
      --fixture-spec D:\path\to\controlled_fixture_spec.json `
+     --licensed-regression-timeout-seconds 900 `
      --output D:\comsol_release\real_gate.json
    ```
 
@@ -42,8 +43,10 @@ Before a release:
    for the licensed regression suite without rerunning optional reference-power
    evidence. Use `--require-reference-power --reference-power-spec ...` only
    when that release must generate a new reference-power receipt as well.
-7. Require an unchanged COMSOL PID set, an absent solver lease, no external
-   collision, source-integrity evidence, and all fixture contracts to pass.
+7. Require fresh and complete final process inventory, an unchanged COMSOL PID
+   set, an absent solver lease, no external collision, source-integrity
+   evidence, and all fixture contracts to pass. A phase timeout or exception
+   still requires this final assessment and a failed receipt.
 8. Build once more from the clean release commit and compare discovery output.
 9. Install non-editably in the target MCP environment.
 10. Restart the MCP host; source and profile changes are not hot-reloaded.

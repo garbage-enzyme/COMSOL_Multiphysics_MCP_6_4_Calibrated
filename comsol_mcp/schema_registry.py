@@ -363,6 +363,12 @@ def _entries() -> list[dict[str, Any]]:
         ),
         _entry(_REGISTRY_SCHEMA, _REGISTRY_VERSION, "comsol_mcp.schema_registry"),
         _entry(
+            "comsol_mcp.session_startup_state",
+            "1.0.0",
+            "comsol_mcp.tools.session",
+            artifact_kind="durable_artifact",
+        ),
+        _entry(
             SHARED_MODEL_LOCK_SCHEMA,
             SHARED_MODEL_LOCK_VERSION,
             "comsol_mcp.shared_session.locking",

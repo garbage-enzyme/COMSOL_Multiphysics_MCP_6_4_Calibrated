@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from copy import deepcopy
-import hashlib
 import json
 import math
 from pathlib import Path
 import re
 from typing import Any, Mapping
+
+from comsol_mcp.durable import read_file_bytes_bounded, sha256_file_bounded
 
 from .contracts import canonical_sha256
 from .power_audit import normalize_declared_plane_flux
@@ -256,7 +257,10 @@ def validate_reference_power_execution_spec(
     if verify_files:
         if not source_path.is_file():
             raise FileNotFoundError(source_path)
-        actual = hashlib.sha256(source_path.read_bytes()).hexdigest()
+        actual = sha256_file_bounded(
+            source_path,
+            max_bytes=strict_contract["limits"]["max_artifact_bytes"],
+        )["sha256"]
         if actual != expected_hash:
             raise ValueError("source model SHA-256 does not match expected_source_sha256")
         artifact_dir.mkdir(parents=True, exist_ok=True)
@@ -264,11 +268,18 @@ def validate_reference_power_execution_spec(
 
 
 def load_bounded_json(path: Path, maximum_bytes: int) -> dict[str, Any]:
-    if not path.is_file():
-        raise FileNotFoundError(path)
-    if path.stat().st_size > maximum_bytes:
-        raise ValueError(f"JSON input exceeds {maximum_bytes} bytes: {path.name}")
-    value = json.loads(path.read_text(encoding="utf-8"))
+    try:
+        raw = read_file_bytes_bounded(path, max_bytes=maximum_bytes)
+    except ValueError as exc:
+        if "reading limit" in str(exc):
+            raise ValueError(
+                f"JSON input exceeds {maximum_bytes} bytes: {path.name}"
+            ) from exc
+        raise
+    try:
+        value = json.loads(raw.decode("utf-8"))
+    except UnicodeDecodeError as exc:
+        raise ValueError(f"JSON input is not UTF-8: {path.name}") from exc
     return _object(value, path.name)
 
 

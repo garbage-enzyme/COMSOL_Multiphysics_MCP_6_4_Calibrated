@@ -2,24 +2,40 @@
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
+import _winapi
 import hashlib
 import json
-from pathlib import Path
+import re
 import subprocess
 import sys
 import tomllib
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from types import SimpleNamespace
 
-from src import __version__
+import pytest
+import src.tools.capabilities as capabilities_module
 from src.build_identity import get_build_identity, package_content_sha256
 from src.compatibility import load_runtime_compatibility
-from src.tools.capabilities import get_capabilities
-from src.tools.capabilities import startup_capability_summary
+from src.tools.capabilities import get_capabilities, startup_capability_summary
 from src.tools.profiles import ProfileSelection
 
+from src import __version__
 
 ROOT = Path(__file__).parents[2]
 SNAPSHOTS = ROOT / "development_kit" / "tests" / "snapshots"
+
+
+def _string_leaves(value):
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            yield from _string_leaves(key)
+            yield from _string_leaves(item)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            yield from _string_leaves(item)
 
 
 def _snapshot_sha256(path: Path) -> str:
@@ -55,10 +71,47 @@ def test_deployment_manifest_matches_frozen_profile_and_schema_snapshots():
     assert len(identity["catalog_contract_sha256"]) == 64
     assert identity["source_classification"] == "source_tree"
     assert identity["contains_local_path"] is False
-    serialized = json.dumps(identity, ensure_ascii=False)
-    assert "陆星" not in serialized
-    assert "C:\\Users\\" not in serialized
-    assert str(ROOT) not in serialized
+    string_leaves = tuple(_string_leaves(identity))
+    normalized_leaves = tuple(value.replace("\\", "/").casefold() for value in string_leaves)
+    normalized_root = str(ROOT.resolve()).replace("\\", "/").casefold()
+    assert all("陆星" not in value for value in string_leaves)
+    assert all(not re.search(r"\b[a-z]:/users/", value) for value in normalized_leaves)
+    assert all(normalized_root not in value for value in normalized_leaves)
+
+
+def test_nonobject_deployment_manifest_fails_closed(tmp_path, monkeypatch):
+    manifest = tmp_path / "deployment_manifest.json"
+    manifest.write_text("[]", encoding="utf-8")
+    monkeypatch.setattr(capabilities_module, "_DEPLOYMENT_MANIFEST", manifest)
+
+    identity = get_capabilities(_selection("core"))["deployment_identity"]
+
+    assert identity["available"] is False
+    assert identity["source_classification"] == "unknown"
+    assert "deployment manifest unavailable" in identity["error"]
+
+
+def test_deployment_classification_is_bound_to_the_distribution_root(tmp_path, monkeypatch):
+    distribution_root = tmp_path / "runtime" / "site-packages"
+    source_lookalike = tmp_path / "workspace" / "site-packages" / "source"
+    monkeypatch.setattr(
+        capabilities_module,
+        "distribution",
+        lambda _name: SimpleNamespace(locate_file=lambda _relative: distribution_root),
+    )
+
+    assert (
+        capabilities_module._deployment_source_classification(
+            source_lookalike / "comsol_mcp" / "tools" / "capabilities.py"
+        )
+        == "source_tree"
+    )
+    assert (
+        capabilities_module._deployment_source_classification(
+            distribution_root / "comsol_mcp" / "tools" / "capabilities.py"
+        )
+        == "installed_site_package"
+    )
 
 
 def test_snapshot_identity_is_invariant_to_checkout_line_endings(tmp_path):
@@ -70,7 +123,7 @@ def test_snapshot_identity_is_invariant_to_checkout_line_endings(tmp_path):
     assert _snapshot_sha256(lf) == _snapshot_sha256(crlf)
 
 
-def test_build_identity_ignores_generated_files_and_changes_with_package_bytes(tmp_path):
+def test_build_identity_ignores_interpreter_caches_and_covers_generated_package_bytes(tmp_path):
     package = tmp_path / "src"
     package.mkdir()
     (package / "alpha.py").write_text("value = 1\n", encoding="utf-8")
@@ -84,11 +137,38 @@ def test_build_identity_ignores_generated_files_and_changes_with_package_bytes(t
     (cache / "alpha.pyc").write_bytes(b"generated")
     assert package_content_sha256(package) == first
 
+    generated = package / "generated_manifest.json"
+    generated.write_text('{"generated":true}\n', encoding="utf-8")
+    generated_digest = package_content_sha256(package)
+    assert generated_digest != first
+
+    (nested / "manifest.json").write_text('{"value":2}\n', encoding="utf-8")
+    package_data_digest = package_content_sha256(package)
+    assert package_data_digest != generated_digest
+
     (package / "alpha.py").write_text("value = 2\n", encoding="utf-8")
-    assert package_content_sha256(package) != first
+    assert package_content_sha256(package) != package_data_digest
     identity = get_build_identity(package)
+    assert identity["generated_files_included"] is True
+    assert identity["content_scope"] == ("sorted_relative_non_cache_package_paths_and_file_bytes")
     assert identity["paths_included"] is False
     assert str(tmp_path) not in json.dumps(identity)
+
+
+def test_build_identity_rejects_package_junctions(tmp_path):
+    package = tmp_path / "package"
+    package.mkdir()
+    (package / "module.py").write_text("value = 1\n", encoding="utf-8")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "hidden.py").write_text("hidden = True\n", encoding="utf-8")
+    junction = package / "linked"
+    _winapi.CreateJunction(str(outside), str(junction))
+    try:
+        with pytest.raises(ValueError, match="symlinks or junctions"):
+            package_content_sha256(package)
+    finally:
+        junction.rmdir()
 
 
 def test_package_version_has_one_authoritative_source():
@@ -101,9 +181,10 @@ def test_package_version_has_one_authoritative_source():
     assert "version" not in project["project"]
     assert project["tool"]["hatch"]["version"]["path"] == "comsol_mcp/__init__.py"
     assert "package_version" not in manifest
-    assert get_capabilities(_selection("core"))["deployment_identity"][
-        "package_version"
-    ] == __version__
+    assert (
+        get_capabilities(_selection("core"))["deployment_identity"]["package_version"]
+        == __version__
+    )
 
 
 def test_deployment_identity_is_profile_independent():

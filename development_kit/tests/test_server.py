@@ -1,15 +1,40 @@
 """Tests for MCP server construction without starting a transport."""
 
-import sys
-from pathlib import Path
+import ast
 import shutil
+import sys
 import uuid
-
-from mcp.server.fastmcp import FastMCP
+from pathlib import Path
 
 import src.server as server_module
+from mcp.server.fastmcp import FastMCP
 from src.server import create_server, register_all_resources, register_all_tools
 from src.tools.capabilities import get_capabilities, startup_capability_summary
+
+
+def test_server_module_configures_logging_only_in_main():
+    source = (Path(__file__).parents[2] / "comsol_mcp" / "server.py").read_text(
+        encoding="utf-8"
+    )
+    tree = ast.parse(source)
+    assert not any(
+        isinstance(node, ast.Expr)
+        and isinstance(node.value, ast.Call)
+        and isinstance(node.value.func, ast.Attribute)
+        and node.value.func.attr == "basicConfig"
+        for node in tree.body
+    )
+    main = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "main"
+    )
+    assert any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "basicConfig"
+        for node in ast.walk(main)
+    )
 
 
 def test_server_registration_is_idempotent():

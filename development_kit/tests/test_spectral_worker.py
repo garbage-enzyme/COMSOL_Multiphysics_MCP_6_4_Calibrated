@@ -3,20 +3,20 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 import shutil
 import time
 import uuid
+from pathlib import Path
 
 import pytest
+from src.jobs.manager import JobManager
+from src.jobs.spectral_worker import _run
+from src.jobs.store import JobStore, atomic_write_json, process_identity
 
 from development_kit.tests.spectral_job_fixtures import (
     spectral_job_spec,
     write_fake_point_audit,
 )
-from src.jobs.spectral_worker import _run
-from src.jobs.manager import JobManager
-from src.jobs.store import JobStore, process_identity
 
 
 class _Model:
@@ -30,12 +30,19 @@ class _Model:
 class _Client:
     port = None
 
-    def __init__(self, source: str):
+    def __init__(self, source: str, *, attempt_mutation: bool = False):
         self.source = source
         self.cleared = False
+        self.attempt_mutation = attempt_mutation
+        self.mutation_blocked = False
 
     def load(self, source: str):
         assert source == self.source
+        if self.attempt_mutation:
+            try:
+                Path(source).write_bytes(b"replacement")
+            except PermissionError:
+                self.mutation_blocked = True
         return _Model(source)
 
     def clear(self):
@@ -124,17 +131,21 @@ def _raw_spec(spec):
     return {key: value for key, value in spec.items() if key in allowed}
 
 
+@pytest.mark.parametrize("value", ["false", 0, 1, None])
+def test_worker_boolean_controls_require_exact_booleans(tmp_path, value):
+    with pytest.raises(ValueError, match="native_cancel_enabled must be boolean"):
+        _run(str(tmp_path), "missing", native_cancel_enabled=value)
+
+
 def test_injected_worker_reuses_ownership_resource_and_cleanup_paths(tmp_path, ascii_root):
     store, spec, job_id = _created_job(tmp_path, ascii_root)
     ownership = _Ownership()
-    client = _Client(spec["source_model_path"])
+    client = _Client(spec["source_model_path"], attempt_mutation=True)
 
     def collect(point, _collector, artifact_dir):
         wavelength = point["wavelength"]["value"]
         absorption = 0.1 + 0.8 / (1.0 + ((wavelength - 5e-6) / 0.18e-6) ** 2)
-        return write_fake_point_audit(
-            artifact_dir, spec, point, absorption=absorption
-        )
+        return write_fake_point_audit(artifact_dir, spec, point, absorption=absorption)
 
     code = _run(
         str(store.root),
@@ -151,8 +162,65 @@ def test_injected_worker_reuses_ownership_resource_and_cleanup_paths(tmp_path, a
     assert state["spectral_summary"]["scientific_disposition"] == "accepted"
     assert state["cleanup"]["lease_released"] is True
     assert client.cleared is True
+    assert client.mutation_blocked is True
     assert ownership.released is True
     assert len(store.read_resource_journal(job_id)) > 0
+
+
+def test_all_durable_rows_can_complete_from_smoke_state_on_resume(tmp_path, ascii_root):
+    store, spec, job_id = _created_job(tmp_path, ascii_root)
+    collected = 0
+
+    def collect(point, _collector, artifact_dir):
+        nonlocal collected
+        collected += 1
+        wavelength = point["wavelength"]["value"]
+        absorption = 0.1 + 0.8 / (1.0 + ((wavelength - 5e-6) / 0.18e-6) ** 2)
+        return write_fake_point_audit(artifact_dir, spec, point, absorption=absorption)
+
+    assert (
+        _run(
+            str(store.root),
+            job_id,
+            ownership_factory=lambda _root, _owner: _Ownership(),
+            client_factory=lambda _spec: _Client(spec["source_model_path"]),
+            collector_executor=collect,
+            telemetry_provider=_telemetry,
+            native_cancel_enabled=False,
+        )
+        == 0
+    )
+    first_count = collected
+    state = store.read_state(job_id)
+    state.update(
+        {
+            "status": "starting",
+            "attempt": 2,
+            "progress": {"completed": 0, "total": spec["maximum_points"]},
+            "last_error": None,
+        }
+    )
+    atomic_write_json(store.job_dir(job_id) / "state.json", state)
+
+    assert (
+        _run(
+            str(store.root),
+            job_id,
+            ownership_factory=lambda _root, _owner: _Ownership(),
+            client_factory=lambda _spec: _Client(spec["source_model_path"]),
+            collector_executor=lambda *_args: (_ for _ in ()).throw(
+                AssertionError("durable rows must be reused")
+            ),
+            telemetry_provider=_telemetry,
+            native_cancel_enabled=False,
+        )
+        == 0
+    )
+
+    resumed = store.read_state(job_id)
+    assert resumed["status"] == "completed"
+    assert resumed["progress"]["completed"] == first_count
+    assert collected == first_count
 
 
 def test_cleanup_fault_fails_attempt_but_still_releases_lease(tmp_path, ascii_root):
@@ -162,9 +230,7 @@ def test_cleanup_fault_fails_attempt_but_still_releases_lease(tmp_path, ascii_ro
     def collect(point, _collector, artifact_dir):
         wavelength = point["wavelength"]["value"]
         absorption = 0.1 + 0.8 / (1.0 + ((wavelength - 5e-6) / 0.18e-6) ** 2)
-        return write_fake_point_audit(
-            artifact_dir, spec, point, absorption=absorption
-        )
+        return write_fake_point_audit(artifact_dir, spec, point, absorption=absorption)
 
     code = _run(
         str(store.root),
@@ -185,10 +251,38 @@ def test_cleanup_fault_fails_attempt_but_still_releases_lease(tmp_path, ascii_ro
     assert state["status"] == "failed"
     assert "cleanup_hook" in state["last_error"]["message"]
     assert ownership.released is True
+    assert state["cleanup"]["lease_released"] is True
     assert (store.job_dir(job_id) / "analysis" / "summary.json").is_file()
 
 
-def test_manager_routes_exact_spectral_submissions_and_changed_specs(tmp_path, ascii_root, monkeypatch):
+def test_spectral_error_remains_bound_while_cancellation_is_coordinating(tmp_path, ascii_root):
+    store, spec, job_id = _created_job(tmp_path, ascii_root)
+
+    def fail_after_cancel(_spec):
+        store.request_cancel(job_id, requester_identity=process_identity(os.getpid()))
+        store.update_state(job_id, "cancelling", event="test_coordinator_claimed")
+        raise RuntimeError("independent spectral failure")
+
+    code = _run(
+        str(store.root),
+        job_id,
+        ownership_factory=lambda _root, _owner: _Ownership(),
+        client_factory=fail_after_cancel,
+        collector_executor=lambda *_args: None,
+        telemetry_provider=_telemetry,
+        native_cancel_enabled=False,
+    )
+
+    state = store.read_state(job_id)
+    assert code == 1
+    assert state["status"] == "cancelling"
+    assert state["cancel"]["worker_error"]["type"] == "RuntimeError"
+    assert state["cancel"]["worker_error"]["message"] == "independent spectral failure"
+
+
+def test_manager_routes_exact_spectral_submissions_and_changed_specs(
+    tmp_path, ascii_root, monkeypatch
+):
     spec = spectral_job_spec(tmp_path)
     manager = JobManager(
         ascii_root / "manager-jobs",
@@ -229,15 +323,13 @@ def test_manager_resumes_spectral_worker_without_changing_spec(tmp_path, ascii_r
     monkeypatch.setattr(
         manager,
         "_launch_worker",
-        lambda job_id, module: (
-            launches.append((job_id, module)) or process_identity(os.getpid())
-        ),
+        lambda job_id, module: launches.append((job_id, module)) or process_identity(os.getpid()),
     )
     submitted = manager.submit(_raw_spec(spec))
-    manager.store.update_state(
-        submitted["job_id"], "interrupted", event="injected_interruption"
-    )
+    manager.store.update_state(submitted["job_id"], "interrupted", event="injected_interruption")
     resumed = manager.resume(submitted["job_id"])
     assert resumed["attempt"] == 2
     assert launches[-1][1] == "comsol_mcp.jobs.spectral_worker"
-    assert manager.store.read_spec(submitted["job_id"])["spec_fingerprint"] == spec["spec_fingerprint"]
+    assert (
+        manager.store.read_spec(submitted["job_id"])["spec_fingerprint"] == spec["spec_fingerprint"]
+    )

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 from pathlib import Path
 import sys
@@ -10,11 +11,117 @@ from typing import Any, Callable
 
 import psutil
 
-from .process_control import capture_owned_descendants, inspect_identity, terminate_exact, verify_absent
+from .process_control import (
+    capture_owned_descendants,
+    inspect_identity,
+    terminate_exact,
+    verify_absent,
+)
 from .store import JobStore, atomic_write_json, cancel_request_targets_attempt, process_identity
 
 
 _RESUMABLE_PHASES = {"terminate", "force_kill", "verifying"}
+_PROCESS_IDENTITY_FIELDS = ("pid", "process_create_time", "command_signature")
+
+
+def _same_process_identity(left: Any, right: Any) -> bool:
+    return (
+        isinstance(left, dict)
+        and isinstance(right, dict)
+        and all(left.get(field) == right.get(field) for field in _PROCESS_IDENTITY_FIELDS)
+    )
+
+
+def _owns_cancel_write(
+    state: dict[str, Any],
+    control: dict[str, Any],
+    request_id: str,
+    identity: dict[str, Any],
+) -> bool:
+    cancel = state.get("cancel")
+    if not isinstance(cancel, dict):
+        return False
+    try:
+        attempt = int(state.get("attempt", 1))
+    except TypeError, ValueError, OverflowError:
+        return False
+    return bool(
+        state.get("status") == "cancelling"
+        and control.get("request") == "cancel_requested"
+        and control.get("request_id") == request_id
+        and cancel_request_targets_attempt(control, attempt)
+        and cancel.get("target_attempt") in (None, attempt)
+        and _same_process_identity(cancel.get("coordinator"), identity)
+    )
+
+
+def _remaining_phase_budget(
+    cancel: dict[str, Any],
+    phase: str,
+    budget_seconds: float,
+) -> float:
+    budget = max(0.0, float(budget_seconds))
+    started = (cancel.get("phase_timestamps") or {}).get(phase)
+    if started is None:
+        return budget
+    if isinstance(started, bool) or not isinstance(started, (int, float)):
+        return 0.0
+    started_value = float(started)
+    if not math.isfinite(started_value):
+        return 0.0
+    elapsed = max(0.0, time.time() - started_value)
+    return max(0.0, budget - elapsed)
+
+
+def _persisted_budget(
+    policy: dict[str, Any],
+    key: str,
+    fallback: float,
+) -> float:
+    value = policy.get(key)
+    if value is None:
+        return max(0.0, float(fallback))
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(float(value))
+        or float(value) < 0
+    ):
+        return 0.0
+    return float(value)
+
+
+def _process_identity_key(identity: Any) -> tuple[int, float, str]:
+    if not isinstance(identity, dict):
+        raise ValueError("captured process identity must be an object")
+    pid = identity.get("pid")
+    created = identity.get("process_create_time")
+    signature = identity.get("command_signature")
+    if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0:
+        raise ValueError("captured process identity has an invalid PID")
+    if (
+        isinstance(created, bool)
+        or not isinstance(created, (int, float))
+        or not math.isfinite(float(created))
+    ):
+        raise ValueError("captured process identity has an invalid creation time")
+    if not isinstance(signature, str) or not signature:
+        raise ValueError("captured process identity has an invalid command signature")
+    return pid, float(created), signature
+
+
+def _merge_process_identities(*groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    merged: list[dict[str, Any]] = []
+    seen: set[tuple[int, float, str]] = set()
+    for group in groups:
+        if not isinstance(group, list):
+            raise ValueError("captured descendants must be a list")
+        for identity in group:
+            key = _process_identity_key(identity)
+            if key not in seen:
+                seen.add(key)
+                merged.append(dict(identity))
+    return merged
 
 
 def _enter_phase(cancel: dict[str, Any], phase: str, now: float) -> dict[str, Any]:
@@ -49,8 +156,8 @@ def _claim(
         ):
             return None
         coordinator = cancel.get("coordinator")
-        if isinstance(coordinator, dict) and coordinator.get("pid") != identity["pid"]:
-            if inspect_identity(coordinator)["state"] == "active":
+        if isinstance(coordinator, dict) and not _same_process_identity(coordinator, identity):
+            if inspect_identity(coordinator)["state"] != "stale":
                 return None
         previous_phase = cancel.get("phase")
         now = time.time()
@@ -60,9 +167,19 @@ def _claim(
             previous_phase if previous_phase in _RESUMABLE_PHASES else "native_grace",
             now,
         )
+        timing_policy = dict(cancel.get("timing_policy") or {})
         cancel["timing_policy"] = {
-            "native_grace_budget_s": max(0.0, float(grace_seconds)),
-            "terminate_budget_s": max(0.0, float(terminate_seconds)),
+            **timing_policy,
+            "native_grace_budget_s": _persisted_budget(
+                timing_policy,
+                "native_grace_budget_s",
+                grace_seconds,
+            ),
+            "terminate_budget_s": _persisted_budget(
+                timing_policy,
+                "terminate_budget_s",
+                terminate_seconds,
+            ),
         }
         cancel.pop("blocker", None)
         state["cancel"] = cancel
@@ -92,11 +209,7 @@ def _checkpoint(
         state = store.read_state(job_id)
         control = store.read_control(job_id)
         cancel = dict(state.get("cancel") or {})
-        if (
-            control.get("request_id") != request_id
-            or state.get("status") != "cancelling"
-            or (cancel.get("coordinator") or {}).get("pid") != identity.get("pid")
-        ):
+        if not _owns_cancel_write(state, control, request_id, identity):
             return False
         now = time.time()
         cancel = _enter_phase(cancel, phase, now)
@@ -114,12 +227,18 @@ def _checkpoint(
         return True
 
 
-def _record_blocker(store: JobStore, job_id: str, request_id: str, message: str) -> None:
+def _record_blocker(
+    store: JobStore,
+    job_id: str,
+    request_id: str,
+    identity: dict[str, Any],
+    message: str,
+) -> bool:
     with store.lock(job_id):
         state = store.read_state(job_id)
         control = store.read_control(job_id)
-        if control.get("request_id") != request_id or state.get("status") != "cancelling":
-            return
+        if not _owns_cancel_write(state, control, request_id, identity):
+            return False
         cancel = dict(state.get("cancel") or {})
         now = time.time()
         cancel = _enter_phase(cancel, "blocked", now)
@@ -127,16 +246,24 @@ def _record_blocker(store: JobStore, job_id: str, request_id: str, message: str)
         state["cancel"] = cancel
         state["updated_at_epoch"] = now
         atomic_write_json(store.job_dir(job_id) / "state.json", state)
-        store._append_event_unlocked(job_id, "cancel_blocked", {"request_id": request_id, "message": message}, "cancelling")
+        store._append_event_unlocked(
+            job_id, "cancel_blocked", {"request_id": request_id, "message": message}, "cancelling"
+        )
+        return True
 
 
 def _commit_cancelled(
-    store: JobStore, job_id: str, request_id: str, verification: dict[str, Any], actions: list[dict[str, Any]]
+    store: JobStore,
+    job_id: str,
+    request_id: str,
+    identity: dict[str, Any],
+    verification: dict[str, Any],
+    actions: list[dict[str, Any]],
 ) -> bool:
     with store.lock(job_id):
         state = store.read_state(job_id)
         control = store.read_control(job_id)
-        if control.get("request_id") != request_id or state.get("status") != "cancelling":
+        if not _owns_cancel_write(state, control, request_id, identity):
             return False
         cancel = dict(state.get("cancel") or {})
         completed_at = time.time()
@@ -192,6 +319,7 @@ def _verify_solver_cleanup(store: JobStore, job_id: str) -> dict[str, Any]:
     Bare historical server PIDs are intentionally insufficient: an durable cancellation terminal
     cancellation must remain blocked rather than risk acting after PID reuse.
     """
+
     def with_attached_preservation(result: dict[str, Any]) -> dict[str, Any]:
         spec = store.read_spec(job_id)
         backend = spec.get("execution_backend")
@@ -213,11 +341,14 @@ def _verify_solver_cleanup(store: JobStore, job_id: str) -> dict[str, Any]:
         )
         state = store.read_state(job_id)
         cleanup = state.get("attached_cleanup")
+        model_identity_preserved = bool(
+            isinstance(cleanup, dict)
+            and cleanup.get("success") is True
+            and cleanup.get("model_identity_preserved") is True
+        )
         model_status = (
             "verified_before_cooperative_disconnect"
-            if isinstance(cleanup, dict)
-            and cleanup.get("success")
-            and cleanup.get("model_identity_preserved")
+            if model_identity_preserved
             else "not_automatically_rechecked_after_worker_exit"
         )
         attached = {
@@ -228,7 +359,11 @@ def _verify_solver_cleanup(store: JobStore, job_id: str) -> dict[str, Any]:
         }
         return {
             **result,
-            "ok": bool(result.get("ok") and preservation.get("success")),
+            "ok": bool(
+                result.get("ok")
+                and preservation.get("success")
+                and model_identity_preserved
+            ),
             "attached_external_resources": attached,
         }
 
@@ -261,7 +396,11 @@ def _verify_solver_cleanup(store: JobStore, job_id: str) -> dict[str, Any]:
         )
     lease = lease_status.get("lease")
     if not isinstance(lease, dict) or lease.get("owner") != f"job:{job_id}":
-        return {"ok": False, "reason": "target job does not exclusively own the recorded solver lease", "lease_state": lease_status["state"]}
+        return {
+            "ok": False,
+            "reason": "target job does not exclusively own the recorded solver lease",
+            "lease_state": lease_status["state"],
+        }
     from comsol_mcp.jobs.process_control import owned_solver_identities_from_lease
 
     try:
@@ -269,10 +408,19 @@ def _verify_solver_cleanup(store: JobStore, job_id: str) -> dict[str, Any]:
     except ValueError as exc:
         return {"ok": False, "reason": str(exc), "lease_state": lease_status["state"]}
     if lease.get("comsol_server_pids") and not servers:
-        return {"ok": False, "reason": "lease contains only legacy server PIDs", "lease_state": lease_status["state"]}
+        return {
+            "ok": False,
+            "reason": "lease contains only legacy server PIDs",
+            "lease_state": lease_status["state"],
+        }
     server_verification = verify_absent(servers)
     if not server_verification["absent"]:
-        return {"ok": False, "reason": "recorded server identity remains active or uncertain", "servers": server_verification, "lease_state": lease_status["state"]}
+        return {
+            "ok": False,
+            "reason": "recorded server identity remains active or uncertain",
+            "servers": server_verification,
+            "lease_state": lease_status["state"],
+        }
     port = lease.get("comsol_server_port")
     try:
         port_open = bool(port) and any(
@@ -280,14 +428,30 @@ def _verify_solver_cleanup(store: JobStore, job_id: str) -> dict[str, Any]:
             for connection in psutil.net_connections(kind="inet")
         )
     except (psutil.AccessDenied, OSError) as exc:
-        return {"ok": False, "reason": f"cannot verify recorded server port: {exc}", "lease_state": lease_status["state"]}
+        return {
+            "ok": False,
+            "reason": f"cannot verify recorded server port: {exc}",
+            "lease_state": lease_status["state"],
+        }
     if port_open:
-        return {"ok": False, "reason": "recorded COMSOL server port remains open", "lease_state": lease_status["state"]}
+        return {
+            "ok": False,
+            "reason": "recorded COMSOL server port remains open",
+            "lease_state": lease_status["state"],
+        }
     if lease_status["state"] != "stale":
-        return {"ok": False, "reason": "target job lease is not proven stale", "lease_state": lease_status["state"]}
+        return {
+            "ok": False,
+            "reason": "target job lease is not proven stale",
+            "lease_state": lease_status["state"],
+        }
     recovered = ownership.recover_stale()
     if not recovered.get("success"):
-        return {"ok": False, "reason": f"stale lease recovery refused: {recovered}", "lease_state": lease_status["state"]}
+        return {
+            "ok": False,
+            "reason": f"stale lease recovery refused: {recovered}",
+            "lease_state": lease_status["state"],
+        }
     return with_attached_preservation(
         {
             "ok": True,
@@ -299,9 +463,15 @@ def _verify_solver_cleanup(store: JobStore, job_id: str) -> dict[str, Any]:
     )
 
 
-def _verified_cancel(store: JobStore, job_id: str, worker_verification: dict[str, Any]) -> dict[str, Any]:
+def _verified_cancel(
+    store: JobStore, job_id: str, worker_verification: dict[str, Any]
+) -> dict[str, Any]:
     solver = _verify_solver_cleanup(store, job_id)
-    return {**worker_verification, "solver": solver, "absent": bool(worker_verification["absent"] and solver["ok"])}
+    return {
+        **worker_verification,
+        "solver": solver,
+        "absent": bool(worker_verification["absent"] and solver["ok"]),
+    }
 
 
 def _wait_for_process_absence(
@@ -333,7 +503,6 @@ def run(
 ) -> int:
     store = JobStore(Path(root))
     identity = process_identity(os.getpid())
-    cleanup_verify_seconds = max(0.5, float(terminate_seconds))
     claimed = _claim(
         store,
         job_id,
@@ -348,12 +517,36 @@ def run(
     resume_phase = claimed["resume_phase"]
     worker = control.get("target_worker")
     if not isinstance(worker, dict) or worker.get("pid") is None:
-        _record_blocker(store, job_id, request_id, "target worker identity is missing")
+        _record_blocker(
+            store,
+            job_id,
+            request_id,
+            identity,
+            "target worker identity is missing",
+        )
         return 2
 
     cancel_evidence = claimed["state"].get("cancel") or {}
+    timing_policy = dict(cancel_evidence.get("timing_policy") or {})
+    grace_budget = _persisted_budget(
+        timing_policy,
+        "native_grace_budget_s",
+        grace_seconds,
+    )
+    terminate_budget = _persisted_budget(
+        timing_policy,
+        "terminate_budget_s",
+        terminate_seconds,
+    )
+    cleanup_verify_seconds = _persisted_budget(
+        timing_policy,
+        "cleanup_verification_budget_s",
+        max(0.5, terminate_budget),
+    )
     cancel_evidence["timing_policy"] = {
-        **dict(cancel_evidence.get("timing_policy") or {}),
+        **timing_policy,
+        "native_grace_budget_s": grace_budget,
+        "terminate_budget_s": terminate_budget,
         "cleanup_verification_budget_s": cleanup_verify_seconds,
     }
     if not _checkpoint(
@@ -365,60 +558,109 @@ def run(
         patch={"timing_policy": cancel_evidence["timing_policy"]},
     ):
         return 0
-    persisted_descendants = cancel_evidence.get("descendants")
-    if isinstance(persisted_descendants, list):
-        initial_descendants = persisted_descendants
-    else:
-        initial_capture = capture_owned_descendants(worker)
-        if initial_capture["worker"]["state"] == "uncertain":
-            _record_blocker(store, job_id, request_id, initial_capture["worker"]["reason"])
-            return 0
-        process_tree_contained = bool(
-            store.read_state(job_id).get("process_tree_contained")
-        )
-        capture_complete = bool(initial_capture.get("capture_complete", True))
-        if not capture_complete and not process_tree_contained:
+    process_tree_contained = bool(store.read_state(job_id).get("process_tree_contained"))
+    persisted_descendants = cancel_evidence.get("descendants", [])
+    try:
+        descendants = _merge_process_identities(persisted_descendants)
+    except ValueError as exc:
+        _record_blocker(store, job_id, request_id, identity, str(exc))
+        return 0
+
+    def refresh_descendants(
+        current: list[dict[str, Any]],
+        phase: str,
+    ) -> list[dict[str, Any]] | None:
+        captured = capture_owned_descendants(worker)
+        if captured["worker"]["state"] == "uncertain":
             _record_blocker(
                 store,
                 job_id,
                 request_id,
+                identity,
+                str(captured["worker"]["reason"]),
+            )
+            return None
+        capture_complete = bool(
+            captured.get(
+                "capture_complete",
+                captured["worker"].get("state") == "active",
+            )
+        )
+        previous_capture = cancel_evidence.get("descendant_capture")
+        previous_complete_capture = bool(
+            isinstance(previous_capture, dict)
+            and isinstance(previous_capture.get("worker"), dict)
+            and previous_capture["worker"].get("state") == "active"
+            and previous_capture.get("capture_method", "live_enumeration") == "live_enumeration"
+        )
+        if not capture_complete and not process_tree_contained and not previous_complete_capture:
+            _record_blocker(
+                store,
+                job_id,
+                request_id,
+                identity,
                 str(
-                    initial_capture.get("reason")
+                    captured.get("reason")
                     or "worker exited before descendants were captured and no process-tree containment is proved"
                 ),
             )
-            return 0
-        initial_descendants = initial_capture["descendants"]
+            return None
+        try:
+            merged = _merge_process_identities(current, captured.get("descendants", []))
+        except ValueError as exc:
+            _record_blocker(store, job_id, request_id, identity, str(exc))
+            return None
+        history = list(cancel_evidence.get("descendant_captures") or [])
+        capture_record = {
+            **captured,
+            "captured_at_epoch": time.time(),
+            "capture_method": ("live_enumeration" if capture_complete else "contained_worker_exit"),
+            "process_tree_contained": process_tree_contained,
+        }
+        history.append(capture_record)
         if not _checkpoint(
             store,
             job_id,
             request_id,
             identity,
-            resume_phase,
+            phase,
             patch={
-                "descendants": initial_descendants,
-                "descendant_capture": {
-                    **initial_capture,
-                    "captured_at_epoch": time.time(),
-                    "capture_method": (
-                        "live_enumeration"
-                        if capture_complete
-                        else "contained_worker_exit"
-                    ),
-                    "process_tree_contained": process_tree_contained,
-                },
+                "descendants": merged,
+                "descendant_capture": capture_record,
+                "descendant_captures": history,
             },
         ):
-            return 0
+            return None
+        cancel_evidence["descendant_captures"] = history
+        cancel_evidence["descendant_capture"] = capture_record
+        cancel_evidence["descendants"] = merged
+        return merged
+
+    refreshed = refresh_descendants(descendants, resume_phase)
+    if refreshed is None:
+        return 0
+    descendants = refreshed
 
     if phase_hook is not None:
         phase_hook(resume_phase)
 
     if resume_phase not in _RESUMABLE_PHASES:
-        deadline = time.monotonic() + max(0.0, float(grace_seconds))
+        grace_remaining = _remaining_phase_budget(
+            cancel_evidence,
+            "native_grace",
+            grace_budget,
+        )
+        deadline = time.monotonic() + grace_remaining
         while time.monotonic() < deadline:
             if inspect_identity(worker)["state"] != "active":
-                if not _checkpoint(store, job_id, request_id, identity, "verifying"):
+                if not _checkpoint(
+                    store,
+                    job_id,
+                    request_id,
+                    identity,
+                    "verifying",
+                    patch={"descendants": descendants},
+                ):
                     return 0
                 if phase_hook is not None:
                     phase_hook("verifying")
@@ -426,19 +668,63 @@ def run(
                     store,
                     job_id,
                     _wait_for_process_absence(
-                        [worker, *initial_descendants],
+                        [worker, *descendants],
                         cleanup_verify_seconds,
                     ),
                 )
                 if verification["absent"]:
-                    return 0 if _commit_cancelled(store, job_id, request_id, verification, []) else 0
-                _record_blocker(store, job_id, request_id, str(verification.get("solver", {}).get("reason") or "worker exited during grace with uncertain descendants"))
+                    return (
+                        0
+                        if _commit_cancelled(
+                            store,
+                            job_id,
+                            request_id,
+                            identity,
+                            verification,
+                            [],
+                        )
+                        else 0
+                    )
+                _record_blocker(
+                    store,
+                    job_id,
+                    request_id,
+                    identity,
+                    str(
+                        verification.get("solver", {}).get("reason")
+                        or "worker exited during grace with uncertain descendants"
+                    ),
+                )
                 return 0
             time.sleep(min(0.025, max(0.0, deadline - time.monotonic())))
 
     captured = capture_owned_descendants(worker)
+    if captured["worker"]["state"] == "uncertain":
+        _record_blocker(
+            store,
+            job_id,
+            request_id,
+            identity,
+            str(captured["worker"]["reason"]),
+        )
+        return 0
+    try:
+        descendants = _merge_process_identities(
+            descendants,
+            captured.get("descendants", []),
+        )
+    except ValueError as exc:
+        _record_blocker(store, job_id, request_id, identity, str(exc))
+        return 0
     if captured["worker"]["state"] != "active" and resume_phase not in {"terminate", "force_kill"}:
-        if not _checkpoint(store, job_id, request_id, identity, "verifying"):
+        if not _checkpoint(
+            store,
+            job_id,
+            request_id,
+            identity,
+            "verifying",
+            patch={"descendants": descendants},
+        ):
             return 0
         if phase_hook is not None:
             phase_hook("verifying")
@@ -446,40 +732,88 @@ def run(
             store,
             job_id,
             _wait_for_process_absence(
-                [worker, *initial_descendants],
+                [worker, *descendants],
                 cleanup_verify_seconds,
             ),
         )
         if verification["absent"]:
-            return 0 if _commit_cancelled(store, job_id, request_id, verification, []) else 0
-        _record_blocker(store, job_id, request_id, str(verification.get("solver", {}).get("reason") or captured["worker"]["reason"]))
+            return (
+                0
+                if _commit_cancelled(
+                    store,
+                    job_id,
+                    request_id,
+                    identity,
+                    verification,
+                    [],
+                )
+                else 0
+            )
+        _record_blocker(
+            store,
+            job_id,
+            request_id,
+            identity,
+            str(verification.get("solver", {}).get("reason") or captured["worker"]["reason"]),
+        )
         return 0
-    descendants = initial_descendants or captured["descendants"]
     actions = list(cancel_evidence.get("worker_actions") or [])
     if resume_phase != "verifying":
         if resume_phase != "force_kill":
-            if not _checkpoint(store, job_id, request_id, identity, "terminate", patch={"descendants": descendants, "worker_actions": actions}):
+            if not _checkpoint(
+                store,
+                job_id,
+                request_id,
+                identity,
+                "terminate",
+                patch={"descendants": descendants, "worker_actions": actions},
+            ):
                 return 0
             if phase_hook is not None:
                 phase_hook("terminate")
             actions.append(terminate_exact(worker, force=False))
-            if not _checkpoint(store, job_id, request_id, identity, "terminate", patch={"worker_actions": actions}):
+            if not _checkpoint(
+                store, job_id, request_id, identity, "terminate", patch={"worker_actions": actions}
+            ):
                 return 0
-            wait_deadline = time.monotonic() + max(0.0, float(terminate_seconds))
-            while time.monotonic() < wait_deadline and inspect_identity(worker)["state"] == "active":
+            terminate_remaining = _remaining_phase_budget(
+                store.read_state(job_id).get("cancel") or {},
+                "terminate",
+                terminate_budget,
+            )
+            wait_deadline = time.monotonic() + terminate_remaining
+            while (
+                time.monotonic() < wait_deadline and inspect_identity(worker)["state"] == "active"
+            ):
                 time.sleep(min(0.025, max(0.0, wait_deadline - time.monotonic())))
         if inspect_identity(worker)["state"] == "active":
-            if not _checkpoint(store, job_id, request_id, identity, "force_kill", patch={"worker_actions": actions}):
+            if not _checkpoint(
+                store, job_id, request_id, identity, "force_kill", patch={"worker_actions": actions}
+            ):
                 return 0
             if phase_hook is not None:
                 phase_hook("force_kill")
             actions.append(terminate_exact(worker, force=True))
-            if not _checkpoint(store, job_id, request_id, identity, "force_kill", patch={"worker_actions": actions}):
+            if not _checkpoint(
+                store, job_id, request_id, identity, "force_kill", patch={"worker_actions": actions}
+            ):
                 return 0
+    current_phase = str((store.read_state(job_id).get("cancel") or {}).get("phase") or resume_phase)
+    refreshed = refresh_descendants(descendants, current_phase)
+    if refreshed is None:
+        return 0
+    descendants = refreshed
     for descendant in descendants:
         if inspect_identity(descendant)["state"] == "active":
             actions.append(terminate_exact(descendant, force=True))
-    if not _checkpoint(store, job_id, request_id, identity, "verifying", patch={"worker_actions": actions}):
+    if not _checkpoint(
+        store,
+        job_id,
+        request_id,
+        identity,
+        "verifying",
+        patch={"worker_actions": actions, "descendants": descendants},
+    ):
         return 0
     if phase_hook is not None:
         phase_hook("verifying")
@@ -492,9 +826,29 @@ def run(
         ),
     )
     if not verification["absent"]:
-        _record_blocker(store, job_id, request_id, str(verification.get("solver", {}).get("reason") or "worker or captured descendant identity remains active/uncertain"))
+        _record_blocker(
+            store,
+            job_id,
+            request_id,
+            identity,
+            str(
+                verification.get("solver", {}).get("reason")
+                or "worker or captured descendant identity remains active/uncertain"
+            ),
+        )
         return 0
-    return 0 if _commit_cancelled(store, job_id, request_id, verification, actions) else 0
+    return (
+        0
+        if _commit_cancelled(
+            store,
+            job_id,
+            request_id,
+            identity,
+            verification,
+            actions,
+        )
+        else 0
+    )
 
 
 if __name__ == "__main__":

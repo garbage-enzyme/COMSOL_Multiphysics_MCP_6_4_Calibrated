@@ -1,9 +1,64 @@
 """Mesh tools for COMSOL MCP Server."""
 
 from typing import Optional
+
 from mcp.server.fastmcp import FastMCP
 
 from .session import session_manager
+
+
+def create_mesh_sequence(
+    model,
+    *,
+    mesh_name: str = "mesh1",
+    element_type: str = "FreeTet",
+    component_name: Optional[str] = None,
+    build: bool = True,
+) -> dict:
+    """Create one owned mesh transaction and remove it on setup/build failure."""
+    if not isinstance(mesh_name, str) or not mesh_name.strip():
+        return {"success": False, "error": "mesh_name must be nonempty"}
+    if not isinstance(element_type, str) or not element_type.strip():
+        return {"success": False, "error": "element_type must be nonempty"}
+    if not isinstance(build, bool):
+        return {"success": False, "error": "build must be boolean"}
+    from .physics import _first_component
+
+    jm = model.java
+    comp = jm.component(component_name) if component_name else _first_component(jm)
+    if comp is None:
+        return {"success": False, "error": "No component found in model."}
+    mesh_list = comp.mesh()
+    if mesh_name in {str(value) for value in list(mesh_list.tags())}:
+        return {"success": False, "error": f"Mesh tag already exists: {mesh_name}"}
+    created = False
+    try:
+        mesh_seq = mesh_list.create(mesh_name)
+        created = True
+        feat_tag = "ftr1"
+        mesh_seq.feature().create(feat_tag, element_type)
+        result = {
+            "success": True,
+            "mesh_name": mesh_name,
+            "feature_tag": feat_tag,
+            "element_type": element_type,
+            "built": False,
+        }
+        if build:
+            mesh_seq.run()
+            result["built"] = True
+            if hasattr(mesh_seq, "getNumElem"):
+                result["num_elements"] = int(mesh_seq.getNumElem())
+            if hasattr(mesh_seq, "getNumVertex"):
+                result["num_vertices"] = int(mesh_seq.getNumVertex())
+        return result
+    except Exception:
+        if created:
+            try:
+                mesh_list.remove(mesh_name)
+            except Exception:
+                return {"success": False, "error": "Mesh setup failed and rollback was incomplete.", "rolled_back": False}
+        return {"success": False, "error": "Mesh setup failed.", "rolled_back": True}
 
 
 def get_mesh_info(
@@ -56,12 +111,15 @@ def get_mesh_info(
         pass
     try:
         info["num_elements"] = int(mesh.getNumElem())
-    except Exception:
-        info["num_elements"] = None
-    try:
         info["num_vertices"] = int(mesh.getNumVertex())
-    except Exception:
-        info["num_vertices"] = None
+    except Exception as exc:
+        return {
+            "success": False,
+            "error": f"Mesh statistics are unavailable: {str(exc)[:300]}",
+            "mesh": info,
+            "statistics_complete": False,
+        }
+    info["statistics_complete"] = True
     return {"success": True, "mesh": info}
 
 
@@ -165,43 +223,13 @@ def register_mesh_tools(mcp: FastMCP) -> None:
             }
         
         try:
-            from .physics import _first_component
-            jm = model.java
-            comp = jm.component(component_name) if component_name else _first_component(jm)
-            if comp is None:
-                return {"success": False, "error": "No component found in model."}
-            
-            # create mesh sequence
-            mesh_seq = comp.mesh().create(mesh_name)
-            # add a meshing feature
-            feat_tag = "ftr1"
-            feat = mesh_seq.feature().create(feat_tag, element_type)
-            
-            result = {
-                "success": True,
-                "mesh_name": mesh_name,
-                "feature_tag": feat_tag,
-                "element_type": element_type,
-                "built": False,
-            }
-            
-            if build:
-                mesh_seq.run()
-                result["built"] = True
-                try:
-                    # clientapi MeshSequenceClient uses getNumElem/getNumVertex (return int)
-                    if hasattr(mesh_seq, "getNumElem"):
-                        result["num_elements"] = int(mesh_seq.getNumElem())
-                    elif hasattr(mesh_seq, "getElement") and hasattr(mesh_seq.getElement(), "size"):
-                        result["num_elements"] = int(mesh_seq.getElement().size())
-                    if hasattr(mesh_seq, "getNumVertex"):
-                        result["num_vertices"] = int(mesh_seq.getNumVertex())
-                    elif hasattr(mesh_seq, "getVertex") and hasattr(mesh_seq.getVertex(), "size"):
-                        result["num_vertices"] = int(mesh_seq.getVertex().size())
-                except Exception:
-                    pass
-            
-            return result
+            return create_mesh_sequence(
+                model,
+                mesh_name=mesh_name,
+                element_type=element_type,
+                component_name=component_name,
+                build=build,
+            )
         except Exception as e:
             return {"success": False, "error": f"Failed to create mesh sequence: {str(e)}"}
     

@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 import json
 import math
+from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
 
 import pytest
-
+import src.jobs.spectral_stages as spectral_stages_module
 from src.jobs.spectral_characterization import normalize_spectral_characterization_job_spec
 from src.jobs.spectral_stages import (
     build_initial_spectral_stage,
@@ -61,7 +62,11 @@ def _spec(tmp_path) -> dict:
                     "t_expression": "ewfd.Ttotal",
                     "a_expression": "ewfd.Atotal",
                     "top_air_domain_ids": [1],
-                    "top_air_coordinate_range": {"x": [-1.0, 1.0], "y": [-1.0, 1.0], "z": [-1.0, 1.0]},
+                    "top_air_coordinate_range": {
+                        "x": [-1.0, 1.0],
+                        "y": [-1.0, 1.0],
+                        "z": [-1.0, 1.0],
+                    },
                 },
             },
             "analysis_policy": {
@@ -102,9 +107,58 @@ def test_initial_grid_and_stage_are_deterministic_and_inclusive(tmp_path):
     assert plan["stage_kind"] == "initial_locator"
     assert plan["previous_stage_sha256"] is None
     assert plan["evidence_row_sha256"] is None
-    assert validate_spectral_stage_plan(
-        plan, spec, expected_index=0, previous_stage_sha256=None
-    ) == plan
+    assert (
+        validate_spectral_stage_plan(plan, spec, expected_index=0, previous_stage_sha256=None)
+        == plan
+    )
+
+
+def test_stage_byte_limit_covers_the_persisted_hashed_document(tmp_path, monkeypatch):
+    spec = _spec(tmp_path)
+    plan = build_initial_spectral_stage(spec)
+    body = {key: value for key, value in plan.items() if key != "stage_sha256"}
+    compact_body_bytes = len(
+        json.dumps(
+            body,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    )
+    assert len(spectral_stages_module.json_document_bytes(plan)) > compact_body_bytes
+    monkeypatch.setattr(
+        spectral_stages_module,
+        "MAX_SPECTRAL_STAGE_PLAN_BYTES",
+        compact_body_bytes + 1,
+    )
+
+    with pytest.raises(ValueError, match="stage plan exceeds its byte limit"):
+        build_spectral_stage_plan(
+            spec,
+            stage_index=0,
+            stage_kind="initial_locator",
+            planning_reason="caller_declared_initial_locator",
+            window_lower_m=spec["initial_grid"]["lower_m"],
+            window_upper_m=spec["initial_grid"]["upper_m"],
+            requested_wavelengths_m=plan["requested_wavelengths_m"],
+            previous_stage_sha256=None,
+            evidence_row_sha256=None,
+        )
+
+
+def test_initial_grid_rejects_oversized_count_before_allocation(tmp_path, monkeypatch):
+    spec = _spec(tmp_path)
+    spec["initial_grid"]["point_count"] = 10**9
+    spec["maximum_points"] = 10**9
+    monkeypatch.setattr(
+        spectral_stages_module,
+        "inclusive_wavelength_grid",
+        lambda *_args: pytest.fail("grid allocation must not start"),
+    )
+
+    with pytest.raises(ValueError, match="point_count"):
+        build_initial_spectral_stage(spec)
 
 
 def test_stage_is_atomically_frozen_and_exact_replay_is_idempotent(tmp_path):
@@ -115,6 +169,7 @@ def test_stage_is_atomically_frozen_and_exact_replay_is_idempotent(tmp_path):
     assert write_spectral_stage_plan(job, spec, plan) == plan
     before = (job / "stage_plans" / "000.json").read_bytes()
     assert read_spectral_stage_plans(job, spec) == [plan]
+    assert write_spectral_stage_plan(job, spec, plan) == plan
     assert (job / "stage_plans" / "000.json").read_bytes() == before
 
 
@@ -152,6 +207,20 @@ def test_later_stage_must_chain_and_cannot_repeat_an_exact_point(tmp_path):
     )
     with pytest.raises(ValueError, match="duplicate"):
         write_spectral_stage_plan(job, spec, duplicate)
+
+    wrong_chain = build_spectral_stage_plan(
+        spec,
+        stage_index=1,
+        stage_kind="refinement",
+        planning_reason="measured_candidate_refinement",
+        window_lower_m=4.0e-6,
+        window_upper_m=4.4e-6,
+        requested_wavelengths_m=[4.2e-6],
+        previous_stage_sha256="0" * 64,
+        evidence_row_sha256="b" * 64,
+    )
+    with pytest.raises(ValueError, match="hash chain is discontinuous"):
+        write_spectral_stage_plan(job, spec, wrong_chain)
 
 
 def test_float_precision_collapse_and_out_of_window_targets_are_rejected(tmp_path):
@@ -207,3 +276,62 @@ def test_stage_window_and_endpoint_share_the_same_canonical_precision(tmp_path):
         evidence_row_sha256="b" * 64,
     )
     assert plan["window"]["upper_m"] == plan["requested_wavelengths_m"][0]
+
+
+def test_concurrent_different_next_stages_cannot_overwrite(tmp_path, monkeypatch):
+    spec = _spec(tmp_path)
+    job = tmp_path / "job"
+    initial = write_spectral_stage_plan(job, spec, build_initial_spectral_stage(spec))
+    monkeypatch.setattr(
+        "src.jobs.spectral_progress.build_spectral_progress",
+        lambda *_args: {"action": "solve_current_stage"},
+    )
+
+    def candidate(wavelength):
+        return build_spectral_stage_plan(
+            spec,
+            stage_index=1,
+            stage_kind="refinement",
+            planning_reason="measured_candidate_refinement",
+            window_lower_m=4.0e-6,
+            window_upper_m=4.4e-6,
+            requested_wavelengths_m=[wavelength],
+            previous_stage_sha256=initial["stage_sha256"],
+            evidence_row_sha256="b" * 64,
+        )
+
+    candidates = [candidate(4.1e-6), candidate(4.2e-6)]
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(write_spectral_stage_plan, job, spec, plan) for plan in candidates]
+    outcomes = []
+    for future in futures:
+        try:
+            outcomes.append(future.result())
+        except ValueError as exc:
+            assert "existing spectral stage bytes differ" in str(exc)
+
+    replayed = read_spectral_stage_plans(job, spec)
+    assert len(outcomes) == 1
+    assert replayed == [initial, outcomes[0]]
+    assert not (job / ".stage_plans.lock").exists()
+
+
+def test_invalid_next_stage_is_rejected_before_publication(tmp_path):
+    spec = _spec(tmp_path)
+    job = tmp_path / "prepublication-validation"
+    initial = write_spectral_stage_plan(job, spec, build_initial_spectral_stage(spec))
+    premature = build_spectral_stage_plan(
+        spec,
+        stage_index=1,
+        stage_kind="refinement",
+        planning_reason="premature_stage",
+        window_lower_m=4.1e-6,
+        window_upper_m=4.3e-6,
+        requested_wavelengths_m=[4.2e-6],
+        previous_stage_sha256=initial["stage_sha256"],
+        evidence_row_sha256="b" * 64,
+    )
+
+    with pytest.raises(ValueError, match="before its predecessor completed"):
+        write_spectral_stage_plan(job, spec, premature)
+    assert not (job / "stage_plans" / "001.json").exists()

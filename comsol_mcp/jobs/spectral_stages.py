@@ -2,21 +2,23 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
-from decimal import Decimal, localcontext
 import hashlib
 import json
 import math
+from copy import deepcopy
+from decimal import Decimal, localcontext
 from pathlib import Path
 from typing import Any, Mapping
 
+from comsol_mcp.durable.io import json_document_bytes
+
+from .spectral_characterization import MAX_INITIAL_GRID_POINTS
 from .spectral_rows import (
     SPECTRAL_STAGE_KINDS,
     normalize_spectral_wavelength_m,
     spectral_point_identity,
 )
-from .store import atomic_write_json, read_json
-
+from .store import JobLock, atomic_write_json, read_json
 
 SPECTRAL_STAGE_SCHEMA_NAME = "comsol_mcp.spectral_stage_plan"
 SPECTRAL_STAGE_SCHEMA_VERSION = "1.0.0"
@@ -154,25 +156,36 @@ def build_spectral_stage_plan(
             }
             for point in points
         ],
-        "previous_stage_sha256": _hex_or_none(
-            previous_stage_sha256, "previous_stage_sha256"
-        ),
-        "evidence_row_sha256": _hex_or_none(
-            evidence_row_sha256, "evidence_row_sha256"
-        ),
+        "previous_stage_sha256": _hex_or_none(previous_stage_sha256, "previous_stage_sha256"),
+        "evidence_row_sha256": _hex_or_none(evidence_row_sha256, "evidence_row_sha256"),
     }
-    encoded = _canonical_bytes(body)
-    if len(encoded) > MAX_SPECTRAL_STAGE_PLAN_BYTES:
+    plan = {**body, "stage_sha256": _fingerprint(body)}
+    if len(json_document_bytes(plan)) > MAX_SPECTRAL_STAGE_PLAN_BYTES:
         raise ValueError("spectral stage plan exceeds its byte limit")
-    return {**body, "stage_sha256": _fingerprint(body)}
+    return plan
 
 
 def build_initial_spectral_stage(spec: Mapping[str, Any]) -> dict[str, Any]:
     """Build the exact initial locator request from the immutable job spec."""
     grid = _mapping(spec.get("initial_grid"), "initial_grid")
-    wavelengths = inclusive_wavelength_grid(
-        grid.get("lower_m"), grid.get("upper_m"), grid.get("point_count")
-    )
+    point_count = grid.get("point_count")
+    maximum_points = spec.get("maximum_points")
+    if (
+        isinstance(point_count, bool)
+        or not isinstance(point_count, int)
+        or point_count < 2
+        or point_count > MAX_INITIAL_GRID_POINTS
+    ):
+        raise ValueError(
+            f"initial_grid.point_count must be an integer from 2 to {MAX_INITIAL_GRID_POINTS}"
+        )
+    if (
+        isinstance(maximum_points, bool)
+        or not isinstance(maximum_points, int)
+        or maximum_points < point_count
+    ):
+        raise ValueError("maximum_points must cover the initial grid")
+    wavelengths = inclusive_wavelength_grid(grid.get("lower_m"), grid.get("upper_m"), point_count)
     return build_spectral_stage_plan(
         spec,
         stage_index=0,
@@ -211,7 +224,10 @@ def validate_spectral_stage_plan(
     }
     if set(raw) != fields:
         raise ValueError("spectral stage plan has missing or unsupported fields")
-    if raw["schema_name"] != SPECTRAL_STAGE_SCHEMA_NAME or raw["schema_version"] != SPECTRAL_STAGE_SCHEMA_VERSION:
+    if (
+        raw["schema_name"] != SPECTRAL_STAGE_SCHEMA_NAME
+        or raw["schema_version"] != SPECTRAL_STAGE_SCHEMA_VERSION
+    ):
         raise ValueError("spectral stage plan schema is unsupported")
     if raw["stage_index"] != expected_index:
         raise ValueError("spectral stage indices are not contiguous")
@@ -236,7 +252,9 @@ def validate_spectral_stage_plan(
     return deepcopy(rebuilt)
 
 
-def read_spectral_stage_plans(job_dir: str | Path, spec: Mapping[str, Any]) -> list[dict[str, Any]]:
+def _read_spectral_stage_plans_unlocked(
+    job_dir: str | Path, spec: Mapping[str, Any]
+) -> list[dict[str, Any]]:
     """Read one contiguous immutable stage chain from its durable directory."""
     root = Path(job_dir) / "stage_plans"
     if not root.exists():
@@ -261,9 +279,7 @@ def read_spectral_stage_plans(job_dir: str | Path, spec: Mapping[str, Any]) -> l
         )
         if index == 0 and plan != build_initial_spectral_stage(spec):
             raise ValueError("first spectral stage differs from the immutable initial grid")
-        fingerprints = {
-            point["point_fingerprint"] for point in plan["requested_points"]
-        }
+        fingerprints = {point["point_fingerprint"] for point in plan["requested_points"]}
         if fingerprints & seen_points:
             raise ValueError("spectral stage plans request a duplicate exact point")
         seen_points.update(fingerprints)
@@ -274,6 +290,14 @@ def read_spectral_stage_plans(job_dir: str | Path, spec: Mapping[str, Any]) -> l
     return plans
 
 
+def read_spectral_stage_plans(job_dir: str | Path, spec: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Read one contiguous immutable stage chain under its publication lock."""
+    root = Path(job_dir)
+    root.mkdir(parents=True, exist_ok=True)
+    with JobLock(root / ".stage_plans.lock"):
+        return _read_spectral_stage_plans_unlocked(root, spec)
+
+
 def write_spectral_stage_plan(
     job_dir: str | Path,
     spec: Mapping[str, Any],
@@ -281,26 +305,37 @@ def write_spectral_stage_plan(
 ) -> dict[str, Any]:
     """Atomically freeze one next stage; exact replay observes the existing bytes."""
     root = Path(job_dir)
-    existing = read_spectral_stage_plans(root, spec)
-    expected_index = len(existing)
-    previous = existing[-1]["stage_sha256"] if existing else None
-    normalized = validate_spectral_stage_plan(
-        plan,
-        spec,
-        expected_index=expected_index,
-        previous_stage_sha256=previous,
-    )
-    target = root / "stage_plans" / f"{expected_index:03d}.json"
-    if target.exists():
-        observed = read_json(target)
-        if observed != normalized:
-            raise ValueError("existing spectral stage bytes differ from the requested plan")
+    root.mkdir(parents=True, exist_ok=True)
+    with JobLock(root / ".stage_plans.lock"):
+        existing = _read_spectral_stage_plans_unlocked(root, spec)
+        requested_index = plan.get("stage_index")
+        if isinstance(requested_index, bool) or not isinstance(requested_index, int):
+            raise ValueError("spectral stage index is invalid")
+        if requested_index > len(existing):
+            raise ValueError("spectral stage index is not contiguous")
+        previous = existing[requested_index - 1]["stage_sha256"] if requested_index > 0 else None
+        normalized = validate_spectral_stage_plan(
+            plan,
+            spec,
+            expected_index=requested_index,
+            previous_stage_sha256=previous,
+        )
+        if requested_index < len(existing):
+            observed = existing[requested_index]
+            if observed != normalized:
+                raise ValueError("existing spectral stage bytes differ from the requested plan")
+            return normalized
+        from .spectral_progress import build_spectral_progress
+        from .spectral_rows import read_spectral_rows
+
+        rows = read_spectral_rows(root / "spectral_rows.jsonl", spec, artifact_root=root)
+        build_spectral_progress(spec, [*existing, normalized], rows)
+        target = root / "stage_plans" / f"{requested_index:03d}.json"
+        atomic_write_json(target, normalized)
+        replayed = _read_spectral_stage_plans_unlocked(root, spec)
+        if replayed[-1] != normalized:
+            raise RuntimeError("spectral stage did not replay after its atomic write")
         return normalized
-    atomic_write_json(target, normalized)
-    replayed = read_spectral_stage_plans(root, spec)
-    if replayed[-1] != normalized:
-        raise RuntimeError("spectral stage did not replay after its atomic write")
-    return normalized
 
 
 __all__ = [

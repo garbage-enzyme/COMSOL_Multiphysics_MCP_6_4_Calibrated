@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-import hashlib
-import math
-from pathlib import Path
 import shutil
 import uuid
+from pathlib import Path
 
 import numpy as np
 import pytest
-
 from src.knowledge.lexical_manual import build_index_from_records
 from src.knowledge.semantic_index import (
     build_index,
@@ -20,14 +17,22 @@ from src.knowledge.semantic_index import (
     switch_current,
 )
 from src.knowledge.semantic_retrieval import (
-    HybridRetriever,
     RANKER_SHA256,
+    HybridRetriever,
     fuse_candidates,
 )
 
 
 class ControlledEncoder:
     dimension = 4
+
+    def __init__(self, model_path):
+        from src.knowledge.semantic_index import validate_pinned_model
+
+        model = validate_pinned_model(model_path)
+        self.model_id = model["model_id"]
+        self.model_revision = model["revision"]
+        self.model_fingerprint = model["model_sha256"]
 
     def encode(self, texts):
         rows = []
@@ -60,8 +65,12 @@ def retrieval_assets():
     deployment = root / "deployment"
     model = deployment / "models" / "controlled" / "r1"
     pin_model_snapshot(
-        source_model, model, model_id="test/controlled", revision="r1",
-        dimension=4, license_name="test-only",
+        source_model,
+        model,
+        model_id="test/controlled",
+        revision="r1",
+        dimension=4,
+        license_name="test-only",
     )
     lexical = root / "lexical" / "manuals.sqlite3"
     corpus = "7" * 64
@@ -79,7 +88,9 @@ def retrieval_assets():
                 "module": "Wave_Optics_Module",
                 "page": 20,
                 "heading": "Periodic ports",
-                "text": "A periodic port uses Floquet phase and requires a homogeneous adjacent medium.",
+                "text": (
+                    "A periodic port uses Floquet phase and requires a homogeneous adjacent medium."
+                ),
             },
             {
                 "source": "Heat_Transfer_Module/HeatTransferUsersGuide.pdf",
@@ -96,7 +107,7 @@ def retrieval_assets():
         deployment_root=deployment,
         lexical_index=lexical,
         model_path=model,
-        encoder=ControlledEncoder(),
+        encoder=ControlledEncoder(model),
         build_id="controlled-001",
         maximum_characters=220,
         overlap=20,
@@ -114,17 +125,21 @@ def _retriever(assets, encoder=ControlledEncoder):
         deployment_root=assets["deployment"],
         lexical_index=assets["lexical"],
         model_path=assets["model"],
-        encoder_factory=lambda _path, _dimension: encoder(),
+        encoder_factory=lambda path, _dimension: encoder(path),
         lexical_timeout_seconds=5.0,
     )
 
 
 def test_hybrid_ranking_is_deterministic_provenance_complete_and_loads_once(retrieval_assets):
     retriever = _retriever(retrieval_assets)
-    before = index_file_snapshot(Path(read_current(retrieval_assets["deployment"])["pointer"]["index_path"]))
+    before = index_file_snapshot(
+        Path(read_current(retrieval_assets["deployment"])["pointer"]["index_path"])
+    )
     first = retriever.query("CopyFace source destination", limit=3)
     second = retriever.query("CopyFace source destination", limit=3)
-    after = index_file_snapshot(Path(read_current(retrieval_assets["deployment"])["pointer"]["index_path"]))
+    after = index_file_snapshot(
+        Path(read_current(retrieval_assets["deployment"])["pointer"]["index_path"])
+    )
 
     assert first["results"] == second["results"]
     assert first["results"][0]["source"].endswith("ReferenceManual.pdf")
@@ -142,11 +157,13 @@ def test_hybrid_ranking_is_deterministic_provenance_complete_and_loads_once(retr
 def test_module_source_page_filters_apply_to_both_candidate_paths(retrieval_assets):
     retriever = _retriever(retrieval_assets)
     module = retriever.query(
-        "periodic Floquet port", limit=5,
+        "periodic Floquet port",
+        limit=5,
         filters={"module": "Wave_Optics_Module"},
     )
     source_page = retriever.query(
-        "periodic Floquet port", limit=5,
+        "periodic Floquet port",
+        limit=5,
         filters={
             "source": "Wave_Optics_Module/WaveOpticsUsersGuide.pdf",
             "page_start": 20,
@@ -163,38 +180,72 @@ def test_module_source_page_filters_apply_to_both_candidate_paths(retrieval_asse
 
 
 def test_exact_api_symbol_tier_outranks_loose_semantic_page():
-    lexical = [{
-        "source": "api.pdf", "module": "api", "page": 5,
-        "heading": "getUpDown", "snippet": "Call getUpDown to inspect domains.",
-        "rank": -1.0, "coverage": 1.0,
-    }]
+    lexical = [
+        {
+            "source": "api.pdf",
+            "module": "api",
+            "page": 5,
+            "heading": "getUpDown",
+            "snippet": "Call getUpDown to inspect domains.",
+            "rank": -1.0,
+            "coverage": 1.0,
+        }
+    ]
     vector = [
         {
-            "rank": 1, "similarity": 0.95, "distance": 0.05,
+            "rank": 1,
+            "similarity": 0.95,
+            "distance": 0.05,
             "chunk": {
-                "source": "related.pdf", "module": "related", "page": 1,
-                "heading": "Domain topology", "text": "Inspect adjacent domains.",
-                "id": "a" * 64, "ordinal": 0,
+                "source": "related.pdf",
+                "module": "related",
+                "page": 1,
+                "heading": "Domain topology",
+                "text": "Inspect adjacent domains.",
+                "id": "a" * 64,
+                "ordinal": 0,
             },
         },
         {
-            "rank": 20, "similarity": 0.50, "distance": 0.50,
+            "rank": 20,
+            "similarity": 0.50,
+            "distance": 0.50,
             "chunk": {
-                "source": "api.pdf", "module": "api", "page": 5,
-                "heading": "getUpDown", "text": "Call getUpDown to inspect domains.",
-                "id": "b" * 64, "ordinal": 0,
+                "source": "api.pdf",
+                "module": "api",
+                "page": 5,
+                "heading": "getUpDown",
+                "text": "Call getUpDown to inspect domains.",
+                "id": "b" * 64,
+                "ordinal": 0,
             },
         },
     ]
     provenance = {
-        "corpus_fingerprint": "c" * 64, "index_build_id": "test",
-        "index_manifest_sha256": "d" * 64, "model_id": "test",
-        "model_revision": "r1", "model_fingerprint": "e" * 64,
+        "corpus_fingerprint": "c" * 64,
+        "index_build_id": "test",
+        "index_manifest_sha256": "d" * 64,
+        "model_id": "test",
+        "model_revision": "r1",
+        "model_fingerprint": "e" * 64,
+    }
+    pinned_chunks = {
+        item["chunk"]["id"]: {
+            "source": item["chunk"]["source"],
+            "page": item["chunk"]["page"],
+            "ordinal": item["chunk"]["ordinal"],
+        }
+        for item in vector
     }
 
     result = fuse_candidates(
-        "getUpDown adjacent domains", lexical, vector, limit=2,
-        retrieval_mode="hybrid", provenance=provenance,
+        "getUpDown adjacent domains",
+        lexical,
+        vector,
+        limit=2,
+        retrieval_mode="hybrid",
+        provenance=provenance,
+        pinned_chunks=pinned_chunks,
     )
 
     assert result[0]["source"] == "api.pdf"
@@ -203,30 +254,155 @@ def test_exact_api_symbol_tier_outranks_loose_semantic_page():
     assert result[1]["exact_match_tier"] == 0
 
 
+def test_partial_technical_token_does_not_receive_exact_match_bonus():
+    lexical = [{
+        "source": "api.pdf",
+        "module": "api",
+        "page": 1,
+        "heading": "getUpDownstream helper",
+        "snippet": "This is not the requested API symbol.",
+        "rank": -1.0,
+        "coverage": 1.0,
+    }]
+    result = fuse_candidates(
+        "getUpDown",
+        lexical,
+        [],
+        limit=1,
+        retrieval_mode="lexical",
+        provenance={
+            "corpus_fingerprint": "c" * 64,
+            "index_build_id": "test",
+            "index_manifest_sha256": "d" * 64,
+            "model_id": "test",
+            "model_revision": "r1",
+            "model_fingerprint": "e" * 64,
+        },
+        pinned_chunks={
+            "chunk": {"source": "api.pdf", "page": 1, "ordinal": 0}
+        },
+    )
+
+    assert result[0]["matched_technical_tokens"] == []
+    assert result[0]["exact_match_tier"] == 0
+
+
 def test_page_dedup_abstention_and_nonfinite_scores_are_bounded():
     base_chunk = {
-        "source": "one.pdf", "module": "one", "page": 1,
-        "heading": "One", "text": "semantically weak", "ordinal": 0,
+        "source": "one.pdf",
+        "module": "one",
+        "page": 1,
+        "heading": "One",
+        "text": "semantically weak",
+        "ordinal": 0,
     }
     vector = [
         {"rank": 1, "similarity": 0.20, "distance": 0.80, "chunk": {**base_chunk, "id": "1" * 64}},
-        {"rank": 2, "similarity": 0.19, "distance": 0.81, "chunk": {**base_chunk, "id": "2" * 64, "ordinal": 1}},
+        {
+            "rank": 2,
+            "similarity": 0.19,
+            "distance": 0.81,
+            "chunk": {**base_chunk, "id": "2" * 64, "ordinal": 1},
+        },
     ]
     provenance = {
-        "corpus_fingerprint": "c" * 64, "index_build_id": "test",
-        "index_manifest_sha256": "d" * 64, "model_id": "test",
-        "model_revision": "r1", "model_fingerprint": "e" * 64,
+        "corpus_fingerprint": "c" * 64,
+        "index_build_id": "test",
+        "index_manifest_sha256": "d" * 64,
+        "model_id": "test",
+        "model_revision": "r1",
+        "model_fingerprint": "e" * 64,
+    }
+    pinned_chunks = {
+        item["chunk"]["id"]: {
+            "source": item["chunk"]["source"],
+            "page": item["chunk"]["page"],
+            "ordinal": item["chunk"]["ordinal"],
+        }
+        for item in vector
     }
 
-    assert fuse_candidates(
-        "out of corpus", [], vector, limit=5,
-        retrieval_mode="vector", provenance=provenance,
-    ) == []
+    accepted = [
+        {**item, "similarity": 0.80 - index * 0.01, "distance": 0.20 + index * 0.01}
+        for index, item in enumerate(vector)
+    ]
+    accepted_result = fuse_candidates(
+        "one",
+        [],
+        accepted,
+        limit=5,
+        retrieval_mode="vector",
+        provenance=provenance,
+        pinned_chunks=pinned_chunks,
+    )
+    assert [(row["source"], row["page"]) for row in accepted_result] == [
+        ("one.pdf", 1)
+    ]
+
+    assert (
+        fuse_candidates(
+            "out of corpus",
+            [],
+            vector,
+            limit=5,
+            retrieval_mode="vector",
+            provenance=provenance,
+            pinned_chunks=pinned_chunks,
+        )
+        == []
+    )
     vector[0]["similarity"] = float("nan")
     with pytest.raises(ValueError, match="non-finite"):
         fuse_candidates(
-            "query", [], vector, limit=5,
-            retrieval_mode="vector", provenance=provenance,
+            "query",
+            [],
+            vector,
+            limit=5,
+            retrieval_mode="vector",
+            provenance=provenance,
+            pinned_chunks=pinned_chunks,
+        )
+
+
+def test_fusion_refuses_to_validate_citations_without_pinned_chunk_proof():
+    lexical = [
+        {
+            "source": "invented.pdf",
+            "module": "invented",
+            "page": 999,
+            "heading": "Invented",
+            "snippet": "not in the pinned index",
+            "rank": -1.0,
+            "coverage": 1.0,
+        }
+    ]
+    provenance = {
+        "corpus_fingerprint": "c" * 64,
+        "index_build_id": "test",
+        "index_manifest_sha256": "d" * 64,
+        "model_id": "test",
+        "model_revision": "r1",
+        "model_fingerprint": "e" * 64,
+    }
+
+    with pytest.raises(ValueError, match="pinned chunk"):
+        fuse_candidates(
+            "invented",
+            lexical,
+            [],
+            limit=1,
+            retrieval_mode="lexical",
+            provenance=provenance,
+        )
+    with pytest.raises(ValueError, match="absent from the pinned chunk"):
+        fuse_candidates(
+            "invented",
+            lexical,
+            [],
+            limit=1,
+            retrieval_mode="lexical",
+            provenance=provenance,
+            pinned_chunks={"real": {"source": "real.pdf", "page": 1, "ordinal": 0}},
         )
 
 
@@ -240,6 +416,63 @@ def test_pointer_change_requires_restart_and_nonfinite_query_vector_is_rejected(
     bad = _retriever(retrieval_assets, encoder=NonFiniteEncoder)
     with pytest.raises(ValueError, match="non-finite"):
         bad.query("CopyFace", retrieval_mode="vector")
+
+
+def test_vector_cutoff_orders_all_ties_before_truncation():
+    class EqualEncoder:
+        def encode(self, _texts):
+            return np.asarray([[1.0, 0.0]], dtype=np.float32)
+
+    retriever = object.__new__(HybridRetriever)
+    retriever.encoder = EqualEncoder()
+    retriever.manifest = {"vector_dimension": 2}
+    retriever.embeddings = np.asarray(
+        [[1.0, 0.0], [1.0, 0.0], [1.0, 0.0]], dtype=np.float32
+    )
+    retriever.chunks = [
+        {"id": chunk_id, "page": page}
+        for chunk_id, page in (("c" * 64, 1), ("a" * 64, 2), ("b" * 64, 3))
+    ]
+
+    result = retriever._vector_candidates("tied", {}, 2)
+
+    assert [item["chunk"]["id"] for item in result] == ["a" * 64, "b" * 64]
+
+
+def test_query_encoder_must_match_pinned_model_identity(retrieval_assets):
+    class WrongIdentityEncoder(ControlledEncoder):
+        def __init__(self, model_path):
+            super().__init__(model_path)
+            self.model_revision = "different-revision"
+
+    with pytest.raises(ValueError, match="encoder identity"):
+        _retriever(retrieval_assets, encoder=WrongIdentityEncoder)
+
+
+def test_query_pins_lexical_model_and_vector_snapshots(retrieval_assets, monkeypatch):
+    retriever = _retriever(retrieval_assets)
+    original = retriever._vector_candidates
+    blocked = []
+    targets = [
+        retrieval_assets["lexical"],
+        retrieval_assets["model"] / "model.bin",
+        retriever.index_path / "embeddings.npy",
+    ]
+
+    def attempt_replacement(*args, **kwargs):
+        for path in targets:
+            try:
+                Path(path).write_bytes(b"replacement")
+            except PermissionError:
+                blocked.append(Path(path).name)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(retriever, "_vector_candidates", attempt_replacement)
+
+    result = retriever.query("CopyFace", retrieval_mode="vector")
+
+    assert result["count"] >= 1
+    assert blocked == ["manuals.sqlite3", "model.bin", "embeddings.npy"]
 
 
 def test_model_manifest_identity_mismatch_refuses_cache(retrieval_assets):

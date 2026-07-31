@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 import hashlib
 import json
 import os
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, Mapping
 
 from comsol_mcp.settings import load_settings, settings_fingerprint, settings_status
-
 
 EVIDENCE_SETTINGS_ENV = "COMSOL_MCP_EVIDENCE_SETTINGS_PATH"
 EVIDENCE_SETTINGS_SCHEMA = "comsol_mcp.evidence_integrity_settings"
@@ -69,10 +68,7 @@ def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 
 
 def _default_status() -> dict[str, Any]:
-    checks = {
-        name: {"enabled": True, "source": "default"}
-        for name in EVIDENCE_CHECKS
-    }
+    checks = {name: {"enabled": True, "source": "default"} for name in EVIDENCE_CHECKS}
     effective = {
         "schema_name": EVIDENCE_SETTINGS_SCHEMA,
         "schema_version": EVIDENCE_INTEGRITY_VERSION,
@@ -96,8 +92,16 @@ def _default_status() -> dict[str, Any]:
     }
 
 
-def _invalid_status(reason_code: str, error: Exception, *, raw_sha256: str | None) -> dict[str, Any]:
+def _invalid_status(
+    reason_code: str, error: Exception, *, raw_sha256: str | None
+) -> dict[str, Any]:
     status = _default_status()
+    safe_errors = {
+        "settings_file_missing": "configured evidence-integrity settings file is unavailable",
+        "settings_not_utf8": "evidence-integrity settings are not valid UTF-8",
+        "settings_json_invalid": "evidence-integrity settings are not valid JSON",
+        "settings_rejected": "evidence-integrity settings failed validation",
+    }
     return {
         **status,
         "success": False,
@@ -107,7 +111,7 @@ def _invalid_status(reason_code: str, error: Exception, *, raw_sha256: str | Non
         "strict_verification_active": False,
         "reason_code": reason_code,
         "error_type": type(error).__name__,
-        "error": str(error)[:1024],
+        "error": safe_errors.get(reason_code, "evidence-integrity settings are invalid"),
         "warning_codes": [INVALID_SETTINGS_WARNING_CODE],
         "warning_messages": [INVALID_SETTINGS_WARNING],
     }
@@ -223,9 +227,13 @@ def load_evidence_integrity_status(
             fingerprint=settings_fingerprint(project),
         )
         if project_status.get("settings_errors"):
+            result["success"] = False
             result["configuration_state"] = "degraded"
+            result["strict_verification_active"] = False
             result["reason_code"] = project_status.get("reason_code")
             result["settings_errors"] = project_status["settings_errors"]
+            result["warning_codes"] = [INVALID_SETTINGS_WARNING_CODE]
+            result["warning_messages"] = [INVALID_SETTINGS_WARNING]
         return result
 
     environment = environ
@@ -275,9 +283,7 @@ def warning_fields(status: Mapping[str, Any]) -> dict[str, Any]:
         "disabled_evidence_checks": list(status.get("disabled_checks", [])),
         "evidence_integrity_warning_codes": list(status.get("warning_codes", [])),
         "evidence_integrity_warnings": list(status.get("warning_messages", [])),
-        "evidence_settings_fingerprint_sha256": status.get(
-            "settings_fingerprint_sha256"
-        ),
+        "evidence_settings_fingerprint_sha256": status.get("settings_fingerprint_sha256"),
     }
 
 

@@ -18,10 +18,7 @@ from .branch_continuation_campaign_rows import (
 )
 from .store import atomic_write_json, read_json
 
-
-BRANCH_CONTINUATION_CAMPAIGN_SUMMARY_SCHEMA_NAME = (
-    "comsol_mcp.branch_continuation_campaign_summary"
-)
+BRANCH_CONTINUATION_CAMPAIGN_SUMMARY_SCHEMA_NAME = "comsol_mcp.branch_continuation_campaign_summary"
 BRANCH_CONTINUATION_CAMPAIGN_SUMMARY_SCHEMA_VERSION = "1.0.0"
 
 
@@ -97,8 +94,7 @@ def _planner_policy(
         **spec["continuation_policy"],
         "max_expansions": max(
             0,
-            spec["continuation_policy"]["max_expansions"]
-            - observed_expansion_count,
+            spec["continuation_policy"]["max_expansions"] - observed_expansion_count,
         ),
         "point_budget": spec["maximum_total_points"],
         "continuity_evidence": [],
@@ -127,6 +123,7 @@ def build_branch_continuation_campaign_progress(
         }
     if completed == 1:
         last = rows[-1]
+        observed_expansion_count = int(last["expansion_count"])
         if last["scientific_disposition"] != "accepted":
             return {
                 "action": "complete",
@@ -137,6 +134,12 @@ def build_branch_continuation_campaign_progress(
                 ),
                 "completed_state_count": completed,
                 "declared_state_count": total,
+                "declared_expansion_count": spec["continuation_policy"]["max_expansions"],
+                "observed_expansion_count": observed_expansion_count,
+                "remaining_expansion_count": max(
+                    0,
+                    spec["continuation_policy"]["max_expansions"] - observed_expansion_count,
+                ),
                 "continuation_states": None,
                 "continuation_plan": None,
             }
@@ -156,7 +159,8 @@ def build_branch_continuation_campaign_progress(
     last = rows[-1]
     observed_expansion_count = sum(row["expansion_count"] for row in rows)
     declared_cap_reached = completed == total or last["scientific_disposition"] in {
-        "unresolved_at_declared_cap", "invalid_evidence"
+        "unresolved_at_declared_cap",
+        "invalid_evidence",
     }
     plan = plan_branch_continuation(
         states,
@@ -171,7 +175,8 @@ def build_branch_continuation_campaign_progress(
         and plan["scientific_disposition"] != "accepted"
     )
     terminal_child = last["scientific_disposition"] in {
-        "unresolved_at_declared_cap", "invalid_evidence"
+        "unresolved_at_declared_cap",
+        "invalid_evidence",
     }
     if completed == total or terminal_child or stop_on_unresolved:
         return {
@@ -185,8 +190,7 @@ def build_branch_continuation_campaign_progress(
             "observed_expansion_count": observed_expansion_count,
             "remaining_expansion_count": max(
                 0,
-                spec["continuation_policy"]["max_expansions"]
-                - observed_expansion_count,
+                spec["continuation_policy"]["max_expansions"] - observed_expansion_count,
             ),
             "continuation_states": states,
             "continuation_plan": plan,
@@ -200,8 +204,7 @@ def build_branch_continuation_campaign_progress(
         "observed_expansion_count": observed_expansion_count,
         "remaining_expansion_count": max(
             0,
-            spec["continuation_policy"]["max_expansions"]
-            - observed_expansion_count,
+            spec["continuation_policy"]["max_expansions"] - observed_expansion_count,
         ),
         "continuation_states": states,
         "continuation_plan": plan,
@@ -266,7 +269,9 @@ def _control_action(
         return "continue"
     result = hook(dict(payload))
     if not isinstance(result, Mapping) or result.get("action", "continue") not in {
-        "continue", "stop", "cancel"
+        "continue",
+        "stop",
+        "cancel",
     }:
         raise ValueError("campaign control hook returned an unsupported action")
     return str(result.get("action", "continue"))
@@ -291,11 +296,14 @@ def run_branch_continuation_campaign(
     skipped_complete = len(
         read_branch_continuation_campaign_states(journal, spec, artifact_root=root)
     )
+    if on_durable_state is not None:
+        for durable_row in read_branch_continuation_campaign_states(
+            journal, spec, artifact_root=root
+        ):
+            on_durable_state(dict(durable_row))
     while True:
         rows = read_branch_continuation_campaign_states(journal, spec, artifact_root=root)
-        progress = build_branch_continuation_campaign_progress(
-            spec, rows, artifact_root=root
-        )
+        progress = build_branch_continuation_campaign_progress(spec, rows, artifact_root=root)
         if progress["action"] == "complete":
             if fault_hook is not None:
                 fault_hook("during_summary_write", {"completed_states": len(rows)})
@@ -332,6 +340,23 @@ def run_branch_continuation_campaign(
         if fault_hook is not None:
             fault_hook("before_state", {"state_id": state["state_id"]})
         state_dir = branch_continuation_state_directory(root, state["ordinal"])
+        if state_dir.exists():
+            try:
+                row = append_branch_continuation_campaign_state(
+                    journal,
+                    spec,
+                    attempt=attempt,
+                    state_dir=state_dir,
+                    artifact_root=root,
+                )
+            except OSError, ValueError:
+                pass
+            else:
+                if on_durable_state is not None:
+                    on_durable_state(dict(row))
+                if fault_hook is not None:
+                    fault_hook("after_state_row", row)
+                continue
         result = state_executor(state, state_dir)
         if not isinstance(result, Mapping):
             raise RuntimeError("spectral state executor returned an invalid result")

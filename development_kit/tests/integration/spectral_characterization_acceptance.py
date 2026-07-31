@@ -5,19 +5,20 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
-from pathlib import Path
 import sys
 import time
+from pathlib import Path
 from typing import Any, Callable
 
 from src.build_identity import get_build_identity
+from src.durable.io import atomic_write_json_exclusive
 from src.jobs.spectral_characterization import normalize_spectral_characterization_job_spec
 from src.jobs.spectral_rows import read_spectral_rows
 from src.jobs.spectral_stages import read_spectral_stage_plans
 from src.jobs.spectral_worker import _run
 from src.jobs.store import JobStore, process_identity
-
 
 MAX_INPUT_BYTES = 1024 * 1024
 
@@ -42,14 +43,7 @@ def _load_json(path: Path) -> dict[str, Any]:
 def _write_json(path: Path, value: dict[str, Any]) -> None:
     if path.exists():
         raise FileExistsError(f"refusing to overwrite acceptance receipt: {path}")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    payload = json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2).encode("utf-8")
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    with temporary.open("wb") as handle:
-        handle.write(payload)
-        handle.flush()
-        os.fsync(handle.fileno())
-    os.replace(temporary, path)
+    atomic_write_json_exclusive(path, value)
 
 
 def _require_ascii_root(path: Path) -> Path:
@@ -80,6 +74,68 @@ def _row_receipt(row: dict[str, Any]) -> dict[str, Any]:
         "mesh_vertex_count": row["mesh_vertex_count"],
         "solve_seconds": row["solve_seconds"],
         "audit_artifact": row["audit_artifact"],
+    }
+
+
+def _scientific_acceptance(
+    rows: list[dict[str, Any]],
+    stages: list[dict[str, Any]],
+    spec: dict[str, Any],
+) -> dict[str, Any]:
+    policy = spec["analysis_policy"]
+    passivity_tolerance = float(policy["passivity_abs_tolerance"])
+    closure_tolerance = float(policy["closure_abs_tolerance"])
+    wavelength_tolerance = float(policy["wavelength_sync_abs_m"])
+    row_receipts = [_row_receipt(row) for row in rows]
+    point_ids = [str(row["point_id"]) for row in rows]
+    finite = all(
+        math.isfinite(float(value))
+        for row in row_receipts
+        for value in (
+            row["R"],
+            row["T"],
+            row["A"],
+            row["closure_abs"],
+            row["wavelength_sync_abs_m"],
+            row["solve_seconds"],
+        )
+    )
+    checks = {
+        "stage_plan_present": bool(stages),
+        "minimum_point_count": len(rows) >= int(policy["minimum_point_count"]),
+        "point_ids_unique": len(point_ids) == len(set(point_ids)),
+        "finite_values": finite,
+        "passive_quantity_bounds": finite
+        and all(
+            -passivity_tolerance <= float(row[key]) <= 1.0 + passivity_tolerance
+            for row in row_receipts
+            for key in ("R", "T", "A")
+        ),
+        "power_closure": finite
+        and all(float(row["closure_abs"]) <= closure_tolerance for row in row_receipts),
+        "wavelength_synchronized": finite
+        and all(
+            float(row["wavelength_sync_abs_m"]) <= wavelength_tolerance
+            for row in row_receipts
+        ),
+        "mesh_positive": all(
+            int(row["mesh_element_count"]) > 0 and int(row["mesh_vertex_count"]) > 0
+            for row in row_receipts
+        ),
+        "solve_duration_nonnegative": finite
+        and all(float(row["solve_seconds"]) >= 0.0 for row in row_receipts),
+    }
+    return {
+        "passed": all(checks.values()),
+        "checks": checks,
+        "observed_point_count": len(rows),
+        "required_point_count": int(policy["minimum_point_count"]),
+        "maximum_closure_abs": max(
+            (float(row["closure_abs"]) for row in row_receipts), default=None
+        ),
+        "maximum_wavelength_sync_abs_m": max(
+            (float(row["wavelength_sync_abs_m"]) for row in row_receipts), default=None
+        ),
     }
 
 
@@ -131,14 +187,17 @@ def run_acceptance(
     exit_code = worker_runner(str(store.root), job_id, native_cancel_enabled=True)
     directory = store.job_dir(job_id)
     state = store.read_state(job_id)
-    rows = read_spectral_rows(
-        directory / "spectral_rows.jsonl", spec, artifact_root=directory
-    )
+    rows = read_spectral_rows(directory / "spectral_rows.jsonl", spec, artifact_root=directory)
     stages = read_spectral_stage_plans(directory, spec)
+    scientific_acceptance = _scientific_acceptance(rows, stages, spec)
     source_after = _sha256_file(source)
     lease_absent = not (runtime / "solver_owner.json").exists()
     receipt = {
-        "success": exit_code == 0 and state["status"] == "completed" and source_after == source_before and lease_absent,
+        "success": exit_code == 0
+        and state["status"] == "completed"
+        and source_after == source_before
+        and lease_absent,
+        "scientific_acceptance": scientific_acceptance,
         "dry_run": False,
         "job_id": job_id,
         "worker_exit_code": exit_code,
@@ -166,6 +225,7 @@ def run_acceptance(
             "external_process_absence": "parent_must_verify_after_runner_exit",
         },
     }
+    receipt["success"] = receipt["success"] and scientific_acceptance["passed"] is True
     _write_json(output, receipt)
     return receipt
 

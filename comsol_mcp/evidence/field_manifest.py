@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 import hashlib
 import json
 import math
-from pathlib import PurePosixPath
 import re
+from copy import deepcopy
+from pathlib import PurePosixPath
 from typing import Any, Mapping
 
 from .field_bundle import validate_field_evidence_request
-
 
 FIELD_EVIDENCE_MANIFEST_SCHEMA = "comsol_mcp.field_evidence_manifest"
 FIELD_EVIDENCE_MANIFEST_VERSION = "1.0.0"
@@ -40,9 +39,7 @@ def _fingerprint(value: object) -> str:
 
 
 def _mapping(value: object, label: str) -> dict[str, Any]:
-    if not isinstance(value, Mapping) or not all(
-        isinstance(key, str) for key in value
-    ):
+    if not isinstance(value, Mapping) or not all(isinstance(key, str) for key in value):
         raise ValueError(f"{label} must be an object with string keys")
     return dict(value)
 
@@ -51,9 +48,7 @@ def _exact(value: Mapping[str, Any], fields: set[str], label: str) -> None:
     unknown = sorted(set(value) - fields)
     missing = sorted(fields - set(value))
     if unknown or missing:
-        raise ValueError(
-            f"{label} has unsupported fields {unknown} or missing fields {missing}"
-        )
+        raise ValueError(f"{label} has unsupported fields {unknown} or missing fields {missing}")
 
 
 def _finite(value: object, label: str, *, nonnegative: bool = False) -> float:
@@ -82,10 +77,14 @@ def _hash(value: object, label: str) -> str:
 def _relative_path(value: object, label: str) -> str:
     if not isinstance(value, str) or not value.strip() or len(value) > MAX_ARTIFACT_PATH:
         raise ValueError(f"{label} must be a bounded nonempty relative path")
-    text = value.strip().replace("\\", "/")
+    text = value.strip()
+    if text != value or "\\" in text:
+        raise ValueError(f"{label} must be a canonical relative path")
     path = PurePosixPath(text)
     if path.is_absolute() or ".." in path.parts or _WINDOWS_DRIVE.match(text):
         raise ValueError(f"{label} must be relative and traversal-free")
+    if text == "." or path.as_posix() != text:
+        raise ValueError(f"{label} must be a canonical relative path")
     return text
 
 
@@ -124,8 +123,7 @@ def _coordinate_ranges(value: object, request: Mapping[str, Any]) -> dict[str, A
         if not isinstance(pair, list) or len(pair) != 2:
             raise ValueError(f"coordinate_ranges.{axis} must contain two finite values")
         normalized = [
-            _finite(item, f"coordinate_ranges.{axis}[{index}]")
-            for index, item in enumerate(pair)
+            _finite(item, f"coordinate_ranges.{axis}[{index}]") for index, item in enumerate(pair)
         ]
         if normalized[0] > normalized[1]:
             raise ValueError(f"coordinate_ranges.{axis} must be ordered")
@@ -162,7 +160,7 @@ def _quantity_summaries(
         maximum = _finite(raw["maximum"], f"{label}.maximum")
         if minimum > maximum:
             raise ValueError(f"{label}.minimum must not exceed maximum")
-        finite_count = _count(raw["finite_count"], f"{label}.finite_count")
+        finite_count = _count(raw["finite_count"], f"{label}.finite_count", allow_zero=False)
         missing_count = _count(raw["missing_count"], f"{label}.missing_count")
         if finite_count + missing_count != grid_points:
             raise ValueError(f"{label} counts must equal the exact grid size")
@@ -247,6 +245,8 @@ def _assemble_manifest(
         if png_expected is not None
         else None
     )
+    if png is not None and png["relative_path"] == array["relative_path"]:
+        raise ValueError("field artifacts must use distinct relative paths")
     total_artifact_bytes = array["byte_count"] + (png["byte_count"] if png else 0)
     if total_artifact_bytes > limits["max_artifact_bytes"]:
         raise ValueError("field artifacts exceed the caller-declared byte limit")
@@ -329,20 +329,41 @@ def validate_field_evidence_manifest(value: object, *, request: object) -> dict[
     """Validate a transported manifest against its immutable request."""
     item = _mapping(value, "field_evidence_manifest")
     fields = {
-        "schema_name", "schema_version", "manifest_artifact_id", "request_id",
-        "request_fingerprint", "configuration_sha256", "view_id",
-        "view_fingerprint", "source", "wavelength_m", "expressions", "slice",
-        "coordinate_ranges", "grid", "raw_point_count", "selected_point_count",
-        "unique_point_count", "collapsed_duplicate_point_count", "grid_point_count",
-        "covered_grid_point_count", "missing_grid_point_count",
-        "coverage_fraction", "quantity_summaries", "artifacts",
-        "artifact_byte_count", "visual_review_state", "semantic_mode_label",
-        "measurement_status", "manifest_sha256",
+        "schema_name",
+        "schema_version",
+        "manifest_artifact_id",
+        "request_id",
+        "request_fingerprint",
+        "configuration_sha256",
+        "view_id",
+        "view_fingerprint",
+        "source",
+        "wavelength_m",
+        "expressions",
+        "slice",
+        "coordinate_ranges",
+        "grid",
+        "raw_point_count",
+        "selected_point_count",
+        "unique_point_count",
+        "collapsed_duplicate_point_count",
+        "grid_point_count",
+        "covered_grid_point_count",
+        "missing_grid_point_count",
+        "coverage_fraction",
+        "quantity_summaries",
+        "artifacts",
+        "artifact_byte_count",
+        "visual_review_state",
+        "semantic_mode_label",
+        "measurement_status",
+        "manifest_sha256",
     }
     _exact(item, fields, "field_evidence_manifest")
-    if item["schema_name"] != FIELD_EVIDENCE_MANIFEST_SCHEMA or item[
-        "schema_version"
-    ] != FIELD_EVIDENCE_MANIFEST_VERSION:
+    if (
+        item["schema_name"] != FIELD_EVIDENCE_MANIFEST_SCHEMA
+        or item["schema_version"] != FIELD_EVIDENCE_MANIFEST_VERSION
+    ):
         raise ValueError("field_evidence_manifest schema is unsupported")
     supplied = _hash(item["manifest_sha256"], "manifest_sha256")
     unhashed = dict(item)
@@ -353,9 +374,7 @@ def validate_field_evidence_manifest(value: object, *, request: object) -> dict[
     normalized_request = validate_field_evidence_request(request)
     if item["request_fingerprint"] != normalized_request["request_fingerprint"]:
         raise ValueError("field_evidence_manifest request fingerprint does not match")
-    matches = [
-        view for view in normalized_request["views"] if view["view_id"] == item["view_id"]
-    ]
+    matches = [view for view in normalized_request["views"] if view["view_id"] == item["view_id"]]
     if len(matches) != 1:
         raise ValueError("field_evidence_manifest view is not present in the request")
     artifacts = _mapping(item["artifacts"], "artifacts")

@@ -26,6 +26,7 @@
       "candidate": {
         "name": "progress_context",
         "class_name": "com.comsol.model.util.ProgressContext",
+        "jar_role": "model",
         "methods": [
           "cancel()",
           "stop(int)"

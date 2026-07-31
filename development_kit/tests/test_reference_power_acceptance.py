@@ -2,29 +2,23 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 import hashlib
 import json
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
-
 from src.evidence.reference_power_acceptance import (
     build_reference_power_dry_run_receipt,
+    load_bounded_json,
     validate_reference_power_acceptance_contract,
     validate_reference_power_execution_spec,
 )
 
-
 ROOT = Path(__file__).parents[2]
 CONTRACT_PATH = (
-    ROOT
-    / "development_kit"
-    / "release"
-    / "integration_fixtures"
-    / "reference_power_evidence.json"
+    ROOT / "development_kit" / "release" / "integration_fixtures" / "reference_power_evidence.json"
 )
 
 
@@ -43,7 +37,7 @@ def _plane(expression, selection, coordinate, normal, sign):
     }
 
 
-def _spec(tmp_path):
+def _spec(tmp_path, ascii_tmp_path):
     source = tmp_path / "fixture.mph"
     source.write_bytes(b"immutable")
     return {
@@ -52,13 +46,13 @@ def _spec(tmp_path):
         "config_id": "unit-reference-power-gate",
         "source_model_path": str(source.resolve()),
         "expected_source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
-        "artifact_dir": "D:/reference_power_gate_unit",
+        "artifact_dir": str(ascii_tmp_path / "reference_power_gate_unit"),
         "model": {
             "component_tag": "comp1",
             "physics_tag": "ewfd",
             "study_tag": "std1",
             "study_step_tag": "wl_step",
-            "study_step_property": "plist"
+            "study_step_property": "plist",
         },
         "wavelength": {"value": 4.37, "unit": "um", "parameter": "wl"},
         "reference_air": {
@@ -69,13 +63,13 @@ def _spec(tmp_path):
             "target_axis": "x",
             "aggregation": "rms_abs",
             "r_expression": "ewfd.Rtotal",
-            "t_expression": "ewfd.Ttotal"
+            "t_expression": "ewfd.Ttotal",
         },
         "declared_plane_flux": {
             "incident": _plane("inc_flux", 10, 1e-6, [0, 0, -1], -1),
             "reflected": _plane("ref_flux", 11, 1e-6, [0, 0, 1], 1),
-            "transmitted": _plane("trn_flux", 12, -1e-6, [0, 0, -1], -1)
-        }
+            "transmitted": _plane("trn_flux", 12, -1e-6, [0, 0, -1], -1),
+        },
     }
 
 
@@ -89,8 +83,8 @@ def test_frozen_reference_power_contract_is_strict_sanitized_and_bounded():
     assert contract["limits"]["max_spec_bytes"] <= 256 * 1024
 
 
-def test_execution_spec_normalizes_exact_declarations_and_redacts_paths(tmp_path):
-    spec = _spec(tmp_path)
+def test_execution_spec_normalizes_exact_declarations_and_redacts_paths(tmp_path, ascii_tmp_path):
+    spec = _spec(tmp_path, ascii_tmp_path)
     normalized = validate_reference_power_execution_spec(spec, _contract(), verify_files=True)
     receipt = build_reference_power_dry_run_receipt(_contract(), spec, verify_files=True)
 
@@ -103,18 +97,45 @@ def test_execution_spec_normalizes_exact_declarations_and_redacts_paths(tmp_path
     assert "artifact_dir" not in receipt
 
 
+def test_execution_spec_hashes_source_incrementally_under_contract_limit(tmp_path, ascii_tmp_path):
+    contract = _contract()
+    contract["limits"]["max_artifact_bytes"] = 4
+
+    with pytest.raises(ValueError, match="hashing limit"):
+        validate_reference_power_execution_spec(
+            _spec(tmp_path, ascii_tmp_path), contract, verify_files=True
+        )
+
+
+def test_bounded_json_reads_limit_plus_one_from_one_descriptor(tmp_path):
+    path = tmp_path / "input.json"
+    path.write_bytes(b'{"value":"0123456789"}')
+
+    with pytest.raises(ValueError, match="exceeds 8 bytes"):
+        load_bounded_json(path, 8)
+
+
 @pytest.mark.parametrize(
     "mutation,match",
     [
         (lambda value: value.update({"unknown": True}), "fields mismatch"),
         (lambda value: value["reference_air"].update({"top_air_domain_ids": [9]}), "subset"),
-        (lambda value: value["reference_air"].update({"aggregation": "maximum"}), "rms_abs or median_abs"),
-        (lambda value: value["declared_plane_flux"]["incident"].update({"normal": [0, 0, 2]}), "unit vector"),
-        (lambda value: value.update({"artifact_dir": str(Path("C:/Users/nonascii/测试"))}), "ASCII-only"),
+        (
+            lambda value: value["reference_air"].update({"aggregation": "maximum"}),
+            "rms_abs or median_abs",
+        ),
+        (
+            lambda value: value["declared_plane_flux"]["incident"].update({"normal": [0, 0, 2]}),
+            "unit vector",
+        ),
+        (
+            lambda value: value.update({"artifact_dir": str(Path("C:/Users/nonascii/测试"))}),
+            "ASCII-only",
+        ),
     ],
 )
-def test_execution_spec_fails_closed_on_ambiguous_inputs(tmp_path, mutation, match):
-    value = _spec(tmp_path)
+def test_execution_spec_fails_closed_on_ambiguous_inputs(tmp_path, ascii_tmp_path, mutation, match):
+    value = _spec(tmp_path, ascii_tmp_path)
     mutation(value)
     with pytest.raises(ValueError, match=match):
         validate_reference_power_execution_spec(value, _contract())
@@ -138,3 +159,27 @@ def test_preflight_cli_validates_fixture_without_importing_mph():
     assert "mph" not in (
         ROOT / "development_kit" / "scripts" / "reference_power_gate_preflight.py"
     ).read_text(encoding="utf-8")
+
+
+def test_preflight_cli_never_truncates_an_existing_receipt(tmp_path):
+    output = tmp_path / "existing-receipt.json"
+    original = b'{"preserved":true}\n'
+    output.write_bytes(original)
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "development_kit/scripts/reference_power_gate_preflight.py",
+            "--output",
+            str(output),
+        ],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+
+    assert completed.returncode != 0
+    assert output.read_bytes() == original
+    assert not list(tmp_path.glob(".*.tmp"))

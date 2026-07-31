@@ -2,22 +2,24 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import os
-from typing import Any, Callable, Mapping
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
+from typing import Any
 
-from comsol_mcp.settings import PROFILE_ENV, SETTINGS_PATH_ENV, settings_environment
 from comsol_mcp.contracts import bounded_public_schema, structurally_guarded
-from .catalog import PROFILE_NAMES, TOOL_METADATA
 from comsol_mcp.operation_arbiter import guard_tool_call
+from comsol_mcp.settings import PROFILE_ENV, SETTINGS_PATH_ENV, settings_environment
 from comsol_mcp.shared_session.contracts import (
     SHARED_SERVER_PROFILE,
     normalize_shared_server_feature_gate,
 )
 
+from .catalog import PROFILE_NAMES, TOOL_METADATA
 
 PROFILE_ENV_VAR = PROFILE_ENV
 DEFAULT_PROFILE = "core"
+_PROFILE_SELECTION_TOKEN = object()
 
 PROFILE_DESCRIPTIONS = {
     "core": "Default mature ownership, job, session, inspection, one-point solve, and manual surface.",
@@ -45,9 +47,14 @@ class ProfileSelection:
     """One startup-time profile decision and its provenance."""
 
     name: str
-    environment_variable: str
+    environment_variable: str | None
     default_used: bool
     source: str
+    _registration_token: object | None = field(default=None, repr=False, compare=False)
+
+
+def _is_validated_profile_selection(selection: ProfileSelection) -> bool:
+    return selection._registration_token is _PROFILE_SELECTION_TOKEN
 
 
 def resolve_profile(
@@ -62,15 +69,22 @@ def resolve_profile(
         raw_name = requested
         source = "explicit_argument"
         default_used = False
+        environment_variable = None
     elif PROFILE_ENV_VAR in original_environment:
-        raw_name = environment[PROFILE_ENV_VAR]
+        raw_name = environment.get(PROFILE_ENV_VAR, original_environment[PROFILE_ENV_VAR])
         source = "environment"
         default_used = False
+        environment_variable = PROFILE_ENV_VAR
     else:
-        raw_name = environment[PROFILE_ENV_VAR]
+        raw_name = environment.get(PROFILE_ENV_VAR, DEFAULT_PROFILE)
         source = "settings"
-        default_used = raw_name.strip().casefold() == DEFAULT_PROFILE
+        default_used = SETTINGS_PATH_ENV not in original_environment
+        environment_variable = (
+            SETTINGS_PATH_ENV if SETTINGS_PATH_ENV in original_environment else None
+        )
 
+    if not isinstance(raw_name, str):
+        raise ValueError(f"Invalid {PROFILE_ENV_VAR} profile type")
     name = raw_name.strip().lower()
     if name not in PROFILE_NAMES:
         available = ", ".join(PROFILE_NAMES)
@@ -86,9 +100,10 @@ def resolve_profile(
             )
     return ProfileSelection(
         name=name,
-        environment_variable=SETTINGS_PATH_ENV,
+        environment_variable=environment_variable,
         default_used=default_used,
         source=source,
+        _registration_token=_PROFILE_SELECTION_TOKEN,
     )
 
 
@@ -155,6 +170,10 @@ def register_profiled(
     profile_selection: ProfileSelection,
 ) -> None:
     """Run one existing registrar through a static name filter."""
+    if not _is_validated_profile_selection(profile_selection):
+        raise ValueError("profile selection was not produced by resolve_profile")
+    if not enabled_names <= tool_names_for_profile(profile_selection.name):
+        raise ValueError("enabled tool names exceed the validated profile")
     registrar(ProfiledRegistrar(server, enabled_names, profile_selection))
 
 

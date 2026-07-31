@@ -14,6 +14,7 @@ JSONValue: TypeAlias = JSONScalar | list[JSONScalar] | list[list[JSONScalar]]
 MAX_PROPERTY_KEYS = 64
 MAX_PROPERTY_KEY_LENGTH = 128
 MAX_LIST_ITEMS = 4096
+MAX_SCALAR_BYTES = 64 * 1024
 MAX_SERIALIZED_BYTES = 256 * 1024
 
 _PROPERTY_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
@@ -39,9 +40,24 @@ def validate_property_name(name: str) -> str:
 
 
 def _normalize_scalar(value: object) -> JSONScalar:
-    if value is None or isinstance(value, (str, bool)):
+    if value is None or isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        if len(value) > MAX_SCALAR_BYTES:
+            raise ValueError(f"property strings may contain at most {MAX_SCALAR_BYTES} bytes")
+        try:
+            byte_count = len(value.encode("utf-8"))
+        except UnicodeEncodeError as exc:
+            raise ValueError("property strings must be valid UTF-8") from exc
+        if byte_count > MAX_SCALAR_BYTES:
+            raise ValueError(f"property strings may contain at most {MAX_SCALAR_BYTES} bytes")
         return value
     if isinstance(value, int):
+        estimated_decimal_bytes = (value.bit_length() * 30103) // 100000 + 1
+        if value < 0:
+            estimated_decimal_bytes += 1
+        if estimated_decimal_bytes > MAX_SCALAR_BYTES:
+            raise ValueError(f"property integers may contain at most {MAX_SCALAR_BYTES} bytes")
         return value
     if isinstance(value, float):
         if not math.isfinite(value):
@@ -119,6 +135,6 @@ def validate_properties(properties: object | None) -> dict[str, JSONValue]:
 
 __all__ = [
     "JSONScalar", "JSONValue", "MAX_LIST_ITEMS", "MAX_PROPERTY_KEYS",
-    "MAX_PROPERTY_KEY_LENGTH", "MAX_SERIALIZED_BYTES",
+    "MAX_PROPERTY_KEY_LENGTH", "MAX_SCALAR_BYTES", "MAX_SERIALIZED_BYTES",
     "normalize_property_value", "validate_properties", "validate_property_name",
 ]

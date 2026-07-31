@@ -5,7 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 
 import pytest
-
+import src.jobs.spectral_characterization as spectral_job_module
 from src.jobs.spectral_characterization import (
     MAX_REFINEMENT_STAGES,
     current_spectral_driver_identity,
@@ -85,6 +85,7 @@ def _raw_spec(tmp_path) -> dict:
         "cores": 2,
     }
 
+
 def test_spec_is_canonical_hash_bound_and_solver_free(tmp_path):
     raw = _raw_spec(tmp_path)
     first = normalize_spectral_characterization_job_spec(raw)
@@ -109,8 +110,14 @@ def test_configuration_and_collector_identity_change_the_fingerprint(tmp_path):
     changed_collector = deepcopy(raw)
     changed_collector["collector"]["inputs"]["physics_tag"] = "ewfd2"
 
-    assert normalize_spectral_characterization_job_spec(changed_configuration)["spec_fingerprint"] != baseline["spec_fingerprint"]
-    assert normalize_spectral_characterization_job_spec(changed_collector)["spec_fingerprint"] != baseline["spec_fingerprint"]
+    assert (
+        normalize_spectral_characterization_job_spec(changed_configuration)["spec_fingerprint"]
+        != baseline["spec_fingerprint"]
+    )
+    assert (
+        normalize_spectral_characterization_job_spec(changed_collector)["spec_fingerprint"]
+        != baseline["spec_fingerprint"]
+    )
 
 
 @pytest.mark.parametrize(
@@ -119,16 +126,33 @@ def test_configuration_and_collector_identity_change_the_fingerprint(tmp_path):
         (lambda spec: spec.__setitem__("automatic_tolerance", 1.0), "unsupported"),
         (lambda spec: spec["initial_grid"].__setitem__("lower_m", float("nan")), "finite"),
         (lambda spec: spec["initial_grid"].__setitem__("point_count", 2), "3 to"),
-        (lambda spec: spec["refinement_policy"].__setitem__("maximum_stages", MAX_REFINEMENT_STAGES + 1), "0 to"),
+        (
+            lambda spec: spec["refinement_policy"].__setitem__(
+                "maximum_stages", MAX_REFINEMENT_STAGES + 1
+            ),
+            "0 to",
+        ),
         (lambda spec: spec["refinement_policy"].__setitem__("points_per_stage", 6), "odd"),
-        (lambda spec: spec["refinement_policy"].__setitem__("peak_shift_abs_tolerance_m", -1.0), "nonnegative"),
+        (
+            lambda spec: spec["refinement_policy"].__setitem__("peak_shift_abs_tolerance_m", -1.0),
+            "nonnegative",
+        ),
         (lambda spec: spec["expansion_policy"].__setitem__("absolute_lower_m", 5.0e-6), "contain"),
         (lambda spec: spec.__setitem__("maximum_points", 8), "initial grid"),
-        (lambda spec: spec["collector"]["inputs"].__setitem__("wavelength_value", 5.0e-6), "locked"),
-        (lambda spec: spec["collector"]["inputs"].__setitem__("output_path", "outside.json"), "unsupported"),
+        (
+            lambda spec: spec["collector"]["inputs"].__setitem__("wavelength_value", 5.0e-6),
+            "locked",
+        ),
+        (
+            lambda spec: spec["collector"]["inputs"].__setitem__("output_path", "outside.json"),
+            "unsupported",
+        ),
         (lambda spec: spec["collector"]["inputs"].pop("r_expression"), "missing"),
         (lambda spec: spec["collector"]["inputs"].pop("top_air_coordinate_range"), "missing"),
-        (lambda spec: spec.__setitem__("source_model_relative_identity", "../private.mph"), "relative path"),
+        (
+            lambda spec: spec.__setitem__("source_model_relative_identity", "../private.mph"),
+            "relative path",
+        ),
         (lambda spec: spec["analysis_policy"].__setitem__("hidden", 1.0), "fields"),
     ],
 )
@@ -136,6 +160,30 @@ def test_invalid_or_hidden_policy_inputs_fail_closed(tmp_path, mutation, match):
     raw = _raw_spec(tmp_path)
     mutation(raw)
     with pytest.raises(ValueError, match=match):
+        normalize_spectral_characterization_job_spec(raw)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda inputs: inputs.__setitem__("top_air_domain_ids", "1"),
+        lambda inputs: inputs.__setitem__("top_air_domain_ids", [1, None]),
+        lambda inputs: inputs.__setitem__("top_air_domain_ids", list(range(1, 514))),
+        lambda inputs: (
+            inputs.pop("top_air_domain_ids"),
+            inputs.__setitem__("top_air_selection", {}),
+        ),
+        lambda inputs: (
+            inputs.pop("top_air_domain_ids"),
+            inputs.__setitem__("top_air_selection", "bad tag"),
+        ),
+    ],
+)
+def test_collector_top_air_identity_is_validated_at_submission(tmp_path, mutation):
+    raw = _raw_spec(tmp_path)
+    mutation(raw["collector"]["inputs"])
+
+    with pytest.raises(ValueError, match="top_air"):
         normalize_spectral_characterization_job_spec(raw)
 
 
@@ -157,8 +205,31 @@ def test_source_bytes_are_part_of_the_immutable_identity(tmp_path):
     assert before["spec_fingerprint"] != after["spec_fingerprint"]
 
 
-def test_changed_driver_identity_cannot_resume_existing_rows(tmp_path):
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda identity: identity.__setitem__("implementation", "other.driver"),
+        lambda identity: identity.__setitem__("driver_version", "0"),
+        lambda identity: identity.__setitem__("package_content_sha256", "0" * 64),
+        lambda identity: identity.__setitem__("build_identity_sha256", "0" * 64),
+        lambda identity: identity.pop("driver_version"),
+        lambda identity: identity.__setitem__("unexpected", "value"),
+    ],
+)
+def test_changed_driver_identity_cannot_resume_existing_rows(tmp_path, mutation):
     spec = normalize_spectral_characterization_job_spec(_raw_spec(tmp_path))
-    spec["driver_identity"]["package_content_sha256"] = "0" * 64
+    mutation(spec["driver_identity"])
     with pytest.raises(ValueError, match="driver identity"):
         validate_spectral_driver_identity(spec)
+
+
+def test_spec_byte_limit_includes_added_fingerprint(tmp_path, monkeypatch):
+    raw = _raw_spec(tmp_path)
+    normalized = normalize_spectral_characterization_job_spec(raw)
+    body = dict(normalized)
+    body.pop("spec_fingerprint")
+    pre_fingerprint_size = len(spectral_job_module._canonical_bytes(body))
+    monkeypatch.setattr(spectral_job_module, "MAX_SPECTRAL_JOB_SPEC_BYTES", pre_fingerprint_size)
+
+    with pytest.raises(ValueError, match="job exceeds"):
+        normalize_spectral_characterization_job_spec(raw)

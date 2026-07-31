@@ -4,36 +4,49 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import io
 import json
 import os
-from pathlib import Path, PurePosixPath, PureWindowsPath
 import re
 import subprocess
 import sys
+import tarfile
 import tomllib
 import zipfile
+from pathlib import Path, PurePosixPath, PureWindowsPath
+from types import SimpleNamespace
 
 import pytest
+import yaml
 
+from development_kit.scripts import generate_release_lock as lock_generator
+from development_kit.scripts import installed_package_probe
+from development_kit.scripts import python_compatibility_licensed_gate as compatibility_gate
+from development_kit.scripts import release_gate as release_gate_module
 from development_kit.scripts.generate_release_lock import _render_lock
-from development_kit.scripts.python_compatibility_licensed_gate import (
-    _select_expected_backend,
-    _status_is_clean,
-)
 from development_kit.scripts.planning_code_gate import (
     TEXT_SUFFIXES,
     load_planning_code_allowlist,
     verify_planning_code_texts,
 )
+from development_kit.scripts.python_compatibility_licensed_gate import (
+    _runtime_process_evidence,
+    _select_expected_backend,
+    _status_is_clean,
+    _terminate_owned_tree,
+    _write_receipt,
+)
 from development_kit.scripts.release_gate import (
     PLANNING_CODE_ALLOWLIST,
+    _dependency_lock_location,
+    _distribution_artifacts,
     _distribution_inventory,
     _lock_lane,
     _run,
+    _sanitized_probe_environment,
     _validated_dependency_lock,
 )
 from development_kit.scripts.run_real_release_gate import _wait_clean_ownership
-
 
 ROOT = Path(__file__).parents[2]
 RELEASE = ROOT / "development_kit" / "release"
@@ -41,15 +54,253 @@ FIXTURES = RELEASE / "integration_fixtures"
 SNAPSHOTS = ROOT / "development_kit" / "tests" / "snapshots"
 
 
+@pytest.mark.parametrize(
+    "relative_path",
+    ["comsol_mcp/tools/ownership.py", "comsol_mcp/jobs/store.py"],
+)
+def test_windows_lock_backend_is_not_imported_at_module_scope(relative_path):
+    tree = ast.parse((ROOT / relative_path).read_text(encoding="utf-8"))
+    imported = {
+        alias.name for node in tree.body if isinstance(node, ast.Import) for alias in node.names
+    }
+
+    assert "msvcrt" not in imported
+
+
+def test_python_compatibility_receipt_publication_preserves_existing_output(tmp_path):
+    output = tmp_path / "receipt.json"
+    output.write_text('{"owner":"competitor"}\n', encoding="utf-8")
+
+    with pytest.raises(FileExistsError):
+        _write_receipt(output, {"owner": "gate"})
+
+    assert json.loads(output.read_text(encoding="utf-8")) == {"owner": "competitor"}
+
+
+def test_python_compatibility_parent_cleans_worker_path_after_output_collision(
+    tmp_path, monkeypatch
+):
+    output = tmp_path / "receipt.json"
+    clean = {
+        "process_inventory": {"complete": True, "fresh": True},
+        "collision": False,
+        "lease": {"state": "absent"},
+        "durable_jobs": {"available": True, "active_count": 0, "active": []},
+    }
+    waits = 0
+
+    def wait_clean(_owner, timeout_seconds=30.0):
+        nonlocal waits
+        waits += 1
+        if waits == 1:
+            output.write_text('{"owner":"competitor"}\n', encoding="utf-8")
+        return clean
+
+    class Owner:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def preflight(self, **_kwargs):
+            return {"ready": False, "blockers": ["injected"]}
+
+    monkeypatch.setattr(compatibility_gate, "_git_identity", lambda: {"dirty_entry_count": 0})
+    monkeypatch.setattr(compatibility_gate, "_wait_clean", wait_clean)
+    monkeypatch.setattr(compatibility_gate, "_descendant_identities", lambda _pid: [])
+    monkeypatch.setattr(compatibility_gate, "SolverOwnership", Owner)
+
+    with pytest.raises(FileExistsError):
+        compatibility_gate._run_parent(
+            SimpleNamespace(
+                output=output,
+                runtime_root=tmp_path / "runtime",
+                minimum_free_gb=0.0,
+                cores=1,
+                timeout_seconds=1.0,
+            )
+        )
+
+    assert json.loads(output.read_text(encoding="utf-8")) == {"owner": "competitor"}
+    assert list(tmp_path.glob(".receipt.worker.*.json")) == []
+
+
+def test_compatibility_cleanup_terminates_captured_descendants_after_worker_exit(
+    monkeypatch,
+):
+    actions = []
+    identities = [
+        {
+            "pid": 41002,
+            "process_create_time": 20.0,
+            "command_signature": "b" * 64,
+        }
+    ]
+
+    class ExitedProcess:
+        pid = 41001
+
+        @staticmethod
+        def poll():
+            return 0
+
+    monkeypatch.setattr(
+        compatibility_gate,
+        "terminate_exact",
+        lambda identity, force: actions.append((identity, force)) or {"acted": True},
+    )
+    monkeypatch.setattr(
+        compatibility_gate,
+        "verify_absent",
+        lambda captured: {"absent": captured == identities, "verdicts": []},
+    )
+
+    result = _terminate_owned_tree(ExitedProcess(), identities)
+
+    assert actions == [(identities[0], True)]
+    assert result["direct_was_running"] is False
+    assert result["passed"] is True
+
+
+def test_compatibility_cleanup_preserves_primary_error_and_continues_after_release_error(
+    tmp_path, monkeypatch
+):
+    output = tmp_path / "receipt.json"
+    clean = {
+        "process_inventory": {"complete": True, "fresh": True},
+        "collision": False,
+        "lease": {"state": "absent"},
+        "durable_jobs": {"available": True, "active_count": 0, "active": []},
+    }
+    waits = []
+
+    class Owner:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def preflight(self, **_kwargs):
+            return {"ready": True}
+
+        def acquire(self, **_kwargs):
+            return {"success": True}
+
+        def release(self):
+            raise OSError("injected release failure")
+
+    monkeypatch.setattr(compatibility_gate, "_git_identity", lambda: {"dirty_entry_count": 0})
+    monkeypatch.setattr(
+        compatibility_gate,
+        "_wait_clean",
+        lambda _owner, timeout_seconds=30.0: waits.append(timeout_seconds) or clean,
+    )
+    monkeypatch.setattr(compatibility_gate, "SolverOwnership", Owner)
+    streams = []
+
+    def fail_launch(*_args, **kwargs):
+        streams.extend([kwargs["stdout"], kwargs["stderr"]])
+        assert kwargs["stdout"] is not subprocess.PIPE
+        assert kwargs["stderr"] is not subprocess.PIPE
+        assert not kwargs.get("text", False)
+        raise OSError("injected launch failure")
+
+    monkeypatch.setattr(compatibility_gate.subprocess, "Popen", fail_launch)
+    monkeypatch.setattr(compatibility_gate, "_descendant_identities", lambda _pid: [])
+    monkeypatch.setattr(
+        compatibility_gate,
+        "_listener_inventory",
+        lambda _pids: {"complete": True, "error": None, "listeners": []},
+    )
+
+    returncode = compatibility_gate._run_parent(
+        SimpleNamespace(
+            output=output,
+            runtime_root=tmp_path / "runtime",
+            minimum_free_gb=0.0,
+            cores=1,
+            timeout_seconds=1.0,
+        )
+    )
+    receipt = json.loads(output.read_text(encoding="utf-8"))
+
+    assert returncode == 1
+    assert receipt["schema_version"] == "1.1.0"
+    assert receipt["error"].startswith("OSError: injected launch failure")
+    assert {item["stage"] for item in receipt["cleanup"]["errors"]} == {"lease_release"}
+    assert receipt["ownership_after"] is not None
+    assert len(waits) == 2
+    assert all(stream.closed for stream in streams)
+    assert not list(tmp_path.glob(".receipt.worker.*.stdout.log"))
+    assert not list(tmp_path.glob(".receipt.worker.*.stderr.log"))
+
+
+def test_compatibility_final_descendant_snapshot_is_recorded_once(tmp_path, monkeypatch):
+    output = tmp_path / "receipt.json"
+    clean = {
+        "process_inventory": {"complete": True, "fresh": True},
+        "collision": False,
+        "lease": {"state": "absent"},
+        "durable_jobs": {"available": True, "active_count": 0, "active": []},
+    }
+    descendant = {"pid": 42001, "process_create_time": 30.0}
+    snapshots = []
+
+    class Owner:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def preflight(self, **_kwargs):
+            return {"ready": False, "blockers": ["injected"]}
+
+    monkeypatch.setattr(compatibility_gate, "_git_identity", lambda: {"dirty_entry_count": 0})
+    monkeypatch.setattr(compatibility_gate, "_wait_clean", lambda *_args, **_kwargs: clean)
+    monkeypatch.setattr(compatibility_gate, "SolverOwnership", Owner)
+    monkeypatch.setattr(
+        compatibility_gate,
+        "_descendant_identities",
+        lambda _pid: snapshots.append(True) or [descendant],
+    )
+    monkeypatch.setattr(
+        compatibility_gate,
+        "_listener_inventory",
+        lambda _pids: {"complete": True, "error": None, "listeners": []},
+    )
+
+    assert (
+        compatibility_gate._run_parent(
+            SimpleNamespace(
+                output=output,
+                runtime_root=tmp_path / "runtime",
+                minimum_free_gb=0.0,
+                cores=1,
+                timeout_seconds=1.0,
+            )
+        )
+        == 1
+    )
+    receipt = json.loads(output.read_text(encoding="utf-8"))
+
+    assert snapshots == [True]
+    assert receipt["cleanup"]["owned_descendants"] == [descendant]
+    assert receipt["cleanup"]["owned_descendants_absent"] is False
+
+
+def test_compatibility_listener_evidence_is_explicitly_sampled_not_exhaustive():
+    evidence = _runtime_process_evidence({}, {}, {})
+
+    assert evidence["owned_listeners"] == []
+    assert evidence["listener_inventory_samples_complete"] is True
+    assert evidence["listener_sampling_exhaustive"] is False
+    assert evidence["listener_evidence_scope"] == "observed_samples_only"
+
+
 def test_production_runtime_guards_survive_python_optimization():
     assert_statements = []
-    for path in (ROOT / "src").rglob("*.py"):
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        assert_statements.extend(
-            f"{path.relative_to(ROOT)}:{node.lineno}"
-            for node in ast.walk(tree)
-            if isinstance(node, ast.Assert)
-        )
+    for package in ("comsol_mcp", "src"):
+        for path in (ROOT / package).rglob("*.py"):
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            assert_statements.extend(
+                f"{path.relative_to(ROOT)}:{node.lineno}"
+                for node in ast.walk(tree)
+                if isinstance(node, ast.Assert)
+            )
     assert assert_statements == []
 
     code = """
@@ -164,10 +415,15 @@ def test_support_matrix_matches_frozen_profile_counts_and_declared_dependencies(
     dependencies = "\n".join(pyproject["project"]["dependencies"])
     for package in ("matplotlib", "mcp", "mph", "numpy", "pydantic", "psutil", "scipy"):
         assert re.search(rf"(?m)^{package}(?:[<>=]|$)", dependencies)
-    assert any(item.startswith("build>=") for item in pyproject["project"]["optional-dependencies"]["dev"])
+    assert any(
+        item.startswith("build>=") for item in pyproject["project"]["optional-dependencies"]["dev"]
+    )
+    assert pyproject["build-system"]["requires"] == ["hatchling==1.31.0"]
+    assert pyproject["project"]["optional-dependencies"]["manuals"] == ["pymupdf>=1.24.0,<2"]
     assert pyproject["project"]["requires-python"] == ">=3.14,<3.15"
     assert pyproject["tool"]["hatch"]["build"]["targets"]["sdist"]["exclude"] == [
-        "/development_kit"
+        "/development_kit",
+        "/.claude",
     ]
 
 
@@ -176,17 +432,13 @@ def test_recommended_profile_migration_records_the_exact_discovery_diff():
     assert migration["profile"] == "wave_optics"
     assert migration["before"] == {
         "tool_count": 68,
-        "tools_removed_from_recommended_surface": [
-            "study_staged_parametric_sweep"
-        ],
+        "tools_removed_from_recommended_surface": ["study_staged_parametric_sweep"],
     }
     assert migration["after"] == {
         "tool_count": 67,
         "tools_added_to_recommended_surface": [],
     }
-    assert migration["replacement"] == (
-        "job_submit/job_status/job_tail/job_cancel/job_resume"
-    )
+    assert migration["replacement"] == ("job_submit/job_status/job_tail/job_cancel/job_resume")
     assert migration["restart_required"] is True
 
 
@@ -254,6 +506,34 @@ def test_active_implementation_has_only_enumerated_legacy_phase_codes():
     assert crlf_receipt == receipt
 
 
+def test_planning_code_gate_detects_codes_inside_underscore_identifiers():
+    text = "prefix_" + "H" + "1" + "_suffix = 1"
+    with pytest.raises(RuntimeError, match=r"unexpected=\['sample.py'\]"):
+        verify_planning_code_texts(
+            {"sample.py": text},
+            allowlist={},
+            require_all_allowlisted=True,
+        )
+
+
+def test_planning_code_allowlist_rejects_unknown_top_level_fields(tmp_path):
+    path = tmp_path / "allowlist.json"
+    path.write_text(
+        json.dumps(
+            {
+                "schema_name": "comsol_mcp.planning_code_allowlist",
+                "schema_version": "1.0.0",
+                "entries": [],
+                "entires": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="schema is invalid"):
+        load_planning_code_allowlist(path)
+
+
 def test_public_tracked_text_has_no_user_profile_paths():
     text_suffixes = {".json", ".md", ".py", ".toml", ".yaml", ".yml"}
     for _mode, path_text in _tracked_entries():
@@ -278,7 +558,9 @@ def test_release_integration_fixture_manifest_is_complete_and_sanitized():
         "lexical_manual_retrieval",
     }
     entries = manifest["fixtures"]
-    assert {entry["fixture_id"] for entry in entries} == expected
+    fixture_ids = [entry["fixture_id"] for entry in entries]
+    assert len(fixture_ids) == len(set(fixture_ids))
+    assert set(fixture_ids) == expected
 
     for entry in entries:
         contract_path = FIXTURES / entry["contract"]
@@ -314,6 +596,88 @@ def test_distribution_inventory_rejects_development_kit_members(tmp_path):
     with pytest.raises(RuntimeError, match="forbidden members"):
         _distribution_inventory(contaminated)
 
+    agent_config = tmp_path / "agent-config.whl"
+    with zipfile.ZipFile(agent_config, "w") as archive:
+        archive.writestr(".claude/settings.local.json", "{}\n")
+    with pytest.raises(RuntimeError, match="forbidden members"):
+        _distribution_inventory(agent_config)
+
+
+def test_distribution_artifacts_require_one_wheel_and_one_sdist(tmp_path):
+    wheel = tmp_path / "package-1-py3-none-any.whl"
+    sdist = tmp_path / "package-1.tar.gz"
+    wheel.touch()
+    sdist.touch()
+    assert _distribution_artifacts(tmp_path) == [wheel, sdist]
+
+    (tmp_path / "package-2-py3-none-any.whl").touch()
+    with pytest.raises(RuntimeError, match="exactly one wheel and one sdist"):
+        _distribution_artifacts(tmp_path)
+
+
+def test_distribution_inventory_rejects_archive_links(tmp_path):
+    symlink_wheel = tmp_path / "linked.whl"
+    with zipfile.ZipFile(symlink_wheel, "w") as archive:
+        info = zipfile.ZipInfo("comsol_mcp/alias.py")
+        info.create_system = 3
+        info.external_attr = 0o120777 << 16
+        archive.writestr(info, "target.py")
+    with pytest.raises(RuntimeError, match="link member"):
+        _distribution_inventory(symlink_wheel)
+
+    hardlink_sdist = tmp_path / "package-1.tar.gz"
+    with tarfile.open(hardlink_sdist, "w:gz") as archive:
+        payload = b"pass\n"
+        source = tarfile.TarInfo("package-1/comsol_mcp/source.py")
+        source.size = len(payload)
+        archive.addfile(source, io.BytesIO(payload))
+        link = tarfile.TarInfo("package-1/comsol_mcp/alias.py")
+        link.type = tarfile.LNKTYPE
+        link.linkname = source.name
+        archive.addfile(link)
+    with pytest.raises(RuntimeError, match="link member"):
+        _distribution_inventory(hardlink_sdist)
+
+
+def test_distribution_inventory_rejects_normalized_name_collisions(tmp_path):
+    wheel = tmp_path / "duplicate.whl"
+    with zipfile.ZipFile(wheel, "w") as archive:
+        archive.writestr("comsol_mcp/first.py", "first\n")
+        archive.writestr("comsol_mcp/./first.py", "second\n")
+    with pytest.raises(RuntimeError, match="duplicate normalized paths"):
+        _distribution_inventory(wheel)
+
+    sdist = tmp_path / "package-1.tar.gz"
+    with tarfile.open(sdist, "w:gz") as archive:
+        for name, payload in (
+            ("package-1/comsol_mcp/first.py", b"first\n"),
+            ("package-1/comsol_mcp/./first.py", b"second\n"),
+        ):
+            member = tarfile.TarInfo(name)
+            member.size = len(payload)
+            archive.addfile(member, io.BytesIO(payload))
+    with pytest.raises(RuntimeError, match="duplicate normalized paths"):
+        _distribution_inventory(sdist)
+
+
+def test_sdist_inventory_requires_its_exact_filename_root(tmp_path):
+    valid = tmp_path / "package-1.tar.gz"
+    with tarfile.open(valid, "w:gz") as archive:
+        payload = b"pass\n"
+        member = tarfile.TarInfo("package-1/comsol_mcp/server.py")
+        member.size = len(payload)
+        archive.addfile(member, io.BytesIO(payload))
+    assert _distribution_inventory(valid)["member_count"] == 1
+
+    invalid = tmp_path / "package-2.tar.gz"
+    with tarfile.open(invalid, "w:gz") as archive:
+        payload = b"pass\n"
+        member = tarfile.TarInfo("comsol_mcp-unrelated/comsol_mcp/server.py")
+        member.size = len(payload)
+        archive.addfile(member, io.BytesIO(payload))
+    with pytest.raises(RuntimeError, match="outside the exact archive root"):
+        _distribution_inventory(invalid)
+
 
 def test_distribution_inventory_enforces_frozen_planning_codes_and_private_paths(tmp_path):
     legacy = tmp_path / "legacy.whl"
@@ -322,9 +686,7 @@ def test_distribution_inventory_enforces_frozen_planning_codes_and_private_paths
             "comsol_mcp/evidence/reference_power_acceptance.py",
             (ROOT / "comsol_mcp" / "evidence" / "reference_power_acceptance.py").read_bytes(),
         )
-    assert _distribution_inventory(legacy)["planning_code_gate"][
-        "matched_occurrence_count"
-    ] == 31
+    assert _distribution_inventory(legacy)["planning_code_gate"]["matched_occurrence_count"] == 31
 
     unexpected = tmp_path / "unexpected.whl"
     with zipfile.ZipFile(unexpected, "w") as archive:
@@ -346,45 +708,88 @@ def test_distribution_inventory_enforces_frozen_planning_codes_and_private_paths
 
 
 def test_hosted_ci_is_dependency_only_and_real_gate_is_explicit():
-    workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-    dependency_report = (
-        ROOT / ".github" / "workflows" / "dependency_report.yml"
-    ).read_text(encoding="utf-8")
-    real_gate = (
-        ROOT / "development_kit" / "scripts" / "run_real_release_gate.py"
-    ).read_text(encoding="utf-8")
-
-    assert "python -m pytest -q" in workflow
-    assert "python -m build" in workflow
-    assert "release_gate.py --skip-tests" in workflow
-    action_references = re.findall(
-        r"(?m)^\s*- uses: (actions/(?:checkout|setup-python))@([^\s]+)$",
-        workflow + "\n" + dependency_report,
+    workflow_path = ROOT / ".github" / "workflows" / "ci.yml"
+    workflow = workflow_path.read_text(encoding="utf-8")
+    workflow_data = yaml.safe_load(workflow)
+    dependency_report = (ROOT / ".github" / "workflows" / "dependency_report.yml").read_text(
+        encoding="utf-8"
     )
+    dependency_report_data = yaml.safe_load(dependency_report)
+    real_gate = (ROOT / "development_kit" / "scripts" / "run_real_release_gate.py").read_text(
+        encoding="utf-8"
+    )
+    quality_gate = (ROOT / "development_kit" / "scripts" / "quality_gate.py").read_text(
+        encoding="utf-8"
+    )
+
+    jobs = workflow_data["jobs"]
+    dependency_job = jobs["dependency-compatibility"]
+    unit_job = jobs["unit-and-package-py314"]
+    dependency_steps = dependency_job["steps"]
+    dependency_commands = "\n".join(
+        str(step.get("run", "")) for step in dependency_steps if isinstance(step, dict)
+    )
+    unit_commands = "\n".join(
+        str(step.get("run", "")) for step in unit_job["steps"] if isinstance(step, dict)
+    )
+    security_job = jobs["locked-runtime-security"]
+    security_commands = "\n".join(
+        str(step.get("run", "")) for step in security_job["steps"] if isinstance(step, dict)
+    )
+    all_commands = "\n".join(
+        str(step.get("run", ""))
+        for job in jobs.values()
+        for step in job["steps"]
+        if isinstance(step, dict)
+    )
+
+    assert "python -u -m pytest -vv" in dependency_commands
+    assert " -n " not in dependency_commands
+    assert 'os.environ.get("GITHUB_ACTIONS", "").casefold() == "true"' in quality_gate
+    assert "python -m build" in unit_commands
+    assert "release_gate.py --skip-tests" in unit_commands
+    action_references = [
+        step["uses"].split("@", 1)
+        for document in (workflow_data, dependency_report_data)
+        for job in document["jobs"].values()
+        for step in job["steps"]
+        if "uses" in step
+    ]
     assert len(action_references) == 10
     assert all(re.fullmatch(r"[0-9a-f]{40}", revision) for _action, revision in action_references)
     assert "# actions/checkout v7.0.0" in workflow
     assert "# actions/setup-python v6.2.0" in workflow
     assert "# actions/checkout v7.0.0" in dependency_report
     assert "# actions/setup-python v6.2.0" in dependency_report
-    assert "continue-on-error" not in workflow
-    assert "Python 3.14, default production lane" in workflow
-    assert "dependency compatibility (${{ matrix.lane }}, Python 3.14)" in workflow
-    assert "matrix:" in workflow
-    assert "minimum-supported" in workflow
-    assert "current-compatible" in workflow
-    assert "constraints/minimum_supported_py314.txt" in workflow
-    assert "--upgrade-strategy eager" in workflow
-    assert "locked runtime vulnerability policy" in workflow
-    assert 'pip-audit==2.10.1' in workflow
-    assert "constraints/release_locked_py314.txt --no-deps --format json" in workflow
-    assert "vulnerability_allowlist.json" in workflow
-    assert "security_gate.py" in workflow
-    assert "dependency_license_gate.py" in workflow
-    assert "dependency_license_review.json" in workflow
-    assert "quality_gate.py" in workflow
-    assert "release_locked_py314.txt" in workflow
-    assert "-m integration" not in workflow
+    assert all("continue-on-error" not in step for job in jobs.values() for step in job["steps"])
+    assert unit_job["name"] == "unit-and-package (Python 3.14, default production lane)"
+    assert dependency_job["name"] == ("dependency compatibility (${{ matrix.lane }}, Python 3.14)")
+    assert dependency_job["timeout-minutes"] == 15
+    assert dependency_job["strategy"]["matrix"]["lane"] == [
+        "minimum-supported",
+        "current-compatible",
+    ]
+    assert dependency_steps[-1]["env"]["PYTHONUNBUFFERED"] == "1"
+    assert "-o faulthandler_timeout=120" in dependency_commands
+    assert "--basetemp D:\\comsol_pytest\\dependency-main" in dependency_commands
+    assert "New-Item -ItemType Directory -Force -Path D:\\comsol_pytest" in dependency_commands
+    assert "--ignore development_kit/tests/test_control_plane_startup.py" in dependency_commands
+    assert "test_control_plane_startup.py --basetemp" in dependency_commands
+    assert any(
+        "constraints/minimum_supported_py314.txt" in str(step.get("run", ""))
+        for step in dependency_steps
+    )
+    assert "--upgrade-strategy eager" in dependency_commands
+    assert security_job["name"] == "locked runtime vulnerability policy"
+    assert "pip-audit==2.10.1" in security_commands
+    assert "constraints/release_locked_py314.txt --no-deps --format json" in security_commands
+    assert "vulnerability_allowlist.json" in security_commands
+    assert "security_gate.py" in security_commands
+    assert "dependency_license_gate.py" in dependency_commands
+    assert "dependency_license_review.json" in dependency_commands
+    assert "quality_gate.py" in unit_commands
+    assert "release_locked_py314.txt" in unit_commands
+    assert "-m integration" not in all_commands
     assert "RUN_REAL_COMSOL" in real_gate
     assert 'choices=["RUN_REAL_COMSOL"]' in real_gate
 
@@ -393,14 +798,14 @@ def test_release_dependency_lock_is_complete_and_matches_current_lane(tmp_path):
     lane = f"{__import__('sys').version_info.major}.{__import__('sys').version_info.minor}"
     lock = tmp_path / "lock.txt"
     lock.write_text(
-        f"# Python-Lane: {lane}\nexample==1.0 \\\n"
-        "    --hash=sha256:" + "a" * 64 + "\n",
+        f"# Python-Lane: {lane}\nexample==1.0 \\\n    --hash=sha256:" + "a" * 64 + "\n",
         encoding="utf-8",
     )
     assert _lock_lane(lock) == lane
     assert _validated_dependency_lock(lock) == lock.resolve()
 
     rendered = _render_lock(
+        platform_name=lock_generator.SUPPORTED_RELEASE_PLATFORM,
         lane=lane,
         python_version=f"{lane}.0",
         pins=["example==1.0"],
@@ -419,6 +824,119 @@ def test_release_dependency_lock_is_complete_and_matches_current_lane(tmp_path):
     assert len(requirement_lines) >= 40
     assert all(re.fullmatch(r"[a-z0-9-]+==[^ ]+ \\", line) for line in requirement_lines)
     assert lock_text.count("--hash=sha256:") >= len(requirement_lines)
+
+
+def test_release_lock_rejects_unhashed_direct_reference_dependencies():
+    assert lock_generator._runtime_pins("comsol-mcp @ file:///tmp/root.whl\nexample==1.2.3\n") == [
+        "example==1.2.3"
+    ]
+
+    with pytest.raises(RuntimeError, match="non-exact pip freeze entry"):
+        lock_generator._runtime_pins("example @ https://packages.invalid/example-1.2.3.whl\n")
+
+
+def test_installed_profiles_must_share_one_release_inventory():
+    first = {"schema_registry_sha256": "a" * 64, "schema_entry_count": 10}
+    assert (
+        installed_package_probe._bind_release_inventory(
+            None,
+            first,
+            profile="core",
+        )
+        == first
+    )
+    assert (
+        installed_package_probe._bind_release_inventory(
+            first,
+            dict(first),
+            profile="full",
+        )
+        is first
+    )
+    with pytest.raises(AssertionError, match="release inventory differs"):
+        installed_package_probe._bind_release_inventory(
+            first,
+            {**first, "schema_entry_count": 11},
+            profile="full",
+        )
+
+
+def test_release_receipt_accepts_external_lock_and_probes_drop_pythonpath(
+    tmp_path,
+    monkeypatch,
+):
+    external = (tmp_path / "external-lock.txt").resolve()
+    assert _dependency_lock_location(external) == {
+        "path": str(external),
+        "path_scope": "absolute_external",
+    }
+
+    monkeypatch.setenv("PYTHONPATH", str(tmp_path / "shadow"))
+    assert "PYTHONPATH" not in _sanitized_probe_environment()
+    source = Path(release_gate_module.__file__).read_text(encoding="utf-8")
+    assert source.count("env=environment") == 3
+
+
+def test_release_lock_binds_the_declared_platform_to_the_target_interpreter(monkeypatch):
+    calls = []
+
+    def fake_run(command, *, cwd=lock_generator.ROOT, capture=False):
+        calls.append((command, cwd, capture))
+        return "win-amd64\n"
+
+    monkeypatch.setattr(lock_generator, "_run", fake_run)
+    target = Path("C:/Python314/python.exe")
+
+    assert lock_generator._validated_target_platform(target) == "win-amd64"
+    assert calls == [
+        (
+            [str(target), "-c", "import sysconfig; print(sysconfig.get_platform())"],
+            lock_generator.ROOT,
+            True,
+        )
+    ]
+
+
+@pytest.mark.parametrize("platform_name", ["win32", "win-arm64", "linux-x86_64", ""])
+def test_release_lock_rejects_a_non_amd64_target_interpreter(monkeypatch, platform_name):
+    monkeypatch.setattr(lock_generator, "_run", lambda *_args, **_kwargs: platform_name)
+
+    with pytest.raises(SystemExit, match="win-amd64 target interpreter"):
+        lock_generator._validated_target_platform(Path("C:/Python314/python.exe"))
+
+
+def test_release_lock_installs_from_the_exact_downloaded_wheelhouse(tmp_path, monkeypatch):
+    source = tmp_path / "comsol_mcp-0.2.0-py3-none-any.whl"
+    source.write_bytes(b"root-wheel")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    commands = []
+
+    def fake_run(command, *, cwd=lock_generator.ROOT, capture=False):
+        commands.append(list(command))
+        if "download" in command:
+            destination = Path(command[command.index("--dest") + 1])
+            (destination / source.name).write_bytes(source.read_bytes())
+            (destination / "example-1.0-py3-none-any.whl").write_bytes(b"dependency-wheel")
+        if "freeze" in command:
+            return "comsol-mcp==0.2.0\nexample==1.0\n"
+        return ""
+
+    monkeypatch.setattr(lock_generator, "_run", fake_run)
+
+    _python, download_dir, freeze = lock_generator._resolve_and_install_wheelhouse(
+        Path("C:/Python314/python.exe"), source, workspace
+    )
+
+    download_index = next(index for index, command in enumerate(commands) if "download" in command)
+    install_index = next(index for index, command in enumerate(commands) if "install" in command)
+    install = commands[install_index]
+    assert download_index < install_index
+    assert "--no-index" in install
+    assert install[install.index("--find-links") + 1] == str(download_dir)
+    assert Path(install[-1]).parent == download_dir
+    assert Path(install[-1]).read_bytes() == source.read_bytes()
+    assert freeze == "comsol-mcp==0.2.0\nexample==1.0\n"
 
 
 def test_minimum_supported_lane_matches_reviewed_manifest_and_package_ranges():
@@ -476,9 +994,9 @@ def test_python_compatibility_gate_requires_exact_backend_and_clean_control_plan
 
 
 def test_installed_probe_checks_every_profile_without_solver_or_heavy_imports():
-    probe = (
-        ROOT / "development_kit" / "scripts" / "installed_package_probe.py"
-    ).read_text(encoding="utf-8")
+    probe = (ROOT / "development_kit" / "scripts" / "installed_package_probe.py").read_text(
+        encoding="utf-8"
+    )
 
     assert "for profile in PROFILE_NAMES" in probe
     assert "snapshot_tool_schemas" in probe
@@ -486,12 +1004,10 @@ def test_installed_probe_checks_every_profile_without_solver_or_heavy_imports():
     assert "release_inventories" in probe
     assert "installed_site_package" in probe
     assert "installed-package discovery must not start COMSOL" in probe
-    assert {"chromadb", "sentence_transformers", "torch"} <= set(
-        re.findall(r'"([a-z_]+)"', probe)
+    assert {"chromadb", "sentence_transformers", "torch"} <= set(re.findall(r'"([a-z_]+)"', probe))
+    release_gate = (ROOT / "development_kit" / "scripts" / "release_gate.py").read_text(
+        encoding="utf-8"
     )
-    release_gate = (
-        ROOT / "development_kit" / "scripts" / "release_gate.py"
-    ).read_text(encoding="utf-8")
     assert "sbom.cdx.json" in release_gate
     assert "release_gate_receipt" in release_gate
     assert "receipt_sha256" in release_gate
@@ -501,9 +1017,9 @@ def test_installed_probe_checks_every_profile_without_solver_or_heavy_imports():
 
 
 def test_release_documentation_requires_restart_and_clean_tree():
-    checklist = (
-        ROOT / "development_kit" / "docs" / "release_checklist.md"
-    ).read_text(encoding="utf-8")
+    checklist = (ROOT / "development_kit" / "docs" / "release_checklist.md").read_text(
+        encoding="utf-8"
+    )
     migration = (ROOT / "docs" / "profile_migration.md").read_text(encoding="utf-8")
 
     assert "clean tree" in checklist

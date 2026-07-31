@@ -33,10 +33,14 @@ Optics、材料与边界、durable jobs、物理证据、资源安全和故障�
 
 ## Client 兼容性与部署
 
-安装后的 FastMCP stdio server 已通过 Codex CLI 和 opencode 验证。按照标准 stdio
-配置，它在理论上兼容 Claude Code 和 Hermes Agent，但本项目尚未对这两个 client
-完成端到端测试；欢迎提交测试结果和 PR。全新安装、精确配置路径、profile 选择、
-重启规则和 solver-free 验证请阅读独立指南：
+安装后的 FastMCP stdio server 已通过 Codex CLI 和 opencode 验证。Windows 11 上的
+Claude Code 2.1.220 验收已完成 stdio 初始化，发现测试所用 `wave_optics` profile 的
+全部 67 个工具，并成功调用 `capabilities`、`comsol_status` 和 `solver_status`；server
+干净退出，未创建 solver lease，也未启动 COMSOL 进程。该结论只覆盖 client transport、
+schema、discovery 和非启动 status 兼容性，不是 licensed runtime 验收：Claude 未调用
+`comsol_start`、未运行模型、未覆盖完整错误界面，也未证明 start/solve/cleanup。
+Hermes Agent 仍只有配置层指导，尚无端到端 client 测试。全新安装、精确配置路径、
+profile 选择、重启规则和 solver-free 验证请阅读独立指南：
 
 - [部署指南](DEPLOYMENT_CN.md)
 
@@ -45,13 +49,14 @@ Optics、材料与边界、durable jobs、物理证据、资源安全和故障�
 client；保持 COMSOL 工具串行。调用 `capabilities` 可在不启动 COMSOL 的情况下
 验证实际部署的 profile。
 
-未经测试的 client 配置依据 Claude Code 官方
+仓库内的 client 示例依据 Claude Code 官方
 [MCP 文档](https://code.claude.com/docs/en/mcp)、Hermes 官方
 [MCP 文档](https://github.com/NousResearch/hermes-agent/blob/main/website/docs/user-guide/features/mcp.md)
 和 [client 源码](https://github.com/NousResearch/hermes-agent/blob/main/tools/mcp_tool.py)
-编写。这只表示配置层面的理论兼容，不构成验证声明。真实 client acceptance 报告应
-至少包含不启动 COMSOL 的 `initialize`、`list_tools` 和 `capabilities` 回读。
-已安装工具界面以实时 discovery 为准，不以文档中复制的数量为准。
+编写。一个示例在其精确 client 路径被实际执行前只属于配置指导。真实 client
+acceptance 报告应至少包含不启动 COMSOL 的 `initialize`、实时 `list_tools` 和
+`capabilities` 回读，并把 licensed start/solve/cleanup 覆盖单独标注。已安装工具界面
+以实时 discovery 为准，不以文档中复制的数量为准。
 
 ## 主要能力
 
@@ -121,6 +126,11 @@ experimental 兼容界面，不能替代受保护的 shared-session 生命周期
 当检测到外部 MPh/COMSOL 所有者或有效租约时，服务器会拒绝继续启动。`solver_recover_stale_lease` 只有在进程身份信息证明租约过期时才移除它，绝不会终止不属于本服务器的进程。
 
 持久化扫描控制工具为 `job_submit`、`job_status`、`job_tail`、`job_cancel` 和 `job_resume`。每个任务在 ASCII-only runtime 目录中保存不可变规格、状态、CSV 日志、检查点和日志文件。恢复时只接受规格一致、数值有限且成功完成的行。只有 worker/相关进程清理和租约释放都得到验证后，取消才会进入终态。此协调机制仅适用于同一台主机上共享 runtime 目录的任务，不是分布式或跨主机取消。
+
+交互式 `mesh_convergence_study` 也会在 CSV 旁写入 manifest。对已有日志执行
+resume 或 append 时必须提供 `source_model_path`；只有源文件哈希、study、表达式、
+参数设置、mesh identity 以及每个 level 的精确 properties 全部一致，已完成 level
+才会被跳过。CSV 或 checkpoint 持久化失败是该 level 的终止结果，不会再次求解。
 
 自适应光谱任务使用 `job_type: "spectral_characterization"`，并显式声明
 源模型/配置身份、初始波长网格、扩展与细化 policy、collector 配置、科学容差，

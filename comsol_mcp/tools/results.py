@@ -1,8 +1,14 @@
 """Results evaluation and export tools for COMSOL MCP Server."""
 
-from typing import Any, Optional, Union, Sequence
+import math
+import os
+import uuid
+from pathlib import Path
+from typing import Any, Optional, Sequence, Union
 
 from mcp.server.fastmcp import FastMCP
+
+from comsol_mcp.durable.io import publish_file_exclusive
 
 from .session import session_manager
 
@@ -21,7 +27,11 @@ def _json_safe(value: Any) -> Any:
     if isinstance(value, np.generic):
         return _json_safe(value.item())
     if isinstance(value, complex):
+        if not math.isfinite(value.real) or not math.isfinite(value.imag):
+            raise ValueError("result values must be finite")
         return {"real": float(value.real), "imag": float(value.imag)}
+    if isinstance(value, float) and not math.isfinite(value):
+        raise ValueError("result values must be finite")
     if isinstance(value, tuple):
         return [_json_safe(item) for item in value]
     if isinstance(value, list):
@@ -29,6 +39,14 @@ def _json_safe(value: Any) -> Any:
     if isinstance(value, dict):
         return {str(key): _json_safe(item) for key, item in value.items()}
     return value
+
+
+def _json_safe_solution_axis(values: Any) -> list[Any]:
+    raw_values = values.tolist() if hasattr(values, "tolist") else list(values)
+    normalized = _json_safe(raw_values)
+    if not isinstance(normalized, list):
+        raise ValueError("solution axis values must be a list")
+    return normalized
 
 
 def evaluate_result(
@@ -73,6 +91,8 @@ def evaluate_global_result(
     array = np.asarray(result)
     if array.size == 0:
         raise ValueError("Global evaluation returned no values.")
+    if array.size != 1:
+        raise ValueError("Global evaluation must return exactly one value.")
     value = _json_safe(array.reshape(-1)[0])
     return {
         "success": True,
@@ -82,9 +102,28 @@ def evaluate_global_result(
     }
 
 
+def export_result_file(model, node_name: str | None, file_path: str) -> str:
+    """Export through a complete staging file before publishing the destination."""
+    path = Path(file_path).expanduser().resolve()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    overwrite = path.exists()
+    staging = path.with_name(f".{path.name}.{uuid.uuid4().hex}.export")
+    try:
+        model.export(node_name, str(staging))
+        if not staging.is_file():
+            raise RuntimeError("result export did not create the staging artifact")
+        if overwrite:
+            os.replace(staging, path)
+        else:
+            publish_file_exclusive(staging, path)
+    finally:
+        staging.unlink(missing_ok=True)
+    return str(path)
+
+
 def register_results_tools(mcp: FastMCP) -> None:
     """Register results tools with the MCP server."""
-    
+
     @mcp.tool()
     def results_evaluate(
         expression: Union[str, Sequence[str]],
@@ -92,11 +131,11 @@ def register_results_tools(mcp: FastMCP) -> None:
         dataset: Optional[str] = None,
         inner: Optional[Union[int, str, Sequence[int]]] = None,
         outer: Optional[Union[int, Sequence[int]]] = None,
-        model_name: Optional[str] = None
+        model_name: Optional[str] = None,
     ) -> dict:
         """
         Evaluate an expression on a solution dataset.
-        
+
         Args:
             expression: Expression(s) to evaluate, e.g., "es.normE" or ["x", "y", "es.normE"]
             unit: Desired unit for result, e.g., "V/m", "pF"
@@ -104,7 +143,7 @@ def register_results_tools(mcp: FastMCP) -> None:
             inner: For time-dependent solutions: index, 'first', 'last', or list of indices
             outer: For parametric sweeps: index or list of indices
             model_name: Model name (default: current model)
-        
+
         Returns:
             Evaluated values as lists, or error message
         """
@@ -112,9 +151,9 @@ def register_results_tools(mcp: FastMCP) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
-        
+
         try:
             return evaluate_result(
                 model,
@@ -126,28 +165,28 @@ def register_results_tools(mcp: FastMCP) -> None:
             )
         except Exception as e:
             return {"success": False, "error": f"Failed to evaluate: {str(e)}"}
-    
+
     @mcp.tool()
     def results_global_evaluate(
         expression: str,
         unit: Optional[str] = None,
         dataset: Optional[str] = None,
-        model_name: Optional[str] = None
+        model_name: Optional[str] = None,
     ) -> dict:
         """
         Evaluate a global expression (returns a single scalar value).
-        
+
         Common global expressions include:
         - Integration: "intop1(T)" where intop1 is an integration operator
-        - Maximum: "maxop1(T)" 
+        - Maximum: "maxop1(T)"
         - Derived values: "2*es.intWe/U^2" for capacitance
-        
+
         Args:
             expression: Global expression to evaluate
             unit: Desired unit for result
             dataset: Dataset name
             model_name: Model name (default: current model)
-        
+
         Returns:
             Single numerical value
         """
@@ -155,9 +194,9 @@ def register_results_tools(mcp: FastMCP) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
-        
+
         try:
             return evaluate_global_result(
                 model,
@@ -167,19 +206,18 @@ def register_results_tools(mcp: FastMCP) -> None:
             )
         except Exception as e:
             return {"success": False, "error": f"Failed to evaluate global expression: {str(e)}"}
-    
+
     @mcp.tool()
     def results_inner_values(
-        dataset: Optional[str] = None,
-        model_name: Optional[str] = None
+        dataset: Optional[str] = None, model_name: Optional[str] = None
     ) -> dict:
         """
         Get inner solution indices and values (time steps in time-dependent study).
-        
+
         Args:
             dataset: Dataset name (default: default dataset)
             model_name: Model name (default: current model)
-        
+
         Returns:
             Arrays of indices and corresponding values (e.g., time values)
         """
@@ -187,34 +225,35 @@ def register_results_tools(mcp: FastMCP) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
-        
+
         try:
             indices, values = model.inner(dataset)
-            
+            normalized_indices = _json_safe_solution_axis(indices)
+            normalized_values = _json_safe_solution_axis(values)
+
             return {
                 "success": True,
                 "dataset": dataset,
-                "indices": indices.tolist() if hasattr(indices, 'tolist') else list(indices),
-                "values": values.tolist() if hasattr(values, 'tolist') else list(values),
-                "count": len(values),
+                "indices": normalized_indices,
+                "values": normalized_values,
+                "count": len(normalized_values),
             }
         except Exception as e:
             return {"success": False, "error": f"Failed to get inner values: {str(e)}"}
-    
+
     @mcp.tool()
     def results_outer_values(
-        dataset: Optional[str] = None,
-        model_name: Optional[str] = None
+        dataset: Optional[str] = None, model_name: Optional[str] = None
     ) -> dict:
         """
         Get outer solution indices and values (parameter values in parametric sweep).
-        
+
         Args:
             dataset: Dataset name (default: default dataset)
             model_name: Model name (default: current model)
-        
+
         Returns:
             Arrays of indices and corresponding parameter values
         """
@@ -222,36 +261,38 @@ def register_results_tools(mcp: FastMCP) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
-        
+
         try:
             indices, values = model.outer(dataset)
-            
+            normalized_indices = _json_safe_solution_axis(indices)
+            normalized_values = _json_safe_solution_axis(values)
+
             return {
                 "success": True,
                 "dataset": dataset,
-                "indices": indices.tolist() if hasattr(indices, 'tolist') else list(indices),
-                "values": values.tolist() if hasattr(values, 'tolist') else list(values),
-                "count": len(values),
+                "indices": normalized_indices,
+                "values": normalized_values,
+                "count": len(normalized_values),
             }
         except Exception as e:
             return {"success": False, "error": f"Failed to get outer values: {str(e)}"}
-    
+
     @mcp.tool()
     def results_export_data(
         node_name: Optional[str] = None,
         file_path: Optional[str] = None,
-        model_name: Optional[str] = None
+        model_name: Optional[str] = None,
     ) -> dict:
         """
         Export data from an export node.
-        
+
         Args:
             node_name: Export node name (default: run all exports)
             file_path: Output file path (overrides node setting)
             model_name: Model name (default: current model)
-        
+
         Returns:
             Export confirmation with file path
         """
@@ -259,35 +300,39 @@ def register_results_tools(mcp: FastMCP) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
-        
+
         try:
-            model.export(node_name, file_path)
-            
+            if file_path is None:
+                model.export(node_name, file_path)
+                exported = None
+            else:
+                exported = export_result_file(model, node_name, file_path)
+
             return {
                 "success": True,
                 "node": node_name,
-                "file": file_path,
+                "file": exported,
                 "message": f"Export completed: {node_name or 'all exports'}",
             }
         except Exception as e:
             return {"success": False, "error": f"Failed to export data: {str(e)}"}
-    
+
     @mcp.tool()
     def results_export_image(
         node_name: Optional[str] = None,
         file_path: Optional[str] = None,
-        model_name: Optional[str] = None
+        model_name: Optional[str] = None,
     ) -> dict:
         """
         Export a plot as an image.
-        
+
         Args:
             node_name: Plot export node name
             file_path: Output image path (e.g., "results.png", "field.png")
             model_name: Model name (default: current model)
-        
+
         Returns:
             Export confirmation with file path
         """
@@ -295,29 +340,33 @@ def register_results_tools(mcp: FastMCP) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
-        
+
         try:
-            model.export(node_name, file_path)
-            
+            if file_path is None:
+                model.export(node_name, file_path)
+                exported = None
+            else:
+                exported = export_result_file(model, node_name, file_path)
+
             return {
                 "success": True,
                 "node": node_name,
-                "file": file_path,
-                "message": f"Image exported to: {file_path}",
+                "file": exported,
+                "message": f"Image exported to: {exported}",
             }
         except Exception as e:
             return {"success": False, "error": f"Failed to export image: {str(e)}"}
-    
+
     @mcp.tool()
     def results_exports_list(model_name: Optional[str] = None) -> dict:
         """
         List all export nodes defined in a model.
-        
+
         Args:
             model_name: Model name (default: current model)
-        
+
         Returns:
             List of export node names
         """
@@ -325,9 +374,9 @@ def register_results_tools(mcp: FastMCP) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
-        
+
         try:
             exports = model.exports()
             return {
@@ -337,15 +386,15 @@ def register_results_tools(mcp: FastMCP) -> None:
             }
         except Exception as e:
             return {"success": False, "error": f"Failed to list exports: {str(e)}"}
-    
+
     @mcp.tool()
     def results_plots_list(model_name: Optional[str] = None) -> dict:
         """
         List all plot nodes defined in a model.
-        
+
         Args:
             model_name: Model name (default: current model)
-        
+
         Returns:
             List of plot node names
         """
@@ -353,9 +402,9 @@ def register_results_tools(mcp: FastMCP) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
-        
+
         try:
             plots = model.plots()
             return {

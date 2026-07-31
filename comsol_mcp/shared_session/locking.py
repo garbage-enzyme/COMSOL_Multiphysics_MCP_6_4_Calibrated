@@ -2,27 +2,29 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
 import hashlib
 import math
 import re
+from dataclasses import asdict, dataclass
 from typing import Any, Mapping
 
 from comsol_mcp.durable import canonical_json_v1, canonical_sha256_v1
+from comsol_mcp.utils.immutability import deep_freeze, deep_thaw
 
 from .identity import (
-    AttachedServerIdentity,
     MAX_MODEL_LABEL_CHARACTERS,
     MAX_MODEL_TAG_CHARACTERS,
+    AttachedServerIdentity,
     _normalize_confirmed_model_path,
+    normalize_attached_server_identity,
 )
-
 
 SHARED_MODEL_LOCK_SCHEMA = "comsol_mcp.shared_model_lock"
 SHARED_MODEL_LOCK_VERSION = "1.0.0"
 MAX_REVISION_READBACK_BYTES = 64 * 1024
 MAX_REVISION_COLLECTION_ITEMS = 256
 MAX_REVISION_DEPTH = 8
+MAX_REVISION_NODES = 4096
 MAX_REVISION_TEXT_CHARACTERS = 4096
 
 _MODEL_IDENTITY_FIELDS = frozenset({"tag", "label", "file_path", "unsaved"})
@@ -92,7 +94,17 @@ def _hex64(value: Any, label: str) -> str:
     return value.casefold()
 
 
-def _normalize_json_value(value: Any, label: str, depth: int = 0) -> Any:
+def _normalize_json_value(
+    value: Any,
+    label: str,
+    depth: int = 0,
+    remaining: list[int] | None = None,
+) -> Any:
+    if remaining is None:
+        remaining = [MAX_REVISION_NODES]
+    remaining[0] -= 1
+    if remaining[0] < 0:
+        raise ValueError(f"{label} exceeds the aggregate node limit")
     if depth > MAX_REVISION_DEPTH:
         raise ValueError(f"{label} exceeds the maximum nesting depth")
     if value is None or isinstance(value, bool) or isinstance(value, int):
@@ -111,16 +123,19 @@ def _normalize_json_value(value: Any, label: str, depth: int = 0) -> Any:
         if len(value) > MAX_REVISION_COLLECTION_ITEMS:
             raise ValueError(f"{label} contains an oversized list")
         return [
-            _normalize_json_value(item, f"{label}[{index}]", depth + 1)
+            _normalize_json_value(item, f"{label}[{index}]", depth + 1, remaining)
             for index, item in enumerate(value)
         ]
     if isinstance(value, Mapping) and all(isinstance(key, str) for key in value):
         if len(value) > MAX_REVISION_COLLECTION_ITEMS:
             raise ValueError(f"{label} contains an oversized object")
-        return {
-            key: _normalize_json_value(item, f"{label}.{key}", depth + 1)
-            for key, item in sorted(value.items())
-        }
+        normalized = {}
+        for key, item in sorted(value.items()):
+            _normalize_json_value(key, f"{label}.<key>", depth + 1, remaining)
+            normalized[key] = _normalize_json_value(
+                item, f"{label}.{key}", depth + 1, remaining
+            )
+        return normalized
     raise ValueError(f"{label} must contain only bounded JSON values")
 
 
@@ -178,8 +193,20 @@ class SharedModelLock:
     mcp_process: dict[str, Any]
     lock_sha256: str
 
+    def __post_init__(self) -> None:
+        for name in (
+            "attached_server",
+            "model",
+            "revision",
+            "immutable_source",
+            "mcp_process",
+        ):
+            value = getattr(self, name)
+            if value is not None:
+                object.__setattr__(self, name, deep_freeze(value))
+
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        return deep_thaw(asdict(self))
 
 
 def normalize_shared_model_identity(value: Any) -> SharedModelIdentity:
@@ -254,6 +281,88 @@ def _normalize_immutable_source(value: Any) -> dict[str, str] | None:
     }
 
 
+def _normalize_lock_server_identity(
+    value: AttachedServerIdentity,
+) -> AttachedServerIdentity:
+    if not isinstance(value, AttachedServerIdentity):
+        raise ValueError("attached server must be a normalized server identity")
+    normalized = normalize_attached_server_identity(
+        {
+            "endpoint": {
+                "host": value.endpoint.host,
+                "port": value.endpoint.port,
+            },
+            "server_pid": value.server_pid,
+            "server_process_create_time": value.server_process_create_time,
+            "server_command_signature": value.server_command_signature,
+            "listener_bind_scope": value.listener_bind_scope,
+            "listener_observed_at_epoch": value.listener_observed_at_epoch,
+        }
+    )
+    if value.ownership != "external_user_owned" or (
+        _hex64(value.identity_sha256, "attached server identity SHA-256")
+        != normalized.identity_sha256
+    ):
+        raise ValueError("attached server identity does not match its fields")
+    return normalized
+
+
+def _normalize_lock_model_identity(value: SharedModelIdentity) -> SharedModelIdentity:
+    if not isinstance(value, SharedModelIdentity):
+        raise ValueError("model must be a normalized shared model identity")
+    normalized = normalize_shared_model_identity(
+        {
+            "tag": value.tag,
+            "label": value.label,
+            "file_path": value.file_path,
+            "unsaved": value.unsaved,
+        }
+    )
+    if _hex64(value.identity_sha256, "shared model identity SHA-256") != (
+        normalized.identity_sha256
+    ):
+        raise ValueError("shared model identity does not match its fields")
+    return normalized
+
+
+def _normalize_lock_revision_identity(
+    value: SharedModelRevision,
+    *,
+    model_identity_sha256: str,
+) -> SharedModelRevision:
+    if not isinstance(value, SharedModelRevision):
+        raise ValueError("revision must be a normalized shared model revision")
+    if (
+        isinstance(value.sequence, bool)
+        or not isinstance(value.sequence, int)
+        or value.sequence < 0
+    ):
+        raise ValueError("shared model revision sequence must be a nonnegative integer")
+    body = {
+        "sequence": value.sequence,
+        "model_identity_sha256": _hex64(
+            value.model_identity_sha256,
+            "revision model identity SHA-256",
+        ),
+        "structural_sha256": _hex64(
+            value.structural_sha256,
+            "revision structural SHA-256",
+        ),
+        "readback_sha256": _hex64(
+            value.readback_sha256,
+            "revision readback SHA-256",
+        ),
+    }
+    if body["model_identity_sha256"] != model_identity_sha256:
+        raise ValueError("shared model revision belongs to a different model identity")
+    revision_sha256 = _sha256(body)
+    if _hex64(value.revision_sha256, "shared model revision SHA-256") != (
+        revision_sha256
+    ):
+        raise ValueError("shared model revision identity does not match its fields")
+    return SharedModelRevision(**body, revision_sha256=revision_sha256)
+
+
 def build_shared_model_lock(
     *,
     attached_server: AttachedServerIdentity,
@@ -270,22 +379,30 @@ def build_shared_model_lock(
         session_acquisition_id
     ):
         raise ValueError("session acquisition ID must be exactly 32 hexadecimal characters")
-    if revision.model_identity_sha256 != model.identity_sha256:
-        raise ValueError("shared model revision belongs to a different model identity")
+    server = _normalize_lock_server_identity(attached_server)
+    normalized_model = _normalize_lock_model_identity(model)
+    normalized_revision = _normalize_lock_revision_identity(
+        revision,
+        model_identity_sha256=normalized_model.identity_sha256,
+    )
     if collaboration_mode not in _COLLABORATION_MODES:
         raise ValueError("shared model collaboration mode is unsupported")
     process = _normalize_process_identity(mcp_process)
     source = _normalize_immutable_source(immutable_source)
+    normalized_session_acquisition_id = session_acquisition_id.casefold()
     body = {
         "schema_name": SHARED_MODEL_LOCK_SCHEMA,
         "schema_version": SHARED_MODEL_LOCK_VERSION,
         "lock_id": hashlib.sha256(
-            f"{session_acquisition_id}:{model.identity_sha256}".encode("ascii")
+            (
+                f"{normalized_session_acquisition_id}:"
+                f"{normalized_model.identity_sha256}"
+            ).encode("ascii")
         ).hexdigest()[:32],
-        "attached_server": attached_server.to_dict(),
-        "session_acquisition_id": session_acquisition_id.casefold(),
-        "model": model.to_dict(),
-        "revision": revision.to_dict(),
+        "attached_server": server.to_dict(),
+        "session_acquisition_id": normalized_session_acquisition_id,
+        "model": normalized_model.to_dict(),
+        "revision": normalized_revision.to_dict(),
         "collaboration_mode": collaboration_mode,
         "immutable_source": source,
         "lock_created_at_epoch": _positive_finite(
@@ -299,6 +416,7 @@ def build_shared_model_lock(
 __all__ = [
     "MAX_REVISION_COLLECTION_ITEMS",
     "MAX_REVISION_DEPTH",
+    "MAX_REVISION_NODES",
     "MAX_REVISION_READBACK_BYTES",
     "SHARED_MODEL_LOCK_SCHEMA",
     "SHARED_MODEL_LOCK_VERSION",

@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
-from pathlib import Path
 import re
 import subprocess
 import sys
+import tempfile
+from pathlib import Path
 from typing import Any, Mapping
 
+from comsol_mcp.path_policy import pin_validated_reads, validated_read_pin
 
 MAX_RENDER_VIEWS = 2
 MAX_RENDER_ARRAY_BYTES = 256 * 1024 * 1024
@@ -31,6 +34,43 @@ def _mapping(value: object, label: str) -> dict[str, Any]:
     if not isinstance(value, Mapping) or not all(isinstance(key, str) for key in value):
         raise ValueError(f"{label} must be an object with string keys")
     return dict(value)
+
+
+def _validate_worker_response(
+    value: object, *, expected_view_ids: list[str]
+) -> dict[str, list[float]]:
+    if not isinstance(value, Mapping) or set(value) != {"success", "views"}:
+        raise RuntimeError("field plot worker response is invalid")
+    if value["success"] is not True or not isinstance(value["views"], list):
+        raise RuntimeError("field plot worker response is invalid")
+    if len(value["views"]) != len(expected_view_ids):
+        raise RuntimeError("field plot worker response view count is invalid")
+    limits_by_view: dict[str, list[float]] = {}
+    for item in value["views"]:
+        if not isinstance(item, Mapping) or set(item) != {"view_id", "color_limits"}:
+            raise RuntimeError("field plot worker response view is invalid")
+        view_id = item["view_id"]
+        limits = item["color_limits"]
+        if (
+            not isinstance(view_id, str)
+            or view_id in limits_by_view
+            or not isinstance(limits, list)
+            or len(limits) != 2
+            or any(
+                isinstance(limit, bool)
+                or not isinstance(limit, (int, float))
+                or not math.isfinite(float(limit))
+                for limit in limits
+            )
+        ):
+            raise RuntimeError("field plot worker response view is invalid")
+        normalized_limits = [float(limits[0]), float(limits[1])]
+        if normalized_limits[0] >= normalized_limits[1]:
+            raise RuntimeError("field plot worker response color limits are invalid")
+        limits_by_view[view_id] = normalized_limits
+    if list(limits_by_view) != expected_view_ids:
+        raise RuntimeError("field plot worker response view identities do not match")
+    return limits_by_view
 
 
 def render_field_png_bundle(
@@ -66,6 +106,7 @@ def render_field_png_bundle(
     root = Path(output_root).expanduser().resolve()
     root.mkdir(parents=True, exist_ok=True)
     normalized = []
+    array_pins = []
     seen_ids = set()
     for index, value in enumerate(views):
         item = _mapping(value, f"views[{index}]")
@@ -83,8 +124,7 @@ def render_field_png_bundle(
         array_path = Path(item["array_path"]).expanduser().resolve()
         if not array_path.is_file() or not 0 < array_path.stat().st_size <= MAX_RENDER_ARRAY_BYTES:
             raise ValueError(f"views[{index}].array_path is missing or oversized")
-        if _sha256_file(array_path) != str(item["array_sha256"]).lower():
-            raise ValueError(f"views[{index}] array SHA-256 does not match")
+        array_pins.append(validated_read_pin(array_path, array_path.parent))
         safe_name = hashlib.sha256(view_id.encode("utf-8")).hexdigest()[:16]
         png_path = root / f"{safe_name}.png"
         if png_path.exists():
@@ -108,29 +148,51 @@ def render_field_png_bundle(
         "views": normalized,
     }
     try:
-        completed = subprocess.run(
-            [sys.executable, "-m", "comsol_mcp.evidence.field_plot_worker"],
-            input=json.dumps(payload, ensure_ascii=False),
-            text=True,
-            capture_output=True,
-            timeout=float(timeout_seconds),
-            check=False,
-            creationflags=(getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0),
-        )
-        if len(completed.stdout.encode("utf-8")) > MAX_RENDER_RESPONSE_BYTES or len(
-            completed.stderr.encode("utf-8")
-        ) > MAX_RENDER_RESPONSE_BYTES:
+        with pin_validated_reads(tuple(array_pins)):
+            for index, view in enumerate(normalized):
+                if _sha256_file(Path(view["array_path"])) != view["array_sha256"]:
+                    raise ValueError(f"views[{index}] array SHA-256 does not match")
+            command = [sys.executable, "-m", "comsol_mcp.evidence.field_plot_worker"]
+            encoded_input = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            with tempfile.TemporaryFile() as stdout_file, tempfile.TemporaryFile() as stderr_file:
+                process = subprocess.Popen(  # noqa: S603
+                    command,
+                    stdin=subprocess.PIPE,
+                    stdout=stdout_file,
+                    stderr=stderr_file,
+                    creationflags=(
+                        getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
+                    ),
+                )
+                try:
+                    process.communicate(input=encoded_input, timeout=float(timeout_seconds))
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
+                    raise
+                stdout_file.seek(0)
+                stderr_file.seek(0)
+                stdout_bytes = stdout_file.read(MAX_RENDER_RESPONSE_BYTES + 1)
+                stderr_bytes = stderr_file.read(MAX_RENDER_RESPONSE_BYTES + 1)
+        if (
+            len(stdout_bytes) > MAX_RENDER_RESPONSE_BYTES
+            or len(stderr_bytes) > MAX_RENDER_RESPONSE_BYTES
+        ):
             raise RuntimeError("field plot worker response exceeded its bound")
-        if completed.returncode != 0:
-            raise RuntimeError(
-                f"field plot worker failed: {completed.stderr.strip()[:2000]}"
-            )
-        response = json.loads(completed.stdout)
-        if response.get("success") is not True:
-            raise RuntimeError("field plot worker did not report success")
-        limits_by_view = {
-            item["view_id"]: item["color_limits"] for item in response["views"]
-        }
+        try:
+            stdout = stdout_bytes.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise RuntimeError("field plot worker response is not UTF-8") from exc
+        stderr = stderr_bytes.decode("utf-8", errors="replace")
+        if process.returncode != 0:
+            raise RuntimeError(f"field plot worker failed: {stderr.strip()[:2000]}")
+        try:
+            response = json.loads(stdout)
+        except (json.JSONDecodeError, RecursionError) as exc:
+            raise RuntimeError("field plot worker response is not valid JSON") from exc
+        limits_by_view = _validate_worker_response(
+            response, expected_view_ids=[item["view_id"] for item in normalized]
+        )
         descriptors = []
         for view in normalized:
             path = Path(view["png_path"])

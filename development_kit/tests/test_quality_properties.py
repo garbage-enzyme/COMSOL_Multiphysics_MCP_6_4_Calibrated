@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import math
+import os
 import tempfile
+from copy import deepcopy
 from dataclasses import replace
-from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -127,6 +129,20 @@ def test_finite_json_limits_fail_closed(monkeypatch: pytest.MonkeyPatch) -> None
     with pytest.raises(ValueError, match="nesting limit"):
         canonical.validate_finite_json([None])
 
+    monkeypatch.setattr(canonical, "MAX_CANONICAL_DEPTH", 64)
+    monkeypatch.setattr(canonical, "MAX_CANONICAL_STRING_BYTES", 3)
+    with pytest.raises(ValueError, match="string.*byte limit"):
+        canonical.validate_finite_json("éé")
+    with pytest.raises(ValueError, match="string.*byte limit"):
+        canonical.validate_finite_json({"éé": None})
+    with pytest.raises(ValueError, match="valid UTF-8"):
+        canonical.validate_finite_json("\ud800")
+
+    monkeypatch.setattr(canonical, "MAX_CANONICAL_STRING_BYTES", 1024)
+    monkeypatch.setattr(canonical, "MAX_CANONICAL_INTEGER_BITS", 3)
+    with pytest.raises(ValueError, match="integer.*bit limit"):
+        canonical.validate_finite_json(8)
+
 
 @pytest.mark.parametrize("domain", [None, "", "x" * 129, "thermal.µm"])
 def test_domain_identity_rejects_invalid_names(domain: object) -> None:
@@ -153,27 +169,46 @@ def test_public_schema_adds_limits_without_overwriting_explicit_policy() -> None
                 "properties": {},
                 "additionalProperties": True,
             },
+            "implicit_closed": {"type": "object"},
             "number": {"type": "number"},
             "bounded": {"type": "integer", "minimum": 0, "maximum": 9},
             "union": {"oneOf": [{"type": "string"}, None]},
         },
     }
 
+    original = deepcopy(source)
     result = bounded_public_schema(source)
 
-    assert "additionalProperties" not in source
+    assert source == original
     assert result["additionalProperties"] is False
     assert result["maxProperties"] == MAX_PUBLIC_OBJECT_FIELDS
     assert result["properties"]["text"]["maxLength"] == MAX_PUBLIC_STRING_LENGTH
     assert result["properties"]["limited_text"]["maxLength"] == 7
     assert result["properties"]["items"]["maxItems"] == MAX_PUBLIC_COLLECTION_ITEMS
     assert result["properties"]["closed"]["additionalProperties"] is True
+    assert result["properties"]["implicit_closed"]["additionalProperties"] is False
     assert result["properties"]["number"]["minimum"] == (-MAX_PUBLIC_NUMBER_MAGNITUDE)
     assert result["properties"]["bounded"] == {
         "type": "integer",
         "minimum": 0,
         "maximum": 9,
     }
+
+
+def test_public_schema_rejects_cycles_and_overdeep_graphs() -> None:
+    cyclic: dict[str, object] = {"type": "object"}
+    cyclic["properties"] = {"self": cyclic}
+    with pytest.raises(ValueError, match="cycle"):
+        bounded_public_schema(cyclic)
+
+    overdeep: dict[str, object] = {"type": "object"}
+    cursor = overdeep
+    for _ in range(MAX_PUBLIC_NESTING_DEPTH + 1):
+        nested: dict[str, object] = {"type": "object"}
+        cursor["properties"] = {"nested": nested}
+        cursor = nested
+    with pytest.raises(ValueError, match="nesting limit"):
+        bounded_public_schema(overdeep)
 
 
 def _overdeep_value() -> list[object]:
@@ -190,6 +225,7 @@ def _overdeep_value() -> list[object]:
         float("nan"),
         float("inf"),
         MAX_PUBLIC_NUMBER_MAGNITUDE * 1.01,
+        pytest.param(10**10_000, id="huge_integer"),
         [None] * (MAX_PUBLIC_COLLECTION_ITEMS + 1),
         {str(index): None for index in range(MAX_PUBLIC_OBJECT_FIELDS + 1)},
         {1: None},
@@ -202,12 +238,58 @@ def test_public_structure_rejects_every_unbounded_shape(value: object) -> None:
         validate_public_structure(value)
 
 
+def test_public_structure_accepts_every_exact_documented_boundary() -> None:
+    exact_depth: object = None
+    for _ in range(MAX_PUBLIC_NESTING_DEPTH):
+        exact_depth = [exact_depth]
+
+    accepted = [
+        "x" * MAX_PUBLIC_STRING_LENGTH,
+        [None] * MAX_PUBLIC_COLLECTION_ITEMS,
+        {str(index): None for index in range(MAX_PUBLIC_OBJECT_FIELDS)},
+        MAX_PUBLIC_NUMBER_MAGNITUDE,
+        -MAX_PUBLIC_NUMBER_MAGNITUDE,
+        exact_depth,
+    ]
+
+    for value in accepted:
+        validate_public_structure(value)
+
+
 def test_structural_guard_executes_after_successful_validation() -> None:
     @structurally_guarded
     def operation(value: str, *, enabled: bool) -> tuple[str, bool]:
         return value, enabled
 
     assert operation("bounded", enabled=True) == ("bounded", True)
+
+
+def test_structural_guard_skips_only_declared_method_receivers() -> None:
+    class Operations:
+        @structurally_guarded
+        def sync(self, value: str) -> str:
+            return value
+
+        @structurally_guarded
+        async def async_operation(self, value: str) -> str:
+            return value
+
+        @classmethod
+        @structurally_guarded
+        def class_operation(cls, value: str) -> str:
+            return value
+
+    operations = Operations()
+    assert operations.sync("bounded") == "bounded"
+    assert asyncio.run(operations.async_operation("bounded")) == "bounded"
+    assert Operations.class_operation("bounded") == "bounded"
+
+    @structurally_guarded
+    def ordinary(receiver: object) -> object:
+        return receiver
+
+    with pytest.raises(ValueError, match="unsupported public input type"):
+        ordinary(object())
 
 
 @seed(20260721)
@@ -308,6 +390,31 @@ def test_jsonl_recovery_rejects_missing_version_policy_and_oversized_files(
     assert read_complete_jsonl(path, max_bytes=1)["state"] == "oversized"
 
 
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b'{"schema_version":"1"}\n{"partial"',
+        b'{"schema_version":"1"}\n{"schema_version":"2"}\n{"partial"',
+        b'{"sequence":1}\n{"partial"',
+    ],
+)
+def test_incomplete_versioned_jsonl_never_exposes_incompatible_prefixes(
+    tmp_path: Path, payload: bytes
+) -> None:
+    path = tmp_path / "incompatible-prefix.jsonl"
+    path.write_bytes(payload)
+
+    result = read_complete_jsonl(
+        path,
+        version_field="schema_version",
+        current_version="2",
+        legacy_versions=("1",),
+    )
+
+    assert result["state"] == "corrupt"
+    assert result["records"] == []
+
+
 @pytest.mark.parametrize("max_bytes", [True, -1, 1.5])
 def test_bounded_hash_rejects_invalid_size_limits(
     tmp_path: Path,
@@ -343,20 +450,21 @@ def test_bounded_hash_rejects_directories_and_growth(
     with pytest.raises(ValueError, match="regular file"):
         durable_io.sha256_file_bounded(tmp_path, max_bytes=1)
 
-    class GrowingFile:
-        def stat(self) -> SimpleNamespace:
-            return SimpleNamespace(st_size=1)
-
-        def is_file(self) -> bool:
-            return True
-
-        def open(self, mode: str) -> BytesIO:
-            assert mode == "rb"
-            return BytesIO(b"ab")
-
-    monkeypatch.setattr(durable_io, "Path", lambda _value: GrowingFile())
+    growing = tmp_path / "growing.bin"
+    growing.write_bytes(b"ab")
+    opened = os.stat(growing)
+    monkeypatch.setattr(
+        durable_io.os,
+        "fstat",
+        lambda _descriptor: SimpleNamespace(
+            st_mode=opened.st_mode,
+            st_dev=opened.st_dev,
+            st_ino=opened.st_ino,
+            st_size=1,
+        ),
+    )
     with pytest.raises(ValueError, match="grew"):
-        durable_io.sha256_file_bounded("ignored", max_bytes=1)
+        durable_io.sha256_file_bounded(growing, max_bytes=1)
 
 
 def test_atomic_write_validates_payload_retries_and_compact_names(
@@ -367,6 +475,18 @@ def test_atomic_write_validates_payload_retries_and_compact_names(
         durable_io.atomic_write_bytes(target, "bytes required")  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="retry_seconds"):
         durable_io.atomic_write_bytes(target, b"value", retry_seconds=-1)
+
+    def unexpected_replace(*_args) -> None:
+        raise AssertionError("replace must not run for invalid retry_seconds")
+
+    for invalid in (True, float("nan"), float("inf"), float("-inf"), "1"):
+        with pytest.raises(ValueError, match="retry_seconds"):
+            durable_io.atomic_write_bytes(
+                target,
+                b"value",
+                retry_seconds=invalid,  # type: ignore[arg-type]
+                replace_fn=unexpected_replace,
+            )
 
     attempts = 0
 
@@ -404,6 +524,74 @@ def test_atomic_write_cleans_up_after_replace_deadline(tmp_path: Path) -> None:
 
     assert not target.exists()
     assert list(tmp_path.iterdir()) == []
+
+
+def test_exclusive_publish_preserves_a_competing_target_and_cleans_temporary(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "exclusive.bin"
+
+    def competing_link(source: object, destination: object) -> None:
+        Path(destination).write_bytes(b"competitor")
+        durable_io.os.link(source, destination)
+
+    with pytest.raises(FileExistsError):
+        durable_io.atomic_write_bytes_exclusive(
+            target,
+            b"ours",
+            link_fn=competing_link,
+        )
+
+    assert target.read_bytes() == b"competitor"
+    assert list(tmp_path.iterdir()) == [target]
+
+
+def test_identity_cleanup_never_removes_a_replacement(tmp_path: Path) -> None:
+    target = tmp_path / "published.bin"
+    identity = durable_io.atomic_write_bytes_exclusive(target, b"ours")
+    replacement = tmp_path / "replacement.bin"
+    replacement.write_bytes(b"competitor")
+    os.replace(replacement, target)
+
+    assert durable_io.unlink_if_identity(target, identity) is False
+    assert target.read_bytes() == b"competitor"
+
+
+def test_exclusive_publish_rejects_invalid_sources_and_identity_mismatch(
+    tmp_path: Path,
+) -> None:
+    other = tmp_path / "other"
+    other.mkdir()
+    source = tmp_path / "source.tmp"
+    source.write_bytes(b"ours")
+
+    with pytest.raises(ValueError, match="one directory"):
+        durable_io.publish_file_exclusive(source, other / "target.bin")
+
+    directory_source = tmp_path / "directory.tmp"
+    directory_source.mkdir()
+    with pytest.raises(ValueError, match="regular temporary file"):
+        durable_io.publish_file_exclusive(directory_source, tmp_path / "directory.bin")
+
+    target = tmp_path / "mismatched.bin"
+
+    def publish_different_file(_source: object, destination: object) -> None:
+        Path(destination).write_bytes(b"competitor")
+
+    with pytest.raises(RuntimeError, match="different file identity"):
+        durable_io.atomic_write_bytes_exclusive(
+            target,
+            b"ours",
+            link_fn=publish_different_file,
+        )
+
+    assert target.read_bytes() == b"competitor"
+    assert durable_io.unlink_if_identity(tmp_path / "missing.bin", (0, 0)) is False
+    with pytest.raises(ValueError, match="payload"):
+        durable_io.atomic_write_bytes_exclusive(
+            tmp_path / "invalid.bin",
+            "bytes required",  # type: ignore[arg-type]
+        )
 
 
 def test_json_document_and_atomic_json_share_finite_serialization(
@@ -593,6 +781,20 @@ def _invalid_manifest(case: str) -> object:
         value["licensed_acceptance"][0]["status"] = "unknown"
     elif case == "lane_field":
         value["licensed_acceptance"][0]["comsol_build"] = ""
+    elif case == "lane_fields":
+        value["licensed_acceptance"][0]["extra"] = True
+    elif case == "lane_missing":
+        value["licensed_acceptance"][0].pop("scope")
+    elif case == "lane_overlong":
+        value["licensed_acceptance"][0]["comsol_build"] = "x" * 257
+    elif case == "lane_scope_type":
+        value["licensed_acceptance"][0]["scope"] = "package_runtime"
+    elif case == "lane_scope_empty":
+        value["licensed_acceptance"][0]["scope"] = []
+    elif case == "lane_scope_item":
+        value["licensed_acceptance"][0]["scope"] = [1]
+    elif case == "lane_scope_duplicate":
+        value["licensed_acceptance"][0]["scope"] = ["package_runtime"] * 2
     elif case == "dependency_type":
         value["dependency_compatibility"] = []
     elif case == "dependency_status":
@@ -601,12 +803,24 @@ def _invalid_manifest(case: str) -> object:
         value["dependency_compatibility"]["comsol_builds"] = ["unlicensed"]
     elif case == "dependency_claim":
         value["dependency_compatibility"]["establishes_licensed_compatibility"] = True
+    elif case == "dependency_fields":
+        value["dependency_compatibility"]["extra"] = True
+    elif case == "dependency_missing":
+        value["dependency_compatibility"].pop("mcp")
+    elif case == "dependency_range":
+        value["dependency_compatibility"]["python"] = []
     elif case == "unknown_type":
         value["unknown_compatibility"] = []
     elif case == "unknown_status":
         value["unknown_compatibility"]["status"] = "accepted"
     elif case == "unknown_claim":
         value["unknown_compatibility"]["requires_independent_licensed_acceptance"] = False
+    elif case == "unknown_fields":
+        value["unknown_compatibility"]["extra"] = True
+    elif case == "unknown_missing":
+        value["unknown_compatibility"].pop("comsol_builds")
+    elif case == "unknown_builds":
+        value["unknown_compatibility"]["comsol_builds"] = []
     else:
         raise AssertionError(f"unknown test case: {case}")
     return value
@@ -624,13 +838,26 @@ def _invalid_manifest(case: str) -> object:
         "lane_type",
         "lane_status",
         "lane_field",
+        "lane_fields",
+        "lane_missing",
+        "lane_overlong",
+        "lane_scope_type",
+        "lane_scope_empty",
+        "lane_scope_item",
+        "lane_scope_duplicate",
         "dependency_type",
         "dependency_status",
         "dependency_builds",
         "dependency_claim",
+        "dependency_fields",
+        "dependency_missing",
+        "dependency_range",
         "unknown_type",
         "unknown_status",
         "unknown_claim",
+        "unknown_fields",
+        "unknown_missing",
+        "unknown_builds",
     ],
 )
 def test_compatibility_manifest_validation_fails_closed(
@@ -648,12 +875,15 @@ def test_compatibility_manifest_validation_fails_closed(
 
 def test_compatibility_manifest_and_session_status_have_copy_semantics() -> None:
     assert compatibility.load_runtime_compatibility()["schema_version"] == "1.0.0"
-    set_session_status(connected=1, starting=0)  # type: ignore[arg-type]
-    snapshot = get_session_status()
-    snapshot["connected"] = False
+    previous = get_session_status()
+    try:
+        set_session_status(connected=1, starting=0)  # type: ignore[arg-type]
+        snapshot = get_session_status()
+        snapshot["connected"] = False
 
-    assert get_session_status() == {"connected": True, "starting": False}
-    set_session_status(connected=False, starting=False)
+        assert get_session_status() == {"connected": True, "starting": False}
+    finally:
+        set_session_status(**previous)
 
 
 @pytest.mark.parametrize(

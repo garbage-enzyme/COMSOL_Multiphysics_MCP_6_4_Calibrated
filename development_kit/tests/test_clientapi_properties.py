@@ -5,7 +5,6 @@ from __future__ import annotations
 import math
 
 import pytest
-
 from src.tools.properties import get_existing_property, set_existing_property
 
 
@@ -82,13 +81,13 @@ class FakeComponent:
         self.feature = feature
 
     def geom(self, tag):
-        return FakeParent(self.feature)
+        return FakeParent(self.feature) if tag == "parent1" else None
 
     def physics(self, tag):
-        return FakeParent(self.feature)
+        return FakeParent(self.feature) if tag == "parent1" else None
 
     def mesh(self, tag):
-        return FakeParent(self.feature)
+        return FakeParent(self.feature) if tag == "parent1" else None
 
 
 class FakeJava:
@@ -134,13 +133,21 @@ def feature():
     ["geometry_feature", "physics_feature", "mesh_feature", "study_step", "result_feature"],
 )
 def test_property_get_resolves_each_allowlisted_container(feature, container):
-    result = get_existing_property(
-        FakeModel(feature), "comp1", container, "parent1/child1", "size"
-    )
+    result = get_existing_property(FakeModel(feature), "comp1", container, "parent1/child1", "size")
 
     assert result["success"] is True
     assert result["value"] == ["1", "2", "3"]
     assert result["target"].endswith("parent1/child1/size")
+
+
+@pytest.mark.parametrize("container", ["study_step", "result_feature"])
+def test_model_level_property_targets_do_not_require_an_unrelated_component(feature, container):
+    result = get_existing_property(
+        FakeModel(feature), "missing_component", container, "parent1/child1", "size"
+    )
+
+    assert result["success"] is True
+    assert result["value"] == ["1", "2", "3"]
 
 
 @pytest.mark.parametrize(
@@ -154,9 +161,7 @@ def test_property_get_resolves_each_allowlisted_container(feature, container):
         ("active", False),
     ],
 )
-def test_property_set_returns_normalized_old_and_new_values(
-    feature, property_name, new_value
-):
+def test_property_set_returns_normalized_old_and_new_values(feature, property_name, new_value):
     old_value = feature.values[property_name]
 
     result = set_existing_property(
@@ -174,23 +179,77 @@ def test_property_set_returns_normalized_old_and_new_values(
     assert feature.set_calls == [(property_name, new_value)]
 
 
+def test_property_set_readback_failure_restores_old_value():
+    class OneShotReadbackFailure(FakeFeature):
+        def __init__(self):
+            super().__init__({"label": "old"}, {"label": "String"})
+            self.read_count = 0
+
+        def getString(self, name):
+            self.read_count += 1
+            if self.read_count == 2:
+                raise RuntimeError("injected readback failure")
+            return super().getString(name)
+
+    target = OneShotReadbackFailure()
+
+    result = set_existing_property(
+        FakeModel(target),
+        "comp1",
+        "geometry_feature",
+        "parent1/child1",
+        "label",
+        "new",
+    )
+
+    assert result["success"] is False
+    assert result["rolled_back"] is True
+    assert target.values["label"] == "old"
+    assert target.set_calls == [("label", "new"), ("label", "old")]
+
+
 def test_property_access_rejects_unknown_targets_and_properties(feature):
     model = FakeModel(feature)
 
-    assert get_existing_property(
-        model, "comp1", "arbitrary_java", "parent1/child1", "label"
-    )["success"] is False
-    assert get_existing_property(
-        model, "comp1", "geometry_feature", "parent1/child1/run", "label"
-    )["success"] is False
-    result = get_existing_property(
-        model, "comp1", "geometry_feature", "parent1/child1", "missing"
+    assert (
+        get_existing_property(model, "comp1", "arbitrary_java", "parent1/child1", "label")[
+            "success"
+        ]
+        is False
     )
+    assert (
+        get_existing_property(model, "comp1", "geometry_feature", "parent1/child1/run", "label")[
+            "success"
+        ]
+        is False
+    )
+    result = get_existing_property(model, "comp1", "geometry_feature", "parent1/child1", "missing")
     assert result["success"] is False
     assert "unknown property" in result["error"]
 
 
-def test_property_set_rejects_nonfinite_before_resolving_clientapi():
+@pytest.mark.parametrize("container", ["geometry_feature", "physics_feature", "mesh_feature"])
+def test_property_access_rejects_missing_parent_tag(feature, container):
+    result = get_existing_property(
+        FakeModel(feature), "comp1", container, "missing/child1", "label"
+    )
+
+    assert result["success"] is False
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        math.nan,
+        math.inf,
+        -math.inf,
+        [1.0, math.inf],
+        [1.0, -math.inf],
+        [[1.0, math.nan]],
+        [[math.inf], [-math.inf]],
+    ],
+)
+def test_property_set_rejects_nonfinite_before_resolving_clientapi(value):
     class UntouchableModel:
         @property
         def java(self):
@@ -202,7 +261,7 @@ def test_property_set_rejects_nonfinite_before_resolving_clientapi():
         "geometry_feature",
         "parent1/child1",
         "scale",
-        math.nan,
+        value,
     )
 
     assert result["success"] is False
@@ -217,6 +276,20 @@ def test_property_access_rejects_file_and_callable_property_names(feature):
             "geometry_feature",
             "parent1/child1",
             property_name,
+        )
+        assert result["success"] is False
+        assert not feature.set_calls
+
+
+def test_property_set_independently_rejects_file_and_callable_names(feature):
+    for property_name in ("filename", "method", "run()"):
+        result = set_existing_property(
+            FakeModel(feature),
+            "comp1",
+            "geometry_feature",
+            "parent1/child1",
+            property_name,
+            "unsafe",
         )
         assert result["success"] is False
         assert not feature.set_calls

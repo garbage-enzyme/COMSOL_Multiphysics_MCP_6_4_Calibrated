@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import ctypes
-from ctypes import wintypes
 import hashlib
 import json
 import os
@@ -14,11 +13,15 @@ import subprocess
 import sys
 import threading
 import time
-from typing import Any
 import uuid
+from ctypes import wintypes
+from typing import Any
 
-from .semantic_contracts import PUBLIC_LIMITS, WORKER_PROTOCOL_SCHEMA_VERSION
-
+from .semantic_contracts import (
+    PUBLIC_LIMITS,
+    WORKER_PROTOCOL_SCHEMA_VERSION,
+    validate_semantic_filters,
+)
 
 CREATE_TIME_TOLERANCE_SECONDS = 0.05
 
@@ -108,6 +111,81 @@ class SemanticWorkerManager:
         self._port: int | None = None
         self._last_activity: float | None = None
         self._last_error: dict[str, Any] | None = None
+        self._pipe_threads: list[threading.Thread] = []
+
+    @staticmethod
+    def _drain_pipe(stream: Any) -> None:
+        try:
+            while stream.read(64 * 1024):
+                pass
+        except (OSError, ValueError):
+            pass
+
+    def _start_pipe_drain(self, stream: Any, label: str) -> None:
+        if stream is None:
+            return
+        thread = threading.Thread(
+            target=self._drain_pipe,
+            args=(stream,),
+            name=f"semantic-{label}-drain",
+            daemon=True,
+        )
+        self._pipe_threads.append(thread)
+        thread.start()
+
+    def _close_process_resources(self, process: subprocess.Popen[bytes]) -> None:
+        for stream in (process.stdout, process.stderr):
+            if stream is not None:
+                try:
+                    stream.close()
+                except (OSError, ValueError):
+                    pass
+        for thread in self._pipe_threads:
+            thread.join(timeout=0.2)
+        self._pipe_threads.clear()
+
+    def _terminate_unverified_spawn(self, reason: str) -> dict[str, Any]:
+        process = self._process
+        errors = []
+        acted = False
+        if process is not None:
+            try:
+                if process.poll() is None:
+                    process.terminate()
+                    acted = True
+                process.wait(timeout=2.0)
+            except subprocess.TimeoutExpired:
+                try:
+                    process.kill()
+                    acted = True
+                    process.wait(timeout=2.0)
+                except (OSError, subprocess.SubprocessError) as exc:
+                    errors.append(type(exc).__name__)
+            except (OSError, subprocess.SubprocessError) as exc:
+                errors.append(type(exc).__name__)
+                try:
+                    process.kill()
+                    acted = True
+                    process.wait(timeout=2.0)
+                except (OSError, subprocess.SubprocessError) as kill_exc:
+                    errors.append(type(kill_exc).__name__)
+        absent = process is None or process.poll() is not None
+        if process is not None and absent:
+            self._close_process_resources(process)
+        if absent:
+            self._process = None
+            self._identity = None
+            self._job = None
+            self._token = None
+            self._port = None
+            self._last_activity = None
+        return {
+            "reason": reason,
+            "identity_state": "unverified_spawn",
+            "acted": acted,
+            "absent": absent,
+            "cleanup_errors": errors,
+        }
 
     def _command(self) -> list[str]:
         command = [self.python_executable, "-m", "comsol_mcp.knowledge.semantic_worker", "--serve", "--port", str(self.forced_port)]
@@ -157,9 +235,34 @@ class SemanticWorkerManager:
             environment = os.environ.copy()
             environment["COMSOL_SEMANTIC_SESSION_TOKEN"] = token
             creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
-            process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=environment, creationflags=creationflags)
+            try:
+                process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=environment, creationflags=creationflags)
+            except OSError as exc:
+                error = {
+                    "code": "startup_failed",
+                    "message": f"{type(exc).__name__}: semantic worker process could not be started",
+                }
+                self._last_error = error
+                return {
+                    "success": False,
+                    "error": error,
+                    "cleanup": {
+                        "reason": "startup_failure",
+                        "acted": False,
+                        "absent": True,
+                    },
+                }
             self._process = process
+            self._start_pipe_drain(process.stderr, "stderr")
             created = _windows_process_create_time(int(process._handle)) if os.name == "nt" else time.time()
+            if created is None:
+                error = {
+                    "code": "startup_failed",
+                    "message": "semantic worker process creation time is unavailable",
+                }
+                self._last_error = error
+                cleanup = self._terminate_unverified_spawn("missing_process_create_time")
+                return {"success": False, "error": error, "cleanup": cleanup}
             self._identity = {"pid": process.pid, "process_create_time": created, "command_signature": _command_signature(command)}
             self._job = _KillOnCloseJob.assign(int(process._handle)) if os.name == "nt" else None
             self._token = token
@@ -168,15 +271,22 @@ class SemanticWorkerManager:
                 stdout = process.stdout
                 if stdout is None:
                     raise RuntimeError("semantic worker stdout pipe was not created")
-                threading.Thread(
+                startup_reader = threading.Thread(
                     target=lambda: line_queue.put(stdout.readline()), daemon=True
-                ).start()
+                )
+                startup_reader.start()
                 line = line_queue.get(timeout=self.startup_deadline)
+                startup_reader.join(timeout=0.2)
+                if startup_reader.is_alive():
+                    raise RuntimeError("worker startup reader did not terminate")
                 ready = json.loads(line.decode("utf-8"))
+                if not isinstance(ready, dict):
+                    raise RuntimeError("worker startup handshake must be a JSON object")
                 if ready.get("schema_version") != WORKER_PROTOCOL_SCHEMA_VERSION or ready.get("event") != "ready" or ready.get("pid") != process.pid or ready.get("host") != "127.0.0.1":
                     raise RuntimeError("invalid worker startup handshake")
                 self._port = int(ready["port"])
                 self._last_activity = time.monotonic()
+                self._start_pipe_drain(stdout, "stdout")
                 return {"success": True, "started": True, "identity": dict(self._identity), "port": self._port, "job_object_contained": self._job is not None}
             except (queue.Empty, UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError, ValueError, RuntimeError) as exc:
                 error = {"code": "startup_failed", "message": str(exc) or "startup deadline exceeded"}
@@ -192,6 +302,7 @@ class SemanticWorkerManager:
         state = self._identity_state()
         identity = dict(self._identity or {})
         acted = False
+        cleanup_errors = []
         if self._process is not None and self._process.poll() is None and state != "active":
             return {
                 "reason": reason,
@@ -203,48 +314,99 @@ class SemanticWorkerManager:
             }
         if self._process is not None and state == "active":
             if self._job is not None:
-                self._job.close()
-                acted = True
-            else:
-                self._process.terminate()
-                acted = True
+                try:
+                    self._job.close()
+                    acted = True
+                except OSError as exc:
+                    cleanup_errors.append(type(exc).__name__)
+            if self._process.poll() is None:
+                try:
+                    self._process.terminate()
+                    acted = True
+                except OSError as exc:
+                    cleanup_errors.append(type(exc).__name__)
             try:
                 self._process.wait(timeout=2.0)
             except subprocess.TimeoutExpired:
                 if self._identity_state() == "active":
-                    self._process.kill()
-                    self._process.wait(timeout=2.0)
+                    try:
+                        self._process.kill()
+                        acted = True
+                        self._process.wait(timeout=2.0)
+                    except (OSError, subprocess.SubprocessError) as exc:
+                        cleanup_errors.append(type(exc).__name__)
+            except (OSError, subprocess.SubprocessError) as exc:
+                cleanup_errors.append(type(exc).__name__)
+                if self._identity_state() == "active":
+                    try:
+                        self._process.kill()
+                        acted = True
+                        self._process.wait(timeout=2.0)
+                    except (OSError, subprocess.SubprocessError) as kill_exc:
+                        cleanup_errors.append(type(kill_exc).__name__)
         elif self._process is not None and self._process.poll() is not None:
             acted = False
         absent = self._process is None or self._process.poll() is not None
         if self._job is not None:
-            self._job.close()
-        self._process = None
-        self._identity = None
-        self._job = None
-        self._token = None
-        self._port = None
-        self._last_activity = None
-        return {"reason": reason, "identity": identity, "identity_state": state, "acted": acted, "absent": absent}
+            try:
+                self._job.close()
+            except OSError as exc:
+                cleanup_errors.append(type(exc).__name__)
+        if self._process is not None and absent:
+            self._close_process_resources(self._process)
+        if absent:
+            self._process = None
+            self._identity = None
+            self._job = None
+            self._token = None
+            self._port = None
+            self._last_activity = None
+        elif self._job is not None and not self._job.handle:
+            self._job = None
+        return {
+            "reason": reason,
+            "identity": identity,
+            "identity_state": state,
+            "acted": acted,
+            "absent": absent,
+            "cleanup_errors": cleanup_errors,
+        }
 
     def reset(self) -> dict[str, Any]:
         with self._lock:
             result = self._terminate_owned("explicit_reset")
-            return {"success": not result.get("refused", False), "reset": result}
+            return {
+                "success": bool(result.get("absent")) and not result.get("refused", False),
+                "reset": result,
+            }
 
     def _request(self, operation: str, fields: dict[str, Any], deadline: float) -> dict[str, Any]:
         started = self.start()
         if not started.get("success"):
             return started
+        request_started = time.monotonic()
+
+        def remaining() -> float:
+            value = float(deadline) - (time.monotonic() - request_started)
+            if value <= 0:
+                raise TimeoutError("semantic worker request deadline exceeded")
+            return value
+
         request_id = f"semantic-{uuid.uuid4().hex}"
         request = {"schema_version": WORKER_PROTOCOL_SCHEMA_VERSION, "request_id": request_id, "token": self._token, "operation": operation, **fields}
-        encoded = json.dumps(request, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode("utf-8") + b"\n"
         try:
-            with socket.create_connection(("127.0.0.1", int(self._port)), timeout=deadline) as connection:
-                connection.settimeout(deadline)
+            encoded = json.dumps(
+                request,
+                ensure_ascii=False,
+                allow_nan=False,
+                separators=(",", ":"),
+            ).encode("utf-8") + b"\n"
+            with socket.create_connection(("127.0.0.1", int(self._port)), timeout=remaining()) as connection:
+                connection.settimeout(remaining())
                 connection.sendall(encoded)
                 chunks = bytearray()
                 while not chunks.endswith(b"\n"):
+                    connection.settimeout(remaining())
                     block = connection.recv(min(4096, PUBLIC_LIMITS["maximum_response_bytes"] + 1 - len(chunks)))
                     if not block:
                         raise RuntimeError("worker closed connection before a complete response")
@@ -256,7 +418,15 @@ class SemanticWorkerManager:
                 raise RuntimeError("worker response identity or schema mismatch")
             self._last_activity = time.monotonic()
             return response
-        except (OSError, TimeoutError, UnicodeDecodeError, json.JSONDecodeError, RuntimeError) as exc:
+        except (
+            OSError,
+            TimeoutError,
+            UnicodeDecodeError,
+            json.JSONDecodeError,
+            TypeError,
+            ValueError,
+            RuntimeError,
+        ) as exc:
             error = {"code": "worker_protocol_failure", "message": f"{type(exc).__name__}: {exc}"}
             self._last_error = error
             cleanup = self._terminate_owned("protocol_failure")
@@ -267,12 +437,17 @@ class SemanticWorkerManager:
             return {"success": False, "error": {"code": "invalid_query", "message": "query violates public limits"}}
         if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= PUBLIC_LIMITS["maximum_results"]:
             return {"success": False, "error": {"code": "invalid_limit", "message": "limit violates public limits"}}
-        if filters is not None and not isinstance(filters, dict):
-            return {"success": False, "error": {"code": "invalid_filters", "message": "filters must be an object"}}
+        try:
+            normalized_filters = validate_semantic_filters(filters)
+        except ValueError as exc:
+            return {
+                "success": False,
+                "error": {"code": "invalid_filters", "message": str(exc)},
+            }
         if retrieval_mode not in {"hybrid", "vector", "lexical"}:
             return {"success": False, "error": {"code": "invalid_retrieval_mode", "message": "retrieval_mode is unsupported"}}
         with self._lock:
-            return self._request("query", {"query": query.strip(), "limit": limit, "filters": filters, "retrieval_mode": retrieval_mode}, self.query_deadline)
+            return self._request("query", {"query": query.strip(), "limit": limit, "filters": normalized_filters, "retrieval_mode": retrieval_mode}, self.query_deadline)
 
     def health(self) -> dict[str, Any]:
         with self._lock:

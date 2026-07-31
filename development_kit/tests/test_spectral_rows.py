@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 import hashlib
 import json
+from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
-
 from src.evidence.contracts import build_physical_evidence
 from src.jobs.spectral_characterization import normalize_spectral_characterization_job_spec
 from src.jobs.spectral_rows import (
+    MAX_SPECTRAL_ROW_BYTES,
     append_spectral_row,
     completed_spectral_point_fingerprints,
     read_spectral_rows,
@@ -61,7 +62,11 @@ def _spec(tmp_path) -> dict:
                     "t_expression": "ewfd.Ttotal",
                     "a_expression": "ewfd.Atotal",
                     "top_air_domain_ids": [1],
-                    "top_air_coordinate_range": {"x": [-1.0, 1.0], "y": [-1.0, 1.0], "z": [-1.0, 1.0]},
+                    "top_air_coordinate_range": {
+                        "x": [-1.0, 1.0],
+                        "y": [-1.0, 1.0],
+                        "z": [-1.0, 1.0],
+                    },
                 },
             },
             "analysis_policy": {
@@ -131,7 +136,35 @@ def _artifact(root: Path, spec: dict, wavelength: float) -> dict:
         encoding="utf-8",
     )
     wrapper = inner.parent / "matrix_collector.json"
-    wrapper.write_text(json.dumps({"inner": inner.name}), encoding="utf-8")
+    wrapper.write_text(
+        json.dumps(
+            {
+                "schema_name": "comsol_mcp.validation_matrix_collector",
+                "schema_version": "1.0.0",
+                "collector": "wave_optics_point_audit",
+                "point": {
+                    "point_id": point["point_id"],
+                    "point_fingerprint": point["point_fingerprint"],
+                    "configuration_sha256": spec["configuration_sha256"],
+                    "wavelength": {
+                        "value": wavelength,
+                        "unit": "m",
+                        "parameter": spec["wavelength_parameter"],
+                    },
+                    "incidence": None,
+                    "incidence_application": "not_mutated_by_collector_adapter",
+                },
+                "source_model_sha256": spec["source_model_sha256"],
+                "audit_status": "measurement_complete",
+                "inner_manifest": {
+                    "relative_path": inner.relative_to(inner.parent).as_posix(),
+                    "sha256": hashlib.sha256(inner.read_bytes()).hexdigest(),
+                    "size_bytes": inner.stat().st_size,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
     return {
         "wrapper_relative_path": wrapper.relative_to(root).as_posix(),
         "wrapper_sha256": hashlib.sha256(wrapper.read_bytes()).hexdigest(),
@@ -144,7 +177,15 @@ def _artifact(root: Path, spec: dict, wavelength: float) -> dict:
     }
 
 
-def _append(path: Path, root: Path, spec: dict, wavelength: float, absorption: float):
+def _append(
+    path: Path,
+    root: Path,
+    spec: dict,
+    wavelength: float,
+    absorption: float,
+    *,
+    reflectance: float | None = None,
+):
     return append_spectral_row(
         path,
         spec,
@@ -154,7 +195,7 @@ def _append(path: Path, root: Path, spec: dict, wavelength: float, absorption: f
         requested_wavelength_m=wavelength,
         evaluated_wavelength_m=wavelength,
         frequency_wavelength_m=wavelength,
-        R=0.95 - absorption,
+        R=0.95 - absorption if reflectance is None else reflectance,
         T=0.05,
         A=absorption,
         mesh_element_count=12,
@@ -192,6 +233,25 @@ def test_exact_complete_wavelength_cannot_be_appended_twice(tmp_path):
         _append(journal, root, spec, 4e-6, 0.1)
 
 
+@pytest.mark.parametrize(
+    "absorption",
+    [float("inf"), pytest.param(10**10_000, id="huge-integer")],
+)
+def test_nonfinite_equivalent_rows_share_the_validation_error_boundary(tmp_path, absorption):
+    spec = _spec(tmp_path)
+    root = tmp_path / "job"
+
+    with pytest.raises(ValueError, match="finite"):
+        _append(
+            root / "spectral_rows.jsonl",
+            root,
+            spec,
+            4e-6,
+            absorption,
+            reflectance=0.0,
+        )
+
+
 def test_row_and_artifact_tampering_fail_before_resume(tmp_path):
     spec = _spec(tmp_path)
     root = tmp_path / "job"
@@ -203,11 +263,80 @@ def test_row_and_artifact_tampering_fail_before_resume(tmp_path):
     with pytest.raises(ValueError, match="row hash"):
         read_spectral_rows(journal, spec, artifact_root=root)
 
-    journal.write_text(json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
+    journal.write_text(
+        json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8"
+    )
     inner = root / row["audit_artifact"]["inner_relative_path"]
     inner.write_text("{}", encoding="utf-8")
     with pytest.raises(ValueError, match="size|hash"):
         read_spectral_rows(journal, spec, artifact_root=root)
+
+
+def test_append_hashes_the_accepted_canonical_row_representation(tmp_path):
+    spec = _spec(tmp_path)
+    root = tmp_path / "job"
+    artifact = _artifact(root, spec, 4e-6)
+    for field in (
+        "wrapper_sha256",
+        "inner_sha256",
+        "physical_evidence_sha256",
+    ):
+        artifact[field] = artifact[field].upper()
+
+    row = append_spectral_row(
+        root / "spectral_rows.jsonl",
+        spec,
+        attempt=1,
+        stage_index=0,
+        stage_kind="initial_locator",
+        requested_wavelength_m=4e-6,
+        evaluated_wavelength_m=4e-6,
+        frequency_wavelength_m=4e-6,
+        R=0,
+        T=0,
+        A=1,
+        mesh_element_count=0,
+        mesh_vertex_count=0,
+        solve_seconds=0,
+        audit_artifact=artifact,
+        artifact_root=root,
+        created_at_epoch=1000,
+    )
+
+    assert row["R"] == 0.0
+    assert row["created_at_epoch"] == 1000.0
+    assert row["audit_artifact"]["inner_sha256"].islower()
+    assert read_spectral_rows(root / "spectral_rows.jsonl", spec, artifact_root=root) == [row]
+
+
+def test_non_object_inner_artifact_uses_the_validation_error_boundary(tmp_path):
+    spec = _spec(tmp_path)
+    root = tmp_path / "job"
+    artifact = _artifact(root, spec, 4e-6)
+    inner = root / artifact["inner_relative_path"]
+    inner.write_text("[]", encoding="utf-8")
+    artifact["inner_sha256"] = hashlib.sha256(inner.read_bytes()).hexdigest()
+    artifact["inner_size_bytes"] = inner.stat().st_size
+
+    with pytest.raises(ValueError, match="audit inner artifact must be an object"):
+        append_spectral_row(
+            root / "spectral_rows.jsonl",
+            spec,
+            attempt=1,
+            stage_index=0,
+            stage_kind="initial_locator",
+            requested_wavelength_m=4e-6,
+            evaluated_wavelength_m=4e-6,
+            frequency_wavelength_m=4e-6,
+            R=0.1,
+            T=0.05,
+            A=0.85,
+            mesh_element_count=12,
+            mesh_vertex_count=8,
+            solve_seconds=0.2,
+            audit_artifact=artifact,
+            artifact_root=root,
+        )
 
 
 def test_changed_configuration_cannot_reuse_rows(tmp_path):
@@ -221,6 +350,15 @@ def test_changed_configuration_cannot_reuse_rows(tmp_path):
         read_spectral_rows(journal, changed, artifact_root=root)
 
 
+def test_newline_free_oversized_row_is_rejected_at_binary_read_limit(tmp_path):
+    spec = _spec(tmp_path)
+    journal = tmp_path / "spectral_rows.jsonl"
+    journal.write_bytes(b"x" * (MAX_SPECTRAL_ROW_BYTES + 1))
+
+    with pytest.raises(ValueError, match="row exceeds its byte limit"):
+        read_spectral_rows(journal, spec, artifact_root=tmp_path)
+
+
 def test_one_ulp_wavelength_variants_share_one_canonical_point_identity(tmp_path):
     spec = _spec(tmp_path)
     exact = spectral_point_identity(spec, 5e-6)
@@ -229,3 +367,35 @@ def test_one_ulp_wavelength_variants_share_one_canonical_point_identity(tmp_path
 
     assert exact == one_ulp_lower == one_ulp_upper
     assert exact["requested_wavelength_m"] == 5e-6
+
+
+def test_concurrent_appends_are_serialized_and_leave_no_lock(tmp_path):
+    spec = _spec(tmp_path)
+    root = tmp_path / "job"
+    journal = root / "spectral_rows.jsonl"
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        rows = list(
+            pool.map(
+                lambda item: _append(journal, root, spec, *item),
+                [(4e-6, 0.1), (5e-6, 0.8)],
+            )
+        )
+
+    replayed = read_spectral_rows(journal, spec, artifact_root=root)
+    assert {row["row_sha256"] for row in replayed} == {row["row_sha256"] for row in rows}
+    assert [row["sequence"] for row in replayed] == [1, 2]
+    assert replayed[1]["previous_row_sha256"] == replayed[0]["row_sha256"]
+    assert not (root / ".spectral_rows.jsonl.lock").exists()
+
+
+def test_complete_newline_free_tail_is_retained_before_next_append(tmp_path):
+    spec = _spec(tmp_path)
+    root = tmp_path / "job"
+    journal = root / "spectral_rows.jsonl"
+    first = _append(journal, root, spec, 4e-6, 0.1)
+    journal.write_bytes(journal.read_bytes().removesuffix(b"\n"))
+
+    second = _append(journal, root, spec, 5e-6, 0.8)
+
+    assert read_spectral_rows(journal, spec, artifact_root=root) == [first, second]
+    assert journal.read_bytes().endswith(b"\n")

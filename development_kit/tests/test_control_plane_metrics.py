@@ -22,8 +22,8 @@ from mcp.server.fastmcp.exceptions import ToolError
 from src.jobs.store import JOB_SCHEMA_VERSION, JobStore
 from src.tools.capabilities import get_capabilities
 from src.tools.ownership import SolverOwnership
-from src.tools.profiles import ProfileSelection, register_profiled
-from src.utils.control_plane import ControlPlaneMetrics, control_plane_metrics
+from src.tools.profiles import register_profiled, resolve_profile
+from src.utils.control_plane import ControlPlaneMetrics, control_plane_metrics, measured_call
 
 
 @pytest.fixture(autouse=True)
@@ -251,12 +251,7 @@ def _profiled_preflight_server() -> FastMCP:
         server,
         ownership_module.register_ownership_tools,
         frozenset({"solver_preflight"}),
-        ProfileSelection(
-            name="core",
-            environment_variable="COMSOL_MCP_SETTINGS_PATH",
-            default_used=False,
-            source="test",
-        ),
+        resolve_profile("core", environ={}),
     )
     return server
 
@@ -274,7 +269,7 @@ def test_public_solver_preflight_runs_entire_callback_off_event_loop(monkeypatch
             worker_threads["session_state"] = kwargs["session_state"]
             entered.set()
             assert release.wait(timeout=2.0)
-            return {"ready": True, "blockers": []}
+            return {"success": True, "ready": True, "blockers": []}
 
     def get_status():
         worker_threads["session"] = threading.get_ident()
@@ -309,6 +304,39 @@ def test_public_solver_preflight_runs_entire_callback_off_event_loop(monkeypatch
     assert result["control_plane"]["operation"] == "solver_preflight"
     assert result["control_plane"]["outcome"] == "success"
     assert result["path_policy"]["accepted"] is True
+
+
+@pytest.mark.parametrize("result", [{}, {"success": "yes"}, {"success": 1}])
+def test_metrics_require_explicit_boolean_success(result):
+    metrics = ControlPlaneMetrics(window_size=8)
+
+    metrics.record("callback", 0.1, result)
+
+    assert metrics.summary("callback")["outcomes"] == {
+        "success": 0,
+        "busy": 0,
+        "timeout": 0,
+        "error": 1,
+    }
+
+
+def test_measured_call_records_callback_exception_before_reraising():
+    metrics = ControlPlaneMetrics(window_size=8)
+    with pytest.raises(RuntimeError, match="callback failed"):
+        measured_call(
+            "callback",
+            lambda: (_ for _ in ()).throw(RuntimeError("callback failed")),
+            metrics=metrics,
+        )
+
+    summary = metrics.summary("callback")
+    assert summary["total_recorded"] == 1
+    assert summary["outcomes"] == {
+        "success": 0,
+        "busy": 0,
+        "timeout": 0,
+        "error": 1,
+    }
 
 
 def test_public_solver_preflight_worker_exception_is_transported(monkeypatch):
@@ -364,6 +392,32 @@ def test_lightweight_job_summaries_avoid_campaign_imports(tmp_path):
     unreadable = next(item for item in result["recent"] if item["status"] == "unreadable")
     assert unreadable["job_id"] == "malformed-job"
     assert unreadable["error"].startswith("JSONDecodeError:")
+
+
+def test_lightweight_job_summaries_find_active_jobs_older_than_recent_limit(tmp_path):
+    jobs_root = tmp_path / "jobs"
+    active = jobs_root / "active-oldest"
+    active.mkdir(parents=True)
+    (active / "state.json").write_text(
+        json.dumps({"status": "running", "updated_at_epoch": 1.0}),
+        encoding="utf-8",
+    )
+    for index in range(21):
+        completed = jobs_root / f"completed-{index:02d}"
+        completed.mkdir()
+        state_path = completed / "state.json"
+        state_path.write_text(
+            json.dumps({"status": "completed", "updated_at_epoch": index + 2.0}),
+            encoding="utf-8",
+        )
+        state_path.touch()
+
+    result = ownership_module._lightweight_job_summaries(jobs_root, limit=20)
+
+    assert result["count_returned"] == 20
+    assert len(result["recent"]) == 20
+    assert result["active_count"] == 1
+    assert [item["job_id"] for item in result["active"]] == ["active-oldest"]
 
 
 def test_standard_library_comsol_discovery_matches_mph_windows_shape(

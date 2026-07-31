@@ -12,6 +12,15 @@ LayeredTransition + LML only on patch boundary; rest = plain continuity.
 """
 import mph, jpype, sys, time
 from _paths import recipe_output_dir
+from _mim_safety import (
+    bind_wavelength_step,
+    require_named_domains,
+    require_partition_result,
+    require_port_pair,
+    require_required_properties,
+    require_spectrum,
+    save_required,
+)
 try:
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
     sys.stderr.reconfigure(encoding='utf-8', errors='replace')
@@ -45,9 +54,8 @@ lm_au.propertyGroup('def').set('murbnd', '1')
 # --- Component + geometry: Al2O3 block + air block ---
 comp = jm.component().create('comp1', True)
 g = comp.geom().create('geom1', 3)
-g.feature().create('b_al2','Block').set('size',jarr([Px,Py,t_al2o3]))
-g.feature().create('b_air','Block').set('size',jarr([Px,Py,H_air]))
-g.feature('b_air').set('pos',jarr([0,0,t_al2o3]))
+b_al2 = g.feature().create('b_al2','Block'); b_al2.set('size',jarr([Px,Py,t_al2o3])); b_al2.set('selresult', True)
+b_air = g.feature().create('b_air','Block'); b_air.set('size',jarr([Px,Py,H_air])); b_air.set('pos',jarr([0,0,t_al2o3])); b_air.set('selresult', True)
 g.run()
 print(f'Base: dom={g.getNDomains()} bnd={g.getNBoundaries()}', flush=True)
 
@@ -66,27 +74,17 @@ print(f'After WP: dom={g.getNDomains()} bnd={g.getNBoundaries()}', flush=True)
 # b_air bottom face (z=t_al2o3, facing -z) = bnd5 of b_air object
 pf = g.feature().create('pf1','PartitionFaces')
 pf.set('partitionwith','workplane')
-# Try b_air face 5 (bottom); fallback to b_al2 face 6 (top)
-partitioned = False
-for obj_tag, face_nums in [('b_air',[5]), ('b_al2',[6]), ('b_air',[1,2,3,4,5,6]), ('b_al2',[1,2,3,4,5,6])]:
-    try:
-        pf.selection('face').set(obj_tag, face_nums)
-        g.run()
-        print(f'  partition face.set({obj_tag},{face_nums}): OK -> bnd={g.getNBoundaries()}', flush=True)
-        partitioned = True
-        break
-    except Exception as e:
-        print(f'  partition face.set({obj_tag},{face_nums}): {repr(e)[:120]}', flush=True)
-if not partitioned:
-    print('FATAL: could not partition. Aborting.', flush=True)
-    raise RuntimeError('partition failed')
+before_partition_boundaries = int(g.getNBoundaries())
+pf.selection('face').set('b_air', [5])
+g.run()
+after_partition_boundaries = int(g.getNBoundaries())
 
 print(f'After partition: dom={g.getNDomains()} bnd={g.getNBoundaries()}', flush=True)
 
 # --- Identify patch boundary by faceX center (patch center ≈ (Px/2, Py/2, t_al2o3)) ---
 # Patch xy-extent = ax×ax = 0.3×0.3µm centered, so center=(0.3µm, 0.3µm, t_al2o3)
 # Rest of interface has center offset from (0.3,0.3). Use faceX at param mid.
-patch_bnd = None
+patch_candidates = []
 nb = g.getNBoundaries()
 print('\nBoundary centers (z≈t_al2o3):', flush=True)
 JD2 = jpype.JArray(jpype.JArray(jpype.JDouble))
@@ -100,27 +98,36 @@ for bn in range(1, nb+1):
         # Patch boundary: z≈t_al2o3 AND center xy near (Px/2, Py/2)
         if abs(cz - t_al2o3) < 1e-9 and abs(cx - Px/2) < ax/4 and abs(cy - Py/2) < ax/4:
             print(f'  bnd{bn}: center=({cx*1e6:.3f},{cy*1e6:.3f},{cz*1e6:.3f})µm  <- PATCH', flush=True)
-            patch_bnd = bn
+            patch_candidates.append(bn)
         elif abs(cz - t_al2o3) < 1e-9:
             print(f'  bnd{bn}: center=({cx*1e6:.3f},{cy*1e6:.3f},{cz*1e6:.3f})µm  (interface rest)', flush=True)
     except Exception as e:
         pass
-if patch_bnd is None:
-    print('Could not auto-identify patch boundary; falling back to highest bnd number.', flush=True)
-    patch_bnd = nb
+patch_bnd = require_partition_result(
+    before_partition_boundaries,
+    after_partition_boundaries,
+    patch_candidates,
+)
 print(f'Patch boundary = bnd{patch_bnd}', flush=True)
 
 # --- Domain materials ---
+al2_domains = require_named_domains(comp, 'geom1_b_al2_dom')
+air_domains = require_named_domains(comp, 'geom1_b_air_dom')
 mat_al2 = comp.material().create('mat_al2','Common')
-mat_al2.propertyGroup('def').set('relpermittivity','3.1'); mat_al2.selection().set([1])
+mat_al2.propertyGroup('def').set('relpermittivity','3.1'); mat_al2.selection().set(al2_domains)
 mat_air = comp.material().create('mat_air','Common')
-mat_air.propertyGroup('def').set('relpermittivity','1'); mat_air.selection().set([2])
+mat_air.propertyGroup('def').set('relpermittivity','1'); mat_air.selection().set(air_domains)
 
 # --- ewfd + PeriodicStructure ---
 p = comp.physics().create('ewfd','ElectromagneticWavesFrequencyDomain', str(g.getSDim()))
 ps = p.feature().create('ps1','PeriodicStructure',3)
-p1b = list(ps.feature('pport1').selection().entities())
-p2b = list(ps.feature('pport2').selection().entities())
+p1b, p2b = require_port_pair(
+    ps.feature('pport1').selection().entities(),
+    ps.feature('pport2').selection().entities(),
+    geometry=g,
+    top_domains=air_domains,
+    bottom_domains=al2_domains,
+)
 ps.selection('excitedPortSelection').set(p1b)
 print(f'pport1(top)={p1b} pport2(bottom)={p2b}', flush=True)
 
@@ -143,10 +150,16 @@ sh.set('sigmabnd', '0'); sh.set('murbnd', '1')
 ltr = p.feature().create('ltr1','LayeredTransitionBoundaryCondition',2)
 ltr.selection().set([patch_bnd])
 ltr.set('DisplacementFieldModel','RelativePermittivity')
-for prop, val in [('sigmabnd_mat','userdef'),('sigmabnd','0'),('murbnd_mat','userdef'),('murbnd','1')]:
-    try: ltr.set(prop, val)
-    except Exception: pass
-ltr.set('lth', str(t_au))
+require_required_properties(ltr, {
+    'DisplacementFieldModel': 'RelativePermittivity',
+    'epsilonr_mat': 'userdef',
+    'epsilonr': au_drude,
+    'sigmabnd_mat': 'userdef',
+    'sigmabnd': '0',
+    'murbnd_mat': 'userdef',
+    'murbnd': '1',
+    'lth': str(t_au),
+})
 print(f'LTR on bnd{patch_bnd}: lth={ltr.getString("lth")} shelllist={ltr.getString("shelllist")}', flush=True)
 
 # --- Mesh: Sweep along z (FreeTri on bottom + Sweep) ---
@@ -163,35 +176,28 @@ except Exception as e:
     # Fallback: plain FreeTet
     try:
         mesh.feature().remove('ftri1'); mesh.feature().remove('sw1')
-        ftet = mesh.feature().create('ftet1','FreeTet')
+        mesh.feature().create('ftet1','FreeTet')
         mesh.run(); print(f'Fallback FreeTet mesh: {mesh.getNumElem()} elements', flush=True)
     except Exception as e2:
-        print(f'FreeTet also FAIL: {repr(e2)[:200]}', flush=True)
+        raise RuntimeError('both MIM mesh strategies failed') from e2
 
 # --- Study: Wavelength step (dummy) + Parametric sweep on wl ---
 wls = [3e-6, 4e-6, 5e-6, 6e-6, 7e-6, 8e-6]
 study = jm.study().create('std1')
 study.create('step1','Wavelength')
-step = study.feature('step1'); step.set('punit','m'); step.set('plist', str(5e-6))
+step = study.feature('step1'); bind_wavelength_step(step, 'wl')
 study.create('sweep1','Parametric')
 sweep = study.feature('sweep1'); sweep.set('pname','wl')
 sweep.set('plist', ' '.join(str(w) for w in wls))
 print(f'Sweeping {len(wls)} wavelengths: {wls}', flush=True)
-try:
-    t0=time.time(); jm.study('std1').run(); t1=time.time()
-    print(f'Solve OK in {t1-t0:.2f}s', flush=True)
-    R = m.evaluate('ewfd.Rtotal')
-    print('\n=== Results ===', flush=True)
-    for i, wl in enumerate(wls):
-        Ri = float(R[i])
-        print(f'  wl={wl*1e6:.1f}µm  R={Ri:.6f}  eps=1-R={1-Ri:.6f}', flush=True)
-except Exception as e:
-    print(f'Solve FAIL: {repr(e)[:300]}', flush=True)
-    import traceback; traceback.print_exc()
+t0=time.time(); jm.study('std1').run(); t1=time.time()
+R = require_spectrum(m.evaluate('ewfd.Rtotal'), wls, 'Rtotal')
+print(f'Solve OK in {t1-t0:.2f}s', flush=True)
+for wl, value in zip(wls, R):
+    print(f'  wl={wl*1e6:.1f}um R={value:.6f}', flush=True)
 
 output_dir = recipe_output_dir()
-try: m.java.save(str((output_dir / "MIM_patch.mph").resolve()))
-except Exception as e: print(f'save err: {repr(e)[:150]}', flush=True)
+save_required(m.java, output_dir / "MIM_patch.mph")
 try: client.disconnect()
 except Exception: pass
 print('Done.', flush=True)

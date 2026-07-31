@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import hashlib
 import json
+from pathlib import Path
 
 import numpy as np
 import pytest
-
 from src.evidence.contracts import example_validation_policies
 from src.tools.wave_optics_audit import (
     _load_air_reference,
+    _load_policy,
     _replace_clone_materials_with_air,
+    _single_real,
     evaluate_validation_policy,
     run_wave_optics_point_audit,
     run_wave_optics_reference_audit,
@@ -45,16 +47,39 @@ def _measurement(*, absorption=1.2, closure=0.5, evidence_level="label_only"):
 
 def test_same_evidence_can_fail_or_pass_two_declared_policies():
     evidence = _measurement(absorption=0.7, closure=0.05)
-    strict = evaluate_validation_policy(
-        evidence, {"tolerances": {"closure_abs": 0.01}}
-    )
-    permissive = evaluate_validation_policy(
-        evidence, {"tolerances": {"closure_abs": 0.1}}
-    )
+    strict = evaluate_validation_policy(evidence, {"tolerances": {"closure_abs": 0.01}})
+    permissive = evaluate_validation_policy(evidence, {"tolerances": {"closure_abs": 0.1}})
 
     assert strict["overall"] == "fail"
     assert permissive["overall"] == "pass"
     assert evidence["power"]["closure_abs"] == 0.05
+
+
+def test_empty_legacy_policy_cannot_produce_a_pass_verdict():
+    result = evaluate_validation_policy(_measurement(), {})
+
+    assert result["overall"] == "missing"
+    assert result["rules"] == []
+
+
+@pytest.mark.parametrize(
+    "policy",
+    [
+        {"assumptions": {"passive": 1}},
+        {"mesh": {"require_unchanged": "yes"}},
+        {"tolerances": {"closure_abs": -1.0}},
+        {"tolerances": {"closure_abs": float("inf")}},
+        pytest.param(
+            {"tolerances": {"closure_abs": 10**10_000}},
+            id="huge-integer-tolerance",
+        ),
+    ],
+)
+def test_legacy_policy_requires_exact_booleans_and_nonnegative_finite_tolerances(
+    policy,
+):
+    with pytest.raises(ValueError):
+        _load_policy(policy, None)
 
 
 def test_a_above_one_is_classified_only_under_passive_normalized_assumptions():
@@ -88,6 +113,56 @@ def test_label_only_polarization_is_missing_only_when_policy_requires_incident_e
     assert result["rules"][0]["measured"] is False
 
 
+def test_incomplete_incident_reference_cannot_elevate_evidence_level():
+    evidence = _measurement(
+        absorption=0.3,
+        closure=0.0,
+        evidence_level="incident_reference",
+    )
+    evidence["polarization"]["incident_reference"] = {
+        "component_statistics": {
+            "x": {"complex_mean": {"real": 1.0}},
+        }
+    }
+
+    result = evaluate_validation_policy(
+        evidence,
+        {"required_evidence": ["incident_polarization"]},
+    )
+
+    assert result["overall"] == "missing"
+    assert result["rules"][0]["measured"] is False
+
+
+@pytest.mark.parametrize("value", [1.0 + 0.1j, np.asarray([2.0 - 0.2j])])
+def test_materially_complex_scientific_scalars_are_rejected(value):
+    with pytest.raises(ValueError, match="materially complex"):
+        _single_real(value, "ewfd.Atotal")
+
+
+def test_numerical_imaginary_noise_is_tolerated_for_real_scientific_scalars():
+    assert _single_real(1.0 + 1e-14j, "ewfd.Atotal") == pytest.approx(1.0)
+
+
+def test_point_audit_does_not_publish_materially_complex_power_as_real(
+    tmp_path,
+    monkeypatch,
+):
+    result, _source = _run(
+        tmp_path,
+        monkeypatch,
+        absorption=0.3 + 0.1j,
+    )
+
+    assert result["audit_status"] == "measurement_partial"
+    assert result["measurement"]["power"]["complete"] is False
+    assert "A" not in result["measurement"]["power"]
+    assert any(
+        item["code"] == "power_expression_unavailable" and item["quantity"] == "A"
+        for item in result["measurement"]["measurement_errors"]
+    )
+
+
 def test_wavelength_differences_remain_raw_until_policy_supplies_tolerances():
     evidence = _measurement(absorption=0.3, closure=0.0)
     strict = evaluate_validation_policy(
@@ -106,12 +181,8 @@ def test_wavelength_differences_remain_raw_until_policy_supplies_tolerances():
 
 def test_loss_without_normalization_remains_raw_evidence():
     evidence = _measurement(absorption=0.3, closure=0.0)
-    evidence["losses"]["items"] = [
-        {"label": "Au", "value": 0.2, "expression": "intAu(ewfd.Qh)"}
-    ]
-    result = evaluate_validation_policy(
-        evidence, {"required_evidence": ["volume_loss"]}
-    )
+    evidence["losses"]["items"] = [{"label": "Au", "value": 0.2, "expression": "intAu(ewfd.Qh)"}]
+    result = evaluate_validation_policy(evidence, {"required_evidence": ["volume_loss"]})
 
     assert result["overall"] == "pass"
     assert "normalized_value" not in evidence["losses"]["items"][0]
@@ -139,9 +210,7 @@ def test_air_reference_requires_matching_config_and_field_statistics(tmp_path):
 
 
 def test_valid_incident_reference_supports_declared_vector_policy_and_config_gate():
-    evidence = _measurement(
-        absorption=0.3, closure=0.0, evidence_level="incident_reference"
-    )
+    evidence = _measurement(absorption=0.3, closure=0.0, evidence_level="incident_reference")
     evidence["polarization"]["incident_reference"] = {
         "config_id": "air-v4",
         "component_statistics": {
@@ -217,10 +286,13 @@ class Component:
 
 class Step:
     def __init__(self):
-        self.values = {}
+        self.values = {"plist": "original_plist"}
 
     def set(self, name, value):
         self.values[name] = value
+
+    def getString(self, name):
+        return self.values[name]
 
 
 class Study:
@@ -239,7 +311,7 @@ class Study:
 
 class Parameters:
     def __init__(self):
-        self.values = {"wl": "4.37[um]"}
+        self.values = {"wl": "4.36[um]"}
 
     def set(self, name, value):
         self.values[name] = value
@@ -262,8 +334,17 @@ class JavaModel:
 
 
 class AuditModel:
-    def __init__(self, path, *, absorption=1.2, nonfinite=False, drift_source=False):
+    def __init__(
+        self,
+        path,
+        *,
+        name="AuditModel",
+        absorption=1.2,
+        nonfinite=False,
+        drift_source=False,
+    ):
         self.path = path
+        self._name = name
         self.absorption = absorption
         self.nonfinite = nonfinite
         self.drift_source = drift_source
@@ -274,7 +355,11 @@ class AuditModel:
         return str(self.path)
 
     def name(self):
-        return "AuditModel"
+        return self._name
+
+    def parameters(self, evaluate=False):
+        assert evaluate is False
+        return dict(self.java._param.values)
 
     def evaluate(self, expression):
         if isinstance(expression, list):
@@ -311,14 +396,25 @@ def _run(tmp_path, monkeypatch, **model_options):
     validation_policy = model_options.pop("validation_policy", None)
     declared_plane_flux = model_options.pop("declared_plane_flux", None)
     internal_absorption = model_options.pop("internal_absorption", None)
+    model_observer = model_options.pop("model_observer", None)
+    model_setup = model_options.pop("model_setup", None)
     source = tmp_path / "source.mph"
     source.write_bytes(b"immutable")
     model = AuditModel(source, **model_options)
+    if model_observer is not None:
+        model_observer.append(model)
+    if model_setup is not None:
+        model_setup(model)
     monkeypatch.setattr(
         "src.tools.wave_optics_audit.collect_wave_optics_preflight",
         lambda *_args, **_kwargs: {
             "inspection_status": "complete",
-            "evidence": {"observations": [], "warnings": [], "unknowns": [], "integrity_errors": []},
+            "evidence": {
+                "observations": [],
+                "warnings": [],
+                "unknowns": [],
+                "integrity_errors": [],
+            },
         },
     )
     monkeypatch.setattr(
@@ -463,7 +559,8 @@ def test_declared_flux_expression_error_is_durable_partial_evidence(tmp_path, mo
 
 
 def test_evidence_only_a_above_one_is_preserved_without_project_verdict(tmp_path, monkeypatch):
-    result, _source = _run(tmp_path, monkeypatch)
+    models = []
+    result, _source = _run(tmp_path, monkeypatch, model_observer=models)
 
     assert result["audit_status"] == "measurement_complete"
     assert result["measurement"]["power"]["A"] == 1.2
@@ -477,12 +574,22 @@ def test_evidence_only_a_above_one_is_preserved_without_project_verdict(tmp_path
     assert manifest["physical_evidence"] == result["physical_evidence"]
     assert "migration" not in result["physical_evidence"]
     assert result["physical_evidence"]["producer"]["tool_schema_version"] == "physical-evidence-1"
-    assert result["physical_evidence"]["evidence"]["polarization.physical_incident"]["state"] == "label_only"
-    assert result["physical_evidence"]["evidence"]["polarization.structure_total_field"]["selection_ids"] == ["topair", 3]
+    assert models[0].java._param.values["wl"] == "4.36[um]"
+    assert models[0].java._study.step.values["plist"] == "original_plist"
+    assert result["measurement"]["integrity"]["model_state_restored"] is True
+    assert (
+        result["physical_evidence"]["evidence"]["polarization.physical_incident"]["state"]
+        == "label_only"
+    )
+    assert result["physical_evidence"]["evidence"]["polarization.structure_total_field"][
+        "selection_ids"
+    ] == ["topair", 3]
     assert result["physical_evidence"]["evidence"]["flux.closure_abs"]["state"] == "not_requested"
 
 
-def test_strict_policy_uses_physical_evidence_and_cannot_promote_structure_total_field(tmp_path, monkeypatch):
+def test_strict_policy_uses_physical_evidence_and_cannot_promote_structure_total_field(
+    tmp_path, monkeypatch
+):
     policy = example_validation_policies()["reference_air_polarization_ratio"]
     result, _source = _run(
         tmp_path,
@@ -496,7 +603,7 @@ def test_strict_policy_uses_physical_evidence_and_cannot_promote_structure_total
     rule = result["assessment"]["policy_evaluation"]["rules"][0]
     assert rule["required_measurement_states"] == {
         "polarization.reference_air_method_valid": "unknown",
-        "polarization.target_to_transverse_ratio": "unknown"
+        "polarization.target_to_transverse_ratio": "unknown",
     }
 
 
@@ -516,6 +623,54 @@ def test_source_hash_drift_after_solve_is_an_integrity_blocker(tmp_path, monkeyp
     assert _hash(source) == result["measurement"]["provenance"]["source_sha256_after"]
 
 
+def test_unhandled_point_audit_failure_terminalizes_running_manifest(tmp_path, monkeypatch):
+    models = []
+    monkeypatch.setattr(
+        "src.tools.wave_optics_audit.build_point_audit_physical_evidence",
+        lambda _value: (_ for _ in ()).throw(RuntimeError("injected contract failure")),
+    )
+    with pytest.raises(RuntimeError, match="contract failure"):
+        _run(tmp_path, monkeypatch, model_observer=models)
+
+    manifests = list((tmp_path / "artifacts").rglob("manifest.json"))
+    assert len(manifests) == 1
+    manifest = json.loads(manifests[0].read_text(encoding="utf-8"))
+    assert manifest["audit_status"] == "runtime_failed"
+    assert manifest["runtime_failure"] == {
+        "code": "point_audit_runtime_failed",
+        "error_type": "RuntimeError",
+        "details_included": False,
+    }
+    assert models[0].java._param.values["wl"] == "4.36[um]"
+    assert models[0].java._study.step.values["plist"] == "original_plist"
+
+
+def test_point_audit_restoration_failure_is_an_integrity_blocker(tmp_path, monkeypatch):
+    models = []
+
+    def reject_restoration(model):
+        original_set = model.java._study.step.set
+
+        def reject_restore(name, value):
+            if value == "original_plist":
+                raise RuntimeError("injected restore failure")
+            original_set(name, value)
+
+        model.java._study.step.set = reject_restore
+
+    result, _source = _run(
+        tmp_path,
+        monkeypatch,
+        model_observer=models,
+        model_setup=reject_restoration,
+    )
+
+    assert result["audit_status"] == "integrity_blocked"
+    assert result["assessment"]["project_verdict"] is None
+    assert result["measurement"]["integrity"]["model_state_restored"] is False
+    assert result["measurement"]["integrity_errors"][-1]["code"] == "model_state_restore_failed"
+
+
 class MaterialSelection:
     def __init__(self):
         self.values = []
@@ -530,9 +685,14 @@ class MaterialSelection:
 class MaterialGroup:
     def __init__(self):
         self.values = {}
+        self.reads = []
 
     def set(self, name, value):
         self.values[name] = value
+
+    def getString(self, name):
+        self.reads.append(name)
+        return self.values[name]
 
 
 class Material:
@@ -604,6 +764,12 @@ def test_all_air_mutation_is_clone_only_and_requires_exact_material_tags():
         "relpermeability": "1",
         "electricconductivity": "0[S/m]",
     }
+    assert air.group.reads == [
+        "relpermittivity",
+        "relpermeability",
+        "electricconductivity",
+    ]
+    assert result["air_properties"] == air.group.values
     assert air.selection_value.values == [1, 2, 3]
 
     untouched = MaterialClone(["mat1"])
@@ -617,7 +783,16 @@ def test_all_air_mutation_is_clone_only_and_requires_exact_material_tags():
     assert untouched.java.component_value.materials.tags() == ["mat1"]
 
 
-def _run_reference(tmp_path, monkeypatch, *, material_error=False, cleanup_result=True):
+def _run_reference(
+    tmp_path,
+    monkeypatch,
+    *,
+    material_error=False,
+    cleanup_result=True,
+    register_error=False,
+    name_error=False,
+    direct_remove_error=False,
+):
     source = tmp_path / "reference_source.mph"
     source.write_bytes(b"immutable-reference")
     source_model = AuditModel(source, absorption=0.0)
@@ -626,10 +801,13 @@ def _run_reference(tmp_path, monkeypatch, *, material_error=False, cleanup_resul
     def clone_factory(_source, _client, new_name):
         clone_path = tmp_path / f"{new_name}.mph"
         clone_path.write_bytes(b"derived-clone")
-        clone = AuditModel(clone_path, absorption=0.0)
+        clone = AuditModel(clone_path, name=new_name, absorption=0.0)
+        model_name = clone.name()
+        if name_error:
+            clone.name = lambda: (_ for _ in ()).throw(RuntimeError("injected clone-name failure"))
         return clone, {
             "derived_model_id": "derived-unit-reference",
-            "model_name": clone.name(),
+            "model_name": model_name,
             "source_path": str(source),
             "source_sha256": _hash(source),
             "backing_path": str(clone_path),
@@ -651,13 +829,25 @@ def _run_reference(tmp_path, monkeypatch, *, material_error=False, cleanup_resul
         cleanup_calls.append(name)
         return cleanup_result
 
+    class Client:
+        @staticmethod
+        def remove(_clone):
+            cleanup_calls.append("direct-client-remove")
+            if direct_remove_error:
+                raise RuntimeError("injected direct removal failure")
+
+    def register(clone, _path):
+        if register_error:
+            raise RuntimeError("injected clone registration failure")
+        return f"registered-{clone.name()}"
+
     monkeypatch.setattr(
         "src.tools.wave_optics_audit._validate_ascii_dir",
         lambda _value: tmp_path / "reference_artifacts",
     )
     result = run_wave_optics_reference_audit(
         source_model,
-        object(),
+        Client(),
         model_name="AuditModel",
         component_tag="comp1",
         physics_tag="ewfd",
@@ -679,7 +869,7 @@ def _run_reference(tmp_path, monkeypatch, *, material_error=False, cleanup_resul
         artifact_dir=str(tmp_path / "ascii_reference"),
         validation_policy=example_validation_policies()["reference_air_polarization_ratio"],
         clone_factory=clone_factory,
-        clone_register=lambda clone, _path: clone.name(),
+        clone_register=register,
         clone_cleanup=cleanup,
         material_mutator=material_mutator,
         preflight_collector=lambda *_args, **_kwargs: {
@@ -695,8 +885,14 @@ def test_reference_audit_uses_fresh_clone_and_persists_dominant_component(tmp_pa
     result, source, cleanup_calls = _run_reference(tmp_path, monkeypatch)
 
     assert result["audit_status"] == "measurement_complete"
-    assert result["cleanup"] == {"attempted": True, "removed": True}
-    assert cleanup_calls == ["AuditModel"]
+    assert result["cleanup"] == {
+        "attempted": True,
+        "removed": True,
+        "client_model_removed": True,
+        "backing_file_removed": True,
+    }
+    assert len(cleanup_calls) == 1
+    assert cleanup_calls[0].startswith("registered-reference_air_clone_")
     assert result["reference"]["method"] == "all_air_clone"
     assert result["reference"]["component_amplitudes"]["x"] == pytest.approx(1.0)
     assert result["reference"]["target_to_transverse_ratio"] > 1e100
@@ -710,25 +906,84 @@ def test_reference_audit_uses_fresh_clone_and_persists_dominant_component(tmp_pa
 
 
 def test_reference_audit_cleans_clone_after_material_error(tmp_path, monkeypatch):
-    result, source, cleanup_calls = _run_reference(
-        tmp_path, monkeypatch, material_error=True
-    )
+    result, source, cleanup_calls = _run_reference(tmp_path, monkeypatch, material_error=True)
 
     assert result["audit_status"] == "measurement_partial"
-    assert cleanup_calls == ["AuditModel"]
+    assert len(cleanup_calls) == 1
+    assert cleanup_calls[0].startswith("registered-reference_air_clone_")
     assert result["cleanup"]["removed"] is True
-    assert result["physical_evidence"]["evidence"]["polarization.reference_air_method_valid"]["value"] is False
+    assert (
+        result["physical_evidence"]["evidence"]["polarization.reference_air_method_valid"]["value"]
+        is False
+    )
     manifest = json.loads(open(result["artifacts"]["manifest"], encoding="utf-8").read())
     assert manifest["measurement_errors"][0]["code"] == "reference_audit_failed"
     assert manifest["source_sha256_before"] == manifest["source_sha256_after"] == _hash(source)
 
 
-def test_reference_audit_refuses_terminal_success_when_cleanup_is_unproved(tmp_path, monkeypatch):
+def test_reference_audit_cleans_live_clone_after_registration_failure(tmp_path, monkeypatch):
     result, _source, cleanup_calls = _run_reference(
-        tmp_path, monkeypatch, cleanup_result=False
+        tmp_path,
+        monkeypatch,
+        register_error=True,
     )
 
-    assert cleanup_calls == ["AuditModel"]
+    assert len(cleanup_calls) == 1
+    assert cleanup_calls[0].startswith("reference_air_clone_")
+    assert result["audit_status"] == "measurement_partial"
+    assert result["cleanup"]["removed"] is True
+    assert result["cleanup"]["backing_file_removed"] is True
+
+
+def test_reference_audit_falls_back_to_exact_clone_after_name_failure(tmp_path, monkeypatch):
+    result, _source, cleanup_calls = _run_reference(
+        tmp_path,
+        monkeypatch,
+        name_error=True,
+    )
+
+    assert cleanup_calls == ["direct-client-remove"]
+    assert result["audit_status"] == "measurement_partial"
+    assert result["cleanup"]["client_model_removed"] is True
+    assert result["cleanup"]["backing_file_removed"] is True
+    assert result["cleanup"]["removed"] is True
+
+
+def test_reference_audit_treats_backing_file_cleanup_failure_as_integrity_blocker(
+    tmp_path, monkeypatch
+):
+    real_unlink = Path.unlink
+
+    def fail_clone_unlink(path, *args, **kwargs):
+        if path.name.startswith("reference_air_clone_"):
+            raise PermissionError("injected backing-file cleanup failure")
+        return real_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", fail_clone_unlink)
+
+    result, _source, cleanup_calls = _run_reference(tmp_path, monkeypatch)
+
+    assert len(cleanup_calls) == 1
+    assert cleanup_calls[0].startswith("registered-reference_air_clone_")
+    assert result["audit_status"] == "integrity_blocked"
+    assert result["cleanup"]["client_model_removed"] is True
+    assert result["cleanup"]["backing_file_removed"] is False
+    assert result["cleanup"]["removed"] is False
+    manifest = json.loads(Path(result["artifacts"]["manifest"]).read_text(encoding="utf-8"))
+    assert manifest["integrity_errors"][0]["code"] == "reference_clone_cleanup_unproved"
+
+
+def test_reference_audit_refuses_terminal_success_when_cleanup_is_unproved(tmp_path, monkeypatch):
+    result, _source, cleanup_calls = _run_reference(
+        tmp_path,
+        monkeypatch,
+        cleanup_result=False,
+        direct_remove_error=True,
+    )
+
+    assert len(cleanup_calls) == 2
+    assert cleanup_calls[0].startswith("registered-reference_air_clone_")
+    assert cleanup_calls[1] == "direct-client-remove"
     assert result["audit_status"] == "integrity_blocked"
     assert result["cleanup"]["removed"] is False
     manifest = json.loads(open(result["artifacts"]["manifest"], encoding="utf-8").read())

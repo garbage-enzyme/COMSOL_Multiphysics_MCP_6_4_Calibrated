@@ -1,15 +1,16 @@
 from __future__ import annotations
 
-from copy import deepcopy
+import hashlib
 import json
+from copy import deepcopy
 
 import pytest
-
 from src.evidence.field_bundle import normalize_field_evidence_request
 from src.evidence.field_manifest import (
     build_field_evidence_manifest,
     validate_field_evidence_manifest,
 )
+
 from development_kit.tests.test_field_bundle import _request
 
 
@@ -27,13 +28,21 @@ def _summaries(grid_points: int = 128 * 96, missing: int = 0) -> list[dict]:
     finite = grid_points - missing
     return [
         {
-            "name": "electric_norm", "unit": "V/m", "minimum": 0.1,
-            "maximum": 4.2, "rms": 1.3, "finite_count": finite,
+            "name": "electric_norm",
+            "unit": "V/m",
+            "minimum": 0.1,
+            "maximum": 4.2,
+            "rms": 1.3,
+            "finite_count": finite,
             "missing_count": missing,
         },
         {
-            "name": "magnetic_norm", "unit": "A/m", "minimum": 0.2,
-            "maximum": 2.1, "rms": 0.9, "finite_count": finite,
+            "name": "magnetic_norm",
+            "unit": "A/m",
+            "minimum": 0.2,
+            "maximum": 2.1,
+            "rms": 0.9,
+            "finite_count": finite,
             "missing_count": missing,
         },
     ]
@@ -49,7 +58,10 @@ def _manifest(*, missing: int = 0) -> tuple[dict, dict]:
         covered_grid_point_count=request["grid_point_count"] - missing,
         missing_grid_point_count=missing,
         coordinate_ranges={
-            "x": [-0.9, 0.9], "y": [-1.4, 1.4], "z": [0.5, 0.5], "unit": "um",
+            "x": [-0.9, 0.9],
+            "y": [-1.4, 1.4],
+            "z": [0.5, 0.5],
+            "unit": "um",
         },
         quantity_summaries=_summaries(missing=missing),
         array_artifact=_artifact("field-on-npz", "on/fields.npz", "application/x-npz"),
@@ -116,9 +128,7 @@ def test_counts_must_close_and_fit_caller_limits():
     with pytest.raises(ValueError, match="raw_point_count exceeds"):
         build_field_evidence_manifest(**dict(kwargs, raw_point_count=100_001))
     with pytest.raises(ValueError, match="must not exceed raw_point_count"):
-        build_field_evidence_manifest(
-            **dict(kwargs, raw_point_count=10, selected_point_count=11)
-        )
+        build_field_evidence_manifest(**dict(kwargs, raw_point_count=10, selected_point_count=11))
     with pytest.raises(ValueError, match="must equal the exact grid size"):
         build_field_evidence_manifest(**dict(kwargs, covered_grid_point_count=100))
     with pytest.raises(ValueError, match="must equal selected_point_count"):
@@ -167,9 +177,40 @@ def test_summary_names_units_and_counts_must_match_expressions_and_coverage():
         (missing_mismatch, "must match the manifest coverage"),
     ):
         with pytest.raises(ValueError, match=message):
-            build_field_evidence_manifest(
-                **dict(kwargs, quantity_summaries=summaries)
+            build_field_evidence_manifest(**dict(kwargs, quantity_summaries=summaries))
+
+
+def test_zero_coverage_cannot_claim_invented_summary_statistics():
+    request, _, kwargs = _kwargs()
+    grid_points = request["grid_point_count"]
+    summaries = _summaries(grid_points=grid_points, missing=grid_points)
+
+    with pytest.raises(ValueError, match="finite_count.*equal to 1"):
+        build_field_evidence_manifest(
+            **dict(
+                kwargs,
+                covered_grid_point_count=0,
+                missing_grid_point_count=grid_points,
+                quantity_summaries=summaries,
             )
+        )
+
+
+@pytest.mark.parametrize("relative_path", [".", "on//fields.npz", "on/./fields.npz"])
+def test_artifact_paths_must_be_canonical(relative_path):
+    _, _, kwargs = _kwargs()
+    kwargs["array_artifact"]["relative_path"] = relative_path
+
+    with pytest.raises(ValueError, match="canonical relative path"):
+        build_field_evidence_manifest(**kwargs)
+
+
+def test_array_and_png_artifacts_must_have_distinct_paths():
+    _, _, kwargs = _kwargs()
+    kwargs["png_artifact"]["relative_path"] = kwargs["array_artifact"]["relative_path"]
+
+    with pytest.raises(ValueError, match="distinct relative paths"):
+        build_field_evidence_manifest(**kwargs)
 
 
 def test_coordinate_ranges_must_stay_inside_requested_bounds():
@@ -184,6 +225,17 @@ def test_coordinate_ranges_must_stay_inside_requested_bounds():
 def test_manifest_rejects_unknown_fields_even_with_recomputed_hash():
     request, manifest = _manifest()
     manifest["semantic_claim"] = "SPP"
+    unhashed = dict(manifest)
+    unhashed.pop("manifest_sha256")
+    manifest["manifest_sha256"] = hashlib.sha256(
+        json.dumps(
+            unhashed,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
 
     with pytest.raises(ValueError, match="unsupported fields"):
         validate_field_evidence_manifest(manifest, request=request)

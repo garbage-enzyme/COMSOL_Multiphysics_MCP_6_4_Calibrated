@@ -35,6 +35,30 @@ def _real_vector(value: Any, label: str) -> Any:
     return array
 
 
+def _resolve_mph_dataset(model: Any, *, dataset_name: str, dataset_tag: str) -> Any:
+    """Bind the MPh evaluation name to the exact ClientAPI dataset tag."""
+    try:
+        datasets = list(model / "datasets")
+    except Exception as exc:
+        raise ValueError("MPh dataset collection is unavailable") from exc
+    matches = []
+    for node in datasets:
+        try:
+            if str(node.name()) == dataset_name:
+                matches.append(node)
+        except Exception as exc:
+            raise ValueError("MPh dataset identity readback is unavailable") from exc
+    if len(matches) != 1:
+        raise ValueError("dataset_name must identify exactly one MPh dataset")
+    try:
+        readback_tag = str(matches[0].tag())
+    except Exception as exc:
+        raise ValueError("MPh dataset tag readback is unavailable") from exc
+    if readback_tag != dataset_tag:
+        raise ValueError("dataset_name and dataset_tag identify different datasets")
+    return matches[0]
+
+
 def _collect_dataset_field_evidence(
     *,
     model: Any,
@@ -90,8 +114,22 @@ def _collect_dataset_field_evidence(
     if solution_readback != source["solution_tag"]:
         raise ValueError("dataset solution readback does not match the request")
 
+    _resolve_mph_dataset(
+        model,
+        dataset_name=source["dataset_name"],
+        dataset_tag=source["dataset_tag"],
+    )
+
     expressions = [item["expression"] for item in request_value["expressions"]]
-    evaluation_expressions = [*expressions, "x", "y", "z"]
+    local_coordinates = ["x", "y", "z"]
+    component_coordinates = [
+        f'{source["component_tag"]}.{axis}' for axis in local_coordinates
+    ]
+    evaluation_expressions = [
+        *expressions,
+        *local_coordinates,
+        *component_coordinates,
+    ]
     try:
         evaluated = model.evaluate(
             evaluation_expressions,
@@ -115,15 +153,26 @@ def _collect_dataset_field_evidence(
     size = int(vectors[0].size)
     if any(vector.size != size for vector in vectors):
         raise ValueError("field evaluation returned incompatible array lengths")
+    local_vectors = vectors[-6:-3]
+    component_vectors = vectors[-3:]
+    try:
+        import numpy as np
+    except ImportError as exc:  # pragma: no cover - field tools require NumPy
+        raise RuntimeError("NumPy is required to bind field dataset components") from exc
+    if any(
+        not np.array_equal(local, scoped)
+        for local, scoped in zip(local_vectors, component_vectors)
+    ):
+        raise ValueError("dataset coordinates do not bind to the declared component_tag")
 
     result = build_field_evidence_from_samples(
         request=request_value,
         view_id=view_id,
         artifact_root=artifact_root,
         coordinates={
-            "x": vectors[-3],
-            "y": vectors[-2],
-            "z": vectors[-1],
+            "x": local_vectors[0],
+            "y": local_vectors[1],
+            "z": local_vectors[2],
         },
         quantities={
             expression["name"]: vectors[index]

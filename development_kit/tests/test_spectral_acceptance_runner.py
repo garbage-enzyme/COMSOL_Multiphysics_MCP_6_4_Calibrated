@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import shutil
 import uuid
+from pathlib import Path
 
 import pytest
 
+from development_kit.tests.integration import spectral_characterization_acceptance as runner
 from development_kit.tests.integration.spectral_characterization_acceptance import (
+    _scientific_acceptance,
     run_acceptance,
 )
 from development_kit.tests.spectral_job_fixtures import spectral_job_spec
@@ -27,11 +29,24 @@ def ascii_root():
 
 def _raw_spec(spec: dict) -> dict:
     allowed = {
-        "job_type", "source_model_path", "source_model_relative_identity",
-        "configuration_sha256", "parameter_state", "wavelength_parameter",
-        "initial_grid", "refinement_policy", "expansion_policy", "maximum_points",
-        "collector", "analysis_policy", "measurement_configuration", "resource_policy",
-        "cores", "version", "max_retries", "continue_on_error",
+        "job_type",
+        "source_model_path",
+        "source_model_relative_identity",
+        "configuration_sha256",
+        "parameter_state",
+        "wavelength_parameter",
+        "initial_grid",
+        "refinement_policy",
+        "expansion_policy",
+        "maximum_points",
+        "collector",
+        "analysis_policy",
+        "measurement_configuration",
+        "resource_policy",
+        "cores",
+        "version",
+        "max_retries",
+        "continue_on_error",
     }
     return {key: value for key, value in spec.items() if key in allowed}
 
@@ -74,3 +89,66 @@ def test_non_ascii_runtime_root_fails_before_worker_start(tmp_path):
             output=tmp_path / "receipt.json",
             dry_run=True,
         )
+
+
+def test_receipt_publication_uses_the_directory_durable_exclusive_primitive(tmp_path, monkeypatch):
+    output = tmp_path / "receipt.json"
+    calls = []
+
+    def publish(path, value):
+        calls.append((Path(path), value))
+        output.write_text(json.dumps(value), encoding="utf-8")
+
+    monkeypatch.setattr(runner, "atomic_write_json_exclusive", publish)
+    runner._write_json(output, {"success": True})
+
+    assert calls == [(output, {"success": True})]
+
+
+def _scientific_row(index: int = 0) -> dict:
+    wavelength = 4.0e-6 + index * 1.0e-9
+    return {
+        "point_id": f"point-{index}",
+        "row_sha256": "a" * 64,
+        "requested_wavelength_m": wavelength,
+        "evaluated_wavelength_m": wavelength,
+        "frequency_wavelength_m": wavelength,
+        "R": 0.4,
+        "T": 0.5,
+        "A": 0.1,
+        "mesh_element_count": 10,
+        "mesh_vertex_count": 8,
+        "solve_seconds": 0.1,
+        "audit_artifact": {"path": "audit.json", "sha256": "b" * 64},
+    }
+
+
+def test_spectral_success_requires_complete_physical_row_evidence(tmp_path):
+    spec = spectral_job_spec(tmp_path)
+    rows = [_scientific_row(index) for index in range(5)]
+
+    accepted = _scientific_acceptance(rows, [{"stage_index": 0}], spec)
+    bad_closure = [dict(row) for row in rows]
+    bad_closure[0]["A"] = 0.3
+    rejected = _scientific_acceptance(bad_closure, [{"stage_index": 0}], spec)
+
+    assert accepted["passed"] is True
+    assert all(accepted["checks"].values())
+    assert rejected["passed"] is False
+    assert rejected["checks"]["power_closure"] is False
+
+
+def test_spectral_success_rejects_empty_or_incomplete_evidence(tmp_path):
+    spec = spectral_job_spec(tmp_path)
+    rows = [_scientific_row(index) for index in range(4)]
+
+    no_stage = _scientific_acceptance(rows, [], spec)
+    insufficient = _scientific_acceptance(rows, [{"stage_index": 0}], spec)
+    rows[0]["mesh_element_count"] = 0
+    bad_mesh = _scientific_acceptance(
+        [*rows, _scientific_row(4)], [{"stage_index": 0}], spec
+    )
+
+    assert no_stage["checks"]["stage_plan_present"] is False
+    assert insufficient["checks"]["minimum_point_count"] is False
+    assert bad_mesh["checks"]["mesh_positive"] is False

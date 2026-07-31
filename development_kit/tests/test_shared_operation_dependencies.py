@@ -63,13 +63,25 @@ def test_two_shared_model_mutations_cannot_overlap(tmp_path, monkeypatch):
         profile_name="desktop_shared",
     )
     result: dict = {}
-    worker = threading.Thread(target=lambda: result.update(first()))
-    worker.start()
-    assert entered.wait(1.0)
+    worker_errors = []
 
-    rejected = second()
-    release.set()
-    worker.join(2.0)
+    def run_first():
+        try:
+            result.update(first())
+        except BaseException as exc:
+            worker_errors.append(exc)
+
+    worker = threading.Thread(target=run_first)
+    worker.start()
+    try:
+        assert entered.wait(1.0)
+        rejected = second()
+    finally:
+        release.set()
+        worker.join(2.0)
+        assert not worker.is_alive()
+    if worker_errors:
+        raise worker_errors[0]
 
     assert rejected["success"] is False
     assert rejected["operation_gate"]["active_operation"]["tool_name"] == (
@@ -113,16 +125,28 @@ def test_status_and_cancel_remain_responsive_during_shared_solve(tmp_path, monke
         profile_name="desktop_shared",
     )
     solve_result: dict = {}
-    worker = threading.Thread(target=lambda: solve_result.update(solve_tool()))
-    worker.start()
-    assert entered.wait(1.0)
+    worker_errors = []
 
-    started = time.perf_counter()
-    status = status_tool()
-    cancel = cancel_tool()
-    elapsed = time.perf_counter() - started
-    release.set()
-    worker.join(2.0)
+    def run_solve():
+        try:
+            solve_result.update(solve_tool())
+        except BaseException as exc:
+            worker_errors.append(exc)
+
+    worker = threading.Thread(target=run_solve)
+    worker.start()
+    try:
+        assert entered.wait(1.0)
+        started = time.perf_counter()
+        status = status_tool()
+        cancel = cancel_tool()
+        elapsed = time.perf_counter() - started
+    finally:
+        release.set()
+        worker.join(2.0)
+        assert not worker.is_alive()
+    if worker_errors:
+        raise worker_errors[0]
 
     assert elapsed < 0.2
     assert status["success"] is True

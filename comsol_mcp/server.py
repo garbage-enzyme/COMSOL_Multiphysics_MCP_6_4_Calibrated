@@ -15,7 +15,6 @@ from .tools.profiles import (
     tool_names_for_profile,
 )
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 mcp = FastMCP("COMSOL MCP")
@@ -84,6 +83,7 @@ def _preload_native_runtime() -> dict[str, str]:
 
 def main() -> None:
     """Run the MCP server."""
+    logging.basicConfig(level=logging.INFO)
     apply_java_settings()
     native_runtime = _preload_native_runtime()
     selection = resolve_profile()

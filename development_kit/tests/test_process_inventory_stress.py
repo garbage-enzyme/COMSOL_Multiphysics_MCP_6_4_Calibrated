@@ -2,20 +2,21 @@
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
 import math
 import os
-from pathlib import Path
 import shutil
 import statistics
 import subprocess
 import sys
+import threading
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import nullcontext
+from pathlib import Path
 
 import psutil
 import pytest
-
 import src.tools.ownership as ownership_module
 from src.tools.ownership import SolverOwnership
 
@@ -47,6 +48,14 @@ def _percentile(values: list[float], fraction: float) -> float:
     return ordered[index]
 
 
+def _join_inventory_scan(inventory, *, timeout: float = 1.0) -> None:
+    thread = inventory._thread
+    if thread is None:
+        return
+    thread.join(timeout=timeout)
+    assert not thread.is_alive(), f"inventory worker {thread.name!r} did not stop"
+
+
 def test_synthetic_large_inventory_preserves_external_owner_and_pid_identity(runtime_dir):
     own = _record(900_001, 1000.0, ["python.exe", "-m", "src.server"])
     external = _record(
@@ -55,8 +64,7 @@ def test_synthetic_large_inventory_preserves_external_owner_and_pid_identity(run
         ["python.exe", "-c", "import mph; mph.Client()"],
     )
     ordinary = [
-        _record(910_000 + index, 2000.0 + index, [f"worker-{index}.exe"])
-        for index in range(5_000)
+        _record(910_000 + index, 2000.0 + index, [f"worker-{index}.exe"]) for index in range(5_000)
     ]
     inventory = [own, external, *ordinary]
     manager = SolverOwnership(
@@ -74,9 +82,7 @@ def test_synthetic_large_inventory_preserves_external_owner_and_pid_identity(run
         status = manager.status()
         latencies.append(time.monotonic() - started)
         assert status["collision"] is True
-        assert [item["pid"] for item in status["external_solver_processes"]] == [
-            external["pid"]
-        ]
+        assert [item["pid"] for item in status["external_solver_processes"]] == [external["pid"]]
         assert status["external_solver_processes"][0]["process_create_time"] == 1001.0
         assert status["external_solver_processes"][0]["command_line"] == external["command_line"]
 
@@ -149,26 +155,130 @@ def test_bounded_inventory_timeout_fails_closed_and_cache_cannot_authorize_acqui
         command_line=["python.exe", "-m", "src.server"],
         owner="inventory-timeout-timeout-observer",
     )
-    started = time.monotonic()
-    status = manager.status()
+    try:
+        started = time.monotonic()
+        status = manager.status()
 
-    assert time.monotonic() - started < 0.15
-    assert status["process_inventory"]["complete"] is False
-    assert status["process_inventory"]["source"] == "unavailable_after_timeout"
-    assert status["collision"] is True
-    assert manager.acquire(mode="must-require-fresh")["success"] is False
-    assert not manager.lease_path.exists()
+        assert time.monotonic() - started < 0.15
+        assert status["process_inventory"]["complete"] is False
+        assert status["process_inventory"]["source"] == "unavailable_after_timeout"
+        assert status["collision"] is True
+        assert manager.acquire(mode="must-require-fresh")["success"] is False
+        assert not manager.lease_path.exists()
 
-    time.sleep(0.25)
-    cached = manager.status()
-    assert cached["process_inventory"]["complete"] is True
-    assert cached["process_inventory"]["fresh"] is False
-    assert cached["process_inventory"]["source"] == "recent_complete_cache"
-    assert manager.acquire(mode="cache-must-not-authorize")["success"] is False
-    preflight = manager.preflight()
-    assert preflight["ready"] is False
-    assert "host process inventory is incomplete" in preflight["blockers"]
-    assert not manager.lease_path.exists()
+        time.sleep(0.25)
+        cached = manager.status()
+        assert cached["process_inventory"]["complete"] is True
+        assert cached["process_inventory"]["fresh"] is False
+        assert cached["process_inventory"]["source"] == "recent_complete_cache"
+        assert manager.acquire(mode="cache-must-not-authorize")["success"] is False
+        preflight = manager.preflight()
+        assert preflight["ready"] is False
+        assert "host process inventory is incomplete" in preflight["blockers"]
+        assert not manager.lease_path.exists()
+    finally:
+        _join_inventory_scan(manager._process_inventory)
+
+
+def test_bounded_inventory_rejects_scan_completed_after_request_deadline(monkeypatch):
+    original_start = threading.Thread.start
+
+    def delayed_return_from_start(thread):
+        original_start(thread)
+        time.sleep(0.1)
+
+    def scan_finishing_after_deadline():
+        time.sleep(0.08)
+        return []
+
+    monkeypatch.setattr(threading.Thread, "start", delayed_return_from_start)
+    inventory = ownership_module._BoundedProcessInventory(scan_finishing_after_deadline)
+
+    records, evidence = inventory.collect(require_fresh=True, timeout=0.05)
+
+    assert records == []
+    assert evidence["complete"] is False
+    assert evidence["fresh"] is False
+    assert evidence["source"] == "stale_cache_after_timeout"
+
+
+def test_read_only_recheck_accepts_scan_that_was_already_in_flight(runtime_dir, monkeypatch):
+    def briefly_slow_inventory():
+        time.sleep(0.08)
+        return []
+
+    monkeypatch.setattr(ownership_module, "_system_processes", briefly_slow_inventory)
+    manager = SolverOwnership(
+        runtime_dir,
+        pid=os.getpid() + 2_000_001,
+        parent_pid=0,
+        create_time=1.0,
+        command_line=["python.exe", "-m", "src.server"],
+        owner="inventory-inflight-observer",
+    )
+
+    first = manager.status(inventory_timeout=0.05)
+    second = manager.status(inventory_timeout=0.05)
+
+    assert first["process_inventory"]["complete"] is False
+    assert first["process_inventory"]["source"] == "unavailable_after_timeout"
+    assert second["process_inventory"]["complete"] is True
+    assert second["process_inventory"]["fresh"] is False
+    assert second["process_inventory"]["source"] == "completed_inflight_scan"
+    assert second["collision"] is False
+
+
+def test_host_inventory_skips_expensive_metadata_for_unrelated_processes(monkeypatch):
+    class UnrelatedProcess:
+        pid = 77
+
+        def oneshot(self):
+            return nullcontext()
+
+        def name(self):
+            return "unrelated-gui.exe"
+
+        def ppid(self):
+            return 7
+
+        def create_time(self):
+            return 70.0
+
+        def cmdline(self):
+            pytest.fail("unrelated command lines must not be queried")
+
+        def exe(self):
+            pytest.fail("executables are not required for collision classification")
+
+    assert ownership_module._process_record(UnrelatedProcess()) == {
+        "pid": 77,
+        "parent_pid": 7,
+        "name": "unrelated-gui.exe",
+        "create_time": 70.0,
+        "command_line": [],
+        "executable": None,
+    }
+
+
+def test_host_inventory_fails_closed_when_solver_process_is_inaccessible(monkeypatch):
+    class InaccessibleProcess:
+        pid = 88
+
+        def cmdline(self):
+            raise psutil.AccessDenied(pid=self.pid)
+
+        def create_time(self):
+            return 88.0
+
+    monkeypatch.setattr(
+        ownership_module,
+        "_windows_process_table",
+        lambda: [(88, 0, "comsolmphserver.exe")],
+    )
+    monkeypatch.setattr(ownership_module.psutil, "Process", lambda _pid: InaccessibleProcess())
+
+    with pytest.raises(RuntimeError, match="inspection failed for PID 88"):
+        ownership_module._system_processes()
 
 
 def test_independent_cold_observers_prove_stale_lease_without_full_inventory(
@@ -209,45 +319,45 @@ def test_independent_cold_observers_prove_stale_lease_without_full_inventory(
     assert all(status["process_inventory"]["complete"] is False for status in observations)
     assert all(status["lease"]["state"] == "stale" for status in observations)
     assert all(
-        status["lease"]["identity_source"] == "targeted_process_probe"
-        for status in observations
+        status["lease"]["identity_source"] == "targeted_process_probe" for status in observations
     )
     assert all(status["collision"] is True for status in observations)
     time.sleep(0.25)
 
 
 def test_real_host_inventory_retains_marker_during_short_process_churn(runtime_dir):
-    marker = subprocess.Popen(
-        [sys.executable, "-c", "import time; marker='mph.Client'; time.sleep(30)"],
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-    )
-    created = psutil.Process(marker.pid).create_time()
+    marker = None
     churned: list[subprocess.Popen] = []
-
-    def churn() -> None:
-        for _ in range(20):
-            process = subprocess.Popen(
-                [sys.executable, "-c", "pass"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            )
-            churned.append(process)
-            process.wait(timeout=10)
-
-    manager = SolverOwnership(
-        runtime_dir,
-        pid=os.getpid() + 1_000_000,
-        parent_pid=0,
-        create_time=1.0,
-        command_line=["python.exe", "-m", "src.server"],
-        owner="process-inventory-real-observer",
-    )
     latencies = []
     complete_scans = 0
     incomplete_scans = 0
     marker_observations = 0
     try:
+        marker = subprocess.Popen(
+            [sys.executable, "-c", "import time; marker='mph.Client'; time.sleep(30)"],
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        created = psutil.Process(marker.pid).create_time()
+
+        def churn() -> None:
+            for _ in range(20):
+                process = subprocess.Popen(
+                    [sys.executable, "-c", "pass"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+                churned.append(process)
+                process.wait(timeout=10)
+
+        manager = SolverOwnership(
+            runtime_dir,
+            pid=os.getpid() + 1_000_000,
+            parent_pid=0,
+            create_time=1.0,
+            command_line=["python.exe", "-m", "src.server"],
+            owner="process-inventory-real-observer",
+        )
         with ThreadPoolExecutor(max_workers=2) as executor:
             churn_future = executor.submit(churn)
             for _ in range(12):
@@ -255,7 +365,8 @@ def test_real_host_inventory_retains_marker_during_short_process_churn(runtime_d
                 status = manager.status()
                 latencies.append(time.monotonic() - started)
                 matches = [
-                    item for item in status["external_solver_processes"]
+                    item
+                    for item in status["external_solver_processes"]
                     if item["pid"] == marker.pid
                 ]
                 assert status["collision"] is True
@@ -273,12 +384,15 @@ def test_real_host_inventory_retains_marker_during_short_process_churn(runtime_d
                     }
             churn_future.result(timeout=30)
     finally:
-        marker.terminate()
-        marker.wait(timeout=10)
-        for process in churned:
-            if process.poll() is None:
-                process.terminate()
-                process.wait(timeout=10)
+        try:
+            if marker is not None:
+                marker.terminate()
+                marker.wait(timeout=10)
+        finally:
+            for process in churned:
+                if process.poll() is None:
+                    process.terminate()
+                    process.wait(timeout=10)
 
     assert statistics.median(latencies) < 1.0
     assert _percentile(latencies, 0.95) < 3.0

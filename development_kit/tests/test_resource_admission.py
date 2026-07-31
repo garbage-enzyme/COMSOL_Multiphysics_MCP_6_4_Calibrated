@@ -1,13 +1,16 @@
-"""resource admission solver-free resource policy and free-space admission free-space admission gates."""
+"""Solver-free resource policy, telemetry, and admission gates."""
 
 from __future__ import annotations
 
-from pathlib import Path
+import copy
+import hashlib
+import json
 import shutil
 import uuid
+from pathlib import Path
 
 import pytest
-
+import src.jobs.worker as production_worker
 from src.jobs.manager import validate_staged_sweep_spec
 from src.jobs.resource_admission import (
     ResourceStageAdapter,
@@ -18,14 +21,15 @@ from src.jobs.resource_admission import (
     evaluate_resource_admission,
     normalize_resource_policy,
     normalize_telemetry_sample,
-    replay_resource_journal,
+)
+from src.jobs.resource_admission import (
+    replay_resource_journal as _replay_resource_journal,
 )
 from src.jobs.store import JobStore
-import src.jobs.worker as production_worker
-from src.tools.workflow import _sweep_point_id, run_staged_parametric_sweep
-from src.tools.workflow import _run_bounded_sweep_hook
-from development_kit.tests.test_workflow import FakeModel, read_csv
+from src.tools.workflow import _run_bounded_sweep_hook, _sweep_point_id, run_staged_parametric_sweep
 
+from development_kit.tests.integration import resource_admission_acceptance as acceptance
+from development_kit.tests.test_workflow import FakeModel, read_csv
 
 POLICY = {
     "available_memory_warn_fraction": 0.25,
@@ -39,6 +43,131 @@ POLICY = {
     "wall_time_budget_seconds": 3600.0,
     "minimum_next_point_seconds": 600.0,
 }
+
+
+def replay_resource_journal(entries, *, attempt, completed_point_ids=(), expected_policy=POLICY):
+    return _replay_resource_journal(
+        entries,
+        attempt=attempt,
+        expected_policy=expected_policy,
+        completed_point_ids=completed_point_ids,
+    )
+
+
+def _self_hash_entry(entry):
+    body = {name: value for name, value in entry.items() if name != "entry_sha256"}
+    payload = json.dumps(
+        body,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    entry["entry_sha256"] = hashlib.sha256(payload).hexdigest()
+
+
+def test_acceptance_requires_both_telemetry_and_admission_stages():
+    empty = acceptance._resource_journal_acceptance([])
+    complete = acceptance._resource_journal_acceptance(
+        [
+            {"entry_type": "telemetry", "stage": "pre_solve"},
+            {"entry_type": "admission", "stage": "pre_solve", "decision": "allow"},
+            {"entry_type": "telemetry", "stage": "post_solve"},
+            {"entry_type": "admission", "stage": "post_solve", "decision": "allow"},
+        ]
+    )
+
+    assert empty["passed"] is False
+    assert empty["checks"]["admission_stages_complete"] is False
+    assert complete["passed"] is True
+
+
+def test_post_submit_recovery_requests_cancel_and_waits_for_cleanup(monkeypatch):
+    calls = []
+
+    class Manager:
+        @staticmethod
+        def status(job_id):
+            calls.append(("status", job_id))
+            return {"status": "running"}
+
+        @staticmethod
+        def cancel(job_id):
+            calls.append(("cancel", job_id))
+            return {"success": True, "status": "cancel_requested"}
+
+    monkeypatch.setattr(
+        acceptance,
+        "_poll_terminal",
+        lambda _manager, job_id, _timeout: (
+            calls.append(("terminal", job_id)) or {"status": "cancelled"}
+        ),
+    )
+    monkeypatch.setattr(
+        acceptance,
+        "_poll_cleanup",
+        lambda _runtime, _timeout: (
+            calls.append(("cleanup", "job-test"))
+            or {"collision": False, "lease": {"state": "absent"}}
+        ),
+    )
+
+    recovery = acceptance._recover_submitted_job(Manager(), "job-test", Path("D:/runtime"))
+
+    assert recovery["passed"] is True
+    assert calls == [
+        ("status", "job-test"),
+        ("cancel", "job-test"),
+        ("terminal", "job-test"),
+        ("cleanup", "job-test"),
+    ]
+
+
+def test_builder_timeout_closes_required_process_tree_containment(monkeypatch):
+    class Process:
+        pid = 44001
+
+        def __init__(self):
+            self.returncode = None
+            self.communications = 0
+
+        def communicate(self, *, timeout):
+            self.communications += 1
+            if self.communications == 1:
+                raise acceptance.subprocess.TimeoutExpired("builder", timeout)
+            return "", ""
+
+        def poll(self):
+            return self.returncode
+
+        def wait(self, *, timeout):
+            self.returncode = 1
+            return 1
+
+        def kill(self):
+            self.returncode = 1
+
+    class Containment:
+        closed = False
+
+        def close(self):
+            self.closed = True
+
+    process = Process()
+    containment = Containment()
+    monkeypatch.setattr(acceptance.subprocess, "Popen", lambda *_args, **_kwargs: process)
+    monkeypatch.setattr(acceptance.OwnedJobObject, "assign", lambda _pid: containment)
+    monkeypatch.setattr(
+        acceptance.subprocess,
+        "run",
+        lambda *_args, **_kwargs: type("Completed", (), {"returncode": 0})(),
+    )
+
+    result = acceptance._run_builder_process(["python", "builder.py"])
+
+    assert result["success"] is False
+    assert result["timed_out"] is True
+    assert result["cleanup"]["passed"] is True
+    assert containment.closed is True
 
 
 @pytest.fixture
@@ -87,8 +216,14 @@ def test_explicit_policy_and_sample_are_deterministic_without_host_defaults():
         ({}, "at least one"),
         ({"unknown": 1}, "unknown"),
         ({"available_memory_warn_fraction": 1.1}, "between 0 and 1"),
-        ({"available_memory_warn_fraction": 0.1, "available_memory_refuse_fraction": 0.2}, "must not exceed"),
-        ({"runtime_free_space_warn_bytes": 100, "runtime_free_space_refuse_bytes": 200}, "must not exceed"),
+        (
+            {"available_memory_warn_fraction": 0.1, "available_memory_refuse_fraction": 0.2},
+            "must not exceed",
+        ),
+        (
+            {"runtime_free_space_warn_bytes": 100, "runtime_free_space_refuse_bytes": 200},
+            "must not exceed",
+        ),
         ({"max_mesh_elements": 1.5}, "positive integer"),
         ({"wall_time_budget_seconds": 10}, "declared together"),
         ({"wall_time_budget_seconds": 10, "minimum_next_point_seconds": 20}, "must not exceed"),
@@ -228,7 +363,9 @@ def test_staged_sweep_spec_normalizes_policy_into_immutable_fingerprint(tmp_path
         staged_spec(source, {**POLICY, "max_mesh_elements": 349_999})
     )
 
-    assert first["resource_policy"]["policy_sha256"] == reordered["resource_policy"]["policy_sha256"]
+    assert (
+        first["resource_policy"]["policy_sha256"] == reordered["resource_policy"]["policy_sha256"]
+    )
     assert first["spec_fingerprint"] == reordered["spec_fingerprint"]
     assert changed["spec_fingerprint"] != first["spec_fingerprint"]
     assert first["resource_policy"]["host_defaults_applied"] is False
@@ -301,6 +438,13 @@ def test_collector_output_feeds_admission_without_dropping_sample_integrity(tmp_
 
     assert decision["decision"] == "allow"
     assert decision["telemetry"]["sample_sha256"] == collected["sample_sha256"]
+    assert decision["telemetry"]["process_id"] == collected["process_id"]
+    assert decision["telemetry"]["metric_sources"] == collected["metric_sources"]
+    assert decision["telemetry"]["collection_errors"] == collected["collection_errors"]
+
+    tampered = {**collected, "process_id": collected["process_id"] + 1}
+    with pytest.raises(ValueError, match="integrity"):
+        normalize_telemetry_sample(tampered)
 
 
 def test_collector_envelope_still_rejects_unknown_metadata(tmp_path):
@@ -385,7 +529,15 @@ def test_calibration_is_deterministic_and_marks_missing_metrics_unavailable():
         ({"baseline_status": "assumed_safe"}, "exactly known_safe"),
         ({"candidates": []}, "non-empty list"),
         ({"candidates": [{"sample_id": "safe", "telemetry": {"stage": "post_solve"}}]}, "unique"),
-        ({"candidates": [{"sample_id": "x", "telemetry": {"stage": "post_solve"}}, {"sample_id": "x", "telemetry": {"stage": "post_solve"}}]}, "unique"),
+        (
+            {
+                "candidates": [
+                    {"sample_id": "x", "telemetry": {"stage": "post_solve"}},
+                    {"sample_id": "x", "telemetry": {"stage": "post_solve"}},
+                ]
+            },
+            "unique",
+        ),
     ],
 )
 def test_invalid_calibration_contract_fails_closed(changes, match):
@@ -427,6 +579,37 @@ def test_green_resource_transition_authorizes_only_after_telemetry_and_decision(
     assert telemetry_only["points"]["wl:4.25"]["start_authorized"] is False
     assert replay["points"]["wl:4.25"]["action"] == "start_point"
     assert replay["next_attempt_sequence"] == 2
+
+
+def test_self_hashed_admission_cannot_override_bound_policy_or_red_telemetry():
+    entries = build_resource_admission_entries(
+        attempt=1,
+        point_id="wl:4.25",
+        attempt_sequence=0,
+        policy=POLICY,
+        sample=sample(available_memory_bytes=12),
+    )
+    fabricated = copy.deepcopy(entries)
+    admission = fabricated[1]
+    admission.update(
+        {
+            "state": "green",
+            "decision": "allow",
+            "evidence_codes": [],
+            "start_authorized": True,
+            "checkpoint_required": False,
+        }
+    )
+    _self_hash_entry(admission)
+
+    with pytest.raises(ValueError, match="does not match bound policy telemetry"):
+        replay_resource_journal(fabricated, attempt=1)
+
+    wrong_policy = copy.deepcopy(entries)
+    wrong_policy[1]["policy_sha256"] = "0" * 64
+    _self_hash_entry(wrong_policy[1])
+    with pytest.raises(ValueError, match="policy identity"):
+        replay_resource_journal(wrong_policy, attempt=1)
 
 
 def test_warning_requires_separate_exact_caller_confirmation_transition():
@@ -493,6 +676,26 @@ def test_completed_point_is_never_authorized_for_a_duplicate_valid_row():
     assert replay["duplicate_valid_rows_authorized"] is False
 
 
+def test_completed_row_does_not_hide_its_post_solve_resource_refusal():
+    entries = build_resource_admission_entries(
+        attempt=1,
+        point_id="wl:4.25",
+        attempt_sequence=0,
+        policy=POLICY,
+        sample=sample(stage="post_solve", available_memory_bytes=12),
+    )
+
+    replay = replay_resource_journal(
+        entries,
+        attempt=1,
+        completed_point_ids=["wl:4.25"],
+    )
+
+    assert replay["points"]["wl:4.25"]["stage"] == "post_solve"
+    assert replay["points"]["wl:4.25"]["action"] == "checkpoint_no_start"
+    assert replay["points"]["wl:4.25"]["start_authorized"] is False
+
+
 def test_stale_attempt_and_stale_warning_confirmation_fail_closed():
     warning = build_resource_admission_entries(
         attempt=1,
@@ -549,7 +752,11 @@ def test_journal_cannot_return_to_an_older_attempt_after_resume():
 
 def test_job_store_persists_validated_resource_journal_with_fsync_contract(ascii_jobs_root):
     store = JobStore(ascii_jobs_root / "jobs")
-    job_id = store.create({}, {"attempt": 1, "status": "submitted"}, job_id="job-resource")
+    job_id = store.create(
+        {"resource_policy": normalize_resource_policy(POLICY)},
+        {"attempt": 1, "status": "submitted"},
+        job_id="job-resource",
+    )
     warning = build_resource_admission_entries(
         attempt=1,
         point_id="wl:4.25",
@@ -557,13 +764,13 @@ def test_job_store_persists_validated_resource_journal_with_fsync_contract(ascii
         policy=POLICY,
         sample=sample(available_memory_bytes=20),
     )
-    first = store.append_resource_journal(job_id, warning)
+    first = store.append_resource_journal(job_id, warning, expected_policy=POLICY)
     continuation = build_resource_warning_continuation_entry(
         warning_admission=warning[1],
         attempt_sequence=2,
         confirmation_id="operator-confirm-001",
     )
-    final = store.append_resource_journal(job_id, [continuation])
+    final = store.append_resource_journal(job_id, [continuation], expected_policy=POLICY)
 
     assert first["points"]["wl:4.25"]["action"] == "await_confirmation"
     assert final["points"]["wl:4.25"]["action"] == "start_point"
@@ -571,9 +778,38 @@ def test_job_store_persists_validated_resource_journal_with_fsync_contract(ascii
     assert (store.job_dir(job_id) / "resource.jsonl").read_bytes().endswith(b"\n")
 
 
+def test_resource_transition_batch_failure_cannot_publish_a_prefix(ascii_jobs_root, monkeypatch):
+    store = JobStore(ascii_jobs_root / "jobs")
+    job_id = store.create(
+        {"resource_policy": normalize_resource_policy(POLICY)},
+        {"attempt": 1, "status": "submitted"},
+        job_id="job-batch",
+    )
+    entries = build_resource_admission_entries(
+        attempt=1,
+        point_id="wl:4.25",
+        attempt_sequence=0,
+        policy=POLICY,
+        sample=sample(available_memory_bytes=20),
+    )
+    monkeypatch.setattr(
+        "src.jobs.store._durable_atomic_write_bytes",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("injected batch failure")),
+    )
+
+    with pytest.raises(OSError, match="batch failure"):
+        store.append_resource_journal(job_id, entries, expected_policy=POLICY)
+    assert store.read_resource_journal(job_id) == []
+    assert (store.job_dir(job_id) / "resource.jsonl").read_bytes() == b""
+
+
 def test_job_store_rejects_wrong_attempt_before_appending(ascii_jobs_root):
     store = JobStore(ascii_jobs_root / "jobs")
-    job_id = store.create({}, {"attempt": 2, "status": "starting"}, job_id="job-resource")
+    job_id = store.create(
+        {"resource_policy": normalize_resource_policy(POLICY)},
+        {"attempt": 2, "status": "starting"},
+        job_id="job-resource",
+    )
     stale = build_resource_admission_entries(
         attempt=1,
         point_id="wl:4.25",
@@ -583,13 +819,17 @@ def test_job_store_rejects_wrong_attempt_before_appending(ascii_jobs_root):
     )
 
     with pytest.raises(ValueError, match="latest journal attempt"):
-        store.append_resource_journal(job_id, stale)
+        store.append_resource_journal(job_id, stale, expected_policy=POLICY)
     assert store.read_resource_journal(job_id) == []
 
 
 def test_stage_adapter_drives_fake_runner_through_all_bounded_actions(ascii_jobs_root):
     store = JobStore(ascii_jobs_root / "jobs")
-    job_id = store.create({}, {"attempt": 1, "status": "running"}, job_id="job-adapter")
+    job_id = store.create(
+        {"resource_policy": normalize_resource_policy(POLICY)},
+        {"attempt": 1, "status": "running"},
+        job_id="job-adapter",
+    )
     completed = set()
     available = {"wl:4.25": 30, "wl:4.30": 20, "wl:4.35": 12}
     provider_calls = []
@@ -643,7 +883,11 @@ def test_stage_adapter_drives_fake_runner_through_all_bounded_actions(ascii_jobs
 
 def test_stage_adapter_starts_new_attempt_at_zero_and_rejects_stale_adapter(ascii_jobs_root):
     store = JobStore(ascii_jobs_root / "jobs")
-    job_id = store.create({}, {"attempt": 1, "status": "running"}, job_id="job-adapter")
+    job_id = store.create(
+        {"resource_policy": normalize_resource_policy(POLICY)},
+        {"attempt": 1, "status": "running"},
+        job_id="job-adapter",
+    )
     values = {"available": 12}
 
     def provider(stage, _point_id):
@@ -678,7 +922,11 @@ def test_stage_adapter_starts_new_attempt_at_zero_and_rejects_stale_adapter(asci
 
 def test_stage_adapter_rejects_provider_stage_mismatch_without_appending(ascii_jobs_root):
     store = JobStore(ascii_jobs_root / "jobs")
-    job_id = store.create({}, {"attempt": 1, "status": "running"}, job_id="job-adapter")
+    job_id = store.create(
+        {"resource_policy": normalize_resource_policy(POLICY)},
+        {"attempt": 1, "status": "running"},
+        job_id="job-adapter",
+    )
     adapter = ResourceStageAdapter(
         store=store,
         job_id=job_id,
@@ -695,7 +943,11 @@ def test_stage_adapter_rejects_provider_stage_mismatch_without_appending(ascii_j
 
 def test_stage_adapter_gates_in_process_fake_comsol_sweep(ascii_jobs_root):
     store = JobStore(ascii_jobs_root / "jobs")
-    job_id = store.create({}, {"attempt": 1, "status": "running"}, job_id="job-sweep-hook")
+    job_id = store.create(
+        {"resource_policy": normalize_resource_policy(POLICY)},
+        {"attempt": 1, "status": "running"},
+        job_id="job-sweep-hook",
+    )
     csv_path = ascii_jobs_root / "hooked-sweep.csv"
     completed = set()
     available = {
@@ -756,13 +1008,16 @@ def test_attached_revision_gate_matches_bounded_sweep_hook_contract():
 
     result = production_worker._attached_point_start_result(context)
 
-    assert _run_bounded_sweep_hook(
-        lambda _context: result,
-        phase="before_point",
-        stage="pre_solve",
-        point_id="point:30",
-        parameter_name="saved_model_agent_value",
-        parameter_value="30[mm]",
-        config_id="config-30",
-    ) == "start_point"
+    assert (
+        _run_bounded_sweep_hook(
+            lambda _context: result,
+            phase="before_point",
+            stage="pre_solve",
+            point_id="point:30",
+            parameter_name="saved_model_agent_value",
+            parameter_value="30[mm]",
+            config_id="config-30",
+        )
+        == "start_point"
+    )
     assert "config_id" not in result

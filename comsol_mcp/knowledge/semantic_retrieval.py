@@ -5,20 +5,21 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-from pathlib import Path
 import re
 import time
+from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
+from comsol_mcp.path_policy import pin_validated_reads, validated_read_pin
+
 from .lexical_manual import run_bounded
-from .semantic_contracts import PUBLIC_LIMITS, object_sha256
+from .semantic_contracts import PUBLIC_LIMITS, object_sha256, validate_semantic_filters
 from .semantic_index import (
     SentenceTransformerEncoder,
     index_file_snapshot,
     read_current,
     validate_pinned_model,
 )
-
 
 RANKER_VERSION = "1"
 RANKER_CONFIG = {
@@ -50,7 +51,12 @@ def _sha256_file(path: Path) -> str:
 def _technical_tokens(query: str) -> list[str]:
     tokens = []
     for token in TECHNICAL_TOKEN_PATTERN.findall(query):
-        if "_" in token or "." in token or any(char.isupper() for char in token[1:]) or any(char.isdigit() for char in token):
+        if (
+            "_" in token
+            or "." in token
+            or any(char.isupper() for char in token[1:])
+            or any(char.isdigit() for char in token)
+        ):
             if token not in tokens:
                 tokens.append(token)
     return tokens
@@ -58,6 +64,14 @@ def _technical_tokens(query: str) -> list[str]:
 
 def _quoted_phrases(query: str) -> list[str]:
     return [match.strip() for match in QUOTED_PHRASE_PATTERN.findall(query) if match.strip()]
+
+
+def _contains_technical_token(haystack: str, token: str) -> bool:
+    boundary = r"[A-Za-z0-9_.]"
+    return re.search(
+        rf"(?<!{boundary}){re.escape(token)}(?!{boundary})",
+        haystack,
+    ) is not None
 
 
 def _filters_match(record: Mapping[str, Any], filters: Mapping[str, Any]) -> bool:
@@ -71,26 +85,6 @@ def _filters_match(record: Mapping[str, Any], filters: Mapping[str, Any]) -> boo
     if filters.get("page_end") is not None and page > int(filters["page_end"]):
         return False
     return True
-
-
-def _validate_filters(filters: Mapping[str, Any] | None) -> dict[str, Any]:
-    value = dict(filters or {})
-    unknown = sorted(set(value) - {"module", "source", "page_start", "page_end"})
-    if unknown:
-        raise ValueError(f"unsupported semantic filters: {unknown}")
-    for field in ("module", "source"):
-        if value.get(field) is not None and (not isinstance(value[field], str) or not value[field].strip()):
-            raise ValueError(f"{field} filter must be a nonempty string")
-        if isinstance(value.get(field), str):
-            value[field] = value[field].strip()
-    for field in ("page_start", "page_end"):
-        if value.get(field) is not None and (
-            not isinstance(value[field], int) or isinstance(value[field], bool) or value[field] < 1
-        ):
-            raise ValueError(f"{field} must be a positive integer")
-    if value.get("page_start") and value.get("page_end") and value["page_start"] > value["page_end"]:
-        raise ValueError("page_start cannot exceed page_end")
-    return value
 
 
 class HybridRetriever:
@@ -114,7 +108,8 @@ class HybridRetriever:
             or not 0.05 <= float(lexical_timeout_seconds) <= PUBLIC_LIMITS["query_deadline_seconds"]
         ):
             raise ValueError(
-                "lexical_timeout_seconds must be finite and between 0.05 and the public query deadline"
+                "lexical_timeout_seconds must be finite and between 0.05 and "
+                "the public query deadline"
             )
 
         self.deployment_root = Path(deployment_root).resolve()
@@ -128,6 +123,7 @@ class HybridRetriever:
         self.manifest = self.index["manifest"]
         self._pointer_sha256 = _sha256_file(self.deployment_root / "current.json")
         model = validate_pinned_model(self.model_path)
+        self._model_snapshot = model
         if model["model_sha256"] != self.manifest["model_fingerprint"]:
             raise ValueError("pinned model fingerprint does not match the active index")
         if model["manifest_sha256"] != self.manifest["model_manifest_sha256"]:
@@ -139,13 +135,37 @@ class HybridRetriever:
         with (self.index_path / "chunks.jsonl").open("r", encoding="utf-8") as handle:
             for line in handle:
                 self.chunks.append(json.loads(line))
-        self.embeddings = np.load(self.index_path / "embeddings.npy", mmap_mode="r", allow_pickle=False)
+        self.pinned_chunks = {
+            chunk["id"]: {
+                "source": chunk["source"],
+                "page": chunk["page"],
+                "ordinal": chunk["ordinal"],
+            }
+            for chunk in self.chunks
+        }
+        self.embeddings = np.load(
+            self.index_path / "embeddings.npy", mmap_mode="r", allow_pickle=False
+        )
         if len(self.chunks) != self.embeddings.shape[0]:
             raise ValueError("chunk/vector count mismatch at retriever load")
-        factory = encoder_factory or (lambda path, dimension: SentenceTransformerEncoder(path, dimension=dimension))
+        factory = encoder_factory or (
+            lambda path, dimension: SentenceTransformerEncoder(path, dimension=dimension)
+        )
         self.encoder = factory(self.model_path, int(self.manifest["vector_dimension"]))
         if int(self.encoder.dimension) != int(self.manifest["vector_dimension"]):
             raise ValueError("query encoder dimension mismatch")
+        encoder_identity = {
+            "model_id": getattr(self.encoder, "model_id", None),
+            "model_revision": getattr(self.encoder, "model_revision", None),
+            "model_fingerprint": getattr(self.encoder, "model_fingerprint", None),
+        }
+        expected_encoder_identity = {
+            "model_id": str(model["model_id"]),
+            "model_revision": str(model["revision"]),
+            "model_fingerprint": str(model["model_sha256"]),
+        }
+        if encoder_identity != expected_encoder_identity:
+            raise ValueError("query encoder identity does not match the pinned model")
         self.load_count = 1
         self.device = str(getattr(self.encoder, "device", "cpu"))
         self.runtime_dependencies = dict(getattr(self.encoder, "dependency_versions", {}))
@@ -155,13 +175,37 @@ class HybridRetriever:
 
     def _check_identity(self) -> None:
         if _sha256_file(self.deployment_root / "current.json") != self._pointer_sha256:
-            raise RuntimeError("active semantic index pointer changed; restart worker before querying")
+            raise RuntimeError(
+                "active semantic index pointer changed; restart worker before querying"
+            )
         current_snapshot = [
-            {**item, "mtime_ns": item["mtime_ns"]}
-            for item in index_file_snapshot(self.index_path)
+            {**item, "mtime_ns": item["mtime_ns"]} for item in index_file_snapshot(self.index_path)
         ]
         if current_snapshot != self._immutable_snapshot:
             raise RuntimeError("active semantic index files changed after worker load")
+        model = validate_pinned_model(self.model_path)
+        if (
+            model["model_sha256"] != self._model_snapshot["model_sha256"]
+            or model["manifest_sha256"] != self._model_snapshot["manifest_sha256"]
+        ):
+            raise RuntimeError("pinned semantic model changed after worker load")
+        if _sha256_file(self.lexical_index) != self.manifest["lexical_index_sha256"]:
+            raise RuntimeError("lexical index changed after worker load")
+
+    def _query_pins(self):
+        paths_and_roots = [
+            (self.deployment_root / "current.json", self.deployment_root),
+            (self.lexical_index, self.lexical_index.parent),
+            (self.model_path / "model_manifest.json", self.model_path),
+        ]
+        paths_and_roots.extend(
+            (self.index_path / item["path"], self.index_path) for item in self._immutable_snapshot
+        )
+        paths_and_roots.extend(
+            (self.model_path / item["path"], self.model_path)
+            for item in self._model_snapshot["files"]
+        )
+        return tuple(validated_read_pin(path, root) for path, root in paths_and_roots)
 
     def status(self) -> dict[str, Any]:
         return {
@@ -184,11 +228,16 @@ class HybridRetriever:
             "last_error": self.last_error,
         }
 
-    def _vector_candidates(self, query: str, filters: Mapping[str, Any], count: int) -> list[dict[str, Any]]:
+    def _vector_candidates(
+        self, query: str, filters: Mapping[str, Any], count: int
+    ) -> list[dict[str, Any]]:
         import numpy as np
 
         encoded = np.asarray(self.encoder.encode([query]), dtype=np.float32)
-        if encoded.shape != (1, int(self.manifest["vector_dimension"])) or not np.isfinite(encoded).all():
+        if (
+            encoded.shape != (1, int(self.manifest["vector_dimension"]))
+            or not np.isfinite(encoded).all()
+        ):
             raise ValueError("query encoder returned malformed or non-finite values")
         norm = float(np.linalg.norm(encoded[0]))
         if not math.isfinite(norm) or norm <= 0:
@@ -197,19 +246,17 @@ class HybridRetriever:
         scores = np.asarray(self.embeddings @ vector, dtype=np.float32)
         eligible = np.fromiter(
             (_filters_match(record, filters) for record in self.chunks),
-            dtype=np.bool_, count=len(self.chunks),
+            dtype=np.bool_,
+            count=len(self.chunks),
         )
         indices = np.flatnonzero(eligible)
         if not len(indices):
             return []
         take = min(int(count), len(indices))
-        eligible_scores = scores[indices]
-        selected_local = np.argpartition(-eligible_scores, take - 1)[:take]
-        selected = indices[selected_local]
         ordered = sorted(
-            (int(index) for index in selected),
+            (int(index) for index in indices),
             key=lambda index: (-float(scores[index]), self.chunks[index]["id"]),
-        )
+        )[:take]
         return [
             {
                 "rank": rank,
@@ -220,7 +267,9 @@ class HybridRetriever:
             for rank, index in enumerate(ordered, 1)
         ]
 
-    def _lexical_candidates(self, query: str, filters: Mapping[str, Any], count: int) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    def _lexical_candidates(
+        self, query: str, filters: Mapping[str, Any], count: int
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         arguments = {
             "query": query,
             "module": filters.get("module"),
@@ -252,17 +301,47 @@ class HybridRetriever:
         filters: Mapping[str, Any] | None = None,
         retrieval_mode: str = "hybrid",
     ) -> dict[str, Any]:
-        if not isinstance(query, str) or not query.strip() or len(query) > PUBLIC_LIMITS["maximum_query_characters"]:
+        with pin_validated_reads(self._query_pins()):
+            result = self._query_pinned(
+                query,
+                limit=limit,
+                filters=filters,
+                retrieval_mode=retrieval_mode,
+            )
+            self._check_identity()
+            return result
+
+    def _query_pinned(
+        self,
+        query: str,
+        *,
+        limit: int = 5,
+        filters: Mapping[str, Any] | None = None,
+        retrieval_mode: str = "hybrid",
+    ) -> dict[str, Any]:
+        if (
+            not isinstance(query, str)
+            or not query.strip()
+            or len(query) > PUBLIC_LIMITS["maximum_query_characters"]
+        ):
             raise ValueError("query violates public limits")
-        if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= PUBLIC_LIMITS["maximum_results"]:
+        if (
+            not isinstance(limit, int)
+            or isinstance(limit, bool)
+            or not 1 <= limit <= PUBLIC_LIMITS["maximum_results"]
+        ):
             raise ValueError("limit violates public limits")
         if retrieval_mode not in {"hybrid", "vector", "lexical"}:
             raise ValueError("retrieval_mode must be hybrid, vector, or lexical")
-        normalized_filters = _validate_filters(filters)
+        normalized_filters = validate_semantic_filters(filters) or {}
         self._check_identity()
         started = time.perf_counter()
-        vector = [] if retrieval_mode == "lexical" else self._vector_candidates(
-            query.strip(), normalized_filters, RANKER_CONFIG["vector_candidate_count"]
+        vector = (
+            []
+            if retrieval_mode == "lexical"
+            else self._vector_candidates(
+                query.strip(), normalized_filters, RANKER_CONFIG["vector_candidate_count"]
+            )
         )
         lexical: list[dict[str, Any]] = []
         lexical_info: dict[str, Any] | None = None
@@ -271,7 +350,11 @@ class HybridRetriever:
                 query.strip(), normalized_filters, RANKER_CONFIG["lexical_candidate_count"]
             )
         results = fuse_candidates(
-            query.strip(), lexical, vector, limit=limit, retrieval_mode=retrieval_mode,
+            query.strip(),
+            lexical,
+            vector,
+            limit=limit,
+            retrieval_mode=retrieval_mode,
             provenance={
                 "corpus_fingerprint": self.manifest["corpus_fingerprint"],
                 "index_build_id": self.manifest["build_id"],
@@ -281,6 +364,7 @@ class HybridRetriever:
                 "model_fingerprint": self.manifest["model_fingerprint"],
                 "runtime_dependencies": self.runtime_dependencies,
             },
+            pinned_chunks=self.pinned_chunks,
         )
         self.query_count += 1
         return {
@@ -305,24 +389,65 @@ def fuse_candidates(
     limit: int,
     retrieval_mode: str,
     provenance: Mapping[str, Any],
+    pinned_chunks: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Fuse page candidates deterministically while protecting exact symbols."""
+    if not isinstance(pinned_chunks, Mapping) or not pinned_chunks:
+        raise ValueError("pinned chunk proof is required before citation validation")
+    pinned_citations: set[tuple[str, int]] = set()
+    normalized_chunks: dict[str, tuple[str, int, int]] = {}
+    for chunk_id, item in pinned_chunks.items():
+        if not isinstance(chunk_id, str) or not chunk_id or not isinstance(item, Mapping):
+            raise ValueError("pinned chunk proof is malformed")
+        source = item.get("source")
+        page = item.get("page")
+        ordinal = item.get("ordinal")
+        if (
+            not isinstance(source, str)
+            or not source
+            or not isinstance(page, int)
+            or isinstance(page, bool)
+            or page < 1
+            or not isinstance(ordinal, int)
+            or isinstance(ordinal, bool)
+            or ordinal < 0
+        ):
+            raise ValueError("pinned chunk proof is malformed")
+        identity = (source, page, ordinal)
+        normalized_chunks[chunk_id] = identity
+        pinned_citations.add(identity[:2])
     pages: dict[tuple[str, int], dict[str, Any]] = {}
     k = int(RANKER_CONFIG["rrf_constant"])
     for rank, row in enumerate(lexical, 1):
         lexical_score = float(row["rank"])
         if not math.isfinite(lexical_score):
             raise ValueError("lexical candidate contains a non-finite score")
-        key = (str(row["source"]), int(row["page"]))
+        source = row.get("source")
+        page_number = row.get("page")
+        if (
+            not isinstance(source, str)
+            or not source
+            or not isinstance(page_number, int)
+            or isinstance(page_number, bool)
+            or page_number < 1
+        ):
+            raise ValueError("lexical citation identity is malformed")
+        key = (source, page_number)
+        if key not in pinned_citations:
+            raise ValueError("lexical citation is absent from the pinned chunk set")
         page = pages.setdefault(key, {"source": key[0], "page": key[1]})
-        page.update({
-            "module": row.get("module"),
-            "heading": row.get("heading"),
-            "snippet": str(row.get("snippet") or "")[: PUBLIC_LIMITS["maximum_snippet_characters"]],
-            "lexical_rank": rank,
-            "lexical_score": lexical_score,
-            "lexical_coverage": float(row.get("coverage", 0.0)),
-        })
+        page.update(
+            {
+                "module": row.get("module"),
+                "heading": row.get("heading"),
+                "snippet": str(row.get("snippet") or "")[
+                    : PUBLIC_LIMITS["maximum_snippet_characters"]
+                ],
+                "lexical_rank": rank,
+                "lexical_score": lexical_score,
+                "lexical_coverage": float(row.get("coverage", 0.0)),
+            }
+        )
     for item in vector:
         similarity = float(item["similarity"])
         distance = float(item["distance"])
@@ -330,19 +455,48 @@ def fuse_candidates(
         if vector_rank_value < 1 or not math.isfinite(similarity) or not math.isfinite(distance):
             raise ValueError("vector candidate contains an invalid rank or non-finite score")
         chunk = item["chunk"]
-        key = (str(chunk["source"]), int(chunk["page"]))
-        page = pages.setdefault(key, {
-            "source": key[0], "page": key[1], "module": chunk.get("module"),
-            "heading": chunk.get("heading"),
-        })
+        if not isinstance(chunk, Mapping):
+            raise ValueError("vector citation identity is malformed")
+        source = chunk.get("source")
+        page_number = chunk.get("page")
+        chunk_id = chunk.get("id")
+        ordinal = chunk.get("ordinal")
+        if (
+            not isinstance(source, str)
+            or not source
+            or not isinstance(page_number, int)
+            or isinstance(page_number, bool)
+            or page_number < 1
+            or not isinstance(chunk_id, str)
+            or not chunk_id
+            or not isinstance(ordinal, int)
+            or isinstance(ordinal, bool)
+            or ordinal < 0
+        ):
+            raise ValueError("vector citation identity is malformed")
+        key = (source, page_number)
+        observed_chunk = (source, page_number, ordinal)
+        if normalized_chunks.get(chunk_id) != observed_chunk:
+            raise ValueError("vector citation does not match its pinned chunk identity")
+        page = pages.setdefault(
+            key,
+            {
+                "source": key[0],
+                "page": key[1],
+                "module": chunk.get("module"),
+                "heading": chunk.get("heading"),
+            },
+        )
         if "vector_rank" not in page:
-            page.update({
-                "vector_rank": vector_rank_value,
-                "vector_similarity": similarity,
-                "vector_distance": distance,
-                "vector_chunk_id": chunk["id"],
-                "vector_chunk_ordinal": int(chunk["ordinal"]),
-            })
+            page.update(
+                {
+                    "vector_rank": vector_rank_value,
+                    "vector_similarity": similarity,
+                    "vector_distance": distance,
+                    "vector_chunk_id": chunk["id"],
+                    "vector_chunk_ordinal": int(chunk["ordinal"]),
+                }
+            )
             if not page.get("snippet"):
                 page["snippet"] = str(chunk["text"])[: PUBLIC_LIMITS["maximum_snippet_characters"]]
 
@@ -358,40 +512,53 @@ def fuse_candidates(
         if vector_rank is not None:
             score += float(RANKER_CONFIG["vector_weight"]) / (k + int(vector_rank))
         haystack = "\n".join(str(page.get(field) or "") for field in ("heading", "snippet"))
-        matched_tokens = [token for token in technical if token in haystack]
+        matched_tokens = [
+            token for token in technical if _contains_technical_token(haystack, token)
+        ]
         token_bonus = min(
             len(matched_tokens) * float(RANKER_CONFIG["exact_technical_token_bonus"]),
             float(RANKER_CONFIG["maximum_technical_token_bonus"]),
         )
         matched_phrases = [phrase for phrase in phrases if phrase.casefold() in haystack.casefold()]
         phrase_bonus = float(RANKER_CONFIG["quoted_phrase_bonus"]) if matched_phrases else 0.0
-        exact_tier = 2 if technical and len(matched_tokens) == len(technical) else (1 if matched_tokens else 0)
-        page.update({
-            "fused_score": score + token_bonus + phrase_bonus,
-            "matched_technical_tokens": matched_tokens,
-            "matched_quoted_phrases": matched_phrases,
-            "exact_match_tier": exact_tier,
-            "citation_integrity": "validated",
-            **provenance,
-            "ranker_version": RANKER_VERSION,
-            "ranker_sha256": RANKER_SHA256,
-        })
+        exact_tier = (
+            2
+            if technical and len(matched_tokens) == len(technical)
+            else (1 if matched_tokens else 0)
+        )
+        page.update(
+            {
+                "fused_score": score + token_bonus + phrase_bonus,
+                "matched_technical_tokens": matched_tokens,
+                "matched_quoted_phrases": matched_phrases,
+                "exact_match_tier": exact_tier,
+                "citation_integrity": "validated",
+                **provenance,
+                "ranker_version": RANKER_VERSION,
+                "ranker_sha256": RANKER_SHA256,
+            }
+        )
         output.append(page)
 
     if retrieval_mode in {"hybrid", "vector"} and not lexical and vector:
         maximum = max(float(item["similarity"]) for item in vector)
         if maximum < float(RANKER_CONFIG["minimum_vector_similarity_without_lexical"]):
             return []
-    output.sort(key=lambda row: (
-        -int(row["exact_match_tier"]),
-        -float(row["fused_score"]),
-        str(row["source"]),
-        int(row["page"]),
-    ))
+    output.sort(
+        key=lambda row: (
+            -int(row["exact_match_tier"]),
+            -float(row["fused_score"]),
+            str(row["source"]),
+            int(row["page"]),
+        )
+    )
     return output[:limit]
 
 
 __all__ = [
-    "HybridRetriever", "RANKER_CONFIG", "RANKER_SHA256", "RANKER_VERSION",
+    "HybridRetriever",
+    "RANKER_CONFIG",
+    "RANKER_SHA256",
+    "RANKER_VERSION",
     "fuse_candidates",
 ]

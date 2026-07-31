@@ -9,6 +9,8 @@ from typing import Any
 
 MAX_CANONICAL_DEPTH = 64
 MAX_CANONICAL_NODES = 1_000_000
+MAX_CANONICAL_STRING_BYTES = 1_048_576
+MAX_CANONICAL_INTEGER_BITS = 4096
 _DOMAIN_PREFIX = b"comsol-mcp.identity\x00v2\x00"
 
 
@@ -23,7 +25,19 @@ def validate_finite_json(value: Any) -> None:
             raise ValueError("JSON value exceeds the canonical node limit")
         if depth > MAX_CANONICAL_DEPTH:
             raise ValueError("JSON value exceeds the canonical nesting limit")
-        if item is None or isinstance(item, (str, bool, int)):
+        if item is None or isinstance(item, bool):
+            return
+        if isinstance(item, str):
+            try:
+                size = len(item.encode("utf-8"))
+            except UnicodeEncodeError as exc:
+                raise ValueError("JSON strings must be valid UTF-8") from exc
+            if size > MAX_CANONICAL_STRING_BYTES:
+                raise ValueError("JSON string exceeds the canonical byte limit")
+            return
+        if isinstance(item, int):
+            if item.bit_length() > MAX_CANONICAL_INTEGER_BITS:
+                raise ValueError("JSON integer exceeds the canonical bit limit")
             return
         if isinstance(item, float):
             if not math.isfinite(item):
@@ -37,6 +51,7 @@ def validate_finite_json(value: Any) -> None:
             for key, nested in item.items():
                 if not isinstance(key, str):
                     raise ValueError("JSON object keys must be strings")
+                visit(key, depth + 1)
                 visit(nested, depth + 1)
             return
         raise ValueError(f"Unsupported JSON value type: {type(item).__name__}")
@@ -76,6 +91,8 @@ def domain_sha256_v2(domain: str, value: Any) -> str:
 __all__ = [
     "MAX_CANONICAL_DEPTH",
     "MAX_CANONICAL_NODES",
+    "MAX_CANONICAL_STRING_BYTES",
+    "MAX_CANONICAL_INTEGER_BITS",
     "canonical_json_v1",
     "canonical_sha256_v1",
     "domain_sha256_v2",

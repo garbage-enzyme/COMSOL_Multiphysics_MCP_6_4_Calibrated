@@ -2,25 +2,35 @@
 
 from __future__ import annotations
 
-from collections import deque
-from contextlib import contextmanager
 import hashlib
 import json
+import math
 import os
-from pathlib import Path
+import shutil
+import threading
 import time
-from typing import Any, Iterator
 import uuid
+from collections import deque
+from contextlib import contextmanager
+from pathlib import Path
+from typing import Any, Iterator
+from weakref import WeakValueDictionary
 
 import psutil
 
 from comsol_mcp.durable import (
+    atomic_write_bytes as _durable_atomic_write_bytes,
+)
+from comsol_mcp.durable import (
     atomic_write_json as _durable_atomic_write_json,
+)
+from comsol_mcp.durable import (
     fsync_directory as _fsync_directory,
+)
+from comsol_mcp.durable import (
     json_document_bytes as _json_bytes,
 )
 from comsol_mcp.utils.runtime_paths import default_jobs_root as _shared_default_jobs_root
-
 
 JOB_SCHEMA_VERSION = "2"
 CREATE_TIME_TOLERANCE_SECONDS = 0.05
@@ -47,6 +57,19 @@ TRANSITIONS = {
     "cancelled": {"starting"},
     "completed": set(),
 }
+
+_PROCESS_GUARD_REGISTRY_LOCK = threading.Lock()
+_PROCESS_GUARDS: WeakValueDictionary[str, Any] = WeakValueDictionary()
+
+
+def _process_guard(path: Path) -> Any:
+    key = os.path.normcase(str(path.resolve(strict=False)))
+    with _PROCESS_GUARD_REGISTRY_LOCK:
+        guard = _PROCESS_GUARDS.get(key)
+        if guard is None:
+            guard = threading.Lock()
+            _PROCESS_GUARDS[key] = guard
+        return guard
 
 
 def default_jobs_root() -> Path:
@@ -100,16 +123,23 @@ def process_identity(pid: int) -> dict[str, Any]:
 def process_identity_state(identity: dict[str, Any]) -> tuple[str, str]:
     try:
         actual = process_identity(int(identity["pid"]))
-    except (KeyError, TypeError, ValueError):
+    except KeyError, TypeError, ValueError:
         return "uncertain", "process identity fields are missing or invalid"
     except psutil.NoSuchProcess:
         return "stale", "worker PID no longer exists"
     except (psutil.AccessDenied, psutil.ZombieProcess, OSError) as exc:
         return "uncertain", f"worker identity cannot be inspected: {exc}"
     expected_time = identity.get("process_create_time")
-    if expected_time is None:
-        return "uncertain", "worker creation time is missing"
-    if abs(float(actual["process_create_time"]) - float(expected_time)) > CREATE_TIME_TOLERANCE_SECONDS:
+    if (
+        isinstance(expected_time, bool)
+        or not isinstance(expected_time, (int, float))
+        or not math.isfinite(float(expected_time))
+    ):
+        return "uncertain", "worker creation time is missing or invalid"
+    if (
+        abs(float(actual["process_create_time"]) - float(expected_time))
+        > CREATE_TIME_TOLERANCE_SECONDS
+    ):
         return "stale", "worker PID was reused"
     expected_signature = identity.get("command_signature")
     if expected_signature and actual["command_signature"] != expected_signature:
@@ -140,42 +170,102 @@ class JobLock:
         self.identity = process_identity(os.getpid())
         self.identity["created_at_epoch"] = time.time()
         self._owned_bytes: bytes | None = None
+        self._guard_path = self.path.with_name(f".{self.path.name}.guard")
+        self._guard_handle = None
+        self._process_guard = _process_guard(self.path)
+        self._process_guard_owned = False
+
+    def _acquire_guard(self, *, deadline: float) -> None:
+        if os.name != "nt":
+            raise RuntimeError("durable job mutation requires supported Windows locking")
+        import msvcrt
+
+        remaining = max(0.0, deadline - time.monotonic())
+        if not self._process_guard.acquire(timeout=remaining):
+            raise TimeoutError(
+                f"Timed out waiting for in-process durable job lock guard: {self.path}"
+            )
+        self._process_guard_owned = True
+        self._guard_path.parent.mkdir(parents=True, exist_ok=True)
+        handle = None
+        try:
+            handle = self._guard_path.open("a+b")
+            handle.seek(0, os.SEEK_END)
+            if handle.tell() == 0:
+                handle.write(b"\0")
+                handle.flush()
+                os.fsync(handle.fileno())
+            while True:
+                handle.seek(0)
+                try:
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                    self._guard_handle = handle
+                    return
+                except OSError as exc:
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError(
+                            f"Timed out waiting for durable job lock guard: {self.path}"
+                        ) from exc
+                    time.sleep(self.poll_interval)
+        except Exception:
+            if handle is not None:
+                handle.close()
+            self._process_guard_owned = False
+            self._process_guard.release()
+            raise
+
+    def _release_guard(self) -> None:
+        import msvcrt
+
+        handle = self._guard_handle
+        self._guard_handle = None
+        try:
+            if handle is not None:
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        finally:
+            if handle is not None:
+                handle.close()
+            if self._process_guard_owned:
+                self._process_guard_owned = False
+                self._process_guard.release()
 
     def acquire(self) -> None:
         deadline = time.monotonic() + self.timeout
         payload = _json_bytes(self.identity)
-        while True:
-            try:
-                descriptor = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
-            except PermissionError:
-                # Windows may report a sharing violation as PermissionError
-                # while another process or scanner briefly opens the lock path.
-                # Ownership cannot be established safely in that state, so
-                # wait without inspecting or removing the unknown lock.
-                if time.monotonic() >= deadline:
-                    raise
-                time.sleep(self.poll_interval)
-                continue
-            except FileExistsError:
+        self._acquire_guard(deadline=deadline)
+        try:
+            while True:
                 try:
-                    observed = self.path.read_bytes()
-                    existing = json.loads(observed.decode("utf-8"))
-                    state, _ = process_identity_state(existing)
-                    if state == "stale" and self.path.read_bytes() == observed:
-                        self._unlink_with_retry(expected=observed)
-                        continue
-                except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-                    pass
-                if time.monotonic() >= deadline:
-                    raise TimeoutError(f"Timed out waiting for durable job lock: {self.path}")
-                time.sleep(self.poll_interval)
-                continue
-            with os.fdopen(descriptor, "wb") as handle:
-                handle.write(payload)
-                handle.flush()
-                os.fsync(handle.fileno())
-            self._owned_bytes = payload
-            return
+                    descriptor = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
+                except PermissionError:
+                    if time.monotonic() >= deadline:
+                        raise
+                    time.sleep(self.poll_interval)
+                    continue
+                except FileExistsError:
+                    try:
+                        observed = self.path.read_bytes()
+                        existing = json.loads(observed.decode("utf-8"))
+                        state, _ = process_identity_state(existing)
+                        if state == "stale" and self.path.read_bytes() == observed:
+                            self._unlink_with_retry(expected=observed)
+                            continue
+                    except OSError, UnicodeDecodeError, json.JSONDecodeError:
+                        pass
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError(f"Timed out waiting for durable job lock: {self.path}")
+                    time.sleep(self.poll_interval)
+                    continue
+                with os.fdopen(descriptor, "wb") as handle:
+                    handle.write(payload)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                self._owned_bytes = payload
+                return
+        except Exception:
+            self._release_guard()
+            raise
 
     def _unlink_with_retry(self, *, expected: bytes) -> bool:
         deadline = time.monotonic() + 2.0
@@ -202,6 +292,7 @@ class JobLock:
             self._unlink_with_retry(expected=self._owned_bytes)
         finally:
             self._owned_bytes = None
+            self._release_guard()
 
     def __enter__(self) -> "JobLock":
         self.acquire()
@@ -220,7 +311,9 @@ class JobStore:
         self.root.mkdir(parents=True, exist_ok=True)
 
     def job_dir(self, job_id: str) -> Path:
-        if not job_id or any(character not in "abcdefghijklmnopqrstuvwxyz0123456789-" for character in job_id):
+        if not job_id or any(
+            character not in "abcdefghijklmnopqrstuvwxyz0123456789-" for character in job_id
+        ):
             raise ValueError("Invalid job ID")
         path = self.root / job_id
         if path.parent.resolve() != self.root.resolve():
@@ -230,18 +323,67 @@ class JobStore:
     def create(self, spec: dict[str, Any], state: dict[str, Any], job_id: str | None = None) -> str:
         job_id = job_id or f"job-{uuid.uuid4().hex}"
         directory = self.job_dir(job_id)
-        directory.mkdir(parents=False, exist_ok=False)
-        atomic_write_json(directory / "spec.json", spec)
-        atomic_write_json(directory / "state.json", state)
-        atomic_write_json(
-            directory / "control.json",
-            {"schema_version": JOB_SCHEMA_VERSION, "request": None, "updated_at_epoch": time.time()},
-        )
-        (directory / "events.jsonl").touch(exist_ok=False)
-        (directory / "resource.jsonl").touch(exist_ok=False)
-        (directory / "worker.log").touch(exist_ok=False)
-        _fsync_directory(directory)
+        if directory.exists():
+            raise FileExistsError(f"Job directory already exists: {directory}")
+        staging = self.root / f".{job_id}.{uuid.uuid4().hex}.tmp"
+        staging.mkdir(parents=False, exist_ok=False)
+        published = False
+        try:
+            atomic_write_json(staging / "spec.json", spec)
+            atomic_write_json(staging / "state.json", state)
+            atomic_write_json(
+                staging / "control.json",
+                {
+                    "schema_version": JOB_SCHEMA_VERSION,
+                    "request": None,
+                    "updated_at_epoch": time.time(),
+                },
+            )
+            (staging / "events.jsonl").touch(exist_ok=False)
+            (staging / "resource.jsonl").touch(exist_ok=False)
+            (staging / "worker.log").touch(exist_ok=False)
+            _fsync_directory(staging)
+            os.rename(staging, directory)
+            published = True
+            _fsync_directory(self.root)
+        finally:
+            if not published:
+                shutil.rmtree(staging, ignore_errors=True)
         return job_id
+
+    def bind_worker_identity(self, job_id: str, identity: dict[str, Any]) -> dict[str, Any]:
+        """Let a launched worker durably bind itself before any side effect."""
+        required = {"pid", "process_create_time", "command_signature"}
+        if not isinstance(identity, dict) or not required <= set(identity):
+            raise ValueError("worker identity is incomplete")
+        with self.lock(job_id):
+            state = self.read_state(job_id)
+            observed = {
+                "pid": state.get("worker_pid"),
+                "process_create_time": state.get("worker_process_create_time"),
+                "command_signature": state.get("worker_command_signature"),
+            }
+            expected = {key: identity[key] for key in required}
+            if observed["pid"] is not None:
+                if observed != expected:
+                    raise RuntimeError("durable job is already bound to another worker")
+                return {"bound": True, "idempotent": True, "state": state}
+            state.update(
+                {
+                    "worker_pid": expected["pid"],
+                    "worker_process_create_time": expected["process_create_time"],
+                    "worker_command_signature": expected["command_signature"],
+                    "updated_at_epoch": time.time(),
+                }
+            )
+            atomic_write_json(self.job_dir(job_id) / "state.json", state)
+            self._append_event_unlocked(
+                job_id,
+                "worker_identity_bound",
+                {"pid": expected["pid"]},
+                str(state["status"]),
+            )
+            return {"bound": True, "idempotent": False, "state": state}
 
     def read_spec(self, job_id: str) -> dict[str, Any]:
         return read_json(self.job_dir(job_id) / "spec.json")
@@ -396,6 +538,7 @@ class JobStore:
         *,
         attempt: int,
         message: str,
+        worker_error: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Record that the target worker observed its matching cancel request.
 
@@ -412,14 +555,82 @@ class JobStore:
             if not cancel_request_targets_attempt(control, attempt):
                 return {"recorded": False, "reason": "no_matching_cancel_request", "state": state}
             if state.get("status") not in {"cancel_requested", "cancelling"}:
-                return {"recorded": False, "reason": "state_not_cancelling", "state": state}
+                status = str(state.get("status"))
+                if "cancel_requested" not in TRANSITIONS.get(status, set()):
+                    return {
+                        "recorded": False,
+                        "reason": "state_not_cancelling",
+                        "state": state,
+                    }
+                requested_at = float(control.get("requested_at_epoch", time.time()))
+                state["status"] = "cancel_requested"
+                state["cancel"] = {
+                    "request_id": control.get("request_id"),
+                    "target_attempt": int(attempt),
+                    "requested_at_epoch": requested_at,
+                    "requester_identity": control.get("requester_identity"),
+                    "phase": "requested",
+                    "phase_timestamps": {"requested": requested_at},
+                    "native": {"candidate": None, "supported": None, "attempted": False},
+                    "worker": {"exact_identity": control.get("target_worker")},
+                }
+                state["updated_at_epoch"] = time.time()
+                atomic_write_json(self.job_dir(job_id) / "state.json", state)
+                self._append_event_unlocked(
+                    job_id,
+                    "cancel_request_reconciled",
+                    {
+                        "request_id": control.get("request_id"),
+                        "target_attempt": int(attempt),
+                    },
+                    "cancel_requested",
+                )
 
             cancel = dict(state.get("cancel") or {})
             request_id = control.get("request_id")
             if cancel.get("request_id") not in (None, request_id):
                 return {"recorded": False, "reason": "state_request_mismatch", "state": state}
+            normalized_error = None
+            if worker_error is not None:
+                if not isinstance(worker_error, dict):
+                    raise ValueError("worker cancellation error must be an object")
+                error_type = worker_error.get("type")
+                error_message = worker_error.get("message")
+                cleanup_errors = worker_error.get("cleanup_errors", [])
+                if not isinstance(error_type, str) or not error_type:
+                    raise ValueError("worker cancellation error type is required")
+                if not isinstance(error_message, str) or not error_message:
+                    raise ValueError("worker cancellation error message is required")
+                if not isinstance(cleanup_errors, list) or not all(
+                    isinstance(item, str) for item in cleanup_errors
+                ):
+                    raise ValueError("worker cancellation cleanup errors must be a string list")
+                normalized_error = {
+                    "type": error_type[:128],
+                    "message": error_message[:2000],
+                    "cleanup_errors": [item[:500] for item in cleanup_errors[:20]],
+                }
+            error_changed = bool(
+                normalized_error is not None and cancel.get("worker_error") != normalized_error
+            )
+            if normalized_error is not None:
+                cancel["worker_error"] = normalized_error
             existing = cancel.get("cooperative_observation")
             if isinstance(existing, dict) and existing.get("request_id") == request_id:
+                if error_changed:
+                    state["cancel"] = cancel
+                    state["updated_at_epoch"] = time.time()
+                    atomic_write_json(self.job_dir(job_id) / "state.json", state)
+                    self._append_event_unlocked(
+                        job_id,
+                        "cancel_worker_error_recorded",
+                        {
+                            "request_id": request_id,
+                            "target_attempt": int(attempt),
+                            "error_type": normalized_error["type"],
+                        },
+                        str(state["status"]),
+                    )
                 return {"recorded": True, "idempotent": True, "state": state}
 
             observed_at = time.time()
@@ -440,7 +651,13 @@ class JobStore:
             self._append_event_unlocked(
                 job_id,
                 "cooperative_cancel_observed",
-                {"request_id": request_id, "target_attempt": int(attempt)},
+                {
+                    "request_id": request_id,
+                    "target_attempt": int(attempt),
+                    "worker_error_type": (
+                        normalized_error["type"] if normalized_error is not None else None
+                    ),
+                },
                 str(state["status"]),
             )
             return {"recorded": True, "idempotent": False, "state": state}
@@ -459,6 +676,8 @@ class JobStore:
         event: str | None = None,
         event_data: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        if patch and "status" in patch:
+            raise ValueError("status must be changed through new_status")
         with self.lock(job_id):
             state = self.read_state(job_id)
             current = str(state.get("status"))
@@ -503,9 +722,15 @@ class JobStore:
         with self.lock(job_id):
             entries = self._read_resource_journal_unlocked(job_id)
             if entries:
+                admission = next(
+                    (item for item in entries if item.get("entry_type") == "admission"),
+                    None,
+                )
+                expected_policy = admission.get("policy") if admission is not None else None
                 replay_resource_journal(
                     entries,
                     attempt=max(int(item.get("attempt", 0)) for item in entries),
+                    expected_policy=expected_policy,
                 )
             return entries
 
@@ -513,6 +738,8 @@ class JobStore:
         self,
         job_id: str,
         entries: list[dict[str, Any]],
+        *,
+        expected_policy: object,
     ) -> dict[str, Any]:
         """Durably append validated resource transitions for the active attempt."""
         from .resource_admission import replay_resource_journal
@@ -523,20 +750,24 @@ class JobStore:
             current = self._read_resource_journal_unlocked(job_id)
             state = self.read_state(job_id)
             attempt = int(state.get("attempt", 1))
-            replay = replay_resource_journal(current + entries, attempt=attempt)
+            replay = replay_resource_journal(
+                current + entries,
+                attempt=attempt,
+                expected_policy=expected_policy,
+            )
             path = self.job_dir(job_id) / "resource.jsonl"
-            with path.open("ab") as handle:
-                for entry in entries:
-                    payload = json.dumps(
-                        entry,
-                        ensure_ascii=False,
-                        sort_keys=True,
-                        separators=(",", ":"),
-                        allow_nan=False,
-                    ).encode("utf-8")
-                    handle.write(payload + b"\n")
-                    handle.flush()
-                    os.fsync(handle.fileno())
+            payload = b"".join(
+                json.dumps(
+                    entry,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    allow_nan=False,
+                ).encode("utf-8")
+                + b"\n"
+                for entry in current + entries
+            )
+            _durable_atomic_write_bytes(path, payload, replace_fn=os.replace)
             return replay
 
     def _append_event_unlocked(
@@ -550,7 +781,9 @@ class JobStore:
             "data": data,
         }
         with (self.job_dir(job_id) / "events.jsonl").open("ab") as handle:
-            handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True).encode("utf-8") + b"\n")
+            handle.write(
+                json.dumps(record, ensure_ascii=False, sort_keys=True).encode("utf-8") + b"\n"
+            )
             handle.flush()
             os.fsync(handle.fileno())
 

@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 import json
-from pathlib import Path
 import subprocess
 import sys
+from copy import deepcopy
+from pathlib import Path
 
 import pytest
 from mcp.server.fastmcp import FastMCP
-
+from src.evidence.contracts import canonical_sha256
 from src.evidence.visual_review import (
     build_visual_review_receipt,
     build_visual_review_request,
@@ -22,7 +22,6 @@ from src.evidence.visual_review import (
     validate_visual_review_request,
 )
 from src.tools.visual_review import register_visual_review_tools
-
 
 CONFIG_HASH = "a" * 64
 ON_HASH = "b" * 64
@@ -104,6 +103,21 @@ def _refs():
     ]
 
 
+def _rehash_visual_contract(value):
+    def json_stable(item):
+        if isinstance(item, float) and item.is_integer():
+            return int(item)
+        if isinstance(item, list):
+            return [json_stable(child) for child in item]
+        if isinstance(item, dict):
+            return {key: json_stable(child) for key, child in item.items()}
+        return item
+
+    value.pop("contract_sha256", None)
+    value["contract_sha256"] = canonical_sha256(json_stable(value))
+    return value
+
+
 def _codex(*, delivered: bool = True, calibrated: bool = True):
     results = [
         {**reference, "image_content_returned": delivered}
@@ -134,15 +148,24 @@ def _findings():
     ]
 
 
-def _receipt(capability, *, session="codex-session-1", received=None, inspected=True, exposure=False):
+def _receipt(
+    capability,
+    *,
+    session="codex-session-1",
+    received=None,
+    inspected=True,
+    exposure=False,
+    request=None,
+    findings=None,
+):
     return build_visual_review_receipt(
         review_id=f"review-{session}",
-        request=_request("dual_blind"),
+        request=_request("dual_blind") if request is None else request,
         capability=capability,
         session_id=session,
         received_artifacts=_refs() if received is None else received,
         visual_inspection_performed=inspected,
-        findings=_findings() if inspected else [],
+        findings=(_findings() if inspected else []) if findings is None else findings,
         uncertainties=["Mode identity still requires physical context."],
         rejected_claims=["No numerical passivity conclusion is made from the images."],
         prior_review_exposure=exposure,
@@ -239,6 +262,26 @@ def test_capability_hash_and_unknown_fields_fail_closed():
         validate_reviewer_capability(unknown)
 
 
+@pytest.mark.parametrize("field", ["provider", "model"])
+def test_capability_requires_explicit_transport_identity_fields(field):
+    capability = deepcopy(_codex())
+    capability.pop(field)
+    capability.pop("contract_sha256")
+    capability["contract_sha256"] = canonical_sha256(capability)
+
+    with pytest.raises(ValueError, match=field):
+        validate_reviewer_capability(capability)
+
+
+def test_capability_reconciles_typed_host_evidence_with_top_level_claims():
+    capability = deepcopy(_codex())
+    capability["host_evidence"]["transport_available"] = False
+    _rehash_visual_contract(capability)
+
+    with pytest.raises(ValueError, match="host evidence"):
+        validate_reviewer_capability(capability)
+
+
 def test_review_request_is_deterministic_bounded_and_contains_shared_view_evidence():
     first = _request()
     second = _request()
@@ -248,6 +291,32 @@ def test_review_request_is_deterministic_bounded_and_contains_shared_view_eviden
     assert first["views"][0]["grid_shape"] == first["views"][1]["grid_shape"]
     assert first["views"][0]["color_limits"] == first["views"][1]["color_limits"]
     assert first["required_artifact_ids"] == ["field.on", "field.off"]
+
+
+@pytest.mark.parametrize(
+    "field,replacement",
+    [
+        ("grid_shape", [201, 300]),
+        ("x_range", [0.0, 4.0]),
+        ("y_range", [-2.0, 2.0]),
+        ("quantity", "ewfd.normH"),
+        ("quantity_unit", "A/m"),
+        ("color_limits", [0.0, 2.0e8]),
+    ],
+)
+def test_review_request_rejects_mismatched_comparison_evidence(field, replacement):
+    views = _views()
+    views[1][field] = replacement
+
+    with pytest.raises(ValueError, match=field):
+        build_visual_review_request(
+            request_id="mismatched-comparison",
+            configuration_sha256=CONFIG_HASH,
+            artifacts=_artifacts(),
+            views=views,
+            numerical_summary={},
+            questions=["Question?"],
+        )
 
 
 def test_request_rejects_absolute_paths_mismatched_views_and_hash_tampering():
@@ -273,6 +342,23 @@ def test_request_rejects_absolute_paths_mismatched_views_and_hash_tampering():
         validate_visual_review_request(tampered)
 
 
+def test_logarithmic_visual_views_require_positive_color_limits():
+    views = _views()
+    for view in views:
+        view["color_scale"] = "log"
+        view["color_limits"] = [0.0, 1.0e8]
+
+    with pytest.raises(ValueError, match="positive"):
+        build_visual_review_request(
+            request_id="invalid-log-limits",
+            configuration_sha256=CONFIG_HASH,
+            artifacts=_artifacts(),
+            views=views,
+            numerical_summary={},
+            questions=["Question?"],
+        )
+
+
 def test_complete_receipt_requires_calibration_delivery_hashes_inspection_and_findings():
     complete = _receipt(_codex())
     no_delivery = _receipt(_codex(delivered=False))
@@ -287,6 +373,86 @@ def test_complete_receipt_requires_calibration_delivery_hashes_inspection_and_fi
     assert "known_answer_calibration_incomplete" in no_calibration["incomplete_reasons"]
     assert "received_artifacts_incomplete_or_mismatched" in missing_artifact["incomplete_reasons"]
     assert "visual_inspection_not_performed" in no_inspection["incomplete_reasons"]
+
+
+def test_inspected_receipt_requires_findings_for_every_question_independently():
+    no_findings = _receipt(_codex(), inspected=True, findings=[])
+    partial_findings = _receipt(_codex(), inspected=True, findings=_findings()[:1])
+
+    for receipt in (no_findings, partial_findings):
+        assert receipt["status"] == "visual_review_required"
+        assert receipt["visual_inspection_performed"] is True
+        assert receipt["received_artifacts"] == _refs()
+        assert "findings_do_not_cover_all_questions" in receipt["incomplete_reasons"]
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda value: value.update(
+            {"visual_inspection_performed": False, "inspection_status": "not_performed"}
+        ),
+        lambda value: value["host_capability_evidence"].update(
+            {"delivery_confirmed": False, "capability_state": "host_capability_confirmed"}
+        ),
+        lambda value: value["host_capability_evidence"].update(
+            {"scientific_review_eligible": False}
+        ),
+        lambda value: value.update({"received_artifacts": []}),
+        lambda value: value.update({"findings": []}),
+        lambda value: value["host_capability_evidence"].update({"calibration_id": None}),
+    ],
+)
+def test_hash_valid_complete_receipt_cannot_bypass_prerequisites(mutation):
+    receipt = deepcopy(_receipt(_codex()))
+    mutation(receipt)
+    _rehash_visual_contract(receipt)
+
+    with pytest.raises(ValueError, match="complete visual review"):
+        validate_visual_review_receipt(receipt)
+
+
+def test_receipt_rejects_duplicate_artifacts():
+    duplicate = deepcopy(_receipt(_codex()))
+    duplicate["received_artifacts"].append(deepcopy(duplicate["received_artifacts"][0]))
+    _rehash_visual_contract(duplicate)
+    with pytest.raises(ValueError, match="duplicated"):
+        validate_visual_review_receipt(duplicate)
+
+
+def test_receipt_rejects_oversized_finding_lists():
+    oversized = deepcopy(_receipt(_codex()))
+    oversized["findings"] = [deepcopy(oversized["findings"][0]) for _ in range(65)]
+    _rehash_visual_contract(oversized)
+    with pytest.raises(ValueError, match="findings"):
+        validate_visual_review_receipt(oversized)
+
+
+@pytest.mark.parametrize("field", ["client", "session_id"])
+def test_receipt_requires_complete_typed_reviewer_identity(field):
+    receipt = deepcopy(_receipt(_codex()))
+    receipt["reviewer"].pop(field)
+    _rehash_visual_contract(receipt)
+
+    with pytest.raises(ValueError, match=field):
+        validate_visual_review_receipt(receipt)
+
+
+def test_receipt_rejects_impossible_utc_timestamp():
+    with pytest.raises(ValueError, match="UTC ISO-8601"):
+        build_visual_review_receipt(
+            review_id="impossible-time",
+            request=_request("dual_blind"),
+            capability=_codex(),
+            session_id="impossible-time-session",
+            received_artifacts=_refs(),
+            visual_inspection_performed=True,
+            findings=_findings(),
+            uncertainties=[],
+            rejected_claims=[],
+            prior_review_exposure=False,
+            timestamp="2026-99-99T29:70:70Z",
+        )
 
 
 def test_visual_contract_hashes_survive_json_number_round_trip():
@@ -348,6 +514,106 @@ def test_dual_blind_review_requires_two_independent_complete_receipts():
     assert agreement["state"] == "dual_review_complete"
     assert disagreement["state"] == "adjudication_required"
     assert disagreement["numerical_policy_authority"] is False
+
+
+def test_dual_review_rejects_each_independence_and_request_binding_failure():
+    request = _request("dual_blind")
+    opencode_capability = normalize_opencode_capability(
+        provider="opencode-go",
+        model="future-vision-model",
+        provider_metadata={
+            "id": "opencode-go/future-vision-model",
+            "capabilities": {"input": {"image": True}},
+        },
+        cli_attachment_supported=True,
+        attachment_part_confirmed=True,
+        delivered_artifacts=_refs(),
+        calibration=_calibration(),
+    )
+    codex = _receipt(_codex(), session="codex-independent", request=request)
+    opencode = _receipt(
+        opencode_capability,
+        session="opencode-independent",
+        request=request,
+    )
+
+    same_session = _receipt(
+        opencode_capability,
+        session="codex-independent",
+        request=request,
+    )
+    same_client = _receipt(
+        _codex(),
+        session="second-codex-session",
+        request=request,
+    )
+    other_request = build_visual_review_request(
+        request_id="other-visual-request",
+        configuration_sha256=CONFIG_HASH,
+        artifacts=_artifacts(),
+        views=_views(),
+        numerical_summary={},
+        questions=["Is the feature localized?", "Are shared color limits comparable?"],
+        review_mode="dual_blind",
+    )
+    wrong_request = _receipt(
+        opencode_capability,
+        session="wrong-request-session",
+        request=other_request,
+    )
+    incomplete = _receipt(
+        opencode_capability,
+        session="incomplete-session",
+        request=request,
+        findings=[],
+    )
+
+    for second, reason in (
+        (same_session, "review_sessions_not_independent"),
+        (same_client, "review_clients_not_distinct"),
+        (wrong_request, "receipt_request_mismatch"),
+        (incomplete, "one_or_more_reviews_incomplete"),
+    ):
+        result = evaluate_dual_visual_review(
+            request=request,
+            first_receipt=codex,
+            second_receipt=second,
+            comparison="agreement",
+        )
+        assert result["state"] == "visual_review_required"
+        assert reason in result["reasons"]
+
+
+def test_dual_review_compares_received_artifacts_as_an_order_independent_set():
+    request = _request("dual_blind")
+    first = _receipt(_codex(), session="ordered-session")
+    opencode_capability = normalize_opencode_capability(
+        provider="opencode-go",
+        model="future-vision-model",
+        provider_metadata={
+            "id": "opencode-go/future-vision-model",
+            "capabilities": {"input": {"image": True}},
+        },
+        cli_attachment_supported=True,
+        attachment_part_confirmed=True,
+        delivered_artifacts=_refs(),
+        calibration=_calibration(),
+    )
+    second = _receipt(
+        opencode_capability,
+        session="reversed-session",
+        received=list(reversed(_refs())),
+    )
+
+    result = evaluate_dual_visual_review(
+        request=request,
+        first_receipt=first,
+        second_receipt=second,
+        comparison="agreement",
+    )
+
+    assert result["state"] == "dual_review_complete"
+    assert "artifact_sets_differ" not in result["reasons"]
 
 
 def test_dual_review_remains_incomplete_after_prior_review_exposure():

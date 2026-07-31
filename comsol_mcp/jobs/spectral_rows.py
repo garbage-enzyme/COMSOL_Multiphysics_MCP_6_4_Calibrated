@@ -6,12 +6,13 @@ import hashlib
 import json
 import math
 import os
-from pathlib import Path, PurePosixPath
 import time
+from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
 
 from comsol_mcp.evidence.contracts import validate_physical_evidence
 
+from .journal import locked_journal, recover_jsonl_tail
 
 SPECTRAL_ROW_SCHEMA_NAME = "comsol_mcp.durable_spectral_point"
 SPECTRAL_ROW_SCHEMA_VERSION = "1.0.0"
@@ -61,7 +62,11 @@ def _hex_digest(value: object, name: str) -> str:
 def _finite(value: object, name: str, *, positive: bool = False) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{name} must be numeric")
-    number = float(value)
+    try:
+        number = float(value)
+    except OverflowError as exc:
+        qualifier = "positive and finite" if positive else "finite"
+        raise ValueError(f"{name} must be {qualifier}") from exc
     if not math.isfinite(number) or (positive and number <= 0.0):
         qualifier = "positive and finite" if positive else "finite"
         raise ValueError(f"{name} must be {qualifier}")
@@ -107,9 +112,7 @@ def spectral_point_identity(spec: Mapping[str, Any], wavelength_m: object) -> di
     """Create the exact deduplication identity for one normalized wavelength."""
     wavelength = normalize_spectral_wavelength_m(wavelength_m)
     body = {
-        "source_model_sha256": _hex_digest(
-            spec.get("source_model_sha256"), "source_model_sha256"
-        ),
+        "source_model_sha256": _hex_digest(spec.get("source_model_sha256"), "source_model_sha256"),
         "configuration_sha256": _hex_digest(
             spec.get("configuration_sha256"), "configuration_sha256"
         ),
@@ -189,6 +192,7 @@ def _verify_artifact_bytes(
         inner = json.loads(inner_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValueError("audit inner artifact is not valid JSON") from exc
+    inner = _mapping(inner, "audit inner artifact")
     physical = validate_physical_evidence(inner.get("physical_evidence"))
     if physical["contract_sha256"] != artifact["physical_evidence_sha256"]:
         raise ValueError("physical evidence hash differs from the durable row")
@@ -202,7 +206,7 @@ def _verify_artifact_bytes(
         raise ValueError("physical evidence point identity differs from the durable row")
 
 
-def _normalize_row(
+def _normalize_row_body(
     value: object,
     *,
     spec: Mapping[str, Any],
@@ -236,15 +240,31 @@ def _normalize_row(
         "solve_seconds",
         "audit_artifact",
         "previous_row_sha256",
-        "row_sha256",
     }
     if set(raw) != fields:
         raise ValueError(f"spectral row {sequence} has missing or unsupported fields")
-    if raw["schema_name"] != SPECTRAL_ROW_SCHEMA_NAME or raw["schema_version"] != SPECTRAL_ROW_SCHEMA_VERSION:
+    if (
+        raw["schema_name"] != SPECTRAL_ROW_SCHEMA_NAME
+        or raw["schema_version"] != SPECTRAL_ROW_SCHEMA_VERSION
+    ):
         raise ValueError("unsupported spectral row schema")
-    if raw["sequence"] != sequence:
+    if (
+        isinstance(raw["sequence"], bool)
+        or not isinstance(raw["sequence"], int)
+        or raw["sequence"] != sequence
+    ):
         raise ValueError("spectral row sequence is not contiguous")
-    if raw["previous_row_sha256"] != previous_row_sha256:
+    previous = (
+        None
+        if raw["previous_row_sha256"] is None
+        else _hex_digest(raw["previous_row_sha256"], "previous_row_sha256")
+    )
+    expected_previous = (
+        None
+        if previous_row_sha256 is None
+        else _hex_digest(previous_row_sha256, "previous_row_sha256")
+    )
+    if previous != expected_previous:
         raise ValueError("spectral row hash chain is discontinuous")
     attempt = raw["attempt"]
     stage_index = raw["stage_index"]
@@ -255,38 +275,58 @@ def _normalize_row(
     if raw["stage_kind"] not in SPECTRAL_STAGE_KINDS:
         raise ValueError("spectral row stage_kind is unsupported")
     created = _finite(raw["created_at_epoch"], "created_at_epoch")
-    if raw["spec_fingerprint"] != spec.get("spec_fingerprint"):
+    spec_fingerprint = _hex_digest(raw["spec_fingerprint"], "spec_fingerprint")
+    source_sha256 = _hex_digest(raw["source_model_sha256"], "source_model_sha256")
+    configuration_sha256 = _hex_digest(raw["configuration_sha256"], "configuration_sha256")
+    collector_sha256 = _hex_digest(raw["collector_identity_sha256"], "collector_identity_sha256")
+    if spec_fingerprint != _hex_digest(spec.get("spec_fingerprint"), "spec_fingerprint"):
         raise ValueError("spectral row spec fingerprint differs from the immutable job")
-    if raw["source_model_sha256"] != spec.get("source_model_sha256"):
+    if source_sha256 != _hex_digest(spec.get("source_model_sha256"), "source_model_sha256"):
         raise ValueError("spectral row source hash differs from the immutable job")
-    if raw["configuration_sha256"] != spec.get("configuration_sha256"):
+    if configuration_sha256 != _hex_digest(
+        spec.get("configuration_sha256"), "configuration_sha256"
+    ):
         raise ValueError("spectral row configuration hash differs from the immutable job")
-    if raw["collector_identity_sha256"] != spectral_collector_identity(spec):
+    if collector_sha256 != spectral_collector_identity(spec):
         raise ValueError("spectral row collector identity differs from the immutable job")
     identity = spectral_point_identity(spec, raw["requested_wavelength_m"])
-    if raw["point_id"] != identity["point_id"] or raw["point_fingerprint"] != identity["point_fingerprint"]:
+    point_fingerprint = _hex_digest(raw["point_fingerprint"], "point_fingerprint")
+    if (
+        raw["point_id"] != identity["point_id"]
+        or point_fingerprint != identity["point_fingerprint"]
+    ):
         raise ValueError("spectral row point identity does not match its wavelength")
     artifact = _normalize_artifact(raw["audit_artifact"])
     normalized = {
         **raw,
+        "spec_fingerprint": spec_fingerprint,
+        "source_model_sha256": source_sha256,
+        "configuration_sha256": configuration_sha256,
+        "collector_identity_sha256": collector_sha256,
+        "point_fingerprint": point_fingerprint,
         "created_at_epoch": created,
         "requested_wavelength_m": identity["requested_wavelength_m"],
-        "evaluated_wavelength_m": _finite(raw["evaluated_wavelength_m"], "evaluated_wavelength_m", positive=True),
-        "frequency_wavelength_m": _finite(raw["frequency_wavelength_m"], "frequency_wavelength_m", positive=True),
+        "evaluated_wavelength_m": _finite(
+            raw["evaluated_wavelength_m"], "evaluated_wavelength_m", positive=True
+        ),
+        "frequency_wavelength_m": _finite(
+            raw["frequency_wavelength_m"], "frequency_wavelength_m", positive=True
+        ),
         "R": _finite(raw["R"], "R"),
         "T": _finite(raw["T"], "T"),
         "A": _finite(raw["A"], "A"),
-        "mesh_element_count": _optional_nonnegative_integer(raw["mesh_element_count"], "mesh_element_count"),
-        "mesh_vertex_count": _optional_nonnegative_integer(raw["mesh_vertex_count"], "mesh_vertex_count"),
+        "mesh_element_count": _optional_nonnegative_integer(
+            raw["mesh_element_count"], "mesh_element_count"
+        ),
+        "mesh_vertex_count": _optional_nonnegative_integer(
+            raw["mesh_vertex_count"], "mesh_vertex_count"
+        ),
         "solve_seconds": _finite(raw["solve_seconds"], "solve_seconds"),
         "audit_artifact": artifact,
-        "row_sha256": _hex_digest(raw["row_sha256"], "row_sha256"),
+        "previous_row_sha256": previous,
     }
     if normalized["solve_seconds"] < 0.0:
         raise ValueError("solve_seconds must be nonnegative")
-    expected = _fingerprint({key: item for key, item in normalized.items() if key != "row_sha256"})
-    if normalized["row_sha256"] != expected:
-        raise ValueError("spectral row hash does not match its canonical content")
     if artifact_root is not None:
         _verify_artifact_bytes(
             artifact,
@@ -297,7 +337,32 @@ def _normalize_row(
     return normalized
 
 
-def read_spectral_rows(
+def _normalize_row(
+    value: object,
+    *,
+    spec: Mapping[str, Any],
+    sequence: int,
+    previous_row_sha256: str | None,
+    artifact_root: Path | None,
+) -> dict[str, Any]:
+    raw = _mapping(value, f"spectral row {sequence}")
+    if "row_sha256" not in raw:
+        raise ValueError(f"spectral row {sequence} has missing or unsupported fields")
+    supplied = _hex_digest(raw.pop("row_sha256"), "row_sha256")
+    normalized = _normalize_row_body(
+        raw,
+        spec=spec,
+        sequence=sequence,
+        previous_row_sha256=previous_row_sha256,
+        artifact_root=artifact_root,
+    )
+    expected = _fingerprint(normalized)
+    if supplied != expected:
+        raise ValueError("spectral row hash does not match its canonical content")
+    return {**normalized, "row_sha256": supplied}
+
+
+def _read_spectral_rows_unlocked(
     path: str | Path,
     spec: Mapping[str, Any],
     *,
@@ -307,20 +372,24 @@ def read_spectral_rows(
     journal = Path(path)
     if not journal.exists():
         return []
+    recover_jsonl_tail(journal, max_row_bytes=MAX_SPECTRAL_ROW_BYTES)
     root = Path(artifact_root) if artifact_root is not None else None
     rows: list[dict[str, Any]] = []
     previous: str | None = None
-    with journal.open("r", encoding="utf-8") as handle:
-        for sequence, line in enumerate(handle, 1):
-            if not line.strip():
+    with journal.open("rb") as handle:
+        for sequence in range(1, MAX_SPECTRAL_ROWS + 2):
+            raw_line = handle.readline(MAX_SPECTRAL_ROW_BYTES + 1)
+            if not raw_line:
+                break
+            if len(raw_line) > MAX_SPECTRAL_ROW_BYTES:
+                raise ValueError("spectral row exceeds its byte limit")
+            if not raw_line.strip():
                 raise ValueError("spectral row journal contains a blank record")
             if sequence > MAX_SPECTRAL_ROWS:
                 raise ValueError("spectral row journal exceeds its entry limit")
-            if len(line.encode("utf-8")) > MAX_SPECTRAL_ROW_BYTES:
-                raise ValueError("spectral row exceeds its byte limit")
             try:
-                value = json.loads(line)
-            except json.JSONDecodeError as exc:
+                value = json.loads(raw_line.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
                 raise ValueError("spectral row journal contains malformed JSON") from exc
             row = _normalize_row(
                 value,
@@ -335,6 +404,17 @@ def read_spectral_rows(
     if len(complete) != len(set(complete)):
         raise ValueError("spectral row journal contains a duplicate complete point")
     return rows
+
+
+def read_spectral_rows(
+    path: str | Path,
+    spec: Mapping[str, Any],
+    *,
+    artifact_root: str | Path | None = None,
+) -> list[dict[str, Any]]:
+    """Read and validate every durable row under its journal lock."""
+    with locked_journal(path) as journal:
+        return _read_spectral_rows_unlocked(journal, spec, artifact_root=artifact_root)
 
 
 def completed_spectral_point_fingerprints(
@@ -370,56 +450,70 @@ def append_spectral_row(
     created_at_epoch: float | None = None,
 ) -> dict[str, Any]:
     """Append and fsync one complete raw point only after its artifact validates."""
-    rows = read_spectral_rows(path, spec, artifact_root=artifact_root)
-    identity = spectral_point_identity(spec, requested_wavelength_m)
-    if identity["point_fingerprint"] in {row["point_fingerprint"] for row in rows}:
-        raise ValueError("an exact complete spectral point already exists")
-    row = {
-        "schema_name": SPECTRAL_ROW_SCHEMA_NAME,
-        "schema_version": SPECTRAL_ROW_SCHEMA_VERSION,
-        "sequence": len(rows) + 1,
-        "attempt": attempt,
-        "stage_index": stage_index,
-        "stage_kind": stage_kind,
-        "created_at_epoch": float(created_at_epoch if created_at_epoch is not None else time.time()),
-        "spec_fingerprint": spec["spec_fingerprint"],
-        "source_model_sha256": spec["source_model_sha256"],
-        "configuration_sha256": spec["configuration_sha256"],
-        "collector_identity_sha256": spectral_collector_identity(spec),
-        "point_id": identity["point_id"],
-        "point_fingerprint": identity["point_fingerprint"],
-        "requested_wavelength_m": identity["requested_wavelength_m"],
-        "evaluated_wavelength_m": evaluated_wavelength_m,
-        "frequency_wavelength_m": frequency_wavelength_m,
-        "R": R,
-        "T": T,
-        "A": A,
-        "mesh_element_count": mesh_element_count,
-        "mesh_vertex_count": mesh_vertex_count,
-        "solve_seconds": solve_seconds,
-        "audit_artifact": dict(audit_artifact),
-        "previous_row_sha256": rows[-1]["row_sha256"] if rows else None,
-    }
-    row["row_sha256"] = _fingerprint(row)
-    normalized = _normalize_row(
-        row,
-        spec=spec,
-        sequence=row["sequence"],
-        previous_row_sha256=row["previous_row_sha256"],
-        artifact_root=Path(artifact_root),
-    )
-    payload = _canonical_bytes(normalized) + b"\n"
-    if len(payload) > MAX_SPECTRAL_ROW_BYTES:
-        raise ValueError("spectral row exceeds its byte limit")
-    if len(rows) >= min(int(spec["maximum_points"]), MAX_SPECTRAL_ROWS):
-        raise ValueError("spectral row journal reached the declared point cap")
-    journal = Path(path)
-    journal.parent.mkdir(parents=True, exist_ok=True)
-    with journal.open("ab") as handle:
-        handle.write(payload)
-        handle.flush()
-        os.fsync(handle.fileno())
-    return normalized
+    with locked_journal(path) as journal:
+        rows = _read_spectral_rows_unlocked(journal, spec, artifact_root=artifact_root)
+        identity = spectral_point_identity(spec, requested_wavelength_m)
+        if identity["point_fingerprint"] in {row["point_fingerprint"] for row in rows}:
+            raise ValueError("an exact complete spectral point already exists")
+        created = _finite(
+            created_at_epoch if created_at_epoch is not None else time.time(),
+            "created_at_epoch",
+        )
+        evaluated = _finite(evaluated_wavelength_m, "evaluated_wavelength_m", positive=True)
+        frequency = _finite(frequency_wavelength_m, "frequency_wavelength_m", positive=True)
+        reflection = _finite(R, "R")
+        transmission = _finite(T, "T")
+        absorption = _finite(A, "A")
+        duration = _finite(solve_seconds, "solve_seconds")
+        if duration < 0.0:
+            raise ValueError("solve_seconds must be nonnegative")
+        row_body = {
+            "schema_name": SPECTRAL_ROW_SCHEMA_NAME,
+            "schema_version": SPECTRAL_ROW_SCHEMA_VERSION,
+            "sequence": len(rows) + 1,
+            "attempt": attempt,
+            "stage_index": stage_index,
+            "stage_kind": stage_kind,
+            "created_at_epoch": created,
+            "spec_fingerprint": spec["spec_fingerprint"],
+            "source_model_sha256": spec["source_model_sha256"],
+            "configuration_sha256": spec["configuration_sha256"],
+            "collector_identity_sha256": spectral_collector_identity(spec),
+            "point_id": identity["point_id"],
+            "point_fingerprint": identity["point_fingerprint"],
+            "requested_wavelength_m": identity["requested_wavelength_m"],
+            "evaluated_wavelength_m": evaluated,
+            "frequency_wavelength_m": frequency,
+            "R": reflection,
+            "T": transmission,
+            "A": absorption,
+            "mesh_element_count": mesh_element_count,
+            "mesh_vertex_count": mesh_vertex_count,
+            "solve_seconds": duration,
+            "audit_artifact": dict(audit_artifact),
+            "previous_row_sha256": rows[-1]["row_sha256"] if rows else None,
+        }
+        normalized_body = _normalize_row_body(
+            row_body,
+            spec=spec,
+            sequence=row_body["sequence"],
+            previous_row_sha256=row_body["previous_row_sha256"],
+            artifact_root=Path(artifact_root),
+        )
+        normalized = {
+            **normalized_body,
+            "row_sha256": _fingerprint(normalized_body),
+        }
+        payload = _canonical_bytes(normalized) + b"\n"
+        if len(payload) > MAX_SPECTRAL_ROW_BYTES:
+            raise ValueError("spectral row exceeds its byte limit")
+        if len(rows) >= min(int(spec["maximum_points"]), MAX_SPECTRAL_ROWS):
+            raise ValueError("spectral row journal reached the declared point cap")
+        with journal.open("ab") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        return normalized
 
 
 __all__ = [

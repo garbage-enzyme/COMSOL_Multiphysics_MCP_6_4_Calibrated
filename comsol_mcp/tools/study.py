@@ -1,10 +1,80 @@
 """Study and solving tools for COMSOL MCP Server."""
 
+import math
 from typing import Optional, Sequence
+
 from mcp.server.fastmcp import FastMCP
 
-from .session import session_manager
 from ..async_handler.solver import async_solver
+from .session import session_manager
+
+
+def create_study(
+    model,
+    study_type: str = "Stationary",
+    study_name: Optional[str] = None,
+    time_list: Optional[Sequence] = None,
+    time_unit: str = "s",
+) -> dict:
+    """Create one study and remove it if step configuration cannot complete."""
+    if not isinstance(study_type, str) or not study_type.strip():
+        return {"success": False, "error": "study_type must be nonempty"}
+    if study_name is not None and (
+        not isinstance(study_name, str) or not study_name.strip()
+    ):
+        return {"success": False, "error": "study_name must be nonempty"}
+    if not isinstance(time_unit, str) or not time_unit.strip():
+        return {"success": False, "error": "time_unit must be nonempty"}
+    normalized_times = None
+    if time_list is not None:
+        if isinstance(time_list, (str, bytes)):
+            return {"success": False, "error": "time_list must be numeric"}
+        normalized_times = []
+        for value in time_list:
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                return {"success": False, "error": "time_list must be numeric"}
+            number = float(value)
+            if not math.isfinite(number):
+                return {"success": False, "error": "time_list must be finite"}
+            normalized_times.append(number)
+    aliases = {
+        "stat": "Stationary", "time": "Transient", "timedependent": "Transient",
+        "transient": "Transient", "eig": "Eigenfrequency",
+        "freq": "FrequencyDomain", "frequency": "FrequencyDomain",
+        "pert": "Perturbation",
+    }
+    step_type = aliases.get(study_type.casefold(), study_type)
+    study_list = model.java.study()
+    existing = {str(value) for value in list(study_list.tags())}
+    if study_name:
+        study_tag = study_name
+        if study_tag in existing:
+            return {"success": False, "error": f"Study tag already exists: {study_tag}"}
+    else:
+        index = 1
+        while f"std{index}" in existing:
+            index += 1
+        study_tag = f"std{index}"
+    created = False
+    try:
+        study = study_list.create(study_tag)
+        created = True
+        study.create("step1", step_type)
+        if step_type == "Transient" and normalized_times is not None:
+            study.feature("step1").set(
+                "tlist", " ".join(f"{value}[{time_unit}]" for value in normalized_times)
+            )
+    except Exception:
+        if created:
+            try:
+                study_list.remove(study_tag)
+            except Exception:
+                return {"success": False, "error": "Study setup failed and rollback was incomplete.", "rolled_back": False}
+        return {"success": False, "error": "Study setup failed.", "rolled_back": True}
+    result = {"success": True, "study": study_tag, "type": study_type, "step_type": step_type, "model": model.name()}
+    if step_type == "Transient" and normalized_times is None:
+        result["warning"] = "Transient study created without time_list."
+    return result
 
 
 def _resolve_study_tag(model, study_name: Optional[str]) -> Optional[str]:
@@ -26,12 +96,19 @@ def _resolve_study_tag(model, study_name: Optional[str]) -> Optional[str]:
     tags = [str(tag) for tag in study_list.tags()]
     if study_name in tags:
         return study_name
+    matches = []
     for tag in tags:
         try:
-            if study_list.get(tag).label() == study_name:
-                return tag
-        except Exception:
-            pass
+            if str(study_list.get(tag).label()) == study_name:
+                matches.append(tag)
+        except Exception as exc:
+            raise RuntimeError(f"Cannot read label for study {tag!r}: {exc}") from exc
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        raise ValueError(
+            f"Study label {study_name!r} is ambiguous across tags: {matches}"
+        )
     raise ValueError(
         f"Study '{study_name}' not found. Available tags: {tags}"
     )
@@ -51,22 +128,112 @@ def list_studies(model) -> dict:
             info["label"] = tag
 
         steps = []
-        try:
-            feature_list = study.feature()
-            for raw_step_tag in list(feature_list.tags()):
-                step_tag = str(raw_step_tag)
-                step = feature_list.get(step_tag)
-                step_info = {"tag": step_tag}
-                try:
-                    step_info["label"] = str(step.label())
-                except Exception:
-                    step_info["label"] = step_tag
-                steps.append(step_info)
-        except Exception:
-            pass
+        feature_list = study.feature()
+        for raw_step_tag in list(feature_list.tags()):
+            step_tag = str(raw_step_tag)
+            step = feature_list.get(step_tag)
+            step_info = {"tag": step_tag}
+            try:
+                step_info["label"] = str(step.label())
+            except Exception:
+                step_info["label"] = step_tag
+            steps.append(step_info)
         info["steps"] = steps
         studies.append(info)
     return {"success": True, "studies": studies, "count": len(studies)}
+
+
+def solve_study(
+    model,
+    study_name: Optional[str] = None,
+    *,
+    wait: bool = True,
+    timeout: Optional[float] = None,
+    solver=async_solver,
+) -> dict:
+    """Run synchronously only for an unbounded wait; finite waits use the manager."""
+    if not isinstance(wait, bool):
+        return {"success": False, "error": "wait must be a boolean"}
+    if timeout is not None:
+        if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
+            return {"success": False, "error": "timeout must be a finite non-negative number"}
+        timeout = float(timeout)
+        if not math.isfinite(timeout) or timeout < 0:
+            return {"success": False, "error": "timeout must be a finite non-negative number"}
+        if not wait:
+            return {"success": False, "error": "timeout requires wait=true"}
+    if solver.is_running:
+        return {
+            "success": False,
+            "error": "Another solving operation is in progress. Use study_get_progress to check status.",
+        }
+
+    tag = _resolve_study_tag(model, study_name)
+    if wait and timeout is None:
+        jm = model.java
+        if tag is None:
+            for raw_tag in jm.study().tags():
+                jm.study(str(raw_tag)).run()
+        else:
+            jm.study(tag).run()
+        return {
+            "success": True,
+            "study": study_name,
+            "resolved_tag": tag,
+            "message": "Solving completed.",
+            "completed": True,
+            "async": False,
+        }
+
+    started = solver.start_solve(model, tag)
+    if not started:
+        return {"success": False, "error": "Failed to start async solver."}
+    if not wait:
+        return {
+            "success": True,
+            "study": study_name,
+            "resolved_tag": tag,
+            "message": "Solving started in background. Use study_get_progress to monitor.",
+            "async": True,
+            "completed": False,
+        }
+
+    completed = solver.wait(timeout=timeout)
+    progress = solver.get_progress()
+    if not completed:
+        return {
+            "success": False,
+            "study": study_name,
+            "resolved_tag": tag,
+            "completed": False,
+            "timed_out": True,
+            "async": True,
+            "background_continues": True,
+            "progress": progress,
+            "message": (
+                "The wait deadline expired; the blocking COMSOL call may continue in "
+                "the managed background solver."
+            ),
+        }
+    if progress.get("status") != "completed":
+        return {
+            "success": False,
+            "study": study_name,
+            "resolved_tag": tag,
+            "completed": True,
+            "async": True,
+            "progress": progress,
+            "error": "Managed solving finished without a completed status.",
+        }
+    return {
+        "success": True,
+        "study": study_name,
+        "resolved_tag": tag,
+        "completed": True,
+        "async": True,
+        "progress": progress,
+        "message": "Solving completed.",
+    }
 
 
 def register_study_tools(mcp: FastMCP) -> None:
@@ -134,60 +301,13 @@ def register_study_tools(mcp: FastMCP) -> None:
             }
 
         try:
-            jm = model.java
-            existing_studies = jm.study().size()
-            study_tag = study_name or f"std{existing_studies + 1}"
-
-            # clientapi (mph 1.3+ standalone) requires the FULL step-type name
-            # (e.g. "Stationary", "Transient"), NOT the short tag ("stat").
-            # Direct-Model API used the short form, but clientapi rejects it
-            # with "Operation_cannot_be_created_in_this_context".  Note that
-            # the *real* tag for a time-dependent study step is "Transient"
-            # (NOT "TimeDependent"); the historical alias is normalised here.
-            SHORT_TO_FULL = {
-                "stat": "Stationary",
-                "time": "Transient",
-                "timedependent": "Transient",
-                "transient": "Transient",
-                "eig": "Eigenfrequency",
-                "freq": "FrequencyDomain",
-                "frequency": "FrequencyDomain",
-                "pert": "Perturbation",
-            }
-            step_type = SHORT_TO_FULL.get(study_type.lower(), study_type)
-
-            study = jm.study().create(study_tag)
-            study.create("step1", step_type)
-
-            tlist_warning = None
-            if step_type == "Transient" and time_list is not None:
-                try:
-                    step = study.feature("step1")
-                    tlist_str = " ".join(
-                        f"{float(t)}[{time_unit}]" for t in time_list
-                    )
-                    step.set("tlist", tlist_str)
-                except Exception as exc:
-                    tlist_warning = (
-                        f"Study created but failed to set tlist: {exc}"
-                    )
-
-            result = {
-                "success": True,
-                "study": study_tag,
-                "type": study_type,
-                "step_type": step_type,
-                "model": model.name(),
-            }
-            if step_type == "Transient" and time_list is None:
-                result["warning"] = (
-                    "Transient study created without time_list. Set it via "
-                    "study_create(time_list=...) or the COMSOL GUI before "
-                    "solving."
-                )
-            if tlist_warning:
-                result["warning"] = tlist_warning
-            return result
+            return create_study(
+                model,
+                study_type=study_type,
+                study_name=study_name,
+                time_list=time_list,
+                time_unit=time_unit,
+            )
         except Exception as e:
             return {"success": False, "error": f"Failed to create study: {str(e)}"}
     
@@ -217,46 +337,13 @@ def register_study_tools(mcp: FastMCP) -> None:
                 "error": f"Model not found: {model_name or 'no current model'}"
             }
         
-        if async_solver.is_running:
-            return {
-                "success": False,
-                "error": "Another solving operation is in progress. Use study_get_progress to check status."
-            }
-        
         try:
-            # Resolve tag OR label to a canonical tag, then use the Java
-            # API directly. mph's ``model.solve(name)`` only accepts the
-            # study *label* (e.g. "研究 1"), but callers typically pass the
-            # *tag* returned by ``study_create`` (e.g. "std1").
-            tag = _resolve_study_tag(model, study_name)
-            jm = model.java
-            if wait:
-                if tag is None:
-                    for t in jm.study().tags():
-                        jm.study(t).run()
-                else:
-                    jm.study(tag).run()
-                return {
-                    "success": True,
-                    "study": study_name,
-                    "resolved_tag": tag,
-                    "message": "Solving completed.",
-                }
-            else:
-                started = async_solver.start_solve(model, tag)
-                if started:
-                    return {
-                        "success": True,
-                        "study": study_name,
-                        "resolved_tag": tag,
-                        "message": "Solving started in background. Use study_get_progress to monitor.",
-                        "async": True,
-                    }
-                else:
-                    return {
-                        "success": False,
-                        "error": "Failed to start async solver."
-                    }
+            return solve_study(
+                model,
+                study_name,
+                wait=wait,
+                timeout=timeout,
+            )
         except Exception as e:
             return {"success": False, "error": f"Failed to solve: {str(e)}"}
     

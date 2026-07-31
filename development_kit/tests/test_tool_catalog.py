@@ -7,14 +7,17 @@ import json
 import subprocess
 import sys
 from dataclasses import replace
+from importlib import import_module
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+import src.tools as tools_module
 from mcp.server.fastmcp import FastMCP
+from src.knowledge import embedded as embedded_module
 from src.knowledge.embedded import register_knowledge_tools
 from src.knowledge.lexical_manual import register_lexical_manual_tools
 from src.server import create_server
-from src.tools import TOOL_REGISTRARS
 from src.tools.catalog import (
     PROFILE_NAMES,
     TOOL_METADATA,
@@ -66,7 +69,7 @@ def test_every_registered_tool_has_complete_canonical_metadata():
         assert metadata.name == name
         assert metadata.registrar.startswith("comsol_mcp.")
         assert metadata.group
-        assert metadata.maturity in {"verified", "experimental"}
+        assert metadata.maturity in {"verified", "experimental", "deprecated"}
         assert metadata.side_effect_class
         assert metadata.concurrency_class in {
             "control_plane",
@@ -96,6 +99,21 @@ def test_tool_specs_are_the_validated_canonical_registry():
         assert dict(spec.structural_limits)["response_bytes"] > 0
 
 
+def test_new_tool_without_explicit_side_effect_class_fails_closed(monkeypatch):
+    from src.tools import catalog
+
+    registrars = dict(catalog._TOOLS_BY_REGISTRAR)
+    registrar = next(iter(registrars))
+    monkeypatch.setattr(
+        catalog,
+        "_TOOLS_BY_REGISTRAR",
+        {**registrars, registrar: (*registrars[registrar], "unclassified_tool")},
+    )
+
+    with pytest.raises(ValueError, match="no explicit side-effect classification"):
+        catalog._build_registry()
+
+
 def test_profile_registrar_selection_is_derived_from_tool_specs():
     core = registrars_for_profile("core")
     full = registrars_for_profile("full")
@@ -107,6 +125,7 @@ def test_profile_registrar_selection_is_derived_from_tool_specs():
 
 def test_deprecated_foreground_sweep_has_a_durable_replacement():
     spec = TOOL_SPECS["study_staged_parametric_sweep"]
+    assert spec.maturity == "deprecated"
     assert spec.deprecation_state == "deprecated"
     assert spec.replacement_tool == "job_submit"
     assert spec.sunset_release == "next_major"
@@ -147,6 +166,32 @@ def test_tool_spec_validation_rejects_conflicting_declarations_import_free():
     with pytest.raises(ValueError, match="profiles are invalid"):
         validate_tool_specs({**TOOL_SPECS, read_only.name: duplicated_profile})
 
+    with pytest.raises(ValueError, match="deprecation state is invalid"):
+        validate_tool_specs(
+            {**TOOL_SPECS, read_only.name: replace(read_only, deprecation_state="retired")}
+        )
+
+    with pytest.raises(ValueError, match="maturity/deprecation state is inconsistent"):
+        validate_tool_specs(
+            {**TOOL_SPECS, read_only.name: replace(read_only, maturity="deprecated")}
+        )
+
+
+def test_schema_snapshot_rejects_duplicate_registered_names():
+    duplicate = SimpleNamespace(name="duplicate", inputSchema={"type": "object"})
+
+    class DuplicateServer:
+        async def list_tools(self):
+            return [duplicate, duplicate]
+
+    with pytest.raises(ValueError, match="duplicate registered tool names"):
+        asyncio.run(snapshot_tool_schemas(DuplicateServer()))
+
+
+def test_tools_package_exports_only_profile_guarded_registration():
+    assert tools_module.__all__ == ["register_tool_modules"]
+    assert not hasattr(tools_module, "TOOL_REGISTRARS")
+
 
 def test_unknown_tool_metadata_fails_closed():
     try:
@@ -157,12 +202,41 @@ def test_unknown_tool_metadata_fails_closed():
         raise AssertionError("unknown tools must not receive implicit metadata")
 
 
-def test_metadata_registrars_match_actual_registration():
-    registrars = (
-        *TOOL_REGISTRARS,
-        register_knowledge_tools,
-        register_lexical_manual_tools,
+def test_embedded_knowledge_uses_one_bounded_regular_file_read(tmp_path, monkeypatch):
+    prompt = tmp_path / "mph_api.md"
+    prompt.write_text("bounded guidance", encoding="utf-8")
+    monkeypatch.setattr(embedded_module, "KNOWLEDGE_DIR", tmp_path)
+    monkeypatch.setattr(
+        Path,
+        "exists",
+        lambda _path: pytest.fail("embedded knowledge must not pre-check existence"),
     )
+
+    assert embedded_module._load_knowledge_file("mph_api") == "bounded guidance"
+
+
+def test_embedded_knowledge_responses_do_not_expose_module_state():
+    docs = embedded_module.list_docs()
+    docs["topics"][0]["keywords"].append("injected")
+    guide = embedded_module.get_physics_guide("electrostatics")
+    guide["guide"]["tips"].clear()
+    troubleshoot = embedded_module.get_troubleshoot("mesh_failed")
+    troubleshoot["solutions"].clear()
+    practices = embedded_module.get_best_practices("mesh")
+    practices["best_practices"]["tips"].clear()
+
+    assert "injected" not in embedded_module.list_docs()["topics"][0]["keywords"]
+    assert embedded_module.get_physics_guide("electrostatics")["guide"]["tips"]
+    assert embedded_module.get_troubleshoot("mesh_failed")["solutions"]
+    assert embedded_module.get_best_practices("mesh")["best_practices"]["tips"]
+
+
+def test_metadata_registrars_match_actual_registration():
+    registrars = []
+    for registrar_path in registrars_for_profile("full"):
+        module_name, symbol_name = registrar_path.rsplit(".", 1)
+        registrars.append(getattr(import_module(module_name), symbol_name))
+    registrars.extend((register_knowledge_tools, register_lexical_manual_tools))
 
     for registrar in registrars:
         server = FastMCP(f"metadata-{registrar.__name__}")

@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 import hashlib
 import json
 
 import pytest
-
 from src.evidence.contracts import build_physical_evidence
 from src.jobs.spectral_audit import build_spectral_audit_point, extract_spectral_audit_result
 from src.jobs.spectral_characterization import normalize_spectral_characterization_job_spec
@@ -55,7 +53,11 @@ def _spec(tmp_path):
                     "t_expression": "T",
                     "a_expression": "A",
                     "top_air_domain_ids": [1],
-                    "top_air_coordinate_range": {"x": [-1.0, 1.0], "y": [-1.0, 1.0], "z": [-1.0, 1.0]},
+                    "top_air_coordinate_range": {
+                        "x": [-1.0, 1.0],
+                        "y": [-1.0, 1.0],
+                        "z": [-1.0, 1.0],
+                    },
                 },
             },
             "analysis_policy": {
@@ -170,6 +172,18 @@ def _result(job, spec, point):
     }
 
 
+def _rewrite_inner(artifact, mutate):
+    inner = artifact / "audit" / "manifest.json"
+    document = json.loads(inner.read_text(encoding="utf-8"))
+    mutate(document)
+    inner.write_text(json.dumps(document), encoding="utf-8")
+    wrapper_path = artifact / "matrix_collector.json"
+    wrapper = json.loads(wrapper_path.read_text(encoding="utf-8"))
+    wrapper["inner_manifest"]["sha256"] = hashlib.sha256(inner.read_bytes()).hexdigest()
+    wrapper["inner_manifest"]["size_bytes"] = inner.stat().st_size
+    wrapper_path.write_text(json.dumps(wrapper), encoding="utf-8")
+
+
 def test_point_identity_and_complete_audit_projection(tmp_path):
     spec = _spec(tmp_path)
     job = tmp_path / "job"
@@ -189,7 +203,82 @@ def test_point_identity_and_complete_audit_projection(tmp_path):
     assert projected["A"] == 0.85
     assert projected["mesh_element_count"] == 12
     assert projected["mesh_vertex_count"] == 8
-    assert projected["audit_artifact"]["physical_evidence_sha256"]
+    audit = projected["audit_artifact"]
+    wrapper = artifact / "matrix_collector.json"
+    inner = next((artifact / "audit").glob("manifest.json"))
+    assert audit == {
+        "wrapper_relative_path": wrapper.relative_to(job).as_posix(),
+        "wrapper_sha256": hashlib.sha256(wrapper.read_bytes()).hexdigest(),
+        "wrapper_size_bytes": wrapper.stat().st_size,
+        "inner_relative_path": inner.relative_to(job).as_posix(),
+        "inner_sha256": hashlib.sha256(inner.read_bytes()).hexdigest(),
+        "inner_size_bytes": inner.stat().st_size,
+        "physical_evidence_sha256": audit["physical_evidence_sha256"],
+        "audit_status": "measurement_complete",
+    }
+    assert audit["physical_evidence_sha256"]
+
+
+def test_requested_wavelength_uses_the_frozen_canonical_point(tmp_path):
+    spec = _spec(tmp_path)
+    job = tmp_path / "job"
+    point = build_spectral_audit_point(spec, 5e-6)
+    artifact, result = _result(job, spec, point)
+    _rewrite_inner(
+        artifact,
+        lambda document: document["measurement"]["wavelength"].__setitem__(
+            "requested_m", 4.999999999999999e-6
+        ),
+    )
+
+    projected = extract_spectral_audit_result(
+        job_dir=job,
+        artifact_dir=artifact,
+        spec=spec,
+        point=point,
+        result=result,
+    )
+
+    assert projected["requested_wavelength_m"] == point["wavelength"]["value"]
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["evaluated_parameter_m", "solved_frequency_wavelength_m"],
+)
+def test_solved_wavelengths_must_match_the_frozen_point_within_policy(tmp_path, field):
+    spec = _spec(tmp_path)
+    job = tmp_path / "job"
+    point = build_spectral_audit_point(spec, 5e-6)
+    artifact, result = _result(job, spec, point)
+    _rewrite_inner(
+        artifact,
+        lambda document: document["measurement"]["wavelength"].__setitem__(
+            field, 5e-6 + 2 * spec["analysis_policy"]["wavelength_sync_abs_m"]
+        ),
+    )
+
+    with pytest.raises(ValueError, match="wavelength differs from the frozen point"):
+        extract_spectral_audit_result(
+            job_dir=job,
+            artifact_dir=artifact,
+            spec=spec,
+            point=point,
+            result=result,
+        )
+
+
+def test_point_incidence_is_detached_from_the_normalized_spec(tmp_path):
+    spec = _spec(tmp_path)
+    spec["parameter_state"]["incidence"] = {
+        "polarization": "S",
+        "angles": [20.0, 0.0],
+    }
+    point = build_spectral_audit_point(spec, 5e-6)
+
+    spec["parameter_state"]["incidence"]["angles"][0] = 45.0
+
+    assert point["incidence"] == {"polarization": "S", "angles": [20.0, 0.0]}
 
 
 def test_incomplete_audit_is_not_projected(tmp_path):
@@ -199,7 +288,9 @@ def test_incomplete_audit_is_not_projected(tmp_path):
     artifact, result = _result(job, spec, point)
     result["audit_status"] = "measurement_partial"
     with pytest.raises(ValueError, match="incomplete"):
-        extract_spectral_audit_result(job_dir=job, artifact_dir=artifact, spec=spec, point=point, result=result)
+        extract_spectral_audit_result(
+            job_dir=job, artifact_dir=artifact, spec=spec, point=point, result=result
+        )
 
 
 def test_wrapper_and_inner_tampering_fail_closed(tmp_path):
@@ -212,7 +303,9 @@ def test_wrapper_and_inner_tampering_fail_closed(tmp_path):
     wrapper["point"]["configuration_sha256"] = "c" * 64
     wrapper_path.write_text(json.dumps(wrapper), encoding="utf-8")
     with pytest.raises(ValueError, match="configuration_sha256"):
-        extract_spectral_audit_result(job_dir=job, artifact_dir=artifact, spec=spec, point=point, result=result)
+        extract_spectral_audit_result(
+            job_dir=job, artifact_dir=artifact, spec=spec, point=point, result=result
+        )
 
     artifact, result = _result(job, spec, point)
     inner = next((artifact / "audit").glob("manifest.json"))
@@ -220,7 +313,9 @@ def test_wrapper_and_inner_tampering_fail_closed(tmp_path):
     document["measurement"]["power"]["A"] = 0.5
     inner.write_text(json.dumps(document), encoding="utf-8")
     with pytest.raises(ValueError, match="size|hash"):
-        extract_spectral_audit_result(job_dir=job, artifact_dir=artifact, spec=spec, point=point, result=result)
+        extract_spectral_audit_result(
+            job_dir=job, artifact_dir=artifact, spec=spec, point=point, result=result
+        )
 
 
 def test_artifact_must_remain_inside_job_directory(tmp_path):
@@ -235,4 +330,22 @@ def test_artifact_must_remain_inside_job_directory(tmp_path):
     moved.write_bytes(wrapper.read_bytes())
     result["artifacts"]["manifest"] = str(moved)
     with pytest.raises(ValueError, match="assigned artifact"):
-        extract_spectral_audit_result(job_dir=job, artifact_dir=artifact, spec=spec, point=point, result=result)
+        extract_spectral_audit_result(
+            job_dir=job, artifact_dir=artifact, spec=spec, point=point, result=result
+        )
+
+
+def test_assigned_artifact_root_must_remain_inside_durable_job(tmp_path):
+    spec = _spec(tmp_path)
+    job = tmp_path / "job"
+    point = build_spectral_audit_point(spec, 5e-6)
+    artifact, result = _result(tmp_path / "other-job", spec, point)
+
+    with pytest.raises(ValueError, match="escapes the durable job"):
+        extract_spectral_audit_result(
+            job_dir=job,
+            artifact_dir=artifact,
+            spec=spec,
+            point=point,
+            result=result,
+        )

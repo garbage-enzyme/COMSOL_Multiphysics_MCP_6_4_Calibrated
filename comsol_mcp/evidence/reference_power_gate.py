@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import math
 from copy import deepcopy
-import hashlib
 from pathlib import Path
 from typing import Any, Mapping
+
+from comsol_mcp.durable import snapshot_file_bounded
 
 from .contracts import (
     build_physical_evidence,
@@ -14,6 +16,26 @@ from .contracts import (
     example_validation_policies,
 )
 from .reference_power_acceptance import validate_reference_power_acceptance_contract
+
+
+def _finite_nonnegative(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    try:
+        result = float(value)
+    except OverflowError:
+        return None
+    return result if math.isfinite(result) and result >= 0.0 else None
+
+
+def _at_most(value: Any, threshold: float) -> bool:
+    result = _finite_nonnegative(value)
+    return result is not None and result <= threshold
+
+
+def _at_least(value: Any, threshold: float) -> bool:
+    result = _finite_nonnegative(value)
+    return result is not None and result >= threshold
 
 
 def build_reference_power_policies(contract: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
@@ -105,32 +127,47 @@ def evaluate_reference_power_results(
     reference = reference_result.get("reference") or {}
     point_measurement = point_result.get("measurement") or {}
     wavelength = point_measurement.get("wavelength") or {}
+    positive_policy = evaluate_physical_evidence_policy(
+        point_result["physical_evidence"], policies["declared_flux"]
+    )
     negative = evaluate_reference_power_negative_controls(
         point_result["physical_evidence"], policies["declared_flux"]
     )
     reference_checks = {
         "audit_complete": reference_result.get("audit_status") == "measurement_complete",
         "policy_pass": reference_result.get("assessment", {}).get("overall") == "pass",
-        "reflection": float(reference.get("R", float("inf")))
-        <= acceptance["reference_air"]["reflection_max"],
-        "r_plus_t_residual": float(reference.get("R_plus_T_residual_abs", float("inf")))
-        <= acceptance["reference_air"]["r_plus_t_residual_max"],
-        "target_ratio": float(reference.get("target_to_transverse_ratio", -1.0))
-        >= acceptance["reference_air"]["target_to_transverse_ratio_min"],
+        "reflection": _at_most(reference.get("R"), acceptance["reference_air"]["reflection_max"]),
+        "r_plus_t_residual": _at_most(
+            reference.get("R_plus_T_residual_abs"),
+            acceptance["reference_air"]["r_plus_t_residual_max"],
+        ),
+        "target_ratio": _at_least(
+            reference.get("target_to_transverse_ratio"),
+            acceptance["reference_air"]["target_to_transverse_ratio_min"],
+        ),
         "clone_cleanup": reference_result.get("cleanup", {}).get("removed") is True,
     }
     point_checks = {
         "audit_complete": point_result.get("audit_status") == "policy_evaluated",
-        "policy_pass": point_result.get("assessment", {}).get("project_verdict") == "pass",
-        "wavelength_absolute": float(wavelength.get("absolute_difference_m", float("inf")))
-        <= acceptance["wavelength"]["absolute_m_max"],
-        "wavelength_relative": float(wavelength.get("relative_difference", float("inf")))
-        <= acceptance["wavelength"]["relative_max"],
+        "policy_pass": (
+            positive_policy["overall"] == "pass"
+            and point_result.get("assessment", {}).get("project_verdict") == "pass"
+        ),
+        "wavelength_absolute": _at_most(
+            wavelength.get("absolute_difference_m"),
+            acceptance["wavelength"]["absolute_m_max"],
+        ),
+        "wavelength_relative": _at_most(
+            wavelength.get("relative_difference"),
+            acceptance["wavelength"]["relative_max"],
+        ),
         "source_unchanged": point_measurement.get("integrity", {}).get("source_unchanged") is True,
     }
     negative_checks = {
         "reversed_sign_rejected": negative["reversed_sign"]["passed_rejection_gate"],
-        "internal_substitution_rejected": negative["internal_consistency_substitution"]["passed_rejection_gate"],
+        "internal_substitution_rejected": negative["internal_consistency_substitution"][
+            "passed_rejection_gate"
+        ],
     }
     checks = {
         "reference_air": reference_checks,
@@ -142,6 +179,7 @@ def evaluate_reference_power_results(
         "passed": passed,
         "checks": checks,
         "negative_controls": negative,
+        "physical_point_policy_evaluation": positive_policy,
         "raw": {
             "reference": {
                 "R": reference.get("R"),
@@ -162,17 +200,30 @@ def inventory_reference_power_artifacts(root: Path, limits: Mapping[str, Any]) -
     files = sorted(path for path in resolved.rglob("*") if path.is_file())
     if len(files) > int(limits["max_artifact_files"]):
         raise ValueError("reference-power artifact file count exceeds the contract")
-    total = sum(path.stat().st_size for path in files)
-    if total > int(limits["max_artifact_bytes"]):
-        raise ValueError("reference-power artifact bytes exceed the contract")
+    maximum_bytes = int(limits["max_artifact_bytes"])
+    total = 0
     entries = []
     for path in files:
-        relative = path.resolve().relative_to(resolved).as_posix()
+        current = path.resolve(strict=True)
+        try:
+            relative = current.relative_to(resolved).as_posix()
+        except ValueError as exc:
+            raise ValueError("reference-power artifact escapes its root") from exc
+        try:
+            snapshot = snapshot_file_bounded(
+                current,
+                max_bytes=maximum_bytes - total,
+            )
+        except ValueError as exc:
+            if "snapshot limit" in str(exc):
+                raise ValueError("reference-power artifact bytes exceed the contract") from exc
+            raise
+        total += int(snapshot["byte_count"])
         entries.append(
             {
                 "relative_path": relative,
-                "bytes": path.stat().st_size,
-                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                "bytes": snapshot["byte_count"],
+                "sha256": snapshot["sha256"],
             }
         )
     return {"file_count": len(entries), "total_bytes": total, "files": entries}

@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
+import _winapi
 import hashlib
 import json
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
-
+import src.artifact_chain as artifact_chain_module
 from src.artifact_chain import (
     build_artifact_chain_manifest,
     validate_artifact_chain_manifest,
@@ -74,6 +75,20 @@ def _chain(root: Path):
     )
 
 
+def _rehash_manifest(manifest: dict) -> None:
+    body = dict(manifest)
+    body.pop("manifest_sha256")
+    manifest["manifest_sha256"] = hashlib.sha256(
+        json.dumps(
+            body,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+
+
 def test_complete_chain_verifies_exact_bytes_and_returns_path_redacted_receipt(tmp_path):
     manifest = _chain(tmp_path)
 
@@ -94,6 +109,48 @@ def test_chain_rejects_tampered_artifact_bytes(tmp_path):
 
     with pytest.raises(ValueError, match="byte count|SHA-256"):
         verify_artifact_chain(manifest, artifact_root=tmp_path)
+
+
+def test_chain_rejects_equal_length_digest_tampering(tmp_path):
+    manifest = _chain(tmp_path)
+    path = tmp_path / "spectrum.json"
+    original = path.read_bytes()
+    replacement = original.replace(b'"spectrum"', b'"spectruN"')
+    assert len(replacement) == len(original)
+    path.write_bytes(replacement)
+
+    with pytest.raises(ValueError, match="SHA-256"):
+        verify_artifact_chain(manifest, artifact_root=tmp_path)
+
+
+def test_chain_schema_parsing_reuses_the_hashed_snapshot(tmp_path, monkeypatch):
+    manifest = _chain(tmp_path)
+    original_reader = artifact_chain_module.read_contained_file_snapshot
+    changed = []
+
+    def replace_after_snapshot(path, **kwargs):
+        snapshot = original_reader(path, **kwargs)
+        if Path(path).name == "raw.json":
+            payload = snapshot["payload"].replace(b'"raw"', b'"raW"')
+            assert len(payload) == snapshot["byte_count"]
+            Path(path).write_bytes(payload)
+            changed.append(True)
+        return snapshot
+
+    monkeypatch.setattr(
+        artifact_chain_module,
+        "read_contained_file_snapshot",
+        replace_after_snapshot,
+    )
+
+    receipt, documents = artifact_chain_module._verify_artifact_chain_snapshot(
+        manifest,
+        artifact_root=tmp_path,
+    )
+
+    assert receipt["verification_state"] == "verified"
+    assert documents["raw"]["artifact_id"] == "raw"
+    assert changed == [True]
 
 
 def test_chain_rejects_parent_hash_mismatch_cycle_or_orphan(tmp_path):
@@ -159,3 +216,60 @@ def test_chain_rejects_future_schema_and_path_traversal(tmp_path):
             artifacts=[traversal],
             terminal_artifact_ids=["raw"],
         )
+
+
+def test_chain_rejects_absolute_and_junction_escaped_artifact_paths(tmp_path):
+    artifact = _write(tmp_path, "raw", "comsol_mcp.environment_identity", "1.0.0")
+    absolute = {
+        **artifact,
+        "role": "raw_evidence",
+        "parents": [],
+        "relative_path": str((tmp_path / "raw.json").resolve()),
+    }
+    with pytest.raises(ValueError, match="relative and traversal-free"):
+        build_artifact_chain_manifest(
+            chain_id="absolute",
+            artifacts=[absolute],
+            terminal_artifact_ids=["raw"],
+        )
+
+    outside = tmp_path.parent / f"{tmp_path.name}-outside"
+    outside.mkdir()
+    escaped = _write(outside, "escaped", "comsol_mcp.environment_identity", "1.0.0")
+    junction = tmp_path / "linked"
+    _winapi.CreateJunction(str(outside), str(junction))
+    escaped["relative_path"] = "linked/escaped.json"
+    manifest = build_artifact_chain_manifest(
+        chain_id="junction",
+        artifacts=[{**escaped, "role": "raw_evidence", "parents": []}],
+        terminal_artifact_ids=["escaped"],
+    )
+    try:
+        with pytest.raises(ValueError, match="escapes artifact_root"):
+            verify_artifact_chain(manifest, artifact_root=tmp_path)
+    finally:
+        junction.rmdir()
+        (outside / "escaped.json").unlink()
+        outside.rmdir()
+
+
+@pytest.mark.parametrize("version", [None, "", {"unbounded": True}, "x" * 129])
+def test_chain_rejects_invalid_producer_version(tmp_path, version):
+    manifest = _chain(tmp_path)
+    manifest["producer"]["version"] = version
+    _rehash_manifest(manifest)
+
+    with pytest.raises(ValueError, match="producer"):
+        validate_artifact_chain_manifest(manifest)
+
+
+def test_chain_rechecks_size_after_validating_supplied_producer(tmp_path, monkeypatch):
+    manifest = _chain(tmp_path)
+    manifest["producer"]["version"] = "release-candidate"
+    _rehash_manifest(manifest)
+    unhashed = {key: value for key, value in manifest.items() if key != "manifest_sha256"}
+    exact_size = len(artifact_chain_module._canonical_bytes(unhashed))
+    monkeypatch.setattr(artifact_chain_module, "MAX_CHAIN_MANIFEST_BYTES", exact_size - 1)
+
+    with pytest.raises(ValueError, match="oversized"):
+        validate_artifact_chain_manifest(manifest)

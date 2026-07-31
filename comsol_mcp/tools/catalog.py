@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass
 from types import MappingProxyType
-from typing import Any, Mapping
+from typing import Any
 
 PROFILE_NAMES = (
     "core",
@@ -421,6 +421,68 @@ _STARTS_SOLVER = frozenset(
     }
 )
 
+_EXPLICIT_READ_ONLY_TOOLS = frozenset(
+    {
+        "branch_continuation_plan",
+        "capabilities",
+        "clientapi_property_get",
+        "comsol_status",
+        "convergence_evaluate",
+        "datasets_list",
+        "docs_get",
+        "docs_list",
+        "evidence_integrity_status",
+        "evidence_integrity_verify",
+        "geometry_blocks_preview",
+        "geometry_fin_preview",
+        "geometry_list",
+        "geometry_list_features",
+        "job_status",
+        "job_tail",
+        "mesh_info",
+        "mesh_list",
+        "mim_evaluate_spectral",
+        "model_inspect",
+        "model_list",
+        "model_list_components",
+        "modeling_best_practices",
+        "param_get",
+        "param_list",
+        "physics_get_available",
+        "physics_get_guide",
+        "physics_list",
+        "physics_list_features",
+        "results_evaluate",
+        "results_exports_list",
+        "results_global_evaluate",
+        "results_inner_values",
+        "results_outer_values",
+        "results_plots_list",
+        "shared_model_verify",
+        "shared_server_models",
+        "shared_server_preflight",
+        "shared_server_status",
+        "solutions_list",
+        "solver_preflight",
+        "solver_status",
+        "spectral_characterize",
+        "study_get_progress",
+        "study_list",
+        "troubleshoot",
+        "visual_review_capability_normalize",
+        "visual_review_dual_evaluate",
+        "visual_review_receipt_create",
+        "visual_review_request_create",
+        "wave_optics_field_datasets",
+        "wave_optics_field_extract",
+        "wave_optics_incidence_preview",
+        "wave_optics_material_expression_preview",
+        "wave_optics_periodic_mesh_audit",
+        "wave_optics_preflight",
+    }
+)
+
+
 _CONTROL_PLANE_TOOLS = frozenset(
     {
         "capabilities",
@@ -713,7 +775,13 @@ def _build_registry() -> dict[str, ToolMetadata]:
     for registrar, names in _TOOLS_BY_REGISTRAR.items():
         group = _GROUP_BY_REGISTRAR[registrar.rsplit(".", 1)[-1]]
         for name in names:
-            side_effect_class = _SIDE_EFFECTS.get(name, "read_only")
+            deprecated = name == "study_staged_parametric_sweep"
+            if name in _SIDE_EFFECTS:
+                side_effect_class = _SIDE_EFFECTS[name]
+            elif name in _EXPLICIT_READ_ONLY_TOOLS:
+                side_effect_class = "read_only"
+            else:
+                raise ValueError(f"Tool {name!r} has no explicit side-effect classification")
             requires_revision = (
                 side_effect_class in _MODEL_REVISION_REQUIRED_CLASSES
                 or name in _MODEL_REVISION_REQUIRED_ADDITIONS
@@ -722,7 +790,13 @@ def _build_registry() -> dict[str, ToolMetadata]:
                 name=name,
                 registrar=registrar,
                 group=group,
-                maturity="experimental" if name in _EXPERIMENTAL_TOOLS else "verified",
+                maturity=(
+                    "deprecated"
+                    if deprecated
+                    else "experimental"
+                    if name in _EXPERIMENTAL_TOOLS
+                    else "verified"
+                ),
                 side_effect_class=side_effect_class,
                 concurrency_class=(
                     "control_plane"
@@ -751,13 +825,9 @@ def _build_registry() -> dict[str, ToolMetadata]:
                     else "none",
                 ),
                 required_features=("comsol",) if name in _STARTS_SOLVER else (),
-                replacement_tool=(
-                    "job_submit" if name == "study_staged_parametric_sweep" else None
-                ),
-                sunset_release=("next_major" if name == "study_staged_parametric_sweep" else None),
-                deprecation_state=(
-                    "deprecated" if name == "study_staged_parametric_sweep" else "active"
-                ),
+                replacement_tool=("job_submit" if deprecated else None),
+                sunset_release=("next_major" if deprecated else None),
+                deprecation_state=("deprecated" if deprecated else "active"),
             )
     return registry
 
@@ -801,6 +871,10 @@ def validate_tool_specs(
             raise ValueError(f"ToolSpec compatibility profile is missing for {name!r}")
         if spec.maturity not in {"verified", "experimental", "deprecated"}:
             raise ValueError(f"ToolSpec maturity is invalid for {name!r}")
+        if spec.deprecation_state not in {"active", "deprecated"}:
+            raise ValueError(f"ToolSpec deprecation state is invalid for {name!r}")
+        if (spec.maturity == "deprecated") != (spec.deprecation_state == "deprecated"):
+            raise ValueError(f"ToolSpec maturity/deprecation state is inconsistent for {name!r}")
         if spec.side_effect_class == "read_only" and spec.requires_model_revision:
             raise ValueError(f"read-only ToolSpec requires a model revision: {name!r}")
         if spec.starts_solver and spec.side_effect_class not in {
@@ -854,15 +928,18 @@ def get_tool_metadata(name: str) -> ToolMetadata:
 async def snapshot_tool_schemas(server: Any) -> dict[str, dict[str, Any]]:
     """Return name-keyed public input schemas for every registered tool."""
     tools = await server.list_tools()
+    names = [tool.name for tool in tools]
+    if len(names) != len(set(names)):
+        raise ValueError("duplicate registered tool names prevent a canonical schema snapshot")
     return {tool.name: tool.inputSchema for tool in sorted(tools, key=lambda item: item.name)}
 
 
 __all__ = [
     "PROFILE_NAMES",
-    "TOOL_SPECS",
     "TOOL_METADATA",
-    "ToolSpec",
+    "TOOL_SPECS",
     "ToolMetadata",
+    "ToolSpec",
     "get_tool_metadata",
     "registrars_for_profile",
     "snapshot_tool_schemas",

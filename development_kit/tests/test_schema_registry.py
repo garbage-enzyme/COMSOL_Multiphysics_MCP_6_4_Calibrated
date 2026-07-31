@@ -47,7 +47,7 @@ def test_registry_is_complete_sorted_and_snapshot_stable():
     assert registry["schema_name"] == "comsol_mcp.schema_registry"
     assert registry["schema_version"] == "1.0.0"
     assert registry["producer"] == {"package": "comsol-mcp", "version": __version__}
-    assert registry["entry_count"] == len(entries) == 59
+    assert registry["entry_count"] == len(entries) == 60
     assert names == sorted(names)
     assert len(names) == len(set(names))
     # Canonical package imports are also dotted ``comsol_mcp.*`` strings; the
@@ -55,7 +55,11 @@ def test_registry_is_complete_sorted_and_snapshot_stable():
     # path in the implementation.
     assert set(names).issubset(_named_schemas_in_source())
     assert re.fullmatch(r"[0-9a-f]{64}", registry["registry_sha256"])
+    assert registry["registry_sha256"] == (
+        "36917a7cb176cb2cf2244a840634c53bc4f66597ade9275444df33d2f52e54b4"
+    )
     assert registry["registry_sha256"] == get_schema_registry()["registry_sha256"]
+    assert check_schema_support("comsol_mcp.session_startup_state", "1.0.0")["supported"] is True
 
 
 def test_every_entry_declares_read_write_and_non_mutating_migration_policy():

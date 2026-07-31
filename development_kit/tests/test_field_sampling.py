@@ -4,9 +4,9 @@ from copy import deepcopy
 
 import numpy as np
 import pytest
-
 from src.evidence.field_bundle import normalize_field_evidence_request
 from src.evidence.field_sampling import select_field_slice_samples
+
 from development_kit.tests.test_field_bundle import _request
 
 
@@ -89,9 +89,7 @@ def test_raw_arrays_must_be_finite_aligned_numeric_and_bounded():
     oversized = deepcopy(kwargs)
     count = request["limits"]["max_raw_points"] + 1
     oversized["coordinates"] = {axis: np.zeros(count) for axis in ("x", "y", "z")}
-    oversized["quantities"] = {
-        name: np.zeros(count) for name in ("electric_norm", "magnetic_norm")
-    }
+    oversized["quantities"] = {name: np.zeros(count) for name in ("electric_norm", "magnetic_norm")}
 
     for value, message in (
         (nonfinite_coordinate, "only finite"),
@@ -101,6 +99,44 @@ def test_raw_arrays_must_be_finite_aligned_numeric_and_bounded():
     ):
         with pytest.raises(ValueError, match=message):
             select_field_slice_samples(**value)
+
+
+@pytest.mark.parametrize(
+    "target,replacement,match",
+    [
+        (("coordinates", "x"), np.array(["x"] * 8), "one-dimensional numeric"),
+        (("coordinates", "y"), np.array([object()] * 8), "one-dimensional numeric"),
+        (("coordinates", "z"), np.zeros((2, 4)), "one-dimensional numeric"),
+        (("coordinates", "x"), np.array([]), "must not be empty"),
+        (("quantities", "electric_norm"), np.array(["1"] * 8), "one-dimensional numeric"),
+        (("quantities", "magnetic_norm"), np.zeros((2, 4)), "one-dimensional numeric"),
+        (("quantities", "electric_norm"), np.array([]), "matching coordinates"),
+    ],
+)
+def test_raw_arrays_reject_invalid_dtype_dimensionality_and_empty_values(
+    target, replacement, match
+):
+    _, kwargs = _samples()
+    kwargs[target[0]][target[1]] = replacement
+
+    with pytest.raises(ValueError, match=match):
+        select_field_slice_samples(**kwargs)
+
+
+def test_oversized_coordinate_is_rejected_before_array_conversion():
+    request, kwargs = _samples()
+
+    class OversizedCoordinate:
+        def __len__(self):
+            return request["limits"]["max_raw_points"] + 1
+
+        def __array__(self, *_args, **_kwargs):
+            pytest.fail("oversized coordinate must not be converted")
+
+    kwargs["coordinates"]["x"] = OversizedCoordinate()
+
+    with pytest.raises(ValueError, match="caller-declared point limit"):
+        select_field_slice_samples(**kwargs)
 
 
 def test_coordinate_and_quantity_keys_are_exact_and_view_is_bound():

@@ -6,12 +6,14 @@ import hashlib
 from pathlib import Path
 
 import pytest
-
 from src.tools.periodic_mesh_audit import (
+    _mesh_sequence,
     _periodic_groups,
+    _recipe_for_group,
     collect_periodic_mesh_audit,
     run_clone_mesh_smoke,
 )
+
 from development_kit.tests.test_wave_optics_preflight import FullFakeModel
 
 
@@ -22,6 +24,7 @@ def _hash(path: Path) -> str:
 def _audit(tmp_path, monkeypatch, **fixture):
     source = tmp_path / "periodic.mph"
     source.write_bytes(b"immutable periodic model")
+    expected_source_sha256 = _hash(source)
     monkeypatch.setattr(
         "src.tools.wave_optics_preflight.ownership_manager.status",
         lambda **_kwargs: {"collision": False, "session": {"connected": True}},
@@ -33,17 +36,25 @@ def _audit(tmp_path, monkeypatch, **fixture):
         session_state={"connected": True},
         active_profile="wave_optics",
         expected_source_path=str(source),
-        expected_source_sha256=_hash(source),
+        expected_source_sha256=expected_source_sha256,
+        loaded_source_identity={
+            "source_path": str(source),
+            "source_sha256": expected_source_sha256,
+            "capture": "test_load",
+        },
         expected_component_tag="comp1",
         expected_physics_tag="ewfd",
         expected_study_tag="std1",
         expected_mesh_tag="mesh1",
     )
-    assert _hash(source) == result["source"]["source_sha256"]
+    assert _hash(source) == expected_source_sha256
+    assert result["source"]["source_sha256"] == expected_source_sha256
     return result
 
 
-def test_valid_rectangular_recipe_is_reported_without_compatibility_overclaim(tmp_path, monkeypatch):
+def test_valid_rectangular_recipe_is_reported_without_compatibility_overclaim(
+    tmp_path, monkeypatch
+):
     result = _audit(tmp_path, monkeypatch)
 
     assert len(result["periodic_groups"]) == 2
@@ -55,7 +66,11 @@ def test_valid_rectangular_recipe_is_reported_without_compatibility_overclaim(tm
         "node_by_node_mesh_equality": "not_evaluated",
     }
     assert [item["tag"] for item in result["mesh_sequence"]["features_in_execution_order"]] == [
-        "ft_x", "cp_x", "ft_y", "cp_y", "ftet1"
+        "ft_x",
+        "cp_x",
+        "ft_y",
+        "cp_y",
+        "ftet1",
     ]
     assert all(item["order_verified"] for item in result["group_recipes"])
 
@@ -95,6 +110,53 @@ def test_segmented_oblique_group_reports_balanced_translation_without_axis_guess
     assert group["source_destination_orientation"] == "not_inferred_from_floquet_selection"
 
 
+def test_periodic_group_rejects_noncollinear_normals_in_the_same_hemisphere():
+    preflight = {
+        "topology": {
+            "boundaries": [
+                {"boundary": 1, "normal": [1, 0, 0], "center": [0, 0, 0], "interior": False},
+                {"boundary": 2, "normal": [0.01, 1, 0], "center": [0, 1, 0], "interior": False},
+                {"boundary": 3, "normal": [-1, 0, 0], "center": [1, 0, 0], "interior": False},
+                {"boundary": 4, "normal": [-0.01, -1, 0], "center": [1, 1, 0], "interior": False},
+            ]
+        },
+        "periodicity": {
+            "floquet_features": [
+                {"tag": "mixed", "type": "PeriodicCondition", "selection": [1, 2, 3, 4]}
+            ]
+        },
+    }
+
+    group = _periodic_groups(preflight)[0]
+
+    assert group["geometry_consistent"] is False
+    assert group["ambiguous_faces"] == [2, 4]
+
+
+def test_periodic_group_requires_one_to_one_center_translation():
+    preflight = {
+        "topology": {
+            "boundaries": [
+                {"boundary": 1, "normal": [1, 0, 0], "center": [0, 0, 0], "interior": False},
+                {"boundary": 2, "normal": [1, 0, 0], "center": [0, 2, 0], "interior": False},
+                {"boundary": 3, "normal": [-1, 0, 0], "center": [1, 0, 0], "interior": False},
+                {"boundary": 4, "normal": [-1, 0, 0], "center": [1, 3, 0], "interior": False},
+            ]
+        },
+        "periodicity": {
+            "floquet_features": [
+                {"tag": "mismatch", "type": "PeriodicCondition", "selection": [1, 2, 3, 4]}
+            ]
+        },
+    }
+
+    group = _periodic_groups(preflight)[0]
+
+    assert group["inferred_translation"] is None
+    assert group["translation_pairing_verified"] is False
+    assert group["geometry_consistent"] is False
+
+
 @pytest.mark.parametrize(
     ("fixture", "expected"),
     [
@@ -103,16 +165,66 @@ def test_segmented_oblique_group_reports_balanced_translation_without_axis_guess
         ({"mismatched_floquet": True}, "repair_periodic_geometry_group_before_meshing"),
     ],
 )
-def test_smallest_actionable_periodic_mesh_mismatch_is_reported(tmp_path, monkeypatch, fixture, expected):
+def test_smallest_actionable_periodic_mesh_mismatch_is_reported(
+    tmp_path, monkeypatch, fixture, expected
+):
     result = _audit(tmp_path, monkeypatch, **fixture)
     mismatches = {
-        mismatch
-        for item in result["actionable_mismatches"]
-        for mismatch in item["mismatches"]
+        mismatch for item in result["actionable_mismatches"] for mismatch in item["mismatches"]
     }
 
     assert expected in mismatches
     assert result["summary"]["compatibility_assessment"] == "compatibility_unproven"
+
+
+def test_unrelated_freetet_does_not_prove_periodic_mesh_recipe(tmp_path, monkeypatch):
+    result = _audit(tmp_path, monkeypatch)
+    result["mesh_sequence"]["features_in_execution_order"][-1]["selection"] = [99]
+    recipe = _recipe_for_group(
+        result["periodic_groups"][0],
+        result["mesh_sequence"]["features_in_execution_order"],
+    )
+
+    assert recipe["mesh_recipe_present"] is False
+    assert recipe["free_tet_coverage_verified"] is False
+    assert recipe["actionable_mismatches"] == [
+        "place_freetet_covering_periodic_adjacent_domains_after_copyface"
+    ]
+
+
+def test_mesh_feature_truncation_requires_an_observed_extra_item():
+    from development_kit.tests.test_wave_optics_preflight import (
+        FakeComponent,
+        FakeFeature,
+        FakeMesh,
+    )
+
+    component = FakeComponent()
+    exactly = {f"size{index}": FakeFeature(f"size{index}", "Size") for index in range(256)}
+    component._mesh.items["mesh1"] = FakeMesh(1, exactly)
+    complete, _mesh = _mesh_sequence(component, "mesh1")
+    component._mesh.items["mesh1"] = FakeMesh(
+        1,
+        {**exactly, "late_copy": FakeFeature("late_copy", "CopyFace")},
+    )
+    truncated, _mesh = _mesh_sequence(component, "mesh1")
+
+    assert complete["feature_count_truncated"] is False
+    assert truncated["feature_count_truncated"] is True
+    group = {
+        "group_id": "fpc1",
+        "source_candidate": [1],
+        "destination_candidate": [2],
+        "adjacent_domains": [1],
+        "geometry_consistent": True,
+    }
+    recipe = _recipe_for_group(
+        group,
+        truncated["features_in_execution_order"],
+        feature_count_truncated=True,
+    )
+    assert recipe["actionable_mismatches"] == ["inspect_complete_mesh_feature_sequence"]
+    assert recipe["order_ambiguous"] is True
 
 
 class SmokeMesh:
@@ -214,6 +326,36 @@ def test_clone_only_native_mesh_smoke_preserves_source_and_cleans_artifact(tmp_p
     assert result["native_mesh_build"] == "passed"
     assert result["counts"]["element_count"] == 250
     assert result["source_integrity"]["unchanged"] is True
+    assert result["cleanup"] == {
+        "client_model_removed": True,
+        "clone_file_removed": True,
+        "clone_dir_removed": True,
+    }
+    assert client.removed == [clone]
+    assert not list(tmp_path.glob("periodic_mesh_smoke_*"))
+
+
+def test_clone_mesh_smoke_cleans_loaded_clone_after_post_creation_failure(tmp_path):
+    class FailingMesh(SmokeMesh):
+        def run(self):
+            raise RuntimeError("injected mesh failure")
+
+    source = tmp_path / "source.mph"
+    source.write_bytes(b"source bytes")
+    clone = SmokeModel(source, SmokeComponent(FailingMesh()))
+    client = SmokeClient(clone)
+
+    result = run_clone_mesh_smoke(
+        SmokeModel(source),
+        client,
+        expected_source_sha256=_hash(source),
+        expected_component_tag="comp1",
+        expected_mesh_tag="mesh1",
+        runtime_dir=tmp_path,
+    )
+
+    assert result["success"] is False
+    assert result["native_mesh_build"] == "failed"
     assert result["cleanup"] == {
         "client_model_removed": True,
         "clone_file_removed": True,

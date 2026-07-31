@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 import shutil
@@ -11,14 +10,18 @@ import sys
 import threading
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import psutil
 import pytest
-
 import src.tools.ownership as ownership_module
 from src.shared_session.identity import normalize_attached_server_identity
-from src.tools.ownership import SolverOwnership, _command_signature
+from src.tools.ownership import (
+    SolverOwnership,
+    _command_signature,
+    _configured_java_home_is_usable,
+)
 
 
 @pytest.fixture()
@@ -40,6 +43,22 @@ def process(pid: int, created: float, command: list[str], parent_pid: int = 0):
         "command_line": command,
         "executable": command[0],
     }
+
+
+def test_configured_java_home_requires_the_windows_java_executable(tmp_path):
+    regular_file = tmp_path / "not-a-home"
+    regular_file.write_text("not java", encoding="utf-8")
+    empty_home = tmp_path / "empty-home"
+    empty_home.mkdir()
+    valid_home = tmp_path / "valid-home"
+    java = valid_home / "bin" / "java.exe"
+    java.parent.mkdir(parents=True)
+    java.write_bytes(b"java")
+
+    assert _configured_java_home_is_usable(None) is False
+    assert _configured_java_home_is_usable(str(regular_file)) is False
+    assert _configured_java_home_is_usable(str(empty_home)) is False
+    assert _configured_java_home_is_usable(str(valid_home)) is True
 
 
 def owner(runtime_dir: Path, pid: int, created: float, command: list[str], records):
@@ -84,10 +103,125 @@ def test_two_simultaneous_claims_produce_one_owner(runtime_dir):
     second = owner(runtime_dir, 12, 102.0, second_process["command_line"], records)
 
     with ThreadPoolExecutor(max_workers=2) as executor:
-        results = list(executor.map(lambda manager: manager.acquire(mode="local-client"), [first, second]))
+        results = list(
+            executor.map(lambda manager: manager.acquire(mode="local-client"), [first, second])
+        )
 
     assert sum(result["success"] for result in results) == 1
     assert sum(result.get("acquired", False) for result in results) == 1
+
+
+def test_independent_processes_produce_one_owner(runtime_dir):
+    child = r"""
+import json
+import os
+from pathlib import Path
+import sys
+import time
+
+import psutil
+
+from comsol_mcp.tools.ownership import SolverOwnership
+
+runtime = Path(sys.argv[1])
+token = sys.argv[2]
+process = psutil.Process(os.getpid())
+command = list(process.cmdline())
+record = {
+    "pid": process.pid,
+    "parent_pid": process.ppid(),
+    "name": process.name(),
+    "create_time": process.create_time(),
+    "command_line": command,
+    "executable": process.exe(),
+}
+(runtime / f"ready-{token}").write_text("ready", encoding="ascii")
+deadline = time.monotonic() + 10.0
+while not (runtime / "start").is_file():
+    if time.monotonic() >= deadline:
+        raise TimeoutError("parent did not release acquisition barrier")
+    time.sleep(0.01)
+manager = SolverOwnership(
+    runtime,
+    process_provider=lambda: [record],
+    pid=record["pid"],
+    parent_pid=record["parent_pid"],
+    create_time=record["create_time"],
+    command_line=command,
+    owner=f"process-{token}",
+)
+result = manager.acquire(mode="cross-process-test")
+print(json.dumps(result), flush=True)
+time.sleep(1.0)
+if result.get("success"):
+    manager.release()
+"""
+    processes = [
+        subprocess.Popen(
+            [sys.executable, "-c", child, str(runtime_dir), token],
+            cwd=Path(__file__).resolve().parents[2],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        for token in ("first", "second")
+    ]
+    try:
+        deadline = time.monotonic() + 10.0
+        while not all((runtime_dir / f"ready-{token}").is_file() for token in ("first", "second")):
+            if time.monotonic() >= deadline:
+                raise TimeoutError("child acquisition processes did not reach barrier")
+            time.sleep(0.01)
+        (runtime_dir / "start").write_text("start", encoding="ascii")
+        completed = [process.communicate(timeout=15) for process in processes]
+    finally:
+        for process in processes:
+            if process.poll() is None:
+                process.terminate()
+                process.wait(timeout=5)
+
+    assert all(process.returncode == 0 for process in processes), completed
+    results = [json.loads(stdout.strip().splitlines()[-1]) for stdout, _stderr in completed]
+    assert sum(result["success"] for result in results) == 1
+    assert sum(result.get("acquired", False) for result in results) == 1
+
+
+def test_lease_mutations_hold_one_cross_process_operation_lock(runtime_dir, monkeypatch):
+    command = ["python.exe", "server"]
+    own_process = process(13, 103.0, command)
+    manager = owner(runtime_dir, 13, 103.0, command, [own_process])
+    assert manager.acquire(mode="local-client")["success"] is True
+    entered_replace = threading.Event()
+    allow_replace = threading.Event()
+    release_finished = threading.Event()
+    original_replace = ownership_module._replace_retry_if_unchanged
+
+    def paused_replace(*args, **kwargs):
+        entered_replace.set()
+        assert allow_replace.wait(timeout=1)
+        return original_replace(*args, **kwargs)
+
+    monkeypatch.setattr(ownership_module, "_replace_retry_if_unchanged", paused_replace)
+    heartbeat_result = []
+    release_result = []
+    heartbeat_thread = threading.Thread(target=lambda: heartbeat_result.append(manager.heartbeat()))
+    release_thread = threading.Thread(
+        target=lambda: (
+            release_result.append(manager.release()),
+            release_finished.set(),
+        )
+    )
+    heartbeat_thread.start()
+    assert entered_replace.wait(timeout=1)
+    release_thread.start()
+    assert not release_finished.wait(timeout=0.05)
+    allow_replace.set()
+    heartbeat_thread.join(timeout=2)
+    release_thread.join(timeout=2)
+
+    assert heartbeat_result == [True]
+    assert release_result == [{"success": True, "released": True}]
 
 
 def test_pid_reuse_is_stale_and_requires_explicit_recovery(runtime_dir):
@@ -230,9 +364,7 @@ def test_targeted_active_identity_does_not_claim_collision_free(runtime_dir, mon
         return []
 
     monkeypatch.setattr(ownership_module, "_system_processes", delayed_inventory)
-    monkeypatch.setattr(
-        ownership_module, "PROCESS_INVENTORY_MUTATION_TIMEOUT_SECONDS", 0.02
-    )
+    monkeypatch.setattr(ownership_module, "PROCESS_INVENTORY_MUTATION_TIMEOUT_SECONDS", 0.02)
     manager._process_provider = ownership_module._system_processes
     manager._process_inventory = ownership_module._BoundedProcessInventory(
         manager._process_provider
@@ -273,6 +405,106 @@ def test_uncertain_lease_identity_cannot_be_acquired(runtime_dir):
     assert status["lease"]["state"] == "uncertain"
     assert status["collision"] is True
     assert manager.acquire(mode="local-client")["success"] is False
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("pid", "not-a-pid"),
+        ("process_create_time", "not-a-time"),
+        ("command_signature", []),
+    ],
+)
+def test_malformed_json_lease_identity_is_bounded_and_uncertain(runtime_dir, field, value):
+    command = ["python.exe", "observer"]
+    observer_process = process(45, 45.0, command)
+    manager = owner(runtime_dir, 45, 45.0, command, [observer_process])
+    payload = {
+        "pid": 99,
+        "process_create_time": 99.0,
+        "command_signature": "a" * 64,
+        "acquisition_id": "malformed-identity",
+    }
+    payload[field] = value
+    manager.lease_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    status = manager.status()
+    recovery = manager.recover_stale()
+
+    assert status["lease"]["state"] == "uncertain"
+    assert status["collision"] is True
+    assert recovery["success"] is False
+    assert "uncertain" in recovery["error"]
+
+
+def test_legacy_owned_server_pid_does_not_hide_reused_external_process(runtime_dir):
+    command = ["python.exe", "server"]
+    own_process = process(46, 46.0, command)
+    records = [own_process]
+    manager = owner(runtime_dir, 46, 46.0, command, records)
+    assert manager.acquire(mode="local-client")["success"] is True
+    payload = json.loads(manager.lease_path.read_text(encoding="utf-8"))
+    payload["comsol_server_pids"] = [47]
+    payload["comsol_server_processes"] = []
+    manager.lease_path.write_text(json.dumps(payload), encoding="utf-8")
+    records.append(process(47, 999.0, ["comsolmphserver.exe", "-port", "2036"]))
+
+    status = manager.status(require_fresh_inventory=True)
+
+    assert status["collision"] is True
+    assert [item["pid"] for item in status["external_solver_processes"]] == [47]
+
+
+def test_external_solver_appearing_during_lease_publication_rolls_back(runtime_dir):
+    command = ["python.exe", "server"]
+    own_process = process(48, 48.0, command)
+    external = process(49, 49.0, ["comsolmphserver.exe", "-port", "2036"])
+    inventories = iter(([own_process], [own_process, external]))
+    manager = SolverOwnership(
+        runtime_dir,
+        process_provider=lambda: list(next(inventories)),
+        pid=48,
+        parent_pid=0,
+        create_time=48.0,
+        command_line=command,
+        owner="publication-race",
+    )
+
+    result = manager.acquire(mode="local-client")
+
+    assert result["success"] is False
+    assert result["acquired"] is False
+    assert "appeared during lease publication" in result["error"]
+    assert not manager.lease_path.exists()
+
+
+def test_empty_process_command_line_cannot_prove_active_lease(runtime_dir):
+    original_command = ["python.exe", "owner"]
+    original = process(50, 50.0, original_command)
+    first = owner(runtime_dir, 50, 50.0, original_command, [original])
+    assert first.acquire(mode="local-client")["success"] is True
+    observer_process = process(51, 51.0, ["python.exe", "observer"])
+    unavailable_command = {
+        "pid": 50,
+        "parent_pid": 0,
+        "name": "python.exe",
+        "create_time": 50.0,
+        "command_line": [],
+        "executable": None,
+    }
+    observer = owner(
+        runtime_dir,
+        51,
+        51.0,
+        observer_process["command_line"],
+        [observer_process, unavailable_command],
+    )
+
+    status = observer.status(require_fresh_inventory=True)
+
+    assert status["lease"]["state"] == "uncertain"
+    assert status["lease"]["reason"] == "process command line is unavailable"
+    assert status["collision"] is True
 
 
 def test_heartbeat_records_owned_comsol_server_pid(runtime_dir):
@@ -390,7 +622,10 @@ def test_heartbeat_never_overwrites_lease_changed_during_replace_retry(runtime_d
     monkeypatch.setattr(ownership_module.os, "replace", competing_replace)
 
     assert manager.heartbeat() is False
-    assert json.loads(manager.lease_path.read_text(encoding="utf-8"))["acquisition_id"] == "competing-owner"
+    assert (
+        json.loads(manager.lease_path.read_text(encoding="utf-8"))["acquisition_id"]
+        == "competing-owner"
+    )
     assert not list(runtime_dir.glob(".solver_owner.json.*.tmp"))
 
 
@@ -533,14 +768,16 @@ def test_real_process_evidence_refuses_known_external_client(runtime_dir):
 
 def _attached_identity(pid=720, created=720.0, command=None, bind_scope="loopback"):
     command = command or ["comsolmphserver.exe", "-port", "2036"]
-    return normalize_attached_server_identity({
-        "endpoint": {"host": "127.0.0.1", "port": 2036},
-        "server_pid": pid,
-        "server_process_create_time": created,
-        "server_command_signature": _command_signature(command),
-        "listener_bind_scope": bind_scope,
-        "listener_observed_at_epoch": 800.0,
-    })
+    return normalize_attached_server_identity(
+        {
+            "endpoint": {"host": "127.0.0.1", "port": 2036},
+            "server_pid": pid,
+            "server_process_create_time": created,
+            "server_command_signature": _command_signature(command),
+            "listener_bind_scope": bind_scope,
+            "listener_observed_at_epoch": 800.0,
+        }
+    )
 
 
 def test_attached_lease_separates_external_server_from_owned_targets(runtime_dir):
@@ -557,9 +794,7 @@ def test_attached_lease_separates_external_server_from_owned_targets(runtime_dir
 
     result = manager.acquire_attached(
         _attached_identity(command=server_command),
-        listener_provider=lambda: [
-            {"host": "127.0.0.1", "port": 2036, "pid": 720}
-        ],
+        listener_provider=lambda: [{"host": "127.0.0.1", "port": 2036, "pid": 720}],
     )
     lease = result["lease"]
 
@@ -626,9 +861,7 @@ def test_attached_lease_rejects_listener_scope_change(runtime_dir):
             command=server_command,
             bind_scope="wildcard",
         ),
-        listener_provider=lambda: [
-            {"host": "127.0.0.1", "port": 2036, "pid": 722}
-        ],
+        listener_provider=lambda: [{"host": "127.0.0.1", "port": 2036, "pid": 722}],
     )
 
     assert result["success"] is False
@@ -647,11 +880,13 @@ def test_attached_lease_rejects_changed_server_identity(runtime_dir, changed):
         own_process["command_line"],
         [own_process, server],
     )
-    listeners = [{
-        "host": "127.0.0.1",
-        "port": 2036,
-        "pid": 741 if changed == "listener_owner" else 740,
-    }]
+    listeners = [
+        {
+            "host": "127.0.0.1",
+            "port": 2036,
+            "pid": 741 if changed == "listener_owner" else 740,
+        }
+    ]
 
     result = manager.acquire_attached(
         _attached_identity(pid=740, created=740.0, command=command),
@@ -677,9 +912,7 @@ def test_attached_lease_rejects_other_external_mph_client(runtime_dir):
 
     result = manager.acquire_attached(
         _attached_identity(pid=760, created=760.0, command=command),
-        listener_provider=lambda: [
-            {"host": "127.0.0.1", "port": 2036, "pid": 760}
-        ],
+        listener_provider=lambda: [{"host": "127.0.0.1", "port": 2036, "pid": 760}],
     )
 
     assert result["success"] is False

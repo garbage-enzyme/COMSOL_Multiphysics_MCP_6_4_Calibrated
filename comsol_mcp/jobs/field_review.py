@@ -4,24 +4,25 @@ from __future__ import annotations
 
 import hashlib
 import json
-from pathlib import Path
 import re
 import shutil
+from pathlib import Path
 from typing import Any, Mapping
 
+from comsol_mcp.evidence.field_manifest import validate_field_evidence_manifest
 from comsol_mcp.evidence.field_matrix import bind_validation_matrix_field_request
 from comsol_mcp.evidence.field_render import render_field_png_bundle
 
 from .store import atomic_write_json
+from .validation_collectors import _validate_point_audit_inner_manifest
 from .validation_rows import read_validation_rows
-
 
 FIELD_REVIEW_BUNDLE_SCHEMA = "comsol_mcp.validation_matrix_field_review"
 FIELD_REVIEW_BUNDLE_VERSION = "1.0.0"
 MAX_WRAPPER_BYTES = 1024 * 1024
 MAX_FIELD_MANIFEST_BYTES = 4 * 1024 * 1024
 MAX_FIELD_ARRAY_BYTES = 256 * 1024 * 1024
-_IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
+_IDENTIFIER = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]{0,127}$")
 _PATH_IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 _WINDOWS_DEVICE_NAMES = {
     "con",
@@ -89,6 +90,75 @@ def _verify_descriptor(
     if _sha256_file(path) != descriptor.get("sha256"):
         raise ValueError(f"{label} hash readback does not match")
     return path
+
+
+def _verify_field_array(path: Path, manifest: Mapping[str, Any]) -> None:
+    """Bind the stored NPZ structure to the already validated manifest."""
+    try:
+        import numpy as np
+    except ImportError as exc:  # pragma: no cover - NumPy is a runtime dependency
+        raise RuntimeError("NumPy is required to verify field arrays") from exc
+
+    rows, columns = manifest["grid"]["shape"]
+    slice_axis = manifest["slice"]["axis"]
+    plane_axes = [axis for axis in ("x", "y", "z") if axis != slice_axis]
+    column_axis, row_axis = plane_axes
+    expression_names = [item["name"] for item in manifest["expressions"]]
+    expected_keys = {
+        *(f"coordinate_{axis}" for axis in plane_axes),
+        *(f"quantity_{name}" for name in expression_names),
+    }
+    try:
+        with np.load(path, allow_pickle=False) as archive:
+            if set(archive.files) != expected_keys:
+                raise ValueError("field array keys differ from the manifest")
+            coordinates = {}
+            for axis, length in ((column_axis, columns), (row_axis, rows)):
+                values = np.asarray(archive[f"coordinate_{axis}"])
+                if (
+                    values.ndim != 1
+                    or values.shape[0] != length
+                    or values.dtype.kind not in "fiu"
+                    or not np.all(np.isfinite(values))
+                    or np.any(np.diff(values.astype(np.float64, copy=False)) <= 0)
+                ):
+                    raise ValueError(f"field coordinate_{axis} differs from the manifest grid")
+                coordinates[axis] = values
+            missing_mask = None
+            for name in expression_names:
+                values = np.asarray(archive[f"quantity_{name}"])
+                if (
+                    values.shape != (rows, columns)
+                    or values.dtype.kind not in "fiu"
+                    or np.any(np.isinf(values))
+                ):
+                    raise ValueError(f"field quantity_{name} differs from the manifest grid")
+                current_missing = np.isnan(values.astype(np.float64, copy=False))
+                if missing_mask is None:
+                    missing_mask = current_missing
+                elif not np.array_equal(missing_mask, current_missing):
+                    raise ValueError("field quantities do not share the manifest missing-cell mask")
+    except (OSError, ValueError) as exc:
+        if isinstance(exc, ValueError) and str(exc).startswith("field "):
+            raise
+        raise ValueError("field array is not a valid bounded NPZ artifact") from exc
+
+    ranges = manifest["coordinate_ranges"]
+    for axis, values in coordinates.items():
+        observed = [float(values[0]), float(values[-1])]
+        if observed != ranges[axis]:
+            raise ValueError(f"field coordinate_{axis} range differs from the manifest")
+    if ranges[slice_axis] != [manifest["slice"]["value"], manifest["slice"]["value"]]:
+        raise ValueError("field slice coordinate range differs from the manifest")
+    if missing_mask is None:
+        raise ValueError("field array contains no quantities")
+    missing_count = int(missing_mask.sum())
+    if (
+        rows * columns != manifest["grid_point_count"]
+        or missing_count != manifest["missing_grid_point_count"]
+        or rows * columns - missing_count != manifest["covered_grid_point_count"]
+    ):
+        raise ValueError("field array coverage differs from the manifest")
 
 
 def _job_descriptor(
@@ -165,11 +235,19 @@ def _load_source_audit(
         or _sha256_file(inner_path) != inner_descriptor.get("sha256")
     ):
         raise ValueError("point audit inner manifest differs from its wrapper")
+    inner = _validate_point_audit_inner_manifest(
+        inner_path,
+        expected_status=summary["audit_status"],
+        point=declared_point,
+        expected_source_sha256=spec["source_model_sha256"],
+        require_clean_measurement=True,
+    )
     return {
         "summary": summary,
         "wrapper_path": wrapper_path,
         "inner_path": inner_path,
         "inner_descriptor": dict(inner_descriptor),
+        "inner": inner,
     }
 
 
@@ -178,9 +256,7 @@ def _load_point_field(
     spec: Mapping[str, Any],
     row: Mapping[str, Any],
 ) -> dict[str, Any]:
-    declared_points = [
-        item for item in spec["points"] if item.get("point_id") == row["point_id"]
-    ]
+    declared_points = [item for item in spec["points"] if item.get("point_id") == row["point_id"]]
     if len(declared_points) != 1:
         raise ValueError("matrix row does not resolve to one immutable point")
     declared_point = declared_points[0]
@@ -261,12 +337,10 @@ def _load_point_field(
         label="field manifest",
         maximum_bytes=MAX_FIELD_MANIFEST_BYTES,
     )
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    if (
-        manifest.get("schema_name") != "comsol_mcp.field_evidence_manifest"
-        or manifest.get("schema_version") != "1.0.0"
-    ):
-        raise ValueError("field manifest schema is unsupported")
+    manifest = validate_field_evidence_manifest(
+        json.loads(manifest_path.read_text(encoding="utf-8")),
+        request=expected_request,
+    )
     if manifest.get("measurement_status") != "measurement_complete":
         raise ValueError("paired review requires complete field manifests")
     if (
@@ -290,6 +364,7 @@ def _load_point_field(
         != expected_view["outputs"]["manifest_artifact_id"]
     ):
         raise ValueError("field manifest identity differs from its wrapper")
+    _verify_field_array(array_path, manifest)
     source = manifest.get("source")
     if not isinstance(source, Mapping) or (
         source.get("kind") != "validation_matrix_point"
@@ -331,13 +406,10 @@ def assemble_validation_matrix_field_review(
         not isinstance(point_ids, list)
         or len(point_ids) != 2
         or len(set(point_ids)) != 2
-        or any(
-            not isinstance(item, str) or not _IDENTIFIER.fullmatch(item)
-            for item in point_ids
-        )
+        or any(not isinstance(item, str) or not _IDENTIFIER.fullmatch(item) for item in point_ids)
     ):
         raise ValueError("point_ids must contain exactly two unique portable IDs")
-    if not _portable_path_identifier(bundle_id):
+    if not _portable_path_identifier(bundle_id) or not _IDENTIFIER.fullmatch(bundle_id):
         raise ValueError("bundle_id must be a portable identifier")
     spec_path = directory / "spec.json"
     if not spec_path.is_file() or spec_path.stat().st_size > 512 * 1024:
@@ -346,16 +418,16 @@ def assemble_validation_matrix_field_review(
     if spec.get("job_type") != "validation_matrix":
         raise ValueError("paired field review requires a validation_matrix job")
     spec_fingerprint = spec.get("spec_fingerprint")
-    if not isinstance(spec_fingerprint, str) or _fingerprint(
-        {key: value for key, value in spec.items() if key != "spec_fingerprint"}
-    ) != spec_fingerprint:
+    if (
+        not isinstance(spec_fingerprint, str)
+        or _fingerprint({key: value for key, value in spec.items() if key != "spec_fingerprint"})
+        != spec_fingerprint
+    ):
         raise ValueError("durable matrix spec fingerprint does not match")
     rows = read_validation_rows(directory / "matrix_rows.jsonl", spec)
     selected = []
     for point_id in point_ids:
-        matches = [
-            row for row in rows if row["status"] == "ok" and row["point_id"] == point_id
-        ]
+        matches = [row for row in rows if row["status"] == "ok" and row["point_id"] == point_id]
         if len(matches) != 1:
             raise ValueError("each paired point must have exactly one complete row")
         selected.append(_load_point_field(directory, spec, matches[0]))
@@ -371,9 +443,7 @@ def assemble_validation_matrix_field_review(
         isinstance(item, Mapping) for item in expression_list
     ):
         raise ValueError("field manifest expressions are unavailable")
-    expressions = [
-        item for item in expression_list if item.get("name") == quantity_name
-    ]
+    expressions = [item for item in expression_list if item.get("name") == quantity_name]
     if len(expressions) != 1 or expressions[0].get("unit") != quantity_unit:
         raise ValueError("requested paired quantity/unit is not present in both manifests")
     coordinate_ranges = first_manifest.get("coordinate_ranges")
@@ -383,7 +453,20 @@ def assemble_validation_matrix_field_review(
     ):
         raise ValueError("requested coordinate unit differs from the field manifests")
 
-    output_root = directory / "artifacts" / "visual-review" / bundle_id
+    visual_root = directory / "artifacts" / "visual-review"
+    for candidate in (directory / "artifacts", visual_root):
+        is_junction = getattr(candidate, "is_junction", lambda: False)
+        if candidate.exists() and (candidate.is_symlink() or is_junction()):
+            raise ValueError("field-review output path contains a link or junction")
+        if candidate.exists():
+            try:
+                candidate.resolve(strict=True).relative_to(directory)
+            except ValueError as exc:
+                raise ValueError("field-review output path escapes the job directory") from exc
+    visual_root.mkdir(parents=True, exist_ok=True)
+    if visual_root.is_symlink() or getattr(visual_root, "is_junction", lambda: False)():
+        raise ValueError("field-review output path contains a link or junction")
+    output_root = visual_root / bundle_id
     try:
         output_root.mkdir(parents=True)
     except FileExistsError:
@@ -430,34 +513,22 @@ def assemble_validation_matrix_field_review(
                     "row_sha256": item["row"]["row_sha256"],
                     "wavelength_m": item["manifest"]["wavelength_m"],
                     "source_audit": {
-                        "artifact_id": item["source_audit"]["summary"][
-                            "artifact_id"
-                        ],
-                        "wrapper_relative_path": item["source_audit"][
-                            "wrapper_path"
-                        ]
+                        "artifact_id": item["source_audit"]["summary"]["artifact_id"],
+                        "wrapper_relative_path": item["source_audit"]["wrapper_path"]
                         .relative_to(directory)
                         .as_posix(),
-                        "wrapper_sha256": item["source_audit"]["summary"][
-                            "manifest_sha256"
-                        ],
+                        "wrapper_sha256": item["source_audit"]["summary"]["manifest_sha256"],
                         "wrapper_byte_count": item["source_audit"]["summary"][
                             "manifest_size_bytes"
                         ],
                         "inner_relative_path": item["source_audit"]["inner_path"]
                         .relative_to(directory)
                         .as_posix(),
-                        "inner_sha256": item["source_audit"]["inner_descriptor"][
-                            "sha256"
-                        ],
-                        "inner_byte_count": item["source_audit"]["inner_descriptor"][
-                            "size_bytes"
-                        ],
+                        "inner_sha256": item["source_audit"]["inner_descriptor"]["sha256"],
+                        "inner_byte_count": item["source_audit"]["inner_descriptor"]["size_bytes"],
                     },
                     "wrapper": {
-                        "relative_path": item["wrapper_path"]
-                        .relative_to(directory)
-                        .as_posix(),
+                        "relative_path": item["wrapper_path"].relative_to(directory).as_posix(),
                         "sha256": item["field_summary"]["manifest_sha256"],
                         "byte_count": item["field_summary"]["manifest_size_bytes"],
                     },

@@ -4,17 +4,42 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from importlib.metadata import requires, version
 import json
-from pathlib import Path
 import sys
-
+from importlib.metadata import requires, version
+from pathlib import Path
 
 HEAVY_SEMANTIC_MODULES = {"chromadb", "sentence_transformers", "torch"}
 
 
 def _load_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _release_inventory(capabilities: dict) -> dict:
+    return {
+        "schema_registry_sha256": capabilities["schema_registry"]["registry_sha256"],
+        "schema_entry_count": capabilities["schema_registry"]["entry_count"],
+        "catalog_contract_sha256": capabilities["deployment_identity"]["catalog_contract_sha256"],
+        "full_tool_schemas_sha256": capabilities["deployment_identity"]["full_tool_schemas_sha256"],
+        "profile_tool_names_sha256": capabilities["deployment_identity"][
+            "profile_tool_names_sha256"
+        ],
+        "build_identity_sha256": capabilities["deployment_identity"]["build_identity"][
+            "build_identity_sha256"
+        ],
+    }
+
+
+def _bind_release_inventory(
+    baseline: dict | None,
+    observed: dict,
+    *,
+    profile: str,
+) -> dict:
+    if baseline is not None and observed != baseline:
+        raise AssertionError(f"installed {profile} release inventory differs from earlier profiles")
+    return observed if baseline is None else baseline
 
 
 def main() -> int:
@@ -35,8 +60,8 @@ def main() -> int:
         SHARED_SERVER_FEATURE_ENV,
         SHARED_SERVER_PROFILE,
     )
-    from comsol_mcp.tools.catalog import PROFILE_NAMES, snapshot_tool_schemas
     from comsol_mcp.tools.capabilities import get_capabilities
+    from comsol_mcp.tools.catalog import PROFILE_NAMES, snapshot_tool_schemas
     from comsol_mcp.tools.profiles import resolve_profile
 
     expected_names = _load_json(args.snapshot_dir / "profile_tool_names.json")
@@ -73,15 +98,11 @@ def main() -> int:
         actual_counts[profile] = len(schemas)
         capabilities = get_capabilities(selection)
         deployment_identities.append(capabilities["deployment_identity"])
-        if release_inventories is None:
-            release_inventories = {
-                "schema_registry_sha256": capabilities["schema_registry"]["registry_sha256"],
-                "schema_entry_count": capabilities["schema_registry"]["entry_count"],
-                "catalog_contract_sha256": capabilities["deployment_identity"]["catalog_contract_sha256"],
-                "full_tool_schemas_sha256": capabilities["deployment_identity"]["full_tool_schemas_sha256"],
-                "profile_tool_names_sha256": capabilities["deployment_identity"]["profile_tool_names_sha256"],
-                "build_identity_sha256": capabilities["deployment_identity"]["build_identity"]["build_identity_sha256"],
-            }
+        release_inventories = _bind_release_inventory(
+            release_inventories,
+            _release_inventory(capabilities),
+            profile=profile,
+        )
 
     if not all(identity == deployment_identities[0] for identity in deployment_identities[1:]):
         raise AssertionError("installed profiles disagree on deployment identity")
@@ -101,7 +122,8 @@ def main() -> int:
         "installed_package": {
             "name": "comsol-mcp",
             "version": version("comsol-mcp"),
-            "module_path_is_site_package": "site-packages" in str(Path(comsol_mcp.__file__).resolve()).lower(),
+            "module_path_is_site_package": "site-packages"
+            in str(Path(comsol_mcp.__file__).resolve()).lower(),
             "requirements": package_requirements,
         },
         "profile_counts": actual_counts,
@@ -112,12 +134,12 @@ def main() -> int:
         "heavy_semantic_modules_imported": imported_heavy,
     }
     if not result["installed_package"]["module_path_is_site_package"]:
-        raise AssertionError(f"probe imported source tree instead of installed wheel: {comsol_mcp.__file__}")
+        raise AssertionError(
+            f"probe imported source tree instead of installed wheel: {comsol_mcp.__file__}"
+        )
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(
-        json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
+    args.output.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return 0
 
 

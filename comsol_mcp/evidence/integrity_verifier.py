@@ -2,20 +2,21 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 import re
+from copy import deepcopy
+from pathlib import Path
 from typing import Any, Mapping
 
 from comsol_mcp.evidence.contracts import canonical_sha256
 from comsol_mcp.evidence.integrity_controls import (
     EVIDENCE_CHECKS,
     EVIDENCE_INTEGRITY_VERSION,
+    EVIDENCE_STATUS_SCHEMA,
     EVIDENCE_VERIFICATION_SCHEMA,
     load_evidence_integrity_status,
     warning_fields,
 )
 from comsol_mcp.evidence.portfolio_verifier import verify_portfolio_evidence_checks
-
 
 _HASH = re.compile(r"^[0-9a-f]{64}$")
 _COMPATIBILITY_FIELDS = {
@@ -24,6 +25,60 @@ _COMPATIBILITY_FIELDS = {
     "driver_sha256",
     "schema_version",
 }
+
+
+def _validated_settings_status(value: Any) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ValueError("settings_status must be an object")
+    status = deepcopy(dict(value))
+    if status.get("schema_name") != EVIDENCE_STATUS_SCHEMA:
+        raise ValueError("settings_status schema_name is invalid")
+    if status.get("schema_version") != EVIDENCE_INTEGRITY_VERSION:
+        raise ValueError("settings_status schema_version is invalid")
+    state = status.get("configuration_state")
+    if state not in {"valid", "degraded", "invalid"}:
+        raise ValueError("settings_status configuration_state is invalid")
+    strict = status.get("strict_verification_active")
+    if not isinstance(strict, bool):
+        raise ValueError("settings_status strict_verification_active must be boolean")
+    checks = status.get("checks")
+    if not isinstance(checks, Mapping) or set(checks) != set(EVIDENCE_CHECKS):
+        raise ValueError("settings_status checks are incomplete")
+    enabled: dict[str, bool] = {}
+    for name in EVIDENCE_CHECKS:
+        check = checks[name]
+        if not isinstance(check, Mapping) or set(check) != {"enabled", "source"}:
+            raise ValueError(f"settings_status checks.{name} is invalid")
+        if not isinstance(check["enabled"], bool):
+            raise ValueError(f"settings_status checks.{name}.enabled must be boolean")
+        if not isinstance(check["source"], str) or not check["source"] or len(check["source"]) > 64:
+            raise ValueError(f"settings_status checks.{name}.source is invalid")
+        enabled[name] = check["enabled"]
+    disabled = [name for name in EVIDENCE_CHECKS if not enabled[name]]
+    supplied_disabled = status.get("disabled_checks")
+    if (
+        not isinstance(supplied_disabled, list)
+        or supplied_disabled != disabled
+        or not all(isinstance(name, str) for name in supplied_disabled)
+    ):
+        raise ValueError("settings_status disabled_checks is inconsistent")
+    for field in ("warning_codes", "warning_messages"):
+        items = status.get(field)
+        if not isinstance(items, list) or not all(
+            isinstance(item, str) and len(item) <= 2048 for item in items
+        ):
+            raise ValueError(f"settings_status {field} is invalid")
+    if state == "valid":
+        if status.get("success") is not True:
+            raise ValueError("settings_status valid state must be successful")
+        fingerprint = status.get("settings_fingerprint_sha256")
+        if not isinstance(fingerprint, str) or not _HASH.fullmatch(fingerprint):
+            raise ValueError("settings_status fingerprint is invalid")
+        if strict is not all(enabled.values()):
+            raise ValueError("settings_status strict verification state is inconsistent")
+    elif state == "invalid" and strict:
+        raise ValueError("settings_status invalid configuration cannot be strictly verified")
+    return status
 
 
 def _bounded_text(value: Any, label: str) -> str:
@@ -50,11 +105,11 @@ def verify_producer_driver_compatibility(value: Any) -> dict[str, Any]:
         raise ValueError("producer_compatibility fields are invalid")
     expected = _compatibility_identity(value["expected"], "producer_compatibility.expected")
     observed = _compatibility_identity(value["observed"], "producer_compatibility.observed")
-    mismatches = [name for name in sorted(_COMPATIBILITY_FIELDS) if expected[name] != observed[name]]
+    mismatches = [
+        name for name in sorted(_COMPATIBILITY_FIELDS) if expected[name] != observed[name]
+    ]
     if mismatches:
-        raise ValueError(
-            f"producer/driver compatibility mismatch: {mismatches}"
-        )
+        raise ValueError(f"producer/driver compatibility mismatch: {mismatches}")
     return {
         "state": "passed",
         "matched_fields": sorted(_COMPATIBILITY_FIELDS),
@@ -80,15 +135,14 @@ def verify_evidence_integrity(
     if not isinstance(portfolio_request, Mapping):
         raise ValueError("portfolio_request must be a JSON object")
     if not isinstance(artifact_roots, Mapping) or not all(
-        isinstance(key, str) and isinstance(value, str)
-        for key, value in artifact_roots.items()
+        isinstance(key, str) and isinstance(value, str) for key, value in artifact_roots.items()
     ):
         raise ValueError("artifact_roots must map case IDs to absolute directory strings")
+    if any(not value or not Path(value).is_absolute() for value in artifact_roots.values()):
+        raise ValueError("artifact_roots must map case IDs to absolute directory strings")
 
-    status = deepcopy(
-        dict(settings_status)
-        if settings_status is not None
-        else load_evidence_integrity_status()
+    status = _validated_settings_status(
+        settings_status if settings_status is not None else load_evidence_integrity_status()
     )
     base = {
         "schema_name": EVIDENCE_VERIFICATION_SCHEMA,
@@ -125,38 +179,43 @@ def verify_evidence_integrity(
         for name in ("artifact_chain_verification", "summary_claim_verification")
     )
     selected_roots = dict(artifact_roots) if filesystem_checks_enabled else {}
-    for check_name, argument_name in portfolio_check_args.items():
+    enabled_portfolio_checks = {
+        check_name: argument_name
+        for check_name, argument_name in portfolio_check_args.items()
+        if checks[check_name]["enabled"]
+    }
+    for check_name in portfolio_check_args:
         if not checks[check_name]["enabled"]:
             check_results[check_name] = {
                 "state": "skipped",
                 "reason_code": "disabled_by_settings",
             }
-            continue
+    if enabled_portfolio_checks:
         arguments = {
-            "check_outcome_contract": False,
-            "check_artifact_chain": False,
-            "check_summary_claims": False,
+            argument_name: check_name in enabled_portfolio_checks
+            for check_name, argument_name in portfolio_check_args.items()
         }
-        arguments[argument_name] = True
         try:
             receipt = verify_portfolio_evidence_checks(
                 portfolio_request,
-                artifact_roots=selected_roots if argument_name != "check_outcome_contract" else {},
+                artifact_roots=selected_roots,
                 **arguments,
             )
-            check_results[check_name] = {
-                "state": "passed",
-                "verification_sha256": receipt["verification_sha256"],
-                "case_count": receipt["case_count"],
-            }
-        except (OSError, RuntimeError, TypeError, ValueError) as exc:
-            check_results[check_name] = {
-                "state": "failed",
-                "reason_code": "deterministic_check_failed",
-                "error_type": type(exc).__name__,
-                "error": str(exc)[:1024],
-            }
-            failures.append({"check": check_name, "error": str(exc)[:1024]})
+            for check_name in enabled_portfolio_checks:
+                check_results[check_name] = {
+                    "state": "passed",
+                    "verification_sha256": receipt["verification_sha256"],
+                    "case_count": receipt["case_count"],
+                }
+        except (KeyError, OSError, RuntimeError, TypeError, ValueError) as exc:
+            for check_name in enabled_portfolio_checks:
+                check_results[check_name] = {
+                    "state": "failed",
+                    "reason_code": "deterministic_check_failed",
+                    "error_type": type(exc).__name__,
+                    "error": "Evidence check failed.",
+                }
+                failures.append({"check": check_name, "error": "Evidence check failed."})
 
     producer_check = "producer_driver_compatibility"
     if not checks[producer_check]["enabled"]:
@@ -187,22 +246,24 @@ def verify_evidence_integrity(
                 "state": "failed",
                 "reason_code": "resume_compatibility_failed",
                 "error_type": type(exc).__name__,
-                "error": str(exc)[:1024],
+                "error": "Producer compatibility verification failed.",
             }
-            failures.append({"check": producer_check, "error": str(exc)[:1024]})
+            failures.append(
+                {
+                    "check": producer_check,
+                    "error": "Producer compatibility verification failed.",
+                }
+            )
 
     fully_active = status["strict_verification_active"] is True
-    strictly_verified = fully_active and not failures and all(
-        check_results[name]["state"] in {"passed", "not_applicable"}
-        for name in EVIDENCE_CHECKS
+    strictly_verified = (
+        fully_active
+        and not failures
+        and all(
+            check_results[name]["state"] in {"passed", "not_applicable"} for name in EVIDENCE_CHECKS
+        )
     )
-    verification_state = (
-        "verified"
-        if strictly_verified
-        else "failed"
-        if failures
-        else "unverified"
-    )
+    verification_state = "verified" if strictly_verified else "failed" if failures else "unverified"
     result = {
         **base,
         "success": not failures,

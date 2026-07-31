@@ -1,6 +1,6 @@
 """Parameter management tools for COMSOL MCP Server."""
 
-from typing import Optional, Sequence, Union
+from typing import Any, Optional, Sequence, Union
 
 from mcp.server.fastmcp import FastMCP
 
@@ -13,6 +13,83 @@ def _java_string_array(values: Sequence[str]):
     from jpype import JArray, JString
 
     return JArray(JString)([str(value) for value in values])
+
+
+_SWEEP_ARRAY_PROPERTIES = ("pname", "plistarr", "punit")
+
+
+def _sweep_state(sweep: Any) -> dict[str, Any]:
+    arrays = {}
+    for name in _SWEEP_ARRAY_PROPERTIES:
+        arrays[name] = [str(value) for value in sweep.getStringArray(name)]
+    return {
+        **arrays,
+        "sweeptype": str(sweep.getString("sweeptype")),
+        "active": bool(sweep.isActive()),
+    }
+
+
+def _set_sweep_state(sweep: Any, state: dict[str, Any]) -> None:
+    for name in _SWEEP_ARRAY_PROPERTIES:
+        sweep.set(name, _java_string_array(state[name]))
+    sweep.set("sweeptype", state["sweeptype"])
+    sweep.active(state["active"])
+
+
+def _remove_sweep(feature_list: Any, sweep_tag: str) -> None:
+    feature_list.remove(sweep_tag)
+
+
+def set_parameter(
+    model: Any,
+    name: str,
+    value: str,
+    *,
+    description: Optional[str],
+) -> dict[str, Any]:
+    """Set one parameter and description as a readback-proved transaction."""
+    existing = {str(key): str(item) for key, item in model.parameters(evaluate=False).items()}
+    existed = name in existing
+    old_value = existing.get(name)
+    old_description = str(model.description(name)) if existed else None
+    try:
+        model.parameter(name, value)
+        if description is not None:
+            model.description(name, description)
+        actual_value = str(model.parameter(name, evaluate=False))
+        actual_description = str(model.description(name))
+        expected_description = old_description if description is None else description
+        if actual_value != value or actual_description != expected_description:
+            raise ValueError("parameter readback mismatch")
+    except Exception as exc:
+        rollback_errors = []
+        try:
+            if existed:
+                model.parameter(name, old_value)
+                model.description(name, old_description)
+                if (
+                    str(model.parameter(name, evaluate=False)) != old_value
+                    or str(model.description(name)) != old_description
+                ):
+                    raise ValueError("restored parameter readback mismatch")
+            else:
+                model.java.param().remove(name)
+                if name in {str(key) for key in model.parameters(evaluate=False)}:
+                    raise ValueError("new parameter survived rollback")
+        except Exception as rollback_exc:
+            rollback_errors.append(str(rollback_exc)[:300])
+        return {
+            "success": False,
+            "error": f"Failed to set parameter: {str(exc)[:300]}",
+            "rolled_back": not rollback_errors,
+            "rollback_errors": rollback_errors,
+        }
+    return {
+        "success": True,
+        "parameter": name,
+        "value": actual_value,
+        "description": actual_description,
+    }
 
 
 def setup_parametric_sweep(
@@ -41,21 +118,30 @@ def setup_parametric_sweep(
     study = jm.study(study_tag)
 
     feature_list = study.feature()
-    sweep = None
-    sweep_tag = None
+    candidates = []
     for raw_tag in list(feature_list.tags()):
         tag = str(raw_tag)
         feature = feature_list.get(raw_tag)
         try:
-            label = str(feature.label()).lower()
+            feature_type = str(feature.getType())
         except Exception:
-            label = ""
-        if tag.lower().startswith(("param", "sweep")) or "parametric" in label:
-            sweep = feature
-            sweep_tag = tag
-            break
+            feature_type = ""
+        if feature_type.casefold() == "parametric":
+            candidates.append((tag, feature))
+    if len(candidates) > 1:
+        return {
+            "success": False,
+            "error": "Multiple Parametric sweep features found; selection is ambiguous.",
+        }
 
-    if sweep is None:
+    created = not candidates
+    if candidates:
+        sweep_tag, sweep = candidates[0]
+        try:
+            before = _sweep_state(sweep)
+        except Exception as exc:
+            return {"success": False, "error": f"Cannot snapshot Parametric sweep: {exc}"}
+    else:
         existing = {str(tag) for tag in feature_list.tags()}
         index = 1
         sweep_tag = f"param{index}"
@@ -63,14 +149,39 @@ def setup_parametric_sweep(
             index += 1
             sweep_tag = f"param{index}"
         sweep = study.create(sweep_tag, "Parametric")
+        before = None
 
     value_list = " ".join(str(value) for value in values)
-    sweep.set("pname", _java_string_array([parameter_name]))
-    sweep.set("plistarr", _java_string_array([value_list]))
-    if parameter_unit:
-        sweep.set("punit", _java_string_array([parameter_unit]))
-    sweep.set("sweeptype", "sparse")
-    sweep.active(True)
+    planned = {
+        "pname": [parameter_name],
+        "plistarr": [value_list],
+        "punit": [parameter_unit.strip() if parameter_unit else ""],
+        "sweeptype": "sparse",
+        "active": True,
+    }
+    try:
+        _set_sweep_state(sweep, planned)
+        if _sweep_state(sweep) != planned:
+            raise ValueError("Parametric sweep readback mismatch")
+    except Exception as exc:
+        rollback_errors = []
+        try:
+            if created:
+                _remove_sweep(feature_list, sweep_tag)
+                if sweep_tag in {str(tag) for tag in feature_list.tags()}:
+                    raise ValueError("created Parametric sweep survived rollback")
+            else:
+                _set_sweep_state(sweep, before)
+                if _sweep_state(sweep) != before:
+                    raise ValueError("restored Parametric sweep readback mismatch")
+        except Exception as rollback_exc:
+            rollback_errors.append(str(rollback_exc)[:300])
+        return {
+            "success": False,
+            "error": f"Failed to configure Parametric sweep: {str(exc)[:300]}",
+            "rolled_back": not rollback_errors,
+            "rollback_errors": rollback_errors,
+        }
 
     return {
         "success": True,
@@ -150,17 +261,12 @@ def register_parameter_tools(mcp: FastMCP) -> None:
             }
         
         try:
-            model.parameter(name, value)
-            
-            if description:
-                model.description(name, description)
-            
-            return {
-                "success": True,
-                "parameter": name,
-                "value": value,
-                "description": description,
-            }
+            return set_parameter(
+                model,
+                name,
+                value,
+                description=description,
+            )
         except Exception as e:
             return {"success": False, "error": f"Failed to set parameter: {str(e)}"}
     

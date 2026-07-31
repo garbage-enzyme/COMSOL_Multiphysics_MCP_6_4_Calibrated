@@ -31,7 +31,7 @@ def _point_audit_next_call(
         "available": (
             profile in metadata.intended_profiles
             and not missing_evidence
-            and inspection_status != "integrity_blocked"
+            and inspection_status == "complete"
         ),
         "implementation_status": metadata.maturity,
         "missing_evidence": list(missing_evidence),
@@ -100,8 +100,11 @@ def _safe_text(callable_value: Callable[[], Any], ledger: EvidenceLedger, code: 
 
 
 def _tags(container: Any) -> list[str]:
-    values = list(container.tags())
-    return [str(value) for value in values[:MAX_TAGS]]
+    return _all_tags(container)[:MAX_TAGS]
+
+
+def _all_tags(container: Any) -> list[str]:
+    return [str(value) for value in list(container.tags())]
 
 
 def _get(container: Any, tag: str) -> Any:
@@ -181,7 +184,9 @@ def _resolve_tag(
                 f"requested_{kind}_missing",
                 f"The exact requested {kind} tag does not exist.",
                 expected=expected,
-                available=available,
+                available=available[:MAX_TAGS],
+                available_count=len(available),
+                available_truncated=len(available) > MAX_TAGS,
             )
             return None
         return expected
@@ -193,7 +198,9 @@ def _resolve_tag(
         "unknown",
         f"{kind}_tag_ambiguous",
         f"An exact {kind} tag could not be selected without caller input.",
-        available=available,
+        available=available[:MAX_TAGS],
+        available_count=len(available),
+        available_truncated=len(available) > MAX_TAGS,
     )
     return None
 
@@ -209,7 +216,40 @@ def _face_point(values: list[float]) -> Any:
         return [values]
 
 
-def _probe_boundaries_read_only(geom: Any, ledger: EvidenceLedger) -> tuple[list[dict[str, Any]], int, int, int]:
+def _probe_boundary_read_only(
+    geom: Any,
+    number: int,
+    *,
+    sdim: int,
+    ups: list[int],
+    downs: list[int],
+) -> dict[str, Any]:
+    item: dict[str, Any] = {"boundary": number}
+    if number <= len(ups) and number <= len(downs):
+        item.update(
+            up_domain=ups[number - 1],
+            down_domain=downs[number - 1],
+            interior=ups[number - 1] != 0 and downs[number - 1] != 0,
+        )
+    try:
+        if sdim == 3:
+            ranges = [float(value) for value in list(geom.faceParamRange(number))]
+            point = _face_point([(ranges[0] + ranges[1]) / 2, (ranges[2] + ranges[3]) / 2])
+            item["center"] = [float(value) for value in list(geom.faceX(number, point)[0])]
+            item["normal"] = [float(value) for value in list(geom.faceNormal(number, point)[0])]
+        elif sdim == 2:
+            ranges = [float(value) for value in list(geom.edgeParamRange(number))]
+            point = _face_point([(ranges[0] + ranges[1]) / 2])[0]
+            item["center"] = [float(value) for value in list(geom.edgeX(number, point)[0])]
+            item["normal"] = [float(value) for value in list(geom.edgeNormal(number, point)[0])]
+    except Exception as exc:
+        item["probe_error"] = _error(exc)
+    return item
+
+
+def _probe_boundaries_read_only(
+    geom: Any, ledger: EvidenceLedger
+) -> tuple[list[dict[str, Any]], int, int, int]:
     n_boundaries = int(geom.getNBoundaries())
     n_domains = int(geom.getNDomains())
     sdim = int(geom.getSDim())
@@ -228,32 +268,86 @@ def _probe_boundaries_read_only(geom: Any, ledger: EvidenceLedger) -> tuple[list
         ups = [int(item) for item in list(up_down[0])]
         downs = [int(item) for item in list(up_down[1])]
     except Exception as exc:
-        ledger.add("unknown", "up_down_unreadable", "Boundary-domain adjacency could not be read.", error=_error(exc))
+        ledger.add(
+            "unknown",
+            "up_down_unreadable",
+            "Boundary-domain adjacency could not be read.",
+            error=_error(exc),
+        )
 
     boundaries: list[dict[str, Any]] = []
     for number in range(1, min(n_boundaries, MAX_BOUNDARIES) + 1):
-        item: dict[str, Any] = {"boundary": number}
-        if number <= len(ups) and number <= len(downs):
-            item.update(
-                up_domain=ups[number - 1],
-                down_domain=downs[number - 1],
-                interior=ups[number - 1] != 0 and downs[number - 1] != 0,
+        boundaries.append(
+            _probe_boundary_read_only(
+                geom,
+                number,
+                sdim=sdim,
+                ups=ups,
+                downs=downs,
             )
-        try:
-            if sdim == 3:
-                ranges = [float(value) for value in list(geom.faceParamRange(number))]
-                point = _face_point([(ranges[0] + ranges[1]) / 2, (ranges[2] + ranges[3]) / 2])
-                item["center"] = [float(value) for value in list(geom.faceX(number, point)[0])]
-                item["normal"] = [float(value) for value in list(geom.faceNormal(number, point)[0])]
-            elif sdim == 2:
-                ranges = [float(value) for value in list(geom.edgeParamRange(number))]
-                point = _face_point([(ranges[0] + ranges[1]) / 2])[0]
-                item["center"] = [float(value) for value in list(geom.edgeX(number, point)[0])]
-                item["normal"] = [float(value) for value in list(geom.edgeNormal(number, point)[0])]
-        except Exception as exc:
-            item["probe_error"] = _error(exc)
-        boundaries.append(item)
+        )
+    failed = [item["boundary"] for item in boundaries if item.get("probe_error")]
+    if failed:
+        ledger.add(
+            "unknown",
+            "boundary_probes_incomplete",
+            "One or more boundary center/normal probes failed.",
+            count=len(failed),
+            boundaries=failed[:MAX_TAGS],
+            boundaries_truncated=len(failed) > MAX_TAGS,
+        )
     return boundaries, n_domains, n_boundaries, sdim
+
+
+def _extend_boundary_map(
+    geom: Any,
+    boundary_map: dict[int, dict[str, Any]],
+    requested: Iterable[int],
+    ledger: EvidenceLedger,
+) -> None:
+    missing = sorted({int(value) for value in requested if int(value) not in boundary_map})
+    if not missing:
+        return
+    n_boundaries = int(geom.getNBoundaries())
+    sdim = int(geom.getSDim())
+    try:
+        up_down = geom.getUpDown()
+        ups = [int(item) for item in list(up_down[0])]
+        downs = [int(item) for item in list(up_down[1])]
+    except Exception:
+        ups = []
+        downs = []
+    invalid = [number for number in missing if number < 1 or number > n_boundaries]
+    failures: list[int] = []
+    for number in missing:
+        if number in invalid:
+            continue
+        item = _probe_boundary_read_only(
+            geom,
+            number,
+            sdim=sdim,
+            ups=ups,
+            downs=downs,
+        )
+        boundary_map[number] = item
+        if item.get("probe_error"):
+            failures.append(number)
+    if invalid:
+        ledger.add(
+            "unknown",
+            "selected_boundaries_invalid",
+            "One or more selected boundaries fall outside the built topology.",
+            boundaries=invalid[:MAX_TAGS],
+            boundaries_truncated=len(invalid) > MAX_TAGS,
+        )
+    if failures:
+        ledger.add(
+            "unknown",
+            "selected_boundary_probes_incomplete",
+            "Selected boundary center/normal evidence could not be read.",
+            boundaries=failures[:MAX_TAGS],
+            boundaries_truncated=len(failures) > MAX_TAGS,
+        )
 
 
 def _pair_metadata(component: Any, ledger: EvidenceLedger) -> list[dict[str, Any]]:
@@ -261,7 +355,12 @@ def _pair_metadata(component: Any, ledger: EvidenceLedger) -> list[dict[str, Any
         pair_container = component.pair()
         pair_tags = _tags(pair_container)
     except Exception as exc:
-        ledger.add("unknown", "pairs_unreadable", "Identity/assembly pairs could not be inspected.", error=_error(exc))
+        ledger.add(
+            "unknown",
+            "pairs_unreadable",
+            "Identity/assembly pairs could not be inspected.",
+            error=_error(exc),
+        )
         return []
     pairs: list[dict[str, Any]] = []
     for tag in pair_tags:
@@ -284,41 +383,77 @@ def _collect_topology(
 ) -> tuple[dict[str, Any], Any | None, Any | None, dict[int, dict[str, Any]]]:
     try:
         component_container = jm.component()
-        component_tags = _tags(component_container)
+        all_component_tags = _all_tags(component_container)
+        component_tags = all_component_tags[:MAX_TAGS]
     except Exception as exc:
-        ledger.add("unknown", "components_unreadable", "Component tags could not be read.", error=_error(exc))
+        ledger.add(
+            "unknown",
+            "components_unreadable",
+            "Component tags could not be read.",
+            error=_error(exc),
+        )
         return {}, None, None, {}
     component_tag = _resolve_tag(
-        available=component_tags,
+        available=all_component_tags,
         expected=expected_component_tag,
         preferred="comp1",
         kind="component",
         ledger=ledger,
     )
     if component_tag is None:
-        return {"component_tags": component_tags}, None, None, {}
+        return (
+            {
+                "component_tags": component_tags,
+                "component_tag_count": len(all_component_tags),
+                "component_tags_truncated": len(all_component_tags) > len(component_tags),
+            },
+            None,
+            None,
+            {},
+        )
     component = _get(component_container, component_tag)
     try:
         geometry_container = component.geom()
-        geometry_tags = _tags(geometry_container)
+        all_geometry_tags = _all_tags(geometry_container)
+        geometry_tags = all_geometry_tags[:MAX_TAGS]
     except Exception as exc:
-        ledger.add("unknown", "geometries_unreadable", "Geometry tags could not be read.", error=_error(exc))
+        ledger.add(
+            "unknown",
+            "geometries_unreadable",
+            "Geometry tags could not be read.",
+            error=_error(exc),
+        )
         return {"component_tag": component_tag}, component, None, {}
     geometry_tag = _resolve_tag(
-        available=geometry_tags,
+        available=all_geometry_tags,
         expected=None,
         preferred="geom1",
         kind="geometry",
         ledger=ledger,
     )
     if geometry_tag is None:
-        return {"component_tag": component_tag, "geometry_tags": geometry_tags}, component, None, {}
+        return (
+            {
+                "component_tag": component_tag,
+                "geometry_tags": geometry_tags,
+                "geometry_tag_count": len(all_geometry_tags),
+                "geometry_tags_truncated": len(all_geometry_tags) > len(geometry_tags),
+            },
+            component,
+            None,
+            {},
+        )
     geom = _get(geometry_container, geometry_tag)
     try:
         boundaries, n_domains, n_boundaries, sdim = _probe_boundaries_read_only(geom, ledger)
         bbox = [float(value) for value in list(geom.getBoundingBox())]
     except Exception as exc:
-        ledger.add("unknown", "topology_unreadable", "Built geometry topology could not be read without rebuilding.", error=_error(exc))
+        ledger.add(
+            "unknown",
+            "topology_unreadable",
+            "Built geometry topology could not be read without rebuilding.",
+            error=_error(exc),
+        )
         return {"component_tag": component_tag, "geometry_tag": geometry_tag}, component, geom, {}
     fin: dict[str, Any] = {}
     try:
@@ -333,13 +468,21 @@ def _collect_topology(
             }
     except Exception as exc:
         fin = {"error": _error(exc)}
-    ledger.add("observation", "topology_inspected", "Built geometry topology was inspected without running the geometry.")
+    ledger.add(
+        "observation",
+        "topology_inspected",
+        "Built geometry topology was inspected without running the geometry.",
+    )
     return (
         {
             "component_tag": component_tag,
             "component_tags": component_tags,
+            "component_tag_count": len(all_component_tags),
+            "component_tags_truncated": len(all_component_tags) > len(component_tags),
             "geometry_tag": geometry_tag,
             "geometry_tags": geometry_tags,
+            "geometry_tag_count": len(all_geometry_tags),
+            "geometry_tags_truncated": len(all_geometry_tags) > len(geometry_tags),
             "space_dimension": sdim,
             "bounding_box": bbox,
             "domain_count": n_domains,
@@ -354,32 +497,44 @@ def _collect_topology(
     )
 
 
-def _find_physics(component: Any, expected: str | None, ledger: EvidenceLedger) -> tuple[str | None, Any | None, list[str]]:
+def _find_physics(
+    component: Any, expected: str | None, ledger: EvidenceLedger
+) -> tuple[str | None, Any | None, list[str]]:
     try:
         container = component.physics()
-        tags = _tags(container)
+        tags = _all_tags(container)
     except Exception as exc:
-        ledger.add("unknown", "physics_tags_unreadable", "Physics tags could not be read.", error=_error(exc))
+        ledger.add(
+            "unknown",
+            "physics_tags_unreadable",
+            "Physics tags could not be read.",
+            error=_error(exc),
+        )
         return None, None, []
-    tag = _resolve_tag(available=tags, expected=expected, preferred="ewfd", kind="physics", ledger=ledger)
+    tag = _resolve_tag(
+        available=tags, expected=expected, preferred="ewfd", kind="physics", ledger=ledger
+    )
     return tag, _get(container, tag) if tag else None, tags
 
 
 def _feature_inventory(container: Any) -> list[tuple[str, Any, str | None]]:
     result: list[tuple[str, Any, str | None]] = []
-    for tag in _tags(container):
+    for tag in _all_tags(container):
         feature = _get(container, tag)
         result.append((tag, feature, _feature_type(feature)))
     return result
 
 
-def _is_kind(tag: str, feature_type: str | None, label: str | None, needles: tuple[str, ...]) -> bool:
+def _is_kind(
+    tag: str, feature_type: str | None, label: str | None, needles: tuple[str, ...]
+) -> bool:
     text = " ".join(value for value in (tag, feature_type, label) if value).lower()
     return any(needle.lower() in text for needle in needles)
 
 
 def _collect_periodic_ports_incidence(
     component: Any,
+    geom: Any,
     physics: Any,
     physics_tag: str,
     boundary_map: dict[int, dict[str, Any]],
@@ -388,57 +543,217 @@ def _collect_periodic_ports_incidence(
     try:
         features = _feature_inventory(physics.feature())
     except Exception as exc:
-        ledger.add("unknown", "physics_features_unreadable", "Physics feature tags could not be read.", error=_error(exc))
+        ledger.add(
+            "unknown",
+            "physics_features_unreadable",
+            "Physics feature tags could not be read.",
+            error=_error(exc),
+        )
         return {}, {}, {"physical_polarization_evidence": "label_only"}
     periodic_structures = [
-        (tag, feature) for tag, feature, kind in features
+        (tag, feature)
+        for tag, feature, kind in features
         if _is_kind(tag, kind, _label(feature), ("periodicstructure", "periodic structure", "ps1"))
     ]
     if not periodic_structures:
-        ledger.add("unknown", "periodic_structure_missing", "No PeriodicStructure feature was identified.", physics_tag=physics_tag)
-        return {"physics_tag": physics_tag, "physics_feature_tags": [tag for tag, _, _ in features]}, {}, {"physical_polarization_evidence": "label_only"}
+        ledger.add(
+            "unknown",
+            "periodic_structure_missing",
+            "No PeriodicStructure feature was identified.",
+            physics_tag=physics_tag,
+        )
+        feature_tags = [tag for tag, _, _ in features]
+        return (
+            {
+                "physics_tag": physics_tag,
+                "physics_feature_tags": feature_tags[:MAX_TAGS],
+                "physics_feature_tag_count": len(feature_tags),
+                "physics_feature_tags_truncated": len(feature_tags) > MAX_TAGS,
+            },
+            {},
+            {"physical_polarization_evidence": "label_only"},
+        )
     if len(periodic_structures) > 1:
-        ledger.add("unknown", "periodic_structure_ambiguous", "Multiple PeriodicStructure candidates exist.", tags=[tag for tag, _ in periodic_structures])
+        candidate_tags = [tag for tag, _ in periodic_structures]
+        ledger.add(
+            "unknown",
+            "periodic_structure_ambiguous",
+            "Multiple PeriodicStructure candidates exist; no candidate was audited.",
+            tags=candidate_tags[:MAX_TAGS],
+            tag_count=len(candidate_tags),
+            tags_truncated=len(candidate_tags) > MAX_TAGS,
+        )
+        return (
+            {
+                "physics_tag": physics_tag,
+                "periodic_structure_tag": None,
+                "candidate_tags": candidate_tags[:MAX_TAGS],
+                "candidate_count": len(candidate_tags),
+                "candidate_tags_truncated": len(candidate_tags) > MAX_TAGS,
+                "selection_status": "ambiguous",
+                "floquet_features": [],
+            },
+            {
+                "periodic_port_features": [],
+                "reference_direction_features": [],
+                "material_assignments": [],
+                "homogeneity_isotropy_evidence": "not_inspected_due_to_ambiguity",
+            },
+            {
+                "physical_polarization_evidence": "label_only",
+                "selection_status": "ambiguous_periodic_structure",
+            },
+        )
     ps_tag, ps = periodic_structures[0]
     ps_props = _properties(ps, ("Polarization", "LinearPol", "alpha1_inc", "alpha2_inc"))
     if not ps_props:
-        ledger.add("unknown", "incidence_properties_unreadable", "PeriodicStructure incidence properties could not be read on this clientapi build.")
+        ledger.add(
+            "unknown",
+            "incidence_properties_unreadable",
+            "PeriodicStructure incidence properties could not be read on this clientapi build.",
+        )
     all_boundaries, all_error = _selection_entities(ps, "allBoundaries")
     excited, excited_error = _selection_entities(ps, "excitedPortSelection")
+    if all_error:
+        ledger.add(
+            "unknown",
+            "periodic_all_boundaries_unreadable",
+            "The PeriodicStructure all-boundaries selection could not be read.",
+            error=all_error,
+        )
     try:
         children = _feature_inventory(ps.feature())
     except Exception as exc:
-        ledger.add("unknown", "periodic_children_unreadable", "PeriodicStructure subfeatures could not be read.", error=_error(exc))
+        ledger.add(
+            "unknown",
+            "periodic_children_unreadable",
+            "PeriodicStructure subfeatures could not be read.",
+            error=_error(exc),
+        )
         children = []
+
+    child_records: list[tuple[str, Any, str | None, str | None, list[int] | None, str | None]] = []
+    for tag, feature, kind in children:
+        label = _label(feature)
+        entities, selection_error = _selection_entities(feature)
+        child_records.append((tag, feature, kind, label, entities, selection_error))
+
+    selected_boundaries = {
+        int(number) for values in (all_boundaries, excited) for number in values or []
+    }
+    selected_boundaries.update(
+        int(number)
+        for _tag, _feature, kind, label, entities, _error_value in child_records
+        if _is_kind(
+            _tag,
+            kind,
+            label,
+            ("floquet", "periodiccondition", "fpc", "periodicport", "periodic port", "pport"),
+        )
+        for number in entities or []
+    )
+    _extend_boundary_map(geom, boundary_map, selected_boundaries, ledger)
+
+    selection_failures = [
+        {"tag": tag, "type": kind}
+        for tag, _feature, kind, label, _entities, selection_error in child_records
+        if selection_error
+        and _is_kind(
+            tag,
+            kind,
+            label,
+            (
+                "floquet",
+                "periodiccondition",
+                "fpc",
+                "periodicport",
+                "periodic port",
+                "pport",
+                "referencedirection",
+                "reference direction",
+                "rdir",
+            ),
+        )
+    ]
+    if selection_failures:
+        ledger.add(
+            "unknown",
+            "periodic_subfeature_selections_unreadable",
+            "One or more PeriodicStructure subfeature selections could not be read.",
+            features=selection_failures[:MAX_TAGS],
+            features_truncated=len(selection_failures) > MAX_TAGS,
+        )
 
     floquet: list[dict[str, Any]] = []
     ports: list[dict[str, Any]] = []
     reference: list[dict[str, Any]] = []
-    for tag, feature, kind in children:
-        label = _label(feature)
-        entities, selection_error = _selection_entities(feature)
-        base = {"tag": tag, "type": kind, "label": label, "selection": entities}
+    for tag, feature, kind, label, entities, selection_error in child_records:
+        bounded_entities = None if entities is None else entities[:MAX_BOUNDARIES]
+        base = {
+            "tag": tag,
+            "type": kind,
+            "label": label,
+            "selection": bounded_entities,
+            "selection_count": None if entities is None else len(entities),
+            "selection_truncated": bool(entities is not None and len(entities) > MAX_BOUNDARIES),
+        }
         if selection_error:
             base["selection_error"] = selection_error
         if _is_kind(tag, kind, label, ("floquet", "periodiccondition", "fpc")):
-            base["properties"] = _properties(feature, ("PeriodicType", "Floquet_source", "kFloquet"))
+            base["properties"] = _properties(
+                feature, ("PeriodicType", "Floquet_source", "kFloquet")
+            )
             selected = [boundary_map[number] for number in entities or [] if number in boundary_map]
             normals = [item.get("normal") for item in selected if item.get("normal")]
             opposite_groups = None
             if len(normals) >= 2:
                 first = normals[0]
-                same_items = [item for item in selected if item.get("normal") and sum(a * b for a, b in zip(first, item["normal"])) > 0]
-                opposite_items = [item for item in selected if item.get("normal") and sum(a * b for a, b in zip(first, item["normal"])) < 0]
+                same_items = [
+                    item
+                    for item in selected
+                    if item.get("normal") and sum(a * b for a, b in zip(first, item["normal"])) > 0
+                ]
+                opposite_items = [
+                    item
+                    for item in selected
+                    if item.get("normal") and sum(a * b for a, b in zip(first, item["normal"])) < 0
+                ]
                 positive = len(same_items)
                 negative = len(opposite_items)
                 translation = None
-                if positive and negative and all(item.get("center") for item in same_items + opposite_items):
-                    same_mean = [sum(item["center"][axis] for item in same_items) / positive for axis in range(len(same_items[0]["center"]))]
-                    opposite_mean = [sum(item["center"][axis] for item in opposite_items) / negative for axis in range(len(opposite_items[0]["center"]))]
-                    translation = [opposite_mean[axis] - same_mean[axis] for axis in range(len(same_mean))]
+                if (
+                    positive
+                    and negative
+                    and all(item.get("center") for item in same_items + opposite_items)
+                ):
+                    same_mean = [
+                        sum(item["center"][axis] for item in same_items) / positive
+                        for axis in range(len(same_items[0]["center"]))
+                    ]
+                    opposite_mean = [
+                        sum(item["center"][axis] for item in opposite_items) / negative
+                        for axis in range(len(opposite_items[0]["center"]))
+                    ]
+                    translation = [
+                        opposite_mean[axis] - same_mean[axis] for axis in range(len(same_mean))
+                    ]
                 signatures = {
-                    "same": sorted(sorted(domain for domain in (item.get("up_domain", 0), item.get("down_domain", 0)) if domain) for item in same_items),
-                    "opposite": sorted(sorted(domain for domain in (item.get("up_domain", 0), item.get("down_domain", 0)) if domain) for item in opposite_items),
+                    "same": sorted(
+                        sorted(
+                            domain
+                            for domain in (item.get("up_domain", 0), item.get("down_domain", 0))
+                            if domain
+                        )
+                        for item in same_items
+                    ),
+                    "opposite": sorted(
+                        sorted(
+                            domain
+                            for domain in (item.get("up_domain", 0), item.get("down_domain", 0))
+                            if domain
+                        )
+                        for item in opposite_items
+                    ),
                 }
                 opposite_groups = {
                     "same_normal_count": positive,
@@ -446,42 +761,76 @@ def _collect_periodic_ports_incidence(
                     "unclassified_count": len(selected) - positive - negative,
                     "count_balanced": positive == negative and positive + negative == len(selected),
                     "adjacent_domain_signatures": signatures,
-                    "adjacent_domain_signatures_match": signatures["same"] == signatures["opposite"],
+                    "adjacent_domain_signatures_match": signatures["same"]
+                    == signatures["opposite"],
                     "inferred_translation": translation,
                     "limitation": "This is a topology/selection check, not proof of source-destination mesh compatibility.",
                 }
                 if not opposite_groups["count_balanced"]:
-                    ledger.add("warning", "floquet_face_count_mismatch", "A Floquet selection has unequal opposing-normal face counts.", tag=tag, groups=opposite_groups)
+                    ledger.add(
+                        "warning",
+                        "floquet_face_count_mismatch",
+                        "A Floquet selection has unequal opposing-normal face counts.",
+                        tag=tag,
+                        groups=opposite_groups,
+                    )
             base["opposing_face_groups"] = opposite_groups
             floquet.append(base)
         elif _is_kind(tag, kind, label, ("periodicport", "periodic port", "pport")):
-            adjacent = sorted({
-                domain
-                for number in entities or []
-                for domain in (
-                    boundary_map.get(number, {}).get("up_domain", 0),
-                    boundary_map.get(number, {}).get("down_domain", 0),
-                )
-                if domain
-            })
+            adjacent = sorted(
+                {
+                    domain
+                    for number in entities or []
+                    for domain in (
+                        boundary_map.get(number, {}).get("up_domain", 0),
+                        boundary_map.get(number, {}).get("down_domain", 0),
+                    )
+                    if domain
+                }
+            )
             base["adjacent_domains"] = adjacent
-            base["properties"] = _properties(feature, ("alpha1_inc", "alpha2_inc", "PortType", "DiffractionOrder", "EnableActiveMode"))
+            base["properties"] = _properties(
+                feature,
+                ("alpha1_inc", "alpha2_inc", "PortType", "DiffractionOrder", "EnableActiveMode"),
+            )
             ports.append(base)
         elif _is_kind(tag, kind, label, ("referencedirection", "reference direction", "rdir")):
             reference.append(base)
 
     if not floquet:
-        ledger.add("unknown", "floquet_features_missing", "No Floquet periodic subfeatures were identified.")
+        ledger.add(
+            "unknown",
+            "floquet_features_missing",
+            "No Floquet periodic subfeatures were identified.",
+        )
     if not ports:
-        ledger.add("unknown", "periodic_ports_missing", "No PeriodicPort subfeatures were identified.")
+        ledger.add(
+            "unknown", "periodic_ports_missing", "No PeriodicPort subfeatures were identified."
+        )
     if not reference or not any(item.get("selection") for item in reference):
-        ledger.add("unknown", "reference_direction_missing", "No non-empty rdir1/reference-direction selection was identified.")
+        ledger.add(
+            "unknown",
+            "reference_direction_missing",
+            "No non-empty rdir1/reference-direction selection was identified.",
+        )
     if excited is None:
-        ledger.add("unknown", "excited_port_selection_unreadable", "The excited-port selection could not be read.", error=excited_error)
+        ledger.add(
+            "unknown",
+            "excited_port_selection_unreadable",
+            "The excited-port selection could not be read.",
+            error=excited_error,
+        )
     elif not excited:
-        ledger.add("unknown", "excited_port_selection_empty", "The excited-port selection is empty.")
+        ledger.add(
+            "unknown", "excited_port_selection_empty", "The excited-port selection is empty."
+        )
 
-    ledger.add("observation", "periodic_structure_inspected", "PeriodicStructure configuration was inspected without mutation.", tag=ps_tag)
+    ledger.add(
+        "observation",
+        "periodic_structure_inspected",
+        "PeriodicStructure configuration was inspected without mutation.",
+        tag=ps_tag,
+    )
     material_assignments: list[dict[str, Any]] = []
     try:
         material_container = component.material()
@@ -493,43 +842,85 @@ def _collect_periodic_ports_incidence(
                 permittivity = _property(material.propertyGroup("def"), "relpermittivity")
             except Exception:
                 pass
-            material_assignments.append({
-                "tag": material_tag,
-                "label": _label(material),
-                "domains": domains,
-                "selection_error": selection_error,
-                "relative_permittivity": permittivity,
-                "isotropy_evidence": "scalar_expression" if permittivity and len(permittivity.replace(",", " ").split()) == 1 else "unresolved",
-            })
+            material_assignments.append(
+                {
+                    "tag": material_tag,
+                    "label": _label(material),
+                    "domains": domains,
+                    "selection_error": selection_error,
+                    "relative_permittivity": permittivity,
+                    "isotropy_evidence": "scalar_expression"
+                    if permittivity and len(permittivity.replace(",", " ").split()) == 1
+                    else "unresolved",
+                }
+            )
     except Exception as exc:
-        ledger.add("unknown", "materials_unreadable", "Port-adjacent material assignments could not be inspected.", error=_error(exc))
+        ledger.add(
+            "unknown",
+            "materials_unreadable",
+            "Port-adjacent material assignments could not be inspected.",
+            error=_error(exc),
+        )
     for port in ports:
         adjacent = set(port.get("adjacent_domains", []))
         matches = [
-            item for item in material_assignments
+            item
+            for item in material_assignments
             if adjacent and adjacent <= set(item.get("domains") or [])
         ]
         port["material_assignment_evidence"] = matches
         if len(matches) != 1 or matches[0].get("isotropy_evidence") != "scalar_expression":
-            ledger.add("unknown", "port_medium_unresolved", "A periodic port's adjacent medium could not be established as one scalar-permittivity material from assignments alone.", port_tag=port["tag"], adjacent_domains=sorted(adjacent))
+            ledger.add(
+                "unknown",
+                "port_medium_unresolved",
+                "A periodic port's adjacent medium could not be established as one scalar-permittivity material from assignments alone.",
+                port_tag=port["tag"],
+                adjacent_domains=sorted(adjacent),
+            )
+    if any(len(items) > MAX_TAGS for items in (floquet, ports, reference)):
+        ledger.add(
+            "warning",
+            "periodic_feature_response_truncated",
+            "Periodic subfeature details were truncated only after complete discovery.",
+            floquet_count=len(floquet),
+            port_count=len(ports),
+            reference_direction_count=len(reference),
+            returned_per_kind=MAX_TAGS,
+        )
     periodicity = {
         "physics_tag": physics_tag,
         "periodic_structure_tag": ps_tag,
-        "all_boundaries_selection": all_boundaries,
+        "all_boundaries_selection": (
+            None if all_boundaries is None else all_boundaries[:MAX_BOUNDARIES]
+        ),
+        "all_boundaries_count": None if all_boundaries is None else len(all_boundaries),
+        "all_boundaries_truncated": bool(
+            all_boundaries is not None and len(all_boundaries) > MAX_BOUNDARIES
+        ),
         "all_boundaries_error": all_error,
-        "floquet_features": floquet,
+        "floquet_features": floquet[:MAX_TAGS],
+        "floquet_feature_count": len(floquet),
+        "floquet_features_truncated": len(floquet) > MAX_TAGS,
     }
     port_section = {
-        "periodic_port_features": ports,
-        "excited_port_selection": excited,
+        "periodic_port_features": ports[:MAX_TAGS],
+        "periodic_port_feature_count": len(ports),
+        "periodic_port_features_truncated": len(ports) > MAX_TAGS,
+        "excited_port_selection": None if excited is None else excited[:MAX_BOUNDARIES],
+        "excited_port_selection_count": None if excited is None else len(excited),
+        "excited_port_selection_truncated": bool(
+            excited is not None and len(excited) > MAX_BOUNDARIES
+        ),
         "excited_port_selection_error": excited_error,
-        "reference_direction_features": reference,
+        "reference_direction_features": reference[:MAX_TAGS],
+        "reference_direction_feature_count": len(reference),
+        "reference_direction_features_truncated": len(reference) > MAX_TAGS,
         "material_assignments": material_assignments,
         "homogeneity_isotropy_evidence": "per_port_material_assignment_only",
     }
     incidence = {
         "raw_properties": ps_props,
-        "reference_direction_features": reference,
+        "reference_direction_features": reference[:MAX_TAGS],
         "physical_polarization_evidence": "label_only",
         "limitation": "S/P or CircularPol labels and rdir1 do not prove the physical incident field vector.",
     }
@@ -555,44 +946,102 @@ def _collect_wavelength(
     parameter_name = target_parameter_name or "wl"
     expressions, parameter_error = _parameter_expressions(model)
     if parameter_error:
-        ledger.add("unknown", "parameters_unreadable", "Global parameter expressions could not be read.", error=parameter_error)
+        ledger.add(
+            "unknown",
+            "parameters_unreadable",
+            "Global parameter expressions could not be read.",
+            error=parameter_error,
+        )
     parameter_expression = expressions.get(parameter_name)
     if parameter_expression is None:
-        ledger.add("unknown", "wavelength_parameter_missing", "The requested wavelength parameter was not found.", parameter=parameter_name)
+        ledger.add(
+            "unknown",
+            "wavelength_parameter_missing",
+            "The requested wavelength parameter was not found.",
+            parameter=parameter_name,
+        )
     try:
         study_container = jm.study()
-        study_tags = _tags(study_container)
+        all_study_tags = _all_tags(study_container)
+        study_tags = all_study_tags[:MAX_TAGS]
     except Exception as exc:
-        ledger.add("unknown", "studies_unreadable", "Study tags could not be read.", error=_error(exc))
-        return {"parameter_name": parameter_name, "parameter_expression": parameter_expression}, None, None
-    study_tag = _resolve_tag(available=study_tags, expected=expected_study_tag, preferred="std1", kind="study", ledger=ledger)
+        ledger.add(
+            "unknown", "studies_unreadable", "Study tags could not be read.", error=_error(exc)
+        )
+        return (
+            {"parameter_name": parameter_name, "parameter_expression": parameter_expression},
+            None,
+            None,
+        )
+    study_tag = _resolve_tag(
+        available=all_study_tags,
+        expected=expected_study_tag,
+        preferred="std1",
+        kind="study",
+        ledger=ledger,
+    )
     if study_tag is None:
-        return {"parameter_name": parameter_name, "parameter_expression": parameter_expression, "study_tags": study_tags}, None, None
+        return (
+            {
+                "parameter_name": parameter_name,
+                "parameter_expression": parameter_expression,
+                "study_tags": study_tags,
+                "study_tag_count": len(all_study_tags),
+                "study_tags_truncated": len(all_study_tags) > len(study_tags),
+            },
+            None,
+            None,
+        )
     study = _get(study_container, study_tag)
     steps: list[dict[str, Any]] = []
     linked_locations: list[dict[str, str]] = []
     try:
         for tag, feature, kind in _feature_inventory(study.feature()):
-            props = _properties(feature, ("plist", "punit", "pname", "plistarr", "sweeptype", "activate"))
+            props = _properties(
+                feature, ("plist", "punit", "pname", "plistarr", "sweeptype", "activate")
+            )
             for prop, value in props.items():
-                if re.search(rf"(?<![A-Za-z0-9_]){re.escape(parameter_name)}(?![A-Za-z0-9_])", value):
+                if re.search(
+                    rf"(?<![A-Za-z0-9_]){re.escape(parameter_name)}(?![A-Za-z0-9_])", value
+                ):
                     linked_locations.append({"step_tag": tag, "property": prop, "value": value})
             steps.append({"tag": tag, "type": kind, "label": _label(feature), "properties": props})
     except Exception as exc:
-        ledger.add("unknown", "study_steps_unreadable", "Study-step properties could not be read.", error=_error(exc))
+        ledger.add(
+            "unknown",
+            "study_steps_unreadable",
+            "Study-step properties could not be read.",
+            error=_error(exc),
+        )
     structurally_linked: bool | None = bool(linked_locations) if steps else None
     if structurally_linked is False:
-        ledger.add("unknown", "wavelength_link_missing", "No structural link from the selected study to the wavelength parameter was found.", parameter=parameter_name, study_tag=study_tag)
-    ledger.add("observation", "wavelength_controls_inspected", "Wavelength parameters and study controls were inspected structurally; no numeric synchronization verdict was made.")
+        ledger.add(
+            "unknown",
+            "wavelength_link_missing",
+            "No structural link from the selected study to the wavelength parameter was found.",
+            parameter=parameter_name,
+            study_tag=study_tag,
+        )
+    ledger.add(
+        "observation",
+        "wavelength_controls_inspected",
+        "Wavelength parameters and study controls were inspected structurally; no numeric synchronization verdict was made.",
+    )
     return (
         {
             "parameter_name": parameter_name,
             "parameter_expression": parameter_expression,
             "study_tag": study_tag,
             "study_tags": study_tags,
-            "steps": steps,
+            "study_tag_count": len(all_study_tags),
+            "study_tags_truncated": len(all_study_tags) > len(study_tags),
+            "steps": steps[:MAX_TAGS],
+            "step_count": len(steps),
+            "steps_truncated": len(steps) > MAX_TAGS,
             "structurally_linked": structurally_linked,
-            "link_evidence": linked_locations,
+            "link_evidence": linked_locations[:MAX_TAGS],
+            "link_evidence_count": len(linked_locations),
+            "link_evidence_truncated": len(linked_locations) > MAX_TAGS,
             "solved_frequency_expression": "c_const/ewfd.freq",
             "numeric_synchronization": "not_evaluated_in_read_only_preflight",
         },
@@ -601,7 +1050,13 @@ def _collect_wavelength(
     )
 
 
-def _collect_mesh_study_results(model: Any, component: Any, physics_tag: str | None, study_tag: str | None, ledger: EvidenceLedger) -> dict[str, Any]:
+def _collect_mesh_study_results(
+    model: Any,
+    component: Any,
+    physics_tag: str | None,
+    study_tag: str | None,
+    ledger: EvidenceLedger,
+) -> dict[str, Any]:
     meshes: list[dict[str, Any]] = []
     try:
         mesh_container = component.mesh()
@@ -612,31 +1067,59 @@ def _collect_mesh_study_results(model: Any, component: Any, physics_tag: str | N
                 item["element_count"] = int(mesh.getNumElem())
                 item["vertex_count"] = int(mesh.getNumVertex())
                 if item["element_count"] == 0:
-                    ledger.add("warning", "mesh_empty", "A mesh sequence contains zero elements.", mesh_tag=tag)
+                    ledger.add(
+                        "warning",
+                        "mesh_empty",
+                        "A mesh sequence contains zero elements.",
+                        mesh_tag=tag,
+                    )
             except Exception as exc:
                 item["count_error"] = _error(exc)
-                ledger.add("unknown", "mesh_counts_unreadable", "Mesh counts could not be read.", mesh_tag=tag, error=_error(exc))
+                ledger.add(
+                    "unknown",
+                    "mesh_counts_unreadable",
+                    "Mesh counts could not be read.",
+                    mesh_tag=tag,
+                    error=_error(exc),
+                )
             meshes.append(item)
     except Exception as exc:
-        ledger.add("unknown", "meshes_unreadable", "Mesh sequences could not be inspected.", error=_error(exc))
+        ledger.add(
+            "unknown",
+            "meshes_unreadable",
+            "Mesh sequences could not be inspected.",
+            error=_error(exc),
+        )
     try:
         solutions = [str(value) for value in list(model.solutions())[:MAX_TAGS]]
     except Exception as exc:
         solutions = []
-        ledger.add("unknown", "solutions_unreadable", "Solution tags could not be read.", error=_error(exc))
+        ledger.add(
+            "unknown", "solutions_unreadable", "Solution tags could not be read.", error=_error(exc)
+        )
     try:
         datasets = [str(value) for value in list(model.datasets())[:MAX_TAGS]]
     except Exception as exc:
         datasets = []
-        ledger.add("unknown", "datasets_unreadable", "Dataset tags could not be read.", error=_error(exc))
+        ledger.add(
+            "unknown", "datasets_unreadable", "Dataset tags could not be read.", error=_error(exc)
+        )
     expression_prefix = physics_tag or "ewfd"
-    ledger.add("observation", "mesh_study_results_inspected", "Mesh, study, solution, and dataset metadata were inspected without solving.")
+    ledger.add(
+        "observation",
+        "mesh_study_results_inspected",
+        "Mesh, study, solution, and dataset metadata were inspected without solving.",
+    )
     return {
         "meshes": meshes,
         "study_tag": study_tag,
         "solutions": solutions,
         "datasets": datasets,
-        "power_expression_candidates": [f"{expression_prefix}.Rtotal", f"{expression_prefix}.Ttotal", f"{expression_prefix}.Atotal"],
+        "power_expression_candidates": [
+            f"{expression_prefix}.Rtotal",
+            f"{expression_prefix}.Ttotal",
+            f"{expression_prefix}.Atotal",
+        ],
         "power_expression_availability": "not_evaluated_in_read_only_preflight",
         "loss_expression_candidates": [f"{expression_prefix}.Qh"],
         "loss_operator_availability": "not_evaluated_in_read_only_preflight",
@@ -651,6 +1134,7 @@ def collect_preflight_foundation(
     active_profile: str,
     expected_source_path: str | None = None,
     expected_source_sha256: str | None = None,
+    loaded_source_identity: dict[str, Any] | None = None,
     mark_uninspected: bool = True,
 ) -> dict[str, Any]:
     """Collect provenance and ownership without running or mutating clientapi."""
@@ -662,32 +1146,111 @@ def collect_preflight_foundation(
     model_label = _safe_text(model.name, ledger, "model_label_unreadable")
     comsol_version = _safe_text(model.version, ledger, "comsol_version_unreadable")
     loaded_path = Path(loaded_path_text).resolve() if loaded_path_text else None
-    source_sha256 = None
+    current_file_sha256 = None
 
     if loaded_path is None or not loaded_path.is_file():
-        ledger.add("unknown", "source_file_unavailable", "The loaded model has no readable source file for hashing.", loaded_path=loaded_path_text)
+        ledger.add(
+            "unknown",
+            "source_file_unavailable",
+            "The loaded model has no readable source file for hashing.",
+            loaded_path=loaded_path_text,
+        )
     else:
         try:
-            source_sha256 = _sha256(loaded_path)
-            ledger.add("observation", "source_hash_measured", "The loaded source file was hashed without modification.", sha256=source_sha256)
+            current_file_sha256 = _sha256(loaded_path)
+            ledger.add(
+                "observation",
+                "current_file_hash_measured",
+                "The file currently named by the loaded model was hashed without modification.",
+                sha256=current_file_sha256,
+            )
         except OSError as exc:
-            ledger.add("unknown", "source_hash_unavailable", "The loaded source file could not be hashed.", error=_error(exc))
+            ledger.add(
+                "unknown",
+                "source_hash_unavailable",
+                "The loaded source file could not be hashed.",
+                error=_error(exc),
+            )
+
+    source_path = None
+    source_sha256 = None
+    source_capture = None
+    if isinstance(loaded_source_identity, dict):
+        candidate_path = loaded_source_identity.get("source_path")
+        candidate_hash = str(loaded_source_identity.get("source_sha256") or "").lower()
+        if candidate_path and re.fullmatch(r"[0-9a-f]{64}", candidate_hash):
+            source_path = Path(str(candidate_path)).resolve()
+            source_sha256 = candidate_hash
+            source_capture = str(loaded_source_identity.get("capture") or "session_registration")
+            ledger.add(
+                "observation",
+                "loaded_source_identity_available",
+                "The session supplied the source identity captured when this model was loaded.",
+                sha256=source_sha256,
+                capture=source_capture,
+            )
+        else:
+            ledger.add(
+                "unknown",
+                "loaded_source_identity_invalid",
+                "The session's captured loaded-source identity is malformed.",
+            )
+    else:
+        ledger.add(
+            "unknown",
+            "loaded_source_identity_unavailable",
+            "Only the current on-disk file can be measured; the bytes loaded into the model are not attested.",
+        )
+
+    if (
+        source_path is not None
+        and loaded_path is not None
+        and source_path == loaded_path
+        and source_sha256 is not None
+        and current_file_sha256 is not None
+        and source_sha256 != current_file_sha256
+    ):
+        ledger.add(
+            "warning",
+            "source_file_changed_since_load",
+            "The current source path no longer contains the bytes captured when the model was loaded.",
+            loaded_source_sha256=source_sha256,
+            current_file_sha256=current_file_sha256,
+        )
 
     if expected_source_path is not None:
         expected_path = Path(expected_source_path).resolve()
-        if loaded_path is None or loaded_path != expected_path:
-            ledger.add("integrity_error", "source_path_mismatch", "Loaded source path does not match the caller-declared path.", expected=str(expected_path), actual=str(loaded_path) if loaded_path else None)
+        if source_path is None or source_path != expected_path:
+            ledger.add(
+                "integrity_error",
+                "source_path_mismatch",
+                "Captured loaded-source path does not match the caller-declared path.",
+                expected=str(expected_path),
+                actual=str(source_path) if source_path else None,
+            )
     if expected_source_sha256 is not None:
         normalized_expected = expected_source_sha256.strip().lower()
         if source_sha256 is None or source_sha256.lower() != normalized_expected:
-            ledger.add("integrity_error", "source_hash_mismatch", "Measured source hash does not match the caller-declared hash.", expected=normalized_expected, actual=source_sha256)
+            ledger.add(
+                "integrity_error",
+                "source_hash_mismatch",
+                "Captured loaded-source hash does not match the caller-declared hash.",
+                expected=normalized_expected,
+                actual=source_sha256,
+            )
 
     ownership = ownership_manager.status(session_state=session_state)
     collision = bool(ownership.get("collision"))
     if collision:
-        ledger.add("integrity_error", "solver_collision", "Solver ownership evidence reports a collision.")
+        ledger.add(
+            "integrity_error", "solver_collision", "Solver ownership evidence reports a collision."
+        )
     else:
-        ledger.add("observation", "solver_ownership_inspected", "Solver ownership was inspected without starting COMSOL.")
+        ledger.add(
+            "observation",
+            "solver_ownership_inspected",
+            "Solver ownership was inspected without starting COMSOL.",
+        )
 
     if mark_uninspected:
         for section, code in (
@@ -698,17 +1261,28 @@ def collect_preflight_foundation(
             ("wavelength", "wavelength_not_inspected"),
             ("mesh_study_results", "mesh_study_results_not_inspected"),
         ):
-            ledger.add("unknown", code, f"The {section} evidence collector has not populated this section yet.")
+            ledger.add(
+                "unknown",
+                code,
+                f"The {section} evidence collector has not populated this section yet.",
+            )
 
     return {
         "inspection_status": ledger.inspection_status,
-        "assessment": {"mode": "evidence_only", "project_verdict": None, "long_sweep_recommendation": None},
+        "assessment": {
+            "mode": "evidence_only",
+            "project_verdict": None,
+            "long_sweep_recommendation": None,
+        },
         "evidence": ledger.to_dict(),
         "provenance": {
             "requested_model_name": model_name,
             "model_label": model_label,
             "loaded_path": str(loaded_path) if loaded_path else loaded_path_text,
+            "source_path": str(source_path) if source_path else None,
             "source_sha256": source_sha256,
+            "source_identity_capture": source_capture,
+            "current_file_sha256": current_file_sha256,
             "comsol_version": comsol_version,
             "active_profile": active_profile,
         },
@@ -751,6 +1325,7 @@ def collect_wave_optics_preflight(
     expected_study_tag: str | None = None,
     expected_source_path: str | None = None,
     expected_source_sha256: str | None = None,
+    loaded_source_identity: dict[str, Any] | None = None,
     target_wavelength_parameter: str | None = None,
     expected_lattice_axes: list[str] | None = None,
     target_physical_polarization: list[float] | None = None,
@@ -763,6 +1338,7 @@ def collect_wave_optics_preflight(
         active_profile=active_profile,
         expected_source_path=expected_source_path,
         expected_source_sha256=expected_source_sha256,
+        loaded_source_identity=loaded_source_identity,
         mark_uninspected=False,
     )
     ledger = EvidenceLedger(**result["evidence"])
@@ -772,33 +1348,58 @@ def collect_wave_optics_preflight(
     try:
         jm = model.java
     except Exception as exc:
-        ledger.add("unknown", "clientapi_unavailable", "The read-only clientapi model handle is unavailable.", error=_error(exc))
+        ledger.add(
+            "unknown",
+            "clientapi_unavailable",
+            "The read-only clientapi model handle is unavailable.",
+            error=_error(exc),
+        )
         result["evidence"] = ledger.to_dict()
         result["inspection_status"] = ledger.inspection_status
         return result
 
-    result["provenance"]["model_tag"] = _safe_text(
-        lambda: jm.tag(), ledger, "model_tag_unreadable"
-    )
+    result["provenance"]["model_tag"] = _safe_text(lambda: jm.tag(), ledger, "model_tag_unreadable")
     try:
         import mph
 
         result["provenance"]["mph_version"] = getattr(mph, "__version__", None)
     except Exception as exc:
         result["provenance"]["mph_version"] = None
-        ledger.add("unknown", "mph_version_unreadable", "The MPh package version could not be read.", error=_error(exc))
+        ledger.add(
+            "unknown",
+            "mph_version_unreadable",
+            "The MPh package version could not be read.",
+            error=_error(exc),
+        )
 
-    topology, component, _geom, boundary_map = _collect_topology(jm, ledger, expected_component_tag=expected_component_tag)
+    topology, component, geom, boundary_map = _collect_topology(
+        jm, ledger, expected_component_tag=expected_component_tag
+    )
     result["topology"] = topology
     physics_tag = None
     if component is not None:
         physics_tag, physics, physics_tags = _find_physics(component, expected_physics_tag, ledger)
-        topology["physics_tags"] = physics_tags
-        if physics is not None and physics_tag is not None:
-            periodicity, ports, incidence = _collect_periodic_ports_incidence(component, physics, physics_tag, boundary_map, ledger)
+        topology["physics_tags"] = physics_tags[:MAX_TAGS]
+        topology["physics_tag_count"] = len(physics_tags)
+        topology["physics_tags_truncated"] = len(physics_tags) > MAX_TAGS
+        if physics is not None and physics_tag is not None and geom is not None:
+            periodicity, ports, incidence = _collect_periodic_ports_incidence(
+                component,
+                geom,
+                physics,
+                physics_tag,
+                boundary_map,
+                ledger,
+            )
             result["periodicity"] = periodicity
             result["ports"] = ports
             result["incidence"] = incidence
+        elif physics is not None and physics_tag is not None:
+            ledger.add(
+                "unknown",
+                "periodic_topology_unavailable",
+                "PeriodicStructure evidence requires readable built geometry topology.",
+            )
     wavelength, _study, study_tag = _collect_wavelength(
         model,
         jm,
@@ -808,9 +1409,15 @@ def collect_wave_optics_preflight(
     )
     result["wavelength"] = wavelength
     if component is not None:
-        result["mesh_study_results"] = _collect_mesh_study_results(model, component, physics_tag, study_tag, ledger)
+        result["mesh_study_results"] = _collect_mesh_study_results(
+            model, component, physics_tag, study_tag, ledger
+        )
     else:
-        ledger.add("unknown", "mesh_study_results_unavailable", "Mesh/study/result evidence requires an unambiguous component.")
+        ledger.add(
+            "unknown",
+            "mesh_study_results_unavailable",
+            "Mesh/study/result evidence requires an unambiguous component.",
+        )
 
     if expected_lattice_axes is not None:
         expected_axes = [str(value).lower() for value in expected_lattice_axes[:3]]
@@ -819,13 +1426,20 @@ def collect_wave_optics_preflight(
         for feature in result["periodicity"].get("floquet_features", []):
             translation = (feature.get("opposing_face_groups") or {}).get("inferred_translation")
             if translation and any(abs(value) > 0 for value in translation):
-                inferred_axes.append(axis_names[max(range(len(translation)), key=lambda index: abs(translation[index]))])
+                inferred_axes.append(
+                    axis_names[
+                        max(range(len(translation)), key=lambda index: abs(translation[index]))
+                    ]
+                )
             else:
                 inferred_axes.append(None)
         result["periodicity"]["caller_expected_lattice_axes"] = expected_axes
         result["periodicity"]["inferred_dominant_translation_axes"] = inferred_axes
         result["periodicity"]["expected_axis_comparison"] = [
-            {"expected": expected, "inferred": inferred_axes[index] if index < len(inferred_axes) else None}
+            {
+                "expected": expected,
+                "inferred": inferred_axes[index] if index < len(inferred_axes) else None,
+            }
             for index, expected in enumerate(expected_axes)
         ]
     if target_physical_polarization is not None:
@@ -838,7 +1452,15 @@ def collect_wave_optics_preflight(
     result["evidence"] = ledger.to_dict()
     result["inspection_status"] = ledger.inspection_status
     missing = [
-        section for section in ("topology", "periodicity", "ports", "incidence", "wavelength", "mesh_study_results")
+        section
+        for section in (
+            "topology",
+            "periodicity",
+            "ports",
+            "incidence",
+            "wavelength",
+            "mesh_study_results",
+        )
         if not result.get(section)
     ]
     result["next_call"] = _point_audit_next_call(
@@ -891,6 +1513,7 @@ def register_wave_optics_preflight_tools(mcp: FastMCP) -> None:
                 expected_study_tag=expected_study_tag,
                 expected_source_path=expected_source_path,
                 expected_source_sha256=expected_source_sha256,
+                loaded_source_identity=session_manager.get_model_source_identity(model_name),
                 target_wavelength_parameter=target_wavelength_parameter,
                 expected_lattice_axes=expected_lattice_axes,
                 target_physical_polarization=target_physical_polarization,
@@ -899,7 +1522,10 @@ def register_wave_optics_preflight_tools(mcp: FastMCP) -> None:
         except ValueError as exc:
             return {"success": False, "error": str(exc)}
         except Exception as exc:
-            return {"success": False, "error": f"Wave Optics preflight failed safely: {_error(exc)}"}
+            return {
+                "success": False,
+                "error": f"Wave Optics preflight failed safely: {_error(exc)}",
+            }
 
 
 __all__ = [

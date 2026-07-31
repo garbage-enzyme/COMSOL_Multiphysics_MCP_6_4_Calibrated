@@ -17,6 +17,25 @@ MAX_PUBLIC_NUMBER_MAGNITUDE = 1.0e308
 
 def bounded_public_schema(value: dict[str, Any]) -> dict[str, Any]:
     """Return a bounded closed-object discovery schema without mutating input."""
+    active: set[int] = set()
+
+    def validate_graph(node: Any, depth: int) -> None:
+        if depth > MAX_PUBLIC_NESTING_DEPTH:
+            raise ValueError("public schema exceeds the nesting limit")
+        if not isinstance(node, (dict, list)):
+            return
+        identity = id(node)
+        if identity in active:
+            raise ValueError("public schema contains a cycle")
+        active.add(identity)
+        try:
+            nested = node.values() if isinstance(node, dict) else node
+            for item in nested:
+                validate_graph(item, depth + 1)
+        finally:
+            active.remove(identity)
+
+    validate_graph(value, 0)
     schema = deepcopy(value)
 
     def visit(node: Any) -> None:
@@ -33,7 +52,7 @@ def bounded_public_schema(value: dict[str, Any]) -> dict[str, Any]:
             node.setdefault("maxItems", MAX_PUBLIC_COLLECTION_ITEMS)
         elif node_type == "object":
             node.setdefault("maxProperties", MAX_PUBLIC_OBJECT_FIELDS)
-            if "properties" in node and "additionalProperties" not in node:
+            if "additionalProperties" not in node:
                 node["additionalProperties"] = False
         elif node_type in {"integer", "number"}:
             node.setdefault("minimum", -MAX_PUBLIC_NUMBER_MAGNITUDE)
@@ -55,11 +74,15 @@ def validate_public_structure(value: Any, *, path: str = "arguments", depth: int
         return
     if isinstance(value, bool) or value is None:
         return
-    if isinstance(value, (int, float)):
-        if not math.isfinite(float(value)) or abs(value) > MAX_PUBLIC_NUMBER_MAGNITUDE:
+    if isinstance(value, int):
+        if abs(value) > MAX_PUBLIC_NUMBER_MAGNITUDE:
             raise ValueError(f"{path} must be a finite structurally bounded number")
         return
-    if isinstance(value, (list, tuple)):
+    if isinstance(value, float):
+        if not math.isfinite(value) or abs(value) > MAX_PUBLIC_NUMBER_MAGNITUDE:
+            raise ValueError(f"{path} must be a finite structurally bounded number")
+        return
+    if isinstance(value, list):
         if len(value) > MAX_PUBLIC_COLLECTION_ITEMS:
             raise ValueError(f"{path} exceeds the public collection limit")
         for index, item in enumerate(value):
@@ -79,12 +102,17 @@ def validate_public_structure(value: Any, *, path: str = "arguments", depth: int
 
 def structurally_guarded(function: Callable[..., Any]) -> Callable[..., Any]:
     """Validate all supplied arguments before entering a public tool function."""
+    parameters = tuple(inspect.signature(function).parameters.values())
+    has_receiver = bool(parameters and parameters[0].name in {"self", "cls"})
+
+    def supplied_positional(args: tuple[Any, ...]) -> list[Any]:
+        return list(args[1:] if has_receiver and args else args)
 
     if inspect.iscoroutinefunction(function):
 
         @wraps(function)
         async def async_wrapped(*args: Any, **kwargs: Any) -> Any:
-            validate_public_structure(args, path="arguments.positional")
+            validate_public_structure(supplied_positional(args), path="arguments.positional")
             validate_public_structure(kwargs, path="arguments.named")
             return await function(*args, **kwargs)
 
@@ -92,7 +120,7 @@ def structurally_guarded(function: Callable[..., Any]) -> Callable[..., Any]:
 
     @wraps(function)
     def wrapped(*args: Any, **kwargs: Any) -> Any:
-        validate_public_structure(args, path="arguments.positional")
+        validate_public_structure(supplied_positional(args), path="arguments.positional")
         validate_public_structure(kwargs, path="arguments.named")
         return function(*args, **kwargs)
 

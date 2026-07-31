@@ -15,7 +15,6 @@ from comsol_mcp.evidence.convergence_evaluation import MAX_CONVERGENCE_LEVELS
 from .spectral_characterization import normalize_spectral_characterization_job_spec
 from .store import JOB_SCHEMA_VERSION
 
-
 MAX_CONVERGENCE_CAMPAIGN_LEVELS = min(MAX_CONVERGENCE_LEVELS, 8)
 MAX_CONVERGENCE_CAMPAIGN_POINTS = 512
 MAX_CONVERGENCE_CAMPAIGN_SPEC_BYTES = 2 * 1024 * 1024
@@ -88,8 +87,12 @@ def _normalize_campaign_policy(value: object) -> dict[str, Any]:
     raw = _exact_mapping(
         value,
         {
-            "policy_id", "metrics", "minimum_level_count", "governing_pairs",
-            "relative_denominator", "declared_cap_reached",
+            "policy_id",
+            "metrics",
+            "minimum_level_count",
+            "governing_pairs",
+            "relative_denominator",
+            "declared_cap_reached",
         },
         "convergence_policy",
     )
@@ -162,10 +165,7 @@ def validate_convergence_campaign_driver_identity(spec: Mapping[str, Any]) -> di
     if (
         not isinstance(observed, Mapping)
         or set(observed) != set(expected)
-        or any(
-            key != "implementation" and observed[key] != expected[key]
-            for key in expected
-        )
+        or any(key != "implementation" and observed[key] != expected[key] for key in expected)
         or not module_identity_matches(
             expected.get("implementation"), observed.get("implementation")
         )
@@ -179,8 +179,13 @@ def normalize_convergence_campaign_spec(value: object) -> dict[str, Any]:
     raw = _exact_mapping(
         value,
         {
-            "job_type", "campaign_id", "levels", "convergence_policy",
-            "stop_policy", "maximum_total_points", "wall_time_budget_seconds",
+            "job_type",
+            "campaign_id",
+            "levels",
+            "convergence_policy",
+            "stop_policy",
+            "maximum_total_points",
+            "wall_time_budget_seconds",
         },
         "convergence campaign specification",
     )
@@ -195,14 +200,22 @@ def normalize_convergence_campaign_spec(value: object) -> dict[str, Any]:
         level = _exact_mapping(
             value,
             {
-                "level_id", "ordinal", "declared_predecessor_level_id",
-                "model_preparation", "material_identity_sha256",
-                "incidence_identity_sha256", "spectral_job",
+                "level_id",
+                "ordinal",
+                "declared_predecessor_level_id",
+                "model_preparation",
+                "material_identity_sha256",
+                "incidence_identity_sha256",
+                "spectral_job",
             },
             name,
         )
         level_id = _identifier(level["level_id"], f"{name}.level_id")
-        if level["ordinal"] != index:
+        if (
+            isinstance(level["ordinal"], bool)
+            or not isinstance(level["ordinal"], int)
+            or level["ordinal"] != index
+        ):
             raise ValueError(f"{name}.ordinal must equal its declared ladder position")
         predecessor = None if index == 0 else normalized_levels[-1]["level_id"]
         if level["declared_predecessor_level_id"] != predecessor:
@@ -301,7 +314,9 @@ def normalize_convergence_campaign_spec(value: object) -> dict[str, Any]:
         "driver_identity": current_convergence_campaign_driver_identity(),
     }
     if len(_canonical_bytes(spec)) > MAX_CONVERGENCE_CAMPAIGN_SPEC_BYTES:
-        raise ValueError(f"convergence campaign exceeds {MAX_CONVERGENCE_CAMPAIGN_SPEC_BYTES} bytes")
+        raise ValueError(
+            f"convergence campaign exceeds {MAX_CONVERGENCE_CAMPAIGN_SPEC_BYTES} bytes"
+        )
     spec["spec_fingerprint"] = _fingerprint(spec)
     return spec
 

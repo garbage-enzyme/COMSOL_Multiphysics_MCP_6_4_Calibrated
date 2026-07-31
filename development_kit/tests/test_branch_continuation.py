@@ -641,7 +641,7 @@ def _continuation_policy(*, guard_window_m=0.5e-6, max_expansions=3,
     }
 
 
-def _multi_candidate_states():
+def _multi_candidate_states(*, include_later_state=False):
     normal = _state(0, 5.0e-6, None, coordinate_value=0.0)
     multi = _custom_state(
         1,
@@ -651,9 +651,10 @@ def _multi_candidate_states():
         coordinate_value=5.0,
         label="crossing-candidates",
     )
-    return build_continuation_states(
-        states_id="crossing-candidates", states=[normal, multi]
-    )
+    states = [normal, multi]
+    if include_later_state:
+        states.append(_state(2, 5.1e-6, "coord-1", coordinate_value=10.0))
+    return build_continuation_states(states_id="crossing-candidates", states=states)
 
 
 def _measured_continuity_evidence(states, *, row_index=1, tolerance=0.1e-6):
@@ -736,7 +737,11 @@ class TestBranchContinuationPlanning:
             states_id="measured-recovery", states=[normal, boundary, recovered]
         )
         recovered_plan = plan_branch_continuation(
-            recovered_states, _continuation_policy(guard_window_m=guard)
+            recovered_states,
+            _continuation_policy(
+                guard_window_m=guard,
+                stop_policy="stop_at_first_unresolved",
+            ),
         )
         recovery = recovered_plan["coordinate_transitions"][1]
         assert request["expansion_window_m"] == recovered["search_window_m"]
@@ -771,6 +776,49 @@ class TestBranchContinuationPlanning:
         assert transition["branch_recovered"] is False
         assert plan["scientific_disposition"] == "unresolved_at_declared_cap"
         assert plan["reason_code"] == "boundary_expansion_exhausted_at_declared_cap"
+
+    @pytest.mark.parametrize(
+        "policy_changes,flag,reason_code",
+        [
+            (
+                {"max_expansions": 0},
+                "expansion_count_exceeded",
+                "expansion_count_exceeded_at_declared_cap",
+            ),
+            (
+                {"max_total_window_m": 0.3e-6},
+                "expansion_exhausted",
+                "boundary_expansion_exhausted_at_declared_cap",
+            ),
+        ],
+    )
+    def test_boundary_expansion_stops_at_each_declared_resource_cap(
+        self, policy_changes, flag, reason_code
+    ):
+        normal = _state(0, 5.0e-6, None, coordinate_value=0.0)
+        boundary = _custom_state(
+            1,
+            [5.05e-6 + index * 0.05e-6 for index in range(7)],
+            [0.1, 0.2, 0.3, 0.5, 0.7, 0.85, 0.95],
+            "coord-0",
+            coordinate_value=5.0,
+            label=f"bounded-{flag}",
+        )
+        states = build_continuation_states(
+            states_id=f"bounded-{flag}", states=[normal, boundary]
+        )
+        policy = _continuation_policy(guard_window_m=0.2e-6)
+        policy.update(policy_changes)
+
+        plan = plan_branch_continuation(states, policy)
+        transition = plan["coordinate_transitions"][0]
+
+        assert transition["expansion_required"] is True
+        assert transition["expansion_requested"] is False
+        assert transition["expansion_window_m"] is None
+        assert transition[flag] is True
+        assert plan["scientific_disposition"] == "unresolved_at_declared_cap"
+        assert plan["reason_code"] == reason_code
 
     def test_multi_candidate_requires_hash_bound_measured_continuity(self):
         states = _multi_candidate_states()
@@ -825,6 +873,29 @@ class TestBranchContinuationPlanning:
         with pytest.raises(ValueError, match="not a measured candidate"):
             plan_branch_continuation(
                 states, _continuation_policy(continuity_evidence=[evidence])
+            )
+
+    def test_continuity_evidence_rejects_transition_replay_and_duplicates(self):
+        states = _multi_candidate_states(include_later_state=True)
+        evidence = _measured_continuity_evidence(states)
+        replayed = deepcopy(evidence)
+        replayed["transition_index"] = 1
+        replayed_body = dict(replayed)
+        replayed_body.pop("evidence_sha256")
+        replayed["evidence_sha256"] = _canonical_hash(replayed_body)
+
+        with pytest.raises(
+            ValueError,
+            match="multi-candidate state|measured candidate|bound measurements",
+        ):
+            plan_branch_continuation(
+                states,
+                _continuation_policy(continuity_evidence=[replayed]),
+            )
+        with pytest.raises(ValueError, match="duplicate continuity evidence"):
+            plan_branch_continuation(
+                states,
+                _continuation_policy(continuity_evidence=[evidence, deepcopy(evidence)]),
             )
 
     def test_stop_policy_stops_after_first_unresolved_transition(self):
@@ -930,6 +1001,12 @@ class TestBranchContinuationPlanning:
         assert plan["scientific_disposition"] == "residual"
         assert plan["reason_code"] == "branch_not_followed"
         assert plan["branch_followed_transition_count"] == 0
+        transition = plan["coordinate_transitions"][0]
+        request = transition["next_request_window_m"]
+        previous_peak = transition["previous_peak_wavelength_m"]
+        assert (request["lower_m"] + request["upper_m"]) / 2 == pytest.approx(
+            previous_peak
+        )
 
     def test_peak_beyond_guard_at_declared_cap_is_unresolved(self):
         states_input = _build_dispersive_states(3, shift=0.8e-6)
@@ -1119,6 +1196,27 @@ def test_public_tool_accepts_canonical_states_and_rejects_ambiguous_input():
     assert rejected["solver_started"] is False
 
 
+def test_public_tool_does_not_misclassify_internal_type_error_as_caller_rejection(
+    monkeypatch,
+):
+    import src.evidence.branch_continuation as branch_continuation_module
+
+    monkeypatch.setattr(
+        branch_continuation_module,
+        "build_continuation_states",
+        lambda **_kwargs: (_ for _ in ()).throw(TypeError("programming defect")),
+    )
+    server = FastMCP("branch-continuation-internal-error-test")
+    register_branch_continuation_tools(server)
+    result = server._tool_manager._tools["branch_continuation_plan"].fn(
+        continuation_policy={}, states_spec={}
+    )
+
+    assert result["success"] is False
+    assert result["reason_code"] == "continuation_planning_failed"
+    assert "programming defect" not in json.dumps(result)
+
+
 def test_public_branch_continuation_tool_never_constructs_a_comsol_client():
     code = """
 import mph
@@ -1163,6 +1261,41 @@ def test_self_rehashed_malformed_state_summary_still_fails_closed():
     malformed["states_sha256"] = _canonical_hash(states_body)
 
     with pytest.raises(ValueError, match="numeric"):
+        validate_continuation_states(malformed)
+
+
+def test_self_rehashed_noncanonical_states_id_fails_closed():
+    malformed = build_continuation_states(
+        states_id="dispersive", states=_build_dispersive_states(3, shift=0.1e-6)
+    )
+    malformed["states_id"] = "invalid states id"
+    states_body = dict(malformed)
+    states_body.pop("states_sha256")
+    malformed["states_sha256"] = _canonical_hash(states_body)
+
+    with pytest.raises(ValueError, match="states_id|noncanonical"):
+        validate_continuation_states(malformed)
+
+
+def test_self_rehashed_unmeasured_candidate_cannot_retain_metrics():
+    malformed = build_continuation_states(
+        states_id="dispersive", states=_build_dispersive_states(3, shift=0.1e-6)
+    )
+    state = malformed["states"][1]
+    candidate = state["candidate"]
+    assert candidate["fwhm_m"] is not None
+    assert candidate["quality_factor"] is not None
+    candidate["measurement_state"] = "not_measured"
+    candidate["peak_wavelength_m"] = None
+    candidate["peak_response_value"] = None
+    state_body = dict(state)
+    state_body.pop("state_sha256")
+    state["state_sha256"] = _canonical_hash(state_body)
+    states_body = dict(malformed)
+    states_body.pop("states_sha256")
+    malformed["states_sha256"] = _canonical_hash(states_body)
+
+    with pytest.raises(ValueError, match="not_measured|noncanonical"):
         validate_continuation_states(malformed)
 
 

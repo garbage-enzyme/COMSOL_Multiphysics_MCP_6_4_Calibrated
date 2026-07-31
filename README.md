@@ -37,10 +37,15 @@ release procedures remain in this repository's development kit.
 ## Client compatibility and deployment
 
 The installed FastMCP stdio server has been validated with Codex CLI and
-opencode. Its standard stdio configuration is expected to be compatible with
-Claude Code and Hermes Agent, but this project has not yet completed an
-end-to-end client test with either one. Community test reports and pull requests
-are welcome. Use the complete deployment guide for fresh installation, exact
+opencode. A Windows 11 acceptance run with Claude Code 2.1.220 completed stdio
+initialization, discovered all 67 tools in the tested `wave_optics` profile, and
+called `capabilities`, `comsol_status`, and `solver_status` successfully. The
+server exited cleanly with no solver lease or COMSOL process created. This is
+client transport, schema, discovery, and non-starting status compatibility—not
+licensed runtime acceptance: Claude did not call `comsol_start`, run a model,
+exercise the complete error surface, or prove start/solve/cleanup behavior.
+Hermes Agent remains configuration-level guidance without an end-to-end client
+test. Use the complete deployment guide for fresh installation, exact
 configuration paths, profile selection, restart behavior, and solver-free
 verification:
 
@@ -52,15 +57,15 @@ restart the client after changing the profile or package, and keep COMSOL tool
 calls serialized. Call `capabilities` to verify the deployed profile without
 starting COMSOL.
 
-The untested client configurations were derived from the official
+The checked-in client examples follow the official
 [Claude Code MCP documentation](https://code.claude.com/docs/en/mcp), Hermes
 [MCP documentation](https://github.com/NousResearch/hermes-agent/blob/main/website/docs/user-guide/features/mcp.md),
 and Hermes [client source](https://github.com/NousResearch/hermes-agent/blob/main/tools/mcp_tool.py).
-They are configuration-level compatibility guidance, not validation claims.
-A real client acceptance report should include `initialize`, `list_tools`, and
-`capabilities` readback without starting COMSOL. Treat live discovery, not a
-count copied from documentation, as the authority for the installed tool
-surface.
+An example is configuration guidance until its exact client path is exercised.
+A real client acceptance report should include `initialize`, live `list_tools`,
+and `capabilities` readback without starting COMSOL, then separately label any
+licensed start/solve/cleanup coverage. Treat live discovery, not a count copied
+from documentation, as the authority for the installed tool surface.
 
 ## Highlights
 
@@ -136,6 +141,13 @@ Control-plane responses from capabilities, solver ownership, durable jobs, and l
 The server fails closed when an external MPh/COMSOL owner or a valid lease is present. `solver_recover_stale_lease` only removes a lease that process identity evidence proves stale; it never terminates an unowned process.
 
 Durable sweep controls are `job_submit`, `job_status`, `job_tail`, `job_cancel`, and `job_resume`. Each job has its own ASCII-only runtime directory containing its immutable specification, state, CSV journal, checkpoint, and log. Resume accepts only matching, finite, successful rows. Cancellation reaches a terminal cancelled state only after worker/process cleanup and lease release are verified. This coordination is for a shared runtime directory on one host; it is not distributed execution.
+
+The interactive `mesh_convergence_study` helper also writes a manifest beside
+its CSV. Any resume or append to an existing journal requires
+`source_model_path`; the source hash, study, expressions, parameter setting,
+mesh identity, and each level's exact property map must match before a completed
+level can be skipped. CSV and checkpoint failures are terminal persistence
+outcomes for that level and never trigger another solve.
 
 For an adaptive spectrum, submit `job_type: "spectral_characterization"` with
 an explicit source/configuration identity, initial wavelength grid, expansion

@@ -5,15 +5,18 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from pathlib import Path
 import sys
 import threading
 import time
+from contextlib import ExitStack
+from pathlib import Path
 from typing import Any, Callable, Mapping
+
+from comsol_mcp.path_policy import pin_validated_reads, validated_read_pin
 
 from .process_control import contain_current_process_tree
 from .spectral_characterization import validate_spectral_driver_identity
-from .spectral_rows import completed_spectral_point_fingerprints, read_spectral_rows
+from .spectral_rows import completed_spectral_point_fingerprints
 from .store import JobStore, cancel_request_targets_attempt, process_identity
 
 
@@ -44,12 +47,15 @@ def _run(
     *,
     ownership_factory: Callable[[Path, str], Any] = _default_ownership_factory,
     client_factory: Callable[[dict[str, Any]], Any] = _default_client_factory,
-    collector_executor: Callable[[dict[str, Any], dict[str, Any], Path], Mapping[str, Any]] | None = None,
+    collector_executor: Callable[[dict[str, Any], dict[str, Any], Path], Mapping[str, Any]]
+    | None = None,
     telemetry_provider: Callable[[str, str, Any, Path, float], dict[str, Any]] | None = None,
     native_cancel_enabled: bool = True,
     fault_hook: Callable[[str, Mapping[str, Any]], Any] | None = None,
 ) -> int:
     """Run one worker attempt; injected boundaries keep process tests solver-free."""
+    if not isinstance(native_cancel_enabled, bool):
+        raise ValueError("native_cancel_enabled must be boolean")
     worker_started = time.monotonic()
     store = JobStore(Path(root))
     directory = store.job_dir(job_id)
@@ -58,11 +64,7 @@ def _run(
         raise ValueError("Spectral worker accepts only spectral_characterization jobs")
     validate_spectral_driver_identity(spec)
     identity = process_identity(os.getpid())
-    deadline = time.monotonic() + 3.0
-    while store.read_state(job_id).get("worker_pid") != identity["pid"]:
-        if time.monotonic() >= deadline:
-            raise RuntimeError("Control plane did not durably record the worker identity")
-        time.sleep(0.01)
+    store.bind_worker_identity(job_id, identity)
     contained = contain_current_process_tree()
     store.update_state(
         job_id,
@@ -92,8 +94,12 @@ def _run(
     pending_terminal: dict[str, Any] | None = None
     worker_error: Exception | None = None
     cleanup_errors: list[str] = []
+    client_cleared = False
+    lease_released = False
     source = Path(spec["source_model_path"])
+    source_pins = ExitStack()
     try:
+        source_pins.enter_context(pin_validated_reads((validated_read_pin(source, source.parent),)))
         if _sha256_file(source) != spec["source_model_sha256"]:
             raise RuntimeError("Immutable spectral source hash changed before client startup")
         completed_spectral_point_fingerprints(
@@ -116,7 +122,10 @@ def _run(
         model = client.load(str(source))
         model_name = str(model.name())
 
-        from comsol_mcp.jobs.resource_admission import ResourceStageAdapter, collect_resource_telemetry
+        from comsol_mcp.jobs.resource_admission import (
+            ResourceStageAdapter,
+            collect_resource_telemetry,
+        )
         from comsol_mcp.jobs.spectral_runner import run_spectral_characterization
         from comsol_mcp.jobs.validation_collectors import execute_validation_collector
         from comsol_mcp.jobs.worker import _record_native_cancel
@@ -125,9 +134,7 @@ def _run(
         rows_path = directory / "spectral_rows.jsonl"
 
         def completed_ids() -> set[str]:
-            return completed_spectral_point_fingerprints(
-                rows_path, spec, artifact_root=directory
-            )
+            return completed_spectral_point_fingerprints(rows_path, spec, artifact_root=directory)
 
         def sample(stage: str, point_id: str) -> dict[str, Any]:
             if telemetry_provider is not None:
@@ -139,7 +146,7 @@ def _run(
                 mesh = get_mesh_info(model)
                 if mesh.get("success"):
                     mesh_elements = mesh.get("mesh", {}).get("num_elements")
-            except Exception:
+            except Exception:  # noqa: S110 - optional telemetry must not fail work
                 pass
             return collect_resource_telemetry(
                 stage=stage,
@@ -147,9 +154,7 @@ def _run(
                 process_id=os.getpid(),
                 mesh_elements=mesh_elements,
                 elapsed_wall_seconds=time.monotonic() - worker_started,
-                durable_result_epoch=(
-                    rows_path.stat().st_mtime if rows_path.is_file() else None
-                ),
+                durable_result_epoch=(rows_path.stat().st_mtime if rows_path.is_file() else None),
             )
 
         resource = ResourceStageAdapter(
@@ -172,23 +177,13 @@ def _run(
             point = context.get("point")
             if not isinstance(point, Mapping):
                 raise ValueError("resource control point is unavailable")
-            decision = resource.evaluate(
-                stage="pre_solve", point_id=str(point["point_id"])
-            )
+            decision = resource.evaluate(stage="pre_solve", point_id=str(point["point_id"]))
             latest_resource_decision = decision
-            return {
-                "action": (
-                    "continue"
-                    if decision["action"] == "start_point"
-                    else "stop"
-                )
-            }
+            return {"action": ("continue" if decision["action"] == "start_point" else "stop")}
 
         def resource_after(row: Mapping[str, Any]) -> dict[str, Any]:
             nonlocal latest_resource_decision
-            decision = resource.evaluate(
-                stage="post_solve", point_id=str(row["point_id"])
-            )
+            decision = resource.evaluate(stage="post_solve", point_id=str(row["point_id"]))
             latest_resource_decision = decision
             return {
                 "action": (
@@ -204,9 +199,7 @@ def _run(
                     continue
                 from comsol_mcp.jobs.native_cancel_probe import request_native_cancel_once
 
-                _record_native_cancel(
-                    store, job_id, attempt, request_native_cancel_once()
-                )
+                _record_native_cancel(store, job_id, attempt, request_native_cancel_once())
                 return
 
         if native_cancel_enabled:
@@ -238,12 +231,8 @@ def _run(
             completed = len(completed_ids())
             current = store.read_state(job_id)["status"]
             if current == "smoke_running":
-                store.update_state(
-                    job_id, "smoke_validated", event="first_point_validated"
-                )
-                store.update_state(
-                    job_id, "running", event="adaptive_spectral_phase_started"
-                )
+                store.update_state(job_id, "smoke_validated", event="first_point_validated")
+                store.update_state(job_id, "running", event="adaptive_spectral_phase_started")
             store.update_state(
                 job_id,
                 patch={
@@ -263,9 +252,7 @@ def _run(
                     "row_sha256": row["row_sha256"],
                 },
             )
-            ownership.heartbeat(
-                model_path=str(source), refresh_server_processes=True
-            )
+            ownership.heartbeat(model_path=str(source), refresh_server_processes=True)
 
         if should_stop():
             store.record_cooperative_cancel_observed(
@@ -332,15 +319,14 @@ def _run(
         if client is not None:
             try:
                 client.clear()
+                client_cleared = True
             except Exception as exc:
                 cleanup_errors.append(f"client_clear:{type(exc).__name__}:{exc}")
             if getattr(client, "port", None):
                 try:
                     client.disconnect()
                 except Exception as exc:
-                    cleanup_errors.append(
-                        f"client_disconnect:{type(exc).__name__}:{exc}"
-                    )
+                    cleanup_errors.append(f"client_disconnect:{type(exc).__name__}:{exc}")
         if fault_hook is not None:
             try:
                 fault_hook("during_cleanup", {"job_id": job_id, "attempt": attempt})
@@ -349,22 +335,36 @@ def _run(
         if ownership is not None and lease_acquired:
             try:
                 release = ownership.release()
-                if not release.get("success"):
-                    cleanup_errors.append(f"lease_release:{json.dumps(release, ensure_ascii=False)}")
+                lease_released = bool(release.get("success"))
+                if not lease_released:
+                    cleanup_errors.append(
+                        f"lease_release:{json.dumps(release, ensure_ascii=False)}"
+                    )
             except Exception as exc:
                 cleanup_errors.append(f"lease_release:{type(exc).__name__}:{exc}")
-
-    if worker_error is None and _sha256_file(source) != spec["source_model_sha256"]:
-        worker_error = RuntimeError("Immutable spectral source hash changed after execution")
+        try:
+            if worker_error is None and _sha256_file(source) != spec["source_model_sha256"]:
+                worker_error = RuntimeError(
+                    "Immutable spectral source hash changed after execution"
+                )
+        finally:
+            source_pins.close()
     if cleanup_errors and worker_error is None:
         worker_error = RuntimeError("; ".join(cleanup_errors)[:2000])
     current = store.read_state(job_id)["status"]
     if worker_error is not None:
-        if current == "cancel_requested":
+        if current in {"cancel_requested", "cancelling"}:
             store.record_cooperative_cancel_observed(
-                job_id, attempt=attempt, message="Stopped between blocking operations"
+                job_id,
+                attempt=attempt,
+                message="Stopped between blocking operations",
+                worker_error={
+                    "type": type(worker_error).__name__,
+                    "message": str(worker_error),
+                    "cleanup_errors": cleanup_errors,
+                },
             )
-        elif current != "cancelling" and current not in {
+        elif current not in {
             "completed",
             "interrupted",
         }:
@@ -377,6 +377,11 @@ def _run(
                         "message": str(worker_error)[:2000],
                     },
                     "cleanup_errors": cleanup_errors,
+                    "cleanup": {
+                        "client_cleared": client_cleared,
+                        "lease_released": lease_released,
+                        "errors": cleanup_errors,
+                    },
                 },
                 event="worker_failed",
             )
@@ -388,15 +393,23 @@ def _run(
         return 1
     if pending_terminal is not None:
         current = store.read_state(job_id)["status"]
-        if current not in {"cancel_requested", "cancelling"}:
+        if current in {"cancel_requested", "cancelling"}:
+            store.record_cooperative_cancel_observed(
+                job_id,
+                attempt=attempt,
+                message="Stopped before terminal state publication",
+            )
+        else:
+            if current == "smoke_running" and pending_terminal["status"] == "completed":
+                store.update_state(job_id, "smoke_validated", event="durable_rows_revalidated")
             store.update_state(
                 job_id,
                 pending_terminal["status"],
                 patch={
                     **pending_terminal["patch"],
                     "cleanup": {
-                        "client_cleared": client is not None,
-                        "lease_released": lease_acquired,
+                        "client_cleared": client_cleared,
+                        "lease_released": lease_released,
                         "errors": [],
                     },
                 },

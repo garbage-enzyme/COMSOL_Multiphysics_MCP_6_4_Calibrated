@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any, Mapping
 
+from comsol_mcp.utils.immutability import deep_freeze, deep_thaw
+
 from .contracts import (
     SharedServerEndpoint,
     normalize_shared_server_endpoint,
@@ -21,8 +23,11 @@ class SharedServerAttachRequest:
     user_confirmed: bool
     feature_gate: dict[str, Any]
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "feature_gate", deep_freeze(self.feature_gate))
+
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        return deep_thaw(asdict(self))
 
 
 def normalize_shared_server_attach_request(

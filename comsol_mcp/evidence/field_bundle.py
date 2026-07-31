@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 import hashlib
 import json
 import math
 import re
+from copy import deepcopy
 from typing import Any, Mapping
-
 
 FIELD_EVIDENCE_REQUEST_SCHEMA = "comsol_mcp.field_evidence_request"
 FIELD_EVIDENCE_SCHEMA_VERSION = "1.1.0"
@@ -94,7 +93,11 @@ def _sha256(value: object, label: str) -> str:
 def _finite(value: object, label: str, *, positive: bool = False) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{label} must be numeric")
-    number = float(value)
+    try:
+        number = float(value)
+    except OverflowError as exc:
+        qualifier = "positive and finite" if positive else "finite"
+        raise ValueError(f"{label} must be {qualifier}") from exc
     if not math.isfinite(number) or (positive and number <= 0):
         qualifier = "positive and finite" if positive else "finite"
         raise ValueError(f"{label} must be {qualifier}")
@@ -440,11 +443,11 @@ def normalize_field_evidence_request(value: object) -> dict[str, Any]:
         "grid_point_count": grid_points,
         "visual_review_state": "visual_review_required",
     }
+    result["request_fingerprint"] = _fingerprint(result)
     if len(_canonical_bytes(result)) > MAX_FIELD_REQUEST_BYTES:
         raise ValueError(
             f"field-evidence request exceeds {MAX_FIELD_REQUEST_BYTES} bytes"
         )
-    result["request_fingerprint"] = _fingerprint(result)
     return deepcopy(result)
 
 

@@ -3,8 +3,20 @@
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+
+
+def _cancel_and_join_thread(thread, *, timeout: float = 2.0) -> None:
+    if thread is None:
+        return
+    cancel = getattr(thread, "cancel", None)
+    if callable(cancel):
+        cancel()
+    if thread.ident is not None and thread is not threading.current_thread():
+        thread.join(timeout=timeout)
+        assert not thread.is_alive(), f"session worker {thread.name!r} did not stop"
 
 
 @pytest.fixture()
@@ -28,7 +40,7 @@ def permissive_session_ownership(monkeypatch, tmp_path):
             }
 
         def heartbeat(self, **_kwargs):
-            return {"success": True}
+            return True
 
         def release(self):
             self.releases += 1
@@ -40,10 +52,13 @@ def permissive_session_ownership(monkeypatch, tmp_path):
     ownership = PermissiveOwnership()
     monkeypatch.setattr(manager, "_ownership", ownership)
     manager._client = None
+    manager._client_status = None
+    manager._client_status_client = None
     manager._reusable_client = None
     manager._reusable_client_kind = None
     manager._models = {}
     manager._model_paths = {}
+    manager._model_source_identities = {}
     manager._model_revisions = {}
     manager._model_cleanup_paths = {}
     manager._current_model = None
@@ -60,30 +75,46 @@ def permissive_session_ownership(monkeypatch, tmp_path):
     manager._start_watchdog = None
     manager._owns_solver_lease = False
     yield manager
-    if manager._start_thread is not None:
-        manager._start_thread.cancel()
-    if manager._start_watchdog is not None:
-        manager._start_watchdog.cancel()
+    _cancel_and_join_thread(manager._start_watchdog)
+    _cancel_and_join_thread(manager._start_thread)
+
+
+def test_session_thread_cleanup_waits_for_an_entered_timer_callback():
+    entered = threading.Event()
+    release = threading.Event()
+
+    def callback():
+        entered.set()
+        assert release.wait(timeout=1)
+
+    timer = threading.Timer(0, callback)
+    timer.start()
+    assert entered.wait(timeout=1)
+    release.set()
+
+    _cancel_and_join_thread(timer)
+
+    assert not timer.is_alive()
 
 
 class TestVersioning:
     """Tests for version naming utilities."""
-    
+
     def test_generate_version_name(self):
         from src.utils.versioning import generate_version_name
-        
+
         result = generate_version_name("model.mph")
         assert result.startswith("model_")
         assert result.endswith(".mph")
         assert len(result) > len("model.mph")
-    
+
     def test_generate_version_name_no_extension(self):
         from src.utils.versioning import generate_version_name
-        
+
         result = generate_version_name("model")
         assert result.startswith("model_")
         assert result.endswith(".mph")
-    
+
     def test_generate_version_path(self, tmp_path):
         from src.utils.versioning import generate_version_path
 
@@ -100,6 +131,16 @@ class TestVersioning:
 
         assert result == tmp_path / "model" / "model_latest.mph"
         assert result.parent.is_dir()
+
+    def test_version_paths_reject_dot_model_names_and_avoid_same_second_collisions(self, tmp_path):
+        from src.utils.versioning import generate_version_path
+
+        first = generate_version_path("model.mph", base_path=tmp_path)
+        second = generate_version_path("model.mph", base_path=tmp_path)
+
+        assert first != second
+        with pytest.raises(ValueError, match="safe model directory"):
+            generate_version_path("..", base_path=tmp_path)
 
     def test_default_model_storage_uses_runtime_root(self, monkeypatch, tmp_path):
         from src.utils.versioning import get_model_directory
@@ -125,31 +166,31 @@ class TestVersioning:
 
         assert set(result) == {str(older), str(newer)}
         assert str(latest) not in result
-    
+
     def test_parse_version_info_valid(self):
         from src.utils.versioning import parse_version_info
-        
+
         result = parse_version_info("model_20260215_143022.mph")
         assert result is not None
         assert result["base_name"] == "model"
         assert result["timestamp"] == "20260215_143022"
-    
+
     def test_parse_version_info_invalid(self):
         from src.utils.versioning import parse_version_info
-        
+
         result = parse_version_info("model.mph")
         assert result is None
-        
+
         result = parse_version_info("model_20260215.mph")
         assert result is None
 
 
 class TestSessionManager:
     """Tests for session manager (without actual COMSOL)."""
-    
+
     def test_session_manager_singleton(self):
         from src.tools.session import SessionManager
-        
+
         sm1 = SessionManager()
         sm2 = SessionManager()
         assert sm1 is sm2
@@ -163,22 +204,61 @@ class TestSessionManager:
         assert all(manager is managers[0] for manager in managers)
         assert "_models" in managers[0].__dict__
         assert "_start_lock" in managers[0].__dict__
-    
+
     def test_session_manager_initial_state(self):
         from src.tools.session import SessionManager
-        
+
         sm = SessionManager()
         assert sm.client is None
         assert not sm.is_connected
         assert sm.current_model is None
         assert sm.models == {}
-    
+
     def test_get_status_disconnected(self):
         from src.tools.session import SessionManager
-        
+
         sm = SessionManager()
         status = sm.get_status()
         assert status["connected"] is False
+
+    def test_lifecycle_transitions_publish_fresh_control_plane_status(
+        self,
+        monkeypatch,
+        permissive_session_ownership,
+    ):
+        import src.tools.session as session_module
+        from src.tools.session_status import get_session_status
+
+        sm = session_module.SessionManager()
+        entered = threading.Event()
+        release = threading.Event()
+
+        class FakeClient:
+            version = "6.4"
+            cores = 2
+            standalone = True
+
+            def clear(self):
+                return None
+
+        def create_client(**_kwargs):
+            entered.set()
+            assert release.wait(timeout=2)
+            return FakeClient()
+
+        monkeypatch.setattr(session_module.mph, "Client", create_client)
+        monkeypatch.setattr(session_module.mph_session, "client", None)
+
+        assert sm.start(cores=2)["starting"] is True
+        assert entered.wait(timeout=2)
+        assert get_session_status() == {"connected": False, "starting": True}
+
+        release.set()
+        sm._start_thread.join(timeout=2)
+        assert get_session_status() == {"connected": True, "starting": False}
+
+        assert sm.disconnect()["success"] is True
+        assert get_session_status() == {"connected": False, "starting": False}
 
     def test_get_status_normalizes_model_paths_for_mcp_json(self, tmp_path):
         import json
@@ -201,6 +281,7 @@ class TestSessionManager:
         sm._client = FakeClient()
         sm._models = {"model": FakeModel()}
         sm._model_paths = {"model": str(tmp_path / "model.mph")}
+        sm._model_source_identities = {}
         sm._current_model = "model"
         try:
             status = sm.get_status()
@@ -214,6 +295,141 @@ class TestSessionManager:
             sm._model_paths = {}
             sm._model_revisions = {}
             sm._current_model = None
+
+    def test_status_snapshots_model_state_under_the_lifecycle_lock(self):
+        from src.tools.session import SessionManager
+
+        entered = threading.Event()
+        release = threading.Event()
+        mutation_done = threading.Event()
+
+        class FakeClient:
+            version = "6.4"
+            cores = 4
+            standalone = True
+
+        class BlockingModels(dict):
+            def __iter__(self):
+                entered.set()
+                assert release.wait(timeout=2)
+                return super().__iter__()
+
+        sm = SessionManager()
+        client = FakeClient()
+        with sm._start_lock:
+            sm._client = client
+            sm._client_status = sm._client_status_snapshot(client)
+            sm._client_status_client = client
+            sm._models = BlockingModels({"first": object(), "second": object()})
+            sm._model_paths = {}
+            sm._model_source_identities = {}
+            sm._model_revisions = {}
+            sm._current_model = "first"
+        status_result = {}
+
+        status_thread = threading.Thread(
+            target=lambda: status_result.update(sm.get_status()),
+        )
+        status_thread.start()
+        assert entered.wait(timeout=2)
+
+        mutation_thread = threading.Thread(
+            target=lambda: (
+                sm.set_current_model("second"),
+                mutation_done.set(),
+            )
+        )
+        mutation_thread.start()
+        assert mutation_done.wait(timeout=0.05) is False
+
+        release.set()
+        status_thread.join(timeout=2)
+        mutation_thread.join(timeout=2)
+
+        assert not status_thread.is_alive()
+        assert not mutation_thread.is_alive()
+        assert status_result["current_model"] == "first"
+        assert [item["name"] for item in status_result["models"]] == [
+            "first",
+            "second",
+        ]
+        assert sm.current_model == "second"
+        with sm._start_lock:
+            sm._client = None
+            sm._client_status = None
+            sm._client_status_client = None
+            sm._models = {}
+            sm._model_paths = {}
+            sm._model_revisions = {}
+            sm._current_model = None
+
+    def test_model_registration_preserves_loaded_source_identity_after_path_replacement(
+        self, tmp_path
+    ):
+        from src.tools.session import SessionManager
+
+        source = tmp_path / "model.mph"
+        source.write_bytes(b"loaded bytes")
+
+        class FakeModel:
+            def name(self):
+                return "model"
+
+            def file(self):
+                return str(source)
+
+        sm = SessionManager()
+        sm._models = {}
+        sm._model_paths = {}
+        sm._model_source_identities = {}
+        sm._model_revisions = {}
+        sm.add_model(FakeModel())
+        identity = sm.get_model_source_identity("model")
+        source.write_bytes(b"replacement bytes")
+
+        assert identity == sm.get_model_source_identity("model")
+        assert identity["capture"] == "model_registration"
+        assert identity["source_sha256"] != SessionManager._hash_model_source(source)
+
+        sm._models = {}
+        sm._model_paths = {}
+        sm._model_source_identities = {}
+        sm._model_revisions = {}
+
+    def test_connected_status_uses_cached_client_metadata_only(self):
+        from src.tools.session import SessionManager
+
+        class PoisonClient:
+            def __getattribute__(self, name):
+                if name in {"version", "cores", "standalone"}:
+                    raise AssertionError("status must not dereference the live client")
+                return super().__getattribute__(name)
+
+        sm = SessionManager()
+        client = PoisonClient()
+        with sm._start_lock:
+            sm._client = client
+            sm._client_status = {
+                "version": "6.4",
+                "cores": 4,
+                "standalone": True,
+            }
+            sm._client_status_client = client
+            sm._models = {}
+            sm._model_paths = {}
+            sm._model_revisions = {}
+            sm._current_model = None
+
+        status = sm.get_status()
+
+        assert status["connected"] is True
+        assert status["version"] == "6.4"
+        assert status["cores"] == 4
+        assert status["standalone"] is True
+        with sm._start_lock:
+            sm._client = None
+            sm._client_status = None
+            sm._client_status_client = None
 
     def test_disconnect_releases_client(self):
         from src.tools.session import SessionManager
@@ -367,7 +583,9 @@ class TestSessionManager:
         assert sm.get_status()["connected"] is False
         assert client.calls == ["clear", "disconnect"]
 
-    def test_concurrent_start_calls_create_exactly_one_client(self, monkeypatch, permissive_session_ownership):
+    def test_concurrent_start_calls_create_exactly_one_client(
+        self, monkeypatch, permissive_session_ownership
+    ):
         import src.tools.session as session_module
 
         sm = session_module.SessionManager()
@@ -407,7 +625,9 @@ class TestSessionManager:
         assert sm.client is not None
         sm.reset()
 
-    def test_reset_discards_client_that_finishes_starting_late(self, monkeypatch, permissive_session_ownership):
+    def test_reset_discards_client_that_finishes_starting_late(
+        self, monkeypatch, permissive_session_ownership
+    ):
         import src.tools.session as session_module
 
         sm = session_module.SessionManager()
@@ -481,7 +701,9 @@ class TestSessionManager:
 
         sm.disconnect()
 
-    def test_start_does_not_forward_unsupported_products(self, monkeypatch, permissive_session_ownership):
+    def test_start_does_not_forward_unsupported_products(
+        self, monkeypatch, permissive_session_ownership
+    ):
         import src.tools.session as session_module
 
         captured = {}
@@ -788,6 +1010,155 @@ class TestSessionManager:
         assert result["success"] is False
         assert "still starting" in result["error"]
         assert called is False
+
+    def test_connect_rejects_pending_local_start_cleanup_before_loading_mph(
+        self, monkeypatch, permissive_session_ownership
+    ):
+        import src.tools.session as session_module
+
+        sm = session_module.SessionManager()
+        sm._start_cleanup_pending = True
+        monkeypatch.setattr(
+            session_module,
+            "_load_mph",
+            lambda: pytest.fail("pending cleanup must be rejected before loading MPh"),
+        )
+        try:
+            result = sm.connect(port=2036)
+        finally:
+            sm._start_cleanup_pending = False
+
+        assert result["success"] is False
+        assert result["cleanup_pending"] is True
+
+    def test_connect_rolls_back_client_when_lease_heartbeat_is_unverified(
+        self, monkeypatch, permissive_session_ownership
+    ):
+        import src.tools.session as session_module
+
+        sm = session_module.SessionManager()
+
+        class RemoteClient:
+            standalone = False
+            version = "6.4"
+
+            def __init__(self):
+                self.calls = []
+
+            def clear(self):
+                self.calls.append("clear")
+
+            def disconnect(self):
+                self.calls.append("disconnect")
+
+        client = RemoteClient()
+        monkeypatch.setattr(sm._ownership, "heartbeat", lambda **_kwargs: False)
+        monkeypatch.setattr(
+            session_module,
+            "_load_mph",
+            lambda: (
+                SimpleNamespace(Client=lambda **_kwargs: client),
+                SimpleNamespace(client=None),
+            ),
+        )
+
+        result = sm.connect(port=2036)
+
+        assert result["success"] is False
+        assert "heartbeat" in result["error"]
+        assert client.calls == ["disconnect"]
+        assert sm.client is None
+        assert sm._reusable_client is client
+        assert sm._owns_solver_lease is False
+        assert permissive_session_ownership._ownership.releases == 1
+
+    def test_disconnect_retains_client_and_lease_until_retirement_is_verified(
+        self, permissive_session_ownership
+    ):
+        import src.tools.session as session_module
+
+        sm = session_module.SessionManager()
+
+        class RemoteClient:
+            standalone = False
+
+            def __init__(self):
+                self.calls = []
+                self.fail_disconnect = True
+
+            def clear(self):
+                self.calls.append("clear")
+
+            def disconnect(self):
+                self.calls.append("disconnect")
+                if self.fail_disconnect:
+                    raise RuntimeError("disconnect uncertain")
+
+        client = RemoteClient()
+        sm._client = client
+        sm._owns_solver_lease = True
+
+        first = sm.disconnect()
+
+        assert first["success"] is False
+        assert first["cleanup_pending"] is True
+        assert sm.client is client
+        assert sm._owns_solver_lease is True
+        assert permissive_session_ownership._ownership.releases == 0
+
+        client.fail_disconnect = False
+        second = sm.disconnect()
+
+        assert second["success"] is True
+        assert client.calls == ["clear", "disconnect", "clear", "disconnect"]
+        assert sm.client is None
+        assert sm._owns_solver_lease is False
+        assert permissive_session_ownership._ownership.releases == 1
+
+    def test_cancelled_start_retires_exact_client_only_once_after_failure(
+        self, monkeypatch, permissive_session_ownership
+    ):
+        import src.tools.session as session_module
+
+        sm = session_module.SessionManager()
+
+        class RemoteClient:
+            standalone = False
+            version = "6.4"
+
+            def __init__(self):
+                self.calls = []
+
+            def clear(self):
+                self.calls.append("clear")
+
+            def disconnect(self):
+                self.calls.append("disconnect")
+
+        client = RemoteClient()
+        monkeypatch.setattr(
+            session_module,
+            "_load_mph",
+            lambda: (
+                SimpleNamespace(Client=lambda **_kwargs: client),
+                SimpleNamespace(client=None),
+            ),
+        )
+
+        def fail_heartbeat(**_kwargs):
+            sm._start_cancel_requested = True
+            raise RuntimeError("heartbeat failed")
+
+        monkeypatch.setattr(sm._ownership, "heartbeat", fail_heartbeat)
+        sm._start_attempt_id = "test-attempt"
+        sm._starting = True
+
+        sm._start_worker("test-attempt", {})
+
+        assert client.calls == ["clear", "disconnect"]
+        assert sm.client is None
+        assert sm._owns_solver_lease is False
+        assert permissive_session_ownership._ownership.releases == 1
 
     def test_start_preflight_refusal_is_terminal_without_mph_client(
         self, monkeypatch, permissive_session_ownership

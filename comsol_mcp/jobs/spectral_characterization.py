@@ -5,8 +5,8 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-from pathlib import Path, PurePosixPath
 import re
+from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
 
 from comsol_mcp.build_identity import get_build_identity
@@ -20,13 +20,13 @@ from comsol_mcp.evidence.spectral_characterization import (
 from .resource_admission import normalize_resource_policy
 from .store import JOB_SCHEMA_VERSION
 
-
 MAX_INITIAL_GRID_POINTS = 257
 MAX_STAGE_POINTS = 257
 MAX_REFINEMENT_STAGES = 8
 MAX_WINDOW_EXPANSIONS = 8
 MAX_SPECTRAL_JOB_SPEC_BYTES = 512 * 1024
 MAX_COLLECTOR_INPUT_BYTES = 64 * 1024
+MAX_TOP_AIR_DOMAIN_IDS = 512
 SPECTRAL_JOB_DRIVER_VERSION = "1.0.0"
 
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
@@ -347,7 +347,30 @@ def _normalize_collector(value: object) -> dict[str, Any]:
             raise ValueError(f"collector.inputs.{field} must be a bounded nonempty expression")
     selection = inputs.get("top_air_selection")
     domains = inputs.get("top_air_domain_ids")
-    if selection is None and not domains:
+    if selection is not None:
+        if not isinstance(selection, str) or not _TAG.fullmatch(selection):
+            raise ValueError("collector.inputs.top_air_selection must be one exact tag")
+        inputs["top_air_selection"] = selection
+    if domains is not None:
+        if (
+            not isinstance(domains, list)
+            or not domains
+            or len(domains) > MAX_TOP_AIR_DOMAIN_IDS
+            or any(
+                isinstance(domain, bool)
+                or not isinstance(domain, int)
+                or domain <= 0
+                for domain in domains
+            )
+        ):
+            raise ValueError(
+                "collector.inputs.top_air_domain_ids must be a bounded nonempty "
+                "list of positive integers"
+            )
+        if len(set(domains)) != len(domains):
+            raise ValueError("collector.inputs.top_air_domain_ids must be unique")
+        inputs["top_air_domain_ids"] = sorted(domains)
+    if selection is None and domains is None:
         raise ValueError("collector.inputs requires top_air_selection or top_air_domain_ids")
     coordinate_range = inputs["top_air_coordinate_range"]
     if not isinstance(coordinate_range, dict) or set(coordinate_range) != {"x", "y", "z"}:
@@ -503,12 +526,12 @@ def normalize_spectral_characterization_job_spec(raw_spec: object) -> dict[str, 
         "continue_on_error": continue_on_error,
         "driver_identity": current_spectral_driver_identity(),
     }
+    spec["spec_fingerprint"] = _fingerprint(spec)
     encoded = _canonical_bytes(spec)
     if len(encoded) > MAX_SPECTRAL_JOB_SPEC_BYTES:
         raise ValueError(
             f"spectral characterization job exceeds {MAX_SPECTRAL_JOB_SPEC_BYTES} bytes"
         )
-    spec["spec_fingerprint"] = _fingerprint(spec)
     return spec
 
 

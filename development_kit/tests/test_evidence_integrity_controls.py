@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 
 import pytest
-
 from src.evidence.integrity_controls import (
     DISABLED_CHECK_WARNING,
     DISABLED_CHECK_WARNING_CODE,
@@ -18,9 +17,9 @@ from src.evidence.integrity_controls import (
     load_evidence_integrity_status,
     warning_fields,
 )
+from src.operation_arbiter import guard_tool_call
 from src.tools.capabilities import get_capabilities
 from src.tools.profiles import ProfileSelection
-from src.operation_arbiter import guard_tool_call
 
 
 def _selection() -> ProfileSelection:
@@ -118,6 +117,45 @@ def test_malformed_ambiguous_or_unknown_settings_fail_closed(tmp_path, payload, 
     assert status["settings_path_included"] is False
 
 
+def test_missing_settings_path_is_not_disclosed_in_failure_content(tmp_path):
+    path = tmp_path / "private-missing-evidence-settings.json"
+
+    status = load_evidence_integrity_status({EVIDENCE_SETTINGS_ENV: str(path)})
+
+    serialized = json.dumps(status, ensure_ascii=False, sort_keys=True)
+    escaped_path = json.dumps(str(path), ensure_ascii=False)[1:-1]
+    assert status["success"] is False
+    assert status["settings_path_included"] is False
+    assert escaped_path not in serialized
+    assert path.name not in serialized
+
+
+def test_degraded_project_settings_disable_strict_verification_and_emit_warning(monkeypatch):
+    import src.evidence.integrity_controls as integrity_controls_module
+
+    project = integrity_controls_module.load_settings({})
+    monkeypatch.delenv(EVIDENCE_SETTINGS_ENV, raising=False)
+    monkeypatch.setattr(integrity_controls_module, "load_settings", lambda: project)
+    monkeypatch.setattr(
+        integrity_controls_module,
+        "settings_status",
+        lambda: {
+            "success": True,
+            "configuration_state": "degraded",
+            "reason_code": "settings_invalid",
+            "settings_errors": [{"reason_code": "settings_invalid"}],
+        },
+    )
+
+    status = load_evidence_integrity_status()
+
+    assert status["success"] is False
+    assert status["configuration_state"] == "degraded"
+    assert status["strict_verification_active"] is False
+    assert status["warning_codes"] == [INVALID_SETTINGS_WARNING_CODE]
+    assert warning_fields(status)["strictly_verified"] is False
+
+
 def test_capabilities_report_effective_checks_without_exposing_settings_path(tmp_path, monkeypatch):
     path = tmp_path / "private-name-settings.json"
     _write_settings(path, {"summary_claim_verification": False})
@@ -134,9 +172,7 @@ def test_capabilities_report_effective_checks_without_exposing_settings_path(tmp
     assert capability["hashes_prove_physical_correctness"] is False
 
 
-def test_disabled_check_warning_propagates_to_affected_tool_responses(
-    tmp_path, monkeypatch
-):
+def test_disabled_check_warning_propagates_to_affected_tool_responses(tmp_path, monkeypatch):
     path = tmp_path / "evidence-settings.json"
     _write_settings(path, {"artifact_chain_verification": False})
     monkeypatch.setenv(EVIDENCE_SETTINGS_ENV, str(path))
@@ -156,16 +192,12 @@ def test_disabled_check_warning_propagates_to_affected_tool_responses(
     assert result["success"] is True
     assert result["strictly_verified"] is False
     assert result["disabled_evidence_checks"] == ["artifact_chain_verification"]
-    assert result["evidence_integrity_warning_codes"] == [
-        DISABLED_CHECK_WARNING_CODE
-    ]
+    assert result["evidence_integrity_warning_codes"] == [DISABLED_CHECK_WARNING_CODE]
     assert result["evidence_integrity_warnings"] == [DISABLED_CHECK_WARNING]
     assert result["path_policy"]["accepted"] is True
 
 
-def test_capabilities_and_status_keep_their_structured_discovery_contract(
-    tmp_path, monkeypatch
-):
+def test_capabilities_and_status_keep_their_structured_discovery_contract(tmp_path, monkeypatch):
     path = tmp_path / "evidence-settings.json"
     _write_settings(path, {"artifact_chain_verification": False})
     monkeypatch.setenv(EVIDENCE_SETTINGS_ENV, str(path))
@@ -179,7 +211,5 @@ def test_capabilities_and_status_keep_their_structured_discovery_contract(
     )
     result = guarded()
 
-    assert result["evidence_integrity"]["disabled_checks"] == [
-        "artifact_chain_verification"
-    ]
+    assert result["evidence_integrity"]["disabled_checks"] == ["artifact_chain_verification"]
     assert "disabled_evidence_checks" not in result

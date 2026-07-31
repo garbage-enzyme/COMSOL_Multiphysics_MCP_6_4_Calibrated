@@ -15,27 +15,27 @@
     {
       "path": "development_kit/scripts/run_real_release_gate.py",
       "match_count": 16,
-      "match_sha256": "8bdb4410c74247b42d5f786a76e050f733c0b2391579b98865fe978bc18151a7"
+      "match_sha256": "6dd572f19c5910044324810f6e55e5b741f7ce812182d40ab2e34055448dbccb"
     },
     {
       "path": "development_kit/tests/test_durable_job_control_plane.py",
       "match_count": 1,
-      "match_sha256": "0e3d6d4504bdf6f1d276159cb066348662eb01090ffe63ff969c6ca1d6aea1d9"
+      "match_sha256": "8d32311b76e79249f6433551a5f347cc7ea0cbe3aa3d4e165792debbfbc84e30"
     },
     {
       "path": "development_kit/tests/test_reference_power_acceptance.py",
       "match_count": 1,
-      "match_sha256": "8da5ddec0ac9deb9152f04d2645fde63d9fafbe6337d0f58e1ed7f2b3555a180"
+      "match_sha256": "9056bba1570062fae6f7a91ed0f73d2e937b9a41431243259abf909c32ed8fd9"
     },
     {
       "path": "development_kit/tests/test_reference_power_runner.py",
       "match_count": 1,
-      "match_sha256": "b3c34326a3fbaa3d7dbdc2d6ae7889800c76973a15756110b73e63dcdc7f0646"
+      "match_sha256": "ec2c7ed9a0fffe5c2efbbb2c793ed1ae26f96b86b205406c781113dc03494ca2"
     },
     {
       "path": "comsol_mcp/evidence/reference_power_acceptance.py",
       "match_count": 31,
-      "match_sha256": "18aa9c5e8451072800679c6af222a8f2a044bd61170cd54b0f8a2f460c6470a3"
+      "match_sha256": "a9702626b0d24a6442b1717c33a843149c0331a02cc5e238e126da9086125b60"
     }
   ]
 }

@@ -14,7 +14,6 @@ from typing import Any
 
 from .semantic_contracts import PUBLIC_LIMITS, WORKER_PROTOCOL_SCHEMA_VERSION
 
-
 MAXIMUM_REQUEST_BYTES = 16_384
 TOKEN_ENVIRONMENT_VARIABLE = "COMSOL_SEMANTIC_SESSION_TOKEN"
 
@@ -83,6 +82,12 @@ class _RequestHandler(socketserver.StreamRequestHandler):
     server: "_WorkerServer"
 
     def handle(self) -> None:
+        try:
+            self._handle_bounded()
+        finally:
+            self.server.state.capacity.release()
+
+    def _handle_bounded(self) -> None:
         self.connection.settimeout(PUBLIC_LIMITS["query_deadline_seconds"])
         raw = self.rfile.readline(MAXIMUM_REQUEST_BYTES + 1)
         if len(raw) > MAXIMUM_REQUEST_BYTES or not raw.endswith(b"\n"):
@@ -104,14 +109,7 @@ class _RequestHandler(socketserver.StreamRequestHandler):
         if not isinstance(request_id, str) or not request_id or len(request_id) > 128:
             self._write(_response(None, success=False, error={"code": "invalid_request_id", "message": "request_id is required"}))
             return
-        if not self.server.state.capacity.acquire(blocking=False):
-            self._write(_response(request_id, success=False, error={"code": "busy", "message": "worker queue is full"}))
-            return
-        try:
-            with self.server.state.active:
-                self._dispatch(request_id, request)
-        finally:
-            self.server.state.capacity.release()
+        self._dispatch(request_id, request)
 
     def _dispatch(self, request_id: str, request: dict[str, Any]) -> None:
         operation = request.get("operation")
@@ -132,12 +130,23 @@ class _RequestHandler(socketserver.StreamRequestHandler):
                 response = _response(request_id, success=False, error={"code": "invalid_retrieval_mode", "message": "retrieval_mode is unsupported"})
             else:
                 try:
-                    payload = self.server.state.query(
-                        query.strip(), limit, filters=filters, retrieval_mode=retrieval_mode
-                    )
+                    with self.server.state.active:
+                        payload = self.server.state.query(
+                            query.strip(), limit, filters=filters, retrieval_mode=retrieval_mode
+                        )
                     response = _response(request_id, success=True, **payload, status=self.server.state.status())
                 except ValueError as exc:
                     response = _response(request_id, success=False, error={"code": "invalid_arguments", "message": str(exc)})
+                except Exception as exc:
+                    self.server.state.last_error = f"{type(exc).__name__}: backend query failed"
+                    response = _response(
+                        request_id,
+                        success=False,
+                        error={
+                            "code": "backend_failure",
+                            "message": "semantic backend query failed",
+                        },
+                    )
         else:
             response = _response(request_id, success=False, error={"code": "unknown_operation", "message": "operation is unsupported"})
 
@@ -157,7 +166,25 @@ class _RequestHandler(socketserver.StreamRequestHandler):
             os._exit(74)
 
     def _write(self, response: dict[str, Any]) -> None:
-        encoded = json.dumps(response, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode("utf-8") + b"\n"
+        try:
+            encoded = json.dumps(
+                response,
+                ensure_ascii=False,
+                allow_nan=False,
+                separators=(",", ":"),
+            ).encode("utf-8") + b"\n"
+        except (TypeError, ValueError):
+            encoded = json.dumps(
+                _response(
+                    response.get("request_id"),
+                    success=False,
+                    error={
+                        "code": "invalid_response",
+                        "message": "worker response is not finite JSON",
+                    },
+                ),
+                separators=(",", ":"),
+            ).encode("utf-8") + b"\n"
         if len(encoded) > PUBLIC_LIMITS["maximum_response_bytes"]:
             encoded = json.dumps(_response(response.get("request_id"), success=False, error={"code": "response_too_large", "message": "response exceeds public limit"}), separators=(",", ":")).encode("utf-8") + b"\n"
         self.wfile.write(encoded)
@@ -177,6 +204,41 @@ class _WorkerServer(socketserver.ThreadingTCPServer):
         self.state = state
         super().__init__(address, _RequestHandler)
 
+    def process_request(self, request: Any, client_address: Any) -> None:
+        if not self.state.capacity.acquire(blocking=False):
+            try:
+                # Windows resets a TCP connection closed with unread request bytes,
+                # which can discard the bounded busy response. Drain one bounded
+                # line without parsing or authenticating it before replying.
+                request.settimeout(0.1)
+                remaining = MAXIMUM_REQUEST_BYTES + 1
+                while remaining > 0:
+                    block = request.recv(min(4096, remaining))
+                    if not block or b"\n" in block:
+                        break
+                    remaining -= len(block)
+                request.sendall(
+                    json.dumps(
+                        _response(
+                            None,
+                            success=False,
+                            error={"code": "busy", "message": "worker queue is full"},
+                        ),
+                        separators=(",", ":"),
+                    ).encode("utf-8")
+                    + b"\n"
+                )
+            except OSError:
+                pass
+            finally:
+                self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except Exception:
+            self.state.capacity.release()
+            raise
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -185,6 +247,7 @@ def main() -> None:
     parser.add_argument("--fault", choices=[
         "startup_hang", "query_hang", "invalid_json", "oversized_json",
         "wrong_request_id", "crash_before_response", "crash_after_response",
+        "stderr_flood",
     ])
     parser.add_argument("--query-delay", type=float, default=0.0)
     parser.add_argument("--backend", choices=["fake", "hybrid"], default="fake")
@@ -218,6 +281,9 @@ def main() -> None:
             "port": int(server.server_address[1]),
         }
         print(json.dumps(handshake, separators=(",", ":")), flush=True)
+        if args.fault == "stderr_flood":
+            sys.stderr.buffer.write(b"x" * (1024 * 1024))
+            sys.stderr.buffer.flush()
         server.serve_forever(poll_interval=0.1)
 
 

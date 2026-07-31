@@ -11,21 +11,27 @@ from comsol_mcp.durable import canonical_sha256_v1
 
 
 def _package_files(package_root: Path) -> list[Path]:
-    return sorted(
-        (
-            path
-            for path in package_root.rglob("*")
-            if path.is_file()
+    files = []
+    for path in package_root.rglob("*"):
+        is_junction = getattr(path, "is_junction", lambda: False)
+        if path.is_symlink() or is_junction():
+            raise ValueError("package content must not contain symlinks or junctions")
+        if (
+            path.is_file()
             and "__pycache__" not in path.parts
             and path.suffix.casefold() not in {".pyc", ".pyo"}
-        ),
-        key=lambda path: path.relative_to(package_root).as_posix(),
-    )
+        ):
+            files.append(path)
+    return sorted(files, key=lambda path: path.relative_to(package_root).as_posix())
 
 
 def package_content_sha256(package_root: str | Path | None = None) -> str:
     """Hash sorted relative paths and bytes for all shipped package files."""
-    root = Path(package_root).resolve() if package_root is not None else Path(__file__).resolve().parent
+    candidate = Path(package_root) if package_root is not None else Path(__file__).parent
+    is_junction = getattr(candidate, "is_junction", lambda: False)
+    if candidate.is_symlink() or is_junction():
+        raise ValueError("package_root must not be a symlink or junction")
+    root = candidate.resolve()
     if not root.is_dir():
         raise ValueError("package_root must be a directory")
     files = _package_files(root)
@@ -49,8 +55,8 @@ def get_build_identity(package_root: str | Path | None = None) -> dict[str, Any]
         "package_name": "comsol-mcp",
         "package_version": __version__,
         "package_content_sha256": package_content_sha256(package_root),
-        "content_scope": "sorted_relative_package_paths_and_file_bytes",
-        "generated_files_included": False,
+        "content_scope": "sorted_relative_non_cache_package_paths_and_file_bytes",
+        "generated_files_included": True,
         "paths_included": False,
     }
     return {**body, "build_identity_sha256": canonical_sha256_v1(body)}

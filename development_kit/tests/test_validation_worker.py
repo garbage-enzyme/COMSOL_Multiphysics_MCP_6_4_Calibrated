@@ -173,12 +173,13 @@ def test_validation_worker_resource_refusal_is_resumable_without_false_row(tmp_p
     spec = normalize_validation_matrix_spec(_raw_spec(source, points=1))
     store, job_id = _create_job(ascii_root / "jobs", spec)
     ownership = FakeOwnership()
+    client = FakeClient()
 
     code = _run(
         str(store.root),
         job_id,
         ownership_factory=lambda *_args: ownership,
-        client_factory=lambda _spec: FakeClient(),
+        client_factory=lambda _spec: client,
         collector_executor=lambda *_args: (_ for _ in ()).throw(AssertionError("must not solve")),
         telemetry_provider=_telemetry(mesh_elements=101),
         native_cancel_enabled=False,
@@ -190,6 +191,7 @@ def test_validation_worker_resource_refusal_is_resumable_without_false_row(tmp_p
     assert state["last_error"]["type"] == "ResourceAdmissionStop"
     assert not (store.job_dir(job_id) / "matrix_rows.jsonl").exists()
     assert ownership.released
+    assert client.cleared
 
 
 def test_manager_routes_validation_submit_and_resume_to_dedicated_worker(tmp_path, ascii_root, monkeypatch):
@@ -369,3 +371,36 @@ def test_validation_worker_observes_attempt_bound_cancel_before_client_start(tmp
     assert calls == []
     assert state["status"] == "cancel_requested"
     assert state["cancel"]["cooperative_observation"]["target_attempt"] == 1
+
+
+def test_validation_transition_error_remains_bound_to_concurrent_cancel(
+    tmp_path, ascii_root, monkeypatch
+):
+    source = tmp_path / "fixture.mph"
+    source.write_bytes(b"model")
+    spec = normalize_validation_matrix_spec(_raw_spec(source, points=1))
+    store, job_id = _create_job(ascii_root / "jobs", spec)
+    identity = process_identity(os.getpid())
+    real_update = JobStore.update_state
+
+    def cancel_before_validation_transition(self, target_job_id, *args, **kwargs):
+        if target_job_id == job_id and kwargs.get("event") == "first_point_validated":
+            self.request_cancel(job_id, requester_identity=identity)
+        return real_update(self, target_job_id, *args, **kwargs)
+
+    monkeypatch.setattr(JobStore, "update_state", cancel_before_validation_transition)
+    code = _run(
+        str(store.root),
+        job_id,
+        ownership_factory=lambda *_args: FakeOwnership(),
+        client_factory=lambda _spec: FakeClient(),
+        collector_executor=_collector,
+        telemetry_provider=_telemetry(),
+        native_cancel_enabled=False,
+    )
+
+    state = store.read_state(job_id)
+    assert code == 1
+    assert state["status"] == "cancel_requested"
+    assert state["cancel"]["worker_error"]["type"] == "ValueError"
+    assert "Invalid job state transition" in state["cancel"]["worker_error"]["message"]

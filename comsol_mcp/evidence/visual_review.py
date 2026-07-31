@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 import math
-from pathlib import PurePosixPath
 import re
+from copy import deepcopy
+from datetime import datetime, timezone
+from pathlib import PurePosixPath
 from typing import Any, Mapping
 
 from .contracts import canonical_json_bytes, canonical_sha256
-
 
 VISUAL_CAPABILITY_SCHEMA = "comsol_mcp.visual_reviewer_capability"
 VISUAL_REQUEST_SCHEMA = "comsol_mcp.visual_review_request"
@@ -54,6 +54,19 @@ _VIEW_FIELDS = {
     "x_range", "y_range", "coordinate_unit", "color_limits", "color_scale",
     "quantity", "quantity_unit", "wavelength_m", "config_sha256",
 }
+_SHARED_VIEW_FIELDS = (
+    "slice_axis",
+    "slice_value",
+    "slice_unit",
+    "grid_shape",
+    "x_range",
+    "y_range",
+    "coordinate_unit",
+    "color_limits",
+    "color_scale",
+    "quantity",
+    "quantity_unit",
+)
 _REQUEST_FIELDS = {
     "schema_name", "schema_version", "request_id", "configuration_sha256",
     "artifacts", "views", "required_artifact_ids", "numerical_summary",
@@ -122,6 +135,19 @@ def _hash(value: Any, label: str) -> str:
     text = _text(value, label).lower()
     if not _HEX64.fullmatch(text):
         raise ValueError(f"{label} must be exactly 64 hexadecimal characters")
+    return text
+
+
+def _utc_timestamp(value: Any, label: str) -> str:
+    text = _text(value, label)
+    if not _TIMESTAMP.fullmatch(text):
+        raise ValueError(f"{label} must be UTC ISO-8601")
+    try:
+        parsed = datetime.fromisoformat(text[:-1] + "+00:00")
+    except ValueError as exc:
+        raise ValueError(f"{label} must be UTC ISO-8601") from exc
+    if parsed.tzinfo != timezone.utc:
+        raise ValueError(f"{label} must be UTC ISO-8601")
     return text
 
 
@@ -350,11 +376,26 @@ def normalize_codex_capability(
 def validate_reviewer_capability(value: Any) -> dict[str, Any]:
     item = _mapping(value, "reviewer_capability")
     _unknown(item, _CAPABILITY_FIELDS, "reviewer_capability")
+    if set(item) != _CAPABILITY_FIELDS:
+        missing = sorted(_CAPABILITY_FIELDS - set(item))
+        raise ValueError(f"reviewer_capability is missing {missing}")
     if item.get("schema_name") != VISUAL_CAPABILITY_SCHEMA or item.get("schema_version") != VISUAL_REVIEW_SCHEMA_VERSION:
         raise ValueError("reviewer_capability schema is unsupported")
     client = _text(item.get("client"), "reviewer_capability.client", identifier=True)
-    if item.get("transport") not in {"file_attachment", "view_image_tool"}:
+    transport = item.get("transport")
+    if transport not in {"file_attachment", "view_image_tool"}:
         raise ValueError("reviewer_capability.transport is unsupported")
+    if "provider" not in item or "model" not in item:
+        raise ValueError("reviewer_capability provider and model fields are required")
+    if transport == "file_attachment":
+        _text(item["provider"], "reviewer_capability.provider", identifier=True)
+        _text(item["model"], "reviewer_capability.model")
+    elif item["provider"] is not None or item["model"] is not None:
+        raise ValueError("view_image_tool capability provider and model must be null")
+    if client == "opencode" and transport != "file_attachment":
+        raise ValueError("opencode capability requires file_attachment transport")
+    if client == "codex" and transport != "view_image_tool":
+        raise ValueError("codex capability requires view_image_tool transport")
     for field in (
         "image_input", "original_resolution_support", "host_capability_confirmed",
         "delivery_confirmed", "scientific_review_eligible",
@@ -377,6 +418,55 @@ def validate_reviewer_capability(value: Any) -> dict[str, Any]:
         raise ValueError("reviewer_capability.delivered_artifacts is oversized or duplicated")
     host_evidence = _mapping(item.get("host_evidence"), "reviewer_capability.host_evidence")
     _unknown(host_evidence, _HOST_EVIDENCE_FIELDS, "reviewer_capability.host_evidence")
+    if set(host_evidence) != _HOST_EVIDENCE_FIELDS:
+        raise ValueError("reviewer_capability host evidence fields are incomplete")
+    evidence_kind = _text(
+        host_evidence.get("evidence_kind"),
+        "reviewer_capability.host_evidence.evidence_kind",
+        identifier=True,
+    )
+    metadata_image_input = host_evidence.get("metadata_image_input")
+    if metadata_image_input is not None and not isinstance(metadata_image_input, bool):
+        raise ValueError("reviewer_capability host evidence metadata flag is invalid")
+    for field in (
+        "transport_available",
+        "image_content_results_confirmed",
+        "model_identity_confirmed",
+    ):
+        if not isinstance(host_evidence.get(field), bool):
+            raise ValueError(f"reviewer_capability host evidence {field} must be boolean")
+    if evidence_kind == "opencode_provider_metadata_and_input_part":
+        if client != "opencode" or transport != "file_attachment":
+            raise ValueError("reviewer_capability host evidence kind conflicts with transport")
+        if not isinstance(metadata_image_input, bool):
+            raise ValueError("opencode host evidence requires a metadata image-input flag")
+        expected_host_confirmed = bool(
+            metadata_image_input
+            and host_evidence["transport_available"]
+            and host_evidence["model_identity_confirmed"]
+        )
+        if item["image_input"] != metadata_image_input:
+            raise ValueError("reviewer_capability image input conflicts with host evidence")
+    elif evidence_kind == "codex_view_image_tool_result":
+        if client != "codex" or transport != "view_image_tool":
+            raise ValueError("reviewer_capability host evidence kind conflicts with transport")
+        if metadata_image_input is not None or not host_evidence["model_identity_confirmed"]:
+            raise ValueError("codex host evidence identity fields are inconsistent")
+        expected_host_confirmed = host_evidence["transport_available"]
+        if item["image_input"] != expected_host_confirmed:
+            raise ValueError("reviewer_capability image input conflicts with host evidence")
+    else:
+        raise ValueError("reviewer_capability host evidence kind is unsupported")
+    expected_delivery = bool(
+        expected_host_confirmed
+        and host_evidence["image_content_results_confirmed"]
+        and refs
+    )
+    if (
+        item["host_capability_confirmed"] != expected_host_confirmed
+        or item["delivery_confirmed"] != expected_delivery
+    ):
+        raise ValueError("reviewer_capability top-level claims conflict with host evidence")
     if item.get("delivery_confirmed") and (not item.get("host_capability_confirmed") or not refs):
         raise ValueError("delivery_confirmed requires host capability and delivered artifacts")
     calibration = _calibration(item.get("calibration"))
@@ -416,6 +506,9 @@ def _view(value: Any, label: str) -> dict[str, Any]:
     color_scale = item.get("color_scale")
     if color_scale not in {"linear", "log"}:
         raise ValueError(f"{label}.color_scale must be linear or log")
+    color_limits = pair("color_limits", ordered=True)
+    if color_scale == "log" and any(limit <= 0.0 for limit in color_limits):
+        raise ValueError(f"{label}.color_limits must be positive for a log scale")
     return {
         "artifact_id": _text(item.get("artifact_id"), f"{label}.artifact_id", identifier=True),
         "slice_axis": item["slice_axis"],
@@ -425,7 +518,7 @@ def _view(value: Any, label: str) -> dict[str, Any]:
         "x_range": pair("x_range", ordered=True),
         "y_range": pair("y_range", ordered=True),
         "coordinate_unit": _text(item.get("coordinate_unit"), f"{label}.coordinate_unit"),
-        "color_limits": pair("color_limits", ordered=True),
+        "color_limits": color_limits,
         "color_scale": color_scale,
         "quantity": _text(item.get("quantity"), f"{label}.quantity"),
         "quantity_unit": _text(item.get("quantity_unit"), f"{label}.quantity_unit"),
@@ -457,6 +550,13 @@ def build_visual_review_request(
     normalized_views = [_view(item, f"views[{index}]") for index, item in enumerate(views)]
     if {item["artifact_id"] for item in normalized_views} != set(ids):
         raise ValueError("views must describe every artifact exactly once")
+    if len(normalized_views) > 1:
+        reference = normalized_views[0]
+        for field in _SHARED_VIEW_FIELDS:
+            if any(view[field] != reference[field] for view in normalized_views[1:]):
+                raise ValueError(
+                    f"paired visual views must share comparison field {field}"
+                )
     normalized_config = _hash(configuration_sha256, "configuration_sha256")
     if any(view["config_sha256"] != normalized_config for view in normalized_views):
         raise ValueError("every view must reference the request configuration_sha256")
@@ -506,6 +606,13 @@ def validate_visual_review_request(value: Any) -> dict[str, Any]:
     normalized_views = [_view(value, f"visual_review_request.views[{index}]") for index, value in enumerate(views)]
     if len(normalized_views) != len(ids) or {view["artifact_id"] for view in normalized_views} != set(ids):
         raise ValueError("visual_review_request.views must describe every artifact exactly once")
+    if len(normalized_views) > 1:
+        reference = normalized_views[0]
+        for field in _SHARED_VIEW_FIELDS:
+            if any(view[field] != reference[field] for view in normalized_views[1:]):
+                raise ValueError(
+                    f"visual_review_request paired views differ in comparison field {field}"
+                )
     if any(view["config_sha256"] != item.get("configuration_sha256") for view in normalized_views):
         raise ValueError("visual_review_request view configuration does not match the request")
     if item.get("required_artifact_ids") != ids:
@@ -599,7 +706,7 @@ def build_visual_review_receipt(
         "uncertainties": _strings(uncertainties, "uncertainties", MAX_FINDINGS),
         "rejected_claims": _strings(rejected_claims, "rejected_claims", MAX_FINDINGS),
         "prior_review_exposure": prior_review_exposure,
-        "timestamp": _text(timestamp, "timestamp"),
+        "timestamp": _utc_timestamp(timestamp, "timestamp"),
         "inspection_status": "performed" if visual_inspection_performed else "not_performed",
         "status": status,
         "incomplete_reasons": reasons,
@@ -623,33 +730,104 @@ def build_visual_review_receipt(
 def validate_visual_review_receipt(value: Any) -> dict[str, Any]:
     item = _mapping(value, "visual_review_receipt")
     _unknown(item, _RECEIPT_FIELDS, "visual_review_receipt")
+    if set(item) != _RECEIPT_FIELDS:
+        raise ValueError("visual_review_receipt fields are incomplete")
     if item.get("schema_name") != VISUAL_RECEIPT_SCHEMA or item.get("schema_version") != VISUAL_REVIEW_SCHEMA_VERSION:
         raise ValueError("visual_review_receipt schema is unsupported")
     reviewer = _mapping(item.get("reviewer"), "visual_review_receipt.reviewer")
     _unknown(reviewer, _REVIEWER_FIELDS, "visual_review_receipt.reviewer")
+    if set(reviewer) != _REVIEWER_FIELDS:
+        missing = sorted(_REVIEWER_FIELDS - set(reviewer))
+        raise ValueError(f"visual_review_receipt.reviewer is missing {missing}")
+    reviewer_client = _text(
+        reviewer.get("client"), "visual_review_receipt.reviewer.client", identifier=True
+    )
+    _text(
+        reviewer.get("session_id"),
+        "visual_review_receipt.reviewer.session_id",
+        identifier=True,
+    )
+    if reviewer_client == "codex":
+        if reviewer.get("provider") is not None or reviewer.get("model") is not None:
+            raise ValueError("codex visual reviewer provider and model must be null")
+    else:
+        _text(
+            reviewer.get("provider"),
+            "visual_review_receipt.reviewer.provider",
+            identifier=True,
+        )
+        _text(reviewer.get("model"), "visual_review_receipt.reviewer.model")
     for field in ("visual_inspection_performed", "prior_review_exposure"):
         if not isinstance(item.get(field), bool):
             raise ValueError(f"visual_review_receipt.{field} must be boolean")
     if item.get("numerical_policy_authority") is not False:
         raise ValueError("visual review cannot have numerical policy authority")
-    if not _TIMESTAMP.fullmatch(_text(item.get("timestamp"), "visual_review_receipt.timestamp")):
-        raise ValueError("visual_review_receipt.timestamp must be UTC ISO-8601")
+    _utc_timestamp(item.get("timestamp"), "visual_review_receipt.timestamp")
     if item.get("status") not in {"visual_review_required", "visual_review_complete"}:
         raise ValueError("visual_review_receipt.status is unsupported")
     _hash(item.get("request_sha256"), "visual_review_receipt.request_sha256")
     _hash(item.get("capability_sha256"), "visual_review_receipt.capability_sha256")
-    [_artifact_ref(ref, f"visual_review_receipt.received_artifacts[{index}]") for index, ref in enumerate(item.get("received_artifacts", []))]
-    [_finding(finding, f"visual_review_receipt.findings[{index}]") for index, finding in enumerate(item.get("findings", []))]
+    received_raw = item.get("received_artifacts")
+    if not isinstance(received_raw, list) or len(received_raw) > MAX_ARTIFACTS:
+        raise ValueError("visual_review_receipt.received_artifacts is oversized")
+    received = [
+        _artifact_ref(ref, f"visual_review_receipt.received_artifacts[{index}]")
+        for index, ref in enumerate(received_raw)
+    ]
+    if len({ref["artifact_id"] for ref in received}) != len(received):
+        raise ValueError("visual_review_receipt.received_artifacts is duplicated")
+    findings_raw = item.get("findings")
+    if not isinstance(findings_raw, list) or len(findings_raw) > MAX_FINDINGS:
+        raise ValueError("visual_review_receipt.findings is oversized")
+    findings = [
+        _finding(finding, f"visual_review_receipt.findings[{index}]")
+        for index, finding in enumerate(findings_raw)
+    ]
     _strings(item.get("uncertainties"), "visual_review_receipt.uncertainties", MAX_FINDINGS)
     _strings(item.get("rejected_claims"), "visual_review_receipt.rejected_claims", MAX_FINDINGS)
     _strings(item.get("incomplete_reasons"), "visual_review_receipt.incomplete_reasons", 16)
     host = _mapping(item.get("host_capability_evidence"), "visual_review_receipt.host_capability_evidence")
     _unknown(host, _RECEIPT_HOST_FIELDS, "visual_review_receipt.host_capability_evidence")
+    if set(host) != _RECEIPT_HOST_FIELDS:
+        raise ValueError("visual_review_receipt host capability evidence is incomplete")
     if not isinstance(host.get("delivery_confirmed"), bool) or not isinstance(host.get("scientific_review_eligible"), bool):
         raise ValueError("visual_review_receipt host capability booleans are invalid")
-    [_artifact_ref(ref, f"visual_review_receipt.host_capability_evidence.delivered_artifacts[{index}]") for index, ref in enumerate(host.get("delivered_artifacts", []))]
-    if item.get("status") == "visual_review_complete" and item.get("incomplete_reasons"):
-        raise ValueError("complete visual review cannot contain incomplete reasons")
+    if host.get("capability_state") not in {
+        "unavailable", "host_capability_confirmed", "delivery_confirmed"
+    } or host.get("transport") not in {"file_attachment", "view_image_tool"}:
+        raise ValueError("visual_review_receipt host capability state is invalid")
+    delivered_raw = host.get("delivered_artifacts")
+    if not isinstance(delivered_raw, list) or len(delivered_raw) > MAX_ARTIFACTS:
+        raise ValueError("visual_review_receipt host delivered artifacts are oversized")
+    delivered = [
+        _artifact_ref(
+            ref,
+            f"visual_review_receipt.host_capability_evidence.delivered_artifacts[{index}]",
+        )
+        for index, ref in enumerate(delivered_raw)
+    ]
+    if len({ref["artifact_id"] for ref in delivered}) != len(delivered):
+        raise ValueError("visual_review_receipt host delivered artifacts are duplicated")
+    expected_inspection = (
+        "performed" if item["visual_inspection_performed"] else "not_performed"
+    )
+    if item.get("inspection_status") != expected_inspection:
+        raise ValueError("visual_review_receipt inspection status is inconsistent")
+    if item.get("status") == "visual_review_complete":
+        delivered_by_id = {ref["artifact_id"]: ref["sha256"] for ref in delivered}
+        prerequisites = bool(
+            item["visual_inspection_performed"]
+            and host["capability_state"] == "delivery_confirmed"
+            and host["delivery_confirmed"]
+            and host["scientific_review_eligible"]
+            and received
+            and findings
+            and isinstance(host.get("calibration_id"), str)
+            and host["calibration_id"]
+            and all(delivered_by_id.get(ref["artifact_id"]) == ref["sha256"] for ref in received)
+        )
+        if not prerequisites or item.get("incomplete_reasons"):
+            raise ValueError("complete visual review does not satisfy its prerequisites")
     supplied = _hash(item.get("contract_sha256"), "visual_review_receipt.contract_sha256")
     unhashed = dict(item); unhashed.pop("contract_sha256", None)
     if supplied != _visual_contract_sha256(unhashed):
@@ -681,8 +859,26 @@ def evaluate_dual_visual_review(
         reasons.append("review_clients_not_distinct")
     if first["prior_review_exposure"] or second["prior_review_exposure"]:
         reasons.append("blind_review_contaminated")
-    if first["received_artifacts"] != second["received_artifacts"]:
+    first_artifacts = {
+        (item["artifact_id"], item["sha256"]) for item in first["received_artifacts"]
+    }
+    second_artifacts = {
+        (item["artifact_id"], item["sha256"]) for item in second["received_artifacts"]
+    }
+    if first_artifacts != second_artifacts:
         reasons.append("artifact_sets_differ")
+    expected_artifacts = {
+        (item["artifact_id"], item["sha256"]) for item in request["artifacts"]
+    }
+    if first_artifacts != expected_artifacts or second_artifacts != expected_artifacts:
+        reasons.append("receipt_artifacts_do_not_match_request")
+    expected_questions = set(request["questions"])
+    if any(
+        {finding["question"] for finding in receipt["findings"]}
+        != expected_questions
+        for receipt in (first, second)
+    ):
+        reasons.append("receipt_findings_do_not_cover_request")
     if first["status"] != "visual_review_complete" or second["status"] != "visual_review_complete":
         reasons.append("one_or_more_reviews_incomplete")
     if reasons:

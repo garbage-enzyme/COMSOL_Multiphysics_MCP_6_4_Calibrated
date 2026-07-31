@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
-import os
-from pathlib import Path
 import threading
+from pathlib import Path
 from typing import Any, Mapping
 
 from comsol_mcp.settings import settings_environment
+
 from .semantic_contracts import PUBLIC_LIMITS
 from .semantic_process import SemanticWorkerManager
-
 
 SEMANTIC_ROOT_ENV = "COMSOL_SEMANTIC_ROOT"
 SEMANTIC_LEXICAL_ENV = "COMSOL_SEMANTIC_LEXICAL_INDEX"
@@ -21,9 +21,10 @@ DEFAULT_LEXICAL_INDEX = Path("D:/comsol_docs_fts/manuals.sqlite3")
 
 
 def _ascii_absolute(value: str | Path, label: str) -> Path:
-    path = Path(value).expanduser().resolve()
+    path = Path(value).expanduser()
     if not path.is_absolute():
         raise ValueError(f"{label} must be absolute")
+    path = path.resolve()
     try:
         str(path).encode("ascii")
     except UnicodeEncodeError as exc:
@@ -66,12 +67,27 @@ def _lightweight_deployment_identity(configuration: Mapping[str, Any]) -> dict[s
     try:
         root = Path(str(configuration["root"]))
         pointer = json.loads((root / "current.json").read_text(encoding="utf-8"))
-        manifest = json.loads((Path(pointer["index_path"]) / "manifest.json").read_text(encoding="utf-8"))
+        if not isinstance(pointer, dict):
+            raise TypeError("current pointer must be a JSON object")
+        index = _ascii_absolute(pointer["index_path"], "current pointer index path")
+        try:
+            index.relative_to((root / "indexes").resolve())
+        except ValueError as exc:
+            raise ValueError(
+                "current pointer index path is outside the deployment index root"
+            ) from exc
+        manifest_bytes = (index / "manifest.json").read_bytes()
+        manifest_sha256 = hashlib.sha256(manifest_bytes).hexdigest()
+        manifest = json.loads(manifest_bytes.decode("utf-8"))
+        if not isinstance(manifest, dict):
+            raise TypeError("index manifest must be a JSON object")
         model = json.loads((Path(str(configuration["model_path"])) / "model_manifest.json").read_text(encoding="utf-8"))
-    except (OSError, KeyError, TypeError, json.JSONDecodeError) as exc:
+        if not isinstance(model, dict):
+            raise TypeError("model manifest must be a JSON object")
+    except (OSError, KeyError, TypeError, ValueError, UnicodeError, json.JSONDecodeError) as exc:
         return {"readable": False, "error": f"{type(exc).__name__}: {exc}"}
     matches = (
-        pointer.get("manifest_sha256")
+        pointer.get("manifest_sha256") == manifest_sha256
         and pointer.get("build_id") == manifest.get("build_id")
         and pointer.get("model_fingerprint") == manifest.get("model_fingerprint")
         and model.get("model_sha256") == manifest.get("model_fingerprint")

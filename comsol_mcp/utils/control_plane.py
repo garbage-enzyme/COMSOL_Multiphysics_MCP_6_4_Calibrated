@@ -2,19 +2,20 @@
 
 from __future__ import annotations
 
-from collections import Counter, deque
+import logging
 import math
 import threading
 import time
+from collections import Counter, deque
 from typing import Any, Callable
-
 
 CONTROL_PLANE_SCHEMA_VERSION = "1.0.0"
 CONTROL_PLANE_WINDOW_SIZE = 256
+logger = logging.getLogger(__name__)
 
 
 def _outcome(result: dict[str, Any]) -> str:
-    if result.get("success", True):
+    if result.get("success") is True:
         return "success"
     error = result.get("error")
     error_code = error.get("code") if isinstance(error, dict) else None
@@ -130,9 +131,31 @@ def attach_control_plane_evidence(
     return enriched
 
 
-def measured_call(operation: str, callback: Callable[[], dict[str, Any]]) -> dict[str, Any]:
+def measured_call(
+    operation: str,
+    callback: Callable[[], dict[str, Any]],
+    *,
+    metrics: ControlPlaneMetrics = control_plane_metrics,
+) -> dict[str, Any]:
     started = time.perf_counter()
-    return attach_control_plane_evidence(operation, started, callback())
+    try:
+        result = callback()
+    except Exception as exc:
+        latency = time.perf_counter() - started
+        try:
+            metrics.record(
+                operation,
+                latency,
+                {
+                    "success": False,
+                    "error_type": type(exc).__name__,
+                    "error": {"code": "callback_exception"},
+                },
+            )
+        except Exception:
+            logger.exception("Failed to record a control-plane callback exception")
+        raise
+    return attach_control_plane_evidence(operation, started, result, metrics=metrics)
 
 
 __all__ = [

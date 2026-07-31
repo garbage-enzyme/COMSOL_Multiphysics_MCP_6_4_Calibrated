@@ -5,7 +5,6 @@ from __future__ import annotations
 from copy import deepcopy
 
 import pytest
-
 from src.evidence.power_audit import (
     normalize_declared_plane_flux,
     normalize_internal_absorption_consistency,
@@ -80,6 +79,53 @@ def test_declared_plane_flux_fails_closed_on_ambiguous_inputs(mutation, match):
         normalize_declared_plane_flux(value)
 
 
+@pytest.mark.parametrize("sign", [1.0, [1], {"sign": 1}])
+def test_declared_plane_flux_requires_strict_integer_signs(sign):
+    value = _flux_spec()
+    value["reflected"]["positive_power_sign"] = sign
+
+    with pytest.raises(ValueError, match="exactly -1 or 1"):
+        normalize_declared_plane_flux(value)
+
+
+def test_power_audit_entry_points_reject_pair_iterables_instead_of_coercing_them():
+    with pytest.raises(ValueError, match="JSON object"):
+        normalize_declared_plane_flux(list(_flux_spec().items()))
+    with pytest.raises(ValueError, match="JSON object"):
+        normalize_internal_absorption_consistency(list(_cross_section().items()), None)
+
+
+def test_declared_plane_flux_rejects_nonfinite_derived_results_and_huge_integers():
+    overflow = _flux_spec()
+    overflow["incident"]["raw_power_w"] = -1.0e-308
+    overflow["reflected"]["raw_power_w"] = 1.0e308
+    huge = _flux_spec()
+    huge["incident"]["raw_power_w"] = 10**10_000
+
+    with pytest.raises(ValueError, match="finite derived values"):
+        normalize_declared_plane_flux(overflow)
+    with pytest.raises(ValueError, match="finite number"):
+        normalize_declared_plane_flux(huge)
+
+
+@pytest.mark.parametrize(
+    "plane,key,value",
+    [
+        ("incident", "raw_power_w", float("nan")),
+        ("reflected", "raw_power_w", float("inf")),
+        ("transmitted", "plane_coordinate_m", -float("inf")),
+        ("incident", "normal", [0.0, float("nan"), 1.0]),
+        ("reflected", "normal", [float("inf"), 0.0, 0.0]),
+    ],
+)
+def test_declared_plane_flux_rejects_nonfinite_solver_outputs(plane, key, value):
+    spec = _flux_spec()
+    spec[plane][key] = value
+
+    with pytest.raises(ValueError, match="finite number"):
+        normalize_declared_plane_flux(spec)
+
+
 def _cross_section():
     return {
         "expression": "ewfd.sigmaAbs",
@@ -133,7 +179,9 @@ def test_missing_cross_section_is_not_requested_and_missing_volume_is_unknown():
         ("volume", "incident_power_w", 0.0, "strictly positive"),
     ],
 )
-def test_internal_consistency_rejects_incompatible_or_unusable_normalizations(target, key, value, match):
+def test_internal_consistency_rejects_incompatible_or_unusable_normalizations(
+    target, key, value, match
+):
     cross = _cross_section()
     volume = _volume_loss()
     chosen = cross if target == "cross" else volume
@@ -141,3 +189,55 @@ def test_internal_consistency_rejects_incompatible_or_unusable_normalizations(ta
 
     with pytest.raises(ValueError, match=match):
         normalize_internal_absorption_consistency(deepcopy(cross), deepcopy(volume))
+
+
+@pytest.mark.parametrize(
+    "target,key,value",
+    [
+        ("cross", "value_m2", float("nan")),
+        ("cross", "unit_cell_area_m2", float("inf")),
+        ("volume", "value_w", -float("inf")),
+        ("volume", "incident_power_w", float("nan")),
+    ],
+)
+def test_internal_consistency_rejects_nonfinite_solver_outputs(target, key, value):
+    cross = _cross_section()
+    volume = _volume_loss()
+    chosen = cross if target == "cross" else volume
+    chosen[key] = value
+
+    with pytest.raises(ValueError, match="finite number"):
+        normalize_internal_absorption_consistency(cross, volume)
+
+
+@pytest.mark.parametrize(
+    "target,key,value,match",
+    [
+        ("cross", "value_m2", 1.0e308, "cross-section normalization"),
+        ("volume", "value_w", 1.0e308, "volume-loss normalization"),
+    ],
+)
+def test_internal_consistency_rejects_nonfinite_derived_normalizations(target, key, value, match):
+    cross = _cross_section()
+    volume = _volume_loss()
+    chosen = cross if target == "cross" else volume
+    chosen[key] = value
+    if target == "cross":
+        cross["unit_cell_area_m2"] = 1.0e-308
+    else:
+        volume["incident_power_w"] = 1.0e-308
+
+    with pytest.raises(ValueError, match=match):
+        normalize_internal_absorption_consistency(cross, volume)
+
+
+def test_internal_consistency_rejects_nonfinite_derived_residuals():
+    cross = _cross_section()
+    cross["value_m2"] = 1.0e308
+    cross["unit_cell_area_m2"] = 1.0
+    volume = _volume_loss()
+    volume["value_w"] = -1.0e308
+    volume["incident_power_w"] = 1.0
+
+    with pytest.raises(ValueError, match="finite residuals"):
+        normalize_internal_absorption_consistency(cross, volume)

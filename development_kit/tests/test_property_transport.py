@@ -5,10 +5,10 @@ from __future__ import annotations
 import math
 
 import pytest
-
 from src.tools.property_transport import (
     MAX_LIST_ITEMS,
     MAX_PROPERTY_KEYS,
+    MAX_SCALAR_BYTES,
     normalize_property_value,
     validate_properties,
     validate_property_name,
@@ -31,6 +31,20 @@ def test_properties_accept_scalar_vector_and_matrix_values():
 
 @pytest.mark.parametrize("value", [math.nan, math.inf, -math.inf])
 def test_properties_reject_nonfinite_numbers(value):
+    with pytest.raises(ValueError, match="finite"):
+        validate_properties({"value": value})
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        [1.0, math.inf],
+        [1.0, -math.inf],
+        [[1.0, math.nan]],
+        [[math.inf], [-math.inf]],
+    ],
+)
+def test_properties_reject_nested_nonfinite_numbers(value):
     with pytest.raises(ValueError, match="finite"):
         validate_properties({"value": value})
 
@@ -63,3 +77,13 @@ def test_properties_enforce_key_and_list_limits():
         validate_properties({f"key{i}": i for i in range(MAX_PROPERTY_KEYS + 1)})
     with pytest.raises(ValueError, match="at most 4096 items"):
         validate_properties({"values": [0] * (MAX_LIST_ITEMS + 1)})
+
+
+def test_property_scalars_are_bounded_before_aggregate_serialization():
+    assert normalize_property_value("x" * MAX_SCALAR_BYTES) == "x" * MAX_SCALAR_BYTES
+    with pytest.raises(ValueError, match="strings may contain at most"):
+        normalize_property_value("x" * (MAX_SCALAR_BYTES + 1))
+    with pytest.raises(ValueError, match="strings may contain at most"):
+        normalize_property_value("界" * (MAX_SCALAR_BYTES // 3 + 1))
+    with pytest.raises(ValueError, match="integers may contain at most"):
+        normalize_property_value(1 << (MAX_SCALAR_BYTES * 4))

@@ -2,38 +2,26 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 import math
 import os
-from pathlib import Path
-import time
-from typing import Any, Mapping
+import shutil
 import uuid
+from pathlib import Path
+from typing import Any, Mapping
+
+from comsol_mcp.durable.io import (
+    atomic_write_bytes_exclusive,
+    atomic_write_json_exclusive,
+    fsync_directory,
+    publish_file_exclusive,
+    read_file_bytes_bounded,
+    snapshot_file_bounded,
+)
 
 from .field_bundle import validate_field_evidence_request
 from .field_manifest import build_field_evidence_manifest
 
-
 _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
-
-
-def _sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for block in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
-
-
-def _fsync_directory(path: Path) -> None:
-    if os.name == "nt":
-        return
-    descriptor = os.open(path, os.O_RDONLY)
-    try:
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
 
 
 def _resolve_root(value: object) -> Path:
@@ -46,64 +34,36 @@ def _resolve_root(value: object) -> Path:
     return root
 
 
-def _replace_with_retry(temporary: Path, destination: Path) -> None:
-    deadline = time.monotonic() + 1.0
-    while True:
-        try:
-            if destination.exists():
-                raise FileExistsError(f"field artifact already exists: {destination}")
-            os.replace(temporary, destination)
-            _fsync_directory(destination.parent)
-            return
-        except PermissionError:
-            if time.monotonic() >= deadline:
-                raise
-            time.sleep(0.02)
-
-
-def _atomic_json(path: Path, value: Mapping[str, Any]) -> None:
-    payload = (
-        json.dumps(
-            value,
-            ensure_ascii=False,
-            indent=2,
-            sort_keys=True,
-            allow_nan=False,
-        )
-        + "\n"
-    ).encode("utf-8")
-    temporary = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
-    try:
-        with temporary.open("xb") as handle:
-            handle.write(payload)
-            handle.flush()
-            os.fsync(handle.fileno())
-        _replace_with_retry(temporary, path)
-    finally:
-        temporary.unlink(missing_ok=True)
-
-
 def _descriptor(
     path: Path,
     *,
     root: Path,
     artifact_id: str,
     media_type: str,
+    max_bytes: int,
+    required_prefix: bytes | None = None,
+    relative_path: str | None = None,
 ) -> dict[str, Any]:
-    resolved = path.resolve()
+    resolved = path.resolve(strict=True)
     try:
         relative = resolved.relative_to(root).as_posix()
     except ValueError as exc:
         raise ValueError("artifact path escapes artifact_root") from exc
-    size = resolved.stat().st_size
-    if size <= 0:
+    snapshot = snapshot_file_bounded(
+        resolved,
+        max_bytes=max_bytes,
+        prefix_bytes=len(required_prefix) if required_prefix is not None else 0,
+    )
+    if snapshot["byte_count"] <= 0:
         raise ValueError("field artifact must not be empty")
+    if required_prefix is not None and snapshot["prefix"] != required_prefix:
+        raise ValueError("png_path does not contain a PNG signature")
     return {
         "artifact_id": artifact_id,
-        "relative_path": relative,
+        "relative_path": relative_path or relative,
         "media_type": media_type,
-        "sha256": _sha256_file(resolved),
-        "byte_count": size,
+        "sha256": snapshot["sha256"],
+        "byte_count": snapshot["byte_count"],
     }
 
 
@@ -112,6 +72,9 @@ def _png_descriptor(
     *,
     root: Path,
     artifact_id: str | None,
+    max_bytes: int,
+    destination: Path,
+    relative_path: str,
 ) -> dict[str, Any] | None:
     if artifact_id is None:
         if value is not None:
@@ -120,16 +83,26 @@ def _png_descriptor(
     if not isinstance(value, (str, os.PathLike)):
         raise ValueError("png_path is required when PNG rendering was requested")
     path = Path(value).expanduser().resolve()
-    if not path.is_file():
-        raise ValueError("png_path must name an existing PNG file")
     try:
         path.relative_to(root)
     except ValueError as exc:
         raise ValueError("png_path must remain inside artifact_root") from exc
-    with path.open("rb") as handle:
-        if handle.read(len(_PNG_SIGNATURE)) != _PNG_SIGNATURE:
+    try:
+        payload = read_file_bytes_bounded(path, max_bytes=max_bytes)
+        if not payload.startswith(_PNG_SIGNATURE):
             raise ValueError("png_path does not contain a PNG signature")
-    return _descriptor(path, root=root, artifact_id=artifact_id, media_type="image/png")
+        atomic_write_bytes_exclusive(destination, payload)
+        return _descriptor(
+            destination,
+            root=root,
+            artifact_id=artifact_id,
+            media_type="image/png",
+            max_bytes=max_bytes,
+            required_prefix=_PNG_SIGNATURE,
+            relative_path=relative_path,
+        )
+    except FileNotFoundError as exc:
+        raise ValueError("png_path must name an existing PNG file") from exc
 
 
 def write_field_evidence_artifacts(
@@ -175,9 +148,7 @@ def write_field_evidence_artifacts(
     for axis, expected_length in ((column_axis, columns), (row_axis, rows)):
         values = np.asarray(axis_coordinates[axis])
         if values.ndim != 1 or values.shape[0] != expected_length:
-            raise ValueError(
-                f"axis_coordinates.{axis} must have length {expected_length}"
-            )
+            raise ValueError(f"axis_coordinates.{axis} must have length {expected_length}")
         if values.dtype.kind not in "fiu" or not np.all(np.isfinite(values)):
             raise ValueError(f"axis_coordinates.{axis} must be finite numeric values")
         values = values.astype(np.float64, copy=False)
@@ -215,13 +186,15 @@ def write_field_evidence_artifacts(
             raise ValueError(f"quantity_grids.{name} must contain at least one finite value")
         raw_array_bytes += values.nbytes
         normalized_grids[name] = values
+        scale = float(np.max(np.abs(finite)))
+        rms = 0.0 if scale == 0.0 else scale * math.sqrt(float(np.mean(np.square(finite / scale))))
         summaries.append(
             {
                 "name": name,
                 "unit": expression["unit"],
                 "minimum": float(np.min(finite)),
                 "maximum": float(np.max(finite)),
-                "rms": float(math.sqrt(float(np.mean(np.square(finite))))),
+                "rms": rms,
                 "finite_count": int(finite.size),
                 "missing_count": int(current_missing.sum()),
             }
@@ -248,40 +221,41 @@ def write_field_evidence_artifacts(
     coordinate_ranges["unit"] = request_value["coordinate_bounds"]["unit"]
 
     view_directory = root / view["view_fingerprint"]
-    view_directory.mkdir(parents=True, exist_ok=True)
-    array_path = view_directory / "field_arrays.npz"
-    manifest_path = view_directory / "field_manifest.json"
-    if array_path.exists() or manifest_path.exists():
+    if view_directory.exists():
         raise FileExistsError("field evidence artifacts already exist for this view")
-    temporary = view_directory / f".field_arrays.{os.getpid()}.{uuid.uuid4().hex}.tmp"
-    created_array = False
+    staging_directory = root / f".fb-{uuid.uuid4().hex[:8]}"
+    staging_directory.mkdir(parents=False, exist_ok=False)
+    array_path = staging_directory / "field_arrays.npz"
+    manifest_path = staging_directory / "field_manifest.json"
+    png_destination = staging_directory / "field_render.png"
+    temporary = staging_directory / ".a.tmp"
+    published = False
+    final_prefix = view["view_fingerprint"]
     try:
         with temporary.open("xb") as handle:
             np.savez_compressed(
                 handle,
-                **{
-                    f"coordinate_{axis}": coordinate_arrays[axis]
-                    for axis in plane_axes
-                },
-                **{
-                    f"quantity_{name}": normalized_grids[name]
-                    for name in expected_expressions
-                },
+                **{f"coordinate_{axis}": coordinate_arrays[axis] for axis in plane_axes},
+                **{f"quantity_{name}": normalized_grids[name] for name in expected_expressions},
             )
             handle.flush()
             os.fsync(handle.fileno())
-        _replace_with_retry(temporary, array_path)
-        created_array = True
+        publish_file_exclusive(temporary, array_path)
         array_descriptor = _descriptor(
             array_path,
             root=root,
             artifact_id=view["outputs"]["array_artifact_id"],
             media_type="application/x-npz",
+            max_bytes=request_value["limits"]["max_artifact_bytes"],
+            relative_path=f"{final_prefix}/field_arrays.npz",
         )
         png_descriptor = _png_descriptor(
             png_path,
             root=root,
             artifact_id=view["outputs"]["png_artifact_id"],
+            max_bytes=request_value["limits"]["max_artifact_bytes"],
+            destination=png_destination,
+            relative_path=f"{final_prefix}/field_render.png",
         )
         manifest = build_field_evidence_manifest(
             request=request_value,
@@ -297,12 +271,14 @@ def write_field_evidence_artifacts(
             array_artifact=array_descriptor,
             png_artifact=png_descriptor,
         )
-        _atomic_json(manifest_path, manifest)
+        atomic_write_json_exclusive(manifest_path, manifest)
         manifest_descriptor = _descriptor(
             manifest_path,
             root=root,
             artifact_id=view["outputs"]["manifest_artifact_id"],
             media_type="application/json",
+            max_bytes=request_value["limits"]["max_artifact_bytes"],
+            relative_path=f"{final_prefix}/field_manifest.json",
         )
         total_bytes = (
             array_descriptor["byte_count"]
@@ -311,6 +287,12 @@ def write_field_evidence_artifacts(
         )
         if total_bytes > request_value["limits"]["max_artifact_bytes"]:
             raise ValueError("complete field bundle exceeds the caller-declared byte limit")
+        try:
+            os.rename(staging_directory, view_directory)
+        except FileExistsError as exc:
+            raise FileExistsError("field evidence artifacts already exist for this view") from exc
+        fsync_directory(root)
+        published = True
         return {
             "request_id": request_value["request_id"],
             "request_fingerprint": request_value["request_fingerprint"],
@@ -323,22 +305,17 @@ def write_field_evidence_artifacts(
             "selected_point_count": manifest["selected_point_count"],
             "grid_point_count": request_value["grid_point_count"],
             "unique_point_count": manifest["unique_point_count"],
-            "collapsed_duplicate_point_count": manifest[
-                "collapsed_duplicate_point_count"
-            ],
+            "collapsed_duplicate_point_count": manifest["collapsed_duplicate_point_count"],
             "covered_grid_point_count": covered_count,
             "missing_grid_point_count": missing_count,
             "quantity_summaries": summaries,
             "visual_review_state": "visual_review_required",
             "semantic_mode_label": "not_assigned",
         }
-    except Exception:
-        manifest_path.unlink(missing_ok=True)
-        if created_array:
-            array_path.unlink(missing_ok=True)
-        raise
     finally:
         temporary.unlink(missing_ok=True)
+        if not published:
+            shutil.rmtree(staging_directory, ignore_errors=True)
 
 
 __all__ = ["write_field_evidence_artifacts"]

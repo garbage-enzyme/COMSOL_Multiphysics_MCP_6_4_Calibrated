@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 import hashlib
 import json
 import math
-from pathlib import PurePosixPath
 import re
+from copy import deepcopy
+from pathlib import PurePosixPath
 from typing import Any, Mapping
 
 import numpy as np
+import scipy
 from scipy.optimize import brentq, curve_fit
-
 
 SPECTRAL_BUNDLE_SCHEMA = "comsol_mcp.spectral_point_bundle"
 SPECTRAL_DECISION_SCHEMA = "comsol_mcp.spectral_analysis_decision"
@@ -51,7 +51,7 @@ _POLICY_FIELDS = {
     "flat_response_abs_tolerance",
     "minimum_point_count",
 }
-_MEASUREMENT_FIELDS = {
+_MEASUREMENT_REQUIRED_FIELDS = {
     "peak_method",
     "baseline_rule",
     "baseline_response_value",
@@ -60,6 +60,12 @@ _MEASUREMENT_FIELDS = {
     "fit_support_sensitivity_points",
     "local_polynomial_degree",
     "fit_max_evaluations",
+}
+_MEASUREMENT_FIELDS = _MEASUREMENT_REQUIRED_FIELDS | {"fit_quality_policy"}
+_FIT_QUALITY_FIELDS = {
+    "maximum_relative_rms_residual",
+    "maximum_covariance_condition",
+    "minimum_parameter_bound_margin_fraction",
 }
 
 
@@ -108,12 +114,42 @@ def _hash(value: Any, label: str) -> str:
 def _finite(value: Any, label: str, *, nonnegative: bool = False) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{label} must be numeric")
-    result = float(value)
+    try:
+        result = float(value)
+    except OverflowError as exc:
+        raise ValueError(f"{label} must be finite") from exc
     if not math.isfinite(result):
         raise ValueError(f"{label} must be finite")
     if nonnegative and result < 0.0:
         raise ValueError(f"{label} must be nonnegative")
     return result
+
+
+def _finite_derived(value: Any, label: str) -> float:
+    result = float(value)
+    if not math.isfinite(result):
+        raise ValueError(f"{label} arithmetic exceeds finite bounds")
+    return result
+
+
+def _numerical_backend_identity() -> dict[str, str]:
+    configuration = getattr(np.__config__, "CONFIG", {})
+    build_dependencies = (
+        configuration.get("Build Dependencies", {}) if isinstance(configuration, Mapping) else {}
+    )
+    blas = build_dependencies.get("blas", {}) if isinstance(build_dependencies, Mapping) else {}
+
+    def text_field(name: str) -> str:
+        value = blas.get(name, "unknown") if isinstance(blas, Mapping) else "unknown"
+        return str(value)[:512]
+
+    return {
+        "numpy_version": np.__version__,
+        "scipy_version": scipy.__version__,
+        "blas_name": text_field("name"),
+        "blas_version": text_field("version"),
+        "blas_configuration": text_field("openblas configuration"),
+    }
 
 
 def _relative_identity(value: Any, label: str) -> str:
@@ -147,9 +183,7 @@ def _normalize_wavelength_convention(value: Any) -> dict[str, str]:
     if item["unit"] != "m":
         raise ValueError("wavelength_convention.unit must be 'm'")
     if item["frequency_relation"] != "c_const/frequency":
-        raise ValueError(
-            "wavelength_convention.frequency_relation must be 'c_const/frequency'"
-        )
+        raise ValueError("wavelength_convention.frequency_relation must be 'c_const/frequency'")
     return {
         key: _bounded_text(item[key], f"wavelength_convention.{key}", maximum=128)
         for key in sorted(_WAVELENGTH_FIELDS)
@@ -158,18 +192,13 @@ def _normalize_wavelength_convention(value: Any) -> dict[str, str]:
 
 def _normalize_expressions(value: Any) -> dict[str, str]:
     item = _exact_fields(value, {"R", "T", "A"}, "expressions")
-    return {
-        name: _bounded_text(item[name], f"expressions.{name}")
-        for name in ("R", "T", "A")
-    }
+    return {name: _bounded_text(item[name], f"expressions.{name}") for name in ("R", "T", "A")}
 
 
 def _normalize_row(value: Any, index: int, configuration_sha256: str) -> dict[str, Any]:
     label = f"rows[{index}]"
     item = _exact_fields(value, _ROW_FIELDS, label)
-    row_configuration = _hash(
-        item["configuration_sha256"], f"{label}.configuration_sha256"
-    )
+    row_configuration = _hash(item["configuration_sha256"], f"{label}.configuration_sha256")
     if row_configuration != configuration_sha256:
         raise ValueError(f"{label}.configuration_sha256 does not match the bundle")
     return {
@@ -208,9 +237,7 @@ def build_spectral_point_bundle(
     parameters = _mapping(parameter_state, "parameter_state")
     if len(_canonical_bytes(parameters)) > MAX_PARAMETER_STATE_BYTES:
         raise ValueError("parameter_state exceeds its byte limit")
-    normalized_rows = [
-        _normalize_row(row, index, configuration) for index, row in enumerate(rows)
-    ]
+    normalized_rows = [_normalize_row(row, index, configuration) for index, row in enumerate(rows)]
     row_ids = [row["row_id"] for row in normalized_rows]
     raw_hashes = [row["raw_row_sha256"] for row in normalized_rows]
     wavelengths = [row["requested_wavelength_m"] for row in normalized_rows]
@@ -230,9 +257,7 @@ def build_spectral_point_bundle(
         "configuration_sha256": configuration,
         "parameter_state": deepcopy(parameters),
         "parameter_state_sha256": _sha256(parameters),
-        "wavelength_convention": _normalize_wavelength_convention(
-            wavelength_convention
-        ),
+        "wavelength_convention": _normalize_wavelength_convention(wavelength_convention),
         "expressions": _normalize_expressions(expressions),
         "rows": normalized_rows,
     }
@@ -285,9 +310,7 @@ def _normalize_analysis_policy(value: Any) -> dict[str, Any]:
     if response not in {"R", "T", "A"}:
         raise ValueError("analysis_policy.response_quantity must be R, T, or A")
     if polarity not in {"maximum", "minimum"}:
-        raise ValueError(
-            "analysis_policy.candidate_polarity must be maximum or minimum"
-        )
+        raise ValueError("analysis_policy.candidate_polarity must be maximum or minimum")
     minimum = item["minimum_point_count"]
     if isinstance(minimum, bool) or not isinstance(minimum, int) or not 3 <= minimum <= 101:
         raise ValueError("analysis_policy.minimum_point_count must be 3..101")
@@ -336,10 +359,16 @@ def build_spectral_analysis_decision(
     row_checks = []
     invalid_rows = []
     for row in rows:
-        closure = abs(1.0 - row["R"] - row["T"] - row["A"])
-        sync_error = max(
-            abs(row["requested_wavelength_m"] - row["evaluated_wavelength_m"]),
-            abs(row["requested_wavelength_m"] - row["frequency_wavelength_m"]),
+        closure = _finite_derived(
+            abs(1.0 - row["R"] - row["T"] - row["A"]),
+            f"row {row['row_id']} closure",
+        )
+        sync_error = _finite_derived(
+            max(
+                abs(row["requested_wavelength_m"] - row["evaluated_wavelength_m"]),
+                abs(row["requested_wavelength_m"] - row["frequency_wavelength_m"]),
+            ),
+            f"row {row['row_id']} wavelength synchronization",
         )
         passive = all(
             -passivity_tolerance <= row[name] <= 1.0 + passivity_tolerance
@@ -367,12 +396,11 @@ def build_spectral_analysis_decision(
 
     response = [row[policy["response_quantity"]] for row in rows]
     oriented = response if policy["candidate_polarity"] == "maximum" else [-v for v in response]
-    span = max(response) - min(response)
+    span = _finite_derived(max(response) - min(response), "spectral response span")
     local_indices = [
         index
         for index in range(1, len(rows) - 1)
-        if oriented[index] > oriented[index - 1]
-        and oriented[index] > oriented[index + 1]
+        if oriented[index] > oriented[index - 1] and oriented[index] > oriented[index + 1]
     ]
     boundary_indices = []
     if oriented[0] > oriented[1]:
@@ -396,8 +424,7 @@ def build_spectral_analysis_decision(
         classification = "no_candidate"
 
     evidence_rows = [
-        {"row_id": row["row_id"], "raw_row_sha256": row["raw_row_sha256"]}
-        for row in rows
+        {"row_id": row["row_id"], "raw_row_sha256": row["raw_row_sha256"]} for row in rows
     ]
     body = {
         "schema_name": SPECTRAL_DECISION_SCHEMA,
@@ -418,9 +445,7 @@ def build_spectral_analysis_decision(
     return {**body, "decision_sha256": _sha256(body)}
 
 
-def validate_spectral_analysis_decision(
-    value: Any, *, bundle: Mapping[str, Any]
-) -> dict[str, Any]:
+def validate_spectral_analysis_decision(value: Any, *, bundle: Mapping[str, Any]) -> dict[str, Any]:
     """Recompute a decision from its exact bundle and reject hash tampering."""
     item = _mapping(value, "spectral_decision")
     expected = {
@@ -448,24 +473,26 @@ def validate_spectral_analysis_decision(
     return deepcopy(rebuilt)
 
 
-def _normalize_measurement_configuration(value: Any) -> dict[str, str]:
-    item = _exact_fields(value, _MEASUREMENT_FIELDS, "measurement_configuration")
+def _normalize_measurement_configuration(value: Any) -> dict[str, Any]:
+    item = _mapping(value, "measurement_configuration")
+    if not _MEASUREMENT_REQUIRED_FIELDS <= set(item) or set(item) - _MEASUREMENT_FIELDS:
+        raise ValueError("measurement_configuration fields are invalid")
+    item.setdefault("fit_quality_policy", None)
     fit_methods = {"local_polynomial_fit", "lorentzian_fit", "fano_fit"}
-    if item["peak_method"] not in {
+    if not isinstance(item["peak_method"], str) or item["peak_method"] not in {
         "measured_grid",
         "quadratic_interpolation",
         *fit_methods,
     }:
-        raise ValueError(
-            "measurement_configuration.peak_method is unsupported"
-        )
-    if item["baseline_rule"] not in {
+        raise ValueError("measurement_configuration.peak_method is unsupported")
+    if not isinstance(item["baseline_rule"], str) or item["baseline_rule"] not in {
         "local_prominence",
         "window_endpoints_mean",
         "declared_response",
     }:
         raise ValueError(
-            "measurement_configuration.baseline_rule must be local_prominence, window_endpoints_mean, or declared_response"
+            "measurement_configuration.baseline_rule must be local_prominence, "
+            "window_endpoints_mean, or declared_response"
         )
     declared_baseline = item["baseline_response_value"]
     if item["baseline_rule"] == "declared_response":
@@ -478,13 +505,12 @@ def _normalize_measurement_configuration(value: Any) -> dict[str, str]:
             "measurement_configuration.baseline_response_value is only valid with declared_response"
         )
     if item["fwhm_definition"] != "half_prominence":
-        raise ValueError(
-            "measurement_configuration.fwhm_definition must be half_prominence"
-        )
+        raise ValueError("measurement_configuration.fwhm_definition must be half_prominence")
     support = item["fit_support_points"]
     sensitivity = item["fit_support_sensitivity_points"]
     degree = item["local_polynomial_degree"]
     max_evaluations = item["fit_max_evaluations"]
+    fit_quality = item["fit_quality_policy"]
     if item["peak_method"] in fit_methods:
         minimum = 5 if item["peak_method"] != "fano_fit" else 7
         if (
@@ -520,11 +546,38 @@ def _normalize_measurement_configuration(value: Any) -> dict[str, str]:
             or not isinstance(max_evaluations, int)
             or not 100 <= max_evaluations <= 100000
         ):
-            raise ValueError(
-                "measurement_configuration.fit_max_evaluations must be 100..100000"
-            )
+            raise ValueError("measurement_configuration.fit_max_evaluations must be 100..100000")
+        quality = _exact_fields(
+            fit_quality,
+            _FIT_QUALITY_FIELDS,
+            "measurement_configuration.fit_quality_policy",
+        )
+        maximum_relative_rms = _finite(
+            quality["maximum_relative_rms_residual"],
+            "fit_quality_policy.maximum_relative_rms_residual",
+            nonnegative=True,
+        )
+        maximum_covariance = _finite(
+            quality["maximum_covariance_condition"],
+            "fit_quality_policy.maximum_covariance_condition",
+            nonnegative=True,
+        )
+        minimum_margin = _finite(
+            quality["minimum_parameter_bound_margin_fraction"],
+            "fit_quality_policy.minimum_parameter_bound_margin_fraction",
+            nonnegative=True,
+        )
+        if maximum_covariance <= 0.0:
+            raise ValueError("fit quality covariance limit must be positive")
+        if minimum_margin >= 0.5:
+            raise ValueError("fit quality parameter margin must be less than 0.5")
+        normalized_quality = {
+            "maximum_relative_rms_residual": maximum_relative_rms,
+            "maximum_covariance_condition": maximum_covariance,
+            "minimum_parameter_bound_margin_fraction": minimum_margin,
+        }
         if item["peak_method"] == "local_polynomial_fit":
-            if isinstance(degree, bool) or degree not in {2, 3, 4}:
+            if isinstance(degree, bool) or not isinstance(degree, int) or degree not in {2, 3, 4}:
                 raise ValueError(
                     "measurement_configuration.local_polynomial_degree must be 2, 3, or 4"
                 )
@@ -532,13 +585,20 @@ def _normalize_measurement_configuration(value: Any) -> dict[str, str]:
                 raise ValueError("fit support must exceed local polynomial degree")
         elif degree is not None:
             raise ValueError(
-                "measurement_configuration.local_polynomial_degree is only valid for local_polynomial_fit"
+                "measurement_configuration.local_polynomial_degree is only valid "
+                "for local_polynomial_fit"
             )
     else:
-        if support is not None or sensitivity not in ([], None) or degree is not None or max_evaluations is not None:
+        if (
+            support is not None
+            or sensitivity not in ([], None)
+            or degree is not None
+            or max_evaluations is not None
+            or fit_quality is not None
+        ):
             raise ValueError("fit settings are only valid for fit peak methods")
         normalized_sensitivity = []
-        sensitivity = []
+        normalized_quality = None
     return {
         "peak_method": item["peak_method"],
         "baseline_rule": item["baseline_rule"],
@@ -548,6 +608,7 @@ def _normalize_measurement_configuration(value: Any) -> dict[str, str]:
         "fit_support_sensitivity_points": normalized_sensitivity,
         "local_polynomial_degree": degree,
         "fit_max_evaluations": max_evaluations,
+        "fit_quality_policy": normalized_quality,
     }
 
 
@@ -560,9 +621,7 @@ def _row_reference(row: Mapping[str, Any]) -> dict[str, str]:
     return {"row_id": row["row_id"], "raw_row_sha256": row["raw_row_sha256"]}
 
 
-def _linear_crossing(
-    x0: float, y0: float, x1: float, y1: float, level: float
-) -> float:
+def _linear_crossing(x0: float, y0: float, x1: float, y1: float, level: float) -> float:
     if y1 == y0:
         raise ValueError("half-prominence crossing has zero response slope")
     fraction = (level - y0) / (y1 - y0)
@@ -644,7 +703,9 @@ def _centered_support(candidate_index: int, count: int, row_count: int) -> list[
     return list(range(candidate_index - radius, candidate_index + radius + 1))
 
 
-def _covariance_diagnostics(covariance: np.ndarray | None) -> tuple[list[list[float]] | None, float | None]:
+def _covariance_diagnostics(
+    covariance: np.ndarray | None,
+) -> tuple[list[list[float]] | None, float | None]:
     if covariance is None or covariance.shape[0] == 0 or not np.all(np.isfinite(covariance)):
         return None, None
     condition = float(np.linalg.cond(covariance))
@@ -696,6 +757,7 @@ def _fit_candidate(
     baseline: float,
     polynomial_degree: int | None,
     max_evaluations: int,
+    fit_quality_policy: Mapping[str, float] | None = None,
 ) -> dict[str, Any]:
     support_indices = _centered_support(candidate_index, support_count, len(wavelengths))
     x = np.asarray([wavelengths[index] for index in support_indices], dtype=float)
@@ -708,12 +770,13 @@ def _fit_candidate(
     covariance = None
     parameter_names: list[str]
     parameter_values: list[float]
+    parameter_bounds: tuple[list[float], list[float]] | None = None
 
     if method == "local_polynomial_fit":
         if polynomial_degree is None:
-            raise ValueError(
-                "polynomial_degree is required for local_polynomial_fit"
-            )
+            raise ValueError("polynomial_degree is required for local_polynomial_fit")
+        if fit_quality_policy is None:
+            raise ValueError("fit_quality_policy is required for fitted measurements")
         coefficients, covariance = np.polyfit(z, y, polynomial_degree, cov="unscaled")
         polynomial = np.poly1d(coefficients)
         derivative = np.polyder(polynomial)
@@ -722,18 +785,29 @@ def _fit_candidate(
             if abs(float(np.imag(root))) > 1.0e-10:
                 continue
             coordinate = float(np.real(root))
-            if -1.0 < coordinate < 1.0 and float(np.polyval(np.polyder(polynomial, 2), coordinate)) < 0.0:
+            if (
+                -1.0 < coordinate < 1.0
+                and float(np.polyval(np.polyder(polynomial, 2), coordinate)) < 0.0
+            ):
                 candidates.append(coordinate)
         if not candidates:
             raise ValueError("local polynomial fit has no interior peak")
         peak_z = min(candidates, key=lambda value: abs(value))
-        model = lambda coordinate: float(polynomial(coordinate))
-        parameter_names = [f"coefficient_degree_{degree}" for degree in range(polynomial_degree, -1, -1)]
+
+        def model(coordinate):
+            return float(polynomial(coordinate))
+
+        parameter_names = [
+            f"coefficient_degree_{degree}" for degree in range(polynomial_degree, -1, -1)
+        ]
         parameter_values = [float(value) for value in coefficients]
         measured_condition = float(np.linalg.cond(np.vander(z, polynomial_degree + 1)))
         design_condition = measured_condition if math.isfinite(measured_condition) else None
         covariance_kind = "unscaled_design"
     elif method == "lorentzian_fit":
+        if fit_quality_policy is None:
+            raise ValueError("fit_quality_policy is required for fitted measurements")
+
         def lorentzian(coordinate, offset, amplitude, center, half_width):
             return offset + amplitude / (1.0 + ((coordinate - center) / half_width) ** 2)
 
@@ -741,6 +815,7 @@ def _fit_candidate(
         spacing = float(min(np.diff(z)))
         lower = [-10.0, 0.0, -1.0, max(spacing * 1.0e-4, 1.0e-9)]
         upper = [10.0, max(10.0, response_span * 100.0), 1.0, 10.0]
+        parameter_bounds = (lower, upper)
         parameters, covariance = curve_fit(
             lorentzian,
             z,
@@ -749,13 +824,19 @@ def _fit_candidate(
             bounds=(lower, upper),
             maxfev=max_evaluations,
         )
-        model = lambda coordinate: float(lorentzian(coordinate, *parameters))
+
+        def model(coordinate):
+            return float(lorentzian(coordinate, *parameters))
+
         peak_z = float(parameters[2])
         parameter_names = ["offset", "amplitude", "center_scaled", "half_width_scaled"]
         parameter_values = [float(value) for value in parameters]
         design_condition = None
         covariance_kind = "curve_fit_estimate"
     elif method == "fano_fit":
+        if fit_quality_policy is None:
+            raise ValueError("fit_quality_policy is required for fitted measurements")
+
         def fano(coordinate, offset, amplitude, center, half_width, asymmetry):
             epsilon = (coordinate - center) / half_width
             return offset + amplitude * (asymmetry + epsilon) ** 2 / (1.0 + epsilon**2)
@@ -770,21 +851,49 @@ def _fit_candidate(
                     fano,
                     z,
                     y,
-                    p0=[float(min(y)), max(response_span / 5.0, 1.0e-9), 0.0, max(spacing, 0.1), q0],
+                    p0=[
+                        float(min(y)),
+                        max(response_span / 5.0, 1.0e-9),
+                        0.0,
+                        max(spacing, 0.1),
+                        q0,
+                    ],
                     bounds=(
                         [-10.0, 0.0, -1.0, max(spacing * 1.0e-4, 1.0e-9), q_bounds[0]],
                         [10.0, max(10.0, response_span * 100.0), 1.0, 10.0, q_bounds[1]],
                     ),
                     maxfev=max_evaluations,
                 )
-            except (RuntimeError, ValueError):
+            except RuntimeError, ValueError:
                 continue
             residual = y - fano(z, *parameters)
-            attempts.append((float(np.dot(residual, residual)), parameters, candidate_covariance))
+            attempts.append(
+                (
+                    float(np.dot(residual, residual)),
+                    parameters,
+                    candidate_covariance,
+                    list(q_bounds),
+                )
+            )
         if not attempts:
             raise ValueError("Fano fit failed for both asymmetry branches")
-        _best_residual, parameters, covariance = min(attempts, key=lambda item: item[0])
-        model = lambda coordinate: float(fano(coordinate, *parameters))
+        _best_residual, parameters, covariance, selected_q_bounds = min(
+            attempts, key=lambda item: item[0]
+        )
+        parameter_bounds = (
+            [
+                -10.0,
+                0.0,
+                -1.0,
+                max(spacing * 1.0e-4, 1.0e-9),
+                selected_q_bounds[0],
+            ],
+            [10.0, max(10.0, response_span * 100.0), 1.0, 10.0, selected_q_bounds[1]],
+        )
+
+        def model(coordinate):
+            return float(fano(coordinate, *parameters))
+
         peak_z = float(parameters[2] + parameters[3] / parameters[4])
         parameter_names = ["offset", "amplitude", "center_scaled", "half_width_scaled", "asymmetry"]
         parameter_values = [float(value) for value in parameters]
@@ -798,6 +907,38 @@ def _fit_candidate(
     peak_oriented = float(model(peak_z))
     measured_fit = np.asarray([model(value) for value in z])
     residuals = y - measured_fit
+    if not np.all(np.isfinite(measured_fit)) or not np.all(np.isfinite(residuals)):
+        raise ValueError("fit produced non-finite outputs")
+    response_span = _finite_derived(float(max(y) - min(y)), "fit response span")
+    if response_span <= 0.0:
+        raise ValueError("fit response span must be positive")
+    rms_residual = _finite_derived(
+        float(np.sqrt(np.mean(residuals**2))), "fit root mean square residual"
+    )
+    relative_rms_residual = _finite_derived(
+        rms_residual / response_span, "fit relative root mean square residual"
+    )
+    if relative_rms_residual > fit_quality_policy["maximum_relative_rms_residual"]:
+        raise ValueError("fit relative residual exceeds the declared quality policy")
+    covariance_values, covariance_condition = _covariance_diagnostics(covariance)
+    condition = covariance_condition if covariance_condition is not None else design_condition
+    if condition is None or condition > fit_quality_policy["maximum_covariance_condition"]:
+        raise ValueError("fit covariance condition exceeds the declared quality policy")
+    parameter_margin = None
+    if parameter_bounds is not None:
+        lower_bounds, upper_bounds = parameter_bounds
+        margins = [
+            min(
+                (value - lower) / (upper - lower),
+                (upper - value) / (upper - lower),
+            )
+            for value, lower, upper in zip(parameter_values, lower_bounds, upper_bounds)
+        ]
+        parameter_margin = _finite_derived(min(margins), "fit parameter bound margin")
+        if parameter_margin < fit_quality_policy["minimum_parameter_bound_margin_fraction"]:
+            raise ValueError("fit parameter is pinned to its declared bound")
+    if not math.isfinite(peak_oriented) or peak_oriented <= baseline:
+        raise ValueError("fitted peak does not have positive prominence")
     half_prominence = baseline + (peak_oriented - baseline) / 2.0
     left_z, right_z = _model_crossings(
         model,
@@ -806,7 +947,6 @@ def _fit_candidate(
         right_bound=1.0,
         level=half_prominence,
     )
-    covariance_values, covariance_condition = _covariance_diagnostics(covariance)
     peak_wavelength = origin + peak_z * scale
     left_wavelength = None if left_z is None else origin + left_z * scale
     right_wavelength = None if right_z is None else origin + right_z * scale
@@ -815,9 +955,7 @@ def _fit_candidate(
         if left_wavelength is None or right_wavelength is None
         else right_wavelength - left_wavelength
     )
-    quality_factor = (
-        None if width is None or width <= 0.0 else peak_wavelength / width
-    )
+    quality_factor = None if width is None or width <= 0.0 else peak_wavelength / width
     return {
         "support_indices": support_indices,
         "peak_wavelength_m": peak_wavelength,
@@ -836,11 +974,14 @@ def _fit_candidate(
             "parameter_names": parameter_names,
             "parameter_values": parameter_values,
             "residual_sum_squares": float(np.dot(residuals, residuals)),
-            "root_mean_square_residual": float(np.sqrt(np.mean(residuals**2))),
+            "root_mean_square_residual": rms_residual,
+            "relative_root_mean_square_residual": relative_rms_residual,
             "covariance": covariance_values,
             "covariance_condition": covariance_condition,
             "covariance_kind": covariance_kind,
             "design_matrix_condition": design_condition,
+            "parameter_bound_margin_fraction": parameter_margin,
+            "fit_quality_policy": dict(fit_quality_policy),
         },
     }
 
@@ -859,7 +1000,9 @@ def build_spectral_characterization(
     polarity = normalized_decision["analysis_policy"]["candidate_polarity"]
     wavelengths = [row["requested_wavelength_m"] for row in rows]
     measured_response = [row[response_name] for row in rows]
-    oriented = measured_response if polarity == "maximum" else [-value for value in measured_response]
+    oriented = (
+        measured_response if polarity == "maximum" else [-value for value in measured_response]
+    )
     evidence_rows = [_row_reference(row) for row in rows]
     configuration_sha256 = _sha256(configuration)
 
@@ -875,6 +1018,7 @@ def build_spectral_characterization(
         "algorithm": {
             "implementation": "comsol_mcp.evidence.spectral_characterization",
             "version": SPECTRAL_SCHEMA_VERSION,
+            "numerical_backend": _numerical_backend_identity(),
         },
         "measurement_state": "not_measured",
         "reason_code": f"classification_{normalized_decision['classification']}",
@@ -889,9 +1033,7 @@ def build_spectral_characterization(
         return {**body, "characterization_sha256": _sha256(body)}
 
     candidate_id = normalized_decision["candidate_row_ids"][0]
-    candidate_index = next(
-        index for index, row in enumerate(rows) if row["row_id"] == candidate_id
-    )
+    candidate_index = next(index for index, row in enumerate(rows) if row["row_id"] == candidate_id)
     if configuration["baseline_rule"] == "local_prominence":
         left_floor = min(oriented[: candidate_index + 1])
         right_floor = min(oriented[candidate_index:])
@@ -901,9 +1043,7 @@ def build_spectral_characterization(
     else:
         declared_baseline = configuration["baseline_response_value"]
         if declared_baseline is None:
-            raise RuntimeError(
-                "validated fixed baseline configuration is missing its value"
-            )
+            raise RuntimeError("validated fixed baseline configuration is missing its value")
         baseline = declared_baseline if polarity == "maximum" else -declared_baseline
 
     fit_methods = {"local_polynomial_fit", "lorentzian_fit", "fano_fit"}
@@ -931,9 +1071,7 @@ def build_spectral_characterization(
         fit_result = None
     else:
         if configuration["peak_method"] not in fit_methods:
-            raise RuntimeError(
-                "validated measurement configuration has an unsupported peak method"
-            )
+            raise RuntimeError("validated measurement configuration has an unsupported peak method")
         try:
             fit_result = _fit_candidate(
                 method=configuration["peak_method"],
@@ -944,6 +1082,7 @@ def build_spectral_characterization(
                 baseline=baseline,
                 polynomial_degree=configuration["local_polynomial_degree"],
                 max_evaluations=configuration["fit_max_evaluations"],
+                fit_quality_policy=configuration["fit_quality_policy"],
             )
         except (RuntimeError, TypeError, ValueError, np.linalg.LinAlgError) as exc:
             body["reason_code"] = "peak_fit_failed"
@@ -954,11 +1093,13 @@ def build_spectral_characterization(
         support_indices = fit_result["support_indices"]
         peak_diagnostics = fit_result["diagnostics"]
 
+    if not math.isfinite(peak_oriented_response) or peak_oriented_response <= baseline:
+        body["reason_code"] = "nonpositive_peak_prominence"
+        body["candidate"] = {"failure_reason": "selected peak does not exceed its baseline"}
+        return {**body, "characterization_sha256": _sha256(body)}
     half_prominence = baseline + (peak_oriented_response - baseline) / 2.0
     if fit_result is None:
-        left, right = _crossing_brackets(
-            wavelengths, oriented, candidate_index, half_prominence
-        )
+        left, right = _crossing_brackets(wavelengths, oriented, candidate_index, half_prominence)
         left_crossing = None if left is None else left[2]
         right_crossing = None if right is None else right[2]
     else:
@@ -990,9 +1131,7 @@ def build_spectral_characterization(
         }
     else:
         if left_crossing is None or right_crossing is None:
-            raise RuntimeError(
-                "complete crossing classification is missing a crossing value"
-            )
+            raise RuntimeError("complete crossing classification is missing a crossing value")
         width = right_crossing - left_crossing
         if not math.isfinite(width) or width <= 0.0:
             raise ValueError("bracketed half-prominence width must be positive and finite")
@@ -1020,9 +1159,7 @@ def build_spectral_characterization(
             "value": peak_wavelength / width,
         }
 
-    peak_response = (
-        peak_oriented_response if polarity == "maximum" else -peak_oriented_response
-    )
+    peak_response = peak_oriented_response if polarity == "maximum" else -peak_oriented_response
     sensitivity_measurements = []
     if configuration["peak_method"] in fit_methods:
         for support_count in configuration["fit_support_sensitivity_points"]:
@@ -1036,6 +1173,7 @@ def build_spectral_characterization(
                     baseline=baseline,
                     polynomial_degree=configuration["local_polynomial_degree"],
                     max_evaluations=configuration["fit_max_evaluations"],
+                    fit_quality_policy=configuration["fit_quality_policy"],
                 )
                 sensitivity_measurements.append(
                     {
@@ -1050,8 +1188,7 @@ def build_spectral_characterization(
                         "fwhm_m": measured["fwhm_m"],
                         "quality_factor": measured["quality_factor"],
                         "support_rows": [
-                            _row_reference(rows[index])
-                            for index in measured["support_indices"]
+                            _row_reference(rows[index]) for index in measured["support_indices"]
                         ],
                         "diagnostics": measured["diagnostics"],
                     }
@@ -1069,11 +1206,7 @@ def build_spectral_characterization(
     ]
 
     def measured_span(field: str) -> float | None:
-        values = [
-            item[field]
-            for item in successful_sensitivity
-            if item.get(field) is not None
-        ]
+        values = [item[field] for item in successful_sensitivity if item.get(field) is not None]
         return None if len(values) < 2 else max(values) - min(values)
 
     fit_support_sensitivity = {
@@ -1141,13 +1274,9 @@ def validate_spectral_characterization(
     }
     if set(item) != expected:
         raise ValueError("spectral characterization fields are invalid")
-    rebuilt = build_spectral_characterization(
-        bundle, decision, item["measurement_configuration"]
-    )
+    rebuilt = build_spectral_characterization(bundle, decision, item["measurement_configuration"])
     if item != rebuilt:
-        raise ValueError(
-            "spectral characterization is noncanonical or its hash does not match"
-        )
+        raise ValueError("spectral characterization is noncanonical or its hash does not match")
     return deepcopy(rebuilt)
 
 

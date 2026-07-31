@@ -2,24 +2,24 @@
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
 import argparse
-import hashlib
 import json
 import math
 import os
-from pathlib import Path
 import socket
 import sqlite3
 import statistics
 import threading
 import time
-from typing import Any, Iterable, Mapping
 import uuid
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing, contextmanager
+from pathlib import Path
+from typing import Any, Iterable, Mapping
 
 import psutil
-
-from development_kit.benchmarks.semantic_benchmark import evaluate_lexical_baseline
+from src.durable.io import snapshot_file_bounded
+from src.jobs.store import JobLock
 from src.knowledge.semantic_contracts import (
     SEMANTIC_PROMOTION_GATE,
     WORKER_PROTOCOL_SCHEMA_VERSION,
@@ -29,12 +29,15 @@ from src.knowledge.semantic_contracts import (
 from src.knowledge.semantic_index import index_file_snapshot, read_current
 from src.knowledge.semantic_process import SemanticWorkerManager
 
+from development_kit.benchmarks.semantic_benchmark import evaluate_lexical_baseline
 
 ROOT = Path(__file__).parents[3]
 EVALUATION_PATH = ROOT / "development_kit" / "tests" / "fixtures" / "semantic_retrieval_evaluation.json"
 DEPLOYMENT = Path("D:/comsol_semantic")
 LEXICAL = Path("D:/comsol_docs_fts/manuals.sqlite3")
 MODEL = DEPLOYMENT / "models" / "all-MiniLM-L6-v2" / "1110a243fdf4706b3f48f1d95db1a4f5529b4d41"
+RUN_LOCK = Path("D:/comsol_runtime/semantic_soak/acceptance.lock")
+MAX_LEXICAL_SNAPSHOT_BYTES = 2 * 1024 * 1024 * 1024
 
 
 def _percentile(values: list[float], fraction: float) -> float:
@@ -50,7 +53,20 @@ def _dcg(relevance: Iterable[int]) -> float:
     return sum(value / math.log2(index + 2) for index, value in enumerate(relevance))
 
 
-def _metrics(ranked: list[tuple[str, int]], relevant: set[tuple[str, int]]) -> dict[str, Any]:
+def _metrics(
+    ranked: list[tuple[str, int]],
+    relevant: set[tuple[str, int]],
+    corpus: set[tuple[str, int]],
+) -> dict[str, Any]:
+    unique_ranked = []
+    seen = set()
+    for citation in ranked:
+        if citation not in corpus:
+            raise ValueError(f"ranked citation is absent from the pinned corpus: {citation}")
+        if citation not in seen:
+            unique_ranked.append(citation)
+            seen.add(citation)
+    ranked = unique_ranked
     if not relevant:
         return {"negative_abstained": not ranked}
     hits = [1 if item in relevant else 0 for item in ranked[:10]]
@@ -98,11 +114,11 @@ def _summaries(rows: list[Mapping[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _manager() -> SemanticWorkerManager:
+def _manager(lexical_path: Path = LEXICAL) -> SemanticWorkerManager:
     return SemanticWorkerManager(
         backend="hybrid",
         deployment_root=str(DEPLOYMENT),
-        lexical_index=str(LEXICAL),
+        lexical_index=str(lexical_path),
         model_path=str(MODEL),
         startup_deadline=20.0,
         query_deadline=5.0,
@@ -110,8 +126,36 @@ def _manager() -> SemanticWorkerManager:
     )
 
 
-def _corpus_citations() -> set[tuple[str, int]]:
-    with sqlite3.connect(LEXICAL.resolve().as_uri() + "?mode=ro", uri=True) as connection:
+@contextmanager
+def _managed_worker(label: str, lexical_path: Path = LEXICAL):
+    manager = _manager(lexical_path)
+    lifecycle: dict[str, Any] = {}
+    try:
+        startup = manager.start()
+        if not startup.get("success"):
+            raise RuntimeError(f"{label} worker failed to start: {startup}")
+        process = psutil.Process(int(startup["identity"]["pid"]))
+        yield manager, process, lifecycle
+    finally:
+        lifecycle["reset"] = manager.reset()
+
+
+def _sqlite_snapshot(source: Path, destination: Path) -> dict[str, Any]:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    source_uri = source.resolve().as_uri() + "?mode=ro"
+    with closing(sqlite3.connect(source_uri, uri=True)) as source_connection:
+        with closing(sqlite3.connect(destination)) as destination_connection:
+            source_connection.backup(destination_connection)
+    return snapshot_file_bounded(
+        destination,
+        max_bytes=MAX_LEXICAL_SNAPSHOT_BYTES,
+    )
+
+
+def _corpus_citations(lexical_path: Path = LEXICAL) -> set[tuple[str, int]]:
+    with closing(
+        sqlite3.connect(lexical_path.resolve().as_uri() + "?mode=ro", uri=True)
+    ) as connection:
         return {(str(source), int(page)) for source, page in connection.execute("SELECT source, page FROM pages")}
 
 
@@ -127,7 +171,15 @@ def _evaluate_mode(manager: SemanticWorkerManager, evaluation: Mapping[str, Any]
         elapsed = time.perf_counter() - started
         if not response.get("success"):
             raise RuntimeError(f"{mode} query failed for {item['id']}: {response}")
-        ranked = [(row["source"], int(row["page"])) for row in response["results"]]
+        ranked = []
+        seen = set()
+        for row in response["results"]:
+            citation = (row["source"], int(row["page"]))
+            if citation not in corpus:
+                raise ValueError(f"ranked citation is absent from the pinned corpus: {citation}")
+            if citation not in seen:
+                ranked.append(citation)
+                seen.add(citation)
         relevant = {(row["source"], int(row["page"])) for row in item["relevant"]}
         returned += len(ranked)
         valid += sum(1 for citation in ranked if citation in corpus)
@@ -138,7 +190,7 @@ def _evaluate_mode(manager: SemanticWorkerManager, evaluation: Mapping[str, Any]
             "id": item["id"], "category": item["category"], "style": item["style"],
             "relevant": item["relevant"],
             "ranked_citations": [{"source": source, "page": page} for source, page in ranked],
-            "metrics": _metrics(ranked, relevant),
+            "metrics": _metrics(ranked, relevant, corpus),
             "elapsed_seconds": elapsed,
             "response_bytes": encoded_size,
         })
@@ -163,14 +215,21 @@ def _promotion(lexical: Mapping[str, Any], hybrid: Mapping[str, Any]) -> dict[st
     hybrid_exact = float(hybrid["summary"]["by_style"]["exact"]["recall_at_5"])
     lexical_target = float(lexical["summary"]["paraphrase_multi"]["recall_at_5"])
     hybrid_target = float(hybrid["summary"]["paraphrase_multi"]["recall_at_5"])
+    recalls = (lexical_exact, hybrid_exact, lexical_target, hybrid_target)
+    if any(not math.isfinite(value) or not 0.0 <= value <= 1.0 for value in recalls):
+        raise ValueError("promotion recall metrics must be finite and in 0..1")
     absolute_gain = hybrid_target - lexical_target
-    relative_gain = absolute_gain / lexical_target if lexical_target else math.inf
+    relative_gain = absolute_gain / lexical_target if lexical_target > 0.0 else None
     gates = {
         "citation_validity": hybrid["citation_validity"] == SEMANTIC_PROMOTION_GATE["citation_validity"],
         "exact_recall_regression": hybrid_exact - lexical_exact >= -SEMANTIC_PROMOTION_GATE["maximum_exact_symbol_recall_at_5_regression"],
         "target_recall_gain": (
             absolute_gain >= SEMANTIC_PROMOTION_GATE["minimum_target_recall_at_5_absolute_gain"]
-            or relative_gain >= SEMANTIC_PROMOTION_GATE["minimum_target_recall_at_5_relative_gain"]
+            or (
+                relative_gain is not None
+                and relative_gain
+                >= SEMANTIC_PROMOTION_GATE["minimum_target_recall_at_5_relative_gain"]
+            )
         ),
         "warm_p95": hybrid["latency_seconds"]["p95"] < SEMANTIC_PROMOTION_GATE["maximum_warm_p95_seconds"],
         "hard_deadline": hybrid["latency_seconds"]["maximum"] < SEMANTIC_PROMOTION_GATE["hard_query_deadline_seconds"],
@@ -217,21 +276,36 @@ def _raw_request(manager: SemanticWorkerManager, request_id: str, query: str) ->
     return json.loads(bytes(data).decode("utf-8"))
 
 
-def _soak(evaluation: Mapping[str, Any], index_path: Path) -> dict[str, Any]:
-    manager = _manager()
+def _classify_burst(responses: list[Mapping[str, Any]]) -> dict[str, int]:
+    successes = sum(1 for response in responses if response.get("success") is True)
+    busy = sum(
+        1
+        for response in responses
+        if response.get("success") is False
+        and response.get("error", {}).get("code") == "busy"
+    )
+    return {
+        "requests": len(responses),
+        "successes": successes,
+        "busy": busy,
+        "unexpected_failures": len(responses) - successes - busy,
+    }
+
+
+def _soak(
+    evaluation: Mapping[str, Any],
+    index_path: Path,
+    lexical_path: Path = LEXICAL,
+) -> dict[str, Any]:
     before = index_file_snapshot(index_path)
     startup_started = time.perf_counter()
-    startup = manager.start()
-    cold = time.perf_counter() - startup_started
-    if not startup.get("success"):
-        raise RuntimeError(f"soak worker failed to start: {startup}")
-    process = psutil.Process(int(startup["identity"]["pid"]))
-    rss_start = process.memory_info().rss
-    latencies = []
-    sizes = []
-    errors = []
-    samples = []
-    try:
+    with _managed_worker("soak", lexical_path) as (manager, process, lifecycle):
+        cold = time.perf_counter() - startup_started
+        rss_start = process.memory_info().rss
+        latencies = []
+        sizes = []
+        errors = []
+        samples = []
         for number in range(500):
             item = evaluation["queries"][number % len(evaluation["queries"])]
             started = time.perf_counter()
@@ -263,13 +337,9 @@ def _soak(evaluation: Mapping[str, Any], index_path: Path) -> dict[str, Any]:
             burst_responses = list(pool.map(burst, range(12)))
         health = manager.health()
         rss_end = process.memory_info().rss
-    finally:
-        reset = manager.reset()
+    reset = lifecycle["reset"]
     after = index_file_snapshot(index_path)
-    busy = sum(
-        1 for response in burst_responses
-        if not response.get("success") and response.get("error", {}).get("code") == "busy"
-    )
+    burst = _classify_burst(burst_responses)
     return {
         "cold_start_seconds": cold,
         "sequential_queries": 500,
@@ -283,11 +353,7 @@ def _soak(evaluation: Mapping[str, Any], index_path: Path) -> dict[str, Any]:
         "rss_bytes": {"start": rss_start, "end": rss_end, "growth": rss_end - rss_start},
         "load_count": health["status"]["load_count"],
         "query_count": health["status"]["query_count"],
-        "burst": {
-            "requests": len(burst_responses),
-            "successes": sum(1 for response in burst_responses if response.get("success")),
-            "busy": busy,
-        },
+        "burst": burst,
         "reset": reset,
         "index_immutable": before == after,
     }
@@ -306,49 +372,63 @@ def _atomic_write(path: Path, value: Mapping[str, Any]) -> None:
         temporary.unlink(missing_ok=True)
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output", default="D:/comsol_runtime/semantic_soak/benchmark_soak.json")
-    args = parser.parse_args()
+def _run_benchmark(output_path: Path) -> None:
     evaluation = validate_evaluation_set(json.loads(EVALUATION_PATH.read_text(encoding="utf-8")))
-    corpus = _corpus_citations()
-    current = read_current(DEPLOYMENT)
-    index_path = Path(current["pointer"]["index_path"])
-    lexical_started = time.perf_counter()
-    lexical_full = evaluate_lexical_baseline(evaluation, index_path=LEXICAL)
-    lexical = {
-        "mode": "lexical",
-        "summary": {
-            **lexical_full["summary"],
-            "paraphrase_multi": _aggregate([
-                row for row in lexical_full["queries"]
-                if row["style"] in {"paraphrase", "multi_concept"}
-            ]),
-        },
-        "latency_seconds": lexical_full["summary"]["latency_seconds"],
-        "citation_validity": lexical_full["summary"]["citation_validity"],
-        "wall_seconds": time.perf_counter() - lexical_started,
-    }
-    benchmark_manager = _manager()
-    benchmark_start = benchmark_manager.start()
-    if not benchmark_start.get("success"):
-        raise RuntimeError(f"benchmark worker failed to start: {benchmark_start}")
-    benchmark_process = psutil.Process(int(benchmark_start["identity"]["pid"]))
-    rss_before = benchmark_process.memory_info().rss
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    lexical_snapshot = output_path.parent / f".semantic-lexical-{uuid.uuid4().hex}.sqlite3"
     try:
-        vector = _evaluate_mode(benchmark_manager, evaluation, "vector", corpus)
-        hybrid = _evaluate_mode(benchmark_manager, evaluation, "hybrid", corpus)
-        benchmark_health = benchmark_manager.health()
-        rss_after = benchmark_process.memory_info().rss
+        snapshot = _sqlite_snapshot(LEXICAL, lexical_snapshot)
+        corpus = _corpus_citations(lexical_snapshot)
+        current = read_current(DEPLOYMENT)
+        index_path = Path(current["pointer"]["index_path"])
+        lexical_started = time.perf_counter()
+        lexical_full = evaluate_lexical_baseline(evaluation, index_path=lexical_snapshot)
+        lexical = {
+            "mode": "lexical",
+            "summary": {
+                **lexical_full["summary"],
+                "paraphrase_multi": _aggregate([
+                    row for row in lexical_full["queries"]
+                    if row["style"] in {"paraphrase", "multi_concept"}
+                ]),
+            },
+            "latency_seconds": lexical_full["summary"]["latency_seconds"],
+            "citation_validity": lexical_full["summary"]["citation_validity"],
+            "wall_seconds": time.perf_counter() - lexical_started,
+        }
+        with _managed_worker("benchmark", lexical_snapshot) as (
+            benchmark_manager,
+            benchmark_process,
+            benchmark_lifecycle,
+        ):
+            rss_before = benchmark_process.memory_info().rss
+            vector = _evaluate_mode(benchmark_manager, evaluation, "vector", corpus)
+            hybrid = _evaluate_mode(benchmark_manager, evaluation, "hybrid", corpus)
+            benchmark_health = benchmark_manager.health()
+            rss_after = benchmark_process.memory_info().rss
+        benchmark_reset = benchmark_lifecycle["reset"]
+        promotion = _promotion(lexical, hybrid)
+        soak = _soak(evaluation, index_path, lexical_snapshot)
+        snapshot_after = snapshot_file_bounded(
+            lexical_snapshot,
+            max_bytes=MAX_LEXICAL_SNAPSHOT_BYTES,
+        )
+        if snapshot_after != snapshot:
+            raise RuntimeError("semantic lexical snapshot changed during benchmark")
     finally:
-        benchmark_reset = benchmark_manager.reset()
-    promotion = _promotion(lexical, hybrid)
-    soak = _soak(evaluation, index_path)
+        for suffix in ("", "-shm", "-wal"):
+            lexical_snapshot.with_name(lexical_snapshot.name + suffix).unlink(
+                missing_ok=True
+            )
     output = {
         "schema_version": "1",
         "phase": "semantic soak",
         "evaluation_sha256": object_sha256(evaluation),
         "evaluation_query_count": len(evaluation["queries"]),
+        "lexical_snapshot": {
+            "sha256": snapshot["sha256"],
+            "byte_count": snapshot["byte_count"],
+        },
         "lexical": lexical,
         "vector": vector,
         "hybrid": hybrid,
@@ -367,9 +447,15 @@ def main() -> None:
         raise RuntimeError("model load-count gate failed")
     if soak["errors"] or not soak["index_immutable"] or not soak["reset"]["reset"]["absent"]:
         raise RuntimeError("soak containment or immutability gate failed")
-    if soak["burst"]["busy"] < 1:
-        raise RuntimeError("concurrent burst did not exercise bounded busy rejection")
-    _atomic_write(Path(args.output), output)
+    burst = soak["burst"]
+    if (
+        burst["successes"] < 1
+        or burst["busy"] < 1
+        or burst["unexpected_failures"] != 0
+        or burst["successes"] + burst["busy"] != burst["requests"]
+    ):
+        raise RuntimeError("concurrent burst result classification gate failed")
+    _atomic_write(output_path, output)
     print(json.dumps({
         "success": True,
         "promotion": promotion,
@@ -381,8 +467,16 @@ def main() -> None:
             "sequential_queries", "latency_seconds", "response_bytes", "rss_bytes",
             "load_count", "query_count", "burst", "index_immutable",
         )},
-        "artifact": str(Path(args.output)),
+        "artifact": str(output_path),
     }, ensure_ascii=False, allow_nan=False, indent=2))
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--output", default="D:/comsol_runtime/semantic_soak/benchmark_soak.json")
+    args = parser.parse_args()
+    with JobLock(RUN_LOCK, timeout=5.0):
+        _run_benchmark(Path(args.output))
 
 
 if __name__ == "__main__":

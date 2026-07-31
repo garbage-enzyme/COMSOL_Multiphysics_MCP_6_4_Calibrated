@@ -6,14 +6,13 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path
-from pathlib import PurePosixPath, PureWindowsPath
 import platform
 import subprocess
 import sys
 import tarfile
 import tempfile
 import zipfile
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 if __package__:
     from .planning_code_gate import (
@@ -30,10 +29,9 @@ else:
 
 
 ROOT = Path(__file__).resolve().parents[2]
-PLANNING_CODE_ALLOWLIST = (
-    ROOT / "development_kit" / "release" / "planning_code_allowlist.json"
-)
+PLANNING_CODE_ALLOWLIST = ROOT / "development_kit" / "release" / "planning_code_allowlist.json"
 _FORBIDDEN_PARTS = {
+    ".claude",
     "comsol_models",
     "development_kit",
     "knowledge_base",
@@ -55,10 +53,14 @@ def _run(
         cwd=cwd,
         env=env,
         check=True,
-        creationflags=(
-            getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
-        ),
+        creationflags=(getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0),
     )
+
+
+def _sanitized_probe_environment() -> dict[str, str]:
+    environment = os.environ.copy()
+    environment.pop("PYTHONPATH", None)
+    return environment
 
 
 def _git_status() -> list[str]:
@@ -68,9 +70,7 @@ def _git_status() -> list[str]:
         check=True,
         capture_output=True,
         text=True,
-        creationflags=(
-            getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
-        ),
+        creationflags=(getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0),
     )
     return [line for line in completed.stdout.splitlines() if line]
 
@@ -127,45 +127,96 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _normalized_archive_path(name: str) -> str:
+def _normalized_archive_path(
+    name: str,
+    *,
+    sdist_root: str | None = None,
+) -> str:
     raw = name.replace("\\", "/")
     pure = PurePosixPath(raw)
     if pure.is_absolute() or PureWindowsPath(raw).is_absolute() or ".." in pure.parts:
         raise RuntimeError(f"distribution contains unsafe path: {name}")
     parts = list(pure.parts)
-    if parts and parts[0].startswith("comsol_mcp-"):
+    if sdist_root is not None:
+        if not parts or parts[0] != sdist_root:
+            raise RuntimeError(
+                "sdist member is outside the exact archive root: "
+                f"expected={sdist_root}, member={name}"
+            )
         parts = parts[1:]
     return "/".join(parts)
+
+
+def _normalized_archive_members(
+    names: list[str],
+    *,
+    sdist_root: str | None,
+) -> list[str]:
+    normalized = [_normalized_archive_path(name, sdist_root=sdist_root) for name in names]
+    if len(normalized) != len(set(normalized)):
+        raise RuntimeError("distribution contains duplicate normalized paths")
+    return normalized
 
 
 def _distribution_files(path: Path) -> tuple[list[str], dict[str, bytes]]:
     if path.suffix == ".whl":
         with zipfile.ZipFile(path) as archive:
-            members = archive.namelist()
+            infos = archive.infolist()
+            members = [info.filename for info in infos]
+            normalized = _normalized_archive_members(members, sdist_root=None)
+            for info in infos:
+                unix_mode = (info.external_attr >> 16) & 0o170000
+                if unix_mode == 0o120000:
+                    raise RuntimeError(f"distribution contains link member: {info.filename}")
             files = {
-                _normalized_archive_path(info.filename): archive.read(info)
-                for info in archive.infolist()
+                normalized_name: archive.read(info)
+                for info, normalized_name in zip(infos, normalized, strict=True)
                 if not info.is_dir()
             }
     elif path.name.endswith(".tar.gz"):
+        sdist_root = path.name.removesuffix(".tar.gz")
         with tarfile.open(path, "r:gz") as archive:
-            members = archive.getnames()
+            archive_members = archive.getmembers()
+            members = [member.name for member in archive_members]
+            normalized = _normalized_archive_members(
+                members,
+                sdist_root=sdist_root,
+            )
             files = {}
-            for member in archive.getmembers():
+            for member, normalized_name in zip(
+                archive_members,
+                normalized,
+                strict=True,
+            ):
+                if member.issym() or member.islnk():
+                    raise RuntimeError(f"distribution contains link member: {member.name}")
+                if not member.isfile() and not member.isdir():
+                    raise RuntimeError(f"distribution contains special member: {member.name}")
                 if not member.isfile():
                     continue
                 stream = archive.extractfile(member)
                 if stream is None:
                     raise RuntimeError(f"cannot read distribution member: {member.name}")
-                files[_normalized_archive_path(member.name)] = stream.read()
+                files[normalized_name] = stream.read()
     else:
         raise ValueError(f"unsupported distribution artifact: {path.name}")
-    return members, files
+    return normalized, files
+
+
+def _distribution_artifacts(dist_dir: Path) -> list[Path]:
+    artifacts = sorted(path for path in dist_dir.iterdir() if path.is_file())
+    wheels = [path for path in artifacts if path.suffix == ".whl"]
+    sdists = [path for path in artifacts if path.name.endswith(".tar.gz")]
+    if len(wheels) != 1 or len(sdists) != 1 or len(artifacts) != 2:
+        raise RuntimeError(
+            "expected exactly one wheel and one sdist, "
+            f"found wheels={len(wheels)}, sdists={len(sdists)}, artifacts={len(artifacts)}"
+        )
+    return [wheels[0], sdists[0]]
 
 
 def _distribution_inventory(path: Path) -> dict:
-    members, files = _distribution_files(path)
-    normalized = [_normalized_archive_path(name) for name in members]
+    normalized, files = _distribution_files(path)
     offenders = []
     for name in normalized:
         pure = PurePosixPath(name)
@@ -177,9 +228,7 @@ def _distribution_inventory(path: Path) -> dict:
         ):
             offenders.append(name)
     if offenders:
-        raise RuntimeError(
-            f"ordinary distribution contains forbidden members: {offenders[:5]}"
-        )
+        raise RuntimeError(f"ordinary distribution contains forbidden members: {offenders[:5]}")
     texts = {}
     for name, payload in files.items():
         if PurePosixPath(name).suffix.casefold() not in TEXT_SUFFIXES:
@@ -199,12 +248,20 @@ def _distribution_inventory(path: Path) -> dict:
     return {
         "filename": path.name,
         "sha256": _sha256(path),
-        "member_count": len(members),
+        "member_count": len(normalized),
         "development_kit_excluded": True,
         "forbidden_entries_absent": True,
         "private_user_paths_absent": True,
         "planning_code_gate": planning_receipt,
     }
+
+
+def _dependency_lock_location(path: Path) -> dict[str, str]:
+    try:
+        relative = path.relative_to(ROOT)
+    except ValueError:
+        return {"path": str(path), "path_scope": "absolute_external"}
+    return {"path": str(relative), "path_scope": "repository_relative"}
 
 
 def main() -> int:
@@ -252,21 +309,14 @@ def main() -> int:
     if not args.skip_tests:
         _run([sys.executable, "-m", "pytest", "-q"])
     _run([sys.executable, "-m", "build", "--outdir", str(dist_dir)])
-    distributions = [
-        _distribution_inventory(path)
-        for path in sorted(dist_dir.iterdir())
-        if path.suffix == ".whl" or path.name.endswith(".tar.gz")
-    ]
-    if len(distributions) != 2:
-        raise RuntimeError(f"expected wheel and sdist, found {distributions}")
+    distribution_paths = _distribution_artifacts(dist_dir)
+    distributions = [_distribution_inventory(path) for path in distribution_paths]
 
     if not args.skip_install:
         venv_dir = run_root / "venv"
         _run([sys.executable, "-m", "venv", str(venv_dir)])
         python = _venv_python(venv_dir)
-        wheels = sorted(dist_dir.glob("*.whl"))
-        if len(wheels) != 1:
-            raise RuntimeError(f"expected one wheel, found {wheels}")
+        wheels = [path for path in distribution_paths if path.suffix == ".whl"]
         if dependency_lock is not None:
             _run(
                 [
@@ -289,8 +339,7 @@ def main() -> int:
         _run([str(python), "-m", "pip", "check"], cwd=run_root)
         probe_workdir = run_root / "probe_workdir"
         probe_workdir.mkdir()
-        environment = os.environ.copy()
-        environment.pop("PYTHONPATH", None)
+        environment = _sanitized_probe_environment()
         _run(
             [
                 str(python),
@@ -314,6 +363,7 @@ def main() -> int:
                     str(sbom_result),
                 ],
                 cwd=probe_workdir,
+                env=environment,
             )
         _run(
             [
@@ -327,12 +377,11 @@ def main() -> int:
                 str(stdio_probe_result),
             ],
             cwd=probe_workdir,
+            env=environment,
         )
 
     installed_probe = (
-        json.loads(probe_result.read_text(encoding="utf-8"))
-        if probe_result.is_file()
-        else None
+        json.loads(probe_result.read_text(encoding="utf-8")) if probe_result.is_file() else None
     )
     sbom = json.loads(sbom_result.read_text(encoding="utf-8")) if sbom_result.is_file() else None
     stdio_probe = (
@@ -358,7 +407,7 @@ def main() -> int:
         "non_editable_install_run": not args.skip_install,
         "dependency_lock": (
             {
-                "path": str(dependency_lock.relative_to(ROOT)),
+                **_dependency_lock_location(dependency_lock),
                 "sha256": _sha256(dependency_lock),
                 "python_lane": _lock_lane(dependency_lock),
                 "require_hashes": True,
@@ -368,9 +417,7 @@ def main() -> int:
         ),
         "installed_probe": installed_probe,
         "installed_stdio_probe": stdio_probe,
-        "inventory_hashes": (
-            installed_probe["release_inventories"] if installed_probe else None
-        ),
+        "inventory_hashes": (installed_probe["release_inventories"] if installed_probe else None),
         "sbom": (
             {
                 "filename": sbom_result.name,

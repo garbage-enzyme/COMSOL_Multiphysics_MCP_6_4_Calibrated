@@ -6,7 +6,9 @@ import csv
 import hashlib
 import io
 import json
+import math
 import os
+import stat
 import time
 import uuid
 from pathlib import Path
@@ -17,6 +19,86 @@ from .canonical import validate_finite_json
 DEFAULT_REPLACE_RETRY_SECONDS = 1.0
 DEFAULT_MAX_JSONL_BYTES = 256 * 1024 * 1024
 WriteStageHook = Callable[[str, Path], None]
+
+
+class _FileSizeLimitError(ValueError):
+    pass
+
+
+def _open_regular_file_descriptor(path: str | Path) -> tuple[int, os.stat_result]:
+    candidate = Path(path)
+    before = os.stat(candidate, follow_symlinks=False)
+    if not stat.S_ISREG(before.st_mode):
+        raise ValueError("bounded reading requires a regular file without links")
+    flags = os.O_RDONLY
+    for name in ("O_BINARY", "O_NOINHERIT", "O_NONBLOCK", "O_NOFOLLOW"):
+        flags |= getattr(os, name, 0)
+    descriptor = os.open(candidate, flags)
+    try:
+        opened = os.fstat(descriptor)
+        if not stat.S_ISREG(opened.st_mode):
+            raise ValueError("bounded reading requires a regular file")
+        if (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino):
+            raise ValueError("file identity changed before bounded reading")
+        return descriptor, opened
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def read_file_bytes_bounded(path: str | Path, *, max_bytes: int) -> bytes:
+    """Read at most one regular file's declared byte limit from one descriptor."""
+    if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or max_bytes < 0:
+        raise ValueError("max_bytes must be a non-negative integer")
+    descriptor, opened = _open_regular_file_descriptor(path)
+    try:
+        if opened.st_size > max_bytes:
+            raise _FileSizeLimitError("file exceeds the declared reading limit")
+        with os.fdopen(descriptor, "rb", closefd=False) as handle:
+            data = handle.read(max_bytes + 1)
+        if len(data) > max_bytes:
+            raise _FileSizeLimitError("file grew beyond the declared reading limit")
+        return data
+    finally:
+        os.close(descriptor)
+
+
+def snapshot_file_bounded(
+    path: str | Path,
+    *,
+    max_bytes: int,
+    prefix_bytes: int = 0,
+    chunk_bytes: int = 1024 * 1024,
+) -> dict[str, Any]:
+    """Hash and size one regular file from one descriptor, retaining a prefix."""
+    if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or max_bytes < 0:
+        raise ValueError("max_bytes must be a non-negative integer")
+    if isinstance(prefix_bytes, bool) or not isinstance(prefix_bytes, int) or prefix_bytes < 0:
+        raise ValueError("prefix_bytes must be a non-negative integer")
+    if isinstance(chunk_bytes, bool) or not isinstance(chunk_bytes, int) or chunk_bytes < 1:
+        raise ValueError("chunk_bytes must be a positive integer")
+    descriptor, opened = _open_regular_file_descriptor(path)
+    digest = hashlib.sha256()
+    observed = 0
+    prefix = bytearray()
+    try:
+        if opened.st_size > max_bytes:
+            raise ValueError("file exceeds the declared snapshot limit")
+        with os.fdopen(descriptor, "rb", closefd=False) as handle:
+            while block := handle.read(min(chunk_bytes, max_bytes - observed + 1)):
+                observed += len(block)
+                if observed > max_bytes:
+                    raise ValueError("file grew beyond the declared snapshot limit")
+                digest.update(block)
+                if len(prefix) < prefix_bytes:
+                    prefix.extend(block[: prefix_bytes - len(prefix)])
+    finally:
+        os.close(descriptor)
+    return {
+        "sha256": digest.hexdigest(),
+        "byte_count": observed,
+        "prefix": bytes(prefix),
+    }
 
 
 def _notify(hook: WriteStageHook | None, stage: str, path: Path) -> None:
@@ -42,24 +124,24 @@ def sha256_file_bounded(
     chunk_bytes: int = 1024 * 1024,
 ) -> dict[str, Any]:
     """Hash one regular file while refusing a caller-declared size overflow."""
-    candidate = Path(path)
     if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or max_bytes < 0:
         raise ValueError("max_bytes must be a non-negative integer")
     if isinstance(chunk_bytes, bool) or not isinstance(chunk_bytes, int) or chunk_bytes < 1:
         raise ValueError("chunk_bytes must be a positive integer")
-    stat = candidate.stat()
-    if not candidate.is_file():
-        raise ValueError("bounded hashing requires a regular file")
-    if stat.st_size > max_bytes:
-        raise ValueError("file exceeds the declared hashing limit")
+    descriptor, opened = _open_regular_file_descriptor(path)
     digest = hashlib.sha256()
     observed = 0
-    with candidate.open("rb") as handle:
-        while block := handle.read(min(chunk_bytes, max_bytes - observed + 1)):
-            observed += len(block)
-            if observed > max_bytes:
-                raise ValueError("file grew beyond the declared hashing limit")
-            digest.update(block)
+    try:
+        if opened.st_size > max_bytes:
+            raise ValueError("file exceeds the declared hashing limit")
+        with os.fdopen(descriptor, "rb", closefd=False) as handle:
+            while block := handle.read(min(chunk_bytes, max_bytes - observed + 1)):
+                observed += len(block)
+                if observed > max_bytes:
+                    raise ValueError("file grew beyond the declared hashing limit")
+                digest.update(block)
+    finally:
+        os.close(descriptor)
     return {"sha256": digest.hexdigest(), "byte_count": observed}
 
 
@@ -83,8 +165,14 @@ def atomic_write_bytes(
     target = Path(path)
     if not isinstance(payload, bytes):
         raise ValueError("atomic payload must be bytes")
-    if retry_seconds < 0:
-        raise ValueError("retry_seconds must be non-negative")
+    if (
+        isinstance(retry_seconds, bool)
+        or not isinstance(retry_seconds, (int, float))
+        or not math.isfinite(float(retry_seconds))
+        or retry_seconds < 0
+    ):
+        raise ValueError("retry_seconds must be a finite non-negative number")
+    retry_seconds = float(retry_seconds)
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = target.with_name(
         f".tmp-{uuid.uuid4().hex[:8]}"
@@ -116,6 +204,75 @@ def atomic_write_bytes(
         _notify(stage_hook, "after_directory_fsync", target)
     finally:
         if not replaced:
+            temporary.unlink(missing_ok=True)
+
+
+def publish_file_exclusive(
+    temporary: str | Path,
+    target: str | Path,
+    *,
+    link_fn: Callable[[str | Path, str | Path], None] | None = None,
+) -> tuple[int, int]:
+    """Atomically publish a complete same-directory file without replacement."""
+    source = Path(temporary)
+    destination = Path(target)
+    if source.parent.resolve() != destination.parent.resolve():
+        raise ValueError("exclusive publication requires one directory")
+    opened = os.stat(source, follow_symlinks=False)
+    if not stat.S_ISREG(opened.st_mode) or source.is_symlink():
+        raise ValueError("exclusive publication requires a regular temporary file")
+    link = link_fn or os.link
+    link(source, destination)
+    published = os.stat(destination, follow_symlinks=False)
+    identity = (published.st_dev, published.st_ino)
+    if identity != (opened.st_dev, opened.st_ino):
+        raise RuntimeError("exclusive publication produced a different file identity")
+    source.unlink()
+    fsync_directory(destination.parent)
+    return identity
+
+
+def unlink_if_identity(path: str | Path, identity: tuple[int, int]) -> bool:
+    """Remove only the exact file identity published by the current operation."""
+    target = Path(path)
+    try:
+        observed = os.stat(target, follow_symlinks=False)
+    except FileNotFoundError:
+        return False
+    if target.is_symlink() or (observed.st_dev, observed.st_ino) != identity:
+        return False
+    target.unlink()
+    return True
+
+
+def atomic_write_bytes_exclusive(
+    path: str | Path,
+    payload: bytes,
+    *,
+    stage_hook: WriteStageHook | None = None,
+    link_fn: Callable[[str | Path, str | Path], None] | None = None,
+) -> tuple[int, int]:
+    """Durably publish bytes only when the destination is still absent."""
+    target = Path(path)
+    if not isinstance(payload, bytes):
+        raise ValueError("atomic payload must be bytes")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_name(f".{target.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+    published = False
+    try:
+        _notify(stage_hook, "before_temporary_write", target)
+        with temporary.open("xb") as handle:
+            handle.write(payload)
+            _notify(stage_hook, "after_temporary_write", target)
+            handle.flush()
+            os.fsync(handle.fileno())
+        _notify(stage_hook, "after_file_fsync", target)
+        identity = publish_file_exclusive(temporary, target, link_fn=link_fn)
+        published = True
+        _notify(stage_hook, "after_publish", target)
+        return identity
+    finally:
+        if not published:
             temporary.unlink(missing_ok=True)
 
 
@@ -156,6 +313,22 @@ def atomic_write_json(
         stage_hook=stage_hook,
         replace_fn=replace_fn,
         compact_temporary=compact_temporary,
+    )
+
+
+def atomic_write_json_exclusive(
+    path: str | Path,
+    value: Any,
+    *,
+    stage_hook: WriteStageHook | None = None,
+    link_fn: Callable[[str | Path, str | Path], None] | None = None,
+) -> tuple[int, int]:
+    """Write one finite JSON document without replacing an existing target."""
+    return atomic_write_bytes_exclusive(
+        path,
+        json_document_bytes(value),
+        stage_hook=stage_hook,
+        link_fn=link_fn,
     )
 
 
@@ -204,8 +377,9 @@ def read_complete_jsonl(
     candidate = Path(path)
     if not candidate.exists():
         return {"state": "absent", "records": [], "complete_byte_count": 0}
-    data = candidate.read_bytes()
-    if len(data) > max_bytes:
+    try:
+        data = read_file_bytes_bounded(candidate, max_bytes=max_bytes)
+    except _FileSizeLimitError:
         return {"state": "oversized", "records": [], "complete_byte_count": 0}
     complete_end = data.rfind(b"\n") + 1
     complete = data[:complete_end]
@@ -226,18 +400,19 @@ def read_complete_jsonl(
             "error_type": type(exc).__name__,
         }
     state = "incomplete" if trailing else "current_valid"
-    if not trailing and version_field is not None:
+    if version_field is not None:
         if not current_version:
             raise ValueError("current_version is required for versioned JSONL recovery")
         versions = {
             record.get(version_field) if isinstance(record, dict) else None for record in records
         }
         if versions == {current_version}:
-            state = "current_valid"
-        elif len(versions) == 1 and versions <= set(legacy_versions):
+            state = "incomplete" if trailing else "current_valid"
+        elif not trailing and len(versions) == 1 and versions <= set(legacy_versions):
             state = "legacy_valid"
         else:
             state = "corrupt"
+            records = []
     return {
         "state": state,
         "records": records,
@@ -252,9 +427,14 @@ __all__ = [
     "append_csv_row",
     "append_jsonl_record",
     "atomic_write_bytes",
+    "atomic_write_bytes_exclusive",
     "atomic_write_json",
+    "atomic_write_json_exclusive",
     "fsync_directory",
     "json_document_bytes",
+    "publish_file_exclusive",
+    "read_file_bytes_bounded",
     "read_complete_jsonl",
     "sha256_file_bounded",
+    "unlink_if_identity",
 ]

@@ -6,14 +6,15 @@ import csv
 import hashlib
 import json
 import os
-from pathlib import Path
 import sys
 import threading
 import time
 from dataclasses import replace
+from pathlib import Path
 from typing import Any
 
-from .process_control import contain_current_process_tree
+from comsol_mcp.shared_session.locking import build_shared_model_revision
+
 from .attached_runtime import (
     AttachedExecutionTarget,
     normalize_attached_execution_target,
@@ -21,8 +22,8 @@ from .attached_runtime import (
     verify_attached_model_revision,
     verify_attached_process_preservation,
 )
+from .process_control import contain_current_process_tree
 from .store import JobStore, atomic_write_json, cancel_request_targets_attempt, process_identity
-from comsol_mcp.shared_session.locking import build_shared_model_revision
 
 
 def _valid_row_count(csv_path: Path, config_id: str) -> int:
@@ -146,12 +147,22 @@ def _select_attached_model(
         state_readback=state,
     )
     matches = [
-        model
-        for model in list(client.models())
-        if str(model.java.tag()) == target.model.tag
+        model for model in list(client.models()) if str(model.java.tag()) == target.model.tag
     ]
     if len(matches) != 1:
         raise ValueError("attached server model changed after revision verification")
+    return matches[0]
+
+
+def _select_attached_model_identity(client: Any, target: AttachedExecutionTarget):
+    from comsol_mcp.shared_session.lifecycle import _default_model_inventory_reader
+
+    verify_attached_model_inventory(target, _default_model_inventory_reader(client))
+    matches = [
+        model for model in list(client.models()) if str(model.java.tag()) == target.model.tag
+    ]
+    if len(matches) != 1:
+        raise ValueError("attached server model identity is not uniquely available")
     return matches[0]
 
 
@@ -223,7 +234,14 @@ def _cleanup_attached_execution(
         "message": "No attached lease was acquired.",
     }
     if lease_acquired and client_disconnected:
-        release = ownership.release()
+        try:
+            release = ownership.release()
+        except Exception as exc:
+            release = {
+                "success": False,
+                "released": False,
+                "error": f"{type(exc).__name__}: {exc}",
+            }
     elif lease_acquired:
         release = {
             "success": False,
@@ -232,8 +250,7 @@ def _cleanup_attached_execution(
         }
     lease_path = getattr(ownership, "lease_path", None)
     lease_absent = bool(
-        release.get("success")
-        and (lease_path is None or not Path(lease_path).exists())
+        release.get("success") and (lease_path is None or not Path(lease_path).exists())
     )
     try:
         preservation = _collect_attached_process_preservation(target)
@@ -265,7 +282,9 @@ def _cleanup_attached_execution(
     }
 
 
-def _record_native_cancel(store: JobStore, job_id: str, attempt: int, result: dict[str, Any]) -> bool:
+def _record_native_cancel(
+    store: JobStore, job_id: str, attempt: int, result: dict[str, Any]
+) -> bool:
     """Merge native-cancel evidence without overwriting coordinator state."""
     with store.lock(job_id):
         state = store.read_state(job_id)
@@ -294,11 +313,7 @@ def _run(root: str, job_id: str) -> int:
     if spec.get("job_type") != "staged_sweep":
         raise ValueError("Production worker accepts only staged_sweep jobs")
     identity = process_identity(os.getpid())
-    deadline = time.monotonic() + 3.0
-    while store.read_state(job_id).get("worker_pid") != identity["pid"]:
-        if time.monotonic() >= deadline:
-            raise RuntimeError("Control plane did not durably record the worker identity")
-        time.sleep(0.01)
+    store.bind_worker_identity(job_id, identity)
 
     store.update_state(
         job_id,
@@ -309,7 +324,9 @@ def _run(root: str, job_id: str) -> int:
 
     state = store.read_state(job_id)
     attempt = int(state.get("attempt", 1))
-    if state["status"] == "cancel_requested" or cancel_request_targets_attempt(store.read_control(job_id), attempt):
+    if state["status"] == "cancel_requested" or cancel_request_targets_attempt(
+        store.read_control(job_id), attempt
+    ):
         store.record_cooperative_cancel_observed(
             job_id,
             attempt=attempt,
@@ -336,9 +353,7 @@ def _run(root: str, job_id: str) -> int:
             owner=f"job:{job_id}",
         )
         if spec.get("execution_backend") is not None:
-            attached_target = normalize_attached_execution_target(
-                spec["execution_backend"]
-            )
+            attached_target = normalize_attached_execution_target(spec["execution_backend"])
             if _source_sha256(spec["source_model_path"]) != spec["source_model_sha256"]:
                 raise RuntimeError(
                     "Immutable source SHA-256 changed before attached worker startup"
@@ -352,15 +367,17 @@ def _run(root: str, job_id: str) -> int:
             )
             if not preflight["ready"]:
                 raise RuntimeError(f"Worker preflight failed: {preflight['blockers']}")
-            claim = ownership.acquire(
-                mode="durable-job", model_path=spec["source_model_path"]
-            )
+            claim = ownership.acquire(mode="durable-job", model_path=spec["source_model_path"])
         if not claim["success"]:
             raise RuntimeError(claim["error"])
         lease_acquired = True
 
         import mph
-        from comsol_mcp.jobs.resource_admission import ResourceStageAdapter, collect_resource_telemetry
+
+        from comsol_mcp.jobs.resource_admission import (
+            ResourceStageAdapter,
+            collect_resource_telemetry,
+        )
         from comsol_mcp.tools.mesh import get_mesh_info
         from comsol_mcp.tools.workflow import _sweep_point_id, run_staged_parametric_sweep
 
@@ -375,16 +392,38 @@ def _run(root: str, job_id: str) -> int:
             if not ownership.heartbeat():
                 raise RuntimeError("Attached lease heartbeat failed after connection")
             expected_revision = _persisted_attached_revision(state, attached_target)
-            model = _select_attached_model(client, attached_target, expected_revision)
+            durable_count = _valid_row_count(directory / "results.csv", spec["spec_fingerprint"])
+            projected_count = int(state.get("progress", {}).get("completed", 0))
+            reconciled_row_gap = False
+            if durable_count == projected_count:
+                model = _select_attached_model(client, attached_target, expected_revision)
+            elif durable_count == projected_count + 1:
+                model = _select_attached_model_identity(client, attached_target)
+                current_revision = _attached_revision_from_client(
+                    client,
+                    attached_target,
+                    sequence=int(expected_revision["sequence"]) + 1,
+                )
+                if (
+                    current_revision["model_identity_sha256"]
+                    != expected_revision["model_identity_sha256"]
+                    or current_revision["structural_sha256"]
+                    != expected_revision["structural_sha256"]
+                ):
+                    raise RuntimeError(
+                        "attached durable-row gap changed model identity or structure"
+                    )
+                expected_revision = current_revision
+                reconciled_row_gap = True
+            else:
+                raise RuntimeError(
+                    "attached durable rows and state projection differ by more than one"
+                )
             attached_execution = {
-                "backend_identity_sha256": attached_target.backend[
-                    "backend_identity_sha256"
-                ],
+                "backend_identity_sha256": attached_target.backend["backend_identity_sha256"],
                 "server_identity_sha256": attached_target.server.identity_sha256,
                 "model_identity_sha256": attached_target.model.identity_sha256,
-                "initial_revision_sha256": attached_target.expected_revision[
-                    "revision_sha256"
-                ],
+                "initial_revision_sha256": attached_target.expected_revision["revision_sha256"],
                 "current_revision": expected_revision,
                 "lease_acquisition_id": acquisition_id,
                 "resource_ownership": "external_user_owned_server",
@@ -392,9 +431,28 @@ def _run(root: str, job_id: str) -> int:
             }
             store.update_state(
                 job_id,
-                patch={"attached_execution": attached_execution},
-                event="attached_target_verified",
-                event_data=attached_execution,
+                patch={
+                    "attached_execution": attached_execution,
+                    **(
+                        {
+                            "progress": {
+                                "completed": durable_count,
+                                "total": len(spec["parameter_values"]),
+                            }
+                        }
+                        if reconciled_row_gap
+                        else {}
+                    ),
+                },
+                event=(
+                    "attached_durable_row_reconciled"
+                    if reconciled_row_gap
+                    else "attached_target_verified"
+                ),
+                event_data={
+                    **attached_execution,
+                    "durable_row_gap_reconciled": reconciled_row_gap,
+                },
             )
         else:
             client_kwargs = {
@@ -470,9 +528,7 @@ def _run(root: str, job_id: str) -> int:
         def before_attached_point_hook(context: dict[str, Any]) -> dict[str, Any]:
             if attached_target is None:
                 raise RuntimeError("attached revision hook is unavailable")
-            expected = _persisted_attached_revision(
-                store.read_state(job_id), attached_target
-            )
+            expected = _persisted_attached_revision(store.read_state(job_id), attached_target)
             current = _attached_revision_from_client(
                 client,
                 attached_target,
@@ -505,42 +561,43 @@ def _run(root: str, job_id: str) -> int:
                 _record_native_cancel(store, job_id, attempt, result)
                 return
 
-        native_monitor = threading.Thread(target=native_cancel_monitor, name="comsol-native-cancel", daemon=True)
+        native_monitor = threading.Thread(
+            target=native_cancel_monitor, name="comsol-native-cancel", daemon=True
+        )
         native_monitor.start()
 
         def on_row(row: dict[str, Any]) -> None:
             progress["completed"] = _valid_row_count(
                 directory / "results.csv", spec["spec_fingerprint"]
             )
-            store.update_state(
-                job_id,
-                patch={"progress": dict(progress), "last_row": row},
-                event="durable_row",
-                event_data={"status": row.get("status"), "parameter_value": row.get("parameter_value")},
-            )
+            patch = {"progress": dict(progress), "last_row": row}
+            event_data = {
+                "status": row.get("status"),
+                "parameter_value": row.get("parameter_value"),
+            }
             if attached_target is not None:
                 current_state = store.read_state(job_id)
-                expected = _persisted_attached_revision(
-                    current_state, attached_target
-                )
+                expected = _persisted_attached_revision(current_state, attached_target)
                 current_revision = _attached_revision_from_client(
                     client,
                     attached_target,
                     sequence=int(expected["sequence"]) + 1,
                 )
-                attached_execution = dict(
-                    current_state.get("attached_execution") or {}
-                )
+                attached_execution = dict(current_state.get("attached_execution") or {})
                 attached_execution["current_revision"] = current_revision
-                store.update_state(
-                    job_id,
-                    patch={"attached_execution": attached_execution},
-                    event="attached_revision_advanced",
-                    event_data={
+                patch["attached_execution"] = attached_execution
+                event_data.update(
+                    {
                         "revision_sha256": current_revision["revision_sha256"],
                         "sequence": current_revision["sequence"],
-                    },
+                    }
                 )
+            store.update_state(
+                job_id,
+                patch=patch,
+                event=("attached_durable_row" if attached_target is not None else "durable_row"),
+                event_data=event_data,
+            )
             heartbeat = (
                 ownership.heartbeat()
                 if attached_target is not None
@@ -624,7 +681,9 @@ def _run(root: str, job_id: str) -> int:
                 raise RuntimeError(f"Broad sweep failed: {broad}")
         completed = _valid_row_count(directory / "results.csv", spec["spec_fingerprint"])
         if completed != len(spec["parameter_values"]):
-            raise RuntimeError(f"Expected {len(spec['parameter_values'])} valid rows, found {completed}")
+            raise RuntimeError(
+                f"Expected {len(spec['parameter_values'])} valid rows, found {completed}"
+            )
         if attached_target is not None:
             attached_completion_count = completed
         else:

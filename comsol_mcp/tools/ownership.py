@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import ctypes
 import hashlib
 import importlib.metadata
 import json
+import math
 import os
 import platform
 import re
@@ -14,6 +16,7 @@ import sys
 import threading
 import time
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -31,6 +34,7 @@ LEASE_IO_POLL_SECONDS = 0.02
 PROCESS_INVENTORY_STATUS_TIMEOUT_SECONDS = 0.5
 PROCESS_INVENTORY_MUTATION_TIMEOUT_SECONDS = 10.0
 PROCESS_INVENTORY_CACHE_SECONDS = 2.0
+PROCESS_INVENTORY_REFRESH_SECONDS = 1.0
 JOB_STATUS_MAX_BYTES = 1024 * 1024
 DURABLE_ACTIVE_STATES = frozenset(
     {
@@ -43,6 +47,7 @@ DURABLE_ACTIVE_STATES = frozenset(
         "cancelling",
     }
 )
+
 
 def _comsol_jvm_from_ini(path: Path) -> Optional[Path]:
     try:
@@ -72,7 +77,9 @@ def _parse_comsol_version(value: str) -> Optional[str]:
     return f"{major}.{minor}" + (chr(ord("a") + patch - 1) if patch > 0 else "")
 
 
-def _discover_comsol_backends_without_mph() -> tuple[Optional[str], list[dict[str, str]], Optional[str]]:
+def _discover_comsol_backends_without_mph() -> tuple[
+    Optional[str], list[dict[str, str]], Optional[str]
+]:
     """Mirror MPh's Windows discovery without importing MPh/NumPy/JPype."""
     try:
         mph_version = importlib.metadata.version("MPh")
@@ -130,7 +137,7 @@ def _discover_comsol_backends_without_mph() -> tuple[Optional[str], list[dict[st
                 check=False,
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
-        except (OSError, subprocess.TimeoutExpired):
+        except OSError, subprocess.TimeoutExpired:
             continue
         name = _parse_comsol_version(completed.stdout) if completed.returncode == 0 else None
         if name is None or name in names:
@@ -153,14 +160,12 @@ def _lightweight_job_summaries(root: Path, limit: int = 20) -> dict[str, Any]:
         }
     count = max(1, min(int(limit), 100))
     directories = sorted(
-        (
-            path
-            for path in root.iterdir()
-            if path.is_dir() and (path / "state.json").is_file()
-        ),
+        (path for path in root.iterdir() if path.is_dir() and (path / "state.json").is_file()),
         key=lambda path: path.stat().st_mtime_ns,
         reverse=True,
-    )[:count]
+    )
+    if len(directories) > 1000:
+        raise RuntimeError("durable job status inventory exceeds the bounded maximum")
     jobs = []
     for directory in directories:
         try:
@@ -190,18 +195,57 @@ def _lightweight_job_summaries(root: Path, limit: int = 20) -> dict[str, Any]:
                 }
             )
     active = [job for job in jobs if job["status"] in DURABLE_ACTIVE_STATES]
+    recent = jobs[:count]
     return {
         "available": True,
         "root": str(root),
-        "count_returned": len(jobs),
+        "count_returned": len(recent),
         "active_count": len(active),
         "active": active,
-        "recent": jobs,
+        "recent": recent,
     }
 
 
 def _lease_io_deadline() -> float:
     return time.monotonic() + LEASE_IO_TIMEOUT_SECONDS
+
+
+@contextmanager
+def _lease_operation_lock(path: Path):
+    """Serialize cooperating lease mutations with a crash-released Windows lock."""
+    if os.name != "nt":
+        raise RuntimeError("solver lease mutation requires supported Windows locking")
+    import msvcrt
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle = path.open("a+b")
+    acquired = False
+    try:
+        handle.seek(0, os.SEEK_END)
+        if handle.tell() == 0:
+            handle.write(b"\0")
+            handle.flush()
+            os.fsync(handle.fileno())
+        deadline = _lease_io_deadline()
+        while True:
+            handle.seek(0)
+            try:
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                acquired = True
+                break
+            except OSError as exc:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("solver lease operation lock is busy") from exc
+                time.sleep(LEASE_IO_POLL_SECONDS)
+        yield
+    finally:
+        if acquired:
+            handle.seek(0)
+            try:
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            except OSError:
+                pass
+        handle.close()
 
 
 def _read_bytes_retry(path: Path, *, deadline: float | None = None) -> bytes:
@@ -284,33 +328,155 @@ def _command_signature(command_line: list[str]) -> str:
     return hashlib.sha256(canonical.encode("utf-8", errors="replace")).hexdigest()
 
 
+def _configured_java_home_is_usable(java_home: str | None) -> bool:
+    if not java_home:
+        return False
+    return (Path(java_home) / "bin" / "java.exe").is_file()
+
+
+def _lease_process_identity(
+    lease: dict[str, Any],
+) -> tuple[dict[str, Any] | None, str | None]:
+    try:
+        pid = lease["pid"]
+        created = lease["process_create_time"]
+        signature = lease["command_signature"]
+        if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0:
+            raise ValueError("PID must be a positive integer")
+        if (
+            isinstance(created, bool)
+            or not isinstance(created, (int, float))
+            or not math.isfinite(float(created))
+        ):
+            raise ValueError("creation time must be finite")
+        if not isinstance(signature, str) or re.fullmatch(r"[0-9a-f]{64}", signature) is None:
+            raise ValueError("command signature must be lowercase SHA-256")
+    except (KeyError, TypeError, ValueError) as exc:
+        return None, f"lease process identity is invalid: {exc}"
+    return {
+        "pid": pid,
+        "process_create_time": float(created),
+        "command_signature": signature,
+    }, None
+
+
+def _process_may_host_solver(name: str) -> bool:
+    normalized = name.casefold()
+    return (
+        normalized in {"python", "python.exe", "pythonw", "pythonw.exe", "java", "java.exe"}
+        or "comsol" in normalized
+        or "mphserver" in normalized
+    )
+
+
 def _process_record(process: psutil.Process) -> dict[str, Any]:
     with process.oneshot():
-        try:
+        name = process.name()
+        command_line = []
+        if _process_may_host_solver(name):
             command_line = list(process.cmdline())
-        except (psutil.AccessDenied, psutil.ZombieProcess):
-            command_line = []
-        try:
-            executable = process.exe()
-        except (psutil.AccessDenied, psutil.ZombieProcess):
-            executable = None
         return {
             "pid": process.pid,
             "parent_pid": process.ppid(),
-            "name": process.name(),
+            "name": name,
             "create_time": process.create_time(),
             "command_line": command_line,
-            "executable": executable,
+            "executable": None,
         }
 
 
+def _windows_process_table() -> list[tuple[int, int, str]]:
+    """Read PID, PPID, and image name in one Windows Toolhelp snapshot."""
+    from ctypes import wintypes
+
+    class ProcessEntry32W(ctypes.Structure):
+        _fields_ = [
+            ("dwSize", wintypes.DWORD),
+            ("cntUsage", wintypes.DWORD),
+            ("th32ProcessID", wintypes.DWORD),
+            ("th32DefaultHeapID", ctypes.c_size_t),
+            ("th32ModuleID", wintypes.DWORD),
+            ("cntThreads", wintypes.DWORD),
+            ("th32ParentProcessID", wintypes.DWORD),
+            ("pcPriClassBase", wintypes.LONG),
+            ("dwFlags", wintypes.DWORD),
+            ("szExeFile", wintypes.WCHAR * 260),
+        ]
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    create_snapshot = kernel32.CreateToolhelp32Snapshot
+    create_snapshot.argtypes = (wintypes.DWORD, wintypes.DWORD)
+    create_snapshot.restype = wintypes.HANDLE
+    process_first = kernel32.Process32FirstW
+    process_first.argtypes = (wintypes.HANDLE, ctypes.POINTER(ProcessEntry32W))
+    process_first.restype = wintypes.BOOL
+    process_next = kernel32.Process32NextW
+    process_next.argtypes = (wintypes.HANDLE, ctypes.POINTER(ProcessEntry32W))
+    process_next.restype = wintypes.BOOL
+    close_handle = kernel32.CloseHandle
+    close_handle.argtypes = (wintypes.HANDLE,)
+    close_handle.restype = wintypes.BOOL
+
+    handle = create_snapshot(0x00000002, 0)
+    if handle == wintypes.HANDLE(-1).value:
+        raise OSError(ctypes.get_last_error(), "CreateToolhelp32Snapshot failed")
+    entries = []
+    try:
+        entry = ProcessEntry32W()
+        entry.dwSize = ctypes.sizeof(entry)
+        if not process_first(handle, ctypes.byref(entry)):
+            raise OSError(ctypes.get_last_error(), "Process32FirstW failed")
+        while True:
+            entries.append(
+                (
+                    int(entry.th32ProcessID),
+                    int(entry.th32ParentProcessID),
+                    str(entry.szExeFile),
+                )
+            )
+            if not process_next(handle, ctypes.byref(entry)):
+                break
+    finally:
+        close_handle(handle)
+    return entries
+
+
 def _system_processes() -> list[dict[str, Any]]:
+    if os.name == "nt":
+        records = []
+        for pid, parent_pid, name in _windows_process_table():
+            try:
+                process = psutil.Process(pid)
+                command_line = []
+                if _process_may_host_solver(name):
+                    command_line = list(process.cmdline())
+                records.append(
+                    {
+                        "pid": pid,
+                        "parent_pid": parent_pid,
+                        "name": name,
+                        "create_time": process.create_time(),
+                        "command_line": command_line,
+                        "executable": None,
+                    }
+                )
+            except psutil.NoSuchProcess:
+                continue
+            except (psutil.AccessDenied, psutil.ZombieProcess, OSError) as exc:
+                raise RuntimeError(
+                    f"process identity inspection failed for PID {pid}: {type(exc).__name__}"
+                ) from exc
+        return records
     records = []
     for process in psutil.process_iter():
         try:
             records.append(_process_record(process))
-        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+        except psutil.NoSuchProcess:
             continue
+        except (psutil.AccessDenied, psutil.ZombieProcess, OSError) as exc:
+            raise RuntimeError(
+                f"process identity inspection failed for PID {process.pid}: {type(exc).__name__}"
+            ) from exc
     return records
 
 
@@ -370,9 +536,12 @@ class _BoundedProcessInventory:
         )
         self._thread.start()
 
-    def collect(self, *, require_fresh: bool, timeout: float) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    def collect(
+        self, *, require_fresh: bool, timeout: float
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         requested = time.monotonic()
         timeout = max(0.01, float(timeout))
+        deadline = requested + timeout
         with self._lock:
             cache_age = (
                 requested - self._cache_completed_monotonic
@@ -385,6 +554,10 @@ class _BoundedProcessInventory:
                 and cache_age is not None
                 and cache_age <= PROCESS_INVENTORY_CACHE_SECONDS
             ):
+                if cache_age >= PROCESS_INVENTORY_REFRESH_SECONDS and (
+                    self._thread is None or not self._thread.is_alive()
+                ):
+                    self._start_locked()
                 return list(self._cache_records), {
                     "complete": True,
                     "state": "complete",
@@ -400,7 +573,7 @@ class _BoundedProcessInventory:
             thread = self._thread
         if thread is None:
             raise RuntimeError("process inventory thread failed to initialize")
-        thread.join(timeout=timeout)
+        thread.join(timeout=max(0.0, deadline - time.monotonic()))
         completed = time.monotonic()
         with self._lock:
             fresh_complete = (
@@ -408,7 +581,7 @@ class _BoundedProcessInventory:
                 and self._cache_started_monotonic is not None
                 and self._cache_completed_monotonic is not None
                 and self._cache_started_monotonic >= requested
-                and self._cache_completed_monotonic <= completed
+                and self._cache_completed_monotonic <= deadline
             )
             if fresh_complete:
                 return list(self._cache_records or []), {
@@ -426,11 +599,31 @@ class _BoundedProcessInventory:
                 if self._cache_completed_monotonic is not None
                 else None
             )
+            if (
+                not require_fresh
+                and self._cache_records is not None
+                and cache_age is not None
+                and cache_age <= PROCESS_INVENTORY_CACHE_SECONDS
+                and self._cache_completed_monotonic is not None
+                and self._cache_completed_monotonic <= completed
+            ):
+                return list(self._cache_records), {
+                    "complete": True,
+                    "state": "complete",
+                    "fresh": False,
+                    "source": "completed_inflight_scan",
+                    "cache_age_seconds": round(cache_age, 6),
+                    "scan_latency_seconds": self._cache_latency_seconds,
+                    "timeout_seconds": timeout,
+                    "error": None,
+                }
             return list(self._cache_records or []), {
                 "complete": False,
                 "state": "unavailable" if self._last_error and not thread.is_alive() else "pending",
                 "fresh": False,
-                "source": "stale_cache_after_timeout" if self._cache_records is not None else "unavailable_after_timeout",
+                "source": "stale_cache_after_timeout"
+                if self._cache_records is not None
+                else "unavailable_after_timeout",
                 "cache_age_seconds": round(cache_age, 6) if cache_age is not None else None,
                 "scan_latency_seconds": self._cache_latency_seconds,
                 "timeout_seconds": timeout,
@@ -444,7 +637,7 @@ def _agent_owner_label() -> str:
         return configured
     try:
         parent_command = " ".join(psutil.Process(os.getppid()).cmdline()).casefold()
-    except (psutil.Error, OSError):
+    except psutil.Error, OSError:
         parent_command = ""
     if "opencode" in parent_command:
         return "opencode-mcp"
@@ -471,6 +664,7 @@ class SolverOwnership:
         if not _is_ascii_path(self.runtime_dir):
             raise ValueError("COMSOL runtime/lease path must contain ASCII characters only")
         self.lease_path = self.runtime_dir / "solver_owner.json"
+        self.lease_operation_lock_path = self.runtime_dir / ".solver_owner.operation.lock"
         self._process_provider = process_provider or _system_processes
         self._process_inventory = (
             None
@@ -485,7 +679,7 @@ class SolverOwnership:
         if command_line is None:
             try:
                 command_line = list(psutil.Process(self.pid).cmdline())
-            except (psutil.Error, OSError):
+            except psutil.Error, OSError:
                 command_line = [sys.executable, *sys.argv]
         self.command_line = list(command_line)
         self.command_signature = _command_signature(self.command_line)
@@ -534,8 +728,11 @@ class SolverOwnership:
             return None, None, None
         try:
             raw = _read_bytes_retry(self.lease_path)
-            return json.loads(raw.decode("utf-8")), raw, None
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            lease = json.loads(raw.decode("utf-8"))
+            if not isinstance(lease, dict):
+                raise ValueError("solver lease must be a JSON object")
+            return lease, raw, None
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
             return None, None, f"Cannot read solver lease: {exc}"
 
     def _read_lease(self) -> tuple[Optional[dict[str, Any]], Optional[str]]:
@@ -543,34 +740,52 @@ class SolverOwnership:
         return lease, error
 
     def _lease_state_from_process(
-        self,
-        lease: dict[str, Any], process: dict[str, Any] | None
+        self, lease: dict[str, Any], process: dict[str, Any] | None
     ) -> dict[str, Any]:
-        required = {"pid", "process_create_time", "command_signature"}
-        if not required <= set(lease):
-            return {"state": "uncertain", "reason": "lease is missing process identity fields"}
+        identity, identity_error = _lease_process_identity(lease)
+        if identity is None:
+            return {"state": "uncertain", "reason": identity_error}
         if process is None:
             return {"state": "stale", "reason": "lease PID no longer exists"}
         actual_time = process.get("create_time")
-        if actual_time is None:
+        if (
+            isinstance(actual_time, bool)
+            or not isinstance(actual_time, (int, float))
+            or not math.isfinite(float(actual_time))
+        ):
             return {"state": "uncertain", "reason": "process creation time is unavailable"}
-        if abs(float(actual_time) - float(lease["process_create_time"])) > CREATE_TIME_TOLERANCE_SECONDS:
+        if (
+            abs(float(actual_time) - identity["process_create_time"])
+            > CREATE_TIME_TOLERANCE_SECONDS
+        ):
             return {"state": "stale", "reason": "PID was reused with a different creation time"}
         actual_command = list(process.get("command_line") or [])
-        if actual_command and _command_signature(actual_command) != lease["command_signature"]:
+        if not actual_command:
+            return {"state": "uncertain", "reason": "process command line is unavailable"}
+        if _command_signature(actual_command) != identity["command_signature"]:
             return {"state": "stale", "reason": "PID command line no longer matches the lease"}
         return {
             "state": "active",
             "reason": "PID, creation time, and command line match",
             "owned_by_current_process": (
-                int(lease["pid"]) == self.pid
-                and abs(float(lease["process_create_time"]) - self.create_time)
+                identity["pid"] == self.pid
+                and abs(identity["process_create_time"] - self.create_time)
                 <= CREATE_TIME_TOLERANCE_SECONDS
             ),
         }
 
-    def _lease_state(self, lease: dict[str, Any], processes: list[dict[str, Any]]) -> dict[str, Any]:
-        match = next((item for item in processes if item.get("pid") == int(lease.get("pid", -1))), None)
+    def _lease_state(
+        self, lease: dict[str, Any], processes: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        identity, _identity_error = _lease_process_identity(lease)
+        match = (
+            next(
+                (item for item in processes if item.get("pid") == identity["pid"]),
+                None,
+            )
+            if identity is not None
+            else None
+        )
         return self._lease_state_from_process(lease, match)
 
     def _targeted_lease_state(self, lease: dict[str, Any]) -> dict[str, Any] | None:
@@ -586,11 +801,11 @@ class SolverOwnership:
             # snapshots remain the authority so tests cannot accidentally probe
             # the host running the test suite.
             return None
-        required = {"pid", "process_create_time", "command_signature"}
-        if not required <= set(lease):
-            return {"state": "uncertain", "reason": "lease is missing process identity fields"}
+        identity, identity_error = _lease_process_identity(lease)
+        if identity is None:
+            return {"state": "uncertain", "reason": identity_error}
         try:
-            process = psutil.Process(int(lease["pid"]))
+            process = psutil.Process(identity["pid"])
             with process.oneshot():
                 record = {
                     "pid": process.pid,
@@ -629,8 +844,43 @@ class SolverOwnership:
             current = parent_map.get(current, 0)
         owned_pids = {self.pid}
         allowed_external_roots = set()
-        if lease and int(lease.get("pid", -1)) == self.pid:
-            owned_pids.update(int(pid) for pid in lease.get("comsol_server_pids", []))
+        lease_identity, _lease_identity_error = (
+            _lease_process_identity(lease) if lease else (None, None)
+        )
+        if lease and lease_identity and lease_identity["pid"] == self.pid:
+            recorded_servers = lease.get("comsol_server_processes", [])
+            if not isinstance(recorded_servers, list):
+                recorded_servers = []
+            for recorded in recorded_servers:
+                if not isinstance(recorded, dict):
+                    continue
+                server_pid = recorded.get("pid")
+                actual = next(
+                    (item for item in processes if item.get("pid") == server_pid),
+                    None,
+                )
+                if actual is None:
+                    continue
+                actual_time = actual.get("create_time")
+                actual_command = [str(part) for part in actual.get("command_line") or []]
+                recorded_time = recorded.get("process_create_time")
+                recorded_signature = recorded.get("command_signature")
+                if (
+                    isinstance(server_pid, int)
+                    and not isinstance(server_pid, bool)
+                    and isinstance(actual_time, (int, float))
+                    and not isinstance(actual_time, bool)
+                    and isinstance(recorded_time, (int, float))
+                    and not isinstance(recorded_time, bool)
+                    and math.isfinite(float(actual_time))
+                    and math.isfinite(float(recorded_time))
+                    and abs(float(actual_time) - float(recorded_time))
+                    <= CREATE_TIME_TOLERANCE_SECONDS
+                    and bool(actual_command)
+                    and isinstance(recorded_signature, str)
+                    and _command_signature(actual_command) == recorded_signature
+                ):
+                    owned_pids.add(server_pid)
             attached = lease.get("attached_server")
             if isinstance(attached, dict) and attached.get("owned") is False:
                 attached_pid = attached.get("server_pid")
@@ -641,12 +891,16 @@ class SolverOwnership:
                 if match is not None:
                     actual_command = [str(part) for part in match.get("command_line") or []]
                     actual_time = match.get("create_time")
+                    recorded_time = attached.get("process_create_time")
                     if (
-                        actual_time is not None
-                        and abs(float(actual_time) - float(attached.get("process_create_time", -1)))
+                        isinstance(actual_time, (int, float))
+                        and not isinstance(actual_time, bool)
+                        and isinstance(recorded_time, (int, float))
+                        and not isinstance(recorded_time, bool)
+                        and bool(actual_command)
+                        and abs(float(actual_time) - float(recorded_time))
                         <= CREATE_TIME_TOLERANCE_SECONDS
-                        and _command_signature(actual_command)
-                        == attached.get("command_signature")
+                        and _command_signature(actual_command) == attached.get("command_signature")
                     ):
                         allowed_external_roots.add(int(attached_pid))
         evidence = []
@@ -658,8 +912,7 @@ class SolverOwnership:
                 or pid in ancestor_pids
                 or self._is_descendant(pid, parent_map, self.pid)
                 or any(
-                    self._is_descendant(pid, parent_map, root)
-                    for root in allowed_external_roots
+                    self._is_descendant(pid, parent_map, root) for root in allowed_external_roots
                 )
             ):
                 continue
@@ -671,7 +924,9 @@ class SolverOwnership:
                 kind = "comsol-server"
             elif name in {"java", "java.exe"} and "comsol" in command and "server" in command:
                 kind = "comsol-java-server"
-            elif any(pattern in command for pattern in ("mph.client", "import mph", "from mph", "-m mph")):
+            elif any(
+                pattern in command for pattern in ("mph.client", "import mph", "from mph", "-m mph")
+            ):
                 kind = "python-mph-client"
             elif name in {"python", "python.exe", "pythonw", "pythonw.exe"}:
                 for argument in command_line[1:]:
@@ -707,15 +962,17 @@ class SolverOwnership:
         inventory_timeout: float | None = None,
     ) -> dict[str, Any]:
         timeout = (
-            PROCESS_INVENTORY_MUTATION_TIMEOUT_SECONDS
-            if require_fresh_inventory
-            else PROCESS_INVENTORY_STATUS_TIMEOUT_SECONDS
-        ) if inventory_timeout is None else float(inventory_timeout)
+            (
+                PROCESS_INVENTORY_MUTATION_TIMEOUT_SECONDS
+                if require_fresh_inventory
+                else PROCESS_INVENTORY_STATUS_TIMEOUT_SECONDS
+            )
+            if inventory_timeout is None
+            else float(inventory_timeout)
+        )
         lease, lease_error = self._read_lease()
         targeted_lease_state = (
-            self._targeted_lease_state(lease)
-            if lease is not None and not lease_error
-            else None
+            self._targeted_lease_state(lease) if lease is not None and not lease_error else None
         )
         processes, inventory = self._collect_processes(
             require_fresh=require_fresh_inventory,
@@ -771,7 +1028,9 @@ class SolverOwnership:
             "process_inventory": inventory,
             "full_collision_inventory": full_collision_inventory,
             "external_solver_processes": external,
-            "collision": not inventory["complete"] or bool(external) or (
+            "collision": not inventory["complete"]
+            or bool(external)
+            or (
                 lease_status["state"] in {"active", "uncertain"}
                 and not lease_status.get("owned_by_current_process", False)
             ),
@@ -813,15 +1072,19 @@ class SolverOwnership:
         mph_version, detected_backends, discovery_error = _discover_comsol_backends_without_mph()
         if discovery_error:
             warnings.append(f"COMSOL backend discovery failed: {discovery_error}")
-        usable_jre = bool(java_home and Path(java_home).exists()) or any(
+        usable_jre = _configured_java_home_is_usable(java_home) or any(
             Path(item["jvm"]).is_file() for item in detected_backends
         )
         if not usable_jre:
-            blockers.append("No existing COMSOL JRE was found through the environment or MPh discovery")
+            blockers.append(
+                "No existing COMSOL JRE was found through the environment or MPh discovery"
+            )
         memory = psutil.virtual_memory()
         free_gb = memory.available / (1024**3)
         if free_gb < float(minimum_free_gb):
-            blockers.append(f"available memory {free_gb:.2f} GiB is below {minimum_free_gb:.2f} GiB")
+            blockers.append(
+                f"available memory {free_gb:.2f} GiB is below {minimum_free_gb:.2f} GiB"
+            )
         if model_path and not Path(model_path).expanduser().is_file():
             blockers.append(f"model baseline does not exist: {model_path}")
         if output_path:
@@ -833,11 +1096,15 @@ class SolverOwnership:
                 blockers.append(f"output directory is not writable: {parent}")
         if requested_version:
             if not str(requested_version).startswith("6.4"):
-                warnings.append(f"requested COMSOL version {requested_version!r} is outside the verified 6.4 target")
+                warnings.append(
+                    f"requested COMSOL version {requested_version!r} is outside the verified 6.4 target"
+                )
             if detected_backends and not any(
                 item["name"].startswith(str(requested_version)) for item in detected_backends
             ):
-                blockers.append(f"requested COMSOL version {requested_version!r} was not discovered")
+                blockers.append(
+                    f"requested COMSOL version {requested_version!r} was not discovered"
+                )
 
         return {
             "success": not blockers,
@@ -861,6 +1128,17 @@ class SolverOwnership:
         }
 
     def acquire(self, *, mode: str, model_path: Optional[str] = None) -> dict[str, Any]:
+        try:
+            with _lease_operation_lock(self.lease_operation_lock_path):
+                return self._acquire_locked(mode=mode, model_path=model_path)
+        except TimeoutError as exc:
+            return {
+                "success": False,
+                "acquired": False,
+                "error": str(exc),
+            }
+
+    def _acquire_locked(self, *, mode: str, model_path: Optional[str] = None) -> dict[str, Any]:
         status = self.status(require_fresh_inventory=True)
         lease_status = status["lease"]
         if (
@@ -868,7 +1146,12 @@ class SolverOwnership:
             and lease_status.get("owned_by_current_process")
             and not status["collision"]
         ):
-            return {"success": True, "acquired": False, "reused": True, "lease": lease_status["lease"]}
+            return {
+                "success": True,
+                "acquired": False,
+                "reused": True,
+                "lease": lease_status["lease"],
+            }
         if status["collision"] or lease_status["state"] == "stale":
             return {
                 "success": False,
@@ -898,10 +1181,12 @@ class SolverOwnership:
             "comsol_server_port": None,
         }
         self.runtime_dir.mkdir(parents=True, exist_ok=True)
-        return self._create_lease(payload)
+        return self._create_lease_if_collision_free(payload)
 
     def _create_lease(self, payload: dict[str, Any]) -> dict[str, Any]:
-        data = (json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode("utf-8")
+        data = (json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode(
+            "utf-8"
+        )
         try:
             descriptor = os.open(self.lease_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
         except FileExistsError:
@@ -921,6 +1206,33 @@ class SolverOwnership:
             raise
         return {"success": True, "acquired": True, "reused": False, "lease": payload}
 
+    def _create_lease_if_collision_free(self, payload: dict[str, Any]) -> dict[str, Any]:
+        created = self._create_lease(payload)
+        if not created.get("success"):
+            return created
+        status = self.status(require_fresh_inventory=True)
+        if not status["collision"]:
+            return created
+        expected = (
+            json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+        ).encode("utf-8")
+        removed, reason = _unlink_retry(
+            self.lease_path,
+            missing_ok=False,
+            expected_bytes=expected,
+        )
+        return {
+            "success": False,
+            "acquired": not removed,
+            "lease_retained": not removed,
+            "error": (
+                "Solver collision appeared during lease publication."
+                if removed
+                else f"Solver collision appeared and lease rollback failed: {reason}"
+            ),
+            "status": status,
+        }
+
     def acquire_attached(
         self,
         attached_server: Any,
@@ -928,6 +1240,25 @@ class SolverOwnership:
         listener_provider: Callable[[], list[dict[str, Any]]] = _system_listeners,
     ) -> dict[str, Any]:
         """Acquire the existing lease while preserving one exact external server."""
+        try:
+            with _lease_operation_lock(self.lease_operation_lock_path):
+                return self._acquire_attached_locked(
+                    attached_server,
+                    listener_provider=listener_provider,
+                )
+        except TimeoutError as exc:
+            return {
+                "success": False,
+                "acquired": False,
+                "error": str(exc),
+            }
+
+    def _acquire_attached_locked(
+        self,
+        attached_server: Any,
+        *,
+        listener_provider: Callable[[], list[dict[str, Any]]],
+    ) -> dict[str, Any]:
         from comsol_mcp.shared_session.contracts import (
             summarize_shared_listener_bindings,
         )
@@ -979,9 +1310,7 @@ class SolverOwnership:
                 "error": f"Attached listener inventory failed: {type(exc).__name__}",
             }
         endpoint = attached_server.endpoint
-        listener = summarize_shared_listener_bindings(
-            listeners, endpoint=endpoint
-        )
+        listener = summarize_shared_listener_bindings(listeners, endpoint=endpoint)
         if (
             not listener["stable"]
             or listener["owner_pid"] != attached_server.server_pid
@@ -1004,8 +1333,11 @@ class SolverOwnership:
         }
         synthetic_lease = {
             "pid": self.pid,
+            "process_create_time": self.create_time,
+            "command_signature": self.command_signature,
             "attached_server": attached_payload,
             "comsol_server_pids": [],
+            "comsol_server_processes": [],
         }
         external = self._external_solver_processes(processes, synthetic_lease)
         if external:
@@ -1036,15 +1368,30 @@ class SolverOwnership:
             "comsol_server_port": None,
         }
         self.runtime_dir.mkdir(parents=True, exist_ok=True)
-        return self._create_lease(payload)
+        return self._create_lease_if_collision_free(payload)
 
     def heartbeat(
         self, *, model_path: Optional[str] = None, refresh_server_processes: bool = False
     ) -> bool:
-        lease, original, error = self._read_lease_with_bytes()
-        if error or not lease or int(lease.get("pid", -1)) != self.pid:
+        try:
+            with _lease_operation_lock(self.lease_operation_lock_path):
+                return self._heartbeat_locked(
+                    model_path=model_path,
+                    refresh_server_processes=refresh_server_processes,
+                )
+        except TimeoutError:
             return False
-        if abs(float(lease.get("process_create_time", -1)) - self.create_time) > CREATE_TIME_TOLERANCE_SECONDS:
+
+    def _heartbeat_locked(
+        self, *, model_path: Optional[str] = None, refresh_server_processes: bool = False
+    ) -> bool:
+        lease, original, error = self._read_lease_with_bytes()
+        if error or not lease:
+            return False
+        identity, _identity_error = _lease_process_identity(lease)
+        if identity is None or identity["pid"] != self.pid:
+            return False
+        if abs(identity["process_create_time"] - self.create_time) > CREATE_TIME_TOLERANCE_SECONDS:
             return False
         acquisition_id = lease.get("acquisition_id")
         if not acquisition_id:
@@ -1089,47 +1436,86 @@ class SolverOwnership:
             lease["comsol_server_processes"] = servers
             # Keep v2 PID-only evidence readable, but never use it to act.
             lease["comsol_server_pids"] = [item["pid"] for item in servers]
-        temporary = self.lease_path.with_name(f".{self.lease_path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+        temporary = self.lease_path.with_name(
+            f".{self.lease_path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
+        )
         with temporary.open("w", encoding="utf-8", newline="\n") as handle:
             json.dump(lease, handle, ensure_ascii=False, indent=2, sort_keys=True)
             handle.write("\n")
             handle.flush()
             os.fsync(handle.fileno())
         try:
-            replaced, _reason = _replace_retry_if_unchanged(
-                temporary, self.lease_path, original
-            )
+            replaced, _reason = _replace_retry_if_unchanged(temporary, self.lease_path, original)
             return replaced
         finally:
             removed, reason = _unlink_retry(temporary, missing_ok=True)
             if not removed:
-                raise RuntimeError(
-                    f"Cannot clean solver lease temporary file: {reason}"
-                )
+                raise RuntimeError(f"Cannot clean solver lease temporary file: {reason}")
 
     def release(self) -> dict[str, Any]:
+        try:
+            with _lease_operation_lock(self.lease_operation_lock_path):
+                return self._release_locked()
+        except TimeoutError as exc:
+            return {
+                "success": False,
+                "released": False,
+                "error": str(exc),
+            }
+
+    def _release_locked(self) -> dict[str, Any]:
         lease, original, error = self._read_lease_with_bytes()
         if error:
             return {"success": False, "released": False, "error": error}
         if lease is None:
             return {"success": True, "released": False, "message": "No solver lease exists."}
-        if int(lease.get("pid", -1)) != self.pid or abs(
-            float(lease.get("process_create_time", -1)) - self.create_time
-        ) > CREATE_TIME_TOLERANCE_SECONDS:
-            return {"success": False, "released": False, "error": "Refusing to release a foreign solver lease."}
+        identity, identity_error = _lease_process_identity(lease)
+        if identity is None:
+            return {
+                "success": False,
+                "released": False,
+                "error": identity_error,
+            }
+        if (
+            identity["pid"] != self.pid
+            or abs(identity["process_create_time"] - self.create_time)
+            > CREATE_TIME_TOLERANCE_SECONDS
+        ):
+            return {
+                "success": False,
+                "released": False,
+                "error": "Refusing to release a foreign solver lease.",
+            }
         if not lease.get("acquisition_id"):
-            return {"success": False, "released": False, "error": "Refusing to release a legacy lease without acquisition ID."}
+            return {
+                "success": False,
+                "released": False,
+                "error": "Refusing to release a legacy lease without acquisition ID.",
+            }
         if original is None:
             return {"success": True, "released": False, "message": "No solver lease exists."}
-        removed, reason = _unlink_retry(
-            self.lease_path, missing_ok=True, expected_bytes=original
-        )
+        removed, reason = _unlink_retry(self.lease_path, missing_ok=True, expected_bytes=original)
         if not removed:
-            detail = "Lease changed before release; retry status." if reason == "changed" else f"Cannot release solver lease: {reason}"
+            detail = (
+                "Lease changed before release; retry status."
+                if reason == "changed"
+                else f"Cannot release solver lease: {reason}"
+            )
             return {"success": False, "released": False, "error": detail}
         return {"success": True, "released": True}
 
     def recover_stale(self) -> dict[str, Any]:
+        try:
+            with _lease_operation_lock(self.lease_operation_lock_path):
+                return self._recover_stale_locked()
+        except TimeoutError as exc:
+            return {
+                "success": False,
+                "recovered": False,
+                "error": str(exc),
+            }
+
+    def _recover_stale_locked(self) -> dict[str, Any]:
         lease, original, error = self._read_lease_with_bytes()
         if error:
             return {"success": False, "recovered": False, "error": error}
@@ -1157,12 +1543,18 @@ class SolverOwnership:
                 "lease_state": state,
             }
         if not lease.get("acquisition_id"):
-            return {"success": False, "recovered": False, "error": "Lease has no acquisition ID; refusing stale recovery."}
-        removed, reason = _unlink_retry(
-            self.lease_path, missing_ok=False, expected_bytes=original
-        )
+            return {
+                "success": False,
+                "recovered": False,
+                "error": "Lease has no acquisition ID; refusing stale recovery.",
+            }
+        removed, reason = _unlink_retry(self.lease_path, missing_ok=False, expected_bytes=original)
         if not removed:
-            detail = "Lease changed during recovery; retry status." if reason == "changed" else f"Cannot recover stale solver lease: {reason}"
+            detail = (
+                "Lease changed during recovery; retry status."
+                if reason == "changed"
+                else f"Cannot recover stale solver lease: {reason}"
+            )
             return {"success": False, "recovered": False, "error": detail}
         return {"success": True, "recovered": True, "reason": state["reason"]}
 
@@ -1180,9 +1572,7 @@ def register_ownership_tools(mcp: FastMCP) -> None:
 
         return measured_call(
             "solver_status",
-            lambda: ownership_manager.status(
-                session_state=session_manager.get_status()
-            ),
+            lambda: ownership_manager.status(session_state=session_manager.get_status()),
         )
 
     @mcp.tool()

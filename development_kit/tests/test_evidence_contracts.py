@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 import hashlib
 import json
 import math
+from copy import deepcopy
 
 import pytest
-
+from src.evidence import contracts as contracts_module
 from src.evidence.contracts import (
     PHYSICAL_EVIDENCE_SCHEMA_NAME,
     PHYSICAL_EVIDENCE_SCHEMA_VERSION,
@@ -26,7 +26,6 @@ from src.evidence.contracts import (
     validate_physical_evidence,
     validate_validation_policy,
 )
-
 
 SOURCE_HASH = "a" * 64
 CONFIG_HASH = "b" * 64
@@ -57,11 +56,34 @@ def _envelope(*, polarization_state: str = "measured"):
                 "mesh_vertex_count": 600,
             },
             "evidence": {
-                "power.R": {"state": "measured", "value": 0.2, "unit": "1", "expression": "ewfd.Rtotal"},
-                "power.T": {"state": "measured", "value": 0.1, "unit": "1", "expression": "ewfd.Ttotal"},
-                "power.A": {"state": "measured", "value": 0.7, "unit": "1", "expression": "ewfd.Atotal"},
-                "wavelength.evaluated_parameter_m": {"state": "measured", "value": 4.37e-6, "unit": "m"},
-                "wavelength.solved_frequency_m": {"state": "measured", "value": 4.37e-6, "unit": "m"},
+                "power.R": {
+                    "state": "measured",
+                    "value": 0.2,
+                    "unit": "1",
+                    "expression": "ewfd.Rtotal",
+                },
+                "power.T": {
+                    "state": "measured",
+                    "value": 0.1,
+                    "unit": "1",
+                    "expression": "ewfd.Ttotal",
+                },
+                "power.A": {
+                    "state": "measured",
+                    "value": 0.7,
+                    "unit": "1",
+                    "expression": "ewfd.Atotal",
+                },
+                "wavelength.evaluated_parameter_m": {
+                    "state": "measured",
+                    "value": 4.37e-6,
+                    "unit": "m",
+                },
+                "wavelength.solved_frequency_m": {
+                    "state": "measured",
+                    "value": 4.37e-6,
+                    "unit": "m",
+                },
                 "polarization.target_to_transverse_ratio": polarization,
                 "polarization.reference_air_method_valid": (
                     {"state": "measured", "value": True}
@@ -85,9 +107,15 @@ def _policy(rule_type: str, *, tolerances: dict, assumptions: dict | None = None
             "policy_id": f"unit.{rule_type}",
             "rules": [
                 {
-                    **{key: value for key, value in example_rule.items() if key not in {"tolerances", "assumptions"}},
+                    **{
+                        key: value
+                        for key, value in example_rule.items()
+                        if key not in {"tolerances", "assumptions"}
+                    },
                     "tolerances": tolerances,
-                    "assumptions": example_rule["assumptions"] if assumptions is None else assumptions,
+                    "assumptions": example_rule["assumptions"]
+                    if assumptions is None
+                    else assumptions,
                 }
             ],
         }
@@ -115,8 +143,14 @@ def test_same_evidence_and_policy_serialize_byte_stably():
     [
         (lambda value: value.update({"unexpected": True}), "unknown fields"),
         (lambda value: value["evidence"]["power.R"].update({"value": math.nan}), "non-finite"),
-        (lambda value: value["evidence"]["power.R"].update({"state": "maybe"}), "state must be one"),
-        (lambda value: value["evidence"].update({"x" * 200: {"state": "unknown"}}), "invalid evidence key"),
+        (
+            lambda value: value["evidence"]["power.R"].update({"state": "maybe"}),
+            "state must be one",
+        ),
+        (
+            lambda value: value["evidence"].update({"x" * 200: {"state": "unknown"}}),
+            "invalid evidence key",
+        ),
     ],
 )
 def test_physical_evidence_rejects_malformed_ambiguous_and_nonfinite(mutation, match):
@@ -124,6 +158,14 @@ def test_physical_evidence_rejects_malformed_ambiguous_and_nonfinite(mutation, m
     mutation(payload)
     with pytest.raises(ValueError, match=match):
         validate_physical_evidence(payload, verify_hash=False)
+
+
+def test_physical_evidence_rejects_stale_contract_hash():
+    payload = _envelope()
+    payload["model"]["mesh_element_count"] += 1
+
+    with pytest.raises(ValueError, match="contract_sha256 does not match"):
+        validate_physical_evidence(payload)
 
 
 def test_contract_size_is_bounded():
@@ -155,11 +197,38 @@ def test_policy_rejects_unknown_nonfinite_and_hash_mismatch():
         validate_validation_policy(mismatch)
 
 
+@pytest.mark.parametrize("value", [True, "0", 10**400])
+def test_policy_rejects_coercive_or_overflowing_numeric_tolerances(value):
+    policy = _policy(
+        "passive_rta_bounds",
+        tolerances={"margin": 0.0},
+        assumptions={"passive": True, "power_normalized": True},
+    )
+    policy["rules"][0]["tolerances"]["margin"] = value
+
+    with pytest.raises(ValueError, match="numeric|finite"):
+        validate_validation_policy(policy, verify_hash=False)
+
+
+def test_policy_assumptions_require_exact_json_booleans():
+    policy = _policy(
+        "passive_rta_bounds",
+        tolerances={"margin": 0.0},
+        assumptions={"passive": True, "power_normalized": True},
+    )
+    policy["rules"][0]["assumptions"] = {"passive": 1, "power_normalized": 1}
+
+    with pytest.raises(ValueError, match="must be boolean"):
+        validate_validation_policy(policy, verify_hash=False)
+
+
 def test_label_only_or_unknown_required_evidence_cannot_pass_policy():
     policy = _policy("reference_air_polarization_ratio", tolerances={"minimum_ratio": 20.0})
 
     measured = evaluate_physical_evidence_policy(_envelope(polarization_state="measured"), policy)
-    label_only = evaluate_physical_evidence_policy(_envelope(polarization_state="label_only"), policy)
+    label_only = evaluate_physical_evidence_policy(
+        _envelope(polarization_state="label_only"), policy
+    )
     unknown = evaluate_physical_evidence_policy(_envelope(polarization_state="unknown"), policy)
 
     assert measured["overall"] == "pass"
@@ -167,8 +236,22 @@ def test_label_only_or_unknown_required_evidence_cannot_pass_policy():
     assert unknown["overall"] == "missing"
     assert label_only["rules"][0]["required_measurement_states"] == {
         "polarization.reference_air_method_valid": "label_only",
-        "polarization.target_to_transverse_ratio": "label_only"
+        "polarization.target_to_transverse_ratio": "label_only",
     }
+
+
+@pytest.mark.parametrize("value", [True, "0.2", 10**400])
+def test_policy_evaluation_rejects_coercive_or_overflowing_measured_numbers(value):
+    payload = deepcopy(_envelope())
+    payload.pop("contract_sha256")
+    payload["evidence"]["power.R"]["value"] = value
+    evidence = build_physical_evidence(payload)
+    policy = _policy("passive_rta_bounds", tolerances={"margin": 0.0})
+
+    result = evaluate_physical_evidence_policy(evidence, policy)
+
+    assert result["overall"] == "missing"
+    assert "invalid shape" in result["rules"][0]["reason"]
 
 
 def _with_evidence_records(envelope, records):
@@ -188,29 +271,46 @@ def _declared_flux_evidence(*, reflected=0.4, transmitted=1.2, eligible=True, co
         {
             "flux.incident_raw_power_w": {"state": "measured", "value": -incident, "unit": "W"},
             "flux.reflected_raw_power_w": {"state": "measured", "value": reflected, "unit": "W"},
-            "flux.transmitted_raw_power_w": {"state": "measured", "value": -transmitted, "unit": "W"},
+            "flux.transmitted_raw_power_w": {
+                "state": "measured",
+                "value": -transmitted,
+                "unit": "W",
+            },
             "flux.incident_positive_power_sign": {
-                "state": "derived_from_declared_convention", "value": -1,
+                "state": "derived_from_declared_convention",
+                "value": -1,
             },
             "flux.reflected_positive_power_sign": {
-                "state": "derived_from_declared_convention", "value": 1,
+                "state": "derived_from_declared_convention",
+                "value": 1,
             },
             "flux.transmitted_positive_power_sign": {
-                "state": "derived_from_declared_convention", "value": -1,
+                "state": "derived_from_declared_convention",
+                "value": -1,
             },
             "flux.incident_power_w": {
-                "state": "derived_from_declared_convention", "value": incident, "unit": "W",
+                "state": "derived_from_declared_convention",
+                "value": incident,
+                "unit": "W",
             },
             "flux.reflected_power_w": {
-                "state": "derived_from_declared_convention", "value": reflected, "unit": "W",
+                "state": "derived_from_declared_convention",
+                "value": reflected,
+                "unit": "W",
             },
             "flux.transmitted_power_w": {
-                "state": "derived_from_declared_convention", "value": transmitted, "unit": "W",
+                "state": "derived_from_declared_convention",
+                "value": transmitted,
+                "unit": "W",
             },
             "flux.R": {"state": "derived_from_declared_convention", "value": r_value, "unit": "1"},
             "flux.T": {"state": "derived_from_declared_convention", "value": t_value, "unit": "1"},
             "flux.A": {"state": "derived_from_declared_convention", "value": a_value, "unit": "1"},
-            "flux.closure_abs": {"state": "derived_from_declared_convention", "value": 0.0, "unit": "1"},
+            "flux.closure_abs": {
+                "state": "derived_from_declared_convention",
+                "value": 0.0,
+                "unit": "1",
+            },
             "flux.convention_complete": {
                 "state": "derived_from_declared_convention",
                 "value": convention,
@@ -244,6 +344,23 @@ def test_declared_flux_policy_requires_passive_bounds_and_exact_arithmetic():
     assert absorption_above_one["overall"] == "fail"
     assert reversed_outgoing_sign["rules"][0]["checks"]["passive_bounds"] is False
 
+    negative_closure = deepcopy(_declared_flux_evidence())
+    negative_closure.pop("contract_sha256")
+    negative_closure["evidence"]["flux.closure_abs"]["value"] = -1.0
+    inconsistent_closure = deepcopy(_declared_flux_evidence())
+    inconsistent_closure.pop("contract_sha256")
+    inconsistent_closure["evidence"]["flux.closure_abs"]["value"] = 1.0e-12
+
+    negative_result = evaluate_physical_evidence_policy(
+        build_physical_evidence(negative_closure), policy
+    )
+    inconsistent_result = evaluate_physical_evidence_policy(
+        build_physical_evidence(inconsistent_closure), policy
+    )
+
+    assert negative_result["overall"] == "fail"
+    assert inconsistent_result["overall"] == "fail"
+
 
 def test_internal_normalization_cannot_substitute_for_physical_flux_closure():
     policy = _policy(
@@ -266,7 +383,9 @@ def test_internal_normalization_cannot_substitute_for_physical_flux_closure():
 
     derived_raw_payload = deepcopy(_declared_flux_evidence())
     derived_raw_payload.pop("contract_sha256")
-    derived_raw_payload["evidence"]["flux.incident_raw_power_w"]["state"] = "derived_from_declared_convention"
+    derived_raw_payload["evidence"]["flux.incident_raw_power_w"]["state"] = (
+        "derived_from_declared_convention"
+    )
     derived_raw = build_physical_evidence(derived_raw_payload)
     result = evaluate_physical_evidence_policy(derived_raw, policy)
     assert result["overall"] == "missing"
@@ -355,6 +474,46 @@ def test_legacy_reader_preserves_labels_and_does_not_invent_flux_evidence():
     assert migrated["evidence"]["flux.closure_abs"]["state"] == "not_requested"
 
 
+def test_legacy_declared_flux_state_cannot_substitute_for_nested_measurements():
+    legacy = {
+        "schema_version": "1",
+        "config_id": "legacy-config",
+        "config_sha256": CONFIG_HASH,
+        "source_sha256": SOURCE_HASH,
+        "measurement": {
+            "schema_version": "1",
+            "config_id": "legacy-config",
+            "provenance": {
+                "config_sha256": CONFIG_HASH,
+                "source_sha256_before": SOURCE_HASH,
+            },
+            "wavelength": {},
+            "power": {},
+            "polarization": {},
+            "mesh": {},
+            "declared_plane_flux": {
+                "state": "derived_from_declared_convention",
+                "planes": {"incident": None},
+            },
+        },
+    }
+
+    migrated = migrate_legacy_point_audit(legacy)
+
+    for name in (
+        "incident_raw_power_w",
+        "reflected_raw_power_w",
+        "transmitted_raw_power_w",
+        "R",
+        "T",
+        "A",
+        "closure_abs",
+        "convention_complete",
+        "physical_flux_closure_eligible",
+    ):
+        assert migrated["evidence"][f"flux.{name}"]["state"] == "unknown"
+
+
 def test_file_migration_writes_new_hash_bound_artifact_without_touching_source(tmp_path):
     legacy = {
         "schema_version": "1",
@@ -382,12 +541,61 @@ def test_file_migration_writes_new_hash_bound_artifact_without_touching_source(t
     assert source.read_bytes() == source_bytes
     assert source.stat().st_mtime_ns == source_stat.st_mtime_ns
     assert migrated["migration"]["source_hash_basis"] == "file_bytes"
-    assert migrated["migration"]["source_artifact_sha256"] == hashlib.sha256(source_bytes).hexdigest()
+    assert (
+        migrated["migration"]["source_artifact_sha256"] == hashlib.sha256(source_bytes).hexdigest()
+    )
     assert json.loads(output.read_text(encoding="utf-8")) == migrated
     with pytest.raises(FileExistsError):
         migrate_legacy_point_audit_file(source, output)
     with pytest.raises(ValueError, match="distinct"):
         migrate_legacy_point_audit_file(source, source)
+
+
+def test_file_migration_publishes_nothing_when_source_changes_before_commit(tmp_path, monkeypatch):
+    source = tmp_path / "legacy.json"
+    output = tmp_path / "physical_evidence.json"
+    source.write_text(
+        json.dumps(
+            {
+                "schema_version": "1",
+                "config_id": "legacy-config",
+                "config_sha256": CONFIG_HASH,
+                "source_sha256": SOURCE_HASH,
+                "measurement": {
+                    "schema_version": "1",
+                    "config_id": "legacy-config",
+                    "provenance": {
+                        "config_sha256": CONFIG_HASH,
+                        "source_sha256_before": SOURCE_HASH,
+                    },
+                    "wavelength": {},
+                    "power": {},
+                    "polarization": {},
+                    "mesh": {},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    real_read = contracts_module.read_file_bytes_bounded
+    calls = 0
+
+    def changing_read(path, *, max_bytes):
+        nonlocal calls
+        calls += 1
+        payload = real_read(path, max_bytes=max_bytes)
+        return payload if calls == 1 else payload + b" "
+
+    monkeypatch.setattr(
+        contracts_module,
+        "read_file_bytes_bounded",
+        changing_read,
+    )
+
+    with pytest.raises(RuntimeError, match="changed during migration"):
+        migrate_legacy_point_audit_file(source, output)
+
+    assert not output.exists()
 
 
 def test_physical_evidence_reader_preserves_supported_previous_schema():

@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 import hashlib
 import json
 import math
-from pathlib import PurePosixPath
 import re
+from copy import deepcopy
+from pathlib import PurePosixPath
 from typing import Any, Mapping
 
 from comsol_mcp.evidence.spectral_characterization import (
@@ -15,7 +15,6 @@ from comsol_mcp.evidence.spectral_characterization import (
     validate_spectral_characterization,
     validate_spectral_point_bundle,
 )
-
 
 BRANCH_CONTINUATION_STATES_SCHEMA = "comsol_mcp.branch_continuation_states"
 BRANCH_CONTINUATION_PLAN_SCHEMA = "comsol_mcp.branch_continuation_plan"
@@ -25,51 +24,89 @@ MAX_OPTIONAL_METRICS = 32
 
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 _IDENTIFIER = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]{0,127}$")
-_POLARIZATIONS = frozenset({
-    "TE", "TM", "S", "P", "rhcp", "lhcp", "unpolarized",
-})
+_POLARIZATIONS = frozenset(
+    {
+        "TE",
+        "TM",
+        "S",
+        "P",
+        "rhcp",
+        "lhcp",
+        "unpolarized",
+    }
+)
 _STATE_INPUT_FIELDS = {
-    "state_id", "ordinal", "declared_predecessor_state_id",
-    "coordinate_name", "coordinate_value", "coordinate_unit",
-    "coordinate_identity_sha256", "polarization",
-    "source_model_sha256", "configuration_sha256",
-    "material_identity_sha256", "search_window_m",
-    "spectral_bundle", "analysis_decision", "candidate_measurements",
+    "state_id",
+    "ordinal",
+    "declared_predecessor_state_id",
+    "coordinate_name",
+    "coordinate_value",
+    "coordinate_unit",
+    "coordinate_identity_sha256",
+    "polarization",
+    "source_model_sha256",
+    "configuration_sha256",
+    "material_identity_sha256",
+    "search_window_m",
+    "spectral_bundle",
+    "analysis_decision",
+    "candidate_measurements",
     "optional_field_metrics",
 }
 _WINDOW_FIELDS = {"lower_m", "upper_m"}
 _METRIC_FIELDS = {"value", "unit", "evidence_artifact_sha256"}
 _SPECTRAL_ROW_BINDING_FIELDS = {"raw_row_sha256", "requested_wavelength_m"}
 _CANDIDATE_FIELDS = {
-    "classification", "measurement_state",
-    "peak_wavelength_m", "peak_response_value",
-    "fwhm_m", "quality_factor", "boundary_side",
+    "classification",
+    "measurement_state",
+    "peak_wavelength_m",
+    "peak_response_value",
+    "fwhm_m",
+    "quality_factor",
+    "boundary_side",
 }
 _STATE_SUMMARY_FIELDS = {
-    "state_id", "ordinal", "declared_predecessor_state_id",
-    "coordinate_name", "coordinate_value", "coordinate_unit",
-    "coordinate_identity_sha256", "polarization",
-    "source_model", "configuration_sha256",
-    "material_identity_sha256", "search_window_m",
-    "spectral_artifacts", "candidate",
-    "optional_field_metrics", "state_sha256",
+    "state_id",
+    "ordinal",
+    "declared_predecessor_state_id",
+    "coordinate_name",
+    "coordinate_value",
+    "coordinate_unit",
+    "coordinate_identity_sha256",
+    "polarization",
+    "source_model",
+    "configuration_sha256",
+    "material_identity_sha256",
+    "search_window_m",
+    "spectral_artifacts",
+    "candidate",
+    "optional_field_metrics",
+    "state_sha256",
 }
-_VALID_CLASSIFICATIONS = frozenset({
-    "interior_candidate", "boundary_high", "multi_candidate",
-    "flat", "under_sampled", "no_candidate", "invalid_evidence",
-})
+_VALID_CLASSIFICATIONS = frozenset(
+    {
+        "interior_candidate",
+        "boundary_high",
+        "multi_candidate",
+        "flat",
+        "under_sampled",
+        "no_candidate",
+        "invalid_evidence",
+    }
+)
 
 
 def _canonical_bytes(value: Any) -> bytes:
     try:
         return json.dumps(
-            value, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
             allow_nan=False,
         ).encode("utf-8")
     except (TypeError, ValueError) as exc:
-        raise ValueError(
-            "branch continuation evidence must contain finite JSON values"
-        ) from exc
+        raise ValueError("branch continuation evidence must contain finite JSON values") from exc
 
 
 def _sha256(value: Any) -> str:
@@ -108,12 +145,6 @@ def _finite(value: Any, label: str) -> float:
     if not math.isfinite(result):
         raise ValueError(f"{label} must be finite")
     return result
-
-
-def _positive_count(value: Any, label: str) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
-        raise ValueError(f"{label} must be a positive integer")
-    return value
 
 
 def _bounded_text(value: Any, label: str, maximum: int = 128) -> str:
@@ -165,9 +196,7 @@ def _extract_candidate(
 ) -> dict[str, Any]:
     classification = decision["classification"]
     if classification not in _VALID_CLASSIFICATIONS:
-        raise ValueError(
-            f"spectral decision classification {classification!r} is unsupported"
-        )
+        raise ValueError(f"spectral decision classification {classification!r} is unsupported")
     measurement_state = characterization["measurement_state"]
     if measurement_state not in ("measured", "not_measured"):
         raise ValueError("spectral characterization measurement_state is invalid")
@@ -192,12 +221,8 @@ def _extract_candidate(
         return {
             "classification": classification,
             "measurement_state": "measured",
-            "peak_wavelength_m": _finite(
-                peak["wavelength_m"], "candidate.peak.wavelength_m"
-            ),
-            "peak_response_value": _finite(
-                peak["response_value"], "candidate.peak.response_value"
-            ),
+            "peak_wavelength_m": _finite(peak["wavelength_m"], "candidate.peak.wavelength_m"),
+            "peak_response_value": _finite(peak["response_value"], "candidate.peak.response_value"),
             "fwhm_m": (
                 _finite(fwhm["value_m"], "candidate.fwhm.value_m")
                 if fwhm["state"] == "bracketed" and fwhm["value_m"] is not None
@@ -232,15 +257,9 @@ def _summarize_state(value: Any, expected_ordinal: int) -> dict[str, Any]:
     predecessor = item["declared_predecessor_state_id"]
     if predecessor is not None:
         predecessor = _identifier(predecessor, f"{label}.declared_predecessor_state_id")
-    coordinate_name = _bounded_text(
-        item["coordinate_name"], f"{label}.coordinate_name"
-    )
-    coordinate_value = _finite(
-        item["coordinate_value"], f"{label}.coordinate_value"
-    )
-    coordinate_unit = _bounded_text(
-        item["coordinate_unit"], f"{label}.coordinate_unit"
-    )
+    coordinate_name = _bounded_text(item["coordinate_name"], f"{label}.coordinate_name")
+    coordinate_value = _finite(item["coordinate_value"], f"{label}.coordinate_value")
+    coordinate_unit = _bounded_text(item["coordinate_unit"], f"{label}.coordinate_unit")
     coordinate_identity = _hash(
         item["coordinate_identity_sha256"], f"{label}.coordinate_identity_sha256"
     )
@@ -248,19 +267,11 @@ def _summarize_state(value: Any, expected_ordinal: int) -> dict[str, Any]:
     if polarization not in _POLARIZATIONS:
         raise ValueError(f"{label}.polarization is not a recognized convention")
     source_hash = _hash(item["source_model_sha256"], f"{label}.source_model_sha256")
-    configuration_hash = _hash(
-        item["configuration_sha256"], f"{label}.configuration_sha256"
-    )
-    material_hash = _hash(
-        item["material_identity_sha256"], f"{label}.material_identity_sha256"
-    )
-    search_window = _normalize_search_window(
-        item["search_window_m"], f"{label}.search_window_m"
-    )
+    configuration_hash = _hash(item["configuration_sha256"], f"{label}.configuration_sha256")
+    material_hash = _hash(item["material_identity_sha256"], f"{label}.material_identity_sha256")
+    search_window = _normalize_search_window(item["search_window_m"], f"{label}.search_window_m")
     bundle = validate_spectral_point_bundle(item["spectral_bundle"])
-    decision = validate_spectral_analysis_decision(
-        item["analysis_decision"], bundle=bundle
-    )
+    decision = validate_spectral_analysis_decision(item["analysis_decision"], bundle=bundle)
     characterization = validate_spectral_characterization(
         item["candidate_measurements"], bundle=bundle, decision=decision
     )
@@ -276,12 +287,9 @@ def _summarize_state(value: Any, expected_ordinal: int) -> dict[str, Any]:
         }
         for row in bundle["rows"]
     ]
-    requested_wavelengths = [
-        row["requested_wavelength_m"] for row in spectral_rows
-    ]
-    if (
-        search_window["lower_m"] != min(requested_wavelengths)
-        or search_window["upper_m"] != max(requested_wavelengths)
+    requested_wavelengths = [row["requested_wavelength_m"] for row in spectral_rows]
+    if search_window["lower_m"] != min(requested_wavelengths) or search_window["upper_m"] != max(
+        requested_wavelengths
     ):
         raise ValueError(
             f"{label}.search_window_m must exactly match the tested requested-wavelength domain"
@@ -293,9 +301,7 @@ def _summarize_state(value: Any, expected_ordinal: int) -> dict[str, Any]:
         raise ValueError(f"{label} measured candidate lies outside its tested search window")
     candidate_row_ids = set(decision["candidate_row_ids"])
     candidate_row_sha256s = [
-        row["raw_row_sha256"]
-        for row in bundle["rows"]
-        if row["row_id"] in candidate_row_ids
+        row["raw_row_sha256"] for row in bundle["rows"] if row["row_id"] in candidate_row_ids
     ]
     body = {
         "state_id": state_id,
@@ -342,15 +348,9 @@ def _validate_state_summary(value: Any, expected_ordinal: int) -> dict[str, Any]
     predecessor = item["declared_predecessor_state_id"]
     if predecessor is not None:
         predecessor = _identifier(predecessor, f"{label}.declared_predecessor_state_id")
-    coordinate_name = _bounded_text(
-        item["coordinate_name"], f"{label}.coordinate_name"
-    )
-    coordinate_value = _finite(
-        item["coordinate_value"], f"{label}.coordinate_value"
-    )
-    coordinate_unit = _bounded_text(
-        item["coordinate_unit"], f"{label}.coordinate_unit"
-    )
+    coordinate_name = _bounded_text(item["coordinate_name"], f"{label}.coordinate_name")
+    coordinate_value = _finite(item["coordinate_value"], f"{label}.coordinate_value")
+    coordinate_unit = _bounded_text(item["coordinate_unit"], f"{label}.coordinate_unit")
     coordinate_identity = _hash(
         item["coordinate_identity_sha256"], f"{label}.coordinate_identity_sha256"
     )
@@ -366,21 +366,19 @@ def _validate_state_summary(value: Any, expected_ordinal: int) -> dict[str, Any]
         ),
         "sha256": _hash(source["sha256"], f"{label}.source_model.sha256"),
     }
-    material_hash = _hash(
-        item["material_identity_sha256"], f"{label}.material_identity_sha256"
-    )
-    configuration_hash = _hash(
-        item["configuration_sha256"], f"{label}.configuration_sha256"
-    )
-    search_window = _normalize_search_window(
-        item["search_window_m"], f"{label}.search_window_m"
-    )
+    material_hash = _hash(item["material_identity_sha256"], f"{label}.material_identity_sha256")
+    configuration_hash = _hash(item["configuration_sha256"], f"{label}.configuration_sha256")
+    search_window = _normalize_search_window(item["search_window_m"], f"{label}.search_window_m")
     artifacts = _exact_fields(
         item["spectral_artifacts"],
         {
-            "bundle_sha256", "decision_sha256", "characterization_sha256",
-            "analysis_policy_sha256", "measurement_configuration_sha256",
-            "raw_rows", "candidate_row_sha256s",
+            "bundle_sha256",
+            "decision_sha256",
+            "characterization_sha256",
+            "analysis_policy_sha256",
+            "measurement_configuration_sha256",
+            "raw_rows",
+            "candidate_row_sha256s",
         },
         f"{label}.spectral_artifacts",
     )
@@ -391,38 +389,35 @@ def _validate_state_summary(value: Any, expected_ordinal: int) -> dict[str, Any]
     for index, raw_row in enumerate(raw_rows):
         raw_label = f"{label}.spectral_artifacts.raw_rows[{index}]"
         raw_item = _exact_fields(raw_row, _SPECTRAL_ROW_BINDING_FIELDS, raw_label)
-        normalized_raw_rows.append({
-            "raw_row_sha256": _hash(
-                raw_item["raw_row_sha256"], f"{raw_label}.raw_row_sha256"
-            ),
-            "requested_wavelength_m": _finite(
-                raw_item["requested_wavelength_m"],
-                f"{raw_label}.requested_wavelength_m",
-            ),
-        })
+        normalized_raw_rows.append(
+            {
+                "raw_row_sha256": _hash(raw_item["raw_row_sha256"], f"{raw_label}.raw_row_sha256"),
+                "requested_wavelength_m": _finite(
+                    raw_item["requested_wavelength_m"],
+                    f"{raw_label}.requested_wavelength_m",
+                ),
+            }
+        )
     raw_hashes = [row["raw_row_sha256"] for row in normalized_raw_rows]
     if len(raw_hashes) != len(set(raw_hashes)):
         raise ValueError(f"{label}.spectral_artifacts contains duplicate raw row hashes")
-    requested_wavelengths = [
-        row["requested_wavelength_m"] for row in normalized_raw_rows
-    ]
+    requested_wavelengths = [row["requested_wavelength_m"] for row in normalized_raw_rows]
     if len(requested_wavelengths) != len(set(requested_wavelengths)):
-        raise ValueError(
-            f"{label}.spectral_artifacts contains duplicate requested wavelengths"
-        )
+        raise ValueError(f"{label}.spectral_artifacts contains duplicate requested wavelengths")
     normalized_artifacts = {
         name: _hash(artifacts[name], f"{label}.spectral_artifacts.{name}")
         for name in (
-            "bundle_sha256", "decision_sha256", "characterization_sha256",
-            "analysis_policy_sha256", "measurement_configuration_sha256",
+            "bundle_sha256",
+            "decision_sha256",
+            "characterization_sha256",
+            "analysis_policy_sha256",
+            "measurement_configuration_sha256",
         )
     }
     normalized_artifacts["raw_rows"] = normalized_raw_rows
     candidate_hashes = artifacts["candidate_row_sha256s"]
     if not isinstance(candidate_hashes, list):
-        raise ValueError(
-            f"{label}.spectral_artifacts.candidate_row_sha256s must be a list"
-        )
+        raise ValueError(f"{label}.spectral_artifacts.candidate_row_sha256s must be a list")
     normalized_candidate_hashes = [
         _hash(
             digest,
@@ -430,10 +425,9 @@ def _validate_state_summary(value: Any, expected_ordinal: int) -> dict[str, Any]
         )
         for index, digest in enumerate(candidate_hashes)
     ]
-    if (
-        len(normalized_candidate_hashes) != len(set(normalized_candidate_hashes))
-        or not set(normalized_candidate_hashes).issubset(raw_hashes)
-    ):
+    if len(normalized_candidate_hashes) != len(set(normalized_candidate_hashes)) or not set(
+        normalized_candidate_hashes
+    ).issubset(raw_hashes):
         raise ValueError(f"{label}.spectral_artifacts candidate row hashes are invalid")
     normalized_artifacts["candidate_row_sha256s"] = normalized_candidate_hashes
     candidate = _exact_fields(item["candidate"], _CANDIDATE_FIELDS, f"{label}.candidate")
@@ -453,46 +447,38 @@ def _validate_state_summary(value: Any, expected_ordinal: int) -> dict[str, Any]
         "measurement_state": measurement_state,
         "peak_wavelength_m": (
             _finite(candidate["peak_wavelength_m"], f"{label}.candidate.peak_wavelength_m")
-            if complete else None
+            if complete
+            else None
         ),
         "peak_response_value": (
             _finite(candidate["peak_response_value"], f"{label}.candidate.peak_response_value")
-            if complete else None
+            if complete
+            else None
         ),
         "fwhm_m": (
-            None if candidate["fwhm_m"] is None
+            None
+            if not complete or candidate["fwhm_m"] is None
             else _finite(candidate["fwhm_m"], f"{label}.candidate.fwhm_m")
         ),
         "quality_factor": (
-            None if candidate["quality_factor"] is None
+            None
+            if not complete or candidate["quality_factor"] is None
             else _finite(candidate["quality_factor"], f"{label}.candidate.quality_factor")
         ),
         "boundary_side": candidate["boundary_side"],
     }
-    if (
-        normalized_candidate["boundary_side"] is not None
-        and normalized_candidate["boundary_side"] not in ("lower", "upper", "both")
-    ):
+    if normalized_candidate["boundary_side"] is not None and normalized_candidate[
+        "boundary_side"
+    ] not in ("lower", "upper", "both"):
         raise ValueError(f"{label}.candidate.boundary_side is invalid")
-    if (
-        normalized_candidate["boundary_side"] is not None
-        and classification != "boundary_high"
-    ):
-        raise ValueError(
-            f"{label}.candidate.boundary_side is only valid for boundary_high"
-        )
-    if (
-        classification == "boundary_high"
-        and normalized_candidate["boundary_side"] is None
-    ):
-        raise ValueError(
-            f"{label}.candidate.boundary_side is required for boundary_high"
-        )
+    if normalized_candidate["boundary_side"] is not None and classification != "boundary_high":
+        raise ValueError(f"{label}.candidate.boundary_side is only valid for boundary_high")
+    if classification == "boundary_high" and normalized_candidate["boundary_side"] is None:
+        raise ValueError(f"{label}.candidate.boundary_side is required for boundary_high")
     if complete and normalized_candidate["peak_wavelength_m"] is None:
         raise ValueError(f"{label}.candidate measured state requires a peak wavelength")
-    if (
-        search_window["lower_m"] != min(requested_wavelengths)
-        or search_window["upper_m"] != max(requested_wavelengths)
+    if search_window["lower_m"] != min(requested_wavelengths) or search_window["upper_m"] != max(
+        requested_wavelengths
     ):
         raise ValueError(
             f"{label}.search_window_m must exactly match the tested requested-wavelength domain"
@@ -523,7 +509,9 @@ def _validate_state_summary(value: Any, expected_ordinal: int) -> dict[str, Any]
     }
     supplied_hash = _hash(item["state_sha256"], f"{label}.state_sha256")
     rebuilt = {**body, "state_sha256": _sha256(body)}
-    if rebuilt["state_sha256"] != supplied_hash or rebuilt != item:
+    if rebuilt["state_sha256"] != supplied_hash or _canonical_bytes(rebuilt) != _canonical_bytes(
+        item
+    ):
         raise ValueError(f"{label} is noncanonical or its hash does not match")
     return rebuilt
 
@@ -532,15 +520,15 @@ def _validate_states_invariants(states: list[dict[str, Any]]) -> None:
     collections = (
         ("state IDs", [state["state_id"] for state in states]),
         ("configuration hashes", [state["configuration_sha256"] for state in states]),
-        ("coordinate identity hashes", [
-            state["coordinate_identity_sha256"] for state in states
-        ]),
-        ("spectral bundle hashes", [
-            state["spectral_artifacts"]["bundle_sha256"] for state in states
-        ]),
-        ("spectral characterization hashes", [
-            state["spectral_artifacts"]["characterization_sha256"] for state in states
-        ]),
+        ("coordinate identity hashes", [state["coordinate_identity_sha256"] for state in states]),
+        (
+            "spectral bundle hashes",
+            [state["spectral_artifacts"]["bundle_sha256"] for state in states],
+        ),
+        (
+            "spectral characterization hashes",
+            [state["spectral_artifacts"]["characterization_sha256"] for state in states],
+        ),
     )
     for label, values in collections:
         if len(values) != len(set(values)):
@@ -556,18 +544,14 @@ def _validate_states_invariants(states: list[dict[str, Any]]) -> None:
         "coordinate_name": [state["coordinate_name"] for state in states],
         "coordinate_unit": [state["coordinate_unit"] for state in states],
         "polarization": [state["polarization"] for state in states],
-        "material_identity_sha256": [
-            state["material_identity_sha256"] for state in states
-        ],
+        "material_identity_sha256": [state["material_identity_sha256"] for state in states],
     }
     for name, values in consistent.items():
         if len(set(values)) != 1:
             raise ValueError(f"{name} must remain consistent across continuation states")
 
 
-def build_continuation_states(
-    *, states_id: str, states: list[Mapping[str, Any]]
-) -> dict[str, Any]:
+def build_continuation_states(*, states_id: str, states: list[Mapping[str, Any]]) -> dict[str, Any]:
     """Build one ordered immutable continuation-state collection from spectral evidence."""
     if not isinstance(states, list) or not 2 <= len(states) <= MAX_CONTINUATION_STATES:
         raise ValueError(f"states must contain 2..{MAX_CONTINUATION_STATES} entries")
@@ -591,9 +575,16 @@ def validate_continuation_states(value: Any) -> dict[str, Any]:
     """Validate a canonical continuation-state collection without reading external files."""
     item = _mapping(value, "continuation_states")
     expected = {
-        "schema_name", "schema_version", "states_id", "state_count",
-        "coordinate_name", "coordinate_unit", "polarization",
-        "material_identity_sha256", "states", "states_sha256",
+        "schema_name",
+        "schema_version",
+        "states_id",
+        "state_count",
+        "coordinate_name",
+        "coordinate_unit",
+        "polarization",
+        "material_identity_sha256",
+        "states",
+        "states_sha256",
     }
     if set(item) != expected:
         raise ValueError("continuation states fields are invalid")
@@ -602,80 +593,101 @@ def validate_continuation_states(value: Any) -> dict[str, Any]:
         or item["schema_version"] != BRANCH_CONTINUATION_SCHEMA_VERSION
     ):
         raise ValueError("continuation states schema is unsupported")
+    states_id = _identifier(item["states_id"], "continuation_states.states_id")
+    state_count = item["state_count"]
+    if isinstance(state_count, bool) or not isinstance(state_count, int):
+        raise ValueError("continuation states count is invalid")
     states = item["states"]
     if (
         not isinstance(states, list)
         or not 2 <= len(states) <= MAX_CONTINUATION_STATES
-        or item["state_count"] != len(states)
+        or state_count != len(states)
     ):
         raise ValueError("continuation states count is invalid")
-    normalized = [
-        _validate_state_summary(state, index) for index, state in enumerate(states)
-    ]
+    normalized = [_validate_state_summary(state, index) for index, state in enumerate(states)]
     _validate_states_invariants(normalized)
-    if item["coordinate_name"] != normalized[0]["coordinate_name"]:
+    coordinate_name = normalized[0]["coordinate_name"]
+    coordinate_unit = normalized[0]["coordinate_unit"]
+    polarization = normalized[0]["polarization"]
+    material_identity = normalized[0]["material_identity_sha256"]
+    if item["coordinate_name"] != coordinate_name:
         raise ValueError("continuation states coordinate_name does not match its states")
-    if item["coordinate_unit"] != normalized[0]["coordinate_unit"]:
+    if item["coordinate_unit"] != coordinate_unit:
         raise ValueError("continuation states coordinate_unit does not match its states")
-    if item["polarization"] != normalized[0]["polarization"]:
+    if item["polarization"] != polarization:
         raise ValueError("continuation states polarization does not match its states")
-    if item["material_identity_sha256"] != normalized[0]["material_identity_sha256"]:
+    if item["material_identity_sha256"] != material_identity:
         raise ValueError("continuation states material identity does not match its states")
     supplied_hash = _hash(item["states_sha256"], "continuation_states.states_sha256")
-    body = dict(item)
-    body.pop("states_sha256")
-    if _sha256(body) != supplied_hash:
-        raise ValueError("continuation states hash does not match")
-    return deepcopy(item)
+    body = {
+        "schema_name": BRANCH_CONTINUATION_STATES_SCHEMA,
+        "schema_version": BRANCH_CONTINUATION_SCHEMA_VERSION,
+        "states_id": states_id,
+        "state_count": state_count,
+        "coordinate_name": coordinate_name,
+        "coordinate_unit": coordinate_unit,
+        "polarization": polarization,
+        "material_identity_sha256": material_identity,
+        "states": normalized,
+    }
+    rebuilt = {**body, "states_sha256": _sha256(body)}
+    if rebuilt["states_sha256"] != supplied_hash or _canonical_bytes(rebuilt) != _canonical_bytes(
+        item
+    ):
+        raise ValueError("continuation states are noncanonical or their hash does not match")
+    return rebuilt
 
 
 _POLICY_FIELDS = {
-    "policy_id", "guard_window_m", "absolute_bounds_m",
-    "max_expansions", "max_total_window_m", "point_budget",
-    "request_grid", "stop_policy", "continuity_evidence",
+    "policy_id",
+    "guard_window_m",
+    "absolute_bounds_m",
+    "max_expansions",
+    "max_total_window_m",
+    "point_budget",
+    "request_grid",
+    "stop_policy",
+    "continuity_evidence",
     "declared_cap_reached",
 }
 _BOUNDARY_SIDES = {"lower", "upper", "both"}
 _STOP_POLICIES = {"stop_at_first_unresolved", "continue_all_declared"}
 _CONTINUITY_EVIDENCE_FIELDS = {
-    "transition_index", "selected_candidate_wavelength_m",
-    "supporting_raw_row_sha256", "metric_name", "measured_value",
-    "tolerance", "evidence_sha256",
+    "transition_index",
+    "selected_candidate_wavelength_m",
+    "supporting_raw_row_sha256",
+    "metric_name",
+    "measured_value",
+    "tolerance",
+    "evidence_sha256",
 }
 _CONTINUITY_METRICS = {"absolute_wavelength_shift_m"}
 _REQUEST_GRID_FIELDS = {"point_count", "spacing_rule"}
 _REQUEST_GRID_RULES = {"uniform_inclusive"}
-_TRANSITION_FIELDS = {
-    "transition_index", "previous_state_id", "current_state_id",
-    "declared_adjacent", "previous_peak_wavelength_m",
-    "current_peak_wavelength_m", "current_candidate_classification",
-    "peak_within_guard", "peak_at_search_boundary",
-    "boundary_side", "ambiguous_candidates",
-    "expansion_required", "expansion_requested", "expansion_window_m",
-    "expansion_exhausted", "expansion_count_exceeded",
-    "branch_followed", "branch_recovered",
-    "selected_candidate_wavelength_m", "continuity_evidence_sha256",
-    "measured_continuity_verified",
-    "next_request_window_m", "requested_point_count",
-    "requested_wavelengths_m", "point_budget_exhausted",
-    "cumulative_planned_point_count", "transition_sha256",
-}
 _PLAN_FIELDS = {
-    "schema_name", "schema_version", "states_id", "states_sha256",
-    "continuation_policy", "continuation_policy_sha256",
-    "coordinate_transitions", "total_expansions_proposed",
-    "ambiguous_transition_count", "branch_followed_transition_count",
-    "processed_transition_count", "skipped_state_ids",
-    "planned_point_count", "point_budget_exhausted",
-    "scientific_disposition", "reason_code",
-    "branch_disappearance_claimed", "undeclared_coordinate_started",
+    "schema_name",
+    "schema_version",
+    "states_id",
+    "states_sha256",
+    "continuation_policy",
+    "continuation_policy_sha256",
+    "coordinate_transitions",
+    "total_expansions_proposed",
+    "ambiguous_transition_count",
+    "branch_followed_transition_count",
+    "processed_transition_count",
+    "skipped_state_ids",
+    "planned_point_count",
+    "point_budget_exhausted",
+    "scientific_disposition",
+    "reason_code",
+    "branch_disappearance_claimed",
+    "undeclared_coordinate_started",
     "plan_sha256",
 }
 
 
-def _normalize_continuation_policy(
-    value: Any, *, states: Mapping[str, Any]
-) -> dict[str, Any]:
+def _normalize_continuation_policy(value: Any, *, states: Mapping[str, Any]) -> dict[str, Any]:
     item = _exact_fields(value, _POLICY_FIELDS, "continuation_policy")
     guard = _finite(item["guard_window_m"], "continuation_policy.guard_window_m")
     if guard <= 0.0:
@@ -688,18 +700,21 @@ def _normalize_continuation_policy(
     if not (0.0 < lower < upper):
         raise ValueError("continuation_policy.absolute_bounds_m must have 0 < lower_m < upper_m")
     max_expansions = item["max_expansions"]
-    if isinstance(max_expansions, bool) or not isinstance(max_expansions, int) or max_expansions < 0:
+    if (
+        isinstance(max_expansions, bool)
+        or not isinstance(max_expansions, int)
+        or max_expansions < 0
+    ):
         raise ValueError("continuation_policy.max_expansions must be a nonnegative integer")
-    max_total = _finite(
-        item["max_total_window_m"], "continuation_policy.max_total_window_m"
-    )
+    max_total = _finite(item["max_total_window_m"], "continuation_policy.max_total_window_m")
     if max_total <= 0.0:
         raise ValueError("continuation_policy.max_total_window_m must be positive")
     point_budget = item["point_budget"]
     if isinstance(point_budget, bool) or not isinstance(point_budget, int) or point_budget <= 0:
         raise ValueError("continuation_policy.point_budget must be a positive integer")
     request_grid = _exact_fields(
-        item["request_grid"], _REQUEST_GRID_FIELDS,
+        item["request_grid"],
+        _REQUEST_GRID_FIELDS,
         "continuation_policy.request_grid",
     )
     request_point_count = request_grid["point_count"]
@@ -731,12 +746,8 @@ def _normalize_continuation_policy(
     normalized_evidence = []
     evidence_indexes = set()
     for evidence_position, evidence_value in enumerate(continuity_evidence):
-        evidence_label = (
-            f"continuation_policy.continuity_evidence[{evidence_position}]"
-        )
-        evidence = _exact_fields(
-            evidence_value, _CONTINUITY_EVIDENCE_FIELDS, evidence_label
-        )
+        evidence_label = f"continuation_policy.continuity_evidence[{evidence_position}]"
+        evidence = _exact_fields(evidence_value, _CONTINUITY_EVIDENCE_FIELDS, evidence_label)
         transition_index = evidence["transition_index"]
         if (
             isinstance(transition_index, bool)
@@ -763,11 +774,10 @@ def _normalize_continuation_policy(
             f"{evidence_label}.supporting_raw_row_sha256",
         )
         if supporting_hash not in current["spectral_artifacts"]["candidate_row_sha256s"]:
-            raise ValueError(
-                f"{evidence_label} supporting raw row is not a measured candidate"
-            )
+            raise ValueError(f"{evidence_label} supporting raw row is not a measured candidate")
         matching_rows = [
-            row for row in current["spectral_artifacts"]["raw_rows"]
+            row
+            for row in current["spectral_artifacts"]["raw_rows"]
             if row["raw_row_sha256"] == supporting_hash
         ]
         if (
@@ -780,9 +790,7 @@ def _normalize_continuation_policy(
         metric_name = evidence["metric_name"]
         if metric_name not in _CONTINUITY_METRICS:
             raise ValueError(f"{evidence_label}.metric_name is unsupported")
-        measured_value = _finite(
-            evidence["measured_value"], f"{evidence_label}.measured_value"
-        )
+        measured_value = _finite(evidence["measured_value"], f"{evidence_label}.measured_value")
         tolerance = _finite(evidence["tolerance"], f"{evidence_label}.tolerance")
         if measured_value < 0.0 or tolerance <= 0.0:
             raise ValueError(f"{evidence_label} metric values are invalid")
@@ -801,9 +809,7 @@ def _normalize_continuation_policy(
             "measured_value": measured_value,
             "tolerance": tolerance,
         }
-        supplied_hash = _hash(
-            evidence["evidence_sha256"], f"{evidence_label}.evidence_sha256"
-        )
+        supplied_hash = _hash(evidence["evidence_sha256"], f"{evidence_label}.evidence_sha256")
         if _sha256(evidence_body) != supplied_hash:
             raise ValueError(f"{evidence_label} hash does not match")
         normalized_evidence.append({**evidence_body, "evidence_sha256": supplied_hash})
@@ -835,9 +841,7 @@ def _compute_next_request(
     return {"lower_m": lower, "upper_m": upper}
 
 
-def _request_wavelengths(
-    window: Mapping[str, float], point_count: int
-) -> list[float]:
+def _request_wavelengths(window: Mapping[str, float], point_count: int) -> list[float]:
     lower = window["lower_m"]
     upper = window["upper_m"]
     step = (upper - lower) / (point_count - 1)
@@ -908,16 +912,15 @@ def _one_transition(
         ambiguous = True
         continuity_evidence = next(
             (
-                evidence for evidence in policy["continuity_evidence"]
+                evidence
+                for evidence in policy["continuity_evidence"]
                 if evidence["transition_index"] == current["ordinal"] - 1
             ),
             None,
         )
         if continuity_evidence is not None:
             branch_followed = True
-            selected_candidate = continuity_evidence[
-                "selected_candidate_wavelength_m"
-            ]
+            selected_candidate = continuity_evidence["selected_candidate_wavelength_m"]
             continuity_evidence_sha256 = continuity_evidence["evidence_sha256"]
             measured_continuity_verified = True
     elif classification == "boundary_high":
@@ -967,16 +970,14 @@ def _one_transition(
     if expansion_required:
         candidate_request = expansion_window
     else:
-        seed_peak = (
-            current_peak
-            if current_peak is not None
-            else selected_candidate
-            if selected_candidate is not None
-            else previous_peak
-        )
+        if branch_followed:
+            seed_peak = selected_candidate if selected_candidate is not None else current_peak
+        elif previous["candidate"]["classification"] != "boundary_high":
+            seed_peak = previous_peak
+        else:
+            seed_peak = None
         candidate_request = (
-            _compute_next_request(seed_peak, guard, bounds)
-            if seed_peak is not None else None
+            _compute_next_request(seed_peak, guard, bounds) if seed_peak is not None else None
         )
     request_point_count = policy["request_grid"]["point_count"]
     point_budget_exhausted = (
@@ -986,9 +987,7 @@ def _one_transition(
     if candidate_request is not None and not point_budget_exhausted:
         next_request = candidate_request
         requested_point_count = request_point_count
-        requested_wavelengths = _request_wavelengths(
-            next_request, requested_point_count
-        )
+        requested_wavelengths = _request_wavelengths(next_request, requested_point_count)
         planned_points += requested_point_count
         if expansion_required:
             expansion_requested = True
@@ -1002,9 +1001,7 @@ def _one_transition(
         "transition_index": current["ordinal"] - 1,
         "previous_state_id": previous["state_id"],
         "current_state_id": current["state_id"],
-        "declared_adjacent": (
-            current["declared_predecessor_state_id"] == previous["state_id"]
-        ),
+        "declared_adjacent": (current["declared_predecessor_state_id"] == previous["state_id"]),
         "previous_peak_wavelength_m": previous_peak,
         "current_peak_wavelength_m": current_peak,
         "current_candidate_classification": classification,
@@ -1041,9 +1038,7 @@ def plan_branch_continuation(
 ) -> dict[str, Any]:
     """Plan bounded per-coordinate continuation windows from ordered spectral evidence."""
     normalized_states = validate_continuation_states(states)
-    policy = _normalize_continuation_policy(
-        continuation_policy, states=normalized_states
-    )
+    policy = _normalize_continuation_policy(continuation_policy, states=normalized_states)
     all_states = normalized_states["states"]
     transitions = []
     total_expansions = 0
@@ -1051,19 +1046,23 @@ def plan_branch_continuation(
     stopped_after_state_index = None
     for index in range(1, len(all_states)):
         transition, total_expansions, planned_points = _one_transition(
-            all_states[index - 1], all_states[index], policy,
-            total_expansions, planned_points,
+            all_states[index - 1],
+            all_states[index],
+            policy,
+            total_expansions,
+            planned_points,
         )
         transitions.append(transition)
         if (
             policy["stop_policy"] == "stop_at_first_unresolved"
             and not transition["branch_followed"]
+            and not transition["expansion_requested"]
         ):
             stopped_after_state_index = index
             break
 
     skipped_state_ids = (
-        [state["state_id"] for state in all_states[stopped_after_state_index + 1:]]
+        [state["state_id"] for state in all_states[stopped_after_state_index + 1 :]]
         if stopped_after_state_index is not None
         else []
     )
@@ -1073,12 +1072,10 @@ def plan_branch_continuation(
     cap_exceeded = any(t["expansion_count_exceeded"] for t in transitions)
     expansion_exhausted = any(t["expansion_exhausted"] for t in transitions)
     unresolved_ambiguity = any(
-        t["ambiguous_candidates"] and not t["measured_continuity_verified"]
-        for t in transitions
+        t["ambiguous_candidates"] and not t["measured_continuity_verified"] for t in transitions
     )
     required_request_budget_exhausted = any(
-        transition["expansion_required"]
-        and transition["point_budget_exhausted"]
+        transition["expansion_required"] and transition["point_budget_exhausted"]
         for transition in transitions
     )
 
@@ -1093,10 +1090,7 @@ def plan_branch_continuation(
     )
     transitions_resolved = all(
         transition["branch_followed"]
-        or (
-            transition["expansion_requested"]
-            and index in recovered_expansion_indexes
-        )
+        or (transition["expansion_requested"] and index in recovered_expansion_indexes)
         for index, transition in enumerate(transitions)
     )
 
@@ -1157,97 +1151,14 @@ def plan_branch_continuation(
     return {**body, "plan_sha256": _sha256(body)}
 
 
-def _validate_transition(value: Any, expected_index: int) -> dict[str, Any]:
-    label = f"coordinate_transitions[{expected_index}]"
-    item = _exact_fields(value, _TRANSITION_FIELDS, label)
-    if item["transition_index"] != expected_index:
-        raise ValueError(f"{label}.transition_index must match list order")
-    for field in ("previous_state_id", "current_state_id"):
-        _identifier(item[field], f"{label}.{field}")
-    if not isinstance(item["declared_adjacent"], bool):
-        raise ValueError(f"{label}.declared_adjacent must be boolean")
-    for field in ("previous_peak_wavelength_m", "current_peak_wavelength_m"):
-        value = item[field]
-        if value is not None:
-            _finite(value, f"{label}.{field}")
-    classification = item["current_candidate_classification"]
-    if classification not in _VALID_CLASSIFICATIONS:
-        raise ValueError(f"{label}.current_candidate_classification is unsupported")
-    for field in (
-        "peak_within_guard", "peak_at_search_boundary", "ambiguous_candidates",
-        "expansion_required", "expansion_requested", "expansion_exhausted",
-        "expansion_count_exceeded", "branch_followed", "branch_recovered",
-        "measured_continuity_verified", "point_budget_exhausted",
-    ):
-        if not isinstance(item[field], bool):
-            raise ValueError(f"{label}.{field} must be boolean")
-    side = item["boundary_side"]
-    if side is not None and side not in _BOUNDARY_SIDES:
-        raise ValueError(f"{label}.boundary_side is invalid")
-    expansion_window = item["expansion_window_m"]
-    if expansion_window is not None:
-        _normalize_search_window(expansion_window, f"{label}.expansion_window_m")
-    next_request = item["next_request_window_m"]
-    if next_request is not None:
-        _normalize_search_window(next_request, f"{label}.next_request_window_m")
-    requested_point_count = item["requested_point_count"]
-    if (
-        isinstance(requested_point_count, bool)
-        or not isinstance(requested_point_count, int)
-        or requested_point_count < 0
-    ):
-        raise ValueError(f"{label}.requested_point_count is invalid")
-    requested_wavelengths = item["requested_wavelengths_m"]
-    if not isinstance(requested_wavelengths, list):
-        raise ValueError(f"{label}.requested_wavelengths_m must be a list")
-    normalized_wavelengths = [
-        _finite(wavelength, f"{label}.requested_wavelengths_m[{index}]")
-        for index, wavelength in enumerate(requested_wavelengths)
-    ]
-    if len(normalized_wavelengths) != requested_point_count:
-        raise ValueError(f"{label} requested point count does not match its grid")
-    if next_request is None:
-        if requested_point_count != 0:
-            raise ValueError(f"{label} cannot contain points without a request window")
-    elif (
-        requested_point_count < 2
-        or normalized_wavelengths[0] != next_request["lower_m"]
-        or normalized_wavelengths[-1] != next_request["upper_m"]
-    ):
-        raise ValueError(f"{label} request grid does not match its window")
-    cumulative_points = item["cumulative_planned_point_count"]
-    if (
-        isinstance(cumulative_points, bool)
-        or not isinstance(cumulative_points, int)
-        or cumulative_points < 0
-    ):
-        raise ValueError(f"{label}.cumulative_planned_point_count is invalid")
-    selected_candidate = item["selected_candidate_wavelength_m"]
-    if selected_candidate is not None:
-        _finite(selected_candidate, f"{label}.selected_candidate_wavelength_m")
-    evidence_hash = item["continuity_evidence_sha256"]
-    if evidence_hash is not None:
-        _hash(evidence_hash, f"{label}.continuity_evidence_sha256")
-    supplied_hash = _hash(item["transition_sha256"], f"{label}.transition_sha256")
-    rebuilt = dict(item)
-    rebuilt.pop("transition_sha256")
-    if _sha256(rebuilt) != supplied_hash:
-        raise ValueError(f"{label} is noncanonical or its hash does not match")
-    return deepcopy(item)
-
-
-def validate_branch_continuation_plan(
-    value: Any, *, states: Mapping[str, Any]
-) -> dict[str, Any]:
+def validate_branch_continuation_plan(value: Any, *, states: Mapping[str, Any]) -> dict[str, Any]:
     """Recompute one continuation plan and reject hash tampering."""
     item = _mapping(value, "branch_continuation_plan")
     if set(item) != _PLAN_FIELDS:
         raise ValueError("branch continuation plan fields are invalid")
     rebuilt = plan_branch_continuation(states, item["continuation_policy"])
     if item != rebuilt:
-        raise ValueError(
-            "branch continuation plan is noncanonical or its hash does not match"
-        )
+        raise ValueError("branch continuation plan is noncanonical or its hash does not match")
     return deepcopy(rebuilt)
 
 

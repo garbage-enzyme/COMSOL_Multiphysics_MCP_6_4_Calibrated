@@ -1,10 +1,13 @@
-from pathlib import Path
 import shutil
+import sqlite3
+import sys
 import time
 import uuid
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
-
+from src.knowledge import lexical_manual as manual_module
 from src.knowledge.lexical_manual import (
     build_index_from_records,
     read_index_pages,
@@ -113,6 +116,91 @@ def test_read_pages_reports_missing_pages(manual_index: Path):
     assert result["missing_pages"] == [2034]
 
 
+@pytest.mark.parametrize("operation", ["search", "read"])
+def test_readers_reject_an_obsolete_index_schema(manual_index: Path, operation):
+    with sqlite3.connect(manual_index) as connection:
+        connection.execute("UPDATE metadata SET value = 'obsolete' WHERE key = 'schema_version'")
+        connection.commit()
+
+    with pytest.raises(ValueError, match="schema is unsupported"):
+        if operation == "search":
+            search_index("CopyFace", index_path=manual_index)
+        else:
+            read_index_pages(
+                "COMSOL_Multiphysics/COMSOL_ReferenceManual.pdf",
+                [2033],
+                index_path=manual_index,
+            )
+
+
+def test_pdf_index_build_rejects_a_manual_changed_during_extraction(
+    ascii_tmp_path,
+    monkeypatch,
+):
+    pdf_root = ascii_tmp_path / "pdf"
+    pdf_root.mkdir()
+    source = pdf_root / "manual.pdf"
+    source.write_bytes(b"initial-pdf")
+    index = ascii_tmp_path / "manuals.sqlite3"
+
+    class Page:
+        def get_text(self, _format):
+            source.write_bytes(b"changed-pdf-with-a-different-size")
+            return "Searchable manual page"
+
+    class Document:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def __iter__(self):
+            return iter([Page()])
+
+    monkeypatch.setitem(sys.modules, "fitz", SimpleNamespace(open=lambda _path: Document()))
+
+    with pytest.raises(RuntimeError, match="changed during extraction"):
+        manual_module.build_index_from_pdfs(pdf_root, index)
+
+    assert not index.exists()
+    assert not list(ascii_tmp_path.glob("manuals.sqlite3.tmp-*"))
+
+
+def test_read_only_lexical_connections_close_deterministically(manual_index: Path, monkeypatch):
+    real_open = manual_module._open_index
+    tracked = []
+
+    class TrackingConnection:
+        def __init__(self, connection):
+            self.connection = connection
+            self.closed = False
+
+        def __getattr__(self, name):
+            return getattr(self.connection, name)
+
+        def close(self):
+            self.connection.close()
+            self.closed = True
+
+    def tracking_open(*args, **kwargs):
+        connection = TrackingConnection(real_open(*args, **kwargs))
+        tracked.append(connection)
+        return connection
+
+    monkeypatch.setattr(manual_module, "_open_index", tracking_open)
+
+    search_index("CopyFace", index_path=manual_index)
+    read_index_pages(
+        "COMSOL_Multiphysics/COMSOL_ReferenceManual.pdf",
+        [2033],
+        index_path=manual_index,
+    )
+
+    assert len(tracked) == 2
+    assert all(connection.closed for connection in tracked)
+
+
 def test_bounded_worker_searches_without_loading_comsol(manual_index: Path):
     result = run_bounded(
         "search",
@@ -142,3 +230,32 @@ def test_bounded_worker_enforces_deadline(manual_index: Path):
 def test_non_ascii_index_path_is_rejected(tmp_path: Path):
     with pytest.raises(ValueError, match="ASCII"):
         build_index_from_records([], tmp_path / "中文" / "manuals.sqlite3")
+
+
+def test_index_replacement_failure_removes_completed_temporary_database(
+    ascii_tmp_path, monkeypatch
+):
+    target = ascii_tmp_path / "manuals.sqlite3"
+
+    def fail_replace(_source, destination):
+        assert Path(destination) == target
+        raise PermissionError("injected replacement failure")
+
+    monkeypatch.setattr(manual_module.os, "replace", fail_replace)
+
+    with pytest.raises(PermissionError, match="replacement failure"):
+        build_index_from_records(
+            [
+                {
+                    "source": "manual.pdf",
+                    "module": "manual",
+                    "page": 1,
+                    "heading": "Heading",
+                    "text": "Searchable content",
+                }
+            ],
+            target,
+        )
+
+    assert not target.exists()
+    assert not list(ascii_tmp_path.glob("manuals.sqlite3.tmp-*"))

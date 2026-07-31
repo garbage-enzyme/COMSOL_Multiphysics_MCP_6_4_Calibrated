@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from copy import deepcopy
+import hashlib
 
 import numpy as np
 import pytest
@@ -54,11 +54,33 @@ class _JavaModel:
         return _Result(self._datasets)
 
 
+class _MphNode:
+    def __init__(self, name, tag):
+        self._name = name
+        self._tag = tag
+
+    def name(self):
+        return self._name
+
+    def tag(self):
+        return self._tag
+
+
 class _Model:
-    def __init__(self, values=None, solution="sol_on"):
+    def __init__(
+        self,
+        values=None,
+        solution="sol_on",
+        dataset_name="研究 1//解 1",
+        dataset_tag="dset_on",
+    ):
         self.java = _JavaModel(solution)
         self.calls = []
         self.values = self._default_values() if values is None else values
+        self.groups = {"datasets": [_MphNode(dataset_name, dataset_tag)]}
+
+    def __truediv__(self, group):
+        return self.groups[group]
 
     @staticmethod
     def _default_values():
@@ -68,6 +90,9 @@ class _Model:
         return [
             (x + 2.0 * y).astype(complex),
             (3.0 * x - y).astype(complex),
+            x.astype(complex),
+            y.astype(complex),
+            z.astype(complex),
             x.astype(complex),
             y.astype(complex),
             z.astype(complex),
@@ -106,7 +131,16 @@ def test_existing_dataset_adapter_verifies_readback_and_writes_artifacts(tmp_pat
 
     assert model.calls == [
         (
-            ["ewfd.normE", "ewfd.normH", "x", "y", "z"],
+            [
+                "ewfd.normE",
+                "ewfd.normH",
+                "x",
+                "y",
+                "z",
+                "comp1.x",
+                "comp1.y",
+                "comp1.z",
+            ],
             {"dataset": "研究 1//解 1", "inner": [1]},
         )
     ]
@@ -114,7 +148,25 @@ def test_existing_dataset_adapter_verifies_readback_and_writes_artifacts(tmp_pat
     assert result["dataset_identity"]["solution_tag"] == "sol_on"
     assert result["model_mutated"] is False
     assert result["study_run"] is False
-    assert (tmp_path / result["array_artifact"]["relative_path"]).is_file()
+    array_path = tmp_path / result["array_artifact"]["relative_path"]
+    assert array_path.is_file()
+    assert result["array_artifact"]["sha256"] == hashlib.sha256(
+        array_path.read_bytes()
+    ).hexdigest()
+    with np.load(array_path, allow_pickle=False) as archive:
+        assert archive.files == [
+            "coordinate_x",
+            "coordinate_y",
+            "quantity_electric_norm",
+            "quantity_magnetic_norm",
+        ]
+        assert archive["quantity_electric_norm"].shape == (9, 11)
+        assert archive["quantity_magnetic_norm"].shape == (9, 11)
+        assert np.allclose(archive["coordinate_x"], np.linspace(-1.0, 1.0, 11))
+        assert np.allclose(archive["coordinate_y"], np.linspace(-1.5, 1.5, 9))
+        xx, yy = np.meshgrid(archive["coordinate_x"], archive["coordinate_y"])
+        assert np.allclose(archive["quantity_electric_norm"], xx + 2.0 * yy)
+        assert np.allclose(archive["quantity_magnetic_norm"], 3.0 * xx - yy)
 
 
 def test_adapter_rejects_missing_component_dataset_and_solution_mismatch(tmp_path):
@@ -138,6 +190,37 @@ def test_adapter_rejects_missing_component_dataset_and_solution_mismatch(tmp_pat
                 artifact_root=tmp_path / message.split()[0],
             )
         assert model.calls == []
+
+
+def test_adapter_binds_mph_dataset_name_to_tag_before_evaluation(tmp_path):
+    request = _normalized_request()
+
+    for model in (
+        _Model(dataset_name="Different dataset"),
+        _Model(dataset_tag="dset_other"),
+    ):
+        with pytest.raises(ValueError, match="dataset_name"):
+            collect_existing_dataset_field_evidence(
+                model=model,
+                request=request,
+                view_id="on",
+                artifact_root=tmp_path / model.groups["datasets"][0].tag(),
+            )
+        assert model.calls == []
+
+
+def test_adapter_rejects_dataset_not_bound_to_declared_component(tmp_path):
+    request = _normalized_request()
+    model = _Model()
+    model.values[-3] = model.values[-3] + 0.25
+
+    with pytest.raises(ValueError, match="declared component_tag"):
+        collect_existing_dataset_field_evidence(
+            model=model,
+            request=request,
+            view_id="on",
+            artifact_root=tmp_path,
+        )
 
 
 def test_adapter_rejects_complex_nonfinite_and_mismatched_evaluation_arrays(tmp_path):

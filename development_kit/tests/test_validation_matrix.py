@@ -34,7 +34,7 @@ def _spec(source, points=None, **overrides) -> dict:
     value = {
         "job_type": "validation_matrix",
         "source_model_path": str(source),
-        "points": points or [_point()],
+        "points": [_point()] if points is None else points,
         "point_limit": 2,
         "cores": 1,
         "resource_policy": {
@@ -68,6 +68,14 @@ def test_normalization_is_solver_free_and_binds_exact_point_identity(tmp_path, m
     assert len(first["spec_fingerprint"]) == 64
     assert first["points"][0]["incidence"]["polarization_evidence"] == "label_only"
     assert first["resource_policy"]["host_defaults_applied"] is False
+
+
+def test_matrix_fixture_preserves_explicit_empty_points(tmp_path):
+    source = tmp_path / "fixture.mph"
+    source.write_bytes(b"controlled fixture")
+
+    with pytest.raises(ValueError, match="points must be a nonempty list"):
+        normalize_validation_matrix_spec(_spec(source, points=[]))
 
 
 def test_source_or_point_changes_change_immutable_fingerprints(tmp_path):
@@ -139,6 +147,63 @@ def test_declared_point_time_and_resource_bounds_fail_closed_before_runtime(
 
     with pytest.raises(ValueError, match=message):
         normalize_validation_matrix_spec(spec)
+
+
+def test_matrix_accepts_the_exact_maximum_point_count(tmp_path):
+    source = tmp_path / "fixture.mph"
+    source.write_bytes(b"model")
+    points = [
+        _point(f"point-{index}", wavelength=5.0 + index / 100.0)
+        for index in range(MAX_VALIDATION_MATRIX_POINTS)
+    ]
+    spec = _spec(
+        source,
+        points=points,
+        point_limit=MAX_VALIDATION_MATRIX_POINTS,
+        resource_policy={
+            "wall_time_budget_seconds": 2_000,
+            "minimum_next_point_seconds": 30,
+            "max_mesh_elements": 100_000,
+        },
+    )
+
+    normalized = normalize_validation_matrix_spec(spec)
+
+    assert len(normalized["points"]) == MAX_VALIDATION_MATRIX_POINTS
+    assert normalized["point_limit"] == MAX_VALIDATION_MATRIX_POINTS
+
+
+def test_matrix_accepts_wall_budget_equal_to_declared_minimum(tmp_path):
+    source = tmp_path / "fixture.mph"
+    source.write_bytes(b"model")
+    spec = _spec(
+        source,
+        points=[_point("one"), _point("two", 5.2)],
+        point_limit=2,
+        resource_policy={
+            "wall_time_budget_seconds": 60,
+            "minimum_next_point_seconds": 30,
+            "max_mesh_elements": 100_000,
+        },
+    )
+
+    normalized = normalize_validation_matrix_spec(spec)
+
+    assert normalized["resource_policy"]["rules"]["wall_time_budget_seconds"] == 60
+
+
+@pytest.mark.parametrize("field", ["wavelength", "theta_degrees", "phi_degrees"])
+def test_matrix_numeric_fields_reject_integer_overflow_as_validation_error(tmp_path, field):
+    source = tmp_path / "fixture.mph"
+    source.write_bytes(b"model")
+    point = _point()
+    if field == "wavelength":
+        point["wavelength"]["value"] = 10**400
+    else:
+        point["incidence"][field] = 10**400
+
+    with pytest.raises(ValueError, match="must be finite"):
+        normalize_validation_matrix_spec(_spec(source, points=[point]))
 
 
 def test_duplicate_exact_points_and_artifact_ids_are_rejected(tmp_path):

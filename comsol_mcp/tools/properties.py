@@ -23,6 +23,9 @@ _CONTAINERS = frozenset({
     "geometry_feature", "physics_feature", "mesh_feature", "study_step",
     "result_feature",
 })
+_COMPONENT_SCOPED_CONTAINERS = frozenset({
+    "geometry_feature", "physics_feature", "mesh_feature",
+})
 _TAG = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 
 
@@ -56,9 +59,11 @@ def _resolve_existing_target(
         component_name, container, feature_tag, property_name
     )
     jm = model.java
-    component = jm.component(component_name)
-    if component is None:
-        raise ValueError(f"component does not exist: {component_name}")
+    component = None
+    if container in _COMPONENT_SCOPED_CONTAINERS:
+        component = jm.component(component_name)
+        if component is None:
+            raise ValueError(f"component does not exist: {component_name}")
 
     if container == "geometry_feature":
         target = component.geom(parent_tag).feature().get(child_tag)
@@ -161,8 +166,21 @@ def set_existing_property(
         target.set(property_name, normalized_value)
         try:
             new_value, new_value_type = _read_property(target, property_name)
-        except Exception:
-            new_value, new_value_type = normalized_value, value_type
+        except Exception as readback_exc:
+            rolled_back = False
+            try:
+                target.set(property_name, old_value)
+                restored_value, restored_type = _read_property(target, property_name)
+                rolled_back = (
+                    restored_value == old_value and restored_type == value_type
+                )
+            except Exception:
+                rolled_back = False
+            return {
+                "success": False,
+                "error": f"clientapi property readback failed: {readback_exc}",
+                "rolled_back": rolled_back,
+            }
         return {
             "success": True,
             "target": f"{component_name}/{container}/{feature_tag}/{property_name}",

@@ -3,16 +3,14 @@
 from __future__ import annotations
 
 import math
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 from mcp.server.fastmcp import FastMCP
-
 from src.evidence.material_expressions import preview_material_expression
 from src.tools.material_expressions import register_material_expression_tools
-
 
 COMMON = {
     "test_wavelengths": [4.0, 5.0],
@@ -71,6 +69,51 @@ def test_parameter_names_are_used_verbatim_and_values_remain_in_ledger():
     assert result["convention_ledger"]["parameter_values"]["plasma_angular_frequency"] == 1.37e16
 
 
+def test_frequency_parameter_units_are_not_double_scaled_and_literals_use_comsol_case():
+    named = _drude(
+        "positive",
+        parameters={
+            "epsilon_inf": 1.0,
+            "plasma_angular_frequency": 5.0,
+            "damping_angular_frequency": 2.0,
+        },
+        parameter_names={
+            "plasma_angular_frequency": "wp",
+            "damping_angular_frequency": "gamma",
+        },
+        parameter_units={
+            "plasma_angular_frequency": "GHz",
+            "damping_angular_frequency": "MHz",
+        },
+    )
+    literal = _drude(
+        "positive",
+        parameters={
+            "epsilon_inf": 1.0,
+            "plasma_angular_frequency": 5.0,
+            "damping_angular_frequency": 2.0,
+        },
+        parameter_units={
+            "plasma_angular_frequency": "GHz",
+            "damping_angular_frequency": "MHz",
+        },
+    )
+
+    assert "2*pi*wp" in named["expression"]
+    assert "1e9*wp" not in named["expression"]
+    assert "[GHz]" in literal["expression"]
+    assert "[MHz]" in literal["expression"]
+    assert named["convention_ledger"]["named_parameter_unit_contract"] == (
+        "declared_units_already_attached"
+    )
+
+
+@pytest.mark.parametrize("name", ["ewfd.", "ewfd..freq", "ewfd._freq"])
+def test_physics_frequency_expression_requires_valid_dotted_identifiers(name):
+    with pytest.raises(ValueError, match="identifier"):
+        _drude("positive", frequency_source="physics_frequency", physics_frequency_expression=name)
+
+
 def test_constant_and_nk_forms_preserve_declared_imaginary_sign():
     constant = preview_material_expression(
         **COMMON,
@@ -110,13 +153,14 @@ def test_lorentz_preview_supports_both_conventions_without_silent_sign_flip():
         "imaginary_sign": "positive",
     }
     first = preview_material_expression(**base)
-    second = preview_material_expression(
-        **{**base, "harmonic_convention": "exp(-i*omega*t)"}
-    )
+    second = preview_material_expression(**{**base, "harmonic_convention": "exp(-i*omega*t)"})
 
     assert first["expression"] == second["expression"]
     assert first["configuration_sha256"] != second["configuration_sha256"]
-    assert first["convention_ledger"]["harmonic_convention"] != second["convention_ledger"]["harmonic_convention"]
+    assert (
+        first["convention_ledger"]["harmonic_convention"]
+        != second["convention_ledger"]["harmonic_convention"]
+    )
     assert first["preview"][0]["epsilon"]["imag"] > 0
 
 
@@ -143,7 +187,9 @@ def test_missing_units_zero_damping_and_frozen_frequency_are_explicit_warnings()
         "sign_is_diagnostic_only",
     } <= codes
     assert all(item["angular_frequency_rad_s"] == 3.0e14 for item in result["preview"])
-    assert all(item["sign_diagnostic"] == "indeterminate_zero_imaginary" for item in result["preview"])
+    assert all(
+        item["sign_diagnostic"] == "indeterminate_zero_imaginary" for item in result["preview"]
+    )
 
 
 @pytest.mark.parametrize(
@@ -167,6 +213,36 @@ def test_malformed_ambiguous_and_nonfinite_inputs_fail_closed(changes, match):
     }
     with pytest.raises(ValueError, match=match):
         preview_material_expression(**arguments)
+
+
+def test_wavelength_conversion_rejects_positive_values_that_underflow_to_zero():
+    with pytest.raises(ValueError, match="converted wavelength"):
+        preview_material_expression(
+            **{**COMMON, "test_wavelengths": [5e-324], "wavelength_unit": "nm"},
+            model_kind="constant",
+            parameters={"epsilon_real": 2.0, "epsilon_imag": 0.1},
+            imaginary_sign="positive",
+        )
+
+
+def test_frequency_conversion_and_parameter_squaring_fail_as_controlled_validation():
+    with pytest.raises(ValueError, match="converted angular frequency"):
+        _drude(
+            "positive",
+            frequency_source="fixed_angular_frequency",
+            fixed_angular_frequency=1.0e308,
+            fixed_angular_frequency_unit="thz",
+        )
+
+    with pytest.raises(ValueError, match="preview arithmetic"):
+        _drude(
+            "positive",
+            parameters={
+                "epsilon_inf": 1.0,
+                "plasma_angular_frequency": 1.0e308,
+                "damping_angular_frequency": 1.0,
+            },
+        )
 
 
 def test_preview_is_deterministic_and_import_does_not_load_solver_stack():
@@ -208,3 +284,21 @@ def test_public_tool_returns_bounded_validation_error_without_starting_solver():
 
     assert result["success"] is False
     assert "finite" in result["error"]
+
+
+def test_public_tool_contains_tiny_wavelength_arithmetic_as_validation_error():
+    server = FastMCP("material-expression-tiny-wavelength-test")
+    register_material_expression_tools(server)
+    tool = server._tool_manager._tools["wave_optics_material_expression_preview"]
+    result = tool.fn(
+        model_kind="constant",
+        parameters={"epsilon_real": 2.0, "epsilon_imag": 0.1},
+        test_wavelengths=[5e-324],
+        wavelength_unit="nm",
+        harmonic_convention="exp(+i*omega*t)",
+        imaginary_sign="positive",
+        formulation="volumetric_material",
+    )
+
+    assert result["success"] is False
+    assert "converted wavelength" in result["error"]

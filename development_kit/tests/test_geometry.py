@@ -1,10 +1,14 @@
 """Unit tests for geometry helpers without a COMSOL client."""
 
+import pytest
 from src.tools.geometry import (
     add_circle_feature,
+    add_difference_feature,
     add_geometry_feature,
     add_import_feature,
+    add_primitive_feature,
     add_union_feature,
+    build_geometry_sequences,
     list_geometry_features,
 )
 
@@ -46,6 +50,8 @@ class FakeFeatureList:
         return len(self.features)
 
     def create(self, tag, feature_type):
+        if tag in self.features:
+            raise ValueError(f"duplicate feature tag: {tag}")
         feature = FakeFeature(self.failing_property)
         self.features[tag] = (feature_type, feature)
         return feature
@@ -55,6 +61,9 @@ class FakeFeatureList:
 
     def get(self, tag):
         return self.features[tag][1]
+
+    def remove(self, tag):
+        del self.features[tag]
 
 
 class JavaStringLike:
@@ -74,12 +83,16 @@ class FakeGeometry:
     def __init__(self, tag="geom1", failing_property=None):
         self._tag = tag
         self.features = FakeFeatureList(failing_property)
+        self.run_count = 0
 
     def tag(self):
         return self._tag
 
     def feature(self):
         return self.features
+
+    def run(self):
+        self.run_count += 1
 
 
 class FakeGeometryList:
@@ -137,7 +150,7 @@ def test_add_geometry_feature_uses_first_clientapi_geometry():
     assert feature.properties["size"] == ["1", "2", "3"]
 
 
-def test_add_geometry_feature_reports_property_errors():
+def test_add_geometry_feature_rolls_back_property_errors():
     geometry = FakeGeometry(failing_property="bad")
     model = FakeModel(geometry)
 
@@ -148,9 +161,25 @@ def test_add_geometry_feature_reports_property_errors():
         properties={"r": "1", "bad": "value"},
     )
 
-    assert result["success"] is True
+    assert result["success"] is False
     assert result["property_errors"] == {"bad": "unsupported property"}
-    assert "warning" in result
+    assert result["rolled_back"] is True
+    assert "sph1" not in geometry.features.features
+
+
+def test_add_geometry_feature_chooses_first_unused_tag_and_rejects_collision():
+    geometry = FakeGeometry()
+    geometry.features.create("feat1", "Block")
+    geometry.features.create("feat3", "Sphere")
+
+    created = add_geometry_feature(FakeModel(geometry), "Cylinder")
+    collision = add_geometry_feature(FakeModel(geometry), "Cylinder", feature_name="feat1")
+
+    assert created["feature"]["name"] == "feat2"
+    assert collision == {
+        "success": False,
+        "error": "Feature tag already exists: feat1",
+    }
 
 
 def test_add_geometry_feature_validates_type():
@@ -201,9 +230,7 @@ def test_list_geometry_features_normalizes_java_string_tags():
 
     result = list_geometry_features(FakeModel(geometry))
 
-    assert result["features"] == [
-        {"tag": "blk1", "label": "Geometry Feature"}
-    ]
+    assert result["features"] == [{"tag": "blk1", "label": "Geometry Feature"}]
 
 
 def test_add_circle_feature_uses_clientapi_properties():
@@ -223,15 +250,31 @@ def test_add_circle_feature_uses_clientapi_properties():
     assert result["feature"]["radius"] == 0.5
 
 
-def test_add_circle_feature_validates_geometry_values():
-    model = FakeModel(FakeGeometry())
+@pytest.mark.parametrize(
+    "position,radius",
+    [
+        ([0], 1),
+        ([0, 0], 0),
+        ([float("nan"), 0], 1),
+        ([0, float("inf")], 1),
+        ([0, 0], float("nan")),
+        ([0, 0], float("inf")),
+        ([0, 0], -float("inf")),
+    ],
+)
+def test_add_circle_feature_validates_geometry_values_before_creation(position, radius):
+    geometry = FakeGeometry()
 
-    assert add_circle_feature(model, [0], 1)["success"] is False
-    assert add_circle_feature(model, [0, 0], 0)["success"] is False
+    result = add_circle_feature(FakeModel(geometry), position, radius)
+
+    assert result["success"] is False
+    assert geometry.features.features == {}
 
 
 def test_add_union_feature_sets_input_selection():
     geometry = FakeGeometry()
+    geometry.features.create("blk1", "Block")
+    geometry.features.create("blk2", "Block")
 
     result = add_union_feature(
         FakeModel(geometry),
@@ -251,9 +294,41 @@ def test_add_union_feature_requires_inputs():
     assert result["success"] is False
 
 
-def test_add_import_feature_sets_absolute_filename(tmp_path):
+def test_union_uses_first_free_tag_and_rolls_back_selection_failure():
+    geometry = FakeGeometry()
+    geometry.features.create("blk1", "Block")
+    geometry.features.create("blk2", "Block")
+    geometry.features.create("uni1", "Union")
+    geometry.features.create("uni3", "Union")
+
+    created = add_union_feature(FakeModel(geometry), ["blk1", "blk2"])
+    assert created["feature"]["name"] == "uni2"
+
+    class FailingSelection:
+        def set(self, _objects):
+            raise RuntimeError("selection failure")
+
+    original_create = geometry.features.create
+
+    def create(tag, feature_type):
+        feature = original_create(tag, feature_type)
+        if feature_type == "Union":
+            feature.selection = lambda _name: FailingSelection()
+        return feature
+
+    geometry.features.create = create
+    failed = add_union_feature(
+        FakeModel(geometry), ["blk1", "blk2"], feature_name="uni4"
+    )
+    assert failed["success"] is False
+    assert failed["rolled_back"] is True
+    assert "uni4" not in geometry.features.features
+
+
+def test_add_import_feature_sets_absolute_filename(tmp_path, monkeypatch):
     source = tmp_path / "part.step"
     source.write_text("dummy", encoding="utf-8")
+    monkeypatch.setenv("COMSOL_MCP_MODEL_READ_ROOTS", str(tmp_path))
     geometry = FakeGeometry()
 
     result = add_import_feature(
@@ -264,14 +339,143 @@ def test_add_import_feature_sets_absolute_filename(tmp_path):
 
     feature_type, feature = geometry.features.features["imp1"]
     assert feature_type == "Import"
+    assert feature.properties["type"] == "cad"
     assert feature.properties["filename"] == str(source.resolve())
     assert result["feature"]["file"] == str(source.resolve())
 
 
-def test_add_import_feature_requires_existing_file(tmp_path):
+def test_add_import_feature_requires_existing_file(tmp_path, monkeypatch):
+    monkeypatch.setenv("COMSOL_MCP_MODEL_READ_ROOTS", str(tmp_path))
     result = add_import_feature(
         FakeModel(FakeGeometry()),
         str(tmp_path / "missing.step"),
     )
 
     assert result["success"] is False
+
+
+def test_missing_import_is_rejected_before_model_access(tmp_path, monkeypatch):
+    monkeypatch.setenv("COMSOL_MCP_MODEL_READ_ROOTS", str(tmp_path))
+
+    class UntouchableModel:
+        @property
+        def java(self):
+            raise AssertionError("model must not be touched")
+
+    result = add_import_feature(UntouchableModel(), str(tmp_path / "missing.step"))
+    assert result["success"] is False
+
+
+@pytest.mark.parametrize(
+    ("feature_type", "position", "dimensions"),
+    [
+        ("Block", [0, 0], [1, 1, 1]),
+        ("Block", [0, 0, 0], [1, 0, 1]),
+        ("Cylinder", [0, 0, float("nan")], [1, 1]),
+        ("Cylinder", [0, 0, 0], [-1, 1]),
+        ("Sphere", [0, 0, 0], [False]),
+        ("Rectangle", [0, float("inf")], [1, 1]),
+    ],
+)
+def test_primitive_validation_precedes_feature_creation(feature_type, position, dimensions):
+    geometry = FakeGeometry()
+
+    result = add_primitive_feature(FakeModel(geometry), feature_type, position, dimensions)
+
+    assert result["success"] is False
+    assert geometry.features.features == {}
+
+
+def test_primitive_property_failure_removes_created_feature():
+    geometry = FakeGeometry(failing_property="size")
+
+    result = add_primitive_feature(FakeModel(geometry), "Block", [0, 0, 0], [1, 1, 1])
+
+    assert result["success"] is False
+    assert result["rolled_back"] is True
+    assert geometry.features.features == {}
+
+
+def test_difference_validates_inputs_before_creation_and_rolls_back_selection():
+    geometry = FakeGeometry()
+    geometry.features.create("blk1", "Block")
+    missing = add_difference_feature(FakeModel(geometry), "blk1", ["missing"])
+    assert missing["success"] is False
+    assert set(geometry.features.features) == {"blk1"}
+
+    class FailingSelection:
+        def set(self, _objects):
+            raise RuntimeError("controlled selection failure")
+
+    class FailingDifference(FakeFeature):
+        def selection(self, _name):
+            return FailingSelection()
+
+    original_create = geometry.features.create
+
+    def create(tag, feature_type):
+        if feature_type == "Difference":
+            feature = FailingDifference()
+            geometry.features.features[tag] = (feature_type, feature)
+            return feature
+        return original_create(tag, feature_type)
+
+    geometry.features.create = create
+    geometry.features.create("cyl1", "Cylinder")
+    failed = add_difference_feature(FakeModel(geometry), "blk1", ["cyl1"])
+    assert failed["rolled_back"] is True
+    assert not any(tag.startswith("dif") for tag in geometry.features.features)
+
+
+def test_import_filename_failure_removes_created_feature(tmp_path, monkeypatch):
+    source = tmp_path / "part.step"
+    source.write_text("dummy", encoding="utf-8")
+    monkeypatch.setenv("COMSOL_MCP_MODEL_READ_ROOTS", str(tmp_path))
+    geometry = FakeGeometry(failing_property="filename")
+
+    result = add_import_feature(FakeModel(geometry), str(source))
+
+    assert result["success"] is False
+    assert result["rolled_back"] is True
+    assert geometry.features.features == {}
+
+
+def test_import_type_failure_removes_created_feature(tmp_path, monkeypatch):
+    source = tmp_path / "part.step"
+    source.write_text("dummy", encoding="utf-8")
+    monkeypatch.setenv("COMSOL_MCP_MODEL_READ_ROOTS", str(tmp_path))
+    geometry = FakeGeometry(failing_property="type")
+
+    result = add_import_feature(FakeModel(geometry), str(source), import_type="mesh")
+
+    assert result["success"] is False
+    assert result["rolled_back"] is True
+    assert geometry.features.features == {}
+
+
+def test_build_without_name_runs_every_geometry():
+    first = FakeGeometry("geom1")
+    second = FakeGeometry("geom2")
+    model = FakeModel(first)
+    model.java.component_node.geometries["geom2"] = second
+
+    result = build_geometry_sequences(
+        model, geometry_name=None, component_name="comp1"
+    )
+
+    assert result["success"] is True
+    assert result["geometries"] == ["geom1", "geom2"]
+    assert first.run_count == second.run_count == 1
+
+
+def test_add_import_feature_rejects_file_outside_configured_root(tmp_path, monkeypatch):
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    source = tmp_path / "outside.step"
+    source.write_bytes(b"part")
+    monkeypatch.setenv("COMSOL_MCP_MODEL_READ_ROOTS", str(allowed))
+
+    result = add_import_feature(FakeModel(FakeGeometry()), str(source))
+
+    assert result["success"] is False
+    assert "allowed" in result["error"]

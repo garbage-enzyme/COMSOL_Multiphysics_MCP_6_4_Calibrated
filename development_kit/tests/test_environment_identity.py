@@ -6,10 +6,12 @@ import json
 import os
 import re
 
-from src import __version__
+from src.durable import canonical_sha256_v1
 from src.environment_identity import get_environment_identity
 from src.tools.capabilities import get_capabilities
 from src.tools.profiles import ProfileSelection
+
+from src import __version__
 
 
 def _selection() -> ProfileSelection:
@@ -31,6 +33,9 @@ def test_environment_identity_is_bounded_redacted_and_hash_stable():
     assert first["collection_mode"] == "solver_free_metadata_only"
     assert first["package"] == {"name": "comsol-mcp", "version": __version__}
     assert re.fullmatch(r"[0-9a-f]{64}", first["identity_sha256"])
+    identity_payload = dict(first)
+    reported_digest = identity_payload.pop("identity_sha256")
+    assert reported_digest == canonical_sha256_v1(identity_payload)
     assert first["redaction"] == {
         "paths_included": False,
         "host_identity_included": False,
@@ -48,14 +53,9 @@ def test_environment_identity_is_bounded_redacted_and_hash_stable():
 def test_environment_identity_separates_dependency_and_external_runtime_evidence():
     identity = get_environment_identity()
     direct = {item["name"]: item for item in identity["distributions"]["direct"]}
-    transitive = {
-        item["name"]: item
-        for item in identity["distributions"]["relevant_transitive"]
-    }
+    transitive = {item["name"]: item for item in identity["distributions"]["relevant_transitive"]}
 
-    assert set(direct) == {
-        "matplotlib", "mcp", "mph", "numpy", "pydantic", "psutil", "scipy"
-    }
+    assert set(direct) == {"matplotlib", "mcp", "mph", "numpy", "pydantic", "psutil", "scipy"}
     assert {"jpype1", "pydantic-core", "starlette"} <= set(transitive)
     assert direct["mph"]["availability"] == "installed"
     assert identity["licensed_runtime_declaration"] == {

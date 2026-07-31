@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
-
 from src.jobs.validation_matrix import normalize_validation_matrix_spec
 from src.jobs.validation_rows import (
     append_validation_row,
@@ -61,7 +61,12 @@ def test_append_fsync_journal_replays_exact_complete_identities(tmp_path, monkey
     spec = _spec(tmp_path)
     path = tmp_path / "rows.jsonl"
     fsync_calls = []
+    directory_fsync_calls = []
     monkeypatch.setattr("src.jobs.validation_rows.os.fsync", lambda fd: fsync_calls.append(fd))
+    monkeypatch.setattr(
+        "src.jobs.validation_rows.fsync_directory",
+        lambda path: directory_fsync_calls.append(path),
+    )
 
     first = append_validation_row(
         path,
@@ -83,6 +88,7 @@ def test_append_fsync_journal_replays_exact_complete_identities(tmp_path, monkey
     )
 
     assert fsync_calls
+    assert directory_fsync_calls == [path.parent]
     assert second["previous_row_sha256"] == first["row_sha256"]
     assert read_validation_rows(path, spec) == [first, second]
     assert completed_point_fingerprints(path, spec) == {
@@ -186,7 +192,16 @@ def test_tampered_rows_fail_closed(tmp_path, field, value, message):
         read_validation_rows(path, spec)
 
 
-def test_blank_malformed_and_absolute_artifact_paths_are_rejected(tmp_path):
+@pytest.mark.parametrize(
+    "unsafe_path",
+    [
+        "C:/private/manifest.json",
+        "/private/manifest.json",
+        "../manifest.json",
+        "nested/../manifest.json",
+    ],
+)
+def test_blank_malformed_and_absolute_artifact_paths_are_rejected(tmp_path, unsafe_path):
     spec = _spec(tmp_path)
     path = tmp_path / "rows.jsonl"
     path.write_text("\n", encoding="utf-8")
@@ -196,7 +211,7 @@ def test_blank_malformed_and_absolute_artifact_paths_are_rejected(tmp_path):
     with pytest.raises(ValueError, match="malformed JSON"):
         read_validation_rows(path, spec)
     unsafe = _summary("off")
-    unsafe["manifest_relative_path"] = "C:/private/manifest.json"
+    unsafe["manifest_relative_path"] = unsafe_path
     with pytest.raises(ValueError, match="portable relative path"):
         append_validation_row(
             tmp_path / "fresh.jsonl",
@@ -205,6 +220,35 @@ def test_blank_malformed_and_absolute_artifact_paths_are_rejected(tmp_path):
             point_id="off",
             status="ok",
             collector_summaries=[unsafe],
+        )
+
+
+@pytest.mark.parametrize(
+    ("scope", "field"),
+    [
+        ("spec", "spec_fingerprint"),
+        ("spec", "source_model_sha256"),
+        ("point", "point_fingerprint"),
+        ("point", "configuration_sha256"),
+        ("point", "collectors"),
+        ("point", "expected_artifact_ids"),
+    ],
+)
+def test_malformed_immutable_spec_raises_validation_error_before_row_indexing(
+    tmp_path, scope, field
+):
+    spec = _spec(tmp_path)
+    target = spec if scope == "spec" else spec["points"][0]
+    target.pop(field)
+
+    with pytest.raises(ValueError, match="validation_matrix|spec|point"):
+        append_validation_row(
+            tmp_path / "malformed-spec.jsonl",
+            spec,
+            attempt=1,
+            point_id="off",
+            status="ok",
+            collector_summaries=[],
         )
 
 
@@ -222,3 +266,53 @@ def test_partial_or_integrity_blocked_collectors_cannot_form_complete_rows(tmp_p
                 status="ok",
                 collector_summaries=[summary],
             )
+
+
+def test_partial_tail_is_truncated_before_concurrent_safe_append(tmp_path):
+    spec = _spec(tmp_path)
+    path = tmp_path / "rows.jsonl"
+    first = append_validation_row(
+        path,
+        spec,
+        attempt=1,
+        point_id="off",
+        status="ok",
+        collector_summaries=[_summary("off")],
+    )
+    with path.open("ab") as handle:
+        handle.write(b'{"sequence":2')
+
+    second = append_validation_row(
+        path,
+        spec,
+        attempt=1,
+        point_id="target",
+        status="ok",
+        collector_summaries=[_summary("target", "d" * 64)],
+    )
+
+    assert read_validation_rows(path, spec) == [first, second]
+    assert not (tmp_path / ".rows.jsonl.lock").exists()
+
+
+def test_concurrent_validation_appends_form_one_contiguous_chain(tmp_path):
+    spec = _spec(tmp_path)
+    path = tmp_path / "rows.jsonl"
+
+    def append(point_id):
+        return append_validation_row(
+            path,
+            spec,
+            attempt=1,
+            point_id=point_id,
+            status="ok",
+            collector_summaries=[_summary(point_id)],
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        rows = list(pool.map(append, ["off", "target"]))
+
+    replayed = read_validation_rows(path, spec)
+    assert {row["row_sha256"] for row in replayed} == {row["row_sha256"] for row in rows}
+    assert [row["sequence"] for row in replayed] == [1, 2]
+    assert replayed[1]["previous_row_sha256"] == replayed[0]["row_sha256"]

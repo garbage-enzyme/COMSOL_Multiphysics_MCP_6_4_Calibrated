@@ -5,17 +5,24 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from pathlib import Path
 import sys
 import threading
 import time
+from contextlib import ExitStack
+from pathlib import Path
 from typing import Any, Callable, Mapping
+
+from comsol_mcp.path_policy import pin_validated_reads, validated_read_pin
 
 from .branch_continuation_campaign import (
     validate_branch_continuation_campaign_driver_identity,
 )
 from .process_control import contain_current_process_tree
 from .store import JobStore, cancel_request_targets_attempt, process_identity
+
+
+class _CooperativeCancellation(Exception):
+    pass
 
 
 def _sha256_file(path: Path) -> str:
@@ -46,7 +53,8 @@ def _run(
     *,
     ownership_factory: Callable[[Path, str], Any] = _default_ownership_factory,
     client_factory: Callable[[Mapping[str, Any]], Any] = _default_client_factory,
-    collector_executor: Callable[[dict[str, Any], dict[str, Any], Path], Mapping[str, Any]] | None = None,
+    collector_executor: Callable[[dict[str, Any], dict[str, Any], Path], Mapping[str, Any]]
+    | None = None,
     telemetry_provider: Callable[[str, str, Any, Path, float], dict[str, Any]] | None = None,
     native_cancel_enabled: bool = True,
     fault_hook: Callable[[str, Mapping[str, Any]], Any] | None = None,
@@ -55,53 +63,61 @@ def _run(
     worker_started = time.monotonic()
     store = JobStore(Path(root))
     directory = store.job_dir(job_id)
-    spec = store.read_spec(job_id)
-    if spec.get("job_type") != "branch_continuation_campaign":
-        raise ValueError(
-            "Branch-continuation worker accepts only branch_continuation_campaign jobs"
-        )
-    validate_branch_continuation_campaign_driver_identity(spec)
-    identity = process_identity(os.getpid())
-    deadline = time.monotonic() + 3.0
-    while store.read_state(job_id).get("worker_pid") != identity["pid"]:
-        if time.monotonic() >= deadline:
-            raise RuntimeError("Control plane did not durably record the worker identity")
-        time.sleep(0.01)
-    contained = contain_current_process_tree()
-    store.update_state(
-        job_id,
-        patch={"process_tree_contained": bool(contained)},
-        event="worker_containment_recorded",
-        event_data={"process_tree_contained": bool(contained)},
-    )
-    state = store.read_state(job_id)
-    attempt = int(state.get("attempt", 1))
-    if state["status"] == "cancel_requested" or cancel_request_targets_attempt(
-        store.read_control(job_id), attempt
-    ):
-        store.record_cooperative_cancel_observed(
-            job_id, attempt=attempt, message="Stopped before campaign startup"
-        )
-        return 0
-    if state["status"] == "submitted":
-        store.update_state(job_id, "starting", event="worker_started")
-    elif state["status"] != "starting":
-        raise ValueError(f"Branch-continuation worker cannot start from {state['status']}")
-
-    sources = [Path(item["spectral_job"]["source_model_path"]) for item in spec["states"]]
+    spec: dict[str, Any] = {}
+    sources: list[Path] = []
+    attempt = 1
     client = None
     ownership = None
     lease_acquired = False
     cancel_stop = threading.Event()
     cancel_thread: threading.Thread | None = None
     pending_terminal: dict[str, Any] | None = None
+    cancel_observation_message: str | None = None
     worker_error: Exception | None = None
     cleanup_errors: list[str] = []
     latest_resource_decision: dict[str, Any] | None = None
+    source_pins = ExitStack()
     try:
+        spec = store.read_spec(job_id)
+        state = store.read_state(job_id)
+        attempt = int(state.get("attempt", 1))
+        if spec.get("job_type") != "branch_continuation_campaign":
+            raise ValueError(
+                "Branch-continuation worker accepts only branch_continuation_campaign jobs"
+            )
+        validate_branch_continuation_campaign_driver_identity(spec)
+        identity = process_identity(os.getpid())
+        store.bind_worker_identity(job_id, identity)
+        contained = contain_current_process_tree()
+        store.update_state(
+            job_id,
+            patch={"process_tree_contained": bool(contained)},
+            event="worker_containment_recorded",
+            event_data={"process_tree_contained": bool(contained)},
+        )
+        state = store.read_state(job_id)
+        if state["status"] == "cancel_requested" or cancel_request_targets_attempt(
+            store.read_control(job_id), attempt
+        ):
+            raise _CooperativeCancellation("Stopped before campaign startup")
+        if state["status"] == "submitted":
+            store.update_state(job_id, "starting", event="worker_started")
+        elif state["status"] != "starting":
+            raise ValueError(f"Branch-continuation worker cannot start from {state['status']}")
+
+        sources = [
+            Path(item["spectral_job"]["source_model_path"]) for item in spec["states"]
+        ]
+        source_pins.enter_context(
+            pin_validated_reads(
+                tuple(validated_read_pin(source, source.parent) for source in sources)
+            )
+        )
         for source, campaign_state in zip(sources, spec["states"]):
             if _sha256_file(source) != campaign_state["spectral_job"]["source_model_sha256"]:
-                raise RuntimeError("Immutable continuation source hash changed before client startup")
+                raise RuntimeError(
+                    "Immutable continuation source hash changed before client startup"
+                )
         ownership = ownership_factory(store.root.parent, f"job:{job_id}")
         first = spec["states"][0]["spectral_job"]
         preflight = ownership.preflight(
@@ -145,9 +161,7 @@ def _run(
 
         completed_points = int(store.read_state(job_id).get("progress", {}).get("completed", 0))
 
-        def point_persisted(
-            campaign_state: Mapping[str, Any], row: Mapping[str, Any]
-        ) -> None:
+        def point_persisted(campaign_state: Mapping[str, Any], row: Mapping[str, Any]) -> None:
             nonlocal completed_points
             completed_points += 1
             current = store.read_state(job_id)["status"]
@@ -157,7 +171,10 @@ def _run(
             store.update_state(
                 job_id,
                 patch={
-                    "progress": {"completed": completed_points, "total": spec["maximum_total_points"]},
+                    "progress": {
+                        "completed": completed_points,
+                        "total": spec["maximum_total_points"],
+                    },
                     "current_state": {
                         "state_id": campaign_state["state_id"],
                         "ordinal": campaign_state["ordinal"],
@@ -171,9 +188,7 @@ def _run(
                 },
             )
 
-        def execute_state(
-            campaign_state: Mapping[str, Any], state_dir: Path
-        ) -> Mapping[str, Any]:
+        def execute_state(campaign_state: Mapping[str, Any], state_dir: Path) -> Mapping[str, Any]:
             nonlocal latest_resource_decision
             child = campaign_state["spectral_job"]
             source = Path(child["source_model_path"])
@@ -221,10 +236,7 @@ def _run(
             )
 
         if should_stop():
-            store.record_cooperative_cancel_observed(
-                job_id, attempt=attempt, message="Stopped before campaign"
-            )
-            return 0
+            raise _CooperativeCancellation("Stopped before campaign")
         store.update_state(job_id, "smoke_running", event="continuation_campaign_worker_started")
         result = run_branch_continuation_campaign(
             spec,
@@ -236,11 +248,11 @@ def _run(
             fault_hook=fault_hook,
         )
         if should_stop() or result.get("stop_reason") in {
-            "before_state_cancel", "before_solve_cancel", "after_durable_row_cancel"
+            "before_state_cancel",
+            "before_solve_cancel",
+            "after_durable_row_cancel",
         }:
-            store.record_cooperative_cancel_observed(
-                job_id, attempt=attempt, message="Stopped between continuation operations"
-            )
+            cancel_observation_message = "Stopped between continuation operations"
         elif not result.get("completed"):
             pending_terminal = {
                 "status": "interrupted",
@@ -271,13 +283,19 @@ def _run(
                     },
                 },
             }
+    except _CooperativeCancellation as exc:
+        cancel_observation_message = str(exc)
     except Exception as exc:
         worker_error = exc
     finally:
         cancel_stop.set()
+        native_cancel_inflight = False
         if cancel_thread is not None:
             cancel_thread.join(timeout=1.0)
-        if client is not None:
+            native_cancel_inflight = cancel_thread.is_alive()
+            if native_cancel_inflight:
+                cleanup_errors.append("native_cancel_thread:still_active_after_join_timeout")
+        if client is not None and not native_cancel_inflight:
             try:
                 client.clear()
             except Exception as exc:
@@ -292,7 +310,7 @@ def _run(
                 fault_hook("during_cleanup", {"job_id": job_id, "attempt": attempt})
             except Exception as exc:
                 cleanup_errors.append(f"cleanup_hook:{type(exc).__name__}:{exc}")
-        if ownership is not None and lease_acquired:
+        if ownership is not None and lease_acquired and not native_cancel_inflight:
             try:
                 release = ownership.release()
                 if not release.get("success"):
@@ -301,22 +319,41 @@ def _run(
                     )
             except Exception as exc:
                 cleanup_errors.append(f"lease_release:{type(exc).__name__}:{exc}")
-
-    for source, campaign_state in zip(sources, spec["states"]):
-        if (
-            _sha256_file(source) != campaign_state["spectral_job"]["source_model_sha256"]
-            and worker_error is None
-        ):
-            worker_error = RuntimeError("Immutable continuation source changed after execution")
+        try:
+            for source, campaign_state in zip(sources, spec["states"]):
+                if (
+                    _sha256_file(source) != campaign_state["spectral_job"]["source_model_sha256"]
+                    and worker_error is None
+                ):
+                    worker_error = RuntimeError(
+                        "Immutable continuation source changed after execution"
+                    )
+        except Exception as exc:
+            if worker_error is None:
+                worker_error = exc
+            else:
+                cleanup_errors.append(f"final_source_verification:{type(exc).__name__}:{exc}")
+        finally:
+            try:
+                source_pins.close()
+            except Exception as exc:
+                cleanup_errors.append(f"source_pin_close:{type(exc).__name__}:{exc}")
     if cleanup_errors and worker_error is None:
         worker_error = RuntimeError("; ".join(cleanup_errors)[:2000])
     current = store.read_state(job_id)["status"]
     if worker_error is not None:
-        if current == "cancel_requested":
+        if current in {"cancel_requested", "cancelling"}:
             store.record_cooperative_cancel_observed(
-                job_id, attempt=attempt, message="Stopped between blocking operations"
+                job_id,
+                attempt=attempt,
+                message=(cancel_observation_message or "Stopped between blocking operations"),
+                worker_error={
+                    "type": type(worker_error).__name__,
+                    "message": str(worker_error),
+                    "cleanup_errors": cleanup_errors,
+                },
             )
-        elif current != "cancelling" and current not in {"completed", "interrupted"}:
+        elif current not in {"completed", "interrupted"}:
             store.update_state(
                 job_id,
                 "failed",
@@ -331,9 +368,26 @@ def _run(
             )
         print(f"{type(worker_error).__name__}: {worker_error}", file=sys.stderr, flush=True)
         return 1
+    if cancel_observation_message is not None:
+        current = store.read_state(job_id)["status"]
+        if current in {"cancel_requested", "cancelling"}:
+            store.record_cooperative_cancel_observed(
+                job_id,
+                attempt=attempt,
+                message=cancel_observation_message,
+            )
+        return 0
     if pending_terminal is not None:
         current = store.read_state(job_id)["status"]
-        if current not in {"cancel_requested", "cancelling"}:
+        if current in {"cancel_requested", "cancelling"}:
+            store.record_cooperative_cancel_observed(
+                job_id,
+                attempt=attempt,
+                message="Stopped before terminal state publication",
+            )
+        else:
+            if current == "smoke_running" and pending_terminal["status"] == "completed":
+                store.update_state(job_id, "smoke_validated", event="durable_rows_revalidated")
             store.update_state(
                 job_id,
                 pending_terminal["status"],
