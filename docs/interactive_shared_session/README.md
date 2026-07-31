@@ -1,62 +1,77 @@
-# Interactive COMSOL Desktop/Server collaboration
+# COMSOL Desktop/Server interactive collaboration
 
-We thank the original [Ching-Chiang/comsol-mcp](https://github.com/Ching-Chiang/comsol-mcp) repository for the method and UX contribution that informed this interaction concept. That repository was used only as behavioral research: this project independently implemented its own default-off design and did not copy, adapt, translate, cherry-pick, or mechanically rewrite the original repository's source code. This credit recognizes a method contribution; it does not claim that the two implementations or all behaviors are identical.
+Thanks to [Ching-Chiang/comsol-mcp](https://github.com/Ching-Chiang/comsol-mcp)
+for introducing this interaction idea. This project used that work only to
+study the workflow and built its own default-off safety design. It did not copy,
+adapt, translate, cherry-pick, or mechanically rewrite source code from that
+repository. The two implementations do not necessarily behave the same way.
 
-This mode lets you keep a COMSOL model visible in Desktop while an agent attaches
-to the same user-started COMSOL Multiphysics Server. You and the agent take
-explicit turns. The MCP does not start, clear, close, own, or terminate your
-Server, Desktop, listener, model, or main file.
+## What this mode is for
 
-## What this mode is
+Use this mode when you want to keep a model visible in COMSOL Desktop while an
+assistant uses MCP to work with the same COMSOL Multiphysics Server.
 
-The first release supports one local user, one user-owned COMSOL Multiphysics
-Server, one connected Desktop client, and one exact server-held model. MCP
-preflight identifies the local processes and listener, attaches a separate MPh
-client, inventories server models, adopts one exact model, and applies an
-optimistic model/revision lock.
+The main rule is simple: **the user and the assistant must take turns. They must
+not edit the model at the same time.**
 
-There are two collaboration modes:
+MCP does not start, stop, clear, or terminate the user's Server, Desktop,
+listener, or model. It connects only to a local Server that the user names and
+checks that the connection and model still match before each protected action.
 
-- `interactive_inspection` is for short, turn-based adoption, readback,
-  revision checks, and Save Copy snapshots. Unlock before the user edits.
-- `automation_exclusive` is for a bounded durable attached job. Desktop remains
-  visible, but the user must not mutate the model until the job reaches a
-  verified terminal state.
+The current release supports:
 
-The public `desktop_shared` profile deliberately does not mix broad generic
-`param_set` or foreground `study_solve` calls into a shared session. Controlled
-agent mutation/solve work is submitted through the existing durable
-`job_submit/status/tail/cancel/resume` path, currently for `staged_sweep`. A
-single-point staged sweep is the bounded public path for one controlled
-parameter change and solve. This limitation is important: the mode is not
-simultaneous co-editing and not an unrestricted remote console.
+- one Windows computer;
+- one user-started COMSOL Multiphysics Server;
+- one COMSOL Desktop window connected to that Server;
+- one exactly identified model held by the Server;
+- COMSOL `6.4.0.*`, with `6.4.0.293` as the reference build;
+- MPh 1.3.1 and this MCP package;
+- short inspection, readback, and Save Copy work;
+- bounded attached jobs submitted as `staged_sweep`.
 
-## Prerequisites and compatibility
+This is not a remote desktop and does not support simultaneous co-editing.
 
-- COMSOL Multiphysics and COMSOL Multiphysics Server on the same computer;
-- MPh 1.3.1 and this MCP installation;
-- one authorized local user and a license that permits the local client/server
-  topology;
-- COMSOL Desktop and Server in the accepted `6.4.0.*` release line;
-- the exact licensed reference build is `6.4.0.293`;
-- a configured immutable model-read root for saved formal work and an ASCII
-  owned artifact root for snapshots/jobs;
-- an MCP host restart after changing `settings.json` profile or shared-server settings.
+## Two collaboration modes
 
-Only the final build component may differ inside `6.4.0.*`. For example, an
-automatic-update change from `6.4.0.293` to another `6.4.0` build is admitted
-with a build-difference warning. A third numeric component change, such as
-`6.4.1.*`, is a different release family and fails closed. Older releases,
-mixed Desktop/Server release families, and unreadable versions are not guessed.
+### Inspection
 
-The public MCP endpoint is local-loopback-only. COMSOL itself can bind its
-listener more broadly; see [Security and limitations](#security-and-limitations).
+`interactive_inspection` is for short model inspection, readback, revision
+checks, and Save Copy snapshots. The assistant must unlock the model before the
+user edits again.
+
+### Bounded automation
+
+`automation_exclusive` is for resumable bounded jobs. Desktop may continue to
+show the model, but the user must observe only until the job reaches a verified
+terminal state.
+
+The public `desktop_shared` profile does not expose an unrestricted foreground
+solver. Parameter changes and solves use
+`job_submit/status/tail/cancel/resume`. The attached backend currently supports
+only `staged_sweep`.
+
+## Before you begin
+
+Confirm all of the following:
+
+- COMSOL Multiphysics and COMSOL Multiphysics Server are on the same computer;
+- Desktop and Server are both in the `6.4.0.*` release line;
+- the license permits local Client/Server use;
+- formal source models are under a configured read root;
+- snapshots and job artifacts use an ASCII-only output root;
+- you can restart the MCP host after changing its settings.
+
+A change only in the final build number, such as `6.4.0.293` to another
+`6.4.0.x`, is admitted with a warning. A different third component, such as
+`6.4.1.*`, is rejected. Unreadable or mixed Desktop/Server versions are also
+rejected.
 
 ## Quick start
 
-### 1. Enable the default-off MCP profile
+### Step 1: enable the shared profile
 
-Edit the shared project-root `settings.json` before starting the MCP host:
+Before starting the MCP host, edit the repository's `settings.json`. This is a
+partial example; keep the other settings from the project template:
 
 ```json
 {
@@ -70,160 +85,139 @@ Edit the shared project-root `settings.json` before starting the MCP host:
 }
 ```
 
-These are partial edits; keep all other settings from the project template. See
-the [settings guide](../setting_guide/README.md) for every field's meaning,
-default, and accepted values. If the host does not preserve the project
-path, pass only the one locator variable:
+If the MCP host does not start from the repository directory, set:
 
 ```text
 COMSOL_MCP_SETTINGS_PATH=D:\path\to\COMSOL_Multiphysics_MCP\settings.json
 ```
 
-Restart the MCP host. Profile changes are static and are not hot-reloaded. Call
-`capabilities` and confirm:
+Restart the MCP host and call `capabilities`. Confirm that:
 
 - `active_profile` is `desktop_shared`;
 - `shared_session.profile_active` and `shared_session.gate_open` are `true`;
-- shared-session tools are listed;
-- evidence-integrity checks remain independently default-on.
+- the shared-session tools are listed;
+- evidence-integrity checks remain enabled by default.
 
-If a setting is deleted it uses its default. If a setting contains an illegal
-value, the safe default remains active and `project_settings.settings_errors`
-reports the setting path and reason code.
+If the old profile is still shown, stop. Restart the actual MCP host process;
+changing a terminal variable does not update a server that is already running.
 
-Do not proceed if capabilities still show an old profile. Restart the actual
-host process rather than assuming that changing a terminal variable updated an
-already-running stdio server.
+### Step 2: start Server yourself
 
-### 2. Start COMSOL Multiphysics Server manually
+On Windows, open:
 
-On Windows, open **COMSOL 6.4 > COMSOL Launchers > COMSOL Multiphysics Server
-6.4**. COMSOL's 6.4 documentation also describes the Windows server command as
-`comsolmphserver [options]`. For reliable detach/reconnect preservation, start
-the server with repeated-client behavior enabled:
+**COMSOL 6.4 > COMSOL Launchers > COMSOL Multiphysics Server 6.4**
+
+The command-line equivalent can be:
 
 ```text
 comsolmphserver -multi on -port 2036
 ```
 
-Use the executable supplied by your own installation; do not ask the agent to
-find or handle credentials. `-multi on` keeps the Server and in-memory model
-available after a client disconnects. `-port 2036` requests the normal default
-port, but another free port may be selected or configured. The official
-[Windows command reference](https://doc.comsol.com/6.4/doc/com.comsol.help.comsol/comsol_ref_running.38.31.html)
-documents `-multi`, `-port`, login, and password-storage options.
+`-multi on` keeps the Server and in-memory models alive after a client
+disconnects. `-port 2036` requests a common port; the message in the Server
+window is authoritative.
 
-Wait until the console reports that COMSOL Multiphysics Server 6.4 is listening
-and note the actual port, for example:
+Wait for a message similar to:
 
 ```text
 COMSOL Multiphysics Server 6.4 ... started listening on port 2036
 ```
 
-Leave this console running. In shared mode, MCP never starts or terminates it.
-The Windows Start-menu procedure and first-start credential behavior are also
-described in the official [client-server startup guide](https://doc.comsol.com/6.4/doc/com.comsol.help.comsol/comsol_ref_running.38.19.html).
+Record the port and keep this window open. Do not give the assistant any
+credentials. See COMSOL's official
+[Windows command reference](https://doc.comsol.com/6.4/doc/com.comsol.help.comsol/comsol_ref_running.38.31.html)
+and [Client/Server startup guide](https://doc.comsol.com/6.4/doc/com.comsol.help.comsol/comsol_ref_running.38.19.html)
+for installation-specific details.
 
-### 3. Connect COMSOL Desktop
+### Step 3: connect Desktop
 
-Open one COMSOL Desktop 6.4 window. Select **File > COMSOL Multiphysics Server >
-Connect to Server**. Choose the local server, use `localhost`, select a manual
-port if needed, and enter the exact port reported by the Server console.
+Open one COMSOL Desktop 6.4 window and choose:
 
-On the licensed acceptance host, the connection dialog automatically populated
-the username and password from the user's local COMSOL setup. This is a useful
-UX observation, not a guarantee for every installation. Use only credentials
-from your authorized COMSOL installation. Never copy a username, password, or
-login-properties file into an agent prompt, log, screenshot, or receipt.
+**File > COMSOL Multiphysics Server > Connect to Server**
 
-After connection, the lower-left Desktop status area should show
-`localhost:<port>`, such as `localhost:2036`. If that indicator disappears,
-Desktop is no longer connected to the Server. The official
-[Desktop connection guide](https://doc.comsol.com/6.4/doc/com.comsol.help.comsol/comsol_ref_running.38.20.html)
-documents the server/port dialog and explains that COMSOL may ask whether to
-use the current Desktop model or the model already on the Server.
+Use `localhost` and the exact port from the Server window. Enter the username
+and password only in COMSOL's own connection dialog. Never copy credentials to
+chat, logs, screenshots, or receipts.
 
-If the connection dialog asks which model to use, make a deliberate choice.
-MCP can adopt only a model held by the Server. It never guesses whether the
-standalone Desktop model or an existing Server model is intended.
+After connection, Desktop should show `localhost:<port>` in its lower-left
+area, for example `localhost:2036`. If that indicator disappears, Desktop is no
+longer connected to Server.
 
-### 4. Preflight, attach, and adopt exactly one model
+If COMSOL asks whether to use the current Desktop model or an existing Server
+model, the user must choose explicitly. MCP can adopt only a model held by the
+Server and does not guess the user's intent.
 
-Tell the agent the local port, not credentials. The MCP sequence is:
+### Step 4: let MCP check and adopt the model
 
-1. `shared_server_preflight(host="localhost", port=2036)`;
-2. inspect `state`, exact process/listener evidence, release line, and warnings;
-3. only after you confirm Desktop shows the same endpoint, call
+Tell the assistant only the local port. The normal order is:
+
+1. call `shared_server_preflight(host="localhost", port=2036)`;
+2. inspect its `state`, versions, process/listener evidence, and warnings;
+3. after the user confirms that Desktop shows the same endpoint, call
    `shared_server_attach(..., user_confirmed=true)`;
 4. call `shared_server_models`;
-5. select one exact server model and call `shared_model_adopt` with its
-   `model_tag` plus available expected label, path, or unsaved state;
-6. call `shared_model_lock(collaboration_mode="interactive_inspection", ...)`.
+5. select one model and call `shared_model_adopt` with `model_tag` and, when
+   available, the expected label, path, or unsaved state;
+6. call
+   `shared_model_lock(collaboration_mode="interactive_inspection", ...)`.
 
-The `user_confirmed=true` value is per-session evidence. It must reflect a real
-user observation; the agent must not synthesize it from process data alone.
+`user_confirmed=true` means the user actually saw the matching Desktop
+connection. The assistant must not infer this confirmation from process data.
 
-## How state detection behaves
+## Common states
 
-Preflight makes two bounded process/listener observations before constructing
-an MPh client. A visible window title or a process name alone is not enough.
-After attach, the MCP also checks clientapi build readback and enumerates the
-server-held model inventory.
+MCP takes two complete, bounded process/listener observations before creating
+an MPh Client. The second observation must be strictly later than the first. If
+a relevant process appears, disappears, or changes identity between them, MCP
+does not connect.
 
-| Observed state | MCP behavior | Smallest user action |
+| What the user sees | MCP result | What to do |
 | --- | --- | --- |
-| No COMSOL Desktop and no Server | Reports `desktop_and_server_absent`, retryable; no client or lease | Start Server, wait for listening, then start one Desktop |
-| User clicked COMSOL but it is still starting | Reports `desktop_or_server_starting`, retryable | Wait until Desktop responds and the Server listener is stable; rerun preflight |
-| Desktop open, Server absent | Refuses attach because no stable listener exists | Start the Server and connect Desktop to its exact port |
-| Connected Desktop, no server-held model | Attach can succeed, but model inventory is empty and adoption returns `no_server_models` | While connected, create a model or transfer/open one on the Server, then refresh inventory |
-| New blank unsaved model | Inventory marks it unsaved; exact tag plus `expected_unsaved=true` can adopt it | Use only for bounded interactive work, or save a separate immutable source before formal/durable work |
-| Existing saved model | Inventory reports tag/label/path identity; an exact selector is required | Confirm path/label and adopt that one model; keep immutable source distinct from working/snapshot files |
-| Model exists only in standalone Desktop | MCP cannot see it in Server inventory | Connect Desktop and explicitly transfer the current model, or save/open it while connected |
-| Multiple Desktop windows | Preflight reports `ambiguous_gui_clients`; it does not choose a window | Close or disconnect extra windows and keep one intended Desktop client |
-| Multiple server-held models | Inventory is returned, but MCP never auto-selects among ambiguous candidates | Identify one exact tag and add expected label/path/unsaved state |
-| Older or mixed COMSOL release | Reports `unsupported_or_ambiguous_comsol_version` and refuses attach | Use matching Desktop and Server from accepted `6.4.0.*`, then rerun |
-| Version unreadable | Fails closed rather than inferring from a shortcut/title | Repair the installation/process readback; do not override the version gate |
-| Same `6.4.0.*` line, different final build | Admits the release line with `same_accepted_release_line_build_difference` warning | Confirm intentional update; retain exact build evidence in the receipt |
-| Extra MPh/COMSOL owner or changing PID/listener | Reports collision or identity change; no lease/client | Stop the unrelated owner or wait for startup to stabilize; never kill by process name alone |
-| Listener is wildcard-bound | Preserves `listener_bind_scope=wildcard` as a warning | Review firewall/network exposure; MCP does not rewrite it as loopback |
+| Desktop and Server are both absent | `desktop_and_server_absent` | Start Server, wait for listening, then start Desktop |
+| Desktop or the listener is still starting, or the owning Server is nonresponsive | `desktop_or_server_starting` | Wait for Desktop and Server to respond, then retry |
+| The two observations are not ordered in time | `probe_chronology_invalid` | Collect two fresh observations |
+| Desktop is open but no Server listener exists | Connection refused | Start Server and connect Desktop to the exact port |
+| More than one Desktop window is present | `ambiguous_gui_clients` | Close or disconnect extra windows |
+| Another MPh/COMSOL owner appears | Collision or identity-change state | Stop the unrelated owner or wait for startup to settle |
+| Desktop or Server is outside `6.4.0.*` | `unsupported_or_ambiguous_comsol_version` | Use the same accepted release line and retry |
+| Server holds no model | Attach may succeed; adoption returns `no_server_models` | Create, open, or transfer a model in connected Desktop |
+| Server holds several models | A model list is returned; none is chosen automatically | Select by exact tag, path, and saved state |
+| A same-family listener uses a wildcard address | `listener_bind_scope=wildcard` warning | Review firewall and Server settings |
 
-If several windows contain any combination of empty, blank, saved, or older
-models, preflight handles the process/window ambiguity first. It cannot inspect
-each GUI tab and guess intent. Reduce the topology to one intended Desktop, one
-accepted Server, and one exact server-held model.
+MCP never chooses “the first model” or “the current window.” Use an exact model
+tag, path, and saved-state expectation.
 
-## Turn-taking collaboration workflow
+## Taking turns
 
 ### User turn
 
-1. Confirm `localhost:<port>` is visible.
-2. Ensure the MCP lock is released before editing.
-3. Make a bounded Desktop change and wait for COMSOL to finish it.
-4. Tell the agent what you changed as a hint, not as proof.
-5. The agent re-inventories/relocks and uses readback to establish a new revision.
+1. Confirm that Desktop still shows `localhost:<port>`.
+2. Confirm that the MCP model lock has been released.
+3. Make one clear, bounded change and wait for COMSOL to finish.
+4. Tell the assistant what changed.
+5. Let the assistant read the model again and create a new lock.
 
-If you change a parameter from `55` to `30`, for example, the next revision
-readback should establish the change. The agent must not simply trust the chat
-message. A mismatch invalidates the old revision and requires a new lock.
+The chat message is a hint, not proof. If the model no longer matches the old
+lock, that lock is invalid.
 
-### Agent inspection/snapshot turn
+### Assistant inspection turn
 
-1. Adopt and lock the exact model in `interactive_inspection` mode.
-2. Retain `lock_sha256` and `revision_sha256`.
-3. Run `shared_model_verify` immediately before any identity-sensitive action.
-4. A snapshot writer must enforce the caller-declared maximum byte count while
-   writing. COMSOL 6.4 exposes only path-based `Model.save` overloads, so this
-   build returns `snapshot_write_bound_unavailable` before attempting Save Copy;
-   post-write deletion is not treated as a byte bound.
-5. Verify again, then call `shared_model_unlock` with a short audit reason.
-6. Tell the user that their turn has resumed.
+1. Lock the exact model with `interactive_inspection`.
+2. Save the returned `lock_sha256` and `revision_sha256`.
+3. Call `shared_model_verify` before each identity-sensitive action.
+4. Call `shared_model_snapshot` when a separate copy is needed.
+5. Verify again, then call `shared_model_unlock`.
+6. Tell the user clearly that their turn may resume.
 
-### Controlled solve/agent mutation turn
+COMSOL 6.4 Save Copy writes by pathname and cannot enforce a byte ceiling while
+writing. When the bound cannot be guaranteed, this release returns
+`snapshot_write_bound_unavailable`; it does not write a complete oversized file
+and then pretend the write was bounded.
 
-For the public v3.1 surface, use `automation_exclusive` and the durable job
-controls. The agent locks the model with an immutable source, and `job_submit`
-performs the verified handoff, unlocks/detaches the interactive MCP client, and
-starts an attached worker. A neutral one-point shape is:
+### Assistant solve turn
+
+Shared solves use `automation_exclusive` and the durable job tools. A neutral
+one-point example is:
 
 ```json
 {
@@ -241,141 +235,85 @@ starts an attached worker. A neutral one-point shape is:
 }
 ```
 
-The exact parameter, units/conventions, expression, source file, and scientific
-policy are model-specific and must be declared by the caller. Do not copy this
-neutral example into a real model without adapting the formal specification.
+Parameters, units, expressions, source files, and scientific policies depend
+on the real model. Do not copy this neutral example directly into a production
+model.
 
-Poll with `job_status` and inspect bounded logs with `job_tail`. Do not run a
-foreground loop of ordinary shared calls. The worker checks the external
-revision before points, persists evidence point by point, and saves contained
-checkpoints/Save Copies. A Desktop edit during this interval blocks the next
-point or resume rather than silently mixing revisions.
+Use `job_status` for progress and `job_tail` for bounded logs. The job checks
+the external model before each point and persists results point by point. A
+Desktop edit during the job blocks the next point or resume instead of mixing
+old and new revisions.
 
-Use `job_cancel` to request cancellation. `cancel requested` is not terminal.
-Wait for `cancelled` plus verified owned-worker/descendant, port, lease, and
-external-resource-preservation evidence. Cancellation may stop only the
-attached MCP worker/client; it must not terminate the user-owned Server,
+`job_cancel` requests cancellation; it is not a terminal state. Wait for
+`cancelled` and check the recorded worker, port, lease, and external-resource
+preservation evidence. Cancellation must not terminate the user's Server,
 Desktop, listener, or model.
 
-## Native Desktop busy warnings
+## COMSOL busy indication
 
-COMSOL Server serializes access. During a longer agent mutation or solve,
-Desktop may temporarily lock editing and display an occupied-model or busy warning.
-Wait for the agent turn to finish. Do not click through the warning and
-attempt a concurrent edit.
+During a longer operation, Desktop may temporarily prevent editing and show an
+occupied-model or busy warning. Wait for the assistant turn to finish; do not
+force a concurrent edit.
 
-Short property writes or read-only calls may finish without showing the warning.
-On the licensed host, a longer first model construction/solve showed it, while
-later short change/readback operations did not. This difference is expected UX
-timing. The native warning proves only that COMSOL considered the Server/model
-busy; it is not proof that every MCP identity, revision, evidence, or cleanup
-guard passed. Use MCP receipts for those claims.
+A short read or property change may finish before the warning appears, so no
+warning does not mean no call occurred. The native warning proves only that
+COMSOL considered the model busy at that moment. MCP identity, evidence, and
+cleanup checks must be read from the MCP result.
 
-## Saved-model walkthrough
+## Keep three file roles separate
 
-1. Keep an immutable source `.mph` in a configured model-read root. Hash it and
-   do not overwrite it during formal work.
-2. Open or transfer a separate working model to the connected Server. Desktop
-   displays this in-memory server model; it may have a saved path.
-3. Preflight, attach, inventory, and adopt by exact tag plus expected path/label.
-4. Lock with both immutable source path and SHA-256 for formal snapshot or
-   attached durable work.
-5. Alternate user and agent turns. Every agent turn begins with a revision
-   check; every user edit causes a new lock/revision.
-6. Use `shared_model_snapshot` or durable checkpoints for Save Copy artifacts.
-   A snapshot never changes the visible main model path.
-7. Unlock and detach. Confirm Desktop and Server still hold the model.
-
-Windows/COMSOL may lock the currently open `.mph`. Also, **Save As** normally
-switches the working model to the newly saved file; this was observed during
-licensed UX acceptance. For formal work, do not assume that a newly saved file
-remained an untouched source. Prefer a distinct immutable source and use Save
-Copy for snapshots.
-
-## Unsaved-model walkthrough
-
-1. Connect Desktop to the Server first, then create one blank model.
-2. Refresh `shared_server_models` and adopt the exact unsaved tag with
-   `expected_unsaved=true`.
-3. Use short turn-taking inspection/readback. You may create a contained Save
-   Copy, but it does not retroactively prove an immutable starting source.
-4. Before formal durable work, save a distinct source `.mph`, place it under a
-   configured read root, hash it, and establish a new lock/run identity.
-5. Never present an unsaved in-memory model as if it had a verified source-file hash.
-
-## File roles
-
-| Role | Owned by | May change? | Safety rule |
+| Role | Owner | May it change? | Rule |
 | --- | --- | --- | --- |
-| Immutable source | User | No, within one formal identity | Existing readable `.mph` under configured model-read root; exact SHA-256; do not open-and-overwrite it |
-| Open working model | User/COMSOL Server | Yes, by explicit turns | Visible in Desktop and identified by exact server/model/revision evidence; simultaneous edits unsupported |
-| Save Copy snapshot/checkpoint | MCP-owned artifact workflow | New files only | ASCII owned root, collision-free name, size/hash/manifest; never overwrites source or changes main working path |
+| Immutable source | User | Not within one formal run | Keep under a configured read root, record exact SHA-256, and never open-and-overwrite it |
+| Open working model | User and COMSOL Server | Only during an explicit turn | Keep it visible in Desktop and verify Server, model, and revision identity |
+| Save Copy snapshot/checkpoint | MCP artifact workflow | Create new files only | Use an ASCII root, collision-free names, and recorded size/hash/manifest |
 
-These roles may not be collapsed merely because three files currently contain
-similar bytes. A verified source is not a scratch file, and a snapshot is not a
-new source until a new formal identity explicitly adopts it.
+Even if the three files currently contain the same bytes, their roles are not
+interchangeable. An unsaved in-memory model has no verified source-file hash.
+Save a separate source and create a new run identity before formal work.
 
-## Collaboration etiquette checklist
+## Safe finish
 
-- Keep one Desktop window, one intended Server, and one exact server model.
-- Say whose turn it is before any edit or solve.
-- Unlock before the user edits; relock and read back afterward.
-- During `automation_exclusive`, observe only; do not mutate the model.
-- Treat native busy warnings as a stop signal, not as a verification receipt.
-- Use exact tags, paths, hashes, lock IDs, and revisions; never say “the first model.”
-- Keep source, working model, and snapshots separate.
-- Preserve failed, partial, diagnostic, cancelled, and residual evidence.
-- Do not paste credentials into chat or receipts.
-- Normally keep the Server running between collaboration steps.
+End a collaboration in this order:
 
-## Safe detach and shutdown
+1. wait for any attached job to reach a verified terminal state;
+2. retain the required raw results and snapshots;
+3. call `shared_model_verify` for the current lock;
+4. call `shared_model_unlock`;
+5. call `shared_server_detach`;
+6. confirm that the result says external resources were preserved;
+7. confirm that Desktop still shows `localhost:<port>` and the model remains
+   visible.
 
-Normal collaboration ends in this order:
-
-1. Wait for any attached job to reach a verified terminal state.
-2. Save required raw evidence and snapshots.
-3. Verify the current lock/revision.
-4. Call `shared_model_unlock`.
-5. Call `shared_server_detach`.
-6. Confirm detach reports external resources preserved.
-7. Confirm Desktop still shows `localhost:<port>` and the model remains visible.
-
-You normally do **not** restart Server between collaboration steps, after a Save
-Copy, after reopening a model, or after normal MCP detach. Only the user closes
-Desktop or the Server console after evidence is safe. Restart only when a
-documented recovery requires it, such as an unrecoverable Server/client state,
-and expect to create or re-establish process, model, lock, and revision identity.
-
-If `shared_server_detach` reports `model_lock_active`, unlock first. If detach is
-uncertain, do not kill COMSOL by name; inspect exact process/listener identity
-and let the user decide whether to restart their resource.
+A normal detach does not require a Server restart. If detach returns
+`model_lock_active`, unlock first. If detach is uncertain, do not kill COMSOL
+by process name; inspect the exact process/listener identity and let the user
+decide whether to restart their resource.
 
 ## Security and limitations
 
-COMSOL Multiphysics Server is a single-user server that permits multiple
-connections by the same user. Official COMSOL 6.4 documentation notes that the
-TCP connection is password protected but otherwise not encrypted, and that
-firewall/address restrictions remain the administrator's responsibility. This
-MCP release supports only a local loopback endpoint; it does not turn remote or
-wildcard exposure into a supported topology.
+This release supports local loopback only, not a remote Server. COMSOL Server's
+TCP connection is password-protected but is not otherwise encrypted; firewall
+and address restrictions remain the user's or administrator's responsibility.
 
-Preflight preserves the actual listener bind evidence. If COMSOL listens on
-`0.0.0.0` or `::`, it reports `listener_bind_scope=wildcard` even when the MCP
-connects through `localhost`. Review the host firewall and COMSOL configuration.
-MCP never rewrites the listener or claims it is loopback-only.
+`0.0.0.0` matches only an IPv4 loopback endpoint, and `::` matches only an IPv6
+loopback endpoint. Without explicit socket evidence, MCP does not assume that
+an IPv6 wildcard socket also serves IPv4. This contract normalizes `localhost`
+to IPv4. A matched wildcard listener retains the
+`listener_bind_scope=wildcard` warning and is never rewritten as loopback-only.
 
-Limitations:
+Other limitations:
 
-- no remote-host support in the first release;
-- no simultaneous user/agent editing;
-- no automatic choice among multiple windows, servers, or models;
-- no support outside `6.4.0.*` without new release acceptance;
-- no credential handling through MCP;
-- no promise that every short call will trigger a native busy dialog;
-- no claim that visible 3D geometry, plots, or GUI output are scientifically verified;
-- only `staged_sweep` currently has the attached durable execution backend;
-- `desktop_shared` is experimental and default-off.
+- no simultaneous user/assistant editing;
+- no automatic choice among multiple Desktop windows, Servers, or models;
+- no support outside `6.4.0.*`;
+- MCP does not handle the username and password;
+- not every short call produces a COMSOL busy warning;
+- visible geometry, plots, and results are not by themselves scientific proof;
+- attached automation currently supports only `staged_sweep`;
+- `desktop_shared` remains experimental and default-off.
 
-Visible GUI agreement is useful collaboration evidence, but scientific claims
-still require the independent default-on evidence-integrity workflow, raw data,
-declared policy, convergence, and physical validation appropriate to the model.
+Matching visible Desktop output is useful collaboration evidence, but a formal
+scientific conclusion still needs raw data, declared acceptance rules,
+convergence checks, default-on evidence-integrity checks, and the physical
+validation required by the model.

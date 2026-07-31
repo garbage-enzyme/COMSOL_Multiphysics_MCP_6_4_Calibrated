@@ -32,10 +32,10 @@ def _process(pid, kind, command, *, windows=0, created=None):
     }
 
 
-def _snapshot(server_created=20.0, listener_host="127.0.0.1"):
+def _snapshot(server_created=20.0, listener_host="127.0.0.1", observed=1000.0):
     return {
         "inventory_complete": True,
-        "observed_at_epoch": 1000.0,
+        "observed_at_epoch": observed,
         "processes": [
             _process(10, "comsol_desktop", ["comsol.exe"], windows=1),
             _process(
@@ -218,7 +218,12 @@ def _manager(
     manifest_writer=None,
     ownership=None,
 ):
-    values = iter(snapshots or [_snapshot() for _ in range(10)])
+    snapshots = snapshots or [_snapshot() for _ in range(10)]
+    snapshots = [
+        {**snapshot, "observed_at_epoch": 1000.0 + index}
+        for index, snapshot in enumerate(snapshots)
+    ]
+    values = iter(snapshots)
     ownership = ownership or FakeOwnership(tmp_path)
     client = client or FakeClient()
     revision_state = revision_state or {
@@ -364,7 +369,7 @@ def test_attached_inventory_is_bounded_sorted_and_keeps_duplicate_metadata(tmp_p
 def test_attach_preserves_wildcard_listener_scope_in_server_identity(tmp_path):
     manager, _ownership, _client = _manager(
         tmp_path,
-        snapshots=[_snapshot(listener_host="::") for _ in range(10)],
+        snapshots=[_snapshot(listener_host="0.0.0.0") for _ in range(10)],
     )
 
     result = manager.attach(
@@ -548,7 +553,15 @@ def test_attached_job_handoff_recovery_fails_closed_and_detaches_changed_target(
     manager, ownership, client = _manager(tmp_path, models=models)
     handoff = _prepare_saved_handoff(manager, source)
     if changed_identity == "server":
-        manager._snapshot_provider = lambda: _snapshot(server_created=21.0)
+        observed = 2000.0
+
+        def changed_server_snapshot():
+            nonlocal observed
+            snapshot = _snapshot(server_created=21.0, observed=observed)
+            observed += 1.0
+            return snapshot
+
+        manager._snapshot_provider = changed_server_snapshot
         expected_state = "attached_handoff_server_identity_changed"
     else:
         manager._model_inventory_reader = lambda _client: [

@@ -69,7 +69,14 @@ def test_english_interactive_guide_matches_the_shared_public_surface():
     guide = (INTERACTIVE_DOCS / "README.md").read_text(encoding="utf-8")
 
     assert "Ching-Chiang/comsol-mcp" in guide
-    assert "did not copy, adapt, translate, cherry-pick, or mechanically rewrite" in guide
+    assert all(
+        phrase in guide
+        for phrase in (
+            "did not copy",
+            "adapt, translate, cherry-pick",
+            "mechanically rewrite",
+        )
+    )
     assert '"profile": { "name": "desktop_shared" }' in guide
     assert '"shared_server": { "enabled": true }' in guide
     assert "COMSOL_MCP_SETTINGS_PATH=" in guide
@@ -97,15 +104,18 @@ def test_chinese_interactive_guide_is_complete_and_contract_equivalent():
     guide = (INTERACTIVE_DOCS / "README_CN.md").read_text(encoding="utf-8")
 
     assert "Ching-Chiang/comsol-mcp" in guide
-    assert "没有复制、改写、翻译、cherry-pick 或机械重写" in guide
+    assert all(
+        phrase in guide
+        for phrase in ("没有复制", "改写、翻译、挑选提交", "机械重写")
+    )
     assert '"profile": { "name": "desktop_shared" }' in guide
     assert '"shared_server": { "enabled": true }' in guide
     assert "COMSOL_MCP_SETTINGS_PATH=" in guide
     assert "6.4.0.*" in guide
     assert "6.4.0.293" in guide
     assert "localhost:<port>" in guide
-    assert "username 和 password" in guide
-    assert "occupied-model 或 busy warning" in guide
+    assert "用户名和密码" in guide
+    assert "模型占用或忙碌提示" in guide
     assert "shared_server_preflight" in guide
     assert "shared_server_attach" in guide
     assert "shared_server_models" in guide
@@ -116,9 +126,18 @@ def test_chinese_interactive_guide_is_complete_and_contract_equivalent():
     assert "shared_model_unlock" in guide
     assert "shared_server_detach" in guide
     assert "job_submit/status/tail/cancel/resume" in guide
-    assert "Immutable source" in guide
-    assert "Open working model" in guide
-    assert "Save Copy snapshot/checkpoint" in guide
+    assert "不可变源模型" in guide
+    assert "当前工作模型" in guide
+    assert "Save Copy 快照或检查点" in guide
+    for avoidable_english in (
+        "behavioral research",
+        "optimistic model/revision lock",
+        "partial edit",
+        "hot reload",
+        "fail closed",
+        "simultaneous co-editing",
+    ):
+        assert avoidable_english not in guide
 
 
 def test_root_readmes_expose_same_language_feature_and_settings_guides():

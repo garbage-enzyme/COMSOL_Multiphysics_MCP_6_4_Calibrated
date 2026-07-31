@@ -512,10 +512,15 @@ def test_attached_production_worker_uses_existing_model_and_never_clears_server(
     assert hashlib.sha256(source.read_bytes()).hexdigest() == spec["source_model_sha256"]
 
 
-def _attached_process_snapshot(*, server_pid=4200, server_created=1234.5):
+def _attached_process_snapshot(
+    *,
+    server_pid=4200,
+    server_created=1234.5,
+    observed=3000.0,
+):
     return {
         "inventory_complete": True,
-        "observed_at_epoch": 3000.0,
+        "observed_at_epoch": observed,
         "processes": [
             {
                 "pid": 4100,
@@ -538,8 +543,20 @@ def _attached_process_snapshot(*, server_pid=4200, server_created=1234.5):
                 "responding": True,
             },
         ],
-        "listeners": [{"host": "::", "port": 2036, "pid": server_pid}],
+        "listeners": [{"host": "0.0.0.0", "port": 2036, "pid": server_pid}],
     }
+
+
+def _attached_process_provider(**kwargs):
+    observed = 3000.0
+
+    def provider():
+        nonlocal observed
+        snapshot = _attached_process_snapshot(observed=observed, **kwargs)
+        observed += 1.0
+        return snapshot
+
+    return provider
 
 
 def test_attached_process_preservation_requires_same_server_listener_and_desktop():
@@ -548,12 +565,12 @@ def test_attached_process_preservation_requires_same_server_listener_and_desktop
     preserved = verify_attached_process_preservation(
         target,
         first_probe=_attached_process_snapshot(),
-        second_probe=_attached_process_snapshot(),
+        second_probe=_attached_process_snapshot(observed=3001.0),
     )
     changed = verify_attached_process_preservation(
         target,
         first_probe=_attached_process_snapshot(server_pid=4300),
-        second_probe=_attached_process_snapshot(server_pid=4300),
+        second_probe=_attached_process_snapshot(server_pid=4300, observed=3001.0),
     )
 
     assert preserved["success"] is True
@@ -786,7 +803,7 @@ def test_attached_manager_preflight_is_process_only_and_binds_server_identity(
     monkeypatch.setattr(
         process_probe,
         "collect_shared_preflight_snapshot",
-        lambda: _attached_process_snapshot(),
+        _attached_process_provider(),
     )
 
     store = JobStore(ascii_job_root / "runtime" / "jobs")
@@ -825,7 +842,7 @@ def test_attached_manager_preflight_rejects_changed_server_process(ascii_job_roo
     monkeypatch.setattr(
         process_probe,
         "collect_shared_preflight_snapshot",
-        lambda: _attached_process_snapshot(server_pid=4300),
+        _attached_process_provider(server_pid=4300),
     )
     manager = JobManager(
         ascii_job_root / "runtime" / "jobs",
@@ -1074,14 +1091,14 @@ def test_attached_cancel_cleanup_requires_external_server_preservation(ascii_job
     monkeypatch.setattr(
         process_probe,
         "collect_shared_preflight_snapshot",
-        lambda: _attached_process_snapshot(),
+        _attached_process_provider(),
     )
 
     preserved = cancel_worker._verify_solver_cleanup(store, job_id)
     monkeypatch.setattr(
         process_probe,
         "collect_shared_preflight_snapshot",
-        lambda: _attached_process_snapshot(server_pid=4300),
+        _attached_process_provider(server_pid=4300),
     )
     changed = cancel_worker._verify_solver_cleanup(store, job_id)
 
@@ -1132,7 +1149,7 @@ def test_attached_cancel_cleanup_requires_recorded_model_preservation(
     monkeypatch.setattr(
         process_probe,
         "collect_shared_preflight_snapshot",
-        lambda: _attached_process_snapshot(),
+        _attached_process_provider(),
     )
 
     result = cancel_worker._verify_solver_cleanup(store, job_id)

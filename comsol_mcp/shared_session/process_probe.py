@@ -16,6 +16,7 @@ from .contracts import normalize_shared_listener_bind_host
 
 MAX_COMMAND_PARTS = 64
 MAX_PROCESS_RECORDS = 4096
+MAX_LISTENER_RECORDS = 128
 _DESKTOP_EXECUTABLES = frozenset(
     {
         "comsol.exe",
@@ -78,7 +79,7 @@ def _process_records() -> tuple[list[dict[str, Any]], bool]:
             continue
         except psutil.NoSuchProcess, psutil.ZombieProcess:
             continue
-        if len(records) >= MAX_PROCESS_RECORDS:
+        if len(records) > MAX_PROCESS_RECORDS:
             raise RuntimeError("process inventory exceeds the bounded maximum")
     return records, complete
 
@@ -103,6 +104,8 @@ def _listener_records() -> list[dict[str, Any]]:
                 "pid": int(connection.pid),
             }
         )
+        if len(listeners) > MAX_LISTENER_RECORDS:
+            raise RuntimeError("listener inventory exceeds the bounded maximum")
     return listeners
 
 
@@ -120,6 +123,31 @@ def _window_state_by_pid() -> dict[int, dict[str, Any]]:
     user32 = ctypes.WinDLL("user32", use_last_error=True)
     states: dict[int, dict[str, Any]] = {}
     callback_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    user32.EnumWindows.argtypes = [callback_type, wintypes.LPARAM]
+    user32.EnumWindows.restype = wintypes.BOOL
+    user32.IsWindowVisible.argtypes = [wintypes.HWND]
+    user32.IsWindowVisible.restype = wintypes.BOOL
+    user32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
+    user32.GetWindowTextLengthW.restype = ctypes.c_int
+    user32.GetWindowTextW.argtypes = [
+        wintypes.HWND,
+        wintypes.LPWSTR,
+        ctypes.c_int,
+    ]
+    user32.GetWindowTextW.restype = ctypes.c_int
+    user32.GetClassNameW.argtypes = [
+        wintypes.HWND,
+        wintypes.LPWSTR,
+        ctypes.c_int,
+    ]
+    user32.GetClassNameW.restype = ctypes.c_int
+    user32.GetWindowThreadProcessId.argtypes = [
+        wintypes.HWND,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+    user32.IsHungAppWindow.argtypes = [wintypes.HWND]
+    user32.IsHungAppWindow.restype = wintypes.BOOL
 
     @callback_type
     def visit(window, _parameter):
@@ -172,6 +200,25 @@ def _windows_file_version(executable: str | None) -> str | None:
     if platform.system() != "Windows" or not executable:
         return None
     version = ctypes.WinDLL("version", use_last_error=True)
+    version.GetFileVersionInfoSizeW.argtypes = [
+        wintypes.LPCWSTR,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    version.GetFileVersionInfoSizeW.restype = wintypes.DWORD
+    version.GetFileVersionInfoW.argtypes = [
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.LPVOID,
+    ]
+    version.GetFileVersionInfoW.restype = wintypes.BOOL
+    version.VerQueryValueW.argtypes = [
+        wintypes.LPCVOID,
+        wintypes.LPCWSTR,
+        ctypes.POINTER(ctypes.c_void_p),
+        ctypes.POINTER(wintypes.UINT),
+    ]
+    version.VerQueryValueW.restype = wintypes.BOOL
     size = version.GetFileVersionInfoSizeW(str(executable), None)
     if not size:
         return None
@@ -182,7 +229,11 @@ def _windows_file_version(executable: str | None) -> str | None:
     length = wintypes.UINT()
     if not version.VerQueryValueW(buffer, "\\", ctypes.byref(pointer), ctypes.byref(length)):
         return None
+    if not pointer.value or length.value < ctypes.sizeof(_VS_FIXEDFILEINFO):
+        return None
     fixed = ctypes.cast(pointer, ctypes.POINTER(_VS_FIXEDFILEINFO)).contents
+    if fixed.dwSignature != 0xFEEF04BD:
+        return None
     parts = (
         fixed.dwFileVersionMS >> 16,
         fixed.dwFileVersionMS & 0xFFFF,
@@ -243,6 +294,8 @@ def collect_shared_preflight_snapshot(
         records = provided_records
         inventory_complete = True
     listeners = listener_provider()
+    if len(listeners) > MAX_LISTENER_RECORDS:
+        raise RuntimeError("listener inventory exceeds the bounded maximum")
     windows = window_provider()
     excluded = {int(pid) for pid in exclude_pids}
     parent_map = {

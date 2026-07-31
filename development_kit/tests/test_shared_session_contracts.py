@@ -10,6 +10,7 @@ import pytest
 
 from src.shared_session.contracts import (
     SHARED_SERVER_FEATURE_ENV,
+    SharedServerEndpoint,
     normalize_shared_listener_bind_host,
     normalize_shared_server_endpoint,
     normalize_shared_server_feature_gate,
@@ -88,6 +89,24 @@ def test_endpoint_rejects_remote_malformed_and_unknown_inputs(raw):
         normalize_shared_server_endpoint(raw)
 
 
+def test_endpoint_public_constructor_enforces_and_canonicalizes_loopback_contract():
+    endpoint = SharedServerEndpoint(host=" LOCALHOST ", port=2036)
+
+    assert endpoint.to_dict() == {
+        "host": "127.0.0.1",
+        "port": 2036,
+        "scope": "loopback",
+    }
+    for kwargs in (
+        {"host": "0.0.0.0", "port": 2036},
+        {"host": "127.0.0.1", "port": 0},
+        {"host": "127.0.0.1", "port": True},
+        {"host": "127.0.0.1", "port": 2036, "scope": "wildcard"},
+    ):
+        with pytest.raises(ValueError):
+            SharedServerEndpoint(**kwargs)
+
+
 @pytest.mark.parametrize(
     ("host", "expected"),
     [
@@ -101,19 +120,29 @@ def test_listener_bind_host_preserves_scope(host, expected):
     assert normalize_shared_listener_bind_host(host) == expected
 
 
-def test_wildcard_listener_matches_only_the_declared_endpoint_port():
-    endpoint = normalize_shared_server_endpoint(
+def test_wildcard_listener_matches_only_same_address_family_and_endpoint_port():
+    ipv4_endpoint = normalize_shared_server_endpoint(
         {"host": "127.0.0.1", "port": 2036}
     )
+    ipv6_endpoint = normalize_shared_server_endpoint({"host": "::1", "port": 2036})
 
     assert shared_listener_matches_endpoint(
-        listener_host="::", listener_port=2036, endpoint=endpoint
+        listener_host="0.0.0.0", listener_port=2036, endpoint=ipv4_endpoint
     )
     assert not shared_listener_matches_endpoint(
-        listener_host="::", listener_port=2037, endpoint=endpoint
+        listener_host="::", listener_port=2036, endpoint=ipv4_endpoint
+    )
+    assert shared_listener_matches_endpoint(
+        listener_host="::", listener_port=2036, endpoint=ipv6_endpoint
     )
     assert not shared_listener_matches_endpoint(
-        listener_host="192.168.1.2", listener_port=2036, endpoint=endpoint
+        listener_host="0.0.0.0", listener_port=2036, endpoint=ipv6_endpoint
+    )
+    assert not shared_listener_matches_endpoint(
+        listener_host="0.0.0.0", listener_port=2037, endpoint=ipv4_endpoint
+    )
+    assert not shared_listener_matches_endpoint(
+        listener_host="192.168.1.2", listener_port=2036, endpoint=ipv4_endpoint
     )
 
 

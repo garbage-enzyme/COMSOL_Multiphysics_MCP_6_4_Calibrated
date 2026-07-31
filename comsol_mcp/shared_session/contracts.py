@@ -44,6 +44,20 @@ class SharedServerEndpoint:
     port: int
     scope: str = "loopback"
 
+    def __post_init__(self) -> None:
+        if self.scope != LISTENER_BIND_SCOPE_LOOPBACK:
+            raise ValueError("shared server endpoint scope must be loopback")
+        normalized_host = _normalize_endpoint_host(self.host)
+        if (
+            isinstance(self.port, bool)
+            or not isinstance(self.port, int)
+            or not 1 <= self.port <= 65535
+        ):
+            raise ValueError(
+                "shared server endpoint port must be an integer from 1 to 65535"
+            )
+        object.__setattr__(self, "host", normalized_host)
+
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
@@ -80,20 +94,7 @@ def normalize_shared_server_feature_gate(
     )
 
 
-def normalize_shared_server_endpoint(value: Any) -> SharedServerEndpoint:
-    """Validate one explicit loopback endpoint without DNS resolution."""
-    if not isinstance(value, Mapping) or not all(
-        isinstance(key, str) for key in value
-    ):
-        raise ValueError("shared server endpoint must be an object with string keys")
-    unknown = sorted(set(value) - _ENDPOINT_FIELDS)
-    if unknown:
-        raise ValueError(f"shared server endpoint contains unknown fields: {unknown}")
-    missing = sorted(_ENDPOINT_FIELDS - set(value))
-    if missing:
-        raise ValueError(f"shared server endpoint is missing required fields: {missing}")
-
-    raw_host = value["host"]
+def _normalize_endpoint_host(raw_host: Any) -> str:
     if not isinstance(raw_host, str) or not raw_host.strip():
         raise ValueError("shared server endpoint host must be a non-empty string")
     host = raw_host.strip().casefold()
@@ -111,7 +112,23 @@ def normalize_shared_server_endpoint(value: Any) -> SharedServerEndpoint:
         if not address.is_loopback:
             raise ValueError("shared server endpoint host must be loopback-only")
         normalized_host = address.compressed
+    return normalized_host
 
+
+def normalize_shared_server_endpoint(value: Any) -> SharedServerEndpoint:
+    """Validate one explicit loopback endpoint without DNS resolution."""
+    if not isinstance(value, Mapping) or not all(
+        isinstance(key, str) for key in value
+    ):
+        raise ValueError("shared server endpoint must be an object with string keys")
+    unknown = sorted(set(value) - _ENDPOINT_FIELDS)
+    if unknown:
+        raise ValueError(f"shared server endpoint contains unknown fields: {unknown}")
+    missing = sorted(_ENDPOINT_FIELDS - set(value))
+    if missing:
+        raise ValueError(f"shared server endpoint is missing required fields: {missing}")
+
+    normalized_host = _normalize_endpoint_host(value["host"])
     port = value["port"]
     if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
         raise ValueError("shared server endpoint port must be an integer from 1 to 65535")
@@ -146,7 +163,11 @@ def shared_listener_matches_endpoint(
         host, bind_scope = normalize_shared_listener_bind_host(listener_host)
     except ValueError:
         return False
-    return bind_scope == LISTENER_BIND_SCOPE_WILDCARD or host == endpoint.host
+    if bind_scope == LISTENER_BIND_SCOPE_WILDCARD:
+        listener_version = ipaddress.ip_address(host).version
+        endpoint_version = ipaddress.ip_address(endpoint.host).version
+        return listener_version == endpoint_version
+    return host == endpoint.host
 
 
 def summarize_shared_listener_bindings(

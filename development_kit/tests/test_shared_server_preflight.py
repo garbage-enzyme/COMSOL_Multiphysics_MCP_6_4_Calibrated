@@ -44,10 +44,13 @@ def _listener(pid=20):
 
 
 def _classify(first, second=None):
+    if second is None:
+        second = deepcopy(first)
+        second["observed_at_epoch"] = first["observed_at_epoch"] + 1.0
     return classify_shared_server_preflight(
         endpoint={"host": "127.0.0.1", "port": 2036},
         first_probe=first,
-        second_probe=deepcopy(first) if second is None else second,
+        second_probe=second,
     )
 
 
@@ -86,17 +89,17 @@ def test_final_build_difference_is_accepted_and_reported():
 
 def test_wildcard_listener_is_preserved_and_explicitly_warned():
     snapshot = _ready()
-    snapshot["listeners"] = [{"host": "::", "port": 2036, "pid": 20}]
+    snapshot["listeners"] = [{"host": "0.0.0.0", "port": 2036, "pid": 20}]
 
     result = _classify(snapshot)
 
     assert result["success"] is True
     assert result["listener_bind_scope"] == "wildcard"
-    assert result["listener_bind_hosts"] == ["::"]
+    assert result["listener_bind_hosts"] == ["0.0.0.0"]
     assert result["warnings"] == ["listener_bind_scope=wildcard"]
 
 
-def test_dual_stack_wildcard_records_collapse_only_for_one_owner():
+def test_opposite_family_wildcard_is_not_attributed_to_ipv4_endpoint():
     snapshot = _ready()
     snapshot["listeners"] = [
         {"host": "0.0.0.0", "port": 2036, "pid": 20},
@@ -107,12 +110,12 @@ def test_dual_stack_wildcard_records_collapse_only_for_one_owner():
 
     assert result["success"] is True
     assert result["listener_bind_scope"] == "wildcard"
-    assert result["listener_bind_hosts"] == ["0.0.0.0", "::"]
+    assert result["listener_bind_hosts"] == ["0.0.0.0"]
 
 
 def test_wildcard_listener_with_foreign_owner_is_rejected():
     snapshot = _ready()
-    snapshot["listeners"] = [{"host": "::", "port": 2036, "pid": 21}]
+    snapshot["listeners"] = [{"host": "0.0.0.0", "port": 2036, "pid": 21}]
 
     result = _classify(snapshot)
 
@@ -123,7 +126,7 @@ def test_wildcard_listener_with_multiple_owners_is_rejected():
     snapshot = _ready()
     snapshot["listeners"] = [
         {"host": "0.0.0.0", "port": 2036, "pid": 20},
-        {"host": "::", "port": 2036, "pid": 21},
+        {"host": "0.0.0.0", "port": 2036, "pid": 21},
     ]
 
     assert _classify(snapshot)["state"] == "unknown_or_multiple_candidate_servers"
@@ -132,7 +135,8 @@ def test_wildcard_listener_with_multiple_owners_is_rejected():
 def test_listener_bind_scope_change_between_probes_is_rejected():
     first = _ready()
     second = _ready()
-    second["listeners"] = [{"host": "::", "port": 2036, "pid": 20}]
+    second["observed_at_epoch"] = 1001.0
+    second["listeners"] = [{"host": "0.0.0.0", "port": 2036, "pid": 20}]
 
     assert _classify(first, second)["state"] == (
         "listener_bind_scope_changed_between_probes"
@@ -209,6 +213,39 @@ def test_pid_reuse_between_probes_is_rejected():
     result = _classify(first, second)
 
     assert result["state"] == "process_identity_changed_between_probes"
+
+
+@pytest.mark.parametrize("second_observed", [999.0, 1000.0])
+def test_probe_chronology_must_advance(second_observed):
+    first = _ready()
+    second = _ready()
+    second["observed_at_epoch"] = second_observed
+
+    result = _classify(first, second)
+
+    assert result["state"] == "probe_chronology_invalid"
+    assert result["retryable"] is True
+
+
+def test_process_disappearance_between_complete_probes_is_rejected():
+    first = _ready()
+    first["processes"].append(_process(30, "mph_client"))
+    second = _ready()
+    second["observed_at_epoch"] = 1001.0
+
+    result = _classify(first, second)
+
+    assert result["state"] == "process_identity_changed_between_probes"
+
+
+def test_nonresponding_listener_owner_is_retryable_starting_state():
+    snapshot = _ready()
+    snapshot["processes"][1]["responding"] = False
+
+    result = _classify(snapshot)
+
+    assert result["state"] == "desktop_or_server_starting"
+    assert result["retryable"] is True
 
 
 def test_unclassified_mph_collision_is_rejected():
