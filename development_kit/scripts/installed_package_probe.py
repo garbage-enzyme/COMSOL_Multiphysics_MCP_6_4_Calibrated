@@ -42,6 +42,15 @@ def _bind_release_inventory(
     return observed if baseline is None else baseline
 
 
+def _consistent_deployment_identity(identities: list[dict]) -> dict:
+    if not identities:
+        raise AssertionError("installed discovery produced no deployment identities")
+    first = identities[0]
+    if any(identity != first for identity in identities[1:]):
+        raise AssertionError("installed profiles disagree on deployment identity")
+    return first
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--snapshot-dir", type=Path, required=True)
@@ -104,9 +113,9 @@ def main() -> int:
             profile=profile,
         )
 
-    if not all(identity == deployment_identities[0] for identity in deployment_identities[1:]):
-        raise AssertionError("installed profiles disagree on deployment identity")
-    deployment_identity = deployment_identities[0]
+    deployment_identity = _consistent_deployment_identity(deployment_identities)
+    if release_inventories is None:
+        raise AssertionError("installed discovery produced no release inventory")
     if deployment_identity["source_classification"] != "installed_site_package":
         raise AssertionError("installed deployment identity reports source-tree shadowing")
     if deployment_identity.get("contains_local_path") is not False:

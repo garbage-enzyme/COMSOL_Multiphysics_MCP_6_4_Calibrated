@@ -68,6 +68,24 @@ def test_reference_power_spec_translates_to_explicit_subprocess_only_fixture_env
     assert fixture["top_air_coordinate_range"]["z"] == [2.25e-6, 2.55e-6]
 
 
+def test_reference_power_spec_overrides_inherited_reserved_fixture_environment(tmp_path):
+    reserved = {
+        MODEL_ENV: "C:/untrusted/inherited.mph",
+        SOURCE_SHA256_ENV: "0" * 64,
+        WAVELENGTH_ENV: "999",
+        DOMAINS_ENV: "[999]",
+        RANGE_ENV: '{"x":[9,9],"y":[9,9],"z":[9,9]}',
+    }
+
+    environment = controlled_fixture_environment_from_reference_power_spec(
+        _spec(tmp_path), base_environment={**reserved, "PRESERVED": "yes"}
+    )
+
+    assert environment["PRESERVED"] == "yes"
+    assert all(environment[name] != inherited for name, inherited in reserved.items())
+    assert controlled_fixture_from_environment(environment)["source"].name == "controlled.mph"
+
+
 @pytest.mark.parametrize(
     "mutation,match",
     [
@@ -193,16 +211,11 @@ def test_fixture_coordinate_bounds_require_strict_json_numbers(tmp_path, value):
 
 
 def test_real_probe_sources_contain_no_private_model_defaults():
-    probes = (
-        "development_kit/tests/integration/durable_cancel_acceptance.py",
-        "development_kit/tests/integration/wave_optics_preflight_acceptance.py",
-        "development_kit/tests/integration/wave_optics_point_audit_acceptance.py",
-        "development_kit/tests/integration/live_profile_acceptance.py",
-        "development_kit/tests/integration/periodic_mesh_acceptance.py",
-        "development_kit/tests/integration/incidence_configuration_acceptance.py",
-    )
-    for relative in probes:
-        text = (ROOT / relative).read_text(encoding="utf-8")
+    probes = sorted((ROOT / "development_kit" / "tests" / "integration").glob("*_acceptance.py"))
+
+    assert probes
+    for path in probes:
+        text = path.read_text(encoding="utf-8")
         assert not _contains_private_home_path(text)
 
 

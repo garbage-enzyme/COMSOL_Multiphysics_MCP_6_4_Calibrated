@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import ast
 import re
-from copy import deepcopy
 from pathlib import Path
 
 from src.schema_registry import check_schema_support, get_schema_registry
@@ -16,17 +15,86 @@ from src import __version__
 ROOT = Path(__file__).parents[2]
 
 
-def _named_schemas_in_source() -> set[str]:
+def _resolve_string(node: ast.AST, constants: dict[str, str]) -> str | None:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.Name):
+        return constants.get(node.id)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left = _resolve_string(node.left, constants)
+        right = _resolve_string(node.right, constants)
+        return left + right if left is not None and right is not None else None
+    if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "replace"
+        and len(node.args) == 2
+    ):
+        value = _resolve_string(node.func.value, constants)
+        old = _resolve_string(node.args[0], constants)
+        new = _resolve_string(node.args[1], constants)
+        if value is not None and old is not None and new is not None:
+            return value.replace(old, new)
+    return None
+
+
+def _module_string_constants(tree: ast.Module) -> dict[str, str]:
+    constants: dict[str, str] = {}
+    pending = list(tree.body)
+    for _pass in range(len(pending) + 1):
+        changed = False
+        for node in pending:
+            if isinstance(node, ast.Assign) and len(node.targets) == 1:
+                target = node.targets[0]
+                if isinstance(target, ast.Name):
+                    value = _resolve_string(node.value, constants)
+                    if value is not None and constants.get(target.id) != value:
+                        constants[target.id] = value
+                        changed = True
+                elif isinstance(target, (ast.Tuple, ast.List)) and isinstance(
+                    node.value, (ast.Tuple, ast.List)
+                ):
+                    for name, value_node in zip(target.elts, node.value.elts, strict=True):
+                        value = _resolve_string(value_node, constants)
+                        if isinstance(name, ast.Name) and value is not None:
+                            if constants.get(name.id) != value:
+                                constants[name.id] = value
+                                changed = True
+            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+                value = _resolve_string(node.value, constants) if node.value is not None else None
+                if value is not None and constants.get(node.target.id) != value:
+                    constants[node.target.id] = value
+                    changed = True
+        if not changed:
+            break
+    return constants
+
+
+def _emitted_schemas_in_source() -> set[str]:
     names: set[str] = set()
     for path in (ROOT / "comsol_mcp").rglob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"))
+        constants = _module_string_constants(tree)
         for node in ast.walk(tree):
-            if (
-                isinstance(node, ast.Constant)
-                and isinstance(node.value, str)
-                and node.value.startswith("comsol_mcp.")
+            candidates: list[ast.AST] = []
+            if isinstance(node, ast.Dict):
+                candidates.extend(
+                    value
+                    for key, value in zip(node.keys, node.values, strict=True)
+                    if isinstance(key, ast.Constant) and key.value == "schema_name"
+                )
+            elif (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "dict"
             ):
-                names.add(node.value)
+                candidates.extend(
+                    keyword.value for keyword in node.keywords if keyword.arg == "schema_name"
+                )
+            for candidate in candidates:
+                value = _resolve_string(candidate, constants)
+                if value is not None and value.startswith("comsol_mcp."):
+                    names.add(value)
     return names
 
 
@@ -47,16 +115,15 @@ def test_registry_is_complete_sorted_and_snapshot_stable():
     assert registry["schema_name"] == "comsol_mcp.schema_registry"
     assert registry["schema_version"] == "1.0.0"
     assert registry["producer"] == {"package": "comsol-mcp", "version": __version__}
-    assert registry["entry_count"] == len(entries) == 60
+    assert registry["entry_count"] == len(entries) == 61
     assert names == sorted(names)
     assert len(names) == len(set(names))
-    # Canonical package imports are also dotted ``comsol_mcp.*`` strings; the
-    # registry must be a subset of those source identifiers, not every module
-    # path in the implementation.
-    assert set(names).issubset(_named_schemas_in_source())
+    emitted = _emitted_schemas_in_source()
+    assert emitted
+    assert emitted.issubset(set(names))
     assert re.fullmatch(r"[0-9a-f]{64}", registry["registry_sha256"])
     assert registry["registry_sha256"] == (
-        "36917a7cb176cb2cf2244a840634c53bc4f66597ade9275444df33d2f52e54b4"
+        "dd16ec700cf8d0a19fe32d59959a7388175ac3dfd0b3607229b29a4ecd77c02c"
     )
     assert registry["registry_sha256"] == get_schema_registry()["registry_sha256"]
     assert check_schema_support("comsol_mcp.session_startup_state", "1.0.0")["supported"] is True
@@ -97,15 +164,10 @@ def test_every_entry_declares_read_write_and_non_mutating_migration_policy():
 
 
 def test_support_resolution_accepts_current_and_rejects_future_without_mutation():
-    artifact = {
-        "schema_name": "comsol_mcp.physical_evidence",
-        "schema_version": "1.0.0",
-        "payload": {"sentinel": [1, 2, 3]},
-    }
-    original = deepcopy(artifact)
+    registry_before = get_schema_registry()
 
-    accepted = check_schema_support(artifact["schema_name"], artifact["schema_version"])
-    future = check_schema_support(artifact["schema_name"], "99.0.0")
+    accepted = check_schema_support("comsol_mcp.physical_evidence", "1.0.0")
+    future = check_schema_support("comsol_mcp.physical_evidence", "99.0.0")
     unknown = check_schema_support("comsol_mcp.unknown_artifact", "1.0.0")
 
     assert accepted["supported"] is True
@@ -136,7 +198,9 @@ def test_support_resolution_accepts_current_and_rejects_future_without_mutation(
         check_schema_support("comsol_mcp.wave_optics_point_audit", "99")["migration_available"]
         is False
     )
-    assert artifact == original
+    registry_after = get_schema_registry()
+    assert registry_after == registry_before
+    assert registry_after is not registry_before
 
 
 def test_capabilities_embed_the_complete_schema_registry():

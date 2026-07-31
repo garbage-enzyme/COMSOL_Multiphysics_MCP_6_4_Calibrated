@@ -13,8 +13,8 @@
     "full": {"tool_count": 135}
   },
   "schema_registry": {
-    "entry_count": 60,
-    "registry_sha256": "36917a7cb176cb2cf2244a840634c53bc4f66597ade9275444df33d2f52e54b4"
+    "entry_count": 61,
+    "registry_sha256": "dd16ec700cf8d0a19fe32d59959a7388175ac3dfd0b3607229b29a4ecd77c02c"
   },
   "identities": {
     "catalog_sha256": "6c53d70b402f9b3d4ee3080699688c8d3313a0c5c78b570f5f887e0d937e188a",

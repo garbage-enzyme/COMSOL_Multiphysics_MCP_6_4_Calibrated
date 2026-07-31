@@ -232,6 +232,7 @@ def test_concurrent_fresh_source_processes_report_identical_identity():
     with ThreadPoolExecutor(max_workers=6) as executor:
         identities = list(executor.map(probe, range(12)))
 
+    assert identities
     assert all(identity == identities[0] for identity in identities[1:])
     assert identities[0]["source_classification"] == "source_tree"
     assert identities[0]["contains_local_path"] is False

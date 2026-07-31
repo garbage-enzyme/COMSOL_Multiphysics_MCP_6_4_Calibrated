@@ -245,6 +245,11 @@ def _entries() -> list[dict[str, Any]]:
             "comsol_mcp.evidence.field_bundle",
         ),
         _entry(
+            "comsol_mcp.model_version_metadata",
+            "1.0.0",
+            "comsol_mcp.tools.model",
+        ),
+        _entry(
             _REFERENCE_POWER_DRY_RUN_SCHEMA,
             "1.0.0",
             "comsol_mcp.evidence.reference_power_acceptance",
