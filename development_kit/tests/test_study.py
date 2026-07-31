@@ -1,7 +1,7 @@
 """Unit tests for study helpers without a COMSOL client."""
 
 import pytest
-from src.tools.study import _resolve_study_tag, create_study, list_studies
+from src.tools.study import _resolve_study_tag, create_study, list_studies, solve_study
 
 
 class FakeEntity:
@@ -258,3 +258,54 @@ def test_create_study_never_uses_collection_size_for_default_tag():
 
     assert result["success"] is True
     assert result["study"] == "std2"
+
+
+def test_finite_study_wait_uses_managed_solver_and_honors_deadline():
+    model = make_model()
+
+    class Solver:
+        is_running = False
+
+        def __init__(self):
+            self.started = []
+            self.waited = []
+
+        def start_solve(self, active_model, tag):
+            self.started.append((active_model, tag))
+            return True
+
+        def wait(self, timeout):
+            self.waited.append(timeout)
+            return False
+
+        def get_progress(self):
+            return {"status": "running", "progress": 0.3}
+
+    solver = Solver()
+    result = solve_study(
+        model,
+        "std1",
+        wait=True,
+        timeout=0.25,
+        solver=solver,
+    )
+
+    assert result["success"] is False
+    assert result["timed_out"] is True
+    assert result["background_continues"] is True
+    assert solver.started == [(model, "std1")]
+    assert solver.waited == [0.25]
+
+
+@pytest.mark.parametrize("timeout", [True, -1, float("inf"), "1"])
+def test_study_wait_rejects_invalid_timeout_without_starting(timeout):
+    class Solver:
+        is_running = False
+
+        def start_solve(self, *_args):
+            raise AssertionError("invalid timeout must not start solving")
+
+    result = solve_study(make_model(), "std1", timeout=timeout, solver=Solver())
+
+    assert result["success"] is False
+    assert "timeout" in result["error"]

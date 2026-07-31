@@ -127,6 +127,11 @@ experimental 兼容界面，不能替代受保护的 shared-session 生命周期
 
 持久化扫描控制工具为 `job_submit`、`job_status`、`job_tail`、`job_cancel` 和 `job_resume`。每个任务在 ASCII-only runtime 目录中保存不可变规格、状态、CSV 日志、检查点和日志文件。恢复时只接受规格一致、数值有限且成功完成的行。只有 worker/相关进程清理和租约释放都得到验证后，取消才会进入终态。此协调机制仅适用于同一台主机上共享 runtime 目录的任务，不是分布式或跨主机取消。
 
+交互式 `mesh_convergence_study` 也会在 CSV 旁写入 manifest。对已有日志执行
+resume 或 append 时必须提供 `source_model_path`；只有源文件哈希、study、表达式、
+参数设置、mesh identity 以及每个 level 的精确 properties 全部一致，已完成 level
+才会被跳过。CSV 或 checkpoint 持久化失败是该 level 的终止结果，不会再次求解。
+
 自适应光谱任务使用 `job_type: "spectral_characterization"`，并显式声明
 源模型/配置身份、初始波长网格、扩展与细化 policy、collector 配置、科学容差，
 以及点数、stage 和资源上限。worker 每次只求解一个波长；完整 point audit 及其

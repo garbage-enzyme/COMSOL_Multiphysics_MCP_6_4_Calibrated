@@ -24,12 +24,12 @@ from typing import Any, Callable, Optional, Sequence
 import numpy as np
 from mcp.server.fastmcp import FastMCP
 
-from .session import session_manager
 from .results import _json_safe
+from .session import session_manager
 from .study import _resolve_study_tag
 
-
 SWEEP_SCHEMA_VERSION = "2"
+MESH_SCHEMA_VERSION = "1"
 DEFAULT_RESPONSE_TAIL = 5
 _SWEEP_HOOK_ACTIONS = frozenset(
     {"start_point", "skip_completed", "await_confirmation", "checkpoint_no_start"}
@@ -107,6 +107,24 @@ def _evaluate_expressions(model, expressions: Sequence[str]) -> dict[str, Any]:
     }
 
 
+def _validate_csv_column_names(
+    names: Sequence[str],
+    *,
+    reserved: set[str],
+    kind: str,
+) -> list[str]:
+    normalized = list(names)
+    if any(not isinstance(name, str) or not name for name in normalized):
+        raise ValueError(f"{kind} names must be non-empty strings")
+    duplicates = sorted({name for name in normalized if normalized.count(name) > 1})
+    if duplicates:
+        raise ValueError(f"{kind} names must be unique: {duplicates}")
+    collisions = sorted(set(normalized) & reserved)
+    if collisions:
+        raise ValueError(f"{kind} names collide with reserved CSV columns: {collisions}")
+    return normalized
+
+
 def _write_rows_csv(
     csv_path: Optional[str],
     fieldnames: Sequence[str],
@@ -121,14 +139,14 @@ def _write_rows_csv(
     active_fieldnames = list(fieldnames)
     if mode == "a":
         with path.open(newline="", encoding="utf-8-sig") as existing:
-            reader = csv.DictReader(existing)
-            existing_fields = reader.fieldnames or []
-            existing_rows = list(reader)
+            existing_fields = next(csv.reader(existing), [])
         active_fieldnames = [
             *existing_fields,
             *(field for field in fieldnames if field not in existing_fields),
         ]
         if existing_fields != active_fieldnames:
+            with path.open(newline="", encoding="utf-8-sig") as existing:
+                existing_rows = list(csv.DictReader(existing))
             with path.open("w", newline="", encoding="utf-8") as migrated:
                 writer = csv.DictWriter(
                     migrated,
@@ -282,6 +300,8 @@ def _prepare_sweep_manifest(
 
     adopted_legacy = False
     if path and path.is_file() and (resume_csv or append_csv):
+        if csv_path and not Path(csv_path).is_file():
+            raise ValueError("Sweep manifest exists but its CSV journal is missing")
         try:
             existing = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
@@ -336,8 +356,14 @@ def _resume_completed_values(
     adopted_legacy: bool,
 ) -> tuple[set[str], int]:
     existing_fields, rows = _read_csv_journal(csv_path)
+    if csv_path and Path(csv_path).is_file() and not existing_fields:
+        raise ValueError("CSV journal is missing a readable header")
     if not rows:
+        if existing_fields and not adopted_legacy and existing_fields != list(fieldnames):
+            raise ValueError("CSV header does not match the active workflow schema")
         return set(), 0
+    if not adopted_legacy and existing_fields != list(fieldnames):
+        raise ValueError("CSV header does not match the active workflow schema")
     required = {"parameter_value", *expressions}
     wavelength_fields = {
         "evaluated_wl",
@@ -354,15 +380,15 @@ def _resume_completed_values(
     completed: set[str] = set()
     invalid = 0
     for row in rows:
-        status = (row.get("status") or ("success" if adopted_legacy else "")).strip().lower()
-        if status not in ({"success", "ok"} if adopted_legacy else {"ok"}):
-            invalid += 1
-            continue
         if not adopted_legacy and (
             row.get("schema_version") != SWEEP_SCHEMA_VERSION
             or row.get("config_id") != manifest["config_id"]
         ):
             raise ValueError("CSV contains rows from a different schema or config_id")
+        status = (row.get("status") or ("success" if adopted_legacy else "")).strip().lower()
+        if status not in ({"success", "ok"} if adopted_legacy else {"ok"}):
+            invalid += 1
+            continue
         valid = True
         parsed_values: dict[str, list[float]] = {}
         for expression in expressions:
@@ -413,6 +439,119 @@ def _migrate_legacy_sweep_csv(
         *(field for field in existing_fields if field not in fieldnames),
     ]
     _write_rows_csv(csv_path, merged_fields, rows, append=False)
+
+
+def _mesh_level_fingerprint(label: str, properties: dict[str, Any]) -> str:
+    payload = {
+        "level": label,
+        "properties": {key: properties[key] for key in sorted(properties)},
+    }
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _prepare_mesh_manifest(
+    model,
+    *,
+    component_name: str,
+    mesh_name: str,
+    size_feature_tag: str,
+    parameter_name: Optional[str],
+    parameter_value: Optional[Any],
+    parameter_unit: Optional[str],
+    study_tag: str,
+    study_step_tag: Optional[str],
+    study_step_property: str,
+    study_step_unit: Optional[str],
+    expressions: Sequence[str],
+    csv_path: Optional[str],
+    manifest_path: Optional[str],
+    source_model_path: Optional[str],
+    config_id: Optional[str],
+    resume_csv: bool,
+    append_csv: bool,
+) -> tuple[dict[str, Any], Optional[Path]]:
+    if csv_path and Path(csv_path).is_file() and (resume_csv or append_csv):
+        if not source_model_path:
+            raise ValueError(
+                "source_model_path is required to resume or append a mesh-convergence journal"
+            )
+    spec = {
+        "workflow": "mesh_convergence",
+        "model": _model_identity(model, source_model_path),
+        "component_name": component_name,
+        "mesh_name": mesh_name,
+        "size_feature_tag": size_feature_tag,
+        "parameter_name": parameter_name,
+        "parameter_value": (
+            _format_parameter_value(parameter_value, parameter_unit)
+            if parameter_name is not None and parameter_value is not None
+            else None
+        ),
+        "parameter_unit": parameter_unit,
+        "study_tag": study_tag,
+        "study_step_tag": study_step_tag,
+        "study_step_property": study_step_property,
+        "study_step_unit": study_step_unit,
+        "expressions": list(expressions),
+    }
+    canonical = json.dumps(spec, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    spec_fingerprint = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    manifest = {
+        "schema_version": MESH_SCHEMA_VERSION,
+        "config_id": config_id or f"mesh-{spec_fingerprint[:16]}",
+        "spec_fingerprint": spec_fingerprint,
+        "created_at_epoch": time.time(),
+        "spec": spec,
+    }
+    path = Path(manifest_path).expanduser().resolve() if manifest_path else None
+    if path is None and csv_path:
+        path = Path(str(Path(csv_path).expanduser().resolve()) + ".manifest.json")
+    if path and path.is_file() and (resume_csv or append_csv):
+        if csv_path and not Path(csv_path).is_file():
+            raise ValueError("Mesh manifest exists but its CSV journal is missing")
+        try:
+            existing = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError(f"Cannot parse mesh manifest {path}: {exc}") from exc
+        for key in ("schema_version", "config_id", "spec_fingerprint"):
+            if existing.get(key) != manifest.get(key):
+                raise ValueError(
+                    f"Mesh manifest mismatch for {key}: "
+                    f"existing={existing.get(key)!r}, active={manifest.get(key)!r}"
+                )
+        manifest = existing
+    elif path and (resume_csv or append_csv) and csv_path and Path(csv_path).exists():
+        raise ValueError("Existing mesh CSV has no matching manifest")
+    if path and (not path.exists() or not (resume_csv or append_csv)):
+        _atomic_write_json(path, manifest)
+    return manifest, path
+
+
+def _resume_mesh_levels(
+    csv_path: Optional[str],
+    *,
+    fieldnames: Sequence[str],
+    manifest: dict[str, Any],
+    level_fingerprints: dict[str, str],
+) -> set[str]:
+    existing_fields, rows = _read_csv_journal(csv_path)
+    if csv_path and Path(csv_path).is_file() and existing_fields != list(fieldnames):
+        raise ValueError("Mesh CSV header does not match the active workflow schema")
+    completed: set[str] = set()
+    for row in rows:
+        if (
+            row.get("schema_version") != MESH_SCHEMA_VERSION
+            or row.get("config_id") != manifest["config_id"]
+        ):
+            raise ValueError("Mesh CSV contains rows from a different schema or config_id")
+        label = row.get("level")
+        if label in level_fingerprints:
+            if row.get("level_fingerprint") != level_fingerprints[label]:
+                raise ValueError(f"Mesh level {label!r} has incompatible properties")
+            if row.get("status") == "success":
+                completed.add(label)
+    return completed
 
 
 def _validate_evaluated_values(
@@ -600,6 +739,32 @@ def run_staged_parametric_sweep(
 
     if record_wavelength_controls is None:
         record_wavelength_controls = parameter_name.casefold() in {"wl", "wavelength"}
+    reserved_columns = {
+        "schema_version",
+        "config_id",
+        "source_model_sha256",
+        "parameter_value",
+        "requested_wavelength",
+        "evaluated_wl",
+        "evaluated_c_const_over_ewfd_freq",
+        "status",
+        "attempt",
+        "error_type",
+        "error",
+        "solve_sec",
+    }
+    try:
+        if not isinstance(parameter_name, str) or not parameter_name:
+            raise ValueError("parameter_name must be a non-empty string")
+        if parameter_name in reserved_columns:
+            raise ValueError("parameter_name collides with a reserved CSV column")
+        expression_names = _validate_csv_column_names(
+            expressions,
+            reserved=reserved_columns | {parameter_name},
+            kind="expression",
+        )
+    except ValueError as exc:
+        return {"success": False, "error": str(exc)}
     fieldnames = [
         "schema_version",
         "config_id",
@@ -615,7 +780,7 @@ def run_staged_parametric_sweep(
         "error_type",
         "error",
         "solve_sec",
-        *list(expressions),
+        *expression_names,
     ]
     rows: list[dict[str, Any]] = []
     failed_rows: list[dict[str, Any]] = []
@@ -646,6 +811,9 @@ def run_staged_parametric_sweep(
         if adopted_legacy:
             _migrate_legacy_sweep_csv(csv_path, fieldnames, manifest)
             adopted_legacy = False
+        validate_existing_csv = bool(
+            resume_csv or (append_csv and csv_path and Path(csv_path).is_file())
+        )
         completed_values, invalid_existing_rows = (
             _resume_completed_values(
                 csv_path,
@@ -655,8 +823,11 @@ def run_staged_parametric_sweep(
                 physical_bounds=physical_bounds,
                 adopted_legacy=adopted_legacy,
             )
-            if resume_csv else (set(), 0)
+            if validate_existing_csv
+            else (set(), 0)
         )
+        if not resume_csv:
+            completed_values = set()
     except (OSError, ValueError) as exc:
         return {
             "success": False,
@@ -670,6 +841,7 @@ def run_staged_parametric_sweep(
     total_start = time.time()
     stopped_early = False
     stop_reason = None
+    workflow_error: Optional[dict[str, Any]] = None
     processed = 0
     hook_skipped = 0
     hook_action_counts = {
@@ -711,9 +883,10 @@ def run_staged_parametric_sweep(
                 stop_reason = f"before_point_{action}"
                 break
 
+        terminal_error: Optional[Exception] = None
+        row: dict[str, Any]
         for attempt in range(1, max_retries + 2):
             solve_start = time.time()
-            terminal_error: Optional[Exception] = None
             try:
                 jm.param().set(parameter_name, parameter_value)
 
@@ -759,17 +932,6 @@ def run_staged_parametric_sweep(
                             "c_const/ewfd.freq"
                         ],
                     )
-                rows.append(row)
-                journal_tail.append(row)
-                _write_rows_csv(csv_path, fieldnames, [row], append=True)
-                if checkpoint_model_path and len(rows) % checkpoint_every == 0:
-                    _save_model(
-                        model,
-                        checkpoint_model_path,
-                        save_copy=save_model_copy,
-                    )
-                    checkpointed_at = len(rows)
-                processed += 1
             except Exception as exc:
                 if attempt <= max_retries:
                     continue
@@ -787,45 +949,89 @@ def run_staged_parametric_sweep(
                 }
                 if record_wavelength_controls:
                     row["requested_wavelength"] = parameter_value
-                failed_rows.append(row)
-                journal_tail.append(row)
-                _write_rows_csv(csv_path, fieldnames, [row], append=True)
-                processed += 1
                 terminal_error = exc
-
-            # The row is already durable here.  Hook/callback failures must not
-            # retry the solve or append a contradictory second row.
-            if on_durable_row is not None:
-                on_durable_row(dict(row))
-            if after_durable_row_hook is not None:
-                action = _run_bounded_sweep_hook(
-                    after_durable_row_hook,
-                    phase="after_durable_row",
-                    stage="post_solve",
-                    point_id=point_id,
-                    parameter_name=parameter_name,
-                    parameter_value=parameter_value,
-                    config_id=manifest["config_id"],
-                    row_status=str(row["status"]),
-                    row_attempt=int(row["attempt"]),
-                )
-                hook_action_counts["after_durable_row"][action] += 1
-                if action in {"await_confirmation", "checkpoint_no_start"}:
-                    stopped_early = True
-                    stop_reason = f"after_durable_row_{action}"
-            if terminal_error is not None and not continue_on_error:
-                raise terminal_error
             break
+
+        try:
+            _write_rows_csv(csv_path, fieldnames, [row], append=True)
+        except Exception as exc:
+            workflow_error = {
+                "stage": "csv_persistence",
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+                "row_committed": False,
+                "parameter_value": parameter_value,
+            }
+            stopped_early = True
+            stop_reason = "csv_persistence_failed"
+            break
+
+        if terminal_error is None:
+            rows.append(row)
+        else:
+            failed_rows.append(row)
+        journal_tail.append(row)
+        processed += 1
+
+        # The row is already durable here. Hook/callback/checkpoint failures
+        # must not retry the solve or append a contradictory second row.
+        if on_durable_row is not None:
+            on_durable_row(dict(row))
+        if after_durable_row_hook is not None:
+            action = _run_bounded_sweep_hook(
+                after_durable_row_hook,
+                phase="after_durable_row",
+                stage="post_solve",
+                point_id=point_id,
+                parameter_name=parameter_name,
+                parameter_value=parameter_value,
+                config_id=manifest["config_id"],
+                row_status=str(row["status"]),
+                row_attempt=int(row["attempt"]),
+            )
+            hook_action_counts["after_durable_row"][action] += 1
+            if action in {"await_confirmation", "checkpoint_no_start"}:
+                stopped_early = True
+                stop_reason = f"after_durable_row_{action}"
+        if (
+            terminal_error is None
+            and checkpoint_model_path
+            and len(rows) % checkpoint_every == 0
+        ):
+            try:
+                _save_model(
+                    model,
+                    checkpoint_model_path,
+                    save_copy=save_model_copy,
+                )
+                checkpointed_at = len(rows)
+            except Exception as exc:
+                workflow_error = {
+                    "stage": "checkpoint_after_durable_row",
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                    "row_committed": True,
+                    "parameter_value": parameter_value,
+                }
+                stopped_early = True
+                stop_reason = "checkpoint_failed"
+        if terminal_error is not None and not continue_on_error:
+            raise terminal_error
         if stopped_early:
             break
 
-    if save_model_path:
+    if workflow_error is None and save_model_path:
         _save_model(model, save_model_path, save_copy=save_model_copy)
-    elif checkpoint_model_path and rows and checkpointed_at != len(rows):
+    elif (
+        workflow_error is None
+        and checkpoint_model_path
+        and rows
+        and checkpointed_at != len(rows)
+    ):
         _save_model(model, checkpoint_model_path, save_copy=save_model_copy)
 
     return {
-        "success": not failed_rows,
+        "success": not failed_rows and workflow_error is None,
         "model": str(model.name()),
         "study": study_name,
         "resolved_study_tag": study_tag,
@@ -838,6 +1044,7 @@ def run_staged_parametric_sweep(
         "n_processed": processed,
         "stopped_early": stopped_early,
         "stop_reason": stop_reason,
+        "workflow_error": workflow_error,
         "hook_action_counts": hook_action_counts,
         "csv_path": csv_path,
         "manifest_path": str(resolved_manifest_path) if resolved_manifest_path else None,
@@ -874,6 +1081,9 @@ def run_mesh_convergence(
     checkpoint_model_path: Optional[str] = None,
     checkpoint_every: int = 1,
     save_model_path: Optional[str] = None,
+    manifest_path: Optional[str] = None,
+    source_model_path: Optional[str] = None,
+    config_id: Optional[str] = None,
 ) -> dict[str, Any]:
     """Run mesh rebuild + solve + evaluation for each mesh-property level."""
     if not levels:
@@ -884,6 +1094,18 @@ def run_mesh_convergence(
         return {"success": False, "error": "max_retries must be non-negative."}
     if checkpoint_every < 1:
         return {"success": False, "error": "checkpoint_every must be at least 1."}
+    if source_model_path:
+        baseline = Path(source_model_path).expanduser().resolve()
+        mutation_targets = [
+            Path(path).expanduser().resolve()
+            for path in (checkpoint_model_path, save_model_path)
+            if path
+        ]
+        if baseline in mutation_targets:
+            return {
+                "success": False,
+                "error": "checkpoint/save path must not overwrite source_model_path",
+            }
 
     jm = model.java
     study_tag = _resolve_study_tag(model, study_name)
@@ -893,6 +1115,138 @@ def run_mesh_convergence(
             return {"success": False, "error": "No studies found in model."}
         study_tag = str(tags[0])
 
+    mesh = jm.component(component_name).mesh(mesh_name)
+    size_feature = mesh.feature(size_feature_tag)
+
+    try:
+        expression_names = _validate_csv_column_names(
+            expressions,
+            reserved={
+                "schema_version",
+                "config_id",
+                "source_model_sha256",
+                "level",
+                "level_fingerprint",
+                "status",
+                "attempt",
+                "error_type",
+                "error",
+                "mesh_elements",
+                "mesh_vertices",
+                "mesh_sec",
+                "solve_sec",
+            },
+            kind="expression",
+        )
+    except ValueError as exc:
+        return {"success": False, "error": str(exc)}
+    property_keys: list[str] = []
+    for level in levels:
+        if not isinstance(level, dict):
+            return {"success": False, "error": "each mesh level must be an object"}
+        properties = level.get("properties") or {}
+        if not isinstance(properties, dict):
+            return {"success": False, "error": "mesh level properties must be an object"}
+        for key in (level.get("properties") or {}).keys():
+            if not isinstance(key, str) or not key:
+                return {"success": False, "error": "mesh property names must be non-empty strings"}
+            if key not in property_keys:
+                property_keys.append(key)
+    reserved = {
+        "schema_version",
+        "config_id",
+        "source_model_sha256",
+        "level",
+        "level_fingerprint",
+        "status",
+        "attempt",
+        "error_type",
+        "error",
+        "mesh_elements",
+        "mesh_vertices",
+        "mesh_sec",
+        "solve_sec",
+    }
+    if set(property_keys) & (reserved | set(expression_names)):
+        return {"success": False, "error": "mesh property names collide with journal columns"}
+    labels = [str(level.get("name") or f"level_{index}") for index, level in enumerate(levels, 1)]
+    if len(labels) != len(set(labels)):
+        return {"success": False, "error": "mesh level names must be unique"}
+    level_fingerprints = {
+        label: _mesh_level_fingerprint(label, level.get("properties") or {})
+        for label, level in zip(labels, levels)
+    }
+
+    fieldnames = [
+        "schema_version",
+        "config_id",
+        "source_model_sha256",
+        "level",
+        "level_fingerprint",
+        "status",
+        "attempt",
+        "error_type",
+        "error",
+        *property_keys,
+        "mesh_elements",
+        "mesh_vertices",
+        "mesh_sec",
+        "solve_sec",
+        *expression_names,
+    ]
+    rows: list[dict[str, Any]] = []
+    failed_rows: list[dict[str, Any]] = []
+    if csv_path and not append_csv and not resume_csv:
+        Path(csv_path).unlink(missing_ok=True)
+    try:
+        manifest, resolved_manifest_path = _prepare_mesh_manifest(
+            model,
+            component_name=component_name,
+            mesh_name=mesh_name,
+            size_feature_tag=size_feature_tag,
+            parameter_name=parameter_name,
+            parameter_value=parameter_value,
+            parameter_unit=parameter_unit,
+            study_tag=study_tag,
+            study_step_tag=study_step_tag,
+            study_step_property=study_step_property,
+            study_step_unit=study_step_unit,
+            expressions=expression_names,
+            csv_path=csv_path,
+            manifest_path=manifest_path,
+            source_model_path=source_model_path,
+            config_id=config_id,
+            resume_csv=resume_csv,
+            append_csv=append_csv,
+        )
+        validate_existing = bool(
+            resume_csv or (append_csv and csv_path and Path(csv_path).is_file())
+        )
+        completed_levels = (
+            _resume_mesh_levels(
+                csv_path,
+                fieldnames=fieldnames,
+                manifest=manifest,
+                level_fingerprints=level_fingerprints,
+            )
+            if validate_existing
+            else set()
+        )
+        if not resume_csv:
+            completed_levels = set()
+    except (OSError, ValueError) as exc:
+        return {
+            "success": False,
+            "error_type": type(exc).__name__,
+            "error": str(exc),
+            "csv_path": csv_path,
+            "manifest_path": str(resolved_manifest_path) if "resolved_manifest_path" in locals() and resolved_manifest_path else manifest_path,
+        }
+    skipped = 0
+    checkpointed_at = 0
+    total_start = time.time()
+    workflow_error: Optional[dict[str, Any]] = None
+
     if parameter_name is not None and parameter_value is not None:
         jm.param().set(parameter_name, _format_parameter_value(parameter_value, parameter_unit))
         if study_step_tag:
@@ -901,42 +1255,14 @@ def run_mesh_convergence(
             if study_step_unit:
                 step.set(study_step_unit_property, study_step_unit)
 
-    mesh = jm.component(component_name).mesh(mesh_name)
-    size_feature = mesh.feature(size_feature_tag)
-
-    property_keys: list[str] = []
-    for level in levels:
-        for key in (level.get("properties") or {}).keys():
-            if key not in property_keys:
-                property_keys.append(key)
-
-    fieldnames = [
-        "level",
-        "status",
-        "attempt",
-        "error",
-        *property_keys,
-        "mesh_elements",
-        "mesh_vertices",
-        "mesh_sec",
-        "solve_sec",
-        *list(expressions),
-    ]
-    rows: list[dict[str, Any]] = []
-    failed_rows: list[dict[str, Any]] = []
-    if csv_path and not append_csv and not resume_csv:
-        Path(csv_path).unlink(missing_ok=True)
-    completed_levels = _completed_keys(csv_path, "level") if resume_csv else set()
-    skipped = 0
-    checkpointed_at = 0
-    total_start = time.time()
-
     for idx, level in enumerate(levels, start=1):
         label = str(level.get("name") or f"level_{idx}")
         if label in completed_levels:
             skipped += 1
             continue
         properties = level.get("properties") or {}
+        terminal_error: Optional[Exception] = None
+        row: dict[str, Any]
         for attempt in range(1, max_retries + 2):
             mesh_start = time.time()
             try:
@@ -955,11 +1281,16 @@ def run_mesh_convergence(
                 solve_start = time.time()
                 jm.study(study_tag).run()
                 solve_sec = time.time() - solve_start
-                evaluated = _evaluate_expressions(model, expressions)
+                evaluated = _evaluate_expressions(model, expression_names)
                 row = {
+                    "schema_version": MESH_SCHEMA_VERSION,
+                    "config_id": manifest["config_id"],
+                    "source_model_sha256": manifest["spec"]["model"]["source_sha256"],
                     "level": label,
+                    "level_fingerprint": level_fingerprints[label],
                     "status": "success",
                     "attempt": attempt,
+                    "error_type": None,
                     "error": None,
                     "mesh_elements": mesh_elements,
                     "mesh_vertices": mesh_vertices,
@@ -968,35 +1299,73 @@ def run_mesh_convergence(
                     **{key: properties.get(key) for key in property_keys},
                     **evaluated,
                 }
-                rows.append(row)
-                _write_rows_csv(csv_path, fieldnames, [row], append=True)
-                if checkpoint_model_path and len(rows) % checkpoint_every == 0:
-                    _save_model(model, checkpoint_model_path)
-                    checkpointed_at = len(rows)
-                break
             except Exception as exc:
                 if attempt <= max_retries:
                     continue
                 row = {
+                    "schema_version": MESH_SCHEMA_VERSION,
+                    "config_id": manifest["config_id"],
+                    "source_model_sha256": manifest["spec"]["model"]["source_sha256"],
                     "level": label,
+                    "level_fingerprint": level_fingerprints[label],
                     "status": "error",
                     "attempt": attempt,
+                    "error_type": type(exc).__name__,
                     "error": str(exc),
                     "mesh_sec": time.time() - mesh_start,
                     **{key: properties.get(key) for key in property_keys},
                 }
-                failed_rows.append(row)
-                _write_rows_csv(csv_path, fieldnames, [row], append=True)
-                if not continue_on_error:
-                    raise
+                terminal_error = exc
+            break
 
-    if save_model_path:
+        try:
+            _write_rows_csv(csv_path, fieldnames, [row], append=True)
+        except Exception as exc:
+            workflow_error = {
+                "stage": "csv_persistence",
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+                "row_committed": False,
+                "level": label,
+            }
+            break
+        if terminal_error is None:
+            rows.append(row)
+        else:
+            failed_rows.append(row)
+        if (
+            terminal_error is None
+            and checkpoint_model_path
+            and len(rows) % checkpoint_every == 0
+        ):
+            try:
+                _save_model(model, checkpoint_model_path)
+                checkpointed_at = len(rows)
+            except Exception as exc:
+                workflow_error = {
+                    "stage": "checkpoint_after_durable_row",
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                    "row_committed": True,
+                    "level": label,
+                }
+        if terminal_error is not None and not continue_on_error:
+            raise terminal_error
+        if workflow_error is not None:
+            break
+
+    if workflow_error is None and save_model_path:
         _save_model(model, save_model_path)
-    elif checkpoint_model_path and rows and checkpointed_at != len(rows):
+    elif (
+        workflow_error is None
+        and checkpoint_model_path
+        and rows
+        and checkpointed_at != len(rows)
+    ):
         _save_model(model, checkpoint_model_path)
 
     return {
-        "success": not failed_rows,
+        "success": not failed_rows and workflow_error is None,
         "model": model.name(),
         "component": component_name,
         "mesh": mesh_name,
@@ -1007,7 +1376,11 @@ def run_mesh_convergence(
         "n_failed": len(failed_rows),
         "n_skipped": skipped,
         "csv_path": csv_path,
+        "manifest_path": str(resolved_manifest_path) if resolved_manifest_path else None,
+        "config_id": manifest["config_id"],
+        "schema_version": MESH_SCHEMA_VERSION,
         "save_model_path": save_model_path,
+        "workflow_error": workflow_error,
         "total_sec": time.time() - total_start,
         "rows": rows,
         "failed_rows": failed_rows,
@@ -1154,6 +1527,9 @@ def register_workflow_tools(mcp: FastMCP) -> None:
         checkpoint_model_path: Optional[str] = None,
         checkpoint_every: int = 1,
         save_model_path: Optional[str] = None,
+        manifest_path: Optional[str] = None,
+        source_model_path: Optional[str] = None,
+        config_id: Optional[str] = None,
         model_name: Optional[str] = None,
     ) -> dict[str, Any]:
         """
@@ -1185,12 +1561,18 @@ def register_workflow_tools(mcp: FastMCP) -> None:
             checkpoint_model_path: Optional model path saved during the run.
             checkpoint_every: Save a checkpoint after this many new successes.
             save_model_path: Optional path to save the model after the run.
+            manifest_path: Optional manifest path; defaults beside csv_path.
+            source_model_path: Immutable source model required for resume/append.
+            config_id: Optional caller-supplied stable configuration identifier.
             model_name: Model name (default: current).
 
         Returns:
             Rows containing mesh counts, timings, and expression values.
         """
-        preflight = session_manager.preflight_long_operation(output_path=csv_path)
+        preflight = session_manager.preflight_long_operation(
+            model_path=source_model_path,
+            output_path=csv_path,
+        )
         if not preflight["ready"]:
             return {
                 "success": False,
@@ -1227,6 +1609,9 @@ def register_workflow_tools(mcp: FastMCP) -> None:
                 checkpoint_model_path=checkpoint_model_path,
                 checkpoint_every=checkpoint_every,
                 save_model_path=save_model_path,
+                manifest_path=manifest_path,
+                source_model_path=source_model_path,
+                config_id=config_id,
             )
         except Exception as exc:
             return {"success": False, "error": f"mesh convergence failed: {exc}"}

@@ -8,6 +8,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+import src.tools.workflow as workflow_module
 from src.tools.workflow import (
     _csv_value,
     _model_identity,
@@ -578,12 +579,15 @@ def test_out_of_bounds_result_is_journaled_as_error(tmp_path):
 
 def test_mesh_convergence_resumes_completed_levels(tmp_path):
     csv_path = tmp_path / "mesh.csv"
+    source = tmp_path / "source.mph"
+    source.write_bytes(b"immutable mesh source")
     model = FakeModel()
     first = run_mesh_convergence(
         model,
         [{"name": "coarse", "properties": {"hmax": "0.1"}}],
         ["A"],
         csv_path=str(csv_path),
+        source_model_path=str(source),
     )
     resumed = run_mesh_convergence(
         model,
@@ -594,6 +598,7 @@ def test_mesh_convergence_resumes_completed_levels(tmp_path):
         ["A"],
         csv_path=str(csv_path),
         resume_csv=True,
+        source_model_path=str(source),
     )
 
     assert first["success"] is True
@@ -609,3 +614,258 @@ def test_complex_values_are_json_safe_and_csv_serializable():
 
     assert value == {"real": 1.5, "imag": -0.25}
     assert _csv_value(value) == "1.5+-0.25i"
+
+
+def test_incremental_csv_append_reads_only_header_when_schema_matches(tmp_path, monkeypatch):
+    path = tmp_path / "linear.csv"
+    workflow_module._write_rows_csv(
+        str(path), ["status", "value"], [{"status": "ok", "value": 1}], append=False
+    )
+    monkeypatch.setattr(
+        workflow_module.csv,
+        "DictReader",
+        lambda *_args, **_kwargs: pytest.fail("matching append must not materialize prior rows"),
+    )
+
+    workflow_module._write_rows_csv(
+        str(path), ["status", "value"], [{"status": "ok", "value": 2}], append=True
+    )
+
+    assert path.read_text(encoding="utf-8").count("\n") == 3
+
+
+@pytest.mark.parametrize(
+    ("parameter_name", "expressions"),
+    [
+        ("status", ["A"]),
+        ("wl", ["status"]),
+        ("wl", ["A", "A"]),
+        ("wl", ["wl"]),
+    ],
+)
+def test_staged_sweep_rejects_csv_column_collisions(parameter_name, expressions):
+    model = FakeModel()
+
+    result = run_staged_parametric_sweep(model, parameter_name, [1], expressions)
+
+    assert result["success"] is False
+    assert "column" in result["error"] or "unique" in result["error"]
+    assert model.java.study_node.run_count == 0
+
+
+def test_mesh_convergence_rejects_property_and_expression_column_collisions():
+    property_collision = run_mesh_convergence(
+        FakeModel(),
+        [{"name": "coarse", "properties": {"status": "fine"}}],
+        ["A"],
+    )
+    expression_collision = run_mesh_convergence(
+        FakeModel(),
+        [{"name": "coarse", "properties": {"hmax": "0.1"}}],
+        ["mesh_sec"],
+    )
+
+    assert property_collision["success"] is False
+    assert expression_collision["success"] is False
+    assert "collide" in property_collision["error"]
+    assert "reserved" in expression_collision["error"]
+
+
+@pytest.mark.parametrize("tamper", ["deleted", "header", "config"])
+def test_staged_append_validates_existing_csv_even_without_resume(tmp_path, tamper):
+    csv_path = tmp_path / "append.csv"
+    first_model = FakeModel()
+    first = run_staged_parametric_sweep(
+        first_model,
+        "wl",
+        [1],
+        ["A"],
+        csv_path=str(csv_path),
+    )
+    assert first["success"] is True
+    if tamper == "deleted":
+        csv_path.unlink()
+    else:
+        rows = read_csv(csv_path)
+        if tamper == "config":
+            rows[0]["config_id"] = "different"
+        fields = list(rows[0])
+        if tamper == "header":
+            fields.remove("A")
+        with csv_path.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=fields, extrasaction="ignore")
+            writer.writeheader()
+            writer.writerows(rows)
+    second_model = FakeModel()
+
+    result = run_staged_parametric_sweep(
+        second_model,
+        "wl",
+        [1],
+        ["A"],
+        csv_path=str(csv_path),
+        append_csv=True,
+    )
+
+    assert result["success"] is False
+    assert second_model.java.study_node.run_count == 0
+
+
+def test_staged_persistence_failure_never_retries_solve_or_counts_undurable_row(
+    tmp_path, monkeypatch
+):
+    model = FakeModel()
+    monkeypatch.setattr(
+        workflow_module,
+        "_write_rows_csv",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("disk full")),
+    )
+
+    result = run_staged_parametric_sweep(
+        model,
+        "wl",
+        [1],
+        ["A"],
+        csv_path=str(tmp_path / "failure.csv"),
+        max_retries=2,
+    )
+
+    assert result["success"] is False
+    assert result["workflow_error"]["stage"] == "csv_persistence"
+    assert result["workflow_error"]["row_committed"] is False
+    assert result["n_points"] == 0
+    assert model.java.study_node.run_count == 1
+
+
+def test_staged_checkpoint_failure_keeps_one_durable_row_without_resolve_retry(
+    tmp_path, monkeypatch
+):
+    csv_path = tmp_path / "checkpoint.csv"
+    model = FakeModel()
+    monkeypatch.setattr(
+        workflow_module,
+        "_save_model",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("checkpoint failed")),
+    )
+
+    result = run_staged_parametric_sweep(
+        model,
+        "wl",
+        [1],
+        ["A"],
+        csv_path=str(csv_path),
+        checkpoint_model_path=str(tmp_path / "checkpoint.mph"),
+        max_retries=2,
+    )
+
+    assert result["success"] is False
+    assert result["workflow_error"]["stage"] == "checkpoint_after_durable_row"
+    assert result["workflow_error"]["row_committed"] is True
+    assert result["n_points"] == 1
+    assert model.java.study_node.run_count == 1
+    assert len(read_csv(csv_path)) == 1
+
+
+@pytest.mark.parametrize("failure_stage", ["csv", "checkpoint"])
+def test_mesh_persistence_failures_do_not_retry_solved_level(
+    tmp_path, monkeypatch, failure_stage
+):
+    csv_path = tmp_path / f"mesh-{failure_stage}.csv"
+    model = FakeModel()
+    if failure_stage == "csv":
+        monkeypatch.setattr(
+            workflow_module,
+            "_write_rows_csv",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("csv failed")),
+        )
+    else:
+        monkeypatch.setattr(
+            workflow_module,
+            "_save_model",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("checkpoint failed")),
+        )
+
+    result = run_mesh_convergence(
+        model,
+        [{"name": "coarse", "properties": {"hmax": "0.1"}}],
+        ["A"],
+        csv_path=str(csv_path),
+        checkpoint_model_path=(str(tmp_path / "mesh.mph") if failure_stage == "checkpoint" else None),
+        max_retries=2,
+    )
+
+    assert result["success"] is False
+    assert result["workflow_error"]["stage"].startswith(
+        "csv" if failure_stage == "csv" else "checkpoint"
+    )
+    assert model.java.study_node.run_count == 1
+    assert model.java.component_node.mesh_node.run_count == 1
+    assert result["n_levels"] == (0 if failure_stage == "csv" else 1)
+
+
+def test_mesh_resume_rejects_changed_level_properties_before_solving(tmp_path):
+    csv_path = tmp_path / "mesh-identity.csv"
+    source = tmp_path / "mesh-source.mph"
+    source.write_bytes(b"immutable mesh source")
+    first_model = FakeModel()
+    first = run_mesh_convergence(
+        first_model,
+        [{"name": "coarse", "properties": {"hmax": "0.1"}}],
+        ["A"],
+        csv_path=str(csv_path),
+        source_model_path=str(source),
+    )
+    second_model = FakeModel()
+
+    resumed = run_mesh_convergence(
+        second_model,
+        [{"name": "coarse", "properties": {"hmax": "0.2"}}],
+        ["A"],
+        csv_path=str(csv_path),
+        source_model_path=str(source),
+        resume_csv=True,
+    )
+
+    assert first["success"] is True
+    assert resumed["success"] is False
+    assert "incompatible properties" in resumed["error"]
+    assert second_model.java.study_node.run_count == 0
+
+
+def test_mesh_resume_rejects_changed_global_configuration_and_source(tmp_path):
+    csv_path = tmp_path / "mesh-global.csv"
+    source = tmp_path / "mesh-source.mph"
+    source.write_bytes(b"immutable mesh source")
+    run_mesh_convergence(
+        FakeModel(),
+        [{"name": "coarse", "properties": {"hmax": "0.1"}}],
+        ["A"],
+        csv_path=str(csv_path),
+        source_model_path=str(source),
+    )
+    changed_expression_model = FakeModel()
+    changed_expression = run_mesh_convergence(
+        changed_expression_model,
+        [{"name": "coarse", "properties": {"hmax": "0.1"}}],
+        ["B"],
+        csv_path=str(csv_path),
+        source_model_path=str(source),
+        resume_csv=True,
+    )
+    source.write_bytes(b"changed mesh source")
+    changed_source_model = FakeModel()
+    changed_source = run_mesh_convergence(
+        changed_source_model,
+        [{"name": "coarse", "properties": {"hmax": "0.1"}}],
+        ["A"],
+        csv_path=str(csv_path),
+        source_model_path=str(source),
+        resume_csv=True,
+    )
+
+    assert changed_expression["success"] is False
+    assert changed_source["success"] is False
+    assert "manifest mismatch" in changed_expression["error"].lower()
+    assert "manifest mismatch" in changed_source["error"].lower()
+    assert changed_expression_model.java.study_node.run_count == 0
+    assert changed_source_model.java.study_node.run_count == 0

@@ -2818,6 +2818,19 @@
         "title": "Component Name",
         "type": "string"
       },
+      "config_id": {
+        "anyOf": [
+          {
+            "maxLength": 16384,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Config Id"
+      },
       "continue_on_error": {
         "default": false,
         "title": "Continue On Error",
@@ -2867,6 +2880,19 @@
         "maxItems": 2048,
         "title": "Levels",
         "type": "array"
+      },
+      "manifest_path": {
+        "anyOf": [
+          {
+            "maxLength": 16384,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Manifest Path"
       },
       "max_retries": {
         "default": 0,
@@ -2953,6 +2979,19 @@
         "maxLength": 16384,
         "title": "Size Feature Tag",
         "type": "string"
+      },
+      "source_model_path": {
+        "anyOf": [
+          {
+            "maxLength": 16384,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Source Model Path"
       },
       "study_name": {
         "anyOf": [

@@ -142,6 +142,13 @@ The server fails closed when an external MPh/COMSOL owner or a valid lease is pr
 
 Durable sweep controls are `job_submit`, `job_status`, `job_tail`, `job_cancel`, and `job_resume`. Each job has its own ASCII-only runtime directory containing its immutable specification, state, CSV journal, checkpoint, and log. Resume accepts only matching, finite, successful rows. Cancellation reaches a terminal cancelled state only after worker/process cleanup and lease release are verified. This coordination is for a shared runtime directory on one host; it is not distributed execution.
 
+The interactive `mesh_convergence_study` helper also writes a manifest beside
+its CSV. Any resume or append to an existing journal requires
+`source_model_path`; the source hash, study, expressions, parameter setting,
+mesh identity, and each level's exact property map must match before a completed
+level can be skipped. CSV and checkpoint failures are terminal persistence
+outcomes for that level and never trigger another solve.
+
 For an adaptive spectrum, submit `job_type: "spectral_characterization"` with
 an explicit source/configuration identity, initial wavelength grid, expansion
 and refinement policies, collector configuration, scientific tolerances, and

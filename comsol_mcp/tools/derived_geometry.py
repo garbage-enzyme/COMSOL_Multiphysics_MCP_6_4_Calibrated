@@ -6,6 +6,7 @@ import hashlib
 import json
 import math
 import re
+import shutil
 import tempfile
 import uuid
 from dataclasses import dataclass, field
@@ -220,16 +221,19 @@ def create_derived_geometry_clone(
     source_path = Path(str(source_model.file())).resolve()
     if not source_path.is_file():
         raise ValueError("source model has no readable immutable file")
-    source_hash = _sha256(source_path)
     root = Path(runtime_dir) if runtime_dir else ownership_manager.runtime_dir
     root.mkdir(parents=True, exist_ok=True)
     directory = Path(tempfile.mkdtemp(prefix="comsol_mcp_clone_geometry_", dir=root))
     clone_path = directory / "clone.mph"
     clone = None
     try:
-        source_model.java.save(str(clone_path), True)
+        shutil.copyfile(source_path, clone_path)
+        source_hash = _sha256(clone_path)
         clone = client.load(str(clone_path))
         clone.java.label(new_name)
+        backing_hash = _sha256(clone_path)
+        if backing_hash != source_hash:
+            raise RuntimeError("derived clone backing bytes changed during load")
     except Exception as exc:
         cleanup_errors = []
         if clone is not None:
@@ -253,7 +257,7 @@ def create_derived_geometry_clone(
         source_path=str(source_path),
         source_sha256=source_hash,
         backing_path=str(clone_path),
-        backing_sha256=_sha256(clone_path),
+        backing_sha256=backing_hash,
     )
     return clone, record
 

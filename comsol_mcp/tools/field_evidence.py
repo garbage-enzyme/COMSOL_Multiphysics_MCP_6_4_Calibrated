@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
+import shutil
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -152,17 +155,46 @@ def register_field_evidence_tools(mcp: FastMCP) -> None:
 
             relative_root = Path("field_evidence") / normalized["request_fingerprint"]
             artifact_root = ownership_manager.runtime_dir / relative_root
+            artifact_root.parent.mkdir(parents=True, exist_ok=True)
+            staging_root = Path(
+                tempfile.mkdtemp(
+                    prefix=f".{artifact_root.name}.stage-",
+                    dir=artifact_root.parent,
+                )
+            )
+            source_after = None
             try:
                 result = collect_existing_dataset_field_evidence(
                     model=model,
                     request=normalized,
                     view_id=view_id,
-                    artifact_root=artifact_root,
+                    artifact_root=staging_root,
                 )
-            finally:
                 source_after = _sha256_file(source_path)
                 if source_after != source_before:
-                    raise RuntimeError("loaded source changed during read-only field extraction")
+                    raise RuntimeError(
+                        "loaded source changed during read-only field extraction"
+                    )
+                os.rename(staging_root, artifact_root)
+            finally:
+                source_hash_error = None
+                if source_after is None:
+                    try:
+                        source_after = _sha256_file(source_path)
+                    except Exception as exc:
+                        source_hash_error = exc
+                try:
+                    if staging_root.exists():
+                        shutil.rmtree(staging_root)
+                finally:
+                    if source_hash_error is not None:
+                        raise RuntimeError(
+                            "loaded source could not be revalidated after field extraction"
+                        ) from source_hash_error
+                    if source_after != source_before:
+                        raise RuntimeError(
+                            "loaded source changed during read-only field extraction"
+                        )
             return {
                 "success": True,
                 "model_name": model_name,

@@ -282,6 +282,49 @@ def test_clone_label_failure_removes_loaded_clone_and_backing_artifact(tmp_path)
     assert list(tmp_path.glob("comsol_mcp_clone_geometry_*")) == []
 
 
+def test_geometry_clone_uses_exact_immutable_source_bytes_not_unsaved_live_state(tmp_path):
+    source_path = tmp_path / "source.mph"
+    source_path.write_bytes(b"immutable-source")
+
+    class SourceJava:
+        def save(self, _target, _copy):
+            raise AssertionError("unsaved live state must not be cloned")
+
+    class Source:
+        java = SourceJava()
+
+        def file(self):
+            return str(source_path)
+
+    class CloneJava:
+        def label(self, _name):
+            return None
+
+    class Clone:
+        java = CloneJava()
+
+        def name(self):
+            return "derived"
+
+    class Client:
+        def __init__(self):
+            self.loaded_bytes = None
+
+        def load(self, path):
+            self.loaded_bytes = Path(path).read_bytes()
+            return Clone()
+
+    client = Client()
+    clone, record = create_derived_geometry_clone(
+        Source(), client, new_name="derived", runtime_dir=tmp_path
+    )
+
+    assert clone.name() == "derived"
+    assert client.loaded_bytes == b"immutable-source"
+    assert record.source_sha256 == record.backing_sha256
+    assert Path(record.backing_path).read_bytes() == b"immutable-source"
+
+
 def test_session_removal_discards_derived_registry_entry(monkeypatch):
     manager = derived_geometry_module.session_manager
 

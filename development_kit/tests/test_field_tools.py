@@ -265,6 +265,53 @@ def test_public_field_extract_rehashes_source_after_collection_failure(
     assert hash_calls == [source.resolve(), source.resolve()]
 
 
+def test_public_field_extract_never_publishes_artifacts_after_source_drift(
+    tmp_path, ascii_tmp_path, monkeypatch
+):
+    from src.tools import field_evidence
+
+    source = tmp_path / "fixture.mph"
+    source.write_bytes(b"immutable-mph-fixture")
+    request = normalize_field_evidence_request(_extraction_request(source))
+    model = _DatasetModel()
+    model.file = lambda: str(source)
+    runtime = ascii_tmp_path / "runtime"
+
+    def collect_then_drift(**kwargs):
+        root = Path(kwargs["artifact_root"])
+        (root / "arrays").mkdir(parents=True)
+        (root / "arrays" / "field.npz").write_bytes(b"npz")
+        (root / "manifest.json").write_text("{}", encoding="utf-8")
+        source.write_bytes(b"mutated-after-artifact-write")
+        return {
+            "array_artifact": {"relative_path": "arrays/field.npz"},
+            "manifest_artifact": {"relative_path": "manifest.json"},
+        }
+
+    monkeypatch.setattr(
+        field_evidence,
+        "collect_existing_dataset_field_evidence",
+        collect_then_drift,
+    )
+    monkeypatch.setattr(field_evidence.session_manager, "get_model", lambda _name: model)
+    monkeypatch.setattr(
+        field_evidence.session_manager,
+        "preflight_long_operation",
+        lambda: {"ready": True},
+    )
+    monkeypatch.setattr(field_evidence.ownership_manager, "runtime_dir", runtime)
+
+    result = _tool("wave_optics_field_extract")(
+        model_name="fixture", request=request, view_id="on"
+    )
+
+    final_root = runtime / "field_evidence" / request["request_fingerprint"]
+    assert result["success"] is False
+    assert result["reason_code"] == "field_extraction_failed"
+    assert not final_root.exists()
+    assert not list(final_root.parent.glob(f".{final_root.name}.stage-*"))
+
+
 @pytest.mark.parametrize("tamper", ["fingerprint", "schema"])
 def test_public_field_extract_rejects_tampered_canonical_request(tmp_path, monkeypatch, tamper):
     from src.tools import field_evidence

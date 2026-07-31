@@ -143,6 +143,99 @@ def list_studies(model) -> dict:
     return {"success": True, "studies": studies, "count": len(studies)}
 
 
+def solve_study(
+    model,
+    study_name: Optional[str] = None,
+    *,
+    wait: bool = True,
+    timeout: Optional[float] = None,
+    solver=async_solver,
+) -> dict:
+    """Run synchronously only for an unbounded wait; finite waits use the manager."""
+    if not isinstance(wait, bool):
+        return {"success": False, "error": "wait must be a boolean"}
+    if timeout is not None:
+        if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
+            return {"success": False, "error": "timeout must be a finite non-negative number"}
+        timeout = float(timeout)
+        if not math.isfinite(timeout) or timeout < 0:
+            return {"success": False, "error": "timeout must be a finite non-negative number"}
+        if not wait:
+            return {"success": False, "error": "timeout requires wait=true"}
+    if solver.is_running:
+        return {
+            "success": False,
+            "error": "Another solving operation is in progress. Use study_get_progress to check status.",
+        }
+
+    tag = _resolve_study_tag(model, study_name)
+    if wait and timeout is None:
+        jm = model.java
+        if tag is None:
+            for raw_tag in jm.study().tags():
+                jm.study(str(raw_tag)).run()
+        else:
+            jm.study(tag).run()
+        return {
+            "success": True,
+            "study": study_name,
+            "resolved_tag": tag,
+            "message": "Solving completed.",
+            "completed": True,
+            "async": False,
+        }
+
+    started = solver.start_solve(model, tag)
+    if not started:
+        return {"success": False, "error": "Failed to start async solver."}
+    if not wait:
+        return {
+            "success": True,
+            "study": study_name,
+            "resolved_tag": tag,
+            "message": "Solving started in background. Use study_get_progress to monitor.",
+            "async": True,
+            "completed": False,
+        }
+
+    completed = solver.wait(timeout=timeout)
+    progress = solver.get_progress()
+    if not completed:
+        return {
+            "success": False,
+            "study": study_name,
+            "resolved_tag": tag,
+            "completed": False,
+            "timed_out": True,
+            "async": True,
+            "background_continues": True,
+            "progress": progress,
+            "message": (
+                "The wait deadline expired; the blocking COMSOL call may continue in "
+                "the managed background solver."
+            ),
+        }
+    if progress.get("status") != "completed":
+        return {
+            "success": False,
+            "study": study_name,
+            "resolved_tag": tag,
+            "completed": True,
+            "async": True,
+            "progress": progress,
+            "error": "Managed solving finished without a completed status.",
+        }
+    return {
+        "success": True,
+        "study": study_name,
+        "resolved_tag": tag,
+        "completed": True,
+        "async": True,
+        "progress": progress,
+        "message": "Solving completed.",
+    }
+
+
 def register_study_tools(mcp: FastMCP) -> None:
     """Register study and solving tools with the MCP server."""
     
@@ -244,46 +337,13 @@ def register_study_tools(mcp: FastMCP) -> None:
                 "error": f"Model not found: {model_name or 'no current model'}"
             }
         
-        if async_solver.is_running:
-            return {
-                "success": False,
-                "error": "Another solving operation is in progress. Use study_get_progress to check status."
-            }
-        
         try:
-            # Resolve tag OR label to a canonical tag, then use the Java
-            # API directly. mph's ``model.solve(name)`` only accepts the
-            # study *label* (e.g. "研究 1"), but callers typically pass the
-            # *tag* returned by ``study_create`` (e.g. "std1").
-            tag = _resolve_study_tag(model, study_name)
-            jm = model.java
-            if wait:
-                if tag is None:
-                    for t in jm.study().tags():
-                        jm.study(t).run()
-                else:
-                    jm.study(tag).run()
-                return {
-                    "success": True,
-                    "study": study_name,
-                    "resolved_tag": tag,
-                    "message": "Solving completed.",
-                }
-            else:
-                started = async_solver.start_solve(model, tag)
-                if started:
-                    return {
-                        "success": True,
-                        "study": study_name,
-                        "resolved_tag": tag,
-                        "message": "Solving started in background. Use study_get_progress to monitor.",
-                        "async": True,
-                    }
-                else:
-                    return {
-                        "success": False,
-                        "error": "Failed to start async solver."
-                    }
+            return solve_study(
+                model,
+                study_name,
+                wait=wait,
+                timeout=timeout,
+            )
         except Exception as e:
             return {"success": False, "error": f"Failed to solve: {str(e)}"}
     
