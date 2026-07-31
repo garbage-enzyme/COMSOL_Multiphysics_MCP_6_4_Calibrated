@@ -160,6 +160,14 @@ def test_physical_evidence_rejects_malformed_ambiguous_and_nonfinite(mutation, m
         validate_physical_evidence(payload, verify_hash=False)
 
 
+def test_physical_evidence_rejects_stale_contract_hash():
+    payload = _envelope()
+    payload["model"]["mesh_element_count"] += 1
+
+    with pytest.raises(ValueError, match="contract_sha256 does not match"):
+        validate_physical_evidence(payload)
+
+
 def test_contract_size_is_bounded():
     payload = _envelope()
     payload["limitations"] = ["x" * 5000]

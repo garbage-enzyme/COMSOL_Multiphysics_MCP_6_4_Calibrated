@@ -166,9 +166,21 @@ def test_writer_rejects_bad_coordinates_and_expression_set(tmp_path):
 def test_writer_is_immutable_and_refuses_existing_view_artifacts(tmp_path):
     _, kwargs = _inputs(tmp_path)
     write_field_evidence_artifacts(**kwargs)
+    before = {
+        path.relative_to(tmp_path): path.read_bytes()
+        for path in tmp_path.rglob("*")
+        if path.is_file()
+    }
 
     with pytest.raises(FileExistsError, match="already exist"):
         write_field_evidence_artifacts(**kwargs)
+
+    after = {
+        path.relative_to(tmp_path): path.read_bytes()
+        for path in tmp_path.rglob("*")
+        if path.is_file()
+    }
+    assert after == before
 
 
 def test_writer_cleans_owned_partial_files_when_manifest_build_fails(tmp_path):

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from copy import deepcopy
 
@@ -224,6 +225,17 @@ def test_coordinate_ranges_must_stay_inside_requested_bounds():
 def test_manifest_rejects_unknown_fields_even_with_recomputed_hash():
     request, manifest = _manifest()
     manifest["semantic_claim"] = "SPP"
+    unhashed = dict(manifest)
+    unhashed.pop("manifest_sha256")
+    manifest["manifest_sha256"] = hashlib.sha256(
+        json.dumps(
+            unhashed,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
 
     with pytest.raises(ValueError, match="unsupported fields"):
         validate_field_evidence_manifest(manifest, request=request)

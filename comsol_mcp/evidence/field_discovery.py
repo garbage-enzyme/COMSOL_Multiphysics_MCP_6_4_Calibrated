@@ -61,6 +61,17 @@ def _children(model: Any, group: str, limit: int) -> list[Any]:
     return children
 
 
+def validate_field_discovery_limits(
+    *,
+    max_datasets: int = MAX_DISCOVERED_DATASETS,
+    max_components: int = MAX_DISCOVERED_COMPONENTS,
+) -> tuple[int, int]:
+    """Validate public discovery limits without touching a model."""
+    dataset_limit = _positive_limit(max_datasets, "max_datasets", MAX_DISCOVERED_DATASETS)
+    component_limit = _positive_limit(max_components, "max_components", MAX_DISCOVERED_COMPONENTS)
+    return dataset_limit, component_limit
+
+
 def discover_field_datasets(
     model: Any,
     *,
@@ -68,11 +79,9 @@ def discover_field_datasets(
     max_components: int = MAX_DISCOVERED_COMPONENTS,
 ) -> dict[str, Any]:
     """Return bounded live name/tag pairs without evaluating or solving data."""
-    dataset_limit = _positive_limit(
-        max_datasets, "max_datasets", MAX_DISCOVERED_DATASETS
-    )
-    component_limit = _positive_limit(
-        max_components, "max_components", MAX_DISCOVERED_COMPONENTS
+    dataset_limit, component_limit = validate_field_discovery_limits(
+        max_datasets=max_datasets,
+        max_components=max_components,
     )
     components = _children(model, "components", component_limit)
     datasets = _children(model, "datasets", dataset_limit)
@@ -101,11 +110,13 @@ def discover_field_datasets(
             computed_state = "verified_empty" if empty else "verified_computed"
         except Exception as exc:
             computed_state = "unknown"
-            solution_diagnostics.append({
-                "code": "solution_state_unavailable",
-                "solution_tag": tag,
-                "error_type": type(exc).__name__,
-            })
+            solution_diagnostics.append(
+                {
+                    "code": "solution_state_unavailable",
+                    "solution_tag": tag,
+                    "error_type": type(exc).__name__,
+                }
+            )
         solution_by_tag[tag] = {
             "solution_tag": tag,
             "solution_name": _bounded_text(node.name(), f"solutions[{index}].name"),
@@ -187,4 +198,5 @@ __all__ = [
     "MAX_DISCOVERED_DATASETS",
     "MAX_DISCOVERED_SOLUTIONS",
     "discover_field_datasets",
+    "validate_field_discovery_limits",
 ]

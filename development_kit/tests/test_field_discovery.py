@@ -45,9 +45,7 @@ class _Model:
     def __init__(self, *, components=None, datasets=None, solutions=None):
         self.groups = {
             "components": (
-                [_Node("组件 1", "comp1", "Component")]
-                if components is None
-                else components
+                [_Node("组件 1", "comp1", "Component")] if components is None else components
             ),
             "datasets": (
                 [_Node("研究 1//解 1", "dset1", "Solution", {"solution": "sol1"})]
@@ -55,14 +53,38 @@ class _Model:
                 else datasets
             ),
             "solutions": (
-                [_Node("解 1", "sol1", "Solution", empty=False)]
-                if solutions is None
-                else solutions
+                [_Node("解 1", "sol1", "Solution", empty=False)] if solutions is None else solutions
             ),
         }
 
     def __truediv__(self, group):
         return self.groups[group]
+
+    def evaluate(self, *_args, **_kwargs):
+        pytest.fail("discovery must not evaluate the model")
+
+    def solve(self, *_args, **_kwargs):
+        pytest.fail("discovery must not solve the model")
+
+    def run(self, *_args, **_kwargs):
+        pytest.fail("discovery must not run a study")
+
+
+def _model_snapshot(model):
+    return {
+        group: [
+            {
+                "name": node._name,
+                "tag": node._tag,
+                "type": node._type,
+                "properties": dict(node._properties),
+                "empty": node.java.empty,
+                "fail": node.java.fail,
+            }
+            for node in nodes
+        ]
+        for group, nodes in model.groups.items()
+    }
 
 
 def test_discovery_pairs_unicode_names_with_stable_tags_without_solver_import(monkeypatch):
@@ -76,9 +98,7 @@ def test_discovery_pairs_unicode_names_with_stable_tags_without_solver_import(mo
     monkeypatch.setattr(builtins, "__import__", guarded_import)
     result = discover_field_datasets(_Model())
 
-    assert result["components"] == [
-        {"component_name": "组件 1", "component_tag": "comp1"}
-    ]
+    assert result["components"] == [{"component_name": "组件 1", "component_tag": "comp1"}]
     dataset = result["datasets"][0]
     assert dataset["dataset_name"] == "研究 1//解 1"
     assert dataset["dataset_tag"] == "dset1"
@@ -113,17 +133,17 @@ def test_discovery_handles_english_names_empty_unknown_and_non_solution_datasets
     assert result["eligible_dataset_count"] == 0
     assert result["success"] is False
     assert result["discovery_state"] == "partial"
-    assert result["solution_diagnostics"] == [{
-        "code": "solution_state_unavailable",
-        "solution_tag": "sol2",
-        "error_type": "RuntimeError",
-    }]
+    assert result["solution_diagnostics"] == [
+        {
+            "code": "solution_state_unavailable",
+            "solution_tag": "sol2",
+            "error_type": "RuntimeError",
+        }
+    ]
 
 
 def test_discovery_fixture_preserves_explicit_empty_collections():
-    result = discover_field_datasets(
-        _Model(components=[], datasets=[], solutions=[])
-    )
+    result = discover_field_datasets(_Model(components=[], datasets=[], solutions=[]))
 
     assert result["components"] == []
     assert result["datasets"] == []
@@ -195,9 +215,7 @@ def test_discovery_rejects_duplicate_names_tags_and_invalid_clientapi_tags():
 
 @pytest.mark.parametrize("reference", [None, "", "bad tag", "x" * 129, object()])
 def test_discovery_rejects_malformed_dataset_references(reference):
-    model = _Model(
-        datasets=[_Node("Data", "dset1", "Solution", {"solution": reference})]
-    )
+    model = _Model(datasets=[_Node("Data", "dset1", "Solution", {"solution": reference})])
 
     with pytest.raises(ValueError, match="exact clientapi tag|bounded nonempty text"):
         discover_field_datasets(model)
@@ -205,8 +223,10 @@ def test_discovery_rejects_malformed_dataset_references(reference):
 
 def test_discovery_does_not_evaluate_or_run_study():
     model = _Model()
+    before = _model_snapshot(model)
 
     result = discover_field_datasets(model)
 
+    assert _model_snapshot(model) == before
     assert result["model_mutated"] is False
     assert result["study_run"] is False

@@ -86,7 +86,11 @@ def test_public_field_dataset_discovery_is_locale_safe_and_read_only(monkeypatch
 def test_public_field_dataset_discovery_fails_closed_on_incomplete_ownership(monkeypatch):
     from src.tools import field_evidence
 
-    monkeypatch.setattr(field_evidence.session_manager, "get_model", lambda name: _Model())
+    monkeypatch.setattr(
+        field_evidence.session_manager,
+        "get_model",
+        lambda _name: pytest.fail("failed preflight must precede model lookup"),
+    )
     monkeypatch.setattr(
         field_evidence.session_manager,
         "preflight_long_operation",
@@ -102,15 +106,26 @@ def test_public_field_dataset_discovery_fails_closed_on_incomplete_ownership(mon
 def test_public_field_dataset_discovery_rejects_missing_model_and_limits(monkeypatch):
     from src.tools import field_evidence
 
+    monkeypatch.setattr(
+        field_evidence.session_manager,
+        "preflight_long_operation",
+        lambda: {"ready": True},
+    )
     monkeypatch.setattr(field_evidence.session_manager, "get_model", lambda name: None)
     assert _tool()(model_name="missing") == {
         "success": False,
         "error": "Model not found: missing",
     }
 
-    monkeypatch.setattr(field_evidence.session_manager, "get_model", lambda name: _Model())
     monkeypatch.setattr(
-        field_evidence.session_manager, "preflight_long_operation", lambda: {"ready": True}
+        field_evidence.session_manager,
+        "get_model",
+        lambda _name: pytest.fail("invalid limits must precede model lookup"),
+    )
+    monkeypatch.setattr(
+        field_evidence.session_manager,
+        "preflight_long_operation",
+        lambda: pytest.fail("invalid limits must precede ownership preflight"),
     )
     invalid = _tool()(model_name="fixture", max_datasets=0)
     assert invalid["success"] is False
@@ -141,6 +156,7 @@ def test_public_field_extract_binds_source_and_owned_runtime(
 
     source = tmp_path / "fixture.mph"
     source.write_bytes(b"immutable-mph-fixture")
+    source_before = source.read_bytes()
     raw_request = _extraction_request(source)
     canonical_request = normalize_field_evidence_request(raw_request)
     request = canonical_request if canonical_transport else raw_request
@@ -161,6 +177,7 @@ def test_public_field_extract_binds_source_and_owned_runtime(
 
     assert result["success"] is True, result
     assert result["source_unchanged"] is True
+    assert source.read_bytes() == source_before
     assert result["study_run"] is False
     assert result["model_mutated"] is False
     assert result["artifact_root_id"] == (
@@ -234,18 +251,14 @@ def test_public_field_extract_rehashes_source_after_collection_failure(
         raise RuntimeError("injected collection failure")
 
     monkeypatch.setattr(field_evidence, "_sha256_file", observed_hash)
-    monkeypatch.setattr(
-        field_evidence, "collect_existing_dataset_field_evidence", fail_collection
-    )
+    monkeypatch.setattr(field_evidence, "collect_existing_dataset_field_evidence", fail_collection)
     monkeypatch.setattr(field_evidence.session_manager, "get_model", lambda _name: model)
     monkeypatch.setattr(
         field_evidence.session_manager, "preflight_long_operation", lambda: {"ready": True}
     )
     monkeypatch.setattr(field_evidence.ownership_manager, "runtime_dir", runtime)
 
-    result = _tool("wave_optics_field_extract")(
-        model_name="fixture", request=request, view_id="on"
-    )
+    result = _tool("wave_optics_field_extract")(model_name="fixture", request=request, view_id="on")
 
     assert result["success"] is False
     assert result["reason_code"] == "field_extraction_failed"
@@ -278,9 +291,11 @@ def test_public_field_extract_rejects_png_and_matrix_sources(tmp_path, monkeypat
 
     source = tmp_path / "fixture.mph"
     source.write_bytes(b"immutable-mph-fixture")
-    model = _DatasetModel()
-    model.file = lambda: str(source)
-    monkeypatch.setattr(field_evidence.session_manager, "get_model", lambda name: model)
+    monkeypatch.setattr(
+        field_evidence.session_manager,
+        "get_model",
+        lambda _name: pytest.fail("unsupported mode must precede model lookup"),
+    )
 
     png_raw = _request(paired=False, png=True)
     source_value = dict(
@@ -305,4 +320,3 @@ def test_public_field_extract_rejects_png_and_matrix_sources(tmp_path, monkeypat
     )
     assert matrix_result["success"] is False
     assert "validation-matrix source" in matrix_result["error"]
-    assert model.calls == []

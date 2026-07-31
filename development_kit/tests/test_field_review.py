@@ -259,10 +259,15 @@ def test_pair_assembler_rejects_junctioned_publication_parent(tmp_path):
         visual_root.rmdir()
 
 
-def test_pair_assembler_rejects_tampered_wrapper_before_rendering(tmp_path):
+def test_pair_assembler_rejects_tampered_wrapper_before_rendering(tmp_path, monkeypatch):
     directory = _create_job(tmp_path)
     wrapper = next(directory.glob("artifacts/field-off-res/attempt-1/matrix_collector.json"))
     wrapper.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(
+        field_review_module,
+        "render_field_png_bundle",
+        lambda *_args, **_kwargs: pytest.fail("renderer must not run"),
+    )
 
     with pytest.raises(ValueError, match="differs from the durable row"):
         assemble_validation_matrix_field_review(
@@ -307,10 +312,15 @@ def test_pair_assembler_uses_complete_request_bound_manifest_validation(tmp_path
         )
 
 
-def test_pair_assembler_rejects_tampered_source_audit_before_rendering(tmp_path):
+def test_pair_assembler_rejects_tampered_source_audit_before_rendering(tmp_path, monkeypatch):
     directory = _create_job(tmp_path)
     audit = next(directory.glob("artifacts/audit-off-res/attempt-1/inner.json"))
     audit.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(
+        field_review_module,
+        "render_field_png_bundle",
+        lambda *_args, **_kwargs: pytest.fail("renderer must not run"),
+    )
 
     with pytest.raises(ValueError, match="inner manifest differs"):
         assemble_validation_matrix_field_review(

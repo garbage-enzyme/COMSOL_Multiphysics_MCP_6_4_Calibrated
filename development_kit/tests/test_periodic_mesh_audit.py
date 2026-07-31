@@ -22,6 +22,7 @@ def _hash(path: Path) -> str:
 def _audit(tmp_path, monkeypatch, **fixture):
     source = tmp_path / "periodic.mph"
     source.write_bytes(b"immutable periodic model")
+    expected_source_sha256 = _hash(source)
     monkeypatch.setattr(
         "src.tools.wave_optics_preflight.ownership_manager.status",
         lambda **_kwargs: {"collision": False, "session": {"connected": True}},
@@ -33,13 +34,14 @@ def _audit(tmp_path, monkeypatch, **fixture):
         session_state={"connected": True},
         active_profile="wave_optics",
         expected_source_path=str(source),
-        expected_source_sha256=_hash(source),
+        expected_source_sha256=expected_source_sha256,
         expected_component_tag="comp1",
         expected_physics_tag="ewfd",
         expected_study_tag="std1",
         expected_mesh_tag="mesh1",
     )
-    assert _hash(source) == result["source"]["source_sha256"]
+    assert _hash(source) == expected_source_sha256
+    assert result["source"]["source_sha256"] == expected_source_sha256
     return result
 
 
