@@ -7,14 +7,14 @@ import json
 from pathlib import Path
 
 import pytest
-
 from src.server import create_server, register_all_tools
-from src.tools.catalog import PROFILE_NAMES, snapshot_tool_schemas
+from src.settings import RUNTIME_ENV, SETTINGS_PATH_ENV
 from src.shared_session.contracts import SHARED_SERVER_FEATURE_ENV
-from src.tools.profiles import DEFAULT_PROFILE, PROFILE_ENV_VAR, resolve_profile
-
+from src.tools.catalog import PROFILE_NAMES, snapshot_tool_schemas
+from src.tools.profiles import DEFAULT_PROFILE, PROFILE_ENV_VAR, ProfileSelection, resolve_profile
 
 SNAPSHOT_DIR = Path(__file__).parent / "snapshots"
+ROOT = Path(__file__).parents[2]
 
 
 def _tool_names(server) -> list[str]:
@@ -52,6 +52,7 @@ def test_environment_profile_is_normalized(monkeypatch):
     assert selection.name == "wave_optics"
     assert selection.source == "environment"
     assert selection.default_used is False
+    assert selection.environment_variable == PROFILE_ENV_VAR
 
     server = create_server("environment-wave-profile-test")
     assert len(_tool_names(server)) == 67
@@ -148,6 +149,58 @@ def test_validated_shared_startup_selection_is_not_reresolved(monkeypatch):
         "shared_model_verify", "shared_model_unlock", "shared_model_snapshot",
         "shared_model_adopt",
     }
+
+
+def test_directly_constructed_profile_selection_cannot_register_tools():
+    forged = ProfileSelection(
+        name="desktop_shared",
+        environment_variable=PROFILE_ENV_VAR,
+        default_used=False,
+        source="forged",
+    )
+
+    with pytest.raises(ValueError, match="not produced by resolve_profile"):
+        create_server("forged-shared-selection", profile=forged)
+
+
+def test_profile_provenance_distinguishes_argument_environment_settings_and_default(
+    tmp_path,
+):
+    explicit = resolve_profile("core", environ={})
+    environment = resolve_profile(environ={PROFILE_ENV_VAR: "core"})
+    fallback = resolve_profile(environ={RUNTIME_ENV: "D:/runtime"})
+    settings_path = tmp_path / "settings.json"
+    settings_path.write_text(
+        (ROOT / "settings.json").read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    settings = resolve_profile(environ={SETTINGS_PATH_ENV: str(settings_path)})
+
+    assert (explicit.source, explicit.environment_variable, explicit.default_used) == (
+        "explicit_argument",
+        None,
+        False,
+    )
+    assert (environment.source, environment.environment_variable, environment.default_used) == (
+        "environment",
+        PROFILE_ENV_VAR,
+        False,
+    )
+    assert (
+        fallback.name,
+        fallback.source,
+        fallback.environment_variable,
+        fallback.default_used,
+    ) == (
+        "core",
+        "settings",
+        None,
+        True,
+    )
+    assert (settings.source, settings.environment_variable, settings.default_used) == (
+        "settings",
+        SETTINGS_PATH_ENV,
+        False,
+    )
 
 
 def test_existing_profiles_expose_no_shared_session_tools():

@@ -22,7 +22,7 @@ from mcp.server.fastmcp.exceptions import ToolError
 from src.jobs.store import JOB_SCHEMA_VERSION, JobStore
 from src.tools.capabilities import get_capabilities
 from src.tools.ownership import SolverOwnership
-from src.tools.profiles import ProfileSelection, register_profiled
+from src.tools.profiles import register_profiled, resolve_profile
 from src.utils.control_plane import ControlPlaneMetrics, control_plane_metrics, measured_call
 
 
@@ -251,12 +251,7 @@ def _profiled_preflight_server() -> FastMCP:
         server,
         ownership_module.register_ownership_tools,
         frozenset({"solver_preflight"}),
-        ProfileSelection(
-            name="core",
-            environment_variable="COMSOL_MCP_SETTINGS_PATH",
-            default_used=False,
-            source="test",
-        ),
+        resolve_profile("core", environ={}),
     )
     return server
 

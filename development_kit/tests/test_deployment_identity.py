@@ -11,6 +11,7 @@ import sys
 import tomllib
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import src.tools.capabilities as capabilities_module
@@ -88,6 +89,29 @@ def test_nonobject_deployment_manifest_fails_closed(tmp_path, monkeypatch):
     assert identity["available"] is False
     assert identity["source_classification"] == "unknown"
     assert "deployment manifest unavailable" in identity["error"]
+
+
+def test_deployment_classification_is_bound_to_the_distribution_root(tmp_path, monkeypatch):
+    distribution_root = tmp_path / "runtime" / "site-packages"
+    source_lookalike = tmp_path / "workspace" / "site-packages" / "source"
+    monkeypatch.setattr(
+        capabilities_module,
+        "distribution",
+        lambda _name: SimpleNamespace(locate_file=lambda _relative: distribution_root),
+    )
+
+    assert (
+        capabilities_module._deployment_source_classification(
+            source_lookalike / "comsol_mcp" / "tools" / "capabilities.py"
+        )
+        == "source_tree"
+    )
+    assert (
+        capabilities_module._deployment_source_classification(
+            distribution_root / "comsol_mcp" / "tools" / "capabilities.py"
+        )
+        == "installed_site_package"
+    )
 
 
 def test_snapshot_identity_is_invariant_to_checkout_line_endings(tmp_path):

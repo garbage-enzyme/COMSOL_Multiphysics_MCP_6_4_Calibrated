@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass
 from types import MappingProxyType
-from typing import Any, Mapping
+from typing import Any
 
 PROFILE_NAMES = (
     "core",
@@ -775,6 +775,7 @@ def _build_registry() -> dict[str, ToolMetadata]:
     for registrar, names in _TOOLS_BY_REGISTRAR.items():
         group = _GROUP_BY_REGISTRAR[registrar.rsplit(".", 1)[-1]]
         for name in names:
+            deprecated = name == "study_staged_parametric_sweep"
             if name in _SIDE_EFFECTS:
                 side_effect_class = _SIDE_EFFECTS[name]
             elif name in _EXPLICIT_READ_ONLY_TOOLS:
@@ -789,7 +790,13 @@ def _build_registry() -> dict[str, ToolMetadata]:
                 name=name,
                 registrar=registrar,
                 group=group,
-                maturity="experimental" if name in _EXPERIMENTAL_TOOLS else "verified",
+                maturity=(
+                    "deprecated"
+                    if deprecated
+                    else "experimental"
+                    if name in _EXPERIMENTAL_TOOLS
+                    else "verified"
+                ),
                 side_effect_class=side_effect_class,
                 concurrency_class=(
                     "control_plane"
@@ -818,13 +825,9 @@ def _build_registry() -> dict[str, ToolMetadata]:
                     else "none",
                 ),
                 required_features=("comsol",) if name in _STARTS_SOLVER else (),
-                replacement_tool=(
-                    "job_submit" if name == "study_staged_parametric_sweep" else None
-                ),
-                sunset_release=("next_major" if name == "study_staged_parametric_sweep" else None),
-                deprecation_state=(
-                    "deprecated" if name == "study_staged_parametric_sweep" else "active"
-                ),
+                replacement_tool=("job_submit" if deprecated else None),
+                sunset_release=("next_major" if deprecated else None),
+                deprecation_state=("deprecated" if deprecated else "active"),
             )
     return registry
 
@@ -868,6 +871,10 @@ def validate_tool_specs(
             raise ValueError(f"ToolSpec compatibility profile is missing for {name!r}")
         if spec.maturity not in {"verified", "experimental", "deprecated"}:
             raise ValueError(f"ToolSpec maturity is invalid for {name!r}")
+        if spec.deprecation_state not in {"active", "deprecated"}:
+            raise ValueError(f"ToolSpec deprecation state is invalid for {name!r}")
+        if (spec.maturity == "deprecated") != (spec.deprecation_state == "deprecated"):
+            raise ValueError(f"ToolSpec maturity/deprecation state is inconsistent for {name!r}")
         if spec.side_effect_class == "read_only" and spec.requires_model_revision:
             raise ValueError(f"read-only ToolSpec requires a model revision: {name!r}")
         if spec.starts_solver and spec.side_effect_class not in {
@@ -921,15 +928,18 @@ def get_tool_metadata(name: str) -> ToolMetadata:
 async def snapshot_tool_schemas(server: Any) -> dict[str, dict[str, Any]]:
     """Return name-keyed public input schemas for every registered tool."""
     tools = await server.list_tools()
+    names = [tool.name for tool in tools]
+    if len(names) != len(set(names)):
+        raise ValueError("duplicate registered tool names prevent a canonical schema snapshot")
     return {tool.name: tool.inputSchema for tool in sorted(tools, key=lambda item: item.name)}
 
 
 __all__ = [
     "PROFILE_NAMES",
-    "TOOL_SPECS",
     "TOOL_METADATA",
-    "ToolSpec",
+    "TOOL_SPECS",
     "ToolMetadata",
+    "ToolSpec",
     "get_tool_metadata",
     "registrars_for_profile",
     "snapshot_tool_schemas",

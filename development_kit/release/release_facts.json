@@ -17,7 +17,7 @@
     "registry_sha256": "36917a7cb176cb2cf2244a840634c53bc4f66597ade9275444df33d2f52e54b4"
   },
   "identities": {
-    "catalog_sha256": "93b6c956496e327abfaa122717729db95e10285d776c3a6640e8b8b4fe87995a",
+    "catalog_sha256": "6c53d70b402f9b3d4ee3080699688c8d3313a0c5c78b570f5f887e0d937e188a",
     "profile_tools_sha256": "91007c83379fdf6387eca804680eef15226c03047b283410901441cdea23b93f",
     "runtime_compatibility_sha256": "f1a5ee126b15dec89fec3c5758b2d4ee5d0981a8dcd39e6b9cdca1980c82e640"
   }

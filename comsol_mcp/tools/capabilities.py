@@ -2,17 +2,26 @@
 
 from __future__ import annotations
 
-from importlib.metadata import PackageNotFoundError, version
 import json
-from pathlib import Path
 import time
+from importlib.metadata import PackageNotFoundError, distribution, version
+from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
 from comsol_mcp.build_identity import get_build_identity
 from comsol_mcp.compatibility import load_runtime_compatibility
-from comsol_mcp.environment_identity import get_environment_identity
 from comsol_mcp.durable import canonical_sha256_v1
+from comsol_mcp.environment_identity import get_environment_identity
+from comsol_mcp.path_policy import PathPolicy
+from comsol_mcp.settings import SETTINGS_PATH_ENV, settings_status
+from comsol_mcp.shared_session.contracts import (
+    SHARED_SERVER_FEATURE_ENV,
+    SHARED_SERVER_PROFILE,
+    normalize_shared_server_feature_gate,
+)
+from comsol_mcp.utils.control_plane import attach_control_plane_evidence
+
 from .catalog import PROFILE_NAMES, TOOL_METADATA
 from .profiles import (
     DEFAULT_PROFILE,
@@ -23,15 +32,6 @@ from .profiles import (
     tool_names_for_profile,
 )
 from .session_status import get_session_status
-from comsol_mcp.utils.control_plane import attach_control_plane_evidence
-from comsol_mcp.path_policy import PathPolicy
-from comsol_mcp.settings import SETTINGS_PATH_ENV, settings_status
-from comsol_mcp.shared_session.contracts import (
-    SHARED_SERVER_FEATURE_ENV,
-    SHARED_SERVER_PROFILE,
-    normalize_shared_server_feature_gate,
-)
-
 
 ARTIFACT_CHAIN_SCHEMA = "comsol_mcp.artifact_chain"
 ARTIFACT_CHAIN_SCHEMA_VERSION = "1.0.0"
@@ -78,6 +78,16 @@ session_manager = _LightweightSessionStatus()
 _DEPLOYMENT_MANIFEST = Path(__file__).resolve().parents[1] / "deployment_manifest.json"
 
 
+def _deployment_source_classification(module_file: Path | None = None) -> str:
+    module_path = (module_file or Path(__file__)).resolve()
+    try:
+        distribution_root = Path(distribution("comsol-mcp").locate_file("")).resolve()
+        module_path.relative_to(distribution_root)
+    except PackageNotFoundError, ValueError:
+        return "source_tree"
+    return "installed_site_package"
+
+
 def _catalog_contract_sha256() -> str:
     payload = {
         "profiles": {
@@ -111,12 +121,7 @@ def _deployment_identity() -> dict:
             "source_classification": "unknown",
             "error": "TypeError: deployment manifest unavailable",
         }
-    module_path = str(Path(__file__).resolve()).replace("\\", "/").casefold()
-    source_classification = (
-        "installed_site_package"
-        if "/site-packages/" in module_path
-        else "source_tree"
-    )
+    source_classification = _deployment_source_classification()
     if source_classification == "source_tree":
         from comsol_mcp import __version__
 
