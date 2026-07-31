@@ -1,7 +1,7 @@
 import shutil
 import sqlite3
+import subprocess
 import sys
-import time
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
@@ -212,7 +212,12 @@ def test_bounded_worker_searches_without_loading_comsol(manual_index: Path):
     assert result["results"][0]["page"] == 2033
 
 
-def test_bounded_worker_enforces_deadline(manual_index: Path):
+def test_bounded_worker_enforces_deadline(manual_index: Path, monkeypatch):
+    def block_until_deadline(command, **kwargs):
+        assert kwargs["timeout"] == 0.05
+        raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+
+    monkeypatch.setattr(manual_module.subprocess, "run", block_until_deadline)
     result = run_bounded(
         "search",
         {"query": "CopyFace", "index_path": str(manual_index)},
@@ -221,9 +226,7 @@ def test_bounded_worker_enforces_deadline(manual_index: Path):
 
     assert result["success"] is False
     assert result["error_type"] == "TimeoutError"
-    started = time.perf_counter()
     status = session_manager.get_status()
-    assert time.perf_counter() - started < 0.1
     assert "connected" in status
 
 

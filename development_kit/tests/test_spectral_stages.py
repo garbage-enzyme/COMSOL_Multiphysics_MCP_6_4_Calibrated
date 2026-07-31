@@ -171,6 +171,7 @@ def test_stage_is_atomically_frozen_and_exact_replay_is_idempotent(tmp_path):
     assert read_spectral_stage_plans(job, spec) == [plan]
     assert write_spectral_stage_plan(job, spec, plan) == plan
     assert (job / "stage_plans" / "000.json").read_bytes() == before
+    assert not (job / "stage_plans" / "001.json").exists()
 
 
 def test_tampering_and_noncontiguous_files_fail_closed(tmp_path):

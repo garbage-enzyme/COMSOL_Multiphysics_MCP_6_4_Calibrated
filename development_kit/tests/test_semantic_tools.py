@@ -51,15 +51,25 @@ def lightweight_deployment():
     }
     manifest_bytes = json.dumps(manifest).encode("utf-8")
     (index / "manifest.json").write_bytes(manifest_bytes)
-    (model / "model_manifest.json").write_text(json.dumps({
-        "model_sha256": "b" * 64,
-    }), encoding="utf-8")
-    (root / "current.json").write_text(json.dumps({
-        "index_path": str(index),
-        "manifest_sha256": hashlib.sha256(manifest_bytes).hexdigest(),
-        "build_id": "build-1",
-        "model_fingerprint": "b" * 64,
-    }), encoding="utf-8")
+    (model / "model_manifest.json").write_text(
+        json.dumps(
+            {
+                "model_sha256": "b" * 64,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (root / "current.json").write_text(
+        json.dumps(
+            {
+                "index_path": str(index),
+                "manifest_sha256": hashlib.sha256(manifest_bytes).hexdigest(),
+                "build_id": "build-1",
+                "model_fingerprint": "b" * 64,
+            }
+        ),
+        encoding="utf-8",
+    )
     environment = {
         "COMSOL_SEMANTIC_ROOT": str(root),
         "COMSOL_SEMANTIC_LEXICAL_INDEX": str(lexical),
@@ -73,10 +83,14 @@ def lightweight_deployment():
 
 def test_configuration_is_ascii_static_and_missing_model_degrades(lightweight_deployment):
     configured = semantic_configuration(lightweight_deployment)
-    missing = semantic_configuration({
-        "COMSOL_SEMANTIC_ROOT": lightweight_deployment["COMSOL_SEMANTIC_ROOT"],
-        "COMSOL_SEMANTIC_LEXICAL_INDEX": lightweight_deployment["COMSOL_SEMANTIC_LEXICAL_INDEX"],
-    })
+    missing = semantic_configuration(
+        {
+            "COMSOL_SEMANTIC_ROOT": lightweight_deployment["COMSOL_SEMANTIC_ROOT"],
+            "COMSOL_SEMANTIC_LEXICAL_INDEX": lightweight_deployment[
+                "COMSOL_SEMANTIC_LEXICAL_INDEX"
+            ],
+        }
+    )
 
     assert configured["configured"] is True
     assert configured["missing"] == []
@@ -134,11 +148,13 @@ def test_failed_warm_health_degrades_without_leaving_worker(lightweight_deployme
     assert cleanup["success"] is True
 
 
-def test_unconfigured_search_returns_explicit_lexical_fallback(tmp_path):
-    service = SemanticService({
-        "COMSOL_SEMANTIC_ROOT": "D:/missing-semantic-root",
-        "COMSOL_SEMANTIC_LEXICAL_INDEX": "D:/missing-semantic-lexical.sqlite3",
-    })
+def test_unconfigured_search_returns_explicit_lexical_fallback():
+    service = SemanticService(
+        {
+            "COMSOL_SEMANTIC_ROOT": "D:/missing-semantic-root",
+            "COMSOL_SEMANTIC_LEXICAL_INDEX": "D:/missing-semantic-lexical.sqlite3",
+        }
+    )
     result = service.search("CopyFace")
 
     assert result["success"] is False
@@ -165,20 +181,24 @@ def test_public_tool_schemas_expose_queries_filters_and_controls_but_no_paths(mo
             return {"success": True}
 
     import src.tools.semantic_docs as module
+
     monkeypatch.setattr(module, "get_semantic_service", lambda: FakeService())
     server = FastMCP("semantic-tools-test")
     register_semantic_doc_tools(server)
 
     async def exercise():
         listed = await server.list_tools()
-        result = await server.call_tool("semantic_search", {
-            "query": "periodic port",
-            "module": "Wave_Optics_Module",
-            "limit": 3,
-            "source": None,
-            "page_start": 10,
-            "page_end": 20,
-        })
+        result = await server.call_tool(
+            "semantic_search",
+            {
+                "query": "periodic port",
+                "module": "Wave_Optics_Module",
+                "limit": 3,
+                "source": None,
+                "page_start": 10,
+                "page_end": 20,
+            },
+        )
         status = await server.call_tool("semantic_status", {"warm": True})
         reset = await server.call_tool("semantic_worker_reset", {})
         return listed, result, status, reset

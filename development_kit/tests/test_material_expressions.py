@@ -162,6 +162,8 @@ def test_lorentz_preview_supports_both_conventions_without_silent_sign_flip():
         != second["convention_ledger"]["harmonic_convention"]
     )
     assert first["preview"][0]["epsilon"]["imag"] > 0
+    assert second["preview"][0]["epsilon"]["imag"] > 0
+    assert second["preview"] == first["preview"]
 
 
 def test_missing_units_zero_damping_and_frozen_frequency_are_explicit_warnings():

@@ -121,6 +121,41 @@ def test_configuration_and_collector_identity_change_the_fingerprint(tmp_path):
 
 
 @pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda spec: spec["initial_grid"].__setitem__("lower_m", 4.1e-6),
+        lambda spec: spec["refinement_policy"].__setitem__("span_shrink_factor", 3.0),
+        lambda spec: spec["expansion_policy"].__setitem__("span_multiplier", 1.6),
+        lambda spec: spec["analysis_policy"].__setitem__("closure_abs_tolerance", 2.0e-9),
+        lambda spec: spec["measurement_configuration"].__setitem__(
+            "baseline_rule", "window_endpoints_mean"
+        ),
+        lambda spec: spec["resource_policy"].__setitem__("max_mesh_elements", 100_001),
+        lambda spec: spec.__setitem__("cores", 3),
+    ],
+)
+def test_every_execution_policy_section_changes_spec_identity(tmp_path, mutation):
+    raw = _raw_spec(tmp_path)
+    baseline = normalize_spectral_characterization_job_spec(raw)
+    mutation(raw)
+
+    assert (
+        normalize_spectral_characterization_job_spec(raw)["spec_fingerprint"]
+        != baseline["spec_fingerprint"]
+    )
+
+
+def test_parameter_state_changes_both_nested_and_spec_identity(tmp_path):
+    raw = _raw_spec(tmp_path)
+    baseline = normalize_spectral_characterization_job_spec(raw)
+    raw["parameter_state"]["mesh"] = "changed"
+    changed = normalize_spectral_characterization_job_spec(raw)
+
+    assert changed["parameter_state_sha256"] != baseline["parameter_state_sha256"]
+    assert changed["spec_fingerprint"] != baseline["spec_fingerprint"]
+
+
+@pytest.mark.parametrize(
     "mutation,match",
     [
         (lambda spec: spec.__setitem__("automatic_tolerance", 1.0), "unsupported"),
@@ -189,6 +224,9 @@ def test_collector_top_air_identity_is_validated_at_submission(tmp_path, mutatio
 
 def test_point_cap_must_fit_the_declared_wall_budget(tmp_path):
     raw = _raw_spec(tmp_path)
+    accepted = normalize_spectral_characterization_job_spec(raw)
+    assert accepted["resource_policy"]["rules"]["wall_time_budget_seconds"] == 4000
+
     raw["resource_policy"]["wall_time_budget_seconds"] = 3999
     with pytest.raises(ValueError, match="wall-time budget"):
         normalize_spectral_characterization_job_spec(raw)

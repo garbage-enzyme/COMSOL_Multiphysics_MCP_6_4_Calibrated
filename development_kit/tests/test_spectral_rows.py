@@ -368,6 +368,36 @@ def test_one_ulp_wavelength_variants_share_one_canonical_point_identity(tmp_path
     assert exact == one_ulp_lower == one_ulp_upper
     assert exact["requested_wavelength_m"] == 5e-6
 
+    root = tmp_path / "job"
+    journal = root / "spectral_rows.jsonl"
+    artifact = _artifact(root, spec, 5e-6)
+
+    def append_variant(wavelength):
+        return append_spectral_row(
+            journal,
+            spec,
+            attempt=1,
+            stage_index=0,
+            stage_kind="initial_locator",
+            requested_wavelength_m=wavelength,
+            evaluated_wavelength_m=wavelength,
+            frequency_wavelength_m=wavelength,
+            R=0.15,
+            T=0.05,
+            A=0.8,
+            mesh_element_count=12,
+            mesh_vertex_count=8,
+            solve_seconds=0.2,
+            audit_artifact=artifact,
+            artifact_root=root,
+            created_at_epoch=1000.0,
+        )
+
+    append_variant(5e-6)
+    for variant in (4.999999999999999e-6, 5.000000000000001e-6):
+        with pytest.raises(ValueError, match="already exists"):
+            append_variant(variant)
+
 
 def test_concurrent_appends_are_serialized_and_leave_no_lock(tmp_path):
     spec = _spec(tmp_path)

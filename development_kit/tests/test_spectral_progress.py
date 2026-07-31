@@ -13,7 +13,7 @@ from src.jobs.spectral_progress import (
     build_spectral_progress,
 )
 from src.jobs.spectral_rows import read_spectral_rows
-from src.jobs.spectral_stages import build_initial_spectral_stage
+from src.jobs.spectral_stages import build_initial_spectral_stage, build_spectral_stage_plan
 
 from development_kit.tests.test_spectral_rows import (
     _append as append_durable_spectral_row,
@@ -351,18 +351,20 @@ def test_rehashed_adaptive_stage_with_changed_targets_fails_replay(tmp_path):
     initial = build_initial_spectral_stage(spec)
     rows = _rows(spec, initial, [0.1, 0.3, 0.9, 0.3, 0.1])
     progress = build_spectral_progress(spec, [initial], rows)
-    tampered = dict(progress["next_stage_plan"])
-    tampered["planning_reason"] = "attacker_selected_targets"
-    body = {key: value for key, value in tampered.items() if key != "stage_sha256"}
-    tampered["stage_sha256"] = hashlib.sha256(
-        json.dumps(
-            body,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        ).encode("utf-8")
-    ).hexdigest()
+    expected = progress["next_stage_plan"]
+    requested = expected["requested_wavelengths_m"]
+    changed_targets = [(requested[0] + requested[1]) / 2.0, *requested[1:]]
+    tampered = build_spectral_stage_plan(
+        spec,
+        stage_index=expected["stage_index"],
+        stage_kind=expected["stage_kind"],
+        planning_reason=expected["planning_reason"],
+        window_lower_m=expected["window"]["lower_m"],
+        window_upper_m=expected["window"]["upper_m"],
+        requested_wavelengths_m=changed_targets,
+        previous_stage_sha256=expected["previous_stage_sha256"],
+        evidence_row_sha256=expected["evidence_row_sha256"],
+    )
 
     with pytest.raises(ValueError, match="deterministic evidence replay"):
         build_spectral_progress(spec, [initial, tampered], rows)

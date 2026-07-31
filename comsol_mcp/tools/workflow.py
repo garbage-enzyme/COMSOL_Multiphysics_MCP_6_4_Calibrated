@@ -89,9 +89,12 @@ def _scalarize(value: Any) -> Any:
 
 def _csv_value(value: Any) -> Any:
     if isinstance(value, complex):
-        return f"{value.real}+{value.imag}i"
+        sign = "-" if value.imag < 0 else "+"
+        return f"{value.real}{sign}{abs(value.imag)}i"
     if isinstance(value, dict) and set(value) == {"real", "imag"}:
-        return f"{value['real']}+{value['imag']}i"
+        imaginary = value["imag"]
+        sign = "-" if imaginary < 0 else "+"
+        return f"{value['real']}{sign}{abs(imaginary)}i"
     if isinstance(value, list):
         return ";".join(_csv_value(v) for v in value)
     return value
@@ -101,10 +104,7 @@ def _evaluate_expressions(model, expressions: Sequence[str]) -> dict[str, Any]:
     results = model.evaluate(list(expressions))
     if len(expressions) == 1:
         return {expressions[0]: _scalarize(results)}
-    return {
-        expr: _scalarize(value)
-        for expr, value in zip(expressions, results)
-    }
+    return {expr: _scalarize(value) for expr, value in zip(expressions, results)}
 
 
 def _validate_csv_column_names(
@@ -157,9 +157,7 @@ def _write_rows_csv(
                 for row in existing_rows:
                     if "status" in active_fieldnames and not row.get("status"):
                         row["status"] = "success"
-                    writer.writerow(
-                        {key: _csv_value(row.get(key)) for key in active_fieldnames}
-                    )
+                    writer.writerow({key: _csv_value(row.get(key)) for key in active_fieldnames})
                 migrated.flush()
                 os.fsync(migrated.fileno())
     with path.open(mode, newline="", encoding="utf-8") as handle:
@@ -171,9 +169,7 @@ def _write_rows_csv(
         if mode == "w":
             writer.writeheader()
         for row in rows:
-            writer.writerow(
-                {key: _csv_value(row.get(key)) for key in active_fieldnames}
-            )
+            writer.writerow({key: _csv_value(row.get(key)) for key in active_fieldnames})
         handle.flush()
         os.fsync(handle.fileno())
 
@@ -338,7 +334,7 @@ def _finite_csv_value(value: Optional[str]) -> tuple[bool, list[float]]:
                 components = [float(parsed.real), float(parsed.imag)]
             else:
                 components = [float(token)]
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return False, []
         if not all(math.isfinite(component) for component in components):
             return False, []
@@ -642,11 +638,7 @@ def _run_bounded_sweep_hook(
             raise ValueError(f"{phase} hook journal_entries_appended is out of bounds")
     if "next_attempt_sequence" in result:
         sequence = result["next_attempt_sequence"]
-        if (
-            isinstance(sequence, bool)
-            or not isinstance(sequence, int)
-            or not 0 <= sequence <= 4096
-        ):
+        if isinstance(sequence, bool) or not isinstance(sequence, int) or not 0 <= sequence <= 4096:
             raise ValueError(f"{phase} hook next_attempt_sequence is out of bounds")
     if "latest_entry_sha256" in result:
         digest = result["latest_entry_sha256"]
@@ -773,7 +765,8 @@ def run_staged_parametric_sweep(
         "parameter_value",
         *(
             ["requested_wavelength", "evaluated_wl", "evaluated_c_const_over_ewfd_freq"]
-            if record_wavelength_controls else []
+            if record_wavelength_controls
+            else []
         ),
         "status",
         "attempt",
@@ -901,7 +894,8 @@ def run_staged_parametric_sweep(
                 evaluation_expressions = list(expressions)
                 if record_wavelength_controls:
                     evaluation_expressions.extend(
-                        expression for expression in ("wl", "c_const/ewfd.freq")
+                        expression
+                        for expression in ("wl", "c_const/ewfd.freq")
                         if expression not in evaluation_expressions
                     )
                 evaluated_all = _evaluate_expressions(model, evaluation_expressions)
@@ -928,9 +922,7 @@ def run_staged_parametric_sweep(
                     row.update(
                         requested_wavelength=parameter_value,
                         evaluated_wl=evaluated_all["wl"],
-                        evaluated_c_const_over_ewfd_freq=evaluated_all[
-                            "c_const/ewfd.freq"
-                        ],
+                        evaluated_c_const_over_ewfd_freq=evaluated_all["c_const/ewfd.freq"],
                     )
             except Exception as exc:
                 if attempt <= max_retries:
@@ -993,11 +985,7 @@ def run_staged_parametric_sweep(
             if action in {"await_confirmation", "checkpoint_no_start"}:
                 stopped_early = True
                 stop_reason = f"after_durable_row_{action}"
-        if (
-            terminal_error is None
-            and checkpoint_model_path
-            and len(rows) % checkpoint_every == 0
-        ):
+        if terminal_error is None and checkpoint_model_path and len(rows) % checkpoint_every == 0:
             try:
                 _save_model(
                     model,
@@ -1022,12 +1010,7 @@ def run_staged_parametric_sweep(
 
     if workflow_error is None and save_model_path:
         _save_model(model, save_model_path, save_copy=save_model_copy)
-    elif (
-        workflow_error is None
-        and checkpoint_model_path
-        and rows
-        and checkpointed_at != len(rows)
-    ):
+    elif workflow_error is None and checkpoint_model_path and rows and checkpointed_at != len(rows):
         _save_model(model, checkpoint_model_path, save_copy=save_model_copy)
 
     return {
@@ -1240,7 +1223,9 @@ def run_mesh_convergence(
             "error_type": type(exc).__name__,
             "error": str(exc),
             "csv_path": csv_path,
-            "manifest_path": str(resolved_manifest_path) if "resolved_manifest_path" in locals() and resolved_manifest_path else manifest_path,
+            "manifest_path": str(resolved_manifest_path)
+            if "resolved_manifest_path" in locals() and resolved_manifest_path
+            else manifest_path,
         }
     skipped = 0
     checkpointed_at = 0
@@ -1333,11 +1318,7 @@ def run_mesh_convergence(
             rows.append(row)
         else:
             failed_rows.append(row)
-        if (
-            terminal_error is None
-            and checkpoint_model_path
-            and len(rows) % checkpoint_every == 0
-        ):
+        if terminal_error is None and checkpoint_model_path and len(rows) % checkpoint_every == 0:
             try:
                 _save_model(model, checkpoint_model_path)
                 checkpointed_at = len(rows)
@@ -1356,12 +1337,7 @@ def run_mesh_convergence(
 
     if workflow_error is None and save_model_path:
         _save_model(model, save_model_path)
-    elif (
-        workflow_error is None
-        and checkpoint_model_path
-        and rows
-        and checkpointed_at != len(rows)
-    ):
+    elif workflow_error is None and checkpoint_model_path and rows and checkpointed_at != len(rows):
         _save_model(model, checkpoint_model_path)
 
     return {
@@ -1471,7 +1447,10 @@ def register_workflow_tools(mcp: FastMCP) -> None:
             }
         model = session_manager.get_model(model_name)
         if model is None:
-            return {"success": False, "error": f"Model not found: {model_name or 'no current model'}"}
+            return {
+                "success": False,
+                "error": f"Model not found: {model_name or 'no current model'}",
+            }
 
         try:
             return run_staged_parametric_sweep(
@@ -1581,7 +1560,10 @@ def register_workflow_tools(mcp: FastMCP) -> None:
             }
         model = session_manager.get_model(model_name)
         if model is None:
-            return {"success": False, "error": f"Model not found: {model_name or 'no current model'}"}
+            return {
+                "success": False,
+                "error": f"Model not found: {model_name or 'no current model'}",
+            }
 
         try:
             if csv_path and not append_csv and not resume_csv:
