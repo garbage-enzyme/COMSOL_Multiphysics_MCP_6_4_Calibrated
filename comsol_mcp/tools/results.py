@@ -41,6 +41,14 @@ def _json_safe(value: Any) -> Any:
     return value
 
 
+def _json_safe_solution_axis(values: Any) -> list[Any]:
+    raw_values = values.tolist() if hasattr(values, "tolist") else list(values)
+    normalized = _json_safe(raw_values)
+    if not isinstance(normalized, list):
+        raise ValueError("solution axis values must be a list")
+    return normalized
+
+
 def evaluate_result(
     model,
     expression: Union[str, Sequence[str]],
@@ -83,6 +91,8 @@ def evaluate_global_result(
     array = np.asarray(result)
     if array.size == 0:
         raise ValueError("Global evaluation returned no values.")
+    if array.size != 1:
+        raise ValueError("Global evaluation must return exactly one value.")
     value = _json_safe(array.reshape(-1)[0])
     return {
         "success": True,
@@ -220,13 +230,15 @@ def register_results_tools(mcp: FastMCP) -> None:
 
         try:
             indices, values = model.inner(dataset)
+            normalized_indices = _json_safe_solution_axis(indices)
+            normalized_values = _json_safe_solution_axis(values)
 
             return {
                 "success": True,
                 "dataset": dataset,
-                "indices": indices.tolist() if hasattr(indices, "tolist") else list(indices),
-                "values": values.tolist() if hasattr(values, "tolist") else list(values),
-                "count": len(values),
+                "indices": normalized_indices,
+                "values": normalized_values,
+                "count": len(normalized_values),
             }
         except Exception as e:
             return {"success": False, "error": f"Failed to get inner values: {str(e)}"}
@@ -254,13 +266,15 @@ def register_results_tools(mcp: FastMCP) -> None:
 
         try:
             indices, values = model.outer(dataset)
+            normalized_indices = _json_safe_solution_axis(indices)
+            normalized_values = _json_safe_solution_axis(values)
 
             return {
                 "success": True,
                 "dataset": dataset,
-                "indices": indices.tolist() if hasattr(indices, "tolist") else list(indices),
-                "values": values.tolist() if hasattr(values, "tolist") else list(values),
-                "count": len(values),
+                "indices": normalized_indices,
+                "values": normalized_values,
+                "count": len(normalized_values),
             }
         except Exception as e:
             return {"success": False, "error": f"Failed to get outer values: {str(e)}"}

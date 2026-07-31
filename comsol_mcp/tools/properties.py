@@ -23,6 +23,9 @@ _CONTAINERS = frozenset({
     "geometry_feature", "physics_feature", "mesh_feature", "study_step",
     "result_feature",
 })
+_COMPONENT_SCOPED_CONTAINERS = frozenset({
+    "geometry_feature", "physics_feature", "mesh_feature",
+})
 _TAG = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 
 
@@ -56,9 +59,11 @@ def _resolve_existing_target(
         component_name, container, feature_tag, property_name
     )
     jm = model.java
-    component = jm.component(component_name)
-    if component is None:
-        raise ValueError(f"component does not exist: {component_name}")
+    component = None
+    if container in _COMPONENT_SCOPED_CONTAINERS:
+        component = jm.component(component_name)
+        if component is None:
+            raise ValueError(f"component does not exist: {component_name}")
 
     if container == "geometry_feature":
         target = component.geom(parent_tag).feature().get(child_tag)

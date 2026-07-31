@@ -17,7 +17,11 @@ import psutil
 import pytest
 import src.tools.ownership as ownership_module
 from src.shared_session.identity import normalize_attached_server_identity
-from src.tools.ownership import SolverOwnership, _command_signature
+from src.tools.ownership import (
+    SolverOwnership,
+    _command_signature,
+    _configured_java_home_is_usable,
+)
 
 
 @pytest.fixture()
@@ -39,6 +43,22 @@ def process(pid: int, created: float, command: list[str], parent_pid: int = 0):
         "command_line": command,
         "executable": command[0],
     }
+
+
+def test_configured_java_home_requires_the_windows_java_executable(tmp_path):
+    regular_file = tmp_path / "not-a-home"
+    regular_file.write_text("not java", encoding="utf-8")
+    empty_home = tmp_path / "empty-home"
+    empty_home.mkdir()
+    valid_home = tmp_path / "valid-home"
+    java = valid_home / "bin" / "java.exe"
+    java.parent.mkdir(parents=True)
+    java.write_bytes(b"java")
+
+    assert _configured_java_home_is_usable(None) is False
+    assert _configured_java_home_is_usable(str(regular_file)) is False
+    assert _configured_java_home_is_usable(str(empty_home)) is False
+    assert _configured_java_home_is_usable(str(valid_home)) is True
 
 
 def owner(runtime_dir: Path, pid: int, created: float, command: list[str], records):

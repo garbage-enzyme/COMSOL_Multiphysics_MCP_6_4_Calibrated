@@ -140,6 +140,16 @@ def test_property_get_resolves_each_allowlisted_container(feature, container):
     assert result["target"].endswith("parent1/child1/size")
 
 
+@pytest.mark.parametrize("container", ["study_step", "result_feature"])
+def test_model_level_property_targets_do_not_require_an_unrelated_component(feature, container):
+    result = get_existing_property(
+        FakeModel(feature), "missing_component", container, "parent1/child1", "size"
+    )
+
+    assert result["success"] is True
+    assert result["value"] == ["1", "2", "3"]
+
+
 @pytest.mark.parametrize(
     "property_name, new_value",
     [

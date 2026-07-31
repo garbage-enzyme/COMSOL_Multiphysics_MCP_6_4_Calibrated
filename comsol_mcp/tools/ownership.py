@@ -328,6 +328,12 @@ def _command_signature(command_line: list[str]) -> str:
     return hashlib.sha256(canonical.encode("utf-8", errors="replace")).hexdigest()
 
 
+def _configured_java_home_is_usable(java_home: str | None) -> bool:
+    if not java_home:
+        return False
+    return (Path(java_home) / "bin" / "java.exe").is_file()
+
+
 def _lease_process_identity(
     lease: dict[str, Any],
 ) -> tuple[dict[str, Any] | None, str | None]:
@@ -1066,7 +1072,7 @@ class SolverOwnership:
         mph_version, detected_backends, discovery_error = _discover_comsol_backends_without_mph()
         if discovery_error:
             warnings.append(f"COMSOL backend discovery failed: {discovery_error}")
-        usable_jre = bool(java_home and Path(java_home).exists()) or any(
+        usable_jre = _configured_java_home_is_usable(java_home) or any(
             Path(item["jvm"]).is_file() for item in detected_backends
         )
         if not usable_jre:
