@@ -44,9 +44,15 @@ def register_all_tools(
     from .knowledge.lexical_manual import register_lexical_manual_tools
     from .tools import register_tool_modules
 
-    register_tool_modules(target, selection)
-    register_profiled(target, register_knowledge_tools, enabled_names, selection)
-    register_profiled(target, register_lexical_manual_tools, enabled_names, selection)
+    original_tools = dict(target._tool_manager._tools)
+    try:
+        register_tool_modules(target, selection)
+        register_profiled(target, register_knowledge_tools, enabled_names, selection)
+        register_profiled(target, register_lexical_manual_tools, enabled_names, selection)
+    except Exception:
+        target._tool_manager._tools.clear()
+        target._tool_manager._tools.update(original_tools)
+        raise
     _tool_servers[target] = selection
     logger.info("Registered %d tools for profile %s", len(enabled_names), selection.name)
     return selection

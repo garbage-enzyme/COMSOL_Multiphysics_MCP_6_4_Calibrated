@@ -6,6 +6,7 @@ import sys
 import uuid
 from pathlib import Path
 
+import pytest
 import src.server as server_module
 from mcp.server.fastmcp import FastMCP
 from src.server import create_server, register_all_resources, register_all_tools
@@ -65,6 +66,128 @@ def test_server_registration_is_idempotent():
 
     assert set(server._tool_manager._tools) == tool_names
     assert set(server._resource_manager._resources) == resource_names
+
+
+def test_partial_tool_registration_rolls_back_and_can_be_retried(monkeypatch):
+    import src.knowledge.embedded as embedded_module
+    import src.knowledge.lexical_manual as lexical_module
+    import src.tools as tools_module
+
+    server = FastMCP("transactional-registration")
+
+    @server.tool(name="existing_tool")
+    def existing_tool() -> dict:
+        return {"success": True}
+
+    original = dict(server._tool_manager._tools)
+
+    def fail_after_partial_registration(target, _selection):
+        @target.tool(name="partial_tool")
+        def partial_tool() -> dict:
+            return {"success": True}
+
+        raise RuntimeError("injected registrar failure")
+
+    monkeypatch.setattr(tools_module, "register_tool_modules", fail_after_partial_registration)
+    monkeypatch.setattr(embedded_module, "register_knowledge_tools", lambda _server: None)
+    monkeypatch.setattr(lexical_module, "register_lexical_manual_tools", lambda _server: None)
+
+    with pytest.raises(RuntimeError, match="registrar failure"):
+        register_all_tools(server, "core")
+
+    assert server._tool_manager._tools == original
+
+    def complete_registration(target, _selection):
+        @target.tool(name="completed_tool")
+        def completed_tool() -> dict:
+            return {"success": True}
+
+    monkeypatch.setattr(tools_module, "register_tool_modules", complete_registration)
+
+    selection = register_all_tools(server, "core")
+
+    assert selection.name == "core"
+    assert set(server._tool_manager._tools) == {"existing_tool", "completed_tool"}
+
+
+def test_model_resources_escape_untrusted_markdown(monkeypatch):
+    import src.resources.model_resources as resources_module
+
+    malicious = "node|name\n## Injected *bold* `tick`"
+
+    class Model:
+        def name(self):
+            return malicious
+
+        def file(self):
+            return malicious
+
+        def version(self):
+            return malicious
+
+        def parameters(self):
+            return {malicious: "1|2 `value`"}
+
+        def descriptions(self):
+            return {malicious: malicious}
+
+        def problems(self):
+            return [{"node": malicious, "message": malicious}]
+
+        def physics(self):
+            return [malicious]
+
+        def multiphysics(self):
+            return [malicious]
+
+        def __getattr__(self, name):
+            if name in {
+                "components",
+                "datasets",
+                "exports",
+                "functions",
+                "geometries",
+                "materials",
+                "meshes",
+                "plots",
+                "selections",
+                "solutions",
+                "studies",
+            }:
+                return lambda: [malicious]
+            raise AttributeError(name)
+
+    monkeypatch.setattr(resources_module.session_manager, "get_model", lambda _name: Model())
+    monkeypatch.setattr(
+        resources_module.session_manager,
+        "get_status",
+        lambda: {
+            "connected": True,
+            "version": malicious,
+            "cores": malicious,
+            "standalone": True,
+            "models": [{"name": malicious, "file": malicious}],
+            "current_model": malicious,
+        },
+    )
+    server = FastMCP("escaped-resources")
+    resources_module.register_model_resources(server)
+
+    session = server._resource_manager._resources["comsol://session/info"].fn()
+    tree = server._resource_manager._templates["comsol://model/{name}/tree"].fn("model")
+    parameters = server._resource_manager._templates[
+        "comsol://model/{name}/parameters"
+    ].fn("model")
+    physics = server._resource_manager._templates["comsol://model/{name}/physics"].fn(
+        "model"
+    )
+
+    for document in (session, tree, parameters, physics):
+        assert "\n## Injected" not in document
+        assert "\\|" in document
+        assert "\\*bold\\*" in document
+        assert "\\`tick\\`" in document
+    assert "``1\\|2 `value```" in parameters
 
 
 def test_default_registration_does_not_import_semantic_stack():

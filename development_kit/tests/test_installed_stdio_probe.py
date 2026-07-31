@@ -30,6 +30,11 @@ def test_tool_payload_accepts_structured_or_text_json_objects():
         content=[SimpleNamespace(text=json.dumps({"value": 3}))],
     )
     assert _tool_payload(text) == {"value": 3}
+    wrapped_text = SimpleNamespace(
+        structuredContent=None,
+        content=[SimpleNamespace(text=json.dumps({"result": {"value": 3}}))],
+    )
+    assert _tool_payload(wrapped_text) == {"value": 3}
 
     structured_with_metadata = SimpleNamespace(
         structuredContent={"result": {"value": 4}, "request_id": "request-1"}

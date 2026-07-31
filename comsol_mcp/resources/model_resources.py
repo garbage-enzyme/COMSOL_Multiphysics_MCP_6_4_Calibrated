@@ -1,12 +1,33 @@
 """MCP Resources for COMSOL model information."""
 
+import html
 import logging
+import re
 
 from mcp.server.fastmcp import FastMCP
 
 from ..tools.session import session_manager
 
 logger = logging.getLogger(__name__)
+
+_BACKTICK_RUN = re.compile(r"`+")
+
+
+def _markdown_text(value: object) -> str:
+    """Render one untrusted value as inert single-line Markdown text."""
+    text = html.escape(str(value).replace("\r", " ").replace("\n", " "), quote=False)
+    text = text.replace("\\", "\\\\")
+    for character in ("`", "*", "_", "[", "]", "|"):
+        text = text.replace(character, f"\\{character}")
+    return text
+
+
+def _markdown_code(value: object) -> str:
+    """Render one untrusted value in a code span with a non-conflicting fence."""
+    text = str(value).replace("\r", " ").replace("\n", " ").replace("|", "\\|")
+    longest = max((len(match.group(0)) for match in _BACKTICK_RUN.finditer(text)), default=0)
+    fence = "`" * (longest + 1)
+    return f"{fence}{text}{fence}"
 
 
 def register_model_resources(mcp: FastMCP) -> None:
@@ -27,8 +48,8 @@ def register_model_resources(mcp: FastMCP) -> None:
         lines = [
             "# COMSOL Session Status",
             "",
-            f"**Version:** {status.get('version', 'unknown')}",
-            f"**Cores:** {status.get('cores', 'unknown')}",
+            f"**Version:** {_markdown_text(status.get('version', 'unknown'))}",
+            f"**Cores:** {_markdown_text(status.get('cores', 'unknown'))}",
             f"**Mode:** {'Standalone' if status.get('standalone') else 'Client-Server'}",
             "",
             "## Loaded Models",
@@ -44,9 +65,9 @@ def register_model_resources(mcp: FastMCP) -> None:
             for model in models:
                 name = model.get("name", "unnamed")
                 marker = " (current)" if name == current else ""
-                lines.append(f"- **{name}**{marker}")
+                lines.append(f"- **{_markdown_text(name)}**{marker}")
                 if model.get("file"):
-                    lines.append(f"  - File: {model['file']}")
+                    lines.append(f"  - File: {_markdown_text(model['file'])}")
         
         return "\n".join(lines)
     
@@ -62,14 +83,17 @@ def register_model_resources(mcp: FastMCP) -> None:
         """
         model = session_manager.get_model(name)
         if model is None:
-            return f"# Model Not Found\n\nModel '{name}' not found in current session."
+            return (
+                f"# Model Not Found\n\nModel '{_markdown_text(name)}' "
+                "not found in current session."
+            )
         
         try:
             lines = [
-                f"# Model Tree: {model.name()}",
+                f"# Model Tree: {_markdown_text(model.name())}",
                 "",
-                f"**File:** {model.file() or 'Not saved'}",
-                f"**COMSOL Version:** {model.version()}",
+                f"**File:** {_markdown_text(model.file() or 'Not saved')}",
+                f"**COMSOL Version:** {_markdown_text(model.version())}",
                 "",
             ]
             
@@ -95,14 +119,17 @@ def register_model_resources(mcp: FastMCP) -> None:
                 if items:
                     lines.append(f"## {title}")
                     for item in items:
-                        lines.append(f"- {item}")
+                        lines.append(f"- {_markdown_text(item)}")
                     lines.append("")
             
             problems = model.problems()
             if problems:
                 lines.append("## Problems")
                 for problem in problems:
-                    lines.append(f"- **{problem.get('node', 'unknown')}**: {problem.get('message', '')}")
+                    lines.append(
+                        f"- **{_markdown_text(problem.get('node', 'unknown'))}**: "
+                        f"{_markdown_text(problem.get('message', ''))}"
+                    )
                 lines.append("")
             
             return "\n".join(lines)
@@ -122,14 +149,17 @@ def register_model_resources(mcp: FastMCP) -> None:
         """
         model = session_manager.get_model(name)
         if model is None:
-            return f"# Model Not Found\n\nModel '{name}' not found in current session."
+            return (
+                f"# Model Not Found\n\nModel '{_markdown_text(name)}' "
+                "not found in current session."
+            )
         
         try:
             params = model.parameters()
             descriptions = model.descriptions()
             
             lines = [
-                f"# Parameters: {model.name()}",
+                f"# Parameters: {_markdown_text(model.name())}",
                 "",
                 "| Name | Value | Description |",
                 "|------|-------|-------------|",
@@ -137,7 +167,10 @@ def register_model_resources(mcp: FastMCP) -> None:
             
             for param_name, value in params.items():
                 desc = descriptions.get(param_name, "")
-                lines.append(f"| {param_name} | `{value}` | {desc} |")
+                lines.append(
+                    f"| {_markdown_text(param_name)} | {_markdown_code(value)} | "
+                    f"{_markdown_text(desc)} |"
+                )
             
             return "\n".join(lines)
         except Exception:
@@ -156,27 +189,30 @@ def register_model_resources(mcp: FastMCP) -> None:
         """
         model = session_manager.get_model(name)
         if model is None:
-            return f"# Model Not Found\n\nModel '{name}' not found in current session."
+            return (
+                f"# Model Not Found\n\nModel '{_markdown_text(name)}' "
+                "not found in current session."
+            )
         
         try:
             physics_list = model.physics()
             multiphysics_list = model.multiphysics()
             
             lines = [
-                f"# Physics: {model.name()}",
+                f"# Physics: {_markdown_text(model.name())}",
                 "",
             ]
             
             if physics_list:
                 lines.append("## Physics Interfaces")
                 for p in physics_list:
-                    lines.append(f"- {p}")
+                    lines.append(f"- {_markdown_text(p)}")
                 lines.append("")
             
             if multiphysics_list:
                 lines.append("## Multiphysics Couplings")
                 for m in multiphysics_list:
-                    lines.append(f"- {m}")
+                    lines.append(f"- {_markdown_text(m)}")
                 lines.append("")
             
             if not physics_list and not multiphysics_list:
