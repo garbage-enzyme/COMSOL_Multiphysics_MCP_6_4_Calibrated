@@ -43,6 +43,7 @@ models are intentionally absent.
 
 - `recipes/_paths.py` — This module provides shared ASCII-safe paths for standalone recipes.
 - `recipes/_mim_safety.py` — This module provides fail-closed topology, property, sweep, result, and save contracts for standalone MIM recipes.
+- `recipes/acoustic_duct_2d.py` — This script builds and optionally validates a minimal analytical two-dimensional Pressure Acoustics duct.
 - `recipes/acdc_2d_differential_coils.py` — This script builds a two-coil Induction Currents model from a caller-supplied baseline.
 - `recipes/mim_drude_sweep.py` — This script demonstrates a durable Drude-material parameter sweep.
 - `recipes/mim_lml_continuous.py` — This script demonstrates a continuous layered-metal workflow.
@@ -108,6 +109,7 @@ models are intentionally absent.
 ## Licensed and subprocess integration tests
 
 - `development_kit/tests/integration/__init__.py` — This file marks explicit subprocess-isolated integration tests as a Python package.
+- `development_kit/tests/integration/probes/acoustics_pde.py` — This probe validates analytical Pressure Acoustics and Poisson PDE models plus the typed interface surface.
 - `development_kit/tests/integration/clientapi_property_acceptance.py` — This gate checks constrained clientapi property round trips without solving.
 - `development_kit/tests/integration/coordinator_claim_kill.py` — This helper stops only the exact coordinator process after a durable claim.
 - `development_kit/tests/integration/convergence_campaign_acceptance.py` — This runner executes one explicit licensed durable convergence campaign.
@@ -136,6 +138,8 @@ models are intentionally absent.
 ## Dependency and process tests
 
 - `development_kit/tests/test_acceptance_cleanup.py` — This module tests licensed-gate cleanup accounting without starting COMSOL.
+- `development_kit/tests/test_acoustic_duct_recipe.py` — This module tests staging, cleanup ordering, collision refusal, and sharing retries for the acoustic recipe.
+- `development_kit/tests/test_acoustics_pde.py` — This module tests bounded Acoustics and mathematical PDE interface and boundary transactions without COMSOL.
 - `development_kit/tests/test_artifact_chain.py` — This module tests bounded solver-free artifact hash-chain verification.
 - `development_kit/tests/test_acdc_differential_coils_recipe.py` — This module tests static portability and input contracts for the differential-coil recipe.
 - `development_kit/tests/test_attached_job_backend.py` — This module tests immutable attached-job targets, handoff, worker execution, resume, cancellation, and preservation.
@@ -183,6 +187,7 @@ models are intentionally absent.
 - `development_kit/tests/test_field_sampling.py` — This module tests bounded slice selection from raw field samples.
 - `development_kit/tests/test_field_tools.py` — This module tests public field discovery and extraction adapters.
 - `development_kit/tests/test_geometry.py` — This module tests geometry helpers without a COMSOL client.
+- `development_kit/tests/test_geometry_selections.py` — This module tests bounded named Box and rectangular-side selection transactions without COMSOL.
 - `development_kit/tests/test_incidence_config.py` — This module tests typed periodic incidence preview and mutation gates.
 - `development_kit/tests/test_integration_boundaries.py` — This module tests isolation and safety boundaries for integration probes.
 - `development_kit/tests/test_installed_stdio_probe.py` — This module tests installed stdio probe result decoding.
@@ -407,6 +412,7 @@ models are intentionally absent.
 - `comsol_mcp/tools/evidence_integrity.py` — This module exposes solver-free evidence-integrity status and formal verification tools.
 - `comsol_mcp/tools/field_evidence.py` — This module exposes read-only field discovery and extraction tools.
 - `comsol_mcp/tools/geometry.py` — This module exposes COMSOL geometry tools.
+- `comsol_mcp/tools/geometry_selections.py` — This module exposes bounded named Box and rectangular-side selections.
 - `comsol_mcp/tools/incidence_config.py` — This module exposes typed periodic incidence preview and mutation gates.
 - `comsol_mcp/tools/jobs.py` — This module exposes durable job submission and control tools.
 - `comsol_mcp/tools/material_expressions.py` — This module exposes solver-free material-expression preview tools.
@@ -417,6 +423,7 @@ models are intentionally absent.
 - `comsol_mcp/tools/parameters.py` — This module exposes COMSOL parameter tools.
 - `comsol_mcp/tools/periodic_mesh_audit.py` — This module exposes periodic geometry and mesh evidence tools.
 - `comsol_mcp/tools/physics.py` — This module exposes COMSOL physics and multiphysics tools.
+- `comsol_mcp/tools/acoustics_pde.py` — This module exposes constrained Pressure Acoustics and mathematical PDE tools.
 - `comsol_mcp/tools/profiles.py` — This module resolves static profiles and filters tool registration.
 - `comsol_mcp/tools/session_status.py` — This module stores last-known session booleans without importing COMSOL or MPh.
 - `comsol_mcp/tools/properties.py` — This module exposes constrained clientapi property access.

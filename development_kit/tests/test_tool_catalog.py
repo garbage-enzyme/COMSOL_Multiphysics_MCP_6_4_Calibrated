@@ -39,7 +39,7 @@ def test_full_tool_schema_snapshot_is_stable():
     actual = asyncio.run(snapshot_tool_schemas(server))
     expected = json.loads(SNAPSHOT_PATH.read_text(encoding="utf-8"))
 
-    assert len(actual) == 135
+    assert len(actual) == 147
     assert actual == expected
 
 
@@ -87,7 +87,7 @@ def test_every_registered_tool_has_complete_canonical_metadata():
     expected_names = set(json.loads(SNAPSHOT_PATH.read_text(encoding="utf-8")))
 
     assert set(TOOL_METADATA) == expected_names
-    assert len(TOOL_METADATA) == 135
+    assert len(TOOL_METADATA) == 147
     for name, metadata in TOOL_METADATA.items():
         assert metadata.name == name
         assert metadata.registrar.startswith("comsol_mcp.")
@@ -112,7 +112,7 @@ def test_tool_specs_are_the_validated_canonical_registry():
     assert TOOL_SPECS is TOOL_METADATA
     assert validate_tool_specs() == {
         "valid": True,
-        "tool_count": 135,
+        "tool_count": 147,
         "profile_count": len(PROFILE_NAMES),
     }
     for spec in TOOL_SPECS.values():
@@ -120,6 +120,29 @@ def test_tool_specs_are_the_validated_canonical_registry():
         assert spec.output_contract.startswith("tool-output/")
         assert dict(spec.structural_limits)["request_bytes"] > 0
         assert dict(spec.structural_limits)["response_bytes"] > 0
+
+
+def test_licensed_acoustics_and_pde_tools_are_verified_in_basic_fem():
+    mutation_tools = {
+        "geometry_create_box_selection",
+        "geometry_create_side_selections",
+        "physics_add_pressure_acoustics",
+        "physics_add_coefficient_form_pde",
+        "physics_add_general_form_pde",
+        "physics_add_weak_form_pde",
+        "physics_configure_acoustic_boundary",
+        "physics_setup_acoustic_boundaries",
+        "physics_configure_pde_boundary",
+        "physics_setup_pde_boundaries",
+    }
+
+    for name in mutation_tools:
+        metadata = TOOL_METADATA[name]
+        assert metadata.maturity == "verified"
+        assert metadata.side_effect_class == "model_mutation"
+        assert metadata.concurrency_class == "comsol_bound"
+        assert metadata.requires_model_revision is True
+        assert {"basic_fem", "experimental", "full"} <= set(metadata.intended_profiles)
 
 
 def test_new_tool_without_explicit_side_effect_class_fails_closed(monkeypatch):
@@ -296,6 +319,28 @@ def test_embedded_knowledge_responses_do_not_expose_module_state():
     assert embedded_module.get_best_practices("mesh")["best_practices"]["tips"]
 
 
+def test_embedded_guides_publish_exact_acoustics_and_pde_boundaries():
+    acoustic = embedded_module.get_physics_guide("pressure_acoustics")
+    pde = embedded_module.get_physics_guide("mathematical_pde")
+
+    assert acoustic["guide"]["tool_to_add"] == "physics_add_pressure_acoustics"
+    assert acoustic["guide"]["common_boundary_conditions"] == [
+        "SoundHard",
+        "SoundSoft",
+        "Pressure",
+        "Impedance",
+        "NormalAcceleration",
+        "NormalVelocity",
+        "PlaneWaveRadiation",
+    ]
+    assert pde["guide"]["common_boundary_conditions"] == [
+        "DirichletBoundary",
+        "FluxBoundary",
+        "ZeroFluxBoundary",
+        "PeriodicCondition",
+    ]
+
+
 def test_metadata_registrars_match_actual_registration():
     registrars = []
     for registrar_path in registrars_for_profile("full"):
@@ -318,7 +363,7 @@ def test_catalog_import_cannot_start_comsol():
 import mph
 mph.Client = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError('Client called'))
 from src.tools.catalog import TOOL_METADATA
-assert len(TOOL_METADATA) == 135
+assert len(TOOL_METADATA) == 147
 """
     completed = subprocess.run(
         [sys.executable, "-c", code],

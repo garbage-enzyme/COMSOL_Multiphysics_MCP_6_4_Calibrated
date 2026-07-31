@@ -1,24 +1,38 @@
 {
-  "schema_name": "comsol_mcp.release_facts",
-  "schema_version": "1.0.0",
-  "package_version": "0.2.0",
-  "tool_count": 135,
-  "profiles": {
-    "core": {"tool_count": 43},
-    "basic_fem": {"tool_count": 81},
-    "wave_optics": {"tool_count": 67},
-    "semantic_docs": {"tool_count": 46},
-    "desktop_shared": {"tool_count": 19},
-    "experimental": {"tool_count": 69},
-    "full": {"tool_count": 135}
+  "identities": {
+    "catalog_sha256": "a3ea717534401586e1fba0a882ef447318dc193a2f80a359b8078f6fbf662d67",
+    "profile_tools_sha256": "49ec9f2b28a4ac74a15d0680182122a9bdb4e1521c99718dd51cc6a3068b0b42",
+    "runtime_compatibility_sha256": "f1a5ee126b15dec89fec3c5758b2d4ee5d0981a8dcd39e6b9cdca1980c82e640"
   },
+  "package_version": "0.2.0",
+  "profiles": {
+    "basic_fem": {
+      "tool_count": 93
+    },
+    "core": {
+      "tool_count": 43
+    },
+    "desktop_shared": {
+      "tool_count": 19
+    },
+    "experimental": {
+      "tool_count": 81
+    },
+    "full": {
+      "tool_count": 147
+    },
+    "semantic_docs": {
+      "tool_count": 46
+    },
+    "wave_optics": {
+      "tool_count": 67
+    }
+  },
+  "schema_name": "comsol_mcp.release_facts",
   "schema_registry": {
     "entry_count": 61,
     "registry_sha256": "dd16ec700cf8d0a19fe32d59959a7388175ac3dfd0b3607229b29a4ecd77c02c"
   },
-  "identities": {
-    "catalog_sha256": "6c53d70b402f9b3d4ee3080699688c8d3313a0c5c78b570f5f887e0d937e188a",
-    "profile_tools_sha256": "91007c83379fdf6387eca804680eef15226c03047b283410901441cdea23b93f",
-    "runtime_compatibility_sha256": "f1a5ee126b15dec89fec3c5758b2d4ee5d0981a8dcd39e6b9cdca1980c82e640"
-  }
+  "schema_version": "1.0.0",
+  "tool_count": 147
 }

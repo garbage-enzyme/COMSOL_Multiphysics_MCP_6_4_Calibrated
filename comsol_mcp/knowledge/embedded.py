@@ -28,6 +28,8 @@ KNOWLEDGE_FILES = {
             "heat",
             "solid",
             "fluid",
+            "acoustics",
+            "pde",
             "boundary",
             "condition",
         ],
@@ -79,6 +81,40 @@ TOPIC_GUIDES = {
             "Check Reynolds number to determine if laminar or turbulent flow",
             "Pressure outlet is commonly set to zero gauge pressure",
             "No-slip wall is the default condition for solid surfaces",
+        ],
+    },
+    "pressure_acoustics": {
+        "physics": "pressure_acoustics",
+        "boundary_conditions": [
+            "SoundHard",
+            "SoundSoft",
+            "Pressure",
+            "Impedance",
+            "NormalAcceleration",
+            "NormalVelocity",
+            "PlaneWaveRadiation",
+        ],
+        "common_expressions": ["acpr.p_t", "acpr.p", "acpr.Lp"],
+        "tips": [
+            "Use named selections only after the geometry has been built and checked",
+            "Set fluid density and sound speed explicitly when the default material is unsuitable",
+            "Validate a simple duct or cavity against an analytical reference "
+            "before a complex model",
+        ],
+    },
+    "mathematical_pde": {
+        "physics": "coefficient_form_pde",
+        "boundary_conditions": [
+            "DirichletBoundary",
+            "FluxBoundary",
+            "ZeroFluxBoundary",
+            "PeriodicCondition",
+        ],
+        "common_expressions": ["u", "test(u)", "ux", "uy", "uz"],
+        "tips": [
+            "Choose Coefficient, General, or Weak Form explicitly",
+            "Use unique dependent-variable tags across interfaces in one component",
+            "Check equation units, boundary coverage, and an analytical or numerical reference",
         ],
     },
 }
@@ -410,6 +446,8 @@ def register_knowledge_tools(
         - "heat_transfer": Thermal analysis
         - "solid_mechanics": Stress and deformation
         - "fluid_flow": CFD analysis
+        - "pressure_acoustics": Pressure-wave analysis
+        - "mathematical_pde": Coefficient, General, and Weak Form PDEs
 
         Args:
             physics_type: Type of physics to get guide for
