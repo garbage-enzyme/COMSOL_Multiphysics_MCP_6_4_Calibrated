@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -18,6 +19,14 @@ from src.evidence.real_fixture import (
 )
 
 ROOT = Path(__file__).parents[2]
+_PRIVATE_HOME_PATH = re.compile(
+    r"(?:(?<![a-z0-9_])[a-z]:)?/(?:users|documents and settings|home)/[^/\s\"']+",
+    re.IGNORECASE,
+)
+
+
+def _contains_private_home_path(text: str) -> bool:
+    return _PRIVATE_HOME_PATH.search(text.replace("\\", "/")) is not None
 
 
 def _spec(tmp_path: Path) -> Path:
@@ -194,5 +203,18 @@ def test_real_probe_sources_contain_no_private_model_defaults():
     )
     for relative in probes:
         text = (ROOT / relative).read_text(encoding="utf-8")
-        assert "C:\\Users\\" not in text
-        assert "Desktop\\iterations" not in text
+        assert not _contains_private_home_path(text)
+
+
+@pytest.mark.parametrize(
+    "private_path",
+    [
+        "C:\\Users\\Alice\\project\\model.mph",
+        "e:/USERS/Bob/other/model.mph",
+        "C:\\Documents and Settings\\Carol\\model.mph",
+        "/home/dave/project/model.mph",
+        "/Users/Erin/project/model.mph",
+    ],
+)
+def test_private_path_scan_normalizes_drive_case_and_separators(private_path):
+    assert _contains_private_home_path(private_path)

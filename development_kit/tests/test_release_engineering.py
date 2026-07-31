@@ -735,6 +735,7 @@ def test_release_dependency_lock_is_complete_and_matches_current_lane(tmp_path):
     assert _validated_dependency_lock(lock) == lock.resolve()
 
     rendered = _render_lock(
+        platform_name=lock_generator.SUPPORTED_RELEASE_PLATFORM,
         lane=lane,
         python_version=f"{lane}.0",
         pins=["example==1.0"],
@@ -753,6 +754,34 @@ def test_release_dependency_lock_is_complete_and_matches_current_lane(tmp_path):
     assert len(requirement_lines) >= 40
     assert all(re.fullmatch(r"[a-z0-9-]+==[^ ]+ \\", line) for line in requirement_lines)
     assert lock_text.count("--hash=sha256:") >= len(requirement_lines)
+
+
+def test_release_lock_binds_the_declared_platform_to_the_target_interpreter(monkeypatch):
+    calls = []
+
+    def fake_run(command, *, cwd=lock_generator.ROOT, capture=False):
+        calls.append((command, cwd, capture))
+        return "win-amd64\n"
+
+    monkeypatch.setattr(lock_generator, "_run", fake_run)
+    target = Path("C:/Python314/python.exe")
+
+    assert lock_generator._validated_target_platform(target) == "win-amd64"
+    assert calls == [
+        (
+            [str(target), "-c", "import sysconfig; print(sysconfig.get_platform())"],
+            lock_generator.ROOT,
+            True,
+        )
+    ]
+
+
+@pytest.mark.parametrize("platform_name", ["win32", "win-arm64", "linux-x86_64", ""])
+def test_release_lock_rejects_a_non_amd64_target_interpreter(monkeypatch, platform_name):
+    monkeypatch.setattr(lock_generator, "_run", lambda *_args, **_kwargs: platform_name)
+
+    with pytest.raises(SystemExit, match="win-amd64 target interpreter"):
+        lock_generator._validated_target_platform(Path("C:/Python314/python.exe"))
 
 
 def test_release_lock_installs_from_the_exact_downloaded_wheelhouse(tmp_path, monkeypatch):

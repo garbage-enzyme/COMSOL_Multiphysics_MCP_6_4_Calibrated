@@ -173,6 +173,42 @@ def test_worker_output_is_redirected_and_read_with_a_hard_bound(tmp_path, monkey
         )
 
 
+def test_worker_request_transports_unicode_units_as_explicit_utf8_bytes(tmp_path, monkeypatch):
+    array = tmp_path / "unicode.npz"
+    digest = _array(array)
+    requests = []
+
+    class FakeProcess:
+        returncode = 1
+
+        def __init__(self, _command, **kwargs):
+            self.stderr = kwargs["stderr"]
+
+        def communicate(self, *, input, timeout):
+            assert timeout > 0
+            requests.append(input)
+            self.stderr.write(b"controlled worker failure")
+
+    monkeypatch.setattr(field_render_module.subprocess, "Popen", FakeProcess)
+
+    with pytest.raises(RuntimeError, match="worker failed"):
+        render_field_png_bundle(
+            views=[_view("target", array, digest)],
+            quantity_name="abs_ex",
+            quantity_unit="伏特/米",
+            coordinate_unit="微米",
+            color_scale="linear",
+            shared_color_limits=False,
+            output_root=tmp_path / "unicode-output",
+        )
+
+    assert len(requests) == 1
+    assert isinstance(requests[0], bytes)
+    payload = json.loads(requests[0].decode("utf-8"))
+    assert payload["quantity_unit"] == "伏特/米"
+    assert payload["coordinate_unit"] == "微米"
+
+
 def test_array_cannot_change_while_render_worker_consumes_it(tmp_path, monkeypatch):
     array = tmp_path / "pinned.npz"
     digest = _array(array)

@@ -22,6 +22,22 @@ PYPROJECT = ROOT / "pyproject.toml"
 REVIEW = ROOT / "development_kit" / "release" / "dependency_license_review.json"
 
 
+def _string_leaves(value):
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            yield from _string_leaves(key)
+            yield from _string_leaves(item)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            yield from _string_leaves(item)
+
+
+def _normalized_path_text(value: str | Path) -> str:
+    return str(value).replace("\\", "/").casefold()
+
+
 def test_committed_runtime_dependencies_have_a_live_license_review() -> None:
     receipt = build_license_receipt(
         PYPROJECT,
@@ -34,7 +50,11 @@ def test_committed_runtime_dependencies_have_a_live_license_review() -> None:
     assert receipt["failures"] == []
     assert len(receipt["pyproject_sha256"]) == 64
     assert len(receipt["review_sha256"]) == 64
-    assert "Users" not in json.dumps(receipt)
+    receipt_strings = tuple(_normalized_path_text(value) for value in _string_leaves(receipt))
+    sensitive_paths = (ROOT, PYPROJECT, REVIEW, Path.home())
+    for sensitive_path in sensitive_paths:
+        needle = _normalized_path_text(sensitive_path.resolve())
+        assert all(needle not in value for value in receipt_strings)
 
 
 def _metadata(name: str, version: str, license_value: str) -> SimpleNamespace:

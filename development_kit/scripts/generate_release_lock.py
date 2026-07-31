@@ -12,6 +12,7 @@ from pathlib import Path
 from packaging.utils import canonicalize_name, parse_wheel_filename
 
 ROOT = Path(__file__).resolve().parents[2]
+SUPPORTED_RELEASE_PLATFORM = "win-amd64"
 
 
 def _run(command: list[str], *, cwd: Path = ROOT, capture: bool = False) -> str:
@@ -58,6 +59,19 @@ def _wheel_hashes(download_dir: Path) -> dict[tuple[str, str], list[str]]:
         key = (canonicalize_name(name), str(version))
         result.setdefault(key, []).append(_sha256(path))
     return result
+
+
+def _validated_target_platform(target_python: Path) -> str:
+    platform_name = _run(
+        [str(target_python), "-c", "import sysconfig; print(sysconfig.get_platform())"],
+        capture=True,
+    ).strip()
+    if platform_name != SUPPORTED_RELEASE_PLATFORM:
+        raise SystemExit(
+            "release locks require a win-amd64 target interpreter; "
+            f"received {platform_name or 'an empty platform'}"
+        )
+    return platform_name
 
 
 def _downloaded_root_wheel(source: Path, download_dir: Path) -> Path:
@@ -118,7 +132,11 @@ def _resolve_and_install_wheelhouse(
     return python, download_dir, freeze
 
 
-def _render_lock(*, lane: str, python_version: str, pins: list[str], hashes: dict) -> str:
+def _render_lock(
+    *, platform_name: str, lane: str, python_version: str, pins: list[str], hashes: dict
+) -> str:
+    if platform_name != SUPPORTED_RELEASE_PLATFORM:
+        raise ValueError("release-lock platform must be win-amd64")
     lines = [
         "# Complete hash-pinned runtime dependency lock for a Windows release lane.",
         "#",
@@ -130,7 +148,7 @@ def _render_lock(*, lane: str, python_version: str, pins: list[str], hashes: dic
         "# Schema: comsol_mcp.release_dependency_lock / 2.0.0",
         f"# Python-Lane: {lane}",
         f"# Generated-With-Python: {python_version}",
-        "# Platform: win_amd64",
+        f"# Platform: {platform_name.replace('-', '_')}",
         "",
     ]
     for pin in pins:
@@ -159,6 +177,7 @@ def main() -> int:
         raise SystemExit("release locks must be generated on Windows")
     if not target_python.is_file() or not wheel.is_file():
         raise SystemExit("--python and --wheel must name existing files")
+    platform_name = _validated_target_platform(target_python)
 
     with tempfile.TemporaryDirectory(prefix="comsol-lock-") as temporary_text:
         temporary = Path(temporary_text)
@@ -175,6 +194,7 @@ def main() -> int:
         ).strip()
         lane = ".".join(version_text.split(".")[:2])
         rendered = _render_lock(
+            platform_name=platform_name,
             lane=lane,
             python_version=version_text,
             pins=pins,

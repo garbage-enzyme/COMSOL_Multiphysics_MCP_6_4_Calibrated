@@ -5,6 +5,7 @@ from __future__ import annotations
 import _winapi
 import hashlib
 import json
+import re
 import subprocess
 import sys
 import tomllib
@@ -22,6 +23,18 @@ from src import __version__
 
 ROOT = Path(__file__).parents[2]
 SNAPSHOTS = ROOT / "development_kit" / "tests" / "snapshots"
+
+
+def _string_leaves(value):
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            yield from _string_leaves(key)
+            yield from _string_leaves(item)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            yield from _string_leaves(item)
 
 
 def _snapshot_sha256(path: Path) -> str:
@@ -57,10 +70,12 @@ def test_deployment_manifest_matches_frozen_profile_and_schema_snapshots():
     assert len(identity["catalog_contract_sha256"]) == 64
     assert identity["source_classification"] == "source_tree"
     assert identity["contains_local_path"] is False
-    serialized = json.dumps(identity, ensure_ascii=False)
-    assert "陆星" not in serialized
-    assert "C:\\Users\\" not in serialized
-    assert str(ROOT) not in serialized
+    string_leaves = tuple(_string_leaves(identity))
+    normalized_leaves = tuple(value.replace("\\", "/").casefold() for value in string_leaves)
+    normalized_root = str(ROOT.resolve()).replace("\\", "/").casefold()
+    assert all("陆星" not in value for value in string_leaves)
+    assert all(not re.search(r"\b[a-z]:/users/", value) for value in normalized_leaves)
+    assert all(normalized_root not in value for value in normalized_leaves)
 
 
 def test_nonobject_deployment_manifest_fails_closed(tmp_path, monkeypatch):
