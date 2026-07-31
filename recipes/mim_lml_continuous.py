@@ -9,6 +9,15 @@ Test with eps=2.1 first, then Drude.
 """
 import mph, jpype, sys, time
 from _paths import recipe_output_dir
+from _mim_safety import (
+    bind_wavelength_step,
+    require_interface_boundaries,
+    require_named_domains,
+    require_port_pair,
+    require_required_properties,
+    require_spectrum,
+    save_required,
+)
 try:
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
     sys.stderr.reconfigure(encoding='utf-8', errors='replace')
@@ -32,12 +41,11 @@ print('mat_au props: relperm, sigmabnd, murbnd set', flush=True)
 lm_au = jm.material().create('lm_au','LayeredMaterial')
 lm_au.set('layername','Au'); lm_au.set('thickness', str(t_au)); lm_au.set('link','mat_au')
 # Set properties directly on LayeredMaterial's def group
-try: lm_au.propertyGroup('def').set('relpermittivity', eps_test); print('lm_au relperm set', flush=True)
-except Exception as e: print('lm_au relperm err:', repr(e)[:80], flush=True)
-try: lm_au.propertyGroup('def').set('sigmabnd', '0'); print('lm_au sigmabnd set', flush=True)
-except Exception as e: print('lm_au sigmabnd err:', repr(e)[:80], flush=True)
-try: lm_au.propertyGroup('def').set('murbnd', '1'); print('lm_au murbnd set', flush=True)
-except Exception as e: print('lm_au murbnd err:', repr(e)[:80], flush=True)
+require_required_properties(lm_au.propertyGroup('def'), {
+    'relpermittivity': eps_test,
+    'sigmabnd': '0',
+    'murbnd': '1',
+})
 print('lm_au pg tags:', list(lm_au.propertyGroup().tags()), flush=True)
 print('lm_au def props:', list(lm_au.propertyGroup('def').properties()), flush=True)
 print('Global LM: link=', lm_au.getString('link'), 'thick=', lm_au.getString('thickness'), flush=True)
@@ -45,65 +53,79 @@ print('Global LM: link=', lm_au.getString('link'), 'thick=', lm_au.getString('th
 # Component
 comp = jm.component().create('comp1', True)
 g = comp.geom().create('geom1', 3)
-g.feature().create('b_al2','Block').set('size',jarr([Px,Py,t_al2o3]))
-g.feature().create('b_air','Block').set('size',jarr([Px,Py,H_air])); g.feature('b_air').set('pos',jarr([0,0,t_al2o3]))
+b_al2 = g.feature().create('b_al2','Block'); b_al2.set('size',jarr([Px,Py,t_al2o3])); b_al2.set('selresult', True)
+b_air = g.feature().create('b_air','Block'); b_air.set('size',jarr([Px,Py,H_air])); b_air.set('pos',jarr([0,0,t_al2o3])); b_air.set('selresult', True)
 g.run()
+al2_domains = require_named_domains(comp, 'geom1_b_al2_dom')
+air_domains = require_named_domains(comp, 'geom1_b_air_dom')
+interface = require_interface_boundaries(g, al2_domains, air_domains)
 print('dom', g.getNDomains(), 'bnd', g.getNBoundaries(), flush=True)
 
 # Domain materials
 mat_al2 = comp.material().create('mat_al2','Common')
-mat_al2.propertyGroup('def').set('relpermittivity','3.1'); mat_al2.selection().set([1])
+mat_al2.propertyGroup('def').set('relpermittivity','3.1'); mat_al2.selection().set(al2_domains)
 mat_air = comp.material().create('mat_air','Common')
-mat_air.propertyGroup('def').set('relpermittivity','1'); mat_air.selection().set([2])
+mat_air.propertyGroup('def').set('relpermittivity','1'); mat_air.selection().set(air_domains)
 
 # Component LayeredMaterialLink on bnd6
 lml_au = comp.material().create('lml_au','LayeredMaterialLink')
 lml_au.set('link','lm_au')
-lml_au.selection().all(); lml_au.selection().clear(); lml_au.selection().add([6])
+lml_au.selection().all(); lml_au.selection().clear(); lml_au.selection().add(interface)
 # Set properties on LML too (BC might read from here)
-try: lml_au.propertyGroup('def').set('relpermittivity', eps_test)
-except Exception: pass
-try: lml_au.propertyGroup('def').set('sigmabnd', '0')
-except Exception: pass
-try: lml_au.propertyGroup('def').set('murbnd', '1')
-except Exception: pass
+require_required_properties(lml_au.propertyGroup('def'), {
+    'relpermittivity': eps_test,
+    'sigmabnd': '0',
+    'murbnd': '1',
+})
 # Also try shell property group
-try:
-    sh_lml = lml_au.propertyGroup('shell')
-    sh_lml.set('lth', str(t_au))
-    sh_lml.set('relpermittivity', eps_test)
-    sh_lml.set('sigmabnd', '0')
-    sh_lml.set('murbnd', '1')
-    print('LML shell group props set, lth=', sh_lml.getString('lth'), flush=True)
-    print('LML shell props:', list(sh_lml.properties()), flush=True)
-except Exception as e: print('LML shell err:', repr(e)[:100], flush=True)
+sh_lml = lml_au.propertyGroup('shell')
+require_required_properties(sh_lml, {
+    'lth': str(t_au),
+    'relpermittivity': eps_test,
+    'sigmabnd': '0',
+    'murbnd': '1',
+})
 print('LML: link=', lml_au.getString('link'), 'sel=', list(lml_au.selection().entities()), flush=True)
 print('LML pg tags:', list(lml_au.propertyGroup().tags()), 'def props:', list(lml_au.propertyGroup('def').properties()), flush=True)
 
 # ewfd + PeriodicStructure
 p = comp.physics().create('ewfd','ElectromagneticWavesFrequencyDomain', str(g.getSDim()))
 ps = p.feature().create('ps1','PeriodicStructure',3)
-p1b = list(ps.feature('pport1').selection().entities()); p2b = list(ps.feature('pport2').selection().entities())
+p1b, p2b = require_port_pair(
+    ps.feature('pport1').selection().entities(),
+    ps.feature('pport2').selection().entities(),
+    geometry=g,
+    top_domains=air_domains,
+    bottom_domains=al2_domains,
+)
 ps.selection('excitedPortSelection').set(p1b)
 print('pport1:', p1b, 'pport2:', p2b, flush=True)
 
 # LayeredImpedance on bottom (substrate Au)
 lib = p.feature().create('lib1','LayeredImpedanceBoundaryCondition',2)
 lib.selection().set(p2b)
-lib.set('substrateMaterial','mat_au')
-lib.set('DisplacementFieldModelSubstrate','RelativePermittivity')
-lib.set('epsilonrImp_mat','userdef'); lib.set('epsilonrImp', eps_test); lib.set('allLayers', False)
+require_required_properties(lib, {
+    'substrateMaterial': 'mat_au',
+    'DisplacementFieldModelSubstrate': 'RelativePermittivity',
+    'epsilonrImp_mat': 'userdef',
+    'epsilonrImp': eps_test,
+    'allLayers': False,
+})
 
 # LayeredTransition on interface bnd6
 ltr = p.feature().create('ltr1','LayeredTransitionBoundaryCondition',2)
-ltr.selection().set([6])
-ltr.set('DisplacementFieldModel','RelativePermittivity')
+ltr.selection().set(interface)
 # Set _mat to userdef for boundary props (from_mat can't find them in LayeredMaterial via API)
-for prop, val in [('sigmabnd_mat','userdef'),('sigmabnd','0'),('murbnd_mat','userdef'),('murbnd','1')]:
-    try: ltr.set(prop, val); print(f'{prop}={val} set', flush=True)
-    except Exception as e: print(f'{prop} err:', repr(e)[:80], flush=True)
-try: ltr.set('lth', str(t_au)); print('lth set ->', ltr.getString('lth'), flush=True)
-except Exception as e: print('lth err:', repr(e)[:80], flush=True)
+require_required_properties(ltr, {
+    'DisplacementFieldModel': 'RelativePermittivity',
+    'epsilonr_mat': 'userdef',
+    'epsilonr': eps_test,
+    'sigmabnd_mat': 'userdef',
+    'sigmabnd': '0',
+    'murbnd_mat': 'userdef',
+    'murbnd': '1',
+    'lth': str(t_au),
+})
 print('\n--- ltr props ---', flush=True)
 for prop in ['DisplacementFieldModel','epsilonr_mat','epsilonr','lth_mat','lth','allLayers','shelllist','bndType']:
     try: print(f'  {prop}={ltr.getString(prop)}', flush=True)
@@ -121,20 +143,15 @@ except Exception: pass
 
 # Study
 study = jm.study().create('std1'); study.create('step1','Wavelength')
-step = study.feature('step1'); step.set('punit','m'); step.set('plist', str(wl0))
+step = study.feature('step1'); bind_wavelength_step(step, 'wl')
+jm.param().set('wl', f'{wl0}[m]')
 print('Solving wl=5um eps=2.1...', flush=True)
-try:
-    t0=time.time(); jm.study('std1').run(); t1=time.time()
-    print(f'Solve OK {t1-t0:.2f}s', flush=True)
-    R = float(m.evaluate('ewfd.Rtotal'))
-    print(f'Rtotal={R:.6f}', flush=True)
-except Exception as e:
-    print('Solve FAIL:', repr(e)[:300], flush=True)
-    import traceback; traceback.print_exc()
+t0=time.time(); jm.study('std1').run(); t1=time.time()
+R = require_spectrum(m.evaluate('ewfd.Rtotal'), [wl0], 'Rtotal')[0]
+print(f'Solve OK {t1-t0:.2f}s Rtotal={R:.6f}', flush=True)
 
 output_dir = recipe_output_dir()
-try: m.java.save(str((output_dir / "MIM_lml.mph").resolve()))
-except Exception as e: print('save err:', repr(e)[:150], flush=True)
+save_required(m.java, output_dir / "MIM_lml.mph")
 try: client.disconnect()
 except Exception: pass
 print('Done.', flush=True)

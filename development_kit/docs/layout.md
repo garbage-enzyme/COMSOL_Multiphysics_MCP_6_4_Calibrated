@@ -42,6 +42,7 @@ models are intentionally absent.
 ## Standalone recipes
 
 - `recipes/_paths.py` — This module provides shared ASCII-safe paths for standalone recipes.
+- `recipes/_mim_safety.py` — This module provides fail-closed topology, property, sweep, result, and save contracts for standalone MIM recipes.
 - `recipes/acdc_2d_differential_coils.py` — This script builds a two-coil Induction Currents model from a caller-supplied baseline.
 - `recipes/mim_drude_sweep.py` — This script demonstrates a durable Drude-material parameter sweep.
 - `recipes/mim_lml_continuous.py` — This script demonstrates a continuous layered-metal workflow.
@@ -190,6 +191,7 @@ models are intentionally absent.
 - `development_kit/tests/test_material_expressions.py` — This module tests solver-free dispersive material-expression previews.
 - `development_kit/tests/test_mesh.py` — This module tests mesh helpers without a COMSOL client.
 - `development_kit/tests/test_mim_patch.py` — This module tests patch-metasurface helper behavior without a COMSOL client.
+- `development_kit/tests/test_mim_recipe_contracts.py` — This module tests solver-free safety contracts shared by the standalone MIM recipes.
 - `development_kit/tests/test_model.py` — This module tests model management helpers without a COMSOL client.
 - `development_kit/tests/test_outcome_contract.py` — This module tests orthogonal execution, evidence, and scientific outcome contracts.
 - `development_kit/tests/test_operation_arbiter.py` — This module tests durable serialization and responsive control-plane operation classes.

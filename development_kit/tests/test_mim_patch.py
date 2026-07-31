@@ -6,6 +6,7 @@ import pytest
 from src.tools.mim_patch import (
     _build_periodic_mesh,
     _find_air_block_tag,
+    _identify_patch_topology,
     _list_pair_metadata,
     _normalize_spectral_rows,
     _require_mim_selections,
@@ -130,6 +131,68 @@ def test_required_mim_selections_reject_every_missing_build_input(missing):
             values["top"],
             values,
         )
+
+
+def test_patch_topology_is_bound_by_geometry_and_adjacency_not_domain_order():
+    boundaries = [
+        {
+            "boundary_number": 31,
+            "up_domain": 17,
+            "down_domain": 4,
+            "interior": True,
+            "center": [0.3e-6, 0.3e-6, 30e-9],
+            "normal": [0.0, 0.0, -1.0],
+        },
+        {
+            "boundary_number": 32,
+            "up_domain": 9,
+            "down_domain": 17,
+            "interior": True,
+            "center": [0.3e-6, 0.3e-6, 60e-9],
+            "normal": [0.0, 0.0, 1.0],
+        },
+        {
+            "boundary_number": 33,
+            "up_domain": 9,
+            "down_domain": 17,
+            "interior": True,
+            "center": [0.15e-6, 0.3e-6, 45e-9],
+            "normal": [-1.0, 0.0, 0.0],
+        },
+    ]
+
+    domain, footprint = _identify_patch_topology(
+        boundaries,
+        [0.3e-6, 0.3e-6, 30e-9],
+        [0.15e-6, 0.15e-6, 30e-9],
+    )
+
+    assert domain == 17
+    assert footprint == [31]
+
+
+def test_patch_topology_rejects_an_ambiguous_domain_identity():
+    boundaries = [
+        {
+            "boundary_number": 1,
+            "up_domain": 3,
+            "down_domain": 4,
+            "interior": True,
+            "center": [0.5, 0.5, 0.0],
+            "normal": [0.0, 0.0, -1.0],
+        },
+        {
+            "boundary_number": 2,
+            "up_domain": 3,
+            "down_domain": 4,
+            "interior": True,
+            "center": [0.5, 0.5, 1.0],
+            "normal": [0.0, 0.0, 1.0],
+        },
+    ]
+
+    with pytest.raises(ValueError, match="ambiguous domain"):
+        _identify_patch_topology(boundaries, [1.0, 1.0, 1.0], [0.0, 0.0, 0.0])
 
 
 class MeshSelection:

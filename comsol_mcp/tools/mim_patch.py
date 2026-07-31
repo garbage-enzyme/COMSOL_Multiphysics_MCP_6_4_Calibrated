@@ -234,6 +234,85 @@ def _require_mim_selections(
         raise ValueError("MIM patch build is missing required selections: " + ", ".join(missing))
 
 
+def _identify_patch_topology(
+    boundaries: Sequence[dict],
+    patch_size: Sequence[float],
+    patch_pos: Sequence[float],
+) -> tuple[int, list[int]]:
+    """Identify the patch domain and its footprint from box geometry and adjacency."""
+    if len(patch_size) != 3 or len(patch_pos) != 3:
+        raise ValueError("patch_size and patch_pos must contain exactly three values")
+    size = [float(value) for value in patch_size]
+    position = [float(value) for value in patch_pos]
+    if any(value <= 0 for value in size):
+        raise ValueError("patch_size values must be positive")
+    low = position
+    high = [position[index] + size[index] for index in range(3)]
+    tolerance = max(1e-12, max(size) * 1e-6)
+
+    def within(value: float, minimum: float, maximum: float) -> bool:
+        return minimum - tolerance <= value <= maximum + tolerance
+
+    patch_faces = []
+    for boundary in boundaries:
+        center = boundary.get("center")
+        normal = boundary.get("normal")
+        if not isinstance(center, list) or not isinstance(normal, list):
+            continue
+        if len(center) != 3 or len(normal) != 3:
+            continue
+        center_values = [float(value) for value in center]
+        normal_values = [float(value) for value in normal]
+        on_box = any(
+            abs(abs(normal_values[axis]) - 1.0) <= 0.5
+            and (
+                abs(center_values[axis] - low[axis]) <= tolerance
+                or abs(center_values[axis] - high[axis]) <= tolerance
+            )
+            and all(
+                within(center_values[other], low[other], high[other])
+                for other in range(3)
+                if other != axis
+            )
+            for axis in range(3)
+        )
+        if on_box:
+            patch_faces.append(boundary)
+    if len(patch_faces) < 2:
+        raise ValueError("patch topology could not be bound to the requested box")
+
+    counts: dict[int, int] = {}
+    for boundary in patch_faces:
+        for name in ("up_domain", "down_domain"):
+            domain = boundary.get(name)
+            if isinstance(domain, int) and not isinstance(domain, bool) and domain > 0:
+                counts[domain] = counts.get(domain, 0) + 1
+    if not counts:
+        raise ValueError("patch topology has no readable adjacent domains")
+    maximum = max(counts.values())
+    candidates = sorted(domain for domain, count in counts.items() if count == maximum)
+    if len(candidates) != 1:
+        raise ValueError("patch topology has an ambiguous domain identity")
+    patch_domain = candidates[0]
+
+    footprint = []
+    for boundary in patch_faces:
+        center = boundary["center"]
+        normal = boundary["normal"]
+        adjacent = {boundary.get("up_domain"), boundary.get("down_domain")}
+        if (
+            patch_domain in adjacent
+            and boundary.get("interior") is True
+            and abs(float(center[2]) - low[2]) <= tolerance
+            and abs(float(normal[2])) > 0.5
+        ):
+            footprint.append(int(boundary["boundary_number"]))
+    footprint = sorted(set(footprint))
+    if len(footprint) != 1:
+        raise ValueError("patch footprint interface is missing or ambiguous")
+    return patch_domain, footprint
+
+
 def _build_periodic_mesh(comp, side_pairs: dict):
     """Build a new periodic mesh without deleting pre-existing mesh sequences."""
     mesh_list = comp.mesh()
@@ -473,16 +552,11 @@ def register_mim_patch_tools(mcp: FastMCP) -> None:
             report["n_boundaries"] = n_bnd
 
             # ---- Step 5: identify key boundaries ----
-            # patch footprint interface: interior boundary where up=patch_dom, down=al2_dom.
-            # Patch domain is the highest-numbered domain (dom 3 typically) and the
-            # Al2O3/air baseline becomes dom 1+2 (al2o3 keeps its domain tag).
-            patch_dom = n_dom  # last domain added
-            al2_dom = 1
-            patch_footprint = [
-                b["boundary_number"]
-                for b in boundaries
-                if b.get("up_domain") == patch_dom and b.get("down_domain") == al2_dom
-            ]
+            patch_dom, patch_footprint = _identify_patch_topology(
+                boundaries,
+                patch_size,
+                patch_pos,
+            )
 
             # Filter side/top/bottom by BOTH normal AND coordinate. Without the
             # coordinate filter, the patch side/top faces (interior interfaces with
