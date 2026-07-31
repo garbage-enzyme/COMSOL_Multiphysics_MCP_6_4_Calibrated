@@ -123,7 +123,7 @@ def discover_field_datasets(
             "computed_state": computed_state,
         }
 
-    dataset_rows: list[dict[str, Any]] = []
+    dataset_nodes: list[dict[str, Any]] = []
     for index, node in enumerate(datasets):
         name = _bounded_text(node.name(), f"datasets[{index}].name")
         tag = _tag(node.tag(), f"datasets[{index}].tag")
@@ -147,13 +147,44 @@ def discover_field_datasets(
                 reference,
                 f"datasets[{index}].{reference_kind}",
             )
-        solution = solution_by_tag.get(solution_tag) if solution_tag else None
+        dataset_nodes.append(
+            {
+                "dataset_name": name,
+                "dataset_tag": tag,
+                "dataset_type": dataset_type,
+                "solution_reference_kind": reference_kind,
+                "reference_tag": solution_tag,
+            }
+        )
+    if len({row["dataset_name"] for row in dataset_nodes}) != len(dataset_nodes):
+        raise ValueError("dataset names must be unique")
+    if len({row["dataset_tag"] for row in dataset_nodes}) != len(dataset_nodes):
+        raise ValueError("dataset tags must be unique")
+
+    dataset_by_tag = {row["dataset_tag"]: row for row in dataset_nodes}
+
+    def resolve_solution(dataset_tag: str, visited: frozenset[str]) -> dict[str, Any] | None:
+        if dataset_tag in visited:
+            return None
+        dataset = dataset_by_tag.get(dataset_tag)
+        if dataset is None:
+            return None
+        reference = dataset["reference_tag"]
+        if dataset["solution_reference_kind"] == "solution":
+            return solution_by_tag.get(reference)
+        if dataset["solution_reference_kind"] == "data" and reference is not None:
+            return resolve_solution(reference, visited | {dataset_tag})
+        return None
+
+    dataset_rows: list[dict[str, Any]] = []
+    for dataset in dataset_nodes:
+        solution = resolve_solution(dataset["dataset_tag"], frozenset())
         row = {
-            "dataset_name": name,
-            "dataset_tag": tag,
-            "dataset_type": dataset_type,
-            "solution_reference_kind": reference_kind,
-            "solution_tag": solution_tag,
+            "dataset_name": dataset["dataset_name"],
+            "dataset_tag": dataset["dataset_tag"],
+            "dataset_type": dataset["dataset_type"],
+            "solution_reference_kind": dataset["solution_reference_kind"],
+            "solution_tag": solution["solution_tag"] if solution else None,
             "solution_name": solution["solution_name"] if solution else None,
             "computed_state": solution["computed_state"] if solution else "not_solution",
             "field_evaluation_eligible": bool(
@@ -162,10 +193,6 @@ def discover_field_datasets(
         }
         row["dataset_identity_sha256"] = _canonical_hash(row)
         dataset_rows.append(row)
-    if len({row["dataset_name"] for row in dataset_rows}) != len(dataset_rows):
-        raise ValueError("dataset names must be unique")
-    if len({row["dataset_tag"] for row in dataset_rows}) != len(dataset_rows):
-        raise ValueError("dataset tags must be unique")
 
     result = {
         "success": not solution_diagnostics,

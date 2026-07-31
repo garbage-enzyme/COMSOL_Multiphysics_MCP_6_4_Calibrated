@@ -87,6 +87,27 @@ def test_all_default_checks_produce_one_strictly_verified_receipt(tmp_path):
     assert len(result["verification_sha256"]) == 64
 
 
+def test_default_checks_enforce_cross_contract_outcome_chain_binding(tmp_path):
+    request, _raw, _fit = _fixture(tmp_path)
+    outcome = request["cases"][0]["outcome"]
+    outcome.pop("outcome_sha256")
+    outcome["evidence"]["raw_artifact_ids"] = ["different-raw"]
+    from src.evidence.outcome_contract import build_outcome_contract
+
+    request["cases"][0]["outcome"] = build_outcome_contract(outcome)
+    request = _rehash_request(request)
+
+    result = verify_evidence_integrity(
+        portfolio_request=request,
+        artifact_roots={"case-one": str(tmp_path.resolve())},
+        settings_status=load_evidence_integrity_status({}),
+    )
+
+    assert result["success"] is False
+    assert result["strictly_verified"] is False
+    assert result["verification_state"] == "failed"
+
+
 @pytest.mark.parametrize("disabled_check", EVIDENCE_CHECKS)
 def test_each_disabled_check_is_the_only_skipped_check_and_forces_unverified(
     tmp_path, disabled_check
@@ -261,8 +282,7 @@ def test_malformed_portfolio_receipt_becomes_a_failed_check(tmp_path, monkeypatc
     assert result["success"] is False
     assert result["verification_state"] == "failed"
     assert {
-        item["error_type"] for item in result["check_results"].values()
-        if item["state"] == "failed"
+        item["error_type"] for item in result["check_results"].values() if item["state"] == "failed"
     } == {"KeyError"}
 
 

@@ -145,6 +145,20 @@ def test_matrix_field_binding_rejects_malformed_points_without_exception_leaks(t
         )
 
 
+def test_matrix_field_binding_requires_one_to_one_collector_artifact_alignment(tmp_path):
+    spec = _spec(tmp_path)
+    point = spec["points"][0]
+    point["expected_artifact_ids"].pop()
+
+    with pytest.raises(ValueError, match="collector identities"):
+        bind_validation_matrix_field_request(
+            point["collectors"][1]["inputs"],
+            job_id="job-123",
+            point=point,
+            source_model_sha256=spec["source_model_sha256"],
+        )
+
+
 def test_matrix_field_template_rejects_png_and_unknown_fields_before_client(tmp_path):
     png_inputs = _field_inputs()
     png_inputs["render"] = {

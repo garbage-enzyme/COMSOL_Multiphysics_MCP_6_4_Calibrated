@@ -21,6 +21,7 @@ from src.evidence.portfolio_verifier import (
     build_portfolio_evidence_request,
     validate_portfolio_evidence_request,
     verify_portfolio_evidence,
+    verify_portfolio_evidence_checks,
 )
 
 
@@ -254,9 +255,7 @@ def test_missing_artifact_wrong_hash_pointer_or_dimension_fails_closed(tmp_path)
         ("wavelength", "/metadata/wavelengthless_mode"),
     ],
 )
-def test_dimension_binding_rejects_substring_only_pointer_names(
-    tmp_path, dimension, pointer
-):
+def test_dimension_binding_rejects_substring_only_pointer_names(tmp_path, dimension, pointer):
     request, _raw, _fit = _fixture(tmp_path)
     claim = request["cases"][0]["summary_claims"][0]
     claim["dimension"] = dimension
@@ -298,23 +297,62 @@ def test_duplicate_json_keys_are_rejected_before_cited_value_use(tmp_path):
             {
                 **duplicate_fit,
                 "role": "derived_spectral",
-                "parents": [
-                    {"artifact_id": raw["artifact_id"], "sha256": raw["sha256"]}
-                ],
+                "parents": [{"artifact_id": raw["artifact_id"], "sha256": raw["sha256"]}],
             },
         ],
         terminal_artifact_ids=[duplicate_fit["artifact_id"]],
     )
     fit_claim = next(
-        claim
-        for claim in request["cases"][0]["summary_claims"]
-        if claim["claim_id"] == "fit"
+        claim for claim in request["cases"][0]["summary_claims"] if claim["claim_id"] == "fit"
     )
     fit_claim["citation"]["artifact_sha256"] = duplicate_fit["sha256"]
     request = _rehash_request(request)
 
     with pytest.raises(ValueError, match="duplicate JSON key"):
         verify_portfolio_evidence(request, artifact_roots={"case-one": tmp_path})
+
+
+def test_summary_only_cited_artifact_requires_utf8_json(tmp_path):
+    request, raw, fit = _fixture(tmp_path)
+    fit_value = {
+        "schema_name": fit["schema_name"],
+        "schema_version": fit["schema_version"],
+        "fit": {"quality_factor": 425.5},
+    }
+    payload = json.dumps(fit_value).encode("utf-16")
+    fit_path = tmp_path / fit["relative_path"]
+    fit_path.write_bytes(payload)
+    replacement = {
+        **fit,
+        "sha256": hashlib.sha256(payload).hexdigest(),
+        "byte_count": len(payload),
+    }
+    request["cases"][0]["artifact_chain"] = build_artifact_chain_manifest(
+        chain_id="case-chain",
+        artifacts=[
+            {**raw, "role": "raw_evidence", "parents": []},
+            {
+                **replacement,
+                "role": "derived_spectral",
+                "parents": [{"artifact_id": raw["artifact_id"], "sha256": raw["sha256"]}],
+            },
+        ],
+        terminal_artifact_ids=[replacement["artifact_id"]],
+    )
+    fit_claim = next(
+        claim for claim in request["cases"][0]["summary_claims"] if claim["claim_id"] == "fit"
+    )
+    fit_claim["citation"]["artifact_sha256"] = replacement["sha256"]
+    request = _rehash_request(request)
+
+    with pytest.raises(ValueError, match="UTF-8"):
+        verify_portfolio_evidence_checks(
+            request,
+            artifact_roots={"case-one": tmp_path},
+            check_outcome_contract=False,
+            check_artifact_chain=False,
+            check_summary_claims=True,
+        )
 
 
 def test_outcome_raw_ids_must_exactly_match_chain_roots(tmp_path):

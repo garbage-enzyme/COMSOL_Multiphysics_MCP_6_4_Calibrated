@@ -3,16 +3,15 @@
 from __future__ import annotations
 
 import asyncio
-from copy import deepcopy
 import hashlib
 import json
-from pathlib import Path
 import subprocess
 import sys
+from copy import deepcopy
+from pathlib import Path
 
 import pytest
 from mcp.server.fastmcp import FastMCP
-
 from src.evidence.convergence_evaluation import (
     build_convergence_ladder,
     evaluate_convergence,
@@ -26,7 +25,6 @@ from src.evidence.spectral_characterization import (
 )
 from src.tools.convergence_evaluation import register_convergence_evaluation_tools
 
-
 MATERIAL_SHA256 = "d" * 64
 INCIDENCE_SHA256 = "e" * 64
 
@@ -38,19 +36,21 @@ def _spectral_artifacts(index: int, center: float, amplitude: float = 0.9):
     rows = []
     for row_index, (wavelength, absorption) in enumerate(zip(wavelengths, values)):
         raw = {"level": index, "row": row_index, "wavelength": wavelength}
-        rows.append({
-            "row_id": f"level-{index}-point-{row_index}",
-            "raw_row_sha256": hashlib.sha256(
-                json.dumps(raw, sort_keys=True).encode("utf-8")
-            ).hexdigest(),
-            "configuration_sha256": configuration,
-            "requested_wavelength_m": wavelength,
-            "evaluated_wavelength_m": wavelength,
-            "frequency_wavelength_m": wavelength,
-            "R": 0.95 - absorption,
-            "T": 0.05,
-            "A": absorption,
-        })
+        rows.append(
+            {
+                "row_id": f"level-{index}-point-{row_index}",
+                "raw_row_sha256": hashlib.sha256(
+                    json.dumps(raw, sort_keys=True).encode("utf-8")
+                ).hexdigest(),
+                "configuration_sha256": configuration,
+                "requested_wavelength_m": wavelength,
+                "evaluated_wavelength_m": wavelength,
+                "frequency_wavelength_m": wavelength,
+                "R": 0.95 - absorption,
+                "T": 0.05,
+                "A": absorption,
+            }
+        )
     bundle = build_spectral_point_bundle(
         bundle_id=f"spectrum-level-{index}",
         source_model={
@@ -142,14 +142,17 @@ def test_ordered_ladder_binds_exact_identities_artifacts_and_own_peak_measuremen
     assert ladder["level_count"] == 3
     assert [level["ordinal"] for level in ladder["levels"]] == [0, 1, 2]
     assert [level["declared_predecessor_level_id"] for level in ladder["levels"]] == [
-        None, "mesh-0", "mesh-1",
+        None,
+        "mesh-0",
+        "mesh-1",
     ]
     assert ladder["levels"][2]["measurements"]["peak_wavelength_m"] == 5.025e-6
     assert ladder["levels"][2]["evidence_state"] == "complete_own_peak"
     assert len(ladder["levels"][2]["spectral_artifacts"]["raw_row_sha256s"]) == 7
-    assert ladder["levels"][0]["fixed_reference_diagnostics"][
-        "fixed_wavelength_amplitude"
-    ]["value"] == 0.8
+    assert (
+        ladder["levels"][0]["fixed_reference_diagnostics"]["fixed_wavelength_amplitude"]["value"]
+        == 0.8
+    )
 
 
 @pytest.mark.parametrize(
@@ -157,27 +160,27 @@ def test_ordered_ladder_binds_exact_identities_artifacts_and_own_peak_measuremen
     [
         (lambda levels: levels.__setitem__(1, {**levels[1], "ordinal": 2}), "ordinal"),
         (
-            lambda levels: levels.__setitem__(2, {
-                **levels[2], "declared_predecessor_level_id": "mesh-0"
-            }),
+            lambda levels: levels.__setitem__(
+                2, {**levels[2], "declared_predecessor_level_id": "mesh-0"}
+            ),
             "adjacency",
         ),
         (
-            lambda levels: levels.__setitem__(2, {
-                **levels[2], "configuration_sha256": levels[1]["configuration_sha256"]
-            }),
+            lambda levels: levels.__setitem__(
+                2, {**levels[2], "configuration_sha256": levels[1]["configuration_sha256"]}
+            ),
             "does not match|duplicate",
         ),
         (
-            lambda levels: levels.__setitem__(2, {
-                **levels[2], "material_identity_sha256": "f" * 64
-            }),
+            lambda levels: levels.__setitem__(
+                2, {**levels[2], "material_identity_sha256": "f" * 64}
+            ),
             "material identity",
         ),
         (
-            lambda levels: levels.__setitem__(1, {
-                **levels[1], "incidence_identity_sha256": "f" * 64
-            }),
+            lambda levels: levels.__setitem__(
+                1, {**levels[1], "incidence_identity_sha256": "f" * 64}
+            ),
             "incidence identity",
         ),
     ],
@@ -270,9 +273,7 @@ def test_three_level_final_pair_passes_only_declared_metrics_and_tolerances():
 
 def test_all_adjacent_policy_fails_when_earlier_pair_misses_the_same_gate():
     ladder = build_convergence_ladder(ladder_id="three-mesh-ladder", levels=_levels())
-    evaluation = evaluate_convergence(
-        ladder, _policy(governing_pairs="all_adjacent")
-    )
+    evaluation = evaluate_convergence(ladder, _policy(governing_pairs="all_adjacent"))
 
     assert evaluation["governing_pair_indices"] == [0, 1]
     assert evaluation["scientific_disposition"] == "residual"
@@ -282,14 +283,15 @@ def test_all_adjacent_policy_fails_when_earlier_pair_misses_the_same_gate():
 
 def test_stable_amplitude_cannot_hide_excessive_own_peak_shift():
     ladder = build_convergence_ladder(ladder_id="three-mesh-ladder", levels=_levels())
-    policy = _policy(metrics=[
-        _metric("peak_response_value", "1", absolute=1e-6),
-        _metric("peak_wavelength_m", "m", absolute=1e-9),
-    ])
+    policy = _policy(
+        metrics=[
+            _metric("peak_response_value", "1", absolute=1e-6),
+            _metric("peak_wavelength_m", "m", absolute=1e-9),
+        ]
+    )
     evaluation = evaluate_convergence(ladder, policy)
     comparisons = {
-        item["metric"]: item
-        for item in evaluation["pair_comparisons"][-1]["comparisons"]
+        item["metric"]: item for item in evaluation["pair_comparisons"][-1]["comparisons"]
     }
 
     assert comparisons["peak_response_value"]["passed"] is True
@@ -316,10 +318,12 @@ def test_absolute_relative_and_optional_field_metrics_use_declared_units():
     ladder = build_convergence_ladder(ladder_id="three-mesh-ladder", levels=_levels())
     evaluation = evaluate_convergence(
         ladder,
-        _policy(metrics=[
-            _metric("peak_wavelength_m", "m", relative=0.002),
-            _metric("field:field_integral", "J", absolute=0.11),
-        ]),
+        _policy(
+            metrics=[
+                _metric("peak_wavelength_m", "m", relative=0.002),
+                _metric("field:field_integral", "J", absolute=0.11),
+            ]
+        ),
     )
 
     final = evaluation["pair_comparisons"][-1]["comparisons"]
@@ -348,7 +352,10 @@ def test_missing_metric_or_minimum_levels_returns_invalid_evidence():
     [
         (_policy(metrics=[_metric("peak_wavelength_m", "m")]), "tolerance"),
         (_policy(metrics=[_metric("peak_wavelength_m", "nm", absolute=1.0)]), "unit"),
-        (_policy(metrics=[_metric("fixed_reference_amplitude", "1", absolute=0.1)]), "fixed-reference"),
+        (
+            _policy(metrics=[_metric("fixed_reference_amplitude", "1", absolute=0.1)]),
+            "fixed-reference",
+        ),
         (_policy(metrics=[_metric("diagnostic:amplitude", "1", absolute=0.1)]), "fixed-reference"),
         (_policy(governing_pairs="best_pair"), "governing_pairs"),
     ],
@@ -376,17 +383,19 @@ def _fitted_level(index: int, center: float, predecessor: str | None):
     for point, wavelength in enumerate(wavelengths):
         coordinate = (wavelength - center) / 0.06e-6
         absorption = 0.1 + 0.8 / (1.0 + coordinate * coordinate)
-        rows.append({
-            "row_id": f"fit-{index}-point-{point}",
-            "raw_row_sha256": hashlib.sha256(f"fit-{index}-{point}".encode()).hexdigest(),
-            "configuration_sha256": configuration,
-            "requested_wavelength_m": wavelength,
-            "evaluated_wavelength_m": wavelength,
-            "frequency_wavelength_m": wavelength,
-            "R": 0.95 - absorption,
-            "T": 0.05,
-            "A": absorption,
-        })
+        rows.append(
+            {
+                "row_id": f"fit-{index}-point-{point}",
+                "raw_row_sha256": hashlib.sha256(f"fit-{index}-{point}".encode()).hexdigest(),
+                "configuration_sha256": configuration,
+                "requested_wavelength_m": wavelength,
+                "evaluated_wavelength_m": wavelength,
+                "frequency_wavelength_m": wavelength,
+                "R": 0.95 - absorption,
+                "T": 0.05,
+                "A": absorption,
+            }
+        )
     bundle = build_spectral_point_bundle(
         bundle_id=f"fitted-spectrum-{index}",
         source_model={
@@ -396,7 +405,8 @@ def _fitted_level(index: int, center: float, predecessor: str | None):
         configuration_sha256=configuration,
         parameter_state={"mesh_level": index},
         wavelength_convention={
-            "unit": "m", "requested_field": "requested_wavelength_m",
+            "unit": "m",
+            "requested_field": "requested_wavelength_m",
             "evaluated_field": "evaluated_wavelength_m",
             "frequency_derived_field": "frequency_wavelength_m",
             "frequency_relation": "c_const/frequency",
@@ -404,21 +414,40 @@ def _fitted_level(index: int, center: float, predecessor: str | None):
         expressions={"R": "R", "T": "T", "A": "A"},
         rows=rows,
     )
-    decision = build_spectral_analysis_decision(bundle, {
-        "response_quantity": "A", "candidate_polarity": "maximum",
-        "passivity_abs_tolerance": 1e-12, "closure_abs_tolerance": 1e-12,
-        "wavelength_sync_abs_m": 1e-15, "flat_response_abs_tolerance": 1e-12,
-        "minimum_point_count": 5,
-    })
-    characterization = build_spectral_characterization(bundle, decision, {
-        "peak_method": "local_polynomial_fit",
-        "baseline_rule": "declared_response", "baseline_response_value": 0.1,
-        "fwhm_definition": "half_prominence", "fit_support_points": 9,
-        "fit_support_sensitivity_points": [5, 7, 9, 11, 13],
-        "local_polynomial_degree": 2, "fit_max_evaluations": 20000,
-    })
+    decision = build_spectral_analysis_decision(
+        bundle,
+        {
+            "response_quantity": "A",
+            "candidate_polarity": "maximum",
+            "passivity_abs_tolerance": 1e-12,
+            "closure_abs_tolerance": 1e-12,
+            "wavelength_sync_abs_m": 1e-15,
+            "flat_response_abs_tolerance": 1e-12,
+            "minimum_point_count": 5,
+        },
+    )
+    characterization = build_spectral_characterization(
+        bundle,
+        decision,
+        {
+            "peak_method": "local_polynomial_fit",
+            "baseline_rule": "declared_response",
+            "baseline_response_value": 0.1,
+            "fwhm_definition": "half_prominence",
+            "fit_support_points": 9,
+            "fit_support_sensitivity_points": [5, 7, 9, 11, 13],
+            "local_polynomial_degree": 2,
+            "fit_max_evaluations": 20000,
+            "fit_quality_policy": {
+                "maximum_relative_rms_residual": 0.25,
+                "maximum_covariance_condition": 1.0e20,
+                "minimum_parameter_bound_margin_fraction": 1.0e-9,
+            },
+        },
+    )
     return {
-        "level_id": f"fitted-mesh-{index}", "ordinal": index,
+        "level_id": f"fitted-mesh-{index}",
+        "ordinal": index,
         "declared_predecessor_level_id": predecessor,
         "source_model_sha256": bundle["source_model"]["sha256"],
         "configuration_sha256": configuration,
@@ -428,9 +457,11 @@ def _fitted_level(index: int, center: float, predecessor: str | None):
         },
         "material_identity_sha256": MATERIAL_SHA256,
         "incidence_identity_sha256": INCIDENCE_SHA256,
-        "spectral_bundle": bundle, "analysis_decision": decision,
+        "spectral_bundle": bundle,
+        "analysis_decision": decision,
         "candidate_measurements": characterization,
-        "optional_field_metrics": {}, "fixed_reference_diagnostics": {},
+        "optional_field_metrics": {},
+        "fixed_reference_diagnostics": {},
     }
 
 
@@ -464,9 +495,7 @@ def test_fit_support_outcome_change_blocks_automatic_acceptance():
 def test_monotonicity_is_observation_and_fixed_reference_is_diagnostic_only():
     ladder = build_convergence_ladder(ladder_id="three-mesh-ladder", levels=_levels())
     evaluation = evaluate_convergence(ladder, _policy())
-    observations = {
-        item["metric"]: item for item in evaluation["monotonicity_observations"]
-    }
+    observations = {item["metric"]: item for item in evaluation["monotonicity_observations"]}
 
     assert observations["peak_wavelength_m"]["state"] == "nondecreasing"
     assert observations["peak_response_value"]["state"] == "constant"
@@ -495,9 +524,10 @@ def test_public_tool_returns_separate_ladder_and_policy_artifacts():
         "ordered_evidence": "convergence_ladder",
         "policy_decision": "convergence_evaluation",
     }
-    assert result["convergence_evaluation"]["ladder_sha256"] == result[
-        "convergence_ladder"
-    ]["ladder_sha256"]
+    assert (
+        result["convergence_evaluation"]["ladder_sha256"]
+        == result["convergence_ladder"]["ladder_sha256"]
+    )
     assert result["fixed_reference_governs"] is False
     assert result["monotonicity_proves_convergence"] is False
     assert result["undeclared_configuration_started"] is False
@@ -545,9 +575,7 @@ def test_public_convergence_contract_runs_through_fastmcp_transport():
 
 def test_public_tool_structures_extreme_integer_rejection():
     levels = _levels()
-    levels[0]["candidate_measurements"]["candidate"]["peak"][
-        "wavelength_m"
-    ] = 10**10_000
+    levels[0]["candidate_measurements"]["candidate"]["peak"]["wavelength_m"] = 10**10_000
     server = FastMCP("convergence-extreme-input-test")
     register_convergence_evaluation_tools(server)
 
@@ -575,8 +603,11 @@ assert result['solver_started'] is False
 """
     completed = subprocess.run(
         [sys.executable, "-c", code],
-        cwd=Path(__file__).parents[2], capture_output=True, text=True,
-        timeout=20, check=False,
+        cwd=Path(__file__).parents[2],
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
     )
     assert completed.returncode == 0, completed.stderr
 
@@ -584,7 +615,10 @@ assert result['solver_started'] is False
 def _canonical_hash(value):
     return hashlib.sha256(
         json.dumps(
-            value, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
             allow_nan=False,
         ).encode("utf-8")
     ).hexdigest()
@@ -611,9 +645,7 @@ def test_self_rehashed_malformed_level_summary_still_fails_closed():
     [("ladder_id", "invalid ladder id"), ("level_count", 3.0)],
 )
 def test_self_rehashed_noncanonical_ladder_fields_fail_closed(field, value):
-    malformed = build_convergence_ladder(
-        ladder_id="three-mesh-ladder", levels=_levels()
-    )
+    malformed = build_convergence_ladder(ladder_id="three-mesh-ladder", levels=_levels())
     malformed[field] = value
     ladder_body = dict(malformed)
     ladder_body.pop("ladder_sha256")
@@ -629,24 +661,17 @@ def test_self_rehashed_support_rows_bind_count_uniqueness_and_cap(mutation):
         _fitted_level(0, 5.0e-6, None),
         _fitted_level(1, 5.006e-6, "fitted-mesh-0"),
     ]
-    malformed = build_convergence_ladder(
-        ladder_id="fit-sensitive-ladder", levels=levels
-    )
-    measurements = malformed["levels"][0]["fit_support_sensitivity"][
-        "measurements"
-    ]
+    malformed = build_convergence_ladder(ladder_id="fit-sensitive-ladder", levels=levels)
+    measurements = malformed["levels"][0]["fit_support_sensitivity"]["measurements"]
     measurement = measurements[-1] if mutation == "over_cap" else measurements[0]
     if mutation == "count_mismatch":
         measurement["support_point_count"] += 1
     elif mutation == "duplicate":
-        measurement["support_row_hashes"].append(
-            measurement["support_row_hashes"][0]
-        )
+        measurement["support_row_hashes"].append(measurement["support_row_hashes"][0])
         measurement["support_point_count"] += 1
     else:
         measurement["support_row_hashes"] = [
-            hashlib.sha256(f"support-{index}".encode()).hexdigest()
-            for index in range(1025)
+            hashlib.sha256(f"support-{index}".encode()).hexdigest() for index in range(1025)
         ]
         measurement["support_point_count"] = 1025
     level = malformed["levels"][0]
@@ -662,9 +687,7 @@ def test_self_rehashed_support_rows_bind_count_uniqueness_and_cap(mutation):
 
 
 def test_self_rehashed_equal_but_noncanonical_numeric_form_fails_closed():
-    malformed = build_convergence_ladder(
-        ladder_id="three-mesh-ladder", levels=_levels()
-    )
+    malformed = build_convergence_ladder(ladder_id="three-mesh-ladder", levels=_levels())
     level = malformed["levels"][0]
     assert level["optional_field_metrics"]["field_integral"]["value"] == 1.0
     level["optional_field_metrics"]["field_integral"]["value"] = 1

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -167,6 +168,21 @@ def test_combined_reference_power_evaluation_requires_every_physical_and_negativ
     failed = evaluate_reference_power_results(CONTRACT, failed_reference, point)
     assert failed["passed"] is False
     assert failed["checks"]["reference_air"]["reflection"] is False
+
+
+def test_positive_physical_policy_is_recomputed_instead_of_trusting_reported_verdict():
+    reference, point, _policies = _results()
+    payload = deepcopy(point["physical_evidence"])
+    payload.pop("contract_sha256")
+    payload["evidence"]["flux.closure_abs"]["value"] = 1.0
+    point["physical_evidence"] = build_physical_evidence(payload)
+    assert point["assessment"]["project_verdict"] == "pass"
+
+    result = evaluate_reference_power_results(CONTRACT, reference, point)
+
+    assert result["passed"] is False
+    assert result["checks"]["physical_point"]["policy_pass"] is False
+    assert result["physical_point_policy_evaluation"]["overall"] == "fail"
 
 
 @pytest.mark.parametrize(

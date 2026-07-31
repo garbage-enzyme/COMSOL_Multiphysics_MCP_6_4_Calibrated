@@ -128,7 +128,9 @@ def test_discovery_handles_english_names_empty_unknown_and_non_solution_datasets
 
     assert result["datasets"][0]["computed_state"] == "verified_empty"
     assert result["datasets"][0]["field_evaluation_eligible"] is False
-    assert result["datasets"][1]["computed_state"] == "not_solution"
+    assert result["datasets"][1]["solution_reference_kind"] == "data"
+    assert result["datasets"][1]["solution_tag"] == "sol1"
+    assert result["datasets"][1]["computed_state"] == "verified_empty"
     assert result["datasets"][2]["solution_reference_kind"] is None
     assert result["eligible_dataset_count"] == 0
     assert result["success"] is False
@@ -140,6 +142,23 @@ def test_discovery_handles_english_names_empty_unknown_and_non_solution_datasets
             "error_type": "RuntimeError",
         }
     ]
+
+
+def test_discovery_resolves_nested_dataset_references_to_the_terminal_solution():
+    result = discover_field_datasets(
+        _Model(
+            datasets=[
+                _Node("Solution", "dset1", "Solution", {"solution": "sol1"}),
+                _Node("Cut Plane", "cpl1", "CutPlane", {"data": "dset1"}),
+                _Node("Derived", "drv1", "Derived", {"data": "cpl1"}),
+            ],
+            solutions=[_Node("Solution 1", "sol1", "Solution", empty=False)],
+        )
+    )
+
+    assert [item["solution_tag"] for item in result["datasets"]] == ["sol1"] * 3
+    assert [item["computed_state"] for item in result["datasets"]] == ["verified_computed"] * 3
+    assert result["eligible_dataset_count"] == 3
 
 
 def test_discovery_fixture_preserves_explicit_empty_collections():

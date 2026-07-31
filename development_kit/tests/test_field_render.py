@@ -105,6 +105,51 @@ def test_paired_field_pngs_use_exact_shared_color_limits(tmp_path):
     assert result["views"][0]["color_limits"][1] == pytest.approx(expected_max)
 
 
+def test_worker_rejects_array_geometry_that_does_not_match_coordinates(tmp_path):
+    array = tmp_path / "malformed.npz"
+    np.savez_compressed(
+        array,
+        coordinate_x=np.array([0.0, 1.0]),
+        coordinate_y=np.array([0.0, 1.0]),
+        quantity_abs_ex=np.ones((1, 2)),
+    )
+
+    with pytest.raises(RuntimeError, match="shape does not match"):
+        render_field_png_bundle(
+            views=[_view("target", array, hashlib.sha256(array.read_bytes()).hexdigest())],
+            quantity_name="abs_ex",
+            quantity_unit="V/m",
+            coordinate_unit="um",
+            color_scale="linear",
+            shared_color_limits=False,
+            output_root=tmp_path / "malformed-output",
+        )
+
+
+def test_constant_sub_picounit_log_field_uses_positive_finite_limits(tmp_path):
+    array = tmp_path / "constant-log.npz"
+    np.savez_compressed(
+        array,
+        coordinate_x=np.array([0.0, 1.0]),
+        coordinate_y=np.array([0.0, 1.0]),
+        quantity_abs_ex=np.full((2, 2), 1.0e-13),
+    )
+
+    result = render_field_png_bundle(
+        views=[_view("target", array, hashlib.sha256(array.read_bytes()).hexdigest())],
+        quantity_name="abs_ex",
+        quantity_unit="V/m",
+        coordinate_unit="um",
+        color_scale="log",
+        shared_color_limits=False,
+        output_root=tmp_path / "constant-log-output",
+    )
+
+    lower, upper = result["views"][0]["color_limits"]
+    assert 0.0 < lower < upper
+    assert np.isfinite([lower, upper]).all()
+
+
 def test_renderer_rejects_hash_policy_and_log_failures_without_residue(tmp_path):
     array = tmp_path / "negative.npz"
     digest = _array(array, negative=True)

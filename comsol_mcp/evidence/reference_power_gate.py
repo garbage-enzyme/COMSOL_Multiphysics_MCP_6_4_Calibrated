@@ -127,6 +127,9 @@ def evaluate_reference_power_results(
     reference = reference_result.get("reference") or {}
     point_measurement = point_result.get("measurement") or {}
     wavelength = point_measurement.get("wavelength") or {}
+    positive_policy = evaluate_physical_evidence_policy(
+        point_result["physical_evidence"], policies["declared_flux"]
+    )
     negative = evaluate_reference_power_negative_controls(
         point_result["physical_evidence"], policies["declared_flux"]
     )
@@ -146,7 +149,10 @@ def evaluate_reference_power_results(
     }
     point_checks = {
         "audit_complete": point_result.get("audit_status") == "policy_evaluated",
-        "policy_pass": point_result.get("assessment", {}).get("project_verdict") == "pass",
+        "policy_pass": (
+            positive_policy["overall"] == "pass"
+            and point_result.get("assessment", {}).get("project_verdict") == "pass"
+        ),
         "wavelength_absolute": _at_most(
             wavelength.get("absolute_difference_m"),
             acceptance["wavelength"]["absolute_m_max"],
@@ -173,6 +179,7 @@ def evaluate_reference_power_results(
         "passed": passed,
         "checks": checks,
         "negative_controls": negative,
+        "physical_point_policy_evaluation": positive_policy,
         "raw": {
             "reference": {
                 "R": reference.get("R"),
