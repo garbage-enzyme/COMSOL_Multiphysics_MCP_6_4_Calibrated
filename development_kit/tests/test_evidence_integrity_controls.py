@@ -101,6 +101,11 @@ def test_each_check_can_be_explicitly_disabled_without_changing_other_checks(
             '"schema_version":"1.0.0","checks":{},"unknown":true}',
             "settings_rejected",
         ),
+        (
+            '{"schema_name":"comsol_mcp.evidence_integrity_settings",'
+            '"schema_version":"1.0.0","checks":{"unknown_check":false}}',
+            "settings_rejected",
+        ),
     ],
 )
 def test_malformed_ambiguous_or_unknown_settings_fail_closed(tmp_path, payload, reason_code):
