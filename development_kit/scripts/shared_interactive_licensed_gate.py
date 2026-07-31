@@ -6,10 +6,10 @@ import argparse
 import hashlib
 import json
 import math
-from pathlib import Path
 import subprocess
 import sys
 import time
+from pathlib import Path
 from typing import Any
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -20,7 +20,6 @@ from comsol_mcp.jobs.store import atomic_write_json
 from comsol_mcp.operation_arbiter import get_operation_arbiter
 from comsol_mcp.shared_session.contracts import SHARED_SERVER_FEATURE_ENV
 from comsol_mcp.shared_session.lifecycle import SharedSessionManager
-
 
 SCHEMA_NAME = "comsol_mcp.shared_interactive_licensed_gate"
 SCHEMA_VERSION = "1.1.0"
@@ -120,17 +119,17 @@ def _cleanup_shared_resources(
             ),
             lambda value: isinstance(value, dict) and value.get("success") is True,
         )
-    if operation_claim is not None:
-        run(
-            "operation_release",
-            lambda: get_operation_arbiter().release(operation_claim),
-            lambda value: isinstance(value, dict) and value.get("verified") is True,
-        )
     if attached:
         run(
             "detach",
             manager.detach,
             lambda value: isinstance(value, dict) and value.get("success") is True,
+        )
+    if operation_claim is not None:
+        run(
+            "operation_release",
+            lambda: get_operation_arbiter().release(operation_claim),
+            lambda value: isinstance(value, dict) and value.get("verified") is True,
         )
     return {
         "steps": steps,
@@ -403,6 +402,19 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
                 "sha256": _sha256(source_path),
             }
             result["immutable_source_before"] = dict(immutable_source)
+        arbiter = get_operation_arbiter()
+        operation_claim, acquisition = arbiter.try_acquire(
+            tool_name=f"shared_interactive_gate_{args.mode}",
+            side_effect_class={
+                "prepare": "solver_execution",
+                "readback": "filesystem_write",
+                "saved": "model_mutation",
+                "saved_readback": "read_only",
+            }[args.mode],
+        )
+        result["operation_acquisition"] = acquisition
+        if operation_claim is None:
+            raise RuntimeError("shared interactive gate could not acquire operation ownership")
         attach = manager.attach(
             {
                 "endpoint": spec["endpoint"],
@@ -438,20 +450,6 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
         result["initial_verification"] = verified
         if not verified.get("success"):
             raise RuntimeError("initial shared model verification failed")
-
-        arbiter = get_operation_arbiter()
-        operation_claim, acquisition = arbiter.try_acquire(
-            tool_name=f"shared_interactive_gate_{args.mode}",
-            side_effect_class={
-                "prepare": "solver_execution",
-                "readback": "filesystem_write",
-                "saved": "model_mutation",
-                "saved_readback": "read_only",
-            }[args.mode],
-        )
-        result["operation_acquisition"] = acquisition
-        if operation_claim is None:
-            raise RuntimeError("shared interactive gate could not acquire operation ownership")
 
         model = _exact_model(manager, args.model_tag)
         if args.mode == "prepare":
@@ -522,16 +520,16 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
             raise RuntimeError("final shared model unlock failed")
         active_lock_sha256 = None
 
-        release = arbiter.release(operation_claim)
-        result["operation_release"] = release
-        if not release.get("verified"):
-            raise RuntimeError("operation ownership release was not verified")
-        operation_claim = None
         detach = manager.detach()
         result["detach"] = detach
         if not detach.get("success"):
             raise RuntimeError("attached resource preservation failed")
         attached = False
+        release = arbiter.release(operation_claim)
+        result["operation_release"] = release
+        if not release.get("verified"):
+            raise RuntimeError("operation ownership release was not verified")
+        operation_claim = None
         if immutable_source is not None:
             source_sha256_after_detach = _sha256(Path(immutable_source["path"]))
             result["immutable_source_after_detach_sha256"] = source_sha256_after_detach

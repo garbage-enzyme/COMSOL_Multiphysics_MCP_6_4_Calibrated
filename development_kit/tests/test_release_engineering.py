@@ -20,7 +20,9 @@ import pytest
 import yaml
 
 from development_kit.scripts import generate_release_lock as lock_generator
+from development_kit.scripts import installed_package_probe
 from development_kit.scripts import python_compatibility_licensed_gate as compatibility_gate
+from development_kit.scripts import release_gate as release_gate_module
 from development_kit.scripts.generate_release_lock import _render_lock
 from development_kit.scripts.planning_code_gate import (
     TEXT_SUFFIXES,
@@ -36,10 +38,12 @@ from development_kit.scripts.python_compatibility_licensed_gate import (
 )
 from development_kit.scripts.release_gate import (
     PLANNING_CODE_ALLOWLIST,
+    _dependency_lock_location,
     _distribution_artifacts,
     _distribution_inventory,
     _lock_lane,
     _run,
+    _sanitized_probe_environment,
     _validated_dependency_lock,
 )
 from development_kit.scripts.run_real_release_gate import _wait_clean_ownership
@@ -188,11 +192,16 @@ def test_compatibility_cleanup_preserves_primary_error_and_continues_after_relea
         lambda _owner, timeout_seconds=30.0: waits.append(timeout_seconds) or clean,
     )
     monkeypatch.setattr(compatibility_gate, "SolverOwnership", Owner)
-    monkeypatch.setattr(
-        compatibility_gate.subprocess,
-        "Popen",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("injected launch failure")),
-    )
+    streams = []
+
+    def fail_launch(*_args, **kwargs):
+        streams.extend([kwargs["stdout"], kwargs["stderr"]])
+        assert kwargs["stdout"] is not subprocess.PIPE
+        assert kwargs["stderr"] is not subprocess.PIPE
+        assert not kwargs.get("text", False)
+        raise OSError("injected launch failure")
+
+    monkeypatch.setattr(compatibility_gate.subprocess, "Popen", fail_launch)
     monkeypatch.setattr(compatibility_gate, "_descendant_identities", lambda _pid: [])
     monkeypatch.setattr(
         compatibility_gate,
@@ -217,6 +226,9 @@ def test_compatibility_cleanup_preserves_primary_error_and_continues_after_relea
     assert {item["stage"] for item in receipt["cleanup"]["errors"]} == {"lease_release"}
     assert receipt["ownership_after"] is not None
     assert len(waits) == 2
+    assert all(stream.closed for stream in streams)
+    assert not list(tmp_path.glob(".receipt.worker.*.stdout.log"))
+    assert not list(tmp_path.glob(".receipt.worker.*.stderr.log"))
 
 
 def test_compatibility_final_descendant_snapshot_is_recorded_once(tmp_path, monkeypatch):
@@ -504,6 +516,24 @@ def test_planning_code_gate_detects_codes_inside_underscore_identifiers():
         )
 
 
+def test_planning_code_allowlist_rejects_unknown_top_level_fields(tmp_path):
+    path = tmp_path / "allowlist.json"
+    path.write_text(
+        json.dumps(
+            {
+                "schema_name": "comsol_mcp.planning_code_allowlist",
+                "schema_version": "1.0.0",
+                "entries": [],
+                "entires": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="schema is invalid"):
+        load_planning_code_allowlist(path)
+
+
 def test_public_tracked_text_has_no_user_profile_paths():
     text_suffixes = {".json", ".md", ".py", ".toml", ".yaml", ".yml"}
     for _mode, path_text in _tracked_entries():
@@ -595,7 +625,7 @@ def test_distribution_inventory_rejects_archive_links(tmp_path):
     with pytest.raises(RuntimeError, match="link member"):
         _distribution_inventory(symlink_wheel)
 
-    hardlink_sdist = tmp_path / "linked.tar.gz"
+    hardlink_sdist = tmp_path / "package-1.tar.gz"
     with tarfile.open(hardlink_sdist, "w:gz") as archive:
         payload = b"pass\n"
         source = tarfile.TarInfo("package-1/comsol_mcp/source.py")
@@ -607,6 +637,46 @@ def test_distribution_inventory_rejects_archive_links(tmp_path):
         archive.addfile(link)
     with pytest.raises(RuntimeError, match="link member"):
         _distribution_inventory(hardlink_sdist)
+
+
+def test_distribution_inventory_rejects_normalized_name_collisions(tmp_path):
+    wheel = tmp_path / "duplicate.whl"
+    with zipfile.ZipFile(wheel, "w") as archive:
+        archive.writestr("comsol_mcp/first.py", "first\n")
+        archive.writestr("comsol_mcp/./first.py", "second\n")
+    with pytest.raises(RuntimeError, match="duplicate normalized paths"):
+        _distribution_inventory(wheel)
+
+    sdist = tmp_path / "package-1.tar.gz"
+    with tarfile.open(sdist, "w:gz") as archive:
+        for name, payload in (
+            ("package-1/comsol_mcp/first.py", b"first\n"),
+            ("package-1/comsol_mcp/./first.py", b"second\n"),
+        ):
+            member = tarfile.TarInfo(name)
+            member.size = len(payload)
+            archive.addfile(member, io.BytesIO(payload))
+    with pytest.raises(RuntimeError, match="duplicate normalized paths"):
+        _distribution_inventory(sdist)
+
+
+def test_sdist_inventory_requires_its_exact_filename_root(tmp_path):
+    valid = tmp_path / "package-1.tar.gz"
+    with tarfile.open(valid, "w:gz") as archive:
+        payload = b"pass\n"
+        member = tarfile.TarInfo("package-1/comsol_mcp/server.py")
+        member.size = len(payload)
+        archive.addfile(member, io.BytesIO(payload))
+    assert _distribution_inventory(valid)["member_count"] == 1
+
+    invalid = tmp_path / "package-2.tar.gz"
+    with tarfile.open(invalid, "w:gz") as archive:
+        payload = b"pass\n"
+        member = tarfile.TarInfo("comsol_mcp-unrelated/comsol_mcp/server.py")
+        member.size = len(payload)
+        archive.addfile(member, io.BytesIO(payload))
+    with pytest.raises(RuntimeError, match="outside the exact archive root"):
+        _distribution_inventory(invalid)
 
 
 def test_distribution_inventory_enforces_frozen_planning_codes_and_private_paths(tmp_path):
@@ -754,6 +824,57 @@ def test_release_dependency_lock_is_complete_and_matches_current_lane(tmp_path):
     assert len(requirement_lines) >= 40
     assert all(re.fullmatch(r"[a-z0-9-]+==[^ ]+ \\", line) for line in requirement_lines)
     assert lock_text.count("--hash=sha256:") >= len(requirement_lines)
+
+
+def test_release_lock_rejects_unhashed_direct_reference_dependencies():
+    assert lock_generator._runtime_pins("comsol-mcp @ file:///tmp/root.whl\nexample==1.2.3\n") == [
+        "example==1.2.3"
+    ]
+
+    with pytest.raises(RuntimeError, match="non-exact pip freeze entry"):
+        lock_generator._runtime_pins("example @ https://packages.invalid/example-1.2.3.whl\n")
+
+
+def test_installed_profiles_must_share_one_release_inventory():
+    first = {"schema_registry_sha256": "a" * 64, "schema_entry_count": 10}
+    assert (
+        installed_package_probe._bind_release_inventory(
+            None,
+            first,
+            profile="core",
+        )
+        == first
+    )
+    assert (
+        installed_package_probe._bind_release_inventory(
+            first,
+            dict(first),
+            profile="full",
+        )
+        is first
+    )
+    with pytest.raises(AssertionError, match="release inventory differs"):
+        installed_package_probe._bind_release_inventory(
+            first,
+            {**first, "schema_entry_count": 11},
+            profile="full",
+        )
+
+
+def test_release_receipt_accepts_external_lock_and_probes_drop_pythonpath(
+    tmp_path,
+    monkeypatch,
+):
+    external = (tmp_path / "external-lock.txt").resolve()
+    assert _dependency_lock_location(external) == {
+        "path": str(external),
+        "path_scope": "absolute_external",
+    }
+
+    monkeypatch.setenv("PYTHONPATH", str(tmp_path / "shadow"))
+    assert "PYTHONPATH" not in _sanitized_probe_environment()
+    source = Path(release_gate_module.__file__).read_text(encoding="utf-8")
+    assert source.count("env=environment") == 3
 
 
 def test_release_lock_binds_the_declared_platform_to_the_target_interpreter(monkeypatch):

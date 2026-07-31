@@ -36,9 +36,32 @@ QUERY_ALIASES = {
     "alpha1_inc": '"first" AND "angle" AND "incidence" AND "periodic"',
 }
 QUERY_STOP_WORDS = {
-    "a", "an", "and", "are", "can", "do", "does", "for", "from", "how",
-    "i", "in", "is", "it", "of", "on", "please", "the", "this", "to",
-    "use", "using", "what", "when", "where", "with",
+    "a",
+    "an",
+    "and",
+    "are",
+    "can",
+    "do",
+    "does",
+    "for",
+    "from",
+    "how",
+    "i",
+    "in",
+    "is",
+    "it",
+    "of",
+    "on",
+    "please",
+    "the",
+    "this",
+    "to",
+    "use",
+    "using",
+    "what",
+    "when",
+    "where",
+    "with",
 }
 
 
@@ -175,12 +198,26 @@ def build_index_from_records(
     }
 
 
-def _pdf_fingerprint(pdf_dir: Path, pdf_files: Sequence[Path]) -> str:
+def _pdf_snapshot(path: Path) -> tuple[int, int, int, int]:
+    stat = path.stat()
+    return (
+        stat.st_size,
+        stat.st_mtime_ns,
+        stat.st_ctime_ns,
+        stat.st_ino,
+    )
+
+
+def _pdf_fingerprint(
+    pdf_dir: Path,
+    pdf_files: Sequence[Path],
+    snapshots: Mapping[Path, tuple[int, int, int, int]],
+) -> str:
     digest = hashlib.sha256()
     for path in pdf_files:
-        stat = path.stat()
+        size, mtime_ns, _ctime_ns, _inode = snapshots[path]
         relative = path.relative_to(pdf_dir).as_posix()
-        digest.update(f"{relative}\0{stat.st_size}\0{stat.st_mtime_ns}\n".encode("utf-8"))
+        digest.update(f"{relative}\0{size}\0{mtime_ns}\n".encode("utf-8"))
     return digest.hexdigest()
 
 
@@ -193,11 +230,16 @@ def build_index_from_pdfs(
     pdf_files = sorted(source_root.rglob("*.pdf"))
     if not pdf_files:
         raise FileNotFoundError(f"No PDF manuals found below {source_root}")
+    snapshots = {path: _pdf_snapshot(path) for path in pdf_files}
+    corpus_fingerprint = _pdf_fingerprint(source_root, pdf_files, snapshots)
 
     def records():
         import fitz
 
         for pdf_path in pdf_files:
+            expected_snapshot = snapshots[pdf_path]
+            if _pdf_snapshot(pdf_path) != expected_snapshot:
+                raise RuntimeError(f"PDF manual changed before extraction: {pdf_path}")
             source = pdf_path.relative_to(source_root).as_posix()
             module = source.split("/", 1)[0]
             with fitz.open(pdf_path) as document:
@@ -211,11 +253,13 @@ def build_index_from_pdfs(
                             "heading": _page_heading(text),
                             "text": text,
                         }
+            if _pdf_snapshot(pdf_path) != expected_snapshot:
+                raise RuntimeError(f"PDF manual changed during extraction: {pdf_path}")
 
     result = build_index_from_records(
         records(),
         index_path,
-        corpus_fingerprint=_pdf_fingerprint(source_root, pdf_files),
+        corpus_fingerprint=corpus_fingerprint,
     )
     result["pdf_count"] = len(pdf_files)
     result["pdf_dir"] = str(source_root)
@@ -230,8 +274,7 @@ def _query_parts(query: str) -> list[str]:
     remainder = re.sub(r'"[^"\n]+"', " ", query)
     terms = re.findall(r"[\w.:-]+", remainder, flags=re.UNICODE)
     significant_terms = [
-        term for term in terms
-        if term.casefold() not in QUERY_STOP_WORDS and len(term) > 1
+        term for term in terms if term.casefold() not in QUERY_STOP_WORDS and len(term) > 1
     ]
     parts = phrases + significant_terms
     if not parts:
@@ -244,6 +287,26 @@ def _fts_query(query: str, operator: str = "AND") -> str:
     parts = _query_parts(query)
     escaped = [part.replace('"', '""') for part in parts]
     return f" {operator} ".join(f'"{part}"' for part in escaped)
+
+
+def _validated_index_metadata(connection: sqlite3.Connection) -> dict[str, str]:
+    metadata = dict(connection.execute("SELECT key, value FROM metadata"))
+    missing = {"schema_version", "corpus_fingerprint", "page_count"} - set(metadata)
+    if missing:
+        raise ValueError(
+            f"Manual index metadata is incomplete ({sorted(missing)}); rebuild the index"
+        )
+    if metadata["schema_version"] != SCHEMA_VERSION:
+        raise ValueError("Manual index schema is unsupported; rebuild it with the current package")
+    if not metadata["corpus_fingerprint"]:
+        raise ValueError("Manual index corpus fingerprint is empty; rebuild the index")
+    try:
+        page_count = int(metadata["page_count"])
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Manual index page count is invalid; rebuild the index") from exc
+    if page_count < 0:
+        raise ValueError("Manual index page count is invalid; rebuild the index")
+    return metadata
 
 
 def search_index(
@@ -290,11 +353,12 @@ def search_index(
                bm25(pages_fts, 0.0, 0.0, 0.0, 2.0, 1.0) AS rank,
                heading || '\n' || text AS match_text
         FROM pages_fts
-        WHERE {' AND '.join(clauses)}
+        WHERE {" AND ".join(clauses)}
         ORDER BY rank, source, page
         LIMIT ?
     """
     with closing(_open_index(path, readonly=True)) as connection:
+        metadata = _validated_index_metadata(connection)
         rows = [
             dict(row)
             for row in connection.execute(
@@ -324,7 +388,6 @@ def search_index(
             scored.sort(key=lambda row: (-len(row["matched_terms"]), row["rank"]))
             rows = scored[:limit]
             strategy = "relaxed_coverage_bm25"
-        metadata = dict(connection.execute("SELECT key, value FROM metadata"))
     for row in rows:
         haystack = row.pop("match_text").casefold()
         row.setdefault("matched_terms", [part for part in parts if part.casefold() in haystack])
@@ -367,6 +430,7 @@ def read_index_pages(
         f"WHERE source = ? AND page IN ({placeholders}) ORDER BY page"
     )
     with closing(_open_index(path, readonly=True)) as connection:
+        _validated_index_metadata(connection)
         rows = [dict(row) for row in connection.execute(sql, [normalized_source, *requested])]
     return {
         "success": True,
@@ -410,7 +474,7 @@ def run_bounded(operation: str, arguments: dict, timeout: float) -> dict:
         }
     try:
         return json.loads(completed.stdout.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError):
+    except UnicodeDecodeError, json.JSONDecodeError:
         return {
             "success": False,
             "error_type": "WorkerError",

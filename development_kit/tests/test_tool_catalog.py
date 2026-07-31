@@ -215,6 +215,22 @@ def test_embedded_knowledge_uses_one_bounded_regular_file_read(tmp_path, monkeyp
     assert embedded_module._load_knowledge_file("mph_api") == "bounded guidance"
 
 
+def test_embedded_knowledge_responses_do_not_expose_module_state():
+    docs = embedded_module.list_docs()
+    docs["topics"][0]["keywords"].append("injected")
+    guide = embedded_module.get_physics_guide("electrostatics")
+    guide["guide"]["tips"].clear()
+    troubleshoot = embedded_module.get_troubleshoot("mesh_failed")
+    troubleshoot["solutions"].clear()
+    practices = embedded_module.get_best_practices("mesh")
+    practices["best_practices"]["tips"].clear()
+
+    assert "injected" not in embedded_module.list_docs()["topics"][0]["keywords"]
+    assert embedded_module.get_physics_guide("electrostatics")["guide"]["tips"]
+    assert embedded_module.get_troubleshoot("mesh_failed")["solutions"]
+    assert embedded_module.get_best_practices("mesh")["best_practices"]["tips"]
+
+
 def test_metadata_registrars_match_actual_registration():
     registrars = []
     for registrar_path in registrars_for_profile("full"):

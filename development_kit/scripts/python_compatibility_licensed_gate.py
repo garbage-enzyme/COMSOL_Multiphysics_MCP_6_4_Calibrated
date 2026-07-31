@@ -4,18 +4,18 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-from importlib import import_module
-from importlib.metadata import version
 import json
 import math
 import os
-from pathlib import Path
 import platform
 import subprocess
 import sys
 import time
-from typing import Any
 import uuid
+from importlib import import_module
+from importlib.metadata import version
+from pathlib import Path
+from typing import Any
 
 import psutil
 
@@ -423,6 +423,8 @@ def _run_parent(args) -> int:
 
     output.parent.mkdir(parents=True, exist_ok=True)
     worker_output = output.with_name(f".{output.stem}.worker.{uuid.uuid4().hex}.json")
+    worker_stdout = worker_output.with_suffix(".stdout.log")
+    worker_stderr = worker_output.with_suffix(".stderr.log")
     owner = SolverOwnership(args.runtime_root, owner="python-compatibility-licensed-gate")
     receipt = {
         "schema_name": "comsol_mcp.python_compatibility_licensed_gate",
@@ -474,34 +476,36 @@ def _run_parent(args) -> int:
             "--cores",
             str(args.cores),
         ]
-        process = subprocess.Popen(
-            command,
-            cwd=ROOT,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
-        )
-        receipt["worker_process"] = _process_identity(process.pid)
-        deadline = time.monotonic() + args.timeout_seconds
-        timed_out = False
-        while process.poll() is None:
-            if time.monotonic() >= deadline:
-                timed_out = True
-                _terminate_owned_tree(process)
-                break
-            if not owner.heartbeat(refresh_server_processes=True):
-                raise RuntimeError("solver lease heartbeat failed")
-            descendants = _descendant_identities(os.getpid())
-            for identity in descendants:
-                child_identities[(identity["pid"], identity["process_create_time"])] = identity
-            ports = _listener_inventory({item["pid"] for item in descendants})
-            if not ports["complete"]:
-                raise RuntimeError(f"owned listener inventory failed: {ports['error']}")
-            for listener in ports["listeners"]:
-                listeners[(listener["pid"], listener["port"])] = listener
-            time.sleep(0.25)
-        stdout, stderr = process.communicate(timeout=15)
+        with worker_stdout.open("wb") as stdout_handle, worker_stderr.open("wb") as stderr_handle:
+            process = subprocess.Popen(
+                command,
+                cwd=ROOT,
+                stdout=stdout_handle,
+                stderr=stderr_handle,
+                creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
+            )
+            receipt["worker_process"] = _process_identity(process.pid)
+            deadline = time.monotonic() + args.timeout_seconds
+            timed_out = False
+            while process.poll() is None:
+                if time.monotonic() >= deadline:
+                    timed_out = True
+                    _terminate_owned_tree(process)
+                    break
+                if not owner.heartbeat(refresh_server_processes=True):
+                    raise RuntimeError("solver lease heartbeat failed")
+                descendants = _descendant_identities(os.getpid())
+                for identity in descendants:
+                    child_identities[(identity["pid"], identity["process_create_time"])] = identity
+                ports = _listener_inventory({item["pid"] for item in descendants})
+                if not ports["complete"]:
+                    raise RuntimeError(f"owned listener inventory failed: {ports['error']}")
+                for listener in ports["listeners"]:
+                    listeners[(listener["pid"], listener["port"])] = listener
+                time.sleep(0.25)
+            process.wait(timeout=15)
+        stdout = worker_stdout.read_bytes().decode("utf-8", errors="replace")
+        stderr = worker_stderr.read_bytes().decode("utf-8", errors="replace")
         receipt["worker_execution"] = {
             "returncode": process.returncode,
             "timed_out": timed_out,
@@ -607,6 +611,8 @@ def _run_parent(args) -> int:
             _write_receipt(output, receipt)
         finally:
             worker_output.unlink(missing_ok=True)
+            worker_stdout.unlink(missing_ok=True)
+            worker_stderr.unlink(missing_ok=True)
     print(output)
     return returncode
 

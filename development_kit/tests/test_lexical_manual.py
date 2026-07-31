@@ -1,7 +1,10 @@
 import shutil
+import sqlite3
+import sys
 import time
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from src.knowledge import lexical_manual as manual_module
@@ -111,6 +114,57 @@ def test_read_pages_reports_missing_pages(manual_index: Path):
 
     assert [row["page"] for row in result["pages"]] == [2033]
     assert result["missing_pages"] == [2034]
+
+
+@pytest.mark.parametrize("operation", ["search", "read"])
+def test_readers_reject_an_obsolete_index_schema(manual_index: Path, operation):
+    with sqlite3.connect(manual_index) as connection:
+        connection.execute("UPDATE metadata SET value = 'obsolete' WHERE key = 'schema_version'")
+        connection.commit()
+
+    with pytest.raises(ValueError, match="schema is unsupported"):
+        if operation == "search":
+            search_index("CopyFace", index_path=manual_index)
+        else:
+            read_index_pages(
+                "COMSOL_Multiphysics/COMSOL_ReferenceManual.pdf",
+                [2033],
+                index_path=manual_index,
+            )
+
+
+def test_pdf_index_build_rejects_a_manual_changed_during_extraction(
+    ascii_tmp_path,
+    monkeypatch,
+):
+    pdf_root = ascii_tmp_path / "pdf"
+    pdf_root.mkdir()
+    source = pdf_root / "manual.pdf"
+    source.write_bytes(b"initial-pdf")
+    index = ascii_tmp_path / "manuals.sqlite3"
+
+    class Page:
+        def get_text(self, _format):
+            source.write_bytes(b"changed-pdf-with-a-different-size")
+            return "Searchable manual page"
+
+    class Document:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def __iter__(self):
+            return iter([Page()])
+
+    monkeypatch.setitem(sys.modules, "fitz", SimpleNamespace(open=lambda _path: Document()))
+
+    with pytest.raises(RuntimeError, match="changed during extraction"):
+        manual_module.build_index_from_pdfs(pdf_root, index)
+
+    assert not index.exists()
+    assert not list(ascii_tmp_path.glob("manuals.sqlite3.tmp-*"))
 
 
 def test_read_only_lexical_connections_close_deterministically(manual_index: Path, monkeypatch):

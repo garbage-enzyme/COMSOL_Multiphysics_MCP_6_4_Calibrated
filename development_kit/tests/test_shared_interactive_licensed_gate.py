@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
 from development_kit.scripts import shared_interactive_licensed_gate as gate
-
 
 SCRIPT = Path(__file__).parents[1] / "scripts" / "shared_interactive_licensed_gate.py"
 
@@ -271,6 +270,52 @@ def test_git_probe_failure_returns_structured_gate_result(monkeypatch):
     assert result["cleanup"]["passed"] is True
 
 
+def test_operation_ownership_is_required_before_shared_attach(monkeypatch):
+    calls = []
+
+    class Manager:
+        def attach(self, *_args, **_kwargs):
+            calls.append("attach")
+            raise AssertionError("attach must not run before operation ownership")
+
+    class Arbiter:
+        def try_acquire(self, **_kwargs):
+            calls.append("acquire")
+            return None, {"acquired": False}
+
+    monkeypatch.setattr(
+        gate,
+        "_git_head",
+        lambda: {
+            "success": True,
+            "commit": "a" * 40,
+            "error_type": None,
+            "returncode": 0,
+        },
+    )
+    monkeypatch.setattr(gate, "SharedSessionManager", Manager)
+    monkeypatch.setattr(gate, "get_operation_arbiter", lambda: Arbiter())
+    args = gate._parser().parse_args(
+        [
+            "--mode",
+            "prepare",
+            "--model-tag",
+            "Model1",
+            "--expected-label",
+            "Untitled.mph",
+            "--receipt",
+            _ascii_receipt(),
+        ]
+    )
+
+    result = gate._run(args)
+
+    assert calls == ["acquire"]
+    assert result["success"] is False
+    assert result["operation_acquisition"] == {"acquired": False}
+    assert "could not acquire operation ownership" in result["error"]
+
+
 def test_cleanup_steps_continue_independently_and_fail_the_result(monkeypatch):
     calls = []
 
@@ -297,10 +342,10 @@ def test_cleanup_steps_continue_independently_and_fail_the_result(monkeypatch):
         attached=True,
     )
 
-    assert calls == ["unlock", "release", "detach"]
+    assert calls == ["unlock", "detach", "release"]
     assert cleanup["steps"] == {
         "unlock": {"passed": False, "error_type": "OSError"},
-        "operation_release": {"passed": False},
         "detach": {"passed": True},
+        "operation_release": {"passed": False},
     }
     assert cleanup["passed"] is False

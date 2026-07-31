@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from packaging.requirements import InvalidRequirement, Requirement
 from packaging.utils import canonicalize_name, parse_wheel_filename
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -43,12 +44,26 @@ def _runtime_pins(freeze_output: str) -> list[str]:
     pins = []
     for raw in freeze_output.splitlines():
         line = raw.strip()
-        if not line or "==" not in line:
+        if not line or line.startswith("#"):
             continue
-        name, version = line.split("==", 1)
-        if canonicalize_name(name) in excluded:
+        try:
+            requirement = Requirement(line)
+        except InvalidRequirement as exc:
+            raise RuntimeError(f"unsupported pip freeze entry: {line}") from exc
+        name = canonicalize_name(requirement.name)
+        if name in excluded:
             continue
-        pins.append(f"{canonicalize_name(name)}=={version}")
+        specifiers = list(requirement.specifier)
+        if (
+            requirement.url is not None
+            or requirement.extras
+            or requirement.marker is not None
+            or len(specifiers) != 1
+            or specifiers[0].operator != "=="
+            or "*" in specifiers[0].version
+        ):
+            raise RuntimeError(f"release lock cannot hash a non-exact pip freeze entry: {line}")
+        pins.append(f"{name}=={specifiers[0].version}")
     return sorted(set(pins), key=str.casefold)
 
 

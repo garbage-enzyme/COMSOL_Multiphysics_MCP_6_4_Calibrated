@@ -57,6 +57,12 @@ def _run(
     )
 
 
+def _sanitized_probe_environment() -> dict[str, str]:
+    environment = os.environ.copy()
+    environment.pop("PYTHONPATH", None)
+    return environment
+
+
 def _git_status() -> list[str]:
     completed = subprocess.run(
         ["git", "status", "--porcelain"],
@@ -121,15 +127,35 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _normalized_archive_path(name: str) -> str:
+def _normalized_archive_path(
+    name: str,
+    *,
+    sdist_root: str | None = None,
+) -> str:
     raw = name.replace("\\", "/")
     pure = PurePosixPath(raw)
     if pure.is_absolute() or PureWindowsPath(raw).is_absolute() or ".." in pure.parts:
         raise RuntimeError(f"distribution contains unsafe path: {name}")
     parts = list(pure.parts)
-    if parts and parts[0].startswith("comsol_mcp-"):
+    if sdist_root is not None:
+        if not parts or parts[0] != sdist_root:
+            raise RuntimeError(
+                "sdist member is outside the exact archive root: "
+                f"expected={sdist_root}, member={name}"
+            )
         parts = parts[1:]
     return "/".join(parts)
+
+
+def _normalized_archive_members(
+    names: list[str],
+    *,
+    sdist_root: str | None,
+) -> list[str]:
+    normalized = [_normalized_archive_path(name, sdist_root=sdist_root) for name in names]
+    if len(normalized) != len(set(normalized)):
+        raise RuntimeError("distribution contains duplicate normalized paths")
+    return normalized
 
 
 def _distribution_files(path: Path) -> tuple[list[str], dict[str, bytes]]:
@@ -137,20 +163,31 @@ def _distribution_files(path: Path) -> tuple[list[str], dict[str, bytes]]:
         with zipfile.ZipFile(path) as archive:
             infos = archive.infolist()
             members = [info.filename for info in infos]
+            normalized = _normalized_archive_members(members, sdist_root=None)
             for info in infos:
                 unix_mode = (info.external_attr >> 16) & 0o170000
                 if unix_mode == 0o120000:
                     raise RuntimeError(f"distribution contains link member: {info.filename}")
             files = {
-                _normalized_archive_path(info.filename): archive.read(info)
-                for info in infos
+                normalized_name: archive.read(info)
+                for info, normalized_name in zip(infos, normalized, strict=True)
                 if not info.is_dir()
             }
     elif path.name.endswith(".tar.gz"):
+        sdist_root = path.name.removesuffix(".tar.gz")
         with tarfile.open(path, "r:gz") as archive:
-            members = archive.getnames()
+            archive_members = archive.getmembers()
+            members = [member.name for member in archive_members]
+            normalized = _normalized_archive_members(
+                members,
+                sdist_root=sdist_root,
+            )
             files = {}
-            for member in archive.getmembers():
+            for member, normalized_name in zip(
+                archive_members,
+                normalized,
+                strict=True,
+            ):
                 if member.issym() or member.islnk():
                     raise RuntimeError(f"distribution contains link member: {member.name}")
                 if not member.isfile() and not member.isdir():
@@ -160,13 +197,10 @@ def _distribution_files(path: Path) -> tuple[list[str], dict[str, bytes]]:
                 stream = archive.extractfile(member)
                 if stream is None:
                     raise RuntimeError(f"cannot read distribution member: {member.name}")
-                files[_normalized_archive_path(member.name)] = stream.read()
+                files[normalized_name] = stream.read()
     else:
         raise ValueError(f"unsupported distribution artifact: {path.name}")
-    normalized = [_normalized_archive_path(name) for name in members]
-    if len(normalized) != len(set(normalized)):
-        raise RuntimeError("distribution contains duplicate normalized paths")
-    return members, files
+    return normalized, files
 
 
 def _distribution_artifacts(dist_dir: Path) -> list[Path]:
@@ -182,8 +216,7 @@ def _distribution_artifacts(dist_dir: Path) -> list[Path]:
 
 
 def _distribution_inventory(path: Path) -> dict:
-    members, files = _distribution_files(path)
-    normalized = [_normalized_archive_path(name) for name in members]
+    normalized, files = _distribution_files(path)
     offenders = []
     for name in normalized:
         pure = PurePosixPath(name)
@@ -215,12 +248,20 @@ def _distribution_inventory(path: Path) -> dict:
     return {
         "filename": path.name,
         "sha256": _sha256(path),
-        "member_count": len(members),
+        "member_count": len(normalized),
         "development_kit_excluded": True,
         "forbidden_entries_absent": True,
         "private_user_paths_absent": True,
         "planning_code_gate": planning_receipt,
     }
+
+
+def _dependency_lock_location(path: Path) -> dict[str, str]:
+    try:
+        relative = path.relative_to(ROOT)
+    except ValueError:
+        return {"path": str(path), "path_scope": "absolute_external"}
+    return {"path": str(relative), "path_scope": "repository_relative"}
 
 
 def main() -> int:
@@ -298,8 +339,7 @@ def main() -> int:
         _run([str(python), "-m", "pip", "check"], cwd=run_root)
         probe_workdir = run_root / "probe_workdir"
         probe_workdir.mkdir()
-        environment = os.environ.copy()
-        environment.pop("PYTHONPATH", None)
+        environment = _sanitized_probe_environment()
         _run(
             [
                 str(python),
@@ -323,6 +363,7 @@ def main() -> int:
                     str(sbom_result),
                 ],
                 cwd=probe_workdir,
+                env=environment,
             )
         _run(
             [
@@ -336,6 +377,7 @@ def main() -> int:
                 str(stdio_probe_result),
             ],
             cwd=probe_workdir,
+            env=environment,
         )
 
     installed_probe = (
@@ -365,7 +407,7 @@ def main() -> int:
         "non_editable_install_run": not args.skip_install,
         "dependency_lock": (
             {
-                "path": str(dependency_lock.relative_to(ROOT)),
+                **_dependency_lock_location(dependency_lock),
                 "sha256": _sha256(dependency_lock),
                 "python_lane": _lock_lane(dependency_lock),
                 "require_hashes": True,
