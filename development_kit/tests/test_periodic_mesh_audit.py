@@ -7,7 +7,9 @@ from pathlib import Path
 
 import pytest
 from src.tools.periodic_mesh_audit import (
+    _mesh_sequence,
     _periodic_groups,
+    _recipe_for_group,
     collect_periodic_mesh_audit,
     run_clone_mesh_smoke,
 )
@@ -35,6 +37,11 @@ def _audit(tmp_path, monkeypatch, **fixture):
         active_profile="wave_optics",
         expected_source_path=str(source),
         expected_source_sha256=expected_source_sha256,
+        loaded_source_identity={
+            "source_path": str(source),
+            "source_sha256": expected_source_sha256,
+            "capture": "test_load",
+        },
         expected_component_tag="comp1",
         expected_physics_tag="ewfd",
         expected_study_tag="std1",
@@ -103,6 +110,53 @@ def test_segmented_oblique_group_reports_balanced_translation_without_axis_guess
     assert group["source_destination_orientation"] == "not_inferred_from_floquet_selection"
 
 
+def test_periodic_group_rejects_noncollinear_normals_in_the_same_hemisphere():
+    preflight = {
+        "topology": {
+            "boundaries": [
+                {"boundary": 1, "normal": [1, 0, 0], "center": [0, 0, 0], "interior": False},
+                {"boundary": 2, "normal": [0.01, 1, 0], "center": [0, 1, 0], "interior": False},
+                {"boundary": 3, "normal": [-1, 0, 0], "center": [1, 0, 0], "interior": False},
+                {"boundary": 4, "normal": [-0.01, -1, 0], "center": [1, 1, 0], "interior": False},
+            ]
+        },
+        "periodicity": {
+            "floquet_features": [
+                {"tag": "mixed", "type": "PeriodicCondition", "selection": [1, 2, 3, 4]}
+            ]
+        },
+    }
+
+    group = _periodic_groups(preflight)[0]
+
+    assert group["geometry_consistent"] is False
+    assert group["ambiguous_faces"] == [2, 4]
+
+
+def test_periodic_group_requires_one_to_one_center_translation():
+    preflight = {
+        "topology": {
+            "boundaries": [
+                {"boundary": 1, "normal": [1, 0, 0], "center": [0, 0, 0], "interior": False},
+                {"boundary": 2, "normal": [1, 0, 0], "center": [0, 2, 0], "interior": False},
+                {"boundary": 3, "normal": [-1, 0, 0], "center": [1, 0, 0], "interior": False},
+                {"boundary": 4, "normal": [-1, 0, 0], "center": [1, 3, 0], "interior": False},
+            ]
+        },
+        "periodicity": {
+            "floquet_features": [
+                {"tag": "mismatch", "type": "PeriodicCondition", "selection": [1, 2, 3, 4]}
+            ]
+        },
+    }
+
+    group = _periodic_groups(preflight)[0]
+
+    assert group["inferred_translation"] is None
+    assert group["translation_pairing_verified"] is False
+    assert group["geometry_consistent"] is False
+
+
 @pytest.mark.parametrize(
     ("fixture", "expected"),
     [
@@ -121,6 +175,56 @@ def test_smallest_actionable_periodic_mesh_mismatch_is_reported(
 
     assert expected in mismatches
     assert result["summary"]["compatibility_assessment"] == "compatibility_unproven"
+
+
+def test_unrelated_freetet_does_not_prove_periodic_mesh_recipe(tmp_path, monkeypatch):
+    result = _audit(tmp_path, monkeypatch)
+    result["mesh_sequence"]["features_in_execution_order"][-1]["selection"] = [99]
+    recipe = _recipe_for_group(
+        result["periodic_groups"][0],
+        result["mesh_sequence"]["features_in_execution_order"],
+    )
+
+    assert recipe["mesh_recipe_present"] is False
+    assert recipe["free_tet_coverage_verified"] is False
+    assert recipe["actionable_mismatches"] == [
+        "place_freetet_covering_periodic_adjacent_domains_after_copyface"
+    ]
+
+
+def test_mesh_feature_truncation_requires_an_observed_extra_item():
+    from development_kit.tests.test_wave_optics_preflight import (
+        FakeComponent,
+        FakeFeature,
+        FakeMesh,
+    )
+
+    component = FakeComponent()
+    exactly = {f"size{index}": FakeFeature(f"size{index}", "Size") for index in range(256)}
+    component._mesh.items["mesh1"] = FakeMesh(1, exactly)
+    complete, _mesh = _mesh_sequence(component, "mesh1")
+    component._mesh.items["mesh1"] = FakeMesh(
+        1,
+        {**exactly, "late_copy": FakeFeature("late_copy", "CopyFace")},
+    )
+    truncated, _mesh = _mesh_sequence(component, "mesh1")
+
+    assert complete["feature_count_truncated"] is False
+    assert truncated["feature_count_truncated"] is True
+    group = {
+        "group_id": "fpc1",
+        "source_candidate": [1],
+        "destination_candidate": [2],
+        "adjacent_domains": [1],
+        "geometry_consistent": True,
+    }
+    recipe = _recipe_for_group(
+        group,
+        truncated["features_in_execution_order"],
+        feature_count_truncated=True,
+    )
+    assert recipe["actionable_mismatches"] == ["inspect_complete_mesh_feature_sequence"]
+    assert recipe["order_ambiguous"] is True
 
 
 class SmokeMesh:

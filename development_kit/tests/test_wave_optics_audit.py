@@ -286,10 +286,13 @@ class Component:
 
 class Step:
     def __init__(self):
-        self.values = {}
+        self.values = {"plist": "original_plist"}
 
     def set(self, name, value):
         self.values[name] = value
+
+    def getString(self, name):
+        return self.values[name]
 
 
 class Study:
@@ -308,7 +311,7 @@ class Study:
 
 class Parameters:
     def __init__(self):
-        self.values = {"wl": "4.37[um]"}
+        self.values = {"wl": "4.36[um]"}
 
     def set(self, name, value):
         self.values[name] = value
@@ -354,6 +357,10 @@ class AuditModel:
     def name(self):
         return self._name
 
+    def parameters(self, evaluate=False):
+        assert evaluate is False
+        return dict(self.java._param.values)
+
     def evaluate(self, expression):
         if isinstance(expression, list):
             if expression == ["wl", "c_const/ewfd.freq"]:
@@ -389,9 +396,15 @@ def _run(tmp_path, monkeypatch, **model_options):
     validation_policy = model_options.pop("validation_policy", None)
     declared_plane_flux = model_options.pop("declared_plane_flux", None)
     internal_absorption = model_options.pop("internal_absorption", None)
+    model_observer = model_options.pop("model_observer", None)
+    model_setup = model_options.pop("model_setup", None)
     source = tmp_path / "source.mph"
     source.write_bytes(b"immutable")
     model = AuditModel(source, **model_options)
+    if model_observer is not None:
+        model_observer.append(model)
+    if model_setup is not None:
+        model_setup(model)
     monkeypatch.setattr(
         "src.tools.wave_optics_audit.collect_wave_optics_preflight",
         lambda *_args, **_kwargs: {
@@ -546,7 +559,8 @@ def test_declared_flux_expression_error_is_durable_partial_evidence(tmp_path, mo
 
 
 def test_evidence_only_a_above_one_is_preserved_without_project_verdict(tmp_path, monkeypatch):
-    result, _source = _run(tmp_path, monkeypatch)
+    models = []
+    result, _source = _run(tmp_path, monkeypatch, model_observer=models)
 
     assert result["audit_status"] == "measurement_complete"
     assert result["measurement"]["power"]["A"] == 1.2
@@ -560,6 +574,9 @@ def test_evidence_only_a_above_one_is_preserved_without_project_verdict(tmp_path
     assert manifest["physical_evidence"] == result["physical_evidence"]
     assert "migration" not in result["physical_evidence"]
     assert result["physical_evidence"]["producer"]["tool_schema_version"] == "physical-evidence-1"
+    assert models[0].java._param.values["wl"] == "4.36[um]"
+    assert models[0].java._study.step.values["plist"] == "original_plist"
+    assert result["measurement"]["integrity"]["model_state_restored"] is True
     assert (
         result["physical_evidence"]["evidence"]["polarization.physical_incident"]["state"]
         == "label_only"
@@ -607,12 +624,13 @@ def test_source_hash_drift_after_solve_is_an_integrity_blocker(tmp_path, monkeyp
 
 
 def test_unhandled_point_audit_failure_terminalizes_running_manifest(tmp_path, monkeypatch):
+    models = []
     monkeypatch.setattr(
         "src.tools.wave_optics_audit.build_point_audit_physical_evidence",
         lambda _value: (_ for _ in ()).throw(RuntimeError("injected contract failure")),
     )
     with pytest.raises(RuntimeError, match="contract failure"):
-        _run(tmp_path, monkeypatch)
+        _run(tmp_path, monkeypatch, model_observer=models)
 
     manifests = list((tmp_path / "artifacts").rglob("manifest.json"))
     assert len(manifests) == 1
@@ -623,6 +641,34 @@ def test_unhandled_point_audit_failure_terminalizes_running_manifest(tmp_path, m
         "error_type": "RuntimeError",
         "details_included": False,
     }
+    assert models[0].java._param.values["wl"] == "4.36[um]"
+    assert models[0].java._study.step.values["plist"] == "original_plist"
+
+
+def test_point_audit_restoration_failure_is_an_integrity_blocker(tmp_path, monkeypatch):
+    models = []
+
+    def reject_restoration(model):
+        original_set = model.java._study.step.set
+
+        def reject_restore(name, value):
+            if value == "original_plist":
+                raise RuntimeError("injected restore failure")
+            original_set(name, value)
+
+        model.java._study.step.set = reject_restore
+
+    result, _source = _run(
+        tmp_path,
+        monkeypatch,
+        model_observer=models,
+        model_setup=reject_restoration,
+    )
+
+    assert result["audit_status"] == "integrity_blocked"
+    assert result["assessment"]["project_verdict"] is None
+    assert result["measurement"]["integrity"]["model_state_restored"] is False
+    assert result["measurement"]["integrity_errors"][-1]["code"] == "model_state_restore_failed"
 
 
 class MaterialSelection:

@@ -58,6 +58,7 @@ def permissive_session_ownership(monkeypatch, tmp_path):
     manager._reusable_client_kind = None
     manager._models = {}
     manager._model_paths = {}
+    manager._model_source_identities = {}
     manager._model_revisions = {}
     manager._model_cleanup_paths = {}
     manager._current_model = None
@@ -280,6 +281,7 @@ class TestSessionManager:
         sm._client = FakeClient()
         sm._models = {"model": FakeModel()}
         sm._model_paths = {"model": str(tmp_path / "model.mph")}
+        sm._model_source_identities = {}
         sm._current_model = "model"
         try:
             status = sm.get_status()
@@ -320,6 +322,7 @@ class TestSessionManager:
             sm._client_status_client = client
             sm._models = BlockingModels({"first": object(), "second": object()})
             sm._model_paths = {}
+            sm._model_source_identities = {}
             sm._model_revisions = {}
             sm._current_model = "first"
         status_result = {}
@@ -359,6 +362,39 @@ class TestSessionManager:
             sm._model_paths = {}
             sm._model_revisions = {}
             sm._current_model = None
+
+    def test_model_registration_preserves_loaded_source_identity_after_path_replacement(
+        self, tmp_path
+    ):
+        from src.tools.session import SessionManager
+
+        source = tmp_path / "model.mph"
+        source.write_bytes(b"loaded bytes")
+
+        class FakeModel:
+            def name(self):
+                return "model"
+
+            def file(self):
+                return str(source)
+
+        sm = SessionManager()
+        sm._models = {}
+        sm._model_paths = {}
+        sm._model_source_identities = {}
+        sm._model_revisions = {}
+        sm.add_model(FakeModel())
+        identity = sm.get_model_source_identity("model")
+        source.write_bytes(b"replacement bytes")
+
+        assert identity == sm.get_model_source_identity("model")
+        assert identity["capture"] == "model_registration"
+        assert identity["source_sha256"] != SessionManager._hash_model_source(source)
+
+        sm._models = {}
+        sm._model_paths = {}
+        sm._model_source_identities = {}
+        sm._model_revisions = {}
 
     def test_connected_status_uses_cached_client_metadata_only(self):
         from src.tools.session import SessionManager

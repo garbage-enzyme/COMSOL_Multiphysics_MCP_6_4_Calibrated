@@ -51,16 +51,23 @@ logger = logging.getLogger(__name__)
 _ACTIVE_POINT_AUDIT_MANIFEST: ContextVar[Path | None] = ContextVar(
     "active_point_audit_manifest", default=None
 )
+_ACTIVE_POINT_AUDIT_MUTATION: ContextVar[dict[str, Any] | None] = ContextVar(
+    "active_point_audit_mutation", default=None
+)
 
 
-def _terminalize_running_point_audit(path: Path, error: Exception) -> None:
+def _terminalize_running_point_audit(
+    path: Path,
+    error: Exception,
+    restoration_errors: list[str] | None = None,
+) -> None:
     try:
         current = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(current, dict) or current.get("audit_status") != "running":
             return
         failed = {
             **current,
-            "audit_status": "runtime_failed",
+            "audit_status": ("integrity_blocked" if restoration_errors else "runtime_failed"),
             "completed_at_epoch": time.time(),
             "runtime_failure": {
                 "code": "point_audit_runtime_failed",
@@ -68,9 +75,83 @@ def _terminalize_running_point_audit(path: Path, error: Exception) -> None:
                 "details_included": False,
             },
         }
+        if restoration_errors:
+            failed["integrity_errors"] = [
+                {
+                    "code": "model_state_restore_failed",
+                    "errors": restoration_errors,
+                }
+            ]
         _atomic_write_json(path, failed)
     except Exception:
         logger.exception("Failed to terminalize Wave Optics point-audit manifest")
+
+
+def _read_feature_property(feature: Any, name: str) -> str:
+    for getter in ("getString", "get"):
+        try:
+            value = getattr(feature, getter)(name)
+            return str(value)
+        except Exception:
+            continue
+    raise ValueError(f"study-step property is unreadable: {name}")
+
+
+def _capture_point_audit_mutation(
+    model: Any,
+    jm: Any,
+    study_step: Any,
+    *,
+    wavelength_parameter: str,
+    study_step_property: str,
+) -> dict[str, Any]:
+    parameters = {
+        str(name): str(value) for name, value in dict(model.parameters(evaluate=False)).items()
+    }
+    if wavelength_parameter not in parameters:
+        raise ValueError("wavelength parameter is unavailable for transactional readback")
+    return {
+        "model": model,
+        "jm": jm,
+        "study_step": study_step,
+        "wavelength_parameter": wavelength_parameter,
+        "study_step_property": study_step_property,
+        "parameter_before": parameters[wavelength_parameter],
+        "study_property_before": _read_feature_property(study_step, study_step_property),
+    }
+
+
+def _restore_point_audit_mutation() -> list[str]:
+    mutation = _ACTIVE_POINT_AUDIT_MUTATION.get()
+    if mutation is None:
+        return []
+    errors: list[str] = []
+    parameter = mutation["wavelength_parameter"]
+    property_name = mutation["study_step_property"]
+    try:
+        mutation["jm"].param().set(parameter, mutation["parameter_before"])
+    except Exception as exc:
+        errors.append(f"parameter_write:{type(exc).__name__}")
+    try:
+        mutation["study_step"].set(property_name, mutation["study_property_before"])
+    except Exception as exc:
+        errors.append(f"study_property_write:{type(exc).__name__}")
+    try:
+        actual_parameters = {
+            str(name): str(value)
+            for name, value in dict(mutation["model"].parameters(evaluate=False)).items()
+        }
+        if actual_parameters.get(parameter) != mutation["parameter_before"]:
+            errors.append("parameter_readback_mismatch")
+    except Exception as exc:
+        errors.append(f"parameter_readback:{type(exc).__name__}")
+    try:
+        actual_property = _read_feature_property(mutation["study_step"], property_name)
+        if actual_property != mutation["study_property_before"]:
+            errors.append("study_property_readback_mismatch")
+    except Exception as exc:
+        errors.append(f"study_property_readback:{type(exc).__name__}")
+    return errors
 
 
 class CoordinateLimits(TypedDict):
@@ -1078,6 +1159,7 @@ def _run_wave_optics_point_audit_impl(
     validation_policy: dict[str, Any] | None = None,
     validation_policy_path: str | None = None,
     session_state: dict[str, Any] | None = None,
+    loaded_source_identity: dict[str, Any] | None = None,
     active_profile: str = "unknown",
     ownership_preflight: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -1186,6 +1268,7 @@ def _run_wave_optics_point_audit_impl(
         expected_study_tag=study_tag,
         expected_source_path=str(source_path),
         expected_source_sha256=source_hash_before,
+        loaded_source_identity=loaded_source_identity,
         target_wavelength_parameter=wavelength_parameter,
     )
     if preflight["inspection_status"] == "integrity_blocked":
@@ -1207,6 +1290,7 @@ def _run_wave_optics_point_audit_impl(
     study = jm.study(study_tag)
     if study_step_tag not in [str(value) for value in list(study.feature().tags())]:
         raise ValueError("requested study step does not exist")
+    study_step = study.feature().get(study_step_tag)
     domains = explicit_domains
     if top_air_selection:
         named_domains = _resolve_named_domains(component, top_air_selection)
@@ -1273,8 +1357,16 @@ def _run_wave_optics_point_audit_impl(
     )
     _ACTIVE_POINT_AUDIT_MANIFEST.set(manifest_path)
     parameter_value = f"{wavelength_value}[{wavelength_unit}]"
+    mutation = _capture_point_audit_mutation(
+        model,
+        jm,
+        study_step,
+        wavelength_parameter=wavelength_parameter,
+        study_step_property=study_step_property,
+    )
+    _ACTIVE_POINT_AUDIT_MUTATION.set(mutation)
     jm.param().set(wavelength_parameter, parameter_value)
-    study.feature().get(study_step_tag).set(study_step_property, wavelength_parameter)
+    study_step.set(study_step_property, wavelength_parameter)
     started = time.perf_counter()
     solve_error = None
     try:
@@ -1603,7 +1695,6 @@ def _run_wave_optics_point_audit_impl(
         "integrity_error_count": len(integrity_errors),
         "physical_evidence_sha256": physical_evidence["contract_sha256"],
     }
-    _write_rows_csv(str(csv_path), list(row), [row], append=False)
     manifest = {
         "schema_version": AUDIT_SCHEMA_VERSION,
         "audit_id": audit_id,
@@ -1627,7 +1718,6 @@ def _run_wave_optics_point_audit_impl(
         },
         "artifacts": {"csv": str(csv_path), "manifest": str(manifest_path)},
     }
-    _atomic_write_json(manifest_path, manifest)
     return {
         "success": True,
         "audit_status": audit_status,
@@ -1639,21 +1729,93 @@ def _run_wave_optics_point_audit_impl(
             "csv": str(csv_path),
             "manifest": str(manifest_path),
         },
+        "_finalization": {
+            "row": row,
+            "manifest": manifest,
+            "csv_path": csv_path,
+            "manifest_path": manifest_path,
+        },
     }
+
+
+def _finalize_point_audit_result(
+    result: dict[str, Any], restoration_errors: list[str]
+) -> dict[str, Any]:
+    finalization = result.pop("_finalization", None)
+    if finalization is None:
+        return result
+    measurement = result["measurement"]
+    measurement.setdefault("integrity", {})["model_state_restored"] = not restoration_errors
+    if restoration_errors:
+        measurement["integrity_errors"].append(
+            {
+                "code": "model_state_restore_failed",
+                "errors": restoration_errors,
+            }
+        )
+        result["audit_status"] = "integrity_blocked"
+        assessment = dict(result["assessment"])
+        assessment.pop("policy_evaluation", None)
+        assessment.update(project_verdict=None, integrity_blocked=True)
+        result["assessment"] = assessment
+
+    manifest = finalization["manifest"]
+    physical_evidence = build_point_audit_physical_evidence(
+        {
+            "schema_version": AUDIT_SCHEMA_VERSION,
+            "config_id": manifest["config_id"],
+            "config_sha256": manifest["config_sha256"],
+            "source_sha256": measurement["provenance"]["source_sha256_before"],
+            "measurement": measurement,
+        }
+    )
+    result["physical_evidence"] = physical_evidence
+    row = finalization["row"]
+    row.update(
+        audit_status=result["audit_status"],
+        integrity_error_count=len(measurement["integrity_errors"]),
+        physical_evidence_sha256=physical_evidence["contract_sha256"],
+    )
+    manifest.update(
+        audit_status=result["audit_status"],
+        measurement=measurement,
+        physical_evidence=physical_evidence,
+        assessment=result["assessment"],
+    )
+    _write_rows_csv(str(finalization["csv_path"]), list(row), [row], append=False)
+    _atomic_write_json(finalization["manifest_path"], manifest)
+    return result
 
 
 @wraps(_run_wave_optics_point_audit_impl)
 def run_wave_optics_point_audit(*args: Any, **kwargs: Any) -> dict[str, Any]:
-    token = _ACTIVE_POINT_AUDIT_MANIFEST.set(None)
+    manifest_token = _ACTIVE_POINT_AUDIT_MANIFEST.set(None)
+    mutation_token = _ACTIVE_POINT_AUDIT_MUTATION.set(None)
+    restored = False
+    restoration_errors: list[str] = []
     try:
-        return _run_wave_optics_point_audit_impl(*args, **kwargs)
+        result = _run_wave_optics_point_audit_impl(*args, **kwargs)
+        restoration_errors = _restore_point_audit_mutation()
+        restored = True
+        return _finalize_point_audit_result(result, restoration_errors)
     except Exception as exc:
+        if not restored:
+            restoration_errors = _restore_point_audit_mutation()
         manifest_path = _ACTIVE_POINT_AUDIT_MANIFEST.get()
         if manifest_path is not None:
-            _terminalize_running_point_audit(manifest_path, exc)
+            _terminalize_running_point_audit(
+                manifest_path,
+                exc,
+                restoration_errors=restoration_errors,
+            )
+        if restoration_errors:
+            raise RuntimeError(
+                "Wave Optics point audit could not restore the caller model state"
+            ) from exc
         raise
     finally:
-        _ACTIVE_POINT_AUDIT_MANIFEST.reset(token)
+        _ACTIVE_POINT_AUDIT_MUTATION.reset(mutation_token)
+        _ACTIVE_POINT_AUDIT_MANIFEST.reset(manifest_token)
 
 
 def _replace_clone_materials_with_air(
@@ -2161,6 +2323,7 @@ def register_wave_optics_audit_tools(mcp: FastMCP) -> None:
                 validation_policy=validation_policy,
                 validation_policy_path=validation_policy_path,
                 session_state=session_manager.get_status(),
+                loaded_source_identity=session_manager.get_model_source_identity(model_name),
                 active_profile=active_profile,
                 ownership_preflight=ownership_preflight,
             )

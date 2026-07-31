@@ -95,6 +95,7 @@ class SessionManager:
                 instance._client_status_client = None
                 instance._models = {}
                 instance._model_paths = {}
+                instance._model_source_identities = {}
                 instance._model_revisions = {}
                 instance._model_cleanup_paths = {}
                 instance._model_removal_listeners = []
@@ -219,13 +220,7 @@ class SessionManager:
         if self._startup_record is None:
             return None
         record = self._startup_record
-        return deepcopy(
-            {
-                key: value
-                for key, value in record.items()
-                if key != "started_monotonic"
-            }
-        )
+        return deepcopy({key: value for key, value in record.items() if key != "started_monotonic"})
 
     def _begin_startup_record_locked(
         self,
@@ -892,6 +887,7 @@ class SessionManager:
                 self._notify_model_removed_locked(name)
             self._models.clear()
             self._model_paths.clear()
+            self._model_source_identities.clear()
             self._model_revisions.clear()
             self._current_model = None
             self._publish_control_plane_status_locked()
@@ -947,6 +943,9 @@ class SessionManager:
                     model_path = self._model_paths.get(name)
                     if model_path is not None:
                         model_info["file"] = model_path
+                    source_identity = self._model_source_identities.get(name)
+                    if source_identity is not None:
+                        model_info["loaded_source_identity"] = dict(source_identity)
                     revision = self._model_revisions.get(name)
                     if revision is None:
                         revision = self._initialize_model_revision(
@@ -965,8 +964,7 @@ class SessionManager:
                 "cleanup_pending": cleanup_pending,
                 "owns_solver_lease": owns_solver_lease,
                 "host_restart_required": host_restart_required,
-                "message": start_message
-                or "COMSOL is starting in background. Poll again shortly.",
+                "message": start_message or "COMSOL is starting in background. Poll again shortly.",
             }
             if startup is not None:
                 result["startup"] = startup
@@ -1058,19 +1056,60 @@ class SessionManager:
             ),
         }
 
-    def add_model(self, model: mph.Model, cleanup_path: Optional[str] = None) -> str:
+    @staticmethod
+    def _hash_model_source(path: Path) -> str:
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for block in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(block)
+        return digest.hexdigest()
+
+    def add_model(
+        self,
+        model: mph.Model,
+        cleanup_path: Optional[str] = None,
+        *,
+        source_identity: Optional[dict] = None,
+    ) -> str:
         """Add a model to tracking."""
         name = model.name()
         try:
             model_path = model.file() if hasattr(model, "file") else None
         except Exception:
             model_path = None
+        captured_identity = None
+        if source_identity is not None:
+            source_path = Path(str(source_identity.get("source_path", ""))).resolve()
+            source_sha256 = str(source_identity.get("source_sha256", "")).lower()
+            if model_path is None or source_path != Path(str(model_path)).resolve():
+                raise ValueError("source identity path does not match the registered model path")
+            if len(source_sha256) != 64 or any(
+                value not in "0123456789abcdef" for value in source_sha256
+            ):
+                raise ValueError("source identity SHA-256 is invalid")
+            captured_identity = {
+                "source_path": str(source_path),
+                "source_sha256": source_sha256,
+                "capture": str(source_identity.get("capture") or "caller_provided"),
+            }
+        elif model_path is not None:
+            source_path = Path(str(model_path)).resolve()
+            try:
+                if source_path.is_file():
+                    captured_identity = {
+                        "source_path": str(source_path),
+                        "source_sha256": self._hash_model_source(source_path),
+                        "capture": "model_registration",
+                    }
+            except OSError:
+                captured_identity = None
         with self._start_lock:
             if name in self._models:
                 self._notify_model_removed_locked(name)
             if name in self._model_cleanup_paths:
                 self._cleanup_model_artifact(name)
             self._model_revisions.pop(name, None)
+            self._model_source_identities.pop(name, None)
             self._models[name] = model
             if cleanup_path:
                 self._model_cleanup_paths[name] = str(cleanup_path)
@@ -1078,6 +1117,8 @@ class SessionManager:
                 self._current_model = name
             if model_path is not None:
                 self._model_paths[name] = str(model_path)
+            if captured_identity is not None:
+                self._model_source_identities[name] = captured_identity
             self._initialize_model_revision(name, self._model_paths.get(name))
         try:
             self._ownership.heartbeat(model_path=str(model_path) if model_path else None)
@@ -1131,6 +1172,15 @@ class SessionManager:
                     self._model_paths.get(model_name),
                 )
             )
+
+    def get_model_source_identity(self, name: Optional[str] = None) -> Optional[dict]:
+        """Return the source identity captured when the model entered the session."""
+        with self._start_lock:
+            model_name = name or self._current_model
+            if model_name is None or model_name not in self._models:
+                return None
+            identity = self._model_source_identities.get(model_name)
+            return dict(identity) if identity is not None else None
 
     def advance_model_revision(self, name: str, operation: str) -> dict:
         """Advance one model token after a serialized successful mutation."""
@@ -1214,6 +1264,7 @@ class SessionManager:
                     del self._models[name]
                     self._notify_model_removed_locked(name)
                     self._model_paths.pop(name, None)
+                    self._model_source_identities.pop(name, None)
                     self._model_revisions.pop(name, None)
                     self._cleanup_model_artifact(name)
                     if self._current_model == name:

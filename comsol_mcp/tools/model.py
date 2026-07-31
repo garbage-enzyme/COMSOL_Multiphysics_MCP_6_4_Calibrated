@@ -1,5 +1,6 @@
 """Model management tools for COMSOL MCP Server."""
 
+import hashlib
 import json
 import logging
 import os
@@ -22,6 +23,14 @@ from ..utils.versioning import (
 from .session import session_manager
 
 logger = logging.getLogger(__name__)
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 def _save_model_file(
@@ -88,9 +97,7 @@ def _clone_model(
         except Exception as cleanup_exc:
             cleanup_errors.append(f"backing_remove: {cleanup_exc}")
         if cleanup_errors:
-            raise RuntimeError(
-                f"{exc}; clone cleanup failed: {'; '.join(cleanup_errors)}"
-            ) from exc
+            raise RuntimeError(f"{exc}; clone cleanup failed: {'; '.join(cleanup_errors)}") from exc
         raise
     return cloned_model, str(copy_path)
 
@@ -119,13 +126,9 @@ def _save_model_version_bundle(
     token = uuid.uuid4().hex
     stages = {
         version: version.with_name(f".{version.name}.{token}.stage"),
-        version_metadata: version_metadata.with_name(
-            f".{version_metadata.name}.{token}.stage"
-        ),
+        version_metadata: version_metadata.with_name(f".{version_metadata.name}.{token}.stage"),
         latest: latest.with_name(f".{latest.name}.{token}.stage"),
-        latest_metadata: latest_metadata.with_name(
-            f".{latest_metadata.name}.{token}.stage"
-        ),
+        latest_metadata: latest_metadata.with_name(f".{latest_metadata.name}.{token}.stage"),
     }
     backups = {
         target: target.with_name(f".{target.name}.{token}.backup")
@@ -146,9 +149,7 @@ def _save_model_version_bundle(
             "model_name": str(model.name()),
             "snapshot_role": "versioned_and_latest_copy",
         }
-        encoded = json.dumps(
-            metadata, ensure_ascii=False, indent=2, sort_keys=True
-        ) + "\n"
+        encoded = json.dumps(metadata, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
         stages[version_metadata].write_text(encoded, encoding="utf-8")
         stages[latest_metadata].write_text(encoded, encoding="utf-8")
         for target, backup in backups.items():
@@ -248,14 +249,38 @@ def register_model_tools(mcp: FastMCP) -> None:
             return {"success": False, "error": "Client not available."}
 
         try:
-            path = Path(file_path)
+            path = Path(file_path).resolve()
             if not path.exists():
                 return {"success": False, "error": f"File not found: {file_path}"}
             if not path.suffix.lower() == ".mph":
                 return {"success": False, "error": f"File must be a .mph file: {file_path}"}
 
-            model = client.load(str(path.absolute()))
-            name = session_manager.add_model(model)
+            source_hash_before = _sha256_file(path)
+            model = client.load(str(path))
+            source_hash_after = _sha256_file(path)
+            if source_hash_after != source_hash_before:
+                try:
+                    client.remove(model)
+                except Exception:
+                    return {
+                        "success": False,
+                        "error": (
+                            "Model source changed while it was being loaded, and the "
+                            "loaded model could not be removed. Reset the session."
+                        ),
+                    }
+                return {
+                    "success": False,
+                    "error": "Model source changed while it was being loaded.",
+                }
+            name = session_manager.add_model(
+                model,
+                source_identity={
+                    "source_path": str(path),
+                    "source_sha256": source_hash_after,
+                    "capture": "load_bracketed",
+                },
+            )
 
             if set_current:
                 session_manager.set_current_model(name)
@@ -266,7 +291,8 @@ def register_model_tools(mcp: FastMCP) -> None:
                 "success": True,
                 "model": {
                     "name": name,
-                    "file": str(path.absolute()),
+                    "file": str(path),
+                    "source_sha256": source_hash_after,
                     "comsol_version": model.version(),
                     "is_versioned": version_info is not None,
                     "version_info": version_info,

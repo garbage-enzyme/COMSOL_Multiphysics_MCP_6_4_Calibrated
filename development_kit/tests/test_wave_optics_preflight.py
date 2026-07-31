@@ -77,6 +77,11 @@ def test_foundation_reports_evidence_only_and_preserves_source(tmp_path, monkeyp
         active_profile="wave_optics",
         expected_source_path=str(source),
         expected_source_sha256=source_hash,
+        loaded_source_identity={
+            "source_path": str(source),
+            "source_sha256": source_hash,
+            "capture": "test_load",
+        },
     )
 
     assert result["inspection_status"] == "partial"
@@ -122,6 +127,11 @@ def test_foundation_blocks_only_declared_integrity_mismatch(tmp_path, monkeypatc
         model_name="ExactModel",
         session_state={},
         active_profile="full",
+        loaded_source_identity={
+            "source_path": str(source),
+            "source_sha256": _hash(source),
+            "capture": "test_load",
+        },
         **kwargs,
     )
 
@@ -434,6 +444,11 @@ def _full_result(tmp_path, monkeypatch, *, active_profile="wave_optics", **fixtu
         expected_study_tag="std1",
         expected_source_path=str(source),
         expected_source_sha256=_hash(source),
+        loaded_source_identity={
+            "source_path": str(source),
+            "source_sha256": _hash(source),
+            "capture": "test_load",
+        },
         target_wavelength_parameter="wl",
     )
     assert _hash(source) == result["provenance"]["source_sha256"]
@@ -484,3 +499,235 @@ def test_preflight_fixtures_preserve_failures_as_evidence(
     result = _full_result(tmp_path, monkeypatch, **fixture)
     codes = {item["code"] for item in result["evidence"][level]}
     assert code in codes
+
+
+def test_exact_tags_are_resolved_from_complete_discovery_lists(tmp_path, monkeypatch):
+    source = tmp_path / "many-tags.mph"
+    source.write_bytes(b"many tags")
+    model = FullFakeModel(source)
+    component = model._java._components.items["comp1"]
+    physics = component._physics.items["ewfd"]
+    study = model._java._studies.items["std1"]
+    model._java._components.items = {
+        **{f"dummy_comp_{index}": object() for index in range(256)},
+        "comp1": component,
+    }
+    component._physics.items = {
+        **{f"dummy_physics_{index}": object() for index in range(256)},
+        "ewfd": physics,
+    }
+    model._java._studies.items = {
+        **{f"dummy_study_{index}": object() for index in range(256)},
+        "std1": study,
+    }
+    monkeypatch.setattr(
+        "src.tools.wave_optics_preflight.ownership_manager.status",
+        lambda **_kwargs: {"collision": False},
+    )
+
+    result = collect_wave_optics_preflight(
+        model,
+        model_name="ExactModel",
+        session_state={},
+        active_profile="wave_optics",
+        expected_component_tag="comp1",
+        expected_physics_tag="ewfd",
+        expected_study_tag="std1",
+        expected_source_path=str(source),
+        expected_source_sha256=_hash(source),
+        loaded_source_identity={
+            "source_path": str(source),
+            "source_sha256": _hash(source),
+            "capture": "test_load",
+        },
+        target_wavelength_parameter="wl",
+    )
+
+    assert result["inspection_status"] == "complete"
+    assert result["topology"]["component_tag"] == "comp1"
+    assert result["topology"]["component_tags_truncated"] is True
+    assert result["topology"]["physics_tags_truncated"] is True
+    assert result["wavelength"]["study_tag"] == "std1"
+    assert result["wavelength"]["study_tags_truncated"] is True
+
+
+def test_ambiguous_periodic_structure_does_not_audit_arbitrary_candidate(tmp_path, monkeypatch):
+    source = tmp_path / "ambiguous.mph"
+    source.write_bytes(b"ambiguous")
+    model = FullFakeModel(source)
+    physics = model._java._components.items["comp1"]._physics.items["ewfd"]
+    first = physics.children.items["ps1"]
+    physics.children.items["ps2"] = FakeFeature(
+        "ps2",
+        "PeriodicStructure",
+        props={"LinearPol": "P"},
+    )
+    monkeypatch.setattr(
+        "src.tools.wave_optics_preflight.ownership_manager.status",
+        lambda **_kwargs: {"collision": False},
+    )
+
+    result = collect_wave_optics_preflight(
+        model,
+        model_name="ExactModel",
+        session_state={},
+        active_profile="wave_optics",
+        expected_component_tag="comp1",
+        expected_physics_tag="ewfd",
+        expected_study_tag="std1",
+        expected_source_sha256=_hash(source),
+        loaded_source_identity={
+            "source_path": str(source),
+            "source_sha256": _hash(source),
+            "capture": "test_load",
+        },
+        target_wavelength_parameter="wl",
+    )
+
+    assert first.props["LinearPol"] == "S"
+    assert result["periodicity"]["periodic_structure_tag"] is None
+    assert result["periodicity"]["candidate_count"] == 2
+    assert result["ports"]["periodic_port_features"] == []
+    assert result["incidence"]["selection_status"] == "ambiguous_periodic_structure"
+
+
+def test_selected_boundary_after_response_cap_is_used_for_physical_inference(tmp_path, monkeypatch):
+    class LargeGeometry(FakeGeometry):
+        def getNBoundaries(self):
+            return 300
+
+        def getUpDown(self):
+            return [[1] * 300, [0] * 300]
+
+        def faceX(self, number, _point):
+            return [[1.0 if number == 300 else 0.0, float(number), 0.0]]
+
+        def faceNormal(self, number, _point):
+            return [[1.0, 0.0, 0.0] if number == 300 else [-1.0, 0.0, 0.0]]
+
+    source = tmp_path / "large-topology.mph"
+    source.write_bytes(b"large topology")
+    model = FullFakeModel(source)
+    component = model._java._components.items["comp1"]
+    component._geom.items["geom1"] = LargeGeometry(
+        "geom1", "Geometry", children={"fin": FakeFeature("fin", "FormUnion")}
+    )
+    ps = component._physics.items["ewfd"].children.items["ps1"]
+    ps.selections["allBoundaries"] = [1, 300]
+    ps.children.items["fpc1"].selections["default"] = [1, 300]
+    ps.children.items["pport1"].selections["default"] = [300]
+    monkeypatch.setattr(
+        "src.tools.wave_optics_preflight.ownership_manager.status",
+        lambda **_kwargs: {"collision": False},
+    )
+
+    result = collect_wave_optics_preflight(
+        model,
+        model_name="ExactModel",
+        session_state={},
+        active_profile="wave_optics",
+        expected_component_tag="comp1",
+        expected_physics_tag="ewfd",
+        expected_study_tag="std1",
+        expected_source_sha256=_hash(source),
+        loaded_source_identity={
+            "source_path": str(source),
+            "source_sha256": _hash(source),
+            "capture": "test_load",
+        },
+        target_wavelength_parameter="wl",
+    )
+
+    assert len(result["topology"]["boundaries"]) == 256
+    group = result["periodicity"]["floquet_features"][0]["opposing_face_groups"]
+    assert group["count_balanced"] is True
+    assert result["ports"]["periodic_port_features"][0]["adjacent_domains"] == [1]
+
+
+@pytest.mark.parametrize(
+    ("target", "code"),
+    [
+        ("all_boundaries", "periodic_all_boundaries_unreadable"),
+        ("subfeature", "periodic_subfeature_selections_unreadable"),
+        ("boundary_probe", "boundary_probes_incomplete"),
+    ],
+)
+def test_failed_periodic_probes_and_selections_enter_unknown_ledger(
+    tmp_path, monkeypatch, target, code
+):
+    source = tmp_path / f"{target}.mph"
+    source.write_bytes(target.encode())
+    model = FullFakeModel(source)
+    component = model._java._components.items["comp1"]
+    ps = component._physics.items["ewfd"].children.items["ps1"]
+    if target == "all_boundaries":
+        ps.selections["allBoundaries"] = RuntimeError("unreadable")
+    elif target == "subfeature":
+        ps.children.items["fpc1"].selections["default"] = RuntimeError("unreadable")
+    else:
+        geometry = component._geom.items["geom1"]
+        geometry.faceNormal = lambda number, point: (
+            (_ for _ in ()).throw(RuntimeError("probe failed"))
+            if number == 1
+            else [geometry.normals[number]]
+        )
+    monkeypatch.setattr(
+        "src.tools.wave_optics_preflight.ownership_manager.status",
+        lambda **_kwargs: {"collision": False},
+    )
+
+    result = collect_wave_optics_preflight(
+        model,
+        model_name="ExactModel",
+        session_state={},
+        active_profile="wave_optics",
+        expected_component_tag="comp1",
+        expected_physics_tag="ewfd",
+        expected_study_tag="std1",
+        expected_source_sha256=_hash(source),
+        loaded_source_identity={
+            "source_path": str(source),
+            "source_sha256": _hash(source),
+            "capture": "test_load",
+        },
+        target_wavelength_parameter="wl",
+    )
+
+    assert result["inspection_status"] == "partial"
+    assert code in {item["code"] for item in result["evidence"]["unknowns"]}
+
+
+def test_preflight_uses_loaded_identity_when_source_path_changes(tmp_path, monkeypatch):
+    source = tmp_path / "replaced.mph"
+    source.write_bytes(b"loaded bytes")
+    loaded_hash = _hash(source)
+    model = FullFakeModel(source)
+    source.write_bytes(b"replacement bytes")
+    monkeypatch.setattr(
+        "src.tools.wave_optics_preflight.ownership_manager.status",
+        lambda **_kwargs: {"collision": False},
+    )
+
+    result = collect_wave_optics_preflight(
+        model,
+        model_name="ExactModel",
+        session_state={},
+        active_profile="wave_optics",
+        expected_component_tag="comp1",
+        expected_physics_tag="ewfd",
+        expected_study_tag="std1",
+        expected_source_sha256=loaded_hash,
+        loaded_source_identity={
+            "source_path": str(source),
+            "source_sha256": loaded_hash,
+            "capture": "load_bracketed",
+        },
+        target_wavelength_parameter="wl",
+    )
+
+    assert result["inspection_status"] == "complete"
+    assert result["provenance"]["source_sha256"] == loaded_hash
+    assert result["provenance"]["current_file_sha256"] == _hash(source)
+    assert "source_file_changed_since_load" in {
+        item["code"] for item in result["evidence"]["warnings"]
+    }
