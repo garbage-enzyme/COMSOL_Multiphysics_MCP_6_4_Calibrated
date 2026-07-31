@@ -6,8 +6,8 @@ import hashlib
 
 import pytest
 from src.tools.wave_optics_preflight import (
-    _point_audit_next_call,
     EvidenceLedger,
+    _point_audit_next_call,
     collect_preflight_foundation,
     collect_wave_optics_preflight,
 )
@@ -221,14 +221,20 @@ class FakeMaterial(FakeFeature):
 
 class FakeGeometry(FakeFeature):
     centers = {
-        1: [0, 0.5, 0.5], 2: [1, 0.5, 0.5],
-        3: [0.5, 0, 0.5], 4: [0.5, 1, 0.5],
-        5: [0.5, 0.5, 0], 6: [0.5, 0.5, 1],
+        1: [0, 0.5, 0.5],
+        2: [1, 0.5, 0.5],
+        3: [0.5, 0, 0.5],
+        4: [0.5, 1, 0.5],
+        5: [0.5, 0.5, 0],
+        6: [0.5, 0.5, 1],
     }
     normals = {
-        1: [-1, 0, 0], 2: [1, 0, 0],
-        3: [0, -1, 0], 4: [0, 1, 0],
-        5: [0, 0, -1], 6: [0, 0, 1],
+        1: [-1, 0, 0],
+        2: [1, 0, 0],
+        3: [0, -1, 0],
+        4: [0, 1, 0],
+        5: [0, 0, -1],
+        6: [0, 0, 1],
     }
 
     def getNBoundaries(self):
@@ -269,23 +275,56 @@ class FakeMesh(FakeFeature):
 
 
 class FakeComponent:
-    def __init__(self, *, missing_rdir=False, mismatched_floquet=False, absent_excited=False, empty_mesh=False, inaccessible_incidence=False, mesh_case="valid"):
+    def __init__(
+        self,
+        *,
+        missing_rdir=False,
+        mismatched_floquet=False,
+        absent_excited=False,
+        empty_mesh=False,
+        inaccessible_incidence=False,
+        mesh_case="valid",
+    ):
         fpc_x = [1, 3, 2] if mismatched_floquet else [1, 2]
         children = {
-            "fpc1": FakeFeature("fpc1", "PeriodicCondition", selections={"default": fpc_x}, props={"PeriodicType": "Floquet"}),
-            "fpc2": FakeFeature("fpc2", "PeriodicCondition", selections={"default": [3, 4]}, props={"PeriodicType": "Floquet"}),
+            "fpc1": FakeFeature(
+                "fpc1",
+                "PeriodicCondition",
+                selections={"default": fpc_x},
+                props={"PeriodicType": "Floquet"},
+            ),
+            "fpc2": FakeFeature(
+                "fpc2",
+                "PeriodicCondition",
+                selections={"default": [3, 4]},
+                props={"PeriodicType": "Floquet"},
+            ),
             "pport1": FakeFeature("pport1", "PeriodicPort", selections={"default": [6]}),
             "pport2": FakeFeature("pport2", "PeriodicPort", selections={"default": [5]}),
         }
         if not missing_rdir:
-            children["rdir1"] = FakeFeature("rdir1", "ReferenceDirection", selections={"default": [10]})
-        props = {} if inaccessible_incidence else {
-            "Polarization": "LinearPol", "LinearPol": "S",
-            "alpha1_inc": "theta", "alpha2_inc": "phi",
-        }
+            children["rdir1"] = FakeFeature(
+                "rdir1", "ReferenceDirection", selections={"default": [10]}
+            )
+        props = (
+            {}
+            if inaccessible_incidence
+            else {
+                "Polarization": "LinearPol",
+                "LinearPol": "S",
+                "alpha1_inc": "theta",
+                "alpha2_inc": "phi",
+            }
+        )
         ps = FakeFeature(
-            "ps1", "PeriodicStructure", props=props, children=children,
-            selections={"allBoundaries": [1, 2, 3, 4, 5, 6], "excitedPortSelection": [] if absent_excited else [6]},
+            "ps1",
+            "PeriodicStructure",
+            props=props,
+            children=children,
+            selections={
+                "allBoundaries": [1, 2, 3, 4, 5, 6],
+                "excitedPortSelection": [] if absent_excited else [6],
+            },
         )
         ewfd = FakeFeature("ewfd", "ElectromagneticWavesFrequencyDomain", children={"ps1": ps})
         fin = FakeFeature("fin", "FormUnion", props={"action": "union", "createpairs": "off"})
@@ -310,7 +349,9 @@ class FakeComponent:
         self._physics = FakeContainer({"ewfd": ewfd})
         self._geom = FakeContainer({"geom1": geom})
         self._mesh = FakeContainer({"mesh1": FakeMesh(0 if empty_mesh else 1200, mesh_features)})
-        self._materials = FakeContainer({"mat1": FakeMaterial("mat1", "Common", selections={"default": [1]})})
+        self._materials = FakeContainer(
+            {"mat1": FakeMaterial("mat1", "Common", selections={"default": [1]})}
+        )
 
     def physics(self):
         return self._physics
@@ -331,7 +372,9 @@ class FakeComponent:
 class FakeStudy:
     def __init__(self, linked=True):
         props = {"plist": "wl" if linked else "5e-6", "punit": "m"}
-        self._features = FakeContainer({"wl_step": FakeFeature("wl_step", "Wavelength", props=props)})
+        self._features = FakeContainer(
+            {"wl_step": FakeFeature("wl_step", "Wavelength", props=props)}
+        )
 
     def feature(self):
         return self._features
@@ -400,6 +443,7 @@ def _full_result(tmp_path, monkeypatch, *, active_profile="wave_optics", **fixtu
 def test_full_preflight_collects_read_only_wave_optics_evidence(tmp_path, monkeypatch):
     result = _full_result(tmp_path, monkeypatch)
 
+    assert result["inspection_status"] == "complete"
     assert result["topology"]["domain_count"] == 1
     assert result["topology"]["form_finalization"]["properties"]["action"] == "union"
     assert len(result["periodicity"]["floquet_features"]) == 2
@@ -434,7 +478,9 @@ def test_complete_preflight_does_not_recommend_tool_outside_profile(tmp_path, mo
         ({"inaccessible_incidence": True}, "incidence_properties_unreadable", "unknowns"),
     ],
 )
-def test_preflight_fixtures_preserve_failures_as_evidence(tmp_path, monkeypatch, fixture, code, level):
+def test_preflight_fixtures_preserve_failures_as_evidence(
+    tmp_path, monkeypatch, fixture, code, level
+):
     result = _full_result(tmp_path, monkeypatch, **fixture)
     codes = {item["code"] for item in result["evidence"][level]}
     assert code in codes

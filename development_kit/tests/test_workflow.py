@@ -49,13 +49,14 @@ class FakeStudy:
     def __init__(self, java):
         self.java = java
         self.step = FakeStep()
+        self.features = {"wave": self.step}
         self.run_count = 0
 
     def label(self):
         return "Study 1"
 
-    def feature(self, _tag):
-        return self.step
+    def feature(self, tag):
+        return self.features[tag]
 
     def run(self):
         self.run_count += 1
@@ -131,11 +132,12 @@ class FakeJava:
 
 
 class FakeModel:
-    def __init__(self, failures=None):
+    def __init__(self, failures=None, *, name="fake"):
         self.java = FakeJava(failures)
+        self._name = name
 
     def name(self):
-        return "fake"
+        return self._name
 
     def evaluate(self, expressions):
         raw = self.java.parameters.values.get("wl", "0")
@@ -494,6 +496,7 @@ def test_source_identity_ignores_mutable_runtime_model_name(tmp_path):
 
     first = _model_identity(model, str(source))
     model._name = "checkpoint_copy"
+    assert model.name() == "checkpoint_copy"
     resumed = _model_identity(model, str(source))
 
     assert first == resumed

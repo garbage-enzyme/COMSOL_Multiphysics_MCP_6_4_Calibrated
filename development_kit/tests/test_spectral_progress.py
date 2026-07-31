@@ -8,7 +8,13 @@ import json
 import pytest
 from src.jobs.spectral_characterization import normalize_spectral_characterization_job_spec
 from src.jobs.spectral_progress import build_spectral_progress
+from src.jobs.spectral_rows import read_spectral_rows
 from src.jobs.spectral_stages import build_initial_spectral_stage
+
+from development_kit.tests.test_spectral_rows import (
+    _append as append_durable_spectral_row,
+)
+from development_kit.tests.test_spectral_rows import _spec as durable_spectral_spec
 
 
 def _spec(tmp_path, *, maximum_points=20, maximum_expansions=1, absolute_upper=7e-6):
@@ -119,6 +125,31 @@ def _rows(spec, plan, values):
             }
         )
     return rows
+
+
+def test_progress_accepts_replayed_production_valid_durable_rows(tmp_path):
+    spec_root = tmp_path / "spec"
+    spec_root.mkdir()
+    spec = durable_spectral_spec(spec_root)
+    plan = build_initial_spectral_stage(spec)
+    root = tmp_path / "durable-job"
+    journal = root / "spectral_rows.jsonl"
+    values = [0.1, 0.3, 0.9, 0.3, 0.1]
+    for wavelength, absorption in zip(plan["requested_wavelengths_m"], values):
+        append_durable_spectral_row(
+            journal,
+            root,
+            spec,
+            wavelength,
+            absorption,
+        )
+
+    rows = read_spectral_rows(journal, spec, artifact_root=root)
+    progress = build_spectral_progress(spec, [plan], rows)
+
+    assert len(rows) == len(plan["requested_points"])
+    assert progress["action"] == "schedule_next_stage"
+    assert progress["analysis"]["bundle"]["rows"]
 
 
 def test_initial_and_pending_stage_actions_are_explicit(tmp_path):

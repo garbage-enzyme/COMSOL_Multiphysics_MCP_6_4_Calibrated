@@ -331,8 +331,17 @@ class JavaModel:
 
 
 class AuditModel:
-    def __init__(self, path, *, absorption=1.2, nonfinite=False, drift_source=False):
+    def __init__(
+        self,
+        path,
+        *,
+        name="AuditModel",
+        absorption=1.2,
+        nonfinite=False,
+        drift_source=False,
+    ):
         self.path = path
+        self._name = name
         self.absorption = absorption
         self.nonfinite = nonfinite
         self.drift_source = drift_source
@@ -343,7 +352,7 @@ class AuditModel:
         return str(self.path)
 
     def name(self):
-        return "AuditModel"
+        return self._name
 
     def evaluate(self, expression):
         if isinstance(expression, list):
@@ -630,9 +639,14 @@ class MaterialSelection:
 class MaterialGroup:
     def __init__(self):
         self.values = {}
+        self.reads = []
 
     def set(self, name, value):
         self.values[name] = value
+
+    def getString(self, name):
+        self.reads.append(name)
+        return self.values[name]
 
 
 class Material:
@@ -704,6 +718,12 @@ def test_all_air_mutation_is_clone_only_and_requires_exact_material_tags():
         "relpermeability": "1",
         "electricconductivity": "0[S/m]",
     }
+    assert air.group.reads == [
+        "relpermittivity",
+        "relpermeability",
+        "electricconductivity",
+    ]
+    assert result["air_properties"] == air.group.values
     assert air.selection_value.values == [1, 2, 3]
 
     untouched = MaterialClone(["mat1"])
@@ -735,7 +755,7 @@ def _run_reference(
     def clone_factory(_source, _client, new_name):
         clone_path = tmp_path / f"{new_name}.mph"
         clone_path.write_bytes(b"derived-clone")
-        clone = AuditModel(clone_path, absorption=0.0)
+        clone = AuditModel(clone_path, name=new_name, absorption=0.0)
         model_name = clone.name()
         if name_error:
             clone.name = lambda: (_ for _ in ()).throw(RuntimeError("injected clone-name failure"))
@@ -773,7 +793,7 @@ def _run_reference(
     def register(clone, _path):
         if register_error:
             raise RuntimeError("injected clone registration failure")
-        return clone.name()
+        return f"registered-{clone.name()}"
 
     monkeypatch.setattr(
         "src.tools.wave_optics_audit._validate_ascii_dir",
@@ -825,7 +845,8 @@ def test_reference_audit_uses_fresh_clone_and_persists_dominant_component(tmp_pa
         "client_model_removed": True,
         "backing_file_removed": True,
     }
-    assert cleanup_calls == ["AuditModel"]
+    assert len(cleanup_calls) == 1
+    assert cleanup_calls[0].startswith("registered-reference_air_clone_")
     assert result["reference"]["method"] == "all_air_clone"
     assert result["reference"]["component_amplitudes"]["x"] == pytest.approx(1.0)
     assert result["reference"]["target_to_transverse_ratio"] > 1e100
@@ -842,7 +863,8 @@ def test_reference_audit_cleans_clone_after_material_error(tmp_path, monkeypatch
     result, source, cleanup_calls = _run_reference(tmp_path, monkeypatch, material_error=True)
 
     assert result["audit_status"] == "measurement_partial"
-    assert cleanup_calls == ["AuditModel"]
+    assert len(cleanup_calls) == 1
+    assert cleanup_calls[0].startswith("registered-reference_air_clone_")
     assert result["cleanup"]["removed"] is True
     assert (
         result["physical_evidence"]["evidence"]["polarization.reference_air_method_valid"]["value"]
@@ -860,7 +882,8 @@ def test_reference_audit_cleans_live_clone_after_registration_failure(tmp_path, 
         register_error=True,
     )
 
-    assert cleanup_calls == ["AuditModel"]
+    assert len(cleanup_calls) == 1
+    assert cleanup_calls[0].startswith("reference_air_clone_")
     assert result["audit_status"] == "measurement_partial"
     assert result["cleanup"]["removed"] is True
     assert result["cleanup"]["backing_file_removed"] is True
@@ -894,7 +917,8 @@ def test_reference_audit_treats_backing_file_cleanup_failure_as_integrity_blocke
 
     result, _source, cleanup_calls = _run_reference(tmp_path, monkeypatch)
 
-    assert cleanup_calls == ["AuditModel"]
+    assert len(cleanup_calls) == 1
+    assert cleanup_calls[0].startswith("registered-reference_air_clone_")
     assert result["audit_status"] == "integrity_blocked"
     assert result["cleanup"]["client_model_removed"] is True
     assert result["cleanup"]["backing_file_removed"] is False
@@ -911,7 +935,9 @@ def test_reference_audit_refuses_terminal_success_when_cleanup_is_unproved(tmp_p
         direct_remove_error=True,
     )
 
-    assert cleanup_calls == ["AuditModel", "direct-client-remove"]
+    assert len(cleanup_calls) == 2
+    assert cleanup_calls[0].startswith("registered-reference_air_clone_")
+    assert cleanup_calls[1] == "direct-client-remove"
     assert result["audit_status"] == "integrity_blocked"
     assert result["cleanup"]["removed"] is False
     manifest = json.loads(open(result["artifacts"]["manifest"], encoding="utf-8").read())

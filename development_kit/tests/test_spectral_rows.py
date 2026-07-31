@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
-from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
+from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
-
 from src.evidence.contracts import build_physical_evidence
 from src.jobs.spectral_characterization import normalize_spectral_characterization_job_spec
 from src.jobs.spectral_rows import (
@@ -63,7 +62,11 @@ def _spec(tmp_path) -> dict:
                     "t_expression": "ewfd.Ttotal",
                     "a_expression": "ewfd.Atotal",
                     "top_air_domain_ids": [1],
-                    "top_air_coordinate_range": {"x": [-1.0, 1.0], "y": [-1.0, 1.0], "z": [-1.0, 1.0]},
+                    "top_air_coordinate_range": {
+                        "x": [-1.0, 1.0],
+                        "y": [-1.0, 1.0],
+                        "z": [-1.0, 1.0],
+                    },
                 },
             },
             "analysis_policy": {
@@ -133,7 +136,35 @@ def _artifact(root: Path, spec: dict, wavelength: float) -> dict:
         encoding="utf-8",
     )
     wrapper = inner.parent / "matrix_collector.json"
-    wrapper.write_text(json.dumps({"inner": inner.name}), encoding="utf-8")
+    wrapper.write_text(
+        json.dumps(
+            {
+                "schema_name": "comsol_mcp.validation_matrix_collector",
+                "schema_version": "1.0.0",
+                "collector": "wave_optics_point_audit",
+                "point": {
+                    "point_id": point["point_id"],
+                    "point_fingerprint": point["point_fingerprint"],
+                    "configuration_sha256": spec["configuration_sha256"],
+                    "wavelength": {
+                        "value": wavelength,
+                        "unit": "m",
+                        "parameter": spec["wavelength_parameter"],
+                    },
+                    "incidence": None,
+                    "incidence_application": "not_mutated_by_collector_adapter",
+                },
+                "source_model_sha256": spec["source_model_sha256"],
+                "audit_status": "measurement_complete",
+                "inner_manifest": {
+                    "relative_path": inner.relative_to(inner.parent).as_posix(),
+                    "sha256": hashlib.sha256(inner.read_bytes()).hexdigest(),
+                    "size_bytes": inner.stat().st_size,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
     return {
         "wrapper_relative_path": wrapper.relative_to(root).as_posix(),
         "wrapper_sha256": hashlib.sha256(wrapper.read_bytes()).hexdigest(),
@@ -206,9 +237,7 @@ def test_exact_complete_wavelength_cannot_be_appended_twice(tmp_path):
     "absorption",
     [float("inf"), pytest.param(10**10_000, id="huge-integer")],
 )
-def test_nonfinite_equivalent_rows_share_the_validation_error_boundary(
-    tmp_path, absorption
-):
+def test_nonfinite_equivalent_rows_share_the_validation_error_boundary(tmp_path, absorption):
     spec = _spec(tmp_path)
     root = tmp_path / "job"
 
@@ -234,7 +263,9 @@ def test_row_and_artifact_tampering_fail_before_resume(tmp_path):
     with pytest.raises(ValueError, match="row hash"):
         read_spectral_rows(journal, spec, artifact_root=root)
 
-    journal.write_text(json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
+    journal.write_text(
+        json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8"
+    )
     inner = root / row["audit_artifact"]["inner_relative_path"]
     inner.write_text("{}", encoding="utf-8")
     with pytest.raises(ValueError, match="size|hash"):
@@ -284,9 +315,7 @@ def test_concurrent_appends_are_serialized_and_leave_no_lock(tmp_path):
         )
 
     replayed = read_spectral_rows(journal, spec, artifact_root=root)
-    assert {row["row_sha256"] for row in replayed} == {
-        row["row_sha256"] for row in rows
-    }
+    assert {row["row_sha256"] for row in replayed} == {row["row_sha256"] for row in rows}
     assert [row["sequence"] for row in replayed] == [1, 2]
     assert replayed[1]["previous_row_sha256"] == replayed[0]["row_sha256"]
     assert not (root / ".spectral_rows.jsonl.lock").exists()

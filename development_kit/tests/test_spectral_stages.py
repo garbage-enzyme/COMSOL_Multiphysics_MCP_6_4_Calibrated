@@ -174,6 +174,20 @@ def test_later_stage_must_chain_and_cannot_repeat_an_exact_point(tmp_path):
     with pytest.raises(ValueError, match="duplicate"):
         write_spectral_stage_plan(job, spec, duplicate)
 
+    wrong_chain = build_spectral_stage_plan(
+        spec,
+        stage_index=1,
+        stage_kind="refinement",
+        planning_reason="measured_candidate_refinement",
+        window_lower_m=4.0e-6,
+        window_upper_m=4.4e-6,
+        requested_wavelengths_m=[4.2e-6],
+        previous_stage_sha256="0" * 64,
+        evidence_row_sha256="b" * 64,
+    )
+    with pytest.raises(ValueError, match="hash chain is discontinuous"):
+        write_spectral_stage_plan(job, spec, wrong_chain)
+
 
 def test_float_precision_collapse_and_out_of_window_targets_are_rejected(tmp_path):
     with pytest.raises(ValueError, match="strictly increasing"):

@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections import Counter
 
 import pytest
+from src.evidence.spectral_characterization import validate_spectral_point_bundle
 from src.jobs.spectral_rows import read_spectral_rows
 from src.jobs.spectral_runner import run_spectral_characterization
 from src.jobs.spectral_stages import read_spectral_stage_plans
@@ -50,7 +53,15 @@ def test_runner_completes_full_bundle_one_durable_point_at_a_time(tmp_path):
     assert len(calls) == len(rows)
     assert set(calls.values()) == {1}
     assert result["summary"]["row_count"] == len(rows)
-    assert result["summary"]["artifacts"]["spectral_bundle"]["sha256"]
+    descriptor = result["summary"]["artifacts"]["spectral_bundle"]
+    bundle_path = job / descriptor["relative_path"]
+    bundle_bytes = bundle_path.read_bytes()
+    assert descriptor["size_bytes"] == len(bundle_bytes)
+    assert descriptor["sha256"] == hashlib.sha256(bundle_bytes).hexdigest()
+    bundle = validate_spectral_point_bundle(json.loads(bundle_bytes))
+    assert {
+        item["raw_row_sha256"]: item["row_id"] for item in bundle["rows"]
+    } == {row["row_sha256"]: row["point_id"] for row in rows}
 
 
 @pytest.mark.parametrize(

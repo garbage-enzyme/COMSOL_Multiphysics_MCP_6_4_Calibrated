@@ -1683,6 +1683,14 @@ def _replace_clone_materials_with_air(
     group.set("relpermeability", "1")
     group.set("electricconductivity", "0[S/m]")
     air.selection().set(all_domain_ids)
+    expected_properties = {
+        "relpermittivity": "1",
+        "relpermeability": "1",
+        "electricconductivity": "0[S/m]",
+    }
+    property_readback = {name: str(group.getString(name)) for name in expected_properties}
+    if property_readback != expected_properties:
+        raise ValueError(f"all-air material property readback differs: {property_readback}")
     after = sorted(str(value) for value in list(materials.tags()))
     if after != ["reference_air_material"]:
         raise ValueError(f"all-air clone material readback is unexpected: {after}")
@@ -1695,11 +1703,7 @@ def _replace_clone_materials_with_air(
         "method": "all_air_clone",
         "removed_material_tags": before,
         "air_material_tag": "reference_air_material",
-        "air_properties": {
-            "relpermittivity": "1",
-            "relpermeability": "1",
-            "electricconductivity": "0[S/m]",
-        },
+        "air_properties": property_readback,
         "domain_ids": all_domain_ids,
         "readback_complete": True,
     }
