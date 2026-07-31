@@ -90,8 +90,9 @@ def test_happy_path_reuses_one_worker_and_reset_verifies_absence():
 ])
 def test_query_protocol_faults_are_contained_without_retry(fault: str):
     with SemanticWorkerManager(
-        startup_deadline=2.0, query_deadline=0.25, fault=fault
+        startup_deadline=10.0, query_deadline=0.25, fault=fault
     ) as manager:
+        assert manager.start()["success"] is True
         result = manager.query("bounded fault probe")
 
         assert result["success"] is False
