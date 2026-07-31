@@ -200,6 +200,48 @@ def test_tool_spec_validation_rejects_conflicting_declarations_import_free():
         )
 
 
+@pytest.mark.parametrize(
+    ("mutated", "message"),
+    [
+        (
+            lambda spec: replace(spec, starts_solver=True),
+            "solver-starting ToolSpec has impossible effects",
+        ),
+        (
+            lambda spec: replace(
+                spec,
+                side_effect_class="model_mutation",
+                advances_model_revision=True,
+                requires_model_revision=False,
+            ),
+            "advancing ToolSpec lacks revision requirement",
+        ),
+        (
+            lambda spec: replace(
+                spec,
+                maturity="deprecated",
+                deprecation_state="deprecated",
+                replacement_tool=None,
+            ),
+            "deprecated ToolSpec lacks replacement",
+        ),
+        (
+            lambda spec: replace(spec, replacement_tool="missing_replacement"),
+            "ToolSpec replacement is unknown",
+        ),
+        (
+            lambda spec: replace(spec, intended_profiles=("core",)),
+            "ToolSpec compatibility profile is missing",
+        ),
+    ],
+)
+def test_tool_spec_validation_rejects_high_impact_relationship_breaks(mutated, message):
+    read_only = TOOL_SPECS["capabilities"]
+
+    with pytest.raises(ValueError, match=message):
+        validate_tool_specs({**TOOL_SPECS, read_only.name: mutated(read_only)})
+
+
 def test_schema_snapshot_rejects_duplicate_registered_names():
     duplicate = SimpleNamespace(name="duplicate", inputSchema={"type": "object"})
 

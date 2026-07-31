@@ -8,6 +8,7 @@ import uuid
 from pathlib import Path
 
 import pytest
+from src.jobs.spectral_characterization import _SPECTRAL_CHARACTERIZATION_INPUT_FIELDS
 
 from development_kit.tests.integration import spectral_characterization_acceptance as runner
 from development_kit.tests.integration.spectral_characterization_acceptance import (
@@ -28,27 +29,9 @@ def ascii_root():
 
 
 def _raw_spec(spec: dict) -> dict:
-    allowed = {
-        "job_type",
-        "source_model_path",
-        "source_model_relative_identity",
-        "configuration_sha256",
-        "parameter_state",
-        "wavelength_parameter",
-        "initial_grid",
-        "refinement_policy",
-        "expansion_policy",
-        "maximum_points",
-        "collector",
-        "analysis_policy",
-        "measurement_configuration",
-        "resource_policy",
-        "cores",
-        "version",
-        "max_retries",
-        "continue_on_error",
+    return {
+        key: value for key, value in spec.items() if key in _SPECTRAL_CHARACTERIZATION_INPUT_FIELDS
     }
-    return {key: value for key, value in spec.items() if key in allowed}
 
 
 def test_dry_run_normalizes_exact_identity_without_starting_comsol(tmp_path, ascii_root):

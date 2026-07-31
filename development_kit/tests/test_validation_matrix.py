@@ -1,9 +1,12 @@
 from __future__ import annotations
 
-import builtins
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
-
 from src.jobs.validation_matrix import (
     MAX_VALIDATION_MATRIX_POINTS,
     normalize_validation_matrix_spec,
@@ -47,18 +50,32 @@ def _spec(source, points=None, **overrides) -> dict:
     return value
 
 
-def test_normalization_is_solver_free_and_binds_exact_point_identity(tmp_path, monkeypatch):
+def test_normalization_is_solver_free_and_binds_exact_point_identity(tmp_path):
     source = tmp_path / "fixture.mph"
     source.write_bytes(b"controlled fixture")
-    real_import = builtins.__import__
+    raw_spec = _spec(source)
+    child = (
+        "import builtins,json,os;"
+        "real_import=builtins.__import__;"
+        "builtins.__import__=lambda name,*args,**kwargs: "
+        "(_ for _ in ()).throw(AssertionError('normalization imported mph')) "
+        "if name == 'mph' or name.startswith('mph.') else real_import(name,*args,**kwargs);"
+        "from comsol_mcp.jobs.validation_matrix import normalize_validation_matrix_spec;"
+        "print(json.dumps(normalize_validation_matrix_spec(json.loads(os.environ['RAW_SPEC']))))"
+    )
+    env = {**os.environ, "RAW_SPEC": json.dumps(raw_spec)}
+    completed = subprocess.run(
+        [sys.executable, "-c", child],
+        cwd=Path(__file__).parents[2],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
 
-    def guarded_import(name, *args, **kwargs):
-        if name == "mph" or name.startswith("mph."):
-            raise AssertionError("normalization must not import mph")
-        return real_import(name, *args, **kwargs)
-
-    monkeypatch.setattr(builtins, "__import__", guarded_import)
-    first = normalize_validation_matrix_spec(_spec(source))
+    assert completed.returncode == 0, completed.stderr
+    first = json.loads(completed.stdout)
     second = normalize_validation_matrix_spec(_spec(source))
 
     assert first == second
@@ -88,7 +105,9 @@ def test_source_or_point_changes_change_immutable_fingerprints(tmp_path):
     source.write_bytes(b"v2")
     changed_source = normalize_validation_matrix_spec(_spec(source))
 
-    assert first["points"][0]["point_fingerprint"] != changed_point["points"][0]["point_fingerprint"]
+    assert (
+        first["points"][0]["point_fingerprint"] != changed_point["points"][0]["point_fingerprint"]
+    )
     assert first["source_model_sha256"] != changed_source["source_model_sha256"]
     assert first["spec_fingerprint"] != changed_source["spec_fingerprint"]
 

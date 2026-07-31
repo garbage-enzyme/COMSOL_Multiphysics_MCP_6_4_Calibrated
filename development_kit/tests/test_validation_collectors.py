@@ -155,7 +155,14 @@ def test_point_audit_identity_fields_are_matrix_locked_and_wrapped(tmp_path):
     assert kwargs["wavelength_parameter"] == "wl"
     assert kwargs["config_id"] == point["point_fingerprint"]
     assert kwargs["expected_source_sha256"] == spec["source_model_sha256"]
+    assert kwargs["model_name"] == "fixture"
+    assert kwargs["artifact_dir"] == str((tmp_path / "artifact").resolve())
     assert kwargs["session_state"] == {"connected": True}
+    assert kwargs["active_profile"] == "wave_optics"
+    assert kwargs["ownership_preflight"] == {"ready": True}
+    assert "clone_factory" not in kwargs
+    assert "clone_register" not in kwargs
+    assert "clone_cleanup" not in kwargs
     wrapper = json.loads(Path(result["artifacts"]["manifest"]).read_text(encoding="utf-8"))
     assert wrapper["point"]["incidence"]["polarization_evidence"] == "label_only"
     assert wrapper["point"]["incidence_application"] == "not_mutated_by_collector_adapter"
@@ -193,9 +200,16 @@ def test_reference_audit_uses_same_loaded_model_and_client(tmp_path):
     [
         "model_name",
         "wavelength_value",
+        "wavelength_unit",
+        "wavelength_parameter",
         "expected_source_sha256",
         "config_id",
         "artifact_dir",
+        "session_state",
+        "active_profile",
+        "ownership_preflight",
+        "clone_factory",
+        "clone_register",
         "clone_cleanup",
     ],
 )

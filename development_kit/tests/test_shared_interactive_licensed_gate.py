@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 
 import pytest
@@ -13,33 +15,35 @@ import pytest
 from development_kit.scripts import shared_interactive_licensed_gate as gate
 
 SCRIPT = Path(__file__).parents[1] / "scripts" / "shared_interactive_licensed_gate.py"
+_ASCII_ROOT = Path(
+    "D:/comsol_runtime_test"
+    if os.name == "nt"
+    else os.getenv("RUNNER_TEMP", os.path.join(os.sep, "tmp"))
+) / (f"pytest-shared-interactive-{uuid.uuid4().hex}")
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _isolated_ascii_gate_root():
+    _ASCII_ROOT.mkdir(parents=True, exist_ok=False)
+    try:
+        yield
+    finally:
+        shutil.rmtree(_ASCII_ROOT, ignore_errors=True)
 
 
 def _ascii_receipt() -> str:
-    return (
-        "D:/shared_interactive_gate_test_receipt.json"
-        if os.name == "nt"
-        else "/tmp/shared_interactive_gate_test_receipt.json"
-    )
+    return str(_ASCII_ROOT / "receipt.json")
 
 
 def _ascii_source() -> str:
-    return (
-        "D:/shared_interactive_gate_test_source.mph"
-        if os.name == "nt"
-        else "/tmp/shared_interactive_gate_test_source.mph"
-    )
+    return str(_ASCII_ROOT / "source.mph")
 
 
 def _ascii_working_model() -> str:
-    return (
-        "D:/shared_interactive_gate_test_working.mph"
-        if os.name == "nt"
-        else "/tmp/shared_interactive_gate_test_working.mph"
-    )
+    return str(_ASCII_ROOT / "working.mph")
 
 
-def test_shared_interactive_gate_dry_run_is_solver_free(tmp_path):
+def test_shared_interactive_gate_dry_run_is_solver_free():
     receipt = Path(_ascii_receipt())
     completed = subprocess.run(
         [
@@ -75,7 +79,7 @@ def test_shared_interactive_gate_dry_run_is_solver_free(tmp_path):
     assert not receipt.exists()
 
 
-def test_shared_interactive_readback_requires_declared_desktop_value(tmp_path):
+def test_shared_interactive_readback_requires_declared_desktop_value():
     completed = subprocess.run(
         [
             sys.executable,
@@ -173,8 +177,16 @@ def test_saved_readback_mode_uses_distinct_source_and_working_paths():
 
     assert completed.returncode == 0, completed.stderr
     result = json.loads(completed.stdout)
+    source = Path(result["spec"]["immutable_source_path"])
+    working = Path(result["spec"]["expected_file_path"])
     assert result["spec"]["mode"] == "saved_readback"
-    assert result["spec"]["selector"]["expected_file_path"] == str(Path(_ascii_working_model()))
+    assert source.is_absolute()
+    assert working.is_absolute()
+    assert source == Path(_ascii_source()).resolve(strict=False)
+    assert working == Path(_ascii_working_model()).resolve(strict=False)
+    assert result["spec"]["selector"]["expected_file_path"] == str(working)
+    assert source != working
+    assert os.path.normcase(str(source)) != os.path.normcase(str(working))
 
 
 def test_saved_mode_rejects_lexically_distinct_aliases_of_one_path():
