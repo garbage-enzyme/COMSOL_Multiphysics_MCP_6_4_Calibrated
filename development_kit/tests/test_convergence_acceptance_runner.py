@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import shutil
 import uuid
+from pathlib import Path
 
 import pytest
 
@@ -60,6 +60,7 @@ def test_non_ascii_runtime_fails_before_worker(tmp_path):
             runtime_root=tmp_path / "运行时",
             output=tmp_path / "receipt.json",
             dry_run=True,
+            worker_runner=lambda *_args, **_kwargs: pytest.fail("worker must not start"),
         )
 
 

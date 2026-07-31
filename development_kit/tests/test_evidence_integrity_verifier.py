@@ -174,7 +174,16 @@ def test_enabled_summary_check_rejects_a_claim_absent_from_raw_evidence(tmp_path
     assert result["check_results"]["summary_claim_verification"]["state"] == "failed"
 
 
-def test_resume_requires_exact_producer_and_driver_identity(tmp_path):
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("producer", "other-producer"),
+        ("producer_version", "9.9.9"),
+        ("driver_sha256", "e" * 64),
+        ("schema_version", "2.0.0"),
+    ],
+)
+def test_resume_requires_exact_producer_and_driver_identity(tmp_path, field, value):
     request, _raw, _fit = _fixture(tmp_path)
     matched = _compatibility()
     accepted = verify_evidence_integrity(
@@ -188,7 +197,7 @@ def test_resume_requires_exact_producer_and_driver_identity(tmp_path):
     assert accepted["check_results"]["producer_driver_compatibility"]["state"] == "passed"
 
     mismatched = _compatibility()
-    mismatched["observed"]["driver_sha256"] = "e" * 64
+    mismatched["observed"][field] = value
     rejected = verify_evidence_integrity(
         portfolio_request=request,
         artifact_roots={"case-one": str(tmp_path)},

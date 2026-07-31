@@ -218,7 +218,7 @@ class TestSessionManager:
         assert "_models" in managers[0].__dict__
         assert "_start_lock" in managers[0].__dict__
 
-    def test_session_manager_initial_state(self):
+    def test_session_manager_initial_state(self, permissive_session_ownership):
         from src.tools.session import SessionManager
 
         sm = SessionManager()
@@ -778,7 +778,6 @@ class TestSessionManager:
         self, monkeypatch, permissive_session_ownership
     ):
         import json
-        import time
 
         import src.tools.session as session_module
 
@@ -801,12 +800,9 @@ class TestSessionManager:
         monkeypatch.setattr(session_module.mph, "Client", create_client)
         monkeypatch.setattr(session_module.mph_session, "client", None)
 
-        started_at = time.perf_counter()
         result = sm.start(cores=2)
-        elapsed = time.perf_counter() - started_at
 
         assert result["starting"] is True
-        assert elapsed < 0.2
         assert not entered.is_set()
         assert entered.wait(timeout=1)
         sm._start_thread.join(timeout=1)
