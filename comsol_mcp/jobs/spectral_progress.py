@@ -212,6 +212,21 @@ def _new_targets(
     ]
 
 
+def _latest_row_sha256(rows: list[Mapping[str, Any]]) -> str:
+    latest = max(
+        rows,
+        key=lambda row: (
+            row["sequence"]
+            if isinstance(row.get("sequence"), int) and not isinstance(row.get("sequence"), bool)
+            else -1
+        ),
+    )
+    sequence = latest.get("sequence")
+    if isinstance(sequence, bool) or not isinstance(sequence, int) or sequence <= 0:
+        raise ValueError("spectral row sequence is invalid")
+    return str(latest["row_sha256"])
+
+
 def _expansion_plan(
     spec: Mapping[str, Any],
     plans: list[Mapping[str, Any]],
@@ -270,7 +285,7 @@ def _expansion_plan(
         window_upper_m=new_upper,
         requested_wavelengths_m=targets,
         previous_stage_sha256=plans[-1]["stage_sha256"],
-        evidence_row_sha256=rows[-1]["row_sha256"],
+        evidence_row_sha256=_latest_row_sha256(rows),
     )
     return plan, "window_expansion_planned"
 
@@ -302,8 +317,9 @@ def _refinement_plan(
     peak = _candidate_peak(artifacts)
     if peak is None:
         return None, "candidate_measurement_unavailable"
-    lower = min(float(row["requested_wavelength_m"]) for row in rows)
-    upper = max(float(row["requested_wavelength_m"]) for row in rows)
+    latest_window = _mapping(plans[-1].get("window"), "latest stage window")
+    lower = float(latest_window["lower_m"])
+    upper = float(latest_window["upper_m"])
     width = (upper - lower) / float(policy["span_shrink_factor"])
     absolute = spec["expansion_policy"]
     new_lower = max(float(absolute["absolute_lower_m"]), peak - width / 2.0)
@@ -329,7 +345,7 @@ def _refinement_plan(
             window_upper_m=new_upper,
             requested_wavelengths_m=targets,
             previous_stage_sha256=plans[-1]["stage_sha256"],
-            evidence_row_sha256=rows[-1]["row_sha256"],
+            evidence_row_sha256=_latest_row_sha256(rows),
         ),
         "refinement_planned",
     )
@@ -342,6 +358,7 @@ def _final_candidate_disposition(
     artifacts: Mapping[str, Any],
     cap_reason: str,
 ) -> dict[str, Any]:
+    cap_reached = cap_reason != "refinement_converged"
     characterization = artifacts["characterization"]
     candidate = characterization.get("candidate")
     if characterization.get("measurement_state") != "measured" or not isinstance(
@@ -350,7 +367,7 @@ def _final_candidate_disposition(
         return _completion(
             reason_code=characterization.get("reason_code", "candidate_not_measured"),
             disposition="residual",
-            declared_cap_reached=True,
+            declared_cap_reached=cap_reached,
         )
     fwhm = candidate.get("fwhm")
     quality = candidate.get("quality_factor")
@@ -358,20 +375,20 @@ def _final_candidate_disposition(
         return _completion(
             reason_code="fwhm_unbracketed_at_declared_cap",
             disposition="residual",
-            declared_cap_reached=True,
+            declared_cap_reached=cap_reached,
         )
     if not isinstance(quality, Mapping) or quality.get("state") != "computed_from_bracketed_fwhm":
         return _completion(
             reason_code="quality_factor_unavailable",
             disposition="residual",
-            declared_cap_reached=True,
+            declared_cap_reached=cap_reached,
         )
     fit_stable, fit_reason = _fit_support_is_stable(characterization, spec["refinement_policy"])
     if not fit_stable:
         return _completion(
             reason_code=fit_reason,
             disposition="residual",
-            declared_cap_reached=True,
+            declared_cap_reached=cap_reached,
         )
     refinement_count = sum(plan["stage_kind"] == "refinement" for plan in plans)
     if refinement_count:
@@ -383,7 +400,7 @@ def _final_candidate_disposition(
             return _completion(
                 reason_code="refinement_peak_comparison_unavailable",
                 disposition="residual",
-                declared_cap_reached=True,
+                declared_cap_reached=cap_reached,
             )
         if abs(current_peak - previous_peak) > float(
             spec["refinement_policy"]["peak_shift_abs_tolerance_m"]
@@ -391,7 +408,7 @@ def _final_candidate_disposition(
             return _completion(
                 reason_code="refinement_peak_shift_exceeds_tolerance",
                 disposition="residual",
-                declared_cap_reached=True,
+                declared_cap_reached=cap_reached,
             )
     return _completion(
         reason_code=(
@@ -400,7 +417,7 @@ def _final_candidate_disposition(
             else "candidate_characterization_accepted_at_declared_refinement_limit"
         ),
         disposition="accepted",
-        declared_cap_reached=cap_reason != "refinement_converged",
+        declared_cap_reached=cap_reached,
     )
 
 

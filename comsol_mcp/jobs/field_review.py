@@ -22,7 +22,7 @@ FIELD_REVIEW_BUNDLE_VERSION = "1.0.0"
 MAX_WRAPPER_BYTES = 1024 * 1024
 MAX_FIELD_MANIFEST_BYTES = 4 * 1024 * 1024
 MAX_FIELD_ARRAY_BYTES = 256 * 1024 * 1024
-_IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
+_IDENTIFIER = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]{0,127}$")
 _PATH_IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 _WINDOWS_DEVICE_NAMES = {
     "con",
@@ -90,6 +90,75 @@ def _verify_descriptor(
     if _sha256_file(path) != descriptor.get("sha256"):
         raise ValueError(f"{label} hash readback does not match")
     return path
+
+
+def _verify_field_array(path: Path, manifest: Mapping[str, Any]) -> None:
+    """Bind the stored NPZ structure to the already validated manifest."""
+    try:
+        import numpy as np
+    except ImportError as exc:  # pragma: no cover - NumPy is a runtime dependency
+        raise RuntimeError("NumPy is required to verify field arrays") from exc
+
+    rows, columns = manifest["grid"]["shape"]
+    slice_axis = manifest["slice"]["axis"]
+    plane_axes = [axis for axis in ("x", "y", "z") if axis != slice_axis]
+    column_axis, row_axis = plane_axes
+    expression_names = [item["name"] for item in manifest["expressions"]]
+    expected_keys = {
+        *(f"coordinate_{axis}" for axis in plane_axes),
+        *(f"quantity_{name}" for name in expression_names),
+    }
+    try:
+        with np.load(path, allow_pickle=False) as archive:
+            if set(archive.files) != expected_keys:
+                raise ValueError("field array keys differ from the manifest")
+            coordinates = {}
+            for axis, length in ((column_axis, columns), (row_axis, rows)):
+                values = np.asarray(archive[f"coordinate_{axis}"])
+                if (
+                    values.ndim != 1
+                    or values.shape[0] != length
+                    or values.dtype.kind not in "fiu"
+                    or not np.all(np.isfinite(values))
+                    or np.any(np.diff(values.astype(np.float64, copy=False)) <= 0)
+                ):
+                    raise ValueError(f"field coordinate_{axis} differs from the manifest grid")
+                coordinates[axis] = values
+            missing_mask = None
+            for name in expression_names:
+                values = np.asarray(archive[f"quantity_{name}"])
+                if (
+                    values.shape != (rows, columns)
+                    or values.dtype.kind not in "fiu"
+                    or np.any(np.isinf(values))
+                ):
+                    raise ValueError(f"field quantity_{name} differs from the manifest grid")
+                current_missing = np.isnan(values.astype(np.float64, copy=False))
+                if missing_mask is None:
+                    missing_mask = current_missing
+                elif not np.array_equal(missing_mask, current_missing):
+                    raise ValueError("field quantities do not share the manifest missing-cell mask")
+    except (OSError, ValueError) as exc:
+        if isinstance(exc, ValueError) and str(exc).startswith("field "):
+            raise
+        raise ValueError("field array is not a valid bounded NPZ artifact") from exc
+
+    ranges = manifest["coordinate_ranges"]
+    for axis, values in coordinates.items():
+        observed = [float(values[0]), float(values[-1])]
+        if observed != ranges[axis]:
+            raise ValueError(f"field coordinate_{axis} range differs from the manifest")
+    if ranges[slice_axis] != [manifest["slice"]["value"], manifest["slice"]["value"]]:
+        raise ValueError("field slice coordinate range differs from the manifest")
+    if missing_mask is None:
+        raise ValueError("field array contains no quantities")
+    missing_count = int(missing_mask.sum())
+    if (
+        rows * columns != manifest["grid_point_count"]
+        or missing_count != manifest["missing_grid_point_count"]
+        or rows * columns - missing_count != manifest["covered_grid_point_count"]
+    ):
+        raise ValueError("field array coverage differs from the manifest")
 
 
 def _job_descriptor(
@@ -295,6 +364,7 @@ def _load_point_field(
         != expected_view["outputs"]["manifest_artifact_id"]
     ):
         raise ValueError("field manifest identity differs from its wrapper")
+    _verify_field_array(array_path, manifest)
     source = manifest.get("source")
     if not isinstance(source, Mapping) or (
         source.get("kind") != "validation_matrix_point"
@@ -339,7 +409,7 @@ def assemble_validation_matrix_field_review(
         or any(not isinstance(item, str) or not _IDENTIFIER.fullmatch(item) for item in point_ids)
     ):
         raise ValueError("point_ids must contain exactly two unique portable IDs")
-    if not _portable_path_identifier(bundle_id):
+    if not _portable_path_identifier(bundle_id) or not _IDENTIFIER.fullmatch(bundle_id):
         raise ValueError("bundle_id must be a portable identifier")
     spec_path = directory / "spec.json"
     if not spec_path.is_file() or spec_path.stat().st_size > 512 * 1024:

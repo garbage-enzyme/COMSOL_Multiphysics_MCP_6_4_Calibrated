@@ -7,7 +7,11 @@ import json
 
 import pytest
 from src.jobs.spectral_characterization import normalize_spectral_characterization_job_spec
-from src.jobs.spectral_progress import build_spectral_progress
+from src.jobs.spectral_progress import (
+    _final_candidate_disposition,
+    _refinement_plan,
+    build_spectral_progress,
+)
 from src.jobs.spectral_rows import read_spectral_rows
 from src.jobs.spectral_stages import build_initial_spectral_stage
 
@@ -17,7 +21,15 @@ from development_kit.tests.test_spectral_rows import (
 from development_kit.tests.test_spectral_rows import _spec as durable_spectral_spec
 
 
-def _spec(tmp_path, *, maximum_points=20, maximum_expansions=1, absolute_upper=7e-6):
+def _spec(
+    tmp_path,
+    *,
+    maximum_points=20,
+    maximum_expansions=1,
+    maximum_stages=1,
+    peak_shift_tolerance=1e-9,
+    absolute_upper=7e-6,
+):
     source = tmp_path / "source.mph"
     source.write_bytes(b"model")
     return normalize_spectral_characterization_job_spec(
@@ -30,11 +42,11 @@ def _spec(tmp_path, *, maximum_points=20, maximum_expansions=1, absolute_upper=7
             "wavelength_parameter": "wl",
             "initial_grid": {"lower_m": 4e-6, "upper_m": 6e-6, "point_count": 5},
             "refinement_policy": {
-                "maximum_stages": 1,
+                "maximum_stages": maximum_stages,
                 "points_per_stage": 5,
                 "span_shrink_factor": 4.0,
                 "minimum_spacing_m": 1e-10,
-                "peak_shift_abs_tolerance_m": 1e-9,
+                "peak_shift_abs_tolerance_m": peak_shift_tolerance,
                 "fit_support_peak_abs_tolerance_m": 1e-9,
                 "fit_support_fwhm_abs_tolerance_m": 1e-9,
                 "fit_support_quality_factor_abs_tolerance": 1.0,
@@ -203,6 +215,77 @@ def test_boundary_high_schedules_bounded_expansion(tmp_path):
         not in {item["point_fingerprint"] for item in initial["requested_points"]}
         for point in expansion["requested_points"]
     )
+
+
+def test_next_stage_identity_is_independent_of_caller_row_order(tmp_path):
+    spec = _spec(tmp_path)
+    initial = build_initial_spectral_stage(spec)
+    rows = _rows(spec, initial, [0.1, 0.3, 0.9, 0.3, 0.1])
+
+    ordered = build_spectral_progress(spec, [initial], rows)
+    reversed_input = build_spectral_progress(spec, [initial], list(reversed(rows)))
+
+    assert ordered["next_stage_plan"] == reversed_input["next_stage_plan"]
+    assert ordered["next_stage_plan"]["evidence_row_sha256"] == rows[-1]["row_sha256"]
+
+
+def test_each_refinement_shrinks_the_latest_stage_window(tmp_path):
+    spec = _spec(
+        tmp_path,
+        maximum_points=30,
+        maximum_stages=2,
+        peak_shift_tolerance=1e-12,
+    )
+    initial = build_initial_spectral_stage(spec)
+    initial_rows = _rows(spec, initial, [0.1, 0.3, 0.9, 0.3, 0.1])
+    first = build_spectral_progress(spec, [initial], initial_rows)["next_stage_plan"]
+    shifted_peak = first["requested_wavelengths_m"][2]
+    refined_rows = _rows(spec, first, [0.1, 0.2, 0.9, 0.3])
+    for sequence, row in enumerate(refined_rows, len(initial_rows) + 1):
+        row["sequence"] = sequence
+
+    second, reason = _refinement_plan(
+        spec,
+        [initial, first],
+        initial_rows + refined_rows,
+        {
+            "characterization": {
+                "measurement_state": "measured",
+                "candidate": {"peak": {"wavelength_m": shifted_peak}},
+            }
+        },
+    )
+
+    assert reason == "refinement_planned"
+    assert second is not None
+    first_span = first["window"]["upper_m"] - first["window"]["lower_m"]
+    second_span = second["window"]["upper_m"] - second["window"]["lower_m"]
+    assert second_span == pytest.approx(
+        first_span / spec["refinement_policy"]["span_shrink_factor"]
+    )
+    assert second["evidence_row_sha256"] == refined_rows[-1]["row_sha256"]
+
+
+def test_convergence_failure_is_not_mislabeled_as_a_declared_cap(tmp_path):
+    spec = _spec(tmp_path)
+    result = _final_candidate_disposition(
+        spec,
+        [],
+        [],
+        {
+            "characterization": {
+                "measurement_state": "measured",
+                "candidate": {
+                    "fwhm": {"state": "unbracketed"},
+                    "quality_factor": {"state": "unavailable"},
+                },
+            }
+        },
+        "refinement_converged",
+    )
+
+    assert result["action"] == "complete"
+    assert result["declared_cap_reached"] is False
 
 
 def test_boundary_at_absolute_bound_completes_unresolved_without_execution_failure(tmp_path):

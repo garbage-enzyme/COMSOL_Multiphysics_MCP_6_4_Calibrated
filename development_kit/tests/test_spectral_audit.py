@@ -172,6 +172,18 @@ def _result(job, spec, point):
     }
 
 
+def _rewrite_inner(artifact, mutate):
+    inner = artifact / "audit" / "manifest.json"
+    document = json.loads(inner.read_text(encoding="utf-8"))
+    mutate(document)
+    inner.write_text(json.dumps(document), encoding="utf-8")
+    wrapper_path = artifact / "matrix_collector.json"
+    wrapper = json.loads(wrapper_path.read_text(encoding="utf-8"))
+    wrapper["inner_manifest"]["sha256"] = hashlib.sha256(inner.read_bytes()).hexdigest()
+    wrapper["inner_manifest"]["size_bytes"] = inner.stat().st_size
+    wrapper_path.write_text(json.dumps(wrapper), encoding="utf-8")
+
+
 def test_point_identity_and_complete_audit_projection(tmp_path):
     spec = _spec(tmp_path)
     job = tmp_path / "job"
@@ -205,6 +217,55 @@ def test_point_identity_and_complete_audit_projection(tmp_path):
         "audit_status": "measurement_complete",
     }
     assert audit["physical_evidence_sha256"]
+
+
+def test_requested_wavelength_uses_the_frozen_canonical_point(tmp_path):
+    spec = _spec(tmp_path)
+    job = tmp_path / "job"
+    point = build_spectral_audit_point(spec, 5e-6)
+    artifact, result = _result(job, spec, point)
+    _rewrite_inner(
+        artifact,
+        lambda document: document["measurement"]["wavelength"].__setitem__(
+            "requested_m", 4.999999999999999e-6
+        ),
+    )
+
+    projected = extract_spectral_audit_result(
+        job_dir=job,
+        artifact_dir=artifact,
+        spec=spec,
+        point=point,
+        result=result,
+    )
+
+    assert projected["requested_wavelength_m"] == point["wavelength"]["value"]
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["evaluated_parameter_m", "solved_frequency_wavelength_m"],
+)
+def test_solved_wavelengths_must_match_the_frozen_point_within_policy(tmp_path, field):
+    spec = _spec(tmp_path)
+    job = tmp_path / "job"
+    point = build_spectral_audit_point(spec, 5e-6)
+    artifact, result = _result(job, spec, point)
+    _rewrite_inner(
+        artifact,
+        lambda document: document["measurement"]["wavelength"].__setitem__(
+            field, 5e-6 + 2 * spec["analysis_policy"]["wavelength_sync_abs_m"]
+        ),
+    )
+
+    with pytest.raises(ValueError, match="wavelength differs from the frozen point"):
+        extract_spectral_audit_result(
+            job_dir=job,
+            artifact_dir=artifact,
+            spec=spec,
+            point=point,
+            result=result,
+        )
 
 
 def test_point_incidence_is_detached_from_the_normalized_spec(tmp_path):

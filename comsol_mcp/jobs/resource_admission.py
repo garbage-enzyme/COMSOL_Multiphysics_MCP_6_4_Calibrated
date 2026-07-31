@@ -1130,14 +1130,16 @@ def replay_resource_journal(
     for (entry_attempt, point_id), latest in sorted(latest_by_point.items()):
         if entry_attempt != attempt:
             continue
-        if point_id in completed:
-            action = "skip_completed"
-        elif latest["entry_type"] == "telemetry":
+        if latest["entry_type"] == "telemetry":
             action = "admission_required"
-        elif latest["decision"] in {"allow", "allow_with_warning"}:
-            action = "start_point"
         elif latest["decision"] == "require_confirmation":
             action = "await_confirmation"
+        elif latest["decision"] == "refuse":
+            action = "checkpoint_no_start"
+        elif point_id in completed:
+            action = "skip_completed"
+        elif latest["decision"] in {"allow", "allow_with_warning"}:
+            action = "start_point"
         else:
             action = "checkpoint_no_start"
         points[point_id] = {

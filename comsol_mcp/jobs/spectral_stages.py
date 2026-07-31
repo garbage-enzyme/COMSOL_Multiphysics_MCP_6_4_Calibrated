@@ -10,6 +10,8 @@ from decimal import Decimal, localcontext
 from pathlib import Path
 from typing import Any, Mapping
 
+from comsol_mcp.durable.io import json_document_bytes
+
 from .spectral_characterization import MAX_INITIAL_GRID_POINTS
 from .spectral_rows import (
     SPECTRAL_STAGE_KINDS,
@@ -157,10 +159,10 @@ def build_spectral_stage_plan(
         "previous_stage_sha256": _hex_or_none(previous_stage_sha256, "previous_stage_sha256"),
         "evidence_row_sha256": _hex_or_none(evidence_row_sha256, "evidence_row_sha256"),
     }
-    encoded = _canonical_bytes(body)
-    if len(encoded) > MAX_SPECTRAL_STAGE_PLAN_BYTES:
+    plan = {**body, "stage_sha256": _fingerprint(body)}
+    if len(json_document_bytes(plan)) > MAX_SPECTRAL_STAGE_PLAN_BYTES:
         raise ValueError("spectral stage plan exceeds its byte limit")
-    return {**body, "stage_sha256": _fingerprint(body)}
+    return plan
 
 
 def build_initial_spectral_stage(spec: Mapping[str, Any]) -> dict[str, Any]:

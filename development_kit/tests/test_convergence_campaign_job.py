@@ -114,6 +114,15 @@ def test_exact_model_ladder_is_canonical_bounded_and_hash_bound(tmp_path):
     ] == expected_source_hashes
 
 
+@pytest.mark.parametrize("ordinal", [True, 1.0])
+def test_level_ordinals_require_exact_integers(tmp_path, ordinal):
+    raw = _raw_campaign(tmp_path)
+    raw["levels"][1]["ordinal"] = ordinal
+
+    with pytest.raises(ValueError, match="ordinal"):
+        normalize_convergence_campaign_spec(raw)
+
+
 @pytest.mark.parametrize(
     "mutation,match",
     [

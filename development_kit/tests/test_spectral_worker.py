@@ -131,6 +131,12 @@ def _raw_spec(spec):
     return {key: value for key, value in spec.items() if key in allowed}
 
 
+@pytest.mark.parametrize("value", ["false", 0, 1, None])
+def test_worker_boolean_controls_require_exact_booleans(tmp_path, value):
+    with pytest.raises(ValueError, match="native_cancel_enabled must be boolean"):
+        _run(str(tmp_path), "missing", native_cancel_enabled=value)
+
+
 def test_injected_worker_reuses_ownership_resource_and_cleanup_paths(tmp_path, ascii_root):
     store, spec, job_id = _created_job(tmp_path, ascii_root)
     ownership = _Ownership()
@@ -249,9 +255,7 @@ def test_cleanup_fault_fails_attempt_but_still_releases_lease(tmp_path, ascii_ro
     assert (store.job_dir(job_id) / "analysis" / "summary.json").is_file()
 
 
-def test_spectral_error_remains_bound_while_cancellation_is_coordinating(
-    tmp_path, ascii_root
-):
+def test_spectral_error_remains_bound_while_cancellation_is_coordinating(tmp_path, ascii_root):
     store, spec, job_id = _created_job(tmp_path, ascii_root)
 
     def fail_after_cancel(_spec):

@@ -11,7 +11,7 @@ from typing import Any, Mapping
 from comsol_mcp.evidence.contracts import validate_physical_evidence
 from comsol_mcp.path_policy import read_contained_file_snapshot
 
-from .spectral_rows import spectral_point_identity
+from .spectral_rows import normalize_spectral_wavelength_m, spectral_point_identity
 
 
 def _mapping(value: object, name: str) -> dict[str, Any]:
@@ -159,9 +159,32 @@ def extract_spectral_audit_result(
         raise ValueError("point audit contains integrity errors")
     if measurement.get("measurement_errors") not in ([], None):
         raise ValueError("point audit contains measurement errors")
-    requested = _finite(wavelength.get("requested_m"), "requested wavelength", positive=True)
-    if requested != float(point["wavelength"]["value"]):
+    frozen = normalize_spectral_wavelength_m(point["wavelength"]["value"])
+    requested = normalize_spectral_wavelength_m(
+        _finite(wavelength.get("requested_m"), "requested wavelength", positive=True)
+    )
+    if requested != frozen:
         raise ValueError("point audit requested wavelength differs from the frozen point")
+    evaluated = _finite(
+        wavelength.get("evaluated_parameter_m"),
+        "evaluated wavelength",
+        positive=True,
+    )
+    frequency = _finite(
+        wavelength.get("solved_frequency_wavelength_m"),
+        "frequency wavelength",
+        positive=True,
+    )
+    tolerance = _finite(
+        _mapping(spec.get("analysis_policy"), "analysis_policy").get("wavelength_sync_abs_m"),
+        "analysis_policy.wavelength_sync_abs_m",
+    )
+    if tolerance < 0.0:
+        raise ValueError("analysis_policy.wavelength_sync_abs_m must be nonnegative")
+    if abs(evaluated - frozen) > tolerance:
+        raise ValueError("point audit evaluated wavelength differs from the frozen point")
+    if abs(frequency - frozen) > tolerance:
+        raise ValueError("point audit frequency wavelength differs from the frozen point")
 
     for path, name in ((wrapper_path, "wrapper"), (inner_path, "inner")):
         try:
@@ -169,17 +192,9 @@ def extract_spectral_audit_result(
         except ValueError as exc:
             raise ValueError(f"point audit {name} artifact escapes the durable job") from exc
     return {
-        "requested_wavelength_m": requested,
-        "evaluated_wavelength_m": _finite(
-            wavelength.get("evaluated_parameter_m"),
-            "evaluated wavelength",
-            positive=True,
-        ),
-        "frequency_wavelength_m": _finite(
-            wavelength.get("solved_frequency_wavelength_m"),
-            "frequency wavelength",
-            positive=True,
-        ),
+        "requested_wavelength_m": frozen,
+        "evaluated_wavelength_m": evaluated,
+        "frequency_wavelength_m": frequency,
         "R": _finite(power.get("R"), "R"),
         "T": _finite(power.get("T"), "T"),
         "A": _finite(power.get("A"), "A"),

@@ -676,6 +676,26 @@ def test_completed_point_is_never_authorized_for_a_duplicate_valid_row():
     assert replay["duplicate_valid_rows_authorized"] is False
 
 
+def test_completed_row_does_not_hide_its_post_solve_resource_refusal():
+    entries = build_resource_admission_entries(
+        attempt=1,
+        point_id="wl:4.25",
+        attempt_sequence=0,
+        policy=POLICY,
+        sample=sample(stage="post_solve", available_memory_bytes=12),
+    )
+
+    replay = replay_resource_journal(
+        entries,
+        attempt=1,
+        completed_point_ids=["wl:4.25"],
+    )
+
+    assert replay["points"]["wl:4.25"]["stage"] == "post_solve"
+    assert replay["points"]["wl:4.25"]["action"] == "checkpoint_no_start"
+    assert replay["points"]["wl:4.25"]["start_authorized"] is False
+
+
 def test_stale_attempt_and_stale_warning_confirmation_fail_closed():
     warning = build_resource_admission_entries(
         attempt=1,

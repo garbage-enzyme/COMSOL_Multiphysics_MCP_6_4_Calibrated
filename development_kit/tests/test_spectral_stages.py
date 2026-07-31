@@ -113,6 +113,40 @@ def test_initial_grid_and_stage_are_deterministic_and_inclusive(tmp_path):
     )
 
 
+def test_stage_byte_limit_covers_the_persisted_hashed_document(tmp_path, monkeypatch):
+    spec = _spec(tmp_path)
+    plan = build_initial_spectral_stage(spec)
+    body = {key: value for key, value in plan.items() if key != "stage_sha256"}
+    compact_body_bytes = len(
+        json.dumps(
+            body,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    )
+    assert len(spectral_stages_module.json_document_bytes(plan)) > compact_body_bytes
+    monkeypatch.setattr(
+        spectral_stages_module,
+        "MAX_SPECTRAL_STAGE_PLAN_BYTES",
+        compact_body_bytes + 1,
+    )
+
+    with pytest.raises(ValueError, match="stage plan exceeds its byte limit"):
+        build_spectral_stage_plan(
+            spec,
+            stage_index=0,
+            stage_kind="initial_locator",
+            planning_reason="caller_declared_initial_locator",
+            window_lower_m=spec["initial_grid"]["lower_m"],
+            window_upper_m=spec["initial_grid"]["upper_m"],
+            requested_wavelengths_m=plan["requested_wavelengths_m"],
+            previous_stage_sha256=None,
+            evidence_row_sha256=None,
+        )
+
+
 def test_initial_grid_rejects_oversized_count_before_allocation(tmp_path, monkeypatch):
     spec = _spec(tmp_path)
     spec["initial_grid"]["point_count"] = 10**9

@@ -11,11 +11,11 @@ from typing import Any, Callable, Mapping
 
 from comsol_mcp.durable.io import atomic_write_json_exclusive
 from comsol_mcp.evidence.contracts import validate_physical_evidence
+from comsol_mcp.evidence.field_manifest import validate_field_evidence_manifest
 from comsol_mcp.evidence.field_matrix import (
     MATRIX_FIELD_COLLECTOR,
     bind_validation_matrix_field_request,
 )
-from comsol_mcp.evidence.field_manifest import validate_field_evidence_manifest
 
 _LOCKED_INPUTS = frozenset(
     {
@@ -285,6 +285,8 @@ def execute_field_evidence_collector(
     )
     if not isinstance(result, Mapping):
         raise ValueError("field evidence collector returned a non-object result")
+    if "success" in result and result.get("success") is not True:
+        return dict(result)
     manifest_descriptor = result.get("manifest_artifact")
     array_descriptor = result.get("array_artifact")
     if not isinstance(manifest_descriptor, Mapping) or not isinstance(array_descriptor, Mapping):

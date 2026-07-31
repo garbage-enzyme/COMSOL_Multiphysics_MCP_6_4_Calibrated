@@ -54,6 +54,8 @@ def _run(
     fault_hook: Callable[[str, Mapping[str, Any]], Any] | None = None,
 ) -> int:
     """Run one worker attempt; injected boundaries keep process tests solver-free."""
+    if not isinstance(native_cancel_enabled, bool):
+        raise ValueError("native_cancel_enabled must be boolean")
     worker_started = time.monotonic()
     store = JobStore(Path(root))
     directory = store.job_dir(job_id)

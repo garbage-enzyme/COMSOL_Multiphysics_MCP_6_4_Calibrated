@@ -272,6 +272,73 @@ def test_row_and_artifact_tampering_fail_before_resume(tmp_path):
         read_spectral_rows(journal, spec, artifact_root=root)
 
 
+def test_append_hashes_the_accepted_canonical_row_representation(tmp_path):
+    spec = _spec(tmp_path)
+    root = tmp_path / "job"
+    artifact = _artifact(root, spec, 4e-6)
+    for field in (
+        "wrapper_sha256",
+        "inner_sha256",
+        "physical_evidence_sha256",
+    ):
+        artifact[field] = artifact[field].upper()
+
+    row = append_spectral_row(
+        root / "spectral_rows.jsonl",
+        spec,
+        attempt=1,
+        stage_index=0,
+        stage_kind="initial_locator",
+        requested_wavelength_m=4e-6,
+        evaluated_wavelength_m=4e-6,
+        frequency_wavelength_m=4e-6,
+        R=0,
+        T=0,
+        A=1,
+        mesh_element_count=0,
+        mesh_vertex_count=0,
+        solve_seconds=0,
+        audit_artifact=artifact,
+        artifact_root=root,
+        created_at_epoch=1000,
+    )
+
+    assert row["R"] == 0.0
+    assert row["created_at_epoch"] == 1000.0
+    assert row["audit_artifact"]["inner_sha256"].islower()
+    assert read_spectral_rows(root / "spectral_rows.jsonl", spec, artifact_root=root) == [row]
+
+
+def test_non_object_inner_artifact_uses_the_validation_error_boundary(tmp_path):
+    spec = _spec(tmp_path)
+    root = tmp_path / "job"
+    artifact = _artifact(root, spec, 4e-6)
+    inner = root / artifact["inner_relative_path"]
+    inner.write_text("[]", encoding="utf-8")
+    artifact["inner_sha256"] = hashlib.sha256(inner.read_bytes()).hexdigest()
+    artifact["inner_size_bytes"] = inner.stat().st_size
+
+    with pytest.raises(ValueError, match="audit inner artifact must be an object"):
+        append_spectral_row(
+            root / "spectral_rows.jsonl",
+            spec,
+            attempt=1,
+            stage_index=0,
+            stage_kind="initial_locator",
+            requested_wavelength_m=4e-6,
+            evaluated_wavelength_m=4e-6,
+            frequency_wavelength_m=4e-6,
+            R=0.1,
+            T=0.05,
+            A=0.85,
+            mesh_element_count=12,
+            mesh_vertex_count=8,
+            solve_seconds=0.2,
+            audit_artifact=artifact,
+            artifact_root=root,
+        )
+
+
 def test_changed_configuration_cannot_reuse_rows(tmp_path):
     spec = _spec(tmp_path)
     root = tmp_path / "job"
