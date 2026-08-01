@@ -147,6 +147,15 @@ support Windows Server, pre-6.4 COMSOL, Linux, or macOS. The generated EXE takes
 one runtime value: `--comsol-path <COMSOL-root>`. It uses that installation's
 `comsolcompile.exe`, `comsolbatch.exe`, bundled Java, solver, and license.
 
+Building uses the 64-bit C# compiler from the `.NET Framework 4.x` component
+supplied and serviced with supported Windows 10/11 workstations:
+`%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\csc.exe`. It does not require a
+separate modern `.NET Runtime`, `.NET Desktop Runtime`, `.NET SDK`, Visual
+Studio, package download, or network access. If that inbox compiler is absent,
+`standalone_build` fails without installing or downloading a replacement.
+Microsoft's [.NET Framework platform table](https://learn.microsoft.com/en-us/dotnet/framework/install/guide-for-developers)
+documents the inbox 4.x versions supplied with Windows 10 and Windows 11.
+
 Select the `basic_fem` profile in the normal Python MCP host to expose
 `standalone_build`, `standalone_start`, `standalone_status`,
 `standalone_pause`, `standalone_resume`, `standalone_tail`, and

@@ -146,6 +146,17 @@ def verify_standalone_deployment(deployment_directory: str | Path) -> dict[str, 
         raise ValueError("standalone build manifest is not passed")
     if manifest.get("python_required_at_runtime") is not False:
         raise ValueError("standalone build manifest changed its runtime boundary")
+    expected_build_runtime = {
+        "windows_inbox_dotnet_framework_required": True,
+        "separate_dotnet_runtime_required": False,
+        "separate_dotnet_sdk_required": False,
+        "visual_studio_required": False,
+        "network_download_required": False,
+    }
+    if any(
+        manifest.get(field) is not expected for field, expected in expected_build_runtime.items()
+    ):
+        raise ValueError("standalone build manifest changed its .NET runtime boundary")
     if manifest.get("local_comsol_installation_required") is not True:
         raise ValueError("standalone build manifest changed its COMSOL boundary")
 
@@ -180,6 +191,7 @@ def verify_standalone_deployment(deployment_directory: str | Path) -> dict[str, 
         "target_os": manifest.get("target_os"),
         "target_comsol": manifest.get("target_comsol"),
         "python_required_at_runtime": False,
+        **expected_build_runtime,
         "local_comsol_installation_required": True,
     }
 

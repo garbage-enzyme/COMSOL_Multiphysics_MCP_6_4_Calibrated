@@ -135,6 +135,11 @@ def build_standalone_executable(
         "target_comsol": "6.4 release line",
         "python_required_at_runtime": False,
         "external_java_required_at_runtime": False,
+        "windows_inbox_dotnet_framework_required": True,
+        "separate_dotnet_runtime_required": False,
+        "separate_dotnet_sdk_required": False,
+        "visual_studio_required": False,
+        "network_download_required": False,
         "local_comsol_installation_required": True,
         "comsol_runtime_bundled": False,
         "runtime_architecture": [
@@ -160,7 +165,8 @@ def build_standalone_executable(
         "compiler": {
             "sha256": compiler_hash,
             "byte_count": compiler_bytes,
-            "source": "Windows .NET Framework x64",
+            "source": "Windows inbox .NET Framework 4.x x64",
+            "locator": "%WINDIR%/Microsoft.NET/Framework64/v4.0.30319/csc.exe",
         },
         "command_argument_count": len(command),
     }

@@ -100,6 +100,11 @@ def test_packaged_sources_build_one_x64_executable_without_comsol(ascii_tmp_path
     assert receipt["status"] == "passed"
     assert receipt["python_required_at_runtime"] is False
     assert receipt["external_java_required_at_runtime"] is False
+    assert receipt["windows_inbox_dotnet_framework_required"] is True
+    assert receipt["separate_dotnet_runtime_required"] is False
+    assert receipt["separate_dotnet_sdk_required"] is False
+    assert receipt["visual_studio_required"] is False
+    assert receipt["network_download_required"] is False
     assert receipt["local_comsol_installation_required"] is True
     assert receipt["target_os"] == ["Windows 10 x64", "Windows 11 x64"]
     assert receipt["target_comsol"] == "6.4 release line"
@@ -109,6 +114,8 @@ def test_packaged_sources_build_one_x64_executable_without_comsol(ascii_tmp_path
         "COMSOL-compiled Java point driver",
         "native Windows x64 launcher",
     ]
+    assert receipt["compiler"]["source"] == "Windows inbox .NET Framework 4.x x64"
+    assert receipt["compiler"]["locator"] == "%WINDIR%/Microsoft.NET/Framework64/v4.0.30319/csc.exe"
     executable = output / EXECUTABLE_NAME
     assert executable.is_file()
     assert 1 <= executable.stat().st_size <= 8 * 1024 * 1024
@@ -322,6 +329,15 @@ def test_deployment_verification_rejects_executable_or_source_identity_tampering
     atomic_write_json(manifest_path, manifest)
     with pytest.raises(ValueError, match="source identity"):
         verify_standalone_deployment(source_tamper)
+
+    runtime_tamper = ascii_tmp_path / "tampered-runtime-boundary"
+    build_standalone_executable(runtime_tamper)
+    manifest_path = runtime_tamper / MANIFEST_NAME
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["separate_dotnet_runtime_required"] = True
+    atomic_write_json(manifest_path, manifest)
+    with pytest.raises(ValueError, match=".NET runtime boundary"):
+        verify_standalone_deployment(runtime_tamper)
 
     result_mismatch = ascii_tmp_path / "result-mismatch"
     build_standalone_executable(result_mismatch)

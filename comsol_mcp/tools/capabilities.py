@@ -260,6 +260,12 @@ def get_capabilities(selection: ProfileSelection | None = None) -> dict:
             "target_python_required": False,
             "target_conda_required": False,
             "target_external_java_required": False,
+            "windows_inbox_dotnet_framework_required": True,
+            "separate_dotnet_runtime_required": False,
+            "separate_dotnet_sdk_required": False,
+            "visual_studio_required": False,
+            "network_download_required": False,
+            "build_compiler": "%WINDIR%/Microsoft.NET/Framework64/v4.0.30319/csc.exe",
             "architecture": [
                 "licensed COMSOL 6.4 installation",
                 "COMSOL-compiled Java point driver",

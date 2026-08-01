@@ -77,6 +77,12 @@ def test_public_build_and_status_dispatch_are_solver_free_and_contained(
     assert standalone["target_python_required"] is False
     assert standalone["local_licensed_comsol_required"] is True
     assert standalone["comsol_runtime_bundled"] is False
+    assert standalone["windows_inbox_dotnet_framework_required"] is True
+    assert standalone["separate_dotnet_runtime_required"] is False
+    assert standalone["separate_dotnet_sdk_required"] is False
+    assert standalone["visual_studio_required"] is False
+    assert standalone["network_download_required"] is False
+    assert standalone["build_compiler"] == "%WINDIR%/Microsoft.NET/Framework64/v4.0.30319/csc.exe"
 
     built = _call(
         server,

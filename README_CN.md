@@ -129,6 +129,15 @@ Linux 或 macOS。生成的 EXE 只接收一个运行参数：`--comsol-path <CO
 它使用该目录内的 `comsolcompile.exe`、`comsolbatch.exe`、COMSOL 自带 Java、求解器和
 许可证。
 
+构建使用受支持 Windows 10/11 workstation 随系统提供并维护的 64 位
+`.NET Framework 4.x` C# 编译器：
+`%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\csc.exe`。不需要另装现代
+`.NET Runtime`、`.NET Desktop Runtime`、`.NET SDK`、Visual Studio，也不会下载
+任何包或访问网络。若系统内置编译器缺失，`standalone_build` 会直接失败，不会安装或
+下载替代组件。
+微软的 [.NET Framework 平台表](https://learn.microsoft.com/zh-cn/dotnet/framework/install/guide-for-developers)
+列出了 Windows 10 和 Windows 11 随系统提供的 4.x 版本。
+
 在普通 Python MCP host 中选择 `basic_fem` profile，可使用 `standalone_build`、
 `standalone_start`、`standalone_status`、`standalone_pause`、
 `standalone_resume`、`standalone_tail` 和 `standalone_results`。构建与任务目录必须位于

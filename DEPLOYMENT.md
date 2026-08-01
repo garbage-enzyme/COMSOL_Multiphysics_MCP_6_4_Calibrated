@@ -101,9 +101,13 @@ Enable the protected workflow only with the explicit `desktop_shared` profile an
 remains experimental and is not a substitute for this lifecycle.
 
 The standalone tools in `basic_fem` still run inside the normal Python MCP host. They build
-and controls a separate native EXE whose target runtime needs only Windows
+and control a separate native EXE whose target runtime needs only Windows
 10/11 x64 plus an installed licensed COMSOL 6.4. The EXE does not bundle COMSOL
 and does not require target-side Python, Conda, MPh, JPype, or external Java.
+The build step uses the Windows inbox `.NET Framework 4.x` x64 compiler at
+`%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\csc.exe`; no separate modern
+`.NET Runtime`, `.NET SDK`, Visual Studio, download, or network access is
+required. A missing inbox compiler is a fail-closed prerequisite error.
 
 ### Optional shared Desktop/attached-Server mode
 
