@@ -277,7 +277,11 @@ def test_capacitor_probe_uses_one_parameterized_geometry_and_theory(monkeypatch)
         run_name="capacitor_contract_test",
     )
 
-    assert namespace["_geometry_size_expressions"]() == ("L", "L", "d")
+    assert namespace["_geometry_size_expressions"]() == (
+        "plate_side",
+        "plate_side",
+        "plate_gap",
+    )
     expected = 8.8541878128e-12 * 2.1 * (0.01**2) / 0.001 * 1e12
     assert namespace["_theoretical_capacitance_pf"]() == pytest.approx(expected)
 

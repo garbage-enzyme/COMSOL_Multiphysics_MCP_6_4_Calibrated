@@ -48,6 +48,7 @@ models are intentionally absent.
 - `recipes/mim_drude_sweep.py` — This script demonstrates a durable Drude-material parameter sweep.
 - `recipes/mim_lml_continuous.py` — This script demonstrates a continuous layered-metal workflow.
 - `recipes/mim_patch_partition.py` — This script demonstrates partitioned patch-metasurface construction.
+- `recipes/parallel_plate_capacitor.py` — This script builds and optionally validates an analytical three-dimensional parallel-plate capacitor.
 
 ## Development kit entry points
 
@@ -206,6 +207,7 @@ models are intentionally absent.
 - `development_kit/tests/test_ownership.py` — This module tests solver ownership, leases, and collision detection.
 - `development_kit/tests/test_parameters.py` — This module tests parameter tools without a COMSOL client.
 - `development_kit/tests/test_path_policy.py` — This module tests configured model-read and owned-artifact path containment.
+- `development_kit/tests/test_parallel_plate_capacitor_recipe.py` — This module tests the standalone capacitor recipe without starting COMSOL.
 - `development_kit/tests/test_periodic_mesh_audit.py` — This module tests periodic mesh evidence and clone-only smoke logic.
 - `development_kit/tests/test_physics.py` — This module tests physics helpers without a COMSOL client.
 - `development_kit/tests/test_portfolio_verifier.py` — This module tests policy-free summary citations against exact hashed evidence chains.

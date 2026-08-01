@@ -144,6 +144,25 @@ Control-plane responses from capabilities, solver ownership, durable jobs, and l
 
 The server fails closed when an external MPh/COMSOL owner or a valid lease is present. `solver_recover_stale_lease` only removes a lease that process identity evidence proves stale; it never terminates an unowned process.
 
+### Parallel-plate capacitor end-to-end example
+
+The source checkout includes a three-dimensional dielectric capacitor recipe.
+It identifies the two electrode faces from their measured centers and normals,
+applies Ground and Electric Potential conditions, and uses a stationary
+Electrostatics study. Build-only is the default; add `--solve` to compare the
+energy-derived capacitance with `epsilon_0 * epsilon_r * area / separation`.
+
+```powershell
+python -m recipes.parallel_plate_capacitor `
+  --output-model D:\comsol_outputs\parallel_plate_capacitor.mph `
+  --solve
+```
+
+The recipe shares its model and validation functions with the licensed e2e
+probe. It performs solver-ownership preflight and publishes the final model only
+after the COMSOL client and lease are released. Existing output is preserved
+unless `--overwrite-output` is explicit.
+
 ### Minimal Pressure Acoustics example
 
 The source checkout includes a physical two-dimensional air-duct recipe. It

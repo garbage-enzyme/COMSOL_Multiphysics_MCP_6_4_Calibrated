@@ -128,6 +128,23 @@ experimental 兼容界面，不能替代受保护的 shared-session 生命周期
 
 当检测到外部 MPh/COMSOL 所有者或有效租约时，服务器会拒绝继续启动。`solver_recover_stale_lease` 只有在进程身份信息证明租约过期时才移除它，绝不会终止不属于本服务器的进程。
 
+### 平行板电容器端到端示例
+
+源码仓库包含一个三维介质电容器示例。脚本根据实际测得的边界中心和法向识别两块
+电极，分别设置接地与电势边界，并建立静电场稳态研究。默认只构建模型；加入
+`--solve` 后，会将电场能量算出的电容与
+`真空介电常数 × 相对介电常数 × 面积 ÷ 间距` 的解析结果比较。
+
+```powershell
+python -m recipes.parallel_plate_capacitor `
+  --output-model D:\comsol_outputs\parallel_plate_capacitor.mph `
+  --solve
+```
+
+该示例与需要许可证的端到端探针共用建模和验收函数。脚本会先检查求解器所有权，
+清理 COMSOL 客户端并释放租约后才发布最终模型。除非显式加入
+`--overwrite-output`，否则不会覆盖已有输出。
+
 ### 最小 Pressure Acoustics 示例
 
 源码仓库包含一个具有物理意义的二维空气管道示例。上下边界为刚性壁，左侧施加

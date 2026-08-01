@@ -75,6 +75,10 @@ removed.
 
 - Recipes are examples, not MCP runtime dependencies. Keep them self-contained,
   parameterized, and free of hard-coded user paths or committed model binaries.
+- `recipes/parallel_plate_capacitor.py` is the canonical source for the
+  capacitor e2e model and analytical validation. It identifies electrode faces
+  from probed coordinates and normals, builds and saves by default, and solves
+  only with explicit `--solve` on an admitted licensed host.
 - `recipes/acdc_2d_differential_coils.py` derives a two-coil AC/DC magnetic
   model from an upstream example baseline containing `comp1`, `geom1`, and the
   `mf` interface with its required default features. It verifies the baseline
