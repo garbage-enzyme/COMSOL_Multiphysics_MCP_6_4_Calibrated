@@ -38,14 +38,15 @@ def _normalized_path_text(value: str | Path) -> str:
     return str(value).replace("\\", "/").casefold()
 
 
-def test_committed_runtime_dependencies_have_a_live_license_review() -> None:
+def test_committed_runtime_dependencies_match_reviewed_license_snapshot() -> None:
     receipt = build_license_receipt(
         PYPROJECT,
         REVIEW,
-        as_of=date.today(),
+        as_of=date(2026, 7, 18),
     )
 
     assert receipt["status"] == "passed"
+    assert receipt["as_of"] == "2026-07-18"
     assert receipt["dependency_count"] == 7
     assert receipt["failures"] == []
     assert len(receipt["pyproject_sha256"]) == 64

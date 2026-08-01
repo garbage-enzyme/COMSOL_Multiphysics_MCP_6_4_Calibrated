@@ -19,8 +19,9 @@ from development_kit.tests.integration.reference_power_acceptance import (
     _admit_lightweight_status,
     _communicate_worker,
     _load_worker_payload,
-    _start_hidden_worker,
     _redacted_status,
+    _stable_lightweight_admission,
+    _start_hidden_worker,
     _worker_summary,
 )
 
@@ -85,6 +86,30 @@ def _run_with_solver_observer(command):
         stderr,
     )
     return completed, observed
+
+
+def test_stable_admission_rechecks_a_clean_process_snapshot() -> None:
+    clean = {
+        "complete": True,
+        "lease_state": "absent",
+        "external_solver_processes": [],
+    }
+    collision = {
+        **clean,
+        "external_solver_processes": [{"pid": 41001, "kind": "python-mph-client"}],
+    }
+    statuses = iter([clean, collision])
+    sleeps = []
+
+    status, admitted, blockers = _stable_lightweight_admission(
+        status_provider=lambda: next(statuses),
+        sleeper=sleeps.append,
+    )
+
+    assert status is collision
+    assert admitted is False
+    assert blockers == ["external COMSOL/MPh solver process detected"]
+    assert sleeps == [0.05]
 
 
 def test_runner_import_and_dry_run_do_not_import_mph_or_start_comsol():

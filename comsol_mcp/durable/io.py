@@ -16,7 +16,7 @@ from typing import Any, Callable, Sequence
 
 from .canonical import validate_finite_json
 
-DEFAULT_REPLACE_RETRY_SECONDS = 1.0
+DEFAULT_REPLACE_RETRY_SECONDS = 3.0
 DEFAULT_MAX_JSONL_BYTES = 256 * 1024 * 1024
 WriteStageHook = Callable[[str, Path], None]
 
