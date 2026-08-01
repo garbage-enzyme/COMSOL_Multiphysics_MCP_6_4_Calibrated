@@ -613,7 +613,8 @@ def test_complex_values_are_json_safe_and_csv_serializable():
     value = _scalarize(np.array([1.5 - 0.25j]))
 
     assert value == {"real": 1.5, "imag": -0.25}
-    assert _csv_value(value) == "1.5+-0.25i"
+    assert _csv_value(value) == "1.5-0.25i"
+    assert _csv_value(1.5 + 0.25j) == "1.5+0.25i"
 
 
 def test_incremental_csv_append_reads_only_header_when_schema_matches(tmp_path, monkeypatch):
@@ -767,9 +768,7 @@ def test_staged_checkpoint_failure_keeps_one_durable_row_without_resolve_retry(
 
 
 @pytest.mark.parametrize("failure_stage", ["csv", "checkpoint"])
-def test_mesh_persistence_failures_do_not_retry_solved_level(
-    tmp_path, monkeypatch, failure_stage
-):
+def test_mesh_persistence_failures_do_not_retry_solved_level(tmp_path, monkeypatch, failure_stage):
     csv_path = tmp_path / f"mesh-{failure_stage}.csv"
     model = FakeModel()
     if failure_stage == "csv":
@@ -790,7 +789,9 @@ def test_mesh_persistence_failures_do_not_retry_solved_level(
         [{"name": "coarse", "properties": {"hmax": "0.1"}}],
         ["A"],
         csv_path=str(csv_path),
-        checkpoint_model_path=(str(tmp_path / "mesh.mph") if failure_stage == "checkpoint" else None),
+        checkpoint_model_path=(
+            str(tmp_path / "mesh.mph") if failure_stage == "checkpoint" else None
+        ),
         max_retries=2,
     )
 

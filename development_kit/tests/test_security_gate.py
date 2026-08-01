@@ -84,6 +84,52 @@ def test_exact_unexpired_review_is_reported_and_unused_entries_remain_visible():
     assert receipt["unused_allowlist_entries"] == ["unused:CVE-2099-0002"]
 
 
+def test_review_is_valid_through_its_exact_expiration_date():
+    receipt = evaluate_security_report(
+        _report(["CVE-2099-0001"]),
+        [
+            {
+                "dependency": "example",
+                "vulnerability_id": "CVE-2099-0001",
+                "expires_on": date(2026, 7, 17),
+                "reason": "Valid through the declared date.",
+            }
+        ],
+        as_of=date(2026, 7, 17),
+    )
+
+    assert receipt["status"] == "passed"
+    assert receipt["allowlisted"][0]["expires_on"] == "2026-07-17"
+
+
+def test_review_identity_does_not_apply_to_another_dependency():
+    report = {
+        "dependencies": [{"name": "other", "version": "1.0.0", "vulns": [{"id": "CVE-2099-0001"}]}]
+    }
+    receipt = evaluate_security_report(
+        report,
+        [
+            {
+                "dependency": "example",
+                "vulnerability_id": "CVE-2099-0001",
+                "expires_on": date(2027, 1, 1),
+                "reason": "Reviewed only for example.",
+            }
+        ],
+        as_of=date(2026, 7, 17),
+    )
+
+    assert receipt["status"] == "failed"
+    assert receipt["blocked"] == [
+        {
+            "dependency": "other",
+            "version": "1.0.0",
+            "vulnerability_id": "CVE-2099-0001",
+            "reason_code": "not_allowlisted",
+        }
+    ]
+
+
 def test_allowlist_loader_rejects_unknown_fields_or_duplicate_identities(tmp_path):
     path = tmp_path / "allowlist.json"
     path.write_text(
@@ -105,6 +151,25 @@ def test_allowlist_loader_rejects_unknown_fields_or_duplicate_identities(tmp_pat
         encoding="utf-8",
     )
     with pytest.raises(ValueError, match="fields"):
+        load_vulnerability_allowlist(path)
+
+    duplicate = {
+        "dependency": "example",
+        "vulnerability_id": "CVE-2099-0001",
+        "expires_on": "2026-08-01",
+        "reason": "Reviewed.",
+    }
+    path.write_text(
+        json.dumps(
+            {
+                "schema_name": "comsol_mcp.vulnerability_allowlist",
+                "schema_version": "1.0.0",
+                "entries": [duplicate, dict(duplicate)],
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="identities must be unique"):
         load_vulnerability_allowlist(path)
 
 

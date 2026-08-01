@@ -9,6 +9,10 @@ from src.jobs.process_control import OwnedJobObject
 
 ROOT = Path(__file__).parents[3]
 PROBES = (
+    pytest.param(
+        "development_kit/tests/integration/probes/acoustics_pde.py",
+        id="acoustics_pde",
+    ),
     pytest.param("development_kit/tests/integration/probes/study_mesh.py", id="study_mesh"),
     pytest.param("development_kit/tests/integration/probes/capacitor.py", id="capacitor"),
     pytest.param("development_kit/tests/integration/probes/unicode_save.py", id="unicode_save"),

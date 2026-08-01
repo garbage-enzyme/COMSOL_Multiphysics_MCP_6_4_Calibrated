@@ -99,9 +99,13 @@ SPECTRAL_STAGE_SCHEMA_NAME, SPECTRAL_STAGE_SCHEMA_VERSION = (
 
 _REGISTRY_SCHEMA = "comsol_mcp.schema_registry"
 _REGISTRY_VERSION = "1.0.0"
+_LEGACY_POINT_AUDIT_SCHEMA = "comsol_mcp.wave_optics_point_audit"
 _REFERENCE_POWER_DRY_RUN_SCHEMA = REFERENCE_POWER_EXECUTION_SCHEMA.replace(
     "execution_spec", "dry_run_receipt"
 )
+_MIGRATION_SOURCE_CONTRACTS = {
+    "comsol_mcp.physical_evidence": frozenset({(_LEGACY_POINT_AUDIT_SCHEMA, "1")}),
+}
 
 
 def _entry(
@@ -130,7 +134,7 @@ def _entry(
 
 
 def _entries() -> list[dict[str, Any]]:
-    legacy_point_audit = "comsol_mcp.wave_optics_point_audit"
+    legacy_point_audit = _LEGACY_POINT_AUDIT_SCHEMA
     entries = [
         _entry("comsol_mcp.artifact_chain", "1.0.0", "comsol_mcp.artifact_chain"),
         _entry(
@@ -239,6 +243,11 @@ def _entries() -> list[dict[str, Any]]:
             "comsol_mcp.field_evidence_request",
             "1.1.0",
             "comsol_mcp.evidence.field_bundle",
+        ),
+        _entry(
+            "comsol_mcp.model_version_metadata",
+            "1.0.0",
+            "comsol_mcp.tools.model",
         ),
         _entry(
             _REFERENCE_POWER_DRY_RUN_SCHEMA,
@@ -456,6 +465,10 @@ def check_schema_support(
         return {"supported": False, "reason_code": "invalid_schema_name"}
     if not isinstance(schema_version, str) or not schema_version:
         return {"supported": False, "reason_code": "invalid_schema_version"}
+    migration_available = any(
+        (schema_name, schema_version) in source_contracts
+        for source_contracts in _MIGRATION_SOURCE_CONTRACTS.values()
+    )
     by_name = {item["schema_name"]: item for item in _entries()}
     entry = by_name.get(schema_name)
     if entry is None:
@@ -477,7 +490,7 @@ def check_schema_support(
             "schema_name": schema_name,
             "schema_version": schema_version,
             "supported_versions": supported_versions,
-            "migration_available": entry["migration"]["available"],
+            "migration_available": migration_available,
         }
     return {
         "supported": True,

@@ -18,7 +18,7 @@ import src.tools.capabilities as capabilities_module
 from src.build_identity import get_build_identity, package_content_sha256
 from src.compatibility import load_runtime_compatibility
 from src.tools.capabilities import get_capabilities, startup_capability_summary
-from src.tools.profiles import ProfileSelection
+from src.tools.profiles import PROFILE_NAMES, ProfileSelection
 
 from src import __version__
 
@@ -150,9 +150,35 @@ def test_build_identity_ignores_interpreter_caches_and_covers_generated_package_
     assert package_content_sha256(package) != package_data_digest
     identity = get_build_identity(package)
     assert identity["generated_files_included"] is True
-    assert identity["content_scope"] == ("sorted_relative_non_cache_package_paths_and_file_bytes")
+    assert identity["content_scope"] == (
+        "length_prefixed_sorted_relative_non_cache_package_paths_and_file_bytes"
+    )
     assert identity["paths_included"] is False
-    assert str(tmp_path) not in json.dumps(identity)
+    serialized = json.dumps(identity)
+    assert str(tmp_path) not in serialized
+    assert all(
+        private_component not in serialized
+        for private_component in (
+            tmp_path.name,
+            package.name,
+            "alpha.py",
+            nested.name,
+            "manifest.json",
+            generated.name,
+        )
+    )
+
+
+def test_build_identity_length_prefixes_paths_and_payloads(tmp_path):
+    single = tmp_path / "single"
+    multiple = tmp_path / "multiple"
+    single.mkdir()
+    multiple.mkdir()
+    (single / "a").write_bytes(b"X\0b\0Y")
+    (multiple / "a").write_bytes(b"X")
+    (multiple / "b").write_bytes(b"Y")
+
+    assert package_content_sha256(single) != package_content_sha256(multiple)
 
 
 def test_build_identity_rejects_package_junctions(tmp_path):
@@ -189,8 +215,7 @@ def test_package_version_has_one_authoritative_source():
 
 def test_deployment_identity_is_profile_independent():
     identities = [
-        get_capabilities(_selection(profile))["deployment_identity"]
-        for profile in ("core", "basic_fem", "wave_optics", "semantic_docs", "full")
+        get_capabilities(_selection(profile))["deployment_identity"] for profile in PROFILE_NAMES
     ]
 
     assert identities
@@ -218,6 +243,7 @@ def test_concurrent_fresh_source_processes_report_identical_identity():
     with ThreadPoolExecutor(max_workers=6) as executor:
         identities = list(executor.map(probe, range(12)))
 
+    assert identities
     assert all(identity == identities[0] for identity in identities[1:])
     assert identities[0]["source_classification"] == "source_tree"
     assert identities[0]["contains_local_path"] is False

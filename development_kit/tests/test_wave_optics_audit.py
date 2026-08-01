@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from copy import deepcopy
 from pathlib import Path
 
 import numpy as np
@@ -47,12 +48,13 @@ def _measurement(*, absorption=1.2, closure=0.5, evidence_level="label_only"):
 
 def test_same_evidence_can_fail_or_pass_two_declared_policies():
     evidence = _measurement(absorption=0.7, closure=0.05)
+    original = deepcopy(evidence)
     strict = evaluate_validation_policy(evidence, {"tolerances": {"closure_abs": 0.01}})
     permissive = evaluate_validation_policy(evidence, {"tolerances": {"closure_abs": 0.1}})
 
     assert strict["overall"] == "fail"
     assert permissive["overall"] == "pass"
-    assert evidence["power"]["closure_abs"] == 0.05
+    assert evidence == original
 
 
 def test_empty_legacy_policy_cannot_produce_a_pass_verdict():
@@ -515,7 +517,7 @@ def test_point_audit_persists_declared_plane_flux_and_strict_policy_passes(tmp_p
     assert evidence["flux.incident_power_w"]["state"] == "derived_from_declared_convention"
     assert evidence["flux.incident_power_w"]["value"] == pytest.approx(2.0)
     assert evidence["flux.physical_flux_closure_eligible"]["value"] is True
-    manifest = json.loads(open(result["artifacts"]["manifest"], encoding="utf-8").read())
+    manifest = json.loads(Path(result["artifacts"]["manifest"]).read_text(encoding="utf-8"))
     assert manifest["measurement"]["declared_plane_flux"] == flux
     assert _hash(source) == result["measurement"]["provenance"]["source_sha256_after"]
 
@@ -553,7 +555,7 @@ def test_declared_flux_expression_error_is_durable_partial_evidence(tmp_path, mo
         for item in result["measurement"]["measurement_errors"]
     )
     assert result["physical_evidence"]["evidence"]["flux.R"]["state"] == "unknown"
-    manifest = json.loads(open(result["artifacts"]["manifest"], encoding="utf-8").read())
+    manifest = json.loads(Path(result["artifacts"]["manifest"]).read_text(encoding="utf-8"))
     assert manifest["measurement"]["declared_plane_flux"]["declaration"] == declaration
     assert _hash(source) == result["measurement"]["provenance"]["source_sha256_after"]
 
@@ -567,7 +569,7 @@ def test_evidence_only_a_above_one_is_preserved_without_project_verdict(tmp_path
     assert result["assessment"]["project_verdict"] is None
     assert result["measurement"]["polarization"]["evidence_level"] == "structure_total_field"
     assert result["measurement"]["polarization"]["structure_total_field"]["diagnostic_only"] is True
-    manifest = json.loads(open(result["artifacts"]["manifest"], encoding="utf-8").read())
+    manifest = json.loads(Path(result["artifacts"]["manifest"]).read_text(encoding="utf-8"))
     assert manifest["audit_status"] == "measurement_complete"
     assert manifest["config_sha256"] == result["measurement"]["provenance"]["config_sha256"]
     assert manifest["preflight"]["inspection_status"] == "complete"
@@ -612,7 +614,7 @@ def test_nonfinite_power_is_an_integrity_blocker_and_is_journaled(tmp_path, monk
 
     assert result["audit_status"] == "integrity_blocked"
     assert result["measurement"]["integrity_errors"][0]["code"] == "nonfinite_power"
-    assert open(result["artifacts"]["csv"], encoding="utf-8").read()
+    assert Path(result["artifacts"]["csv"]).read_text(encoding="utf-8")
 
 
 def test_source_hash_drift_after_solve_is_an_integrity_blocker(tmp_path, monkeypatch):
@@ -900,7 +902,7 @@ def test_reference_audit_uses_fresh_clone_and_persists_dominant_component(tmp_pa
     evidence = result["physical_evidence"]["evidence"]
     assert evidence["polarization.reference_air_method_valid"]["value"] is True
     assert evidence["integrity.clone_cleanup_proved"]["value"] is True
-    manifest = json.loads(open(result["artifacts"]["manifest"], encoding="utf-8").read())
+    manifest = json.loads(Path(result["artifacts"]["manifest"]).read_text(encoding="utf-8"))
     assert manifest["clone_provenance"]["source_sha256"] == _hash(source)
     assert manifest["source_unchanged"] is True
 
@@ -916,7 +918,7 @@ def test_reference_audit_cleans_clone_after_material_error(tmp_path, monkeypatch
         result["physical_evidence"]["evidence"]["polarization.reference_air_method_valid"]["value"]
         is False
     )
-    manifest = json.loads(open(result["artifacts"]["manifest"], encoding="utf-8").read())
+    manifest = json.loads(Path(result["artifacts"]["manifest"]).read_text(encoding="utf-8"))
     assert manifest["measurement_errors"][0]["code"] == "reference_audit_failed"
     assert manifest["source_sha256_before"] == manifest["source_sha256_after"] == _hash(source)
 
@@ -986,5 +988,5 @@ def test_reference_audit_refuses_terminal_success_when_cleanup_is_unproved(tmp_p
     assert cleanup_calls[1] == "direct-client-remove"
     assert result["audit_status"] == "integrity_blocked"
     assert result["cleanup"]["removed"] is False
-    manifest = json.loads(open(result["artifacts"]["manifest"], encoding="utf-8").read())
+    manifest = json.loads(Path(result["artifacts"]["manifest"]).read_text(encoding="utf-8"))
     assert manifest["integrity_errors"][0]["code"] == "reference_clone_cleanup_unproved"

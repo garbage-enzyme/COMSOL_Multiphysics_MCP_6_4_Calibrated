@@ -1496,6 +1496,242 @@
     "title": "geometry_createArguments",
     "type": "object"
   },
+  "geometry_create_box_selection": {
+    "additionalProperties": false,
+    "maxProperties": 256,
+    "properties": {
+      "component_name": {
+        "anyOf": [
+          {
+            "maxLength": 16384,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Component Name"
+      },
+      "condition": {
+        "default": "intersects",
+        "maxLength": 16384,
+        "title": "Condition",
+        "type": "string"
+      },
+      "entity_dimension": {
+        "default": 1,
+        "maximum": 1e+308,
+        "minimum": -1e+308,
+        "title": "Entity Dimension",
+        "type": "integer"
+      },
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "maxLength": 16384,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
+      },
+      "geometry_name": {
+        "anyOf": [
+          {
+            "maxLength": 16384,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Geometry Name"
+      },
+      "model_name": {
+        "anyOf": [
+          {
+            "maxLength": 16384,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Model Name"
+      },
+      "selection_name": {
+        "maxLength": 16384,
+        "title": "Selection Name",
+        "type": "string"
+      },
+      "x_max": {
+        "maxLength": 16384,
+        "title": "X Max",
+        "type": "string"
+      },
+      "x_min": {
+        "maxLength": 16384,
+        "title": "X Min",
+        "type": "string"
+      },
+      "y_max": {
+        "maxLength": 16384,
+        "title": "Y Max",
+        "type": "string"
+      },
+      "y_min": {
+        "maxLength": 16384,
+        "title": "Y Min",
+        "type": "string"
+      },
+      "z_max": {
+        "anyOf": [
+          {
+            "maxLength": 16384,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Z Max"
+      },
+      "z_min": {
+        "anyOf": [
+          {
+            "maxLength": 16384,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Z Min"
+      }
+    },
+    "required": [
+      "selection_name",
+      "x_min",
+      "x_max",
+      "y_min",
+      "y_max"
+    ],
+    "title": "geometry_create_box_selectionArguments",
+    "type": "object"
+  },
+  "geometry_create_side_selections": {
+    "additionalProperties": false,
+    "maxProperties": 256,
+    "properties": {
+      "component_name": {
+        "anyOf": [
+          {
+            "maxLength": 16384,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Component Name"
+      },
+      "entity_dimension": {
+        "default": 1,
+        "maximum": 1e+308,
+        "minimum": -1e+308,
+        "title": "Entity Dimension",
+        "type": "integer"
+      },
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "maxLength": 16384,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
+      },
+      "geometry_name": {
+        "anyOf": [
+          {
+            "maxLength": 16384,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Geometry Name"
+      },
+      "model_name": {
+        "anyOf": [
+          {
+            "maxLength": 16384,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Model Name"
+      },
+      "prefix": {
+        "default": "side",
+        "maxLength": 16384,
+        "title": "Prefix",
+        "type": "string"
+      },
+      "tolerance": {
+        "default": "1e-9[m]",
+        "maxLength": 16384,
+        "title": "Tolerance",
+        "type": "string"
+      },
+      "x_max": {
+        "maxLength": 16384,
+        "title": "X Max",
+        "type": "string"
+      },
+      "x_min": {
+        "maxLength": 16384,
+        "title": "X Min",
+        "type": "string"
+      },
+      "y_max": {
+        "maxLength": 16384,
+        "title": "Y Max",
+        "type": "string"
+      },
+      "y_min": {
+        "maxLength": 16384,
+        "title": "Y Min",
+        "type": "string"
+      }
+    },
+    "required": [
+      "x_min",
+      "x_max",
+      "y_min",
+      "y_max"
+    ],
+    "title": "geometry_create_side_selectionsArguments",
+    "type": "object"
+  },
   "geometry_derived_clone": {
     "additionalProperties": false,
     "maxProperties": 256,
@@ -4134,6 +4370,199 @@
     "title": "physics_addArguments",
     "type": "object"
   },
+  "physics_add_coefficient_form_pde": {
+    "additionalProperties": false,
+    "maxProperties": 256,
+    "properties": {
+      "component_name": {
+        "anyOf": [
+          {
+            "maxLength": 16384,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Component Name"
+      },
+      "dependent_variables": {
+        "default": [
+          "u"
+        ],
+        "items": {
+          "maxLength": 16384,
+          "type": "string"
+        },
+        "maxItems": 2048,
+        "title": "Dependent Variables",
+        "type": "array"
+      },
+      "domain_selection": {
+        "anyOf": [
+          {
+            "items": {
+              "maximum": 1e+308,
+              "minimum": -1e+308,
+              "type": "integer"
+            },
+            "maxItems": 2048,
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Domain Selection"
+      },
+      "equation_properties": {
+        "anyOf": [
+          {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "maxLength": 16384,
+                  "type": "string"
+                },
+                {
+                  "maximum": 1e+308,
+                  "minimum": -1e+308,
+                  "type": "integer"
+                },
+                {
+                  "maximum": 1e+308,
+                  "minimum": -1e+308,
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "items": {
+                    "anyOf": [
+                      {
+                        "maxLength": 16384,
+                        "type": "string"
+                      },
+                      {
+                        "maximum": 1e+308,
+                        "minimum": -1e+308,
+                        "type": "integer"
+                      },
+                      {
+                        "maximum": 1e+308,
+                        "minimum": -1e+308,
+                        "type": "number"
+                      },
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "maxItems": 2048,
+                  "type": "array"
+                },
+                {
+                  "items": {
+                    "items": {
+                      "anyOf": [
+                        {
+                          "maxLength": 16384,
+                          "type": "string"
+                        },
+                        {
+                          "maximum": 1e+308,
+                          "minimum": -1e+308,
+                          "type": "integer"
+                        },
+                        {
+                          "maximum": 1e+308,
+                          "minimum": -1e+308,
+                          "type": "number"
+                        },
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "maxItems": 2048,
+                    "type": "array"
+                  },
+                  "maxItems": 2048,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "maxProperties": 256,
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Equation Properties"
+      },
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "maxLength": 16384,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
+      },
+      "model_name": {
+        "anyOf": [
+          {
+            "maxLength": 16384,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Model Name"
+      },
+      "physics_tag": {
+        "default": "c",
+        "maxLength": 16384,
+        "title": "Physics Tag",
+        "type": "string"
+      },
+      "selection_name": {
+        "anyOf": [
+          {
+            "maxLength": 16384,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Selection Name"
+      }
+    },
+    "title": "physics_add_coefficient_form_pdeArguments",
+    "type": "object"
+  },
   "physics_add_domain_feature": {
     "additionalProperties": false,
     "maxProperties": 256,
@@ -4299,6 +4728,199 @@
     "title": "physics_add_electrostaticsArguments",
     "type": "object"
   },
+  "physics_add_general_form_pde": {
+    "additionalProperties": false,
+    "maxProperties": 256,
+    "properties": {
+      "component_name": {
+        "anyOf": [
+          {
+            "maxLength": 16384,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Component Name"
+      },
+      "dependent_variables": {
+        "default": [
+          "u"
+        ],
+        "items": {
+          "maxLength": 16384,
+          "type": "string"
+        },
+        "maxItems": 2048,
+        "title": "Dependent Variables",
+        "type": "array"
+      },
+      "domain_selection": {
+        "anyOf": [
+          {
+            "items": {
+              "maximum": 1e+308,
+              "minimum": -1e+308,
+              "type": "integer"
+            },
+            "maxItems": 2048,
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Domain Selection"
+      },
+      "equation_properties": {
+        "anyOf": [
+          {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "maxLength": 16384,
+                  "type": "string"
+                },
+                {
+                  "maximum": 1e+308,
+                  "minimum": -1e+308,
+                  "type": "integer"
+                },
+                {
+                  "maximum": 1e+308,
+                  "minimum": -1e+308,
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "items": {
+                    "anyOf": [
+                      {
+                        "maxLength": 16384,
+                        "type": "string"
+                      },
+                      {
+                        "maximum": 1e+308,
+                        "minimum": -1e+308,
+                        "type": "integer"
+                      },
+                      {
+                        "maximum": 1e+308,
+                        "minimum": -1e+308,
+                        "type": "number"
+                      },
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "maxItems": 2048,
+                  "type": "array"
+                },
+                {
+                  "items": {
+                    "items": {
+                      "anyOf": [
+                        {
+                          "maxLength": 16384,
+                          "type": "string"
+                        },
+                        {
+                          "maximum": 1e+308,
+                          "minimum": -1e+308,
+                          "type": "integer"
+                        },
+                        {
+                          "maximum": 1e+308,
+                          "minimum": -1e+308,
+                          "type": "number"
+                        },
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "maxItems": 2048,
+                    "type": "array"
+                  },
+                  "maxItems": 2048,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "maxProperties": 256,
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Equation Properties"
+      },
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "maxLength": 16384,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
+      },
+      "model_name": {
+        "anyOf": [
+          {
+            "maxLength": 16384,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Model Name"
+      },
+      "physics_tag": {
+        "default": "g",
+        "maxLength": 16384,
+        "title": "Physics Tag",
+        "type": "string"
+      },
+      "selection_name": {
+        "anyOf": [
+          {
+            "maxLength": 16384,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Selection Name"
+      }
+    },
+    "title": "physics_add_general_form_pdeArguments",
+    "type": "object"
+  },
   "physics_add_heat_transfer": {
     "additionalProperties": false,
     "maxProperties": 256,
@@ -4393,6 +5015,103 @@
     "title": "physics_add_laminar_flowArguments",
     "type": "object"
   },
+  "physics_add_pressure_acoustics": {
+    "additionalProperties": false,
+    "maxProperties": 256,
+    "properties": {
+      "component_name": {
+        "anyOf": [
+          {
+            "maxLength": 16384,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Component Name"
+      },
+      "domain_selection": {
+        "anyOf": [
+          {
+            "items": {
+              "maximum": 1e+308,
+              "minimum": -1e+308,
+              "type": "integer"
+            },
+            "maxItems": 2048,
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Domain Selection"
+      },
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "maxLength": 16384,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
+      },
+      "geometry_name": {
+        "anyOf": [
+          {
+            "maxLength": 16384,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Geometry Name"
+      },
+      "model_name": {
+        "anyOf": [
+          {
+            "maxLength": 16384,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Model Name"
+      },
+      "physics_tag": {
+        "default": "acpr",
+        "maxLength": 16384,
+        "title": "Physics Tag",
+        "type": "string"
+      },
+      "selection_name": {
+        "anyOf": [
+          {
+            "maxLength": 16384,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Selection Name"
+      }
+    },
+    "title": "physics_add_pressure_acousticsArguments",
+    "type": "object"
+  },
   "physics_add_solid_mechanics": {
     "additionalProperties": false,
     "maxProperties": 256,
@@ -4438,6 +5157,199 @@
       }
     },
     "title": "physics_add_solid_mechanicsArguments",
+    "type": "object"
+  },
+  "physics_add_weak_form_pde": {
+    "additionalProperties": false,
+    "maxProperties": 256,
+    "properties": {
+      "component_name": {
+        "anyOf": [
+          {
+            "maxLength": 16384,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Component Name"
+      },
+      "dependent_variables": {
+        "default": [
+          "u"
+        ],
+        "items": {
+          "maxLength": 16384,
+          "type": "string"
+        },
+        "maxItems": 2048,
+        "title": "Dependent Variables",
+        "type": "array"
+      },
+      "domain_selection": {
+        "anyOf": [
+          {
+            "items": {
+              "maximum": 1e+308,
+              "minimum": -1e+308,
+              "type": "integer"
+            },
+            "maxItems": 2048,
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Domain Selection"
+      },
+      "equation_properties": {
+        "anyOf": [
+          {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "maxLength": 16384,
+                  "type": "string"
+                },
+                {
+                  "maximum": 1e+308,
+                  "minimum": -1e+308,
+                  "type": "integer"
+                },
+                {
+                  "maximum": 1e+308,
+                  "minimum": -1e+308,
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "items": {
+                    "anyOf": [
+                      {
+                        "maxLength": 16384,
+                        "type": "string"
+                      },
+                      {
+                        "maximum": 1e+308,
+                        "minimum": -1e+308,
+                        "type": "integer"
+                      },
+                      {
+                        "maximum": 1e+308,
+                        "minimum": -1e+308,
+                        "type": "number"
+                      },
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "maxItems": 2048,
+                  "type": "array"
+                },
+                {
+                  "items": {
+                    "items": {
+                      "anyOf": [
+                        {
+                          "maxLength": 16384,
+                          "type": "string"
+                        },
+                        {
+                          "maximum": 1e+308,
+                          "minimum": -1e+308,
+                          "type": "integer"
+                        },
+                        {
+                          "maximum": 1e+308,
+                          "minimum": -1e+308,
+                          "type": "number"
+                        },
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "maxItems": 2048,
+                    "type": "array"
+                  },
+                  "maxItems": 2048,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "maxProperties": 256,
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Equation Properties"
+      },
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "maxLength": 16384,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
+      },
+      "model_name": {
+        "anyOf": [
+          {
+            "maxLength": 16384,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Model Name"
+      },
+      "physics_tag": {
+        "default": "w",
+        "maxLength": 16384,
+        "title": "Physics Tag",
+        "type": "string"
+      },
+      "selection_name": {
+        "anyOf": [
+          {
+            "maxLength": 16384,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Selection Name"
+      }
+    },
+    "title": "physics_add_weak_form_pdeArguments",
     "type": "object"
   },
   "physics_boundary_selection": {
@@ -4513,6 +5425,208 @@
     "title": "physics_boundary_selectionArguments",
     "type": "object"
   },
+  "physics_configure_acoustic_boundary": {
+    "additionalProperties": false,
+    "maxProperties": 256,
+    "properties": {
+      "boundary_condition": {
+        "maxLength": 16384,
+        "title": "Boundary Condition",
+        "type": "string"
+      },
+      "boundary_selection": {
+        "anyOf": [
+          {
+            "items": {
+              "maximum": 1e+308,
+              "minimum": -1e+308,
+              "type": "integer"
+            },
+            "maxItems": 2048,
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Boundary Selection"
+      },
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "maxLength": 16384,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
+      },
+      "feature_tag": {
+        "anyOf": [
+          {
+            "maxLength": 16384,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Feature Tag"
+      },
+      "label": {
+        "anyOf": [
+          {
+            "maxLength": 16384,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Label"
+      },
+      "model_name": {
+        "anyOf": [
+          {
+            "maxLength": 16384,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Model Name"
+      },
+      "physics_name": {
+        "maxLength": 16384,
+        "title": "Physics Name",
+        "type": "string"
+      },
+      "properties": {
+        "anyOf": [
+          {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "maxLength": 16384,
+                  "type": "string"
+                },
+                {
+                  "maximum": 1e+308,
+                  "minimum": -1e+308,
+                  "type": "integer"
+                },
+                {
+                  "maximum": 1e+308,
+                  "minimum": -1e+308,
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "items": {
+                    "anyOf": [
+                      {
+                        "maxLength": 16384,
+                        "type": "string"
+                      },
+                      {
+                        "maximum": 1e+308,
+                        "minimum": -1e+308,
+                        "type": "integer"
+                      },
+                      {
+                        "maximum": 1e+308,
+                        "minimum": -1e+308,
+                        "type": "number"
+                      },
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "maxItems": 2048,
+                  "type": "array"
+                },
+                {
+                  "items": {
+                    "items": {
+                      "anyOf": [
+                        {
+                          "maxLength": 16384,
+                          "type": "string"
+                        },
+                        {
+                          "maximum": 1e+308,
+                          "minimum": -1e+308,
+                          "type": "integer"
+                        },
+                        {
+                          "maximum": 1e+308,
+                          "minimum": -1e+308,
+                          "type": "number"
+                        },
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "maxItems": 2048,
+                    "type": "array"
+                  },
+                  "maxItems": 2048,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "maxProperties": 256,
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Properties"
+      },
+      "selection_name": {
+        "anyOf": [
+          {
+            "maxLength": 16384,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Selection Name"
+      }
+    },
+    "required": [
+      "physics_name",
+      "boundary_condition"
+    ],
+    "title": "physics_configure_acoustic_boundaryArguments",
+    "type": "object"
+  },
   "physics_configure_boundary": {
     "additionalProperties": false,
     "maxProperties": 256,
@@ -4586,6 +5700,215 @@
     "title": "physics_configure_boundaryArguments",
     "type": "object"
   },
+  "physics_configure_pde_boundary": {
+    "additionalProperties": false,
+    "maxProperties": 256,
+    "properties": {
+      "boundary_condition": {
+        "maxLength": 16384,
+        "title": "Boundary Condition",
+        "type": "string"
+      },
+      "boundary_selection": {
+        "anyOf": [
+          {
+            "items": {
+              "maximum": 1e+308,
+              "minimum": -1e+308,
+              "type": "integer"
+            },
+            "maxItems": 2048,
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Boundary Selection"
+      },
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "maxLength": 16384,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
+      },
+      "feature_tag": {
+        "anyOf": [
+          {
+            "maxLength": 16384,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Feature Tag"
+      },
+      "label": {
+        "anyOf": [
+          {
+            "maxLength": 16384,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Label"
+      },
+      "model_name": {
+        "anyOf": [
+          {
+            "maxLength": 16384,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Model Name"
+      },
+      "physics_name": {
+        "maxLength": 16384,
+        "title": "Physics Name",
+        "type": "string"
+      },
+      "properties": {
+        "anyOf": [
+          {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "maxLength": 16384,
+                  "type": "string"
+                },
+                {
+                  "maximum": 1e+308,
+                  "minimum": -1e+308,
+                  "type": "integer"
+                },
+                {
+                  "maximum": 1e+308,
+                  "minimum": -1e+308,
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "items": {
+                    "anyOf": [
+                      {
+                        "maxLength": 16384,
+                        "type": "string"
+                      },
+                      {
+                        "maximum": 1e+308,
+                        "minimum": -1e+308,
+                        "type": "integer"
+                      },
+                      {
+                        "maximum": 1e+308,
+                        "minimum": -1e+308,
+                        "type": "number"
+                      },
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "maxItems": 2048,
+                  "type": "array"
+                },
+                {
+                  "items": {
+                    "items": {
+                      "anyOf": [
+                        {
+                          "maxLength": 16384,
+                          "type": "string"
+                        },
+                        {
+                          "maximum": 1e+308,
+                          "minimum": -1e+308,
+                          "type": "integer"
+                        },
+                        {
+                          "maximum": 1e+308,
+                          "minimum": -1e+308,
+                          "type": "number"
+                        },
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "maxItems": 2048,
+                    "type": "array"
+                  },
+                  "maxItems": 2048,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "maxProperties": 256,
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Properties"
+      },
+      "selection_name": {
+        "anyOf": [
+          {
+            "maxLength": 16384,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Selection Name"
+      }
+    },
+    "required": [
+      "physics_name",
+      "boundary_condition"
+    ],
+    "title": "physics_configure_pde_boundaryArguments",
+    "type": "object"
+  },
+  "physics_get_acoustic_boundary_conditions": {
+    "additionalProperties": false,
+    "maxProperties": 256,
+    "properties": {},
+    "title": "physics_get_acoustic_boundary_conditionsArguments",
+    "type": "object"
+  },
   "physics_get_available": {
     "additionalProperties": false,
     "maxProperties": 256,
@@ -4607,6 +5930,13 @@
       "physics_type"
     ],
     "title": "physics_get_guideArguments",
+    "type": "object"
+  },
+  "physics_get_pde_boundary_conditions": {
+    "additionalProperties": false,
+    "maxProperties": 256,
+    "properties": {},
+    "title": "physics_get_pde_boundary_conditionsArguments",
     "type": "object"
   },
   "physics_interactive_setup_flow": {
@@ -4861,6 +6191,59 @@
     "title": "physics_set_materialArguments",
     "type": "object"
   },
+  "physics_setup_acoustic_boundaries": {
+    "additionalProperties": false,
+    "maxProperties": 256,
+    "properties": {
+      "boundary_conditions": {
+        "items": {
+          "additionalProperties": true,
+          "maxProperties": 256,
+          "type": "object"
+        },
+        "maxItems": 2048,
+        "title": "Boundary Conditions",
+        "type": "array"
+      },
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "maxLength": 16384,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
+      },
+      "model_name": {
+        "anyOf": [
+          {
+            "maxLength": 16384,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Model Name"
+      },
+      "physics_name": {
+        "maxLength": 16384,
+        "title": "Physics Name",
+        "type": "string"
+      }
+    },
+    "required": [
+      "physics_name",
+      "boundary_conditions"
+    ],
+    "title": "physics_setup_acoustic_boundariesArguments",
+    "type": "object"
+  },
   "physics_setup_flow_boundaries": {
     "additionalProperties": false,
     "maxProperties": 256,
@@ -5055,6 +6438,59 @@
       "physics_name"
     ],
     "title": "physics_setup_heat_boundariesArguments",
+    "type": "object"
+  },
+  "physics_setup_pde_boundaries": {
+    "additionalProperties": false,
+    "maxProperties": 256,
+    "properties": {
+      "boundary_conditions": {
+        "items": {
+          "additionalProperties": true,
+          "maxProperties": 256,
+          "type": "object"
+        },
+        "maxItems": 2048,
+        "title": "Boundary Conditions",
+        "type": "array"
+      },
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "maxLength": 16384,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
+      },
+      "model_name": {
+        "anyOf": [
+          {
+            "maxLength": 16384,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Model Name"
+      },
+      "physics_name": {
+        "maxLength": 16384,
+        "title": "Physics Name",
+        "type": "string"
+      }
+    },
+    "required": [
+      "physics_name",
+      "boundary_conditions"
+    ],
+    "title": "physics_setup_pde_boundariesArguments",
     "type": "object"
   },
   "results_evaluate": {

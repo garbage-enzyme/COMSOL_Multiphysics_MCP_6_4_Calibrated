@@ -42,7 +42,7 @@ def test_committed_runtime_dependencies_have_a_live_license_review() -> None:
     receipt = build_license_receipt(
         PYPROJECT,
         REVIEW,
-        as_of=date(2026, 7, 18),
+        as_of=date.today(),
     )
 
     assert receipt["status"] == "passed"
@@ -139,7 +139,7 @@ def test_review_schema_and_dependency_declarations_are_bounded(tmp_path: Path) -
 
     duplicate = tmp_path / "pyproject.toml"
     duplicate.write_text(
-        '[project]\ndependencies = ["same>=1", "same<2"]\n',
+        '[project]\ndependencies = ["same_pkg>=1", "same-pkg<2"]\n',
         encoding="utf-8",
     )
     with pytest.raises(ValueError, match="duplicate"):

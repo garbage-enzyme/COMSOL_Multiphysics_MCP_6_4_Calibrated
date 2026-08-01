@@ -199,6 +199,17 @@ def test_chain_rejects_parent_hash_mismatch_cycle_or_orphan(tmp_path):
         )
 
 
+def test_chain_requires_declared_terminals_to_equal_graph_sinks(tmp_path):
+    manifest = _chain(tmp_path)
+
+    with pytest.raises(ValueError, match="exactly match graph sink"):
+        build_artifact_chain_manifest(
+            chain_id="internal-terminal",
+            artifacts=manifest["artifacts"],
+            terminal_artifact_ids=["branch", "receipt"],
+        )
+
+
 def test_chain_rejects_future_schema_and_path_traversal(tmp_path):
     artifact = _write(tmp_path, "raw", "comsol_mcp.environment_identity", "1.0.0")
     future = {**artifact, "role": "raw_evidence", "parents": [], "schema_version": "99.0.0"}

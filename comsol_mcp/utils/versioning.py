@@ -120,9 +120,11 @@ def list_model_versions(
     if not model_dir.exists():
         return []
 
+    clean_name = Path(model_name).stem
+    latest_name = f"{clean_name}_latest.mph"
     versions = []
     for f in model_dir.glob("*.mph"):
-        if "_latest" not in f.name:
+        if f.name != latest_name:
             versions.append(str(f))
 
     # Sort by modification time, newest first

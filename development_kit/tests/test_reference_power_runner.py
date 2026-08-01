@@ -19,6 +19,7 @@ from development_kit.tests.integration.reference_power_acceptance import (
     _admit_lightweight_status,
     _communicate_worker,
     _load_worker_payload,
+    _start_hidden_worker,
     _redacted_status,
     _worker_summary,
 )
@@ -218,7 +219,7 @@ def test_worker_acquires_operation_ownership_before_final_inventory(monkeypatch)
 def test_coordinator_summary_keeps_failure_details_in_worker_artifact_only():
     payload = {
         "success": False,
-        "error": "material readback mismatch",
+        "error": "material readback mismatch at C:/private/model.mph",
         "traceback": "C:/private/source.py:1",
         "reference_result": {"source_path": "C:/private/model.mph"},
         "evaluation": {"passed": False},
@@ -228,7 +229,7 @@ def test_coordinator_summary_keeps_failure_details_in_worker_artifact_only():
 
     summary = _worker_summary(payload)
 
-    assert summary["error"] == "material readback mismatch"
+    assert summary["error"] == "worker execution failed; see worker artifact"
     assert "traceback" not in summary
     assert "reference_result" not in summary
     assert "private" not in json.dumps(summary)
@@ -268,9 +269,33 @@ def test_real_mode_requires_explicit_authority_and_resource_limits():
 
     assert completed.returncode != 0
     assert "licensed run requires" in completed.stderr
-    source = RUNNER.read_text(encoding="utf-8")
-    assert "CREATE_NO_WINDOW" in source
-    assert "--timeout-seconds" in source
+
+
+def test_worker_launch_applies_hidden_process_controls(monkeypatch):
+    captured = {}
+
+    class Process:
+        pid = 42001
+
+    def popen(command, **kwargs):
+        captured.update(command=list(command), kwargs=kwargs)
+        return Process()
+
+    monkeypatch.setattr(runner_module.subprocess, "Popen", popen)
+    process = _start_hidden_worker([sys.executable, "worker.py"])
+    expected_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(
+        subprocess, "CREATE_NEW_PROCESS_GROUP", 0
+    )
+
+    assert process.pid == 42001
+    assert captured["command"] == [sys.executable, "worker.py"]
+    assert captured["kwargs"] == {
+        "cwd": ROOT,
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.STDOUT,
+        "text": True,
+        "creationflags": expected_flags,
+    }
 
 
 def test_coordinator_refuses_collision_before_starting_worker(tmp_path, ascii_tmp_path):
@@ -278,9 +303,14 @@ def test_coordinator_refuses_collision_before_starting_worker(tmp_path, ascii_tm
     source.write_bytes(b"not-a-real-model")
     blocker_script = tmp_path / "owned_solver.py"
     blocker_script.write_text(
-        "# mph.Client collision marker for the lightweight scanner\nimport time\ntime.sleep(30)\n",
+        "# mph.Client collision marker for the lightweight scanner\n"
+        "import sys, time\n"
+        "from pathlib import Path\n"
+        "Path(sys.argv[1]).write_text('ready', encoding='utf-8')\n"
+        "time.sleep(30)\n",
         encoding="utf-8",
     )
+    blocker_ready = tmp_path / "blocker.ready"
     artifact_dir = ascii_tmp_path / "reference_power_collision"
     spec_path = tmp_path / "spec.json"
     output_path = tmp_path / "receipt.json"
@@ -338,12 +368,18 @@ def test_coordinator_refuses_collision_before_starting_worker(tmp_path, ascii_tm
     }
     spec_path.write_text(json.dumps(spec), encoding="utf-8")
     blocker = subprocess.Popen(
-        [sys.executable, str(blocker_script)],
+        [sys.executable, str(blocker_script), str(blocker_ready)],
         cwd=ROOT,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     try:
-        time.sleep(0.25)
+        deadline = time.monotonic() + 5.0
+        while (
+            not blocker_ready.is_file() and blocker.poll() is None and time.monotonic() < deadline
+        ):
+            time.sleep(0.01)
+        assert blocker_ready.read_text(encoding="utf-8") == "ready"
+        assert blocker.poll() is None
         completed = subprocess.run(
             [
                 sys.executable,
@@ -501,4 +537,4 @@ def test_coordinator_publishes_failure_receipt_for_malformed_worker_result(tmp_p
     assert exit_code == 1
     assert receipt["success"] is False
     assert receipt["worker_result_error"] == "JSONDecodeError"
-    assert receipt["worker_result"]["error"] == ("worker result artifact is unreadable or invalid")
+    assert receipt["worker_result"]["error"] == "worker execution failed; see worker artifact"

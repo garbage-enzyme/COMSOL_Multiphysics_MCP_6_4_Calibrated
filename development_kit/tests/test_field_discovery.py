@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import builtins
+import subprocess
+import sys
 
 import pytest
 from src.evidence.field_discovery import discover_field_datasets
@@ -110,6 +112,31 @@ def test_discovery_pairs_unicode_names_with_stable_tags_without_solver_import(mo
     assert len(result["discovery_sha256"]) == 64
 
 
+def test_discovery_module_import_is_solver_free_in_a_clean_process():
+    script = r"""
+import builtins
+
+real_import = builtins.__import__
+
+def guarded_import(name, *args, **kwargs):
+    if name == "mph" or name.startswith("mph."):
+        raise AssertionError("field discovery module must not import MPh")
+    return real_import(name, *args, **kwargs)
+
+builtins.__import__ = guarded_import
+from comsol_mcp.evidence.field_discovery import discover_field_datasets
+assert callable(discover_field_datasets)
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+
+
 def test_discovery_handles_english_names_empty_unknown_and_non_solution_datasets():
     result = discover_field_datasets(
         _Model(
@@ -118,6 +145,7 @@ def test_discovery_handles_english_names_empty_unknown_and_non_solution_datasets
                 _Node("Study 1//Solution 1", "dset1", "Solution", {"solution": "sol1"}),
                 _Node("Cut Plane 1", "cpl1", "CutPlane", {"data": "dset1"}),
                 _Node("Unbound", "dset2", "Solution"),
+                _Node("Unavailable", "dset3", "Solution", {"solution": "sol2"}),
             ],
             solutions=[
                 _Node("Solution 1", "sol1", "Solution", empty=True),
@@ -132,6 +160,9 @@ def test_discovery_handles_english_names_empty_unknown_and_non_solution_datasets
     assert result["datasets"][1]["solution_tag"] == "sol1"
     assert result["datasets"][1]["computed_state"] == "verified_empty"
     assert result["datasets"][2]["solution_reference_kind"] is None
+    assert result["datasets"][3]["solution_tag"] == "sol2"
+    assert result["datasets"][3]["computed_state"] == "unknown"
+    assert result["datasets"][3]["field_evaluation_eligible"] is False
     assert result["eligible_dataset_count"] == 0
     assert result["success"] is False
     assert result["discovery_state"] == "partial"

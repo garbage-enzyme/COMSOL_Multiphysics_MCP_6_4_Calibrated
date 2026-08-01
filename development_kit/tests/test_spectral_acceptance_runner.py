@@ -8,6 +8,7 @@ import uuid
 from pathlib import Path
 
 import pytest
+from src.jobs.spectral_characterization import _SPECTRAL_CHARACTERIZATION_INPUT_FIELDS
 
 from development_kit.tests.integration import spectral_characterization_acceptance as runner
 from development_kit.tests.integration.spectral_characterization_acceptance import (
@@ -28,27 +29,9 @@ def ascii_root():
 
 
 def _raw_spec(spec: dict) -> dict:
-    allowed = {
-        "job_type",
-        "source_model_path",
-        "source_model_relative_identity",
-        "configuration_sha256",
-        "parameter_state",
-        "wavelength_parameter",
-        "initial_grid",
-        "refinement_policy",
-        "expansion_policy",
-        "maximum_points",
-        "collector",
-        "analysis_policy",
-        "measurement_configuration",
-        "resource_policy",
-        "cores",
-        "version",
-        "max_retries",
-        "continue_on_error",
+    return {
+        key: value for key, value in spec.items() if key in _SPECTRAL_CHARACTERIZATION_INPUT_FIELDS
     }
-    return {key: value for key, value in spec.items() if key in allowed}
 
 
 def test_dry_run_normalizes_exact_identity_without_starting_comsol(tmp_path, ascii_root):
@@ -87,7 +70,8 @@ def test_non_ascii_runtime_root_fails_before_worker_start(tmp_path):
             raw_spec=_raw_spec(spec),
             runtime_root=tmp_path / "运行时",
             output=tmp_path / "receipt.json",
-            dry_run=True,
+            dry_run=False,
+            worker_runner=lambda *_args, **_kwargs: pytest.fail("worker must not start"),
         )
 
 
@@ -145,9 +129,7 @@ def test_spectral_success_rejects_empty_or_incomplete_evidence(tmp_path):
     no_stage = _scientific_acceptance(rows, [], spec)
     insufficient = _scientific_acceptance(rows, [{"stage_index": 0}], spec)
     rows[0]["mesh_element_count"] = 0
-    bad_mesh = _scientific_acceptance(
-        [*rows, _scientific_row(4)], [{"stage_index": 0}], spec
-    )
+    bad_mesh = _scientific_acceptance([*rows, _scientific_row(4)], [{"stage_index": 0}], spec)
 
     assert no_stage["checks"]["stage_plan_present"] is False
     assert insufficient["checks"]["minimum_point_count"] is False

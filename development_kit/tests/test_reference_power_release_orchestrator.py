@@ -261,6 +261,8 @@ def test_missing_or_timed_out_reference_power_receipt_cannot_pass_release(tmp_pa
     [
         ({"reference_power_spec": None}, "requires"),
         ({"reference_power_cores": 0}, "1..64"),
+        ({"reference_power_cores": 65}, "1..64"),
+        ({"reference_power_timeout_seconds": 0.999}, "1..7200"),
         ({"reference_power_timeout_seconds": 8000.0}, "1..7200"),
     ],
 )

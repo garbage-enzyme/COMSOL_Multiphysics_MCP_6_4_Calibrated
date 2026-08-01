@@ -15,7 +15,7 @@
     {
       "name": "basic_fem",
       "support": "verified",
-      "tool_count": 81
+      "tool_count": 93
     },
     {
       "name": "wave_optics",
@@ -35,12 +35,12 @@
     {
       "name": "experimental",
       "support": "experimental",
-      "tool_count": 69
+      "tool_count": 81
     },
     {
       "name": "full",
       "support": "compatibility_only",
-      "tool_count": 135
+      "tool_count": 147
     }
   ],
   "unavailable": [

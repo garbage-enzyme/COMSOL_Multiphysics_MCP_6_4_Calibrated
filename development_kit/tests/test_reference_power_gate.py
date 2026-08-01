@@ -146,6 +146,7 @@ def _results():
 
 def test_negative_controls_reuse_raw_evidence_and_must_fail_policy():
     _reference, point, policies = _results()
+    original = deepcopy(point["physical_evidence"])
     result = evaluate_reference_power_negative_controls(
         point["physical_evidence"], policies["declared_flux"]
     )
@@ -153,9 +154,7 @@ def test_negative_controls_reuse_raw_evidence_and_must_fail_policy():
     assert result["reversed_sign"]["overall"] == "fail"
     assert result["internal_consistency_substitution"]["overall"] == "fail"
     assert result["reversed_sign"]["passed_rejection_gate"] is True
-    assert (
-        point["physical_evidence"]["evidence"]["flux.reflected_positive_power_sign"]["value"] == 1
-    )
+    assert point["physical_evidence"] == original
 
 
 def test_combined_reference_power_evaluation_requires_every_physical_and_negative_gate():

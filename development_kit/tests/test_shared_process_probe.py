@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import ctypes
+import subprocess
 import sys
 from contextlib import nullcontext
 from ctypes import wintypes
 from types import SimpleNamespace
+from pathlib import Path
 
 import psutil
 import pytest
@@ -32,7 +34,6 @@ def _record(pid, parent, name, command, executable=None):
 
 
 def test_collector_redacts_paths_and_ignores_declared_process_children():
-    mph_module_before = sys.modules.get("mph")
     records = [
         _record(10, 0, "comsol.exe", ["comsol.exe"]),
         _record(11, 10, "comsolhelper.exe", ["comsolhelper.exe"]),
@@ -52,7 +53,41 @@ def test_collector_redacts_paths_and_ignores_declared_process_children():
     assert all("command_line" not in item for item in snapshot["processes"])
     serialized = str(snapshot)
     assert "Program Files" not in serialized
-    assert sys.modules.get("mph") is mph_module_before
+
+
+def test_process_collection_never_attempts_to_import_mph():
+    code = r"""
+import importlib.abc
+import sys
+
+class BlockMph(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == "mph" or fullname.startswith("mph."):
+            raise AssertionError(f"forbidden mph import attempted: {fullname}")
+        return None
+
+sys.meta_path.insert(0, BlockMph())
+from comsol_mcp.shared_session.process_probe import collect_shared_preflight_snapshot
+snapshot = collect_shared_preflight_snapshot(
+    process_provider=list,
+    listener_provider=list,
+    window_provider=dict,
+    version_provider=lambda _path: None,
+    clock=lambda: 1000.0,
+)
+assert snapshot["processes"] == []
+assert "mph" not in sys.modules
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=Path(__file__).parents[2],
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
 
 
 def test_collector_exposes_external_mph_as_a_collision_without_version_requirement():
@@ -265,13 +300,13 @@ def test_explicit_comsol_executable_identity_does_not_require_command_substrings
             10,
             0,
             "comsol.exe",
-            ["C:/Program Files/COMSOL/Multiphysics/bin/win64/comsol.exe"],
+            ["--neutral-desktop-command"],
         ),
         _record(
             20,
             0,
             "comsolmphserver.exe",
-            ["C:/Program Files/COMSOL/Multiphysics/bin/win64/comsolmphserver.exe"],
+            ["--neutral-server-command"],
         ),
     ]
 
@@ -390,8 +425,7 @@ def test_listener_inventory_is_bounded_at_consumer_limit(monkeypatch):
         collect_shared_preflight_snapshot(
             process_provider=list,
             listener_provider=lambda: [
-                {"host": "127.0.0.1", "port": 2001 + index, "pid": index + 1}
-                for index in range(3)
+                {"host": "127.0.0.1", "port": 2001 + index, "pid": index + 1} for index in range(3)
             ],
             window_provider=dict,
             version_provider=lambda _path: None,
@@ -457,9 +491,7 @@ class _FakeVersionApi:
         self.GetFileVersionInfoSizeW = _FakeWinFunction(
             lambda _path, _handle: ctypes.sizeof(self.fixed)
         )
-        self.GetFileVersionInfoW = _FakeWinFunction(
-            lambda _path, _handle, _size, _buffer: True
-        )
+        self.GetFileVersionInfoW = _FakeWinFunction(lambda _path, _handle, _size, _buffer: True)
         self.VerQueryValueW = _FakeWinFunction(self._query)
 
     def _query(self, _buffer, _subblock, pointer_out, length_out):
@@ -472,9 +504,7 @@ class _FakeVersionApi:
             length_out,
             ctypes.POINTER(wintypes.UINT),
         ).contents.value = (
-            ctypes.sizeof(self.fixed) - 1
-            if self.mode == "short"
-            else ctypes.sizeof(self.fixed)
+            ctypes.sizeof(self.fixed) - 1 if self.mode == "short" else ctypes.sizeof(self.fixed)
         )
         return True
 

@@ -77,8 +77,11 @@ def test_loopback_endpoint_is_normalized_without_dns(raw, expected_host):
         {"host": "192.168.1.2", "port": 2036},
         {"host": "comsol.internal", "port": 2036},
         {"host": "127.0.0.1", "port": 0},
+        {"host": "127.0.0.1", "port": -1},
         {"host": "127.0.0.1", "port": 65536},
         {"host": "127.0.0.1", "port": True},
+        {"host": "127.0.0.1", "port": 2036.0},
+        {"host": "127.0.0.1", "port": None},
         {"host": "127.0.0.1", "port": "2036"},
         {"host": "127.0.0.1"},
         {"host": "127.0.0.1", "port": 2036, "token": "secret"},
@@ -121,9 +124,7 @@ def test_listener_bind_host_preserves_scope(host, expected):
 
 
 def test_wildcard_listener_matches_only_same_address_family_and_endpoint_port():
-    ipv4_endpoint = normalize_shared_server_endpoint(
-        {"host": "127.0.0.1", "port": 2036}
-    )
+    ipv4_endpoint = normalize_shared_server_endpoint({"host": "127.0.0.1", "port": 2036})
     ipv6_endpoint = normalize_shared_server_endpoint({"host": "::1", "port": 2036})
 
     assert shared_listener_matches_endpoint(

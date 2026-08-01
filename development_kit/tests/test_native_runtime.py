@@ -7,26 +7,47 @@ import json
 import subprocess
 import sys
 import threading
+from importlib.metadata import distributions, packages_distributions
 from pathlib import Path
+
+import pytest
+import src.native_runtime as native_runtime_module
 
 from comsol_mcp.native_runtime import (
     NATIVE_RUNTIME_MANIFEST,
+    NativeRuntimeImport,
     preload_mcp_native_runtime,
 )
 
 ROOT = Path(__file__).parents[2]
 PACKAGE_ROOT = ROOT / "comsol_mcp"
-AUDITED_NATIVE_ROOTS = {
-    "fitz",
-    "jpype",
-    "matplotlib",
-    "mph",
-    "numpy",
-    "psutil",
-    "scipy",
-    "sentence_transformers",
-    "torch",
-}
+
+
+def _direct_imports() -> set[str]:
+    modules: set[str] = set()
+    for path in PACKAGE_ROOT.rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                modules.update(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                modules.add(node.module)
+    return modules
+
+
+def _installed_binary_roots() -> set[str]:
+    binary_distributions = {
+        item.metadata["Name"].casefold()
+        for item in distributions()
+        if any(
+            str(path).casefold().endswith((".pyd", ".dll", ".so")) for path in (item.files or ())
+        )
+    }
+    return {
+        package
+        for package, owners in packages_distributions().items()
+        if any(owner.casefold() in binary_distributions for owner in owners)
+    }
 
 
 def test_native_runtime_manifest_separates_host_worker_and_offline_imports() -> None:
@@ -38,6 +59,7 @@ def test_native_runtime_manifest_separates_host_worker_and_offline_imports() -> 
         "numpy",
         "psutil",
         "pydantic_core",
+        "scipy",
         "scipy.interpolate",
         "scipy.optimize",
         "scipy.spatial",
@@ -48,6 +70,8 @@ def test_native_runtime_manifest_separates_host_worker_and_offline_imports() -> 
         if item.preload_before_event_loop
     )
     assert {item.module for item in NATIVE_RUNTIME_MANIFEST if item.scope == "isolated_worker"} == {
+        "matplotlib",
+        "matplotlib.colors",
         "matplotlib.pyplot",
         "sentence_transformers",
         "torch",
@@ -58,18 +82,24 @@ def test_native_runtime_manifest_separates_host_worker_and_offline_imports() -> 
 
 
 def test_every_direct_native_import_is_classified_by_the_manifest() -> None:
-    imported_roots: set[str] = set()
-    for path in PACKAGE_ROOT.rglob("*.py"):
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                imported_roots.update(alias.name.split(".", 1)[0] for alias in node.names)
-            elif isinstance(node, ast.ImportFrom) and node.module:
-                imported_roots.add(node.module.split(".", 1)[0])
-
+    imported_modules = _direct_imports()
+    imported_roots = {module.split(".", 1)[0] for module in imported_modules}
     manifest_roots = {item.module.split(".", 1)[0] for item in NATIVE_RUNTIME_MANIFEST}
-    assert imported_roots & AUDITED_NATIVE_ROOTS == AUDITED_NATIVE_ROOTS
-    assert imported_roots & AUDITED_NATIVE_ROOTS <= manifest_roots
+    binary_imported_roots = imported_roots & _installed_binary_roots()
+    assert binary_imported_roots
+    assert binary_imported_roots <= manifest_roots
+
+    classified_imports = {
+        module for module in imported_modules if module.split(".", 1)[0] in manifest_roots
+    }
+    assert classified_imports
+    assert all(
+        any(
+            module == item.module or module.startswith(f"{item.module}.")
+            for item in NATIVE_RUNTIME_MANIFEST
+        )
+        for module in classified_imports
+    )
 
 
 def test_native_runtime_preload_rejects_worker_thread() -> None:
@@ -91,6 +121,40 @@ def test_native_runtime_preload_rejects_worker_thread() -> None:
     assert "main thread" in str(errors[0])
 
 
+def test_native_runtime_preload_validates_every_scope_before_import(monkeypatch) -> None:
+    imports: list[str] = []
+    monkeypatch.setattr(
+        native_runtime_module,
+        "NATIVE_RUNTIME_MANIFEST",
+        (
+            NativeRuntimeImport(
+                module="numpy",
+                distribution="numpy",
+                scope="mcp_main_process",
+                preload_before_event_loop=True,
+                reason="test main-process preload",
+            ),
+            NativeRuntimeImport(
+                module="matplotlib.pyplot",
+                distribution="matplotlib",
+                scope="isolated_worker",
+                preload_before_event_loop=True,
+                reason="invalid worker preload",
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        native_runtime_module,
+        "import_module",
+        lambda name: imports.append(name),
+    )
+
+    with pytest.raises(RuntimeError, match="non-main-process scope"):
+        native_runtime_module.preload_mcp_native_runtime()
+
+    assert imports == []
+
+
 def test_fresh_main_thread_preload_covers_representative_lazy_native_calls() -> None:
     code = r"""
 import json
@@ -103,20 +167,20 @@ receipt = preload_mcp_native_runtime()
 
 import jpype
 import numpy as np
+import psutil
 from scipy.interpolate import griddata
 from scipy.optimize import brentq, curve_fit
 
 
-def native_extensions():
-    loaded = set()
-    for name, module in sys.modules.items():
-        path = getattr(module, "__file__", None)
-        if path and Path(path).suffix.casefold() in {".pyd", ".dll", ".so"}:
-            loaded.add((name, str(path)))
-    return loaded
+def native_images():
+    return {
+        str(Path(item.path).resolve()).casefold()
+        for item in psutil.Process().memory_maps()
+        if item.path
+    }
 
 
-before = native_extensions()
+before = native_images()
 root = brentq(lambda value: value - 0.5, 0.0, 1.0)
 parameters, _ = curve_fit(
     lambda value, slope, intercept: slope * value + intercept,
@@ -129,14 +193,14 @@ interpolated = griddata(
     np.array([[0.25, 0.25]]),
     method="linear",
 )
-after = native_extensions()
+after = native_images()
 
 assert after == before, sorted(after - before)
 assert root == 0.5
 assert np.allclose(parameters, [2.0, 1.0])
 assert np.allclose(interpolated, [0.5])
 assert not jpype.isJVMStarted()
-print(json.dumps({"receipt": receipt, "native_extension_count": len(after)}))
+print(json.dumps({"receipt": receipt, "native_image_count": len(after)}))
 """
     completed = subprocess.run(
         [sys.executable, "-c", code],
@@ -155,8 +219,9 @@ print(json.dumps({"receipt": receipt, "native_extension_count": len(after)}))
         "numpy",
         "psutil",
         "pydantic_core",
+        "scipy",
         "scipy.interpolate",
         "scipy.optimize",
         "scipy.spatial",
     }
-    assert result["native_extension_count"] > 0
+    assert result["native_image_count"] > 0

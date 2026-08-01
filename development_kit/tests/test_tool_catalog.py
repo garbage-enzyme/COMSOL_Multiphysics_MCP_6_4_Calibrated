@@ -6,6 +6,7 @@ import asyncio
 import json
 import subprocess
 import sys
+from copy import deepcopy
 from dataclasses import replace
 from importlib import import_module
 from pathlib import Path
@@ -14,6 +15,7 @@ from types import SimpleNamespace
 import pytest
 import src.tools as tools_module
 from mcp.server.fastmcp import FastMCP
+from src.contracts.structural import bounded_public_schema
 from src.knowledge import embedded as embedded_module
 from src.knowledge.embedded import register_knowledge_tools
 from src.knowledge.lexical_manual import register_lexical_manual_tools
@@ -37,7 +39,7 @@ def test_full_tool_schema_snapshot_is_stable():
     actual = asyncio.run(snapshot_tool_schemas(server))
     expected = json.loads(SNAPSHOT_PATH.read_text(encoding="utf-8"))
 
-    assert len(actual) == 135
+    assert len(actual) == 147
     assert actual == expected
 
 
@@ -47,9 +49,30 @@ def test_pre_h3_compatibility_snapshot_is_preserved():
 
     assert len(legacy) == 96
     assert set(legacy) <= set(current)
-    assert legacy["geometry_add_feature"]["properties"]["kwargs"]["type"] == "string"
-    assert "kwargs" not in current["geometry_add_feature"]["properties"]
-    assert current["geometry_add_feature"]["properties"]["properties"]["anyOf"]
+    for name, legacy_schema in legacy.items():
+        expected = bounded_public_schema(legacy_schema)
+        observed = deepcopy(current[name])
+        allowed_additions = set()
+        if TOOL_METADATA[name].requires_model_revision:
+            allowed_additions.add("expected_model_revision")
+        if name == "mesh_convergence_study":
+            allowed_additions.update({"config_id", "manifest_path", "source_model_path"})
+        if name == "geometry_add_feature":
+            assert expected["properties"].pop("kwargs")["type"] == "string"
+            expected["required"].remove("kwargs")
+            allowed_additions.add("properties")
+        if name == "job_submit":
+            migrated_spec = observed["properties"]["spec"]
+            assert migrated_spec["discriminator"]["propertyName"] == "job_type"
+            assert migrated_spec["oneOf"]
+            assert observed.pop("$defs")
+            observed["properties"]["spec"] = expected["properties"]["spec"]
+
+        actual_additions = set(observed["properties"]) - set(expected["properties"])
+        assert actual_additions == allowed_additions, name
+        for field in allowed_additions:
+            observed["properties"].pop(field)
+        assert observed == expected, name
 
 
 def test_registered_tool_names_are_unique():
@@ -64,7 +87,7 @@ def test_every_registered_tool_has_complete_canonical_metadata():
     expected_names = set(json.loads(SNAPSHOT_PATH.read_text(encoding="utf-8")))
 
     assert set(TOOL_METADATA) == expected_names
-    assert len(TOOL_METADATA) == 135
+    assert len(TOOL_METADATA) == 147
     for name, metadata in TOOL_METADATA.items():
         assert metadata.name == name
         assert metadata.registrar.startswith("comsol_mcp.")
@@ -89,7 +112,7 @@ def test_tool_specs_are_the_validated_canonical_registry():
     assert TOOL_SPECS is TOOL_METADATA
     assert validate_tool_specs() == {
         "valid": True,
-        "tool_count": 135,
+        "tool_count": 147,
         "profile_count": len(PROFILE_NAMES),
     }
     for spec in TOOL_SPECS.values():
@@ -97,6 +120,29 @@ def test_tool_specs_are_the_validated_canonical_registry():
         assert spec.output_contract.startswith("tool-output/")
         assert dict(spec.structural_limits)["request_bytes"] > 0
         assert dict(spec.structural_limits)["response_bytes"] > 0
+
+
+def test_licensed_acoustics_and_pde_tools_are_verified_in_basic_fem():
+    mutation_tools = {
+        "geometry_create_box_selection",
+        "geometry_create_side_selections",
+        "physics_add_pressure_acoustics",
+        "physics_add_coefficient_form_pde",
+        "physics_add_general_form_pde",
+        "physics_add_weak_form_pde",
+        "physics_configure_acoustic_boundary",
+        "physics_setup_acoustic_boundaries",
+        "physics_configure_pde_boundary",
+        "physics_setup_pde_boundaries",
+    }
+
+    for name in mutation_tools:
+        metadata = TOOL_METADATA[name]
+        assert metadata.maturity == "verified"
+        assert metadata.side_effect_class == "model_mutation"
+        assert metadata.concurrency_class == "comsol_bound"
+        assert metadata.requires_model_revision is True
+        assert {"basic_fem", "experimental", "full"} <= set(metadata.intended_profiles)
 
 
 def test_new_tool_without_explicit_side_effect_class_fails_closed(monkeypatch):
@@ -177,6 +223,48 @@ def test_tool_spec_validation_rejects_conflicting_declarations_import_free():
         )
 
 
+@pytest.mark.parametrize(
+    ("mutated", "message"),
+    [
+        (
+            lambda spec: replace(spec, starts_solver=True),
+            "solver-starting ToolSpec has impossible effects",
+        ),
+        (
+            lambda spec: replace(
+                spec,
+                side_effect_class="model_mutation",
+                advances_model_revision=True,
+                requires_model_revision=False,
+            ),
+            "advancing ToolSpec lacks revision requirement",
+        ),
+        (
+            lambda spec: replace(
+                spec,
+                maturity="deprecated",
+                deprecation_state="deprecated",
+                replacement_tool=None,
+            ),
+            "deprecated ToolSpec lacks replacement",
+        ),
+        (
+            lambda spec: replace(spec, replacement_tool="missing_replacement"),
+            "ToolSpec replacement is unknown",
+        ),
+        (
+            lambda spec: replace(spec, intended_profiles=("core",)),
+            "ToolSpec compatibility profile is missing",
+        ),
+    ],
+)
+def test_tool_spec_validation_rejects_high_impact_relationship_breaks(mutated, message):
+    read_only = TOOL_SPECS["capabilities"]
+
+    with pytest.raises(ValueError, match=message):
+        validate_tool_specs({**TOOL_SPECS, read_only.name: mutated(read_only)})
+
+
 def test_schema_snapshot_rejects_duplicate_registered_names():
     duplicate = SimpleNamespace(name="duplicate", inputSchema={"type": "object"})
 
@@ -231,6 +319,28 @@ def test_embedded_knowledge_responses_do_not_expose_module_state():
     assert embedded_module.get_best_practices("mesh")["best_practices"]["tips"]
 
 
+def test_embedded_guides_publish_exact_acoustics_and_pde_boundaries():
+    acoustic = embedded_module.get_physics_guide("pressure_acoustics")
+    pde = embedded_module.get_physics_guide("mathematical_pde")
+
+    assert acoustic["guide"]["tool_to_add"] == "physics_add_pressure_acoustics"
+    assert acoustic["guide"]["common_boundary_conditions"] == [
+        "SoundHard",
+        "SoundSoft",
+        "Pressure",
+        "Impedance",
+        "NormalAcceleration",
+        "NormalVelocity",
+        "PlaneWaveRadiation",
+    ]
+    assert pde["guide"]["common_boundary_conditions"] == [
+        "DirichletBoundary",
+        "FluxBoundary",
+        "ZeroFluxBoundary",
+        "PeriodicCondition",
+    ]
+
+
 def test_metadata_registrars_match_actual_registration():
     registrars = []
     for registrar_path in registrars_for_profile("full"):
@@ -253,7 +363,7 @@ def test_catalog_import_cannot_start_comsol():
 import mph
 mph.Client = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError('Client called'))
 from src.tools.catalog import TOOL_METADATA
-assert len(TOOL_METADATA) == 135
+assert len(TOOL_METADATA) == 147
 """
     completed = subprocess.run(
         [sys.executable, "-c", code],

@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 from src.jobs.manager import JobManager
+from src.jobs.spectral_characterization import _SPECTRAL_CHARACTERIZATION_INPUT_FIELDS
 from src.jobs.spectral_worker import _run
 from src.jobs.store import JobStore, atomic_write_json, process_identity
 
@@ -108,27 +109,9 @@ def _created_job(tmp_path, ascii_root):
 
 
 def _raw_spec(spec):
-    allowed = {
-        "job_type",
-        "source_model_path",
-        "source_model_relative_identity",
-        "configuration_sha256",
-        "parameter_state",
-        "wavelength_parameter",
-        "initial_grid",
-        "refinement_policy",
-        "expansion_policy",
-        "maximum_points",
-        "collector",
-        "analysis_policy",
-        "measurement_configuration",
-        "resource_policy",
-        "cores",
-        "version",
-        "max_retries",
-        "continue_on_error",
+    return {
+        key: value for key, value in spec.items() if key in _SPECTRAL_CHARACTERIZATION_INPUT_FIELDS
     }
-    return {key: value for key, value in spec.items() if key in allowed}
 
 
 @pytest.mark.parametrize("value", ["false", 0, 1, None])
@@ -202,15 +185,27 @@ def test_all_durable_rows_can_complete_from_smoke_state_on_resume(tmp_path, asci
     )
     atomic_write_json(store.job_dir(job_id) / "state.json", state)
 
+    resume_collector_calls = []
+
+    def collect_on_resume(point, collector, artifact_dir):
+        resume_collector_calls.append(
+            {
+                "point_id": point["point_id"],
+                "collector": collector["name"],
+                "artifact_dir": str(artifact_dir),
+            }
+        )
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        (artifact_dir / "unexpected-side-effect.txt").write_text("ran", encoding="utf-8")
+        raise AssertionError("durable rows must be reused")
+
     assert (
         _run(
             str(store.root),
             job_id,
             ownership_factory=lambda _root, _owner: _Ownership(),
             client_factory=lambda _spec: _Client(spec["source_model_path"]),
-            collector_executor=lambda *_args: (_ for _ in ()).throw(
-                AssertionError("durable rows must be reused")
-            ),
+            collector_executor=collect_on_resume,
             telemetry_provider=_telemetry,
             native_cancel_enabled=False,
         )
@@ -221,6 +216,8 @@ def test_all_durable_rows_can_complete_from_smoke_state_on_resume(tmp_path, asci
     assert resumed["status"] == "completed"
     assert resumed["progress"]["completed"] == first_count
     assert collected == first_count
+    assert resume_collector_calls == []
+    assert not list(store.job_dir(job_id).rglob("unexpected-side-effect.txt"))
 
 
 def test_cleanup_fault_fails_attempt_but_still_releases_lease(tmp_path, ascii_root):

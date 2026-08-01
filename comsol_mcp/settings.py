@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 import json
 import os
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from comsol_mcp.durable import canonical_sha256_v1, read_file_bytes_bounded
-
 
 SETTINGS_PATH_ENV = "COMSOL_MCP_SETTINGS_PATH"
 SETTINGS_SCHEMA = "comsol_mcp.settings"
@@ -45,20 +44,6 @@ _EVIDENCE_CHECKS = (
     "artifact_chain_verification",
     "summary_claim_verification",
     "producer_driver_compatibility",
-)
-_LEGACY_ENVIRONMENT_NAMES = frozenset(
-    {
-        PROFILE_ENV,
-        RUNTIME_ENV,
-        JOBS_ENV,
-        MODEL_READ_ROOTS_ENV,
-        ARTIFACT_WRITE_ROOT_ENV,
-        SHARED_SERVER_ENV,
-        OWNER_ENV,
-        SEMANTIC_ROOT_ENV,
-        SEMANTIC_LEXICAL_ENV,
-        SEMANTIC_MODEL_ENV,
-    }
 )
 _COMMENT_PREFIX = "_comment"
 
@@ -107,9 +92,7 @@ def _is_comment_key(key: str) -> bool:
     return key.startswith(_COMMENT_PREFIX)
 
 
-def _record_error(
-    errors: list[dict[str, str]], location: str, error: Exception
-) -> None:
+def _record_error(errors: list[dict[str, str]], location: str, error: Exception) -> None:
     errors.append(
         {
             "path": location,
@@ -164,10 +147,7 @@ def _object(
                 reason_code="settings_unknown_field",
             ),
         )
-    return {
-        key: value[key] if key in value else deepcopy(defaults[key])
-        for key in defaults
-    }
+    return {key: value[key] if key in value else deepcopy(defaults[key]) for key in defaults}
 
 
 def _read_value(
@@ -281,10 +261,14 @@ def _normalize(
         top["schema_name"],
         location="settings.schema_name",
         default=SETTINGS_SCHEMA,
-        parser=lambda value: value
-        if value == SETTINGS_SCHEMA
-        else (_ for _ in ()).throw(
-            SettingsError("settings.schema_name is unsupported", reason_code="settings_value_invalid")
+        parser=lambda value: (
+            value
+            if value == SETTINGS_SCHEMA
+            else (_ for _ in ()).throw(
+                SettingsError(
+                    "settings.schema_name is unsupported", reason_code="settings_value_invalid"
+                )
+            )
         ),
         errors=errors,
     )
@@ -292,10 +276,14 @@ def _normalize(
         top["schema_version"],
         location="settings.schema_version",
         default=SETTINGS_VERSION,
-        parser=lambda value: value
-        if value == SETTINGS_VERSION
-        else (_ for _ in ()).throw(
-            SettingsError("settings.schema_version is unsupported", reason_code="settings_value_invalid")
+        parser=lambda value: (
+            value
+            if value == SETTINGS_VERSION
+            else (_ for _ in ()).throw(
+                SettingsError(
+                    "settings.schema_version is unsupported", reason_code="settings_value_invalid"
+                )
+            )
         ),
         errors=errors,
     )
@@ -560,10 +548,12 @@ def load_settings_report(environ: Mapping[str, str] | None = None) -> dict[str, 
         return {"settings": deepcopy(_DEFAULT_SETTINGS), "errors": [_report_error(error)]}
     try:
         document = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_object)
-    except UnicodeDecodeError as exc:
-        error = SettingsError("settings.json must be UTF-8", reason_code="settings_encoding_invalid")
+    except UnicodeDecodeError:
+        error = SettingsError(
+            "settings.json must be UTF-8", reason_code="settings_encoding_invalid"
+        )
         return {"settings": deepcopy(_DEFAULT_SETTINGS), "errors": [_report_error(error)]}
-    except (json.JSONDecodeError, _DuplicateJsonKey) as exc:
+    except (json.JSONDecodeError, _DuplicateJsonKey):
         error = SettingsError(
             "settings.json contains invalid or duplicate JSON",
             reason_code="settings_json_invalid",
@@ -622,12 +612,10 @@ def settings_status(environ: Mapping[str, str] | None = None) -> dict[str, Any]:
 def settings_environment(environ: Mapping[str, str] | None = None) -> dict[str, str]:
     """Return effective legacy-shaped values with project settings as defaults."""
     base = dict(os.environ if environ is None else environ)
-    if environ is not None and _LEGACY_ENVIRONMENT_NAMES.intersection(base):
-        return base
     settings = load_settings(environ)
 
     def set_default(name: str, value: str | None) -> None:
-        if value is not None and not base.get(name):
+        if value is not None and name not in base:
             base[name] = value
 
     set_default(PROFILE_ENV, settings["profile"]["name"])

@@ -211,7 +211,10 @@ def test_failed_later_level_resumes_without_rerunning_completed_level(tmp_path, 
     )
     assert second == 0
     assert store.read_state(job_id)["status"] == "completed"
-    assert len(second_client.loaded) == 2
+    assert second_client.loaded == [
+        spec["levels"][1]["spectral_job"]["source_model_path"],
+        spec["levels"][2]["spectral_job"]["source_model_path"],
+    ]
     rows = read_convergence_campaign_levels(
         store.job_dir(job_id) / "convergence_levels.jsonl",
         spec,

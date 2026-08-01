@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import hashlib
 import os
 from types import SimpleNamespace
@@ -256,10 +257,11 @@ def test_versioned_jsonl_recovery_distinguishes_legacy_without_rewriting(tmp_pat
 
 def test_csv_append_quotes_one_complete_row_per_fsync_boundary(tmp_path):
     path = tmp_path / "rows.csv"
-    append_csv_row(path, ["a,b", 1, "line"])
+    append_csv_row(path, ["a,b", 1, "line\nwrapped"])
     append_csv_row(path, ["c", 2, "next"])
 
-    assert path.read_text(encoding="utf-8").splitlines() == [
-        '"a,b",1,line',
-        "c,2,next",
-    ]
+    with path.open(newline="", encoding="utf-8") as handle:
+        assert list(csv.reader(handle)) == [
+            ["a,b", "1", "line\nwrapped"],
+            ["c", "2", "next"],
+        ]

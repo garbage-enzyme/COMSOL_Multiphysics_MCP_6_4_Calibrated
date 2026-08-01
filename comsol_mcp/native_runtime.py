@@ -31,6 +31,13 @@ NATIVE_RUNTIME_MANIFEST = (
         "Shared array runtime used by solver-free evidence and COMSOL adapters.",
     ),
     NativeRuntimeImport(
+        "scipy",
+        "scipy",
+        "mcp_main_process",
+        True,
+        "Spectral characterization imports the SciPy package before its numerical helpers.",
+    ),
+    NativeRuntimeImport(
         "scipy.optimize",
         "scipy",
         "mcp_main_process",
@@ -80,6 +87,20 @@ NATIVE_RUNTIME_MANIFEST = (
         "FastMCP request validation loads Pydantic's native core before dispatch.",
     ),
     NativeRuntimeImport(
+        "matplotlib",
+        "matplotlib",
+        "isolated_worker",
+        False,
+        "Field PNG rendering selects the Matplotlib backend only in field_plot_worker.",
+    ),
+    NativeRuntimeImport(
+        "matplotlib.colors",
+        "matplotlib",
+        "isolated_worker",
+        False,
+        "Field PNG logarithmic normalization is isolated in field_plot_worker.",
+    ),
+    NativeRuntimeImport(
         "matplotlib.pyplot",
         "matplotlib",
         "isolated_worker",
@@ -115,14 +136,18 @@ def preload_mcp_native_runtime() -> dict[str, str]:
     if threading.current_thread() is not threading.main_thread():
         raise RuntimeError("MCP native runtime preload must run on the main thread")
 
+    preload_items = tuple(
+        item for item in NATIVE_RUNTIME_MANIFEST if item.preload_before_event_loop
+    )
+    if any(item.scope != "mcp_main_process" for item in preload_items):
+        raise RuntimeError("MCP native runtime preload contains a non-main-process scope")
+
     jpype: Any = import_module("jpype")
     if jpype.isJVMStarted():
         raise RuntimeError("MCP native runtime preload found an already-started JVM")
 
     loaded: dict[str, str] = {}
-    for item in NATIVE_RUNTIME_MANIFEST:
-        if not item.preload_before_event_loop:
-            continue
+    for item in preload_items:
         import_module(item.module)
         loaded[item.module] = version(item.distribution)
 

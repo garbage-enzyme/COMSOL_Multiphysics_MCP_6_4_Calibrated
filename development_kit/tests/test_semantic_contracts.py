@@ -8,9 +8,10 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import threading
 import uuid
-from concurrent.futures import Future
-from contextlib import contextmanager
+from concurrent.futures import Future, ThreadPoolExecutor
+from contextlib import closing, contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -63,21 +64,23 @@ def _lexical_test_root():
 def test_semantic_benchmark_citations_and_digest_share_one_sqlite_snapshot(tmp_path):
     source = tmp_path / "source.sqlite3"
     snapshot = tmp_path / "snapshot.sqlite3"
-    with sqlite3.connect(source) as connection:
+    with closing(sqlite3.connect(source)) as connection:
         connection.execute("CREATE TABLE pages (source TEXT NOT NULL, page INTEGER NOT NULL)")
         connection.execute("INSERT INTO pages VALUES ('manual.pdf', 7)")
+        connection.commit()
 
     receipt = soak_module._sqlite_snapshot(source, snapshot)
-    with sqlite3.connect(source) as connection:
+    with closing(sqlite3.connect(source)) as connection:
         connection.execute("DELETE FROM pages")
         connection.execute("INSERT INTO pages VALUES ('replacement.pdf', 9)")
+        connection.commit()
 
     assert soak_module._corpus_citations(snapshot) == {("manual.pdf", 7)}
     assert receipt["byte_count"] == snapshot.stat().st_size
     assert receipt["sha256"] == hashlib.sha256(snapshot.read_bytes()).hexdigest()
 
 
-def test_frozen_evaluation_has_sixty_reviewed_queries_and_declared_slices():
+def test_frozen_evaluation_has_sixty_six_reviewed_queries_and_declared_slices():
     payload = json.loads(EVALUATION_PATH.read_text(encoding="utf-8"))
     result = validate_evaluation_set(payload)
 
@@ -276,6 +279,67 @@ def test_rank_metrics_validate_and_deduplicate_citations_before_dcg():
     assert metrics["ndcg_at_10"] == 1.0
     with pytest.raises(ValueError, match="pinned corpus"):
         _query_metrics([("invented.pdf", 99)], {citation}, valid_citations={citation})
+
+
+def test_semantic_benchmark_retrieval_validates_and_deduplicates_citations():
+    citation = {"source": "manual.pdf", "page": 7}
+
+    class Manager:
+        def __init__(self, results):
+            self.results = results
+
+        def query(self, *_args, **_kwargs):
+            return {"success": True, "results": self.results}
+
+    evaluation = {
+        "queries": [
+            {
+                "id": "citation-contract",
+                "query": "query",
+                "category": "exact_clientapi",
+                "style": "exact",
+                "relevant": [citation],
+            }
+        ]
+    }
+    result = soak_module._evaluate_mode(
+        Manager([citation, citation]),
+        evaluation,
+        "hybrid",
+        {("manual.pdf", 7)},
+    )
+
+    assert result["rows"][0]["ranked_citations"] == [citation]
+    assert result["citation_validity"] == 1.0
+
+    with pytest.raises(ValueError, match="pinned corpus"):
+        soak_module._evaluate_mode(
+            Manager([{"source": "invented.pdf", "page": 99}]),
+            evaluation,
+            "hybrid",
+            {("manual.pdf", 7)},
+        )
+
+
+def test_semantic_benchmark_receipts_publish_concurrently_without_temp_alias(tmp_path):
+    barrier = threading.Barrier(8)
+
+    def publish(index: int) -> None:
+        barrier.wait(timeout=5.0)
+        soak_module._atomic_write(
+            tmp_path / f"receipt-{index}.json",
+            {"index": index, "payload": "x" * 64_000},
+        )
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        list(executor.map(publish, range(8)))
+
+    for index in range(8):
+        assert (
+            json.loads((tmp_path / f"receipt-{index}.json").read_text(encoding="utf-8"))["index"]
+            == index
+        )
+    assert not list(tmp_path.glob(".*.tmp"))
 
 
 def test_semantic_benchmark_installs_cleanup_before_process_inspection(monkeypatch):

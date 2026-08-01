@@ -1,5 +1,8 @@
 """Unit tests for parameter tools without a COMSOL client."""
 
+import sys
+from types import SimpleNamespace
+
 from src.tools import parameters
 
 
@@ -125,6 +128,31 @@ class FakeModel:
         self.java = FakeJava(studies, java_study_tags)
 
 
+def test_java_string_array_uses_jpype_string_component_and_coerces_values(monkeypatch):
+    observed = {}
+
+    class FakeJString:
+        pass
+
+    def fake_jarray(component):
+        observed["component"] = component
+
+        def construct(values):
+            observed["values"] = list(values)
+            return tuple(values)
+
+        return construct
+
+    monkeypatch.setitem(
+        sys.modules,
+        "jpype",
+        SimpleNamespace(JArray=fake_jarray, JString=FakeJString),
+    )
+
+    assert parameters._java_string_array(["wl", 2]) == ("wl", "2")
+    assert observed == {"component": FakeJString, "values": ["wl", "2"]}
+
+
 def test_setup_parametric_sweep_uses_clientapi_properties(monkeypatch):
     study = FakeStudy()
     model = FakeModel({"std1": study})
@@ -219,9 +247,7 @@ def test_parametric_sweep_failure_restores_reused_or_removes_created(monkeypatch
     study = FakeStudy({"custom": existing})
     before = dict(existing.properties)
 
-    reused = parameters.setup_parametric_sweep(
-        FakeModel({"std1": study}), "wl", [3, 4]
-    )
+    reused = parameters.setup_parametric_sweep(FakeModel({"std1": study}), "wl", [3, 4])
     assert reused["success"] is False
     assert reused["rolled_back"] is False
     assert existing.properties["pname"] == before["pname"]
@@ -233,9 +259,7 @@ def test_parametric_sweep_failure_restores_reused_or_removes_created(monkeypatch
             return feature
 
     created_study = FailingCreatedStudy()
-    created = parameters.setup_parametric_sweep(
-        FakeModel({"std1": created_study}), "wl", [3, 4]
-    )
+    created = parameters.setup_parametric_sweep(FakeModel({"std1": created_study}), "wl", [3, 4])
     assert created["success"] is False
     assert created["rolled_back"] is True
     assert created_study.features == {}
@@ -283,9 +307,7 @@ class FakeParameterModel:
 
 def test_parameter_description_failure_restores_value_and_empty_description_clears():
     model = FakeParameterModel(fail_description=True)
-    failed = parameters.set_parameter(
-        model, "wl", "2[m]", description="new"
-    )
+    failed = parameters.set_parameter(model, "wl", "2[m]", description="new")
     assert failed["success"] is False
     assert failed["rolled_back"] is True
     assert model.values == {"wl": "1[m]"}
@@ -303,9 +325,7 @@ def test_parameter_description_failure_restores_value_and_empty_description_clea
 def test_new_parameter_is_removed_when_description_fails():
     model = FakeParameterModel(fail_description=True)
 
-    result = parameters.set_parameter(
-        model, "theta", "10[deg]", description="angle"
-    )
+    result = parameters.set_parameter(model, "theta", "10[deg]", description="angle")
 
     assert result["success"] is False
     assert result["rolled_back"] is True

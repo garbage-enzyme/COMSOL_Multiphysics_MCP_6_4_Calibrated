@@ -61,6 +61,9 @@ acceptance 报告应至少包含不启动 COMSOL 的 `initialize`、实时 `list
 ## 主要能力
 
 - **ClientAPI 适配。** 几何、物理场、材料、网格、研究、结果、模型克隆和 Unicode 安全的 `.mph` 保存已在 COMSOL 6.4.0.293 上通过 licensed acceptance；6.4.0.* 内只改变最后 build 数字时继承 release-line 结论，其他 release family 在独立验收前均为 unknown。
+- **类型化声学与偏微分方程构建。** `basic_fem` 提供可回滚的命名 Box/四边
+  selection、Pressure Acoustics、Coefficient/General/Weak Form PDE，以及具有
+  精确类型和属性白名单的原子边界批量配置。
 - **安全的求解器所有权。** ASCII 路径租约、进程身份核验、外部客户端检测、状态和预检可避免意外启动并发 COMSOL 客户端。
 - **持久化后台任务。** 分段扫描和自适应光谱表征在独立 worker 中执行，具有不可变规格、原子状态、经 `fsync` 的证据行、检查点、校验后的恢复，以及已验证的同主机取消能力。
 - **共享 Desktop 协作（默认关闭）。** `desktop_shared` profile 可连接用户手动启动的本地 COMSOL Server，精确采用一个 Server 模型，执行非拥有式租约和 revision lock，运行持久化 attached job，并在 detach 时保留用户的 Server、Desktop、listener 和模型。
@@ -98,7 +101,7 @@ shared-server 或 Java 设置需要重启 MCP host；随后调用 `capabilities`
 | Profile | 适用场景 |
 | --- | --- |
 | `core`（默认） | 紧凑且成熟的控制面：状态、所有权、会话/模型检查、单点求解/求值及词法手册检索。 |
-| `basic_fem` | 在 `core` 基础上增加传统 FEM 的类型化构建、派生几何编辑和有界导出。 |
+| `basic_fem` | 在 `core` 基础上增加传统 FEM 的类型化构建、命名 selection、Pressure Acoustics 与数学 PDE、派生几何编辑和有界导出。 |
 | `wave_optics` | 超表面推荐：在 `core` 基础上增加派生几何编辑、材料预览、locale-safe 场数据发现及有界 NPZ/manifest 提取、周期网格审计/冒烟、视觉审查合同、Wave Optics 预检和单点/参考审计。持久化分段任务仍通过 `job_submit`。 |
 | `desktop_shared` | 显式选择的 shared Desktop/attached-Server 工作流；要求 `profile.name=desktop_shared` 且 `shared_server.enabled=true`、用户手动启动本地 Server、每次 attach 的用户确认、精确进程/listener 身份和精确模型采用；不会启动或终止外部 Server。 |
 | `semantic_docs` | 在 `core` 基础上增加隔离的实验性向量辅助手册检索。 |
@@ -124,6 +127,40 @@ experimental 兼容界面，不能替代受保护的 shared-session 生命周期
 3. 使用会话/模型工具，或提交持久化分段扫描。
 
 当检测到外部 MPh/COMSOL 所有者或有效租约时，服务器会拒绝继续启动。`solver_recover_stale_lease` 只有在进程身份信息证明租约过期时才移除它，绝不会终止不属于本服务器的进程。
+
+### 平行板电容器端到端示例
+
+源码仓库包含一个三维介质电容器示例。脚本根据实际测得的边界中心和法向识别两块
+电极，分别设置接地与电势边界，并建立静电场稳态研究。默认只构建模型；加入
+`--solve` 后，会将电场能量算出的电容与
+`真空介电常数 × 相对介电常数 × 面积 ÷ 间距` 的解析结果比较。
+
+```powershell
+python -m recipes.parallel_plate_capacitor `
+  --output-model D:\comsol_outputs\parallel_plate_capacitor.mph `
+  --solve
+```
+
+该示例与需要许可证的端到端探针共用建模和验收函数。脚本会先检查求解器所有权，
+清理 COMSOL 客户端并释放租约后才发布最终模型。除非显式加入
+`--overwrite-output`，否则不会覆盖已有输出。
+
+### 最小 Pressure Acoustics 示例
+
+源码仓库包含一个具有物理意义的二维空气管道示例。上下边界为刚性壁，左侧施加
+一帕压力，右侧压力为零；默认频率低于第一横向截止频率。默认只构建模型；加入
+`--solve` 后，脚本会将管道中心的数值压力与一维 Helmholtz 解析解比较，误差通过后
+才把收据标记为已验证。
+
+```powershell
+python -m recipes.acoustic_duct_2d `
+  --output-model D:\comsol_outputs\minimal_acoustic_duct.mph `
+  --solve
+```
+
+脚本会先执行新的求解器所有权预检，要求四条命名边界互不重复，保存到唯一暂存
+模型，清理 COMSOL client 和租约后才发布最终 `.mph`。除非显式加入
+`--overwrite-output`，否则绝不覆盖已有输出。
 
 持久化扫描控制工具为 `job_submit`、`job_status`、`job_tail`、`job_cancel` 和 `job_resume`。每个任务在 ASCII-only runtime 目录中保存不可变规格、状态、CSV 日志、检查点和日志文件。恢复时只接受规格一致、数值有限且成功完成的行。只有 worker/相关进程清理和租约释放都得到验证后，取消才会进入终态。此协调机制仅适用于同一台主机上共享 runtime 目录的任务，不是分布式或跨主机取消。
 
@@ -288,7 +325,7 @@ python -m pip install .
 
 # 推荐离线手册索引；输出目录必须只含 ASCII 字符。
 python -m pip install ".[manuals]"
-python -m src.knowledge.lexical_manual build --index D:\comsol_docs_fts\manuals.sqlite3
+python -m comsol_mcp.knowledge.lexical_manual build --index D:\comsol_docs_fts\manuals.sqlite3
 ```
 
 如需可选的隔离语义检索（sentence-transformers，不含 ChromaDB）：

@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import os
 import socket
 import sqlite3
 import statistics
@@ -18,7 +17,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 import psutil
-from src.durable.io import snapshot_file_bounded
+from src.durable.io import atomic_write_bytes, snapshot_file_bounded
 from src.jobs.store import JobLock
 from src.knowledge.semantic_contracts import (
     SEMANTIC_PROMOTION_GATE,
@@ -360,16 +359,11 @@ def _soak(
 
 
 def _atomic_write(path: Path, value: Mapping[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".tmp-{uuid.uuid4().hex[:8]}")
-    try:
-        with temporary.open("wb") as handle:
-            handle.write(json.dumps(value, ensure_ascii=False, allow_nan=False, indent=2).encode("utf-8") + b"\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, path)
-    finally:
-        temporary.unlink(missing_ok=True)
+    payload = (
+        json.dumps(value, ensure_ascii=False, allow_nan=False, indent=2).encode("utf-8")
+        + b"\n"
+    )
+    atomic_write_bytes(path, payload)
 
 
 def _run_benchmark(output_path: Path) -> None:

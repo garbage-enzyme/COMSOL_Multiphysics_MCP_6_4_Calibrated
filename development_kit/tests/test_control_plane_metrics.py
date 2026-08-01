@@ -65,6 +65,20 @@ def test_metrics_window_is_bounded_and_reports_nearest_rank_latency():
     }
 
 
+def test_metrics_bounds_operation_cardinality_and_evicts_matching_totals():
+    metrics = ControlPlaneMetrics(window_size=2, max_operations=3)
+    for operation in ("first", "second", "third"):
+        metrics.record(operation, 0.1, {"success": True})
+    metrics.record("first", 0.2, {"success": True})
+    metrics.record("fourth", 0.3, {"success": True})
+
+    assert metrics.summary("second")["window_samples"] == 0
+    assert metrics.summary("second")["total_recorded"] == 0
+    assert metrics.summary("first")["total_recorded"] == 2
+    assert metrics.summary("third")["total_recorded"] == 1
+    assert metrics.summary("fourth")["total_recorded"] == 1
+
+
 def test_metrics_classify_structured_busy_timeout_and_error():
     metrics = ControlPlaneMetrics(window_size=8)
     metrics.record(
@@ -91,6 +105,36 @@ def test_metrics_classify_structured_busy_timeout_and_error():
     }
 
 
+def test_metrics_prefer_structured_codes_and_restrict_text_fallback():
+    metrics = ControlPlaneMetrics(window_size=8)
+    cases = [
+        ({"success": False, "error": {"code": "queue_full", "message": "full"}}, "busy"),
+        (
+            {
+                "success": False,
+                "error": {"code": "deadline_exceeded", "message": "late"},
+            },
+            "timeout",
+        ),
+        (
+            {
+                "success": False,
+                "error": {"code": "rule_failure", "message": "worker queue is full"},
+            },
+            "error",
+        ),
+        ({"success": False, "error": "business rule failed"}, "error"),
+        ({"success": False, "error": "quota exceeded"}, "error"),
+        ({"success": False, "error": "worker queue is full"}, "busy"),
+        ({"success": False, "error": "request deadline exceeded"}, "timeout"),
+    ]
+
+    for index, (result, expected) in enumerate(cases):
+        operation = f"case-{index}"
+        metrics.record(operation, 0.1, result)
+        assert metrics.summary(operation)["outcomes"][expected] == 1
+
+
 def test_capability_job_and_manual_tools_attach_bounded_evidence(runtime_root, monkeypatch):
     capabilities = get_capabilities()
     assert capabilities["control_plane"]["operation"] == "capabilities"
@@ -105,10 +149,12 @@ def test_capability_job_and_manual_tools_attach_bounded_evidence(runtime_root, m
     assert status["control_plane"]["outcome"] == "error"
     assert tail["control_plane"]["operation"] == "job_tail"
 
-    responses = iter([
-        {"success": False, "error": {"code": "busy", "message": "worker queue is full"}},
-        {"success": False, "error_type": "TimeoutError", "error": "deadline exceeded"},
-    ])
+    responses = iter(
+        [
+            {"success": False, "error": {"code": "busy", "message": "worker queue is full"}},
+            {"success": False, "error_type": "TimeoutError", "error": "deadline exceeded"},
+        ]
+    )
     monkeypatch.setattr(lexical_module, "run_bounded", lambda *_args, **_kwargs: next(responses))
     manual_server = FastMCP("control-plane-manuals")
     lexical_module.register_lexical_manual_tools(manual_server)
@@ -207,13 +253,15 @@ def test_concurrent_wrappers_record_bounded_latency_and_overload_outcomes(
 
     calls = []
     for index in range(30):
-        calls.extend([
-            lambda: get_capabilities(),
-            lambda: ownership_server._tool_manager._tools["solver_status"].fn(),
-            lambda: jobs_server._tool_manager._tools["job_status"].fn("missing"),
-            lambda: jobs_server._tool_manager._tools["job_tail"].fn("missing", 5),
-            lambda: manual_server._tool_manager._tools["manual_search"].fn("query"),
-        ])
+        calls.extend(
+            [
+                lambda: get_capabilities(),
+                lambda: ownership_server._tool_manager._tools["solver_status"].fn(),
+                lambda: jobs_server._tool_manager._tools["job_status"].fn("missing"),
+                lambda: jobs_server._tool_manager._tools["job_tail"].fn("missing", 5),
+                lambda: manual_server._tool_manager._tools["manual_search"].fn("query"),
+            ]
+        )
 
     with ThreadPoolExecutor(max_workers=16) as executor:
         responses = list(executor.map(lambda callback: callback(), calls))
@@ -239,10 +287,12 @@ def test_concurrent_wrappers_record_bounded_latency_and_overload_outcomes(
         "timeout": 10,
         "error": 0,
     }
-    assert max(
-        len(json.dumps(response["control_plane"], ensure_ascii=False))
-        for response in responses
-    ) < 1000
+    assert (
+        max(
+            len(json.dumps(response["control_plane"], ensure_ascii=False)) for response in responses
+        )
+        < 1000
+    )
 
 
 def _profiled_preflight_server() -> FastMCP:
@@ -420,9 +470,7 @@ def test_lightweight_job_summaries_find_active_jobs_older_than_recent_limit(tmp_
     assert [item["job_id"] for item in result["active"]] == ["active-oldest"]
 
 
-def test_standard_library_comsol_discovery_matches_mph_windows_shape(
-    tmp_path, monkeypatch
-):
+def test_standard_library_comsol_discovery_matches_mph_windows_shape(tmp_path, monkeypatch):
     import winreg
 
     root = tmp_path / "Multiphysics"

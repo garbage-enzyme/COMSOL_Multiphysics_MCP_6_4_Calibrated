@@ -238,7 +238,9 @@ def _normalize_refinement_policy(value: object) -> dict[str, Any]:
         positive=True,
     )
     if shrink <= 1.0 or shrink > 16.0:
-        raise ValueError("refinement_policy.span_shrink_factor must be greater than 1 and at most 16")
+        raise ValueError(
+            "refinement_policy.span_shrink_factor must be greater than 1 and at most 16"
+        )
     return {
         "maximum_stages": stages,
         "points_per_stage": points,
@@ -378,7 +380,9 @@ def _normalize_collector(value: object) -> dict[str, Any]:
     for axis in ("x", "y", "z"):
         limits = coordinate_range[axis]
         if not isinstance(limits, list) or len(limits) != 2:
-            raise ValueError(f"collector.inputs.top_air_coordinate_range.{axis} must contain two limits")
+            raise ValueError(
+                f"collector.inputs.top_air_coordinate_range.{axis} must contain two limits"
+            )
         low = _finite(limits[0], f"collector.inputs.top_air_coordinate_range.{axis}[0]")
         high = _finite(limits[1], f"collector.inputs.top_air_coordinate_range.{axis}[1]")
         if low > high:
@@ -416,10 +420,8 @@ def validate_spectral_driver_identity(spec: Mapping[str, Any]) -> dict[str, str]
     return expected
 
 
-def normalize_spectral_characterization_job_spec(raw_spec: object) -> dict[str, Any]:
-    """Normalize one immutable adaptive spectrum request without importing COMSOL."""
-    raw = _mapping(raw_spec, "spectral characterization job specification")
-    allowed = {
+_SPECTRAL_CHARACTERIZATION_INPUT_FIELDS = frozenset(
+    {
         "job_type",
         "source_model_path",
         "source_model_relative_identity",
@@ -439,10 +441,19 @@ def normalize_spectral_characterization_job_spec(raw_spec: object) -> dict[str, 
         "max_retries",
         "continue_on_error",
     }
+)
+
+
+def normalize_spectral_characterization_job_spec(raw_spec: object) -> dict[str, Any]:
+    """Normalize one immutable adaptive spectrum request without importing COMSOL."""
+    raw = _mapping(raw_spec, "spectral characterization job specification")
+    allowed = _SPECTRAL_CHARACTERIZATION_INPUT_FIELDS
     unknown = sorted(set(raw) - allowed)
     missing = sorted(allowed - {"version", "max_retries", "continue_on_error"} - set(raw))
     if unknown or missing:
-        raise ValueError(f"spectral characterization job has unsupported={unknown} missing={missing}")
+        raise ValueError(
+            f"spectral characterization job has unsupported={unknown} missing={missing}"
+        )
     if raw.get("job_type") != "spectral_characterization":
         raise ValueError("job_type must be spectral_characterization")
 

@@ -591,14 +591,21 @@ def test_public_tool_structures_extreme_integer_rejection():
 
 def test_public_convergence_tool_never_constructs_a_comsol_client():
     code = """
+import asyncio
 import mph
 mph.Client = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError('Client called'))
 from mcp.server.fastmcp import FastMCP
+from development_kit.tests.test_convergence_evaluation import _levels, _policy
 from src.tools.convergence_evaluation import register_convergence_evaluation_tools
 server = FastMCP('solver-free-convergence-subprocess')
 register_convergence_evaluation_tools(server)
-result = server._tool_manager._tools['convergence_evaluate'].fn(convergence_policy={})
-assert result['success'] is False
+result = asyncio.run(server.call_tool('convergence_evaluate', {
+    'ladder_spec': {'ladder_id': 'solver-free-path', 'levels': _levels()},
+    'convergence_policy': _policy(),
+}))
+if isinstance(result, tuple):
+    result = result[1]
+assert result['success'] is True
 assert result['solver_started'] is False
 """
     completed = subprocess.run(

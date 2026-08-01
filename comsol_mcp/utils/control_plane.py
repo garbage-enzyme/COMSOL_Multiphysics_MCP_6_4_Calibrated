@@ -4,14 +4,18 @@ from __future__ import annotations
 
 import logging
 import math
+import re
 import threading
 import time
-from collections import Counter, deque
+from collections import Counter, OrderedDict, deque
 from typing import Any, Callable
 
 CONTROL_PLANE_SCHEMA_VERSION = "1.0.0"
 CONTROL_PLANE_WINDOW_SIZE = 256
+CONTROL_PLANE_MAX_OPERATIONS = 128
 logger = logging.getLogger(__name__)
+_BUSY_ERROR_CODES = frozenset({"busy", "queue_full", "resource_busy", "worker_queue_full"})
+_TIMEOUT_ERROR_CODES = frozenset({"deadline_exceeded", "timed_out", "timeout"})
 
 
 def _outcome(result: dict[str, Any]) -> str:
@@ -19,14 +23,19 @@ def _outcome(result: dict[str, Any]) -> str:
         return "success"
     error = result.get("error")
     error_code = error.get("code") if isinstance(error, dict) else None
-    text = " ".join(
-        str(value)
-        for value in (result.get("error_type"), error_code, error)
-        if value is not None
-    ).casefold()
-    if error_code == "busy" or "queue is full" in text or " busy" in f" {text}":
+    normalized_code = str(error_code).strip().casefold() if error_code is not None else None
+    if normalized_code in _BUSY_ERROR_CODES:
         return "busy"
-    if any(token in text for token in ("timeout", "timed out", "deadline", "exceeded")):
+    if normalized_code in _TIMEOUT_ERROR_CODES:
+        return "timeout"
+    if normalized_code is not None:
+        return "error"
+    text = " ".join(
+        str(value) for value in (result.get("error_type"), error) if value is not None
+    ).casefold()
+    if "queue is full" in text or "queue full" in text or re.search(r"\bbusy\b", text):
+        return "busy"
+    if any(token in text for token in ("timeout", "timed out", "deadline exceeded")):
         return "timeout"
     return "error"
 
@@ -43,15 +52,24 @@ def _percentile(values: list[float], fraction: float) -> float:
 class ControlPlaneMetrics:
     """Thread-safe rolling metrics with fixed memory per named operation."""
 
-    def __init__(self, window_size: int = CONTROL_PLANE_WINDOW_SIZE):
+    def __init__(
+        self,
+        window_size: int = CONTROL_PLANE_WINDOW_SIZE,
+        max_operations: int = CONTROL_PLANE_MAX_OPERATIONS,
+    ):
         if not 1 <= int(window_size) <= 4096:
             raise ValueError("control-plane window_size must be between 1 and 4096")
+        if not 1 <= int(max_operations) <= 4096:
+            raise ValueError("control-plane max_operations must be between 1 and 4096")
         self.window_size = int(window_size)
+        self.max_operations = int(max_operations)
         self._lock = threading.Lock()
-        self._samples: dict[str, deque[tuple[float, str]]] = {}
+        self._samples: OrderedDict[str, deque[tuple[float, str]]] = OrderedDict()
         self._totals: Counter[str] = Counter()
 
-    def record(self, operation: str, latency_seconds: float, result: dict[str, Any]) -> dict[str, Any]:
+    def record(
+        self, operation: str, latency_seconds: float, result: dict[str, Any]
+    ) -> dict[str, Any]:
         operation = str(operation)
         latency = float(latency_seconds)
         if not operation or len(operation) > 80:
@@ -60,10 +78,14 @@ class ControlPlaneMetrics:
             raise ValueError("control-plane latency must be finite and nonnegative")
         outcome = _outcome(result)
         with self._lock:
+            if operation not in self._samples and len(self._samples) >= self.max_operations:
+                evicted, _samples = self._samples.popitem(last=False)
+                self._totals.pop(evicted, None)
             samples = self._samples.setdefault(
                 operation,
                 deque(maxlen=self.window_size),
             )
+            self._samples.move_to_end(operation)
             samples.append((latency, outcome))
             self._totals[operation] += 1
             return self._summary_unlocked(operation)
@@ -92,8 +114,7 @@ class ControlPlaneMetrics:
             "window_samples": len(samples),
             "total_recorded": int(self._totals.get(operation, 0)),
             "outcomes": {
-                name: int(counts.get(name, 0))
-                for name in ("success", "busy", "timeout", "error")
+                name: int(counts.get(name, 0)) for name in ("success", "busy", "timeout", "error")
             },
             "latency": latency,
         }
@@ -159,6 +180,7 @@ def measured_call(
 
 
 __all__ = [
+    "CONTROL_PLANE_MAX_OPERATIONS",
     "CONTROL_PLANE_SCHEMA_VERSION",
     "CONTROL_PLANE_WINDOW_SIZE",
     "ControlPlaneMetrics",

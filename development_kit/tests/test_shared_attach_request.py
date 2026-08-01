@@ -7,9 +7,9 @@ import sys
 from pathlib import Path
 
 import pytest
-
 from src.shared_session.attach_request import normalize_shared_server_attach_request
 from src.shared_session.contracts import SHARED_SERVER_FEATURE_ENV
+from src.shared_session.lifecycle import SharedSessionManager
 
 
 def _request():
@@ -65,13 +65,18 @@ def test_attach_request_normalizes_exact_endpoint():
 def test_malformed_attach_request_is_rejected_before_lease_callback(raw_request):
     lease_calls = []
 
+    def ownership_factory():
+        lease_calls.append("ownership_factory")
+        return object()
+
+    manager = SharedSessionManager(ownership_factory=ownership_factory)
+
     with pytest.raises(ValueError):
-        normalized = normalize_shared_server_attach_request(
+        manager.attach(
             raw_request,
             profile="desktop_shared",
             environ={SHARED_SERVER_FEATURE_ENV: "true"},
         )
-        lease_calls.append(normalized)
 
     assert lease_calls == []
 

@@ -101,6 +101,18 @@ class JavaTagComponent(FakeComponent):
         return JavaTagMeshList(self.meshes)
 
 
+class JavaTagComponentList(FakeComponentList):
+    def tags(self):
+        return [JavaStringLike("comp1")]
+
+
+class JavaTagJava(FakeJava):
+    def component(self, tag=None):
+        if tag is None:
+            return JavaTagComponentList(self.component_node)
+        return super().component(tag)
+
+
 def test_get_mesh_info_uses_clientapi_counts():
     result = get_mesh_info(FakeModel({"mesh1": FakeMesh()}))
 
@@ -148,9 +160,7 @@ def test_get_mesh_info_reports_available_tags():
 
 
 def test_get_mesh_info_rejects_wrong_component_tag():
-    result = get_mesh_info(
-        FakeModel({"mesh1": FakeMesh()}), component_name="missing"
-    )
+    result = get_mesh_info(FakeModel({"mesh1": FakeMesh()}), component_name="missing")
 
     assert result["success"] is False
     assert "component" in result["error"].lower()
@@ -158,12 +168,13 @@ def test_get_mesh_info_rejects_wrong_component_tag():
 
 def test_get_mesh_info_normalizes_java_string_tags():
     model = FakeModel({"mesh1": JavaTagMesh()})
-    model.java = FakeJava(JavaTagComponent({"mesh1": JavaTagMesh()}))
+    model.java = JavaTagJava(JavaTagComponent({"mesh1": JavaTagMesh()}))
 
     result = get_mesh_info(model)
 
     assert result["success"] is True
     assert result["mesh"]["name"] == "mesh1"
+    assert result["mesh"]["component"] == "comp1"
     assert result["mesh"]["features"] == ["size", "ftet1"]
 
 

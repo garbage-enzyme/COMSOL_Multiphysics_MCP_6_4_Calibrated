@@ -104,9 +104,7 @@ def test_model_selector_normalizes_unicode_saved_path():
 
 
 def test_model_selector_supports_explicit_unsaved_confirmation():
-    selector = normalize_shared_model_selector(
-        {"tag": "model1", "expected_unsaved": True}
-    )
+    selector = normalize_shared_model_selector({"tag": "model1", "expected_unsaved": True})
 
     assert selector.expected_file_path is None
     assert selector.expected_unsaved is True
@@ -122,6 +120,8 @@ def test_model_selector_supports_explicit_unsaved_confirmation():
         {"tag": "model1", "expected_file_path": "relative.mph"},
         {"tag": "model1", "expected_file_path": "C:\\x.mph", "expected_unsaved": True},
         {"tag": "model1", "expected_unsaved": False},
+        {"tag": "model1"},
+        {"tag": "model1", "expected_label": "Valid label"},
         {"tag": "model1", "name": "ambiguous"},
     ],
 )

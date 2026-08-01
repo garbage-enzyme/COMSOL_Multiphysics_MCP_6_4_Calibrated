@@ -129,6 +129,7 @@ def test_source_or_extraction_changes_change_request_identity():
         first["views"][0]["source"]["source_fingerprint"]
         != third["views"][0]["source"]["source_fingerprint"]
     )
+    assert first["request_fingerprint"] != third["request_fingerprint"]
 
 
 def test_request_byte_limit_includes_added_fingerprint(monkeypatch):
@@ -137,9 +138,7 @@ def test_request_byte_limit_includes_added_fingerprint(monkeypatch):
     body = dict(normalized)
     body.pop("request_fingerprint")
     pre_fingerprint_size = len(field_bundle_module._canonical_bytes(body))
-    monkeypatch.setattr(
-        field_bundle_module, "MAX_FIELD_REQUEST_BYTES", pre_fingerprint_size
-    )
+    monkeypatch.setattr(field_bundle_module, "MAX_FIELD_REQUEST_BYTES", pre_fingerprint_size)
 
     with pytest.raises(ValueError, match="request exceeds"):
         normalize_field_evidence_request(raw)

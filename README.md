@@ -70,6 +70,10 @@ from documentation, as the authority for the installed tool surface.
 ## Highlights
 
 - **ClientAPI compatibility.** Geometry, physics, materials, meshes, studies, results, model cloning, and Unicode-safe `.mph` saving have licensed acceptance on COMSOL 6.4.0.293; final build changes within 6.4.0.* inherit the release-line conclusion, while other release families remain unknown.
+- **Typed Acoustics and PDE construction.** The `basic_fem` profile includes
+  rollback-safe named Box/side selections, Pressure Acoustics, Coefficient,
+  General, and Weak Form PDE interfaces, and atomic boundary batches with exact
+  type and property allowlists.
 - **Safe solver ownership.** An ASCII-path lease, process identity checks, external-client detection, status, and preflight checks prevent accidental competing COMSOL clients.
 - **Durable background work.** Staged sweeps and adaptive spectral characterization run in detached workers with immutable specifications, atomic state, fsync'd evidence rows, checkpoints, validated resume, and verified same-host cancellation.
 - **Shared Desktop collaboration (default-off).** The `desktop_shared` profile can attach to a manually started local COMSOL Server, adopt exactly one server-held model, enforce non-owning leases and revision locks, run durable attached jobs, and detach without shutting down the user's Server, Desktop, listener, or model.
@@ -111,7 +115,7 @@ fixed for the lifetime of that server process; restart after changing it.
 | Profile | Intended use |
 | --- | --- |
 | `core` (default) | Compact, mature control plane: status, ownership, session/model inspection, one-point solve/evaluation, and lexical manuals. |
-| `basic_fem` | `core` plus typed conventional FEM construction, derived-geometry edits, and bounded exports. |
+| `basic_fem` | `core` plus typed conventional FEM construction, named selections, Pressure Acoustics and mathematical PDE interfaces, derived-geometry edits, and bounded exports. |
 | `wave_optics` | Recommended for metasurfaces: `core` plus derived-geometry edits, material preview, locale-safe field discovery and bounded NPZ/manifest extraction, periodic-mesh audit/smoke, visual-review contracts, Wave Optics preflight, and point/reference audits. Durable staged jobs remain under `job_submit`. |
 | `desktop_shared` | Explicit opt-in shared Desktop/attached-Server workflow; requires `profile.name=desktop_shared` and `shared_server.enabled=true`, a manually started local Server, per-call user confirmation, exact process/listener identity, and exact model adoption. It never starts or terminates the external Server. |
 | `semantic_docs` | `core` plus isolated experimental vector-assisted manual retrieval. |
@@ -139,6 +143,44 @@ Control-plane responses from capabilities, solver ownership, durable jobs, and l
 3. Use the session/model tools or submit a durable staged sweep.
 
 The server fails closed when an external MPh/COMSOL owner or a valid lease is present. `solver_recover_stale_lease` only removes a lease that process identity evidence proves stale; it never terminates an unowned process.
+
+### Parallel-plate capacitor end-to-end example
+
+The source checkout includes a three-dimensional dielectric capacitor recipe.
+It identifies the two electrode faces from their measured centers and normals,
+applies Ground and Electric Potential conditions, and uses a stationary
+Electrostatics study. Build-only is the default; add `--solve` to compare the
+energy-derived capacitance with `epsilon_0 * epsilon_r * area / separation`.
+
+```powershell
+python -m recipes.parallel_plate_capacitor `
+  --output-model D:\comsol_outputs\parallel_plate_capacitor.mph `
+  --solve
+```
+
+The recipe shares its model and validation functions with the licensed e2e
+probe. It performs solver-ownership preflight and publishes the final model only
+after the COMSOL client and lease are released. Existing output is preserved
+unless `--overwrite-output` is explicit.
+
+### Minimal Pressure Acoustics example
+
+The source checkout includes a physical two-dimensional air-duct recipe. It
+uses rigid sidewalls, a one-pascal inlet, and a zero-pressure outlet at a
+frequency below the first transverse cutoff. Build-only is the default; add
+`--solve` to compare the numerical center pressure with the analytical
+one-dimensional Helmholtz solution before the receipt is marked verified.
+
+```powershell
+python -m recipes.acoustic_duct_2d `
+  --output-model D:\comsol_outputs\minimal_acoustic_duct.mph `
+  --solve
+```
+
+The recipe performs a fresh solver-ownership preflight, requires four distinct
+named side selections, saves to a unique staging model, clears the COMSOL client
+and lease, and only then publishes the final `.mph` file. It never overwrites an
+existing output unless `--overwrite-output` is explicit.
 
 Durable sweep controls are `job_submit`, `job_status`, `job_tail`, `job_cancel`, and `job_resume`. Each job has its own ASCII-only runtime directory containing its immutable specification, state, CSV journal, checkpoint, and log. Resume accepts only matching, finite, successful rows. Cancellation reaches a terminal cancelled state only after worker/process cleanup and lease release are verified. This coordination is for a shared runtime directory on one host; it is not distributed execution.
 
@@ -322,7 +364,7 @@ python -m pip install .
 
 # Recommended offline manual index; use an ASCII-only output path.
 python -m pip install ".[manuals]"
-python -m src.knowledge.lexical_manual build --index D:\comsol_docs_fts\manuals.sqlite3
+python -m comsol_mcp.knowledge.lexical_manual build --index D:\comsol_docs_fts\manuals.sqlite3
 ```
 
 For optional isolated semantic retrieval (sentence-transformers, not ChromaDB):

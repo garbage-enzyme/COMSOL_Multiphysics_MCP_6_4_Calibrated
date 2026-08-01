@@ -58,12 +58,19 @@ def test_runner_persists_bounded_summaries_and_skips_exact_completed_points(tmp_
     spec = _spec(tmp_path)
     directory = tmp_path / "job"
     observed = []
+
+    def observe_durable_row(row):
+        replayed = read_validation_rows(directory / "matrix_rows.jsonl", spec)
+        assert replayed[-1] == row
+        assert len(replayed) == row["sequence"]
+        observed.append(row)
+
     first = run_pending_validation_points(
         spec,
         directory,
         attempt=1,
         collector_executor=_complete_executor,
-        on_durable_row=observed.append,
+        on_durable_row=observe_durable_row,
     )
     replay = run_pending_validation_points(
         spec,

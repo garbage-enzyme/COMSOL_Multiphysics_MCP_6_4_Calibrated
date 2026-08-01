@@ -78,6 +78,14 @@ def test_duplicate_append_and_out_of_order_level_directory_fail_closed(tmp_path)
         append_convergence_campaign_level(
             journal, spec, attempt=1, level_dir=first_dir, artifact_root=root
         )
+    second_dir = _complete_level(spec, root, 1)
+    second = append_convergence_campaign_level(
+        journal, spec, attempt=1, level_dir=second_dir, artifact_root=root
+    )
+    later_journal = root / "later-first.jsonl"
+    later_journal.write_text(json.dumps(second) + "\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="ordinal|chain identity"):
+        read_convergence_campaign_levels(later_journal, spec, artifact_root=root)
 
 
 @pytest.mark.parametrize("target", ["summary", "rows", "journal"])
@@ -146,7 +154,9 @@ def test_changed_campaign_identity_cannot_reuse_level_rows(tmp_path):
     append_convergence_campaign_level(
         journal, spec, attempt=1, level_dir=level_dir, artifact_root=root
     )
-    changed = deepcopy(spec)
-    changed["spec_fingerprint"] = "f" * 64
+    changed_raw = deepcopy(raw)
+    changed_raw["wall_time_budget_seconds"] += 1
+    changed = normalize_convergence_campaign_spec(changed_raw)
+    assert changed["spec_fingerprint"] != spec["spec_fingerprint"]
     with pytest.raises(ValueError, match="chain identity"):
         read_convergence_campaign_levels(journal, changed, artifact_root=root)

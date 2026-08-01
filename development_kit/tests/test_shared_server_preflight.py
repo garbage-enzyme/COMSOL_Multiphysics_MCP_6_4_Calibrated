@@ -79,9 +79,7 @@ def test_exact_release_line_is_ready_without_paths_or_mph():
 
 
 def test_final_build_difference_is_accepted_and_reported():
-    result = _classify(
-        _ready(desktop_version="6.4.0.310", server_version="6.4.0.293")
-    )
+    result = _classify(_ready(desktop_version="6.4.0.310", server_version="6.4.0.293"))
 
     assert result["success"] is True
     assert result["warnings"] == ["same_accepted_release_line_build_difference"]
@@ -138,9 +136,7 @@ def test_listener_bind_scope_change_between_probes_is_rejected():
     second["observed_at_epoch"] = 1001.0
     second["listeners"] = [{"host": "0.0.0.0", "port": 2036, "pid": 20}]
 
-    assert _classify(first, second)["state"] == (
-        "listener_bind_scope_changed_between_probes"
-    )
+    assert _classify(first, second)["state"] == ("listener_bind_scope_changed_between_probes")
 
 
 @pytest.mark.parametrize("version", ["6.3.0.405", "6.4.1.12", "6.5.0.1"])
@@ -166,11 +162,14 @@ def test_other_release_lines_are_rejected(version):
             True,
         ),
         (
-            _snapshot([
-                _process(10, "comsol_desktop", windows=1),
-                _process(11, "comsol_desktop", windows=1),
-                _process(20, "comsol_server"),
-            ], [_listener()]),
+            _snapshot(
+                [
+                    _process(10, "comsol_desktop", windows=1),
+                    _process(11, "comsol_desktop", windows=1),
+                    _process(20, "comsol_server"),
+                ],
+                [_listener()],
+            ),
             "ambiguous_gui_clients",
             False,
         ),
@@ -197,10 +196,7 @@ def test_changed_listener_owner_is_rejected():
 
     result = _classify(first, second)
 
-    assert result["state"] in {
-        "process_identity_changed_between_probes",
-        "listener_owner_changed_between_probes",
-    }
+    assert result["state"] == "process_identity_changed_between_probes"
     assert result["success"] is False
 
 
@@ -227,11 +223,15 @@ def test_probe_chronology_must_advance(second_observed):
     assert result["retryable"] is True
 
 
-def test_process_disappearance_between_complete_probes_is_rejected():
+@pytest.mark.parametrize("missing_kind", ["comsol_desktop", "comsol_server", "mph_client"])
+def test_process_disappearance_between_complete_probes_is_rejected(missing_kind):
     first = _ready()
     first["processes"].append(_process(30, "mph_client"))
-    second = _ready()
+    second = deepcopy(first)
     second["observed_at_epoch"] = 1001.0
+    second["processes"] = [
+        process for process in second["processes"] if process["kind"] != missing_kind
+    ]
 
     result = _classify(first, second)
 
@@ -263,6 +263,4 @@ def test_incomplete_inventory_fails_and_unreadable_version_is_classified():
 
     with pytest.raises(ValueError, match="complete"):
         _classify(incomplete)
-    assert _classify(unreadable)["state"] == (
-        "unsupported_or_ambiguous_comsol_version"
-    )
+    assert _classify(unreadable)["state"] == ("unsupported_or_ambiguous_comsol_version")

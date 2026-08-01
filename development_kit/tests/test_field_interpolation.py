@@ -4,10 +4,10 @@ from copy import deepcopy
 
 import numpy as np
 import pytest
-
 from src.evidence.field_bundle import normalize_field_evidence_request
 from src.evidence.field_interpolation import interpolate_field_slice
 from src.evidence.field_sampling import select_field_slice_samples
+
 from development_kit.tests.test_field_bundle import _request
 
 
@@ -54,9 +54,10 @@ def test_linear_interpolation_preserves_convex_hull_gaps():
     result = interpolate_field_slice(request=request, selection=selection)
 
     assert 0 < result["missing_grid_point_count"] < request["grid_point_count"]
-    assert np.isnan(result["quantity_grids"]["electric_norm"]).sum() == result[
-        "missing_grid_point_count"
-    ]
+    assert (
+        np.isnan(result["quantity_grids"]["electric_norm"]).sum()
+        == result["missing_grid_point_count"]
+    )
 
 
 def test_nearest_interpolation_has_complete_coverage():
@@ -86,12 +87,8 @@ def test_exact_duplicate_locations_are_averaged_before_interpolation():
     assert result["collapsed_duplicate_point_count"] == 1
     x_coordinates = result["axis_coordinates"]["x"]
     y_coordinates = result["axis_coordinates"]["y"]
-    column = int(
-        np.flatnonzero(x_coordinates == selection["coordinates"]["x"][0])[0]
-    )
-    row = int(
-        np.flatnonzero(y_coordinates == selection["coordinates"]["y"][0])[0]
-    )
+    column = int(np.flatnonzero(x_coordinates == selection["coordinates"]["x"][0])[0])
+    row = int(np.flatnonzero(y_coordinates == selection["coordinates"]["y"][0])[0])
     for name, values in selection["quantities"].items():
         assert result["quantity_grids"][name][row, column] == pytest.approx(
             (values[0] + values[-1]) / 2.0
@@ -149,6 +146,13 @@ def test_interpolation_rejects_impossible_or_oversized_standalone_counts():
 
 def test_interpolation_revalidates_bounds_slice_and_declared_ranges():
     request, selection = _selection()
+    reordered = deepcopy(selection)
+    permutation = np.array([3, 0, 2, 1])
+    for values in (reordered["coordinates"], reordered["quantities"]):
+        for name in values:
+            values[name] = values[name][permutation]
+    assert interpolate_field_slice(request=request, selection=reordered)["unique_point_count"] == 4
+
     outside = deepcopy(selection)
     outside["coordinates"]["x"][0] = -2.0
     wrong_slice = deepcopy(selection)

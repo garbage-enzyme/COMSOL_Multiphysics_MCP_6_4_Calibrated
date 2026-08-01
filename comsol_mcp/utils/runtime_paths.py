@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 import tempfile
+from pathlib import Path
 
 from comsol_mcp.settings import settings_environment
 
@@ -48,10 +48,11 @@ def default_jobs_root(environ: dict[str, str] | None = None) -> Path:
     if configured:
         jobs_dir = Path(configured)
         explicit_runtime = environment.get("COMSOL_MCP_RUNTIME_DIR")
-        if explicit_runtime and jobs_dir.parent != runtime_dir:
+        if explicit_runtime and jobs_dir.parent.resolve(strict=False) != runtime_dir.resolve(
+            strict=False
+        ):
             raise ValueError(
-                "COMSOL_MCP_JOBS_DIR must be the jobs subdirectory of "
-                "COMSOL_MCP_RUNTIME_DIR"
+                "COMSOL_MCP_JOBS_DIR must be the jobs subdirectory of COMSOL_MCP_RUNTIME_DIR"
             )
         return jobs_dir
     return runtime_dir / "jobs"

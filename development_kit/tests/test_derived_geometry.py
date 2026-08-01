@@ -173,7 +173,7 @@ def test_stale_hash_invalid_feature_partial_vectors_and_nonpositive_size_fail():
 
 
 def test_partial_block_failure_rolls_back_when_setters_remain_available():
-    model, geom, record, state = fixture(fail_second="size")
+    model, _geom, record, state = fixture(fail_second="size")
     preview = preview_blocks(model, record, expected_state_sha256=state, component_tag="comp1", geometry_tag="geom1", block_edits=edits())
     before = _snapshot(model, "comp1", "geom1")
     result = apply_blocks(model, record, preview, "comp1", "geom1")

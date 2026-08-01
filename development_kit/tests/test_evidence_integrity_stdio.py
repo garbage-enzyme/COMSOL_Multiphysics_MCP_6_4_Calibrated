@@ -4,20 +4,20 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 import shutil
 import sys
 import tempfile
 from datetime import timedelta
+from pathlib import Path
 
 import anyio
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
-
-from development_kit.tests.test_portfolio_verifier import _fixture
 from src.evidence.integrity_controls import EVIDENCE_SETTINGS_ENV
 from src.path_policy import ARTIFACT_WRITE_ROOT_ENV
+from src.settings import SETTINGS_PATH_ENV
 
+from development_kit.tests.test_portfolio_verifier import _fixture
 
 ROOT = Path(__file__).parents[2]
 
@@ -42,6 +42,7 @@ def _decode(result) -> dict:
 async def _exercise(request: dict, artifact_root: Path, runtime_root: Path) -> None:
     environment = os.environ.copy()
     environment.pop(EVIDENCE_SETTINGS_ENV, None)
+    environment.pop(SETTINGS_PATH_ENV, None)
     environment.update(
         {
             "COMSOL_MCP_PROFILE": "core",
@@ -79,20 +80,38 @@ async def _exercise(request: dict, artifact_root: Path, runtime_root: Path) -> N
             )
 
     assert capabilities["evidence_integrity"]["strict_verification_active"] is True
-    assert capabilities["evidence_integrity"]["settings_fingerprint_sha256"] == status[
-        "settings_fingerprint_sha256"
-    ]
+    discovery = capabilities["evidence_integrity"]
+    assert discovery["settings_fingerprint_sha256"] == status["settings_fingerprint_sha256"]
+    assert discovery["configuration_state"] == status["configuration_state"] == "valid"
+    assert discovery["settings_source"] == status["settings_source"] == "project_settings"
+    assert discovery["settings_path_included"] is status["settings_path_included"] is False
+    assert discovery["checks"] == status["checks"]
+    assert discovery["disabled_checks"] == status["disabled_checks"] == []
+    assert discovery["warning_codes"] == status["warning_codes"] == []
     assert status["strict_verification_active"] is True
     assert verification["success"] is True
     assert verification["verification_state"] == "verified"
     assert verification["strictly_verified"] is True
-    assert verification["artifact_root_validation"]["paths_included"] is False
+    root_validation = verification["artifact_root_validation"]
+    assert set(root_validation) == {
+        "enforced",
+        "validated_root_count",
+        "root_ids",
+        "paths_included",
+    }
+    assert root_validation["enforced"] is True
+    assert root_validation["validated_root_count"] == 1
+    assert len(root_validation["root_ids"]) == 1
+    assert len(root_validation["root_ids"][0]) == 16
+    assert root_validation["paths_included"] is False
 
 
 def test_source_stdio_client_discovers_and_invokes_both_guard_tools():
-    base = Path("D:/comsol_runtime") if Path("D:/").exists() else Path(
-        os.environ.get("SystemRoot", "C:/Windows")
-    ) / "Temp"
+    base = (
+        Path("D:/comsol_runtime")
+        if Path("D:/").exists()
+        else Path(os.environ.get("SystemRoot", "C:/Windows")) / "Temp"
+    )
     runtime_root = Path(tempfile.mkdtemp(prefix="evidence_stdio_", dir=base))
     artifact_root = runtime_root / "case-one"
     artifact_root.mkdir()

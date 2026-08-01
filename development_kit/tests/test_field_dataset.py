@@ -4,12 +4,12 @@ import hashlib
 
 import numpy as np
 import pytest
-
 from src.evidence.field_bundle import normalize_field_evidence_request
 from src.evidence.field_dataset import (
     collect_existing_dataset_field_evidence,
     collect_validation_matrix_field_evidence,
 )
+
 from development_kit.tests.test_field_bundle import _request
 
 
@@ -150,9 +150,7 @@ def test_existing_dataset_adapter_verifies_readback_and_writes_artifacts(tmp_pat
     assert result["study_run"] is False
     array_path = tmp_path / result["array_artifact"]["relative_path"]
     assert array_path.is_file()
-    assert result["array_artifact"]["sha256"] == hashlib.sha256(
-        array_path.read_bytes()
-    ).hexdigest()
+    assert result["array_artifact"]["sha256"] == hashlib.sha256(array_path.read_bytes()).hexdigest()
     with np.load(array_path, allow_pickle=False) as archive:
         assert archive.files == [
             "coordinate_x",
@@ -229,14 +227,26 @@ def test_adapter_rejects_complex_nonfinite_and_mismatched_evaluation_arrays(tmp_
     complex_values[0] = complex_values[0] + 1j
     nonfinite_values = _Model().values
     nonfinite_values[1][0] = np.nan
-    mismatched_values = _Model().values
-    mismatched_values[-1] = np.ones(2)
+    empty_values = _Model().values
+    empty_values[0] = np.array([])
+    nonnumeric_values = _Model().values
+    nonnumeric_values[0] = np.array(["field"] * 4)
+    first_quantity_mismatch = _Model().values
+    first_quantity_mismatch[0] = np.ones(2)
+    second_quantity_mismatch = _Model().values
+    second_quantity_mismatch[1] = np.ones(2)
+    coordinate_mismatch = _Model().values
+    coordinate_mismatch[-1] = np.ones(2)
 
     for index, (values, message) in enumerate(
         (
             (complex_values, "explicit real scalar expression"),
             (nonfinite_values, "nonfinite values"),
-            (mismatched_values, "incompatible array lengths"),
+            (empty_values, "nonempty numeric array"),
+            (nonnumeric_values, "nonempty numeric array"),
+            (first_quantity_mismatch, "incompatible array lengths"),
+            (second_quantity_mismatch, "incompatible array lengths"),
+            (coordinate_mismatch, "incompatible array lengths"),
         )
     ):
         with pytest.raises(ValueError, match=message):

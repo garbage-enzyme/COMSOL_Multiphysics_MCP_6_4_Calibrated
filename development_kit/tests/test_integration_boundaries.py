@@ -19,6 +19,13 @@ from development_kit.tests.integration import test_real_comsol as real_comsol_ga
 from development_kit.tests.integration import wave_optics_point_audit_acceptance as point_gate
 from development_kit.tests.integration import wave_optics_preflight_acceptance as preflight_gate
 
+ROOT = Path(__file__).parents[2]
+STANDALONE_PROBES = tuple(
+    path.relative_to(ROOT).as_posix()
+    for path in sorted((ROOT / "development_kit/tests/integration/probes").glob("*.py"))
+    if path.name != "__init__.py"
+)
+
 
 def test_clientapi_property_acceptance_uses_explicit_runtime_checks():
     script = (
@@ -247,18 +254,16 @@ def test_unicode_cleanup_continues_after_unlink_failure():
 
 @pytest.mark.parametrize(
     "script_path",
-    [
-        "development_kit/tests/integration/probes/capacitor.py",
-        "development_kit/tests/integration/probes/study_mesh.py",
-        "development_kit/tests/integration/probes/unicode_save.py",
-    ],
+    STANDALONE_PROBES,
 )
 def test_loading_standalone_probe_does_not_create_client(monkeypatch, script_path):
+    assert STANDALONE_PROBES
+
     def fail_client_creation(*args, **kwargs):
         raise AssertionError("mph.Client must not be called while loading a probe")
 
     monkeypatch.setattr(mph, "Client", fail_client_creation)
-    full_path = Path(__file__).parents[2] / script_path
+    full_path = ROOT / script_path
 
     namespace = runpy.run_path(str(full_path), run_name="probe_import_test")
 
@@ -272,7 +277,11 @@ def test_capacitor_probe_uses_one_parameterized_geometry_and_theory(monkeypatch)
         run_name="capacitor_contract_test",
     )
 
-    assert namespace["_geometry_size_expressions"]() == ("L", "L", "d")
+    assert namespace["_geometry_size_expressions"]() == (
+        "plate_side",
+        "plate_side",
+        "plate_gap",
+    )
     expected = 8.8541878128e-12 * 2.1 * (0.01**2) / 0.001 * 1e12
     assert namespace["_theoretical_capacitance_pf"]() == pytest.approx(expected)
 

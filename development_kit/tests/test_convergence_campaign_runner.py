@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -191,17 +192,20 @@ def test_unresolved_level_is_scientific_completion_not_execution_failure(tmp_pat
 
 
 def test_changed_stop_policy_has_a_distinct_campaign_identity(tmp_path):
-    first = _spec(tmp_path / "first", early=False)
-    raw = _raw_campaign(tmp_path / "second" / "sources")
+    raw = _raw_campaign(tmp_path / "sources")
     raw["convergence_policy"]["declared_cap_reached"] = False
-    raw["stop_policy"]["allow_early_acceptance"] = True
-    changed = normalize_convergence_campaign_spec(raw)
+    first = normalize_convergence_campaign_spec(deepcopy(raw))
+    changed_raw = deepcopy(raw)
+    changed_raw["stop_policy"]["allow_early_acceptance"] = True
+    changed = normalize_convergence_campaign_spec(changed_raw)
+    assert changed_raw["levels"] == raw["levels"]
+    assert changed_raw["convergence_policy"] == raw["convergence_policy"]
     assert changed["spec_fingerprint"] != first["spec_fingerprint"]
 
 
 def test_level_directory_stays_inside_the_windows_legacy_path_budget():
     root = Path("D:/comsol_runtime/jobs") / ("job-" + "a" * 32)
-    directory = convergence_level_directory(root, 7)
+    directory = convergence_level_directory(root, 99)
     suffix = (
         "point_artifacts/"
         + "b" * 64
@@ -209,5 +213,5 @@ def test_level_directory_stays_inside_the_windows_legacy_path_budget():
         + "b" * 64
         + "/1784320847805-afba0aeb/manifest.json.tmp-33728"
     )
-    assert directory.name == "l7"
+    assert directory.name == "l99"
     assert len(str(directory / suffix)) <= 259

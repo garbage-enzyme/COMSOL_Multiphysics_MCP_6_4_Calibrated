@@ -180,32 +180,27 @@ assert 'mph' not in sys.modules
 def test_staged_sweep_fingerprint_binds_normalized_attached_backend(tmp_path):
     source = tmp_path / "immutable-source.mph"
     source.write_bytes(b"immutable source")
-    spec = validate_staged_sweep_spec(
-        {
-            "job_type": "staged_sweep",
-            "source_model_path": str(source),
-            "parameter_name": "gap",
-            "parameter_values": [10.0, 11.0],
-            "expressions": ["A"],
-            "execution_backend": _backend(),
-        }
-    )
+    raw = {
+        "job_type": "staged_sweep",
+        "source_model_path": str(source),
+        "parameter_name": "gap",
+        "parameter_values": [10.0, 11.0],
+        "expressions": ["A"],
+        "execution_backend": _backend(),
+    }
+    spec = validate_staged_sweep_spec(raw)
 
     assert spec["execution_backend"]["kind"] == "attached_shared_server"
     assert len(spec["execution_backend"]["backend_identity_sha256"]) == 64
+    assert spec["spec_fingerprint"] == validate_staged_sweep_spec(deepcopy(raw))["spec_fingerprint"]
+    changed = deepcopy(raw)
+    changed["execution_backend"]["source_model_lock_sha256"] = "c" * 64
+    changed_spec = validate_staged_sweep_spec(changed)
     assert (
-        spec["spec_fingerprint"]
-        == validate_staged_sweep_spec(
-            {
-                "job_type": "staged_sweep",
-                "source_model_path": str(source),
-                "parameter_name": "gap",
-                "parameter_values": [10.0, 11.0],
-                "expressions": ["A"],
-                "execution_backend": _backend(),
-            }
-        )["spec_fingerprint"]
+        changed_spec["execution_backend"]["backend_identity_sha256"]
+        != spec["execution_backend"]["backend_identity_sha256"]
     )
+    assert changed_spec["spec_fingerprint"] != spec["spec_fingerprint"]
 
 
 def test_attached_runtime_restores_exact_target_and_accepts_unchanged_readback():
@@ -684,9 +679,7 @@ def test_attached_resume_rejects_stale_advanced_or_structural_revision(
         production_worker._select_attached_model(Client(), target, expected)
 
 
-def test_attached_resume_skips_unrelated_local_owned_lease_recovery(
-    ascii_job_root, monkeypatch
-):
+def test_attached_resume_skips_unrelated_local_owned_lease_recovery(ascii_job_root, monkeypatch):
     import src.tools.ownership as ownership_module
 
     source = ascii_job_root / "immutable-source.mph"
@@ -1115,9 +1108,7 @@ def test_attached_cancel_cleanup_requires_external_server_preservation(ascii_job
     assert changed["attached_external_resources"]["success"] is False
 
 
-def test_attached_cancel_cleanup_requires_recorded_model_preservation(
-    ascii_job_root, monkeypatch
-):
+def test_attached_cancel_cleanup_requires_recorded_model_preservation(ascii_job_root, monkeypatch):
     import src.shared_session.process_probe as process_probe
 
     source = ascii_job_root / "immutable-source.mph"

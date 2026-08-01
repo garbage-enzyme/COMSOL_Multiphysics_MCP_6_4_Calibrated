@@ -11,6 +11,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   report:
     runs-on: windows-latest
@@ -25,12 +29,67 @@ jobs:
           cache: pip
       - name: Install package for metadata inspection
         run: python -m pip install ".[dev]"
-      - name: List installed direct dependency versions
-        run: python -m pip list --format=freeze
-      - name: Check for outdated dependencies
-        run: python -m pip list --outdated --format=json
+      - name: Capture complete installed environment
+        run: python -m pip list --format=json | Set-Content -Encoding utf8 installed-environment.json
+      - name: Capture outdated dependencies
+        run: python -m pip list --outdated --format=json | Set-Content -Encoding utf8 outdated-dependencies.json
       - name: Verify pip check
         run: python -m pip check
+      - name: Build reviewed dependency drift report
+        run: |
+          $testedPath = "constraints/tested_versions.json"
+          $lockPath = "constraints/release_locked_py314.txt"
+          $tested = Get-Content -Raw $testedPath | ConvertFrom-Json
+          $installed = @(Get-Content -Raw installed-environment.json | ConvertFrom-Json)
+          $outdated = @(Get-Content -Raw outdated-dependencies.json | ConvertFrom-Json)
+          $testedHash = (Get-FileHash -Algorithm SHA256 $testedPath).Hash.ToLowerInvariant()
+          $lockText = (Get-Content -Raw $lockPath).Replace("`r`n", "`n")
+          $lockBytes = [Text.Encoding]::UTF8.GetBytes($lockText)
+          $lockDigest = [Security.Cryptography.SHA256]::Create()
+          try {
+            $lockHash = [BitConverter]::ToString($lockDigest.ComputeHash($lockBytes)).Replace("-", "").ToLowerInvariant()
+          } finally {
+            $lockDigest.Dispose()
+          }
+          if ($tested.release_lock.path -ne $lockPath) { throw "reviewed release-lock path differs" }
+          if ($tested.release_lock.sha256 -ne $lockHash) { throw "reviewed release-lock hash differs" }
+          $installedByName = @{}
+          foreach ($item in $installed) { $installedByName[$item.name] = $item.version }
+          $comparison = @(
+            foreach ($property in $tested.production_python_3_14.direct_dependencies.PSObject.Properties) {
+              $actual = $installedByName[$property.Name]
+              [ordered]@{
+                name = $property.Name
+                reviewed_version = $property.Value
+                installed_version = $actual
+                status = if ($null -eq $actual) { "missing" } elseif ($actual -eq $property.Value) { "matched" } else { "drifted" }
+              }
+            }
+          )
+          $report = [ordered]@{
+            schema_name = "comsol_mcp.dependency_drift_report"
+            schema_version = "1.0.0"
+            generated_at_utc = (Get-Date).ToUniversalTime().ToString("o")
+            source_commit = $env:GITHUB_SHA
+            reviewed_inputs = [ordered]@{
+              tested_versions = [ordered]@{ path = $testedPath; sha256 = $testedHash }
+              release_lock = [ordered]@{ path = $lockPath; sha256 = $lockHash }
+            }
+            direct_dependency_comparison = $comparison
+            installed_environment = $installed
+            outdated_dependencies = $outdated
+            pip_check = "passed"
+          }
+          $report | ConvertTo-Json -Depth 20 | Set-Content -Encoding utf8 dependency-drift-report.json
+          "Dependency drift report generated for commit ``$env:GITHUB_SHA`` and uploaded as a workflow artifact." | Add-Content $env:GITHUB_STEP_SUMMARY
+      # actions/upload-artifact v7.0.1
+      - name: Upload dependency drift report
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: dependency-drift-report-${{ github.run_id }}
+          path: dependency-drift-report.json
+          if-no-files-found: error
+          retention-days: 30
 
 # This workflow opens information only. Dependency updates require a human
 # review of the tested_versions manifest, test results, and a recorded decision

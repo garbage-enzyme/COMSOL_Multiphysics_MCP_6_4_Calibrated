@@ -294,7 +294,7 @@ def test_compatibility_listener_evidence_is_explicitly_sampled_not_exhaustive():
 def test_production_runtime_guards_survive_python_optimization():
     assert_statements = []
     for package in ("comsol_mcp", "src"):
-        for path in (ROOT / package).rglob("*.py"):
+        for path in sorted((ROOT / package).rglob("*.py")):
             tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
             assert_statements.extend(
                 f"{path.relative_to(ROOT)}:{node.lineno}"
@@ -331,6 +331,12 @@ else:
         timeout=20,
     )
     assert completed.returncode == 0, completed.stderr
+
+
+def test_wheel_distributes_only_the_canonical_top_level_package():
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+
+    assert project["tool"]["hatch"]["build"]["targets"]["wheel"]["packages"] == ["comsol_mcp"]
 
 
 def _tracked_entries() -> list[tuple[str, str]]:
@@ -715,6 +721,10 @@ def test_hosted_ci_is_dependency_only_and_real_gate_is_explicit():
         encoding="utf-8"
     )
     dependency_report_data = yaml.safe_load(dependency_report)
+    report_job = dependency_report_data["jobs"]["report"]
+    report_commands = "\n".join(
+        str(step.get("run", "")) for step in report_job["steps"] if isinstance(step, dict)
+    )
     real_gate = (ROOT / "development_kit" / "scripts" / "run_real_release_gate.py").read_text(
         encoding="utf-8"
     )
@@ -755,12 +765,26 @@ def test_hosted_ci_is_dependency_only_and_real_gate_is_explicit():
         for step in job["steps"]
         if "uses" in step
     ]
-    assert len(action_references) == 10
+    assert len(action_references) == 11
     assert all(re.fullmatch(r"[0-9a-f]{40}", revision) for _action, revision in action_references)
     assert "# actions/checkout v7.0.0" in workflow
     assert "# actions/setup-python v6.2.0" in workflow
     assert "# actions/checkout v7.0.0" in dependency_report
     assert "# actions/setup-python v6.2.0" in dependency_report
+    assert "# actions/upload-artifact v7.0.1" in dependency_report
+    assert workflow_data["concurrency"]["cancel-in-progress"] is True
+    assert dependency_report_data["concurrency"]["cancel-in-progress"] is True
+    assert "pip list --format=json" in report_commands
+    assert "List installed direct dependency versions" not in dependency_report
+    assert "constraints/tested_versions.json" in report_commands
+    assert "constraints/release_locked_py314.txt" in report_commands
+    assert "reviewed release-lock hash differs" in report_commands
+    assert "dependency-drift-report.json" in report_commands
+    upload = next(
+        step for step in report_job["steps"] if "actions/upload-artifact" in step.get("uses", "")
+    )
+    assert upload["with"]["path"] == "dependency-drift-report.json"
+    assert upload["with"]["if-no-files-found"] == "error"
     assert all("continue-on-error" not in step for job in jobs.values() for step in job["steps"])
     assert unit_job["name"] == "unit-and-package (Python 3.14, default production lane)"
     assert dependency_job["name"] == ("dependency compatibility (${{ matrix.lane }}, Python 3.14)")
@@ -858,6 +882,18 @@ def test_installed_profiles_must_share_one_release_inventory():
             first,
             {**first, "schema_entry_count": 11},
             profile="full",
+        )
+
+    identity = {"schema_name": "comsol_mcp.deployment_identity"}
+    assert (
+        installed_package_probe._consistent_deployment_identity([identity, dict(identity)])
+        is identity
+    )
+    with pytest.raises(AssertionError, match="no deployment identities"):
+        installed_package_probe._consistent_deployment_identity([])
+    with pytest.raises(AssertionError, match="disagree"):
+        installed_package_probe._consistent_deployment_identity(
+            [identity, {"schema_name": "other"}]
         )
 
 
@@ -962,6 +998,10 @@ def test_minimum_supported_lane_matches_reviewed_manifest_and_package_ranges():
     assert re.fullmatch(r"[0-9a-f]{40}", hosted["source_commit"])
     assert isinstance(hosted["run_id"], int) and hosted["run_id"] > 0
     assert set(hosted["jobs"].values()) == {"passed"}
+    release_lock = manifest["release_lock"]
+    lock_path = ROOT / release_lock["path"]
+    canonical_lock = lock_path.read_bytes().replace(b"\r\n", b"\n")
+    assert hashlib.sha256(canonical_lock).hexdigest() == release_lock["sha256"]
 
 
 def test_python_compatibility_gate_requires_exact_backend_and_clean_control_plane():

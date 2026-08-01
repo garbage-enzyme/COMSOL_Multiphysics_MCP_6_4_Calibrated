@@ -59,9 +59,9 @@ def test_runner_completes_full_bundle_one_durable_point_at_a_time(tmp_path):
     assert descriptor["size_bytes"] == len(bundle_bytes)
     assert descriptor["sha256"] == hashlib.sha256(bundle_bytes).hexdigest()
     bundle = validate_spectral_point_bundle(json.loads(bundle_bytes))
-    assert {
-        item["raw_row_sha256"]: item["row_id"] for item in bundle["rows"]
-    } == {row["row_sha256"]: row["point_id"] for row in rows}
+    assert {item["raw_row_sha256"]: item["row_id"] for item in bundle["rows"]} == {
+        row["row_sha256"]: row["point_id"] for row in rows
+    }
 
 
 @pytest.mark.parametrize(
@@ -99,6 +99,7 @@ def test_faults_resume_without_duplicate_complete_points(tmp_path, phase):
     assert fired is True
     assert result["completed"] is True
     assert len({row["point_fingerprint"] for row in rows_after}) == len(rows_after)
+    assert set(calls.values()) == {1}
     if phase == "after_raw_row":
         assert len(rows_before) == 1
         assert calls[rows_before[0]["point_fingerprint"]] == 1

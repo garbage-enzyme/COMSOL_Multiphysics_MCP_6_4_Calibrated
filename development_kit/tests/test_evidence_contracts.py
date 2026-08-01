@@ -5,7 +5,9 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 from copy import deepcopy
+from pathlib import Path
 
 import pytest
 from src.evidence import contracts as contracts_module
@@ -26,6 +28,8 @@ from src.evidence.contracts import (
     validate_physical_evidence,
     validate_validation_policy,
 )
+
+from comsol_mcp.durable import io as durable_io
 
 SOURCE_HASH = "a" * 64
 CONFIG_HASH = "b" * 64
@@ -122,15 +126,23 @@ def _policy(rule_type: str, *, tolerances: dict, assumptions: dict | None = None
     )
 
 
-def test_same_evidence_and_policy_serialize_byte_stably():
+def _reverse_mapping_order(value):
+    if isinstance(value, dict):
+        return {key: _reverse_mapping_order(item) for key, item in reversed(tuple(value.items()))}
+    if isinstance(value, list):
+        return [_reverse_mapping_order(item) for item in value]
+    return value
+
+
+def test_same_evidence_and_policy_serialize_byte_stably_across_mapping_orders():
     first_evidence = _envelope()
-    second_evidence = _envelope()
     first_policy = _policy(
         "passive_rta_bounds",
         tolerances={"margin": 0.0},
         assumptions={"passive": True, "power_normalized": True},
     )
-    second_policy = deepcopy(first_policy)
+    second_evidence = _reverse_mapping_order(first_evidence)
+    second_policy = _reverse_mapping_order(first_policy)
 
     assert canonical_json_bytes(first_evidence) == canonical_json_bytes(second_evidence)
     assert canonical_json_bytes(first_policy) == canonical_json_bytes(second_policy)
@@ -330,9 +342,11 @@ def test_declared_flux_policy_requires_passive_bounds_and_exact_arithmetic():
     )
 
     valid = evaluate_physical_evidence_policy(_declared_flux_evidence(), policy)
-    reversed_outgoing_sign = evaluate_physical_evidence_policy(
-        _declared_flux_evidence(reflected=-0.4),
-        policy,
+    invalid_outgoing_sign = deepcopy(_declared_flux_evidence())
+    invalid_outgoing_sign.pop("contract_sha256")
+    invalid_outgoing_sign["evidence"]["flux.reflected_positive_power_sign"]["value"] = 0
+    invalid_outgoing_sign = evaluate_physical_evidence_policy(
+        build_physical_evidence(invalid_outgoing_sign), policy
     )
     absorption_above_one = evaluate_physical_evidence_policy(
         _declared_flux_evidence(reflected=-0.4, transmitted=-0.2),
@@ -340,9 +354,12 @@ def test_declared_flux_policy_requires_passive_bounds_and_exact_arithmetic():
     )
 
     assert valid["overall"] == "pass"
-    assert reversed_outgoing_sign["overall"] == "fail"
+    assert invalid_outgoing_sign["overall"] == "fail"
     assert absorption_above_one["overall"] == "fail"
-    assert reversed_outgoing_sign["rules"][0]["checks"]["passive_bounds"] is False
+    sign_checks = invalid_outgoing_sign["rules"][0]["checks"]
+    assert sign_checks["passive_bounds"] is True
+    assert sign_checks["signs_valid"] is False
+    assert sign_checks["arithmetic_consistent"] is False
 
     negative_closure = deepcopy(_declared_flux_evidence())
     negative_closure.pop("contract_sha256")
@@ -514,7 +531,9 @@ def test_legacy_declared_flux_state_cannot_substitute_for_nested_measurements():
         assert migrated["evidence"][f"flux.{name}"]["state"] == "unknown"
 
 
-def test_file_migration_writes_new_hash_bound_artifact_without_touching_source(tmp_path):
+def test_file_migration_writes_new_hash_bound_artifact_without_touching_source(
+    tmp_path, monkeypatch
+):
     legacy = {
         "schema_version": "1",
         "config_id": "legacy-config",
@@ -535,9 +554,21 @@ def test_file_migration_writes_new_hash_bound_artifact_without_touching_source(t
     source_bytes = json.dumps(legacy, indent=2).encode("utf-8")
     source.write_bytes(source_bytes)
     source_stat = source.stat()
+    source_open_flags = []
+    real_open = durable_io.os.open
+
+    def tracked_open(path, flags, *args, **kwargs):
+        if Path(path).resolve() == source.resolve():
+            source_open_flags.append(flags)
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(durable_io.os, "open", tracked_open)
 
     migrated = migrate_legacy_point_audit_file(source, output)
 
+    write_flags = os.O_WRONLY | os.O_RDWR | os.O_APPEND | os.O_CREAT | os.O_TRUNC
+    assert source_open_flags
+    assert all(flags & write_flags == 0 for flags in source_open_flags)
     assert source.read_bytes() == source_bytes
     assert source.stat().st_mtime_ns == source_stat.st_mtime_ns
     assert migrated["migration"]["source_hash_basis"] == "file_bytes"

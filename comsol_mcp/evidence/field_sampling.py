@@ -84,13 +84,16 @@ def select_field_slice_samples(
     mask = np.ones(raw_count, dtype=bool)
     for axis in ("x", "y", "z"):
         lower, upper = request_value["coordinate_bounds"][axis]
-        mask &= coordinate_arrays[axis] >= lower
-        mask &= coordinate_arrays[axis] <= upper
+        inclusive_lower = np.nextafter(float(lower), -np.inf)
+        inclusive_upper = np.nextafter(float(upper), np.inf)
+        mask &= coordinate_arrays[axis] >= inclusive_lower
+        mask &= coordinate_arrays[axis] <= inclusive_upper
     slice_spec = request_value["slice"]
-    mask &= (
-        np.abs(coordinate_arrays[slice_spec["axis"]] - slice_spec["value"])
-        <= slice_spec["tolerance"]
-    )
+    slice_lower = np.nextafter(float(slice_spec["value"] - slice_spec["tolerance"]), -np.inf)
+    slice_upper = np.nextafter(float(slice_spec["value"] + slice_spec["tolerance"]), np.inf)
+    slice_coordinates = coordinate_arrays[slice_spec["axis"]]
+    mask &= slice_coordinates >= slice_lower
+    mask &= slice_coordinates <= slice_upper
     selected_count = int(mask.sum())
     if selected_count == 0:
         raise ValueError("slice selection contains no field samples")

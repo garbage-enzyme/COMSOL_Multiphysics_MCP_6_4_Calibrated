@@ -92,7 +92,9 @@ def test_matrix_field_template_is_normalized_and_bound_to_exact_point(tmp_path):
     source = request["views"][0]["source"]
     assert request["configuration_sha256"] == point["configuration_sha256"]
     assert request["views"][0]["wavelength_m"] == pytest.approx(5.292e-6)
+    assert source["kind"] == "validation_matrix_point"
     assert source["job_id"] == "job-123"
+    assert source["point_id"] == point["point_id"]
     assert source["point_fingerprint"] == point["point_fingerprint"]
     assert source["artifact_id"] == "audit-target"
     assert source["source_model_sha256"] == spec["source_model_sha256"]

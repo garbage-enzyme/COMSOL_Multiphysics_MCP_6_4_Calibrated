@@ -96,13 +96,15 @@ def _raw_campaign(tmp_path) -> dict:
 
 def test_exact_model_ladder_is_canonical_bounded_and_hash_bound(tmp_path):
     raw = _raw_campaign(tmp_path)
+    original = deepcopy(raw)
     expected_source_hashes = [
         hashlib.sha256(Path(level["spectral_job"]["source_model_path"]).read_bytes()).hexdigest()
         for level in raw["levels"]
     ]
     first = normalize_convergence_campaign_spec(raw)
-    second = normalize_convergence_campaign_spec(deepcopy(raw))
+    second = normalize_convergence_campaign_spec(original)
 
+    assert raw == original
     assert first == second
     assert first["declared_level_count"] == 3
     assert first["declared_point_count"] == 30

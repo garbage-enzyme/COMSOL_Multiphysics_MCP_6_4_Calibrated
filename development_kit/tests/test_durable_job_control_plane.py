@@ -1,4 +1,4 @@
-"""Process-only acceptance tests for the durable job durable job control plane."""
+"""Process-only acceptance tests for the durable job control plane."""
 
 from __future__ import annotations
 

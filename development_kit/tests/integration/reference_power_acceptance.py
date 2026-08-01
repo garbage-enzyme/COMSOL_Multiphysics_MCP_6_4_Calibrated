@@ -197,9 +197,14 @@ def _redacted_status(status: dict[str, Any]) -> dict[str, Any]:
 
 
 def _worker_summary(payload: dict[str, Any]) -> dict[str, Any]:
+    public_error = (
+        payload.get("error")
+        if payload.get("success") is True
+        else "worker execution failed; see worker artifact"
+    )
     return {
         "success": payload.get("success"),
-        "error": payload.get("error"),
+        "error": public_error,
         "evaluation": payload.get("evaluation"),
         "client_clear": payload.get("client_clear"),
         "lease_release": payload.get("lease_release"),
@@ -511,6 +516,20 @@ def _communicate_worker(
     }
 
 
+def _start_hidden_worker(command: list[str]) -> subprocess.Popen:
+    creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(
+        subprocess, "CREATE_NEW_PROCESS_GROUP", 0
+    )
+    return subprocess.Popen(
+        command,
+        cwd=ROOT,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        creationflags=creation_flags,
+    )
+
+
 def _run_coordinator(args: argparse.Namespace) -> int:
     contract, spec = _load_inputs(args.contract, args.spec, verify_files=True)
     if spec is None:
@@ -570,17 +589,7 @@ def _run_coordinator(args: argparse.Namespace) -> int:
         "--cores",
         str(args.cores),
     ]
-    creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(
-        subprocess, "CREATE_NEW_PROCESS_GROUP", 0
-    )
-    process = subprocess.Popen(
-        command,
-        cwd=ROOT,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        creationflags=creation_flags,
-    )
+    process = _start_hidden_worker(command)
     containment = OwnedJobObject.assign(process.pid)
     communication = _communicate_worker(
         process,

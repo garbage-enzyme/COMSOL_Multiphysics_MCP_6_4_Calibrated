@@ -165,6 +165,59 @@ physics_configure_boundary("Laminar Flow", "Outlet", [2], {"p0": "0[Pa]"})
 - `spf.U` - Velocity magnitude
 - `spf.rho` - Density
 
+## Acoustics Module
+
+### Pressure Acoustics (`acpr`)
+
+Use `physics_add_pressure_acoustics` for an exact Pressure Acoustics interface.
+Call `geometry_create_box_selection` or `geometry_create_side_selections` after
+building the geometry when stable named boundaries are preferable to numeric
+entity IDs. Read `physics_get_acoustic_boundary_conditions` before configuring
+one boundary or an atomic batch.
+
+Supported boundary types are `SoundHard`, `SoundSoft`, `Pressure`, `Impedance`,
+`NormalAcceleration`, `NormalVelocity`, and `PlaneWaveRadiation`. Their exposed
+properties are exact allowlists rather than arbitrary clientapi pass-through.
+For example:
+
+```text
+physics_add_pressure_acoustics(physics_tag="acpr")
+physics_setup_acoustic_boundaries(
+  physics_name="acpr",
+  boundary_conditions=[
+    {"type": "Pressure", "selection_name": "duct_left", "properties": {"p0": "1[Pa]"}},
+    {"type": "SoundSoft", "selection_name": "duct_right"}
+  ]
+)
+```
+
+## Mathematical PDE Interfaces
+
+The typed helpers create only Coefficient, General, or Weak Form PDE interfaces.
+Dependent-variable tags are bounded and unique, equation properties are
+allowlisted per form, and a failed setup removes the new interface. Use
+`physics_get_pde_boundary_conditions` before applying Dirichlet, flux, zero-flux,
+or periodic conditions. A boundary batch either creates every requested feature
+or removes all features created by that request.
+
+```text
+physics_add_coefficient_form_pde(
+  dependent_variables=["u"],
+  equation_properties={"c": "1", "a": "0", "f": "source"},
+  physics_tag="c"
+)
+physics_setup_pde_boundaries(
+  physics_name="c",
+  boundary_conditions=[
+    {"type": "DirichletBoundary", "selection_name": "square_left", "properties": {"r": "0"}}
+  ]
+)
+```
+
+Creation and property readback prove the clientapi operation, not the physical
+equation. Validate units, source terms, boundary coverage, mesh, and a numerical
+or analytical reference before accepting a PDE result.
+
 ## Multiphysics Couplings
 
 `multiphysics_add` is an experimental/full-profile compatibility helper. Verify
@@ -252,4 +305,6 @@ Different physics require appropriate study types:
 | Solid Mechanics | Stationary, Eigenfrequency |
 | Heat Transfer | Stationary, Time Dependent |
 | Fluid Flow | Stationary, Time Dependent |
+| Pressure Acoustics | Frequency Domain, Time Dependent |
+| Coefficient/General/Weak Form PDE | Stationary, Time Dependent, Eigenvalue |
 | Multiphysics | Depends on coupling |

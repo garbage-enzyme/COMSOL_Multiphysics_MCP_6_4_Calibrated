@@ -104,6 +104,30 @@ Passing `relpermittivity` creates the required material and
 `ChargeConservation` feature. Without it, COMSOL 6.3/6.4 Electrostatics defaults
 to `FreeSpace`, which uses vacuum permittivity.
 
+For a rectangular Pressure Acoustics or mathematical PDE model, create stable
+side selections after the geometry build:
+
+```text
+geometry_create_side_selections(
+  x_min="0[m]", x_max="duct_L",
+  y_min="0[m]", y_max="duct_H",
+  prefix="duct", tolerance="1e-7[m]"
+)
+physics_add_pressure_acoustics(physics_tag="acpr")
+physics_setup_acoustic_boundaries(
+  physics_name="acpr",
+  boundary_conditions=[
+    {"type": "Pressure", "selection_name": "duct_left", "properties": {"p0": "1[Pa]"}},
+    {"type": "SoundSoft", "selection_name": "duct_right"}
+  ]
+)
+```
+
+Require each side selection to resolve to the intended distinct entity after
+every geometry build. Use the reference tools to discover exact acoustic/PDE
+boundary types, and keep batch configuration atomic. A successful interface or
+feature creation is not a solved or physically validated model.
+
 ## 4. Solve one point and collect evidence
 
 ```text

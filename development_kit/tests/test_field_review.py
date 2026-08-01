@@ -227,6 +227,8 @@ def test_pair_assembler_verifies_rows_and_renders_shared_scale_bundle(tmp_path):
         == bundle["points"][1]["png_artifact"]["color_limits"]
     )
     assert bundle["shared_color_limits"] == bundle["points"][0]["png_artifact"]["color_limits"]
+    assert bundle["shared_color_limits"][0] <= 2.0
+    assert bundle["shared_color_limits"][1] >= 12.0
     assert bundle["artifact_path_base"] == "job_directory"
     for point in bundle["points"]:
         png = directory / point["png_artifact"]["relative_path"]

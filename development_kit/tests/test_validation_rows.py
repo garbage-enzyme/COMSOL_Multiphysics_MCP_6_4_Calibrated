@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
@@ -60,9 +61,21 @@ def _summary(point_id: str, digest: str = "c" * 64) -> dict:
 def test_append_fsync_journal_replays_exact_complete_identities(tmp_path, monkeypatch):
     spec = _spec(tmp_path)
     path = tmp_path / "rows.jsonl"
-    fsync_calls = []
+    fsync_snapshots = []
     directory_fsync_calls = []
-    monkeypatch.setattr("src.jobs.validation_rows.os.fsync", lambda fd: fsync_calls.append(fd))
+    real_fsync = os.fsync
+
+    def observe_fsync(fd):
+        real_fsync(fd)
+        descriptor = os.fstat(fd)
+        if not path.exists():
+            return
+        journal = path.stat()
+        if (descriptor.st_dev, descriptor.st_ino) != (journal.st_dev, journal.st_ino):
+            return
+        fsync_snapshots.append(path.read_bytes())
+
+    monkeypatch.setattr("src.jobs.validation_rows.os.fsync", observe_fsync)
     monkeypatch.setattr(
         "src.jobs.validation_rows.fsync_directory",
         lambda path: directory_fsync_calls.append(path),
@@ -87,7 +100,8 @@ def test_append_fsync_journal_replays_exact_complete_identities(tmp_path, monkey
         created_at_epoch=2.0,
     )
 
-    assert fsync_calls
+    assert [snapshot.count(b"\n") for snapshot in fsync_snapshots] == [1, 2]
+    assert all(snapshot.endswith(b"\n") for snapshot in fsync_snapshots)
     assert directory_fsync_calls == [path.parent]
     assert second["previous_row_sha256"] == first["row_sha256"]
     assert read_validation_rows(path, spec) == [first, second]
@@ -160,6 +174,42 @@ def test_changed_immutable_spec_rejects_prior_rows(tmp_path):
     changed = json.loads(json.dumps(spec))
     changed["spec_fingerprint"] = "f" * 64
 
+    with pytest.raises(ValueError, match="spec_fingerprint differs"):
+        read_validation_rows(path, changed)
+
+
+@pytest.mark.parametrize("change", ["cores", "source"])
+def test_raw_immutable_inputs_and_source_identity_bind_replayed_rows(tmp_path, change):
+    spec = _spec(tmp_path)
+    path = tmp_path / "rows.jsonl"
+    append_validation_row(
+        path,
+        spec,
+        attempt=1,
+        point_id="off",
+        status="ok",
+        collector_summaries=[_summary("off")],
+    )
+    source = tmp_path / "changed-source.mph"
+    source.write_bytes(b"different immutable model")
+    raw = {
+        "job_type": "validation_matrix",
+        "source_model_path": str(source if change == "source" else tmp_path / "fixture.mph"),
+        "points": [_point("off", 5.1, "a"), _point("target", 5.2, "b")],
+        "point_limit": 2,
+        "cores": 2 if change == "cores" else 1,
+        "resource_policy": {
+            "wall_time_budget_seconds": 120,
+            "minimum_next_point_seconds": 30,
+            "max_mesh_elements": 100_000,
+        },
+    }
+    changed = normalize_validation_matrix_spec(raw)
+
+    assert changed["spec_fingerprint"] != spec["spec_fingerprint"]
+    if change == "source":
+        assert changed["source_model_sha256"] != spec["source_model_sha256"]
+        assert changed["points"][0]["point_fingerprint"] != spec["points"][0]["point_fingerprint"]
     with pytest.raises(ValueError, match="spec_fingerprint differs"):
         read_validation_rows(path, changed)
 

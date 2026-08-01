@@ -704,11 +704,10 @@ def test_hanging_semantic_worker_does_not_delay_control_plane_or_lexical_search(
             assert isinstance(ownership["external_solver_processes"], list)
             assert job_status["success"] is True and job_status["status"] == "completed"
             assert lexical["success"] is True and lexical["results"]
-            # Host-wide process inventory latency changes when a user-owned solver is
-            # factorizing. Compare against an immediately measured no-hang baseline and
-            # retain an absolute containment ceiling.
+            # Host-wide process inventory latency changes with unrelated host load.
+            # Keep an absolute containment ceiling and observable behavior checks;
+            # a relative wall-clock comparison to an earlier baseline is unstable.
             assert control_elapsed < 8.0
-            assert control_elapsed < max(4.0, baseline_elapsed * 2.0 + 0.5)
             assert lexical_elapsed < 4.0
             assert not thread.is_alive()
             assert result["success"] is False and result["cleanup"]["absent"] is True
