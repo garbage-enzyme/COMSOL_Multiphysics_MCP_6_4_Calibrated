@@ -30,13 +30,16 @@ LINT_TARGETS = (
     "comsol_mcp/durable",
     "comsol_mcp/native_runtime.py",
     "comsol_mcp/schema_registry.py",
+    "comsol_mcp/standalone",
     "comsol_mcp/tools/acoustics_pde.py",
     "comsol_mcp/tools/catalog.py",
     "comsol_mcp/tools/geometry_selections.py",
     "comsol_mcp/tools/session_status.py",
+    "comsol_mcp/tools/standalone.py",
     "src/__init__.py",
     "development_kit/scripts/dependency_license_gate.py",
     "development_kit/scripts/quality_gate.py",
+    "development_kit/scripts/standalone_licensed_gate.py",
     "development_kit/tests/conftest.py",
     "development_kit/tests/test_control_plane_startup.py",
     "development_kit/tests/test_dependency_license_gate.py",
@@ -47,6 +50,9 @@ LINT_TARGETS = (
     "development_kit/tests/test_quality_gate.py",
     "development_kit/tests/test_quality_properties.py",
     "development_kit/tests/test_schema_registry.py",
+    "development_kit/tests/test_standalone_acceptance_runner.py",
+    "development_kit/tests/test_standalone_executable.py",
+    "development_kit/tests/test_standalone_tools.py",
     "development_kit/tests/test_tool_catalog.py",
 )
 MYPY_GROUPS = (
@@ -67,12 +73,13 @@ MYPY_GROUPS = (
         "comsol_mcp/compatibility.py",
         "comsol_mcp/tools/session_status.py",
         "comsol_mcp/native_runtime.py",
+        "comsol_mcp/standalone",
         "src/__init__.py",
     ),
 )
 PRODUCTION_ROOTS = ("comsol_mcp", "src")
 LINT_EXCLUSIONS_SHA256 = "c3306e6115cbe533a5317054ce1af85cab33bff2147ec1b7feff990cf4ed9fe8"
-MYPY_EXCLUSIONS_SHA256 = "6f5a47e2bd72ccf5f5daed69e51849fd9a63f5c279817d88cd3534c1b61e7946"
+MYPY_EXCLUSIONS_SHA256 = "8d5b4a970ff2235f0dd3ba3bafc1827d8e6b27975127bac9c221fcf07ae2f7db"
 PARALLEL_TEST_WORKERS = 4
 SERIAL_TEST_TARGETS = ("development_kit/tests/test_control_plane_startup.py",)
 

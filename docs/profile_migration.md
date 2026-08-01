@@ -7,7 +7,7 @@ workflow before the MCP process starts.
 | Need | Profile | Support |
 | --- | --- | --- |
 | Ownership, durable jobs, model inspection, one-point solve, lexical manuals | `core` | Verified default |
-| Typed conventional FEM construction and bounded exports | `basic_fem` | Verified |
+| Typed conventional FEM construction, bounded exports, and Python-free launcher control | `basic_fem` | Verified |
 | Periodic Wave Optics preflight, evidence audit, visual-review contracts | `wave_optics` | Experimental; licensed acceptance is version/model-specific |
 | Isolated vector-assisted manuals | `semantic_docs` | Experimental; promotion rejected |
 | User-owned local Desktop/Server collaboration | `desktop_shared` | Experimental; default-off, local-only, explicit confirmation |

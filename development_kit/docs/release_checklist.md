@@ -47,10 +47,22 @@ Before a release:
    set, an absent solver lease, no external collision, source-integrity
    evidence, and all fixture contracts to pass. A phase timeout or exception
    still requires this final assessment and a failed receipt.
-8. Build once more from the clean release commit and compare discovery output.
-9. Install non-editably in the target MCP environment.
-10. Restart the MCP host; source and profile changes are not hot-reloaded.
-11. Call `capabilities`; require `deployment_identity.source_classification` to
+8. When the standalone launcher changes, run its explicit serial gate on a free
+   Windows 10/11 x64 host with licensed COMSOL 6.4:
+
+   ```powershell
+   python development_kit/scripts/standalone_licensed_gate.py `
+     --confirm RUN_REAL_COMSOL `
+     --comsol-root D:\path\to\COMSOL64\Multiphysics `
+     --output-directory D:\comsol_release\standalone_acceptance
+   ```
+
+   Require a one-plus-two attempt split, `3/3` points, a passed physical
+   summary, matching terminal/result identity, and zero process residue.
+9. Build once more from the clean release commit and compare discovery output.
+10. Install non-editably in the target MCP environment.
+11. Restart the MCP host; source and profile changes are not hot-reloaded.
+12. Call `capabilities`; require `deployment_identity.source_classification` to
    be `installed_site_package`, compare its profile/schema/catalog hashes with
    the clean release receipt, and then treat installed profile counts as
    authoritative. A matching version string alone is insufficient.

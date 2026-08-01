@@ -22,13 +22,28 @@ DEFAULT_PROFILE = "core"
 _PROFILE_SELECTION_TOKEN = object()
 
 PROFILE_DESCRIPTIONS = {
-    "core": "Default mature ownership, job, session, inspection, one-point solve, and manual surface.",
-    "basic_fem": "Core plus typed conventional FEM construction and bounded exports.",
-    "wave_optics": "Recommended metasurface profile: core plus material preview, field-dataset discovery, visual-review contracts, Wave Optics preflight, point audit, and staged workflows.",
-    "semantic_docs": "Core plus isolated immutable BM25/vector manual retrieval and worker controls.",
-    "desktop_shared": "Default-off non-owning local COMSOL Server and shared Desktop collaboration surface.",
+    "core": (
+        "Default mature ownership, job, session, inspection, one-point solve, and manual surface."
+    ),
+    "basic_fem": (
+        "Core plus typed conventional FEM construction, bounded exports, and standalone execution."
+    ),
+    "wave_optics": (
+        "Recommended metasurface profile: core plus material preview, field-dataset "
+        "discovery, visual-review contracts, Wave Optics preflight, point audit, and "
+        "staged workflows."
+    ),
+    "semantic_docs": (
+        "Core plus isolated immutable BM25/vector manual retrieval and worker controls."
+    ),
+    "desktop_shared": (
+        "Default-off non-owning local COMSOL Server and shared Desktop collaboration surface."
+    ),
     "experimental": "Core plus explicitly risky, generic, asynchronous, and project helpers.",
-    "full": "Backward-compatible discovery surface with legacy broad-path behavior and weaker containment guarantees.",
+    "full": (
+        "Backward-compatible discovery surface with legacy broad-path behavior and "
+        "weaker containment guarantees."
+    ),
 }
 
 PROFILE_MATURITY = {

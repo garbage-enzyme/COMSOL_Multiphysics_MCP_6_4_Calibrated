@@ -35,7 +35,9 @@ after installation, restart the exact MCP host, then check
 
 `desktop_shared` also requires `shared_server.enabled: true`; it never starts
 or terminates the user's COMSOL Server. `semantic_docs` requires its configured
-retrieval assets to be available. Use `core` unless a larger surface is needed.
+retrieval assets to be available. `basic_fem` also exposes the native EXE build
+and control tools; the generated EXE still requires a licensed local COMSOL 6.4
+installation. Use `core` unless a larger surface is needed.
 
 ## Runtime and containment paths
 

@@ -83,7 +83,7 @@ and are omitted from the checked-in examples.
 | Profile | Intended use |
 | --- | --- |
 | `core` | Compact default control plane and lexical manuals. |
-| `basic_fem` | Conventional FEM construction and bounded exports. |
+| `basic_fem` | Conventional FEM construction, bounded exports, and the Python-free standalone launcher tools. |
 | `wave_optics` | Periodic optics, metasurfaces, bounded field discovery/extraction, preflight, and evidence audits. |
 | `desktop_shared` | Default-off shared Desktop/attached-Server workflow with exact process/listener/model identity, non-owning leases, revision locks, durable attached jobs, and detach preservation. |
 | `semantic_docs` | Isolated experimental semantic manual retrieval. |
@@ -99,6 +99,11 @@ The default `core` and `wave_optics` profiles do not expose shared-session tools
 Enable the protected workflow only with the explicit `desktop_shared` profile and
 `shared_server.enabled=true` in `settings.json`. The legacy `comsol_connect` compatibility tool
 remains experimental and is not a substitute for this lifecycle.
+
+The standalone tools in `basic_fem` still run inside the normal Python MCP host. They build
+and controls a separate native EXE whose target runtime needs only Windows
+10/11 x64 plus an installed licensed COMSOL 6.4. The EXE does not bundle COMSOL
+and does not require target-side Python, Conda, MPh, JPype, or external Java.
 
 ### Optional shared Desktop/attached-Server mode
 

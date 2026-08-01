@@ -553,7 +553,7 @@ def load_settings_report(environ: Mapping[str, str] | None = None) -> dict[str, 
             "settings.json must be UTF-8", reason_code="settings_encoding_invalid"
         )
         return {"settings": deepcopy(_DEFAULT_SETTINGS), "errors": [_report_error(error)]}
-    except (json.JSONDecodeError, _DuplicateJsonKey):
+    except json.JSONDecodeError, _DuplicateJsonKey:
         error = SettingsError(
             "settings.json contains invalid or duplicate JSON",
             reason_code="settings_json_invalid",

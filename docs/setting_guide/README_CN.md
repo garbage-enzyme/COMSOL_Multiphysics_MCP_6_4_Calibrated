@@ -29,7 +29,8 @@ configuration state 有效。
 | `profile.name` | 此 MCP 进程固定的公共 tool surface。 | `"core"` | `"core"`、`"basic_fem"`、`"wave_optics"`、`"semantic_docs"`、`"desktop_shared"`、`"experimental"` 或 `"full"`（不区分大小写，保存时转为小写）。 |
 
 `desktop_shared` 还要求 `shared_server.enabled: true`，并且不会启动或终止用户的
-COMSOL Server。`semantic_docs` 需要相应检索资产可用。没有明确需求时使用 `core`。
+COMSOL Server。`semantic_docs` 需要相应检索资产可用。`basic_fem` 还公开原生 EXE 的
+构建和控制工具；生成的 EXE 仍要求本机安装并授权 COMSOL 6.4。没有明确需求时使用 `core`。
 
 ## Runtime 与 containment 路径
 
