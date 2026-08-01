@@ -15,7 +15,7 @@
     {
       "name": "basic_fem",
       "support": "verified",
-      "tool_count": 93
+      "tool_count": 100
     },
     {
       "name": "wave_optics",
@@ -35,19 +35,21 @@
     {
       "name": "experimental",
       "support": "experimental",
-      "tool_count": 81
+      "tool_count": 88
     },
     {
       "name": "full",
       "support": "compatibility_only",
-      "tool_count": 147
+      "tool_count": 154
     }
   ],
   "unavailable": [
     "cross_host_or_distributed_solver_coordination",
     "automatic_visual_mode_identity",
     "unbounded_solver_or_retrieval_queues",
-    "semantic_docs_multilingual_production_claim"
+    "semantic_docs_multilingual_production_claim",
+    "standalone_without_local_licensed_comsol",
+    "standalone_windows_server_or_pre_6_4_compatibility"
   ],
   "real_integration": {
     "hosted_ci_default": false,

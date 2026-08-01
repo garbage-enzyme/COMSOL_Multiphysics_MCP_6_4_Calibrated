@@ -74,7 +74,7 @@ COMSOL_MCP_SETTINGS_PATH=D:\path\to\COMSOL_Multiphysics_MCP\settings.json
 | Profile | 用途 |
 | --- | --- |
 | `core` | 紧凑默认控制面和词法手册检索。 |
-| `basic_fem` | 常规 FEM 构建和有界导出。 |
+| `basic_fem` | 常规 FEM 构建、有界导出，以及无需 Python 的独立启动器工具。 |
 | `wave_optics` | 周期光学、超表面、有界场数据发现/提取、预检和证据审计。 |
 | `desktop_shared` | 默认关闭的 shared Desktop/attached-Server 工作流，提供精确进程/listener/model 身份、非拥有式租约、revision lock、持久化 attached job 和 detach preservation。 |
 | `semantic_docs` | 隔离的实验性语义手册检索。 |
@@ -89,6 +89,14 @@ COMSOL_MCP_SETTINGS_PATH=D:\path\to\COMSOL_Multiphysics_MCP\settings.json
 只有显式选择 `desktop_shared` profile 并在 `settings.json` 设置
 `shared_server.enabled=true`，才会启用受保护
 的 shared workflow。旧 `comsol_connect` 仍是 experimental 兼容工具，不能替代该生命周期。
+
+`basic_fem` 中的独立启动器工具仍运行在普通 Python MCP host 中；它们负责构建和控制另一个原生
+EXE。目标机只需 Windows 10/11 x64 与已安装并授权的 COMSOL 6.4。EXE 不打包 COMSOL，
+也不要求目标机安装 Python、Conda、MPh、JPype 或外部 Java。
+构建步骤使用 Windows 随系统提供的 `.NET Framework 4.x` 64 位编译器
+`%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\csc.exe`；不需要另装现代
+`.NET Runtime`、`.NET SDK` 或 Visual Studio，也不需要下载或联网。系统内置编译器缺失时
+会直接 fail closed。
 
 ### 可选的 shared Desktop/attached-Server 模式
 

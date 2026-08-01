@@ -7362,6 +7362,155 @@
     "title": "spectral_characterizeArguments",
     "type": "object"
   },
+  "standalone_build": {
+    "additionalProperties": false,
+    "maxProperties": 256,
+    "properties": {
+      "output_directory": {
+        "maxLength": 16384,
+        "title": "Output Directory",
+        "type": "string"
+      }
+    },
+    "required": [
+      "output_directory"
+    ],
+    "title": "standalone_buildArguments",
+    "type": "object"
+  },
+  "standalone_pause": {
+    "additionalProperties": false,
+    "maxProperties": 256,
+    "properties": {
+      "deployment_directory": {
+        "maxLength": 16384,
+        "title": "Deployment Directory",
+        "type": "string"
+      }
+    },
+    "required": [
+      "deployment_directory"
+    ],
+    "title": "standalone_pauseArguments",
+    "type": "object"
+  },
+  "standalone_results": {
+    "additionalProperties": false,
+    "maxProperties": 256,
+    "properties": {
+      "deployment_directory": {
+        "maxLength": 16384,
+        "title": "Deployment Directory",
+        "type": "string"
+      },
+      "limit": {
+        "default": 32,
+        "maximum": 1e+308,
+        "minimum": -1e+308,
+        "title": "Limit",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "deployment_directory"
+    ],
+    "title": "standalone_resultsArguments",
+    "type": "object"
+  },
+  "standalone_resume": {
+    "additionalProperties": false,
+    "maxProperties": 256,
+    "properties": {
+      "comsol_root": {
+        "maxLength": 16384,
+        "title": "Comsol Root",
+        "type": "string"
+      },
+      "deployment_directory": {
+        "maxLength": 16384,
+        "title": "Deployment Directory",
+        "type": "string"
+      }
+    },
+    "required": [
+      "deployment_directory",
+      "comsol_root"
+    ],
+    "title": "standalone_resumeArguments",
+    "type": "object"
+  },
+  "standalone_start": {
+    "additionalProperties": false,
+    "maxProperties": 256,
+    "properties": {
+      "comsol_root": {
+        "maxLength": 16384,
+        "title": "Comsol Root",
+        "type": "string"
+      },
+      "deployment_directory": {
+        "maxLength": 16384,
+        "title": "Deployment Directory",
+        "type": "string"
+      }
+    },
+    "required": [
+      "deployment_directory",
+      "comsol_root"
+    ],
+    "title": "standalone_startArguments",
+    "type": "object"
+  },
+  "standalone_status": {
+    "additionalProperties": false,
+    "maxProperties": 256,
+    "properties": {
+      "deployment_directory": {
+        "maxLength": 16384,
+        "title": "Deployment Directory",
+        "type": "string"
+      }
+    },
+    "required": [
+      "deployment_directory"
+    ],
+    "title": "standalone_statusArguments",
+    "type": "object"
+  },
+  "standalone_tail": {
+    "additionalProperties": false,
+    "maxProperties": 256,
+    "properties": {
+      "deployment_directory": {
+        "maxLength": 16384,
+        "title": "Deployment Directory",
+        "type": "string"
+      },
+      "lines": {
+        "default": 100,
+        "maximum": 1e+308,
+        "minimum": -1e+308,
+        "title": "Lines",
+        "type": "integer"
+      },
+      "log_name": {
+        "default": "launcher.log",
+        "enum": [
+          "launcher.log",
+          "compile.log",
+          "current-point.log"
+        ],
+        "maxLength": 16384,
+        "title": "Log Name",
+        "type": "string"
+      }
+    },
+    "required": [
+      "deployment_directory"
+    ],
+    "title": "standalone_tailArguments",
+    "type": "object"
+  },
   "study_cancel": {
     "additionalProperties": false,
     "maxProperties": 256,

@@ -66,6 +66,9 @@ acceptance 报告应至少包含不启动 COMSOL 的 `initialize`、实时 `list
   精确类型和属性白名单的原子边界批量配置。
 - **安全的求解器所有权。** ASCII 路径租约、进程身份核验、外部客户端检测、状态和预检可避免意外启动并发 COMSOL 客户端。
 - **持久化后台任务。** 分段扫描和自适应光谱表征在独立 worker 中执行，具有不可变规格、原子状态、经 `fsync` 的证据行、检查点、校验后的恢复，以及已验证的同主机取消能力。
+- **无需 Python 的独立执行。** 原生 Windows x64 启动器保留三层结构：本机已安装并
+  授权的 COMSOL 6.4、由 COMSOL 编译的 Java 单点驱动，以及启动器 EXE。目标机不需要
+  Python、Conda、MPh、JPype 或另装 Java；COMSOL 本身仍然必需，项目不会打包或替代它。
 - **共享 Desktop 协作（默认关闭）。** `desktop_shared` profile 可连接用户手动启动的本地 COMSOL Server，精确采用一个 Server 模型，执行非拥有式租约和 revision lock，运行持久化 attached job，并在 detach 时保留用户的 Server、Desktop、listener 和模型。
 - **Wave Optics 验证。** 专用 profile 支持只读模型预检，以及用于周期性超表面的单波长证据审计。
 - **有界离线手册检索。** SQLite FTS5/BM25 检索和页读取不在 COMSOL 控制进程中运行，返回紧凑的来源/页码引用。
@@ -101,7 +104,7 @@ shared-server 或 Java 设置需要重启 MCP host；随后调用 `capabilities`
 | Profile | 适用场景 |
 | --- | --- |
 | `core`（默认） | 紧凑且成熟的控制面：状态、所有权、会话/模型检查、单点求解/求值及词法手册检索。 |
-| `basic_fem` | 在 `core` 基础上增加传统 FEM 的类型化构建、命名 selection、Pressure Acoustics 与数学 PDE、派生几何编辑和有界导出。 |
+| `basic_fem` | 在 `core` 基础上增加传统 FEM 的类型化构建、命名 selection、Pressure Acoustics 与数学 PDE、派生几何编辑、有界导出，以及无需 Python 的独立启动器工具。 |
 | `wave_optics` | 超表面推荐：在 `core` 基础上增加派生几何编辑、材料预览、locale-safe 场数据发现及有界 NPZ/manifest 提取、周期网格审计/冒烟、视觉审查合同、Wave Optics 预检和单点/参考审计。持久化分段任务仍通过 `job_submit`。 |
 | `desktop_shared` | 显式选择的 shared Desktop/attached-Server 工作流；要求 `profile.name=desktop_shared` 且 `shared_server.enabled=true`、用户手动启动本地 Server、每次 attach 的用户确认、精确进程/listener 身份和精确模型采用；不会启动或终止外部 Server。 |
 | `semantic_docs` | 在 `core` 基础上增加隔离的实验性向量辅助手册检索。 |
@@ -117,6 +120,29 @@ shared-server 或 Java 设置需要重启 MCP host；随后调用 `capabilities`
 experimental 兼容界面，不能替代受保护的 shared-session 生命周期。
 
 来自 capabilities、求解器所有权、持久化任务和词法手册的控制面响应会附带紧凑的滚动 `control_plane` 数据。每种操作最多保留 256 个样本，报告 success/busy/timeout/error 计数和 p50/p95/max 延迟；完整日志及无界遥测不会内联返回。
+
+### Windows 独立启动器
+
+独立路线只面向 Windows 10/11 x64 和 COMSOL 6.4 release line；当前 licensed
+acceptance 精确绑定 COMSOL 6.4.0.293。不支持 Windows Server、COMSOL 6.4 以下版本、
+Linux 或 macOS。生成的 EXE 只接收一个运行参数：`--comsol-path <COMSOL 根目录>`。
+它使用该目录内的 `comsolcompile.exe`、`comsolbatch.exe`、COMSOL 自带 Java、求解器和
+许可证。
+
+构建使用受支持 Windows 10/11 workstation 随系统提供并维护的 64 位
+`.NET Framework 4.x` C# 编译器：
+`%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\csc.exe`。不需要另装现代
+`.NET Runtime`、`.NET Desktop Runtime`、`.NET SDK`、Visual Studio，也不会下载
+任何包或访问网络。若系统内置编译器缺失，`standalone_build` 会直接失败，不会安装或
+下载替代组件。
+微软的 [.NET Framework 平台表](https://learn.microsoft.com/zh-cn/dotnet/framework/install/guide-for-developers)
+列出了 Windows 10 和 Windows 11 随系统提供的 4.x 版本。
+
+在普通 Python MCP host 中选择 `basic_fem` profile，可使用 `standalone_build`、
+`standalone_start`、`standalone_status`、`standalone_pause`、
+`standalone_resume`、`standalone_tail` 和 `standalone_results`。构建与任务目录必须位于
+配置的 ASCII 自有产物根目录内；MCP 在执行前核对包内源码身份、构建清单与 EXE 哈希。
+EXE 生成后也可复制到目标机直接操作，此时不需要该 Python MCP host。
 
 ## 推荐工作流
 

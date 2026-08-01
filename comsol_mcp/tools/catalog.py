@@ -67,6 +67,15 @@ _TOOLS_BY_REGISTRAR = {
         "job_cancel",
         "job_resume",
     ),
+    "comsol_mcp.tools.standalone.register_standalone_tools": (
+        "standalone_build",
+        "standalone_start",
+        "standalone_status",
+        "standalone_pause",
+        "standalone_resume",
+        "standalone_tail",
+        "standalone_results",
+    ),
     "comsol_mcp.tools.session.register_session_tools": (
         "comsol_start",
         "comsol_connect",
@@ -266,6 +275,7 @@ _GROUP_BY_REGISTRAR = {
     "register_evidence_integrity_tools": "evidence_integrity",
     "register_ownership_tools": "ownership",
     "register_job_tools": "jobs",
+    "register_standalone_tools": "standalone",
     "register_session_tools": "session",
     "register_model_tools": "model",
     "register_parameter_tools": "parameters",
@@ -348,6 +358,10 @@ _SIDE_EFFECTS = {
     "job_submit": "solver_execution",
     "job_cancel": "job_control",
     "job_resume": "solver_execution",
+    "standalone_build": "filesystem_write",
+    "standalone_start": "solver_execution",
+    "standalone_pause": "job_control",
+    "standalone_resume": "solver_execution",
     "comsol_start": "process_lifecycle",
     "comsol_connect": "process_lifecycle",
     "comsol_disconnect": "process_lifecycle",
@@ -439,6 +453,8 @@ _STARTS_SOLVER = frozenset(
     {
         "job_submit",
         "job_resume",
+        "standalone_start",
+        "standalone_resume",
         "comsol_start",
         "study_solve",
         "study_solve_async",
@@ -495,6 +511,9 @@ _EXPLICIT_READ_ONLY_TOOLS = frozenset(
         "solutions_list",
         "solver_preflight",
         "solver_status",
+        "standalone_status",
+        "standalone_tail",
+        "standalone_results",
         "spectral_characterize",
         "study_get_progress",
         "study_list",
@@ -523,6 +542,8 @@ _CONTROL_PLANE_TOOLS = frozenset(
         "job_status",
         "job_tail",
         "job_cancel",
+        "standalone_status",
+        "standalone_pause",
         "comsol_status",
         "study_get_progress",
         "study_cancel",
@@ -558,6 +579,9 @@ _SOLVER_FREE_TOOLS = frozenset(
         "geometry_fin_preview",
         "geometry_blocks_preview",
         "wave_optics_incidence_preview",
+        "standalone_build",
+        "standalone_tail",
+        "standalone_results",
     }
 )
 
@@ -576,6 +600,8 @@ _MODEL_REVISION_EXCLUSIONS = frozenset(
         "mim_patch_build",
         "solver_recover_stale_lease",
         "semantic_worker_reset",
+        "standalone_start",
+        "standalone_resume",
     }
 )
 
@@ -708,6 +734,13 @@ _BASIC_FEM_ADDITIONS = frozenset(
         "results_export_image",
         "results_exports_list",
         "results_plots_list",
+        "standalone_build",
+        "standalone_start",
+        "standalone_status",
+        "standalone_pause",
+        "standalone_resume",
+        "standalone_tail",
+        "standalone_results",
     }
 )
 
@@ -780,6 +813,13 @@ _EXPERIMENTAL_ADDITIONS = frozenset(
         "modeling_best_practices",
         "clientapi_property_get",
         "clientapi_property_set",
+        "standalone_build",
+        "standalone_start",
+        "standalone_status",
+        "standalone_pause",
+        "standalone_resume",
+        "standalone_tail",
+        "standalone_results",
     }
 )
 
@@ -876,11 +916,23 @@ def _build_registry() -> dict[str, ToolMetadata]:
                     ("response_bytes", 4_194_304),
                 ),
                 artifact_path_classes=(
-                    "owned_artifact"
+                    ("owned_artifact", "local_comsol_installation")
+                    if name in {"standalone_start", "standalone_resume"}
+                    else ("owned_artifact",)
+                    if name.startswith("standalone_")
+                    else ("owned_artifact",)
                     if side_effect_class in {"filesystem_write", "filesystem_write_model_mutation"}
-                    else "none",
+                    else ("none",)
                 ),
-                required_features=("comsol",) if name in _STARTS_SOLVER else (),
+                required_features=(
+                    ("windows_dotnet_framework_x64",)
+                    if name == "standalone_build"
+                    else ("licensed_comsol_6_4",)
+                    if name in {"standalone_start", "standalone_resume"}
+                    else ("comsol",)
+                    if name in _STARTS_SOLVER
+                    else ()
+                ),
                 replacement_tool=("job_submit" if deprecated else None),
                 sunset_release=("next_major" if deprecated else None),
                 deprecation_state=("deprecated" if deprecated else "active"),

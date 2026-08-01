@@ -97,6 +97,7 @@ models are intentionally absent.
 - `development_kit/scripts/run_real_release_gate.py` — This script orchestrates the explicit serial licensed COMSOL release gate.
 - `development_kit/scripts/sbom_probe.py` — This script generates a deterministic CycloneDX SBOM from the locked installed runtime.
 - `development_kit/scripts/security_gate.py` — This script evaluates pip-audit findings against the exact expiring review policy.
+- `development_kit/scripts/standalone_licensed_gate.py` — This script runs the explicit serial COMSOL 6.4 standalone build, pause, exact-resume, physical, and cleanup acceptance.
 - `development_kit/scripts/shared_interactive_licensed_gate.py` — This script runs bounded non-owning shared Desktop/Server prepare and readback acceptance phases.
 
 ## Test fixtures and frozen snapshots
@@ -263,6 +264,9 @@ models are intentionally absent.
 - `development_kit/tests/test_spectral_stages.py` — This module tests immutable spectral stage planning, freezing, and replay.
 - `development_kit/tests/test_spectral_worker.py` — This module tests injected spectral worker ownership, resources, state, and cleanup.
 - `development_kit/tests/test_study.py` — This module tests study helpers without a COMSOL client.
+- `development_kit/tests/test_standalone_executable.py` — This module tests the reviewed Python-free Windows launcher build, deployment identity, durable inspection, and fixed launch contract.
+- `development_kit/tests/test_standalone_acceptance_runner.py` — This module tests the explicit licensed standalone acceptance orchestration without starting COMSOL.
+- `development_kit/tests/test_standalone_tools.py` — This module tests the standalone tools within `basic_fem`, public dispatch, metadata, and owned-artifact containment.
 - `development_kit/tests/test_tool_catalog.py` — This module tests deterministic tool catalog metadata and discovery.
 - `development_kit/tests/test_tool_profiles.py` — This module tests static profile selection, membership, and registration.
 - `development_kit/tests/test_validation_collectors.py` — This module tests adapters from validation points to evidence collectors.
@@ -297,6 +301,13 @@ models are intentionally absent.
 - `comsol_mcp/native_runtime.py` — This module classifies native-backed imports and preloads every main-process runtime before event-loop dispatch.
 - `comsol_mcp/server.py` — This module creates the profiled MCP server and console entry point.
 - `comsol_mcp/settings.py` — This module loads grouped project settings and reports bounded fallback errors.
+- `comsol_mcp/standalone/__init__.py` — This module exports the standalone launcher build and solver-free inspection surface.
+- `comsol_mcp/standalone/builder.py` — This module builds one reviewed native Windows x64 launcher from packaged C# and Java sources.
+- `comsol_mcp/standalone/control.py` — This module detaches, controls, and inspects manifest-verified standalone COMSOL 6.4 campaigns.
+- `comsol_mcp/standalone/inspection.py` — This module validates bounded standalone build, status, result, log, and terminal artifacts without COMSOL.
+- `comsol_mcp/standalone/assets/__init__.py` — This file marks embedded standalone launcher sources as packaged resources.
+- `comsol_mcp/standalone/assets/Launcher.cs` — This source builds the native Windows 10/11 x64 campaign launcher and durable control plane.
+- `comsol_mcp/standalone/assets/CapacitorPointTemplate.java` — This embedded COMSOL Java driver generates and validates one analytical capacitor point.
 
 ## Asynchronous compatibility layer
 
@@ -436,6 +447,7 @@ models are intentionally absent.
 - `comsol_mcp/tools/session.py` — This module manages COMSOL client startup, status, models, and shutdown.
 - `comsol_mcp/tools/shared_session.py` — This module exposes default-off local attached-server lifecycle tools.
 - `comsol_mcp/tools/study.py` — This module exposes COMSOL study and solving tools.
+- `comsol_mcp/tools/standalone.py` — This module exposes typed standalone build, lifecycle, log, and result tools.
 - `comsol_mcp/tools/visual_review.py` — This module exposes solver-free visual-review contract adapters.
 - `comsol_mcp/tools/wave_optics_audit.py` — This module exposes one-point policy-separated Wave Optics evidence audits.
 - `comsol_mcp/tools/wave_optics_preflight.py` — This module exposes threshold-free read-only Wave Optics preflight.

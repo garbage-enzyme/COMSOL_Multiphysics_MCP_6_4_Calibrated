@@ -90,14 +90,8 @@ def _deployment_source_classification(module_file: Path | None = None) -> str:
 
 def _catalog_contract_sha256() -> str:
     payload = {
-        "profiles": {
-            profile: sorted(tool_names_for_profile(profile))
-            for profile in PROFILE_NAMES
-        },
-        "tools": {
-            name: TOOL_METADATA[name].to_dict()
-            for name in sorted(TOOL_METADATA)
-        },
+        "profiles": {profile: sorted(tool_names_for_profile(profile)) for profile in PROFILE_NAMES},
+        "tools": {name: TOOL_METADATA[name].to_dict() for name in sorted(TOOL_METADATA)},
     }
     return canonical_sha256_v1(payload)
 
@@ -147,19 +141,19 @@ def _deployment_identity() -> dict:
 def _profile_inventory(selection: ProfileSelection) -> dict:
     enabled_names = tool_names_for_profile(selection.name)
     all_groups = {metadata.group for metadata in TOOL_METADATA.values()}
-    enabled_groups = {
-        TOOL_METADATA[name].group for name in enabled_names
-    }
+    enabled_groups = {TOOL_METADATA[name].group for name in enabled_names}
     available_profiles = []
     for profile in PROFILE_NAMES:
         names = tool_names_for_profile(profile)
-        available_profiles.append({
-            "name": profile,
-            "maturity": PROFILE_MATURITY[profile],
-            "tool_count": len(names),
-            "starts_solver": any(TOOL_METADATA[name].starts_solver for name in names),
-            "description": PROFILE_DESCRIPTIONS[profile],
-        })
+        available_profiles.append(
+            {
+                "name": profile,
+                "maturity": PROFILE_MATURITY[profile],
+                "tool_count": len(names),
+                "starts_solver": any(TOOL_METADATA[name].starts_solver for name in names),
+                "description": PROFILE_DESCRIPTIONS[profile],
+            }
+        )
     return {
         "active_profile": selection.name,
         "available_profiles": available_profiles,
@@ -185,6 +179,11 @@ def get_capabilities(selection: ProfileSelection | None = None) -> dict:
     active_selection = selection or resolve_profile()
     status = session_manager.get_status()
     semantic_profile_active = active_selection.name in {"semantic_docs", "full"}
+    standalone_profile_active = active_selection.name in {
+        "basic_fem",
+        "experimental",
+        "full",
+    }
     semantic = semantic_capability_status(profile_active=semantic_profile_active)
     compatibility = load_runtime_compatibility()
     shared_gate = normalize_shared_server_feature_gate(active_selection.name)
@@ -242,8 +241,7 @@ def get_capabilities(selection: ProfileSelection | None = None) -> dict:
             "async_solver": {
                 "progress": "synthetic checkpoints, not COMSOL solver percentage",
                 "cancellation": (
-                    "cooperative Python flag; does not interrupt a blocking "
-                    "COMSOL study.run()"
+                    "cooperative Python flag; does not interrupt a blocking COMSOL study.run()"
                 ),
                 "profiles": ["experimental", "full"],
                 "recommended_profile_exposure": False,
@@ -251,15 +249,67 @@ def get_capabilities(selection: ProfileSelection | None = None) -> dict:
             },
             "semantic_manual_search": semantic,
         },
+        "standalone_executable": {
+            "profiles": ["basic_fem", "experimental", "full"],
+            "profile_active": standalone_profile_active,
+            "target_os": ["Windows 10 x64", "Windows 11 x64"],
+            "target_comsol_release": "6.4",
+            "licensed_acceptance_build": "6.4.0.293",
+            "local_licensed_comsol_required": True,
+            "comsol_runtime_bundled": False,
+            "target_python_required": False,
+            "target_conda_required": False,
+            "target_external_java_required": False,
+            "windows_inbox_dotnet_framework_required": True,
+            "separate_dotnet_runtime_required": False,
+            "separate_dotnet_sdk_required": False,
+            "visual_studio_required": False,
+            "network_download_required": False,
+            "build_compiler": "%WINDIR%/Microsoft.NET/Framework64/v4.0.30319/csc.exe",
+            "architecture": [
+                "licensed COMSOL 6.4 installation",
+                "COMSOL-compiled Java point driver",
+                "native Windows x64 launcher",
+            ],
+            "tools": [
+                "standalone_build",
+                "standalone_start",
+                "standalone_status",
+                "standalone_pause",
+                "standalone_resume",
+                "standalone_tail",
+                "standalone_results",
+            ],
+        },
         "disabled_by_default": [
-            *([] if semantic_profile_active else [
-                "semantic_search", "semantic_status", "semantic_worker_reset",
-            ]),
+            *(
+                []
+                if semantic_profile_active
+                else [
+                    "semantic_search",
+                    "semantic_status",
+                    "semantic_worker_reset",
+                ]
+            ),
+            *(
+                []
+                if standalone_profile_active
+                else [
+                    "standalone_build",
+                    "standalone_start",
+                    "standalone_status",
+                    "standalone_pause",
+                    "standalone_resume",
+                    "standalone_tail",
+                    "standalone_results",
+                ]
+            ),
         ],
         "profile_guidance": {
             "default_profile": DEFAULT_PROFILE,
             "wave_optics_recommended_profile": "wave_optics",
             "semantic_docs_opt_in_profile": "semantic_docs",
+            "standalone_tools_profile": "basic_fem",
             "backward_compatibility_profile": "full",
             "selection_settings_key": "profile.name",
             "settings_path_environment_variable": SETTINGS_PATH_ENV,
@@ -338,7 +388,8 @@ def get_capabilities(selection: ProfileSelection | None = None) -> dict:
             ),
             "cancellation_strategy": (
                 "attempt-bound native cancellation on the verified COMSOL 6.4.0.293 profile; "
-                "exact-identity owned-process fallback elsewhere; cancelled is committed only after "
+                "exact-identity owned-process fallback elsewhere; cancelled is committed only "
+                "after "
                 "worker/descendant/port/lease cleanup verification"
             ),
             "external_solver_ownership": True,
@@ -406,9 +457,7 @@ def get_capabilities(selection: ProfileSelection | None = None) -> dict:
                 enforced=active_selection.name != "full"
             ),
             "model_revision_policy": {
-                "required_for_verified_mutation_and_solve": (
-                    active_selection.name != "full"
-                ),
+                "required_for_verified_mutation_and_solve": (active_selection.name != "full"),
                 "checked_after_operation_lock_acquisition": True,
                 "successful_mutations_advance_revision": True,
                 "compatibility_profile_enforcement": False,
@@ -429,8 +478,7 @@ def get_capabilities(selection: ProfileSelection | None = None) -> dict:
             "model_scope": "one_exact_server_model",
             "durable_execution": {
                 "available": bool(
-                    active_selection.name == SHARED_SERVER_PROFILE
-                    and shared_gate.gate_open
+                    active_selection.name == SHARED_SERVER_PROFILE and shared_gate.gate_open
                 ),
                 "execution_backend": "attached_shared_server",
                 "job_types": ["staged_sweep"],
@@ -463,7 +511,8 @@ def startup_capability_summary(selection: ProfileSelection | None = None) -> str
         f"profile={capabilities['profile']}; "
         f"tools={capabilities['tool_count']}; "
         f"target=COMSOL {targets['comsol']} exact licensed / MPh {targets['mph']}; "
-        f"lexical_manual=enabled; semantic_docs={'active' if capabilities['semantic_search']['profile_active'] else 'disabled'}; "
+        "lexical_manual=enabled; semantic_docs="
+        f"{'active' if capabilities['semantic_search']['profile_active'] else 'disabled'}; "
         "durable_jobs=staged_sweep,validation_matrix,spectral_characterization,"
         "convergence_campaign,branch_continuation_campaign; "
         "solver_ownership=enforced; durable_job_cancellation=verified"

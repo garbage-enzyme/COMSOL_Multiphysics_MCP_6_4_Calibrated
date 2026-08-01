@@ -423,7 +423,18 @@ class PathPolicy:
             or not _is_relative_to(resolved, root)
         ):
             raise ValueError("artifact root escapes the owned artifact root")
-        return PathDecision("artifact_read_root", resolved, _root_id(root))
+        return PathDecision(
+            "artifact_read_root",
+            resolved,
+            _root_id(root),
+            write_pin=ValidatedWritePin(
+                target=resolved,
+                root=root,
+                ancestor=resolved,
+                root_identity=_file_identity(root),
+                ancestor_identity=_file_identity(resolved),
+            ),
+        )
 
     def validate_artifact_write(self, value: Any, *, directory: bool = False) -> PathDecision:
         return self._validate_write_under_root(
@@ -526,6 +537,14 @@ _SHARED_SOURCE_READ_ARGUMENTS = {
 _ARTIFACT_READ_ARGUMENTS = {
     "wave_optics_point_audit": ("air_reference_artifact_path",),
 }
+_ARTIFACT_READ_ROOT_ARGUMENTS = {
+    "standalone_start": ("deployment_directory",),
+    "standalone_status": ("deployment_directory",),
+    "standalone_pause": ("deployment_directory",),
+    "standalone_resume": ("deployment_directory",),
+    "standalone_tail": ("deployment_directory",),
+    "standalone_results": ("deployment_directory",),
+}
 _ARTIFACT_WRITE_ARGUMENTS = {
     "model_save": (("file_path", False, True),),
     "model_save_version": (("base_path", True, False),),
@@ -543,7 +562,12 @@ _ARTIFACT_WRITE_ARGUMENTS = {
         ("checkpoint_model_path", False, False),
         ("save_model_path", False, False),
     ),
+    "standalone_build": (("output_directory", True, True),),
 }
+
+_ALWAYS_ENFORCED_TOOLS = frozenset(
+    {"geometry_import", "standalone_build", *_ARTIFACT_READ_ROOT_ARGUMENTS}
+)
 
 
 def validate_tool_paths(
@@ -561,7 +585,7 @@ def validate_tool_paths(
     tuple[ValidatedWritePin, ...],
 ]:
     """Validate and normalize known caller-selected path arguments."""
-    if profile_name == "full" and tool_name != "geometry_import":
+    if profile_name == "full" and tool_name not in _ALWAYS_ENFORCED_TOOLS:
         return (
             args,
             kwargs,
@@ -595,6 +619,12 @@ def validate_tool_paths(
         value = bound.arguments.get(argument)
         if value is not None:
             decision = policy.validate_artifact_read(value)
+            bound.arguments[argument] = str(decision.normalized_path)
+            decisions.append(decision)
+    for argument in _ARTIFACT_READ_ROOT_ARGUMENTS.get(tool_name, ()):
+        value = bound.arguments.get(argument)
+        if value is not None:
+            decision = policy.validate_artifact_read_root(value)
             bound.arguments[argument] = str(decision.normalized_path)
             decisions.append(decision)
     for argument, directory, required in _ARTIFACT_WRITE_ARGUMENTS.get(tool_name, ()):

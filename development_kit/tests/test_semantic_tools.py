@@ -258,14 +258,20 @@ print(json.dumps({'count': len(names), 'configured': status['configured']}))
 
 def test_semantic_and_other_profile_counts_match_declared_discovery():
     counts = {}
-    for profile in ("core", "basic_fem", "wave_optics", "experimental", "full"):
+    for profile in (
+        "core",
+        "basic_fem",
+        "wave_optics",
+        "experimental",
+        "full",
+    ):
         server = create_server(f"semantic-profile-{profile}", profile=profile)
         counts[profile] = len(asyncio.run(server.list_tools()))
 
     assert counts == {
         "core": 43,
-        "basic_fem": 93,
+        "basic_fem": 100,
         "wave_optics": 67,
-        "experimental": 81,
-        "full": 147,
+        "experimental": 88,
+        "full": 154,
     }

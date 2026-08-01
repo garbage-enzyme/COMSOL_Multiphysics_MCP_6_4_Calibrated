@@ -76,6 +76,11 @@ from documentation, as the authority for the installed tool surface.
   type and property allowlists.
 - **Safe solver ownership.** An ASCII-path lease, process identity checks, external-client detection, status, and preflight checks prevent accidental competing COMSOL clients.
 - **Durable background work.** Staged sweeps and adaptive spectral characterization run in detached workers with immutable specifications, atomic state, fsync'd evidence rows, checkpoints, validated resume, and verified same-host cancellation.
+- **Python-free standalone execution.** A reviewed native Windows x64 launcher
+  keeps the same three layers: an installed and licensed COMSOL 6.4, a
+  COMSOL-compiled Java point driver, and the launcher EXE. The target does not
+  need Python, Conda, MPh, JPype, or an external Java installation; COMSOL
+  itself is still required and is never bundled or replaced.
 - **Shared Desktop collaboration (default-off).** The `desktop_shared` profile can attach to a manually started local COMSOL Server, adopt exactly one server-held model, enforce non-owning leases and revision locks, run durable attached jobs, and detach without shutting down the user's Server, Desktop, listener, or model.
 - **Wave Optics validation.** A focused profile provides read-only model preflight and a one-wavelength evidence audit for periodic metasurfaces.
 - **Bounded offline manuals.** SQLite FTS5/BM25 search and page retrieval run outside the COMSOL control process and return compact source/page citations.
@@ -115,7 +120,7 @@ fixed for the lifetime of that server process; restart after changing it.
 | Profile | Intended use |
 | --- | --- |
 | `core` (default) | Compact, mature control plane: status, ownership, session/model inspection, one-point solve/evaluation, and lexical manuals. |
-| `basic_fem` | `core` plus typed conventional FEM construction, named selections, Pressure Acoustics and mathematical PDE interfaces, derived-geometry edits, and bounded exports. |
+| `basic_fem` | `core` plus typed conventional FEM construction, named selections, Pressure Acoustics and mathematical PDE interfaces, derived-geometry edits, bounded exports, and the Python-free standalone launcher tools. |
 | `wave_optics` | Recommended for metasurfaces: `core` plus derived-geometry edits, material preview, locale-safe field discovery and bounded NPZ/manifest extraction, periodic-mesh audit/smoke, visual-review contracts, Wave Optics preflight, and point/reference audits. Durable staged jobs remain under `job_submit`. |
 | `desktop_shared` | Explicit opt-in shared Desktop/attached-Server workflow; requires `profile.name=desktop_shared` and `shared_server.enabled=true`, a manually started local Server, per-call user confirmation, exact process/listener identity, and exact model adoption. It never starts or terminates the external Server. |
 | `semantic_docs` | `core` plus isolated experimental vector-assisted manual retrieval. |
@@ -133,6 +138,31 @@ tool remains an experimental compatibility surface and is not a substitute for
 the protected shared-session lifecycle.
 
 Control-plane responses from capabilities, solver ownership, durable jobs, and lexical manuals include a compact rolling `control_plane` block. It retains at most 256 samples per operation and reports success/busy/timeout/error counts plus p50/p95/max latency; full logs and unbounded telemetry are never returned inline.
+
+### Standalone Windows launcher
+
+The standalone route targets Windows 10/11 x64 and the COMSOL 6.4 release
+line. Licensed acceptance is currently exact for COMSOL 6.4.0.293. It does not
+support Windows Server, pre-6.4 COMSOL, Linux, or macOS. The generated EXE takes
+one runtime value: `--comsol-path <COMSOL-root>`. It uses that installation's
+`comsolcompile.exe`, `comsolbatch.exe`, bundled Java, solver, and license.
+
+Building uses the 64-bit C# compiler from the `.NET Framework 4.x` component
+supplied and serviced with supported Windows 10/11 workstations:
+`%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\csc.exe`. It does not require a
+separate modern `.NET Runtime`, `.NET Desktop Runtime`, `.NET SDK`, Visual
+Studio, package download, or network access. If that inbox compiler is absent,
+`standalone_build` fails without installing or downloading a replacement.
+Microsoft's [.NET Framework platform table](https://learn.microsoft.com/en-us/dotnet/framework/install/guide-for-developers)
+documents the inbox 4.x versions supplied with Windows 10 and Windows 11.
+
+Select the `basic_fem` profile in the normal Python MCP host to expose
+`standalone_build`, `standalone_start`, `standalone_status`,
+`standalone_pause`, `standalone_resume`, `standalone_tail`, and
+`standalone_results`. The build and campaign directories must remain under the
+configured owned ASCII artifact root. The MCP host verifies the packaged source
+identity, build manifest, and EXE hash before execution. Once generated, the
+EXE can also be copied and operated directly without that Python MCP host.
 
 ## Recommended workflows
 

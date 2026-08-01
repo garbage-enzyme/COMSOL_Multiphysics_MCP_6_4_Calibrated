@@ -95,6 +95,18 @@ SPECTRAL_STAGE_SCHEMA_NAME, SPECTRAL_STAGE_SCHEMA_VERSION = (
     "comsol_mcp.spectral_stage_plan",
     "1.0.0",
 )
+STANDALONE_SCHEMA_VERSION = "1.0.0"
+STANDALONE_SCHEMAS = (
+    "comsol_mcp.standalone_build_receipt",
+    "comsol_mcp.standalone_driver_event",
+    "comsol_mcp.standalone_licensed_acceptance",
+    "comsol_mcp.standalone_mcp_launch",
+    "comsol_mcp.standalone_owner",
+    "comsol_mcp.standalone_pause_ack",
+    "comsol_mcp.standalone_pause_request",
+    "comsol_mcp.standalone_status",
+    "comsol_mcp.standalone_terminal",
+)
 
 
 _REGISTRY_SCHEMA = "comsol_mcp.schema_registry"
@@ -376,6 +388,15 @@ def _entries() -> list[dict[str, Any]]:
             "1.0.0",
             "comsol_mcp.tools.session",
             artifact_kind="durable_artifact",
+        ),
+        *(
+            _entry(
+                schema_name,
+                STANDALONE_SCHEMA_VERSION,
+                "comsol_mcp.standalone",
+                artifact_kind="durable_artifact",
+            )
+            for schema_name in STANDALONE_SCHEMAS
         ),
         _entry(
             SHARED_MODEL_LOCK_SCHEMA,
