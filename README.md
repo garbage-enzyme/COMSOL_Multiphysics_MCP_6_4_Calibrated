@@ -23,6 +23,12 @@ This server gives AI agents a safer, smaller interface for COMSOL inspection, co
   agent can take explicit turns with one user-owned local Server, one connected
   Desktop, and one exact server-held model. It requires explicit profile/flag
   enablement and per-session confirmation. Read the [interactive guide](docs/interactive_shared_session/README.md).
+- **Five simulation execution modes.** `interactive`, `inline`, `launcher`,
+  `standalone`, and `mphonly` distinguish short feedback, direct scripts,
+  durable local campaigns, Python-free Windows handoff, and portable COMSOL
+  cluster/cloud delivery. Agents default to the first three and must collect
+  the target environment before preparing either cross-device mode. Read the
+  independent [execution-modes guide](docs/simulation_execution_modes/README.md).
 
 ## Recommended companion skill
 
@@ -75,7 +81,7 @@ from documentation, as the authority for the installed tool surface.
   General, and Weak Form PDE interfaces, and atomic boundary batches with exact
   type and property allowlists.
 - **Safe solver ownership.** An ASCII-path lease, process identity checks, external-client detection, status, and preflight checks prevent accidental competing COMSOL clients.
-- **Durable background work.** Staged sweeps and adaptive spectral characterization run in detached workers with immutable specifications, atomic state, fsync'd evidence rows, checkpoints, validated resume, and verified same-host cancellation.
+- **Durable background work.** Staged sweeps and adaptive spectral characterization run in detached workers with immutable specifications, atomic state, fsync'd evidence rows, checkpoints, validated resume, and verified same-host cancellation. A reusable [local launcher](launcher/README.md) provides the same point-boundary operating pattern for project drivers.
 - **Python-free standalone execution.** A reviewed native Windows x64 launcher
   keeps the same three layers: an installed and licensed COMSOL 6.4, a
   COMSOL-compiled Java point driver, and the launcher EXE. The target does not

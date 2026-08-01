@@ -22,6 +22,11 @@
   本地 Server、一个连接的 Desktop 和一个精确 server-held model 上明确轮流操作。
   该模式要求显式 profile/flag enablement 以及每次 session confirmation。请阅读
   [交互协作指南](docs/interactive_shared_session/README_CN.md)。
+- **五种仿真运行方式。** `interactive`、`inline`、`launcher`、`standalone` 和
+  `mphonly` 分别用于短反馈、直接脚本、可恢复的本地长任务、目标机无 Python 的
+  Windows 交付，以及可移植的 COMSOL 集群或云端交付。agent 默认只使用前三种；准备
+  跨设备方式前必须先询问目标环境。请阅读独立的
+  [运行方式指南](docs/simulation_execution_modes/README_CN.md)。
 
 ## 推荐配套 Skill
 
@@ -65,7 +70,7 @@ acceptance 报告应至少包含不启动 COMSOL 的 `initialize`、实时 `list
   selection、Pressure Acoustics、Coefficient/General/Weak Form PDE，以及具有
   精确类型和属性白名单的原子边界批量配置。
 - **安全的求解器所有权。** ASCII 路径租约、进程身份核验、外部客户端检测、状态和预检可避免意外启动并发 COMSOL 客户端。
-- **持久化后台任务。** 分段扫描和自适应光谱表征在独立 worker 中执行，具有不可变规格、原子状态、经 `fsync` 的证据行、检查点、校验后的恢复，以及已验证的同主机取消能力。
+- **持久化后台任务。** 分段扫描和自适应光谱表征在独立 worker 中执行，具有不可变规格、原子状态、经 `fsync` 的证据行、检查点、校验后的恢复，以及已验证的同主机取消能力。可复用的[本地启动器](launcher/README_CN.md)为项目驱动提供相同的逐点运行方式。
 - **无需 Python 的独立执行。** 原生 Windows x64 启动器保留三层结构：本机已安装并
   授权的 COMSOL 6.4、由 COMSOL 编译的 Java 单点驱动，以及启动器 EXE。目标机不需要
   Python、Conda、MPh、JPype 或另装 Java；COMSOL 本身仍然必需，项目不会打包或替代它。

@@ -38,6 +38,26 @@ models are intentionally absent.
 - `docs/evidence_integrity/exploration_settings.json` — This file is the tested single-check opt-out exploration example.
 - `docs/interactive_shared_session/README.md` — This file is the complete English interactive Desktop/Server collaboration guide.
 - `docs/interactive_shared_session/README_CN.md` — This file is the complete Chinese interactive Desktop/Server collaboration guide.
+- `docs/simulation_execution_modes/README.md` — This file defines the five supported simulation execution modes and the English selection contract.
+- `docs/simulation_execution_modes/README_CN.md` — This file defines the five supported simulation execution modes and the Chinese selection contract.
+
+## Durable local launcher
+
+- `launcher/README.md` — This file explains the English durable local launcher workflow and safety contract.
+- `launcher/README_CN.md` — This file explains the Chinese durable local launcher workflow and safety contract.
+- `launcher/powershell/DurableLauncher.psm1` — This module implements portable Windows PowerShell start, status, pause, resume, monitoring, and cleanup operations.
+- `launcher/python/durable_control.py` — This helper applies atomic file-based pause, resume, and stop control inside a compatible Python driver.
+- `launcher/templates/Run_DurableJob.template.ps1` — This parameterized template launches one portable durable local job.
+- `launcher/tests/fake_durable_driver.py` — This synthetic driver exercises durable point commits and file-based control without COMSOL.
+- `launcher/tests/Test_DurableLauncher.ps1` — This script tests the main start, status, pause, resume, identity, and cleanup workflow.
+- `launcher/tests/Test_MonitorRefreshFailure.ps1` — This script tests bounded monitor behavior after a refresh failure.
+- `launcher/tests/Test_PreflightFailure.ps1` — This script tests fail-closed resource and configuration preflight behavior.
+- `launcher/tests/Test_RefreshFailureChild.ps1` — This child script supplies a controlled monitor-refresh failure.
+- `launcher/tests/Test_TerminalBanner.ps1` — This script tests terminal-state banner presentation.
+- `launcher/tests/Test_TerminalBannerChild.ps1` — This child script supplies terminal banner fixture state.
+- `launcher/tests/Test_TerminalHold.ps1` — This script tests that terminal state remains visible until explicit acknowledgement.
+- `launcher/tests/Test_TerminalHoldChild.ps1` — This child script supplies terminal hold fixture state.
+- `launcher/tests/Test_TerminalPresentation.ps1` — This script tests terminal summary formatting and durable result presentation.
 
 ## Standalone recipes
 
@@ -194,6 +214,7 @@ models are intentionally absent.
 - `development_kit/tests/test_integration_boundaries.py` — This module tests isolation and safety boundaries for integration probes.
 - `development_kit/tests/test_installed_stdio_probe.py` — This module tests installed stdio probe result decoding.
 - `development_kit/tests/test_job_state_stress.py` — This module stress-tests durable state readers and writers without COMSOL.
+- `development_kit/tests/test_launcher_distribution.py` — This module tests launcher portability and runs its PowerShell 5.1 and pwsh acceptance suite on Windows.
 - `development_kit/tests/test_lexical_manual.py` — This module tests bounded SQLite lexical manual search and page reading.
 - `development_kit/tests/test_material_expressions.py` — This module tests solver-free dispersive material-expression previews.
 - `development_kit/tests/test_mesh.py` — This module tests mesh helpers without a COMSOL client.

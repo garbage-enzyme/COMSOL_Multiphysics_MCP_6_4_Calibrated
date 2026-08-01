@@ -78,6 +78,12 @@ The old individual `COMSOL_MCP_*`, `COMSOL_SEMANTIC_*`, and Java variables remai
 one-release compatibility overrides, but are not needed for a normal deployment
 and are omitted from the checked-in examples.
 
+Before choosing a profile, choose how the simulation will run. The independent
+[five execution modes guide](docs/simulation_execution_modes/README.md)
+distinguishes `interactive`, `inline`, `launcher`, `standalone`, and `mphonly`.
+A cross-device or cloud package requires the target operating system, COMSOL
+build/modules, license, scheduler, storage, and output requirements first.
+
 ## 3. Select a profile
 
 | Profile | Intended use |
