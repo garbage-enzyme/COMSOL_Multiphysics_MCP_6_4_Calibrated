@@ -11,7 +11,10 @@ from typing import Any, Mapping
 
 from comsol_mcp.evidence.field_manifest import validate_field_evidence_manifest
 from comsol_mcp.evidence.field_matrix import bind_validation_matrix_field_request
-from comsol_mcp.evidence.field_render import render_field_png_bundle
+from comsol_mcp.evidence.field_render import (
+    DEFAULT_RENDER_TIMEOUT_SECONDS,
+    render_field_png_bundle,
+)
 
 from .store import atomic_write_json
 from .validation_collectors import _validate_point_audit_inner_manifest
@@ -396,7 +399,7 @@ def assemble_validation_matrix_field_review(
     quantity_unit: str,
     coordinate_unit: str,
     color_scale: str = "linear",
-    render_timeout_seconds: float = 30.0,
+    render_timeout_seconds: float = DEFAULT_RENDER_TIMEOUT_SECONDS,
 ) -> dict[str, Any]:
     """Verify two exact complete matrix fields and render one shared-scale bundle."""
     directory = Path(job_directory).expanduser().resolve()
