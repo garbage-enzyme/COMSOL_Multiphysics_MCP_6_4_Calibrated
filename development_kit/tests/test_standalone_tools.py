@@ -6,10 +6,21 @@ import asyncio
 import json
 from pathlib import Path
 
+import pytest
+
+import comsol_mcp.standalone.builder as builder_module
 from comsol_mcp.durable.io import atomic_write_json
 from comsol_mcp.path_policy import ARTIFACT_WRITE_ROOT_ENV
 from comsol_mcp.server import create_server
 from comsol_mcp.tools.catalog import TOOL_METADATA
+
+
+def _workstation_build_available() -> bool:
+    try:
+        builder_module._validate_build_host(builder_module._default_csc_path())
+    except builder_module.PlatformError, FileNotFoundError:
+        return False
+    return True
 
 
 def _call(server, name: str, arguments: dict) -> dict:
@@ -48,6 +59,10 @@ def test_standalone_tool_metadata_is_explicit() -> None:
         assert metadata.requires_model_revision is False
 
 
+@pytest.mark.skipif(
+    not _workstation_build_available(),
+    reason="requires a supported Windows 10/11 x64 workstation build host",
+)
 def test_public_build_and_status_dispatch_are_solver_free_and_contained(
     ascii_tmp_path: Path, monkeypatch
 ) -> None:

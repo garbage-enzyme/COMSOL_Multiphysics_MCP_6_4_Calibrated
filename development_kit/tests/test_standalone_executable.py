@@ -30,6 +30,20 @@ from comsol_mcp.standalone.inspection import (
 )
 
 
+def _workstation_build_available() -> bool:
+    try:
+        builder_module._validate_build_host(builder_module._default_csc_path())
+    except builder_module.PlatformError, FileNotFoundError:
+        return False
+    return True
+
+
+requires_windows_workstation_build = pytest.mark.skipif(
+    not _workstation_build_available(),
+    reason="requires a supported Windows 10/11 x64 workstation build host",
+)
+
+
 def _status(*, state: str = "running", completed: int = 1) -> dict[str, object]:
     return {
         "schema_name": "comsol_mcp.standalone_status",
@@ -76,7 +90,7 @@ def _campaign(root: Path) -> Path:
     return root
 
 
-@pytest.mark.skipif(not Path("C:/Windows").exists(), reason="Windows-only build contract")
+@requires_windows_workstation_build
 def test_packaged_sources_build_one_x64_executable_without_comsol(ascii_tmp_path: Path) -> None:
     output = ascii_tmp_path / "standalone-build"
 
@@ -140,11 +154,12 @@ def test_builder_rejects_windows_server_even_with_an_x64_compiler(
 
 
 def test_builder_failure_preserves_bounded_logs_and_no_false_manifest(
-    ascii_tmp_path: Path,
+    ascii_tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     compiler = ascii_tmp_path / "csc.exe"
     compiler.write_bytes(b"fake-compiler")
     output = ascii_tmp_path / "failed-build"
+    monkeypatch.setattr(builder_module, "_validate_build_host", lambda _path: None)
 
     def fail(command, **kwargs):
         assert command[0] == str(compiler)
@@ -288,7 +303,7 @@ def test_completed_terminal_must_bind_the_exact_result_journal(
         read_campaign_results(campaign)
 
 
-@pytest.mark.skipif(not Path("C:/Windows").exists(), reason="Windows-only build contract")
+@requires_windows_workstation_build
 def test_deployment_verification_rejects_executable_or_source_identity_tampering(
     ascii_tmp_path: Path,
 ) -> None:
@@ -319,7 +334,7 @@ def test_deployment_verification_rejects_executable_or_source_identity_tampering
         read_standalone_results(result_mismatch, limit=1)
 
 
-@pytest.mark.skipif(not Path("C:/Windows").exists(), reason="Windows-only build contract")
+@requires_windows_workstation_build
 def test_mcp_launch_uses_fixed_arguments_and_writes_path_free_record(
     ascii_tmp_path: Path,
 ) -> None:
