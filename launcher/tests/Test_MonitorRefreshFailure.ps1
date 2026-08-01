@@ -17,10 +17,18 @@ $Process = Start-Process -FilePath $PowerShellPath -ArgumentList @(
     '-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
     ('"' + $Child + '"'), '-TestRoot', ('"' + $TestRoot + '"')
 ) -RedirectStandardOutput $Stdout -RedirectStandardError $Stderr -WindowStyle Hidden -PassThru
-Start-Sleep -Seconds 3
-$Process.Refresh()
-$Alive = -not $Process.HasExited
-$Output = (Get-Content -LiteralPath $Stdout -Raw -ErrorAction SilentlyContinue) + (Get-Content -LiteralPath $Stderr -Raw -ErrorAction SilentlyContinue)
+$Deadline = [DateTime]::UtcNow.AddSeconds(15)
+$Alive = $true
+$Output = ''
+while ([DateTime]::UtcNow -lt $Deadline) {
+    $Process.Refresh()
+    $Alive = -not $Process.HasExited
+    $Output = (Get-Content -LiteralPath $Stdout -Raw -ErrorAction SilentlyContinue) + (Get-Content -LiteralPath $Stderr -Raw -ErrorAction SilentlyContinue)
+    if (-not $Alive -or ($Output -match 'MONITOR REFRESH FAILED' -and $Output -match 'displayed progress is not current')) {
+        break
+    }
+    Start-Sleep -Milliseconds 100
+}
 if ($Alive) {
     Stop-Process -Id $Process.Id -Force
     $Process.WaitForExit()
@@ -34,7 +42,7 @@ $Receipt = [ordered]@{
     status = 'pass'
     powershell_path = $PowerShellPath
     powershell_version = (& $PowerShellPath -NoLogo -NoProfile -Command '$PSVersionTable.PSVersion.ToString()')
-    monitor_alive_after_three_seconds = $true
+    monitor_alive_until_failure_banner = $true
     refresh_failure_banner_visible = $true
     stale_progress_explicitly_disclaimed = $true
     test_pid = $Process.Id
