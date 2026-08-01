@@ -57,7 +57,7 @@ def _relevant_processes() -> list[dict[str, Any]]:
                         "process_create_time": float(process.info["create_time"]),
                     }
                 )
-        except (psutil.AccessDenied, psutil.NoSuchProcess, psutil.ZombieProcess):
+        except psutil.AccessDenied, psutil.NoSuchProcess, psutil.ZombieProcess:
             continue
     return sorted(processes, key=lambda item: (item["name"], item["pid"]))
 

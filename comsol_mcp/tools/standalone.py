@@ -25,7 +25,7 @@ def _call(callback) -> dict[str, Any]:
         return callback()
     except ValueError as exc:
         return public_error("standalone_input_rejected", str(exc))
-    except (FileNotFoundError, FileExistsError):
+    except FileNotFoundError, FileExistsError:
         return public_error(
             "standalone_artifact_unavailable",
             "A required standalone artifact is absent or the target is not empty.",
