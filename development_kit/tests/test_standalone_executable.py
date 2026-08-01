@@ -33,7 +33,7 @@ from comsol_mcp.standalone.inspection import (
 def _workstation_build_available() -> bool:
     try:
         builder_module._validate_build_host(builder_module._default_csc_path())
-    except builder_module.PlatformError, FileNotFoundError:
+    except (builder_module.PlatformError, FileNotFoundError):
         return False
     return True
 
