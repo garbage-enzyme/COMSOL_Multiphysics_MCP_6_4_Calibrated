@@ -152,6 +152,13 @@ Real COMSOL gates are opt-in, licensed, and serial. Follow
 `development_kit/docs/release_checklist.md`; hosted CI intentionally does not
 run them.
 
+The repository launcher keeps its PowerShell scripts directly runnable for
+focused diagnosis. `development_kit/tests/test_launcher_distribution.py` is
+the canonical pytest wrapper: on Windows it runs the accepted suite serially
+under both Windows PowerShell 5.1 and `pwsh`, so complete local pytest and the
+hosted Windows CI jobs exercise the same contract. Non-Windows collection
+skips the process tests; it does not emulate Windows behavior.
+
 ## MCP and evidence contracts
 
 - Use `capabilities` to discover the installed profile and tool surface without

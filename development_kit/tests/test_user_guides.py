@@ -18,6 +18,7 @@ from src.evidence.integrity_controls import (
 ROOT = Path(__file__).parents[2]
 EVIDENCE_DOCS = ROOT / "docs" / "evidence_integrity"
 INTERACTIVE_DOCS = ROOT / "docs" / "interactive_shared_session"
+MODES_DOCS = ROOT / "docs" / "simulation_execution_modes"
 SETTINGS_DOCS = ROOT / "docs" / "setting_guide"
 CHINESE_DISABLED_WARNING = (
     "严格证据检查已关闭；这些结果未经过完整验证，可能包含 AI 生成或幻觉内容。"
@@ -193,6 +194,33 @@ def test_chinese_interactive_guide_is_complete_and_contract_equivalent():
         assert avoidable_english not in guide
 
 
+def test_execution_mode_guides_are_bilingual_and_contract_equivalent():
+    english = (MODES_DOCS / "README.md").read_text(encoding="utf-8")
+    chinese = (MODES_DOCS / "README_CN.md").read_text(encoding="utf-8")
+    modes = ("interactive", "inline", "launcher", "standalone", "mphonly")
+
+    assert all(f"`{mode}`" in english for mode in modes)
+    assert all(f"`{mode}`" in chinese for mode in modes)
+    assert "Agents use `interactive`, `inline`, or `launcher` by default" in english
+    assert "agent 默认只使用 `interactive`、`inline` 和 `launcher`" in chinese
+    assert "below 1 hour" in english
+    assert "少于 1 小时" in chinese
+    assert "target operating system and architecture" in english
+    assert "目标操作系统、处理器架构" in chinese
+    assert "Windows 10/11 x64" in english
+    assert "Windows 10/11 x64" in chinese
+    assert "exact per-point durability is not promised" in english
+    assert "不承诺每点都能恢复" in chinese
+    assert "relative errors of about `6.81e-10`" in english
+    assert "相对解析误差约为 `6.81e-10`" in chinese
+    assert "It does not verify interruption recovery" in english
+    assert "不能证明中断后恢复" in chinese
+    assert "comsol_ref_solver.36.230.html" in english
+    assert "comsol_ref_solver.36.230.html" in chinese
+    assert "comsol_ref_solver.36.042.html" in english
+    assert "comsol_ref_solver.36.042.html" in chinese
+
+
 def test_root_readmes_expose_same_language_feature_and_settings_guides():
     english = (ROOT / "README.md").read_text(encoding="utf-8")
     chinese = (ROOT / "README_CN.md").read_text(encoding="utf-8")
@@ -202,6 +230,7 @@ def test_root_readmes_expose_same_language_feature_and_settings_guides():
     for guide_path in (
         "docs/evidence_integrity/README.md",
         "docs/interactive_shared_session/README.md",
+        "docs/simulation_execution_modes/README.md",
         "docs/setting_guide/README.md",
     ):
         assert guide_path in english
@@ -209,6 +238,7 @@ def test_root_readmes_expose_same_language_feature_and_settings_guides():
     for guide_path in (
         "docs/evidence_integrity/README_CN.md",
         "docs/interactive_shared_session/README_CN.md",
+        "docs/simulation_execution_modes/README_CN.md",
         "docs/setting_guide/README_CN.md",
     ):
         assert guide_path in chinese
@@ -249,6 +279,10 @@ def test_language_switch_is_limited_to_the_main_readmes():
         EVIDENCE_DOCS / "README_CN.md",
         INTERACTIVE_DOCS / "README.md",
         INTERACTIVE_DOCS / "README_CN.md",
+        MODES_DOCS / "README.md",
+        MODES_DOCS / "README_CN.md",
+        ROOT / "launcher" / "README.md",
+        ROOT / "launcher" / "README_CN.md",
         SETTINGS_DOCS / "README.md",
         SETTINGS_DOCS / "README_CN.md",
     ):
@@ -265,6 +299,9 @@ def test_deployment_guides_explain_the_shared_settings_file_and_fallbacks():
         assert "COMSOL_MCP_SETTINGS_PATH" in guide
         assert "settings_errors" in guide
         assert "shared_server" in guide
+        assert all(
+            mode in guide for mode in ("interactive", "inline", "launcher", "standalone", "mphonly")
+        )
 
 
 def test_embedded_guidance_no_longer_denies_the_shared_profile():

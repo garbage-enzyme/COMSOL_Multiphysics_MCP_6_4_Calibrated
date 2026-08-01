@@ -69,6 +69,11 @@ COMSOL_MCP_SETTINGS_PATH=D:\path\to\COMSOL_Multiphysics_MCP\settings.json
 旧的 `COMSOL_MCP_*`、`COMSOL_SEMANTIC_*` 和 Java 环境变量仍保留一个 release 的
 兼容覆盖能力，但正常部署不需要它们，提交的 client 示例也已移除。
 
+选择 profile 前，先确定仿真怎样运行。独立的
+[五种运行方式指南](docs/simulation_execution_modes/README_CN.md)区分 `interactive`、
+`inline`、`launcher`、`standalone` 和 `mphonly`。跨设备或云端运行前，必须先确认
+目标操作系统、COMSOL 版本与模块、许可证、调度器、存储和输出要求。
+
 ## 3. 选择 Profile
 
 | Profile | 用途 |
