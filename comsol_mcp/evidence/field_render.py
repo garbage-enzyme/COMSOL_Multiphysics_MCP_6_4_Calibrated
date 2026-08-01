@@ -19,6 +19,7 @@ MAX_RENDER_VIEWS = 2
 MAX_RENDER_ARRAY_BYTES = 256 * 1024 * 1024
 MAX_RENDER_OUTPUT_BYTES = 32 * 1024 * 1024
 MAX_RENDER_RESPONSE_BYTES = 64 * 1024
+DEFAULT_RENDER_TIMEOUT_SECONDS = 60.0
 _IDENTIFIER = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]{0,127}$")
 
 
@@ -82,7 +83,7 @@ def render_field_png_bundle(
     color_scale: str,
     shared_color_limits: bool,
     output_root: str | os.PathLike[str],
-    timeout_seconds: float = 30.0,
+    timeout_seconds: float = DEFAULT_RENDER_TIMEOUT_SECONDS,
 ) -> dict[str, Any]:
     """Render one or two immutable NPZ views in an isolated plotting process."""
     if not isinstance(views, list) or not 1 <= len(views) <= MAX_RENDER_VIEWS:
@@ -228,4 +229,4 @@ def render_field_png_bundle(
         raise
 
 
-__all__ = ["render_field_png_bundle"]
+__all__ = ["DEFAULT_RENDER_TIMEOUT_SECONDS", "render_field_png_bundle"]

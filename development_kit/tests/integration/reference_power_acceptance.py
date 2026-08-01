@@ -169,6 +169,24 @@ def _admit_lightweight_status(status: dict[str, Any]) -> tuple[bool, list[str]]:
     return not blockers, blockers
 
 
+def _stable_lightweight_admission(
+    *,
+    status_provider=None,
+    sleeper=None,
+) -> tuple[dict[str, Any], bool, list[str]]:
+    """Require two serial clean snapshots before admitting solver startup."""
+    status_provider = status_provider or _lightweight_solver_status
+    sleeper = sleeper or time.sleep
+    status = status_provider()
+    admitted, blockers = _admit_lightweight_status(status)
+    if not admitted:
+        return status, admitted, blockers
+    sleeper(0.05)
+    status = status_provider()
+    admitted, blockers = _admit_lightweight_status(status)
+    return status, admitted, blockers
+
+
 def _redacted_status(status: dict[str, Any]) -> dict[str, Any]:
     return {
         "complete": status.get("complete"),
@@ -542,8 +560,7 @@ def _run_coordinator(args: argparse.Namespace) -> int:
         pass
     else:
         raise ValueError("licensed receipt output must remain outside the artifact root")
-    before_status = _lightweight_solver_status()
-    admitted, blockers = _admit_lightweight_status(before_status)
+    before_status, admitted, blockers = _stable_lightweight_admission()
     receipt: dict[str, Any] = {
         "schema_version": "1.0.0",
         "gate": "reference_power_fresh_process_licensed",

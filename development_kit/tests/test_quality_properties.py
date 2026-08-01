@@ -508,6 +508,35 @@ def test_atomic_write_validates_payload_retries_and_compact_names(
     assert attempts == 2
 
 
+def test_atomic_write_default_retry_survives_extended_windows_sharing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "extended-sharing.bin"
+    attempts = 0
+    ticks = iter([0.0, 0.4, 0.8, 1.2])
+
+    def replace_after_extended_sharing(source: object, destination: object) -> None:
+        nonlocal attempts
+        attempts += 1
+        if attempts <= 3:
+            raise PermissionError("extended sharing violation")
+        durable_io.os.replace(source, destination)
+
+    monkeypatch.setattr(durable_io.time, "monotonic", lambda: next(ticks))
+    monkeypatch.setattr(durable_io.time, "sleep", lambda _seconds: None)
+
+    durable_io.atomic_write_bytes(
+        target,
+        b"complete",
+        replace_fn=replace_after_extended_sharing,
+    )
+
+    assert durable_io.DEFAULT_REPLACE_RETRY_SECONDS == 3.0
+    assert attempts == 4
+    assert target.read_bytes() == b"complete"
+
+
 def test_atomic_write_cleans_up_after_replace_deadline(tmp_path: Path) -> None:
     target = tmp_path / "blocked.bin"
 

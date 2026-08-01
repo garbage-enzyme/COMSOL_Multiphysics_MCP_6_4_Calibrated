@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import _winapi
 import hashlib
+import inspect
 import json
 from copy import deepcopy
 from pathlib import Path
@@ -18,6 +19,15 @@ from src.jobs.validation_matrix import normalize_validation_matrix_spec
 from src.jobs.validation_rows import append_validation_row, read_validation_rows
 
 from development_kit.tests.test_field_matrix import _field_inputs
+
+
+def test_field_review_uses_the_isolated_renderer_timeout_default():
+    default = (
+        inspect.signature(assemble_validation_matrix_field_review)
+        .parameters["render_timeout_seconds"]
+        .default
+    )
+    assert default == field_review_module.DEFAULT_RENDER_TIMEOUT_SECONDS == 60.0
 
 
 def _sha256(path: Path) -> str:

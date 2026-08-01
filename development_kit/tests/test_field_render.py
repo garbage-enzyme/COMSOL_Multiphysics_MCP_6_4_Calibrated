@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
 from pathlib import Path
 
 import numpy as np
@@ -201,7 +202,7 @@ def test_worker_output_is_redirected_and_read_with_a_hard_bound(tmp_path, monkey
             self.stdout = kwargs["stdout"]
 
         def communicate(self, *, input, timeout):
-            assert input and timeout > 0
+            assert input and timeout == field_render_module.DEFAULT_RENDER_TIMEOUT_SECONDS
             self.stdout.write(b"x" * (field_render_module.MAX_RENDER_RESPONSE_BYTES + 1))
 
     monkeypatch.setattr(field_render_module.subprocess, "Popen", FakeProcess)
@@ -321,6 +322,48 @@ def test_worker_failure_removes_every_owned_partial_png(tmp_path, monkeypatch):
             output_root=output,
         )
 
+    assert not list(output.glob("*.png"))
+
+
+def test_worker_timeout_stays_bounded_and_removes_partial_png(tmp_path, monkeypatch):
+    array = tmp_path / "timeout.npz"
+    digest = _array(array)
+    output = tmp_path / "timeout-output"
+
+    class FakeProcess:
+        returncode = None
+        killed = False
+        waited = False
+
+        def communicate(self, *, input, timeout):
+            assert timeout == field_render_module.DEFAULT_RENDER_TIMEOUT_SECONDS
+            payload = json.loads(input)
+            for view in payload["views"]:
+                Path(view["png_path"]).write_bytes(b"partial")
+            raise subprocess.TimeoutExpired("field_plot_worker", timeout)
+
+        def kill(self):
+            self.killed = True
+
+        def wait(self):
+            self.waited = True
+
+    process = FakeProcess()
+    monkeypatch.setattr(field_render_module.subprocess, "Popen", lambda *_args, **_kwargs: process)
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        render_field_png_bundle(
+            views=[_view("target", array, digest)],
+            quantity_name="abs_ex",
+            quantity_unit="V/m",
+            coordinate_unit="um",
+            color_scale="linear",
+            shared_color_limits=False,
+            output_root=output,
+        )
+
+    assert process.killed is True
+    assert process.waited is True
     assert not list(output.glob("*.png"))
 
 
