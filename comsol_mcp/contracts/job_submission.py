@@ -7,6 +7,7 @@ from typing import Annotated, Any, Literal, TypeAlias
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 from .structural import validate_public_structure
+from .thermo_optomechanical import ThermoOptomechanicalReplayInput
 
 MAX_PUBLIC_TEXT = 4096
 MAX_PUBLIC_PATH = 1024
@@ -116,7 +117,8 @@ JobSubmissionSpec: TypeAlias = Annotated[
     | ValidationMatrixInput
     | SpectralCharacterizationInput
     | ConvergenceCampaignInput
-    | BranchContinuationCampaignInput,
+    | BranchContinuationCampaignInput
+    | ThermoOptomechanicalReplayInput,
     Field(discriminator="job_type"),
 ]
 _JOB_SUBMISSION_ADAPTER: TypeAdapter[JobSubmissionSpec] = TypeAdapter(JobSubmissionSpec)
@@ -144,6 +146,7 @@ __all__ = [
     "JobSubmissionSpec",
     "SpectralCharacterizationInput",
     "StagedSweepInput",
+    "ThermoOptomechanicalReplayInput",
     "ValidationMatrixInput",
     "job_submission_dict",
     "validate_job_submission",

@@ -248,6 +248,71 @@ Spectral summaries retain raw R/T/A, closure, wavelength synchronization, mesh
 counts, own-peak, FWHM, Q, stage hashes, and exact artifact references when the
 declared collector and evidence support those quantities.
 
+The solver-free `spectral_model_compare` tool compares two or three declared
+scalar line-shape models on exactly the same spectral rows, support, baseline,
+response, polarity, coordinate domain, and quality policy. It supports local
+polynomial, Lorentzian, and Fano fits in wavelength, frequency, angular-frequency,
+or energy coordinates, then maps peak and half-prominence crossings back to the
+original wavelength evidence. It reports fit diagnostics, support sensitivity,
+AIC, AICc when defined, BIC, deltas, and descriptive Akaike weights. These rank
+model support only; they do not prove Lorentzian physics, Fano interference,
+mode identity, or scientific acceptance.
+
+Three solver-free preview tools make configuration review explicit before any
+COMSOL admission or mutation. `simulation_configuration_validate` accepts a
+closed typed contract for source/producer identity, geometry semantics, ordered
+layers, material state and loss sign, incidence and polarization, mesh keys,
+model-tree identities, solver termination, units, and artifact chains. It
+normalizes supported units and returns a content-bound fingerprint.
+`simulation_configuration_diff` classifies leaves as exact, within tolerance,
+semantic, label-only, or unavailable; labels never become physical identity.
+`job_spec_preview` reuses the exact discriminated input validator used by
+`job_submit` and reports its bounded point/stage inventory, path/resource
+checks, requirements, and declared submit-time side effects without admission,
+ownership acquisition, filesystem writes, process creation, or solver startup.
+
+The solver-free `thermal_kirchhoff_assess` tool permits directional
+absorptivity-to-emissivity substitution only when the exact channel has verified
+linearity, time invariance, reciprocity, local equilibrium, direction, frequency,
+and polarization evidence. Unknown facts remain conditional or unavailable, and
+nonreciprocal channels are not applicable. `thermal_radiation_evaluate` applies
+the SI Planck law with explicit wavelength/frequency/wavenumber Jacobians,
+projected-solid-angle integration, scalar, incoherent TE/TM, or Stokes/Mueller
+polarization, and bounded gas/aperture/optics/analyzer/detector kernels. Its
+hash-bound evidence records coverage, integration policy, extrapolation state,
+uncertainty, source artifacts, and detector/reference/background signals. It
+does not replace COMSOL's Surface-to-Surface Radiation solver.
+
+The solver-free `thermal_material_validate` and `thermal_material_evaluate`
+tools use a versioned ledger instead of embedding a material database. Each
+state binds material/sample identity, phase and fabrication state, source,
+spectral/temperature validity, uncertainty, measurement conditions, and whether
+the data are measured, fitted, or assumed. Typed entries cover n/k and complex
+permittivity tables plus Drude, Lorentz, TOLO, and thermo-optic models. State IDs
+remain distinct across carrier density, mobility, effective mass, and phase
+fraction; declared phase/discontinuity boundaries are never smoothed through.
+The internal convention is `exp(-i*omega*t)` with passive `Im(epsilon)>=0`.
+COMSOL output is a mutation-free `exp(+i*omega*t)` conversion preview containing
+exact target property/function tags, units, interpolation/extrapolation policy,
+table hashes, readback expectations, and rollback requirements.
+
+A licensed durable thermal-to-optical replay uses
+`job_type: "thermo_optomechanical_replay"` plus an ASCII JSON
+`specification_path` and exact `specification_sha256`. The bounded manifest is
+validated against the complete closed contract before submission; this keeps
+core MCP discovery bounded without accepting free-form configuration. It binds an
+immutable source, one validated thermal material state, exact Heat Transfer,
+Solid Mechanics, Moving Mesh, Wave Optics, study, selection, parameter, mesh,
+and expression tags, and a caller-supplied resource and acceptance policy. Five
+hash-chained stages persist preflight, thermal/structural solve, state evidence,
+spatial-frame deformation transfer, and exact optical replay. Resume verifies
+orphaned evidence before appending its missing row and never repeats a completed
+stage. Acceptance keeps raw R/T/A, temperature, stress, displacement, energy,
+mesh, wavelength, zero-CTE, zero-temperature-rise, rollback, source-integrity,
+and cleanup evidence separate from execution completion. The minimal supported
+route forbids topology change and requires a licensed COMSOL 6.4 synthetic
+fixture gate before use with research models.
+
 A durable convergence campaign uses `job_type: "convergence_campaign"` and an
 immutable ordered ladder of two to eight exact source or prebuilt derived model
 identities. Every level runs the accepted adaptive spectral job, persists its

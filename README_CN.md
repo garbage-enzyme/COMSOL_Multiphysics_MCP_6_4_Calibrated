@@ -216,6 +216,58 @@ worker driver 身份均相同时，重新提交才会观察到已有任务。
 证据支持相应量时，光谱 summary 会保留原始 R/T/A、闭合误差、波长同步、网格计数、
 own peak、FWHM、Q、stage 哈希及精确 artifact 引用。
 
+solver-free 的 `spectral_model_compare` 会让两到三个声明的标量线形模型使用完全相同的
+光谱行、support、baseline、response、polarity、拟合坐标和质量 policy。它支持在
+wavelength、frequency、angular-frequency 或 energy 坐标下比较局部多项式、
+Lorentzian 与 Fano 拟合，并把 peak 和 half-prominence crossings 映射回原始波长证据。
+输出包含拟合诊断、窗口敏感性、AIC、可定义时的 AICc、BIC、差值和描述性 Akaike
+权重。这些结果只表示数据对模型的相对支持，不证明 Lorentzian/Fano 物理机制、模式
+身份或科学验收。
+
+三个 solver-free 预览工具把 COMSOL admission 或模型修改前的配置审查变成显式契约。
+`simulation_configuration_validate` 只接受封闭的 typed 字段，包括 source/producer
+identity、几何语义、层顺序、材料状态与损耗符号、入射与偏振、mesh dependency、
+model-tree identity、solver termination、单位和 artifact chain；它统一受支持的单位并
+返回内容绑定指纹。`simulation_configuration_diff` 把字段分为 exact、容差内、semantic、
+label-only 或 unavailable，标签不会被提升为物理身份。`job_spec_preview` 复用
+`job_submit` 的同一个 discriminated input validator，只报告受限的 point/stage 清单、
+路径与资源检查、需求及提交时副作用，不做 admission、ownership、文件写入、进程创建或
+solver 启动。
+
+solver-free 的 `thermal_kirchhoff_assess` 只有在同一方向、频率和偏振通道的线性、
+时不变、互易、局域平衡及通道匹配证据全部验证后，才允许把 directional absorptivity
+当作 emissivity；未知事实保持 conditional/unavailable，非互易通道为 not applicable。
+`thermal_radiation_evaluate` 使用 SI Planck 定律和显式 wavelength/frequency/
+wavenumber Jacobian，执行含投影固体角的积分，支持 scalar、非相干 TE/TM 或
+Stokes/Mueller 偏振，并可应用受限的气体、孔径、光学、analyzer 和 detector kernel。
+哈希绑定输出保留 coverage、积分 policy、extrapolation 状态、不确定度、source artifact
+以及 detector/reference/background signal；它不替代 COMSOL Surface-to-Surface
+Radiation solver。
+
+solver-free 的 `thermal_material_validate` 与 `thermal_material_evaluate` 使用
+versioned ledger，而不是内置第二套材料数据库。每个 state 都绑定 material/sample
+identity、phase/fabrication state、source、光谱与温度有效域、不确定度、测量条件以及
+measured/fitted/assumed 分类。typed entry 支持 n/k 与复介电常数表，以及 Drude、
+Lorentz、TOLO 和 thermo-optic 模型。不同 carrier density、mobility、effective mass
+与 phase fraction 的 state 保持独立，声明的 phase/discontinuity boundary 不会被通用
+插值跨越。内部约定为 `exp(-i*omega*t)` 且被动介质 `Im(epsilon)>=0`；COMSOL 输出只
+提供 mutation-free 的 `exp(+i*omega*t)` 转换预览，包含精确 property/function tag、
+单位、插值/外推 policy、table hash、readback 期望和 rollback 要求。
+
+需要许可证的持久化热到光重放任务使用
+`job_type: "thermo_optomechanical_replay"`，并提供 ASCII JSON
+`specification_path` 与精确 `specification_sha256`。提交前会用完整的封闭契约验证受限
+manifest；这样既控制 core MCP discovery 大小，也不接受自由格式配置。manifest 绑定
+不可变源模型、一个已验证的
+热材料状态，以及精确的 Heat Transfer、Solid Mechanics、Moving Mesh、Wave Optics、
+study、selection、parameter、mesh 和 expression tag，并要求调用方声明 resource 与
+acceptance policy。五个哈希链 stage 依次保存 preflight、热-结构求解、状态证据、空间
+frame 形变传递和精确光学重放。resume 会先验证孤立 evidence，再补写缺失 row，绝不
+重复已完成 stage。验收分别保留 raw R/T/A、温度、应力、位移、能量、网格、波长、
+zero-CTE、zero-temperature-rise、rollback、源完整性与 cleanup 证据，不把执行完成等同
+于科学通过。最小支持路径禁止拓扑变化，并要求先通过 COMSOL 6.4 synthetic fixture 的
+licensed gate，之后才可用于研究模型。
+
 持久化收敛任务使用 `job_type: "convergence_campaign"`，并声明 2–8 个严格排序的
 exact source 或预先构建并验证的 derived model identity。每个 level 都复用已验收的
 自适应光谱任务，完整持久化哈希绑定 artifacts，并且只以各 level 自己 bracketed

@@ -2166,6 +2166,745 @@
     "title": "job_resumeArguments",
     "type": "object"
   },
+  "job_spec_preview": {
+    "$defs": {
+      "BranchContinuationCampaignInput": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "campaign_id": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Campaign Id",
+            "type": "string"
+          },
+          "continuation_policy": {
+            "additionalProperties": true,
+            "maxProperties": 256,
+            "title": "Continuation Policy",
+            "type": "object"
+          },
+          "job_type": {
+            "const": "branch_continuation_campaign",
+            "maxLength": 16384,
+            "title": "Job Type",
+            "type": "string"
+          },
+          "maximum_total_points": {
+            "maximum": 2048,
+            "minimum": 1,
+            "title": "Maximum Total Points",
+            "type": "integer"
+          },
+          "states": {
+            "items": {
+              "additionalProperties": true,
+              "maxProperties": 256,
+              "type": "object"
+            },
+            "maxItems": 2048,
+            "minItems": 1,
+            "title": "States",
+            "type": "array"
+          },
+          "wall_time_budget_seconds": {
+            "maximum": 31536000,
+            "minimum": 1,
+            "title": "Wall Time Budget Seconds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "job_type",
+          "campaign_id",
+          "states",
+          "continuation_policy",
+          "maximum_total_points",
+          "wall_time_budget_seconds"
+        ],
+        "title": "BranchContinuationCampaignInput",
+        "type": "object"
+      },
+      "ConvergenceCampaignInput": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "campaign_id": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Campaign Id",
+            "type": "string"
+          },
+          "convergence_policy": {
+            "additionalProperties": true,
+            "maxProperties": 256,
+            "title": "Convergence Policy",
+            "type": "object"
+          },
+          "job_type": {
+            "const": "convergence_campaign",
+            "maxLength": 16384,
+            "title": "Job Type",
+            "type": "string"
+          },
+          "levels": {
+            "items": {
+              "additionalProperties": true,
+              "maxProperties": 256,
+              "type": "object"
+            },
+            "maxItems": 2048,
+            "minItems": 1,
+            "title": "Levels",
+            "type": "array"
+          },
+          "maximum_total_points": {
+            "maximum": 2048,
+            "minimum": 1,
+            "title": "Maximum Total Points",
+            "type": "integer"
+          },
+          "stop_policy": {
+            "additionalProperties": true,
+            "maxProperties": 256,
+            "title": "Stop Policy",
+            "type": "object"
+          },
+          "wall_time_budget_seconds": {
+            "maximum": 31536000,
+            "minimum": 1,
+            "title": "Wall Time Budget Seconds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "job_type",
+          "campaign_id",
+          "levels",
+          "convergence_policy",
+          "stop_policy",
+          "maximum_total_points",
+          "wall_time_budget_seconds"
+        ],
+        "title": "ConvergenceCampaignInput",
+        "type": "object"
+      },
+      "SpectralCharacterizationInput": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "analysis_policy": {
+            "additionalProperties": true,
+            "maxProperties": 256,
+            "title": "Analysis Policy",
+            "type": "object"
+          },
+          "collector": {
+            "additionalProperties": true,
+            "maxProperties": 256,
+            "title": "Collector",
+            "type": "object"
+          },
+          "configuration_sha256": {
+            "maxLength": 16384,
+            "pattern": "^[0-9a-fA-F]{64}$",
+            "title": "Configuration Sha256",
+            "type": "string"
+          },
+          "continue_on_error": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Continue On Error"
+          },
+          "cores": {
+            "maximum": 1024,
+            "minimum": 1,
+            "title": "Cores",
+            "type": "integer"
+          },
+          "expansion_policy": {
+            "additionalProperties": true,
+            "maxProperties": 256,
+            "title": "Expansion Policy",
+            "type": "object"
+          },
+          "initial_grid": {
+            "additionalProperties": true,
+            "maxProperties": 256,
+            "title": "Initial Grid",
+            "type": "object"
+          },
+          "job_type": {
+            "const": "spectral_characterization",
+            "maxLength": 16384,
+            "title": "Job Type",
+            "type": "string"
+          },
+          "max_retries": {
+            "anyOf": [
+              {
+                "maximum": 3,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Max Retries"
+          },
+          "maximum_points": {
+            "maximum": 2048,
+            "minimum": 3,
+            "title": "Maximum Points",
+            "type": "integer"
+          },
+          "measurement_configuration": {
+            "additionalProperties": true,
+            "maxProperties": 256,
+            "title": "Measurement Configuration",
+            "type": "object"
+          },
+          "parameter_state": {
+            "additionalProperties": true,
+            "maxProperties": 256,
+            "title": "Parameter State",
+            "type": "object"
+          },
+          "refinement_policy": {
+            "additionalProperties": true,
+            "maxProperties": 256,
+            "title": "Refinement Policy",
+            "type": "object"
+          },
+          "resource_policy": {
+            "additionalProperties": true,
+            "maxProperties": 256,
+            "title": "Resource Policy",
+            "type": "object"
+          },
+          "source_model_path": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Source Model Path",
+            "type": "string"
+          },
+          "source_model_relative_identity": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Source Model Relative Identity",
+            "type": "string"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "maxLength": 4096,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Version"
+          },
+          "wavelength_parameter": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Wavelength Parameter",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_type",
+          "source_model_path",
+          "source_model_relative_identity",
+          "configuration_sha256",
+          "parameter_state",
+          "wavelength_parameter",
+          "initial_grid",
+          "refinement_policy",
+          "expansion_policy",
+          "maximum_points",
+          "collector",
+          "analysis_policy",
+          "measurement_configuration",
+          "resource_policy",
+          "cores"
+        ],
+        "title": "SpectralCharacterizationInput",
+        "type": "object"
+      },
+      "StagedSweepInput": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "checkpoint_every": {
+            "anyOf": [
+              {
+                "maximum": 2048,
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Checkpoint Every"
+          },
+          "continue_on_error": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Continue On Error"
+          },
+          "cores": {
+            "anyOf": [
+              {
+                "maximum": 1024,
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Cores"
+          },
+          "execution_backend": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "maxProperties": 256,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Execution Backend"
+          },
+          "expressions": {
+            "items": {
+              "maxLength": 4096,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 2048,
+            "minItems": 1,
+            "title": "Expressions",
+            "type": "array"
+          },
+          "job_type": {
+            "const": "staged_sweep",
+            "maxLength": 16384,
+            "title": "Job Type",
+            "type": "string"
+          },
+          "max_retries": {
+            "anyOf": [
+              {
+                "maximum": 100,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Max Retries"
+          },
+          "parameter_name": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Parameter Name",
+            "type": "string"
+          },
+          "parameter_unit": {
+            "anyOf": [
+              {
+                "maxLength": 4096,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Parameter Unit"
+          },
+          "parameter_values": {
+            "items": {
+              "anyOf": [
+                {
+                  "maximum": 1e+308,
+                  "minimum": -1e+308,
+                  "type": "integer"
+                },
+                {
+                  "maximum": 1e+308,
+                  "minimum": -1e+308,
+                  "type": "number"
+                }
+              ]
+            },
+            "maxItems": 2048,
+            "minItems": 1,
+            "title": "Parameter Values",
+            "type": "array"
+          },
+          "physical_bounds": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "maxProperties": 256,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Physical Bounds"
+          },
+          "record_wavelength_controls": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Record Wavelength Controls"
+          },
+          "resource_policy": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "maxProperties": 256,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Resource Policy"
+          },
+          "smoke_points": {
+            "anyOf": [
+              {
+                "enum": [
+                  1,
+                  2
+                ],
+                "maximum": 1e+308,
+                "minimum": -1e+308,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Smoke Points"
+          },
+          "source_model_path": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Source Model Path",
+            "type": "string"
+          },
+          "study_name": {
+            "anyOf": [
+              {
+                "maxLength": 4096,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Study Name"
+          },
+          "study_step_property": {
+            "anyOf": [
+              {
+                "maxLength": 4096,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Study Step Property"
+          },
+          "study_step_tag": {
+            "anyOf": [
+              {
+                "maxLength": 4096,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Study Step Tag"
+          },
+          "study_step_unit": {
+            "anyOf": [
+              {
+                "maxLength": 4096,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Study Step Unit"
+          },
+          "study_step_unit_property": {
+            "anyOf": [
+              {
+                "maxLength": 4096,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Study Step Unit Property"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "maxLength": 4096,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Version"
+          }
+        },
+        "required": [
+          "job_type",
+          "source_model_path",
+          "parameter_name",
+          "parameter_values",
+          "expressions"
+        ],
+        "title": "StagedSweepInput",
+        "type": "object"
+      },
+      "ThermoOptomechanicalReplayInput": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "job_type": {
+            "const": "thermo_optomechanical_replay",
+            "maxLength": 16384,
+            "title": "Job Type",
+            "type": "string"
+          },
+          "specification_path": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Specification Path",
+            "type": "string"
+          },
+          "specification_sha256": {
+            "maxLength": 16384,
+            "pattern": "^[0-9a-fA-F]{64}$",
+            "title": "Specification Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_type",
+          "specification_path",
+          "specification_sha256"
+        ],
+        "title": "ThermoOptomechanicalReplayInput",
+        "type": "object"
+      },
+      "ValidationMatrixInput": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "continue_on_error": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Continue On Error"
+          },
+          "cores": {
+            "maximum": 1024,
+            "minimum": 1,
+            "title": "Cores",
+            "type": "integer"
+          },
+          "job_type": {
+            "const": "validation_matrix",
+            "maxLength": 16384,
+            "title": "Job Type",
+            "type": "string"
+          },
+          "max_retries": {
+            "anyOf": [
+              {
+                "maximum": 3,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Max Retries"
+          },
+          "point_limit": {
+            "maximum": 2048,
+            "minimum": 1,
+            "title": "Point Limit",
+            "type": "integer"
+          },
+          "points": {
+            "items": {
+              "additionalProperties": true,
+              "maxProperties": 256,
+              "type": "object"
+            },
+            "maxItems": 2048,
+            "minItems": 1,
+            "title": "Points",
+            "type": "array"
+          },
+          "resource_policy": {
+            "additionalProperties": true,
+            "maxProperties": 256,
+            "title": "Resource Policy",
+            "type": "object"
+          },
+          "source_model_path": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Source Model Path",
+            "type": "string"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "maxLength": 4096,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Version"
+          }
+        },
+        "required": [
+          "job_type",
+          "source_model_path",
+          "points",
+          "point_limit",
+          "resource_policy",
+          "cores"
+        ],
+        "title": "ValidationMatrixInput",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "maxProperties": 256,
+    "properties": {
+      "spec": {
+        "discriminator": {
+          "mapping": {
+            "branch_continuation_campaign": "#/$defs/BranchContinuationCampaignInput",
+            "convergence_campaign": "#/$defs/ConvergenceCampaignInput",
+            "spectral_characterization": "#/$defs/SpectralCharacterizationInput",
+            "staged_sweep": "#/$defs/StagedSweepInput",
+            "thermo_optomechanical_replay": "#/$defs/ThermoOptomechanicalReplayInput",
+            "validation_matrix": "#/$defs/ValidationMatrixInput"
+          },
+          "propertyName": "job_type"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/StagedSweepInput"
+          },
+          {
+            "$ref": "#/$defs/ValidationMatrixInput"
+          },
+          {
+            "$ref": "#/$defs/SpectralCharacterizationInput"
+          },
+          {
+            "$ref": "#/$defs/ConvergenceCampaignInput"
+          },
+          {
+            "$ref": "#/$defs/BranchContinuationCampaignInput"
+          },
+          {
+            "$ref": "#/$defs/ThermoOptomechanicalReplayInput"
+          }
+        ],
+        "title": "Spec"
+      }
+    },
+    "required": [
+      "spec"
+    ],
+    "title": "job_spec_previewArguments",
+    "type": "object"
+  },
   "job_status": {
     "additionalProperties": false,
     "maxProperties": 256,
@@ -2748,6 +3487,37 @@
         "title": "StagedSweepInput",
         "type": "object"
       },
+      "ThermoOptomechanicalReplayInput": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "job_type": {
+            "const": "thermo_optomechanical_replay",
+            "maxLength": 16384,
+            "title": "Job Type",
+            "type": "string"
+          },
+          "specification_path": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Specification Path",
+            "type": "string"
+          },
+          "specification_sha256": {
+            "maxLength": 16384,
+            "pattern": "^[0-9a-fA-F]{64}$",
+            "title": "Specification Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_type",
+          "specification_path",
+          "specification_sha256"
+        ],
+        "title": "ThermoOptomechanicalReplayInput",
+        "type": "object"
+      },
       "ValidationMatrixInput": {
         "additionalProperties": false,
         "maxProperties": 256,
@@ -2856,6 +3626,7 @@
             "convergence_campaign": "#/$defs/ConvergenceCampaignInput",
             "spectral_characterization": "#/$defs/SpectralCharacterizationInput",
             "staged_sweep": "#/$defs/StagedSweepInput",
+            "thermo_optomechanical_replay": "#/$defs/ThermoOptomechanicalReplayInput",
             "validation_matrix": "#/$defs/ValidationMatrixInput"
           },
           "propertyName": "job_type"
@@ -2875,6 +3646,9 @@
           },
           {
             "$ref": "#/$defs/BranchContinuationCampaignInput"
+          },
+          {
+            "$ref": "#/$defs/ThermoOptomechanicalReplayInput"
           }
         ],
         "title": "Spec"
@@ -7221,6 +7995,1556 @@
     "title": "shared_server_statusArguments",
     "type": "object"
   },
+  "simulation_configuration_diff": {
+    "$defs": {
+      "ArtifactChainReference": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "chain_sha256": {
+            "maxLength": 16384,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Chain Sha256",
+            "type": "string"
+          },
+          "role": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "chain_sha256",
+          "role"
+        ],
+        "title": "ArtifactChainReference",
+        "type": "object"
+      },
+      "ConfigurationDiffPolicy": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "tolerances": {
+            "$ref": "#/$defs/ConfigurationDiffTolerance",
+            "default": {
+              "angle_rad": 0.0,
+              "dimensionless": 0.0,
+              "energy_J": 0.0,
+              "frequency_Hz": 0.0,
+              "length_m": 0.0,
+              "temperature_K": 0.0
+            }
+          }
+        },
+        "title": "ConfigurationDiffPolicy",
+        "type": "object"
+      },
+      "ConfigurationDiffTolerance": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "angle_rad": {
+            "default": 0.0,
+            "maximum": 6.283185307179586,
+            "minimum": 0.0,
+            "title": "Angle Rad",
+            "type": "number"
+          },
+          "dimensionless": {
+            "default": 0.0,
+            "maximum": 1000000.0,
+            "minimum": 0.0,
+            "title": "Dimensionless",
+            "type": "number"
+          },
+          "energy_J": {
+            "default": 0.0,
+            "maximum": 1000000.0,
+            "minimum": 0.0,
+            "title": "Energy J",
+            "type": "number"
+          },
+          "frequency_Hz": {
+            "default": 0.0,
+            "maximum": 1e+30,
+            "minimum": 0.0,
+            "title": "Frequency Hz",
+            "type": "number"
+          },
+          "length_m": {
+            "default": 0.0,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Length M",
+            "type": "number"
+          },
+          "temperature_K": {
+            "default": 0.0,
+            "maximum": 1000000.0,
+            "minimum": 0.0,
+            "title": "Temperature K",
+            "type": "number"
+          }
+        },
+        "title": "ConfigurationDiffTolerance",
+        "type": "object"
+      },
+      "DeclaredQuantity": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "dimension": {
+            "enum": [
+              "length",
+              "angle",
+              "temperature",
+              "dimensionless",
+              "frequency",
+              "energy"
+            ],
+            "maxLength": 16384,
+            "title": "Dimension",
+            "type": "string"
+          },
+          "status": {
+            "default": "known",
+            "enum": [
+              "known",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Status",
+            "type": "string"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Unit"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "maximum": 1e+308,
+                "minimum": -1e+308,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Value"
+          }
+        },
+        "required": [
+          "dimension"
+        ],
+        "title": "DeclaredQuantity",
+        "type": "object"
+      },
+      "GeometryDimension": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "dimension_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Dimension Id",
+            "type": "string"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Label"
+          },
+          "quantity": {
+            "$ref": "#/$defs/DeclaredQuantity"
+          },
+          "semantic": {
+            "enum": [
+              "period_x",
+              "period_y",
+              "full_width",
+              "half_width",
+              "radius",
+              "diameter",
+              "thickness",
+              "height",
+              "gap",
+              "offset",
+              "other"
+            ],
+            "maxLength": 16384,
+            "title": "Semantic",
+            "type": "string"
+          }
+        },
+        "required": [
+          "dimension_id",
+          "semantic",
+          "quantity"
+        ],
+        "title": "GeometryDimension",
+        "type": "object"
+      },
+      "IncidenceDeclaration": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "handedness_convention": {
+            "enum": [
+              "ieee_observer",
+              "optics_source_view",
+              "explicit_jones",
+              "not_applicable",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Handedness Convention",
+            "type": "string"
+          },
+          "phi": {
+            "$ref": "#/$defs/DeclaredQuantity"
+          },
+          "polarization_basis": {
+            "enum": [
+              "sp",
+              "xy",
+              "circular",
+              "jones",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Polarization Basis",
+            "type": "string"
+          },
+          "polarization_state": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Polarization State",
+            "type": "string"
+          },
+          "propagation_direction": {
+            "enum": [
+              "positive_z",
+              "negative_z",
+              "other",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Propagation Direction",
+            "type": "string"
+          },
+          "theta": {
+            "$ref": "#/$defs/DeclaredQuantity"
+          }
+        },
+        "required": [
+          "theta",
+          "phi",
+          "propagation_direction",
+          "polarization_basis",
+          "polarization_state",
+          "handedness_convention"
+        ],
+        "title": "IncidenceDeclaration",
+        "type": "object"
+      },
+      "LayerDeclaration": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "label": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Label"
+          },
+          "layer_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Layer Id",
+            "type": "string"
+          },
+          "material_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Material Id",
+            "type": "string"
+          },
+          "order": {
+            "maximum": 2047,
+            "minimum": 0,
+            "title": "Order",
+            "type": "integer"
+          },
+          "thickness": {
+            "$ref": "#/$defs/DeclaredQuantity"
+          }
+        },
+        "required": [
+          "layer_id",
+          "material_id",
+          "order",
+          "thickness"
+        ],
+        "title": "LayerDeclaration",
+        "type": "object"
+      },
+      "MaterialState": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "label": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Label"
+          },
+          "loss_sign_convention": {
+            "enum": [
+              "positive_imaginary_loss",
+              "negative_imaginary_loss",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Loss Sign Convention",
+            "type": "string"
+          },
+          "material_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Material Id",
+            "type": "string"
+          },
+          "model_identity_sha256": {
+            "maxLength": 16384,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Model Identity Sha256",
+            "type": "string"
+          },
+          "region_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Region Id",
+            "type": "string"
+          },
+          "temperature": {
+            "$ref": "#/$defs/DeclaredQuantity"
+          }
+        },
+        "required": [
+          "material_id",
+          "region_id",
+          "model_identity_sha256",
+          "temperature",
+          "loss_sign_convention"
+        ],
+        "title": "MaterialState",
+        "type": "object"
+      },
+      "MeshDeclaration": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "characteristic_lengths": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/GeometryDimension"
+            },
+            "maxItems": 256,
+            "title": "Characteristic Lengths",
+            "type": "array"
+          },
+          "dependency_keys": {
+            "default": [],
+            "items": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 256,
+            "title": "Dependency Keys",
+            "type": "array"
+          }
+        },
+        "title": "MeshDeclaration",
+        "type": "object"
+      },
+      "ModelTreeIdentity": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "datasets": {
+            "default": [],
+            "items": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 256,
+            "title": "Datasets",
+            "type": "array"
+          },
+          "physics": {
+            "default": [],
+            "items": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 256,
+            "title": "Physics",
+            "type": "array"
+          },
+          "selections": {
+            "default": [],
+            "items": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 256,
+            "title": "Selections",
+            "type": "array"
+          },
+          "solvers": {
+            "default": [],
+            "items": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 256,
+            "title": "Solvers",
+            "type": "array"
+          },
+          "studies": {
+            "default": [],
+            "items": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 256,
+            "title": "Studies",
+            "type": "array"
+          }
+        },
+        "title": "ModelTreeIdentity",
+        "type": "object"
+      },
+      "ProducerIdentity": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "contract_sha256": {
+            "maxLength": 16384,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Contract Sha256",
+            "type": "string"
+          },
+          "tool": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Tool",
+            "type": "string"
+          },
+          "version": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tool",
+          "version",
+          "contract_sha256"
+        ],
+        "title": "ProducerIdentity",
+        "type": "object"
+      },
+      "SimulationConfigurationInput": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "artifact_chains": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/ArtifactChainReference"
+            },
+            "maxItems": 256,
+            "title": "Artifact Chains",
+            "type": "array"
+          },
+          "configuration_sha256": {
+            "anyOf": [
+              {
+                "maxLength": 16384,
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Configuration Sha256"
+          },
+          "geometry": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/GeometryDimension"
+            },
+            "maxItems": 512,
+            "title": "Geometry",
+            "type": "array"
+          },
+          "incidence": {
+            "$ref": "#/$defs/IncidenceDeclaration"
+          },
+          "layers": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/LayerDeclaration"
+            },
+            "maxItems": 512,
+            "title": "Layers",
+            "type": "array"
+          },
+          "materials": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/MaterialState"
+            },
+            "maxItems": 512,
+            "title": "Materials",
+            "type": "array"
+          },
+          "mesh": {
+            "$ref": "#/$defs/MeshDeclaration"
+          },
+          "method": {
+            "enum": [
+              "fem",
+              "rcwa",
+              "hybrid",
+              "other"
+            ],
+            "maxLength": 16384,
+            "title": "Method",
+            "type": "string"
+          },
+          "model_tree": {
+            "$ref": "#/$defs/ModelTreeIdentity"
+          },
+          "producer": {
+            "$ref": "#/$defs/ProducerIdentity"
+          },
+          "schema_name": {
+            "const": "comsol_mcp.simulation_configuration",
+            "default": "comsol_mcp.simulation_configuration",
+            "maxLength": 16384,
+            "title": "Schema Name",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": "1.0.0",
+            "default": "1.0.0",
+            "maxLength": 16384,
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "solver": {
+            "$ref": "#/$defs/SolverDeclaration"
+          },
+          "source": {
+            "$ref": "#/$defs/SourceIdentity"
+          },
+          "unit_contracts": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/UnitContract"
+            },
+            "maxItems": 256,
+            "title": "Unit Contracts",
+            "type": "array"
+          },
+          "wavelength_control": {
+            "$ref": "#/$defs/WavelengthControlDeclaration"
+          }
+        },
+        "required": [
+          "method",
+          "source",
+          "producer",
+          "incidence",
+          "wavelength_control",
+          "mesh",
+          "model_tree",
+          "solver"
+        ],
+        "title": "SimulationConfigurationInput",
+        "type": "object"
+      },
+      "SolverDeclaration": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "boundary_termination": {
+            "enum": [
+              "periodic",
+              "port",
+              "pml",
+              "scattering",
+              "pec",
+              "pmc",
+              "other",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Boundary Termination",
+            "type": "string"
+          },
+          "formulation": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Formulation",
+            "type": "string"
+          },
+          "termination_condition": {
+            "enum": [
+              "fixed_iterations",
+              "relative_tolerance",
+              "absolute_tolerance",
+              "residual_tolerance",
+              "other",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Termination Condition",
+            "type": "string"
+          }
+        },
+        "required": [
+          "formulation",
+          "termination_condition",
+          "boundary_termination"
+        ],
+        "title": "SolverDeclaration",
+        "type": "object"
+      },
+      "SourceIdentity": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "content_sha256": {
+            "maxLength": 16384,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Content Sha256",
+            "type": "string"
+          },
+          "format": {
+            "enum": [
+              "mph",
+              "json",
+              "yaml",
+              "toml",
+              "other"
+            ],
+            "maxLength": 16384,
+            "title": "Format",
+            "type": "string"
+          },
+          "relative_identity": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Relative Identity",
+            "type": "string"
+          }
+        },
+        "required": [
+          "relative_identity",
+          "content_sha256",
+          "format"
+        ],
+        "title": "SourceIdentity",
+        "type": "object"
+      },
+      "UnitContract": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "evaluated_unit": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Evaluated Unit",
+            "type": "string"
+          },
+          "quantity": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Quantity",
+            "type": "string"
+          },
+          "requested_unit": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Requested Unit",
+            "type": "string"
+          }
+        },
+        "required": [
+          "quantity",
+          "requested_unit",
+          "evaluated_unit"
+        ],
+        "title": "UnitContract",
+        "type": "object"
+      },
+      "WavelengthControlDeclaration": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "driver": {
+            "enum": [
+              "parameter",
+              "frequency",
+              "study_expression",
+              "dataset",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Driver",
+            "type": "string"
+          },
+          "evaluated": {
+            "$ref": "#/$defs/DeclaredQuantity"
+          },
+          "parameter_name": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Parameter Name"
+          },
+          "requested": {
+            "$ref": "#/$defs/DeclaredQuantity"
+          }
+        },
+        "required": [
+          "driver",
+          "requested",
+          "evaluated"
+        ],
+        "title": "WavelengthControlDeclaration",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "maxProperties": 256,
+    "properties": {
+      "left": {
+        "$ref": "#/$defs/SimulationConfigurationInput"
+      },
+      "policy": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ConfigurationDiffPolicy"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "right": {
+        "$ref": "#/$defs/SimulationConfigurationInput"
+      }
+    },
+    "required": [
+      "left",
+      "right"
+    ],
+    "title": "simulation_configuration_diffArguments",
+    "type": "object"
+  },
+  "simulation_configuration_validate": {
+    "$defs": {
+      "ArtifactChainReference": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "chain_sha256": {
+            "maxLength": 16384,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Chain Sha256",
+            "type": "string"
+          },
+          "role": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "chain_sha256",
+          "role"
+        ],
+        "title": "ArtifactChainReference",
+        "type": "object"
+      },
+      "DeclaredQuantity": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "dimension": {
+            "enum": [
+              "length",
+              "angle",
+              "temperature",
+              "dimensionless",
+              "frequency",
+              "energy"
+            ],
+            "maxLength": 16384,
+            "title": "Dimension",
+            "type": "string"
+          },
+          "status": {
+            "default": "known",
+            "enum": [
+              "known",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Status",
+            "type": "string"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Unit"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "maximum": 1e+308,
+                "minimum": -1e+308,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Value"
+          }
+        },
+        "required": [
+          "dimension"
+        ],
+        "title": "DeclaredQuantity",
+        "type": "object"
+      },
+      "GeometryDimension": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "dimension_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Dimension Id",
+            "type": "string"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Label"
+          },
+          "quantity": {
+            "$ref": "#/$defs/DeclaredQuantity"
+          },
+          "semantic": {
+            "enum": [
+              "period_x",
+              "period_y",
+              "full_width",
+              "half_width",
+              "radius",
+              "diameter",
+              "thickness",
+              "height",
+              "gap",
+              "offset",
+              "other"
+            ],
+            "maxLength": 16384,
+            "title": "Semantic",
+            "type": "string"
+          }
+        },
+        "required": [
+          "dimension_id",
+          "semantic",
+          "quantity"
+        ],
+        "title": "GeometryDimension",
+        "type": "object"
+      },
+      "IncidenceDeclaration": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "handedness_convention": {
+            "enum": [
+              "ieee_observer",
+              "optics_source_view",
+              "explicit_jones",
+              "not_applicable",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Handedness Convention",
+            "type": "string"
+          },
+          "phi": {
+            "$ref": "#/$defs/DeclaredQuantity"
+          },
+          "polarization_basis": {
+            "enum": [
+              "sp",
+              "xy",
+              "circular",
+              "jones",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Polarization Basis",
+            "type": "string"
+          },
+          "polarization_state": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Polarization State",
+            "type": "string"
+          },
+          "propagation_direction": {
+            "enum": [
+              "positive_z",
+              "negative_z",
+              "other",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Propagation Direction",
+            "type": "string"
+          },
+          "theta": {
+            "$ref": "#/$defs/DeclaredQuantity"
+          }
+        },
+        "required": [
+          "theta",
+          "phi",
+          "propagation_direction",
+          "polarization_basis",
+          "polarization_state",
+          "handedness_convention"
+        ],
+        "title": "IncidenceDeclaration",
+        "type": "object"
+      },
+      "LayerDeclaration": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "label": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Label"
+          },
+          "layer_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Layer Id",
+            "type": "string"
+          },
+          "material_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Material Id",
+            "type": "string"
+          },
+          "order": {
+            "maximum": 2047,
+            "minimum": 0,
+            "title": "Order",
+            "type": "integer"
+          },
+          "thickness": {
+            "$ref": "#/$defs/DeclaredQuantity"
+          }
+        },
+        "required": [
+          "layer_id",
+          "material_id",
+          "order",
+          "thickness"
+        ],
+        "title": "LayerDeclaration",
+        "type": "object"
+      },
+      "MaterialState": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "label": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Label"
+          },
+          "loss_sign_convention": {
+            "enum": [
+              "positive_imaginary_loss",
+              "negative_imaginary_loss",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Loss Sign Convention",
+            "type": "string"
+          },
+          "material_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Material Id",
+            "type": "string"
+          },
+          "model_identity_sha256": {
+            "maxLength": 16384,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Model Identity Sha256",
+            "type": "string"
+          },
+          "region_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Region Id",
+            "type": "string"
+          },
+          "temperature": {
+            "$ref": "#/$defs/DeclaredQuantity"
+          }
+        },
+        "required": [
+          "material_id",
+          "region_id",
+          "model_identity_sha256",
+          "temperature",
+          "loss_sign_convention"
+        ],
+        "title": "MaterialState",
+        "type": "object"
+      },
+      "MeshDeclaration": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "characteristic_lengths": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/GeometryDimension"
+            },
+            "maxItems": 256,
+            "title": "Characteristic Lengths",
+            "type": "array"
+          },
+          "dependency_keys": {
+            "default": [],
+            "items": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 256,
+            "title": "Dependency Keys",
+            "type": "array"
+          }
+        },
+        "title": "MeshDeclaration",
+        "type": "object"
+      },
+      "ModelTreeIdentity": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "datasets": {
+            "default": [],
+            "items": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 256,
+            "title": "Datasets",
+            "type": "array"
+          },
+          "physics": {
+            "default": [],
+            "items": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 256,
+            "title": "Physics",
+            "type": "array"
+          },
+          "selections": {
+            "default": [],
+            "items": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 256,
+            "title": "Selections",
+            "type": "array"
+          },
+          "solvers": {
+            "default": [],
+            "items": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 256,
+            "title": "Solvers",
+            "type": "array"
+          },
+          "studies": {
+            "default": [],
+            "items": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 256,
+            "title": "Studies",
+            "type": "array"
+          }
+        },
+        "title": "ModelTreeIdentity",
+        "type": "object"
+      },
+      "ProducerIdentity": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "contract_sha256": {
+            "maxLength": 16384,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Contract Sha256",
+            "type": "string"
+          },
+          "tool": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Tool",
+            "type": "string"
+          },
+          "version": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tool",
+          "version",
+          "contract_sha256"
+        ],
+        "title": "ProducerIdentity",
+        "type": "object"
+      },
+      "SimulationConfigurationInput": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "artifact_chains": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/ArtifactChainReference"
+            },
+            "maxItems": 256,
+            "title": "Artifact Chains",
+            "type": "array"
+          },
+          "configuration_sha256": {
+            "anyOf": [
+              {
+                "maxLength": 16384,
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Configuration Sha256"
+          },
+          "geometry": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/GeometryDimension"
+            },
+            "maxItems": 512,
+            "title": "Geometry",
+            "type": "array"
+          },
+          "incidence": {
+            "$ref": "#/$defs/IncidenceDeclaration"
+          },
+          "layers": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/LayerDeclaration"
+            },
+            "maxItems": 512,
+            "title": "Layers",
+            "type": "array"
+          },
+          "materials": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/MaterialState"
+            },
+            "maxItems": 512,
+            "title": "Materials",
+            "type": "array"
+          },
+          "mesh": {
+            "$ref": "#/$defs/MeshDeclaration"
+          },
+          "method": {
+            "enum": [
+              "fem",
+              "rcwa",
+              "hybrid",
+              "other"
+            ],
+            "maxLength": 16384,
+            "title": "Method",
+            "type": "string"
+          },
+          "model_tree": {
+            "$ref": "#/$defs/ModelTreeIdentity"
+          },
+          "producer": {
+            "$ref": "#/$defs/ProducerIdentity"
+          },
+          "schema_name": {
+            "const": "comsol_mcp.simulation_configuration",
+            "default": "comsol_mcp.simulation_configuration",
+            "maxLength": 16384,
+            "title": "Schema Name",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": "1.0.0",
+            "default": "1.0.0",
+            "maxLength": 16384,
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "solver": {
+            "$ref": "#/$defs/SolverDeclaration"
+          },
+          "source": {
+            "$ref": "#/$defs/SourceIdentity"
+          },
+          "unit_contracts": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/UnitContract"
+            },
+            "maxItems": 256,
+            "title": "Unit Contracts",
+            "type": "array"
+          },
+          "wavelength_control": {
+            "$ref": "#/$defs/WavelengthControlDeclaration"
+          }
+        },
+        "required": [
+          "method",
+          "source",
+          "producer",
+          "incidence",
+          "wavelength_control",
+          "mesh",
+          "model_tree",
+          "solver"
+        ],
+        "title": "SimulationConfigurationInput",
+        "type": "object"
+      },
+      "SolverDeclaration": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "boundary_termination": {
+            "enum": [
+              "periodic",
+              "port",
+              "pml",
+              "scattering",
+              "pec",
+              "pmc",
+              "other",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Boundary Termination",
+            "type": "string"
+          },
+          "formulation": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Formulation",
+            "type": "string"
+          },
+          "termination_condition": {
+            "enum": [
+              "fixed_iterations",
+              "relative_tolerance",
+              "absolute_tolerance",
+              "residual_tolerance",
+              "other",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Termination Condition",
+            "type": "string"
+          }
+        },
+        "required": [
+          "formulation",
+          "termination_condition",
+          "boundary_termination"
+        ],
+        "title": "SolverDeclaration",
+        "type": "object"
+      },
+      "SourceIdentity": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "content_sha256": {
+            "maxLength": 16384,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Content Sha256",
+            "type": "string"
+          },
+          "format": {
+            "enum": [
+              "mph",
+              "json",
+              "yaml",
+              "toml",
+              "other"
+            ],
+            "maxLength": 16384,
+            "title": "Format",
+            "type": "string"
+          },
+          "relative_identity": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Relative Identity",
+            "type": "string"
+          }
+        },
+        "required": [
+          "relative_identity",
+          "content_sha256",
+          "format"
+        ],
+        "title": "SourceIdentity",
+        "type": "object"
+      },
+      "UnitContract": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "evaluated_unit": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Evaluated Unit",
+            "type": "string"
+          },
+          "quantity": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Quantity",
+            "type": "string"
+          },
+          "requested_unit": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Requested Unit",
+            "type": "string"
+          }
+        },
+        "required": [
+          "quantity",
+          "requested_unit",
+          "evaluated_unit"
+        ],
+        "title": "UnitContract",
+        "type": "object"
+      },
+      "WavelengthControlDeclaration": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "driver": {
+            "enum": [
+              "parameter",
+              "frequency",
+              "study_expression",
+              "dataset",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Driver",
+            "type": "string"
+          },
+          "evaluated": {
+            "$ref": "#/$defs/DeclaredQuantity"
+          },
+          "parameter_name": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Parameter Name"
+          },
+          "requested": {
+            "$ref": "#/$defs/DeclaredQuantity"
+          }
+        },
+        "required": [
+          "driver",
+          "requested",
+          "evaluated"
+        ],
+        "title": "WavelengthControlDeclaration",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "maxProperties": 256,
+    "properties": {
+      "configuration": {
+        "$ref": "#/$defs/SimulationConfigurationInput"
+      }
+    },
+    "required": [
+      "configuration"
+    ],
+    "title": "simulation_configuration_validateArguments",
+    "type": "object"
+  },
   "solutions_list": {
     "additionalProperties": false,
     "maxProperties": 256,
@@ -7360,6 +9684,58 @@
       "measurement_configuration"
     ],
     "title": "spectral_characterizeArguments",
+    "type": "object"
+  },
+  "spectral_model_compare": {
+    "additionalProperties": false,
+    "maxProperties": 256,
+    "properties": {
+      "analysis_policy": {
+        "additionalProperties": true,
+        "maxProperties": 256,
+        "title": "Analysis Policy",
+        "type": "object"
+      },
+      "bundle_spec": {
+        "anyOf": [
+          {
+            "additionalProperties": true,
+            "maxProperties": 256,
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Bundle Spec"
+      },
+      "comparison_configuration": {
+        "additionalProperties": true,
+        "maxProperties": 256,
+        "title": "Comparison Configuration",
+        "type": "object"
+      },
+      "spectral_bundle": {
+        "anyOf": [
+          {
+            "additionalProperties": true,
+            "maxProperties": 256,
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Spectral Bundle"
+      }
+    },
+    "required": [
+      "analysis_policy",
+      "comparison_configuration"
+    ],
+    "title": "spectral_model_compareArguments",
     "type": "object"
   },
   "standalone_build": {
@@ -8028,6 +10404,3081 @@
       }
     },
     "title": "study_waitArguments",
+    "type": "object"
+  },
+  "thermal_kirchhoff_assess": {
+    "$defs": {
+      "KirchhoffAssessmentRequest": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "absorptivity_evidence_sha256": {
+            "maxLength": 16384,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Absorptivity Evidence Sha256",
+            "type": "string"
+          },
+          "absorptivity_evidence_state": {
+            "enum": [
+              "verified",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Absorptivity Evidence State",
+            "type": "string"
+          },
+          "channel_identity_sha256": {
+            "maxLength": 16384,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Channel Identity Sha256",
+            "type": "string"
+          },
+          "direction_channel_match": {
+            "enum": [
+              "verified",
+              "failed",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Direction Channel Match",
+            "type": "string"
+          },
+          "frequency_channel_match": {
+            "enum": [
+              "verified",
+              "failed",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Frequency Channel Match",
+            "type": "string"
+          },
+          "handedness_convention": {
+            "enum": [
+              "ieee_observer",
+              "optics_source_view",
+              "explicit_stokes",
+              "not_applicable",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Handedness Convention",
+            "type": "string"
+          },
+          "linearity": {
+            "enum": [
+              "verified",
+              "failed",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Linearity",
+            "type": "string"
+          },
+          "local_equilibrium": {
+            "enum": [
+              "verified",
+              "failed",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Local Equilibrium",
+            "type": "string"
+          },
+          "polarization_basis": {
+            "enum": [
+              "scalar",
+              "te_tm",
+              "stokes_mueller",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Polarization Basis",
+            "type": "string"
+          },
+          "polarization_channel_match": {
+            "enum": [
+              "verified",
+              "failed",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Polarization Channel Match",
+            "type": "string"
+          },
+          "propagation_direction": {
+            "enum": [
+              "positive_z",
+              "negative_z",
+              "other",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Propagation Direction",
+            "type": "string"
+          },
+          "reciprocity": {
+            "enum": [
+              "verified",
+              "failed",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Reciprocity",
+            "type": "string"
+          },
+          "time_invariance": {
+            "enum": [
+              "verified",
+              "failed",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Time Invariance",
+            "type": "string"
+          }
+        },
+        "required": [
+          "absorptivity_evidence_sha256",
+          "absorptivity_evidence_state",
+          "linearity",
+          "time_invariance",
+          "reciprocity",
+          "local_equilibrium",
+          "direction_channel_match",
+          "frequency_channel_match",
+          "polarization_channel_match",
+          "propagation_direction",
+          "polarization_basis",
+          "handedness_convention",
+          "channel_identity_sha256"
+        ],
+        "title": "KirchhoffAssessmentRequest",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "maxProperties": 256,
+    "properties": {
+      "request": {
+        "$ref": "#/$defs/KirchhoffAssessmentRequest"
+      }
+    },
+    "required": [
+      "request"
+    ],
+    "title": "thermal_kirchhoff_assessArguments",
+    "type": "object"
+  },
+  "thermal_material_evaluate": {
+    "$defs": {
+      "CarrierState": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "density_per_cubic_metre": {
+            "maximum": 1e+308,
+            "minimum": 0.0,
+            "title": "Density Per Cubic Metre",
+            "type": "number"
+          },
+          "effective_mass_electron": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 1e+308,
+            "minimum": -1e+308,
+            "title": "Effective Mass Electron",
+            "type": "number"
+          },
+          "mobility_square_metre_per_V_s": {
+            "maximum": 1e+308,
+            "minimum": 0.0,
+            "title": "Mobility Square Metre Per V S",
+            "type": "number"
+          }
+        },
+        "required": [
+          "density_per_cubic_metre",
+          "mobility_square_metre_per_V_s",
+          "effective_mass_electron"
+        ],
+        "title": "CarrierState",
+        "type": "object"
+      },
+      "ComsolMaterialTarget": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "component_tag": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+            "title": "Component Tag",
+            "type": "string"
+          },
+          "function_tag_prefix": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+            "title": "Function Tag Prefix",
+            "type": "string"
+          },
+          "material_tag": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+            "title": "Material Tag",
+            "type": "string"
+          },
+          "property_group_tag": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+            "title": "Property Group Tag",
+            "type": "string"
+          },
+          "relative_permittivity_property_key": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+            "title": "Relative Permittivity Property Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "component_tag",
+          "material_tag",
+          "property_group_tag",
+          "relative_permittivity_property_key",
+          "function_tag_prefix"
+        ],
+        "title": "ComsolMaterialTarget",
+        "type": "object"
+      },
+      "DrudeModel": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "damping_angular_frequency_rad_s": {
+            "maximum": 1e+308,
+            "minimum": 0.0,
+            "title": "Damping Angular Frequency Rad S",
+            "type": "number"
+          },
+          "epsilon_infinity": {
+            "maximum": 1e+308,
+            "minimum": -1e+308,
+            "title": "Epsilon Infinity",
+            "type": "number"
+          },
+          "extrapolation": {
+            "$ref": "#/$defs/ExtrapolationPolicy"
+          },
+          "model_kind": {
+            "const": "drude",
+            "maxLength": 16384,
+            "title": "Model Kind",
+            "type": "string"
+          },
+          "plasma_angular_frequency_rad_s": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 1e+308,
+            "minimum": -1e+308,
+            "title": "Plasma Angular Frequency Rad S",
+            "type": "number"
+          }
+        },
+        "required": [
+          "model_kind",
+          "epsilon_infinity",
+          "plasma_angular_frequency_rad_s",
+          "damping_angular_frequency_rad_s"
+        ],
+        "title": "DrudeModel",
+        "type": "object"
+      },
+      "ExtrapolationPolicy": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "maximum_fraction_outside_domain": {
+            "default": 0.0,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Maximum Fraction Outside Domain",
+            "type": "number"
+          },
+          "mode": {
+            "default": "none",
+            "enum": [
+              "none",
+              "source_backed_linear"
+            ],
+            "maxLength": 16384,
+            "title": "Mode",
+            "type": "string"
+          },
+          "policy_source_sha256": {
+            "anyOf": [
+              {
+                "maxLength": 16384,
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Policy Source Sha256"
+          },
+          "uncertainty_growth_per_fraction": {
+            "default": 0.0,
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Uncertainty Growth Per Fraction",
+            "type": "number"
+          }
+        },
+        "title": "ExtrapolationPolicy",
+        "type": "object"
+      },
+      "InterpolationPolicy": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "extrapolation": {
+            "$ref": "#/$defs/ExtrapolationPolicy"
+          },
+          "temperature_discontinuities_K": {
+            "items": {
+              "exclusiveMinimum": 0.0,
+              "maximum": 1e+308,
+              "minimum": -1e+308,
+              "type": "number"
+            },
+            "maxItems": 64,
+            "title": "Temperature Discontinuities K",
+            "type": "array"
+          },
+          "temperature_method": {
+            "enum": [
+              "linear",
+              "nearest",
+              "piecewise_constant"
+            ],
+            "maxLength": 16384,
+            "title": "Temperature Method",
+            "type": "string"
+          },
+          "wavelength_discontinuities_m": {
+            "items": {
+              "exclusiveMinimum": 0.0,
+              "maximum": 1e+308,
+              "minimum": -1e+308,
+              "type": "number"
+            },
+            "maxItems": 64,
+            "title": "Wavelength Discontinuities M",
+            "type": "array"
+          },
+          "wavelength_method": {
+            "enum": [
+              "linear",
+              "nearest",
+              "piecewise_constant"
+            ],
+            "maxLength": 16384,
+            "title": "Wavelength Method",
+            "type": "string"
+          }
+        },
+        "required": [
+          "wavelength_method",
+          "temperature_method",
+          "wavelength_discontinuities_m",
+          "temperature_discontinuities_K"
+        ],
+        "title": "InterpolationPolicy",
+        "type": "object"
+      },
+      "LorentzModel": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "epsilon_infinity": {
+            "maximum": 1e+308,
+            "minimum": -1e+308,
+            "title": "Epsilon Infinity",
+            "type": "number"
+          },
+          "extrapolation": {
+            "$ref": "#/$defs/ExtrapolationPolicy"
+          },
+          "model_kind": {
+            "const": "lorentz",
+            "maxLength": 16384,
+            "title": "Model Kind",
+            "type": "string"
+          },
+          "oscillators": {
+            "items": {
+              "$ref": "#/$defs/LorentzOscillator"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Oscillators",
+            "type": "array"
+          }
+        },
+        "required": [
+          "model_kind",
+          "epsilon_infinity",
+          "oscillators"
+        ],
+        "title": "LorentzModel",
+        "type": "object"
+      },
+      "LorentzOscillator": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "damping_angular_frequency_rad_s": {
+            "maximum": 1e+308,
+            "minimum": 0.0,
+            "title": "Damping Angular Frequency Rad S",
+            "type": "number"
+          },
+          "oscillator_strength": {
+            "maximum": 1e+308,
+            "minimum": 0.0,
+            "title": "Oscillator Strength",
+            "type": "number"
+          },
+          "resonance_angular_frequency_rad_s": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 1e+308,
+            "minimum": -1e+308,
+            "title": "Resonance Angular Frequency Rad S",
+            "type": "number"
+          }
+        },
+        "required": [
+          "oscillator_strength",
+          "resonance_angular_frequency_rad_s",
+          "damping_angular_frequency_rad_s"
+        ],
+        "title": "LorentzOscillator",
+        "type": "object"
+      },
+      "MaterialStateEntry": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "carrier_state": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/CarrierState"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "classification": {
+            "enum": [
+              "measured",
+              "fitted",
+              "assumed"
+            ],
+            "maxLength": 16384,
+            "title": "Classification",
+            "type": "string"
+          },
+          "fabrication_state": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Fabrication State",
+            "type": "string"
+          },
+          "measurement_conditions": {
+            "$ref": "#/$defs/MeasurementConditions"
+          },
+          "optical_model": {
+            "discriminator": {
+              "mapping": {
+                "drude": "#/$defs/DrudeModel",
+                "lorentz": "#/$defs/LorentzModel",
+                "nk_table": "#/$defs/NkTableModel",
+                "permittivity_table": "#/$defs/PermittivityTableModel",
+                "thermo_optic": "#/$defs/ThermoOpticModel",
+                "tolo": "#/$defs/TOLOModel"
+              },
+              "propertyName": "model_kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/NkTableModel"
+              },
+              {
+                "$ref": "#/$defs/PermittivityTableModel"
+              },
+              {
+                "$ref": "#/$defs/DrudeModel"
+              },
+              {
+                "$ref": "#/$defs/LorentzModel"
+              },
+              {
+                "$ref": "#/$defs/TOLOModel"
+              },
+              {
+                "$ref": "#/$defs/ThermoOpticModel"
+              }
+            ],
+            "title": "Optical Model"
+          },
+          "phase_fraction": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Phase Fraction"
+          },
+          "phase_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Phase Id",
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/$defs/SourceRecord"
+          },
+          "state_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+            "title": "State Id",
+            "type": "string"
+          },
+          "state_variables": {
+            "items": {
+              "$ref": "#/$defs/StateVariable"
+            },
+            "maxItems": 64,
+            "title": "State Variables",
+            "type": "array"
+          },
+          "uncertainty": {
+            "$ref": "#/$defs/UncertaintyModel"
+          },
+          "validity": {
+            "$ref": "#/$defs/ValidityDomain"
+          }
+        },
+        "required": [
+          "state_id",
+          "phase_id",
+          "fabrication_state",
+          "classification",
+          "source",
+          "validity",
+          "uncertainty",
+          "measurement_conditions",
+          "optical_model"
+        ],
+        "title": "MaterialStateEntry",
+        "type": "object"
+      },
+      "MeasurementConditions": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "ambient": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Ambient",
+            "type": "string"
+          },
+          "crystallographic_orientation": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Crystallographic Orientation"
+          },
+          "method": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Method",
+            "type": "string"
+          },
+          "pressure_Pa": {
+            "anyOf": [
+              {
+                "maximum": 1e+308,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Pressure Pa"
+          }
+        },
+        "required": [
+          "method",
+          "ambient"
+        ],
+        "title": "MeasurementConditions",
+        "type": "object"
+      },
+      "NkTableModel": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "interpolation": {
+            "$ref": "#/$defs/InterpolationPolicy"
+          },
+          "k_flat": {
+            "items": {
+              "maximum": 1e+308,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            "maxItems": 2048,
+            "minItems": 2,
+            "title": "K Flat",
+            "type": "array"
+          },
+          "model_kind": {
+            "const": "nk_table",
+            "maxLength": 16384,
+            "title": "Model Kind",
+            "type": "string"
+          },
+          "n_flat": {
+            "items": {
+              "maximum": 1e+308,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            "maxItems": 2048,
+            "minItems": 2,
+            "title": "N Flat",
+            "type": "array"
+          },
+          "table_sha256": {
+            "maxLength": 16384,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Table Sha256",
+            "type": "string"
+          },
+          "temperatures_K": {
+            "items": {
+              "exclusiveMinimum": 0.0,
+              "maximum": 1e+308,
+              "minimum": -1e+308,
+              "type": "number"
+            },
+            "maxItems": 64,
+            "minItems": 1,
+            "title": "Temperatures K",
+            "type": "array"
+          },
+          "wavelengths_m": {
+            "items": {
+              "exclusiveMinimum": 0.0,
+              "maximum": 1e+308,
+              "minimum": -1e+308,
+              "type": "number"
+            },
+            "maxItems": 512,
+            "minItems": 2,
+            "title": "Wavelengths M",
+            "type": "array"
+          }
+        },
+        "required": [
+          "model_kind",
+          "wavelengths_m",
+          "temperatures_K",
+          "n_flat",
+          "k_flat",
+          "interpolation",
+          "table_sha256"
+        ],
+        "title": "NkTableModel",
+        "type": "object"
+      },
+      "PermittivityTableModel": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "epsilon_imag_flat": {
+            "items": {
+              "maximum": 1e+308,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            "maxItems": 2048,
+            "minItems": 2,
+            "title": "Epsilon Imag Flat",
+            "type": "array"
+          },
+          "epsilon_real_flat": {
+            "items": {
+              "maximum": 1e+308,
+              "minimum": -1e+308,
+              "type": "number"
+            },
+            "maxItems": 2048,
+            "minItems": 2,
+            "title": "Epsilon Real Flat",
+            "type": "array"
+          },
+          "interpolation": {
+            "$ref": "#/$defs/InterpolationPolicy"
+          },
+          "model_kind": {
+            "const": "permittivity_table",
+            "maxLength": 16384,
+            "title": "Model Kind",
+            "type": "string"
+          },
+          "table_sha256": {
+            "maxLength": 16384,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Table Sha256",
+            "type": "string"
+          },
+          "temperatures_K": {
+            "items": {
+              "exclusiveMinimum": 0.0,
+              "maximum": 1e+308,
+              "minimum": -1e+308,
+              "type": "number"
+            },
+            "maxItems": 64,
+            "minItems": 1,
+            "title": "Temperatures K",
+            "type": "array"
+          },
+          "wavelengths_m": {
+            "items": {
+              "exclusiveMinimum": 0.0,
+              "maximum": 1e+308,
+              "minimum": -1e+308,
+              "type": "number"
+            },
+            "maxItems": 512,
+            "minItems": 2,
+            "title": "Wavelengths M",
+            "type": "array"
+          }
+        },
+        "required": [
+          "model_kind",
+          "wavelengths_m",
+          "temperatures_K",
+          "epsilon_real_flat",
+          "epsilon_imag_flat",
+          "interpolation",
+          "table_sha256"
+        ],
+        "title": "PermittivityTableModel",
+        "type": "object"
+      },
+      "PhaseBoundary": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "boundary_temperature_K": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 1e+308,
+            "minimum": -1e+308,
+            "title": "Boundary Temperature K",
+            "type": "number"
+          },
+          "lower_state_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+            "title": "Lower State Id",
+            "type": "string"
+          },
+          "smoothing_allowed": {
+            "const": false,
+            "default": false,
+            "title": "Smoothing Allowed",
+            "type": "boolean"
+          },
+          "source_sha256": {
+            "maxLength": 16384,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Source Sha256",
+            "type": "string"
+          },
+          "upper_state_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+            "title": "Upper State Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "lower_state_id",
+          "upper_state_id",
+          "boundary_temperature_K",
+          "source_sha256"
+        ],
+        "title": "PhaseBoundary",
+        "type": "object"
+      },
+      "SourceRecord": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "citation": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Citation"
+          },
+          "file_sha256": {
+            "anyOf": [
+              {
+                "maxLength": 16384,
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "File Sha256"
+          },
+          "source_kind": {
+            "enum": [
+              "citation",
+              "file",
+              "database_export"
+            ],
+            "maxLength": 16384,
+            "title": "Source Kind",
+            "type": "string"
+          },
+          "source_state_description": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Source State Description",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_kind",
+          "source_state_description"
+        ],
+        "title": "SourceRecord",
+        "type": "object"
+      },
+      "StateVariable": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "name": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+            "title": "Name",
+            "type": "string"
+          },
+          "source_sha256": {
+            "anyOf": [
+              {
+                "maxLength": 16384,
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Sha256"
+          },
+          "unit": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Unit",
+            "type": "string"
+          },
+          "value": {
+            "maximum": 1e+308,
+            "minimum": -1e+308,
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "name",
+          "value",
+          "unit"
+        ],
+        "title": "StateVariable",
+        "type": "object"
+      },
+      "TOLOMode": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "longitudinal_angular_frequency_rad_s": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 1e+308,
+            "minimum": -1e+308,
+            "title": "Longitudinal Angular Frequency Rad S",
+            "type": "number"
+          },
+          "longitudinal_damping_rad_s": {
+            "maximum": 1e+308,
+            "minimum": 0.0,
+            "title": "Longitudinal Damping Rad S",
+            "type": "number"
+          },
+          "transverse_angular_frequency_rad_s": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 1e+308,
+            "minimum": -1e+308,
+            "title": "Transverse Angular Frequency Rad S",
+            "type": "number"
+          },
+          "transverse_damping_rad_s": {
+            "maximum": 1e+308,
+            "minimum": 0.0,
+            "title": "Transverse Damping Rad S",
+            "type": "number"
+          }
+        },
+        "required": [
+          "transverse_angular_frequency_rad_s",
+          "longitudinal_angular_frequency_rad_s",
+          "transverse_damping_rad_s",
+          "longitudinal_damping_rad_s"
+        ],
+        "title": "TOLOMode",
+        "type": "object"
+      },
+      "TOLOModel": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "epsilon_infinity": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 1e+308,
+            "minimum": -1e+308,
+            "title": "Epsilon Infinity",
+            "type": "number"
+          },
+          "extrapolation": {
+            "$ref": "#/$defs/ExtrapolationPolicy"
+          },
+          "model_kind": {
+            "const": "tolo",
+            "maxLength": 16384,
+            "title": "Model Kind",
+            "type": "string"
+          },
+          "modes": {
+            "items": {
+              "$ref": "#/$defs/TOLOMode"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Modes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "model_kind",
+          "epsilon_infinity",
+          "modes"
+        ],
+        "title": "TOLOModel",
+        "type": "object"
+      },
+      "ThermalMaterialEvaluationRequest": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "ledger": {
+            "$ref": "#/$defs/ThermalMaterialLedger"
+          },
+          "state_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+            "title": "State Id",
+            "type": "string"
+          },
+          "temperature_K": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 1e+308,
+            "minimum": -1e+308,
+            "title": "Temperature K",
+            "type": "number"
+          },
+          "wavelength_m": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 1e+308,
+            "minimum": -1e+308,
+            "title": "Wavelength M",
+            "type": "number"
+          }
+        },
+        "required": [
+          "ledger",
+          "state_id",
+          "wavelength_m",
+          "temperature_K"
+        ],
+        "title": "ThermalMaterialEvaluationRequest",
+        "type": "object"
+      },
+      "ThermalMaterialLedger": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "comsol_target": {
+            "$ref": "#/$defs/ComsolMaterialTarget"
+          },
+          "internal_passive_loss_convention": {
+            "const": "positive_imaginary_permittivity",
+            "default": "positive_imaginary_permittivity",
+            "maxLength": 16384,
+            "title": "Internal Passive Loss Convention",
+            "type": "string"
+          },
+          "internal_phasor_convention": {
+            "const": "exp(-i*omega*t)",
+            "default": "exp(-i*omega*t)",
+            "maxLength": 16384,
+            "title": "Internal Phasor Convention",
+            "type": "string"
+          },
+          "ledger_sha256": {
+            "anyOf": [
+              {
+                "maxLength": 16384,
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ledger Sha256"
+          },
+          "material_identity_sha256": {
+            "maxLength": 16384,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Material Identity Sha256",
+            "type": "string"
+          },
+          "phase_boundaries": {
+            "items": {
+              "$ref": "#/$defs/PhaseBoundary"
+            },
+            "maxItems": 64,
+            "title": "Phase Boundaries",
+            "type": "array"
+          },
+          "sample_identity_sha256": {
+            "maxLength": 16384,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Sample Identity Sha256",
+            "type": "string"
+          },
+          "schema_name": {
+            "const": "comsol_mcp.thermal_material_ledger",
+            "default": "comsol_mcp.thermal_material_ledger",
+            "maxLength": 16384,
+            "title": "Schema Name",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": "1.0.0",
+            "default": "1.0.0",
+            "maxLength": 16384,
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "states": {
+            "items": {
+              "$ref": "#/$defs/MaterialStateEntry"
+            },
+            "maxItems": 64,
+            "minItems": 1,
+            "title": "States",
+            "type": "array"
+          }
+        },
+        "required": [
+          "material_identity_sha256",
+          "sample_identity_sha256",
+          "states",
+          "comsol_target"
+        ],
+        "title": "ThermalMaterialLedger",
+        "type": "object"
+      },
+      "ThermoOpticModel": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "dk_dT_per_K": {
+            "maximum": 1e+308,
+            "minimum": -1e+308,
+            "title": "Dk Dt Per K",
+            "type": "number"
+          },
+          "dn_dT_per_K": {
+            "maximum": 1e+308,
+            "minimum": -1e+308,
+            "title": "Dn Dt Per K",
+            "type": "number"
+          },
+          "extinction_coefficient_at_reference": {
+            "maximum": 1e+308,
+            "minimum": 0.0,
+            "title": "Extinction Coefficient At Reference",
+            "type": "number"
+          },
+          "extrapolation": {
+            "$ref": "#/$defs/ExtrapolationPolicy"
+          },
+          "model_kind": {
+            "const": "thermo_optic",
+            "maxLength": 16384,
+            "title": "Model Kind",
+            "type": "string"
+          },
+          "reference_temperature_K": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 1e+308,
+            "minimum": -1e+308,
+            "title": "Reference Temperature K",
+            "type": "number"
+          },
+          "refractive_index_at_reference": {
+            "maximum": 1e+308,
+            "minimum": 0.0,
+            "title": "Refractive Index At Reference",
+            "type": "number"
+          }
+        },
+        "required": [
+          "model_kind",
+          "reference_temperature_K",
+          "refractive_index_at_reference",
+          "extinction_coefficient_at_reference",
+          "dn_dT_per_K",
+          "dk_dT_per_K"
+        ],
+        "title": "ThermoOpticModel",
+        "type": "object"
+      },
+      "UncertaintyModel": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "epsilon_imag_abs": {
+            "default": 0.0,
+            "maximum": 1e+308,
+            "minimum": 0.0,
+            "title": "Epsilon Imag Abs",
+            "type": "number"
+          },
+          "epsilon_real_abs": {
+            "default": 0.0,
+            "maximum": 1e+308,
+            "minimum": 0.0,
+            "title": "Epsilon Real Abs",
+            "type": "number"
+          },
+          "k_abs": {
+            "default": 0.0,
+            "maximum": 1e+308,
+            "minimum": 0.0,
+            "title": "K Abs",
+            "type": "number"
+          },
+          "kind": {
+            "enum": [
+              "nk_absolute",
+              "epsilon_absolute",
+              "relative"
+            ],
+            "maxLength": 16384,
+            "title": "Kind",
+            "type": "string"
+          },
+          "n_abs": {
+            "default": 0.0,
+            "maximum": 1e+308,
+            "minimum": 0.0,
+            "title": "N Abs",
+            "type": "number"
+          },
+          "relative_fraction": {
+            "default": 0.0,
+            "maximum": 10.0,
+            "minimum": 0.0,
+            "title": "Relative Fraction",
+            "type": "number"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "title": "UncertaintyModel",
+        "type": "object"
+      },
+      "ValidityDomain": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "temperature_max_K": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 1e+308,
+            "minimum": -1e+308,
+            "title": "Temperature Max K",
+            "type": "number"
+          },
+          "temperature_min_K": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 1e+308,
+            "minimum": -1e+308,
+            "title": "Temperature Min K",
+            "type": "number"
+          },
+          "wavelength_max_m": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 1e+308,
+            "minimum": -1e+308,
+            "title": "Wavelength Max M",
+            "type": "number"
+          },
+          "wavelength_min_m": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 1e+308,
+            "minimum": -1e+308,
+            "title": "Wavelength Min M",
+            "type": "number"
+          }
+        },
+        "required": [
+          "wavelength_min_m",
+          "wavelength_max_m",
+          "temperature_min_K",
+          "temperature_max_K"
+        ],
+        "title": "ValidityDomain",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "maxProperties": 256,
+    "properties": {
+      "request": {
+        "$ref": "#/$defs/ThermalMaterialEvaluationRequest"
+      }
+    },
+    "required": [
+      "request"
+    ],
+    "title": "thermal_material_evaluateArguments",
+    "type": "object"
+  },
+  "thermal_material_validate": {
+    "$defs": {
+      "CarrierState": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "density_per_cubic_metre": {
+            "maximum": 1e+308,
+            "minimum": 0.0,
+            "title": "Density Per Cubic Metre",
+            "type": "number"
+          },
+          "effective_mass_electron": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 1e+308,
+            "minimum": -1e+308,
+            "title": "Effective Mass Electron",
+            "type": "number"
+          },
+          "mobility_square_metre_per_V_s": {
+            "maximum": 1e+308,
+            "minimum": 0.0,
+            "title": "Mobility Square Metre Per V S",
+            "type": "number"
+          }
+        },
+        "required": [
+          "density_per_cubic_metre",
+          "mobility_square_metre_per_V_s",
+          "effective_mass_electron"
+        ],
+        "title": "CarrierState",
+        "type": "object"
+      },
+      "ComsolMaterialTarget": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "component_tag": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+            "title": "Component Tag",
+            "type": "string"
+          },
+          "function_tag_prefix": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+            "title": "Function Tag Prefix",
+            "type": "string"
+          },
+          "material_tag": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+            "title": "Material Tag",
+            "type": "string"
+          },
+          "property_group_tag": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+            "title": "Property Group Tag",
+            "type": "string"
+          },
+          "relative_permittivity_property_key": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+            "title": "Relative Permittivity Property Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "component_tag",
+          "material_tag",
+          "property_group_tag",
+          "relative_permittivity_property_key",
+          "function_tag_prefix"
+        ],
+        "title": "ComsolMaterialTarget",
+        "type": "object"
+      },
+      "DrudeModel": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "damping_angular_frequency_rad_s": {
+            "maximum": 1e+308,
+            "minimum": 0.0,
+            "title": "Damping Angular Frequency Rad S",
+            "type": "number"
+          },
+          "epsilon_infinity": {
+            "maximum": 1e+308,
+            "minimum": -1e+308,
+            "title": "Epsilon Infinity",
+            "type": "number"
+          },
+          "extrapolation": {
+            "$ref": "#/$defs/ExtrapolationPolicy"
+          },
+          "model_kind": {
+            "const": "drude",
+            "maxLength": 16384,
+            "title": "Model Kind",
+            "type": "string"
+          },
+          "plasma_angular_frequency_rad_s": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 1e+308,
+            "minimum": -1e+308,
+            "title": "Plasma Angular Frequency Rad S",
+            "type": "number"
+          }
+        },
+        "required": [
+          "model_kind",
+          "epsilon_infinity",
+          "plasma_angular_frequency_rad_s",
+          "damping_angular_frequency_rad_s"
+        ],
+        "title": "DrudeModel",
+        "type": "object"
+      },
+      "ExtrapolationPolicy": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "maximum_fraction_outside_domain": {
+            "default": 0.0,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Maximum Fraction Outside Domain",
+            "type": "number"
+          },
+          "mode": {
+            "default": "none",
+            "enum": [
+              "none",
+              "source_backed_linear"
+            ],
+            "maxLength": 16384,
+            "title": "Mode",
+            "type": "string"
+          },
+          "policy_source_sha256": {
+            "anyOf": [
+              {
+                "maxLength": 16384,
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Policy Source Sha256"
+          },
+          "uncertainty_growth_per_fraction": {
+            "default": 0.0,
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Uncertainty Growth Per Fraction",
+            "type": "number"
+          }
+        },
+        "title": "ExtrapolationPolicy",
+        "type": "object"
+      },
+      "InterpolationPolicy": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "extrapolation": {
+            "$ref": "#/$defs/ExtrapolationPolicy"
+          },
+          "temperature_discontinuities_K": {
+            "items": {
+              "exclusiveMinimum": 0.0,
+              "maximum": 1e+308,
+              "minimum": -1e+308,
+              "type": "number"
+            },
+            "maxItems": 64,
+            "title": "Temperature Discontinuities K",
+            "type": "array"
+          },
+          "temperature_method": {
+            "enum": [
+              "linear",
+              "nearest",
+              "piecewise_constant"
+            ],
+            "maxLength": 16384,
+            "title": "Temperature Method",
+            "type": "string"
+          },
+          "wavelength_discontinuities_m": {
+            "items": {
+              "exclusiveMinimum": 0.0,
+              "maximum": 1e+308,
+              "minimum": -1e+308,
+              "type": "number"
+            },
+            "maxItems": 64,
+            "title": "Wavelength Discontinuities M",
+            "type": "array"
+          },
+          "wavelength_method": {
+            "enum": [
+              "linear",
+              "nearest",
+              "piecewise_constant"
+            ],
+            "maxLength": 16384,
+            "title": "Wavelength Method",
+            "type": "string"
+          }
+        },
+        "required": [
+          "wavelength_method",
+          "temperature_method",
+          "wavelength_discontinuities_m",
+          "temperature_discontinuities_K"
+        ],
+        "title": "InterpolationPolicy",
+        "type": "object"
+      },
+      "LorentzModel": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "epsilon_infinity": {
+            "maximum": 1e+308,
+            "minimum": -1e+308,
+            "title": "Epsilon Infinity",
+            "type": "number"
+          },
+          "extrapolation": {
+            "$ref": "#/$defs/ExtrapolationPolicy"
+          },
+          "model_kind": {
+            "const": "lorentz",
+            "maxLength": 16384,
+            "title": "Model Kind",
+            "type": "string"
+          },
+          "oscillators": {
+            "items": {
+              "$ref": "#/$defs/LorentzOscillator"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Oscillators",
+            "type": "array"
+          }
+        },
+        "required": [
+          "model_kind",
+          "epsilon_infinity",
+          "oscillators"
+        ],
+        "title": "LorentzModel",
+        "type": "object"
+      },
+      "LorentzOscillator": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "damping_angular_frequency_rad_s": {
+            "maximum": 1e+308,
+            "minimum": 0.0,
+            "title": "Damping Angular Frequency Rad S",
+            "type": "number"
+          },
+          "oscillator_strength": {
+            "maximum": 1e+308,
+            "minimum": 0.0,
+            "title": "Oscillator Strength",
+            "type": "number"
+          },
+          "resonance_angular_frequency_rad_s": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 1e+308,
+            "minimum": -1e+308,
+            "title": "Resonance Angular Frequency Rad S",
+            "type": "number"
+          }
+        },
+        "required": [
+          "oscillator_strength",
+          "resonance_angular_frequency_rad_s",
+          "damping_angular_frequency_rad_s"
+        ],
+        "title": "LorentzOscillator",
+        "type": "object"
+      },
+      "MaterialStateEntry": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "carrier_state": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/CarrierState"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "classification": {
+            "enum": [
+              "measured",
+              "fitted",
+              "assumed"
+            ],
+            "maxLength": 16384,
+            "title": "Classification",
+            "type": "string"
+          },
+          "fabrication_state": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Fabrication State",
+            "type": "string"
+          },
+          "measurement_conditions": {
+            "$ref": "#/$defs/MeasurementConditions"
+          },
+          "optical_model": {
+            "discriminator": {
+              "mapping": {
+                "drude": "#/$defs/DrudeModel",
+                "lorentz": "#/$defs/LorentzModel",
+                "nk_table": "#/$defs/NkTableModel",
+                "permittivity_table": "#/$defs/PermittivityTableModel",
+                "thermo_optic": "#/$defs/ThermoOpticModel",
+                "tolo": "#/$defs/TOLOModel"
+              },
+              "propertyName": "model_kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/NkTableModel"
+              },
+              {
+                "$ref": "#/$defs/PermittivityTableModel"
+              },
+              {
+                "$ref": "#/$defs/DrudeModel"
+              },
+              {
+                "$ref": "#/$defs/LorentzModel"
+              },
+              {
+                "$ref": "#/$defs/TOLOModel"
+              },
+              {
+                "$ref": "#/$defs/ThermoOpticModel"
+              }
+            ],
+            "title": "Optical Model"
+          },
+          "phase_fraction": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Phase Fraction"
+          },
+          "phase_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Phase Id",
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/$defs/SourceRecord"
+          },
+          "state_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+            "title": "State Id",
+            "type": "string"
+          },
+          "state_variables": {
+            "items": {
+              "$ref": "#/$defs/StateVariable"
+            },
+            "maxItems": 64,
+            "title": "State Variables",
+            "type": "array"
+          },
+          "uncertainty": {
+            "$ref": "#/$defs/UncertaintyModel"
+          },
+          "validity": {
+            "$ref": "#/$defs/ValidityDomain"
+          }
+        },
+        "required": [
+          "state_id",
+          "phase_id",
+          "fabrication_state",
+          "classification",
+          "source",
+          "validity",
+          "uncertainty",
+          "measurement_conditions",
+          "optical_model"
+        ],
+        "title": "MaterialStateEntry",
+        "type": "object"
+      },
+      "MeasurementConditions": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "ambient": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Ambient",
+            "type": "string"
+          },
+          "crystallographic_orientation": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Crystallographic Orientation"
+          },
+          "method": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Method",
+            "type": "string"
+          },
+          "pressure_Pa": {
+            "anyOf": [
+              {
+                "maximum": 1e+308,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Pressure Pa"
+          }
+        },
+        "required": [
+          "method",
+          "ambient"
+        ],
+        "title": "MeasurementConditions",
+        "type": "object"
+      },
+      "NkTableModel": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "interpolation": {
+            "$ref": "#/$defs/InterpolationPolicy"
+          },
+          "k_flat": {
+            "items": {
+              "maximum": 1e+308,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            "maxItems": 2048,
+            "minItems": 2,
+            "title": "K Flat",
+            "type": "array"
+          },
+          "model_kind": {
+            "const": "nk_table",
+            "maxLength": 16384,
+            "title": "Model Kind",
+            "type": "string"
+          },
+          "n_flat": {
+            "items": {
+              "maximum": 1e+308,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            "maxItems": 2048,
+            "minItems": 2,
+            "title": "N Flat",
+            "type": "array"
+          },
+          "table_sha256": {
+            "maxLength": 16384,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Table Sha256",
+            "type": "string"
+          },
+          "temperatures_K": {
+            "items": {
+              "exclusiveMinimum": 0.0,
+              "maximum": 1e+308,
+              "minimum": -1e+308,
+              "type": "number"
+            },
+            "maxItems": 64,
+            "minItems": 1,
+            "title": "Temperatures K",
+            "type": "array"
+          },
+          "wavelengths_m": {
+            "items": {
+              "exclusiveMinimum": 0.0,
+              "maximum": 1e+308,
+              "minimum": -1e+308,
+              "type": "number"
+            },
+            "maxItems": 512,
+            "minItems": 2,
+            "title": "Wavelengths M",
+            "type": "array"
+          }
+        },
+        "required": [
+          "model_kind",
+          "wavelengths_m",
+          "temperatures_K",
+          "n_flat",
+          "k_flat",
+          "interpolation",
+          "table_sha256"
+        ],
+        "title": "NkTableModel",
+        "type": "object"
+      },
+      "PermittivityTableModel": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "epsilon_imag_flat": {
+            "items": {
+              "maximum": 1e+308,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            "maxItems": 2048,
+            "minItems": 2,
+            "title": "Epsilon Imag Flat",
+            "type": "array"
+          },
+          "epsilon_real_flat": {
+            "items": {
+              "maximum": 1e+308,
+              "minimum": -1e+308,
+              "type": "number"
+            },
+            "maxItems": 2048,
+            "minItems": 2,
+            "title": "Epsilon Real Flat",
+            "type": "array"
+          },
+          "interpolation": {
+            "$ref": "#/$defs/InterpolationPolicy"
+          },
+          "model_kind": {
+            "const": "permittivity_table",
+            "maxLength": 16384,
+            "title": "Model Kind",
+            "type": "string"
+          },
+          "table_sha256": {
+            "maxLength": 16384,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Table Sha256",
+            "type": "string"
+          },
+          "temperatures_K": {
+            "items": {
+              "exclusiveMinimum": 0.0,
+              "maximum": 1e+308,
+              "minimum": -1e+308,
+              "type": "number"
+            },
+            "maxItems": 64,
+            "minItems": 1,
+            "title": "Temperatures K",
+            "type": "array"
+          },
+          "wavelengths_m": {
+            "items": {
+              "exclusiveMinimum": 0.0,
+              "maximum": 1e+308,
+              "minimum": -1e+308,
+              "type": "number"
+            },
+            "maxItems": 512,
+            "minItems": 2,
+            "title": "Wavelengths M",
+            "type": "array"
+          }
+        },
+        "required": [
+          "model_kind",
+          "wavelengths_m",
+          "temperatures_K",
+          "epsilon_real_flat",
+          "epsilon_imag_flat",
+          "interpolation",
+          "table_sha256"
+        ],
+        "title": "PermittivityTableModel",
+        "type": "object"
+      },
+      "PhaseBoundary": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "boundary_temperature_K": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 1e+308,
+            "minimum": -1e+308,
+            "title": "Boundary Temperature K",
+            "type": "number"
+          },
+          "lower_state_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+            "title": "Lower State Id",
+            "type": "string"
+          },
+          "smoothing_allowed": {
+            "const": false,
+            "default": false,
+            "title": "Smoothing Allowed",
+            "type": "boolean"
+          },
+          "source_sha256": {
+            "maxLength": 16384,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Source Sha256",
+            "type": "string"
+          },
+          "upper_state_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+            "title": "Upper State Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "lower_state_id",
+          "upper_state_id",
+          "boundary_temperature_K",
+          "source_sha256"
+        ],
+        "title": "PhaseBoundary",
+        "type": "object"
+      },
+      "SourceRecord": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "citation": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Citation"
+          },
+          "file_sha256": {
+            "anyOf": [
+              {
+                "maxLength": 16384,
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "File Sha256"
+          },
+          "source_kind": {
+            "enum": [
+              "citation",
+              "file",
+              "database_export"
+            ],
+            "maxLength": 16384,
+            "title": "Source Kind",
+            "type": "string"
+          },
+          "source_state_description": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Source State Description",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_kind",
+          "source_state_description"
+        ],
+        "title": "SourceRecord",
+        "type": "object"
+      },
+      "StateVariable": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "name": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+            "title": "Name",
+            "type": "string"
+          },
+          "source_sha256": {
+            "anyOf": [
+              {
+                "maxLength": 16384,
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Sha256"
+          },
+          "unit": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Unit",
+            "type": "string"
+          },
+          "value": {
+            "maximum": 1e+308,
+            "minimum": -1e+308,
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "name",
+          "value",
+          "unit"
+        ],
+        "title": "StateVariable",
+        "type": "object"
+      },
+      "TOLOMode": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "longitudinal_angular_frequency_rad_s": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 1e+308,
+            "minimum": -1e+308,
+            "title": "Longitudinal Angular Frequency Rad S",
+            "type": "number"
+          },
+          "longitudinal_damping_rad_s": {
+            "maximum": 1e+308,
+            "minimum": 0.0,
+            "title": "Longitudinal Damping Rad S",
+            "type": "number"
+          },
+          "transverse_angular_frequency_rad_s": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 1e+308,
+            "minimum": -1e+308,
+            "title": "Transverse Angular Frequency Rad S",
+            "type": "number"
+          },
+          "transverse_damping_rad_s": {
+            "maximum": 1e+308,
+            "minimum": 0.0,
+            "title": "Transverse Damping Rad S",
+            "type": "number"
+          }
+        },
+        "required": [
+          "transverse_angular_frequency_rad_s",
+          "longitudinal_angular_frequency_rad_s",
+          "transverse_damping_rad_s",
+          "longitudinal_damping_rad_s"
+        ],
+        "title": "TOLOMode",
+        "type": "object"
+      },
+      "TOLOModel": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "epsilon_infinity": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 1e+308,
+            "minimum": -1e+308,
+            "title": "Epsilon Infinity",
+            "type": "number"
+          },
+          "extrapolation": {
+            "$ref": "#/$defs/ExtrapolationPolicy"
+          },
+          "model_kind": {
+            "const": "tolo",
+            "maxLength": 16384,
+            "title": "Model Kind",
+            "type": "string"
+          },
+          "modes": {
+            "items": {
+              "$ref": "#/$defs/TOLOMode"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Modes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "model_kind",
+          "epsilon_infinity",
+          "modes"
+        ],
+        "title": "TOLOModel",
+        "type": "object"
+      },
+      "ThermalMaterialLedger": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "comsol_target": {
+            "$ref": "#/$defs/ComsolMaterialTarget"
+          },
+          "internal_passive_loss_convention": {
+            "const": "positive_imaginary_permittivity",
+            "default": "positive_imaginary_permittivity",
+            "maxLength": 16384,
+            "title": "Internal Passive Loss Convention",
+            "type": "string"
+          },
+          "internal_phasor_convention": {
+            "const": "exp(-i*omega*t)",
+            "default": "exp(-i*omega*t)",
+            "maxLength": 16384,
+            "title": "Internal Phasor Convention",
+            "type": "string"
+          },
+          "ledger_sha256": {
+            "anyOf": [
+              {
+                "maxLength": 16384,
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ledger Sha256"
+          },
+          "material_identity_sha256": {
+            "maxLength": 16384,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Material Identity Sha256",
+            "type": "string"
+          },
+          "phase_boundaries": {
+            "items": {
+              "$ref": "#/$defs/PhaseBoundary"
+            },
+            "maxItems": 64,
+            "title": "Phase Boundaries",
+            "type": "array"
+          },
+          "sample_identity_sha256": {
+            "maxLength": 16384,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Sample Identity Sha256",
+            "type": "string"
+          },
+          "schema_name": {
+            "const": "comsol_mcp.thermal_material_ledger",
+            "default": "comsol_mcp.thermal_material_ledger",
+            "maxLength": 16384,
+            "title": "Schema Name",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": "1.0.0",
+            "default": "1.0.0",
+            "maxLength": 16384,
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "states": {
+            "items": {
+              "$ref": "#/$defs/MaterialStateEntry"
+            },
+            "maxItems": 64,
+            "minItems": 1,
+            "title": "States",
+            "type": "array"
+          }
+        },
+        "required": [
+          "material_identity_sha256",
+          "sample_identity_sha256",
+          "states",
+          "comsol_target"
+        ],
+        "title": "ThermalMaterialLedger",
+        "type": "object"
+      },
+      "ThermoOpticModel": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "dk_dT_per_K": {
+            "maximum": 1e+308,
+            "minimum": -1e+308,
+            "title": "Dk Dt Per K",
+            "type": "number"
+          },
+          "dn_dT_per_K": {
+            "maximum": 1e+308,
+            "minimum": -1e+308,
+            "title": "Dn Dt Per K",
+            "type": "number"
+          },
+          "extinction_coefficient_at_reference": {
+            "maximum": 1e+308,
+            "minimum": 0.0,
+            "title": "Extinction Coefficient At Reference",
+            "type": "number"
+          },
+          "extrapolation": {
+            "$ref": "#/$defs/ExtrapolationPolicy"
+          },
+          "model_kind": {
+            "const": "thermo_optic",
+            "maxLength": 16384,
+            "title": "Model Kind",
+            "type": "string"
+          },
+          "reference_temperature_K": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 1e+308,
+            "minimum": -1e+308,
+            "title": "Reference Temperature K",
+            "type": "number"
+          },
+          "refractive_index_at_reference": {
+            "maximum": 1e+308,
+            "minimum": 0.0,
+            "title": "Refractive Index At Reference",
+            "type": "number"
+          }
+        },
+        "required": [
+          "model_kind",
+          "reference_temperature_K",
+          "refractive_index_at_reference",
+          "extinction_coefficient_at_reference",
+          "dn_dT_per_K",
+          "dk_dT_per_K"
+        ],
+        "title": "ThermoOpticModel",
+        "type": "object"
+      },
+      "UncertaintyModel": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "epsilon_imag_abs": {
+            "default": 0.0,
+            "maximum": 1e+308,
+            "minimum": 0.0,
+            "title": "Epsilon Imag Abs",
+            "type": "number"
+          },
+          "epsilon_real_abs": {
+            "default": 0.0,
+            "maximum": 1e+308,
+            "minimum": 0.0,
+            "title": "Epsilon Real Abs",
+            "type": "number"
+          },
+          "k_abs": {
+            "default": 0.0,
+            "maximum": 1e+308,
+            "minimum": 0.0,
+            "title": "K Abs",
+            "type": "number"
+          },
+          "kind": {
+            "enum": [
+              "nk_absolute",
+              "epsilon_absolute",
+              "relative"
+            ],
+            "maxLength": 16384,
+            "title": "Kind",
+            "type": "string"
+          },
+          "n_abs": {
+            "default": 0.0,
+            "maximum": 1e+308,
+            "minimum": 0.0,
+            "title": "N Abs",
+            "type": "number"
+          },
+          "relative_fraction": {
+            "default": 0.0,
+            "maximum": 10.0,
+            "minimum": 0.0,
+            "title": "Relative Fraction",
+            "type": "number"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "title": "UncertaintyModel",
+        "type": "object"
+      },
+      "ValidityDomain": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "temperature_max_K": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 1e+308,
+            "minimum": -1e+308,
+            "title": "Temperature Max K",
+            "type": "number"
+          },
+          "temperature_min_K": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 1e+308,
+            "minimum": -1e+308,
+            "title": "Temperature Min K",
+            "type": "number"
+          },
+          "wavelength_max_m": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 1e+308,
+            "minimum": -1e+308,
+            "title": "Wavelength Max M",
+            "type": "number"
+          },
+          "wavelength_min_m": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 1e+308,
+            "minimum": -1e+308,
+            "title": "Wavelength Min M",
+            "type": "number"
+          }
+        },
+        "required": [
+          "wavelength_min_m",
+          "wavelength_max_m",
+          "temperature_min_K",
+          "temperature_max_K"
+        ],
+        "title": "ValidityDomain",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "maxProperties": 256,
+    "properties": {
+      "ledger": {
+        "$ref": "#/$defs/ThermalMaterialLedger"
+      }
+    },
+    "required": [
+      "ledger"
+    ],
+    "title": "thermal_material_validateArguments",
+    "type": "object"
+  },
+  "thermal_radiation_evaluate": {
+    "$defs": {
+      "AngularGrid": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "mode": {
+            "enum": [
+              "lambertian_pi",
+              "grid_trapezoid"
+            ],
+            "maxLength": 16384,
+            "title": "Mode",
+            "type": "string"
+          },
+          "phi_rad": {
+            "items": {
+              "maximum": 6.283185307179586,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            "maxItems": 128,
+            "minItems": 1,
+            "title": "Phi Rad",
+            "type": "array"
+          },
+          "theta_rad": {
+            "items": {
+              "maximum": 1.5707963267948966,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            "maxItems": 128,
+            "minItems": 1,
+            "title": "Theta Rad",
+            "type": "array"
+          }
+        },
+        "required": [
+          "mode",
+          "theta_rad",
+          "phi_rad"
+        ],
+        "title": "AngularGrid",
+        "type": "object"
+      },
+      "DetectorPath": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "analyzer_response": {
+            "items": {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            "maxItems": 2048,
+            "title": "Analyzer Response",
+            "type": "array"
+          },
+          "aperture_weights": {
+            "items": {
+              "maximum": 1e+308,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            "maxItems": 2048,
+            "title": "Aperture Weights",
+            "type": "array"
+          },
+          "background_response": {
+            "items": {
+              "maximum": 1e+308,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            "maxItems": 2048,
+            "title": "Background Response",
+            "type": "array"
+          },
+          "detector_response": {
+            "items": {
+              "maximum": 1e+308,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            "maxItems": 2048,
+            "title": "Detector Response",
+            "type": "array"
+          },
+          "gas_absorption_per_m": {
+            "items": {
+              "maximum": 1e+308,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            "maxItems": 2048,
+            "title": "Gas Absorption Per M",
+            "type": "array"
+          },
+          "gas_concentration_scale": {
+            "default": 0.0,
+            "maximum": 1000000000.0,
+            "minimum": 0.0,
+            "title": "Gas Concentration Scale",
+            "type": "number"
+          },
+          "gas_path_length_m": {
+            "default": 0.0,
+            "maximum": 1000000000.0,
+            "minimum": 0.0,
+            "title": "Gas Path Length M",
+            "type": "number"
+          },
+          "kernel_source_sha256s": {
+            "items": {
+              "maxLength": 16384,
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "maxItems": 64,
+            "title": "Kernel Source Sha256S",
+            "type": "array"
+          },
+          "optics_transmission": {
+            "items": {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            "maxItems": 2048,
+            "title": "Optics Transmission",
+            "type": "array"
+          },
+          "reference_response": {
+            "items": {
+              "maximum": 1e+308,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            "maxItems": 2048,
+            "title": "Reference Response",
+            "type": "array"
+          }
+        },
+        "title": "DetectorPath",
+        "type": "object"
+      },
+      "KirchhoffAssessmentReceipt": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "absorptivity_evidence_sha256": {
+            "maxLength": 16384,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Absorptivity Evidence Sha256",
+            "type": "string"
+          },
+          "absorptivity_evidence_state": {
+            "enum": [
+              "verified",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Absorptivity Evidence State",
+            "type": "string"
+          },
+          "assessment_sha256": {
+            "maxLength": 16384,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Assessment Sha256",
+            "type": "string"
+          },
+          "channel_identity_sha256": {
+            "maxLength": 16384,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Channel Identity Sha256",
+            "type": "string"
+          },
+          "checks": {
+            "$ref": "#/$defs/KirchhoffChecks"
+          },
+          "disposition": {
+            "enum": [
+              "applicable",
+              "conditional",
+              "not_applicable",
+              "unavailable"
+            ],
+            "maxLength": 16384,
+            "title": "Disposition",
+            "type": "string"
+          },
+          "handedness_convention": {
+            "enum": [
+              "ieee_observer",
+              "optics_source_view",
+              "explicit_stokes",
+              "not_applicable",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Handedness Convention",
+            "type": "string"
+          },
+          "polarization_basis": {
+            "enum": [
+              "scalar",
+              "te_tm",
+              "stokes_mueller",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Polarization Basis",
+            "type": "string"
+          },
+          "propagation_direction": {
+            "enum": [
+              "positive_z",
+              "negative_z",
+              "other",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Propagation Direction",
+            "type": "string"
+          },
+          "reason_codes": {
+            "items": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 16,
+            "title": "Reason Codes",
+            "type": "array"
+          },
+          "schema_name": {
+            "const": "comsol_mcp.kirchhoff_assessment",
+            "maxLength": 16384,
+            "title": "Schema Name",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": "1.0.0",
+            "maxLength": 16384,
+            "title": "Schema Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_name",
+          "schema_version",
+          "disposition",
+          "reason_codes",
+          "absorptivity_evidence_sha256",
+          "absorptivity_evidence_state",
+          "channel_identity_sha256",
+          "checks",
+          "propagation_direction",
+          "polarization_basis",
+          "handedness_convention",
+          "assessment_sha256"
+        ],
+        "title": "KirchhoffAssessmentReceipt",
+        "type": "object"
+      },
+      "KirchhoffChecks": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "direction_channel_match": {
+            "enum": [
+              "verified",
+              "failed",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Direction Channel Match",
+            "type": "string"
+          },
+          "frequency_channel_match": {
+            "enum": [
+              "verified",
+              "failed",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Frequency Channel Match",
+            "type": "string"
+          },
+          "linearity": {
+            "enum": [
+              "verified",
+              "failed",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Linearity",
+            "type": "string"
+          },
+          "local_equilibrium": {
+            "enum": [
+              "verified",
+              "failed",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Local Equilibrium",
+            "type": "string"
+          },
+          "polarization_channel_match": {
+            "enum": [
+              "verified",
+              "failed",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Polarization Channel Match",
+            "type": "string"
+          },
+          "reciprocity": {
+            "enum": [
+              "verified",
+              "failed",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Reciprocity",
+            "type": "string"
+          },
+          "time_invariance": {
+            "enum": [
+              "verified",
+              "failed",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Time Invariance",
+            "type": "string"
+          }
+        },
+        "required": [
+          "linearity",
+          "time_invariance",
+          "reciprocity",
+          "local_equilibrium",
+          "direction_channel_match",
+          "frequency_channel_match",
+          "polarization_channel_match"
+        ],
+        "title": "KirchhoffChecks",
+        "type": "object"
+      },
+      "PolarizationContract": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "analyzer_handedness": {
+            "enum": [
+              "ieee_observer",
+              "optics_source_view",
+              "explicit_stokes",
+              "not_applicable"
+            ],
+            "maxLength": 16384,
+            "title": "Analyzer Handedness",
+            "type": "string"
+          },
+          "analyzer_stokes": {
+            "items": {
+              "maximum": 1e+308,
+              "minimum": -1e+308,
+              "type": "number"
+            },
+            "maxItems": 4,
+            "minItems": 4,
+            "title": "Analyzer Stokes",
+            "type": "array"
+          },
+          "basis_rotation_rad": {
+            "default": 0.0,
+            "maximum": 6.283185307179586,
+            "minimum": -6.283185307179586,
+            "title": "Basis Rotation Rad",
+            "type": "number"
+          },
+          "channels": {
+            "items": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 4,
+            "minItems": 1,
+            "title": "Channels",
+            "type": "array"
+          },
+          "mode": {
+            "enum": [
+              "scalar",
+              "te_tm_incoherent",
+              "stokes_mueller"
+            ],
+            "maxLength": 16384,
+            "title": "Mode",
+            "type": "string"
+          },
+          "propagation_direction": {
+            "enum": [
+              "positive_z",
+              "negative_z",
+              "other"
+            ],
+            "maxLength": 16384,
+            "title": "Propagation Direction",
+            "type": "string"
+          },
+          "source_handedness": {
+            "enum": [
+              "ieee_observer",
+              "optics_source_view",
+              "explicit_stokes",
+              "not_applicable"
+            ],
+            "maxLength": 16384,
+            "title": "Source Handedness",
+            "type": "string"
+          },
+          "weights": {
+            "items": {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            "maxItems": 4,
+            "title": "Weights",
+            "type": "array"
+          }
+        },
+        "required": [
+          "mode",
+          "channels",
+          "propagation_direction",
+          "source_handedness",
+          "analyzer_handedness"
+        ],
+        "title": "PolarizationContract",
+        "type": "object"
+      },
+      "SpectralAxis": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "coordinates": {
+            "items": {
+              "exclusiveMinimum": 0.0,
+              "maximum": 1e+308,
+              "minimum": -1e+308,
+              "type": "number"
+            },
+            "maxItems": 2048,
+            "minItems": 2,
+            "title": "Coordinates",
+            "type": "array"
+          },
+          "representation": {
+            "enum": [
+              "wavelength_m",
+              "wavelength_um",
+              "frequency_Hz",
+              "wavenumber_m_inv"
+            ],
+            "maxLength": 16384,
+            "title": "Representation",
+            "type": "string"
+          }
+        },
+        "required": [
+          "representation",
+          "coordinates"
+        ],
+        "title": "SpectralAxis",
+        "type": "object"
+      },
+      "ThermalRadiationRequest": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "angular_grid": {
+            "$ref": "#/$defs/AngularGrid"
+          },
+          "artifact_chain_sha256": {
+            "maxLength": 16384,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Artifact Chain Sha256",
+            "type": "string"
+          },
+          "axis": {
+            "$ref": "#/$defs/SpectralAxis"
+          },
+          "configuration_sha256": {
+            "maxLength": 16384,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Configuration Sha256",
+            "type": "string"
+          },
+          "detector_path": {
+            "$ref": "#/$defs/DetectorPath"
+          },
+          "extrapolation": {
+            "default": false,
+            "title": "Extrapolation",
+            "type": "boolean"
+          },
+          "integration_method": {
+            "const": "trapezoid",
+            "default": "trapezoid",
+            "maxLength": 16384,
+            "title": "Integration Method",
+            "type": "string"
+          },
+          "interpolation": {
+            "default": "none",
+            "enum": [
+              "none",
+              "linear"
+            ],
+            "maxLength": 16384,
+            "title": "Interpolation",
+            "type": "string"
+          },
+          "kirchhoff_assessment": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/KirchhoffAssessmentReceipt"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "optical_quantity": {
+            "enum": [
+              "emissivity",
+              "absorptivity"
+            ],
+            "maxLength": 16384,
+            "title": "Optical Quantity",
+            "type": "string"
+          },
+          "polarization": {
+            "$ref": "#/$defs/PolarizationContract"
+          },
+          "schema_name": {
+            "const": "comsol_mcp.thermal_radiation_request",
+            "default": "comsol_mcp.thermal_radiation_request",
+            "maxLength": 16384,
+            "title": "Schema Name",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": "1.0.0",
+            "default": "1.0.0",
+            "maxLength": 16384,
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "source_artifact_sha256s": {
+            "items": {
+              "maxLength": 16384,
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "maxItems": 64,
+            "minItems": 1,
+            "title": "Source Artifact Sha256S",
+            "type": "array"
+          },
+          "temperature_K": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 1000000000.0,
+            "minimum": -1e+308,
+            "title": "Temperature K",
+            "type": "number"
+          },
+          "uncertainty_flat": {
+            "items": {
+              "maximum": 1e+308,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            "maxItems": 2048,
+            "title": "Uncertainty Flat",
+            "type": "array"
+          },
+          "values_flat": {
+            "items": {
+              "maximum": 1e+308,
+              "minimum": -1e+308,
+              "type": "number"
+            },
+            "maxItems": 2048,
+            "minItems": 1,
+            "title": "Values Flat",
+            "type": "array"
+          }
+        },
+        "required": [
+          "temperature_K",
+          "axis",
+          "angular_grid",
+          "polarization",
+          "optical_quantity",
+          "values_flat",
+          "configuration_sha256",
+          "source_artifact_sha256s",
+          "artifact_chain_sha256"
+        ],
+        "title": "ThermalRadiationRequest",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "maxProperties": 256,
+    "properties": {
+      "request": {
+        "$ref": "#/$defs/ThermalRadiationRequest"
+      }
+    },
+    "required": [
+      "request"
+    ],
+    "title": "thermal_radiation_evaluateArguments",
     "type": "object"
   },
   "troubleshoot": {

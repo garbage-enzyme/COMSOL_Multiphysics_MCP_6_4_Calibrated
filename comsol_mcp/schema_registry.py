@@ -83,6 +83,18 @@ CONVERGENCE_CAMPAIGN_LEVEL_SCHEMA_NAME, CONVERGENCE_CAMPAIGN_LEVEL_SCHEMA_VERSIO
     BRANCH_CONTINUATION_CAMPAIGN_SUMMARY_SCHEMA_NAME,
     BRANCH_CONTINUATION_CAMPAIGN_SUMMARY_SCHEMA_VERSION,
 ) = "comsol_mcp.branch_continuation_campaign_summary", "1.0.0"
+(
+    THERMO_OPTOMECHANICAL_STAGE_SCHEMA_NAME,
+    THERMO_OPTOMECHANICAL_STAGE_SCHEMA_VERSION,
+) = "comsol_mcp.thermo_optomechanical_stage", "1.0.0"
+(
+    THERMO_OPTOMECHANICAL_MANIFEST_SCHEMA_NAME,
+    THERMO_OPTOMECHANICAL_MANIFEST_SCHEMA_VERSION,
+) = "comsol_mcp.thermo_optomechanical_replay_manifest", "1.0.0"
+(
+    THERMO_OPTOMECHANICAL_SUMMARY_SCHEMA_NAME,
+    THERMO_OPTOMECHANICAL_SUMMARY_SCHEMA_VERSION,
+) = "comsol_mcp.thermo_optomechanical_summary", "1.0.0"
 SPECTRAL_ROW_SCHEMA_NAME, SPECTRAL_ROW_SCHEMA_VERSION = (
     "comsol_mcp.durable_spectral_point",
     "1.0.0",
@@ -95,6 +107,21 @@ SPECTRAL_STAGE_SCHEMA_NAME, SPECTRAL_STAGE_SCHEMA_VERSION = (
     "comsol_mcp.spectral_stage_plan",
     "1.0.0",
 )
+SPECTRAL_MODEL_COMPARISON_SCHEMA_NAME, SPECTRAL_MODEL_COMPARISON_SCHEMA_VERSION = (
+    "comsol_mcp.spectral_model_comparison",
+    "1.0.0",
+)
+SIMULATION_CONFIGURATION_SCHEMA_NAME = "comsol_mcp.simulation_configuration"
+SIMULATION_CONFIGURATION_DIFF_SCHEMA_NAME = "comsol_mcp.simulation_configuration_diff"
+JOB_SPEC_PREVIEW_SCHEMA_NAME = "comsol_mcp.job_spec_preview"
+CONFIGURATION_SCHEMA_VERSION = "1.0.0"
+KIRCHHOFF_ASSESSMENT_SCHEMA_NAME = "comsol_mcp.kirchhoff_assessment"
+THERMAL_RADIATION_REQUEST_SCHEMA_NAME = "comsol_mcp.thermal_radiation_request"
+THERMAL_RADIATION_EVIDENCE_SCHEMA_NAME = "comsol_mcp.thermal_radiation_evidence"
+THERMAL_RADIATION_SCHEMA_VERSION = "1.0.0"
+THERMAL_MATERIAL_LEDGER_SCHEMA_NAME = "comsol_mcp.thermal_material_ledger"
+THERMAL_MATERIAL_EVALUATION_SCHEMA_NAME = "comsol_mcp.thermal_material_evaluation"
+THERMAL_MATERIAL_SCHEMA_VERSION = "1.0.0"
 STANDALONE_SCHEMA_VERSION = "1.0.0"
 STANDALONE_SCHEMAS = (
     "comsol_mcp.standalone_build_receipt",
@@ -186,6 +213,23 @@ def _entries() -> list[dict[str, Any]]:
             BRANCH_CONTINUATION_CAMPAIGN_SUMMARY_SCHEMA_NAME,
             BRANCH_CONTINUATION_CAMPAIGN_SUMMARY_SCHEMA_VERSION,
             "comsol_mcp.jobs.branch_continuation_campaign_runner",
+            artifact_kind="durable_artifact",
+        ),
+        _entry(
+            THERMO_OPTOMECHANICAL_MANIFEST_SCHEMA_NAME,
+            THERMO_OPTOMECHANICAL_MANIFEST_SCHEMA_VERSION,
+            "comsol_mcp.contracts.thermo_optomechanical",
+        ),
+        _entry(
+            THERMO_OPTOMECHANICAL_STAGE_SCHEMA_NAME,
+            THERMO_OPTOMECHANICAL_STAGE_SCHEMA_VERSION,
+            "comsol_mcp.jobs.thermo_optomechanical_replay_rows",
+            artifact_kind="durable_artifact",
+        ),
+        _entry(
+            THERMO_OPTOMECHANICAL_SUMMARY_SCHEMA_NAME,
+            THERMO_OPTOMECHANICAL_SUMMARY_SCHEMA_VERSION,
+            "comsol_mcp.jobs.thermo_optomechanical_replay_runner",
             artifact_kind="durable_artifact",
         ),
         _entry(
@@ -329,6 +373,53 @@ def _entries() -> list[dict[str, Any]]:
             SPECTRAL_CHARACTERIZATION_SCHEMA,
             SPECTRAL_SCHEMA_VERSION,
             "comsol_mcp.evidence.spectral_characterization",
+        ),
+        _entry(
+            SPECTRAL_MODEL_COMPARISON_SCHEMA_NAME,
+            SPECTRAL_MODEL_COMPARISON_SCHEMA_VERSION,
+            "comsol_mcp.evidence.spectral_model_comparison",
+        ),
+        _entry(
+            SIMULATION_CONFIGURATION_SCHEMA_NAME,
+            CONFIGURATION_SCHEMA_VERSION,
+            "comsol_mcp.evidence.simulation_configuration",
+            artifact_kind="configuration",
+        ),
+        _entry(
+            SIMULATION_CONFIGURATION_DIFF_SCHEMA_NAME,
+            CONFIGURATION_SCHEMA_VERSION,
+            "comsol_mcp.evidence.simulation_configuration",
+        ),
+        _entry(
+            JOB_SPEC_PREVIEW_SCHEMA_NAME,
+            CONFIGURATION_SCHEMA_VERSION,
+            "comsol_mcp.tools.jobs",
+        ),
+        _entry(
+            KIRCHHOFF_ASSESSMENT_SCHEMA_NAME,
+            THERMAL_RADIATION_SCHEMA_VERSION,
+            "comsol_mcp.evidence.thermal_radiation",
+        ),
+        _entry(
+            THERMAL_RADIATION_REQUEST_SCHEMA_NAME,
+            THERMAL_RADIATION_SCHEMA_VERSION,
+            "comsol_mcp.contracts.thermal_radiation",
+        ),
+        _entry(
+            THERMAL_RADIATION_EVIDENCE_SCHEMA_NAME,
+            THERMAL_RADIATION_SCHEMA_VERSION,
+            "comsol_mcp.evidence.thermal_radiation",
+        ),
+        _entry(
+            THERMAL_MATERIAL_LEDGER_SCHEMA_NAME,
+            THERMAL_MATERIAL_SCHEMA_VERSION,
+            "comsol_mcp.evidence.thermal_material",
+            artifact_kind="configuration",
+        ),
+        _entry(
+            THERMAL_MATERIAL_EVALUATION_SCHEMA_NAME,
+            THERMAL_MATERIAL_SCHEMA_VERSION,
+            "comsol_mcp.evidence.thermal_material",
         ),
         _entry(
             SPECTRAL_PROGRESS_SCHEMA_NAME,
