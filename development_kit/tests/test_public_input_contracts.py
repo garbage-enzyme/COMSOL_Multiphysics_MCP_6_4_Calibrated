@@ -41,8 +41,9 @@ def test_job_submit_discovery_is_a_closed_finite_discriminated_union():
         "spectral_characterization",
         "convergence_campaign",
         "branch_continuation_campaign",
+        "thermo_optomechanical_replay",
     }
-    assert len(spec["oneOf"]) == 5
+    assert len(spec["oneOf"]) == 6
     assert all(
         definition["additionalProperties"] is False for definition in schema["$defs"].values()
     )

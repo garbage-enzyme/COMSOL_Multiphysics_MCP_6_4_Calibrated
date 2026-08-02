@@ -118,6 +118,7 @@ models are intentionally absent.
 - `development_kit/scripts/sbom_probe.py` — This script generates a deterministic CycloneDX SBOM from the locked installed runtime.
 - `development_kit/scripts/security_gate.py` — This script evaluates pip-audit findings against the exact expiring review policy.
 - `development_kit/scripts/standalone_licensed_gate.py` — This script runs the explicit serial COMSOL 6.4 standalone build, pause, exact-resume, physical, and cleanup acceptance.
+- `development_kit/scripts/thermo_optomechanical_licensed_gate.py` — This script generates and validates the serial licensed COMSOL 6.4 thermal-structural-moving-mesh-optical replay fixture.
 - `development_kit/scripts/shared_interactive_licensed_gate.py` — This script runs bounded non-owning shared Desktop/Server prepare and readback acceptance phases.
 
 ## Test fixtures and frozen snapshots
@@ -278,6 +279,7 @@ models are intentionally absent.
 - `development_kit/tests/test_simulation_configuration.py` — This module tests typed configuration normalization, classified diffs, and solver-free durable-job previews.
 - `development_kit/tests/test_thermal_radiation.py` — This module tests Kirchhoff applicability, Planck/Jacobian integration, angular and polarization handling, detector kernels, and public dispatch.
 - `development_kit/tests/test_thermal_material.py` — This module tests typed material states, analytic/table models, phase boundaries, extrapolation, conversion previews, and public dispatch.
+- `development_kit/tests/test_thermo_optomechanical_replay.py` — This module tests the closed thermo-optomechanical specification, durable stage replay, result binding, save semantics, evidence validation, and cleanup.
 - `development_kit/tests/test_spectral_audit.py` — This module tests strict projection of point-audit artifacts into durable spectral rows.
 - `development_kit/tests/test_spectral_acceptance_runner.py` — This module tests the licensed spectral runner contract without starting COMSOL.
 - `development_kit/tests/test_spectral_characterization_job.py` — This module tests immutable bounded durable spectral job specifications.
@@ -316,6 +318,7 @@ models are intentionally absent.
 - `comsol_mcp/contracts/simulation_configuration.py` — This module defines closed typed simulation-configuration and diff-policy inputs.
 - `comsol_mcp/contracts/thermal_radiation.py` — This module defines closed Kirchhoff-assessment and thermal-radiation request inputs.
 - `comsol_mcp/contracts/thermal_material.py` — This module defines closed temperature/state material ledger and evaluation inputs.
+- `comsol_mcp/contracts/thermo_optomechanical.py` — This module defines the closed durable thermal-to-optical replay input contract.
 - `comsol_mcp/contracts/structural.py` — This module applies shared public schema and runtime structural limits.
 - `comsol_mcp/durable/__init__.py` — This module exports versioned canonicalization and durable filesystem primitives.
 - `comsol_mcp/durable/canonical.py` — This module preserves legacy canonical bytes and adds domain-separated identities for new schemas.
@@ -406,6 +409,11 @@ models are intentionally absent.
 - `comsol_mcp/jobs/spectral_stages.py` — This module builds and atomically freezes hash-chained adaptive spectral stage plans.
 - `comsol_mcp/jobs/spectral_worker.py` — This module runs detached adaptive spectral jobs through the shared solver runtime.
 - `comsol_mcp/jobs/store.py` — This module persists crash-durable job state and process-safe locks.
+- `comsol_mcp/jobs/thermo_optomechanical_replay.py` — This module normalizes immutable bounded thermal-to-optical replay specifications.
+- `comsol_mcp/jobs/thermo_optomechanical_replay_execution.py` — This module executes fixed COMSOL thermal, structural, moving-mesh, and optical stages against explicit result datasets.
+- `comsol_mcp/jobs/thermo_optomechanical_replay_rows.py` — This module validates and persists hash-chained thermo-optomechanical stage evidence.
+- `comsol_mcp/jobs/thermo_optomechanical_replay_runner.py` — This module runs resumable thermo-optomechanical stages and derives the policy-separated summary.
+- `comsol_mcp/jobs/thermo_optomechanical_replay_worker.py` — This worker owns one licensed COMSOL client and publishes terminal state only after cleanup.
 - `comsol_mcp/jobs/validation_collectors.py` — This module adapts validation points to physical evidence collectors.
 - `comsol_mcp/jobs/validation_matrix.py` — This module normalizes bounded durable validation-matrix specifications.
 - `comsol_mcp/jobs/validation_rows.py` — This module writes and validates append-only durable validation rows.

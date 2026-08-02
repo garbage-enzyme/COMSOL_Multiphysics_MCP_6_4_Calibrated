@@ -30,8 +30,8 @@
   },
   "schema_name": "comsol_mcp.release_facts",
   "schema_registry": {
-    "entry_count": 79,
-    "registry_sha256": "ddb88d1c6e1510e4c81ba3c2319dd4db68c2b7468d5e00439bbace7144d2fe62"
+    "entry_count": 82,
+    "registry_sha256": "2ace1045f7bd4e426752fecafd4d6e0871dff6c0b42fbde2575252e45bcef450"
   },
   "schema_version": "1.0.0",
   "tool_count": 162

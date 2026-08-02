@@ -9,6 +9,7 @@ from .simulation_configuration import ConfigurationDiffPolicy, SimulationConfigu
 from .structural import bounded_public_schema, structurally_guarded
 from .thermal_material import ThermalMaterialEvaluationRequest, ThermalMaterialLedger
 from .thermal_radiation import KirchhoffAssessmentRequest, ThermalRadiationRequest
+from .thermo_optomechanical import ThermoOptomechanicalReplayInput
 
 __all__ = [
     "JobSubmissionSpec",
@@ -18,6 +19,7 @@ __all__ = [
     "ThermalRadiationRequest",
     "ThermalMaterialEvaluationRequest",
     "ThermalMaterialLedger",
+    "ThermoOptomechanicalReplayInput",
     "bounded_public_schema",
     "job_submission_dict",
     "structurally_guarded",

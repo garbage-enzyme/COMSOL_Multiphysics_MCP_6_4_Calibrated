@@ -83,6 +83,18 @@ CONVERGENCE_CAMPAIGN_LEVEL_SCHEMA_NAME, CONVERGENCE_CAMPAIGN_LEVEL_SCHEMA_VERSIO
     BRANCH_CONTINUATION_CAMPAIGN_SUMMARY_SCHEMA_NAME,
     BRANCH_CONTINUATION_CAMPAIGN_SUMMARY_SCHEMA_VERSION,
 ) = "comsol_mcp.branch_continuation_campaign_summary", "1.0.0"
+(
+    THERMO_OPTOMECHANICAL_STAGE_SCHEMA_NAME,
+    THERMO_OPTOMECHANICAL_STAGE_SCHEMA_VERSION,
+) = "comsol_mcp.thermo_optomechanical_stage", "1.0.0"
+(
+    THERMO_OPTOMECHANICAL_MANIFEST_SCHEMA_NAME,
+    THERMO_OPTOMECHANICAL_MANIFEST_SCHEMA_VERSION,
+) = "comsol_mcp.thermo_optomechanical_replay_manifest", "1.0.0"
+(
+    THERMO_OPTOMECHANICAL_SUMMARY_SCHEMA_NAME,
+    THERMO_OPTOMECHANICAL_SUMMARY_SCHEMA_VERSION,
+) = "comsol_mcp.thermo_optomechanical_summary", "1.0.0"
 SPECTRAL_ROW_SCHEMA_NAME, SPECTRAL_ROW_SCHEMA_VERSION = (
     "comsol_mcp.durable_spectral_point",
     "1.0.0",
@@ -201,6 +213,23 @@ def _entries() -> list[dict[str, Any]]:
             BRANCH_CONTINUATION_CAMPAIGN_SUMMARY_SCHEMA_NAME,
             BRANCH_CONTINUATION_CAMPAIGN_SUMMARY_SCHEMA_VERSION,
             "comsol_mcp.jobs.branch_continuation_campaign_runner",
+            artifact_kind="durable_artifact",
+        ),
+        _entry(
+            THERMO_OPTOMECHANICAL_MANIFEST_SCHEMA_NAME,
+            THERMO_OPTOMECHANICAL_MANIFEST_SCHEMA_VERSION,
+            "comsol_mcp.contracts.thermo_optomechanical",
+        ),
+        _entry(
+            THERMO_OPTOMECHANICAL_STAGE_SCHEMA_NAME,
+            THERMO_OPTOMECHANICAL_STAGE_SCHEMA_VERSION,
+            "comsol_mcp.jobs.thermo_optomechanical_replay_rows",
+            artifact_kind="durable_artifact",
+        ),
+        _entry(
+            THERMO_OPTOMECHANICAL_SUMMARY_SCHEMA_NAME,
+            THERMO_OPTOMECHANICAL_SUMMARY_SCHEMA_VERSION,
+            "comsol_mcp.jobs.thermo_optomechanical_replay_runner",
             artifact_kind="durable_artifact",
         ),
         _entry(

@@ -296,6 +296,23 @@ COMSOL output is a mutation-free `exp(+i*omega*t)` conversion preview containing
 exact target property/function tags, units, interpolation/extrapolation policy,
 table hashes, readback expectations, and rollback requirements.
 
+A licensed durable thermal-to-optical replay uses
+`job_type: "thermo_optomechanical_replay"` plus an ASCII JSON
+`specification_path` and exact `specification_sha256`. The bounded manifest is
+validated against the complete closed contract before submission; this keeps
+core MCP discovery bounded without accepting free-form configuration. It binds an
+immutable source, one validated thermal material state, exact Heat Transfer,
+Solid Mechanics, Moving Mesh, Wave Optics, study, selection, parameter, mesh,
+and expression tags, and a caller-supplied resource and acceptance policy. Five
+hash-chained stages persist preflight, thermal/structural solve, state evidence,
+spatial-frame deformation transfer, and exact optical replay. Resume verifies
+orphaned evidence before appending its missing row and never repeats a completed
+stage. Acceptance keeps raw R/T/A, temperature, stress, displacement, energy,
+mesh, wavelength, zero-CTE, zero-temperature-rise, rollback, source-integrity,
+and cleanup evidence separate from execution completion. The minimal supported
+route forbids topology change and requires a licensed COMSOL 6.4 synthetic
+fixture gate before use with research models.
+
 A durable convergence campaign uses `job_type: "convergence_campaign"` and an
 immutable ordered ladder of two to eight exact source or prebuilt derived model
 identities. Every level runs the accepted adaptive spectral job, persists its

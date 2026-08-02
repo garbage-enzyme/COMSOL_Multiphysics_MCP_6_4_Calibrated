@@ -33,6 +33,7 @@ from .store import (
     process_identity_state,
     read_json,
 )
+from .thermo_optomechanical_replay import normalize_thermo_optomechanical_replay_spec
 from .validation_matrix import normalize_validation_matrix_spec
 
 
@@ -270,6 +271,7 @@ def _worker_module(job_type: str) -> str:
         "spectral_characterization": "comsol_mcp.jobs.spectral_worker",
         "convergence_campaign": "comsol_mcp.jobs.convergence_campaign_worker",
         "branch_continuation_campaign": "comsol_mcp.jobs.branch_continuation_campaign_worker",
+        "thermo_optomechanical_replay": "comsol_mcp.jobs.thermo_optomechanical_replay_worker",
     }
     try:
         return modules[job_type]
@@ -288,6 +290,8 @@ def _point_count(spec: dict[str, Any]) -> int:
         return int(spec["maximum_total_points"])
     if spec["job_type"] == "branch_continuation_campaign":
         return int(spec["maximum_total_points"])
+    if spec["job_type"] == "thermo_optomechanical_replay":
+        return int(spec["declared_stage_count"])
     return len(spec["parameter_values"])
 
 
@@ -326,6 +330,8 @@ class JobManager:
             spec = normalize_convergence_campaign_spec(raw_spec)
         elif job_type == "branch_continuation_campaign":
             spec = normalize_branch_continuation_campaign_spec(raw_spec)
+        elif job_type == "thermo_optomechanical_replay":
+            spec = normalize_thermo_optomechanical_replay_spec(raw_spec)
         else:
             spec = validate_staged_sweep_spec(raw_spec)
         worker_module = _worker_module(spec["job_type"])
@@ -354,6 +360,7 @@ class JobManager:
             "spectral_characterization",
             "convergence_campaign",
             "branch_continuation_campaign",
+            "thermo_optomechanical_replay",
         }:
             with JobLock(self.store.root / ".submit.lock"):
                 duplicate = self._find_exact_duplicate(spec["job_type"], spec["spec_fingerprint"])
@@ -782,6 +789,7 @@ class JobManager:
             "spectral_characterization",
             "convergence_campaign",
             "branch_continuation_campaign",
+            "thermo_optomechanical_replay",
         }:
             if self._preflight is None and spec.get("execution_backend") is None:
                 from comsol_mcp.tools.ownership import SolverOwnership
@@ -971,6 +979,25 @@ class JobManager:
                     "completed_state_ids": [row["state_id"] for row in rows],
                     "last_state_row_sha256": rows[-1]["row_sha256"] if rows else None,
                     "maximum_total_points": spec["maximum_total_points"],
+                }
+            elif spec.get("job_type") == "thermo_optomechanical_replay":
+                from .thermo_optomechanical_replay_rows import (
+                    read_thermo_optomechanical_stage_rows,
+                )
+
+                directory = self.store.job_dir(job_id)
+                rows = read_thermo_optomechanical_stage_rows(
+                    directory / "thermo_optomechanical_stages.jsonl",
+                    spec,
+                    artifact_root=directory,
+                )
+                state["thermo_optomechanical_progress"] = {
+                    "declared_stages": len(spec["declared_stages"]),
+                    "completed_stages": len(rows),
+                    "pending_stages": len(spec["declared_stages"]) - len(rows),
+                    "completed_stage_ids": [row["stage_id"] for row in rows],
+                    "last_stage_row_sha256": rows[-1]["row_sha256"] if rows else None,
+                    "declared_optical_points": spec["declared_optical_point_count"],
                 }
             return {"success": True, "job_id": job_id, **state}
 

@@ -254,6 +254,20 @@ Lorentz、TOLO 和 thermo-optic 模型。不同 carrier density、mobility、eff
 提供 mutation-free 的 `exp(+i*omega*t)` 转换预览，包含精确 property/function tag、
 单位、插值/外推 policy、table hash、readback 期望和 rollback 要求。
 
+需要许可证的持久化热到光重放任务使用
+`job_type: "thermo_optomechanical_replay"`，并提供 ASCII JSON
+`specification_path` 与精确 `specification_sha256`。提交前会用完整的封闭契约验证受限
+manifest；这样既控制 core MCP discovery 大小，也不接受自由格式配置。manifest 绑定
+不可变源模型、一个已验证的
+热材料状态，以及精确的 Heat Transfer、Solid Mechanics、Moving Mesh、Wave Optics、
+study、selection、parameter、mesh 和 expression tag，并要求调用方声明 resource 与
+acceptance policy。五个哈希链 stage 依次保存 preflight、热-结构求解、状态证据、空间
+frame 形变传递和精确光学重放。resume 会先验证孤立 evidence，再补写缺失 row，绝不
+重复已完成 stage。验收分别保留 raw R/T/A、温度、应力、位移、能量、网格、波长、
+zero-CTE、zero-temperature-rise、rollback、源完整性与 cleanup 证据，不把执行完成等同
+于科学通过。最小支持路径禁止拓扑变化，并要求先通过 COMSOL 6.4 synthetic fixture 的
+licensed gate，之后才可用于研究模型。
+
 持久化收敛任务使用 `job_type: "convergence_campaign"`，并声明 2–8 个严格排序的
 exact source 或预先构建并验证的 derived model identity。每个 level 都复用已验收的
 自适应光谱任务，完整持久化哈希绑定 artifacts，并且只以各 level 自己 bracketed

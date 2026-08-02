@@ -52,6 +52,21 @@ def _job_point_inventory(spec: dict[str, Any]) -> dict[str, Any]:
             "maximum_points": spec["maximum_points"],
             "stages": ["initial", "refinement", "expansion"],
         }
+    if job_type == "thermo_optomechanical_replay":
+        return {
+            "maximum_points": 5,
+            "declared_items": 5,
+            "stages": [
+                "preflight",
+                "thermal_structural_solve",
+                "state_evidence",
+                "deformation_transfer",
+                "optical_replay",
+            ],
+            "declared_optical_points": len(spec["optical_replay"]["wavelengths_m"])
+            * len(spec["optical_replay"]["branches"]),
+            "control_count": len(spec["validation_controls"]),
+        }
     return {
         "maximum_points": spec["maximum_total_points"],
         "declared_items": len(
@@ -66,6 +81,7 @@ def _preview_job_spec(spec: JobSubmissionSpec | dict[str, Any]) -> dict[str, Any
     from comsol_mcp.tools.catalog import get_tool_metadata
 
     source_path = normalized.get("source_model_path")
+    manifest_path = normalized.get("submission_manifest_path")
     path_checks: dict[str, Any]
     if source_path is None:
         path_checks = {"source_model_declared": False, "source_model_required": False}
@@ -89,6 +105,11 @@ def _preview_job_spec(spec: JobSubmissionSpec | dict[str, Any]) -> dict[str, Any
         "spec_fingerprint": domain_sha256_v2("job_spec_preview/spec/1.0.0", normalized),
         "inventory": _job_point_inventory(normalized),
         "path_checks": path_checks,
+        "submission_manifest": {
+            "declared": manifest_path is not None,
+            "hash_verified": normalized.get("submission_manifest_sha256") is not None,
+            "read_only": True,
+        },
         "resource_policy": {
             "declared": resource_policy is not None,
             "requested_cores": cores,
@@ -98,6 +119,7 @@ def _preview_job_spec(spec: JobSubmissionSpec | dict[str, Any]) -> dict[str, Any
             "submit_tool": "job_submit",
             "submit_profiles": list(get_tool_metadata("job_submit").intended_profiles),
             "source_model_read": source_path is not None,
+            "submission_manifest_read": manifest_path is not None,
             "licensed_comsol_on_submit": True,
         },
         "declared_submission_side_effects": [
