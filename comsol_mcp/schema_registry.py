@@ -103,6 +103,10 @@ SIMULATION_CONFIGURATION_SCHEMA_NAME = "comsol_mcp.simulation_configuration"
 SIMULATION_CONFIGURATION_DIFF_SCHEMA_NAME = "comsol_mcp.simulation_configuration_diff"
 JOB_SPEC_PREVIEW_SCHEMA_NAME = "comsol_mcp.job_spec_preview"
 CONFIGURATION_SCHEMA_VERSION = "1.0.0"
+KIRCHHOFF_ASSESSMENT_SCHEMA_NAME = "comsol_mcp.kirchhoff_assessment"
+THERMAL_RADIATION_REQUEST_SCHEMA_NAME = "comsol_mcp.thermal_radiation_request"
+THERMAL_RADIATION_EVIDENCE_SCHEMA_NAME = "comsol_mcp.thermal_radiation_evidence"
+THERMAL_RADIATION_SCHEMA_VERSION = "1.0.0"
 STANDALONE_SCHEMA_VERSION = "1.0.0"
 STANDALONE_SCHEMAS = (
     "comsol_mcp.standalone_build_receipt",
@@ -358,6 +362,21 @@ def _entries() -> list[dict[str, Any]]:
             JOB_SPEC_PREVIEW_SCHEMA_NAME,
             CONFIGURATION_SCHEMA_VERSION,
             "comsol_mcp.tools.jobs",
+        ),
+        _entry(
+            KIRCHHOFF_ASSESSMENT_SCHEMA_NAME,
+            THERMAL_RADIATION_SCHEMA_VERSION,
+            "comsol_mcp.evidence.thermal_radiation",
+        ),
+        _entry(
+            THERMAL_RADIATION_REQUEST_SCHEMA_NAME,
+            THERMAL_RADIATION_SCHEMA_VERSION,
+            "comsol_mcp.contracts.thermal_radiation",
+        ),
+        _entry(
+            THERMAL_RADIATION_EVIDENCE_SCHEMA_NAME,
+            THERMAL_RADIATION_SCHEMA_VERSION,
+            "comsol_mcp.evidence.thermal_radiation",
         ),
         _entry(
             SPECTRAL_PROGRESS_SCHEMA_NAME,

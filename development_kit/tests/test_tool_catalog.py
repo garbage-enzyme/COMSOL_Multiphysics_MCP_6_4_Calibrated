@@ -39,7 +39,7 @@ def test_full_tool_schema_snapshot_is_stable():
     actual = asyncio.run(snapshot_tool_schemas(server))
     expected = json.loads(SNAPSHOT_PATH.read_text(encoding="utf-8"))
 
-    assert len(actual) == 158
+    assert len(actual) == 160
     assert actual == expected
 
 
@@ -87,7 +87,7 @@ def test_every_registered_tool_has_complete_canonical_metadata():
     expected_names = set(json.loads(SNAPSHOT_PATH.read_text(encoding="utf-8")))
 
     assert set(TOOL_METADATA) == expected_names
-    assert len(TOOL_METADATA) == 158
+    assert len(TOOL_METADATA) == 160
     for name, metadata in TOOL_METADATA.items():
         assert metadata.name == name
         assert metadata.registrar.startswith("comsol_mcp.")
@@ -112,7 +112,7 @@ def test_tool_specs_are_the_validated_canonical_registry():
     assert TOOL_SPECS is TOOL_METADATA
     assert validate_tool_specs() == {
         "valid": True,
-        "tool_count": 158,
+        "tool_count": 160,
         "profile_count": len(PROFILE_NAMES),
     }
     for spec in TOOL_SPECS.values():
@@ -363,7 +363,7 @@ def test_catalog_import_cannot_start_comsol():
 import mph
 mph.Client = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError('Client called'))
 from src.tools.catalog import TOOL_METADATA
-assert len(TOOL_METADATA) == 158
+assert len(TOOL_METADATA) == 160
 """
     completed = subprocess.run(
         [sys.executable, "-c", code],

@@ -151,7 +151,9 @@
     "standalone_tail",
     "study_create",
     "study_list",
-    "study_solve"
+    "study_solve",
+    "thermal_kirchhoff_assess",
+    "thermal_radiation_evaluate"
   ],
   "wave_optics": [
     "branch_continuation_plan",
@@ -211,6 +213,8 @@
     "spectral_model_compare",
     "study_list",
     "study_solve",
+    "thermal_kirchhoff_assess",
+    "thermal_radiation_evaluate",
     "visual_review_capability_normalize",
     "visual_review_dual_evaluate",
     "visual_review_receipt_create",
@@ -391,6 +395,8 @@
     "study_solve_async",
     "study_staged_parametric_sweep",
     "study_wait",
+    "thermal_kirchhoff_assess",
+    "thermal_radiation_evaluate",
     "troubleshoot"
   ],
   "full": [
@@ -537,6 +543,8 @@
     "study_solve_async",
     "study_staged_parametric_sweep",
     "study_wait",
+    "thermal_kirchhoff_assess",
+    "thermal_radiation_evaluate",
     "troubleshoot",
     "visual_review_capability_normalize",
     "visual_review_dual_evaluate",

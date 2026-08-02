@@ -10336,6 +10336,807 @@
     "title": "study_waitArguments",
     "type": "object"
   },
+  "thermal_kirchhoff_assess": {
+    "$defs": {
+      "KirchhoffAssessmentRequest": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "absorptivity_evidence_sha256": {
+            "maxLength": 16384,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Absorptivity Evidence Sha256",
+            "type": "string"
+          },
+          "absorptivity_evidence_state": {
+            "enum": [
+              "verified",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Absorptivity Evidence State",
+            "type": "string"
+          },
+          "channel_identity_sha256": {
+            "maxLength": 16384,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Channel Identity Sha256",
+            "type": "string"
+          },
+          "direction_channel_match": {
+            "enum": [
+              "verified",
+              "failed",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Direction Channel Match",
+            "type": "string"
+          },
+          "frequency_channel_match": {
+            "enum": [
+              "verified",
+              "failed",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Frequency Channel Match",
+            "type": "string"
+          },
+          "handedness_convention": {
+            "enum": [
+              "ieee_observer",
+              "optics_source_view",
+              "explicit_stokes",
+              "not_applicable",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Handedness Convention",
+            "type": "string"
+          },
+          "linearity": {
+            "enum": [
+              "verified",
+              "failed",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Linearity",
+            "type": "string"
+          },
+          "local_equilibrium": {
+            "enum": [
+              "verified",
+              "failed",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Local Equilibrium",
+            "type": "string"
+          },
+          "polarization_basis": {
+            "enum": [
+              "scalar",
+              "te_tm",
+              "stokes_mueller",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Polarization Basis",
+            "type": "string"
+          },
+          "polarization_channel_match": {
+            "enum": [
+              "verified",
+              "failed",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Polarization Channel Match",
+            "type": "string"
+          },
+          "propagation_direction": {
+            "enum": [
+              "positive_z",
+              "negative_z",
+              "other",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Propagation Direction",
+            "type": "string"
+          },
+          "reciprocity": {
+            "enum": [
+              "verified",
+              "failed",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Reciprocity",
+            "type": "string"
+          },
+          "time_invariance": {
+            "enum": [
+              "verified",
+              "failed",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Time Invariance",
+            "type": "string"
+          }
+        },
+        "required": [
+          "absorptivity_evidence_sha256",
+          "absorptivity_evidence_state",
+          "linearity",
+          "time_invariance",
+          "reciprocity",
+          "local_equilibrium",
+          "direction_channel_match",
+          "frequency_channel_match",
+          "polarization_channel_match",
+          "propagation_direction",
+          "polarization_basis",
+          "handedness_convention",
+          "channel_identity_sha256"
+        ],
+        "title": "KirchhoffAssessmentRequest",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "maxProperties": 256,
+    "properties": {
+      "request": {
+        "$ref": "#/$defs/KirchhoffAssessmentRequest"
+      }
+    },
+    "required": [
+      "request"
+    ],
+    "title": "thermal_kirchhoff_assessArguments",
+    "type": "object"
+  },
+  "thermal_radiation_evaluate": {
+    "$defs": {
+      "AngularGrid": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "mode": {
+            "enum": [
+              "lambertian_pi",
+              "grid_trapezoid"
+            ],
+            "maxLength": 16384,
+            "title": "Mode",
+            "type": "string"
+          },
+          "phi_rad": {
+            "items": {
+              "maximum": 6.283185307179586,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            "maxItems": 128,
+            "minItems": 1,
+            "title": "Phi Rad",
+            "type": "array"
+          },
+          "theta_rad": {
+            "items": {
+              "maximum": 1.5707963267948966,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            "maxItems": 128,
+            "minItems": 1,
+            "title": "Theta Rad",
+            "type": "array"
+          }
+        },
+        "required": [
+          "mode",
+          "theta_rad",
+          "phi_rad"
+        ],
+        "title": "AngularGrid",
+        "type": "object"
+      },
+      "DetectorPath": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "analyzer_response": {
+            "items": {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            "maxItems": 2048,
+            "title": "Analyzer Response",
+            "type": "array"
+          },
+          "aperture_weights": {
+            "items": {
+              "maximum": 1e+308,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            "maxItems": 2048,
+            "title": "Aperture Weights",
+            "type": "array"
+          },
+          "background_response": {
+            "items": {
+              "maximum": 1e+308,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            "maxItems": 2048,
+            "title": "Background Response",
+            "type": "array"
+          },
+          "detector_response": {
+            "items": {
+              "maximum": 1e+308,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            "maxItems": 2048,
+            "title": "Detector Response",
+            "type": "array"
+          },
+          "gas_absorption_per_m": {
+            "items": {
+              "maximum": 1e+308,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            "maxItems": 2048,
+            "title": "Gas Absorption Per M",
+            "type": "array"
+          },
+          "gas_concentration_scale": {
+            "default": 0.0,
+            "maximum": 1000000000.0,
+            "minimum": 0.0,
+            "title": "Gas Concentration Scale",
+            "type": "number"
+          },
+          "gas_path_length_m": {
+            "default": 0.0,
+            "maximum": 1000000000.0,
+            "minimum": 0.0,
+            "title": "Gas Path Length M",
+            "type": "number"
+          },
+          "kernel_source_sha256s": {
+            "items": {
+              "maxLength": 16384,
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "maxItems": 64,
+            "title": "Kernel Source Sha256S",
+            "type": "array"
+          },
+          "optics_transmission": {
+            "items": {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            "maxItems": 2048,
+            "title": "Optics Transmission",
+            "type": "array"
+          },
+          "reference_response": {
+            "items": {
+              "maximum": 1e+308,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            "maxItems": 2048,
+            "title": "Reference Response",
+            "type": "array"
+          }
+        },
+        "title": "DetectorPath",
+        "type": "object"
+      },
+      "KirchhoffAssessmentReceipt": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "absorptivity_evidence_sha256": {
+            "maxLength": 16384,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Absorptivity Evidence Sha256",
+            "type": "string"
+          },
+          "absorptivity_evidence_state": {
+            "enum": [
+              "verified",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Absorptivity Evidence State",
+            "type": "string"
+          },
+          "assessment_sha256": {
+            "maxLength": 16384,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Assessment Sha256",
+            "type": "string"
+          },
+          "channel_identity_sha256": {
+            "maxLength": 16384,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Channel Identity Sha256",
+            "type": "string"
+          },
+          "checks": {
+            "$ref": "#/$defs/KirchhoffChecks"
+          },
+          "disposition": {
+            "enum": [
+              "applicable",
+              "conditional",
+              "not_applicable",
+              "unavailable"
+            ],
+            "maxLength": 16384,
+            "title": "Disposition",
+            "type": "string"
+          },
+          "handedness_convention": {
+            "enum": [
+              "ieee_observer",
+              "optics_source_view",
+              "explicit_stokes",
+              "not_applicable",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Handedness Convention",
+            "type": "string"
+          },
+          "polarization_basis": {
+            "enum": [
+              "scalar",
+              "te_tm",
+              "stokes_mueller",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Polarization Basis",
+            "type": "string"
+          },
+          "propagation_direction": {
+            "enum": [
+              "positive_z",
+              "negative_z",
+              "other",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Propagation Direction",
+            "type": "string"
+          },
+          "reason_codes": {
+            "items": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 16,
+            "title": "Reason Codes",
+            "type": "array"
+          },
+          "schema_name": {
+            "const": "comsol_mcp.kirchhoff_assessment",
+            "maxLength": 16384,
+            "title": "Schema Name",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": "1.0.0",
+            "maxLength": 16384,
+            "title": "Schema Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_name",
+          "schema_version",
+          "disposition",
+          "reason_codes",
+          "absorptivity_evidence_sha256",
+          "absorptivity_evidence_state",
+          "channel_identity_sha256",
+          "checks",
+          "propagation_direction",
+          "polarization_basis",
+          "handedness_convention",
+          "assessment_sha256"
+        ],
+        "title": "KirchhoffAssessmentReceipt",
+        "type": "object"
+      },
+      "KirchhoffChecks": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "direction_channel_match": {
+            "enum": [
+              "verified",
+              "failed",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Direction Channel Match",
+            "type": "string"
+          },
+          "frequency_channel_match": {
+            "enum": [
+              "verified",
+              "failed",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Frequency Channel Match",
+            "type": "string"
+          },
+          "linearity": {
+            "enum": [
+              "verified",
+              "failed",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Linearity",
+            "type": "string"
+          },
+          "local_equilibrium": {
+            "enum": [
+              "verified",
+              "failed",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Local Equilibrium",
+            "type": "string"
+          },
+          "polarization_channel_match": {
+            "enum": [
+              "verified",
+              "failed",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Polarization Channel Match",
+            "type": "string"
+          },
+          "reciprocity": {
+            "enum": [
+              "verified",
+              "failed",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Reciprocity",
+            "type": "string"
+          },
+          "time_invariance": {
+            "enum": [
+              "verified",
+              "failed",
+              "unknown"
+            ],
+            "maxLength": 16384,
+            "title": "Time Invariance",
+            "type": "string"
+          }
+        },
+        "required": [
+          "linearity",
+          "time_invariance",
+          "reciprocity",
+          "local_equilibrium",
+          "direction_channel_match",
+          "frequency_channel_match",
+          "polarization_channel_match"
+        ],
+        "title": "KirchhoffChecks",
+        "type": "object"
+      },
+      "PolarizationContract": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "analyzer_handedness": {
+            "enum": [
+              "ieee_observer",
+              "optics_source_view",
+              "explicit_stokes",
+              "not_applicable"
+            ],
+            "maxLength": 16384,
+            "title": "Analyzer Handedness",
+            "type": "string"
+          },
+          "analyzer_stokes": {
+            "items": {
+              "maximum": 1e+308,
+              "minimum": -1e+308,
+              "type": "number"
+            },
+            "maxItems": 4,
+            "minItems": 4,
+            "title": "Analyzer Stokes",
+            "type": "array"
+          },
+          "basis_rotation_rad": {
+            "default": 0.0,
+            "maximum": 6.283185307179586,
+            "minimum": -6.283185307179586,
+            "title": "Basis Rotation Rad",
+            "type": "number"
+          },
+          "channels": {
+            "items": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 4,
+            "minItems": 1,
+            "title": "Channels",
+            "type": "array"
+          },
+          "mode": {
+            "enum": [
+              "scalar",
+              "te_tm_incoherent",
+              "stokes_mueller"
+            ],
+            "maxLength": 16384,
+            "title": "Mode",
+            "type": "string"
+          },
+          "propagation_direction": {
+            "enum": [
+              "positive_z",
+              "negative_z",
+              "other"
+            ],
+            "maxLength": 16384,
+            "title": "Propagation Direction",
+            "type": "string"
+          },
+          "source_handedness": {
+            "enum": [
+              "ieee_observer",
+              "optics_source_view",
+              "explicit_stokes",
+              "not_applicable"
+            ],
+            "maxLength": 16384,
+            "title": "Source Handedness",
+            "type": "string"
+          },
+          "weights": {
+            "items": {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            "maxItems": 4,
+            "title": "Weights",
+            "type": "array"
+          }
+        },
+        "required": [
+          "mode",
+          "channels",
+          "propagation_direction",
+          "source_handedness",
+          "analyzer_handedness"
+        ],
+        "title": "PolarizationContract",
+        "type": "object"
+      },
+      "SpectralAxis": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "coordinates": {
+            "items": {
+              "exclusiveMinimum": 0.0,
+              "maximum": 1e+308,
+              "minimum": -1e+308,
+              "type": "number"
+            },
+            "maxItems": 2048,
+            "minItems": 2,
+            "title": "Coordinates",
+            "type": "array"
+          },
+          "representation": {
+            "enum": [
+              "wavelength_m",
+              "wavelength_um",
+              "frequency_Hz",
+              "wavenumber_m_inv"
+            ],
+            "maxLength": 16384,
+            "title": "Representation",
+            "type": "string"
+          }
+        },
+        "required": [
+          "representation",
+          "coordinates"
+        ],
+        "title": "SpectralAxis",
+        "type": "object"
+      },
+      "ThermalRadiationRequest": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "angular_grid": {
+            "$ref": "#/$defs/AngularGrid"
+          },
+          "artifact_chain_sha256": {
+            "maxLength": 16384,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Artifact Chain Sha256",
+            "type": "string"
+          },
+          "axis": {
+            "$ref": "#/$defs/SpectralAxis"
+          },
+          "configuration_sha256": {
+            "maxLength": 16384,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Configuration Sha256",
+            "type": "string"
+          },
+          "detector_path": {
+            "$ref": "#/$defs/DetectorPath"
+          },
+          "extrapolation": {
+            "default": false,
+            "title": "Extrapolation",
+            "type": "boolean"
+          },
+          "integration_method": {
+            "const": "trapezoid",
+            "default": "trapezoid",
+            "maxLength": 16384,
+            "title": "Integration Method",
+            "type": "string"
+          },
+          "interpolation": {
+            "default": "none",
+            "enum": [
+              "none",
+              "linear"
+            ],
+            "maxLength": 16384,
+            "title": "Interpolation",
+            "type": "string"
+          },
+          "kirchhoff_assessment": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/KirchhoffAssessmentReceipt"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "optical_quantity": {
+            "enum": [
+              "emissivity",
+              "absorptivity"
+            ],
+            "maxLength": 16384,
+            "title": "Optical Quantity",
+            "type": "string"
+          },
+          "polarization": {
+            "$ref": "#/$defs/PolarizationContract"
+          },
+          "schema_name": {
+            "const": "comsol_mcp.thermal_radiation_request",
+            "default": "comsol_mcp.thermal_radiation_request",
+            "maxLength": 16384,
+            "title": "Schema Name",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": "1.0.0",
+            "default": "1.0.0",
+            "maxLength": 16384,
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "source_artifact_sha256s": {
+            "items": {
+              "maxLength": 16384,
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "maxItems": 64,
+            "minItems": 1,
+            "title": "Source Artifact Sha256S",
+            "type": "array"
+          },
+          "temperature_K": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 1000000000.0,
+            "minimum": -1e+308,
+            "title": "Temperature K",
+            "type": "number"
+          },
+          "uncertainty_flat": {
+            "items": {
+              "maximum": 1e+308,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            "maxItems": 2048,
+            "title": "Uncertainty Flat",
+            "type": "array"
+          },
+          "values_flat": {
+            "items": {
+              "maximum": 1e+308,
+              "minimum": -1e+308,
+              "type": "number"
+            },
+            "maxItems": 2048,
+            "minItems": 1,
+            "title": "Values Flat",
+            "type": "array"
+          }
+        },
+        "required": [
+          "temperature_K",
+          "axis",
+          "angular_grid",
+          "polarization",
+          "optical_quantity",
+          "values_flat",
+          "configuration_sha256",
+          "source_artifact_sha256s",
+          "artifact_chain_sha256"
+        ],
+        "title": "ThermalRadiationRequest",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "maxProperties": 256,
+    "properties": {
+      "request": {
+        "$ref": "#/$defs/ThermalRadiationRequest"
+      }
+    },
+    "required": [
+      "request"
+    ],
+    "title": "thermal_radiation_evaluateArguments",
+    "type": "object"
+  },
   "troubleshoot": {
     "additionalProperties": false,
     "maxProperties": 256,

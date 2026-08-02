@@ -271,6 +271,18 @@ semantic, label-only, or unavailable; labels never become physical identity.
 checks, requirements, and declared submit-time side effects without admission,
 ownership acquisition, filesystem writes, process creation, or solver startup.
 
+The solver-free `thermal_kirchhoff_assess` tool permits directional
+absorptivity-to-emissivity substitution only when the exact channel has verified
+linearity, time invariance, reciprocity, local equilibrium, direction, frequency,
+and polarization evidence. Unknown facts remain conditional or unavailable, and
+nonreciprocal channels are not applicable. `thermal_radiation_evaluate` applies
+the SI Planck law with explicit wavelength/frequency/wavenumber Jacobians,
+projected-solid-angle integration, scalar, incoherent TE/TM, or Stokes/Mueller
+polarization, and bounded gas/aperture/optics/analyzer/detector kernels. Its
+hash-bound evidence records coverage, integration policy, extrapolation state,
+uncertainty, source artifacts, and detector/reference/background signals. It
+does not replace COMSOL's Surface-to-Surface Radiation solver.
+
 A durable convergence campaign uses `job_type: "convergence_campaign"` and an
 immutable ordered ladder of two to eight exact source or prebuilt derived model
 identities. Every level runs the accepted adaptive spectral job, persists its

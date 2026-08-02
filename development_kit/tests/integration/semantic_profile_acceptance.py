@@ -24,11 +24,11 @@ RUN_LOCK = OUTPUT.parent / "acceptance.lock"
 MODEL = Path("D:/comsol_semantic/models/all-MiniLM-L6-v2/1110a243fdf4706b3f48f1d95db1a4f5529b4d41")
 PROFILE_COUNTS = {
     "core": 46,
-    "basic_fem": 85,
-    "wave_optics": 72,
+    "basic_fem": 87,
+    "wave_optics": 74,
     "semantic_docs": 49,
-    "experimental": 73,
-    "full": 139,
+    "experimental": 75,
+    "full": 141,
 }
 
 

@@ -234,6 +234,16 @@ label-only 或 unavailable，标签不会被提升为物理身份。`job_spec_pr
 路径与资源检查、需求及提交时副作用，不做 admission、ownership、文件写入、进程创建或
 solver 启动。
 
+solver-free 的 `thermal_kirchhoff_assess` 只有在同一方向、频率和偏振通道的线性、
+时不变、互易、局域平衡及通道匹配证据全部验证后，才允许把 directional absorptivity
+当作 emissivity；未知事实保持 conditional/unavailable，非互易通道为 not applicable。
+`thermal_radiation_evaluate` 使用 SI Planck 定律和显式 wavelength/frequency/
+wavenumber Jacobian，执行含投影固体角的积分，支持 scalar、非相干 TE/TM 或
+Stokes/Mueller 偏振，并可应用受限的气体、孔径、光学、analyzer 和 detector kernel。
+哈希绑定输出保留 coverage、积分 policy、extrapolation 状态、不确定度、source artifact
+以及 detector/reference/background signal；它不替代 COMSOL Surface-to-Surface
+Radiation solver。
+
 持久化收敛任务使用 `job_type: "convergence_campaign"`，并声明 2–8 个严格排序的
 exact source 或预先构建并验证的 derived model identity。每个 level 都复用已验收的
 自适应光谱任务，完整持久化哈希绑定 artifacts，并且只以各 level 自己 bracketed

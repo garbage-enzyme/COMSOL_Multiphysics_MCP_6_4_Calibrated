@@ -245,6 +245,10 @@ _TOOLS_BY_REGISTRAR = {
         "simulation_configuration_validate",
         "simulation_configuration_diff",
     ),
+    "comsol_mcp.tools.thermal_radiation.register_thermal_radiation_tools": (
+        "thermal_kirchhoff_assess",
+        "thermal_radiation_evaluate",
+    ),
     "comsol_mcp.tools.convergence_evaluation.register_convergence_evaluation_tools": (
         "convergence_evaluate",
     ),
@@ -306,6 +310,7 @@ _GROUP_BY_REGISTRAR = {
     "register_semantic_doc_tools": "semantic_docs",
     "register_spectral_characterization_tools": "spectral_evidence",
     "register_configuration_tools": "configuration_evidence",
+    "register_thermal_radiation_tools": "thermal_radiation_evidence",
     "register_convergence_evaluation_tools": "convergence_evidence",
     "register_branch_continuation_tools": "branch_continuation_evidence",
     "register_shared_session_tools": "shared_session",
@@ -526,6 +531,8 @@ _EXPLICIT_READ_ONLY_TOOLS = frozenset(
         "spectral_model_compare",
         "simulation_configuration_validate",
         "simulation_configuration_diff",
+        "thermal_kirchhoff_assess",
+        "thermal_radiation_evaluate",
         "study_get_progress",
         "study_list",
         "troubleshoot",
@@ -597,6 +604,8 @@ _SOLVER_FREE_TOOLS = frozenset(
         "standalone_tail",
         "standalone_results",
         "simulation_configuration_diff",
+        "thermal_kirchhoff_assess",
+        "thermal_radiation_evaluate",
     }
 )
 
@@ -761,6 +770,8 @@ _BASIC_FEM_ADDITIONS = frozenset(
         "standalone_tail",
         "standalone_results",
         "simulation_configuration_diff",
+        "thermal_kirchhoff_assess",
+        "thermal_radiation_evaluate",
     }
 )
 
@@ -791,6 +802,8 @@ _WAVE_OPTICS_ADDITIONS = frozenset(
         "visual_review_receipt_create",
         "visual_review_dual_evaluate",
         "simulation_configuration_diff",
+        "thermal_kirchhoff_assess",
+        "thermal_radiation_evaluate",
     }
 )
 
@@ -842,6 +855,8 @@ _EXPERIMENTAL_ADDITIONS = frozenset(
         "standalone_tail",
         "standalone_results",
         "simulation_configuration_diff",
+        "thermal_kirchhoff_assess",
+        "thermal_radiation_evaluate",
     }
 )
 
