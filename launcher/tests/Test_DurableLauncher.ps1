@@ -18,7 +18,7 @@ if ([string]::IsNullOrWhiteSpace($TestRoot)) {
     )
 }
 Import-Module $Module -Force
-if ((Get-DurableLauncherVersion) -ne '1.8.0') { throw 'Unexpected launcher version.' }
+if ((Get-DurableLauncherVersion) -ne '1.8.1') { throw 'Unexpected launcher version.' }
 
 $ModuleText = [IO.File]::ReadAllText($Module)
 $MonitorStart = $ModuleText.IndexOf('function Show-DurableJobMonitor', [StringComparison]::Ordinal)
@@ -169,6 +169,34 @@ $Choice = Read-DurableValidatedChoice -Prompt 'test' -Choices @('RUN','CANCEL') 
 if ($Choice -ne 'RUN') { throw 'Validated-choice retry test failed.' }
 if ((Resolve-DurableMonitorCommand -Command 'not-a-command') -ne 'invalid') { throw 'Invalid monitor command did not remain nonterminal.' }
 if ((Resolve-DurableMonitorCommand -Command 'PAUSE') -ne 'pause') { throw 'Pause command normalization failed.' }
+$SyntheticInventory = @(
+    [pscustomobject]@{ ProcessId = 1001; Name = 'comsol-mcp.exe'; CommandLine = 'comsol-mcp.exe' },
+    [pscustomobject]@{ ProcessId = 1002; Name = 'COMSOL-MCP.EXE'; CommandLine = 'COMSOL-MCP.EXE' },
+    [pscustomobject]@{ ProcessId = 2001; Name = 'comsol.exe'; CommandLine = 'comsol.exe' },
+    [pscustomobject]@{ ProcessId = 2002; Name = 'comsolbatch.exe'; CommandLine = 'comsolbatch.exe' },
+    [pscustomobject]@{ ProcessId = 2003; Name = 'comsolmphserver.exe'; CommandLine = 'comsolmphserver.exe' },
+    [pscustomobject]@{ ProcessId = 2004; Name = 'mphserver.exe'; CommandLine = 'mphserver.exe' },
+    [pscustomobject]@{ ProcessId = 2005; Name = 'java.exe'; CommandLine = 'java.exe comsol runtime' },
+    [pscustomobject]@{ ProcessId = 3001; Name = 'java.exe'; CommandLine = 'java.exe unrelated.jar' },
+    [pscustomobject]@{ ProcessId = 3002; Name = 'python.exe'; CommandLine = 'python.exe server.py' }
+)
+$SolverCollisions = @(& (Get-Module DurableLauncher) {
+    param([object[]]$Inventory)
+    Test-DurableSolverCollision -ProcessInventory $Inventory
+} $SyntheticInventory)
+$CollisionIds = @($SolverCollisions.ProcessId | Sort-Object)
+if (($CollisionIds -join ',') -ne '2001,2002,2003,2004,2005') {
+    throw "Solver collision classification mismatch: $($CollisionIds -join ',')"
+}
+$ModeCombinationRejected = $false
+try {
+    Invoke-DurableJobLauncher -Config @{} -Run -Monitor -NoTopMost
+}
+catch {
+    if ($_.Exception.Message -notmatch 'mutually exclusive') { throw }
+    $ModeCombinationRejected = $true
+}
+if (-not $ModeCombinationRejected) { throw 'Combined -Run -Monitor mode was not rejected.' }
 $script:FailureAnswers = [System.Collections.Generic.Queue[string]]::new()
 $script:FailureAnswers.Enqueue('invalid')
 $script:FailureAnswers.Enqueue('quit')
@@ -242,6 +270,9 @@ $Receipt = [ordered]@{
     failed_terminal_classified = $true
     paused_terminal_classified = $true
     exact_duplicate_detection = $true
+    idle_mcp_host_not_solver_collision = $true
+    real_solver_processes_rejected = $true
+    launcher_modes_mutually_exclusive = $true
     shared_module_start_driver = $true
     pause_request_id = $Request.RequestId
     paused_after_rows = [int]$Paused.completed

@@ -59,7 +59,9 @@ def test_launcher_distribution_is_portable_and_outside_runtime_package() -> None
         "Guo2026",
     ):
         assert forbidden not in text
-    assert "$script:DurableLauncherVersion = '1.8.0'" in text
+    assert "$script:DurableLauncherVersion = '1.8.1'" in text
+    assert "if ($Name -ieq 'comsol-mcp.exe') { return $false }" in text
+    assert "-Run, -Monitor, and -ValidateOnly are mutually exclusive" in text
     assert "MinimumFreeSystemDriveGiB" in text
     assert "MinimumFreeOutputDriveGiB" in text
     assert "MinimumFreeCGiB" not in text

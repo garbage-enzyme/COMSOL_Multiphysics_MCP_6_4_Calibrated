@@ -4,8 +4,10 @@
 环境。它对应[五种运行方式指南](../docs/simulation_execution_modes/README_CN.md)中的
 `launcher`，不是目标机无需 Python 的 `standalone` EXE。
 
-启动器版本：`1.8.0`。已验收的 v1.7 是功能基线。v1.8 保留原有状态显示、暂停、逐点
+启动器版本：`1.8.1`。已验收的 v1.7 是功能基线。v1.8 保留原有状态显示、暂停、逐点
 记录、结束颜色和故障处理，并删除固定电脑路径、Python 路径、输出路径和盘符假设。
+v1.8.1 区分空闲的 `comsol-mcp.exe` stdio host 与真实求解器，并拒绝含义不明确的组合
+运行模式开关。
 
 ## 目录内容
 
@@ -70,8 +72,15 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass `
 
 先使用 `-ValidateOnly`，并要求它输出
 `LAUNCHER_VALIDATE_PASS no solver client created`。然后使用 `-Run`；也可以不加运行开关，
-在交互提示中选择 `RUN`。状态窗口接受 `pause`、`status`、`help`、`resume` 和
-`quit`。`quit` 只关闭状态窗口，不会终止仍在运行的 worker。
+在交互提示中选择 `RUN`。`-Run` 会启动或继续 driver，随后自动进入状态窗口；不要再与
+`-Monitor` 组合。`-Monitor` 只能单独用于查看已有或已停止任务，并由操作者明确选择界面
+提供的 `resume`。`-Run`、`-Monitor` 和 `-ValidateOnly` 互斥。状态窗口接受 `pause`、
+`status`、`help`、`resume` 和 `quit`。`quit` 只关闭状态窗口，不会终止仍在运行的
+worker。
+
+空闲的 `comsol-mcp.exe` 是不拥有求解器的 MCP stdio host，不会阻止 launcher。除这个
+精确 host 名称以外的真实 `comsol*.exe` solver/server、`mphserver*.exe` 或 COMSOL/MPh
+Java runtime 仍属于冲突，必须拒绝启动。
 
 ## 结束状态
 

@@ -1,6 +1,6 @@
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:DurableLauncherVersion = '1.8.0'
+$script:DurableLauncherVersion = '1.8.1'
 
 function Get-DurableLauncherVersion {
     return $script:DurableLauncherVersion
@@ -799,12 +799,31 @@ function Test-DurableResourcePolicy {
     }
 }
 
+function Test-DurableSolverProcess {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)]$Process)
+    $Name = [string]$Process.Name
+    $CommandLine = [string]$Process.CommandLine
+
+    # The MCP console entry point is a solver-free stdio host until it creates
+    # an actual COMSOL/MPh/Java child.  Treating the host executable as a solver
+    # would reject every launcher run while an idle MCP client is connected.
+    if ($Name -ieq 'comsol-mcp.exe') { return $false }
+
+    return (
+        $Name -match '^comsol.*\.exe$' -or
+        $Name -match '^mphserver.*\.exe$' -or
+        (($Name -in @('java.exe', 'javaw.exe')) -and $CommandLine -match 'comsol|mphserver')
+    )
+}
+
 function Test-DurableSolverCollision {
-    $Processes = @(Get-CimInstance Win32_Process | Where-Object {
-        $_.Name -match '^comsol.*\.exe$' -or $_.Name -match '^mphserver.*\.exe$' -or
-        (($_.Name -in @('java.exe', 'javaw.exe')) -and [string]$_.CommandLine -match 'comsol|mphserver')
-    })
-    return $Processes
+    [CmdletBinding()]
+    param([object[]]$ProcessInventory)
+    if (-not $PSBoundParameters.ContainsKey('ProcessInventory')) {
+        $ProcessInventory = @(Get-CimInstance Win32_Process)
+    }
+    return @($ProcessInventory | Where-Object { Test-DurableSolverProcess -Process $_ })
 }
 
 function Invoke-DurableDriverValidation {
@@ -879,6 +898,10 @@ function Invoke-DurableJobLauncher {
         [switch]$Monitor,
         [switch]$NoTopMost
     )
+    $SelectedModeCount = [int]$Run.IsPresent + [int]$ValidateOnly.IsPresent + [int]$Monitor.IsPresent
+    if ($SelectedModeCount -gt 1) {
+        throw '-Run, -Monitor, and -ValidateOnly are mutually exclusive. Use -Run to start/resume and monitor; use -Monitor only to inspect.'
+    }
     foreach ($Name in @('JobName','JobId','Python','Driver','Output','TotalPoints','StatusPath','ResultsPath','ControlDirectory','StdoutPath','StderrPath','MonitorIntervalSeconds','MinimumFreeRamGiB','MinimumFreeSystemDriveGiB','MinimumFreeOutputDriveGiB','ValidateEnvironment','RunEnvironment','RequiredFiles')) {
         if (-not $Config.ContainsKey($Name)) { throw "Launcher configuration is missing '$Name'." }
     }

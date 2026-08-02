@@ -5,9 +5,11 @@ campaigns that have a local Python environment. It is the `launcher` mode from
 the [five execution modes guide](../docs/simulation_execution_modes/README.md).
 It is not the Python-free `standalone` EXE.
 
-Launcher version: `1.8.0`. The accepted v1.7 runtime is the baseline. Version
+Launcher version: `1.8.1`. The accepted v1.7 runtime is the baseline. Version
 1.8 keeps its monitor, pause, result-journal, terminal, and failure behavior and
-removes machine-specific package, Python, output, and drive assumptions.
+removes machine-specific package, Python, output, and drive assumptions. Version
+1.8.1 distinguishes an idle `comsol-mcp.exe` stdio host from a real solver and
+rejects ambiguous combined mode switches.
 
 ## Contents
 
@@ -82,9 +84,18 @@ does not require fixed `C:` or `D:` layouts. Output must be on a local drive.
 
 Use `-ValidateOnly` first. It must print
 `LAUNCHER_VALIDATE_PASS no solver client created`. Then use `-Run` or start the
-template without a mode switch and select `RUN` interactively. The monitor
-accepts `pause`, `status`, `help`, `resume`, and `quit`. `quit` closes only the
-monitor; it does not terminate an active worker.
+template without a mode switch and select `RUN` interactively. `-Run` starts or
+resumes the driver and then opens the monitor; do not add `-Monitor` to that
+command. Use `-Monitor` by itself only to inspect an existing or stopped job and
+choose any offered `resume` action explicitly. `-Run`, `-Monitor`, and
+`-ValidateOnly` are mutually exclusive. The monitor accepts `pause`, `status`,
+`help`, `resume`, and `quit`. `quit` closes only the monitor; it does not
+terminate an active worker.
+
+An idle `comsol-mcp.exe` process is a solver-free MCP stdio host and does not
+block a launcher. A real `comsol*.exe` solver/server other than that exact host,
+an `mphserver*.exe`, or a COMSOL/MPh Java runtime remains a collision and blocks
+startup.
 
 ## Terminal meanings
 
