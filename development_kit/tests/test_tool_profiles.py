@@ -72,7 +72,7 @@ def test_environment_profile_is_normalized(monkeypatch):
     assert selection.environment_variable == PROFILE_ENV_VAR
 
     server = create_server("environment-wave-profile-test")
-    assert len(_tool_names(server)) == 73
+    assert len(_tool_names(server)) == 75
     assert "wave_optics_field_datasets" in _tool_names(server)
     assert "wave_optics_field_extract" in _tool_names(server)
     assert "wave_optics_material_expression_preview" in _tool_names(server)
@@ -108,9 +108,9 @@ def test_profile_registration_has_no_cross_server_leakage():
     experimental = create_server("isolated-experimental", profile="experimental")
 
     assert len(_tool_names(core)) == 46
-    assert len(_tool_names(full)) == 160
+    assert len(_tool_names(full)) == 162
     assert len(_tool_names(semantic)) == 49
-    assert len(_tool_names(experimental)) == 94
+    assert len(_tool_names(experimental)) == 96
     assert _tool_names(core) != _tool_names(experimental)
     assert {"semantic_search", "semantic_status", "semantic_worker_reset"} <= set(
         _tool_names(semantic)
@@ -289,7 +289,7 @@ def test_capabilities_are_bound_to_each_server_profile(monkeypatch):
     assert core_result["tool_count"] == 46
     assert core_result["profile_source"]["source"] == "explicit_argument"
     assert wave_result["active_profile"] == "wave_optics"
-    assert wave_result["tool_count"] == 73
+    assert wave_result["tool_count"] == 75
 
 
 @pytest.mark.parametrize("profile", ["core", "basic_fem", "wave_optics", "semantic_docs"])

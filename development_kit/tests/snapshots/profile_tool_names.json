@@ -153,6 +153,8 @@
     "study_list",
     "study_solve",
     "thermal_kirchhoff_assess",
+    "thermal_material_evaluate",
+    "thermal_material_validate",
     "thermal_radiation_evaluate"
   ],
   "wave_optics": [
@@ -214,6 +216,8 @@
     "study_list",
     "study_solve",
     "thermal_kirchhoff_assess",
+    "thermal_material_evaluate",
+    "thermal_material_validate",
     "thermal_radiation_evaluate",
     "visual_review_capability_normalize",
     "visual_review_dual_evaluate",
@@ -396,6 +400,8 @@
     "study_staged_parametric_sweep",
     "study_wait",
     "thermal_kirchhoff_assess",
+    "thermal_material_evaluate",
+    "thermal_material_validate",
     "thermal_radiation_evaluate",
     "troubleshoot"
   ],
@@ -544,6 +550,8 @@
     "study_staged_parametric_sweep",
     "study_wait",
     "thermal_kirchhoff_assess",
+    "thermal_material_evaluate",
+    "thermal_material_validate",
     "thermal_radiation_evaluate",
     "troubleshoot",
     "visual_review_capability_normalize",

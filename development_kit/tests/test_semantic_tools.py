@@ -270,8 +270,8 @@ def test_semantic_and_other_profile_counts_match_declared_discovery():
 
     assert counts == {
         "core": 46,
-        "basic_fem": 106,
-        "wave_optics": 73,
-        "experimental": 94,
-        "full": 160,
+        "basic_fem": 108,
+        "wave_optics": 75,
+        "experimental": 96,
+        "full": 162,
     }

@@ -249,6 +249,10 @@ _TOOLS_BY_REGISTRAR = {
         "thermal_kirchhoff_assess",
         "thermal_radiation_evaluate",
     ),
+    "comsol_mcp.tools.thermal_material.register_thermal_material_tools": (
+        "thermal_material_validate",
+        "thermal_material_evaluate",
+    ),
     "comsol_mcp.tools.convergence_evaluation.register_convergence_evaluation_tools": (
         "convergence_evaluate",
     ),
@@ -311,6 +315,7 @@ _GROUP_BY_REGISTRAR = {
     "register_spectral_characterization_tools": "spectral_evidence",
     "register_configuration_tools": "configuration_evidence",
     "register_thermal_radiation_tools": "thermal_radiation_evidence",
+    "register_thermal_material_tools": "thermal_material_evidence",
     "register_convergence_evaluation_tools": "convergence_evidence",
     "register_branch_continuation_tools": "branch_continuation_evidence",
     "register_shared_session_tools": "shared_session",
@@ -533,6 +538,8 @@ _EXPLICIT_READ_ONLY_TOOLS = frozenset(
         "simulation_configuration_diff",
         "thermal_kirchhoff_assess",
         "thermal_radiation_evaluate",
+        "thermal_material_validate",
+        "thermal_material_evaluate",
         "study_get_progress",
         "study_list",
         "troubleshoot",
@@ -606,6 +613,8 @@ _SOLVER_FREE_TOOLS = frozenset(
         "simulation_configuration_diff",
         "thermal_kirchhoff_assess",
         "thermal_radiation_evaluate",
+        "thermal_material_validate",
+        "thermal_material_evaluate",
     }
 )
 
@@ -772,6 +781,8 @@ _BASIC_FEM_ADDITIONS = frozenset(
         "simulation_configuration_diff",
         "thermal_kirchhoff_assess",
         "thermal_radiation_evaluate",
+        "thermal_material_validate",
+        "thermal_material_evaluate",
     }
 )
 
@@ -804,6 +815,8 @@ _WAVE_OPTICS_ADDITIONS = frozenset(
         "simulation_configuration_diff",
         "thermal_kirchhoff_assess",
         "thermal_radiation_evaluate",
+        "thermal_material_validate",
+        "thermal_material_evaluate",
     }
 )
 
@@ -857,6 +870,8 @@ _EXPERIMENTAL_ADDITIONS = frozenset(
         "simulation_configuration_diff",
         "thermal_kirchhoff_assess",
         "thermal_radiation_evaluate",
+        "thermal_material_validate",
+        "thermal_material_evaluate",
     }
 )
 

@@ -244,6 +244,16 @@ Stokes/Mueller 偏振，并可应用受限的气体、孔径、光学、analyzer
 以及 detector/reference/background signal；它不替代 COMSOL Surface-to-Surface
 Radiation solver。
 
+solver-free 的 `thermal_material_validate` 与 `thermal_material_evaluate` 使用
+versioned ledger，而不是内置第二套材料数据库。每个 state 都绑定 material/sample
+identity、phase/fabrication state、source、光谱与温度有效域、不确定度、测量条件以及
+measured/fitted/assumed 分类。typed entry 支持 n/k 与复介电常数表，以及 Drude、
+Lorentz、TOLO 和 thermo-optic 模型。不同 carrier density、mobility、effective mass
+与 phase fraction 的 state 保持独立，声明的 phase/discontinuity boundary 不会被通用
+插值跨越。内部约定为 `exp(-i*omega*t)` 且被动介质 `Im(epsilon)>=0`；COMSOL 输出只
+提供 mutation-free 的 `exp(+i*omega*t)` 转换预览，包含精确 property/function tag、
+单位、插值/外推 policy、table hash、readback 期望和 rollback 要求。
+
 持久化收敛任务使用 `job_type: "convergence_campaign"`，并声明 2–8 个严格排序的
 exact source 或预先构建并验证的 derived model identity。每个 level 都复用已验收的
 自适应光谱任务，完整持久化哈希绑定 artifacts，并且只以各 level 自己 bracketed

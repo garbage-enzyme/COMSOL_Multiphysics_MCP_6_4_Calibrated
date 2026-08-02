@@ -277,6 +277,7 @@ models are intentionally absent.
 - `development_kit/tests/test_spectral_model_comparison.py` — This module tests identical-support line-shape comparison, coordinate transforms, information criteria, and public dispatch.
 - `development_kit/tests/test_simulation_configuration.py` — This module tests typed configuration normalization, classified diffs, and solver-free durable-job previews.
 - `development_kit/tests/test_thermal_radiation.py` — This module tests Kirchhoff applicability, Planck/Jacobian integration, angular and polarization handling, detector kernels, and public dispatch.
+- `development_kit/tests/test_thermal_material.py` — This module tests typed material states, analytic/table models, phase boundaries, extrapolation, conversion previews, and public dispatch.
 - `development_kit/tests/test_spectral_audit.py` — This module tests strict projection of point-audit artifacts into durable spectral rows.
 - `development_kit/tests/test_spectral_acceptance_runner.py` — This module tests the licensed spectral runner contract without starting COMSOL.
 - `development_kit/tests/test_spectral_characterization_job.py` — This module tests immutable bounded durable spectral job specifications.
@@ -314,6 +315,7 @@ models are intentionally absent.
 - `comsol_mcp/contracts/job_submission.py` — This module defines bounded discriminated durable-job submission inputs.
 - `comsol_mcp/contracts/simulation_configuration.py` — This module defines closed typed simulation-configuration and diff-policy inputs.
 - `comsol_mcp/contracts/thermal_radiation.py` — This module defines closed Kirchhoff-assessment and thermal-radiation request inputs.
+- `comsol_mcp/contracts/thermal_material.py` — This module defines closed temperature/state material ledger and evaluation inputs.
 - `comsol_mcp/contracts/structural.py` — This module applies shared public schema and runtime structural limits.
 - `comsol_mcp/durable/__init__.py` — This module exports versioned canonicalization and durable filesystem primitives.
 - `comsol_mcp/durable/canonical.py` — This module preserves legacy canonical bytes and adds domain-separated identities for new schemas.
@@ -370,6 +372,7 @@ models are intentionally absent.
 - `comsol_mcp/evidence/spectral_model_comparison.py` — This module compares bounded scalar line-shape fits on identical spectral evidence without assigning a physical mechanism.
 - `comsol_mcp/evidence/simulation_configuration.py` — This module normalizes declared simulation units and classifies provenance-bound configuration differences.
 - `comsol_mcp/evidence/thermal_radiation.py` — This module evaluates exact-channel Kirchhoff applicability and bounded channel-resolved thermal radiation.
+- `comsol_mcp/evidence/thermal_material.py` — This module validates and evaluates provenance-bound temperature/state material ledgers.
 - `comsol_mcp/evidence/visual_review.py` — This module defines visual-review capability, request, receipt, and dual-review contracts.
 
 ## Durable job modules
@@ -475,6 +478,7 @@ models are intentionally absent.
 - `comsol_mcp/tools/spectral_characterization.py` — This module exposes bounded solver-free spectral characterization.
 - `comsol_mcp/tools/configuration.py` — This module exposes solver-free simulation configuration validation and comparison.
 - `comsol_mcp/tools/thermal_radiation.py` — This module exposes solver-free Kirchhoff and thermal-radiation evidence tools.
+- `comsol_mcp/tools/thermal_material.py` — This module exposes solver-free thermal material ledger validation and evaluation.
 - `comsol_mcp/tools/session.py` — This module manages COMSOL client startup, status, models, and shutdown.
 - `comsol_mcp/tools/shared_session.py` — This module exposes default-off local attached-server lifecycle tools.
 - `comsol_mcp/tools/study.py` — This module exposes COMSOL study and solving tools.

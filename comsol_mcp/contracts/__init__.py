@@ -7,6 +7,7 @@ from .job_submission import (
 )
 from .simulation_configuration import ConfigurationDiffPolicy, SimulationConfigurationInput
 from .structural import bounded_public_schema, structurally_guarded
+from .thermal_material import ThermalMaterialEvaluationRequest, ThermalMaterialLedger
 from .thermal_radiation import KirchhoffAssessmentRequest, ThermalRadiationRequest
 
 __all__ = [
@@ -15,6 +16,8 @@ __all__ = [
     "ConfigurationDiffPolicy",
     "SimulationConfigurationInput",
     "ThermalRadiationRequest",
+    "ThermalMaterialEvaluationRequest",
+    "ThermalMaterialLedger",
     "bounded_public_schema",
     "job_submission_dict",
     "structurally_guarded",

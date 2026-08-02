@@ -283,6 +283,19 @@ hash-bound evidence records coverage, integration policy, extrapolation state,
 uncertainty, source artifacts, and detector/reference/background signals. It
 does not replace COMSOL's Surface-to-Surface Radiation solver.
 
+The solver-free `thermal_material_validate` and `thermal_material_evaluate`
+tools use a versioned ledger instead of embedding a material database. Each
+state binds material/sample identity, phase and fabrication state, source,
+spectral/temperature validity, uncertainty, measurement conditions, and whether
+the data are measured, fitted, or assumed. Typed entries cover n/k and complex
+permittivity tables plus Drude, Lorentz, TOLO, and thermo-optic models. State IDs
+remain distinct across carrier density, mobility, effective mass, and phase
+fraction; declared phase/discontinuity boundaries are never smoothed through.
+The internal convention is `exp(-i*omega*t)` with passive `Im(epsilon)>=0`.
+COMSOL output is a mutation-free `exp(+i*omega*t)` conversion preview containing
+exact target property/function tags, units, interpolation/extrapolation policy,
+table hashes, readback expectations, and rollback requirements.
+
 A durable convergence campaign uses `job_type: "convergence_campaign"` and an
 immutable ordered ladder of two to eight exact source or prebuilt derived model
 identities. Every level runs the accepted adaptive spectral job, persists its

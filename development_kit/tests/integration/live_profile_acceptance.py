@@ -26,11 +26,11 @@ RUNTIME = Path(os.environ.get("COMSOL_MCP_RUNTIME_DIR", "D:/comsol_runtime"))
 ARTIFACT_DIR = RUNTIME / "live_profile"
 PROFILE_COUNTS = {
     "core": 46,
-    "basic_fem": 87,
-    "wave_optics": 74,
+    "basic_fem": 89,
+    "wave_optics": 76,
     "semantic_docs": 49,
-    "experimental": 75,
-    "full": 141,
+    "experimental": 77,
+    "full": 143,
 }
 COLD_START_RESPONSE_LIMIT_SECONDS = 5.0
 CONTROL_PLANE_READ_LIMIT_SECONDS = 15.0
