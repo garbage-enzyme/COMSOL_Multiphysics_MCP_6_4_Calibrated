@@ -8,6 +8,8 @@ from copy import deepcopy
 from functools import wraps
 from typing import Any, Callable
 
+from pydantic import BaseModel
+
 MAX_PUBLIC_STRING_LENGTH = 16_384
 MAX_PUBLIC_COLLECTION_ITEMS = 2_048
 MAX_PUBLIC_OBJECT_FIELDS = 256
@@ -81,6 +83,9 @@ def validate_public_structure(value: Any, *, path: str = "arguments", depth: int
     if isinstance(value, float):
         if not math.isfinite(value) or abs(value) > MAX_PUBLIC_NUMBER_MAGNITUDE:
             raise ValueError(f"{path} must be a finite structurally bounded number")
+        return
+    if isinstance(value, BaseModel):
+        validate_public_structure(value.model_dump(mode="python"), path=path, depth=depth)
         return
     if isinstance(value, list):
         if len(value) > MAX_PUBLIC_COLLECTION_ITEMS:

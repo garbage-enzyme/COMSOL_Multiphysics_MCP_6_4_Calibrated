@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
 from comsol_mcp.contracts import JobSubmissionSpec, validate_job_submission
+from comsol_mcp.durable import domain_sha256_v2
 from comsol_mcp.utils.control_plane import measured_call
 
 
@@ -30,6 +32,96 @@ class _LazyJobManager:
 job_manager: Any = _LazyJobManager()
 
 
+def _job_point_inventory(spec: dict[str, Any]) -> dict[str, Any]:
+    job_type = spec["job_type"]
+    if job_type == "staged_sweep":
+        return {
+            "maximum_points": len(spec["parameter_values"]),
+            "stages": ["smoke", "full"],
+            "parameter": spec["parameter_name"],
+            "expression_count": len(spec["expressions"]),
+        }
+    if job_type == "validation_matrix":
+        return {
+            "maximum_points": spec["point_limit"],
+            "declared_points": len(spec["points"]),
+            "stages": ["matrix"],
+        }
+    if job_type == "spectral_characterization":
+        return {
+            "maximum_points": spec["maximum_points"],
+            "stages": ["initial", "refinement", "expansion"],
+        }
+    return {
+        "maximum_points": spec["maximum_total_points"],
+        "declared_items": len(
+            spec["levels"] if job_type == "convergence_campaign" else spec["states"]
+        ),
+        "stages": ["campaign"],
+    }
+
+
+def _preview_job_spec(spec: JobSubmissionSpec | dict[str, Any]) -> dict[str, Any]:
+    normalized = validate_job_submission(spec)
+    from comsol_mcp.tools.catalog import get_tool_metadata
+
+    source_path = normalized.get("source_model_path")
+    path_checks: dict[str, Any]
+    if source_path is None:
+        path_checks = {"source_model_declared": False, "source_model_required": False}
+    else:
+        source = Path(source_path).expanduser()
+        path_checks = {
+            "source_model_declared": True,
+            "source_model_required": True,
+            "absolute": source.is_absolute(),
+            "mph_extension": source.suffix.casefold() == ".mph",
+            "exists": source.is_file(),
+        }
+    cores = normalized.get("cores")
+    resource_policy = normalized.get("resource_policy")
+    execution_backend = normalized.get("execution_backend")
+    body = {
+        "success": True,
+        "schema_name": "comsol_mcp.job_spec_preview",
+        "schema_version": "1.0.0",
+        "job_type": normalized["job_type"],
+        "spec_fingerprint": domain_sha256_v2("job_spec_preview/spec/1.0.0", normalized),
+        "inventory": _job_point_inventory(normalized),
+        "path_checks": path_checks,
+        "resource_policy": {
+            "declared": resource_policy is not None,
+            "requested_cores": cores,
+            "wall_time_budget_seconds": normalized.get("wall_time_budget_seconds"),
+        },
+        "requirements": {
+            "submit_tool": "job_submit",
+            "submit_profiles": list(get_tool_metadata("job_submit").intended_profiles),
+            "source_model_read": source_path is not None,
+            "licensed_comsol_on_submit": True,
+        },
+        "declared_submission_side_effects": [
+            "durable_job_filesystem_write",
+            "worker_process_start",
+            "licensed_solver_may_start",
+        ],
+        "execution_mode": {
+            "declared": execution_backend is not None,
+            "compatibility_assessed": False,
+            "recommendation_made": False,
+        },
+        "preview_guarantees": {
+            "submitted": False,
+            "admission_checked": False,
+            "solver_ownership_checked": False,
+            "solve_success_implied": False,
+            "solver_started": False,
+            "filesystem_modified": False,
+        },
+    }
+    return {**body, "preview_sha256": domain_sha256_v2("job_spec_preview/1.0.0", body)}
+
+
 def __getattr__(name: str) -> Any:
     """Preserve the historical JobManager module attribute lazily.
 
@@ -50,15 +142,9 @@ def _attached_handoff_summary(value: dict[str, Any]) -> dict[str, Any]:
     return {
         "state": value.get("state"),
         "backend_identity_sha256": backend.get("backend_identity_sha256"),
-        "server_identity_sha256": (backend.get("attached_server") or {}).get(
-            "identity_sha256"
-        ),
-        "model_identity_sha256": (backend.get("model") or {}).get(
-            "identity_sha256"
-        ),
-        "external_resources_preserved": detach.get(
-            "external_resources_preserved"
-        ),
+        "server_identity_sha256": (backend.get("attached_server") or {}).get("identity_sha256"),
+        "model_identity_sha256": (backend.get("model") or {}).get("identity_sha256"),
+        "external_resources_preserved": detach.get("external_resources_preserved"),
         "detach_state": detach.get("state"),
     }
 
@@ -74,9 +160,7 @@ def _submit_job(
     if execution_request is None:
         return manager.submit(spec)
     if spec.get("job_type") != "staged_sweep":
-        raise ValueError(
-            "attached execution is currently supported only for staged_sweep jobs"
-        )
+        raise ValueError("attached execution is currently supported only for staged_sweep jobs")
     from comsol_mcp.jobs.attached_backend import normalize_attached_execution_request
     from comsol_mcp.jobs.manager import JobLaunchError, validate_staged_sweep_spec
     from comsol_mcp.tools.shared_session import shared_session_manager
@@ -90,9 +174,7 @@ def _submit_job(
         expected_lock_sha256=request["expected_lock_sha256"],
         expected_revision_sha256=request["expected_revision_sha256"],
         source_model_path=validated["source_model_path"],
-        user_confirmed_automation_exclusive=(
-            request["user_confirmed_automation_exclusive"]
-        ),
+        user_confirmed_automation_exclusive=(request["user_confirmed_automation_exclusive"]),
     )
     if not handoff.get("success"):
         return {
@@ -169,6 +251,11 @@ def register_job_tools(mcp: FastMCP) -> None:
         return _job_call("job_submit", lambda: _submit_job(spec))
 
     @mcp.tool()
+    def job_spec_preview(spec: JobSubmissionSpec) -> dict[str, Any]:
+        """Validate one durable job input without admission, submission, or solver startup."""
+        return _job_call("job_spec_preview", lambda: _preview_job_spec(spec))
+
+    @mcp.tool()
     def job_status(job_id: str) -> dict[str, Any]:
         """Read and reconcile durable job state without starting COMSOL."""
         return _job_call(
@@ -188,7 +275,7 @@ def register_job_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     def job_cancel(job_id: str) -> dict[str, Any]:
-        """Cancel one owned durable job; terminal cancelled requires verified process, port, and lease cleanup."""
+        """Cancel one owned job; terminal cancellation requires verified cleanup."""
         return _job_call(
             "job_cancel",
             lambda: job_manager.cancel(job_id),

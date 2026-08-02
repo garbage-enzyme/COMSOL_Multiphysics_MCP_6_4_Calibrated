@@ -258,6 +258,19 @@ AIC, AICc when defined, BIC, deltas, and descriptive Akaike weights. These rank
 model support only; they do not prove Lorentzian physics, Fano interference,
 mode identity, or scientific acceptance.
 
+Three solver-free preview tools make configuration review explicit before any
+COMSOL admission or mutation. `simulation_configuration_validate` accepts a
+closed typed contract for source/producer identity, geometry semantics, ordered
+layers, material state and loss sign, incidence and polarization, mesh keys,
+model-tree identities, solver termination, units, and artifact chains. It
+normalizes supported units and returns a content-bound fingerprint.
+`simulation_configuration_diff` classifies leaves as exact, within tolerance,
+semantic, label-only, or unavailable; labels never become physical identity.
+`job_spec_preview` reuses the exact discriminated input validator used by
+`job_submit` and reports its bounded point/stage inventory, path/resource
+checks, requirements, and declared submit-time side effects without admission,
+ownership acquisition, filesystem writes, process creation, or solver startup.
+
 A durable convergence campaign uses `job_type: "convergence_campaign"` and an
 immutable ordered ladder of two to eight exact source or prebuilt derived model
 identities. Every level runs the accepted adaptive spectral job, persists its

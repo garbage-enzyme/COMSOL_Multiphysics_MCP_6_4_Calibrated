@@ -379,7 +379,14 @@ def get_capabilities(selection: ProfileSelection | None = None) -> dict:
                 "convergence_campaign",
                 "branch_continuation_campaign",
             ],
-            "control_tools": ["job_submit", "job_status", "job_tail", "job_cancel", "job_resume"],
+            "control_tools": [
+                "job_spec_preview",
+                "job_submit",
+                "job_status",
+                "job_tail",
+                "job_cancel",
+                "job_resume",
+            ],
             "cancellation_scope": (
                 "same-host durable staged_sweep, validation_matrix, and "
                 "spectral_characterization, convergence_campaign, and "
@@ -483,6 +490,7 @@ def get_capabilities(selection: ProfileSelection | None = None) -> dict:
                 "execution_backend": "attached_shared_server",
                 "job_types": ["staged_sweep"],
                 "control_tools": [
+                    "job_spec_preview",
                     "job_submit",
                     "job_status",
                     "job_tail",

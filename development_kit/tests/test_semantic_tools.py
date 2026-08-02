@@ -235,7 +235,7 @@ def decode(result):
 server = create_server('semantic-profile-subprocess', profile='semantic_docs')
 tools = asyncio.run(server.list_tools())
 names = sorted(tool.name for tool in tools)
-assert len(names) == 47
+assert len(names) == 49
 assert {'semantic_search','semantic_status','semantic_worker_reset'} <= set(names)
 for name in ('chromadb','torch','sentence_transformers'):
     assert name not in sys.modules, name
@@ -253,7 +253,7 @@ print(json.dumps({'count': len(names), 'configured': status['configured']}))
     )
 
     assert completed.returncode == 0, completed.stderr
-    assert json.loads(completed.stdout)["count"] == 47
+    assert json.loads(completed.stdout)["count"] == 49
 
 
 def test_semantic_and_other_profile_counts_match_declared_discovery():
@@ -269,9 +269,9 @@ def test_semantic_and_other_profile_counts_match_declared_discovery():
         counts[profile] = len(asyncio.run(server.list_tools()))
 
     assert counts == {
-        "core": 44,
-        "basic_fem": 101,
-        "wave_optics": 68,
-        "experimental": 89,
-        "full": 155,
+        "core": 46,
+        "basic_fem": 104,
+        "wave_optics": 71,
+        "experimental": 92,
+        "full": 158,
     }

@@ -99,6 +99,10 @@ SPECTRAL_MODEL_COMPARISON_SCHEMA_NAME, SPECTRAL_MODEL_COMPARISON_SCHEMA_VERSION 
     "comsol_mcp.spectral_model_comparison",
     "1.0.0",
 )
+SIMULATION_CONFIGURATION_SCHEMA_NAME = "comsol_mcp.simulation_configuration"
+SIMULATION_CONFIGURATION_DIFF_SCHEMA_NAME = "comsol_mcp.simulation_configuration_diff"
+JOB_SPEC_PREVIEW_SCHEMA_NAME = "comsol_mcp.job_spec_preview"
+CONFIGURATION_SCHEMA_VERSION = "1.0.0"
 STANDALONE_SCHEMA_VERSION = "1.0.0"
 STANDALONE_SCHEMAS = (
     "comsol_mcp.standalone_build_receipt",
@@ -338,6 +342,22 @@ def _entries() -> list[dict[str, Any]]:
             SPECTRAL_MODEL_COMPARISON_SCHEMA_NAME,
             SPECTRAL_MODEL_COMPARISON_SCHEMA_VERSION,
             "comsol_mcp.evidence.spectral_model_comparison",
+        ),
+        _entry(
+            SIMULATION_CONFIGURATION_SCHEMA_NAME,
+            CONFIGURATION_SCHEMA_VERSION,
+            "comsol_mcp.evidence.simulation_configuration",
+            artifact_kind="configuration",
+        ),
+        _entry(
+            SIMULATION_CONFIGURATION_DIFF_SCHEMA_NAME,
+            CONFIGURATION_SCHEMA_VERSION,
+            "comsol_mcp.evidence.simulation_configuration",
+        ),
+        _entry(
+            JOB_SPEC_PREVIEW_SCHEMA_NAME,
+            CONFIGURATION_SCHEMA_VERSION,
+            "comsol_mcp.tools.jobs",
         ),
         _entry(
             SPECTRAL_PROGRESS_SCHEMA_NAME,

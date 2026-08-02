@@ -5,13 +5,14 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from pydantic import TypeAdapter, ValidationError
+from pydantic import BaseModel, TypeAdapter, ValidationError
 from src.contracts import JobSubmissionSpec, structurally_guarded
 from src.contracts.job_submission import job_submission_dict, validate_job_submission
 from src.contracts.structural import (
     MAX_PUBLIC_COLLECTION_ITEMS,
     MAX_PUBLIC_NESTING_DEPTH,
     MAX_PUBLIC_STRING_LENGTH,
+    validate_public_structure,
 )
 from src.jobs.manager import validate_staged_sweep_spec
 from src.server import create_server
@@ -85,6 +86,13 @@ def test_unknown_job_fields_fail_at_the_contract_boundary():
 def test_runtime_job_validator_uses_the_same_discriminated_contract():
     with pytest.raises(ValidationError, match="union_tag_invalid"):
         validate_job_submission({"job_type": "unsupported"})
+
+
+def test_structural_guard_validates_typed_pydantic_arguments():
+    class TypedArgument(BaseModel):
+        values: list[float]
+
+    validate_public_structure(TypedArgument(values=[1.0, 2.0]))
 
 
 def _validation_matrix_submission(nested_value):

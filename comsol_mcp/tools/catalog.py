@@ -62,6 +62,7 @@ _TOOLS_BY_REGISTRAR = {
     ),
     "comsol_mcp.tools.jobs.register_job_tools": (
         "job_submit",
+        "job_spec_preview",
         "job_status",
         "job_tail",
         "job_cancel",
@@ -240,6 +241,10 @@ _TOOLS_BY_REGISTRAR = {
         "spectral_characterize",
         "spectral_model_compare",
     ),
+    "comsol_mcp.tools.configuration.register_configuration_tools": (
+        "simulation_configuration_validate",
+        "simulation_configuration_diff",
+    ),
     "comsol_mcp.tools.convergence_evaluation.register_convergence_evaluation_tools": (
         "convergence_evaluate",
     ),
@@ -300,6 +305,7 @@ _GROUP_BY_REGISTRAR = {
     "register_field_evidence_tools": "field_evidence",
     "register_semantic_doc_tools": "semantic_docs",
     "register_spectral_characterization_tools": "spectral_evidence",
+    "register_configuration_tools": "configuration_evidence",
     "register_convergence_evaluation_tools": "convergence_evidence",
     "register_branch_continuation_tools": "branch_continuation_evidence",
     "register_shared_session_tools": "shared_session",
@@ -483,6 +489,7 @@ _EXPLICIT_READ_ONLY_TOOLS = frozenset(
         "geometry_list",
         "geometry_list_features",
         "job_status",
+        "job_spec_preview",
         "job_tail",
         "mesh_info",
         "mesh_list",
@@ -517,6 +524,8 @@ _EXPLICIT_READ_ONLY_TOOLS = frozenset(
         "standalone_results",
         "spectral_characterize",
         "spectral_model_compare",
+        "simulation_configuration_validate",
+        "simulation_configuration_diff",
         "study_get_progress",
         "study_list",
         "troubleshoot",
@@ -577,6 +586,8 @@ _SOLVER_FREE_TOOLS = frozenset(
         "visual_review_dual_evaluate",
         "spectral_characterize",
         "spectral_model_compare",
+        "simulation_configuration_validate",
+        "job_spec_preview",
         "convergence_evaluate",
         "branch_continuation_plan",
         "geometry_fin_preview",
@@ -585,12 +596,14 @@ _SOLVER_FREE_TOOLS = frozenset(
         "standalone_build",
         "standalone_tail",
         "standalone_results",
+        "simulation_configuration_diff",
     }
 )
 
 _MODEL_REVISION_EXCLUSIONS = frozenset(
     {
         "job_submit",
+        "job_spec_preview",
         "job_resume",
         "comsol_start",
         "comsol_connect",
@@ -681,6 +694,8 @@ _CORE_TOOLS = frozenset(
         "manual_read_pages",
         "spectral_characterize",
         "spectral_model_compare",
+        "simulation_configuration_validate",
+        "job_spec_preview",
         "convergence_evaluate",
         "branch_continuation_plan",
     }
@@ -745,6 +760,7 @@ _BASIC_FEM_ADDITIONS = frozenset(
         "standalone_resume",
         "standalone_tail",
         "standalone_results",
+        "simulation_configuration_diff",
     }
 )
 
@@ -774,6 +790,7 @@ _WAVE_OPTICS_ADDITIONS = frozenset(
         "visual_review_request_create",
         "visual_review_receipt_create",
         "visual_review_dual_evaluate",
+        "simulation_configuration_diff",
     }
 )
 
@@ -824,6 +841,7 @@ _EXPERIMENTAL_ADDITIONS = frozenset(
         "standalone_resume",
         "standalone_tail",
         "standalone_results",
+        "simulation_configuration_diff",
     }
 )
 
@@ -842,6 +860,7 @@ _DESKTOP_SHARED_FOUNDATION = frozenset(
         "evidence_integrity_verify",
         "solver_status",
         "job_submit",
+        "job_spec_preview",
         "job_status",
         "job_tail",
         "job_cancel",

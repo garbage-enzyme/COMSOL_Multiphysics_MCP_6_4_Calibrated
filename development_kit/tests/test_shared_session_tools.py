@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-
 from src.server import create_server
 from src.shared_session.attach_request import normalize_shared_server_attach_request
 from src.shared_session.contracts import SHARED_SERVER_FEATURE_ENV
@@ -19,10 +18,15 @@ def test_shared_profile_capabilities_and_tools_are_explicit(monkeypatch):
     capabilities = server._tool_manager._tools["capabilities"].fn()
 
     assert {
-        "shared_server_preflight", "shared_server_attach",
-        "shared_server_detach", "shared_server_status",
-        "shared_server_models", "shared_model_lock",
-        "shared_model_verify", "shared_model_unlock", "shared_model_snapshot",
+        "shared_server_preflight",
+        "shared_server_attach",
+        "shared_server_detach",
+        "shared_server_status",
+        "shared_server_models",
+        "shared_model_lock",
+        "shared_model_verify",
+        "shared_model_unlock",
+        "shared_model_snapshot",
         "shared_model_adopt",
     } <= set(tools)
     assert capabilities["shared_session"] == {
@@ -41,7 +45,12 @@ def test_shared_profile_capabilities_and_tools_are_explicit(monkeypatch):
             "execution_backend": "attached_shared_server",
             "job_types": ["staged_sweep"],
             "control_tools": [
-                "job_submit", "job_status", "job_tail", "job_cancel", "job_resume"
+                "job_spec_preview",
+                "job_submit",
+                "job_status",
+                "job_tail",
+                "job_cancel",
+                "job_resume",
             ],
             "requires_automation_exclusive_handoff": True,
             "requires_immutable_source": True,
@@ -52,15 +61,13 @@ def test_shared_profile_capabilities_and_tools_are_explicit(monkeypatch):
         },
         "restart_required_after_change": True,
     }
-    assert capabilities["tool_count"] == 19
+    assert capabilities["tool_count"] == 20
 
 
 def test_shared_attach_public_schema_requires_confirmation(monkeypatch):
     monkeypatch.setenv(SHARED_SERVER_FEATURE_ENV, "true")
     server = create_server("shared-schema", profile="desktop_shared")
-    schemas = {
-        tool.name: tool.inputSchema for tool in asyncio.run(server.list_tools())
-    }
+    schemas = {tool.name: tool.inputSchema for tool in asyncio.run(server.list_tools())}
     attach = schemas["shared_server_attach"]
 
     assert set(attach["required"]) == {"host", "port", "user_confirmed"}
@@ -180,17 +187,11 @@ def test_shared_model_guard_tools_delegate_exact_caller_evidence(monkeypatch):
     tools = server._tool_manager._tools
 
     assert tools["shared_server_models"].fn()["sentinel"] == "models"
-    assert tools["shared_model_adopt"].fn(
-        "Model_1", "Shared", None, True
-    )["success"] is True
-    assert tools["shared_model_lock"].fn(
-        "interactive_inspection", None, None
-    )["success"] is True
+    assert tools["shared_model_adopt"].fn("Model_1", "Shared", None, True)["success"] is True
+    assert tools["shared_model_lock"].fn("interactive_inspection", None, None)["success"] is True
     assert tools["shared_model_verify"].fn("a" * 64, "b" * 64)["success"] is True
     assert tools["shared_model_unlock"].fn("a" * 64, "Desktop turn")["success"] is True
-    assert tools["shared_model_snapshot"].fn(
-        "a" * 64, "b" * 64, 1024
-    )["success"] is True
+    assert tools["shared_model_snapshot"].fn("a" * 64, "b" * 64, 1024)["success"] is True
     assert calls == [
         (
             "adopt",

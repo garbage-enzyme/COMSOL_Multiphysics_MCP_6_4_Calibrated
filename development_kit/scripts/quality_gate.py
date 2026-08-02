@@ -28,12 +28,15 @@ LINT_TARGETS = (
     "comsol_mcp/compatibility.py",
     "comsol_mcp/contracts",
     "comsol_mcp/durable",
+    "comsol_mcp/contracts/simulation_configuration.py",
+    "comsol_mcp/evidence/simulation_configuration.py",
     "comsol_mcp/evidence/spectral_model_comparison.py",
     "comsol_mcp/native_runtime.py",
     "comsol_mcp/schema_registry.py",
     "comsol_mcp/standalone",
     "comsol_mcp/tools/acoustics_pde.py",
     "comsol_mcp/tools/catalog.py",
+    "comsol_mcp/tools/configuration.py",
     "comsol_mcp/tools/geometry_selections.py",
     "comsol_mcp/tools/session_status.py",
     "comsol_mcp/tools/standalone.py",
@@ -59,6 +62,7 @@ LINT_TARGETS = (
 MYPY_GROUPS = (
     (
         "comsol_mcp/contracts/job_submission.py",
+        "comsol_mcp/contracts/simulation_configuration.py",
         "comsol_mcp/contracts/structural.py",
     ),
     (
@@ -68,8 +72,10 @@ MYPY_GROUPS = (
     (
         "--follow-imports=skip",
         "comsol_mcp/evidence/spectral_model_comparison.py",
+        "comsol_mcp/evidence/simulation_configuration.py",
         "comsol_mcp/tools/acoustics_pde.py",
         "comsol_mcp/tools/catalog.py",
+        "comsol_mcp/tools/configuration.py",
         "comsol_mcp/tools/geometry_selections.py",
         "comsol_mcp/schema_registry.py",
         "comsol_mcp/compatibility.py",

@@ -224,6 +224,16 @@ Lorentzian 与 Fano 拟合，并把 peak 和 half-prominence crossings 映射回
 权重。这些结果只表示数据对模型的相对支持，不证明 Lorentzian/Fano 物理机制、模式
 身份或科学验收。
 
+三个 solver-free 预览工具把 COMSOL admission 或模型修改前的配置审查变成显式契约。
+`simulation_configuration_validate` 只接受封闭的 typed 字段，包括 source/producer
+identity、几何语义、层顺序、材料状态与损耗符号、入射与偏振、mesh dependency、
+model-tree identity、solver termination、单位和 artifact chain；它统一受支持的单位并
+返回内容绑定指纹。`simulation_configuration_diff` 把字段分为 exact、容差内、semantic、
+label-only 或 unavailable，标签不会被提升为物理身份。`job_spec_preview` 复用
+`job_submit` 的同一个 discriminated input validator，只报告受限的 point/stage 清单、
+路径与资源检查、需求及提交时副作用，不做 admission、ownership、文件写入、进程创建或
+solver 启动。
+
 持久化收敛任务使用 `job_type: "convergence_campaign"`，并声明 2–8 个严格排序的
 exact source 或预先构建并验证的 derived model identity。每个 level 都复用已验收的
 自适应光谱任务，完整持久化哈希绑定 artifacts，并且只以各 level 自己 bracketed
