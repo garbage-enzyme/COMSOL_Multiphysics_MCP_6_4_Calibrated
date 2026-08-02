@@ -238,6 +238,7 @@ _TOOLS_BY_REGISTRAR = {
     ),
     "comsol_mcp.tools.spectral_characterization.register_spectral_characterization_tools": (
         "spectral_characterize",
+        "spectral_model_compare",
     ),
     "comsol_mcp.tools.convergence_evaluation.register_convergence_evaluation_tools": (
         "convergence_evaluate",
@@ -515,6 +516,7 @@ _EXPLICIT_READ_ONLY_TOOLS = frozenset(
         "standalone_tail",
         "standalone_results",
         "spectral_characterize",
+        "spectral_model_compare",
         "study_get_progress",
         "study_list",
         "troubleshoot",
@@ -574,6 +576,7 @@ _SOLVER_FREE_TOOLS = frozenset(
         "visual_review_receipt_create",
         "visual_review_dual_evaluate",
         "spectral_characterize",
+        "spectral_model_compare",
         "convergence_evaluate",
         "branch_continuation_plan",
         "geometry_fin_preview",
@@ -677,6 +680,7 @@ _CORE_TOOLS = frozenset(
         "manual_search",
         "manual_read_pages",
         "spectral_characterize",
+        "spectral_model_compare",
         "convergence_evaluate",
         "branch_continuation_plan",
     }

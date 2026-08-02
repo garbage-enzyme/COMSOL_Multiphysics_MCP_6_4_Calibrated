@@ -216,6 +216,14 @@ worker driver 身份均相同时，重新提交才会观察到已有任务。
 证据支持相应量时，光谱 summary 会保留原始 R/T/A、闭合误差、波长同步、网格计数、
 own peak、FWHM、Q、stage 哈希及精确 artifact 引用。
 
+solver-free 的 `spectral_model_compare` 会让两到三个声明的标量线形模型使用完全相同的
+光谱行、support、baseline、response、polarity、拟合坐标和质量 policy。它支持在
+wavelength、frequency、angular-frequency 或 energy 坐标下比较局部多项式、
+Lorentzian 与 Fano 拟合，并把 peak 和 half-prominence crossings 映射回原始波长证据。
+输出包含拟合诊断、窗口敏感性、AIC、可定义时的 AICc、BIC、差值和描述性 Akaike
+权重。这些结果只表示数据对模型的相对支持，不证明 Lorentzian/Fano 物理机制、模式
+身份或科学验收。
+
 持久化收敛任务使用 `job_type: "convergence_campaign"`，并声明 2–8 个严格排序的
 exact source 或预先构建并验证的 derived model identity。每个 level 都复用已验收的
 自适应光谱任务，完整持久化哈希绑定 artifacts，并且只以各 level 自己 bracketed

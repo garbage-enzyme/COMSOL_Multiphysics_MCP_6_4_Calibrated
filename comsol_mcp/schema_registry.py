@@ -95,6 +95,10 @@ SPECTRAL_STAGE_SCHEMA_NAME, SPECTRAL_STAGE_SCHEMA_VERSION = (
     "comsol_mcp.spectral_stage_plan",
     "1.0.0",
 )
+SPECTRAL_MODEL_COMPARISON_SCHEMA_NAME, SPECTRAL_MODEL_COMPARISON_SCHEMA_VERSION = (
+    "comsol_mcp.spectral_model_comparison",
+    "1.0.0",
+)
 STANDALONE_SCHEMA_VERSION = "1.0.0"
 STANDALONE_SCHEMAS = (
     "comsol_mcp.standalone_build_receipt",
@@ -329,6 +333,11 @@ def _entries() -> list[dict[str, Any]]:
             SPECTRAL_CHARACTERIZATION_SCHEMA,
             SPECTRAL_SCHEMA_VERSION,
             "comsol_mcp.evidence.spectral_characterization",
+        ),
+        _entry(
+            SPECTRAL_MODEL_COMPARISON_SCHEMA_NAME,
+            SPECTRAL_MODEL_COMPARISON_SCHEMA_VERSION,
+            "comsol_mcp.evidence.spectral_model_comparison",
         ),
         _entry(
             SPECTRAL_PROGRESS_SCHEMA_NAME,

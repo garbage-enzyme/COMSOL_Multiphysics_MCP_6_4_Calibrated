@@ -274,6 +274,7 @@ models are intentionally absent.
 - `development_kit/tests/test_shared_session_tools.py` — This module tests the public default-off shared lifecycle tools and capability surface.
 - `development_kit/tests/test_shared_server_preflight.py` — This module tests two-probe Desktop, listener, collision, and COMSOL release-line classification.
 - `development_kit/tests/test_spectral_characterization.py` — This module tests provenance-bound offline spectral validation and measurements.
+- `development_kit/tests/test_spectral_model_comparison.py` — This module tests identical-support line-shape comparison, coordinate transforms, information criteria, and public dispatch.
 - `development_kit/tests/test_spectral_audit.py` — This module tests strict projection of point-audit artifacts into durable spectral rows.
 - `development_kit/tests/test_spectral_acceptance_runner.py` — This module tests the licensed spectral runner contract without starting COMSOL.
 - `development_kit/tests/test_spectral_characterization_job.py` — This module tests immutable bounded durable spectral job specifications.
@@ -362,6 +363,7 @@ models are intentionally absent.
 - `comsol_mcp/evidence/reference_power_acceptance.py` — This module validates reference-power acceptance and execution inputs.
 - `comsol_mcp/evidence/reference_power_gate.py` — This module evaluates reference-power receipts and artifact accounting.
 - `comsol_mcp/evidence/spectral_characterization.py` — This module validates and characterizes provenance-bound spectra without a solver.
+- `comsol_mcp/evidence/spectral_model_comparison.py` — This module compares bounded scalar line-shape fits on identical spectral evidence without assigning a physical mechanism.
 - `comsol_mcp/evidence/visual_review.py` — This module defines visual-review capability, request, receipt, and dual-review contracts.
 
 ## Durable job modules

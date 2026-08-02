@@ -7362,6 +7362,58 @@
     "title": "spectral_characterizeArguments",
     "type": "object"
   },
+  "spectral_model_compare": {
+    "additionalProperties": false,
+    "maxProperties": 256,
+    "properties": {
+      "analysis_policy": {
+        "additionalProperties": true,
+        "maxProperties": 256,
+        "title": "Analysis Policy",
+        "type": "object"
+      },
+      "bundle_spec": {
+        "anyOf": [
+          {
+            "additionalProperties": true,
+            "maxProperties": 256,
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Bundle Spec"
+      },
+      "comparison_configuration": {
+        "additionalProperties": true,
+        "maxProperties": 256,
+        "title": "Comparison Configuration",
+        "type": "object"
+      },
+      "spectral_bundle": {
+        "anyOf": [
+          {
+            "additionalProperties": true,
+            "maxProperties": 256,
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Spectral Bundle"
+      }
+    },
+    "required": [
+      "analysis_policy",
+      "comparison_configuration"
+    ],
+    "title": "spectral_model_compareArguments",
+    "type": "object"
+  },
   "standalone_build": {
     "additionalProperties": false,
     "maxProperties": 256,

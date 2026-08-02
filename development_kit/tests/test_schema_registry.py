@@ -115,7 +115,7 @@ def test_registry_is_complete_sorted_and_snapshot_stable():
     assert registry["schema_name"] == "comsol_mcp.schema_registry"
     assert registry["schema_version"] == "1.0.0"
     assert registry["producer"] == {"package": "comsol-mcp", "version": __version__}
-    assert registry["entry_count"] == len(entries) == 70
+    assert registry["entry_count"] == len(entries) == 71
     assert names == sorted(names)
     assert len(names) == len(set(names))
     emitted = _emitted_schemas_in_source()
@@ -123,7 +123,7 @@ def test_registry_is_complete_sorted_and_snapshot_stable():
     assert emitted.issubset(set(names))
     assert re.fullmatch(r"[0-9a-f]{64}", registry["registry_sha256"])
     assert registry["registry_sha256"] == (
-        "b623380358b56f933fae2cd3aba49959a5f77ea7ae22d6266fb2af4aae87a8e1"
+        "4b78ca32e907dcfe07bd115e5d518316ce6a38760926c6d551e036e62aeb19e6"
     )
     assert registry["registry_sha256"] == get_schema_registry()["registry_sha256"]
     assert check_schema_support("comsol_mcp.session_startup_state", "1.0.0")["supported"] is True

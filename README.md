@@ -248,6 +248,16 @@ Spectral summaries retain raw R/T/A, closure, wavelength synchronization, mesh
 counts, own-peak, FWHM, Q, stage hashes, and exact artifact references when the
 declared collector and evidence support those quantities.
 
+The solver-free `spectral_model_compare` tool compares two or three declared
+scalar line-shape models on exactly the same spectral rows, support, baseline,
+response, polarity, coordinate domain, and quality policy. It supports local
+polynomial, Lorentzian, and Fano fits in wavelength, frequency, angular-frequency,
+or energy coordinates, then maps peak and half-prominence crossings back to the
+original wavelength evidence. It reports fit diagnostics, support sensitivity,
+AIC, AICc when defined, BIC, deltas, and descriptive Akaike weights. These rank
+model support only; they do not prove Lorentzian physics, Fano interference,
+mode identity, or scientific acceptance.
+
 A durable convergence campaign uses `job_type: "convergence_campaign"` and an
 immutable ordered ladder of two to eight exact source or prebuilt derived model
 identities. Every level runs the accepted adaptive spectral job, persists its

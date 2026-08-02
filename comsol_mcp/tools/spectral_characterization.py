@@ -7,6 +7,7 @@ from typing import Any, Optional
 
 from mcp.server.fastmcp import FastMCP
 
+
 def _nonfinite_row_summary(bundle_spec: dict[str, Any]) -> dict[str, Any] | None:
     rows = bundle_spec.get("rows")
     if not isinstance(rows, list):
@@ -55,7 +56,7 @@ def _nonfinite_row_summary(bundle_spec: dict[str, Any]) -> dict[str, Any] | None
 
 
 def register_spectral_characterization_tools(mcp: FastMCP) -> None:
-    """Register one solver-free tool that returns three separate artifacts."""
+    """Register bounded solver-free spectral evidence tools."""
 
     @mcp.tool()
     def spectral_characterize(
@@ -74,9 +75,7 @@ def register_spectral_characterization_tools(mcp: FastMCP) -> None:
 
         try:
             if (bundle_spec is None) == (spectral_bundle is None):
-                raise ValueError(
-                    "provide exactly one of bundle_spec or spectral_bundle"
-                )
+                raise ValueError("provide exactly one of bundle_spec or spectral_bundle")
             if bundle_spec is not None:
                 nonfinite = _nonfinite_row_summary(bundle_spec)
                 if nonfinite is not None:
@@ -107,6 +106,54 @@ def register_spectral_characterization_tools(mcp: FastMCP) -> None:
                 "success": False,
                 "classification": "invalid_input",
                 "reason_code": "spectral_input_rejected",
+                "error": str(exc)[:2048],
+                "solver_started": False,
+                "filesystem_modified": False,
+            }
+
+    @mcp.tool()
+    def spectral_model_compare(
+        analysis_policy: dict[str, Any],
+        comparison_configuration: dict[str, Any],
+        bundle_spec: Optional[dict[str, Any]] = None,
+        spectral_bundle: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
+        """Compare scalar spectral fit models on identical evidence and support."""
+        from comsol_mcp.evidence.spectral_characterization import (
+            build_spectral_analysis_decision,
+            build_spectral_point_bundle,
+            validate_spectral_point_bundle,
+        )
+        from comsol_mcp.evidence.spectral_model_comparison import (
+            build_spectral_model_comparison,
+        )
+
+        try:
+            if (bundle_spec is None) == (spectral_bundle is None):
+                raise ValueError("provide exactly one of bundle_spec or spectral_bundle")
+            if bundle_spec is not None:
+                nonfinite = _nonfinite_row_summary(bundle_spec)
+                if nonfinite is not None:
+                    return nonfinite
+                bundle = build_spectral_point_bundle(**bundle_spec)
+            else:
+                bundle = validate_spectral_point_bundle(spectral_bundle)
+            decision = build_spectral_analysis_decision(bundle, analysis_policy)
+            comparison = build_spectral_model_comparison(bundle, decision, comparison_configuration)
+            return {
+                "success": True,
+                "classification": decision["classification"],
+                "raw_bundle": bundle,
+                "analysis_decision": decision,
+                "model_comparison": comparison,
+                "solver_started": False,
+                "filesystem_modified": False,
+            }
+        except (TypeError, ValueError) as exc:
+            return {
+                "success": False,
+                "classification": "invalid_input",
+                "reason_code": "spectral_model_comparison_input_rejected",
                 "error": str(exc)[:2048],
                 "solver_started": False,
                 "filesystem_modified": False,
