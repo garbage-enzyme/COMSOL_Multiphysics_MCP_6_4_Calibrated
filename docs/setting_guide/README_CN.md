@@ -152,7 +152,7 @@ English (en)
 | 设置项 | 默认值 | 作用和可填写内容 |
 | --- | --- | --- |
 | `schema_name` | `"comsol_mcp.settings"` | 设置格式名称，只读，必须完全一致。 |
-| `schema_version` | `"1.1.0"` | 新保存的文件使用 `1.1.0`；旧版 `1.0.0` 可以读取，并在内存中转换。 |
+| `schema_version` | `"1.2.0"` | 新保存的文件使用 `1.2.0`；旧版 `1.0.0` 和 `1.1.0` 可以读取，并在内存中转换。 |
 | `gui.language` | `"zh-cn"` | 只能是 `"en"`、`"zh-cn"` 或 `"zh-tw"`。 |
 | `gui.scale` | `"system"` | 可选 `"system"`、`"100"`、`"125"`、`"150"` 或 `"200"`；界面把数字显示为百分比。 |
 
@@ -160,21 +160,19 @@ English (en)
 
 | 设置项 | 默认值 | 作用和可填写内容 |
 | --- | --- | --- |
-| `profile.name` | `"core"` | 可选 `core`、`basic_fem`、`wave_optics`、`semantic_docs`、`desktop_shared`、`experimental` 或 `full`；保存为小写。 |
+| `profile.name` | `"core"` | 可选 `core`、`basic_fem`、`wave_optics`、`experimental` 或 `full`；保存为小写。不支持的值会回落到 `core` 并报告来源。 |
 
 新手在重视安全、希望减少可用操作时，可以从 `core` 开始。大多数进行常规仿真的用户应
-选择 `basic_fem`。`desktop_shared` 还要求把 `shared_server.enabled` 设为 `true`。
-`semantic_docs` 只有在可选资产已经准备好时才能正常使用。
+选择 `basic_fem`。Profile 只控制 COMSOL 自动化仿真及未来自主探索工具的可见性；共享
+协作和语义检索使用独立 Boolean 开关，可用于任意 profile，也可同时启用。
 
 | Profile | 适用情况 |
 | --- | --- |
 | `core` | 面向新手的安全默认项：操作较少，可查看模型、管理任务、进行谨慎的单点检查与手册搜索。 |
 | `basic_fem` | 推荐大多数用户选择：常规 FEM 建模、结果导出和 Windows standalone 包。 |
 | `wave_optics` | 光学与超表面、场结果查看、Wave Optics 检查、单点审计和分阶段参数流程。 |
-| `semantic_docs` | 已准备好的本地手册索引，以及文字和语义搜索。 |
-| `desktop_shared` | 用户在 COMSOL Desktop 观看同一 Server 模型，并与 MCP 轮流操作。 |
 | `experimental` | 范围更广或尚未成熟、需要仔细检查输出的额外工具。 |
-| `full` | 需要几乎全部工具且接受较弱文件范围保护的旧流程迁移；不建议新用户使用。 |
+| `full` | 需要几乎全部非 feature 工具且接受较弱文件范围保护的旧流程迁移；不建议新用户使用。 |
 
 ### 运行与文件范围
 
@@ -203,7 +201,7 @@ Java 查找顺序是：COMSOL 自带且可用的 Java、`JAVA_HOME`、`JDK_HOME`
 
 | 设置项 | 默认值 | 作用和可填写内容 |
 | --- | --- | --- |
-| `shared_server.enabled` | `false` | 是否允许本机 Desktop/Server 交互协作流程。它不会启动或关闭用户自己的 COMSOL Server。 |
+| `shared_server.enabled` | `false` | 独立控制本机 Desktop/Server 交互协作流程；可与任意 profile 组合，也不会启动或关闭用户自己的 COMSOL Server。 |
 | `ownership.owner` | `null` | 可选的所有者名称。最多 256 个字符，不能为空且不能含控制字符；`null` 时从父进程生成有限长度的名称。 |
 
 ### 证据检查
@@ -221,12 +219,13 @@ Java 查找顺序是：COMSOL 自带且可用的 Java、`JAVA_HOME`、`JDK_HOME`
 
 | 设置项 | 默认值 | 作用和可填写内容 |
 | --- | --- | --- |
+| `semantic_docs.enabled` | `false` | 独立控制隔离式语义工具；可与任意 profile 以及 `shared_server.enabled` 组合。 |
 | `semantic_docs.root` | `null` | 预处理语义检索资产的可选根目录。它不是 COMSOL 安装包自带的 manual 目录，也不会自动检测。 |
 | `semantic_docs.lexical_index` | `null` | 可选的只读 SQLite 词法索引文件。 |
 | `semantic_docs.model_path` | `null` | 可选的本地语义模型版本目录。 |
 
-这三项保持 `null` 是正常状态。只有事先生成并放好所需资产后，`semantic_docs` profile 才
-能提供相应检索功能。
+三项资产路径保持 `null` 是正常状态。只有事先生成并放好所需资产后，开启
+`semantic_docs.enabled` 才能提供相应检索功能。
 
 ## 保留的 JSON 设置方式
 
@@ -238,7 +237,7 @@ MCP host 并关闭设置界面。只修改上文解析出的可写文件；验�
 ```json
 {
   "schema_name": "comsol_mcp.settings",
-  "schema_version": "1.1.0",
+  "schema_version": "1.2.0",
   "profile": {"name": "core"},
   "runtime": {
     "directory": "%PROGRAMDATA%/comsol_mcp/runtime",
@@ -258,6 +257,7 @@ MCP host 并关闭设置界面。只修改上文解析出的可写文件；验�
     }
   },
   "semantic_docs": {
+    "enabled": false,
     "root": null,
     "lexical_index": null,
     "model_path": null
@@ -287,7 +287,7 @@ setup_required: false
 
 文件缺失、JSON 损坏、key 重复、不是 UTF-8、超过大小限制或使用不支持的未来 schema 时，
 设置界面只提供恢复或退出，不会猜测如何修补。用户确认恢复后，程序会保留一份受大小限制
-的损坏文件副本，再用原子写入方式保存标准 `1.1.0` 设置。
+的损坏文件副本，再用原子写入方式保存标准 `1.2.0` 设置。
 
 证据检查的详细含义见
 [`../evidence_integrity/README_CN.md`](../evidence_integrity/README_CN.md)。默认关闭的共享

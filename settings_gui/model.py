@@ -29,15 +29,6 @@ PROFILE_HELP_IDS = {
         "For optical and metasurface work. Adds materials, field review, Wave Optics checks, "
         "point audits, and staged parameter workflows to Core."
     ),
-    "semantic_docs": (
-        "For searching prepared local COMSOL manuals with text and meaning-based search. "
-        "Choose it only after the optional manual indexes and search model have been prepared."
-    ),
-    "desktop_shared": (
-        "For users who want to watch the same model in COMSOL Desktop while MCP takes a turn "
-        "through a local Server. Choose it only after Desktop and Server are connected and "
-        "shared mode is enabled."
-    ),
     "experimental": (
         "For testing extra helpers that are broader or less mature. Use it only when a required "
         "tool is missing from the safer profiles, and check every output carefully."
@@ -51,6 +42,7 @@ GUI_SCALE_HELP_ID = (
     "Size of text and controls. Following Windows is recommended. "
     "Other choices are previewed immediately and saved for the next opening."
 )
+GUI_IMMEDIATE_FIELDS = frozenset({"gui.language", "gui.scale"})
 
 
 @dataclass(frozen=True)
@@ -169,9 +161,12 @@ FIELDS = (
     ),
     FieldDescriptor(
         "shared_server.enabled",
-        "shared_server",
+        "profile",
         "boolean",
-        help_id="Allow MCP to work with a COMSOL Desktop connected to a local Server.",
+        help_id=(
+            "Enable optional interactive collaboration with a COMSOL Desktop connected to a "
+            "local Server. This feature composes with every tool profile."
+        ),
     ),
     FieldDescriptor(
         "evidence_integrity.checks.outcome_contract_validation",
@@ -196,6 +191,15 @@ FIELDS = (
         "evidence",
         "boolean",
         help_id="Check that a resumed job uses the same producer and driver.",
+    ),
+    FieldDescriptor(
+        "semantic_docs.enabled",
+        "semantic",
+        "boolean",
+        help_id=(
+            "Enable optional semantic manual-search tools for the selected profile. "
+            "This feature requires prepared local indexes and a search model."
+        ),
     ),
     FieldDescriptor(
         "semantic_docs.root",
@@ -242,7 +246,6 @@ TAB_IDS = (
     "profile",
     "runtime",
     "comsol_java",
-    "shared_server",
     "evidence",
     "semantic",
     "ownership",
@@ -323,6 +326,8 @@ class SettingsFormModel:
                 normalized = raw_value.casefold().replace("_", "-")
                 if normalized in GUI_LANGUAGES:
                     raw_value = normalized
+            if field.key == "profile.name" and raw_value not in field.choices:
+                continue
             if field.kind in {"directory", "file"} and isinstance(raw_value, str):
                 if raw_value.casefold().startswith(("%localappdata%", "%programdata%")):
                     raw_value = get_value(merged, field.key)
@@ -346,6 +351,15 @@ class SettingsFormModel:
     @property
     def valid(self) -> bool:
         return not self.errors and self.canonical is not None
+
+    @property
+    def restart_required(self) -> bool:
+        return any(
+            field.key not in GUI_IMMEDIATE_FIELDS
+            and field.kind != "readonly"
+            and get_value(self.document, field.key) != get_value(self.baseline, field.key)
+            for field in FIELDS
+        )
 
     @property
     def language(self) -> str:
@@ -394,6 +408,7 @@ __all__ = [
     "FIELDS",
     "FIELD_BY_KEY",
     "GUI_SCALE_HELP_ID",
+    "GUI_IMMEDIATE_FIELDS",
     "PROFILE_HELP_IDS",
     "TAB_IDS",
     "FieldDescriptor",

@@ -50,7 +50,6 @@ TAB_TITLES = {
     "profile": "Profile",
     "runtime": "Runtime",
     "comsol_java": "COMSOL/Java",
-    "shared_server": "Shared",
     "evidence": "Evidence",
     "semantic": "Docs",
     "ownership": "Owner",
@@ -127,6 +126,7 @@ class SettingsApplication:
         self.entries: dict[str, ttk.Entry] = {}
         self.root_lists: dict[str, tk.Listbox] = {}
         self.shortcut_buttons: dict[str, ttk.Button] = {}
+        self.fixed_link_buttons: list[ttk.Button] = []
         self.banner: ttk.Label | None = None
         self.save_button: ttk.Button | None = None
         self.apply_button: ttk.Button | None = None
@@ -179,6 +179,7 @@ class SettingsApplication:
             self.entries.clear()
             self.root_lists.clear()
             self.shortcut_buttons.clear()
+            self.fixed_link_buttons.clear()
             apply_locale_font(self.root, self.controller.model.language)
             self._build()
         finally:
@@ -202,7 +203,7 @@ class SettingsApplication:
             style="Restart.TLabel",
             anchor="w",
         )
-        if self.controller.model.dirty or self.controller.restart_pending:
+        if self.controller.model.restart_required or self.controller.restart_pending:
             self.banner.pack(fill="x", pady=(0, 8))
 
         self.notebook = ttk.Notebook(outer)
@@ -335,9 +336,10 @@ class SettingsApplication:
                     command=lambda: self.controller.auto_detect(manual=True),
                 ).pack(side="left", padx=(6, 0))
         self.variables[field.key] = variable
+        help_id = profile_help_id(value) if field.key == "profile.name" else field.help_id
         help_label = ttk.Label(
             frame,
-            text=self.controller.text(field.help_id),
+            text=self.controller.text(help_id),
             style="Help.TLabel",
             wraplength=620,
             justify="left",
@@ -431,17 +433,33 @@ class SettingsApplication:
             command=self.controller.remove_desktop_shortcut,
         )
         self.shortcut_buttons["remove"].pack(side="left", padx=(8, 0))
-        ttk.Label(parent, text="Copyright (c) 2025").pack(anchor="w", pady=(12, 0))
         ttk.Label(parent, text=_("Repositories and acknowledgements"), font="TkHeadingFont").pack(
             anchor="w",
             pady=(18, 6),
         )
-        for label, url in FIXED_LINKS:
-            ttk.Button(
-                parent,
+        repository_row = ttk.Frame(parent)
+        repository_row.pack(anchor="w")
+        self.fixed_link_buttons = []
+        for index, (label, url) in enumerate(FIXED_LINKS[:3]):
+            button = ttk.Button(
+                repository_row,
                 text=_(label),
                 command=lambda fixed=url: webbrowser.open(fixed),
-            ).pack(anchor="w", pady=3)
+            )
+            button.pack(side="left", padx=(0 if index == 0 else 8, 0))
+            self.fixed_link_buttons.append(button)
+        ttk.Label(parent, text="Copyright © 2026 garbage-enzyme").pack(
+            anchor="w",
+            pady=(12, 6),
+        )
+        license_label, license_url = FIXED_LINKS[3]
+        license_button = ttk.Button(
+            parent,
+            text=_(license_label),
+            command=lambda: webbrowser.open(license_url),
+        )
+        license_button.pack(anchor="w")
+        self.fixed_link_buttons.append(license_button)
 
     def _controller_refresh(self) -> None:
         scale_changed = self.controller.model.scale != self._built_scale
@@ -494,7 +512,7 @@ class SettingsApplication:
             if self.apply_button is not None:
                 self.apply_button.configure(state=state)
             if self.banner is not None and self.notebook is not None:
-                if self.controller.model.dirty or self.controller.restart_pending:
+                if self.controller.model.restart_required or self.controller.restart_pending:
                     if not self.banner.winfo_manager():
                         self.banner.pack(fill="x", pady=(0, 8), before=self.notebook)
                 elif self.banner.winfo_manager():

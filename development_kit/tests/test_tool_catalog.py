@@ -25,17 +25,26 @@ from src.tools.catalog import (
     TOOL_METADATA,
     TOOL_SPECS,
     get_tool_metadata,
+    registrars_for_configuration,
     registrars_for_profile,
     snapshot_tool_schemas,
     validate_tool_specs,
 )
+from src.tools.profiles import resolve_profile
 
 SNAPSHOT_PATH = Path(__file__).parent / "snapshots" / "full_tool_schemas.json"
 BASELINE_SNAPSHOT_PATH = Path(__file__).parent / "snapshots" / "baseline_tool_schemas.json"
 
 
 def test_full_tool_schema_snapshot_is_stable():
-    server = create_server("full-schema-snapshot-test", profile="full")
+    selection = resolve_profile(
+        "full",
+        environ={
+            "COMSOL_MCP_ENABLE_SEMANTIC_DOCS": "true",
+            "COMSOL_MCP_ENABLE_SHARED_SERVER": "true",
+        },
+    )
+    server = create_server("full-schema-snapshot-test", profile=selection)
     actual = asyncio.run(snapshot_tool_schemas(server))
     expected = json.loads(SNAPSHOT_PATH.read_text(encoding="utf-8"))
 
@@ -167,6 +176,8 @@ def test_profile_registrar_selection_is_derived_from_tool_specs():
     assert len(core) < len(full)
     assert "comsol_mcp.tools.wave_optics_audit.register_wave_optics_audit_tools" not in core
     assert "comsol_mcp.tools.wave_optics_audit.register_wave_optics_audit_tools" in full
+    with pytest.raises(ValueError, match="unknown feature gate"):
+        registrars_for_configuration("core", ("not-a-feature",))
 
 
 def test_deprecated_foreground_sweep_has_a_durable_replacement():
@@ -194,6 +205,26 @@ def test_tool_spec_validation_rejects_conflicting_declarations_import_free():
         )
 
     experimental = TOOL_SPECS["semantic_search"]
+    with pytest.raises(ValueError, match="feature gate is invalid"):
+        validate_tool_specs(
+            {
+                **TOOL_SPECS,
+                experimental.name: replace(
+                    experimental,
+                    feature_gate="not-a-feature",
+                ),
+            }
+        )
+    with pytest.raises(ValueError, match="not compatible with every profile"):
+        validate_tool_specs(
+            {
+                **TOOL_SPECS,
+                experimental.name: replace(
+                    experimental,
+                    intended_profiles=("core", "full"),
+                ),
+            }
+        )
     with pytest.raises(ValueError, match="stable profile contains experimental"):
         validate_tool_specs(
             {
@@ -201,6 +232,7 @@ def test_tool_spec_validation_rejects_conflicting_declarations_import_free():
                 experimental.name: replace(
                     experimental,
                     intended_profiles=("core", "full"),
+                    feature_gate=None,
                 ),
             }
         )

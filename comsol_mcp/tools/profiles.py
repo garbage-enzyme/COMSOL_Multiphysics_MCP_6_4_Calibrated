@@ -9,13 +9,15 @@ from typing import Any
 
 from comsol_mcp.contracts import bounded_public_schema, structurally_guarded
 from comsol_mcp.operation_arbiter import guard_tool_call
-from comsol_mcp.settings import PROFILE_ENV, SETTINGS_PATH_ENV, settings_environment
-from comsol_mcp.shared_session.contracts import (
-    SHARED_SERVER_PROFILE,
-    normalize_shared_server_feature_gate,
+from comsol_mcp.settings import (
+    PROFILE_ENV,
+    SEMANTIC_ENABLED_ENV,
+    SETTINGS_PATH_ENV,
+    SHARED_SERVER_ENV,
+    settings_environment,
 )
 
-from .catalog import PROFILE_NAMES, TOOL_METADATA
+from .catalog import FEATURE_NAMES, PROFILE_NAMES, TOOL_METADATA
 
 PROFILE_ENV_VAR = PROFILE_ENV
 DEFAULT_PROFILE = "core"
@@ -33,12 +35,6 @@ PROFILE_DESCRIPTIONS = {
         "discovery, visual-review contracts, Wave Optics preflight, point audit, and "
         "staged workflows."
     ),
-    "semantic_docs": (
-        "Core plus isolated immutable BM25/vector manual retrieval and worker controls."
-    ),
-    "desktop_shared": (
-        "Default-off non-owning local COMSOL Server and shared Desktop collaboration surface."
-    ),
     "experimental": "Core plus explicitly risky, generic, asynchronous, and project helpers.",
     "full": (
         "Backward-compatible discovery surface with legacy broad-path behavior and "
@@ -50,8 +46,6 @@ PROFILE_MATURITY = {
     "core": "verified",
     "basic_fem": "verified",
     "wave_optics": "experimental",
-    "semantic_docs": "experimental",
-    "desktop_shared": "experimental",
     "experimental": "experimental",
     "full": "compatibility",
 }
@@ -65,7 +59,14 @@ class ProfileSelection:
     environment_variable: str | None
     default_used: bool
     source: str
+    enabled_features: tuple[str, ...] = ()
+    feature_sources: tuple[tuple[str, str], ...] = ()
+    fallback_used: bool = False
+    requested_name: str | None = None
     _registration_token: object | None = field(default=None, repr=False, compare=False)
+
+    def feature_enabled(self, name: str) -> bool:
+        return name in self.enabled_features
 
 
 def _is_validated_profile_selection(selection: ProfileSelection) -> bool:
@@ -101,23 +102,51 @@ def resolve_profile(
     if not isinstance(raw_name, str):
         raise ValueError(f"Invalid {PROFILE_ENV_VAR} profile type")
     name = raw_name.strip().lower()
+    requested_name = name
+    fallback_used = False
+    legacy_feature: str | None = None
+    if source == "environment" and name in {"semantic_docs", "desktop_shared"}:
+        legacy_feature = "semantic_docs" if name == "semantic_docs" else "shared_server"
+        name = DEFAULT_PROFILE
+        source = "environment_legacy_feature_alias"
+        fallback_used = True
     if name not in PROFILE_NAMES:
-        available = ", ".join(PROFILE_NAMES)
-        raise ValueError(
-            f"Invalid {PROFILE_ENV_VAR} profile {raw_name!r}; expected one of: {available}"
-        )
-    if name == SHARED_SERVER_PROFILE:
-        gate = normalize_shared_server_feature_gate(name, environ=environment)
-        if not gate.feature_enabled:
-            raise ValueError(
-                f"Profile {SHARED_SERVER_PROFILE!r} requires "
-                f"{gate.environment_variable}=true and an MCP host restart"
+        name = DEFAULT_PROFILE
+        source = f"{source}_invalid_profile_fallback"
+        fallback_used = True
+    feature_environment = {
+        "semantic_docs": SEMANTIC_ENABLED_ENV,
+        "shared_server": SHARED_SERVER_ENV,
+    }
+    enabled_features: list[str] = []
+    feature_sources: list[tuple[str, str]] = []
+    for feature in FEATURE_NAMES:
+        variable = feature_environment[feature]
+        raw_flag = environment.get(variable, "false")
+        if not isinstance(raw_flag, str) or raw_flag.strip().casefold() not in {"true", "false"}:
+            raise ValueError(f"{variable} must be exactly true or false")
+        enabled = raw_flag.strip().casefold() == "true" or legacy_feature == feature
+        if enabled:
+            enabled_features.append(feature)
+        feature_sources.append(
+            (
+                feature,
+                "legacy_profile_alias"
+                if legacy_feature == feature
+                else "environment"
+                if variable in original_environment
+                else "settings",
             )
+        )
     return ProfileSelection(
         name=name,
         environment_variable=environment_variable,
         default_used=default_used,
         source=source,
+        enabled_features=tuple(enabled_features),
+        feature_sources=tuple(feature_sources),
+        fallback_used=fallback_used,
+        requested_name=requested_name,
         _registration_token=_PROFILE_SELECTION_TOKEN,
     )
 
@@ -133,7 +162,22 @@ def tool_names_for_profile(profile: str) -> frozenset[str]:
     return frozenset(
         tool_name
         for tool_name, metadata in TOOL_METADATA.items()
-        if name in metadata.intended_profiles
+        if name in metadata.intended_profiles and metadata.feature_gate is None
+    )
+
+
+def tool_names_for_selection(selection: ProfileSelection) -> frozenset[str]:
+    """Return deterministic base-profile tools plus enabled feature overlays."""
+    if selection.name not in PROFILE_NAMES:
+        raise ValueError("profile selection contains an unknown base profile")
+    enabled_features = frozenset(selection.enabled_features)
+    if not enabled_features <= set(FEATURE_NAMES):
+        raise ValueError("profile selection contains an unknown feature gate")
+    return frozenset(
+        tool_name
+        for tool_name, metadata in TOOL_METADATA.items()
+        if selection.name in metadata.intended_profiles
+        and (metadata.feature_gate is None or metadata.feature_gate in enabled_features)
     )
 
 
@@ -187,8 +231,8 @@ def register_profiled(
     """Run one existing registrar through a static name filter."""
     if not _is_validated_profile_selection(profile_selection):
         raise ValueError("profile selection was not produced by resolve_profile")
-    if not enabled_names <= tool_names_for_profile(profile_selection.name):
-        raise ValueError("enabled tool names exceed the validated profile")
+    if not enabled_names <= tool_names_for_selection(profile_selection):
+        raise ValueError("enabled tool names exceed the validated startup selection")
     registrar(ProfiledRegistrar(server, enabled_names, profile_selection))
 
 
@@ -202,4 +246,5 @@ __all__ = [
     "register_profiled",
     "resolve_profile",
     "tool_names_for_profile",
+    "tool_names_for_selection",
 ]

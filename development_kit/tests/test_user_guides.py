@@ -134,7 +134,7 @@ def test_english_interactive_guide_matches_the_shared_public_surface():
             "mechanically rewrite",
         )
     )
-    assert '"profile": { "name": "desktop_shared" }' in guide
+    assert '"profile": { "name": "core" }' in guide
     assert '"shared_server": { "enabled": true }' in guide
     assert "COMSOL_MCP_SETTINGS_PATH=" in guide
     assert "6.4.0.*" in guide
@@ -162,7 +162,7 @@ def test_chinese_interactive_guide_is_complete_and_contract_equivalent():
 
     assert "Ching-Chiang/comsol-mcp" in guide
     assert all(phrase in guide for phrase in ("没有复制", "改写、翻译、挑选提交", "机械重写"))
-    assert '"profile": { "name": "desktop_shared" }' in guide
+    assert '"profile": { "name": "core" }' in guide
     assert '"shared_server": { "enabled": true }' in guide
     assert "COMSOL_MCP_SETTINGS_PATH=" in guide
     assert "6.4.0.*" in guide
@@ -320,7 +320,7 @@ def test_gui_guides_document_exact_path_and_opt_in_shortcut_lifecycle():
         assert "COMSOL MCP Settings.lnk" in guide
 
 
-def test_embedded_guidance_no_longer_denies_the_shared_profile():
+def test_embedded_guidance_exposes_the_independent_shared_feature():
     documents = [
         ROOT / "docs" / "profile_migration.md",
         ROOT / "comsol_mcp" / "knowledge" / "prompts" / "workflow.md",
@@ -330,7 +330,8 @@ def test_embedded_guidance_no_longer_denies_the_shared_profile():
 
     assert "no protected shared Desktop" not in combined
     assert "No current profile implements protected shared" not in combined
-    assert "desktop_shared" in combined
+    assert "shared_server.enabled" in combined
+    assert "any suitable" in combined or "every profile" in combined
     assert "shared_server_preflight" in combined
 
 

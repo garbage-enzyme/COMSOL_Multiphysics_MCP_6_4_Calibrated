@@ -10,7 +10,6 @@ from comsol_mcp.settings import settings_environment
 
 
 SHARED_SERVER_FEATURE_ENV = "COMSOL_MCP_ENABLE_SHARED_SERVER"
-SHARED_SERVER_PROFILE = "desktop_shared"
 MAX_ENDPOINT_HOST_CHARACTERS = 253
 LISTENER_BIND_SCOPE_LOOPBACK = "loopback"
 LISTENER_BIND_SCOPE_WILDCARD = "wildcard"
@@ -27,7 +26,7 @@ class SharedServerFeatureGate:
 
     profile: str
     feature_enabled: bool
-    profile_selected: bool
+    profile_independent: bool
     gate_open: bool
     environment_variable: str = SHARED_SERVER_FEATURE_ENV
     restart_required_after_change: bool = True
@@ -77,20 +76,25 @@ def normalize_shared_server_feature_gate(
     profile: str,
     *,
     environ: Mapping[str, str] | None = None,
+    feature_enabled: bool | None = None,
 ) -> SharedServerFeatureGate:
-    """Normalize the two startup-only gates without importing MPh."""
+    """Normalize the independent startup feature gate without importing MPh."""
     if not isinstance(profile, str) or not profile.strip():
         raise ValueError("active profile must be a non-empty string")
     normalized_profile = profile.strip().casefold()
-    environment = settings_environment(environ)
-    raw_flag = environment.get(SHARED_SERVER_FEATURE_ENV, _FALSE)
-    enabled = _normalize_feature_flag(raw_flag)
-    selected = normalized_profile == SHARED_SERVER_PROFILE
+    if feature_enabled is None:
+        environment = settings_environment(environ)
+        raw_flag = environment.get(SHARED_SERVER_FEATURE_ENV, _FALSE)
+        enabled = _normalize_feature_flag(raw_flag)
+    elif not isinstance(feature_enabled, bool):
+        raise ValueError("feature_enabled must be a boolean")
+    else:
+        enabled = feature_enabled
     return SharedServerFeatureGate(
         profile=normalized_profile,
         feature_enabled=enabled,
-        profile_selected=selected,
-        gate_open=selected and enabled,
+        profile_independent=True,
+        gate_open=enabled,
     )
 
 
@@ -219,7 +223,6 @@ __all__ = [
     "LISTENER_BIND_SCOPE_WILDCARD",
     "MAX_ENDPOINT_HOST_CHARACTERS",
     "SHARED_SERVER_FEATURE_ENV",
-    "SHARED_SERVER_PROFILE",
     "SharedServerEndpoint",
     "SharedServerFeatureGate",
     "normalize_shared_listener_bind_host",

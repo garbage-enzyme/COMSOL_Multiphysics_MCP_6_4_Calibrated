@@ -183,7 +183,7 @@ def test_rebuild_preserves_one_exact_damaged_copy(tmp_path):
         backups = list(tmp_path.glob("settings.damaged-*.json"))
         assert len(backups) == 1
         assert backups[0].read_bytes() == damaged
-        assert store.load()["schema_version"] == "1.1.0"
+        assert store.load()["schema_version"] == "1.2.0"
         assert (tmp_path / "models").is_dir()
         program_root = Path(os.environ["PROGRAMDATA"]) / "comsol_mcp"
         assert (program_root / "runtime").is_dir()

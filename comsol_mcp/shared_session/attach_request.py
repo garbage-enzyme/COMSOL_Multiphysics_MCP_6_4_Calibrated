@@ -35,12 +35,15 @@ def normalize_shared_server_attach_request(
     *,
     profile: str,
     environ: Mapping[str, str] | None = None,
+    feature_enabled: bool | None = None,
 ) -> SharedServerAttachRequest:
     """Require every static and per-call gate before lease acquisition."""
-    gate = normalize_shared_server_feature_gate(profile, environ=environ)
-    if not gate.profile_selected:
-        raise ValueError("shared server attach requires the desktop_shared profile")
-    if not gate.feature_enabled:
+    gate = normalize_shared_server_feature_gate(
+        profile,
+        environ=environ,
+        feature_enabled=feature_enabled,
+    )
+    if not gate.gate_open:
         raise ValueError("shared server attach requires the static feature flag")
     if not isinstance(value, Mapping) or not all(
         isinstance(key, str) for key in value

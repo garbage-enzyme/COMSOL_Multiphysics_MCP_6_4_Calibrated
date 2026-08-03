@@ -12,7 +12,7 @@ from .tools.profiles import (
     ProfileSelection,
     register_profiled,
     resolve_profile,
-    tool_names_for_profile,
+    tool_names_for_selection,
 )
 
 logger = logging.getLogger(__name__)
@@ -31,15 +31,20 @@ def register_all_tools(
     if target in _tool_servers:
         existing = _tool_servers[target]
         if profile is not None:
-            requested = profile.name if isinstance(profile, ProfileSelection) else profile
-            if resolve_profile(requested).name != existing.name:
+            requested_selection = (
+                profile if isinstance(profile, ProfileSelection) else resolve_profile(profile)
+            )
+            if (
+                requested_selection.name,
+                requested_selection.enabled_features,
+            ) != (existing.name, existing.enabled_features):
                 raise ValueError(
-                    f"Server already registered with profile {existing.name!r}; "
-                    f"cannot change it to {requested!r} without restart"
+                    "Server already registered with a different startup selection; "
+                    "profile or feature gates cannot change without restart"
                 )
         return existing
     selection = profile if isinstance(profile, ProfileSelection) else resolve_profile(profile)
-    enabled_names = tool_names_for_profile(selection.name)
+    enabled_names = tool_names_for_selection(selection)
     from .knowledge.embedded import register_knowledge_tools
     from .knowledge.lexical_manual import register_lexical_manual_tools
     from .tools import register_tool_modules
@@ -54,7 +59,12 @@ def register_all_tools(
         target._tool_manager._tools.update(original_tools)
         raise
     _tool_servers[target] = selection
-    logger.info("Registered %d tools for profile %s", len(enabled_names), selection.name)
+    logger.info(
+        "Registered %d tools for profile %s with features %s",
+        len(enabled_names),
+        selection.name,
+        selection.enabled_features,
+    )
     return selection
 
 

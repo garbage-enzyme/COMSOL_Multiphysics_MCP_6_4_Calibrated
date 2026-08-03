@@ -89,6 +89,21 @@ def _application(document: dict | None = None, *, scaling: float | None = None):
     return root, app, controller, store
 
 
+def _field_keys(app: SettingsApplication, tab_id: str) -> list[str]:
+    return [
+        str(frame.winfo_children()[0].cget("text"))
+        for frame in app.tabs[tab_id].content.winfo_children()
+        if frame.winfo_children()
+    ]
+
+
+def _boolean_widget(app: SettingsApplication, key: str):
+    field_frame = app.help_labels[key].master
+    return next(
+        child for child in field_frame.winfo_children() if child.winfo_class() == "TCheckbutton"
+    )
+
+
 def _scenario_constructs_every_tab_and_field() -> None:
     root, app, controller, store = _application(scaling=2.0 * 96.0 / 72.0)
     try:
@@ -101,7 +116,7 @@ def _scenario_constructs_every_tab_and_field() -> None:
             for child in row.winfo_children()
             if child.winfo_class() == "TLabel"
         }
-        assert "alpha6.1  |  0.6.1" in header_labels
+        assert "alpha6.2  |  0.6.2" in header_labels
         assert set(app.variables) == {
             "schema_name",
             "schema_version",
@@ -120,11 +135,20 @@ def _scenario_constructs_every_tab_and_field() -> None:
             "evidence_integrity.checks.artifact_chain_verification",
             "evidence_integrity.checks.summary_claim_verification",
             "evidence_integrity.checks.producer_driver_compatibility",
+            "semantic_docs.enabled",
             "semantic_docs.root",
             "semantic_docs.lexical_index",
             "semantic_docs.model_path",
             "ownership.owner",
         }
+        assert "shared" not in TAB_IDS
+        assert _field_keys(app, "profile") == ["profile.name", "shared_server.enabled"]
+        assert _field_keys(app, "semantic") == [
+            "semantic_docs.enabled",
+            "semantic_docs.root",
+            "semantic_docs.lexical_index",
+            "semantic_docs.model_path",
+        ]
         app.notebook.select(TAB_IDS.index("about"))
         root.geometry("960x640")
         root.attributes("-alpha", 0.0)
@@ -138,6 +162,23 @@ def _scenario_constructs_every_tab_and_field() -> None:
         )
         assert app.shortcut_buttons["remove"].cget("text") == controller.text(
             "Remove desktop shortcut"
+        )
+        repository_buttons = app.fixed_link_buttons[:3]
+        license_button = app.fixed_link_buttons[3]
+        assert len({str(button.master) for button in repository_buttons}) == 1
+        assert all(button.pack_info()["side"] == "left" for button in repository_buttons)
+        assert license_button.master != repository_buttons[0].master
+        about_children = app.tabs["about"].content.winfo_children()
+        copyright_label = next(
+            child
+            for child in about_children
+            if child.winfo_class() == "TLabel"
+            and child.cget("text") == "Copyright © 2026 garbage-enzyme"
+        )
+        assert (
+            about_children.index(repository_buttons[0].master)
+            < about_children.index(copyright_label)
+            < about_children.index(license_button)
         )
         actions = app.save_button.master
         assert actions.winfo_height() >= actions.winfo_reqheight()
@@ -198,6 +239,30 @@ def _scenario_language_rebuild() -> None:
         app.close()
 
 
+def _scenario_immediate_gui_fields_do_not_request_restart() -> None:
+    document = default_settings_document()
+    root, app, controller, store = _application(document)
+    try:
+        assert app.banner is not None and app.banner.winfo_manager() == ""
+
+        app.variables["gui.language"].set("English (en)")
+        root.update_idletasks()
+        assert app.banner is not None and app.banner.winfo_manager() == ""
+
+        app.variables["gui.scale"].set("125%")
+        root.update_idletasks()
+        assert app.banner is not None and app.banner.winfo_manager() == ""
+        assert controller.apply() is True
+        root.update_idletasks()
+
+        assert controller.restart_pending is False
+        assert controller.model.restart_required is False
+        assert app.banner is not None and app.banner.winfo_manager() == ""
+        assert len(store.saved) == 1
+    finally:
+        app.close()
+
+
 def _scenario_scale_rebuild() -> None:
     document = default_settings_document()
     document["gui"]["language"] = "en"
@@ -232,17 +297,40 @@ def _scenario_scale_rebuild() -> None:
 def _scenario_profile_help_changes() -> None:
     document = default_settings_document()
     document["gui"]["language"] = "en"
+    document["profile"]["name"] = "wave_optics"
+    document["profile"]["_comment"] = "Core profile comment from an older settings file."
     root, app, controller, _store = _application(document)
     try:
         initial = app.help_labels["profile.name"].cget("text")
-        app.variables["profile.name"].set("wave_optics")
+        assert "optical and metasurface work" in initial
+        assert "Wave Optics" in initial
+
+        app.variables["profile.name"].set("basic_fem")
         root.update_idletasks()
 
         changed = app.help_labels["profile.name"].cget("text")
-        assert get_value(controller.model.document, "profile.name") == "wave_optics"
+        assert get_value(controller.model.document, "profile.name") == "basic_fem"
         assert changed != initial
-        assert "optical and metasurface work" in changed
-        assert "Wave Optics" in changed
+        assert "most users" in changed
+    finally:
+        app.close()
+
+
+def _scenario_feature_checkboxes_compose() -> None:
+    document = default_settings_document()
+    document["gui"]["language"] = "en"
+    root, app, controller, _store = _application(document)
+    try:
+        _boolean_widget(app, "shared_server.enabled").invoke()
+        _boolean_widget(app, "semantic_docs.enabled").invoke()
+        root.update_idletasks()
+
+        assert get_value(controller.model.document, "profile.name") == "core"
+        assert get_value(controller.model.document, "shared_server.enabled") is True
+        assert get_value(controller.model.document, "semantic_docs.enabled") is True
+        assert app.variables["shared_server.enabled"].get() is True
+        assert app.variables["semantic_docs.enabled"].get() is True
+        assert app.banner is not None and app.banner.winfo_manager() == "pack"
     finally:
         app.close()
 
@@ -294,10 +382,12 @@ def _scenario_initial_auto_detect() -> None:
 _TK_SCENARIOS = {
     "construct": _scenario_constructs_every_tab_and_field,
     "initial-auto-detect": _scenario_initial_auto_detect,
+    "immediate-no-restart": _scenario_immediate_gui_fields_do_not_request_restart,
     "invalid": _scenario_invalid_entry,
     "legacy-comments": _scenario_legacy_comments,
     "language": _scenario_language_rebuild,
     "profile-help": _scenario_profile_help_changes,
+    "feature-checkboxes": _scenario_feature_checkboxes_compose,
     "scale": _scenario_scale_rebuild,
 }
 
@@ -334,6 +424,10 @@ def test_language_rebuild_preserves_unsaved_values_and_tab() -> None:
     _run_tk_scenario("language")
 
 
+def test_immediate_gui_fields_never_show_restart_state_even_after_apply() -> None:
+    _run_tk_scenario("immediate-no-restart")
+
+
 def test_initial_auto_detect_reveals_paths_and_button_without_modal() -> None:
     _run_tk_scenario("initial-auto-detect")
 
@@ -344,6 +438,10 @@ def test_scale_rebuild_applies_immediately_and_preserves_unsaved_state() -> None
 
 def test_profile_help_changes_with_selected_profile() -> None:
     _run_tk_scenario("profile-help")
+
+
+def test_feature_checkboxes_are_independent_and_composable() -> None:
+    _run_tk_scenario("feature-checkboxes")
 
 
 @pytest.mark.parametrize("version", ["9.0.0", 2, None])

@@ -13,8 +13,8 @@ from comsol_mcp.durable import canonical_sha256_v1, read_file_bytes_bounded
 
 SETTINGS_PATH_ENV = "COMSOL_MCP_SETTINGS_PATH"
 SETTINGS_SCHEMA = "comsol_mcp.settings"
-SETTINGS_VERSION = "1.1.0"
-SETTINGS_READABLE_VERSIONS = ("1.0.0", SETTINGS_VERSION)
+SETTINGS_VERSION = "1.2.0"
+SETTINGS_READABLE_VERSIONS = ("1.0.0", "1.1.0", SETTINGS_VERSION)
 MAX_SETTINGS_BYTES = 64 * 1024
 LOCALAPPDATA_ENV = "LOCALAPPDATA"
 PROGRAMDATA_ENV = "PROGRAMDATA"
@@ -25,6 +25,7 @@ JOBS_ENV = "COMSOL_MCP_JOBS_DIR"
 MODEL_READ_ROOTS_ENV = "COMSOL_MCP_MODEL_READ_ROOTS"
 ARTIFACT_WRITE_ROOT_ENV = "COMSOL_MCP_ARTIFACT_WRITE_ROOT"
 SHARED_SERVER_ENV = "COMSOL_MCP_ENABLE_SHARED_SERVER"
+SEMANTIC_ENABLED_ENV = "COMSOL_MCP_ENABLE_SEMANTIC_DOCS"
 OWNER_ENV = "COMSOL_MCP_OWNER"
 SEMANTIC_ROOT_ENV = "COMSOL_SEMANTIC_ROOT"
 SEMANTIC_LEXICAL_ENV = "COMSOL_SEMANTIC_LEXICAL_INDEX"
@@ -39,8 +40,6 @@ _PROFILE_NAMES = frozenset(
         "core",
         "basic_fem",
         "wave_optics",
-        "semantic_docs",
-        "desktop_shared",
         "experimental",
         "full",
     }
@@ -75,6 +74,7 @@ _DEFAULT_SETTINGS = {
         "checks": {name: True for name in _EVIDENCE_CHECKS},
     },
     "semantic_docs": {
+        "enabled": False,
         "root": None,
         "lexical_index": None,
         "model_path": None,
@@ -273,6 +273,37 @@ def _parse_gui_scale(value: Any) -> str:
     return normalized
 
 
+def _migrate_legacy_document(document: Any) -> Any:
+    """Return one pure current-shape view of a readable legacy document."""
+    if not isinstance(document, dict):
+        return document
+    migrated = deepcopy(document)
+    raw_version = migrated.get("schema_version")
+    profile = migrated.get("profile")
+    raw_profile = profile.get("name") if isinstance(profile, dict) else None
+    normalized_profile = raw_profile.strip().casefold() if isinstance(raw_profile, str) else None
+    semantic = migrated.get("semantic_docs")
+    if not isinstance(semantic, dict):
+        semantic = {}
+        migrated["semantic_docs"] = semantic
+    shared = migrated.get("shared_server")
+    if not isinstance(shared, dict):
+        shared = {}
+        migrated["shared_server"] = shared
+
+    if normalized_profile == "semantic_docs":
+        migrated.setdefault("profile", {})["name"] = "core"
+        semantic["enabled"] = True
+    elif normalized_profile == "desktop_shared":
+        migrated.setdefault("profile", {})["name"] = "core"
+        shared["enabled"] = True
+    elif normalized_profile == "full" and raw_version in {None, "1.0.0", "1.1.0"}:
+        semantic.setdefault("enabled", True)
+    else:
+        semantic.setdefault("enabled", False)
+    return migrated
+
+
 def _parse_bool(value: Any, *, location: str) -> bool:
     if not isinstance(value, bool):
         raise SettingsError(
@@ -327,6 +358,7 @@ def _normalize(
     *,
     errors: list[dict[str, str]],
 ) -> dict[str, Any]:
+    document = _migrate_legacy_document(document)
     if not isinstance(document, dict):
         _record_error(
             errors,
@@ -578,6 +610,13 @@ def _normalize(
         parser=_parse_gui_language,
         errors=errors,
     )
+    semantic_enabled = _read_value(
+        semantic["enabled"],
+        location="settings.semantic_docs.enabled",
+        default=_DEFAULT_SETTINGS["semantic_docs"]["enabled"],
+        parser=lambda value: _parse_bool(value, location="settings.semantic_docs.enabled"),
+        errors=errors,
+    )
     scale = _read_value(
         gui["scale"],
         location="settings.gui.scale",
@@ -598,6 +637,7 @@ def _normalize(
         "shared_server": {"enabled": shared_enabled},
         "evidence_integrity": {"checks": normalized_checks},
         "semantic_docs": {
+            "enabled": semantic_enabled,
             "root": semantic_root,
             "lexical_index": lexical_index,
             "model_path": model_path,
@@ -891,6 +931,7 @@ def settings_environment(environ: Mapping[str, str] | None = None) -> dict[str, 
 
     set_default(PROFILE_ENV, settings["profile"]["name"])
     set_default(SHARED_SERVER_ENV, str(settings["shared_server"]["enabled"]).lower())
+    set_default(SEMANTIC_ENABLED_ENV, str(settings["semantic_docs"]["enabled"]).lower())
     set_default(RUNTIME_ENV, settings["runtime"]["directory"])
     set_default(JOBS_ENV, settings["runtime"]["jobs_directory"])
     roots = settings["paths"]["model_read_roots"]
@@ -928,6 +969,7 @@ __all__ = [
     "PROFILE_ENV",
     "RUNTIME_ENV",
     "SEMANTIC_LEXICAL_ENV",
+    "SEMANTIC_ENABLED_ENV",
     "SEMANTIC_MODEL_ENV",
     "SEMANTIC_ROOT_ENV",
     "SETTINGS_PATH_ENV",

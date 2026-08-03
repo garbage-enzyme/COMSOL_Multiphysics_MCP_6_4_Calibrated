@@ -40,6 +40,9 @@ dev = [
 comsol-mcp = "comsol_mcp.server:main"
 comsol-mcp-settings = "settings_gui.__main__:main"
 
+[project.gui-scripts]
+comsol-mcp-settings-gui = "settings_gui.__main__:main"
+
 [build-system]
 requires = ["hatchling==1.31.0"]
 build-backend = "hatchling.build"

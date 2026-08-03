@@ -353,7 +353,7 @@ def test_attached_inventory_is_bounded_sorted_and_keeps_duplicate_metadata(tmp_p
     manager, _ownership, _client = _manager(tmp_path, models=models)
     assert manager.attach(
         _request(),
-        profile="desktop_shared",
+        profile="core",
         environ={SHARED_SERVER_FEATURE_ENV: "true"},
     )["success"] is True
 
@@ -374,7 +374,7 @@ def test_attach_preserves_wildcard_listener_scope_in_server_identity(tmp_path):
 
     result = manager.attach(
         _request(),
-        profile="desktop_shared",
+        profile="core",
         environ={SHARED_SERVER_FEATURE_ENV: "true"},
     )
 
@@ -409,7 +409,7 @@ def test_exact_tag_adoption_allows_duplicate_unicode_labels_and_paths(tmp_path):
 
     attached = manager.attach(
         _request(),
-        profile="desktop_shared",
+        profile="core",
         environ={SHARED_SERVER_FEATURE_ENV: "true"},
     )
     adopted = manager.adopt_model(selector)
@@ -429,7 +429,7 @@ def test_duplicate_server_model_tags_fail_attach_closed(tmp_path):
 
     result = manager.attach(
         _request(),
-        profile="desktop_shared",
+        profile="core",
         environ={SHARED_SERVER_FEATURE_ENV: "true"},
     )
 
@@ -454,7 +454,7 @@ def test_model_inventory_requires_an_attached_client(tmp_path):
 def _attach_and_lock(manager):
     assert manager.attach(
         _request(),
-        profile="desktop_shared",
+        profile="core",
         environ={SHARED_SERVER_FEATURE_ENV: "true"},
     )["success"] is True
     assert manager.adopt_model(_selector())["success"] is True
@@ -466,7 +466,7 @@ def _attach_and_lock(manager):
 def _attach_saved_and_lock(manager, source, *, collaboration_mode):
     assert manager.attach(
         _request(),
-        profile="desktop_shared",
+        profile="core",
         environ={SHARED_SERVER_FEATURE_ENV: "true"},
     )["success"] is True
     assert manager.adopt_model(
@@ -518,7 +518,9 @@ def test_attached_job_handoff_recovery_reattaches_and_re_adopts_exact_model(tmp_
     handoff = _prepare_saved_handoff(manager, source)
 
     recovered = manager.recover_attached_job_handoff(
-        handoff["execution_backend"]
+        handoff["execution_backend"],
+        profile="wave_optics",
+        feature_enabled=True,
     )
 
     assert recovered["success"] is True
@@ -575,7 +577,9 @@ def test_attached_job_handoff_recovery_fails_closed_and_detaches_changed_target(
         expected_state = "attached_handoff_model_recovery_failed"
 
     recovered = manager.recover_attached_job_handoff(
-        handoff["execution_backend"]
+        handoff["execution_backend"],
+        profile="wave_optics",
+        feature_enabled=True,
     )
 
     assert recovered["success"] is False
@@ -604,7 +608,7 @@ def test_model_lock_verifies_immutable_source_bytes(tmp_path):
     manager, _ownership, _client = _manager(tmp_path)
     assert manager.attach(
         _request(),
-        profile="desktop_shared",
+        profile="core",
         environ={SHARED_SERVER_FEATURE_ENV: "true"},
     )["success"] is True
     assert manager.adopt_model(_selector())["success"] is True
@@ -1052,7 +1056,7 @@ def test_snapshot_rehashes_and_preserves_declared_immutable_source(tmp_path):
     manager, _ownership, _client = _manager(tmp_path)
     assert manager.attach(
         _request(),
-        profile="desktop_shared",
+        profile="core",
         environ={SHARED_SERVER_FEATURE_ENV: "true"},
     )["success"] is True
     assert manager.adopt_model(_selector())["success"] is True
@@ -1197,7 +1201,7 @@ def test_attach_and_detach_preserve_server_listener_and_model_inventory(tmp_path
 
     attached = manager.attach(
         _request(),
-        profile="desktop_shared",
+        profile="core",
         environ={SHARED_SERVER_FEATURE_ENV: "true"},
     )
     status = manager.status()
@@ -1230,7 +1234,7 @@ def test_post_connect_accepts_final_build_difference_with_warning(tmp_path):
 
     result = manager.attach(
         _request(),
-        profile="desktop_shared",
+        profile="core",
         environ={SHARED_SERVER_FEATURE_ENV: "true"},
     )
 
@@ -1249,7 +1253,7 @@ def test_post_connect_correlates_localized_clientapi_build_to_file_version(tmp_p
 
     result = manager.attach(
         _request(),
-        profile="desktop_shared",
+        profile="core",
         environ={SHARED_SERVER_FEATURE_ENV: "true"},
     )
 
@@ -1268,7 +1272,7 @@ def test_post_connect_rejects_other_release_and_releases_lease(tmp_path):
 
     result = manager.attach(
         _request(),
-        profile="desktop_shared",
+        profile="core",
         environ={SHARED_SERVER_FEATURE_ENV: "true"},
     )
 
@@ -1288,7 +1292,7 @@ def test_post_connect_rejects_localized_build_mismatch(tmp_path):
 
     result = manager.attach(
         _request(),
-        profile="desktop_shared",
+        profile="core",
         environ={SHARED_SERVER_FEATURE_ENV: "true"},
     )
 
@@ -1304,7 +1308,7 @@ def test_post_connect_rejects_changed_server_identity_before_inventory(tmp_path)
 
     result = manager.attach(
         _request(),
-        profile="desktop_shared",
+        profile="core",
         environ={SHARED_SERVER_FEATURE_ENV: "true"},
     )
 
@@ -1322,7 +1326,7 @@ def test_client_construction_failure_releases_only_mcp_lease(tmp_path):
 
     result = manager.attach(
         _request(),
-        profile="desktop_shared",
+        profile="core",
         environ={SHARED_SERVER_FEATURE_ENV: "true"},
     )
 
@@ -1359,7 +1363,7 @@ def test_attach_inventory_and_disconnect_failures_retain_cleanup_handles(tmp_pat
 
     attached = manager.attach(
         _request(),
-        profile="desktop_shared",
+        profile="core",
         environ={SHARED_SERVER_FEATURE_ENV: "true"},
     )
 
@@ -1404,7 +1408,7 @@ def test_attach_release_failure_without_client_retains_ownership_for_retry(tmp_p
 
     attached = manager.attach(
         _request(),
-        profile="desktop_shared",
+        profile="core",
         environ={SHARED_SERVER_FEATURE_ENV: "true"},
     )
 
@@ -1415,7 +1419,7 @@ def test_attach_release_failure_without_client_retains_ownership_for_retry(tmp_p
 
     duplicate = manager.attach(
         _request(),
-        profile="desktop_shared",
+        profile="core",
         environ={SHARED_SERVER_FEATURE_ENV: "true"},
     )
     assert duplicate["state"] == "cleanup_pending"
@@ -1449,7 +1453,7 @@ def test_detach_release_failure_retains_ownership_for_retry(tmp_path):
     manager, _ownership, client = _manager(tmp_path, ownership=ownership)
     assert manager.attach(
         _request(),
-        profile="desktop_shared",
+        profile="core",
         environ={SHARED_SERVER_FEATURE_ENV: "true"},
     )["success"] is True
 
@@ -1474,7 +1478,7 @@ def test_zero_models_attach_for_inventory_then_reject_adoption_without_clear(tmp
 
     attached = manager.attach(
         _request(),
-        profile="desktop_shared",
+        profile="core",
         environ={SHARED_SERVER_FEATURE_ENV: "true"},
     )
 
@@ -1500,7 +1504,7 @@ def test_disconnect_failure_keeps_lease_and_reports_uncertain(tmp_path):
     manager, ownership, _ = _manager(tmp_path, client=client)
     attached = manager.attach(
         _request(),
-        profile="desktop_shared",
+        profile="core",
         environ={SHARED_SERVER_FEATURE_ENV: "true"},
     )
     assert manager.adopt_model(_selector())["success"] is True
@@ -1525,7 +1529,7 @@ def test_changed_server_identity_after_disconnect_fails_preservation(tmp_path):
     manager, ownership, client = _manager(tmp_path, snapshots=snapshots)
     assert manager.attach(
         _request(),
-        profile="desktop_shared",
+        profile="core",
         environ={SHARED_SERVER_FEATURE_ENV: "true"},
     )["success"] is True
 
@@ -1560,7 +1564,7 @@ def test_detach_independently_checks_preservation_boundaries(
     )
     assert manager.attach(
         _request(),
-        profile="desktop_shared",
+        profile="core",
         environ={SHARED_SERVER_FEATURE_ENV: "true"},
     )["success"] is True
     if after_mutation == "model_inventory":

@@ -42,18 +42,24 @@ removed.
    status. Do not batch or retry while an earlier call might still be running.
 5. Keep `settings.json` as the shared settings source. Do not add
    agent-specific settings files or split configuration by client.
-6. Do not start COMSOL for unit, schema, packaging, documentation, lint, or
+6. Use profiles only for startup-time visibility of COMSOL automation,
+   simulation, and future autonomous-exploration experiment tools. Model
+   orthogonal optional functionality as independent, explicit, default-off
+   boolean feature gates that compose with every profile and with one another.
+   Changing a profile or feature gate requires an MCP host restart; GUI language
+   and scale are presentation-only exceptions that apply immediately.
+7. Do not start COMSOL for unit, schema, packaging, documentation, lint, or
    process-only work. Licensed COMSOL checks are explicit and serial.
-7. Bound inputs, responses, retries, workers, artifact counts, and file sizes.
+8. Bound inputs, responses, retries, workers, artifact counts, and file sizes.
    Durable resume requires exact source, configuration, and driver identities.
-8. Keep evidence state separate from execution state and scientific disposition.
+9. Keep evidence state separate from execution state and scientific disposition.
    A successful native call, fixed-wavelength match, or S/P label alone is not
    physical validation.
-9. Keep evidence-integrity checks enabled unless an explicit exploration opt-out
+10. Keep evidence-integrity checks enabled unless an explicit exploration opt-out
    is requested; preserve the resulting unverified state in the outcome.
-10. Do not commit credentials, private assets, licensed manuals, `.mph` models,
+11. Do not commit credentials, private assets, licensed manuals, `.mph` models,
     or unreviewed third-party data.
-11. Update public tool schemas, profile snapshots, documentation, and release
+12. Update public tool schemas, profile snapshots, documentation, and release
     facts when a public tool, profile, or schema contract changes.
 
 ## Implementation workflow

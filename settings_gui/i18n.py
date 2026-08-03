@@ -23,7 +23,6 @@ MESSAGE_IDS = (
     "Profile",
     "Runtime",
     "COMSOL/Java",
-    "Shared",
     "Evidence",
     "Docs",
     "Owner",
@@ -94,11 +93,18 @@ MESSAGE_IDS = (
         "JDK folder used by COMSOL. Auto-detect can fill this value. "
         "\nExample: C:\\COMSOL64\\Multiphysics\\java\\win64\\jre"
     ),
-    "Allow MCP to work with a COMSOL Desktop connected to a local Server.",
+    (
+        "Enable optional interactive collaboration with a COMSOL Desktop connected to a "
+        "local Server. This feature composes with every tool profile."
+    ),
     "Check that execution results and scientific conclusions are reported separately.",
     "Check saved result files and their hashes.",
     "Check that summary statements match the saved result values.",
     "Check that a resumed job uses the same producer and driver.",
+    (
+        "Enable optional semantic manual-search tools for the selected profile. "
+        "This feature requires prepared local indexes and a search model."
+    ),
     (
         "Optional folder containing prepared semantic-search files. "
         "This is not COMSOL's built-in manual folder. "

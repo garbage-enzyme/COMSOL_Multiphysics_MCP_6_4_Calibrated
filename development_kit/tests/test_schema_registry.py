@@ -123,7 +123,7 @@ def test_registry_is_complete_sorted_and_snapshot_stable():
     assert emitted.issubset(set(names))
     assert re.fullmatch(r"[0-9a-f]{64}", registry["registry_sha256"])
     assert registry["registry_sha256"] == (
-        "f2fac4379f39745e6678bbf5eaa7d3e2beff6e797f610ef80dc4a777f34ebe0b"
+        "baf6da2a0a1224568186b90072de2058c73fa71032f0dd0fe07b6fcad144d9eb"
     )
     assert registry["registry_sha256"] == get_schema_registry()["registry_sha256"]
     assert check_schema_support("comsol_mcp.session_startup_state", "1.0.0")["supported"] is True
@@ -152,8 +152,8 @@ def test_every_entry_declares_read_write_and_non_mutating_migration_policy():
         for item in get_schema_registry()["entries"]
         if item["schema_name"] == "comsol_mcp.deployment_identity"
     )
-    assert deployment["readable_versions"] == ["1.0.0", "1.1.0"]
-    assert deployment["writable_version"] == "1.1.0"
+    assert deployment["readable_versions"] == ["1.0.0", "1.1.0", "1.2.0"]
+    assert deployment["writable_version"] == "1.2.0"
     path_policy = next(
         item
         for item in get_schema_registry()["entries"]

@@ -33,7 +33,7 @@ from development_kit.benchmarks.semantic_benchmark import (
     evaluate_lexical_baseline,
 )
 from development_kit.tests.integration import semantic_benchmark_soak as soak_module
-from development_kit.tests.integration import semantic_profile_acceptance as profile_module
+from development_kit.tests.integration import semantic_feature_acceptance as feature_module
 from development_kit.tests.integration import semantic_retrieval_acceptance as retrieval_module
 from development_kit.tests.integration import semantic_worker_containment as containment_module
 from development_kit.tests.integration.semantic_benchmark_soak import _promotion
@@ -387,12 +387,14 @@ def test_semantic_worker_inventory_matches_actual_module_command(monkeypatch):
 
 
 def test_semantic_acceptance_uses_isolated_runtime_and_run_lock():
-    runtime = Path("D:/comsol_runtime/semantic_profile/runs/test-run")
-    parameters = profile_module._server("semantic_docs", runtime)
+    runtime = Path("D:/comsol_runtime/semantic_feature/runs/test-run")
+    parameters = feature_module._server("core", runtime, semantic_enabled=True)
 
     assert parameters.env["COMSOL_MCP_RUNTIME_DIR"] == str(runtime)
-    assert profile_module.RUN_LOCK.name == "acceptance.lock"
-    assert profile_module.RUN_LOCK.is_absolute()
+    assert parameters.env["COMSOL_MCP_PROFILE"] == "core"
+    assert parameters.env["COMSOL_MCP_ENABLE_SEMANTIC_DOCS"] == "true"
+    assert feature_module.RUN_LOCK.name == "acceptance.lock"
+    assert feature_module.RUN_LOCK.is_absolute()
 
 
 def test_concurrent_burst_requires_success_busy_and_no_unexpected_failures():

@@ -58,7 +58,7 @@ def test_deployment_manifest_matches_frozen_profile_and_schema_snapshots():
 
     assert identity["available"] is True
     assert identity["schema_name"] == "comsol_mcp.deployment_identity"
-    assert identity["schema_version"] == "1.1.0"
+    assert identity["schema_version"] == "1.2.0"
     assert identity["package_version"] == __version__
     assert identity["build_identity"] == get_build_identity()
     assert identity["build_identity"]["package_version"] == __version__
@@ -67,6 +67,9 @@ def test_deployment_manifest_matches_frozen_profile_and_schema_snapshots():
     )
     assert identity["profile_tool_names_sha256"] == _snapshot_sha256(
         SNAPSHOTS / "profile_tool_names.json"
+    )
+    assert identity["feature_tool_names_sha256"] == _snapshot_sha256(
+        SNAPSHOTS / "feature_tool_names.json"
     )
     assert len(identity["catalog_contract_sha256"]) == 64
     assert identity["source_classification"] == "source_tree"

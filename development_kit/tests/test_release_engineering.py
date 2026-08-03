@@ -8,6 +8,7 @@ import io
 import json
 import os
 import re
+import struct
 import subprocess
 import sys
 import tarfile
@@ -404,6 +405,7 @@ def test_release_gate_subprocesses_use_hidden_windows_launch(monkeypatch):
 def test_support_matrix_matches_frozen_profile_counts_and_declared_dependencies():
     matrix = _json(RELEASE / "support_matrix.json")
     names = _json(SNAPSHOTS / "profile_tool_names.json")
+    features = _json(SNAPSHOTS / "feature_tool_names.json")
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
 
     assert matrix["schema_name"] == "comsol_mcp.release_support_matrix"
@@ -425,6 +427,10 @@ def test_support_matrix_matches_frozen_profile_counts_and_declared_dependencies(
     assert {item["name"]: item["tool_count"] for item in matrix["profiles"]} == {
         profile: len(tools) for profile, tools in names.items()
     }
+    assert {item["name"]: item["tool_count"] for item in matrix["features"]} == {
+        feature: len(tools) for feature, tools in features.items()
+    }
+    assert all(item["default_enabled"] is False for item in matrix["features"])
     dependencies = "\n".join(pyproject["project"]["dependencies"])
     for package in ("matplotlib", "mcp", "mph", "numpy", "pydantic", "psutil", "scipy"):
         assert re.search(rf"(?m)^{package}(?:[<>=]|$)", dependencies)
@@ -917,6 +923,23 @@ def test_installed_profiles_must_share_one_release_inventory():
         installed_package_probe._consistent_deployment_identity(
             [identity, {"schema_name": "other"}]
         )
+
+
+def test_installed_gui_launcher_pe_subsystem_is_read_without_execution(tmp_path):
+    launcher = tmp_path / "settings-gui.exe"
+    raw = bytearray(0x80 + 24 + 70)
+    raw[:2] = b"MZ"
+    struct.pack_into("<I", raw, 0x3C, 0x80)
+    raw[0x80:0x84] = b"PE\0\0"
+    struct.pack_into("<H", raw, 0x80 + 24, 0x20B)
+    struct.pack_into("<H", raw, 0x80 + 24 + 68, 2)
+    launcher.write_bytes(raw)
+
+    assert installed_package_probe._windows_pe_subsystem(launcher) == 2
+
+    launcher.write_bytes(b"not-pe")
+    with pytest.raises(AssertionError, match="Windows PE"):
+        installed_package_probe._windows_pe_subsystem(launcher)
 
 
 def test_release_receipt_accepts_external_lock_and_probes_drop_pythonpath(

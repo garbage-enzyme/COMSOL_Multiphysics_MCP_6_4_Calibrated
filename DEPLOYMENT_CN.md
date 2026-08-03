@@ -119,19 +119,17 @@ comsol-mcp-settings --settings-path "D:\settings\settings.json" --remove-desktop
 | `core` | 紧凑默认控制面和词法手册检索。 |
 | `basic_fem` | 常规 FEM 构建、有界导出，以及无需 Python 的独立启动器工具。 |
 | `wave_optics` | 周期光学、超表面、有界场数据发现/提取、预检和证据审计。 |
-| `desktop_shared` | 默认关闭的 shared Desktop/attached-Server 工作流，提供精确进程/listener/model 身份、非拥有式租约、revision lock、持久化 attached job 和 detach preservation。 |
-| `semantic_docs` | 隔离的实验性语义手册检索。 |
 | `experimental` | 显式选择的通用和 escape-hatch 工具。 |
-| `full` | 宽兼容界面；默认不推荐。 |
+| `full` | 宽泛的非 feature 兼容界面；默认不推荐。 |
 
 在 `settings.json` 的 `profile.name` 中设置 profile。删除时使用 `core`。stdio 进程
 启动时会冻结 profile，修改后必须重启 client/MCP host。非法 profile 保持 `core`，并在
 `settings_errors` 中报告，不会静默选择另一个 profile。
 
-默认的 `core` 和 `wave_optics` profile 不暴露 shared-session 工具。
-只有显式选择 `desktop_shared` profile 并在 `settings.json` 设置
-`shared_server.enabled=true`，才会启用受保护
-的 shared workflow。旧 `comsol_connect` 仍是 experimental 兼容工具，不能替代该生命周期。
+Profile 只控制 COMSOL 自动化仿真及未来自主探索工具的可见性。任意 profile 都可通过
+`settings.json` 中独立的 `shared_server.enabled=true` 开启受保护 shared workflow，或通过
+`semantic_docs.enabled=true` 开启隔离语义检索；两个开关默认均为 false，也可同时启用。
+旧 `comsol_connect` 仍是 experimental 兼容工具，不能替代该生命周期。
 
 `basic_fem` 中的独立启动器工具仍运行在普通 Python MCP host 中；它们负责构建和控制另一个原生
 EXE。目标机只需 Windows 10/11 x64 与已安装并授权的 COMSOL 6.4。EXE 不打包 COMSOL，
@@ -149,13 +147,14 @@ multi-client 选项的 COMSOL Multiphysics Server 6.4，记录本地 endpoint（
 
 ```json
 {
-  "profile": { "name": "desktop_shared" },
+  "profile": { "name": "core" },
   "shared_server": { "enabled": true },
   "runtime": { "directory": "D:/comsol_mcp_runtime" }
 }
 ```
 
-重启 MCP host 后调用 `capabilities`，确认 live profile 是 `desktop_shared`。在
+重启 MCP host 后调用 `capabilities`，确认所选 live profile 未改变、`enabled_features`
+包含 `shared_server`，且 `shared_session.feature_enabled` 与 `shared_session.gate_open` 都是 true。在
 `shared_server_attach` 前调用 `shared_server_preflight`；只有确认 endpoint 和 Desktop
 连接正确后，才传入 `user_confirmed=true`。attach 要求一个精确的 6.4.0.* Server 身份
 和一个精确的 Server-held model；对于启动中/未就绪 Server、多个 GUI client、歧义模型、
@@ -298,8 +297,8 @@ MPh 每个 Python 进程只允许一个 client wrapper。因此 `comsol_disconne
 lease，直到该调用返回且清理得到验证。cleanup pending 时不要重试 start，也不要重启
 MCP host。
 
-如果使用 `desktop_shared`，还要确认 `capabilities` 报告 shared profile，并且只有在
-feature flag 开启后才出现 shared-session 工具。先启动并连接 Desktop/Server，再调用
+如果使用 shared Desktop，还要确认 `capabilities` 报告的所选 profile 未改变，并且只有在
+独立 feature flag 开启后才出现 shared-session 工具。先启动并连接 Desktop/Server，再调用
 `shared_server_preflight` 和带显式用户确认的 `shared_server_attach`。此模式不要调用
 `comsol_start`，也不要把成功 attach 理解为可以并行执行模型修改。
 

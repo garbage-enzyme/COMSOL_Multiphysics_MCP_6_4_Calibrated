@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import io
+import subprocess
+import sys
 import tarfile
 import zipfile
 from pathlib import Path
 
 import pytest
 
+from development_kit.scripts import settings_gui_visual_capture
 from development_kit.scripts.settings_gui_package_probe import (
     ICON_MEMBER,
     LANGUAGES,
@@ -16,6 +19,8 @@ from development_kit.scripts.settings_gui_package_probe import (
     SHORTCUT_MEMBER,
     inspect_settings_gui_distributions,
 )
+
+ROOT = Path(__file__).parents[2]
 
 
 def _archives(
@@ -26,6 +31,7 @@ def _archives(
     include_wheel_launcher: bool = False,
     include_test: bool = False,
     include_shortcut_adapter: bool = True,
+    include_gui_entry: bool = True,
 ) -> Path:
     dist = root / "dist"
     dist.mkdir()
@@ -37,10 +43,13 @@ def _archives(
                 f"settings_gui/locales/{language}/LC_MESSAGES/settings_gui.mo",
                 b"mo",
             )
-        archive.writestr(
-            "comsol_mcp-0.6.0.dist-info/entry_points.txt",
-            "[console_scripts]\ncomsol-mcp-settings = settings_gui.__main__:main\n",
-        )
+        entry_points = "[console_scripts]\ncomsol-mcp-settings = settings_gui.__main__:main\n"
+        if include_gui_entry:
+            entry_points += (
+                "[gui_scripts]\n"
+                "comsol-mcp-settings-gui = settings_gui.__main__:main\n"
+            )
+        archive.writestr("comsol_mcp-0.6.0.dist-info/entry_points.txt", entry_points)
         if include_icon:
             archive.writestr(ICON_MEMBER, b"ico")
         if include_shortcut_adapter:
@@ -75,6 +84,7 @@ def test_distribution_probe_accepts_exact_gui_membership(tmp_path: Path) -> None
     assert result["wheel_locale_count"] == 3
     assert result["sdist_po_count"] == 3
     assert result["console_entry_included"] is True
+    assert result["gui_entry_included"] is True
     assert result["wheel_icon_included"] is True
     assert result["sdist_icon_included"] is True
     assert result["shortcut_adapter_included"] is True
@@ -106,3 +116,42 @@ def test_distribution_probe_rejects_root_launcher_in_wheel(tmp_path: Path) -> No
 def test_distribution_probe_rejects_missing_shortcut_adapter(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="shortcut adapter"):
         inspect_settings_gui_distributions(_archives(tmp_path, include_shortcut_adapter=False))
+
+
+def test_distribution_probe_rejects_missing_gui_subsystem_entry(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="GUI entry point"):
+        inspect_settings_gui_distributions(_archives(tmp_path, include_gui_entry=False))
+
+
+def test_visual_capture_direct_script_uses_current_source_tab_contract() -> None:
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "development_kit" / "scripts" / "settings_gui_visual_capture.py"),
+            "--help",
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "shared_server" not in completed.stdout
+    assert (
+        "--tab {general,profile,runtime,comsol_java,evidence,semantic,ownership,about}"
+        in completed.stdout
+    )
+
+
+def test_visual_capture_matrix_covers_feature_tabs_and_about_at_every_scale() -> None:
+    scenarios = set(settings_gui_visual_capture._capture_scenarios())
+
+    for dpi_percent in (100, 125, 150, 200):
+        for language in ("en", "zh-cn", "zh-tw"):
+            assert (language, dpi_percent, "valid", "general") in scenarios
+            assert (language, dpi_percent, "valid", "profile") in scenarios
+            assert (language, dpi_percent, "valid", "semantic") in scenarios
+            assert (language, dpi_percent, "about", "about") in scenarios
+    assert len(scenarios) == 57

@@ -23,23 +23,23 @@ def test_shared_feature_is_default_off_for_existing_profiles(profile):
     gate = normalize_shared_server_feature_gate(profile, environ={})
 
     assert gate.feature_enabled is False
-    assert gate.profile_selected is False
+    assert gate.profile_independent is True
     assert gate.gate_open is False
     assert gate.restart_required_after_change is True
 
 
-def test_shared_feature_requires_profile_and_strict_true_flag():
+def test_shared_feature_is_profile_independent_and_requires_strict_true_flag():
     enabled = {SHARED_SERVER_FEATURE_ENV: " TRUE "}
 
-    wrong_profile = normalize_shared_server_feature_gate("wave_optics", environ=enabled)
-    selected = normalize_shared_server_feature_gate(" DESKTOP_SHARED ", environ=enabled)
+    wave = normalize_shared_server_feature_gate("wave_optics", environ=enabled)
+    core = normalize_shared_server_feature_gate(" core ", environ=enabled)
 
-    assert wrong_profile.feature_enabled is True
-    assert wrong_profile.gate_open is False
-    assert selected.to_dict() == {
-        "profile": "desktop_shared",
+    assert wave.feature_enabled is True
+    assert wave.gate_open is True
+    assert core.to_dict() == {
+        "profile": "core",
         "feature_enabled": True,
-        "profile_selected": True,
+        "profile_independent": True,
         "gate_open": True,
         "environment_variable": SHARED_SERVER_FEATURE_ENV,
         "restart_required_after_change": True,
@@ -50,7 +50,7 @@ def test_shared_feature_requires_profile_and_strict_true_flag():
 def test_shared_feature_rejects_ambiguous_flag_values(value):
     with pytest.raises(ValueError, match="exactly true or false"):
         normalize_shared_server_feature_gate(
-            "desktop_shared", environ={SHARED_SERVER_FEATURE_ENV: value}
+            "core", environ={SHARED_SERVER_FEATURE_ENV: value}
         )
 
 

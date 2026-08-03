@@ -14,8 +14,8 @@ their own compatibility checks.
   separate path.
 - A direct `mph.Client(port=...)` connection does not by itself provide safe
   shared Desktop ownership, model locking, or detach-preservation semantics.
-  Use the explicit default-off `desktop_shared` profile and its preflight,
-  exact adoption, revision lock, Save Copy, and detach tools for the supported
+  Use the explicit default-off `shared_server.enabled` feature with any suitable
+  tool profile, plus its preflight, exact adoption, revision lock, Save Copy, and detach tools for the supported
   local shared lifecycle; see `docs/interactive_shared_session/`.
 
 ## Installation

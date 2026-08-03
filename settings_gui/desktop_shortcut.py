@@ -146,21 +146,21 @@ def known_desktop_path() -> Path:
     return desktop
 
 
-def installed_entry_executable() -> Path:
-    """Find the exact console entry generated for this Python installation."""
+def _installed_named_entry(name: str) -> Path:
+    """Find one exact generated entry for this Python installation."""
     candidates: list[Path] = []
     argv0 = Path(sys.argv[0])
-    if argv0.name.casefold() == "comsol-mcp-settings.exe":
+    if argv0.name.casefold() == name.casefold():
         candidates.append(argv0)
     executable = Path(sys.executable)
     candidates.extend(
         (
-            executable.parent / "comsol-mcp-settings.exe",
-            executable.parent / "Scripts" / "comsol-mcp-settings.exe",
-            Path(sys.prefix) / "Scripts" / "comsol-mcp-settings.exe",
+            executable.parent / name,
+            executable.parent / "Scripts" / name,
+            Path(sys.prefix) / "Scripts" / name,
         )
     )
-    discovered = shutil.which("comsol-mcp-settings.exe")
+    discovered = shutil.which(name)
     if discovered:
         candidates.append(Path(discovered))
     seen: set[str] = set()
@@ -171,7 +171,17 @@ def installed_entry_executable() -> Path:
         seen.add(normalized)
         if candidate.is_file() and candidate.suffix.casefold() == ".exe":
             return Path(os.path.abspath(candidate))
-    raise FileNotFoundError("installed comsol-mcp-settings.exe was not found")
+    raise FileNotFoundError(f"installed {name} was not found")
+
+
+def installed_entry_executable() -> Path:
+    """Find the console entry used for explicit command-line actions."""
+    return _installed_named_entry("comsol-mcp-settings.exe")
+
+
+def installed_gui_entry_executable() -> Path:
+    """Find the windowed entry used by owned Desktop shortcuts."""
+    return _installed_named_entry("comsol-mcp-settings-gui.exe")
 
 
 def _powershell_executable() -> Path:
@@ -432,7 +442,7 @@ def _resolved_inputs(
     desktop = Path(desktop_path) if desktop_path is not None else known_desktop_path()
     if not desktop.is_absolute() or not desktop.is_dir() or path_has_linked_component(desktop):
         raise ValueError("Desktop folder is unavailable")
-    entry = executable if executable is not None else installed_entry_executable()
+    entry = executable if executable is not None else installed_gui_entry_executable()
     icon = icon_path if icon_path is not None else ICON_PATH
     return settings, desktop / SHORTCUT_NAME, _desired_spec(settings, entry, icon)
 
@@ -582,7 +592,7 @@ def shortcut_prerequisites(
     try:
         _validated_settings_path(settings_path)
         checks["desktop_available"] = known_desktop_path().is_dir()
-        checks["entry_executable_available"] = installed_entry_executable().is_file()
+        checks["entry_executable_available"] = installed_gui_entry_executable().is_file()
         checks["windows_shortcut_runtime_available"] = _powershell_executable().is_file()
     except OSError, RuntimeError, ValueError:
         pass
@@ -600,6 +610,7 @@ __all__ = [
     "encode_settings_path_token",
     "inspect_windows_shortcut",
     "installed_entry_executable",
+    "installed_gui_entry_executable",
     "known_desktop_path",
     "remove_desktop_shortcut",
     "shortcut_prerequisites",

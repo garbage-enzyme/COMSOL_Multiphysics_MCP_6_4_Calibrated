@@ -9,11 +9,19 @@ from src.server import create_server
 from src.shared_session.attach_request import normalize_shared_server_attach_request
 from src.shared_session.contracts import SHARED_SERVER_FEATURE_ENV
 from src.shared_session.lifecycle import SharedSessionManager
+from src.tools.profiles import resolve_profile
 
 
-def test_shared_profile_capabilities_and_tools_are_explicit(monkeypatch):
-    monkeypatch.setenv(SHARED_SERVER_FEATURE_ENV, "true")
-    server = create_server("shared-tools", profile="desktop_shared")
+def _shared_server(name: str, *, profile: str = "core"):
+    selection = resolve_profile(
+        profile,
+        environ={SHARED_SERVER_FEATURE_ENV: "true"},
+    )
+    return create_server(name, profile=selection)
+
+
+def test_shared_feature_capabilities_and_tools_are_explicit():
+    server = _shared_server("shared-tools", profile="wave_optics")
     tools = {tool.name: tool for tool in asyncio.run(server.list_tools())}
     capabilities = server._tool_manager._tools["capabilities"].fn()
 
@@ -30,8 +38,8 @@ def test_shared_profile_capabilities_and_tools_are_explicit(monkeypatch):
         "shared_model_adopt",
     } <= set(tools)
     assert capabilities["shared_session"] == {
-        "profile": "desktop_shared",
-        "profile_active": True,
+        "profile_independent": True,
+        "compatible_profiles": ["core", "basic_fem", "wave_optics", "experimental", "full"],
         "feature_flag": SHARED_SERVER_FEATURE_ENV,
         "feature_enabled": True,
         "gate_open": True,
@@ -61,12 +69,11 @@ def test_shared_profile_capabilities_and_tools_are_explicit(monkeypatch):
         },
         "restart_required_after_change": True,
     }
-    assert capabilities["tool_count"] == 21
+    assert capabilities["tool_count"] == 86
 
 
-def test_shared_attach_public_schema_requires_confirmation(monkeypatch):
-    monkeypatch.setenv(SHARED_SERVER_FEATURE_ENV, "true")
-    server = create_server("shared-schema", profile="desktop_shared")
+def test_shared_attach_public_schema_requires_confirmation():
+    server = _shared_server("shared-schema")
     schemas = {tool.name: tool.inputSchema for tool in asyncio.run(server.list_tools())}
     attach = schemas["shared_server_attach"]
 
@@ -76,8 +83,7 @@ def test_shared_attach_public_schema_requires_confirmation(monkeypatch):
 
 
 def test_shared_status_uses_manager_without_constructing_client(monkeypatch):
-    monkeypatch.setenv(SHARED_SERVER_FEATURE_ENV, "true")
-    server = create_server("shared-status", profile="desktop_shared")
+    server = _shared_server("shared-status")
     import src.tools.shared_session as module
 
     client_constructions = []
@@ -101,19 +107,18 @@ def test_shared_status_uses_manager_without_constructing_client(monkeypatch):
 
 
 def test_shared_attach_adapter_propagates_and_enforces_confirmation(monkeypatch):
-    monkeypatch.setenv(SHARED_SERVER_FEATURE_ENV, "true")
-    server = create_server("shared-confirmation", profile="desktop_shared")
+    server = _shared_server("shared-confirmation")
     import src.tools.shared_session as module
 
     calls = []
 
     class ValidatingManager:
-        def attach(self, request, *, profile):
-            calls.append((request, profile))
+        def attach(self, request, *, profile, feature_enabled):
+            calls.append((request, profile, feature_enabled))
             normalized = normalize_shared_server_attach_request(
                 request,
                 profile=profile,
-                environ={SHARED_SERVER_FEATURE_ENV: "true"},
+                feature_enabled=feature_enabled,
             )
             return {
                 "success": True,
@@ -136,21 +141,23 @@ def test_shared_attach_adapter_propagates_and_enforces_confirmation(monkeypatch)
                 "endpoint": {"host": "127.0.0.1", "port": 2036},
                 "user_confirmed": False,
             },
-            "desktop_shared",
+            "core",
+            True,
         ),
         (
             {
                 "endpoint": {"host": "127.0.0.1", "port": 2036},
                 "user_confirmed": True,
             },
-            "desktop_shared",
+            "core",
+            True,
         ),
     ]
 
 
 def test_shared_model_guard_tools_delegate_exact_caller_evidence(monkeypatch):
     monkeypatch.setenv(SHARED_SERVER_FEATURE_ENV, "true")
-    server = create_server("shared-model-guards", profile="desktop_shared")
+    server = create_server("shared-model-guards", profile="core")
     import src.tools.shared_session as module
 
     calls = []

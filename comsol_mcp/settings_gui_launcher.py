@@ -25,7 +25,7 @@ from .settings_gui_handshake import (
     validate_handshake_path,
 )
 
-GUI_RELEASE = "alpha6.1"
+GUI_RELEASE = "alpha6.2"
 HANDSHAKE_TIMEOUT_SECONDS = 5.0
 HANDSHAKE_POLL_SECONDS = 0.05
 

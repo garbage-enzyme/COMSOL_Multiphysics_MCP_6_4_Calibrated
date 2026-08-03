@@ -888,6 +888,8 @@ def test_public_job_submit_resolves_live_handoff_before_manager_submit(
                 "user_confirmed_automation_exclusive": True,
             },
         },
+        profile_name="wave_optics",
+        shared_enabled=True,
         manager=FakeJobManager(),
         session_manager=FakeSessionManager(),
     )
@@ -930,6 +932,8 @@ def test_public_job_submit_does_not_launch_after_handoff_failure(ascii_job_root)
                 "user_confirmed_automation_exclusive": True,
             },
         },
+        profile_name="wave_optics",
+        shared_enabled=True,
         manager=UnexpectedJobManager(),
         session_manager=RejectingSessionManager(),
     )
@@ -966,8 +970,14 @@ def test_public_job_submit_recovers_handoff_after_prelaunch_failure(ascii_job_ro
                 },
             }
 
-        def recover_attached_job_handoff(self, execution_backend):
-            recovered.append(execution_backend)
+        def recover_attached_job_handoff(
+            self,
+            execution_backend,
+            *,
+            profile,
+            feature_enabled,
+        ):
+            recovered.append((execution_backend, profile, feature_enabled))
             return {
                 "success": True,
                 "state": "attached_handoff_reclaimed_pending_lock",
@@ -991,6 +1001,8 @@ def test_public_job_submit_recovers_handoff_after_prelaunch_failure(ascii_job_ro
                 "user_confirmed_automation_exclusive": True,
             },
         },
+        profile_name="wave_optics",
+        shared_enabled=True,
         manager=PreflightFailingJobManager(),
         session_manager=RecoveringSessionManager(),
     )
@@ -998,7 +1010,7 @@ def test_public_job_submit_recovers_handoff_after_prelaunch_failure(ascii_job_ro
     assert result["success"] is False
     assert result["state"] == "job_submit_failed_after_attached_handoff"
     assert result["handoff_recovery"]["success"] is True
-    assert recovered == [backend]
+    assert recovered == [(backend, "wave_optics", True)]
 
 
 def test_public_job_submit_reconciles_durable_launch_failure_without_reclaim(
@@ -1020,7 +1032,13 @@ def test_public_job_submit_reconciles_durable_launch_failure_without_reclaim(
                 },
             }
 
-        def recover_attached_job_handoff(self, _execution_backend):
+        def recover_attached_job_handoff(
+            self,
+            _execution_backend,
+            *,
+            profile,
+            feature_enabled,
+        ):
             raise AssertionError("durable launch failures must not reclaim the session")
 
     class DurableFailingJobManager:
@@ -1041,6 +1059,8 @@ def test_public_job_submit_reconciles_durable_launch_failure_without_reclaim(
                 "user_confirmed_automation_exclusive": True,
             },
         },
+        profile_name="wave_optics",
+        shared_enabled=True,
         manager=DurableFailingJobManager(),
         session_manager=UnreachableRecoverySessionManager(),
     )

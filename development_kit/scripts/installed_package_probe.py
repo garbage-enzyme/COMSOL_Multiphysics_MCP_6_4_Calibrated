@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import hashlib
 import json
+import os
 import struct
 import subprocess
 import sys
@@ -20,6 +21,7 @@ FORBIDDEN_PROCESS_NAMES = frozenset(
     {
         "comsol-mcp.exe",
         "comsol-mcp-settings.exe",
+        "comsol-mcp-settings-gui.exe",
         "comsol.exe",
         "comsolmphserver.exe",
         "java.exe",
@@ -48,6 +50,25 @@ def _ico_sizes(raw: bytes) -> tuple[int, ...]:
     return tuple(sizes)
 
 
+def _windows_pe_subsystem(path: Path) -> int:
+    """Read the PE optional-header subsystem without executing the launcher."""
+    with path.open("rb") as stream:
+        dos_header = stream.read(64)
+        if len(dos_header) != 64 or dos_header[:2] != b"MZ":
+            raise AssertionError("installed entry point is not a Windows PE executable")
+        pe_offset = struct.unpack_from("<I", dos_header, 0x3C)[0]
+        if pe_offset < 64 or pe_offset > 16 * 1024 * 1024:
+            raise AssertionError("installed entry point has an invalid PE header offset")
+        stream.seek(pe_offset)
+        optional_prefix = stream.read(24 + 70)
+    if len(optional_prefix) != 94 or optional_prefix[:4] != b"PE\0\0":
+        raise AssertionError("installed entry point has an invalid PE header")
+    optional_header = optional_prefix[24:]
+    if struct.unpack_from("<H", optional_header)[0] not in {0x10B, 0x20B}:
+        raise AssertionError("installed entry point has an unsupported PE optional header")
+    return struct.unpack_from("<H", optional_header, 68)[0]
+
+
 def _release_inventory(capabilities: dict) -> dict:
     return {
         "schema_registry_sha256": capabilities["schema_registry"]["registry_sha256"],
@@ -56,6 +77,9 @@ def _release_inventory(capabilities: dict) -> dict:
         "full_tool_schemas_sha256": capabilities["deployment_identity"]["full_tool_schemas_sha256"],
         "profile_tool_names_sha256": capabilities["deployment_identity"][
             "profile_tool_names_sha256"
+        ],
+        "feature_tool_names_sha256": capabilities["deployment_identity"][
+            "feature_tool_names_sha256"
         ],
         "build_identity_sha256": capabilities["deployment_identity"]["build_identity"][
             "build_identity_sha256"
@@ -169,6 +193,45 @@ def _probe_direct_settings_entry(output_parent: Path) -> dict:
     }
 
 
+def _probe_owned_shortcut(output_parent: Path) -> dict:
+    from settings_gui.desktop_shortcut import (
+        SHORTCUT_NAME,
+        create_desktop_shortcut,
+        inspect_windows_shortcut,
+        installed_gui_entry_executable,
+        remove_desktop_shortcut,
+    )
+
+    desktop = output_parent / "settings-gui-shortcut-probe"
+    desktop.mkdir(parents=True, exist_ok=False)
+    settings = output_parent / "settings-gui-shortcut-settings.json"
+    gui_entry = installed_gui_entry_executable()
+    try:
+        created = create_desktop_shortcut(settings_path=settings, desktop_path=desktop)
+        if created.get("success") is not True or created.get("state") != "created":
+            raise AssertionError("installed Settings GUI shortcut creation failed")
+        observed = inspect_windows_shortcut(desktop / SHORTCUT_NAME)
+        if os.path.normcase(os.path.abspath(observed.target)) != os.path.normcase(
+            os.path.abspath(gui_entry)
+        ):
+            raise AssertionError("installed shortcut does not target the GUI-subsystem entry")
+        removed = remove_desktop_shortcut(settings_path=settings, desktop_path=desktop)
+        if removed.get("success") is not True or removed.get("state") != "removed":
+            raise AssertionError("installed Settings GUI shortcut cleanup failed")
+        if any(desktop.iterdir()):
+            raise AssertionError("installed Settings GUI shortcut probe left an artifact")
+    finally:
+        for child in desktop.iterdir():
+            child.unlink(missing_ok=True)
+        desktop.rmdir()
+    return {
+        "created": True,
+        "target_is_gui_entry": True,
+        "removed": True,
+        "contains_local_path": False,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--snapshot-dir", type=Path, required=True)
@@ -185,38 +248,28 @@ def main() -> int:
     import comsol_mcp
     import settings_gui
     from comsol_mcp.server import create_server
-    from comsol_mcp.shared_session.contracts import (
-        SHARED_SERVER_FEATURE_ENV,
-        SHARED_SERVER_PROFILE,
-    )
+    from comsol_mcp.settings import SEMANTIC_ENABLED_ENV
+    from comsol_mcp.shared_session.contracts import SHARED_SERVER_FEATURE_ENV
     from comsol_mcp.tools.capabilities import get_capabilities
-    from comsol_mcp.tools.catalog import PROFILE_NAMES, snapshot_tool_schemas
+    from comsol_mcp.tools.catalog import FEATURE_NAMES, PROFILE_NAMES, snapshot_tool_schemas
     from comsol_mcp.tools.profiles import resolve_profile
     from settings_gui.i18n import Translator
 
     expected_names = _load_json(args.snapshot_dir / "profile_tool_names.json")
+    expected_features = _load_json(args.snapshot_dir / "feature_tool_names.json")
     expected_schemas = _load_json(args.snapshot_dir / "full_tool_schemas.json")
     actual_counts: dict[str, int] = {}
+    feature_counts: dict[str, int] = {}
     deployment_identities: list[dict] = []
     release_inventories: dict | None = None
 
     if tuple(expected_names) != PROFILE_NAMES:
         raise AssertionError("installed profile order differs from the frozen snapshot")
+    if tuple(expected_features) != FEATURE_NAMES:
+        raise AssertionError("installed feature order differs from the frozen snapshot")
 
     for profile in PROFILE_NAMES:
-        if profile == SHARED_SERVER_PROFILE:
-            try:
-                resolve_profile(profile, environ={})
-            except ValueError:
-                pass
-            else:
-                raise AssertionError("installed shared profile is not default-off")
-            selection = resolve_profile(
-                profile,
-                environ={SHARED_SERVER_FEATURE_ENV: "true"},
-            )
-        else:
-            selection = resolve_profile(profile, environ={})
+        selection = resolve_profile(profile, environ={})
         server = create_server(f"installed-{profile}", profile=selection)
         schemas = asyncio.run(snapshot_tool_schemas(server))
         names = expected_names[profile]
@@ -233,6 +286,46 @@ def main() -> int:
             _release_inventory(capabilities),
             profile=profile,
         )
+
+    feature_environments = {
+        "semantic_docs": SEMANTIC_ENABLED_ENV,
+        "shared_server": SHARED_SERVER_FEATURE_ENV,
+    }
+    for feature in FEATURE_NAMES:
+        selection = resolve_profile(
+            "core",
+            environ={feature_environments[feature]: "true"},
+        )
+        server = create_server(f"installed-feature-{feature}", profile=selection)
+        schemas = asyncio.run(snapshot_tool_schemas(server))
+        names = sorted(set(expected_names["core"]) | set(expected_features[feature]))
+        if sorted(schemas) != names:
+            raise AssertionError(f"installed {feature} overlay differs from snapshot")
+        if schemas != {name: expected_schemas[name] for name in names}:
+            raise AssertionError(f"installed {feature} schemas differ from snapshot")
+        feature_counts[feature] = len(expected_features[feature])
+        capabilities = get_capabilities(selection)
+        if capabilities["enabled_features"] != [feature]:
+            raise AssertionError(f"installed {feature} capability provenance differs")
+        deployment_identities.append(capabilities["deployment_identity"])
+        release_inventories = _bind_release_inventory(
+            release_inventories,
+            _release_inventory(capabilities),
+            profile=f"core+{feature}",
+        )
+
+    composed = resolve_profile(
+        "full",
+        environ={
+            SEMANTIC_ENABLED_ENV: "true",
+            SHARED_SERVER_FEATURE_ENV: "true",
+        },
+    )
+    composed_schemas = asyncio.run(
+        snapshot_tool_schemas(create_server("installed-full-with-features", profile=composed))
+    )
+    if composed_schemas != expected_schemas:
+        raise AssertionError("installed composed feature surface differs from full schema snapshot")
 
     deployment_identity = _consistent_deployment_identity(deployment_identities)
     if release_inventories is None:
@@ -266,9 +359,18 @@ def main() -> int:
     scripts = {item.name: item.value for item in entry_points(group="console_scripts")}
     if scripts.get("comsol-mcp-settings") != "settings_gui.__main__:main":
         raise AssertionError("installed Settings GUI console entry point is unavailable")
+    gui_scripts = {item.name: item.value for item in entry_points(group="gui_scripts")}
+    if gui_scripts.get("comsol-mcp-settings-gui") != "settings_gui.__main__:main":
+        raise AssertionError("installed Settings GUI GUI entry point is unavailable")
+    from settings_gui.desktop_shortcut import installed_gui_entry_executable
+
+    gui_entry = installed_gui_entry_executable()
+    if _windows_pe_subsystem(gui_entry) != 2:
+        raise AssertionError("installed Settings GUI entry does not use the Windows GUI subsystem")
     if "tkinter" in sys.modules:
         raise AssertionError("installed solver-free discovery imported tkinter")
     direct_entry = _probe_direct_settings_entry(args.output.parent)
+    shortcut_entry = _probe_owned_shortcut(args.output.parent)
 
     imported_heavy = sorted(HEAVY_SEMANTIC_MODULES.intersection(sys.modules))
     if imported_heavy:
@@ -287,14 +389,18 @@ def main() -> int:
         "settings_gui": {
             "release": settings_gui.GUI_RELEASE,
             "console_entry": scripts["comsol-mcp-settings"],
+            "gui_entry": gui_scripts["comsol-mcp-settings-gui"],
+            "gui_entry_subsystem": "windows_gui",
             "locale_bytes": locale_members,
             "icon_bytes": len(icon_raw),
             "icon_sizes": SETTINGS_GUI_ICON_SIZES,
             "tests_excluded": True,
             "tkinter_imported": False,
             "direct_entry": direct_entry,
+            "shortcut_entry": shortcut_entry,
         },
         "profile_counts": actual_counts,
+        "feature_counts": feature_counts,
         "deployment_identity": deployment_identity,
         "release_inventories": release_inventories,
         "schema_snapshot_match": True,

@@ -1,4 +1,4 @@
-"""Fresh-stdio semantic profile profile discovery and public semantic-tool acceptance."""
+"""Fresh-stdio base-profile discovery and semantic-feature public acceptance."""
 
 from __future__ import annotations
 
@@ -19,16 +19,15 @@ from src.jobs.store import JobLock
 
 ROOT = Path(__file__).parents[3]
 PYTHON = Path(sys.executable)
-OUTPUT = Path("D:/comsol_runtime/semantic_profile/live_profile.json")
+OUTPUT = Path("D:/comsol_runtime/semantic_feature/live_feature.json")
 RUN_LOCK = OUTPUT.parent / "acceptance.lock"
 MODEL = Path("D:/comsol_semantic/models/all-MiniLM-L6-v2/1110a243fdf4706b3f48f1d95db1a4f5529b4d41")
 PROFILE_COUNTS = {
     "core": 47,
-    "basic_fem": 90,
+    "basic_fem": 109,
     "wave_optics": 76,
-    "semantic_docs": 50,
-    "experimental": 78,
-    "full": 144,
+    "experimental": 97,
+    "full": 150,
 }
 
 
@@ -49,11 +48,17 @@ def _decode(result: Any) -> dict[str, Any]:
     raise ValueError("MCP result did not contain an object")
 
 
-def _server(profile: str, runtime_dir: Path) -> StdioServerParameters:
+def _server(
+    profile: str,
+    runtime_dir: Path,
+    *,
+    semantic_enabled: bool = False,
+) -> StdioServerParameters:
     environment = os.environ.copy()
     environment.update({
         "COMSOL_MCP_PROFILE": profile,
         "COMSOL_MCP_RUNTIME_DIR": str(runtime_dir),
+        "COMSOL_MCP_ENABLE_SEMANTIC_DOCS": str(semantic_enabled).lower(),
         "COMSOL_SEMANTIC_ROOT": "D:/comsol_semantic",
         "COMSOL_SEMANTIC_LEXICAL_INDEX": "D:/comsol_docs_fts/manuals.sqlite3",
         "COMSOL_SEMANTIC_MODEL_PATH": str(MODEL),
@@ -88,7 +93,7 @@ async def _discover(profile: str, runtime_dir: Path) -> dict[str, Any]:
 
 
 async def _semantic_flow(runtime_dir: Path) -> dict[str, Any]:
-    async with stdio_client(_server("semantic_docs", runtime_dir)) as (read, write):
+    async with stdio_client(_server("core", runtime_dir, semantic_enabled=True)) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
             try:
@@ -118,6 +123,9 @@ async def _semantic_flow(runtime_dir: Path) -> dict[str, Any]:
     assert search["payload"]["success"] is True and search["payload"]["results"]
     assert all(item["module"] == "Wave_Optics_Module" for item in search["payload"]["results"])
     assert capabilities["payload"]["semantic_search"]["available"] is True
+    assert capabilities["payload"]["profile"] == "core"
+    assert capabilities["payload"]["enabled_features"] == ["semantic_docs"]
+    assert capabilities["payload"]["tool_count"] == 50
     assert reset["payload"]["success"] is True
     assert stopped["payload"]["worker"]["state"] == "stopped"
     assert lexical["payload"]["success"] is True and lexical["payload"]["results"]

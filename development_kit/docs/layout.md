@@ -133,6 +133,7 @@ models are intentionally absent.
 - `development_kit/tests/fixtures/semantic_retrieval_evaluation.json` — This fixture contains the frozen judged semantic retrieval queries.
 - `development_kit/tests/snapshots/baseline_tool_schemas.json` — This snapshot freezes the baseline public tool schemas.
 - `development_kit/tests/snapshots/full_tool_schemas.json` — This snapshot freezes every registered public tool schema.
+- `development_kit/tests/snapshots/feature_tool_names.json` — This snapshot freezes the membership of every independent default-off feature overlay.
 - `development_kit/tests/snapshots/profile_tool_names.json` — This snapshot freezes tool membership for every static profile.
 
 ## Licensed and subprocess integration tests
@@ -153,7 +154,7 @@ models are intentionally absent.
 - `development_kit/tests/integration/spectral_characterization_acceptance.py` — This runner executes one explicit licensed durable spectral acceptance job.
 - `development_kit/tests/integration/resource_admission_acceptance.py` — This gate checks detached resource admission on controlled COMSOL input.
 - `development_kit/tests/integration/semantic_benchmark_soak.py` — This gate runs the frozen semantic retrieval soak and concurrent burst.
-- `development_kit/tests/integration/semantic_profile_acceptance.py` — This gate checks fresh-stdio semantic profile discovery and tools.
+- `development_kit/tests/integration/semantic_feature_acceptance.py` — This gate checks fresh-stdio base-profile discovery and opt-in semantic-feature tools.
 - `development_kit/tests/integration/semantic_retrieval_acceptance.py` — This gate checks isolated semantic retrieval against a pinned local index.
 - `development_kit/tests/integration/semantic_worker_containment.py` — This gate checks semantic worker hang and crash containment.
 - `development_kit/tests/integration/test_native_cancel_candidate.py` — This gate checks the native cancellation candidate across fresh processes.
@@ -266,7 +267,7 @@ models are intentionally absent.
 - `development_kit/tests/test_semantic_contracts.py` — This module tests semantic benchmark contracts, limits, and import safety.
 - `development_kit/tests/test_semantic_index.py` — This module tests immutable semantic index construction and publication.
 - `development_kit/tests/test_semantic_retrieval.py` — This module tests deterministic vector retrieval, filtering, fusion, and cache identity.
-- `development_kit/tests/test_semantic_tools.py` — This module tests semantic profile schemas, configuration, and degradation behavior.
+- `development_kit/tests/test_semantic_tools.py` — This module tests semantic feature schemas, configuration, and degradation behavior.
 - `development_kit/tests/test_semantic_worker_protocol.py` — This module tests isolated semantic worker protocol and containment.
 - `development_kit/tests/test_server.py` — This module tests server construction and capabilities without starting a transport.
 - `development_kit/tests/test_settings.py` — This module tests grouped settings defaults, validation, and fallback errors.

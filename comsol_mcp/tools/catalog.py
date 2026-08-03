@@ -11,11 +11,10 @@ PROFILE_NAMES = (
     "core",
     "basic_fem",
     "wave_optics",
-    "semantic_docs",
-    "desktop_shared",
     "experimental",
     "full",
 )
+FEATURE_NAMES = ("semantic_docs", "shared_server")
 
 
 @dataclass(frozen=True)
@@ -32,6 +31,7 @@ class ToolSpec:
     advances_model_revision: bool
     starts_solver: bool
     intended_profiles: tuple[str, ...]
+    feature_gate: str | None
     input_contract: str
     output_contract: str
     structural_limits: tuple[tuple[str, int], ...] = ()
@@ -913,23 +913,28 @@ _DESKTOP_SHARED_FOUNDATION = frozenset(
         "shared_model_adopt",
     }
 )
+_SHARED_SERVER_ADDITIONS = _DESKTOP_SHARED_FOUNDATION - _CORE_TOOLS
 
 
 def _build_registry() -> dict[str, ToolMetadata]:
     all_names = {name for names in _TOOLS_BY_REGISTRAR.values() for name in names}
+    feature_by_tool = {
+        **{name: "semantic_docs" for name in _SEMANTIC_DOCS_ADDITIONS},
+        **{name: "shared_server" for name in _SHARED_SERVER_ADDITIONS},
+    }
+    base_names = frozenset(all_names - set(feature_by_tool))
     profile_tools = {
         "core": _CORE_TOOLS,
         "basic_fem": _CORE_TOOLS | _BASIC_FEM_ADDITIONS,
         "wave_optics": _CORE_TOOLS | _WAVE_OPTICS_ADDITIONS,
-        "semantic_docs": _CORE_TOOLS | _SEMANTIC_DOCS_ADDITIONS,
-        "desktop_shared": _DESKTOP_SHARED_FOUNDATION,
         "experimental": _CORE_TOOLS | _EXPERIMENTAL_ADDITIONS,
-        "full": frozenset(all_names),
+        "full": base_names,
     }
     registry: dict[str, ToolMetadata] = {}
     for registrar, names in _TOOLS_BY_REGISTRAR.items():
         group = _GROUP_BY_REGISTRAR[registrar.rsplit(".", 1)[-1]]
         for name in names:
+            feature_gate = feature_by_tool.get(name)
             deprecated = name == "study_staged_parametric_sweep"
             if name in _SIDE_EFFECTS:
                 side_effect_class = _SIDE_EFFECTS[name]
@@ -966,8 +971,11 @@ def _build_registry() -> dict[str, ToolMetadata]:
                 ),
                 starts_solver=name in _STARTS_SOLVER,
                 intended_profiles=tuple(
-                    profile for profile in PROFILE_NAMES if name in profile_tools[profile]
+                    PROFILE_NAMES
+                    if feature_gate is not None
+                    else (profile for profile in PROFILE_NAMES if name in profile_tools[profile])
                 ),
+                feature_gate=feature_gate,
                 input_contract=f"tool-input/{name}/1",
                 output_contract=f"tool-output/{name}/1",
                 structural_limits=(
@@ -1020,6 +1028,7 @@ def validate_tool_specs(
         raise ValueError("ToolSpec registry cannot be empty")
     normalized = {spec.name: spec for spec in entries}
     profile_set = set(PROFILE_NAMES)
+    feature_set = set(FEATURE_NAMES)
     for key, spec in zip(keys, entries, strict=True):
         name = spec.name
         if key != name:
@@ -1036,6 +1045,12 @@ def validate_tool_specs(
             raise ValueError(f"ToolSpec profiles are invalid for {name!r}")
         if "full" not in spec.intended_profiles:
             raise ValueError(f"ToolSpec compatibility profile is missing for {name!r}")
+        if spec.feature_gate is not None and spec.feature_gate not in feature_set:
+            raise ValueError(f"ToolSpec feature gate is invalid for {name!r}")
+        if spec.feature_gate is not None and set(spec.intended_profiles) != profile_set:
+            raise ValueError(
+                f"feature-gated ToolSpec is not compatible with every profile: {name!r}"
+            )
         if spec.maturity not in {"verified", "experimental", "deprecated"}:
             raise ValueError(f"ToolSpec maturity is invalid for {name!r}")
         if spec.deprecation_state not in {"active", "deprecated"}:
@@ -1049,10 +1064,15 @@ def validate_tool_specs(
             "process_lifecycle",
         }:
             raise ValueError(f"solver-starting ToolSpec has impossible effects: {name!r}")
-        if spec.maturity == "experimental" and {
-            "core",
-            "basic_fem",
-        } & set(spec.intended_profiles):
+        if (
+            spec.feature_gate is None
+            and spec.maturity == "experimental"
+            and {
+                "core",
+                "basic_fem",
+            }
+            & set(spec.intended_profiles)
+        ):
             raise ValueError(f"stable profile contains experimental ToolSpec: {name!r}")
         if spec.advances_model_revision and not spec.requires_model_revision:
             raise ValueError(f"advancing ToolSpec lacks revision requirement: {name!r}")
@@ -1072,13 +1092,26 @@ validate_tool_specs()
 
 def registrars_for_profile(profile: str) -> tuple[str, ...]:
     """Return only registrar paths needed by one validated profile."""
+    return registrars_for_configuration(profile, ())
+
+
+def registrars_for_configuration(
+    profile: str,
+    enabled_features: Iterable[str],
+) -> tuple[str, ...]:
+    """Return registrar paths for one base profile plus independent features."""
     if profile not in PROFILE_NAMES:
         raise ValueError(f"Invalid profile {profile!r}")
+    features = frozenset(enabled_features)
+    if not features <= set(FEATURE_NAMES):
+        raise ValueError("enabled features contain an unknown feature gate")
     return tuple(
         registrar
         for registrar in _TOOLS_BY_REGISTRAR
         if any(
-            spec.registrar == registrar and profile in spec.intended_profiles
+            spec.registrar == registrar
+            and profile in spec.intended_profiles
+            and ((spec.feature_gate is None) or (spec.feature_gate in features))
             for spec in TOOL_SPECS.values()
         )
     )
@@ -1102,6 +1135,7 @@ async def snapshot_tool_schemas(server: Any) -> dict[str, dict[str, Any]]:
 
 
 __all__ = [
+    "FEATURE_NAMES",
     "PROFILE_NAMES",
     "TOOL_METADATA",
     "TOOL_SPECS",
@@ -1109,6 +1143,7 @@ __all__ = [
     "ToolSpec",
     "get_tool_metadata",
     "registrars_for_profile",
+    "registrars_for_configuration",
     "snapshot_tool_schemas",
     "validate_tool_specs",
 ]

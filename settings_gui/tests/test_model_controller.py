@@ -193,7 +193,25 @@ def test_dirty_notice_apply_and_next_dirty_cycle() -> None:
     assert len(store.saved) == 1
 
     controller.update("ownership.owner", "operator-2")
-    assert len(dialogs.infos) == 2
+    assert len(dialogs.infos) == 1
+
+
+def test_gui_language_and_scale_are_immediate_without_restart_notice_or_pending_state() -> None:
+    controller, store, dialogs = _controller()
+
+    controller.update("gui.language", "en")
+    controller.update("gui.scale", "125")
+
+    assert controller.model.dirty is True
+    assert controller.model.restart_required is False
+    assert dialogs.infos == []
+    assert controller.apply() is True
+    assert controller.restart_pending is False
+    assert len(store.saved) == 1
+
+    controller.update("profile.name", "basic_fem")
+    assert controller.model.restart_required is True
+    assert len(dialogs.infos) == 1
 
 
 def test_evidence_disable_decline_and_cancel_decline_preserve_state() -> None:

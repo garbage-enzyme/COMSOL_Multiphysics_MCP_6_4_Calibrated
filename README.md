@@ -87,10 +87,10 @@ from documentation, as the authority for the installed tool surface.
   COMSOL-compiled Java point driver, and the launcher EXE. The target does not
   need Python, Conda, MPh, JPype, or an external Java installation; COMSOL
   itself is still required and is never bundled or replaced.
-- **Shared Desktop collaboration (default-off).** The `desktop_shared` profile can attach to a manually started local COMSOL Server, adopt exactly one server-held model, enforce non-owning leases and revision locks, run durable attached jobs, and detach without shutting down the user's Server, Desktop, listener, or model.
+- **Shared Desktop collaboration (default-off).** The independent `shared_server.enabled` feature can be combined with any tool profile to attach to a manually started local COMSOL Server, adopt exactly one server-held model, enforce non-owning leases and revision locks, run durable attached jobs, and detach without shutting down the user's Server, Desktop, listener, or model.
 - **Wave Optics validation.** A focused profile provides read-only model preflight and a one-wavelength evidence audit for periodic metasurfaces.
 - **Bounded offline manuals.** SQLite FTS5/BM25 search and page retrieval run outside the COMSOL control process and return compact source/page citations.
-- **Honest optional semantic retrieval.** The isolated semantic profile is contained, but its baseline model did not meet quality and memory promotion gates. Lexical manual search remains the recommended default.
+- **Honest optional semantic retrieval.** The isolated `semantic_docs.enabled` feature is contained and composes with any tool profile, but its baseline model did not meet quality and memory promotion gates. Lexical manual search remains the recommended default.
 
 ## Shared project settings
 
@@ -141,7 +141,10 @@ third-party agents to comply.
 The installed entry also accepts `--settings-path` and `--validate-only` and
 works with MCP stdio stopped. Its About page can explicitly create or remove the
 per-user `COMSOL MCP Settings.lnk`; installation and ordinary GUI actions never
-create that shortcut automatically.
+create that shortcut automatically. The shortcut targets the installed
+`comsol-mcp-settings-gui` Windows GUI-subsystem entry, so it does not open a
+terminal window; the console `comsol-mcp-settings` entry remains available for
+validation and scripted actions.
 
 ## Profiles
 
@@ -153,16 +156,24 @@ fixed for the lifetime of that server process; restart after changing it.
 | `core` (default) | Compact, mature control plane: status, ownership, session/model inspection, one-point solve/evaluation, and lexical manuals. |
 | `basic_fem` | `core` plus typed conventional FEM construction, named selections, Pressure Acoustics and mathematical PDE interfaces, derived-geometry edits, bounded exports, and the Python-free standalone launcher tools. |
 | `wave_optics` | Recommended for metasurfaces: `core` plus derived-geometry edits, material preview, locale-safe field discovery and bounded NPZ/manifest extraction, periodic-mesh audit/smoke, visual-review contracts, Wave Optics preflight, and point/reference audits. Durable staged jobs remain under `job_submit`. |
-| `desktop_shared` | Explicit opt-in shared Desktop/attached-Server workflow; requires `profile.name=desktop_shared` and `shared_server.enabled=true`, a manually started local Server, per-call user confirmation, exact process/listener identity, and exact model adoption. It never starts or terminates the external Server. |
-| `semantic_docs` | `core` plus isolated experimental vector-assisted manual retrieval. |
 | `experimental` | Explicit opt-in generic creation, async, property escape hatches, and project helpers. |
-| `full` | Broad compatibility/discovery surface containing every tool across all profiles. |
+| `full` | Broad compatibility/discovery surface containing every non-feature-gated tool. |
+
+Profiles only control the visibility of COMSOL automation/simulation tools and
+future autonomous-exploration tools. Orthogonal functionality uses independent,
+default-off Boolean feature gates that compose with every profile and with each
+other:
+
+| Feature setting | Added surface |
+| --- | --- |
+| `shared_server.enabled=true` | Protected shared Desktop/attached-Server workflow with explicit confirmation and exact process/listener/model identity. |
+| `semantic_docs.enabled=true` | Three isolated experimental vector-assisted manual-retrieval tools. |
 
 Call `capabilities` to discover the active profile, exact registered tools, target versions, disabled groups, and restart requirements without starting COMSOL. Its bounded `deployment_identity` reports source-tree versus installed-package loading plus frozen profile/schema and catalog hashes, so a host restart can detect same-version stale installs or source shadowing without exposing local paths.
 
-The default `core` and `wave_optics` profiles do not expose shared-session tools.
 Shared Desktop/attached-Server work is isolated behind the default-off
-`desktop_shared` profile and `shared_server.enabled=true` in `settings.json`.
+`shared_server.enabled=true` feature in `settings.json`, independently of the
+selected profile.
 The user must start COMSOL Server manually, connect Desktop to it, confirm
 the endpoint, and explicitly confirm each attach. The legacy `comsol_connect`
 tool remains an experimental compatibility surface and is not a substitute for
@@ -387,7 +398,7 @@ Without a caller-supplied versioned validation policy, an audit is evidence-only
 
 `manual_search` and `manual_read_pages` are the production documentation path. They use an offline SQLite FTS5/BM25 index, bounded worker processes, and compact source/page citations. The MCP control process does not import Torch or SentenceTransformer for this path.
 
-`semantic_docs` is opt-in and isolated from COMSOL control. Its isolated-worker vector retrieval is an English diagnostic baseline, not a multilingual or production-quality claim: the frozen benchmark improved exact-match recall but regressed paraphrase/multi-concept recall, returned no direct-Chinese matches, failed negative-query abstention, and grew substantially in memory during soak testing. The baseline model and its index assets have been removed; a replacement model would require a full benchmark gate before re-deployment. Keep `core` plus lexical manual search for normal work.
+`semantic_docs.enabled` is opt-in and isolated from COMSOL control. Its isolated-worker vector retrieval is an English diagnostic baseline, not a multilingual or production-quality claim: the frozen benchmark improved exact-match recall but regressed paraphrase/multi-concept recall, returned no direct-Chinese matches, failed negative-query abstention, and grew substantially in memory during soak testing. The baseline model and its index assets have been removed; a replacement model would require a full benchmark gate before re-deployment. Keep lexical manual search for normal work.
 
 ## ClientAPI compatibility notes
 
@@ -500,7 +511,7 @@ For optional isolated semantic retrieval (sentence-transformers, not ChromaDB):
 ```powershell
 python -m pip install ".[semantic-docs]"
 # Edit settings.json:
-#   profile.name = "semantic_docs"
+#   semantic_docs.enabled = true
 #   semantic_docs.root = "D:/comsol_semantic"
 #   semantic_docs.lexical_index = "D:/comsol_docs_fts/manuals.sqlite3"
 #   semantic_docs.model_path = "D:/comsol_semantic/models/<model>/<revision>"

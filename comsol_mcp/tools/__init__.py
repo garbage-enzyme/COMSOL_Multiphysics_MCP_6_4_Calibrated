@@ -5,7 +5,7 @@ from __future__ import annotations
 from importlib import import_module
 from typing import Any
 
-from .catalog import registrars_for_profile
+from .catalog import registrars_for_configuration
 
 
 def _load_symbol(path: str) -> Any:
@@ -19,7 +19,7 @@ def register_tool_modules(mcp, profile="full") -> None:
         ProfileSelection,
         _is_validated_profile_selection,
         resolve_profile,
-        tool_names_for_profile,
+        tool_names_for_selection,
     )
 
     if isinstance(profile, ProfileSelection):
@@ -28,8 +28,11 @@ def register_tool_modules(mcp, profile="full") -> None:
         selection = profile
     else:
         selection = resolve_profile(profile)
-    enabled_names = tool_names_for_profile(selection.name)
-    for registrar_path in registrars_for_profile(selection.name):
+    enabled_names = tool_names_for_selection(selection)
+    for registrar_path in registrars_for_configuration(
+        selection.name,
+        selection.enabled_features,
+    ):
         register = _load_symbol(registrar_path)
         from .profiles import register_profiled
 
