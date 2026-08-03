@@ -164,6 +164,35 @@ def _canonical_icon_location(value: str) -> str:
     return f"{icon_path.rstrip()},{index}"
 
 
+def _icon_location_identity(value: str) -> tuple[str, str | None]:
+    canonical = _canonical_icon_location(value)
+    icon_path, separator, raw_index = canonical.rpartition(",")
+    if not separator or not icon_path:
+        return canonical, None
+    return _normalized_path(Path(icon_path)), raw_index
+
+
+def _shortcut_spec_mismatch_fields(
+    observed: ShortcutSpec,
+    expected: ShortcutSpec,
+) -> tuple[str, ...]:
+    """Return path-free names for Shell Link properties that differ semantically."""
+    mismatches: list[str] = []
+    if _normalized_path(observed.target) != _normalized_path(expected.target):
+        mismatches.append("target")
+    if observed.arguments != expected.arguments:
+        mismatches.append("arguments")
+    if _normalized_path(observed.working_directory) != _normalized_path(expected.working_directory):
+        mismatches.append("working_directory")
+    if _icon_location_identity(observed.icon_location) != _icon_location_identity(
+        expected.icon_location
+    ):
+        mismatches.append("icon_location")
+    if observed.description != expected.description:
+        mismatches.append("description")
+    return tuple(mismatches)
+
+
 def _run_powershell(script: str, environment: dict[str, str]) -> str:
     completed = subprocess.run(  # noqa: S603
         [
@@ -264,8 +293,12 @@ def _write_windows_shortcut(path: Path, spec: ShortcutSpec) -> None:
                 "COMSOL_MCP_SHORTCUT_DESCRIPTION": spec.description,
             },
         )
-        if inspect_windows_shortcut(temporary) != spec:
-            raise OSError("written shortcut properties differ")
+        mismatches = _shortcut_spec_mismatch_fields(
+            inspect_windows_shortcut(temporary),
+            spec,
+        )
+        if mismatches:
+            raise OSError("written shortcut properties differ: " + ",".join(mismatches))
         os.rename(temporary, path)
     finally:
         temporary.unlink(missing_ok=True)
@@ -330,7 +363,9 @@ def _resolved_inputs(
 def _existing_kind(existing: ShortcutSpec | None, desired: ShortcutSpec) -> str:
     if existing is None or existing.description != OWNERSHIP_DESCRIPTION:
         return "foreign"
-    return "owned_current" if existing == desired else "owned_stale"
+    return (
+        "owned_current" if not _shortcut_spec_mismatch_fields(existing, desired) else "owned_stale"
+    )
 
 
 def _shortcut_identity(path: Path) -> tuple[int, int, int, str]:

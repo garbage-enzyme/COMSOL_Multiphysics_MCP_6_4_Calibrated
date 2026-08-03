@@ -14,6 +14,7 @@ from settings_gui.desktop_shortcut import (
     SHORTCUT_NAME,
     ShortcutSpec,
     _canonical_icon_location,
+    _shortcut_spec_mismatch_fields,
     create_desktop_shortcut,
     inspect_windows_shortcut,
     remove_desktop_shortcut,
@@ -29,6 +30,50 @@ def test_shell_icon_location_spacing_is_canonicalized() -> None:
         "C:\\icons,archive\\icon.ico,-1"
     )
     assert _canonical_icon_location("invalid icon location") == "invalid icon location"
+
+
+def test_shell_equivalent_path_serializations_have_no_mismatches(tmp_path: Path) -> None:
+    expected = ShortcutSpec(
+        target=tmp_path / "Scripts" / "python.exe",
+        arguments='--settings-path "D:\\settings path\\settings.json"',
+        working_directory=tmp_path / "Scripts",
+        icon_location=f"{tmp_path / 'icon.ico'},0",
+        description=OWNERSHIP_DESCRIPTION,
+    )
+    observed = ShortcutSpec(
+        target=expected.target,
+        arguments=expected.arguments,
+        working_directory=expected.working_directory / ".",
+        icon_location=f"{tmp_path / 'icon.ico'}, 0",
+        description=expected.description,
+    )
+
+    assert _shortcut_spec_mismatch_fields(observed, expected) == ()
+
+
+def test_shell_mismatch_diagnostics_include_only_field_names(tmp_path: Path) -> None:
+    expected = ShortcutSpec(
+        target=tmp_path / "python.exe",
+        arguments="--expected",
+        working_directory=tmp_path,
+        icon_location=f"{tmp_path / 'expected.ico'},0",
+        description=OWNERSHIP_DESCRIPTION,
+    )
+    observed = ShortcutSpec(
+        target=tmp_path / "other.exe",
+        arguments="--other",
+        working_directory=tmp_path / "other",
+        icon_location=f"{tmp_path / 'other.ico'},0",
+        description="other",
+    )
+
+    assert _shortcut_spec_mismatch_fields(observed, expected) == (
+        "target",
+        "arguments",
+        "working_directory",
+        "icon_location",
+        "description",
+    )
 
 
 class FakeShortcutBackend:
