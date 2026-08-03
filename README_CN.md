@@ -5,6 +5,7 @@
 [![CI](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/actions/workflows/ci.yml)
 [![Python 3.14](https://img.shields.io/badge/python-3.14-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
+![Release: 0.6.2](https://img.shields.io/badge/release-0.6.2-blue)
 ![Status: alpha](https://img.shields.io/badge/status-alpha-red)
 [![GitHub stars](https://img.shields.io/github/stars/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated?style=social)](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/stargazers)
 
@@ -20,7 +21,7 @@
   warning。请阅读独立的[证据完整性指南](docs/evidence_integrity/README_CN.md)。
 - **COMSOL Desktop/Server 交互协作（默认关闭）。** 用户和 agent 可以在一个用户拥有的
   本地 Server、一个连接的 Desktop 和一个精确 server-held model 上明确轮流操作。
-  该模式要求显式 profile/flag enablement 以及每次 session confirmation。请阅读
+  该模式要求显式启用独立功能以及每次 session confirmation。请阅读
   [交互协作指南](docs/interactive_shared_session/README_CN.md)。
 - **五种仿真运行方式。** `interactive`、`inline`、`launcher`、`standalone` 和
   `mphonly` 分别用于短反馈、直接脚本、可恢复的本地长任务、目标机无 Python 的
@@ -40,7 +41,7 @@ Optics、材料与边界、durable jobs、物理证据、资源安全和故障�
 
 安装后的 FastMCP stdio server 已通过 Codex CLI 和 opencode 验证。Windows 11 上的
 Claude Code 2.1.220 验收已完成 stdio 初始化，发现测试所用 `wave_optics` profile 的
-全部 67 个工具，并成功调用 `capabilities`、`comsol_status` 和 `solver_status`；server
+完整工具界面，并成功调用 `capabilities`、`comsol_status` 和 `solver_status`；server
 干净退出，未创建 solver lease，也未启动 COMSOL 进程。该结论只覆盖 client transport、
 schema、discovery 和非启动 status 兼容性，不是 licensed runtime 验收：Claude 未调用
 `comsol_start`、未运行模型、未覆盖完整错误界面，也未证明 start/solve/cleanup。
@@ -50,9 +51,9 @@ profile 选择、重启规则和 solver-free 验证请阅读独立指南：
 - [部署指南](DEPLOYMENT_CN.md)
 
 关键规则：使用非 editable 安装；配置安装后的 `comsol-mcp` executable 绝对路径；
-编辑项目根目录统一的 [`settings.json`](settings.json)；修改 profile 或安装包后重启
-client；保持 COMSOL 工具串行。调用 `capabilities` 可在不启动 COMSOL 的情况下
-验证实际部署的 profile。
+普通用户通过设置界面完成配置；修改启动设置或安装包后重启 client；保持 COMSOL 工具
+串行。直接编辑 JSON 是面向开发者、自动部署和获得用户明确授权的 agent 的高级路径。
+调用 `capabilities` 可在不启动 COMSOL 的情况下验证实际部署的 profile。
 
 仓库内的 client 示例依据 Claude Code 官方
 [MCP 文档](https://code.claude.com/docs/en/mcp)、Hermes 官方
@@ -81,10 +82,11 @@ acceptance 报告应至少包含不启动 COMSOL 的 `initialize`、实时 `list
 
 ## 统一项目设置
 
-所有启动设置都按功能分类存储在项目根目录的 [`settings.json`](settings.json) 中。
-Codex、opencode、Claude Code 和 Hermes 应使用同一个文件，避免不同 agent 悄悄使用
-不同的 profile、路径、Java runtime 或证据规则。模板只包含配置；每个设置项的含义、
-默认值和可接受值见[设置指南](docs/setting_guide/README_CN.md)。用户删去设置条目时，
+**普通用户首选设置界面。** 它修改 Codex、opencode、Claude Code 和 Hermes 共用的
+同一份 `settings.json`，避免不同 agent 悄悄使用不同的 profile、路径、Java runtime 或
+证据规则。仓库中的 [`settings.json`](settings.json) 是 canonical 模板，也是开发者、
+自动部署和 agent 使用的高级接口。每个设置项的含义、默认值和可接受值见
+[设置指南](docs/setting_guide/README_CN.md)。用户删去设置条目时，
 该条目回填安全默认值；用户输入非法值时，仅该条目保持默认值，并由 `capabilities` 和
 `evidence_integrity_status` 报告 `settings_errors`；JSON 整体损坏时回退完整安全默认值
 并报告错误。不要为每个 agent 创建第二份 settings 文件。
@@ -107,10 +109,11 @@ shared-server 或 Java 设置需要重启 MCP host；随后调用 `capabilities`
 
 安装后首次使用时，`capabilities.project_settings` 会报告 `setup_required: true`、
 `configuration_source: bundled_template`、设置方式 `settings.start` 与 `agent_edit`，以及
-修改后需要重启。先询问用户选择哪种方式。若选择 GUI，只调用一次所有 profile 都有的
-`settings.start`，说明改动要在重启 Codex 或所属 MCP client 后生效，然后停止继续输出并
-等待用户下一条消息；GUI 打开期间不要同时编辑 JSON。若选择 agent edit，只修改解析出的
-可写文件，验证后请求同样的重启。安装后的 `comsol-mcp-settings` 命令可直接打开 GUI；从
+修改后需要重启。对普通用户，只调用一次所有 profile 都有的 `settings.start`，说明启动
+设置要在重启 Codex 或所属 MCP client 后生效，然后停止继续输出并等待用户下一条消息；
+GUI 打开期间不要同时编辑 JSON。只有用户明确要求 agent 管理或自动配置时才使用
+`agent_edit`；只修改解析出的可写文件，验证后请求同样的重启。安装后的
+`comsol-mcp-settings` 命令可直接打开 GUI；从
 仓库或源码分发包使用时也可运行 `./Open_Settings_GUI.ps1`。该脚本会查找受支持的 Python
 3.14，也可通过 `-PythonPath` 和 `-SettingsPath` 明确指定；`-ValidateOnly` 只验证启动条件，
 不会打开界面或启动 COMSOL。服务器会返回 `agent_action_required: pause_for_user`，但无法从
@@ -123,8 +126,8 @@ shared-server 或 Java 设置需要重启 MCP host；随后调用 `capabilities`
 
 ## Profile
 
-在启动服务器前修改 `settings.json` 的 `profile.name`。一个 profile 在该服务器进程的
-整个生命周期内固定；更改后需重启。
+普通用户在启动服务器前通过设置界面选择 profile。开发者和 agent 可以修改 JSON 中等价的
+`profile.name` 字段。一个 profile 在该服务器进程的整个生命周期内固定；更改后需重启。
 
 | Profile | 适用场景 |
 | --- | --- |
@@ -137,15 +140,15 @@ shared-server 或 Java 设置需要重启 MCP host；随后调用 `capabilities`
 Profile 只控制 COMSOL 自动化仿真工具以及未来自主探索工具的可见性。其他正交功能使用
 独立、默认关闭的 Boolean 开关；它们可与任意 profile 组合，也可同时开启：
 
-| 功能设置 | 增加的工具界面 |
+| 功能（高级 JSON 设置） | 增加的工具界面 |
 | --- | --- |
 | `shared_server.enabled=true` | 需要显式确认及精确进程/listener/model 身份的受保护 shared Desktop/attached-Server 工作流。 |
 | `semantic_docs.enabled=true` | 三个隔离的实验性向量辅助手册检索工具。 |
 
 调用 `capabilities` 可在不启动 COMSOL 的情况下获知当前 profile、精确注册工具、目标版本、禁用工具组和重启要求。其中有界的 `deployment_identity` 会报告当前代码来自源码树还是已安装包，并给出冻结的 profile/schema 与 catalog 哈希；因此即使版本号相同，也能在重启后识别旧安装或源码遮蔽，且不暴露本机路径。
 
-共享 Desktop/attached-Server 工作由 `settings.json` 中默认关闭的
-`shared_server.enabled=true` 功能独立控制，不依赖所选 profile。用户必须手动启动 COMSOL Server，
+在设置界面的“工具配置”页开启共享 Desktop/attached-Server 工作。该功能默认关闭，且不依赖
+所选 profile；高级 JSON 等价值为 `shared_server.enabled=true`。用户必须手动启动 COMSOL Server，
 让 Desktop 连接它，确认 endpoint，并显式确认每次 attach。旧 `comsol_connect` 仍是
 experimental 兼容界面，不能替代受保护的 shared-session 生命周期。
 
@@ -433,6 +436,9 @@ git clone https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrat
 cd COMSOL_Multiphysics_MCP_6_4_Calibrated
 python -m pip install .
 
+# 安装后，普通用户首选设置界面：
+comsol-mcp-settings
+
 # 推荐离线手册索引；输出目录必须只含 ASCII 字符。
 python -m pip install ".[manuals]"
 python -m comsol_mcp.knowledge.lexical_manual build --index D:\comsol_docs_fts\manuals.sqlite3
@@ -442,7 +448,7 @@ python -m comsol_mcp.knowledge.lexical_manual build --index D:\comsol_docs_fts\m
 
 ```powershell
 python -m pip install ".[semantic-docs]"
-# 编辑 settings.json：
+# 优先使用设置界面的“文档”页；开发者/agent 自动化可编辑 JSON：
 #   semantic_docs.enabled = true
 #   semantic_docs.root = "D:/comsol_semantic"
 #   semantic_docs.lexical_index = "D:/comsol_docs_fts/manuals.sqlite3"
@@ -468,7 +474,8 @@ MCP 客户端配置示例：
 }
 ```
 
-在 `settings.json` 中将 `profile.name` 设为 `core` 即使用紧凑默认 profile。客户端示例见
+普通用户在设置界面选择 `core` 即使用紧凑默认 profile；开发者和 agent 可在 JSON 中设置
+等价的 `profile.name`。客户端示例见
 `config/claude-code-mcp.example.json`、`config/codex-mcp.example.toml`、
 `config/hermes-mcp.example.yaml` 和 `config/opencode-mcp.example.json`。
 

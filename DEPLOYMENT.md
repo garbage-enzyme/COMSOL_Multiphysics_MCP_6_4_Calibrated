@@ -35,14 +35,30 @@ The wheel exposes the canonical `comsol_mcp` runtime and the solver-free
 is not installed. Configure the absolute installed server console entry point
 for a portable deployment.
 
-## 2. Configure the shared settings file
+## 2. Configure with the Settings GUI (recommended)
 
-Edit the checked-in project-root [`settings.json`](settings.json) before starting
-any client. It is the single source for profile, runtime/job roots, model and
-artifact containment, shared-server enablement, evidence checks, semantic-doc
-paths, ownership label, and optional COMSOL Java paths. Keep the same file for
-every agent. See the [settings guide](docs/setting_guide/README.md) for every
-field's meaning, default, and accepted values.
+The Settings GUI is the normal configuration path for users. Open the installed
+application before starting an MCP client, or ask an already connected agent to
+call `settings.start` once:
+
+```powershell
+comsol-mcp-settings
+# Bind the GUI to the same explicit file used by the MCP client when needed:
+comsol-mcp-settings --settings-path "D:\settings\settings.json"
+```
+
+Use the GUI to choose the profile and feature gates, review discovered COMSOL
+and Java paths, and set runtime, model-read, and artifact roots. Save the
+settings, close the GUI, then restart the owning MCP client. The GUI and every
+agent use one shared `settings.json`; there is no per-agent settings file. See
+the [settings guide](docs/setting_guide/README.md) for every field's meaning,
+default, and accepted values.
+
+Direct JSON editing is an advanced path for developers, deployment automation,
+and agents acting on an explicit user request. Ordinary users should not need to
+hand-edit the checked-in template.
+
+### Developer and agent JSON configuration (advanced)
 
 The template contains every setting and its default. Removing a field restores
 that field's safe default. An illegal value restores only that field's default
@@ -91,11 +107,12 @@ For an installed package with no persistent file, `capabilities` reports:
 }
 ```
 
-Ask the user whether to open the GUI or let the agent edit JSON. For the GUI,
-call `settings.start` once, state that changes require restarting Codex or the
-owning MCP client, stop further task output, and wait for the user's next
-message. Do not modify settings directly while the GUI is open. For agent edit,
-modify only the resolved writable file, validate it, and request the restart.
+For an ordinary user, call `settings.start` once, state that startup-setting
+changes require restarting Codex or the owning MCP client, stop further task
+output, and wait for the user's next message. Do not modify settings directly
+while the GUI is open. Use agent JSON editing only when the user explicitly
+requests it; modify only the resolved writable file, validate it, and request
+the restart.
 The GUI writes `%LOCALAPPDATA%/comsol_mcp/settings.json` by default; the bundled
 package file remains a read-only template. `comsol-mcp-settings` is the direct
 console fallback. The MCP response asks agents to pause, but cannot technically
@@ -136,17 +153,19 @@ build/modules, license, scheduler, storage, and output requirements first.
 | `experimental` | Explicit opt-in generic and escape-hatch tools. |
 | `full` | Broad non-feature compatibility surface; not recommended by default. |
 
-Set `profile.name` in `settings.json`. Omitting the entry selects `core`. The
-profile is frozen when the stdio process starts; changing it requires a
+Select the profile in the Settings GUI. Developers and agents may set the
+equivalent `profile.name` field in JSON; omitting it selects `core`. The profile
+is frozen when the stdio process starts, so changing it requires a
 client/MCP-host restart. An invalid profile keeps `core` and is reported in
 `settings_errors` instead of silently selecting another profile.
 
 Profiles control COMSOL automation/simulation and future autonomous-exploration
-tool visibility. Enable the protected shared workflow independently for any
-profile with `shared_server.enabled=true` in `settings.json`; enable isolated
-semantic retrieval with `semantic_docs.enabled=true`. Both default to false and
-may be enabled together. The legacy `comsol_connect` compatibility tool
-remains experimental and is not a substitute for this lifecycle.
+tool visibility. In the GUI, independent feature gates can be combined with any
+profile and with one another. Their advanced JSON equivalents are
+`shared_server.enabled=true` for the protected shared workflow and
+`semantic_docs.enabled=true` for isolated semantic retrieval; both remain
+default-off. The legacy `comsol_connect` compatibility tool remains experimental
+and is not a substitute for this lifecycle.
 
 The standalone tools in `basic_fem` still run inside the normal Python MCP host. They build
 and control a separate native EXE whose target runtime needs only Windows
@@ -159,10 +178,12 @@ required. A missing inbox compiler is a fail-closed prerequisite error.
 
 ### Optional shared Desktop/attached-Server mode
 
-The shared profile never starts, stops, or terminates the user's COMSOL Server.
+The shared-server feature never starts, stops, or terminates the user's COMSOL
+Server.
 Start COMSOL Multiphysics Server 6.4 manually with its persistent multi-client
 option, record the local endpoint (normally port 2036), and connect the Desktop
-client to that Server. Then edit the MCP settings with:
+client to that Server. In the Settings GUI, enable interactive shared-server
+collaboration in the Profile tab. The equivalent advanced JSON configuration is:
 
 ```json
 {

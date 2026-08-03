@@ -3,8 +3,9 @@
 This directory contains repository-only tests, integration probes, release
 fixtures, build/release utilities, benchmarks, and developer documentation. It
 is intentionally excluded from the ordinary wheel and source distribution.
-Installed runtime imports and the `comsol-mcp` console entry point must depend
-only on packaged runtime resources under `src/`.
+Installed runtime imports and the `comsol-mcp` console entry point depend only
+on packaged runtime resources under `comsol_mcp/` and `settings_gui/`; `src/`
+is a repository-only legacy import compatibility layer.
 
 ## Start here
 
@@ -14,7 +15,9 @@ runtime code from repository-only development assets.
 
 The main boundaries are:
 
-- `src/` is the only packaged runtime implementation.
+- `comsol_mcp/` is the canonical packaged server runtime.
+- `settings_gui/` is the packaged solver-free Settings GUI runtime.
+- `src/` is a repository-only legacy import compatibility layer.
 - `development_kit/tests/` contains dependency/process tests, frozen snapshots,
   and explicit licensed integration probes.
 - `development_kit/release/` contains sanitized acceptance contracts and release
@@ -30,9 +33,9 @@ The main boundaries are:
 
 1. Read [`docs/layout.md`](docs/layout.md) and open only the files related to the
    requested change.
-2. Read `src/tools/catalog.py` and `src/tools/profiles.py` before changing tool
+2. Read `comsol_mcp/tools/catalog.py` and `comsol_mcp/tools/profiles.py` before changing tool
    registration or profile membership.
-3. Read `src/tools/capabilities.py`, `src/schema_registry.py`, and the nearest
+3. Read `comsol_mcp/tools/capabilities.py`, `comsol_mcp/schema_registry.py`, and the nearest
    contract module before changing public identity or artifact schemas.
 4. Run the smallest related test module first, then run the complete default
    suite before commit.
@@ -75,7 +78,7 @@ explicitly requested.
 
 ## Outcome and portfolio evidence contracts
 
-`src/evidence/outcome_contract.py` keeps three decisions independent:
+`comsol_mcp/evidence/outcome_contract.py` keeps three decisions independent:
 
 - `execution.state` records whether requested work completed, failed, was
   interrupted, or reached verified cancellation;
@@ -88,7 +91,7 @@ Every non-accepted disposition carries a reason code, a declared-cap flag, a
 missing-evidence list, and the next caller-eligible action. A terminal cancelled
 state requires exact process, descendant, port, and lease cleanup proof.
 
-`src/evidence/portfolio_verifier.py` accepts a bounded list of cases. Each case
+`comsol_mcp/evidence/portfolio_verifier.py` accepts a bounded list of cases. Each case
 contains one hashed outcome, one artifact-chain manifest, and zero or more
 summary claims. A claim names the `configuration`, `mesh`, `fit`, or
 `wavelength` dimension and cites an artifact ID, exact artifact SHA-256, JSON

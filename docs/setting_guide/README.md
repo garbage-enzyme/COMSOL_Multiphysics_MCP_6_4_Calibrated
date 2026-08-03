@@ -1,7 +1,10 @@
 # COMSOL MCP Settings Guide
 
+Applies to COMSOL MCP `0.6.2` and settings schema `1.2.0`.
+
 The Settings GUI is the primary way to configure COMSOL MCP. Direct JSON editing
-remains supported for automation, recovery, and advanced deployments. Both methods
+remains supported for developers, agents, automation, recovery, and advanced
+deployments. Ordinary users should not need to edit JSON by hand. Both methods
 write the same shared `settings.json`; there is no per-agent configuration file.
 
 Saved changes take effect only after restarting Codex or the MCP client that owns
@@ -256,12 +259,13 @@ explicitly unverified.
 Leaving the asset values at `null` is valid. Enabling `semantic_docs.enabled`
 becomes useful only after the required preprocessed assets exist.
 
-## Direct JSON Editing
+## Developer and Agent JSON Editing (Advanced)
 
-JSON editing remains available when a GUI cannot be used or when settings are
-managed by an installer or deployment script. Stop the MCP host and close the GUI
-before editing. Modify only the resolved writable file, validate it, then restart
-the exact owning client.
+Use JSON when a developer or agent needs reproducible automation, an installer
+manages settings, the GUI cannot be used, or recovery requires it. Agent editing
+requires an explicit user request. Stop the MCP host and close the GUI before
+editing. Modify only the resolved writable file, validate it, then restart the
+exact owning client.
 
 Canonical default template:
 
@@ -303,8 +307,8 @@ Canonical default template:
 Existing `COMSOL_MCP_*`, `COMSOL_SEMANTIC_*`, `JAVA_HOME`, and `JDK_HOME`
 variables remain compatibility overrides. A value already present in the process
 environment has precedence over the corresponding JSON-derived environment value.
-New deployments should use the GUI or JSON file instead of creating separate
-environment-only configurations.
+New user deployments should use the GUI. Developer and agent automation may use
+the same JSON file, but must not create separate environment-only configurations.
 
 ## Update and Recovery
 

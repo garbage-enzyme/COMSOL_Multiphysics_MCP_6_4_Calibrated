@@ -15,11 +15,14 @@ has a different default: it is disabled until explicitly enabled.
 
 ## One-page quick start
 
-1. Keep formal artifacts under the configured `paths.artifact_write_root`,
-   normally the `owned_artifacts` directory beneath `runtime.directory`. Use an
-   absolute ASCII-only directory when overriding the template value.
-2. With the project-root `settings.json`, call `evidence_integrity_status`. All
-   four checks should report `enabled: true`, `source: project_settings`, and
+1. Open the Settings GUI by asking an agent to call `settings.start` once, or by
+   running `comsol-mcp-settings`. In the Evidence tab, keep all four checks
+   enabled. In the Paths tab, keep formal artifacts under
+   `paths.artifact_write_root`, normally the `owned_artifacts` directory beneath
+   `runtime.directory`; use an absolute ASCII-only directory when overriding
+   the template value. Save, close the GUI, and restart the owning MCP client.
+2. Call `evidence_integrity_status`. All four checks should report
+   `enabled: true`, `source: project_settings`, and
    `strict_verification_active: true`.
 3. Run exploratory work normally. Preserve raw and diagnostic rows; do not
    delete a failed or partial point to make a later summary look cleaner.
@@ -89,9 +92,11 @@ that it was truthful.
 
 ## Default-on settings and explicit opt-out
 
-The project-root `settings.json` is the canonical settings file. See the
-[settings guide](../setting_guide/README.md) for the full settings reference. Its
-`evidence_integrity.checks` object contains all four checks and their defaults:
+The Settings GUI is the normal user configuration path. Its Evidence tab shows
+all four default-on checks; see the [settings guide](../setting_guide/README.md)
+for the complete workflow and settings reference. The shared `settings.json`
+below is the advanced developer, automation, and explicitly authorized agent
+equivalent:
 
 ```json
 {
@@ -106,13 +111,13 @@ The project-root `settings.json` is the canonical settings file. See the
 }
 ```
 
-Only an explicit JSON boolean `false` disables a check. A deleted check returns
-to `true`. For exploration, change only the relevant value in the shared file,
-for example set `summary_claim_verification` to `false`; affected responses
-carry `strictly_verified: false` and the stable warning. Evidence-only changes
-are read on each status or guarded call, but restoring a check still requires a
-**fresh verification against unchanged artifacts** and never relabels an old
-receipt.
+Only an explicit opt-out disables a check: clear that check in the GUI Evidence
+tab, or set its advanced JSON value to boolean `false`. A deleted JSON entry
+returns to `true`. For exploration, disable only the relevant check; affected
+responses carry `strictly_verified: false` and the stable warning.
+Evidence-only changes are read on each status or guarded call, but restoring a
+check still requires a **fresh verification against unchanged artifacts** and
+never relabels an old receipt.
 
 When a setting has an illegal character, wrong type, or unsupported value, only
 that setting uses its documented default and `project_settings.settings_errors`

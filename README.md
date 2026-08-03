@@ -5,6 +5,7 @@ English | [中文](README_CN.md)
 [![CI](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/actions/workflows/ci.yml)
 [![Python 3.14](https://img.shields.io/badge/python-3.14-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
+![Release: 0.6.2](https://img.shields.io/badge/release-0.6.2-blue)
 ![Status: alpha](https://img.shields.io/badge/status-alpha-red)
 [![GitHub stars](https://img.shields.io/github/stars/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated?style=social)](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/stargazers)
 
@@ -21,8 +22,8 @@ This server gives AI agents a safer, smaller interface for COMSOL inspection, co
   warning. Read the independent [evidence-integrity guide](docs/evidence_integrity/README.md).
 - **Interactive COMSOL Desktop/Server collaboration (default-off).** A user and
   agent can take explicit turns with one user-owned local Server, one connected
-  Desktop, and one exact server-held model. It requires explicit profile/flag
-  enablement and per-session confirmation. Read the [interactive guide](docs/interactive_shared_session/README.md).
+  Desktop, and one exact server-held model. It requires explicit independent
+  feature enablement and per-session confirmation. Read the [interactive guide](docs/interactive_shared_session/README.md).
 - **Five simulation execution modes.** `interactive`, `inline`, `launcher`,
   `standalone`, and `mphonly` distinguish short feedback, direct scripts,
   durable local campaigns, Python-free Windows handoff, and portable COMSOL
@@ -44,7 +45,7 @@ release procedures remain in this repository's development kit.
 
 The installed FastMCP stdio server has been validated with Codex CLI and
 opencode. A Windows 11 acceptance run with Claude Code 2.1.220 completed stdio
-initialization, discovered all 67 tools in the tested `wave_optics` profile, and
+initialization, discovered the complete tested `wave_optics` tool surface, and
 called `capabilities`, `comsol_status`, and `solver_status` successfully. The
 server exited cleanly with no solver lease or COMSOL process created. This is
 client transport, schema, discovery, and non-starting status compatibility—not
@@ -58,10 +59,12 @@ verification:
 - [Deployment guide](DEPLOYMENT.md)
 
 The essential rules are: perform a non-editable install, configure the absolute
-installed `comsol-mcp` executable, edit the shared project-root [`settings.json`](settings.json),
-restart the client after changing the profile or package, and keep COMSOL tool
-calls serialized. Call `capabilities` to verify the deployed profile without
-starting COMSOL.
+installed `comsol-mcp` executable, use the Settings GUI for ordinary user
+configuration, restart the client after changing startup settings or the
+package, and keep COMSOL tool calls serialized. Direct JSON editing is the
+advanced path for developers, deployment automation, and agents acting on an
+explicit user request. Call `capabilities` to verify the deployed profile
+without starting COMSOL.
 
 The checked-in client examples follow the official
 [Claude Code MCP documentation](https://code.claude.com/docs/en/mcp), Hermes
@@ -94,11 +97,13 @@ from documentation, as the authority for the installed tool surface.
 
 ## Shared project settings
 
-All startup settings are grouped in the project-root [`settings.json`](settings.json).
-Use the same file for Codex, opencode, Claude Code, and Hermes so that agents do
-not silently receive different profiles, paths, Java runtimes, or evidence rules.
-The template intentionally contains configuration only; the complete meaning,
-defaults, and accepted values are in the [settings guide](docs/setting_guide/README.md).
+The **Settings GUI is the preferred configuration path for users**. It edits one
+shared `settings.json` used by Codex, opencode, Claude Code, and Hermes so that
+agents do not silently receive different profiles, paths, Java runtimes, or
+evidence rules. The checked-in [`settings.json`](settings.json) is the canonical
+template and an advanced interface for developers, deployment automation, and
+agents. The complete field meanings, defaults, and accepted values are in the
+[settings guide](docs/setting_guide/README.md).
 Missing entries use their documented safe defaults. An invalid entry keeps only
 that entry at its default and is reported by `capabilities` and
 `evidence_integrity_status`; malformed JSON falls back to the complete safe default
@@ -125,12 +130,13 @@ live under `%PROGRAMDATA%/comsol_mcp`. Optional semantic assets remain unset.
 
 On first installed use, `capabilities.project_settings` reports
 `setup_required: true`, `configuration_source: bundled_template`, setup methods
-`settings.start` and `agent_edit`, and that a restart is required. Ask the user
-which method to use. If GUI is selected, call profile-independent
-`settings.start` once, tell the user that changes apply after restarting Codex
-or the owning MCP client, stop further task output, and wait for the user's next
-message. Do not edit JSON while the GUI is open. If agent edit is selected, edit
-only the resolved writable file, validate it, and request the same restart.
+`settings.start` and `agent_edit`, and that a restart is required. For an
+ordinary user, call profile-independent `settings.start` once, tell the user
+that startup-setting changes apply after restarting Codex or the owning MCP
+client, stop further task output, and wait for the user's next message. Do not
+edit JSON while the GUI is open. Use `agent_edit` only when the user explicitly
+requests agent-managed or automated configuration; edit only the resolved
+writable file, validate it, and request the same restart.
 The installed `comsol-mcp-settings` command opens the GUI directly. Repository
 and source-distribution users can also run `./Open_Settings_GUI.ps1`. The script
 discovers a supported Python 3.14 interpreter, or accepts explicit
@@ -148,8 +154,10 @@ validation and scripted actions.
 
 ## Profiles
 
-Set `profile.name` in `settings.json` before starting the server. A profile is
-fixed for the lifetime of that server process; restart after changing it.
+Users select a profile in the Settings GUI before starting the server.
+Developers and agents may set the equivalent `profile.name` field in
+`settings.json`. A profile is fixed for the lifetime of that server process;
+restart after changing it.
 
 | Profile | Intended use |
 | --- | --- |
@@ -164,16 +172,16 @@ future autonomous-exploration tools. Orthogonal functionality uses independent,
 default-off Boolean feature gates that compose with every profile and with each
 other:
 
-| Feature setting | Added surface |
+| Feature (advanced JSON setting) | Added surface |
 | --- | --- |
 | `shared_server.enabled=true` | Protected shared Desktop/attached-Server workflow with explicit confirmation and exact process/listener/model identity. |
 | `semantic_docs.enabled=true` | Three isolated experimental vector-assisted manual-retrieval tools. |
 
 Call `capabilities` to discover the active profile, exact registered tools, target versions, disabled groups, and restart requirements without starting COMSOL. Its bounded `deployment_identity` reports source-tree versus installed-package loading plus frozen profile/schema and catalog hashes, so a host restart can detect same-version stale installs or source shadowing without exposing local paths.
 
-Shared Desktop/attached-Server work is isolated behind the default-off
-`shared_server.enabled=true` feature in `settings.json`, independently of the
-selected profile.
+Enable shared Desktop/attached-Server work in the Settings GUI Profile tab. It
+is a default-off feature independent of the selected profile; the advanced JSON
+equivalent is `shared_server.enabled=true`.
 The user must start COMSOL Server manually, connect Desktop to it, confirm
 the endpoint, and explicitly confirm each attach. The legacy `comsol_connect`
 tool remains an experimental compatibility surface and is not a substitute for
@@ -501,6 +509,9 @@ git clone https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrat
 cd COMSOL_Multiphysics_MCP_6_4_Calibrated
 python -m pip install .
 
+# Preferred user configuration after installation:
+comsol-mcp-settings
+
 # Recommended offline manual index; use an ASCII-only output path.
 python -m pip install ".[manuals]"
 python -m comsol_mcp.knowledge.lexical_manual build --index D:\comsol_docs_fts\manuals.sqlite3
@@ -510,7 +521,7 @@ For optional isolated semantic retrieval (sentence-transformers, not ChromaDB):
 
 ```powershell
 python -m pip install ".[semantic-docs]"
-# Edit settings.json:
+# Prefer the Settings GUI Docs tab. For developer/agent JSON automation:
 #   semantic_docs.enabled = true
 #   semantic_docs.root = "D:/comsol_semantic"
 #   semantic_docs.lexical_index = "D:/comsol_docs_fts/manuals.sqlite3"
@@ -536,7 +547,8 @@ Configure an MCP client, for example:
 }
 ```
 
-Set `profile.name` to `core` in `settings.json` for the compact default. Client examples are available at
+Select `core` in the Settings GUI for the compact default. Developers and
+agents can set the equivalent `profile.name` value in JSON. Client examples are available at
 `config/claude-code-mcp.example.json`, `config/codex-mcp.example.toml`,
 `config/hermes-mcp.example.yaml`, and `config/opencode-mcp.example.json`.
 

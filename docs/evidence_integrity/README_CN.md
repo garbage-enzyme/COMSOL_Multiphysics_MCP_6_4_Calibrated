@@ -12,11 +12,13 @@ artifact 字节、模型 revision 和软件身份来降低这些风险。它不�
 
 ## 一页快速开始
 
-1. 把正式 artifact 保存在 `settings.json` 的 `paths.artifact_write_root` 中。默认位置是
-   `runtime.directory` 下的 `owned_artifacts`；覆盖时应使用绝对、仅 ASCII 的目录。
-2. 使用项目根目录 `settings.json` 调用 `evidence_integrity_status`。四项检查均应
-   显示 `enabled: true`、`source: project_settings`，并且
-   `strict_verification_active: true`。
+1. 让 agent 只调用一次 `settings.start`，或运行 `comsol-mcp-settings` 打开设置界面。
+   在“证据”页保持四项检查全部开启；在“路径”页把正式 artifact 保存在
+   `paths.artifact_write_root` 中。默认位置是 `runtime.directory` 下的
+   `owned_artifacts`；覆盖时应使用绝对、仅 ASCII 的目录。保存并关闭界面，然后重启
+   实际拥有 MCP 的客户端。
+2. 调用 `evidence_integrity_status`。四项检查均应显示 `enabled: true`、
+   `source: project_settings`，并且 `strict_verification_active: true`。
 3. 可以正常进行探索，但要保留原始行和 diagnostic 行；不要为了让总结更好看而删除
    失败点或 partial 数据。
 4. 构造 `comsol_mcp.portfolio_evidence_request`，其中包含精确的 outcome contract、
@@ -76,9 +78,10 @@ artifact 字节、模型 revision 和软件身份来降低这些风险。它不�
 
 ## 默认开启设置与显式 opt-out
 
-项目根目录 `settings.json` 是 canonical settings 文件。完整设置参考见
-[设置指南](../setting_guide/README_CN.md)。其中
-`evidence_integrity.checks` 保存四项检查和默认值：
+普通用户通过设置界面的“证据”页配置，四项检查默认全部开启。完整操作流程和设置参考见
+[设置指南](../setting_guide/README_CN.md)。下面统一 `settings.json` 中的
+`evidence_integrity.checks` 是面向开发者、自动部署和获得用户明确授权的 agent 的
+高级等价方式：
 
 ```json
 {
@@ -93,11 +96,11 @@ artifact 字节、模型 revision 和软件身份来降低这些风险。它不�
 }
 ```
 
-只有显式 JSON boolean `false` 才能关闭某项检查；删除该项会回到 `true`。探索时只在
-统一文件中修改对应值，例如把 `summary_claim_verification` 改为 `false`；受影响的
-response 必须携带 `strictly_verified: false` 和稳定 warning。证据设置会在每次 status
-或 guarded call 时读取，但恢复检查后仍必须针对**未改变的 artifacts 重新验证**，不能
-给旧 receipt 重新贴 verified 标签。
+只有显式 opt-out 才能关闭某项检查：在设置界面的“证据”页取消对应复选框，或把高级
+JSON 值设为 boolean `false`。删除 JSON 条目会回到 `true`。探索时只关闭必要的检查；
+受影响的 response 必须携带 `strictly_verified: false` 和稳定 warning。证据设置会在每次
+status 或 guarded call 时读取，但恢复检查后仍必须针对**未改变的 artifacts 重新验证**，
+不能给旧 receipt 重新贴 verified 标签。
 
 当某个设置含非法字符、错误类型或不支持的值时，只有该设置使用文档默认值，并由
 `project_settings.settings_errors` 报告 key 和 reason code。JSON 损坏或不可读时使用完整

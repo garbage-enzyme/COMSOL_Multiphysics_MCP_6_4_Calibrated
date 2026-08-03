@@ -62,8 +62,19 @@ MCP 不会启动、关闭、清空或终止用户拥有的 Server、Desktop、�
 
 ### 第一步：开启共享功能
 
-在启动 MCP 前，编辑项目根目录的 `settings.json`。下面只是局部示例，请保留模板中的
-其他设置：
+启动 MCP 前先打开设置界面。可以让已连接的 agent 只调用一次所有 profile 都有的
+`settings.start`，也可以直接运行安装后的命令：
+
+```powershell
+comsol-mcp-settings
+```
+
+在“Profile”页选择能提供任务所需工具的任意基础 profile，再开启交互式共享 Server
+协作；然后在其他页面配置 runtime、模型读取目录和 artifact 目录。保存设置并关闭界面，
+再重启实际拥有 MCP 的客户端。界面打开期间不要同时编辑 JSON。
+
+直接编辑 JSON 是面向开发者、自动部署和获得用户明确授权的 agent 的高级等价方式。
+下面只是局部示例，请保留模板中的其他设置：
 
 ```json
 {

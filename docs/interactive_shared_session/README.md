@@ -70,7 +70,21 @@ rejected.
 
 ### Step 1: enable the shared feature
 
-Before starting the MCP host, edit the repository's `settings.json`. This is a
+Before starting the MCP host, open the Settings GUI. Ask a connected agent to
+call profile-independent `settings.start` once, or run the installed command:
+
+```powershell
+comsol-mcp-settings
+```
+
+In the Profile tab, choose any base profile that exposes the tools needed for
+your work, then enable interactive shared-server collaboration. Configure the
+runtime, model-read, and artifact roots in the other tabs. Save the settings,
+close the GUI, and restart the owning MCP client. Do not edit JSON while the GUI
+is open.
+
+Direct JSON editing is the advanced equivalent for developers, deployment
+automation, and agents acting on an explicit user request. The following is a
 partial example; keep the other settings from the project template:
 
 ```json

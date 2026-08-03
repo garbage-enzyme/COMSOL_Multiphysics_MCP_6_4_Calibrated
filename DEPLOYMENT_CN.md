@@ -32,13 +32,26 @@ wheel 公开 canonical `comsol_mcp` runtime 和 solver-free `settings_gui` 应�
 `src` compatibility namespace 不会安装。可移植部署应配置安装后的 server console entry
 point 绝对路径。
 
-## 2. 配置统一 settings.json
+## 2. 使用设置界面配置（推荐）
 
-启动任何 client 前，编辑项目根目录的 [`settings.json`](settings.json)。它是 profile、
-runtime/jobs、模型读取和 artifact containment、shared-server 开关、证据检查、语义
-手册路径、owner label 以及可选 COMSOL Java 路径的唯一设置来源。Codex、opencode、
-Claude Code 和 Hermes 都使用同一个文件。每个字段的含义、默认值和可接受值见
-[设置指南](docs/setting_guide/README_CN.md)。
+普通用户应在启动 MCP client 前打开设置界面；若 agent 已连接，也可以让它只调用一次
+`settings.start`：
+
+```powershell
+comsol-mcp-settings
+# 需要时，把界面绑定到 MCP client 使用的同一份明确设置文件：
+comsol-mcp-settings --settings-path "D:\settings\settings.json"
+```
+
+在界面中选择 profile 与功能开关，检查自动发现的 COMSOL/Java 路径，并设置 runtime、
+模型读取和 artifact 目录。保存并关闭界面后，重启真正拥有 MCP 的 client。界面和所有
+agent 修改的是同一份 `settings.json`，不存在每个 agent 各自的设置文件。每个字段的
+含义、默认值和可接受值见[设置指南](docs/setting_guide/README_CN.md)。
+
+直接编辑 JSON 是面向开发者、自动部署和获得用户明确授权的 agent 的高级路径。普通用户
+不需要手工修改仓库模板。
+
+### 开发者和 agent 的 JSON 配置（高级）
 
 模板列出所有设置和默认值。用户删去设置条目时，该条目使用安全默认值；输入非法值时，
 仅该条目回退默认值，并在 `settings_errors` 中报错；JSON 整体损坏时回退完整安全默认
@@ -82,10 +95,10 @@ COMSOL_MCP_SETTINGS_PATH=D:\path\to\COMSOL_Multiphysics_MCP\settings.json
 }
 ```
 
-先询问用户选择打开 GUI，还是让 agent 编辑 JSON。选择 GUI 时，只调用一次
-`settings.start`，说明改动需要重启 Codex 或所属 MCP client，然后停止继续输出并等待用户
-下一条消息；GUI 打开期间不要直接修改设置。选择 agent edit 时，只修改解析出的可写文件，
-验证后请求重启。GUI 默认写入 `%LOCALAPPDATA%/comsol_mcp/settings.json`，包内文件保持只读
+对普通用户，只调用一次 `settings.start`，说明启动设置需要重启 Codex 或所属 MCP client，
+然后停止继续输出并等待用户下一条消息；GUI 打开期间不要直接修改设置。只有用户明确要求
+时才由 agent 编辑 JSON；只修改解析出的可写文件，验证后请求重启。GUI 默认写入
+`%LOCALAPPDATA%/comsol_mcp/settings.json`，包内文件保持只读
 模板。`comsol-mcp-settings` 是直接命令行备用入口。MCP 响应会要求 agent 暂停，但无法从
 技术上强制任意第三方 agent 遵守。
 
@@ -122,14 +135,15 @@ comsol-mcp-settings --settings-path "D:\settings\settings.json" --remove-desktop
 | `experimental` | 显式选择的通用和 escape-hatch 工具。 |
 | `full` | 宽泛的非 feature 兼容界面；默认不推荐。 |
 
-在 `settings.json` 的 `profile.name` 中设置 profile。删除时使用 `core`。stdio 进程
-启动时会冻结 profile，修改后必须重启 client/MCP host。非法 profile 保持 `core`，并在
-`settings_errors` 中报告，不会静默选择另一个 profile。
+普通用户在设置界面选择 profile。开发者和 agent 可以在 JSON 的 `profile.name` 中设置
+等价值；删除时使用 `core`。stdio 进程启动时会冻结 profile，修改后必须重启 client/MCP
+host。非法 profile 保持 `core`，并在 `settings_errors` 中报告，不会静默选择另一个 profile。
 
-Profile 只控制 COMSOL 自动化仿真及未来自主探索工具的可见性。任意 profile 都可通过
-`settings.json` 中独立的 `shared_server.enabled=true` 开启受保护 shared workflow，或通过
-`semantic_docs.enabled=true` 开启隔离语义检索；两个开关默认均为 false，也可同时启用。
-旧 `comsol_connect` 仍是 experimental 兼容工具，不能替代该生命周期。
+Profile 只控制 COMSOL 自动化仿真及未来自主探索工具的可见性。在设置界面中，独立功能
+开关可与任意 profile 组合，也可彼此组合。高级 JSON 等价值是用于受保护 shared workflow
+的 `shared_server.enabled=true`，以及用于隔离语义检索的
+`semantic_docs.enabled=true`；两个开关默认均为 false。旧 `comsol_connect` 仍是
+experimental 兼容工具，不能替代该生命周期。
 
 `basic_fem` 中的独立启动器工具仍运行在普通 Python MCP host 中；它们负责构建和控制另一个原生
 EXE。目标机只需 Windows 10/11 x64 与已安装并授权的 COMSOL 6.4。EXE 不打包 COMSOL，
@@ -141,9 +155,10 @@ EXE。目标机只需 Windows 10/11 x64 与已安装并授权的 COMSOL 6.4。EX
 
 ### 可选的 shared Desktop/attached-Server 模式
 
-shared profile 不会启动、停止或终止用户的 COMSOL Server。请先手动启动带 persistent
+shared-server 功能不会启动、停止或终止用户的 COMSOL Server。请先手动启动带 persistent
 multi-client 选项的 COMSOL Multiphysics Server 6.4，记录本地 endpoint（通常是 2036
-端口），再让 Desktop client 连接该 Server。然后编辑 MCP settings：
+端口），再让 Desktop client 连接该 Server。在设置界面的“工具配置”页开启交互式共享
+Server 协作。等价的高级 JSON 配置如下：
 
 ```json
 {
