@@ -8,8 +8,8 @@ import sys
 from pathlib import Path
 
 import pytest
-import settings_gui.desktop_shortcut as shortcut_module
 
+import settings_gui.desktop_shortcut as shortcut_module
 from settings_gui.desktop_shortcut import (
     ICON_PATH,
     OWNERSHIP_DESCRIPTION,
