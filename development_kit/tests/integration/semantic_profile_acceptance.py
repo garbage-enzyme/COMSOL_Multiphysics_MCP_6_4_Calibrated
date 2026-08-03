@@ -23,12 +23,12 @@ OUTPUT = Path("D:/comsol_runtime/semantic_profile/live_profile.json")
 RUN_LOCK = OUTPUT.parent / "acceptance.lock"
 MODEL = Path("D:/comsol_semantic/models/all-MiniLM-L6-v2/1110a243fdf4706b3f48f1d95db1a4f5529b4d41")
 PROFILE_COUNTS = {
-    "core": 46,
-    "basic_fem": 89,
+    "core": 47,
+    "basic_fem": 90,
     "wave_optics": 76,
-    "semantic_docs": 49,
-    "experimental": 77,
-    "full": 143,
+    "semantic_docs": 50,
+    "experimental": 78,
+    "full": 144,
 }
 
 

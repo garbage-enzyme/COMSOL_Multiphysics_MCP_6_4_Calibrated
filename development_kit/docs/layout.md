@@ -11,8 +11,10 @@ models are intentionally absent.
 - `AGENTS.md` — This file provides repository development, testing, and safety guidance for coding agents.
 - `CLAUDE.md` — This file provides repository development, testing, and safety guidance for Claude Code.
 - `.github/workflows/ci.yml` — This workflow runs the blocking Python build and test gates.
+- `.github/workflows/settings-gui-ci.yml` — This workflow runs the independent Windows Settings GUI, locale, package, and installed probes.
 - `.github/workflows/dependency_report.yml` — This workflow produces the scheduled information-only dependency report.
 - `LICENSE` — This file contains the repository MIT license.
+- `Open_Settings_GUI.ps1` — This script opens or validates the Settings GUI through the bounded Python launcher.
 - `README.md` — This file is the primary English project introduction and usage guide.
 - `README_CN.md` — This file is the Chinese project introduction and usage guide.
 - `DEPLOYMENT.md` — This file explains the supported English deployment procedure.
@@ -117,6 +119,10 @@ models are intentionally absent.
 - `development_kit/scripts/run_real_release_gate.py` — This script orchestrates the explicit serial licensed COMSOL release gate.
 - `development_kit/scripts/sbom_probe.py` — This script generates a deterministic CycloneDX SBOM from the locked installed runtime.
 - `development_kit/scripts/security_gate.py` — This script evaluates pip-audit findings against the exact expiring review policy.
+- `development_kit/scripts/settings_gui_locales.py` — This script generates and checks deterministic English, Simplified Chinese, and Traditional Chinese gettext catalogs.
+- `development_kit/scripts/settings_gui_icon.py` — This script crops, pads, and PNG-compresses a user-supplied high-resolution logo into the packaged multi-size Windows icon.
+- `development_kit/scripts/settings_gui_package_probe.py` — This script verifies Settings GUI wheel and source-distribution membership.
+- `development_kit/scripts/settings_gui_visual_capture.py` — This script captures real Tk locale, DPI, and state screenshots in isolated processes.
 - `development_kit/scripts/standalone_licensed_gate.py` — This script runs the explicit serial COMSOL 6.4 standalone build, pause, exact-resume, physical, and cleanup acceptance.
 - `development_kit/scripts/thermo_optomechanical_licensed_gate.py` — This script generates and validates the serial licensed COMSOL 6.4 thermal-structural-moving-mesh-optical replay fixture.
 - `development_kit/scripts/shared_interactive_licensed_gate.py` — This script runs bounded non-owning shared Desktop/Server prepare and readback acceptance phases.
@@ -263,6 +269,10 @@ models are intentionally absent.
 - `development_kit/tests/test_semantic_worker_protocol.py` — This module tests isolated semantic worker protocol and containment.
 - `development_kit/tests/test_server.py` — This module tests server construction and capabilities without starting a transport.
 - `development_kit/tests/test_settings.py` — This module tests grouped settings defaults, validation, and fallback errors.
+- `development_kit/tests/test_alpha6_settings_gui_contract.py` — This module locks the alpha6 settings schema, location, launcher, and packaging contracts.
+- `development_kit/tests/test_settings_gui_launcher.py` — This module tests detached Settings GUI launch, handshake, profile discovery, and Tk import isolation.
+- `development_kit/tests/test_settings_gui_package.py` — This module tests Settings GUI distribution membership receipts.
+- `development_kit/tests/test_settings_gui_root_launcher.py` — This module tests the repository-root manual Settings GUI launcher under both supported PowerShell hosts.
 - `development_kit/tests/test_shared_attach_request.py` — This module tests the complete pre-lease shared-server attach gate.
 - `development_kit/tests/test_shared_cleanup_contracts.py` — This module tests non-owning detach and owned-cleanup outcome semantics.
 - `development_kit/tests/test_shared_interactive_licensed_gate.py` — This module tests the licensed shared interactive gate's solver-free specification path.
@@ -332,6 +342,8 @@ models are intentionally absent.
 - `comsol_mcp/native_runtime.py` — This module classifies native-backed imports and preloads every main-process runtime before event-loop dispatch.
 - `comsol_mcp/server.py` — This module creates the profiled MCP server and console entry point.
 - `comsol_mcp/settings.py` — This module loads grouped project settings and reports bounded fallback errors.
+- `comsol_mcp/settings_gui_handshake.py` — This module implements the bounded path-free Settings GUI startup handshake.
+- `comsol_mcp/settings_gui_launcher.py` — This module launches and tracks one detached Windows Settings GUI without importing Tk.
 - `comsol_mcp/standalone/__init__.py` — This module exports the standalone launcher build and solver-free inspection surface.
 - `comsol_mcp/standalone/builder.py` — This module builds one reviewed native Windows x64 launcher from packaged C# and Java sources.
 - `comsol_mcp/standalone/control.py` — This module detaches, controls, and inspects manifest-verified standalone COMSOL 6.4 campaigns.
@@ -488,6 +500,7 @@ models are intentionally absent.
 - `comsol_mcp/tools/thermal_radiation.py` — This module exposes solver-free Kirchhoff and thermal-radiation evidence tools.
 - `comsol_mcp/tools/thermal_material.py` — This module exposes solver-free thermal material ledger validation and evaluation.
 - `comsol_mcp/tools/session.py` — This module manages COMSOL client startup, status, models, and shutdown.
+- `comsol_mcp/tools/settings_gui.py` — This module exposes the profile-independent solver-free Settings GUI launcher.
 - `comsol_mcp/tools/shared_session.py` — This module exposes default-off local attached-server lifecycle tools.
 - `comsol_mcp/tools/study.py` — This module exposes COMSOL study and solving tools.
 - `comsol_mcp/tools/standalone.py` — This module exposes typed standalone build, lifecycle, log, and result tools.
@@ -495,6 +508,39 @@ models are intentionally absent.
 - `comsol_mcp/tools/wave_optics_audit.py` — This module exposes one-point policy-separated Wave Optics evidence audits.
 - `comsol_mcp/tools/wave_optics_preflight.py` — This module exposes threshold-free read-only Wave Optics preflight.
 - `comsol_mcp/tools/workflow.py` — This module exposes reusable staged study workflows.
+
+## Settings GUI
+
+- `settings_gui/__init__.py` — This module exports the alpha6 Settings GUI release identity.
+- `settings_gui/__main__.py` — This module provides the installed Settings GUI console entry point and startup failure handshake.
+- `settings_gui/app.py` — This module constructs the localized single-window Tk and ttk settings editor.
+- `settings_gui/assets/__init__.py` — This file marks the packaged Settings GUI visual assets.
+- `settings_gui/assets/comsol_mcp.ico` — This file provides the compressed transparent multi-size Windows application icon.
+- `settings_gui/comsol_discovery.py` — This module discovers validated COMSOL 6.4 and Java installations without launching a process.
+- `settings_gui/constants.py` — This module defines bounded Settings GUI runtime constants.
+- `settings_gui/controller.py` — This module coordinates validation, dialogs, discovery, persistence, and close behavior.
+- `settings_gui/dialogs.py` — This module adapts native file, folder, confirmation, information, and error dialogs.
+- `settings_gui/fonts.py` — This module selects deterministic Windows CJK system-font fallbacks.
+- `settings_gui/i18n.py` — This module loads complete runtime gettext catalogs and supports language switching.
+- `settings_gui/model.py` — This module defines every settings field binding and the validated dirty form model.
+- `settings_gui/storage.py` — This module implements strict loading, recovery copies, and exact atomic settings writes.
+- `settings_gui/windows_lock.py` — This module enforces Windows mutex, sidecar, target-handle, and file-identity ownership.
+- `settings_gui/locales/settings_gui.pot` — This file is the deterministic Settings GUI gettext template.
+- `settings_gui/locales/en/LC_MESSAGES/settings_gui.po` — This file contains the complete English Settings GUI translation source.
+- `settings_gui/locales/en/LC_MESSAGES/settings_gui.mo` — This file contains the compiled English Settings GUI runtime catalog.
+- `settings_gui/locales/zh_CN/LC_MESSAGES/settings_gui.po` — This file contains the complete Simplified Chinese Settings GUI translation source.
+- `settings_gui/locales/zh_CN/LC_MESSAGES/settings_gui.mo` — This file contains the compiled Simplified Chinese Settings GUI runtime catalog.
+- `settings_gui/locales/zh_TW/LC_MESSAGES/settings_gui.po` — This file contains the complete Traditional Chinese Settings GUI translation source.
+- `settings_gui/locales/zh_TW/LC_MESSAGES/settings_gui.mo` — This file contains the compiled Traditional Chinese Settings GUI runtime catalog.
+- `settings_gui/tests/__init__.py` — This file marks the independent repository-only Settings GUI test package.
+- `settings_gui/tests/conftest.py` — This file isolates GUI tests under a temporary ASCII ProgramData root.
+- `settings_gui/tests/test_app.py` — This module performs bounded real-Tk construction, invalid-style, language, and startup-version tests.
+- `settings_gui/tests/test_discovery.py` — This module tests COMSOL registry, marker, Java ordering, and ambiguity behavior.
+- `settings_gui/tests/test_fonts.py` — This module tests deterministic English and CJK font selection.
+- `settings_gui/tests/test_i18n.py` — This module tests gettext completeness, placeholders, and reproducible PO and MO outputs.
+- `settings_gui/tests/test_icon.py` — This module verifies the packaged ICO dimensions, encoding, transparency-capable depth, and size bound.
+- `settings_gui/tests/test_model_controller.py` — This module tests complete field bindings and controller state transitions.
+- `settings_gui/tests/test_storage.py` — This module tests Windows mutex, sharing, conflict, recovery, and atomic-write behavior.
 
 ## Shared utilities
 

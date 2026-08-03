@@ -1,111 +1,275 @@
 # COMSOL MCP 设置指南
 
-`settings.json` 是所有 MCP client 共用的启动配置。应在启动 host 前编辑；修改
-`profile.name`、`shared_server.enabled` 或 Java 路径后必须重启 host。随后可通过
-`capabilities.project_settings` 确认实际配置，响应不会暴露本机路径。
+普通用户优先使用设置界面。直接修改 `settings.json` 的方式仍然保留，适合批量安装、
+自动部署、界面无法打开时的恢复，以及熟悉配置文件的用户。两种方式修改的是同一份设置，
+不会为 Codex、Claude、opencode 或其他 agent 各建一份文件。
 
-文件必须是 UTF-8 JSON、只含一个对象、没有重复 key，且不超过 64 KiB。提交的模板
-有意不包含注释。未知字段会写入 `settings_errors`。缺失字段使用下方安全默认值；非法
-字段仅自身回退默认值。JSON 损坏或不可读时，使用完整安全默认配置。
+保存设置后，必须重启 Codex 或当前使用 MCP 的客户端，新设置才会生效。
 
-## 更新或重装前备份设置
+## 打开设置界面
 
-更新或重装 MCP package 前，先备份实际生效的 `settings.json`。如果设置了
-`COMSOL_MCP_SETTINGS_PATH`，应备份该绝对路径文件，而不是只依赖源码树模板。安装后恢复
-已批准的设置文件，重启准确的 MCP host，再通过 `capabilities.project_settings` 确认
-configuration state 有效。
+可以直接告诉 agent“打开 COMSOL MCP 设置”，agent 会调用：
 
-## 文档身份
+```text
+settings.start
+```
 
-| 字段 | 含义 | 默认值 | 可接受值 |
-| --- | --- | --- | --- |
-| `schema_name` | 标识此设置 schema。 | `"comsol_mcp.settings"` | 只能是 `"comsol_mcp.settings"`。 |
-| `schema_version` | 标识支持的设置格式。 | `"1.0.0"` | 只能是 `"1.0.0"`。 |
+也可以在 Windows 命令行中运行：
 
-## Profile
+```powershell
+comsol-mcp-settings
+```
 
-| 字段 | 含义 | 默认值 | 可接受值 |
-| --- | --- | --- | --- |
-| `profile.name` | 此 MCP 进程固定的公共 tool surface。 | `"core"` | `"core"`、`"basic_fem"`、`"wave_optics"`、`"semantic_docs"`、`"desktop_shared"`、`"experimental"` 或 `"full"`（不区分大小写，保存时转为小写）。 |
+从仓库源码或解压后的源码分发包运行时，也可以使用根目录手动启动器：
 
-`desktop_shared` 还要求 `shared_server.enabled: true`，并且不会启动或终止用户的
-COMSOL Server。`semantic_docs` 需要相应检索资产可用。`basic_fem` 还公开原生 EXE 的
-构建和控制工具；生成的 EXE 仍要求本机安装并授权 COMSOL 6.4。没有明确需求时使用 `core`。
+```powershell
+.\Open_Settings_GUI.ps1
+.\Open_Settings_GUI.ps1 -PythonPath "D:\path\to\python.exe"
+.\Open_Settings_GUI.ps1 -PythonPath "D:\path\to\python.exe" -SettingsPath "D:\settings\settings.json"
+.\Open_Settings_GUI.ps1 -ValidateOnly
+```
 
-## Runtime 与 containment 路径
+未指定 `-PythonPath` 时，脚本依次检查当前虚拟环境、`comsol-mcp-settings` 所在环境、
+`PATH` 中的 `python.exe`，以及 Windows Python launcher 提供的 CPython 3.14。明确指定的
+`-SettingsPath` 必须是绝对文件路径，而且父目录必须已经存在。`-ValidateOnly` 只验证
+Python、package import 和可选 settings 定位器，输出不含路径的 JSON receipt；它不会创建
+settings 文件、打开 Tk 或启动 COMSOL。
 
-下列允许路径的字段只接受绝对路径字符串。空字符串、相对路径和控制字符均非法。路径
-按 host 平台标准化。Windows 部署根和 durable artifact 建议使用仅 ASCII 路径。
+打开设置界面不会启动 COMSOL，也不会开始计算。agent 打开界面后应暂停，让用户完成设置，
+不能同时在后台修改同一份 JSON。
 
-| 字段 | 含义 | 默认值 | 可接受值 |
-| --- | --- | --- | --- |
-| `runtime.directory` | Server 自有 runtime state 的根目录。 | `null` | `null` 或绝对路径字符串。`null` 使用平台安全 runtime root。 |
-| `runtime.jobs_directory` | Durable job state 的根目录。 | `null` | `null` 或绝对路径字符串。`null` 使用实际 runtime root 下的默认目录。 |
-| `paths.model_read_roots` | Tool 可读取 source model 的已批准根目录。 | `[]` | 由绝对路径字符串构成的 JSON 数组，标准化后不得重复。未显式批准 model 目录前保持空数组。 |
-| `paths.artifact_write_root` | MCP 自有 artifact、manifest 和 evidence 的根目录。 | `null` | `null` 或绝对路径字符串。`null` 使用实际 runtime root 下默认的 owned-artifact 目录。 |
+第一次使用安装版时，界面会先询问是否创建设置。只有用户确认后，才会创建：
 
-路径值通过此设置验证并不表示后续 tool 一定可用：containment、存在性、link/junction、
-覆盖和具体操作的检查仍会执行。
-首次加载模型前，必须把 `paths.model_read_roots` 设为源 `.mph` 所在的绝对父目录；其默认
-值 `[]` 会有意拒绝所有模型输入。`paths.artifact_write_root` 保持 `null` 时，输出会使用
-实际 runtime root 下的 owned-artifact 目录。
+```text
+%LOCALAPPDATA%\comsol_mcp\settings.json
+%LOCALAPPDATA%\comsol_mcp\models
 
-## Shared Desktop/Server 模式
+%PROGRAMDATA%\comsol_mcp\runtime
+%PROGRAMDATA%\comsol_mcp\artifacts
+```
 
-| 字段 | 含义 | 默认值 | 可接受值 |
-| --- | --- | --- | --- |
-| `shared_server.enabled` | 在选中 `desktop_shared` profile 时打开 shared Desktop/attached-Server gate。 | `false` | JSON `true` 或 `false`；`"true"` 这类字符串非法。 |
+前两个位置允许 Windows 用户名中出现中文。后两个位置用于运行记录、锁和正式产物，必须
+只含 ASCII 字符，所以默认放在通常不含中文的 `%PROGRAMDATA%`。可选功能的目录不会自动
+创建。
 
-仅在已手动启动本地 COMSOL Server 后才设为 `true`。所需 confirmation 和 ownership
-流程见[交互协作指南](../interactive_shared_session/README_CN.md)。
+如果还没有设置 COMSOL 路径，界面会直接打开 `COMSOL/Java` 页，并尝试查找本机的
+COMSOL 6.4 和它自带的 Java：
 
-## 证据完整性
+- 只找到一个可用安装时，路径会填入输入框，但不会自动保存；
+- 没有找到时，输入框保持空白，不会编造一个默认路径，也不会报错打断使用；
+- 找到多个安装时，由用户选择，界面不会猜测；
+- 安装或移动 COMSOL 后，可以点击“自动检测”重新查找；
+- 也可以点击“浏览”手动选择目录。
 
-四项检查默认均开启。把任一项设为 `false` 是探索性 opt-out：受影响的正式结果都会明确
-标记为未验证。
+## 设置界面怎么用
 
-| 字段 | 含义 | 默认值 | 可接受值 |
-| --- | --- | --- | --- |
-| `evidence_integrity.checks.outcome_contract_validation` | 验证声明的 outcome 及其 machine-readable contract。 | `true` | JSON `true` 或 `false`。 |
-| `evidence_integrity.checks.artifact_chain_verification` | 验证自有 artifact bytes、provenance 和 hash-chain identity。 | `true` | JSON `true` 或 `false`。 |
-| `evidence_integrity.checks.summary_claim_verification` | 对照精确引用的 artifact 值验证 summary claim。 | `true` | JSON `true` 或 `false`。 |
-| `evidence_integrity.checks.producer_driver_compatibility` | 恢复 continuation 前验证 producer 和 driver identity。 | `true` | JSON `true` 或 `false`。 |
+每个选项旁边都会显示它在 JSON 中的完整名称。路径选项带有例子，也可以用“浏览”选择。
 
-opt-out 的影响和验证流程见[证据完整性指南](../evidence_integrity/README_CN.md)。
+- “应用”：检查并保存，窗口继续保持打开；
+- “保存并退出”：检查并保存，然后关闭窗口；
+- “取消”：直接关闭，不保存本次修改；
+- 输入不合要求时，该项会标红，而且不能保存；
+- 修改任何会影响 MCP 的选项后，界面会提醒需要重启；
+- 自动找到 COMSOL 或 Java 时，只显示持续可见的重启提示，不会一打开就弹出重启窗口；
+- 切换界面语言不会丢失尚未保存的内容，也不会跳回其他页面。
+- 调整界面大小会立即预览。一般选择“跟随 Windows 显示设置”；需要固定大小时可选
+  100%、125%、150% 或 200%；
+- `profile.name` 下方的说明会随选择变化，直接说明该 profile 能做什么、适合什么情况，
+  以及何时不应选择。
 
-## 语义手册检索
+同一份设置一次只能打开一个编辑窗口。再次打开时会提示已有窗口正在使用。设置窗口打开
+期间，如果其他程序改了同一文件，当前窗口会停止保存，避免互相覆盖。
 
-| 字段 | 含义 | 默认值 | 可接受值 |
-| --- | --- | --- | --- |
-| `semantic_docs.root` | 隔离语义检索资产的部署根目录。 | `"D:/comsol_semantic"` | 绝对路径字符串；不接受 `null`。 |
-| `semantic_docs.lexical_index` | 不可变的 SQLite 词法手册索引。 | `"D:/comsol_docs_fts/manuals.sqlite3"` | 绝对路径字符串；不接受 `null`。 |
-| `semantic_docs.model_path` | 可选的本地 semantic model revision 目录。 | `null` | `null` 或绝对路径字符串。`null` 时 semantic retrieval 不可用。 |
+语言选项显示语言自称名和保存值：
 
-所需资产尚不存在时，semantic profile 保持不可用。
+```text
+English (en)
+简体中文 (zh-cn)
+繁體中文 (zh-tw)
+```
 
-## Ownership 与 Java
+旧设置中的 `zh_CN` 和 `zh_TW` 仍能读取，保存时会改为 `zh-cn` 和 `zh-tw`。
 
-| 字段 | 含义 | 默认值 | 可接受值 |
-| --- | --- | --- | --- |
-| `ownership.owner` | MCP solver owner 的可选稳定 label。 | `null` | `null`，或不为空、最多 256 个字符且不含控制字符的字符串。`null` 时从 parent agent process 推导有界 label。 |
-| `java.java_home` | 可选的 COMSOL bundled Java runtime 路径。 | `null` | `null` 或绝对路径字符串。`null` 保留 host Java environment。 |
-| `java.jdk_home` | ClientAPI import 前设置的可选 JDK 路径。 | `null` | `null` 或绝对路径字符串。对于已验证的 COMSOL runtime，它通常与 `java.java_home` 相同。 |
+## 设置文件在哪里
 
-## 示例
+程序按下面顺序寻找设置：
 
-下面是 partial edit，不能替代提交的完整模板：
+1. `COMSOL_MCP_SETTINGS_PATH` 指定的绝对文件；
+2. 从源码运行时，仓库根目录的 `settings.json`；
+3. 安装版的 `%LOCALAPPDATA%\comsol_mcp\settings.json`；
+4. 安装包内的只读模板，它只用于第一次创建设置。
+
+设置界面不会写入 `site-packages`。设置文件本身可以位于中文路径，但必须是普通文件，路径
+中不能经过符号链接或 junction。
+
+文件必须使用 UTF-8 编码，只包含一个 JSON 对象，不能有重复 key，大小不能超过 64 KiB。
+未知字段和非法值会出现在 `capabilities.project_settings.settings_errors` 中，但返回结果
+不会暴露本机路径。缺少某个字段时只补该字段的默认值；某一项非法时只回退该项；整个 JSON
+损坏时才使用完整默认配置。
+
+## 路径怎么选
+
+读取设置时，程序会展开开头的 `%LOCALAPPDATA%` 和 `%PROGRAMDATA%`。其他环境变量写法
+不会自动展开。所有路径都必须是绝对路径；空字符串、相对路径和控制字符都不允许。
+
+| 路径用途 | 是否支持中文 | 默认位置 |
+| --- | --- | --- |
+| 设置文件 | 支持 | `%LOCALAPPDATA%\comsol_mcp\settings.json` |
+| 模型读取目录 | 支持 | `%LOCALAPPDATA%\comsol_mcp\models` |
+| 运行目录和求解器锁 | 不支持，只能用 ASCII | `%PROGRAMDATA%\comsol_mcp\runtime` |
+| Durable job 单独目录 | 不支持，只能用 ASCII | `null`，从运行目录推导 |
+| MCP 自有产物 | 不支持，只能用 ASCII | `%PROGRAMDATA%\comsol_mcp\artifacts` |
+| COMSOL 和 Java | 取决于软件安装位置 | `null`，由界面检测 |
+| 可选语义资产 | 取决于所用后端，建议用 ASCII | `null` |
+
+模型读取目录可以包含中文。运行目录、durable job 目录和产物目录如果包含中文，设置界面会
+在保存前标红；直接修改 JSON 时，后端也会拒绝这些值，不会等到开始计算后才报错。
+
+## 全部设置项
+
+### 文件与界面
+
+| 设置项 | 默认值 | 作用和可填写内容 |
+| --- | --- | --- |
+| `schema_name` | `"comsol_mcp.settings"` | 设置格式名称，只读，必须完全一致。 |
+| `schema_version` | `"1.1.0"` | 新保存的文件使用 `1.1.0`；旧版 `1.0.0` 可以读取，并在内存中转换。 |
+| `gui.language` | `"zh-cn"` | 只能是 `"en"`、`"zh-cn"` 或 `"zh-tw"`。 |
+| `gui.scale` | `"system"` | 可选 `"system"`、`"100"`、`"125"`、`"150"` 或 `"200"`；界面把数字显示为百分比。 |
+
+### 工具范围
+
+| 设置项 | 默认值 | 作用和可填写内容 |
+| --- | --- | --- |
+| `profile.name` | `"core"` | 可选 `core`、`basic_fem`、`wave_optics`、`semantic_docs`、`desktop_shared`、`experimental` 或 `full`；保存为小写。 |
+
+新手在重视安全、希望减少可用操作时，可以从 `core` 开始。大多数进行常规仿真的用户应
+选择 `basic_fem`。`desktop_shared` 还要求把 `shared_server.enabled` 设为 `true`。
+`semantic_docs` 只有在可选资产已经准备好时才能正常使用。
+
+| Profile | 适用情况 |
+| --- | --- |
+| `core` | 面向新手的安全默认项：操作较少，可查看模型、管理任务、进行谨慎的单点检查与手册搜索。 |
+| `basic_fem` | 推荐大多数用户选择：常规 FEM 建模、结果导出和 Windows standalone 包。 |
+| `wave_optics` | 光学与超表面、场结果查看、Wave Optics 检查、单点审计和分阶段参数流程。 |
+| `semantic_docs` | 已准备好的本地手册索引，以及文字和语义搜索。 |
+| `desktop_shared` | 用户在 COMSOL Desktop 观看同一 Server 模型，并与 MCP 轮流操作。 |
+| `experimental` | 范围更广或尚未成熟、需要仔细检查输出的额外工具。 |
+| `full` | 需要几乎全部工具且接受较弱文件范围保护的旧流程迁移；不建议新用户使用。 |
+
+### 运行与文件范围
+
+| 设置项 | 默认值 | 作用和可填写内容 |
+| --- | --- | --- |
+| `runtime.directory` | `%PROGRAMDATA%\comsol_mcp\runtime` | MCP 的运行记录和锁目录。自定义值必须是只含 ASCII 的绝对路径。`null` 只用于兼容旧的平台默认行为。 |
+| `runtime.jobs_directory` | `null` | 可选的 durable job 单独目录。`null` 表示从实际运行目录推导；自定义值必须是只含 ASCII 的绝对路径。 |
+| `paths.model_read_roots` | `[%LOCALAPPDATA%\comsol_mcp\models]` | 允许读取且不得原地修改的源模型目录。每项必须是不同的绝对路径，可以包含中文；`[]` 表示拒绝读取任何模型。 |
+| `paths.artifact_write_root` | `%PROGRAMDATA%\comsol_mcp\artifacts` | MCP 自有的结果、manifest 和证据目录。自定义值必须是只含 ASCII 的绝对路径。`null` 只用于兼容旧的推导方式。 |
+
+设置文件接受某个路径，不代表所有工具都能立刻使用它。实际操作仍会检查文件是否存在、
+是否位于允许范围内、扩展名、link/junction、是否覆盖旧文件，以及该工具自己的限制。
+
+### COMSOL 与 Java
+
+| 设置项 | 默认值 | 作用和可填写内容 |
+| --- | --- | --- |
+| `comsol.installation_root` | `null` | COMSOL Multiphysics 6.4 安装根目录。设置界面可以自动查找。Standalone 工具明确传入的路径优先。 |
+| `java.java_home` | `null` | 可选 Java runtime 目录。自动检测优先使用 COMSOL 自带 Java。 |
+| `java.jdk_home` | `null` | 可选 JDK 目录。在已验证的 COMSOL 安装中通常与 `java.java_home` 相同。 |
+
+Java 查找顺序是：COMSOL 自带且可用的 Java、`JAVA_HOME`、`JDK_HOME`、`PATH`。自动检测
+需要替换已有非空值时，一定会先询问用户。
+
+### 共享模式与所有者
+
+| 设置项 | 默认值 | 作用和可填写内容 |
+| --- | --- | --- |
+| `shared_server.enabled` | `false` | 是否允许本机 Desktop/Server 交互协作流程。它不会启动或关闭用户自己的 COMSOL Server。 |
+| `ownership.owner` | `null` | 可选的所有者名称。最多 256 个字符，不能为空且不能含控制字符；`null` 时从父进程生成有限长度的名称。 |
+
+### 证据检查
+
+| 设置项 | 默认值 | 作用 |
+| --- | --- | --- |
+| `evidence_integrity.checks.outcome_contract_validation` | `true` | 检查执行结果和结论的约定格式。 |
+| `evidence_integrity.checks.artifact_chain_verification` | `true` | 检查产物内容、来源和哈希链。 |
+| `evidence_integrity.checks.summary_claim_verification` | `true` | 对照引用的产物数值检查摘要结论。 |
+| `evidence_integrity.checks.producer_driver_compatibility` | `true` | 继续旧任务前检查生成器和驱动身份。 |
+
+关闭任何一项都属于探索性跳过。受影响的正式结果会继续标记为“未完整验证”。
+
+### 可选语义检索
+
+| 设置项 | 默认值 | 作用和可填写内容 |
+| --- | --- | --- |
+| `semantic_docs.root` | `null` | 预处理语义检索资产的可选根目录。它不是 COMSOL 安装包自带的 manual 目录，也不会自动检测。 |
+| `semantic_docs.lexical_index` | `null` | 可选的只读 SQLite 词法索引文件。 |
+| `semantic_docs.model_path` | `null` | 可选的本地语义模型版本目录。 |
+
+这三项保持 `null` 是正常状态。只有事先生成并放好所需资产后，`semantic_docs` profile 才
+能提供相应检索功能。
+
+## 保留的 JSON 设置方式
+
+界面无法使用，或设置由安装器、部署脚本统一管理时，可以直接编辑 JSON。编辑前先停止
+MCP host 并关闭设置界面。只修改上文解析出的可写文件；验证后重启真正拥有 MCP 的客户端。
+
+完整默认模板如下：
 
 ```json
 {
-  "profile": {"name": "wave_optics"},
-  "runtime": {"directory": "D:/comsol_runtime"},
+  "schema_name": "comsol_mcp.settings",
+  "schema_version": "1.1.0",
+  "profile": {"name": "core"},
+  "runtime": {
+    "directory": "%PROGRAMDATA%/comsol_mcp/runtime",
+    "jobs_directory": null
+  },
   "paths": {
-    "model_read_roots": ["D:/comsol_models"],
-    "artifact_write_root": "D:/comsol_runtime/owned_artifacts"
-  }
+    "model_read_roots": ["%LOCALAPPDATA%/comsol_mcp/models"],
+    "artifact_write_root": "%PROGRAMDATA%/comsol_mcp/artifacts"
+  },
+  "shared_server": {"enabled": false},
+  "evidence_integrity": {
+    "checks": {
+      "outcome_contract_validation": true,
+      "artifact_chain_verification": true,
+      "summary_claim_verification": true,
+      "producer_driver_compatibility": true
+    }
+  },
+  "semantic_docs": {
+    "root": null,
+    "lexical_index": null,
+    "model_path": null
+  },
+  "ownership": {"owner": null},
+  "java": {"java_home": null, "jdk_home": null},
+  "comsol": {"installation_root": null},
+  "gui": {"language": "zh-cn", "scale": "system"}
 }
 ```
 
-如果 client 不能保留项目根目录，可把唯一的绝对文件定位变量
-`COMSOL_MCP_SETTINGS_PATH` 设为所需的常规、非 link 的 `settings.json` 文件。定位文件
-必须已经存在。
+现有的 `COMSOL_MCP_*`、`COMSOL_SEMANTIC_*`、`JAVA_HOME` 和 `JDK_HOME` 环境变量仍
+保留兼容覆盖能力。如果某个变量在 MCP 进程启动前已经存在，它优先于 JSON 转换出的同名
+环境值。新安装应优先使用设置界面或 JSON，不要再建立一套只靠环境变量的独立配置。
+
+## 更新与恢复
+
+更新或重装 MCP package 前，先备份实际生效的可写 `settings.json`。如果使用了
+`COMSOL_MCP_SETTINGS_PATH`，应备份它指向的准确文件。安装后恢复或重新检查设置，重启
+MCP 客户端，再查看 `capabilities.project_settings`：
+
+```text
+configuration_state: valid
+settings_errors: []
+setup_required: false
+```
+
+文件缺失、JSON 损坏、key 重复、不是 UTF-8、超过大小限制或使用不支持的未来 schema 时，
+设置界面只提供恢复或退出，不会猜测如何修补。用户确认恢复后，程序会保留一份受大小限制
+的损坏文件副本，再用原子写入方式保存标准 `1.1.0` 设置。
+
+证据检查的详细含义见
+[`../evidence_integrity/README_CN.md`](../evidence_integrity/README_CN.md)。默认关闭的共享
+Desktop/Server 工作流见
+[`../interactive_shared_session/README_CN.md`](../interactive_shared_session/README_CN.md)。

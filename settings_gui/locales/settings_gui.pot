@@ -1,0 +1,261 @@
+# Generated deterministic gettext template for COMSOL MCP Settings.
+msgid ""
+msgstr "Project-Id-Version: comsol-mcp alpha6\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\nLanguage: \nPlural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "COMSOL MCP Settings"
+msgstr ""
+
+msgid "General"
+msgstr ""
+
+msgid "Profile"
+msgstr ""
+
+msgid "Runtime"
+msgstr ""
+
+msgid "COMSOL/Java"
+msgstr ""
+
+msgid "Shared"
+msgstr ""
+
+msgid "Evidence"
+msgstr ""
+
+msgid "Docs"
+msgstr ""
+
+msgid "Owner"
+msgstr ""
+
+msgid "About"
+msgstr ""
+
+msgid "Changes take effect only after restarting Codex or the owning MCP client."
+msgstr ""
+
+msgid "Save and Exit"
+msgstr ""
+
+msgid "Apply"
+msgstr ""
+
+msgid "Cancel"
+msgstr ""
+
+msgid "Browse"
+msgstr ""
+
+msgid "Clear"
+msgstr ""
+
+msgid "Auto-detect"
+msgstr ""
+
+msgid "Add folder"
+msgstr ""
+
+msgid "Remove"
+msgstr ""
+
+msgid "Choose folder"
+msgstr ""
+
+msgid "Choose file"
+msgstr ""
+
+msgid "GUI release"
+msgstr ""
+
+msgid "Installed package version"
+msgstr ""
+
+msgid "Repositories and acknowledgements"
+msgstr ""
+
+msgid "This repository"
+msgstr ""
+
+msgid "Thanks: upstream project"
+msgstr ""
+
+msgid "Thanks: Ching-Chiang project"
+msgstr ""
+
+msgid "MIT License"
+msgstr ""
+
+msgid "English"
+msgstr ""
+
+msgid "简体中文"
+msgstr ""
+
+msgid "繁體中文"
+msgstr ""
+
+msgid "Internal settings format name. You do not need to change it."
+msgstr ""
+
+msgid "Settings format version used when this file is saved."
+msgstr ""
+
+msgid "Language used by this Settings window."
+msgstr ""
+
+msgid "Size of text and controls. Following Windows is recommended. Other choices are previewed immediately and saved for the next opening."
+msgstr ""
+
+msgid "Follow Windows display settings"
+msgstr ""
+
+msgid "Safety-first default for new users. It offers fewer operations, which lowers the risk of an unintended change. Choose it while learning or when you only need to open and inspect models, manage jobs, run careful single-point checks, or search manuals."
+msgstr ""
+
+msgid "Recommended for most users. It covers ordinary FEM model building and result export, and includes tools for making a Windows standalone package. Choose it for general simulation work that does not need a specialist profile."
+msgstr ""
+
+msgid "For optical and metasurface work. Adds materials, field review, Wave Optics checks, point audits, and staged parameter workflows to Core."
+msgstr ""
+
+msgid "For searching prepared local COMSOL manuals with text and meaning-based search. Choose it only after the optional manual indexes and search model have been prepared."
+msgstr ""
+
+msgid "For users who want to watch the same model in COMSOL Desktop while MCP takes a turn through a local Server. Choose it only after Desktop and Server are connected and shared mode is enabled."
+msgstr ""
+
+msgid "For testing extra helpers that are broader or less mature. Use it only when a required tool is missing from the safer profiles, and check every output carefully."
+msgstr ""
+
+msgid "For old workflows that need nearly every tool. It keeps older broad path behavior and has weaker file containment. New users should not choose it."
+msgstr ""
+
+msgid "Folder for working files and locks. Use an ASCII-only path. \nExample: %PROGRAMDATA%\\comsol_mcp\\runtime"
+msgstr ""
+
+msgid "Optional separate folder for resumable jobs. Leave it empty to use the runtime folder. \nExample: %PROGRAMDATA%\\comsol_mcp\\runtime\\jobs"
+msgstr ""
+
+msgid "Folders where COMSOL MCP may read your .mph files. Chinese paths are supported. \nExample: %LOCALAPPDATA%\\comsol_mcp\\models"
+msgstr ""
+
+msgid "Folder where COMSOL MCP writes results and evidence. Use an ASCII-only path. \nExample: %PROGRAMDATA%\\comsol_mcp\\artifacts"
+msgstr ""
+
+msgid "Folder where COMSOL Multiphysics 6.4 is installed. \nExample: C:\\COMSOL64\\Multiphysics"
+msgstr ""
+
+msgid "Java folder used by COMSOL. Auto-detect can fill this value. \nExample: C:\\COMSOL64\\Multiphysics\\java\\win64\\jre"
+msgstr ""
+
+msgid "JDK folder used by COMSOL. Auto-detect can fill this value. \nExample: C:\\COMSOL64\\Multiphysics\\java\\win64\\jre"
+msgstr ""
+
+msgid "Allow MCP to work with a COMSOL Desktop connected to a local Server."
+msgstr ""
+
+msgid "Check that execution results and scientific conclusions are reported separately."
+msgstr ""
+
+msgid "Check saved result files and their hashes."
+msgstr ""
+
+msgid "Check that summary statements match the saved result values."
+msgstr ""
+
+msgid "Check that a resumed job uses the same producer and driver."
+msgstr ""
+
+msgid "Optional folder containing prepared semantic-search files. This is not COMSOL's built-in manual folder. \nExample: %LOCALAPPDATA%\\comsol_mcp\\semantic\\manuals"
+msgstr ""
+
+msgid "Optional SQLite file used for manual text search. \nExample: %LOCALAPPDATA%\\comsol_mcp\\semantic\\manuals.sqlite3"
+msgstr ""
+
+msgid "Optional folder containing the local semantic-search model. \nExample: %LOCALAPPDATA%\\comsol_mcp\\semantic\\models"
+msgstr ""
+
+msgid "Optional name that identifies who owns the COMSOL session."
+msgstr ""
+
+msgid "Enter a valid absolute path or clear this setting."
+msgstr ""
+
+msgid "Enter an ASCII-only full path, or leave this setting empty."
+msgstr ""
+
+msgid "Enter a valid absolute path."
+msgstr ""
+
+msgid "Enter a valid value for this setting."
+msgstr ""
+
+msgid "Required setting is missing."
+msgstr ""
+
+msgid "Unknown setting is not supported."
+msgstr ""
+
+msgid "Disable evidence check?"
+msgstr ""
+
+msgid "Disabling an evidence check makes future results not fully verified. Continue?"
+msgstr ""
+
+msgid "Restart required"
+msgstr ""
+
+msgid "Invalid settings"
+msgstr ""
+
+msgid "Correct every highlighted field before saving."
+msgstr ""
+
+msgid "Save failed"
+msgstr ""
+
+msgid "Settings were not saved. Close conflicting editors and try again."
+msgstr ""
+
+msgid "Discard changes?"
+msgstr ""
+
+msgid "Close without saving the current edits?"
+msgstr ""
+
+msgid "The configured COMSOL root is not a supported 6.4 installation."
+msgstr ""
+
+msgid "Multiple COMSOL 6.4 installations were found. Choose one manually."
+msgstr ""
+
+msgid "No supported COMSOL 6.4 installation was found."
+msgstr ""
+
+msgid "Replace existing values?"
+msgstr ""
+
+msgid "Auto-detect would replace these settings: {keys}"
+msgstr ""
+
+msgid "Settings conflict"
+msgstr ""
+
+msgid "The settings file changed outside this editor. Close this window and reopen settings."
+msgstr ""
+
+msgid "The selected language catalog is unavailable; English is active."
+msgstr ""
+
+msgid "No writable settings file exists. Rebuild canonical settings now?\n\nChoose No to exit without writing."
+msgstr ""
+
+msgid "Another settings editor is active. Close it and reopen settings."
+msgstr ""
+
+msgid "Settings could not be prepared safely."
+msgstr ""
+
+msgid "Settings are missing or damaged. Preserve them and rebuild defaults?"
+msgstr ""

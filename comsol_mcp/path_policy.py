@@ -340,7 +340,7 @@ class PathPolicy:
         configured_roots = environment.get(MODEL_READ_ROOTS_ENV, "")
         root_values = tuple(value for value in configured_roots.split(os.pathsep) if value)
         read_roots = tuple(
-            _normalize_root(value, require_ascii=False, must_exist=True) for value in root_values
+            _normalize_root(value, require_ascii=False, must_exist=False) for value in root_values
         )
         runtime = Path(runtime_root or default_runtime_dir()).resolve()
         write_value = environment.get(

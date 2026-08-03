@@ -1,0 +1,1 @@
+"""Independent Settings GUI tests."""

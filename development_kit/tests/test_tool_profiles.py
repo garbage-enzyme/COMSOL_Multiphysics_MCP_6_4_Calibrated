@@ -39,7 +39,7 @@ def test_default_profile_is_core_after_h3_cutover(monkeypatch):
     server = create_server("default-core-profile-test")
 
     assert DEFAULT_PROFILE == "core"
-    assert len(_tool_names(server)) == 46
+    assert len(_tool_names(server)) == 47
     names = set(_tool_names(server))
     assert {"solver_status", "job_cancel", "model_load", "study_solve"} <= names
     assert "spectral_characterize" in names
@@ -72,7 +72,7 @@ def test_environment_profile_is_normalized(monkeypatch):
     assert selection.environment_variable == PROFILE_ENV_VAR
 
     server = create_server("environment-wave-profile-test")
-    assert len(_tool_names(server)) == 75
+    assert len(_tool_names(server)) == 76
     assert "wave_optics_field_datasets" in _tool_names(server)
     assert "wave_optics_field_extract" in _tool_names(server)
     assert "wave_optics_material_expression_preview" in _tool_names(server)
@@ -107,10 +107,10 @@ def test_profile_registration_has_no_cross_server_leakage():
     semantic = create_server("isolated-semantic", profile="semantic_docs")
     experimental = create_server("isolated-experimental", profile="experimental")
 
-    assert len(_tool_names(core)) == 46
-    assert len(_tool_names(full)) == 162
-    assert len(_tool_names(semantic)) == 49
-    assert len(_tool_names(experimental)) == 96
+    assert len(_tool_names(core)) == 47
+    assert len(_tool_names(full)) == 163
+    assert len(_tool_names(semantic)) == 50
+    assert len(_tool_names(experimental)) == 97
     assert _tool_names(core) != _tool_names(experimental)
     assert {"semantic_search", "semantic_status", "semantic_worker_reset"} <= set(
         _tool_names(semantic)
@@ -133,6 +133,7 @@ def test_desktop_shared_profile_is_static_default_off_and_minimal(monkeypatch):
 
     assert names == {
         "capabilities",
+        "settings.start",
         "evidence_integrity_status",
         "evidence_integrity_verify",
         "solver_status",
@@ -178,6 +179,7 @@ def test_validated_shared_startup_selection_is_not_reresolved(monkeypatch):
     assert _call_tool(server, "capabilities", {})["active_profile"] == selection.name
     assert set(_tool_names(server)) == {
         "capabilities",
+        "settings.start",
         "evidence_integrity_status",
         "evidence_integrity_verify",
         "solver_status",
@@ -286,10 +288,10 @@ def test_capabilities_are_bound_to_each_server_profile(monkeypatch):
     wave_result = _call_tool(wave, "capabilities", {})
 
     assert core_result["active_profile"] == "core"
-    assert core_result["tool_count"] == 46
+    assert core_result["tool_count"] == 47
     assert core_result["profile_source"]["source"] == "explicit_argument"
     assert wave_result["active_profile"] == "wave_optics"
-    assert wave_result["tool_count"] == 75
+    assert wave_result["tool_count"] == 76
 
 
 @pytest.mark.parametrize("profile", ["core", "basic_fem", "wave_optics", "semantic_docs"])

@@ -18,6 +18,11 @@ Before a release:
 
 1. Confirm `git status --short` is empty.
 2. Run the dependency-only gate and archive its sanitized JSON report.
+   When Settings GUI files change, also run `settings-gui-ci`, verify the
+   deterministic locale, multi-size Windows icon, and package receipts, inspect
+   the real 100%, 125%, 150%, and 200% three-language screenshots directly, and
+   record the user's final rendered-interface acceptance before the GUI-bearing
+   commit.
 3. Confirm `development_kit/release/support_matrix.json` matches the intended
    version tuple.
 4. For a Python runtime promotion, run the provenance-bound compatibility gate
@@ -61,6 +66,9 @@ Before a release:
    summary, matching terminal/result identity, and zero process residue.
 9. Build once more from the clean release commit and compare discovery output.
 10. Install non-editably in the target MCP environment.
+    Confirm `comsol-mcp-settings`, all three compiled catalogs, and
+    profile-independent `settings.start` are installed while GUI tests and PO
+    sources remain outside the wheel.
 11. Restart the MCP host; source and profile changes are not hot-reloaded.
 12. Call `capabilities`; require `deployment_identity.source_classification` to
    be `installed_site_package`, compare its profile/schema/catalog hashes with

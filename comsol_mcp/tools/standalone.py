@@ -7,6 +7,7 @@ from typing import Any, Literal
 
 from mcp.server.fastmcp import FastMCP
 
+from comsol_mcp.settings import load_settings
 from comsol_mcp.standalone.builder import build_standalone_executable
 from comsol_mcp.standalone.control import (
     launch_standalone_campaign,
@@ -42,6 +43,17 @@ def _call(callback) -> dict[str, Any]:
         )
 
 
+def _resolve_comsol_root(explicit: str | None) -> str:
+    if explicit is not None:
+        return explicit
+    configured = load_settings()["comsol"]["installation_root"]
+    if configured is None:
+        raise ValueError(
+            "COMSOL installation root is required; configure it in settings or pass it explicitly."
+        )
+    return configured
+
+
 def register_standalone_tools(mcp: FastMCP) -> None:
     """Register reviewed build, lifecycle, and solver-free inspection tools."""
 
@@ -56,10 +68,17 @@ def register_standalone_tools(mcp: FastMCP) -> None:
         )
 
     @mcp.tool()
-    def standalone_start(deployment_directory: str, comsol_root: str) -> dict[str, Any]:
-        """Start one detached campaign using only the supplied licensed COMSOL 6.4 root."""
+    def standalone_start(
+        deployment_directory: str,
+        comsol_root: str | None = None,
+    ) -> dict[str, Any]:
+        """Start one detached campaign using an explicit or configured COMSOL 6.4 root."""
         return _call(
-            lambda: launch_standalone_campaign(deployment_directory, comsol_root, resume=False)
+            lambda: launch_standalone_campaign(
+                deployment_directory,
+                _resolve_comsol_root(comsol_root),
+                resume=False,
+            )
         )
 
     @mcp.tool()
@@ -73,10 +92,17 @@ def register_standalone_tools(mcp: FastMCP) -> None:
         return _call(lambda: request_standalone_pause(deployment_directory))
 
     @mcp.tool()
-    def standalone_resume(deployment_directory: str, comsol_root: str) -> dict[str, Any]:
-        """Resume exact verified rows under a new detached attempt."""
+    def standalone_resume(
+        deployment_directory: str,
+        comsol_root: str | None = None,
+    ) -> dict[str, Any]:
+        """Resume exact verified rows with an explicit or configured COMSOL 6.4 root."""
         return _call(
-            lambda: launch_standalone_campaign(deployment_directory, comsol_root, resume=True)
+            lambda: launch_standalone_campaign(
+                deployment_directory,
+                _resolve_comsol_root(comsol_root),
+                resume=True,
+            )
         )
 
     @mcp.tool()
@@ -96,4 +122,4 @@ def register_standalone_tools(mcp: FastMCP) -> None:
         return _call(lambda: read_standalone_results(deployment_directory, limit=limit))
 
 
-__all__ = ["register_standalone_tools"]
+__all__ = ["_resolve_comsol_root", "register_standalone_tools"]

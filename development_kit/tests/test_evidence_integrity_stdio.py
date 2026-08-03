@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import sys
-import tempfile
 from datetime import timedelta
 from pathlib import Path
 
@@ -106,17 +104,10 @@ async def _exercise(request: dict, artifact_root: Path, runtime_root: Path) -> N
     assert root_validation["paths_included"] is False
 
 
-def test_source_stdio_client_discovers_and_invokes_both_guard_tools():
-    base = (
-        Path("D:/comsol_runtime")
-        if Path("D:/").exists()
-        else Path(os.environ.get("SystemRoot", "C:/Windows")) / "Temp"
-    )
-    runtime_root = Path(tempfile.mkdtemp(prefix="evidence_stdio_", dir=base))
+def test_source_stdio_client_discovers_and_invokes_both_guard_tools(ascii_tmp_path: Path):
+    runtime_root = ascii_tmp_path / "evidence_stdio"
+    runtime_root.mkdir()
     artifact_root = runtime_root / "case-one"
     artifact_root.mkdir()
-    try:
-        request, _raw, _fit = _fixture(artifact_root)
-        anyio.run(_exercise, request, artifact_root, runtime_root)
-    finally:
-        shutil.rmtree(runtime_root, ignore_errors=True)
+    request, _raw, _fit = _fixture(artifact_root)
+    anyio.run(_exercise, request, artifact_root, runtime_root)

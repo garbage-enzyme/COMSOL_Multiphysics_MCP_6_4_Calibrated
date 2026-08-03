@@ -1,123 +1,306 @@
-# COMSOL MCP settings guide
+# COMSOL MCP Settings Guide
 
-`settings.json` is the shared startup configuration for every MCP client. Edit
-it before starting the host, then restart the host after changing
-`profile.name`, `shared_server.enabled`, or Java paths. Use
-`capabilities.project_settings` to confirm the effective configuration without
-exposing local paths.
+The Settings GUI is the primary way to configure COMSOL MCP. Direct JSON editing
+remains supported for automation, recovery, and advanced deployments. Both methods
+write the same shared `settings.json`; there is no per-agent configuration file.
 
-The file must be UTF-8 JSON, contain one object, use no duplicate keys, and be
-at most 64 KiB. The checked-in template intentionally contains no comments.
-Unknown fields are reported in `settings_errors`. A missing field uses the safe
-default below; an invalid field uses only its own default. Malformed or unreadable
-JSON uses the complete safe default document.
+Saved changes take effect only after restarting Codex or the MCP client that owns
+the server process.
 
-## Preserve settings before an update or reinstall
+## Open the Settings GUI
 
-Before updating or reinstalling the MCP package, back up the effective
-`settings.json`. If `COMSOL_MCP_SETTINGS_PATH` is set, back up that absolute
-file rather than relying on a source-tree template. Restore the approved file
-after installation, restart the exact MCP host, then check
-`capabilities.project_settings` for a valid configuration state.
+From any MCP profile, call:
 
-## Document identity
+```text
+settings.start
+```
 
-| Field | Meaning | Default | Accepted value |
-| --- | --- | --- | --- |
-| `schema_name` | Identifies this settings schema. | `"comsol_mcp.settings"` | Exactly `"comsol_mcp.settings"`. |
-| `schema_version` | Identifies the supported settings format. | `"1.0.0"` | Exactly `"1.0.0"`. |
+The installed command-line fallback is:
 
-## Profile
+```powershell
+comsol-mcp-settings
+```
 
-| Field | Meaning | Default | Accepted value |
-| --- | --- | --- | --- |
-| `profile.name` | Static public tool surface for this MCP process. | `"core"` | `"core"`, `"basic_fem"`, `"wave_optics"`, `"semantic_docs"`, `"desktop_shared"`, `"experimental"`, or `"full"` (case-insensitive; stored lower-case). |
+From a repository checkout or unpacked source distribution, use the root manual
+launcher:
 
-`desktop_shared` also requires `shared_server.enabled: true`; it never starts
-or terminates the user's COMSOL Server. `semantic_docs` requires its configured
-retrieval assets to be available. `basic_fem` also exposes the native EXE build
-and control tools; the generated EXE still requires a licensed local COMSOL 6.4
-installation. Use `core` unless a larger surface is needed.
+```powershell
+.\Open_Settings_GUI.ps1
+.\Open_Settings_GUI.ps1 -PythonPath "D:\path\to\python.exe"
+.\Open_Settings_GUI.ps1 -PythonPath "D:\path\to\python.exe" -SettingsPath "D:\settings\settings.json"
+.\Open_Settings_GUI.ps1 -ValidateOnly
+```
 
-## Runtime and containment paths
+Without `-PythonPath`, the script checks the active virtual environment, the
+environment containing `comsol-mcp-settings`, `python.exe` on `PATH`, and the
+Windows Python launcher for CPython 3.14. An explicit `-SettingsPath` must be
+absolute and its parent directory must already exist. `-ValidateOnly` verifies
+the interpreter, package import, and optional settings locator, prints a
+path-free JSON receipt, and does not create the settings file, open Tk, or start
+COMSOL.
 
-All path settings below accept only an absolute path string when a path is
-allowed. Empty strings, relative paths, and control characters are invalid.
-Paths are normalized by the host platform. For Windows deployment roots and
-durable artifacts, prefer ASCII-only paths.
+Opening Settings does not start COMSOL or begin a calculation. After an agent opens
+the window, it must pause and let the user finish instead of editing the JSON in
+the background.
 
-| Field | Meaning | Default | Accepted value |
-| --- | --- | --- | --- |
-| `runtime.directory` | Root for server-owned runtime state. | `null` | `null` or an absolute path string. `null` selects the platform-safe runtime root. |
-| `runtime.jobs_directory` | Root for durable job state. | `null` | `null` or an absolute path string. `null` selects the default below the effective runtime root. |
-| `paths.model_read_roots` | Approved roots that tools may use for reading source models. | `[]` | A JSON array of absolute path strings, with no duplicate normalized paths. Keep it empty until an explicit model directory is approved. |
-| `paths.artifact_write_root` | Root for MCP-owned artifacts, manifests, and evidence. | `null` | `null` or an absolute path string. `null` selects the default owned-artifact directory below the effective runtime root. |
+The first time an installed copy is used, the window asks whether it may create the
+settings. Nothing is written until the user confirms. Confirmation creates:
 
-An accepted path value is not proof that a later tool may use it: containment,
-existence, link/junction, overwrite, and operation-specific checks still apply.
-For a first model load, set `paths.model_read_roots` to the absolute parent
-directory of the source `.mph`; its default `[]` deliberately rejects every
-model input. Leaving `paths.artifact_write_root` at `null` selects the owned-
-artifact directory beneath the effective runtime root.
+```text
+%LOCALAPPDATA%\comsol_mcp\settings.json
+%LOCALAPPDATA%\comsol_mcp\models
 
-## Shared Desktop/Server mode
+%PROGRAMDATA%\comsol_mcp\runtime
+%PROGRAMDATA%\comsol_mcp\artifacts
+```
 
-| Field | Meaning | Default | Accepted value |
-| --- | --- | --- | --- |
-| `shared_server.enabled` | Opens the shared Desktop/attached-Server gate when the `desktop_shared` profile is selected. | `false` | JSON `true` or `false`; strings such as `"true"` are invalid. |
+The first two locations work when the Windows user name contains Chinese or other
+non-ASCII characters. The last two store working records, locks, and formal
+outputs; they must contain only ASCII characters, so they are placed under the
+normally ASCII `%PROGRAMDATA%` folder. Folders for optional features are not
+created.
 
-Set this to `true` only after manually starting the local COMSOL Server. See the
-[interactive shared-session guide](../interactive_shared_session/README.md) for
-the required confirmation and ownership workflow.
+If no COMSOL path has been saved, the window opens the `COMSOL/Java` page and looks
+for COMSOL 6.4 and its included Java:
 
-## Evidence integrity
+- If exactly one usable installation is found, its paths appear in the boxes but
+  are not saved automatically.
+- If none is found, the boxes stay empty. The window does not invent a path or stop
+  the user with an error.
+- If several installations are found, the user chooses one; the window does not
+  guess.
+- After installing or moving COMSOL, click `Auto-detect` to look again.
+- Click `Browse` to choose a folder manually.
 
-All four checks are enabled by default. Setting any one to `false` is an
-exploration opt-out: affected formal results remain explicitly unverified.
+## Use the GUI
 
-| Field | Meaning | Default | Accepted value |
-| --- | --- | --- | --- |
-| `evidence_integrity.checks.outcome_contract_validation` | Verifies declared outcomes and their machine-readable contract. | `true` | JSON `true` or `false`. |
-| `evidence_integrity.checks.artifact_chain_verification` | Verifies owned artifact bytes, provenance, and hash-chain identity. | `true` | JSON `true` or `false`. |
-| `evidence_integrity.checks.summary_claim_verification` | Verifies summary claims against exact cited artifact values. | `true` | JSON `true` or `false`. |
-| `evidence_integrity.checks.producer_driver_compatibility` | Verifies producer and driver identity before a resumed continuation. | `true` | JSON `true` or `false`. |
+Every option shows the exact name used in JSON. Path options include examples and
+can also be selected with `Browse`.
 
-See the [evidence-integrity guide](../evidence_integrity/README.md) for the
-effects of an opt-out and the verification workflow.
+- `Apply` checks and saves the settings, then keeps the window open.
+- `Save and Exit` checks and saves the settings, then closes the window.
+- `Cancel` closes the window without saving the current changes.
+- A value that cannot be used is shown in red, and saving stays disabled until it
+  is corrected.
+- After the user changes a setting, the window explains that Codex or the MCP
+  client must be restarted.
+- Paths found automatically show the lasting restart message without displaying a
+  restart pop-up as soon as the window opens.
+- Changing the interface language keeps unsaved values and the current page.
+- Changing interface size previews the selected scale immediately. Choose
+  `Follow Windows display settings` unless a fixed 100%, 125%, 150%, or 200% size
+  is more comfortable.
+- The explanation below `profile.name` changes with the selected profile and says
+  what it is for and when it should be avoided.
 
-## Semantic manual retrieval
+Only one Settings window can edit a file at a time. If the user opens it again, the
+second window explains that Settings is already open. If another program changes
+the same file while the window is open, saving stops so that neither copy silently
+overwrites the other.
 
-| Field | Meaning | Default | Accepted value |
-| --- | --- | --- | --- |
-| `semantic_docs.root` | Deployment root for isolated semantic retrieval assets. | `"D:/comsol_semantic"` | An absolute path string; `null` is invalid. |
-| `semantic_docs.lexical_index` | Immutable SQLite lexical manual index. | `"D:/comsol_docs_fts/manuals.sqlite3"` | An absolute path string; `null` is invalid. |
-| `semantic_docs.model_path` | Optional local semantic-model revision directory. | `null` | `null` or an absolute path string. `null` leaves semantic retrieval unavailable. |
+Language choices are displayed by self-name and stored key:
 
-The semantic profile remains unavailable until its required artifacts exist.
+```text
+English (en)
+简体中文 (zh-cn)
+繁體中文 (zh-tw)
+```
 
-## Ownership and Java
+Legacy `zh_CN` and `zh_TW` values are read and normalized to `zh-cn` and `zh-tw`.
 
-| Field | Meaning | Default | Accepted value |
-| --- | --- | --- | --- |
-| `ownership.owner` | Optional stable label for the MCP solver owner. | `null` | `null`, or a non-empty string of at most 256 characters with no control characters. `null` derives a bounded label from the parent agent process. |
-| `java.java_home` | Optional COMSOL-bundled Java runtime path. | `null` | `null` or an absolute path string. `null` preserves the host Java environment. |
-| `java.jdk_home` | Optional JDK path supplied before ClientAPI import. | `null` | `null` or an absolute path string. It is commonly the same as `java.java_home` for the validated COMSOL runtime. |
+## Where Settings Are Read
 
-## Example
+The read and write target is resolved in this order:
 
-This is a partial edit, not a replacement for the checked-in template:
+1. The absolute file selected by `COMSOL_MCP_SETTINGS_PATH`.
+2. The project-root `settings.json` in a source checkout.
+3. `%LOCALAPPDATA%\comsol_mcp\settings.json` in an installed deployment.
+4. The packaged read-only template, used only to offer first-run setup.
+
+The GUI never writes into `site-packages`. A settings path may contain Unicode,
+but it must be an ordinary file whose path contains no symbolic link or junction.
+
+The document must be UTF-8 JSON, contain exactly one object, contain no duplicate
+keys, and be no larger than 64 KiB. Unknown fields and invalid values are reported
+through `capabilities.project_settings.settings_errors` without exposing local
+paths. A missing field uses its safe default. An invalid leaf falls back only that
+leaf. Malformed JSON falls back to the complete default document.
+
+## Path Rules
+
+The portable prefixes `%LOCALAPPDATA%` and `%PROGRAMDATA%` are expanded when a
+settings document is loaded. Other environment-variable tokens are not expanded.
+All configured paths must be absolute; empty strings, relative paths, and control
+characters are invalid.
+
+| Path type | Unicode support | Default |
+| --- | --- | --- |
+| Settings file | Yes | `%LOCALAPPDATA%\comsol_mcp\settings.json` |
+| Model-read roots | Yes | `%LOCALAPPDATA%\comsol_mcp\models` |
+| Runtime and solver lease | ASCII only | `%PROGRAMDATA%\comsol_mcp\runtime` |
+| Durable jobs override | ASCII only | `null`, derived below runtime |
+| Owned artifacts | ASCII only | `%PROGRAMDATA%\comsol_mcp\artifacts` |
+| COMSOL and Java | Installation-dependent | `null`, discovered by the GUI |
+| Semantic assets | Backend-dependent; use ASCII when possible | `null` |
+
+Model-read roots may contain Chinese or other Unicode characters. Runtime,
+durable-job, and artifact roots containing non-ASCII characters are rejected by
+the GUI before save and by backend validation when JSON is edited directly.
+
+## Settings Reference
+
+### Document and Interface
+
+| Key | Default | Meaning and accepted values |
+| --- | --- | --- |
+| `schema_name` | `"comsol_mcp.settings"` | Read-only schema identity; must match exactly. |
+| `schema_version` | `"1.1.0"` | New writes use `1.1.0`; `1.0.0` is read and migrated in memory. |
+| `gui.language` | `"zh-cn"` | `"en"`, `"zh-cn"`, or `"zh-tw"`. |
+| `gui.scale` | `"system"` | `"system"`, `"100"`, `"125"`, `"150"`, or `"200"`. The GUI displays the numeric choices as percentages. |
+
+### Tool Profile
+
+| Key | Default | Meaning and accepted values |
+| --- | --- | --- |
+| `profile.name` | `"core"` | `core`, `basic_fem`, `wave_optics`, `semantic_docs`, `desktop_shared`, `experimental`, or `full`. The stored value is lower-case. |
+
+New users can begin with the smaller `core` surface when safety is the priority.
+Most users doing ordinary simulation should choose `basic_fem`. `desktop_shared`
+also requires `shared_server.enabled: true`. `semantic_docs` remains unavailable
+until its optional assets are configured and valid.
+
+| Profile | Best suited to |
+| --- | --- |
+| `core` | Safety-first default for new users: fewer operations, model inspection, jobs, careful single-point checks, and manual search. |
+| `basic_fem` | Recommended for most users: ordinary FEM construction, result export, and Windows standalone packages. |
+| `wave_optics` | Optical and metasurface work, field review, Wave Optics checks, point audits, and staged parameters. |
+| `semantic_docs` | Prepared local manual indexes with text and meaning-based search. |
+| `desktop_shared` | Taking turns with MCP while viewing the same Server-owned model in COMSOL Desktop. |
+| `experimental` | Extra helpers that are broader or less mature and require careful review. |
+| `full` | Legacy migration that needs nearly every tool and accepts weaker file containment; not recommended for new users. |
+
+### Runtime and Containment
+
+| Key | Default | Meaning and accepted values |
+| --- | --- | --- |
+| `runtime.directory` | `%PROGRAMDATA%\comsol_mcp\runtime` | Server-owned runtime and lease root. Use `null` only to delegate to the legacy platform fallback. A configured value must be absolute and ASCII-only. |
+| `runtime.jobs_directory` | `null` | Optional durable-job override. `null` derives the job directory from the effective runtime root. A configured value must be absolute and ASCII-only. |
+| `paths.model_read_roots` | `[%LOCALAPPDATA%\comsol_mcp\models]` | Approved immutable source-model roots. Values must be unique absolute paths; Unicode is supported. `[]` deliberately rejects every model input. |
+| `paths.artifact_write_root` | `%PROGRAMDATA%\comsol_mcp\artifacts` | MCP-owned artifacts, manifests, and evidence. Use `null` only to derive the legacy owned-artifact root. A configured value must be absolute and ASCII-only. |
+
+A path accepted by settings validation is not automatically authorized for every
+operation. Tools still enforce existence, containment, extension, link/junction,
+overwrite, and operation-specific rules.
+
+### COMSOL and Java
+
+| Key | Default | Meaning and accepted values |
+| --- | --- | --- |
+| `comsol.installation_root` | `null` | COMSOL Multiphysics 6.4 installation root. The GUI can discover it without starting COMSOL. An explicit standalone tool argument has precedence. |
+| `java.java_home` | `null` | Optional Java runtime home. Auto-detection prefers the COMSOL-bundled runtime. |
+| `java.jdk_home` | `null` | Optional JDK home. It commonly matches `java.java_home` for the validated COMSOL runtime. |
+
+Java lookup order is the usable COMSOL-bundled runtime, `JAVA_HOME`, `JDK_HOME`,
+then `PATH`. Auto-detect never replaces a non-null value without confirmation.
+
+### Shared Server and Ownership
+
+| Key | Default | Meaning and accepted values |
+| --- | --- | --- |
+| `shared_server.enabled` | `false` | Boolean gate for the explicit local Desktop/attached-Server workflow. It never starts or terminates the user's COMSOL Server. |
+| `ownership.owner` | `null` | Optional non-empty owner label, at most 256 characters and without control characters. `null` derives a bounded label from the parent process. |
+
+### Evidence Integrity
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `evidence_integrity.checks.outcome_contract_validation` | `true` | Validates declared execution and outcome contracts. |
+| `evidence_integrity.checks.artifact_chain_verification` | `true` | Verifies artifact bytes, provenance, and hash chains. |
+| `evidence_integrity.checks.summary_claim_verification` | `true` | Checks summary claims against cited artifact values. |
+| `evidence_integrity.checks.producer_driver_compatibility` | `true` | Verifies producer and driver identity before resume. |
+
+Disabling any check is an exploration opt-out. Affected formal results remain
+explicitly unverified.
+
+### Optional Semantic Retrieval
+
+| Key | Default | Meaning and accepted values |
+| --- | --- | --- |
+| `semantic_docs.root` | `null` | Optional root for preprocessed semantic retrieval assets. This is not COMSOL's bundled manual directory and is not auto-detected. |
+| `semantic_docs.lexical_index` | `null` | Optional immutable SQLite lexical index file. |
+| `semantic_docs.model_path` | `null` | Optional local semantic-model revision directory. |
+
+Leaving these values at `null` is valid. The `semantic_docs` profile becomes useful
+only after the required preprocessed assets exist.
+
+## Direct JSON Editing
+
+JSON editing remains available when a GUI cannot be used or when settings are
+managed by an installer or deployment script. Stop the MCP host and close the GUI
+before editing. Modify only the resolved writable file, validate it, then restart
+the exact owning client.
+
+Canonical default template:
 
 ```json
 {
-  "profile": {"name": "wave_optics"},
-  "runtime": {"directory": "D:/comsol_runtime"},
+  "schema_name": "comsol_mcp.settings",
+  "schema_version": "1.1.0",
+  "profile": {"name": "core"},
+  "runtime": {
+    "directory": "%PROGRAMDATA%/comsol_mcp/runtime",
+    "jobs_directory": null
+  },
   "paths": {
-    "model_read_roots": ["D:/comsol_models"],
-    "artifact_write_root": "D:/comsol_runtime/owned_artifacts"
-  }
+    "model_read_roots": ["%LOCALAPPDATA%/comsol_mcp/models"],
+    "artifact_write_root": "%PROGRAMDATA%/comsol_mcp/artifacts"
+  },
+  "shared_server": {"enabled": false},
+  "evidence_integrity": {
+    "checks": {
+      "outcome_contract_validation": true,
+      "artifact_chain_verification": true,
+      "summary_claim_verification": true,
+      "producer_driver_compatibility": true
+    }
+  },
+  "semantic_docs": {
+    "root": null,
+    "lexical_index": null,
+    "model_path": null
+  },
+  "ownership": {"owner": null},
+  "java": {"java_home": null, "jdk_home": null},
+  "comsol": {"installation_root": null},
+  "gui": {"language": "zh-cn", "scale": "system"}
 }
 ```
 
-If a client cannot preserve the project root, set the one absolute file locator
-`COMSOL_MCP_SETTINGS_PATH` to the desired regular, non-link `settings.json`
-file. The locator file must already exist.
+Existing `COMSOL_MCP_*`, `COMSOL_SEMANTIC_*`, `JAVA_HOME`, and `JDK_HOME`
+variables remain compatibility overrides. A value already present in the process
+environment has precedence over the corresponding JSON-derived environment value.
+New deployments should use the GUI or JSON file instead of creating separate
+environment-only configurations.
+
+## Update and Recovery
+
+Before updating or reinstalling, back up the effective writable `settings.json`.
+If `COMSOL_MCP_SETTINGS_PATH` is set, back up that exact file. After installation,
+restore or review the settings, restart the MCP client, and inspect
+`capabilities.project_settings` for:
+
+```text
+configuration_state: valid
+settings_errors: []
+setup_required: false
+```
+
+If the file is missing, malformed, duplicated-key, non-UTF-8, oversized, or uses
+an unsupported future schema, the GUI offers only bounded recovery or exit. A
+confirmed recovery preserves one damaged copy and writes canonical `1.1.0`
+settings atomically.
+
+For the evidence-check meanings, see
+[`../evidence_integrity/README.md`](../evidence_integrity/README.md). For the
+default-off shared Desktop/Server workflow, see
+[`../interactive_shared_session/README.md`](../interactive_shared_session/README.md).
