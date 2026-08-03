@@ -1,6 +1,6 @@
 # Generated deterministic gettext template for COMSOL MCP Settings.
 msgid ""
-msgstr "Project-Id-Version: comsol-mcp alpha6.1\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\nLanguage: \nPlural-Forms: nplurals=2; plural=(n != 1);\n"
+msgstr "Project-Id-Version: comsol-mcp alpha6.2\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\nLanguage: \nPlural-Forms: nplurals=2; plural=(n != 1);\n"
 
 msgid "COMSOL MCP Settings"
 msgstr ""
@@ -15,9 +15,6 @@ msgid "Runtime"
 msgstr ""
 
 msgid "COMSOL/Java"
-msgstr ""
-
-msgid "Shared"
 msgstr ""
 
 msgid "Evidence"
@@ -161,12 +158,6 @@ msgstr ""
 msgid "For optical and metasurface work. Adds materials, field review, Wave Optics checks, point audits, and staged parameter workflows to Core."
 msgstr ""
 
-msgid "For searching prepared local COMSOL manuals with text and meaning-based search. Choose it only after the optional manual indexes and search model have been prepared."
-msgstr ""
-
-msgid "For users who want to watch the same model in COMSOL Desktop while MCP takes a turn through a local Server. Choose it only after Desktop and Server are connected and shared mode is enabled."
-msgstr ""
-
 msgid "For testing extra helpers that are broader or less mature. Use it only when a required tool is missing from the safer profiles, and check every output carefully."
 msgstr ""
 
@@ -194,7 +185,7 @@ msgstr ""
 msgid "JDK folder used by COMSOL. Auto-detect can fill this value. \nExample: C:\\COMSOL64\\Multiphysics\\java\\win64\\jre"
 msgstr ""
 
-msgid "Allow MCP to work with a COMSOL Desktop connected to a local Server."
+msgid "Enable optional interactive collaboration with a COMSOL Desktop connected to a local Server. This feature composes with every tool profile."
 msgstr ""
 
 msgid "Check that execution results and scientific conclusions are reported separately."
@@ -207,6 +198,9 @@ msgid "Check that summary statements match the saved result values."
 msgstr ""
 
 msgid "Check that a resumed job uses the same producer and driver."
+msgstr ""
+
+msgid "Enable optional semantic manual-search tools for the selected profile. This feature requires prepared local indexes and a search model."
 msgstr ""
 
 msgid "Optional folder containing prepared semantic-search files. This is not COMSOL's built-in manual folder. \nExample: %LOCALAPPDATA%\\comsol_mcp\\semantic\\manuals"

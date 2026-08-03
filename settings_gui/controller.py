@@ -40,7 +40,7 @@ class SettingsController:
         return self.translator(message)
 
     def update(self, key: str, value: Any, *, show_dirty_notice: bool = True) -> bool:
-        previous_dirty = self.model.dirty
+        previous_restart_required = self.model.restart_required
         if key.startswith("evidence_integrity.checks.") and value is False:
             if not self.dialogs.confirm(
                 title=self.text("Disable evidence check?"),
@@ -52,7 +52,12 @@ class SettingsController:
         self.model.update(key, value)
         if key == "gui.language" and value != self.translator.language:
             self.translator = Translator(str(value))
-        if self.model.dirty and not previous_dirty and not self._dirty_notice_shown:
+        if (
+            self.model.restart_required
+            and not previous_restart_required
+            and not self.restart_pending
+            and not self._dirty_notice_shown
+        ):
             self._dirty_notice_shown = True
             if show_dirty_notice:
                 self.dialogs.info(
@@ -73,6 +78,7 @@ class SettingsController:
             )
             self.on_refresh()
             return False
+        restart_required = self.model.restart_required
         try:
             self.store.save(self.model.canonical)
         except Exception:
@@ -84,7 +90,7 @@ class SettingsController:
             )
             return False
         self.model.mark_saved()
-        self.restart_pending = True
+        self.restart_pending = self.restart_pending or restart_required
         self._dirty_notice_shown = False
         self.on_refresh()
         return True

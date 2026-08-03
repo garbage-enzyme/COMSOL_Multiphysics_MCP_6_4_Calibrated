@@ -464,7 +464,7 @@ def test_shared_model_lock_wrapper_normalizes_immutable_source(tmp_path, ascii_r
         tool_name="shared_model_lock",
         side_effect_class="shared_model_guard",
         concurrency_class="solver_free",
-        profile_name="desktop_shared",
+        profile_name="core",
     )
     accepted = guarded("interactive_inspection", str(source), "a" * 64)
     rejected = guarded("interactive_inspection", str(outside), "a" * 64)

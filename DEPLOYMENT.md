@@ -133,19 +133,19 @@ build/modules, license, scheduler, storage, and output requirements first.
 | `core` | Compact default control plane and lexical manuals. |
 | `basic_fem` | Conventional FEM construction, bounded exports, and the Python-free standalone launcher tools. |
 | `wave_optics` | Periodic optics, metasurfaces, bounded field discovery/extraction, preflight, and evidence audits. |
-| `desktop_shared` | Default-off shared Desktop/attached-Server workflow with exact process/listener/model identity, non-owning leases, revision locks, durable attached jobs, and detach preservation. |
-| `semantic_docs` | Isolated experimental semantic manual retrieval. |
 | `experimental` | Explicit opt-in generic and escape-hatch tools. |
-| `full` | Broad compatibility surface; not recommended by default. |
+| `full` | Broad non-feature compatibility surface; not recommended by default. |
 
 Set `profile.name` in `settings.json`. Omitting the entry selects `core`. The
 profile is frozen when the stdio process starts; changing it requires a
 client/MCP-host restart. An invalid profile keeps `core` and is reported in
 `settings_errors` instead of silently selecting another profile.
 
-The default `core` and `wave_optics` profiles do not expose shared-session tools.
-Enable the protected workflow only with the explicit `desktop_shared` profile and
-`shared_server.enabled=true` in `settings.json`. The legacy `comsol_connect` compatibility tool
+Profiles control COMSOL automation/simulation and future autonomous-exploration
+tool visibility. Enable the protected shared workflow independently for any
+profile with `shared_server.enabled=true` in `settings.json`; enable isolated
+semantic retrieval with `semantic_docs.enabled=true`. Both default to false and
+may be enabled together. The legacy `comsol_connect` compatibility tool
 remains experimental and is not a substitute for this lifecycle.
 
 The standalone tools in `basic_fem` still run inside the normal Python MCP host. They build
@@ -166,14 +166,15 @@ client to that Server. Then edit the MCP settings with:
 
 ```json
 {
-  "profile": { "name": "desktop_shared" },
+  "profile": { "name": "core" },
   "shared_server": { "enabled": true },
   "runtime": { "directory": "D:/comsol_mcp_runtime" }
 }
 ```
 
-After restarting the MCP host, call `capabilities` and verify the live
-`desktop_shared` profile. Call `shared_server_preflight` before
+After restarting the MCP host, call `capabilities` and verify the chosen live
+profile, `enabled_features` contains `shared_server`, and
+`shared_session.feature_enabled` and `shared_session.gate_open` are true. Call `shared_server_preflight` before
 `shared_server_attach`; pass `user_confirmed=true` only after the endpoint and
 Desktop connection are correct. The attach path requires one exact 6.4.0.*
 Server identity and one exact server-held model. It rejects starting/unready
@@ -333,8 +334,9 @@ native constructor is still blocked, status reports `cleanup_pending=true` and
 the owned lease remains held until that call returns and cleanup is verified.
 Do not retry start or restart the MCP host while cleanup is pending.
 
-For `desktop_shared`, verify that `capabilities` reports the shared profile and
-that shared-session tools are present only after the feature flag is enabled.
+For shared Desktop work, verify that `capabilities` reports the chosen profile
+unchanged and that shared-session tools are present only after the independent
+feature flag is enabled.
 Start and connect Desktop/Server first, then call `shared_server_preflight` and
 `shared_server_attach` with explicit user confirmation. Do not call
 `comsol_start` in this mode, and do not treat a successful attach as permission

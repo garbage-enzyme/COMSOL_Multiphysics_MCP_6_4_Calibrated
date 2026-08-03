@@ -71,6 +71,8 @@ def inspect_settings_gui_distributions(dist: Path) -> dict:
         raise ValueError("wheel contains translator source catalogs")
     if "comsol-mcp-settings = settings_gui.__main__:main" not in entry_points:
         raise ValueError("wheel is missing the Settings GUI console entry point")
+    if "comsol-mcp-settings-gui = settings_gui.__main__:main" not in entry_points:
+        raise ValueError("wheel is missing the Settings GUI GUI entry point")
     return {
         "schema_name": "comsol_mcp.settings_gui_package_receipt",
         "schema_version": "1.0.0",
@@ -80,6 +82,7 @@ def inspect_settings_gui_distributions(dist: Path) -> dict:
         "wheel_tests_excluded": True,
         "wheel_translation_sources_excluded": True,
         "console_entry_included": True,
+        "gui_entry_included": True,
         "wheel_icon_included": True,
         "sdist_icon_included": True,
         "shortcut_adapter_included": True,

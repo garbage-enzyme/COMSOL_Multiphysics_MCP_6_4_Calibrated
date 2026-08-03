@@ -22,25 +22,25 @@ def _request():
 def test_attach_request_requires_all_static_and_per_call_gates():
     enabled = {SHARED_SERVER_FEATURE_ENV: "true"}
 
-    with pytest.raises(ValueError, match="desktop_shared profile"):
-        normalize_shared_server_attach_request(
-            _request(), profile="wave_optics", environ=enabled
-        )
+    accepted = normalize_shared_server_attach_request(
+        _request(), profile="wave_optics", environ=enabled
+    )
+    assert accepted.feature_gate["profile"] == "wave_optics"
     with pytest.raises(ValueError, match="static feature flag"):
         normalize_shared_server_attach_request(
-            _request(), profile="desktop_shared", environ={}
+            _request(), profile="core", environ={}
         )
     unconfirmed = {**_request(), "user_confirmed": False}
     with pytest.raises(ValueError, match="user_confirmed=true"):
         normalize_shared_server_attach_request(
-            unconfirmed, profile="desktop_shared", environ=enabled
+            unconfirmed, profile="core", environ=enabled
         )
 
 
 def test_attach_request_normalizes_exact_endpoint():
     result = normalize_shared_server_attach_request(
         _request(),
-        profile="desktop_shared",
+        profile="core",
         environ={SHARED_SERVER_FEATURE_ENV: "true"},
     )
 
@@ -74,25 +74,23 @@ def test_malformed_attach_request_is_rejected_before_lease_callback(raw_request)
     with pytest.raises(ValueError):
         manager.attach(
             raw_request,
-            profile="desktop_shared",
+            profile="core",
             environ={SHARED_SERVER_FEATURE_ENV: "true"},
         )
 
     assert lease_calls == []
 
 
-def test_disabled_profile_fails_before_mph_import():
+def test_disabled_feature_registers_no_shared_tools_before_mph_import():
     code = """
 import os
 import sys
 os.environ.pop('COMSOL_MCP_ENABLE_SHARED_SERVER', None)
-try:
-    from src.server import create_server
-    create_server('disabled-shared', profile='desktop_shared')
-except ValueError as exc:
-    assert 'COMSOL_MCP_ENABLE_SHARED_SERVER=true' in str(exc)
-else:
-    raise AssertionError('disabled shared profile unexpectedly started')
+import asyncio
+from src.server import create_server
+server = create_server('disabled-shared', profile='core')
+names = {tool.name for tool in asyncio.run(server.list_tools())}
+assert 'shared_server_attach' not in names
 assert 'mph' not in sys.modules
 """
     completed = subprocess.run(

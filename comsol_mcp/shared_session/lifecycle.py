@@ -20,8 +20,6 @@ from comsol_mcp.durable import (
 from .attach_request import normalize_shared_server_attach_request
 from .cleanup import evaluate_attached_detach
 from .contracts import (
-    SHARED_SERVER_FEATURE_ENV,
-    SHARED_SERVER_PROFILE,
     summarize_shared_listener_bindings,
 )
 from .identity import (
@@ -484,10 +482,14 @@ class SharedSessionManager:
         *,
         profile: str,
         environ: Mapping[str, str] | None = None,
+        feature_enabled: bool | None = None,
     ) -> dict[str, Any]:
         """Attach to one exact existing server without selecting a model."""
         normalized_request = normalize_shared_server_attach_request(
-            request, profile=profile, environ=environ
+            request,
+            profile=profile,
+            environ=environ,
+            feature_enabled=feature_enabled,
         )
         with self._lock:
             if self._client is not None or self._ownership is not None:
@@ -1163,7 +1165,11 @@ class SharedSessionManager:
             }
 
     def recover_attached_job_handoff(
-        self, execution_backend: Mapping[str, Any]
+        self,
+        execution_backend: Mapping[str, Any],
+        *,
+        profile: str,
+        feature_enabled: bool,
     ) -> dict[str, Any]:
         """Reattach and re-adopt an exact target after a pre-launch submit failure."""
         from comsol_mcp.jobs.attached_backend import (
@@ -1182,8 +1188,8 @@ class SharedSessionManager:
                     },
                     "user_confirmed": True,
                 },
-                profile=SHARED_SERVER_PROFILE,
-                environ={SHARED_SERVER_FEATURE_ENV: "true"},
+                profile=profile,
+                feature_enabled=feature_enabled,
             )
             if not attached.get("success"):
                 return {

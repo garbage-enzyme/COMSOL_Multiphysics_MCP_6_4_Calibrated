@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import settings_gui.desktop_shortcut as shortcut_module
 
 from settings_gui.desktop_shortcut import (
     ICON_PATH,
@@ -29,6 +30,25 @@ def test_shell_icon_location_spacing_is_canonicalized() -> None:
     assert _canonical_icon_location("C:\\Program Files\\COMSOL MCP\\icon.ico, 0") == (
         "C:\\Program Files\\COMSOL MCP\\icon.ico,0"
     )
+
+
+def test_installed_shortcut_entry_prefers_the_gui_subsystem_launcher(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    python = tmp_path / "python.exe"
+    scripts = tmp_path / "Scripts"
+    console = scripts / "comsol-mcp-settings.exe"
+    gui = scripts / "comsol-mcp-settings-gui.exe"
+    scripts.mkdir()
+    python.write_bytes(b"python")
+    console.write_bytes(b"console")
+    gui.write_bytes(b"gui")
+    monkeypatch.setattr(shortcut_module.sys, "executable", str(python))
+    monkeypatch.setattr(shortcut_module.sys, "prefix", str(tmp_path))
+    monkeypatch.setattr(shortcut_module.shutil, "which", lambda _name: None)
+
+    assert shortcut_module.installed_gui_entry_executable() == gui
     assert _canonical_icon_location("C:\\icons,archive\\icon.ico, -1") == (
         "C:\\icons,archive\\icon.ico,-1"
     )

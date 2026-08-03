@@ -24,7 +24,6 @@ ZH_CN = {
     "Profile": "工具配置",
     "Runtime": "运行路径",
     "COMSOL/Java": "COMSOL/Java",
-    "Shared": "共享",
     "Evidence": "证据",
     "Docs": "文档",
     "Owner": "所有者",
@@ -72,8 +71,6 @@ ZH_CN = {
     "Safety-first default for new users. It offers fewer operations, which lowers the risk of an unintended change. Choose it while learning or when you only need to open and inspect models, manage jobs, run careful single-point checks, or search manuals.": "面向新手的安全默认选项。它提供的操作较少，可降低误操作风险。学习阶段，或只需要打开和查看模型、管理任务、进行谨慎的单点检查或搜索手册时，请选择此项。",
     "Recommended for most users. It covers ordinary FEM model building and result export, and includes tools for making a Windows standalone package. Choose it for general simulation work that does not need a specialist profile.": "推荐大多数用户选择。它覆盖常规 FEM 建模和结果导出，也包含制作 Windows standalone 包的工具。一般仿真不需要专用 profile 时，请选择此项。",
     "For optical and metasurface work. Adds materials, field review, Wave Optics checks, point audits, and staged parameter workflows to Core.": "适合光学和超表面工作。在 Core 基础上增加材料、场结果查看、Wave Optics 检查、单点审计和分阶段参数流程。",
-    "For searching prepared local COMSOL manuals with text and meaning-based search. Choose it only after the optional manual indexes and search model have been prepared.": "适合搜索已准备好的本地 COMSOL 手册，支持文字和语义搜索。只有在可选手册索引和搜索模型准备完成后才选择此项。",
-    "For users who want to watch the same model in COMSOL Desktop while MCP takes a turn through a local Server. Choose it only after Desktop and Server are connected and shared mode is enabled.": "适合希望在 COMSOL Desktop 中观看同一模型，并让 MCP 通过本机 Server 轮流操作的用户。只有在 Desktop 与 Server 已连接且共享模式已开启后才选择此项。",
     "For testing extra helpers that are broader or less mature. Use it only when a required tool is missing from the safer profiles, and check every output carefully.": "适合测试范围更广或尚未成熟的额外工具。只有在较安全的 profile 缺少所需工具时才使用，并仔细检查每项输出。",
     "For old workflows that need nearly every tool. It keeps older broad path behavior and has weaker file containment. New users should not choose it.": "适合需要几乎全部工具的旧流程。它保留较宽松的旧路径行为，文件范围保护较弱；新用户不应选择。",
     "Folder for working files and locks. Use an ASCII-only path. \nExample: %PROGRAMDATA%\\comsol_mcp\\runtime": "存放运行文件和锁的文件夹。路径只能含 ASCII 字符。\n示例：%PROGRAMDATA%\\comsol_mcp\\runtime",
@@ -83,11 +80,12 @@ ZH_CN = {
     "Folder where COMSOL Multiphysics 6.4 is installed. \nExample: C:\\COMSOL64\\Multiphysics": "COMSOL Multiphysics 6.4 的安装文件夹。\n示例：C:\\COMSOL64\\Multiphysics",
     "Java folder used by COMSOL. Auto-detect can fill this value. \nExample: C:\\COMSOL64\\Multiphysics\\java\\win64\\jre": "COMSOL 使用的 Java 文件夹，可由自动检测填写。\n示例：C:\\COMSOL64\\Multiphysics\\java\\win64\\jre",
     "JDK folder used by COMSOL. Auto-detect can fill this value. \nExample: C:\\COMSOL64\\Multiphysics\\java\\win64\\jre": "COMSOL 使用的 JDK 文件夹，可由自动检测填写。\n示例：C:\\COMSOL64\\Multiphysics\\java\\win64\\jre",
-    "Allow MCP to work with a COMSOL Desktop connected to a local Server.": "允许 MCP 与连接到本机 Server 的 COMSOL Desktop 协作。",
+    "Enable optional interactive collaboration with a COMSOL Desktop connected to a local Server. This feature composes with every tool profile.": "启用与连接到本机 Server 的 COMSOL Desktop 的可选交互协作。此功能可与任意工具 profile 组合使用。",
     "Check that execution results and scientific conclusions are reported separately.": "检查运行结果和科学结论是否分开说明。",
     "Check saved result files and their hashes.": "检查保存的结果文件及其哈希。",
     "Check that summary statements match the saved result values.": "检查摘要说明是否与保存的结果数值一致。",
     "Check that a resumed job uses the same producer and driver.": "检查恢复任务是否使用相同的生成器和驱动。",
+    "Enable optional semantic manual-search tools for the selected profile. This feature requires prepared local indexes and a search model.": "为所选 profile 启用可选的语义手册搜索工具。此功能需要预先准备本地索引和搜索模型。",
     "Optional folder containing prepared semantic-search files. This is not COMSOL's built-in manual folder. \nExample: %LOCALAPPDATA%\\comsol_mcp\\semantic\\manuals": "存放已准备语义搜索文件的可选文件夹。它不是 COMSOL 自带的 manual 文件夹。\n示例：%LOCALAPPDATA%\\comsol_mcp\\semantic\\manuals",
     "Optional SQLite file used for manual text search. \nExample: %LOCALAPPDATA%\\comsol_mcp\\semantic\\manuals.sqlite3": "用于手册文字搜索的可选 SQLite 文件。\n示例：%LOCALAPPDATA%\\comsol_mcp\\semantic\\manuals.sqlite3",
     "Optional folder containing the local semantic-search model. \nExample: %LOCALAPPDATA%\\comsol_mcp\\semantic\\models": "存放本地语义搜索模型的可选文件夹。\n示例：%LOCALAPPDATA%\\comsol_mcp\\semantic\\models",
@@ -127,7 +125,6 @@ ZH_TW = {
     "Profile": "工具設定檔",
     "Runtime": "執行路徑",
     "COMSOL/Java": "COMSOL/Java",
-    "Shared": "共用",
     "Evidence": "證據",
     "Docs": "文件",
     "Owner": "擁有者",
@@ -175,8 +172,6 @@ ZH_TW = {
     "Safety-first default for new users. It offers fewer operations, which lowers the risk of an unintended change. Choose it while learning or when you only need to open and inspect models, manage jobs, run careful single-point checks, or search manuals.": "面向新手的安全預設選項。它提供的操作較少，可降低誤操作風險。學習階段，或只需要開啟和查看模型、管理工作、進行謹慎的單點檢查或搜尋手冊時，請選擇此項。",
     "Recommended for most users. It covers ordinary FEM model building and result export, and includes tools for making a Windows standalone package. Choose it for general simulation work that does not need a specialist profile.": "建議大多數使用者選擇。它涵蓋一般 FEM 建模和結果匯出，也包含製作 Windows standalone 套件的工具。一般模擬不需要專用 profile 時，請選擇此項。",
     "For optical and metasurface work. Adds materials, field review, Wave Optics checks, point audits, and staged parameter workflows to Core.": "適合光學和超表面工作。在 Core 基礎上增加材料、場結果查看、Wave Optics 檢查、單點稽核和分階段參數流程。",
-    "For searching prepared local COMSOL manuals with text and meaning-based search. Choose it only after the optional manual indexes and search model have been prepared.": "適合搜尋已準備好的本機 COMSOL 手冊，支援文字和語意搜尋。只有在可選手冊索引和搜尋模型準備完成後才選擇此項。",
-    "For users who want to watch the same model in COMSOL Desktop while MCP takes a turn through a local Server. Choose it only after Desktop and Server are connected and shared mode is enabled.": "適合希望在 COMSOL Desktop 中觀看同一模型，並讓 MCP 透過本機 Server 輪流操作的使用者。只有在 Desktop 與 Server 已連線且共用模式已啟用後才選擇此項。",
     "For testing extra helpers that are broader or less mature. Use it only when a required tool is missing from the safer profiles, and check every output carefully.": "適合測試範圍更廣或尚未成熟的額外工具。只有在較安全的 profile 缺少所需工具時才使用，並仔細檢查每項輸出。",
     "For old workflows that need nearly every tool. It keeps older broad path behavior and has weaker file containment. New users should not choose it.": "適合需要幾乎全部工具的舊流程。它保留較寬鬆的舊路徑行為，檔案範圍保護較弱；新使用者不應選擇。",
     "Folder for working files and locks. Use an ASCII-only path. \nExample: %PROGRAMDATA%\\comsol_mcp\\runtime": "存放執行檔案和鎖定資料的資料夾。路徑只能含 ASCII 字元。\n範例：%PROGRAMDATA%\\comsol_mcp\\runtime",
@@ -186,11 +181,12 @@ ZH_TW = {
     "Folder where COMSOL Multiphysics 6.4 is installed. \nExample: C:\\COMSOL64\\Multiphysics": "COMSOL Multiphysics 6.4 的安裝資料夾。\n範例：C:\\COMSOL64\\Multiphysics",
     "Java folder used by COMSOL. Auto-detect can fill this value. \nExample: C:\\COMSOL64\\Multiphysics\\java\\win64\\jre": "COMSOL 使用的 Java 資料夾，可由自動偵測填入。\n範例：C:\\COMSOL64\\Multiphysics\\java\\win64\\jre",
     "JDK folder used by COMSOL. Auto-detect can fill this value. \nExample: C:\\COMSOL64\\Multiphysics\\java\\win64\\jre": "COMSOL 使用的 JDK 資料夾，可由自動偵測填入。\n範例：C:\\COMSOL64\\Multiphysics\\java\\win64\\jre",
-    "Allow MCP to work with a COMSOL Desktop connected to a local Server.": "允許 MCP 與連線到本機 Server 的 COMSOL Desktop 協作。",
+    "Enable optional interactive collaboration with a COMSOL Desktop connected to a local Server. This feature composes with every tool profile.": "啟用與連線到本機 Server 的 COMSOL Desktop 的可選互動協作。此功能可與任意工具 profile 組合使用。",
     "Check that execution results and scientific conclusions are reported separately.": "檢查執行結果和科學結論是否分開說明。",
     "Check saved result files and their hashes.": "檢查儲存的結果檔案及其雜湊。",
     "Check that summary statements match the saved result values.": "檢查摘要說明是否與儲存的結果數值一致。",
     "Check that a resumed job uses the same producer and driver.": "檢查恢復工作是否使用相同的產生器和驅動程式。",
+    "Enable optional semantic manual-search tools for the selected profile. This feature requires prepared local indexes and a search model.": "為所選 profile 啟用可選的語意手冊搜尋工具。此功能需要預先準備本機索引和搜尋模型。",
     "Optional folder containing prepared semantic-search files. This is not COMSOL's built-in manual folder. \nExample: %LOCALAPPDATA%\\comsol_mcp\\semantic\\manuals": "存放已準備語意搜尋檔案的可選資料夾。它不是 COMSOL 內建的 manual 資料夾。\n範例：%LOCALAPPDATA%\\comsol_mcp\\semantic\\manuals",
     "Optional SQLite file used for manual text search. \nExample: %LOCALAPPDATA%\\comsol_mcp\\semantic\\manuals.sqlite3": "用於手冊文字搜尋的可選 SQLite 檔案。\n範例：%LOCALAPPDATA%\\comsol_mcp\\semantic\\manuals.sqlite3",
     "Optional folder containing the local semantic-search model. \nExample: %LOCALAPPDATA%\\comsol_mcp\\semantic\\models": "存放本機語意搜尋模型的可選資料夾。\n範例：%LOCALAPPDATA%\\comsol_mcp\\semantic\\models",
@@ -230,7 +226,7 @@ def _header(language: str) -> str:
         "nplurals=1; plural=0;" if language.startswith("zh_") else "nplurals=2; plural=(n != 1);"
     )
     return (
-        "Project-Id-Version: comsol-mcp alpha6.1\n"
+        "Project-Id-Version: comsol-mcp alpha6.2\n"
         "MIME-Version: 1.0\n"
         "Content-Type: text/plain; charset=UTF-8\n"
         "Content-Transfer-Encoding: 8bit\n"

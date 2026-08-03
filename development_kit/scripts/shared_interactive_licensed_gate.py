@@ -420,7 +420,7 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
                 "endpoint": spec["endpoint"],
                 "user_confirmed": True,
             },
-            profile="desktop_shared",
+            profile="core",
             environ={SHARED_SERVER_FEATURE_ENV: "true"},
         )
         result["attach"] = attach

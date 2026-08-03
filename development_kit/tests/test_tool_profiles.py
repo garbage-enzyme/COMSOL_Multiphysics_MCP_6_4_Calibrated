@@ -10,7 +10,7 @@ import pytest
 from src.server import create_server, register_all_tools
 from src.settings import RUNTIME_ENV, SETTINGS_PATH_ENV
 from src.shared_session.contracts import SHARED_SERVER_FEATURE_ENV
-from src.tools.catalog import PROFILE_NAMES, snapshot_tool_schemas
+from src.tools.catalog import FEATURE_NAMES, PROFILE_NAMES, TOOL_METADATA, snapshot_tool_schemas
 from src.tools.profiles import DEFAULT_PROFILE, PROFILE_ENV_VAR, ProfileSelection, resolve_profile
 
 SNAPSHOT_DIR = Path(__file__).parent / "snapshots"
@@ -57,9 +57,15 @@ def test_default_profile_is_core_after_h3_cutover(monkeypatch):
     }.isdisjoint(names)
 
 
-def test_invalid_profile_fails_without_fallback():
-    with pytest.raises(ValueError, match="Invalid COMSOL_MCP_PROFILE"):
-        create_server("invalid-profile-test", profile="not-real")
+def test_invalid_profile_falls_back_to_core_with_explicit_provenance():
+    selection = resolve_profile("not-real", environ={})
+    server = create_server("invalid-profile-test", profile=selection)
+
+    assert selection.name == "core"
+    assert selection.fallback_used is True
+    assert selection.requested_name == "not-real"
+    assert selection.source == "explicit_argument_invalid_profile_fallback"
+    assert len(_tool_names(server)) == 47
 
 
 def test_environment_profile_is_normalized(monkeypatch):
@@ -86,8 +92,7 @@ def test_environment_profile_is_normalized(monkeypatch):
     } <= set(_tool_names(server))
 
 
-def test_profile_name_and_schema_snapshots_are_exact(monkeypatch):
-    monkeypatch.setenv(SHARED_SERVER_FEATURE_ENV, "true")
+def test_profile_name_and_schema_snapshots_are_exact():
     expected_names = json.loads(
         (SNAPSHOT_DIR / "profile_tool_names.json").read_text(encoding="utf-8")
     )
@@ -101,14 +106,34 @@ def test_profile_name_and_schema_snapshots_are_exact(monkeypatch):
         assert actual_schemas == {name: full_schemas[name] for name in expected_names[profile]}
 
 
+def test_feature_tool_name_snapshot_is_exact() -> None:
+    expected = json.loads(
+        (SNAPSHOT_DIR / "feature_tool_names.json").read_text(encoding="utf-8")
+    )
+
+    assert tuple(expected) == FEATURE_NAMES
+    assert expected == {
+        feature: sorted(
+            name
+            for name, metadata in TOOL_METADATA.items()
+            if metadata.feature_gate == feature
+        )
+        for feature in FEATURE_NAMES
+    }
+
+
 def test_profile_registration_has_no_cross_server_leakage():
     core = create_server("isolated-core", profile="core")
     full = create_server("isolated-full", profile="full")
-    semantic = create_server("isolated-semantic", profile="semantic_docs")
+    semantic_selection = resolve_profile(
+        "core",
+        environ={"COMSOL_MCP_ENABLE_SEMANTIC_DOCS": "true"},
+    )
+    semantic = create_server("isolated-semantic", profile=semantic_selection)
     experimental = create_server("isolated-experimental", profile="experimental")
 
     assert len(_tool_names(core)) == 47
-    assert len(_tool_names(full)) == 163
+    assert len(_tool_names(full)) == 150
     assert len(_tool_names(semantic)) == 50
     assert len(_tool_names(experimental)) == 97
     assert _tool_names(core) != _tool_names(experimental)
@@ -122,27 +147,57 @@ def test_profile_registration_has_no_cross_server_leakage():
     assert "wave_optics_incidence_apply" not in _tool_names(core)
 
 
-def test_desktop_shared_profile_is_static_default_off_and_minimal(monkeypatch):
-    monkeypatch.delenv(SHARED_SERVER_FEATURE_ENV, raising=False)
-    with pytest.raises(ValueError, match="requires COMSOL_MCP_ENABLE_SHARED_SERVER=true"):
-        resolve_profile("desktop_shared")
-
-    monkeypatch.setenv(SHARED_SERVER_FEATURE_ENV, "true")
-    server = create_server("desktop-shared-foundation", profile="desktop_shared")
+def test_independent_feature_overlays_compose_with_any_base_profile() -> None:
+    selection = resolve_profile(
+        "wave_optics",
+        environ={
+            "COMSOL_MCP_ENABLE_SEMANTIC_DOCS": "true",
+            SHARED_SERVER_FEATURE_ENV: "true",
+        },
+    )
+    server = create_server("composed-feature-overlays", profile=selection)
     names = set(_tool_names(server))
 
-    assert names == {
-        "capabilities",
-        "settings.start",
-        "evidence_integrity_status",
-        "evidence_integrity_verify",
-        "solver_status",
-        "job_submit",
-        "job_spec_preview",
-        "job_status",
-        "job_tail",
-        "job_cancel",
-        "job_resume",
+    assert tuple(selection.enabled_features) == ("semantic_docs", "shared_server")
+    assert selection.name == "wave_optics"
+    assert {"semantic_search", "semantic_status", "semantic_worker_reset"} <= names
+    assert {
+        "shared_server_preflight",
+        "shared_server_attach",
+        "shared_model_adopt",
+        "shared_model_lock",
+    } <= names
+    assert "wave_optics_preflight" in names
+    assert len(names) == len(_tool_names(server))
+
+
+def test_synthetic_feature_profiles_are_not_current_profile_names() -> None:
+    assert "semantic_docs" not in PROFILE_NAMES
+    assert "desktop_shared" not in PROFILE_NAMES
+
+    semantic = resolve_profile("semantic_docs", environ={})
+    shared = resolve_profile("desktop_shared", environ={})
+    legacy_semantic = resolve_profile(environ={PROFILE_ENV_VAR: "semantic_docs"})
+    legacy_shared = resolve_profile(environ={PROFILE_ENV_VAR: "desktop_shared"})
+
+    assert (semantic.name, semantic.enabled_features, semantic.fallback_used) == (
+        "core",
+        (),
+        True,
+    )
+    assert (shared.name, shared.enabled_features, shared.fallback_used) == ("core", (), True)
+    assert legacy_semantic.enabled_features == ("semantic_docs",)
+    assert legacy_shared.enabled_features == ("shared_server",)
+
+
+def test_shared_server_feature_is_default_off_and_adds_only_its_delta():
+    base = set(_tool_names(create_server("shared-off", profile="core")))
+    selection = resolve_profile(
+        "core",
+        environ={SHARED_SERVER_FEATURE_ENV: "true"},
+    )
+    names = set(_tool_names(create_server("shared-on", profile=selection)))
+    shared = {
         "shared_server_preflight",
         "shared_server_attach",
         "shared_server_detach",
@@ -154,22 +209,14 @@ def test_desktop_shared_profile_is_static_default_off_and_minimal(monkeypatch):
         "shared_model_snapshot",
         "shared_model_adopt",
     }
-    assert {
-        "comsol_start",
-        "comsol_connect",
-        "comsol_disconnect",
-        "session_reset",
-        "session_clear_models",
-        "model_load",
-        "model_create",
-        "model_remove",
-        "model_set_current",
-    }.isdisjoint(names)
+
+    assert shared.isdisjoint(base)
+    assert names == base | shared
 
 
 def test_validated_shared_startup_selection_is_not_reresolved(monkeypatch):
     selection = resolve_profile(
-        "desktop_shared",
+        "core",
         environ={SHARED_SERVER_FEATURE_ENV: "true"},
     )
     monkeypatch.delenv(SHARED_SERVER_FEATURE_ENV, raising=False)
@@ -177,18 +224,9 @@ def test_validated_shared_startup_selection_is_not_reresolved(monkeypatch):
     server = create_server("validated-shared-selection", profile=selection)
 
     assert _call_tool(server, "capabilities", {})["active_profile"] == selection.name
-    assert set(_tool_names(server)) == {
-        "capabilities",
-        "settings.start",
-        "evidence_integrity_status",
-        "evidence_integrity_verify",
-        "solver_status",
-        "job_submit",
-        "job_spec_preview",
-        "job_status",
-        "job_tail",
-        "job_cancel",
-        "job_resume",
+    assert set(_tool_names(server)) - set(
+        _tool_names(create_server("validated-shared-base", profile="core"))
+    ) == {
         "shared_server_preflight",
         "shared_server_attach",
         "shared_server_detach",
@@ -204,7 +242,7 @@ def test_validated_shared_startup_selection_is_not_reresolved(monkeypatch):
 
 def test_directly_constructed_profile_selection_cannot_register_tools():
     forged = ProfileSelection(
-        name="desktop_shared",
+        name="core",
         environment_variable=PROFILE_ENV_VAR,
         default_used=False,
         source="forged",
@@ -265,7 +303,7 @@ def test_existing_profiles_expose_no_shared_session_tools():
         "shared_model_snapshot",
         "shared_model_adopt",
     }
-    for profile in ("core", "wave_optics", "semantic_docs", "experimental"):
+    for profile in PROFILE_NAMES:
         assert shared.isdisjoint(
             _tool_names(create_server(f"no-shared-{profile}", profile=profile))
         )
@@ -275,7 +313,7 @@ def test_registered_server_profile_is_immutable():
     server = create_server("immutable-profile", profile="core")
 
     register_all_tools(server, "core")
-    with pytest.raises(ValueError, match="cannot change"):
+    with pytest.raises(ValueError, match="different startup selection"):
         register_all_tools(server, "full")
 
 
@@ -294,7 +332,7 @@ def test_capabilities_are_bound_to_each_server_profile(monkeypatch):
     assert wave_result["tool_count"] == 76
 
 
-@pytest.mark.parametrize("profile", ["core", "basic_fem", "wave_optics", "semantic_docs"])
+@pytest.mark.parametrize("profile", ["core", "basic_fem", "wave_optics"])
 def test_recommended_profiles_exclude_synthetic_async_solver(profile):
     names = set(_tool_names(create_server(f"no-synthetic-async-{profile}", profile=profile)))
     assert {

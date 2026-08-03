@@ -20,11 +20,17 @@ def register_shared_session_tools(mcp: FastMCP) -> None:
     """Register explicit local attached-server lifecycle tools."""
     selection = getattr(mcp, "profile_selection", None)
     profile_name = getattr(selection, "name", "unknown")
+    shared_enabled = bool(
+        selection is not None and selection.feature_enabled("shared_server")
+    )
 
     @mcp.tool()
     def shared_server_preflight(host: str, port: int) -> dict[str, Any]:
         """Classify one existing local Desktop/Server endpoint without MPh."""
-        gate = normalize_shared_server_feature_gate(profile_name)
+        gate = normalize_shared_server_feature_gate(
+            profile_name,
+            feature_enabled=shared_enabled,
+        )
         if not gate.gate_open:
             return {
                 "success": False,
@@ -54,6 +60,7 @@ def register_shared_session_tools(mcp: FastMCP) -> None:
                 "user_confirmed": user_confirmed,
             },
             profile=profile_name,
+            feature_enabled=shared_enabled,
         )
 
     @mcp.tool()

@@ -1,4 +1,4 @@
-"""Dependency-light runtime configuration for the opt-in semantic profile."""
+"""Dependency-light runtime configuration for the opt-in semantic feature."""
 
 from __future__ import annotations
 
@@ -232,14 +232,14 @@ def get_semantic_service() -> SemanticService:
         return _SERVICE
 
 
-def semantic_capability_status(*, profile_active: bool) -> dict[str, Any]:
+def semantic_capability_status(*, feature_enabled: bool) -> dict[str, Any]:
     service = get_semantic_service()
     status = service.status(warm=False)
     return {
-        "profile_active": profile_active,
+        "feature_enabled": feature_enabled,
         "configured": status["configured"],
         "health_gate_passed": status["health_gate_passed"],
-        "available": bool(profile_active and status["available"]),
+        "available": bool(feature_enabled and status["available"]),
         "worker_state": status["worker"]["state"],
         "device": status["device"],
         "maturity": status["maturity"],

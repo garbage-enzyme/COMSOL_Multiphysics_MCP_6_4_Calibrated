@@ -2,7 +2,6 @@
 
 from .contracts import (
     SHARED_SERVER_FEATURE_ENV,
-    SHARED_SERVER_PROFILE,
     SharedServerFeatureGate,
     SharedServerEndpoint,
     normalize_shared_server_endpoint,
@@ -40,7 +39,6 @@ from .lifecycle import SharedSessionManager
 
 __all__ = [
     "SHARED_SERVER_FEATURE_ENV",
-    "SHARED_SERVER_PROFILE",
     "AttachedServerIdentity",
     "CleanupOutcome",
     "SharedModelIdentity",

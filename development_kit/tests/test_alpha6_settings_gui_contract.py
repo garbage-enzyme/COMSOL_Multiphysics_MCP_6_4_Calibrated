@@ -12,12 +12,12 @@ from comsol_mcp.tools.catalog import PROFILE_NAMES, TOOL_SPECS
 
 
 def test_alpha6_settings_schema_and_defaults_are_current_and_backward_readable(tmp_path):
-    assert settings_module.SETTINGS_VERSION == "1.1.0"
-    assert settings_module.SETTINGS_READABLE_VERSIONS == ("1.0.0", "1.1.0")
+    assert settings_module.SETTINGS_VERSION == "1.2.0"
+    assert settings_module.SETTINGS_READABLE_VERSIONS == ("1.0.0", "1.1.0", "1.2.0")
 
     defaults = settings_module.default_settings_document()
     assert defaults["schema_name"] == "comsol_mcp.settings"
-    assert defaults["schema_version"] == "1.1.0"
+    assert defaults["schema_version"] == "1.2.0"
     assert defaults["comsol"] == {"installation_root": None}
     assert defaults["gui"] == {"language": "zh-cn", "scale": "system"}
     user_root = tmp_path / "用户配置" / "comsol_mcp"
@@ -33,6 +33,7 @@ def test_alpha6_settings_schema_and_defaults_are_current_and_backward_readable(t
     assert str(program_root / "runtime").isascii() is True
     assert str(program_root / "artifacts").isascii() is True
     assert user_defaults["semantic_docs"] == {
+        "enabled": False,
         "root": None,
         "lexical_index": None,
         "model_path": None,
@@ -51,7 +52,7 @@ def test_alpha6_settings_schema_and_defaults_are_current_and_backward_readable(t
     )
     report = settings_module.load_settings_report({settings_module.SETTINGS_PATH_ENV: str(legacy)})
     assert report["errors"] == []
-    assert report["settings"]["schema_version"] == "1.1.0"
+    assert report["settings"]["schema_version"] == "1.2.0"
     assert report["settings"]["comsol"]["installation_root"] is None
     assert report["settings"]["gui"]["language"] == "zh-cn"
 
@@ -109,5 +110,6 @@ def test_settings_gui_console_entry_and_packages_are_declared():
     root = Path(__file__).parents[2]
     pyproject = root.joinpath("pyproject.toml").read_text(encoding="utf-8")
     assert 'comsol-mcp-settings = "settings_gui.__main__:main"' in pyproject
+    assert 'comsol-mcp-settings-gui = "settings_gui.__main__:main"' in pyproject
     assert 'packages = ["comsol_mcp", "settings_gui"]' in pyproject
-    assert __version__ == "0.6.1"
+    assert __version__ == "0.6.2"

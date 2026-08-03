@@ -237,10 +237,13 @@ def test_capabilities_report_risky_operations_without_starting_comsol(monkeypatc
         "core",
         "basic_fem",
         "wave_optics",
-        "semantic_docs",
-        "desktop_shared",
         "experimental",
         "full",
+    ]
+    assert result["enabled_features"] == []
+    assert [item["name"] for item in result["available_features"]] == [
+        "semantic_docs",
+        "shared_server",
     ]
     assert result["session"] == {"connected": False, "starting": False}
     assert result["long_jobs"]["real_cancellation"] is True
@@ -250,8 +253,11 @@ def test_capabilities_report_risky_operations_without_starting_comsol(monkeypatc
     assert "semantic_search" in result["disabled_by_default"]
     assert result["profile_guidance"]["default_profile"] == "core"
     assert result["profile_guidance"]["wave_optics_recommended_profile"] == "wave_optics"
-    assert result["profile_guidance"]["semantic_docs_opt_in_profile"] == "semantic_docs"
-    assert result["semantic_search"]["profile_active"] is False
+    assert result["profile_guidance"]["independent_feature_gates"] == {
+        "semantic_docs": "COMSOL_MCP_ENABLE_SEMANTIC_DOCS",
+        "shared_server": "COMSOL_MCP_ENABLE_SHARED_SERVER",
+    }
+    assert result["semantic_search"]["feature_enabled"] is False
     assert result["semantic_search"]["available"] is False
     assert result["wave_optics_audit"]["default_assessment"] == "evidence_only"
     assert result["physical_evidence_contract"] == {

@@ -43,14 +43,14 @@ def test_two_shared_model_mutations_cannot_overlap(tmp_path, monkeypatch):
         tool_name="shared_model_mutate_fixture",
         side_effect_class="model_mutation",
         concurrency_class="comsol_bound",
-        profile_name="desktop_shared",
+        profile_name="core",
     )
     second = guard_tool_call(
         lambda: {"success": True},
         tool_name="shared_model_mutate_fixture",
         side_effect_class="model_mutation",
         concurrency_class="comsol_bound",
-        profile_name="desktop_shared",
+        profile_name="core",
     )
     result: dict = {}
     worker_errors = []
@@ -97,14 +97,14 @@ def test_status_and_cancel_remain_responsive_during_shared_solve(tmp_path, monke
         tool_name="shared_model_solve_fixture",
         side_effect_class="solver_execution",
         concurrency_class="comsol_bound",
-        profile_name="desktop_shared",
+        profile_name="core",
     )
     status_tool = guard_tool_call(
         lambda: {"success": True, "operation": get_operation_status()},
         tool_name="shared_server_status_fixture",
         side_effect_class="read_only",
         concurrency_class="control_plane",
-        profile_name="desktop_shared",
+        profile_name="core",
     )
     cancel_calls = []
     cancel_tool = guard_tool_call(
@@ -112,7 +112,7 @@ def test_status_and_cancel_remain_responsive_during_shared_solve(tmp_path, monke
         tool_name="job_cancel_fixture",
         side_effect_class="job_control",
         concurrency_class="control_plane",
-        profile_name="desktop_shared",
+        profile_name="core",
     )
     solve_result: dict = {}
     worker_errors = []

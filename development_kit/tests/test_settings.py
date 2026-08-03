@@ -12,6 +12,7 @@ from src.settings import (
     SETTINGS_VERSION,
     default_settings_document,
     load_settings,
+    normalize_settings_document,
     settings_environment,
     settings_status,
 )
@@ -80,6 +81,7 @@ def test_deleted_entries_use_safe_defaults_without_an_error(tmp_path):
     assert settings["runtime"] == defaults["runtime"]
     assert settings["paths"] == defaults["paths"]
     assert settings["semantic_docs"] == {
+        "enabled": False,
         "root": None,
         "lexical_index": None,
         "model_path": None,
@@ -302,3 +304,66 @@ def test_explicit_empty_legacy_value_is_preserved(tmp_path):
     effective = settings_environment({SETTINGS_PATH_ENV: str(path), "COMSOL_MCP_PROFILE": ""})
 
     assert effective["COMSOL_MCP_PROFILE"] == ""
+
+
+def test_legacy_synthetic_profiles_migrate_to_independent_feature_gates() -> None:
+    semantic = normalize_settings_document(
+        {
+            "schema_name": SETTINGS_SCHEMA,
+            "schema_version": "1.1.0",
+            "profile": {"name": "semantic_docs"},
+        }
+    )
+    shared = normalize_settings_document(
+        {
+            "schema_name": SETTINGS_SCHEMA,
+            "schema_version": "1.1.0",
+            "profile": {"name": "desktop_shared"},
+            "shared_server": {"enabled": False},
+        }
+    )
+    full = normalize_settings_document(
+        {
+            "schema_name": SETTINGS_SCHEMA,
+            "schema_version": "1.1.0",
+            "profile": {"name": "full"},
+        }
+    )
+
+    assert semantic["errors"] == []
+    assert semantic["settings"]["schema_version"] == SETTINGS_VERSION
+    assert semantic["settings"]["profile"]["name"] == "core"
+    assert semantic["settings"]["semantic_docs"]["enabled"] is True
+    assert shared["errors"] == []
+    assert shared["settings"]["profile"]["name"] == "core"
+    assert shared["settings"]["shared_server"]["enabled"] is True
+    assert full["errors"] == []
+    assert full["settings"]["profile"]["name"] == "full"
+    assert full["settings"]["semantic_docs"]["enabled"] is True
+
+
+def test_current_feature_gates_are_boolean_composable_and_environment_visible(tmp_path) -> None:
+    path = _settings_path(
+        tmp_path,
+        {
+            "schema_name": SETTINGS_SCHEMA,
+            "schema_version": SETTINGS_VERSION,
+            "profile": {"name": "wave_optics"},
+            "shared_server": {"enabled": True},
+            "semantic_docs": {
+                "enabled": True,
+                "root": None,
+                "lexical_index": None,
+                "model_path": None,
+            },
+        },
+    )
+
+    effective = settings_environment({SETTINGS_PATH_ENV: str(path)})
+    loaded = load_settings({SETTINGS_PATH_ENV: str(path)})
+
+    assert loaded["profile"]["name"] == "wave_optics"
+    assert loaded["shared_server"]["enabled"] is True
+    assert loaded["semantic_docs"]["enabled"] is True
+    assert effective["COMSOL_MCP_ENABLE_SHARED_SERVER"] == "true"
+    assert effective["COMSOL_MCP_ENABLE_SEMANTIC_DOCS"] == "true"

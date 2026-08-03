@@ -1,4 +1,4 @@
-"""semantic profile static profile, public schema, configuration, and degradation gates."""
+"""Semantic feature public schema, configuration, and degradation gates."""
 
 from __future__ import annotations
 
@@ -232,7 +232,7 @@ def decode(result):
             if isinstance(value, dict):
                 return value
     raise RuntimeError('public FastMCP result did not contain a JSON object')
-server = create_server('semantic-profile-subprocess', profile='semantic_docs')
+server = create_server('semantic-feature-subprocess', profile='core')
 tools = asyncio.run(server.list_tools())
 names = sorted(tool.name for tool in tools)
 assert len(names) == 50
@@ -249,7 +249,9 @@ print(json.dumps({'count': len(names), 'configured': status['configured']}))
         capture_output=True,
         text=True,
         timeout=20,
-        env=isolated_semantic_environment(),
+        env=isolated_semantic_environment(
+            {"COMSOL_MCP_ENABLE_SEMANTIC_DOCS": "true"}
+        ),
     )
 
     assert completed.returncode == 0, completed.stderr
@@ -273,5 +275,5 @@ def test_semantic_and_other_profile_counts_match_declared_discovery():
         "basic_fem": 109,
         "wave_optics": 76,
         "experimental": 97,
-        "full": 163,
+        "full": 150,
     }

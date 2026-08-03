@@ -13,14 +13,16 @@ from copy import deepcopy
 from pathlib import Path
 from tkinter import ttk
 
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 from PIL import ImageGrab
 
 from comsol_mcp.settings import default_settings_document
 from settings_gui.app import SettingsApplication
 from settings_gui.controller import SettingsController
 from settings_gui.model import TAB_IDS, SettingsFormModel
-
-ROOT = Path(__file__).resolve().parents[2]
 
 
 class _Ownership:
@@ -120,23 +122,33 @@ def _capture_one(
     return receipt
 
 
-def capture_matrix(output_root: Path) -> dict:
-    output_root.mkdir(parents=True, exist_ok=False)
-    scenarios = []
-    for dpi in (100, 125, 150, 200):
+def _capture_scenarios() -> tuple[tuple[str, int, str, str], ...]:
+    scenarios: list[tuple[str, int, str, str]] = []
+    for dpi_percent in (100, 125, 150, 200):
         for language in ("en", "zh-cn", "zh-tw"):
-            scenarios.append((language, dpi, "valid", "general"))
+            scenarios.extend(
+                (
+                    (language, dpi_percent, "valid", "general"),
+                    (language, dpi_percent, "valid", "profile"),
+                    (language, dpi_percent, "valid", "semantic"),
+                    (language, dpi_percent, "about", "about"),
+                )
+            )
     for language in ("en", "zh-cn", "zh-tw"):
         scenarios.extend(
             (
                 (language, 200, "invalid", "runtime"),
                 (language, 200, "long_paths", "comsol_java"),
                 (language, 150, "evidence", "evidence"),
-                (language, 200, "about", "about"),
             )
         )
+    return tuple(scenarios)
+
+
+def capture_matrix(output_root: Path) -> dict:
+    output_root.mkdir(parents=True, exist_ok=False)
     captures = []
-    for language, dpi, state, tab in scenarios:
+    for language, dpi, state, tab in _capture_scenarios():
         completed = subprocess.run(  # noqa: S603
             [
                 sys.executable,
@@ -164,7 +176,7 @@ def capture_matrix(output_root: Path) -> dict:
         captures.append(json.loads(completed.stdout))
     receipt = {
         "schema_name": "comsol_mcp.settings_gui_visual_matrix",
-        "schema_version": "1.0.0",
+        "schema_version": "1.1.0",
         "capture_count": len(captures),
         "captures": captures,
     }

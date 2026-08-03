@@ -11,7 +11,7 @@ from comsol_mcp.settings_gui_handshake import HANDSHAKE_SCHEMA, HANDSHAKE_VERSIO
 
 OPERATION_LOCK_SCHEMA, OPERATION_LOCK_VERSION = "comsol_mcp.operation_lock", "1.0.0"
 PATH_POLICY_SCHEMA, PATH_POLICY_VERSION = "comsol_mcp.path_policy", "1.1.0"
-SETTINGS_SCHEMA, SETTINGS_VERSION = "comsol_mcp.settings", "1.1.0"
+SETTINGS_SCHEMA, SETTINGS_VERSION = "comsol_mcp.settings", "1.2.0"
 CLEANUP_OUTCOME_SCHEMA, CLEANUP_OUTCOME_VERSION = "comsol_mcp.cleanup_outcome", "1.0.0"
 SHARED_MODEL_LOCK_SCHEMA, SHARED_MODEL_LOCK_VERSION = (
     "comsol_mcp.shared_model_lock",
@@ -257,9 +257,9 @@ def _entries() -> list[dict[str, Any]]:
         ),
         _entry(
             "comsol_mcp.deployment_identity",
-            "1.1.0",
+            "1.2.0",
             "comsol_mcp.tools.capabilities",
-            readable_versions=("1.0.0", "1.1.0"),
+            readable_versions=("1.0.0", "1.1.0", "1.2.0"),
         ),
         _entry(
             "comsol_mcp.environment_identity",
@@ -473,7 +473,7 @@ def _entries() -> list[dict[str, Any]]:
             SETTINGS_VERSION,
             "comsol_mcp.settings",
             artifact_kind="configuration",
-            readable_versions=("1.0.0", SETTINGS_VERSION),
+            readable_versions=("1.0.0", "1.1.0", SETTINGS_VERSION),
         ),
         _entry(
             HANDSHAKE_SCHEMA,

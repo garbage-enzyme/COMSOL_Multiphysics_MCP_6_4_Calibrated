@@ -45,8 +45,8 @@ user edits again.
 show the model, but the user must observe only until the job reaches a verified
 terminal state.
 
-The public `desktop_shared` profile does not expose an unrestricted foreground
-solver. Parameter changes and solves use
+The independent `shared_server.enabled` feature does not expose an unrestricted
+foreground solver. Parameter changes and solves use
 `job_submit/status/tail/cancel/resume`. The attached backend currently supports
 only `staged_sweep`.
 
@@ -68,14 +68,14 @@ rejected.
 
 ## Quick start
 
-### Step 1: enable the shared profile
+### Step 1: enable the shared feature
 
 Before starting the MCP host, edit the repository's `settings.json`. This is a
 partial example; keep the other settings from the project template:
 
 ```json
 {
-  "profile": { "name": "desktop_shared" },
+  "profile": { "name": "core" },
   "shared_server": { "enabled": true },
   "runtime": { "directory": "D:/comsol_runtime" },
   "paths": {
@@ -93,8 +93,9 @@ COMSOL_MCP_SETTINGS_PATH=D:\path\to\COMSOL_Multiphysics_MCP\settings.json
 
 Restart the MCP host and call `capabilities`. Confirm that:
 
-- `active_profile` is `desktop_shared`;
-- `shared_session.profile_active` and `shared_session.gate_open` are `true`;
+- `active_profile` is the profile you selected;
+- `enabled_features` contains `shared_server`;
+- `shared_session.feature_enabled` and `shared_session.gate_open` are `true`;
 - the shared-session tools are listed;
 - evidence-integrity checks remain enabled by default.
 
@@ -311,7 +312,7 @@ Other limitations:
 - not every short call produces a COMSOL busy warning;
 - visible geometry, plots, and results are not by themselves scientific proof;
 - attached automation currently supports only `staged_sweep`;
-- `desktop_shared` remains experimental and default-off.
+- `shared_server.enabled` remains experimental and default-off.
 
 Matching visible Desktop output is useful collaboration evidence, but a formal
 scientific conclusion still needs raw data, declared acceptance rules,

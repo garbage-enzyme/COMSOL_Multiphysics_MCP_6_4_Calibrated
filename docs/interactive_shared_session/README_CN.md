@@ -39,7 +39,7 @@ MCP 不会启动、关闭、清空或终止用户拥有的 Server、Desktop、�
 `automation_exclusive` 用于可恢复的有界任务。Desktop 可以继续显示模型，但任务达到
 已确认的终止状态前，用户只能观察，不能修改。
 
-公共 `desktop_shared` 配置档不会开放不受约束的前台求解。需要改变参数或求解时，智能
+独立的 `shared_server.enabled` 功能不会开放不受约束的前台求解。需要改变参数或求解时，智能
 助手应使用 `job_submit/status/tail/cancel/resume`。目前共享模式只支持
 `staged_sweep`。
 
@@ -60,14 +60,14 @@ MCP 不会启动、关闭、清空或终止用户拥有的 Server、Desktop、�
 
 ## 快速开始
 
-### 第一步：开启共享配置
+### 第一步：开启共享功能
 
 在启动 MCP 前，编辑项目根目录的 `settings.json`。下面只是局部示例，请保留模板中的
 其他设置：
 
 ```json
 {
-  "profile": { "name": "desktop_shared" },
+  "profile": { "name": "core" },
   "shared_server": { "enabled": true },
   "runtime": { "directory": "D:/comsol_runtime" },
   "paths": {
@@ -85,8 +85,9 @@ COMSOL_MCP_SETTINGS_PATH=D:\path\to\COMSOL_Multiphysics_MCP\settings.json
 
 重启 MCP，然后调用 `capabilities`，确认：
 
-- `active_profile` 是 `desktop_shared`；
-- `shared_session.profile_active` 和 `shared_session.gate_open` 都是 `true`；
+- `active_profile` 是用户选择的 profile；
+- `enabled_features` 包含 `shared_server`；
+- `shared_session.feature_enabled` 和 `shared_session.gate_open` 都是 `true`；
 - 返回结果中列出了共享模式工具；
 - 证据完整性检查仍保持默认开启。
 
@@ -279,7 +280,7 @@ IPv4。任何通配监听都会保留 `listener_bind_scope=wildcard` 警告，MC
 - 不保证每个短操作都会触发 COMSOL 的占用提示；
 - Desktop 中看见的几何、图和结果不等于科学结论已经验证；
 - 共享自动任务目前只支持 `staged_sweep`；
-- `desktop_shared` 仍是默认关闭的试验功能。
+- `shared_server.enabled` 仍是默认关闭的试验功能。
 
 Desktop 中可见的一致结果是有价值的协作证据，但正式科学结论还需要原始数据、明确的判定
 规则、收敛性检查、默认开启的证据完整性检查，以及具体模型所需的物理验证。

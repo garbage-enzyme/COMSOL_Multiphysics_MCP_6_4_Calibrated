@@ -16,7 +16,7 @@ if str(ROOT) not in sys.path:
 from comsol_mcp import __version__
 from comsol_mcp.compatibility import load_runtime_compatibility
 from comsol_mcp.schema_registry import get_schema_registry
-from comsol_mcp.tools.catalog import PROFILE_NAMES, TOOL_METADATA
+from comsol_mcp.tools.catalog import FEATURE_NAMES, PROFILE_NAMES, TOOL_METADATA
 from comsol_mcp.tools.profiles import tool_names_for_profile
 
 
@@ -39,6 +39,14 @@ def build_release_facts() -> dict[str, Any]:
         profile: sorted(tool_names_for_profile(profile))
         for profile in PROFILE_NAMES
     }
+    features = {
+        feature: sorted(
+            name
+            for name, metadata in TOOL_METADATA.items()
+            if metadata.feature_gate == feature
+        )
+        for feature in FEATURE_NAMES
+    }
     schema_registry = get_schema_registry()
     compatibility = load_runtime_compatibility()
     catalog = {
@@ -54,6 +62,10 @@ def build_release_facts() -> dict[str, Any]:
             name: {"tool_count": len(tools)}
             for name, tools in profiles.items()
         },
+        "features": {
+            name: {"tool_count": len(tools), "default_enabled": False}
+            for name, tools in features.items()
+        },
         "schema_registry": {
             "entry_count": schema_registry["entry_count"],
             "registry_sha256": schema_registry["registry_sha256"],
@@ -61,6 +73,7 @@ def build_release_facts() -> dict[str, Any]:
         "identities": {
             "catalog_sha256": _canonical_sha256(catalog),
             "profile_tools_sha256": _canonical_sha256(profiles),
+            "feature_tools_sha256": _canonical_sha256(features),
             "runtime_compatibility_sha256": _canonical_sha256(compatibility),
         },
     }

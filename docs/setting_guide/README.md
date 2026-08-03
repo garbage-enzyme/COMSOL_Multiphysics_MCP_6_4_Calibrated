@@ -177,7 +177,7 @@ the GUI before save and by backend validation when JSON is edited directly.
 | Key | Default | Meaning and accepted values |
 | --- | --- | --- |
 | `schema_name` | `"comsol_mcp.settings"` | Read-only schema identity; must match exactly. |
-| `schema_version` | `"1.1.0"` | New writes use `1.1.0`; `1.0.0` is read and migrated in memory. |
+| `schema_version` | `"1.2.0"` | New writes use `1.2.0`; `1.0.0` and `1.1.0` are read and migrated in memory. |
 | `gui.language` | `"zh-cn"` | `"en"`, `"zh-cn"`, or `"zh-tw"`. |
 | `gui.scale` | `"system"` | `"system"`, `"100"`, `"125"`, `"150"`, or `"200"`. The GUI displays the numeric choices as percentages. |
 
@@ -185,22 +185,21 @@ the GUI before save and by backend validation when JSON is edited directly.
 
 | Key | Default | Meaning and accepted values |
 | --- | --- | --- |
-| `profile.name` | `"core"` | `core`, `basic_fem`, `wave_optics`, `semantic_docs`, `desktop_shared`, `experimental`, or `full`. The stored value is lower-case. |
+| `profile.name` | `"core"` | `core`, `basic_fem`, `wave_optics`, `experimental`, or `full`. The stored value is lower-case. Unsupported values fall back to `core` with reported provenance. |
 
 New users can begin with the smaller `core` surface when safety is the priority.
-Most users doing ordinary simulation should choose `basic_fem`. `desktop_shared`
-also requires `shared_server.enabled: true`. `semantic_docs` remains unavailable
-until its optional assets are configured and valid.
+Most users doing ordinary simulation should choose `basic_fem`. Profiles only
+control COMSOL automation/simulation and future autonomous-exploration tool
+visibility. Shared collaboration and semantic retrieval use independent Boolean
+feature gates and may be enabled together for any profile.
 
 | Profile | Best suited to |
 | --- | --- |
 | `core` | Safety-first default for new users: fewer operations, model inspection, jobs, careful single-point checks, and manual search. |
 | `basic_fem` | Recommended for most users: ordinary FEM construction, result export, and Windows standalone packages. |
 | `wave_optics` | Optical and metasurface work, field review, Wave Optics checks, point audits, and staged parameters. |
-| `semantic_docs` | Prepared local manual indexes with text and meaning-based search. |
-| `desktop_shared` | Taking turns with MCP while viewing the same Server-owned model in COMSOL Desktop. |
 | `experimental` | Extra helpers that are broader or less mature and require careful review. |
-| `full` | Legacy migration that needs nearly every tool and accepts weaker file containment; not recommended for new users. |
+| `full` | Legacy migration that needs nearly every non-feature tool and accepts weaker file containment; not recommended for new users. |
 
 ### Runtime and Containment
 
@@ -230,7 +229,7 @@ then `PATH`. Auto-detect never replaces a non-null value without confirmation.
 
 | Key | Default | Meaning and accepted values |
 | --- | --- | --- |
-| `shared_server.enabled` | `false` | Boolean gate for the explicit local Desktop/attached-Server workflow. It never starts or terminates the user's COMSOL Server. |
+| `shared_server.enabled` | `false` | Independent Boolean gate for the explicit local Desktop/attached-Server workflow. It composes with every profile and never starts or terminates the user's COMSOL Server. |
 | `ownership.owner` | `null` | Optional non-empty owner label, at most 256 characters and without control characters. `null` derives a bounded label from the parent process. |
 
 ### Evidence Integrity
@@ -249,12 +248,13 @@ explicitly unverified.
 
 | Key | Default | Meaning and accepted values |
 | --- | --- | --- |
+| `semantic_docs.enabled` | `false` | Independent Boolean gate for the isolated semantic tools. It composes with every profile and with `shared_server.enabled`. |
 | `semantic_docs.root` | `null` | Optional root for preprocessed semantic retrieval assets. This is not COMSOL's bundled manual directory and is not auto-detected. |
 | `semantic_docs.lexical_index` | `null` | Optional immutable SQLite lexical index file. |
 | `semantic_docs.model_path` | `null` | Optional local semantic-model revision directory. |
 
-Leaving these values at `null` is valid. The `semantic_docs` profile becomes useful
-only after the required preprocessed assets exist.
+Leaving the asset values at `null` is valid. Enabling `semantic_docs.enabled`
+becomes useful only after the required preprocessed assets exist.
 
 ## Direct JSON Editing
 
@@ -268,7 +268,7 @@ Canonical default template:
 ```json
 {
   "schema_name": "comsol_mcp.settings",
-  "schema_version": "1.1.0",
+  "schema_version": "1.2.0",
   "profile": {"name": "core"},
   "runtime": {
     "directory": "%PROGRAMDATA%/comsol_mcp/runtime",
@@ -288,6 +288,7 @@ Canonical default template:
     }
   },
   "semantic_docs": {
+    "enabled": false,
     "root": null,
     "lexical_index": null,
     "model_path": null
@@ -320,7 +321,7 @@ setup_required: false
 
 If the file is missing, malformed, duplicated-key, non-UTF-8, oversized, or uses
 an unsupported future schema, the GUI offers only bounded recovery or exit. A
-confirmed recovery preserves one damaged copy and writes canonical `1.1.0`
+confirmed recovery preserves one damaged copy and writes canonical `1.2.0`
 settings atomically.
 
 For the evidence-check meanings, see

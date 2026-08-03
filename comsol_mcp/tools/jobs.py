@@ -174,6 +174,8 @@ def _attached_handoff_summary(value: dict[str, Any]) -> dict[str, Any]:
 def _submit_job(
     spec: JobSubmissionSpec | dict[str, Any],
     *,
+    profile_name: str,
+    shared_enabled: bool,
     manager: Any = job_manager,
     session_manager: Any = None,
 ) -> dict[str, Any]:
@@ -222,7 +224,11 @@ def _submit_job(
             recover = getattr(session_manager, "recover_attached_job_handoff", None)
             if callable(recover):
                 try:
-                    recovery = recover(handoff["execution_backend"])
+                    recovery = recover(
+                        handoff["execution_backend"],
+                        profile=profile_name,
+                        feature_enabled=shared_enabled,
+                    )
                 except Exception as recovery_exc:
                     recovery = {
                         "success": False,
@@ -266,11 +272,23 @@ def _job_call(operation: str, callback, **error_fields: Any) -> dict[str, Any]:
 
 def register_job_tools(mcp: FastMCP) -> None:
     """Register durable submit/status/tail/cooperative-cancel/resume tools."""
+    selection = getattr(mcp, "profile_selection", None)
+    profile_name = getattr(selection, "name", "unknown")
+    shared_enabled = bool(
+        selection is not None and selection.feature_enabled("shared_server")
+    )
 
     @mcp.tool()
     def job_submit(spec: JobSubmissionSpec) -> dict[str, Any]:
         """Validate and detach one bounded standalone or attached durable job."""
-        return _job_call("job_submit", lambda: _submit_job(spec))
+        return _job_call(
+            "job_submit",
+            lambda: _submit_job(
+                spec,
+                profile_name=profile_name,
+                shared_enabled=shared_enabled,
+            ),
+        )
 
     @mcp.tool()
     def job_spec_preview(spec: JobSubmissionSpec) -> dict[str, Any]:

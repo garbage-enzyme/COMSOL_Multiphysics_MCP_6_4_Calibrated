@@ -14,15 +14,14 @@ from comsol_mcp.compatibility import load_runtime_compatibility
 from comsol_mcp.durable import canonical_sha256_v1
 from comsol_mcp.environment_identity import get_environment_identity
 from comsol_mcp.path_policy import PathPolicy
-from comsol_mcp.settings import SETTINGS_PATH_ENV, settings_status
+from comsol_mcp.settings import SEMANTIC_ENABLED_ENV, SETTINGS_PATH_ENV, settings_status
 from comsol_mcp.shared_session.contracts import (
     SHARED_SERVER_FEATURE_ENV,
-    SHARED_SERVER_PROFILE,
     normalize_shared_server_feature_gate,
 )
 from comsol_mcp.utils.control_plane import attach_control_plane_evidence
 
-from .catalog import PROFILE_NAMES, TOOL_METADATA
+from .catalog import FEATURE_NAMES, PROFILE_NAMES, TOOL_METADATA
 from .profiles import (
     DEFAULT_PROFILE,
     PROFILE_DESCRIPTIONS,
@@ -30,6 +29,7 @@ from .profiles import (
     ProfileSelection,
     resolve_profile,
     tool_names_for_profile,
+    tool_names_for_selection,
 )
 from .session_status import get_session_status
 
@@ -91,6 +91,12 @@ def _deployment_source_classification(module_file: Path | None = None) -> str:
 def _catalog_contract_sha256() -> str:
     payload = {
         "profiles": {profile: sorted(tool_names_for_profile(profile)) for profile in PROFILE_NAMES},
+        "features": {
+            feature: sorted(
+                name for name, metadata in TOOL_METADATA.items() if metadata.feature_gate == feature
+            )
+            for feature in FEATURE_NAMES
+        },
         "tools": {name: TOOL_METADATA[name].to_dict() for name in sorted(TOOL_METADATA)},
     }
     return canonical_sha256_v1(payload)
@@ -139,7 +145,7 @@ def _deployment_identity() -> dict:
 
 
 def _profile_inventory(selection: ProfileSelection) -> dict:
-    enabled_names = tool_names_for_profile(selection.name)
+    enabled_names = tool_names_for_selection(selection)
     all_groups = {metadata.group for metadata in TOOL_METADATA.values()}
     enabled_groups = {TOOL_METADATA[name].group for name in enabled_names}
     available_profiles = []
@@ -164,8 +170,23 @@ def _profile_inventory(selection: ProfileSelection) -> dict:
             "environment_variable": selection.environment_variable,
             "default_used": selection.default_used,
             "source": selection.source,
+            "fallback_used": selection.fallback_used,
+            "requested_name": selection.requested_name,
         },
         "profile_restart_required": True,
+        "enabled_features": list(selection.enabled_features),
+        "available_features": [
+            {
+                "name": feature,
+                "enabled": selection.feature_enabled(feature),
+                "tool_count": sum(
+                    metadata.feature_gate == feature for metadata in TOOL_METADATA.values()
+                ),
+                "source": dict(selection.feature_sources).get(feature, "unknown"),
+                "restart_required": True,
+            }
+            for feature in FEATURE_NAMES
+        ],
     }
 
 
@@ -178,15 +199,19 @@ def get_capabilities(selection: ProfileSelection | None = None) -> dict:
     started = time.perf_counter()
     active_selection = selection or resolve_profile()
     status = session_manager.get_status()
-    semantic_profile_active = active_selection.name in {"semantic_docs", "full"}
+    semantic_feature_enabled = active_selection.feature_enabled("semantic_docs")
+    shared_feature_enabled = active_selection.feature_enabled("shared_server")
     standalone_profile_active = active_selection.name in {
         "basic_fem",
         "experimental",
         "full",
     }
-    semantic = semantic_capability_status(profile_active=semantic_profile_active)
+    semantic = semantic_capability_status(feature_enabled=semantic_feature_enabled)
     compatibility = load_runtime_compatibility()
-    shared_gate = normalize_shared_server_feature_gate(active_selection.name)
+    shared_gate = normalize_shared_server_feature_gate(
+        active_selection.name,
+        feature_enabled=shared_feature_enabled,
+    )
     accepted_lane = compatibility["licensed_acceptance"][0]
     result = {
         "success": True,
@@ -284,7 +309,7 @@ def get_capabilities(selection: ProfileSelection | None = None) -> dict:
         "disabled_by_default": [
             *(
                 []
-                if semantic_profile_active
+                if semantic_feature_enabled
                 else [
                     "semantic_search",
                     "semantic_status",
@@ -308,7 +333,10 @@ def get_capabilities(selection: ProfileSelection | None = None) -> dict:
         "profile_guidance": {
             "default_profile": DEFAULT_PROFILE,
             "wave_optics_recommended_profile": "wave_optics",
-            "semantic_docs_opt_in_profile": "semantic_docs",
+            "independent_feature_gates": {
+                "semantic_docs": SEMANTIC_ENABLED_ENV,
+                "shared_server": SHARED_SERVER_FEATURE_ENV,
+            },
             "standalone_tools_profile": "basic_fem",
             "backward_compatibility_profile": "full",
             "selection_settings_key": "profile.name",
@@ -473,8 +501,8 @@ def get_capabilities(selection: ProfileSelection | None = None) -> dict:
             "compatibility_profile_weaker_guarantees": True,
         },
         "shared_session": {
-            "profile": SHARED_SERVER_PROFILE,
-            "profile_active": active_selection.name == SHARED_SERVER_PROFILE,
+            "profile_independent": True,
+            "compatible_profiles": list(PROFILE_NAMES),
             "feature_flag": SHARED_SERVER_FEATURE_ENV,
             "feature_enabled": shared_gate.feature_enabled,
             "gate_open": shared_gate.gate_open,
@@ -485,7 +513,7 @@ def get_capabilities(selection: ProfileSelection | None = None) -> dict:
             "model_scope": "one_exact_server_model",
             "durable_execution": {
                 "available": bool(
-                    active_selection.name == SHARED_SERVER_PROFILE and shared_gate.gate_open
+                    shared_gate.gate_open
                 ),
                 "execution_backend": "attached_shared_server",
                 "job_types": ["staged_sweep"],
@@ -520,7 +548,7 @@ def startup_capability_summary(selection: ProfileSelection | None = None) -> str
         f"tools={capabilities['tool_count']}; "
         f"target=COMSOL {targets['comsol']} exact licensed / MPh {targets['mph']}; "
         "lexical_manual=enabled; semantic_docs="
-        f"{'active' if capabilities['semantic_search']['profile_active'] else 'disabled'}; "
+        f"{'active' if capabilities['semantic_search']['feature_enabled'] else 'disabled'}; "
         "durable_jobs=staged_sweep,validation_matrix,spectral_characterization,"
         "convergence_campaign,branch_continuation_campaign; "
         "solver_ownership=enforced; durable_job_cancellation=verified"

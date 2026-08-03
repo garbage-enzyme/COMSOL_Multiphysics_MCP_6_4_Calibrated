@@ -74,10 +74,10 @@ acceptance 报告应至少包含不启动 COMSOL 的 `initialize`、实时 `list
 - **无需 Python 的独立执行。** 原生 Windows x64 启动器保留三层结构：本机已安装并
   授权的 COMSOL 6.4、由 COMSOL 编译的 Java 单点驱动，以及启动器 EXE。目标机不需要
   Python、Conda、MPh、JPype 或另装 Java；COMSOL 本身仍然必需，项目不会打包或替代它。
-- **共享 Desktop 协作（默认关闭）。** `desktop_shared` profile 可连接用户手动启动的本地 COMSOL Server，精确采用一个 Server 模型，执行非拥有式租约和 revision lock，运行持久化 attached job，并在 detach 时保留用户的 Server、Desktop、listener 和模型。
+- **共享 Desktop 协作（默认关闭）。** 独立的 `shared_server.enabled` 功能可与任意工具 profile 组合，连接用户手动启动的本地 COMSOL Server，精确采用一个 Server 模型，执行非拥有式租约和 revision lock，运行持久化 attached job，并在 detach 时保留用户的 Server、Desktop、listener 和模型。
 - **Wave Optics 验证。** 专用 profile 支持只读模型预检，以及用于周期性超表面的单波长证据审计。
 - **有界离线手册检索。** SQLite FTS5/BM25 检索和页读取不在 COMSOL 控制进程中运行，返回紧凑的来源/页码引用。
-- **如实标注的可选语义检索。** 隔离式语义 profile 已具备进程隔离，但基线模型未通过质量和内存的晋级门槛；推荐默认使用词法手册检索。
+- **如实标注的可选语义检索。** 隔离式 `semantic_docs.enabled` 功能可与任意工具 profile 组合，但基线模型未通过质量和内存的晋级门槛；推荐默认使用词法手册检索。
 
 ## 统一项目设置
 
@@ -117,7 +117,9 @@ shared-server 或 Java 设置需要重启 MCP host；随后调用 `capabilities`
 技术上强制任意第三方 agent 遵守暂停。
 安装入口也支持 `--settings-path` 和 `--validate-only`，即使 MCP stdio 已停止也能独立工作。
 “关于”页可由用户明确创建或移除每用户 `COMSOL MCP Settings.lnk`；安装和普通 GUI 操作
-从不自动创建该快捷方式。
+从不自动创建该快捷方式。快捷方式指向安装后的 Windows GUI-subsystem 入口
+`comsol-mcp-settings-gui`，因此不会同时打开终端窗口；控制台入口
+`comsol-mcp-settings` 仍用于验证和脚本操作。
 
 ## Profile
 
@@ -129,16 +131,21 @@ shared-server 或 Java 设置需要重启 MCP host；随后调用 `capabilities`
 | `core`（默认） | 紧凑且成熟的控制面：状态、所有权、会话/模型检查、单点求解/求值及词法手册检索。 |
 | `basic_fem` | 在 `core` 基础上增加传统 FEM 的类型化构建、命名 selection、Pressure Acoustics 与数学 PDE、派生几何编辑、有界导出，以及无需 Python 的独立启动器工具。 |
 | `wave_optics` | 超表面推荐：在 `core` 基础上增加派生几何编辑、材料预览、locale-safe 场数据发现及有界 NPZ/manifest 提取、周期网格审计/冒烟、视觉审查合同、Wave Optics 预检和单点/参考审计。持久化分段任务仍通过 `job_submit`。 |
-| `desktop_shared` | 显式选择的 shared Desktop/attached-Server 工作流；要求 `profile.name=desktop_shared` 且 `shared_server.enabled=true`、用户手动启动本地 Server、每次 attach 的用户确认、精确进程/listener 身份和精确模型采用；不会启动或终止外部 Server。 |
-| `semantic_docs` | 在 `core` 基础上增加隔离的实验性向量辅助手册检索。 |
 | `experimental` | 显式选择的通用创建、异步、属性逃生口和项目辅助工具。 |
-| `full` | 宽兼容/发现界面，包含所有 profile 的全部工具。 |
+| `full` | 宽兼容/发现界面，包含全部非 feature-gated 工具。 |
+
+Profile 只控制 COMSOL 自动化仿真工具以及未来自主探索工具的可见性。其他正交功能使用
+独立、默认关闭的 Boolean 开关；它们可与任意 profile 组合，也可同时开启：
+
+| 功能设置 | 增加的工具界面 |
+| --- | --- |
+| `shared_server.enabled=true` | 需要显式确认及精确进程/listener/model 身份的受保护 shared Desktop/attached-Server 工作流。 |
+| `semantic_docs.enabled=true` | 三个隔离的实验性向量辅助手册检索工具。 |
 
 调用 `capabilities` 可在不启动 COMSOL 的情况下获知当前 profile、精确注册工具、目标版本、禁用工具组和重启要求。其中有界的 `deployment_identity` 会报告当前代码来自源码树还是已安装包，并给出冻结的 profile/schema 与 catalog 哈希；因此即使版本号相同，也能在重启后识别旧安装或源码遮蔽，且不暴露本机路径。
 
-默认的 `core` 和 `wave_optics` profile 不暴露 shared-session 工具。
-共享 Desktop/attached-Server 工作被隔离在默认关闭的 `desktop_shared` profile 和
-`settings.json` 中的 `shared_server.enabled=true` 后面。用户必须手动启动 COMSOL Server，
+共享 Desktop/attached-Server 工作由 `settings.json` 中默认关闭的
+`shared_server.enabled=true` 功能独立控制，不依赖所选 profile。用户必须手动启动 COMSOL Server，
 让 Desktop 连接它，确认 endpoint，并显式确认每次 attach。旧 `comsol_connect` 仍是
 experimental 兼容界面，不能替代受保护的 shared-session 生命周期。
 
@@ -331,7 +338,7 @@ solver_status -> wave_optics_preflight -> wave_optics_reference_audit（可选�
 
 `manual_search` 和 `manual_read_pages` 是正式的文档检索路径。它们使用离线 SQLite FTS5/BM25 索引、有截止时间的 worker 进程以及紧凑的来源/页码引用；此路径不会在 MCP 控制进程中导入 Torch 或 SentenceTransformer。
 
-`semantic_docs` 是可选的隔离 profile，不会干扰 COMSOL 控制。隔离 worker 向量检索只是英文诊断基线，并非多语言或生产质量声明：冻结基准中它提高了精确匹配召回率，却降低了改述/多概念召回，直接中文检索无命中，负查询没有正确弃答，长时间运行时内存也显著增长。基线模型及其索引资产已移除；替换模型需通过完整基准门槛后才能重新部署。常规工作请使用 `core` 加词法手册检索。
+`semantic_docs.enabled` 是可选的隔离功能，不会干扰 COMSOL 控制。隔离 worker 向量检索只是英文诊断基线，并非多语言或生产质量声明：冻结基准中它提高了精确匹配召回率，却降低了改述/多概念召回，直接中文检索无命中，负查询没有正确弃答，长时间运行时内存也显著增长。基线模型及其索引资产已移除；替换模型需通过完整基准门槛后才能重新部署。常规工作请使用词法手册检索。
 
 ## ClientAPI 适配要点
 
@@ -436,7 +443,7 @@ python -m comsol_mcp.knowledge.lexical_manual build --index D:\comsol_docs_fts\m
 ```powershell
 python -m pip install ".[semantic-docs]"
 # 编辑 settings.json：
-#   profile.name = "semantic_docs"
+#   semantic_docs.enabled = true
 #   semantic_docs.root = "D:/comsol_semantic"
 #   semantic_docs.lexical_index = "D:/comsol_docs_fts/manuals.sqlite3"
 #   semantic_docs.model_path = "D:/comsol_semantic/models/<model>/<revision>"

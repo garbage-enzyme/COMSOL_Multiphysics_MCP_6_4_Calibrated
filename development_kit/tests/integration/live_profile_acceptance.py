@@ -1,4 +1,4 @@
-"""Fresh-host live profile profile discovery and live three-call acceptance gate."""
+"""Fresh-host base-profile discovery and live three-call acceptance gate."""
 
 from __future__ import annotations
 
@@ -26,11 +26,10 @@ RUNTIME = Path(os.environ.get("COMSOL_MCP_RUNTIME_DIR", "D:/comsol_runtime"))
 ARTIFACT_DIR = RUNTIME / "live_profile"
 PROFILE_COUNTS = {
     "core": 47,
-    "basic_fem": 90,
+    "basic_fem": 109,
     "wave_optics": 76,
-    "semantic_docs": 50,
-    "experimental": 78,
-    "full": 144,
+    "experimental": 97,
+    "full": 150,
 }
 COLD_START_RESPONSE_LIMIT_SECONDS = 5.0
 CONTROL_PLANE_READ_LIMIT_SECONDS = 15.0
