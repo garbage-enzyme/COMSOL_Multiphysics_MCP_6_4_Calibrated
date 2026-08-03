@@ -10,37 +10,37 @@
     {
       "name": "core",
       "support": "verified",
-      "tool_count": 46
+      "tool_count": 47
     },
     {
       "name": "basic_fem",
       "support": "verified",
-      "tool_count": 108
+      "tool_count": 109
     },
     {
       "name": "wave_optics",
       "support": "experimental",
-      "tool_count": 75
+      "tool_count": 76
     },
     {
       "name": "semantic_docs",
       "support": "experimental_promotion_rejected",
-      "tool_count": 49
+      "tool_count": 50
     },
     {
       "name": "desktop_shared",
       "support": "experimental_default_off",
-      "tool_count": 20
+      "tool_count": 21
     },
     {
       "name": "experimental",
       "support": "experimental",
-      "tool_count": 96
+      "tool_count": 97
     },
     {
       "name": "full",
       "support": "compatibility_only",
-      "tool_count": 162
+      "tool_count": 163
     }
   ],
   "unavailable": [

@@ -49,6 +49,24 @@ def _policy(tmp_path, ascii_root):
     )
 
 
+def test_uncreated_configured_model_root_allows_startup_but_not_model_read(
+    tmp_path, ascii_root
+):
+    read_root = tmp_path / "用户模型"
+    write_root = ascii_root / "artifacts"
+
+    policy = PathPolicy.from_environment(
+        {
+            MODEL_READ_ROOTS_ENV: str(read_root),
+            ARTIFACT_WRITE_ROOT_ENV: str(write_root),
+        }
+    )
+
+    assert policy.model_read_roots == (read_root.resolve(strict=False),)
+    with pytest.raises(ValueError, match="model input cannot be resolved"):
+        policy.validate_model_read(str(read_root / "missing.mph"), suffixes=(".mph",))
+
+
 def _selection(name):
     return ProfileSelection(
         name=name,

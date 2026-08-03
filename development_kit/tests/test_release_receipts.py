@@ -24,7 +24,7 @@ def test_locked_requirement_parser_and_sbom_are_sorted_and_exact(tmp_path):
     sbom = build_cyclonedx_sbom(
         locked_pins=pins,
         installed_versions={"ZETA": "2.0", "alpha_core": "1.0"},
-        package_version="0.2.0",
+        package_version="0.6.0",
         lock_sha256="c" * 64,
     )
     assert sbom == {
@@ -35,9 +35,9 @@ def test_locked_requirement_parser_and_sbom_are_sorted_and_exact(tmp_path):
             "component": {
                 "type": "application",
                 "name": "comsol-mcp",
-                "version": "0.2.0",
-                "bom-ref": "pkg:pypi/comsol-mcp@0.2.0",
-                "purl": "pkg:pypi/comsol-mcp@0.2.0",
+                "version": "0.6.0",
+                "bom-ref": "pkg:pypi/comsol-mcp@0.6.0",
+                "purl": "pkg:pypi/comsol-mcp@0.6.0",
             },
             "properties": [
                 {"name": "comsol-mcp:release-lock-sha256", "value": "c" * 64},
@@ -62,7 +62,7 @@ def test_locked_requirement_parser_and_sbom_are_sorted_and_exact(tmp_path):
         ],
         "dependencies": [
             {
-                "ref": "pkg:pypi/comsol-mcp@0.2.0",
+                "ref": "pkg:pypi/comsol-mcp@0.6.0",
                 "dependsOn": ["pkg:pypi/alpha-core@1.0", "pkg:pypi/zeta@2.0"],
             }
         ],
@@ -75,6 +75,6 @@ def test_sbom_fails_on_missing_or_different_locked_versions(installed_versions):
         build_cyclonedx_sbom(
             locked_pins={"alpha": "1.0"},
             installed_versions=installed_versions,
-            package_version="0.2.0",
+            package_version="0.6.0",
             lock_sha256="c" * 64,
         )

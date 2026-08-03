@@ -5,16 +5,35 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import struct
 import sys
-from importlib.metadata import requires, version
+from importlib.metadata import entry_points, requires, version
+from importlib.resources import files
 from importlib.util import find_spec
 from pathlib import Path
 
 HEAVY_SEMANTIC_MODULES = {"chromadb", "sentence_transformers", "torch"}
+SETTINGS_GUI_ICON_SIZES = (16, 20, 24, 32, 40, 48, 64, 128, 256)
 
 
 def _load_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _ico_sizes(raw: bytes) -> tuple[int, ...]:
+    if len(raw) < 6:
+        raise AssertionError("installed Settings GUI icon is truncated")
+    reserved, kind, count = struct.unpack_from("<HHH", raw)
+    if reserved != 0 or kind != 1 or len(raw) < 6 + 16 * count:
+        raise AssertionError("installed Settings GUI icon header is invalid")
+    sizes = []
+    for index in range(count):
+        width, height = struct.unpack_from("<BB", raw, 6 + 16 * index)
+        width, height = width or 256, height or 256
+        if width != height:
+            raise AssertionError("installed Settings GUI icon contains a non-square frame")
+        sizes.append(width)
+    return tuple(sizes)
 
 
 def _release_inventory(capabilities: dict) -> dict:
@@ -65,6 +84,7 @@ def main() -> int:
     )
 
     import comsol_mcp
+    import settings_gui
     from comsol_mcp.server import create_server
     from comsol_mcp.shared_session.contracts import (
         SHARED_SERVER_FEATURE_ENV,
@@ -73,6 +93,7 @@ def main() -> int:
     from comsol_mcp.tools.capabilities import get_capabilities
     from comsol_mcp.tools.catalog import PROFILE_NAMES, snapshot_tool_schemas
     from comsol_mcp.tools.profiles import resolve_profile
+    from settings_gui.i18n import Translator
 
     expected_names = _load_json(args.snapshot_dir / "profile_tool_names.json")
     expected_schemas = _load_json(args.snapshot_dir / "full_tool_schemas.json")
@@ -124,6 +145,30 @@ def main() -> int:
 
     if find_spec("src") is not None:
         raise AssertionError("installed wheel exposes a generic top-level src package")
+    if find_spec("settings_gui.tests") is not None:
+        raise AssertionError("installed wheel exposes Settings GUI tests")
+
+    locale_members = {}
+    locale_directories = {"en": "en", "zh-cn": "zh_CN", "zh-tw": "zh_TW"}
+    for language, locale_directory in locale_directories.items():
+        member = files("settings_gui").joinpath(
+            "locales",
+            locale_directory,
+            "LC_MESSAGES",
+            "settings_gui.mo",
+        )
+        raw = member.read_bytes()
+        if not raw or Translator(language).warning is not None:
+            raise AssertionError(f"installed {language} Settings GUI catalog is unavailable")
+        locale_members[language] = len(raw)
+    icon_raw = files("settings_gui").joinpath("assets", "comsol_mcp.ico").read_bytes()
+    if _ico_sizes(icon_raw) != SETTINGS_GUI_ICON_SIZES or len(icon_raw) >= 128 * 1024:
+        raise AssertionError("installed Settings GUI icon contract differs from the source")
+    scripts = {item.name: item.value for item in entry_points(group="console_scripts")}
+    if scripts.get("comsol-mcp-settings") != "settings_gui.__main__:main":
+        raise AssertionError("installed Settings GUI console entry point is unavailable")
+    if "tkinter" in sys.modules:
+        raise AssertionError("installed solver-free discovery imported tkinter")
 
     imported_heavy = sorted(HEAVY_SEMANTIC_MODULES.intersection(sys.modules))
     if imported_heavy:
@@ -138,6 +183,15 @@ def main() -> int:
             "module_path_is_site_package": "site-packages"
             in str(Path(comsol_mcp.__file__).resolve()).lower(),
             "requirements": package_requirements,
+        },
+        "settings_gui": {
+            "release": settings_gui.GUI_RELEASE,
+            "console_entry": scripts["comsol-mcp-settings"],
+            "locale_bytes": locale_members,
+            "icon_bytes": len(icon_raw),
+            "icon_sizes": SETTINGS_GUI_ICON_SIZES,
+            "tests_excluded": True,
+            "tkinter_imported": False,
         },
         "profile_counts": actual_counts,
         "deployment_identity": deployment_identity,

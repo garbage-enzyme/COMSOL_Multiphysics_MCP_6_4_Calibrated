@@ -51,6 +51,7 @@ ToolMetadata = ToolSpec
 
 _TOOLS_BY_REGISTRAR = {
     "comsol_mcp.tools.capabilities.register_capability_tools": ("capabilities",),
+    "comsol_mcp.tools.settings_gui.register_settings_gui_tools": ("settings.start",),
     "comsol_mcp.tools.evidence_integrity.register_evidence_integrity_tools": (
         "evidence_integrity_status",
         "evidence_integrity_verify",
@@ -286,6 +287,7 @@ _TOOLS_BY_REGISTRAR = {
 
 _GROUP_BY_REGISTRAR = {
     "register_capability_tools": "capabilities",
+    "register_settings_gui_tools": "settings",
     "register_evidence_integrity_tools": "evidence_integrity",
     "register_ownership_tools": "ownership",
     "register_job_tools": "jobs",
@@ -371,6 +373,7 @@ _EXPERIMENTAL_TOOLS = frozenset(
 )
 
 _SIDE_EFFECTS = {
+    "settings.start": "process_lifecycle",
     "solver_recover_stale_lease": "ownership_control",
     "job_submit": "solver_execution",
     "job_cancel": "job_control",
@@ -560,6 +563,7 @@ _EXPLICIT_READ_ONLY_TOOLS = frozenset(
 _CONTROL_PLANE_TOOLS = frozenset(
     {
         "capabilities",
+        "settings.start",
         "evidence_integrity_status",
         "solver_status",
         "solver_preflight",
@@ -671,6 +675,7 @@ _MODEL_REVISION_NONADVANCING = frozenset(
 _CORE_TOOLS = frozenset(
     {
         "capabilities",
+        "settings.start",
         "evidence_integrity_status",
         "evidence_integrity_verify",
         "solver_status",
@@ -886,6 +891,7 @@ _SEMANTIC_DOCS_ADDITIONS = frozenset(
 _DESKTOP_SHARED_FOUNDATION = frozenset(
     {
         "capabilities",
+        "settings.start",
         "evidence_integrity_status",
         "evidence_integrity_verify",
         "solver_status",

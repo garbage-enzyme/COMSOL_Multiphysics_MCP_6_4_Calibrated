@@ -38,6 +38,7 @@ dev = [
 
 [project.scripts]
 comsol-mcp = "comsol_mcp.server:main"
+comsol-mcp-settings = "settings_gui.__main__:main"
 
 [build-system]
 requires = ["hatchling==1.31.0"]
@@ -47,7 +48,12 @@ build-backend = "hatchling.build"
 path = "comsol_mcp/__init__.py"
 
 [tool.hatch.build.targets.wheel]
-packages = ["comsol_mcp"]
+packages = ["comsol_mcp", "settings_gui"]
+exclude = [
+    "/settings_gui/tests",
+    "/settings_gui/locales/**/*.po",
+    "/settings_gui/locales/*.pot",
+]
 
 [tool.hatch.build.targets.wheel.force-include]
 "settings.json" = "comsol_mcp/settings.json"
@@ -71,3 +77,4 @@ select = ["E", "F", "I", "S"]
 
 [tool.ruff.lint.per-file-ignores]
 "development_kit/tests/*.py" = ["S101", "S603"]
+"settings_gui/tests/*.py" = ["S101", "S603"]

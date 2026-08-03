@@ -10,6 +10,7 @@ from src.settings import (
     SETTINGS_PATH_ENV,
     SETTINGS_SCHEMA,
     SETTINGS_VERSION,
+    default_settings_document,
     load_settings,
     settings_environment,
     settings_status,
@@ -17,8 +18,7 @@ from src.settings import (
 
 
 def _safe_defaults() -> dict:
-    root = Path(__file__).parents[2]
-    return json.loads((root / "settings.json").read_text(encoding="utf-8"))
+    return default_settings_document()
 
 
 def _settings_path(tmp_path: Path, payload: object) -> Path:
@@ -74,10 +74,16 @@ def test_deleted_entries_use_safe_defaults_without_an_error(tmp_path):
 
     settings = load_settings(environment)
     status = settings_status(environment)
+    defaults = default_settings_document()
 
     assert settings["profile"]["name"] == "core"
-    assert settings["runtime"] == {"directory": None, "jobs_directory": None}
-    assert settings["paths"]["model_read_roots"] == []
+    assert settings["runtime"] == defaults["runtime"]
+    assert settings["paths"] == defaults["paths"]
+    assert settings["semantic_docs"] == {
+        "root": None,
+        "lexical_index": None,
+        "model_path": None,
+    }
     assert settings["shared_server"]["enabled"] is False
     assert all(settings["evidence_integrity"]["checks"].values())
     assert status["configuration_state"] == "valid"
@@ -102,7 +108,7 @@ def test_invalid_value_keeps_only_that_setting_at_default_and_reports_it(tmp_pat
     status = settings_status(environment)
 
     assert settings["profile"]["name"] == "core"
-    assert settings["runtime"]["directory"] is None
+    assert settings["runtime"]["directory"] == default_settings_document()["runtime"]["directory"]
     assert settings["runtime"]["jobs_directory"] == str(Path("D:/valid/jobs"))
     assert settings["shared_server"]["enabled"] is False
     assert status["configuration_state"] == "degraded"
@@ -166,7 +172,7 @@ def test_expanduser_runtime_error_isolated_to_the_invalid_path(tmp_path, monkeyp
     status = settings_status(environment)
 
     assert settings["profile"]["name"] == "wave_optics"
-    assert settings["runtime"]["directory"] is None
+    assert settings["runtime"]["directory"] == default_settings_document()["runtime"]["directory"]
     assert settings["shared_server"]["enabled"] is True
     assert [item["path"] for item in status["settings_errors"]] == ["settings.runtime.directory"]
 
@@ -197,6 +203,67 @@ def test_project_settings_fill_legacy_runtime_shape_for_existing_callers(tmp_pat
     assert effective["COMSOL_MCP_RUNTIME_DIR"] == str(Path("D:/comsol_runtime"))
     assert effective["COMSOL_MCP_JOBS_DIR"] == str(Path("D:/comsol_runtime/jobs"))
     assert effective["COMSOL_MCP_ENABLE_SHARED_SERVER"] == "true"
+
+
+def test_split_defaults_preserve_unicode_models_and_ascii_runtime(
+    tmp_path, ascii_tmp_path, monkeypatch
+):
+    local_appdata = tmp_path / "用户" / "AppData" / "Local"
+    local_appdata.mkdir(parents=True)
+    program_data = ascii_tmp_path / "ProgramData"
+    program_data.mkdir()
+    monkeypatch.setenv("LOCALAPPDATA", str(local_appdata))
+    monkeypatch.setenv("PROGRAMDATA", str(program_data))
+    path = _settings_path(
+        tmp_path,
+        {
+            "runtime": {"directory": "%PROGRAMDATA%/comsol_mcp/runtime"},
+            "paths": {
+                "model_read_roots": ["%LOCALAPPDATA%/comsol_mcp/models"],
+                "artifact_write_root": "%PROGRAMDATA%/comsol_mcp/artifacts",
+            },
+        },
+    )
+
+    settings = load_settings({SETTINGS_PATH_ENV: str(path)})
+    user_root = local_appdata / "comsol_mcp"
+    machine_root = program_data / "comsol_mcp"
+
+    assert Path(settings["runtime"]["directory"]) == machine_root / "runtime"
+    assert [Path(item) for item in settings["paths"]["model_read_roots"]] == [user_root / "models"]
+    assert Path(settings["paths"]["artifact_write_root"]) == machine_root / "artifacts"
+    assert settings["paths"]["model_read_roots"][0].isascii() is False
+    assert settings["runtime"]["directory"].isascii() is True
+    assert settings["paths"]["artifact_write_root"].isascii() is True
+
+
+def test_non_ascii_durable_paths_fall_back_without_rejecting_unicode_models(tmp_path):
+    path = _settings_path(
+        tmp_path,
+        {
+            "runtime": {
+                "directory": str(tmp_path / "运行"),
+                "jobs_directory": str(tmp_path / "任务"),
+            },
+            "paths": {
+                "model_read_roots": [str(tmp_path / "模型")],
+                "artifact_write_root": str(tmp_path / "产物"),
+            },
+        },
+    )
+
+    status = settings_status({SETTINGS_PATH_ENV: str(path)})
+    settings = load_settings({SETTINGS_PATH_ENV: str(path)})
+
+    assert settings["paths"]["model_read_roots"] == [str(tmp_path / "模型")]
+    assert settings["runtime"]["directory"].isascii()
+    assert settings["runtime"]["jobs_directory"] is None
+    assert settings["paths"]["artifact_write_root"].isascii()
+    assert {item["path"] for item in status["settings_errors"]} == {
+        "settings.runtime.directory",
+        "settings.runtime.jobs_directory",
+        "settings.paths.artifact_write_root",
+    }
 
 
 def test_legacy_override_preserves_itself_without_suppressing_project_defaults(tmp_path):

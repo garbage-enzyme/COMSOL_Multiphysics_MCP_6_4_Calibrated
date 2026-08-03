@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 from copy import deepcopy
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
@@ -12,8 +13,11 @@ from comsol_mcp.durable import canonical_sha256_v1, read_file_bytes_bounded
 
 SETTINGS_PATH_ENV = "COMSOL_MCP_SETTINGS_PATH"
 SETTINGS_SCHEMA = "comsol_mcp.settings"
-SETTINGS_VERSION = "1.0.0"
+SETTINGS_VERSION = "1.1.0"
+SETTINGS_READABLE_VERSIONS = ("1.0.0", SETTINGS_VERSION)
 MAX_SETTINGS_BYTES = 64 * 1024
+LOCALAPPDATA_ENV = "LOCALAPPDATA"
+PROGRAMDATA_ENV = "PROGRAMDATA"
 
 PROFILE_ENV = "COMSOL_MCP_PROFILE"
 RUNTIME_ENV = "COMSOL_MCP_RUNTIME_DIR"
@@ -27,6 +31,8 @@ SEMANTIC_LEXICAL_ENV = "COMSOL_SEMANTIC_LEXICAL_INDEX"
 SEMANTIC_MODEL_ENV = "COMSOL_SEMANTIC_MODEL_PATH"
 JAVA_HOME_ENV = "JAVA_HOME"
 JDK_HOME_ENV = "JDK_HOME"
+GUI_LANGUAGES = ("en", "zh-cn", "zh-tw")
+GUI_SCALES = ("system", "100", "125", "150", "200")
 
 _PROFILE_NAMES = frozenset(
     {
@@ -46,25 +52,48 @@ _EVIDENCE_CHECKS = (
     "producer_driver_compatibility",
 )
 _COMMENT_PREFIX = "_comment"
+_LOCALAPPDATA_REFERENCE = "%LOCALAPPDATA%"
+_PROGRAMDATA_REFERENCE = "%PROGRAMDATA%"
+_DEFAULT_USER_DIR = "comsol_mcp"
+_DEFAULT_LOCAL_ROOT = f"{_LOCALAPPDATA_REFERENCE}/{_DEFAULT_USER_DIR}"
+_DEFAULT_PROGRAM_ROOT = f"{_PROGRAMDATA_REFERENCE}/{_DEFAULT_USER_DIR}"
 
 _DEFAULT_SETTINGS = {
     "schema_name": SETTINGS_SCHEMA,
     "schema_version": SETTINGS_VERSION,
     "profile": {"name": "core"},
-    "runtime": {"directory": None, "jobs_directory": None},
-    "paths": {"model_read_roots": [], "artifact_write_root": None},
+    "runtime": {
+        "directory": f"{_DEFAULT_PROGRAM_ROOT}/runtime",
+        "jobs_directory": None,
+    },
+    "paths": {
+        "model_read_roots": [f"{_DEFAULT_LOCAL_ROOT}/models"],
+        "artifact_write_root": f"{_DEFAULT_PROGRAM_ROOT}/artifacts",
+    },
     "shared_server": {"enabled": False},
     "evidence_integrity": {
         "checks": {name: True for name in _EVIDENCE_CHECKS},
     },
     "semantic_docs": {
-        "root": "D:/comsol_semantic",
-        "lexical_index": "D:/comsol_docs_fts/manuals.sqlite3",
+        "root": None,
+        "lexical_index": None,
         "model_path": None,
     },
     "ownership": {"owner": None},
     "java": {"java_home": None, "jdk_home": None},
+    "comsol": {"installation_root": None},
+    "gui": {"language": "zh-cn", "scale": "system"},
 }
+
+
+@dataclass(frozen=True)
+class SettingsLocation:
+    """One resolved read source and its persistent writable target."""
+
+    path: Path
+    writable_path: Path
+    source: str
+    setup_required: bool
 
 
 class SettingsError(ValueError):
@@ -162,10 +191,16 @@ def _read_value(
         return parser(value)
     except (SettingsError, TypeError, ValueError, RuntimeError) as exc:
         _record_error(errors, location, exc)
-        return deepcopy(default)
+        return parser(deepcopy(default))
 
 
-def _absolute_string(value: Any, *, location: str, allow_none: bool) -> str | None:
+def _absolute_string(
+    value: Any,
+    *,
+    location: str,
+    allow_none: bool,
+    require_ascii: bool = False,
+) -> str | None:
     if value is None and allow_none:
         return None
     if not isinstance(value, str) or not value.strip():
@@ -175,9 +210,28 @@ def _absolute_string(value: Any, *, location: str, allow_none: bool) -> str | No
             f"{location} contains an illegal control character",
             reason_code="settings_value_invalid",
         )
-    path = Path(value).expanduser()
+    raw = value.strip()
+    if raw.casefold().startswith(_LOCALAPPDATA_REFERENCE.casefold()):
+        suffix_with_separator = raw[len(_LOCALAPPDATA_REFERENCE) :]
+        if suffix_with_separator and suffix_with_separator[0] not in "\\/":
+            raise SettingsError(f"{location} contains an unsupported environment token")
+        suffix = suffix_with_separator.lstrip("\\/")
+        path = _local_appdata_root(os.environ, None) / suffix.replace("\\", "/")
+    elif raw.casefold().startswith(_PROGRAMDATA_REFERENCE.casefold()):
+        suffix_with_separator = raw[len(_PROGRAMDATA_REFERENCE) :]
+        if suffix_with_separator and suffix_with_separator[0] not in "\\/":
+            raise SettingsError(f"{location} contains an unsupported environment token")
+        suffix = suffix_with_separator.lstrip("\\/")
+        path = _program_data_root(os.environ, None) / suffix.replace("\\", "/")
+    else:
+        path = Path(raw).expanduser()
     if not path.is_absolute():
         raise SettingsError(f"{location} must be an absolute path")
+    if require_ascii and not str(path).isascii():
+        raise SettingsError(
+            f"{location} must contain ASCII characters only",
+            reason_code="settings_value_invalid",
+        )
     return str(path)
 
 
@@ -188,6 +242,35 @@ def _parse_profile(value: Any) -> str:
             reason_code="settings_value_invalid",
         )
     return value.strip().casefold()
+
+
+def _parse_schema_version(value: Any) -> str:
+    if value not in SETTINGS_READABLE_VERSIONS:
+        raise SettingsError(
+            "settings.schema_version is unsupported",
+            reason_code="settings_value_invalid",
+        )
+    return SETTINGS_VERSION
+
+
+def _parse_gui_language(value: Any) -> str:
+    normalized = value.strip().casefold().replace("_", "-") if isinstance(value, str) else None
+    if normalized not in GUI_LANGUAGES:
+        raise SettingsError(
+            f"settings.gui.language must be one of {list(GUI_LANGUAGES)}",
+            reason_code="settings_value_invalid",
+        )
+    return normalized
+
+
+def _parse_gui_scale(value: Any) -> str:
+    normalized = value.strip().casefold() if isinstance(value, str) else None
+    if normalized not in GUI_SCALES:
+        raise SettingsError(
+            f"settings.gui.scale must be one of {list(GUI_SCALES)}",
+            reason_code="settings_value_invalid",
+        )
+    return normalized
 
 
 def _parse_bool(value: Any, *, location: str) -> bool:
@@ -276,15 +359,7 @@ def _normalize(
         top["schema_version"],
         location="settings.schema_version",
         default=SETTINGS_VERSION,
-        parser=lambda value: (
-            value
-            if value == SETTINGS_VERSION
-            else (_ for _ in ()).throw(
-                SettingsError(
-                    "settings.schema_version is unsupported", reason_code="settings_value_invalid"
-                )
-            )
-        ),
+        parser=_parse_schema_version,
         errors=errors,
     )
 
@@ -313,7 +388,10 @@ def _normalize(
         location="settings.runtime.directory",
         default=_DEFAULT_SETTINGS["runtime"]["directory"],
         parser=lambda value: _absolute_string(
-            value, location="settings.runtime.directory", allow_none=True
+            value,
+            location="settings.runtime.directory",
+            allow_none=True,
+            require_ascii=True,
         ),
         errors=errors,
     )
@@ -322,7 +400,10 @@ def _normalize(
         location="settings.runtime.jobs_directory",
         default=_DEFAULT_SETTINGS["runtime"]["jobs_directory"],
         parser=lambda value: _absolute_string(
-            value, location="settings.runtime.jobs_directory", allow_none=True
+            value,
+            location="settings.runtime.jobs_directory",
+            allow_none=True,
+            require_ascii=True,
         ),
         errors=errors,
     )
@@ -345,7 +426,10 @@ def _normalize(
         location="settings.paths.artifact_write_root",
         default=_DEFAULT_SETTINGS["paths"]["artifact_write_root"],
         parser=lambda value: _absolute_string(
-            value, location="settings.paths.artifact_write_root", allow_none=True
+            value,
+            location="settings.paths.artifact_write_root",
+            allow_none=True,
+            require_ascii=True,
         ),
         errors=errors,
     )
@@ -401,7 +485,7 @@ def _normalize(
         location="settings.semantic_docs.root",
         default=_DEFAULT_SETTINGS["semantic_docs"]["root"],
         parser=lambda value: _absolute_string(
-            value, location="settings.semantic_docs.root", allow_none=False
+            value, location="settings.semantic_docs.root", allow_none=True
         ),
         errors=errors,
     )
@@ -410,7 +494,7 @@ def _normalize(
         location="settings.semantic_docs.lexical_index",
         default=_DEFAULT_SETTINGS["semantic_docs"]["lexical_index"],
         parser=lambda value: _absolute_string(
-            value, location="settings.semantic_docs.lexical_index", allow_none=False
+            value, location="settings.semantic_docs.lexical_index", allow_none=True
         ),
         errors=errors,
     )
@@ -463,6 +547,45 @@ def _normalize(
         errors=errors,
     )
 
+    comsol = _object(
+        top["comsol"],
+        location="settings.comsol",
+        defaults=_DEFAULT_SETTINGS["comsol"],
+        errors=errors,
+    )
+    installation_root = _read_value(
+        comsol["installation_root"],
+        location="settings.comsol.installation_root",
+        default=_DEFAULT_SETTINGS["comsol"]["installation_root"],
+        parser=lambda value: _absolute_string(
+            value,
+            location="settings.comsol.installation_root",
+            allow_none=True,
+        ),
+        errors=errors,
+    )
+
+    gui = _object(
+        top["gui"],
+        location="settings.gui",
+        defaults=_DEFAULT_SETTINGS["gui"],
+        errors=errors,
+    )
+    language = _read_value(
+        gui["language"],
+        location="settings.gui.language",
+        default=_DEFAULT_SETTINGS["gui"]["language"],
+        parser=_parse_gui_language,
+        errors=errors,
+    )
+    scale = _read_value(
+        gui["scale"],
+        location="settings.gui.scale",
+        default=_DEFAULT_SETTINGS["gui"]["scale"],
+        parser=_parse_gui_scale,
+        errors=errors,
+    )
+
     return {
         "schema_name": schema_name,
         "schema_version": schema_version,
@@ -481,12 +604,19 @@ def _normalize(
         },
         "ownership": {"owner": owner},
         "java": {"java_home": java_home, "jdk_home": jdk_home},
+        "comsol": {"installation_root": installation_root},
+        "gui": {"language": language, "scale": scale},
     }
 
 
 def _validate_file(path: Path) -> Path:
     if not path.is_absolute():
         raise SettingsError(f"{SETTINGS_PATH_ENV} must be an absolute path")
+    if any(
+        candidate.is_symlink() or getattr(candidate, "is_junction", lambda: False)()
+        for candidate in (path, *path.parents)
+    ):
+        raise SettingsError("settings.json path must not contain a link or junction")
     resolved = path.resolve(strict=True)
     is_junction = getattr(path, "is_junction", lambda: False)
     if path.is_symlink() or is_junction() or not resolved.is_file():
@@ -494,17 +624,125 @@ def _validate_file(path: Path) -> Path:
     return resolved
 
 
-def default_settings_path(environ: Mapping[str, str] | None = None) -> Path:
-    """Locate the shared root settings file or the bundled wheel copy."""
+def _local_appdata_root(
+    environment: Mapping[str, str],
+    local_appdata: Path | str | None,
+) -> Path:
+    raw = local_appdata if local_appdata is not None else environment.get(LOCALAPPDATA_ENV)
+    if raw is None:
+        raw = Path.home() / "AppData" / "Local"
+    path = Path(raw).expanduser()
+    if not path.is_absolute():
+        raise SettingsError(f"{LOCALAPPDATA_ENV} must be an absolute path")
+    return path.resolve(strict=False)
+
+
+def _program_data_root(
+    environment: Mapping[str, str],
+    program_data: Path | str | None,
+) -> Path:
+    raw = program_data if program_data is not None else environment.get(PROGRAMDATA_ENV)
+    if raw is None:
+        raw = environment.get("ALLUSERSPROFILE")
+    if raw is None:
+        system_root = Path(environment.get("SystemRoot", Path.cwd().anchor))
+        raw = Path(system_root.anchor) / "ProgramData"
+    path = Path(raw).expanduser()
+    if not path.is_absolute():
+        raise SettingsError(f"{PROGRAMDATA_ENV} must be an absolute path")
+    path = path.resolve(strict=False)
+    if not str(path).isascii():
+        raise SettingsError(f"{PROGRAMDATA_ENV} must contain ASCII characters only")
+    return path
+
+
+def default_settings_document(
+    *,
+    user_root: Path | str | None = None,
+    program_root: Path | str | None = None,
+) -> dict[str, Any]:
+    """Return canonical Unicode-safe user and ASCII-safe machine defaults."""
+    local_root = (
+        _local_appdata_root(os.environ, None) / _DEFAULT_USER_DIR
+        if user_root is None
+        else Path(user_root).expanduser()
+    )
+    if not local_root.is_absolute():
+        raise SettingsError("default settings user root must be an absolute path")
+    machine_root = (
+        _program_data_root(os.environ, None) / _DEFAULT_USER_DIR
+        if program_root is None
+        else Path(program_root).expanduser()
+    )
+    if not machine_root.is_absolute():
+        raise SettingsError("default settings program root must be an absolute path")
+    if not str(machine_root).isascii():
+        raise SettingsError("default settings program root must contain ASCII characters only")
+    document = deepcopy(_DEFAULT_SETTINGS)
+    document["runtime"]["directory"] = str(machine_root / "runtime")
+    document["paths"]["model_read_roots"] = [str(local_root / "models")]
+    document["paths"]["artifact_write_root"] = str(machine_root / "artifacts")
+    return document
+
+
+def resolve_settings_location(
+    environ: Mapping[str, str] | None = None,
+    *,
+    source_settings_path: Path | None = None,
+    bundled_settings_path: Path | None = None,
+    local_appdata: Path | str | None = None,
+) -> SettingsLocation:
+    """Resolve the effective read source and persistent writable target."""
     environment = os.environ if environ is None else environ
     configured = environment.get(SETTINGS_PATH_ENV)
     if configured:
-        return _validate_file(Path(configured))
-    source_root = Path(__file__).resolve().parents[1] / "settings.json"
-    if source_root.is_file():
-        return _validate_file(source_root)
-    bundled = Path(__file__).resolve().parent / "settings.json"
-    return _validate_file(bundled)
+        target = Path(configured).expanduser()
+        if not target.is_absolute():
+            raise SettingsError(f"{SETTINGS_PATH_ENV} must be an absolute path")
+        normalized = _validate_file(target) if target.exists() else target.resolve(strict=False)
+        return SettingsLocation(
+            path=normalized,
+            writable_path=normalized,
+            source="explicit_settings",
+            setup_required=not target.exists(),
+        )
+
+    source = source_settings_path or (Path(__file__).resolve().parents[1] / "settings.json")
+    if source.is_file():
+        normalized = _validate_file(source)
+        return SettingsLocation(
+            path=normalized,
+            writable_path=normalized,
+            source="source_settings",
+            setup_required=False,
+        )
+
+    user_target = (
+        _local_appdata_root(environment, local_appdata) / _DEFAULT_USER_DIR / "settings.json"
+    )
+    if user_target.is_file():
+        normalized = _validate_file(user_target)
+        return SettingsLocation(
+            path=normalized,
+            writable_path=normalized,
+            source="user_settings",
+            setup_required=False,
+        )
+
+    bundled = bundled_settings_path or (Path(__file__).resolve().parent / "settings.json")
+    normalized_bundled = _validate_file(bundled)
+    return SettingsLocation(
+        path=normalized_bundled,
+        writable_path=user_target,
+        source="bundled_template",
+        setup_required=True,
+    )
+
+
+def default_settings_path(environ: Mapping[str, str] | None = None) -> Path:
+    """Locate the effective settings read source."""
+    location = resolve_settings_location(environ)
+    return _validate_file(location.path)
 
 
 def _report_error(error: Exception, *, location: str = "settings") -> dict[str, str]:
@@ -528,16 +766,16 @@ def load_settings_report(environ: Mapping[str, str] | None = None) -> dict[str, 
                 reason_code="settings_size_invalid",
             )
             return {
-                "settings": deepcopy(_DEFAULT_SETTINGS),
+                "settings": default_settings_document(),
                 "errors": [_report_error(error)],
             }
         return {
-            "settings": deepcopy(_DEFAULT_SETTINGS),
+            "settings": default_settings_document(),
             "errors": [_report_error(exc)],
         }
     except (OSError, RuntimeError, SettingsError) as exc:
         return {
-            "settings": deepcopy(_DEFAULT_SETTINGS),
+            "settings": default_settings_document(),
             "errors": [_report_error(exc)],
         }
     if not raw:
@@ -545,34 +783,56 @@ def load_settings_report(environ: Mapping[str, str] | None = None) -> dict[str, 
             f"settings.json must contain 1..{MAX_SETTINGS_BYTES} bytes",
             reason_code="settings_size_invalid",
         )
-        return {"settings": deepcopy(_DEFAULT_SETTINGS), "errors": [_report_error(error)]}
+        return {"settings": default_settings_document(), "errors": [_report_error(error)]}
     try:
         document = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_object)
     except UnicodeDecodeError:
         error = SettingsError(
             "settings.json must be UTF-8", reason_code="settings_encoding_invalid"
         )
-        return {"settings": deepcopy(_DEFAULT_SETTINGS), "errors": [_report_error(error)]}
+        return {"settings": default_settings_document(), "errors": [_report_error(error)]}
     except json.JSONDecodeError, _DuplicateJsonKey:
         error = SettingsError(
             "settings.json contains invalid or duplicate JSON",
             reason_code="settings_json_invalid",
         )
-        return {"settings": deepcopy(_DEFAULT_SETTINGS), "errors": [_report_error(error)]}
+        return {"settings": default_settings_document(), "errors": [_report_error(error)]}
     except RecursionError as exc:
         return {
-            "settings": deepcopy(_DEFAULT_SETTINGS),
+            "settings": default_settings_document(),
             "errors": [_report_error(exc)],
         }
-    errors: list[dict[str, str]] = []
     try:
-        settings = _normalize(document, errors=errors)
+        return normalize_settings_document(document)
     except RecursionError as exc:
         return {
-            "settings": deepcopy(_DEFAULT_SETTINGS),
+            "settings": default_settings_document(),
             "errors": [_report_error(exc)],
         }
+
+
+def normalize_settings_document(document: Any) -> dict[str, Any]:
+    """Normalize one decoded document without reading or writing the filesystem."""
+    errors: list[dict[str, str]] = []
+    settings = _normalize(document, errors=errors)
     return {"settings": settings, "errors": errors}
+
+
+def serialize_settings_document(document: Any) -> bytes:
+    """Return canonical writable UTF-8 bytes or reject the complete document."""
+    report = normalize_settings_document(document)
+    if report["errors"]:
+        raise SettingsError(
+            "settings document contains invalid values",
+            reason_code="settings_value_invalid",
+        )
+    raw = (json.dumps(report["settings"], ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+    if not raw or len(raw) > MAX_SETTINGS_BYTES:
+        raise SettingsError(
+            f"settings document must contain 1..{MAX_SETTINGS_BYTES} bytes",
+            reason_code="settings_size_invalid",
+        )
+    return raw
 
 
 def load_settings(environ: Mapping[str, str] | None = None) -> dict[str, Any]:
@@ -591,6 +851,13 @@ def settings_status(environ: Mapping[str, str] | None = None) -> dict[str, Any]:
     report = load_settings_report(environ)
     settings = report["settings"]
     errors = report["errors"]
+    try:
+        location = resolve_settings_location(environ)
+        configuration_source = location.source
+        setup_required = location.setup_required
+    except OSError, RuntimeError, SettingsError:
+        configuration_source = "unavailable"
+        setup_required = True
     result = {
         "success": True,
         "schema_name": SETTINGS_SCHEMA,
@@ -599,6 +866,10 @@ def settings_status(environ: Mapping[str, str] | None = None) -> dict[str, Any]:
         "settings_fingerprint_sha256": settings_fingerprint(settings),
         "settings_path_included": False,
         "settings_path_environment_variable": SETTINGS_PATH_ENV,
+        "configuration_source": configuration_source,
+        "setup_required": setup_required,
+        "setup_methods": ["settings.start", "agent_edit"],
+        "restart_required_after_change": True,
         "defaults_used_for_invalid_or_missing_entries": bool(errors),
         "settings_errors": errors,
         "legacy_environment_overrides_supported": True,
@@ -645,9 +916,13 @@ def apply_java_settings(environ: Mapping[str, str] | None = None) -> None:
 
 __all__ = [
     "ARTIFACT_WRITE_ROOT_ENV",
+    "GUI_LANGUAGES",
+    "GUI_SCALES",
     "JOBS_ENV",
     "JAVA_HOME_ENV",
     "JDK_HOME_ENV",
+    "LOCALAPPDATA_ENV",
+    "PROGRAMDATA_ENV",
     "MODEL_READ_ROOTS_ENV",
     "OWNER_ENV",
     "PROFILE_ENV",
@@ -657,13 +932,19 @@ __all__ = [
     "SEMANTIC_ROOT_ENV",
     "SETTINGS_PATH_ENV",
     "SETTINGS_SCHEMA",
+    "SETTINGS_READABLE_VERSIONS",
     "SETTINGS_VERSION",
     "SHARED_SERVER_ENV",
     "SettingsError",
+    "SettingsLocation",
     "apply_java_settings",
     "default_settings_path",
+    "default_settings_document",
     "load_settings",
     "load_settings_report",
+    "normalize_settings_document",
+    "resolve_settings_location",
+    "serialize_settings_document",
     "settings_environment",
     "settings_fingerprint",
     "settings_status",

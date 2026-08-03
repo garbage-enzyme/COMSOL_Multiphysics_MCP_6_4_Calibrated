@@ -89,8 +89,8 @@ Codex、opencode、Claude Code 和 Hermes 应使用同一个文件，避免不�
 `evidence_integrity_status` 报告 `settings_errors`；JSON 整体损坏时回退完整安全默认值
 并报告错误。不要为每个 agent 创建第二份 settings 文件。
 
-从源码树运行或使用包含 bundled settings 的 wheel 时，通常不需要环境变量。若 client
-不保留项目路径，只传入一个统一的绝对路径定位变量：
+从源码树运行时，项目根目录文件可写。安装 wheel 后，包内文件只是只读模板；若没有使用
+下面的绝对定位变量，持久设置写入 `%LOCALAPPDATA%/comsol_mcp/settings.json`：
 
 ```text
 COMSOL_MCP_SETTINGS_PATH=D:\path\to\COMSOL_Multiphysics_MCP\settings.json
@@ -100,6 +100,21 @@ COMSOL_MCP_SETTINGS_PATH=D:\path\to\COMSOL_Multiphysics_MCP\settings.json
 兼容覆盖能力，但已从提交的 client 配置示例中移除。修改 `settings.json` 后，profile、
 shared-server 或 Java 设置需要重启 MCP host；随后调用 `capabilities` 检查
 `project_settings`。
+
+首次设置默认把 settings 文件和支持 Unicode 的模型读取目录放在
+`%LOCALAPPDATA%/comsol_mcp`，把必须仅含 ASCII 字符的 runtime 与自有 artifacts 放在
+`%PROGRAMDATA%/comsol_mcp`；可选语义资产保持未设置。
+
+安装后首次使用时，`capabilities.project_settings` 会报告 `setup_required: true`、
+`configuration_source: bundled_template`、设置方式 `settings.start` 与 `agent_edit`，以及
+修改后需要重启。先询问用户选择哪种方式。若选择 GUI，只调用一次所有 profile 都有的
+`settings.start`，说明改动要在重启 Codex 或所属 MCP client 后生效，然后停止继续输出并
+等待用户下一条消息；GUI 打开期间不要同时编辑 JSON。若选择 agent edit，只修改解析出的
+可写文件，验证后请求同样的重启。安装后的 `comsol-mcp-settings` 命令可直接打开 GUI；从
+仓库或源码分发包使用时也可运行 `./Open_Settings_GUI.ps1`。该脚本会查找受支持的 Python
+3.14，也可通过 `-PythonPath` 和 `-SettingsPath` 明确指定；`-ValidateOnly` 只验证启动条件，
+不会打开界面或启动 COMSOL。服务器会返回 `agent_action_required: pause_for_user`，但无法从
+技术上强制任意第三方 agent 遵守暂停。
 
 ## Profile
 
@@ -148,6 +163,8 @@ Linux 或 macOS。生成的 EXE 只接收一个运行参数：`--comsol-path <CO
 `standalone_resume`、`standalone_tail` 和 `standalone_results`。构建与任务目录必须位于
 配置的 ASCII 自有产物根目录内；MCP 在执行前核对包内源码身份、构建清单与 EXE 哈希。
 EXE 生成后也可复制到目标机直接操作，此时不需要该 Python MCP host。
+`standalone_start` 和 `standalone_resume` 有显式 `comsol_root` 时优先使用它；省略时读取共享
+设置中的 `comsol.installation_root`。
 
 ## 推荐工作流
 

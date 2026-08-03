@@ -27,11 +27,13 @@ git clone https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrat
 Set-Location .\COMSOL_Multiphysics_MCP_6_4_Calibrated
 D:\path\to\python-env\python.exe -m pip install .
 Test-Path "D:\path\to\python-env\Scripts\comsol-mcp.exe"
+Test-Path "D:\path\to\python-env\Scripts\comsol-mcp-settings.exe"
 ```
 
-The wheel intentionally exposes only the canonical `comsol_mcp` package; the
-repository-only `src` compatibility namespace is not installed. Configure the
-absolute installed console entry point for a portable deployment.
+The wheel exposes the canonical `comsol_mcp` runtime and the solver-free
+`settings_gui` application; the repository-only `src` compatibility namespace
+is not installed. Configure the absolute installed server console entry point
+for a portable deployment.
 
 ## 2. Configure the shared settings file
 
@@ -77,6 +79,31 @@ COMSOL_MCP_SETTINGS_PATH=D:\path\to\COMSOL_Multiphysics_MCP\settings.json
 The old individual `COMSOL_MCP_*`, `COMSOL_SEMANTIC_*`, and Java variables remain
 one-release compatibility overrides, but are not needed for a normal deployment
 and are omitted from the checked-in examples.
+
+For an installed package with no persistent file, `capabilities` reports:
+
+```json
+{
+  "setup_required": true,
+  "configuration_source": "bundled_template",
+  "setup_methods": ["settings.start", "agent_edit"],
+  "restart_required_after_change": true
+}
+```
+
+Ask the user whether to open the GUI or let the agent edit JSON. For the GUI,
+call `settings.start` once, state that changes require restarting Codex or the
+owning MCP client, stop further task output, and wait for the user's next
+message. Do not modify settings directly while the GUI is open. For agent edit,
+modify only the resolved writable file, validate it, and request the restart.
+The GUI writes `%LOCALAPPDATA%/comsol_mcp/settings.json` by default; the bundled
+package file remains a read-only template. `comsol-mcp-settings` is the direct
+console fallback. The MCP response asks agents to pause, but cannot technically
+enforce arbitrary third-party behavior.
+
+Confirmed first-run setup creates the Unicode-capable model-read directory
+under `%LOCALAPPDATA%/comsol_mcp` and the ASCII-only runtime and owned-artifact
+directories under `%PROGRAMDATA%/comsol_mcp`. Optional assets remain unset.
 
 Before choosing a profile, choose how the simulation will run. The independent
 [five execution modes guide](docs/simulation_execution_modes/README.md)

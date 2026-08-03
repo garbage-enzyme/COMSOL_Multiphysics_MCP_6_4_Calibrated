@@ -7754,6 +7754,13 @@
     "title": "session_resetArguments",
     "type": "object"
   },
+  "settings.start": {
+    "additionalProperties": false,
+    "maxProperties": 256,
+    "properties": {},
+    "title": "settings_startArguments",
+    "type": "object"
+  },
   "shared_model_adopt": {
     "additionalProperties": false,
     "maxProperties": 256,
@@ -9798,9 +9805,17 @@
     "maxProperties": 256,
     "properties": {
       "comsol_root": {
-        "maxLength": 16384,
-        "title": "Comsol Root",
-        "type": "string"
+        "anyOf": [
+          {
+            "maxLength": 16384,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Comsol Root"
       },
       "deployment_directory": {
         "maxLength": 16384,
@@ -9809,8 +9824,7 @@
       }
     },
     "required": [
-      "deployment_directory",
-      "comsol_root"
+      "deployment_directory"
     ],
     "title": "standalone_resumeArguments",
     "type": "object"
@@ -9820,9 +9834,17 @@
     "maxProperties": 256,
     "properties": {
       "comsol_root": {
-        "maxLength": 16384,
-        "title": "Comsol Root",
-        "type": "string"
+        "anyOf": [
+          {
+            "maxLength": 16384,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Comsol Root"
       },
       "deployment_directory": {
         "maxLength": 16384,
@@ -9831,8 +9853,7 @@
       }
     },
     "required": [
-      "deployment_directory",
-      "comsol_root"
+      "deployment_directory"
     ],
     "title": "standalone_startArguments",
     "type": "object"

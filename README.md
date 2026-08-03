@@ -104,9 +104,10 @@ that entry at its default and is reported by `capabilities` and
 `evidence_integrity_status`; malformed JSON falls back to the complete safe default
 document and reports the error. Do not create a second agent-owned settings file.
 
-Normally no settings environment variable is needed when running from the source
-tree or a wheel containing the bundled file. If a client does not preserve the
-project path, pass only the one absolute locator variable:
+In a source checkout, the project-root file is writable. In an installed wheel,
+the bundled file is a read-only template and persistent settings live at
+`%LOCALAPPDATA%/comsol_mcp/settings.json` unless the one absolute locator below
+selects another file:
 
 ```text
 COMSOL_MCP_SETTINGS_PATH=D:\path\to\COMSOL_Multiphysics_MCP\settings.json
@@ -117,6 +118,26 @@ one-release compatibility overrides, but they are intentionally absent from the
 checked-in client examples. Change `settings.json`, restart the MCP host for
 profile/shared-server/Java changes, then call `capabilities` and inspect the
 `project_settings` status.
+
+First-run defaults keep the settings file and Unicode-capable model-read root
+under `%LOCALAPPDATA%/comsol_mcp`, while ASCII-only runtime and owned artifacts
+live under `%PROGRAMDATA%/comsol_mcp`. Optional semantic assets remain unset.
+
+On first installed use, `capabilities.project_settings` reports
+`setup_required: true`, `configuration_source: bundled_template`, setup methods
+`settings.start` and `agent_edit`, and that a restart is required. Ask the user
+which method to use. If GUI is selected, call profile-independent
+`settings.start` once, tell the user that changes apply after restarting Codex
+or the owning MCP client, stop further task output, and wait for the user's next
+message. Do not edit JSON while the GUI is open. If agent edit is selected, edit
+only the resolved writable file, validate it, and request the same restart.
+The installed `comsol-mcp-settings` command opens the GUI directly. Repository
+and source-distribution users can also run `./Open_Settings_GUI.ps1`. The script
+discovers a supported Python 3.14 interpreter, or accepts explicit
+`-PythonPath` and `-SettingsPath` values. `-ValidateOnly` checks the manual
+launcher without opening the GUI or starting COMSOL. The server can report
+`agent_action_required: pause_for_user`; it cannot technically force arbitrary
+third-party agents to comply.
 
 ## Profiles
 
@@ -169,6 +190,8 @@ Select the `basic_fem` profile in the normal Python MCP host to expose
 configured owned ASCII artifact root. The MCP host verifies the packaged source
 identity, build manifest, and EXE hash before execution. Once generated, the
 EXE can also be copied and operated directly without that Python MCP host.
+`standalone_start` and `standalone_resume` use an explicit `comsol_root` when
+provided; otherwise they use `comsol.installation_root` from shared settings.
 
 ## Recommended workflows
 

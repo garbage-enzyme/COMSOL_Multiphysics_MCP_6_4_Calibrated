@@ -333,10 +333,17 @@ else:
     assert completed.returncode == 0, completed.stderr
 
 
-def test_wheel_distributes_only_the_canonical_top_level_package():
+def test_wheel_distributes_only_reviewed_runtime_packages():
     project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
 
-    assert project["tool"]["hatch"]["build"]["targets"]["wheel"]["packages"] == ["comsol_mcp"]
+    wheel = project["tool"]["hatch"]["build"]["targets"]["wheel"]
+    assert wheel["packages"] == ["comsol_mcp", "settings_gui"]
+    assert wheel["exclude"] == [
+        "/settings_gui/tests",
+        "/settings_gui/locales/**/*.po",
+        "/settings_gui/locales/*.pot",
+    ]
+    assert project["project"]["scripts"]["comsol-mcp-settings"] == "settings_gui.__main__:main"
 
 
 def _tracked_entries() -> list[tuple[str, str]]:
@@ -459,6 +466,7 @@ def test_repository_root_is_release_focused_and_free_of_generated_artifacts():
         "DEPLOYMENT.md",
         "DEPLOYMENT_CN.md",
         "LICENSE",
+        "Open_Settings_GUI.ps1",
         "README.md",
         "README_CN.md",
         "pyproject.toml",
@@ -942,7 +950,7 @@ def test_release_lock_rejects_a_non_amd64_target_interpreter(monkeypatch, platfo
 
 
 def test_release_lock_installs_from_the_exact_downloaded_wheelhouse(tmp_path, monkeypatch):
-    source = tmp_path / "comsol_mcp-0.2.0-py3-none-any.whl"
+    source = tmp_path / "comsol_mcp-0.6.0-py3-none-any.whl"
     source.write_bytes(b"root-wheel")
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -955,7 +963,7 @@ def test_release_lock_installs_from_the_exact_downloaded_wheelhouse(tmp_path, mo
             (destination / source.name).write_bytes(source.read_bytes())
             (destination / "example-1.0-py3-none-any.whl").write_bytes(b"dependency-wheel")
         if "freeze" in command:
-            return "comsol-mcp==0.2.0\nexample==1.0\n"
+            return "comsol-mcp==0.6.0\nexample==1.0\n"
         return ""
 
     monkeypatch.setattr(lock_generator, "_run", fake_run)
@@ -972,7 +980,7 @@ def test_release_lock_installs_from_the_exact_downloaded_wheelhouse(tmp_path, mo
     assert install[install.index("--find-links") + 1] == str(download_dir)
     assert Path(install[-1]).parent == download_dir
     assert Path(install[-1]).read_bytes() == source.read_bytes()
-    assert freeze == "comsol-mcp==0.2.0\nexample==1.0\n"
+    assert freeze == "comsol-mcp==0.6.0\nexample==1.0\n"
 
 
 def test_minimum_supported_lane_matches_reviewed_manifest_and_package_ranges():

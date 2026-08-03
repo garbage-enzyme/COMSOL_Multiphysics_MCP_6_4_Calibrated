@@ -1,16 +1,18 @@
 {
   "schema_name": "comsol_mcp.settings",
-  "schema_version": "1.0.0",
+  "schema_version": "1.1.0",
   "profile": {
     "name": "core"
   },
   "runtime": {
-    "directory": null,
+    "directory": "%PROGRAMDATA%/comsol_mcp/runtime",
     "jobs_directory": null
   },
   "paths": {
-    "model_read_roots": [],
-    "artifact_write_root": null
+    "model_read_roots": [
+      "%LOCALAPPDATA%/comsol_mcp/models"
+    ],
+    "artifact_write_root": "%PROGRAMDATA%/comsol_mcp/artifacts"
   },
   "shared_server": {
     "enabled": false
@@ -24,8 +26,8 @@
     }
   },
   "semantic_docs": {
-    "root": "D:/comsol_semantic",
-    "lexical_index": "D:/comsol_docs_fts/manuals.sqlite3",
+    "root": null,
+    "lexical_index": null,
     "model_path": null
   },
   "ownership": {
@@ -34,5 +36,12 @@
   "java": {
     "java_home": null,
     "jdk_home": null
+  },
+  "comsol": {
+    "installation_root": null
+  },
+  "gui": {
+    "language": "zh-cn",
+    "scale": "system"
   }
 }

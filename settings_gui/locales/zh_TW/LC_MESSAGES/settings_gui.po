@@ -1,0 +1,261 @@
+# Generated deterministically; edit the generator, not this file.
+msgid ""
+msgstr "Project-Id-Version: comsol-mcp alpha6\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\nLanguage: zh_TW\nPlural-Forms: nplurals=1; plural=0;\n"
+
+msgid "COMSOL MCP Settings"
+msgstr "COMSOL MCP 設定"
+
+msgid "General"
+msgstr "一般"
+
+msgid "Profile"
+msgstr "工具設定檔"
+
+msgid "Runtime"
+msgstr "執行路徑"
+
+msgid "COMSOL/Java"
+msgstr "COMSOL/Java"
+
+msgid "Shared"
+msgstr "共用"
+
+msgid "Evidence"
+msgstr "證據"
+
+msgid "Docs"
+msgstr "文件"
+
+msgid "Owner"
+msgstr "擁有者"
+
+msgid "About"
+msgstr "關於"
+
+msgid "Changes take effect only after restarting Codex or the owning MCP client."
+msgstr "變更僅在重新啟動 Codex 或目前的 MCP 用戶端後生效。"
+
+msgid "Save and Exit"
+msgstr "儲存並結束"
+
+msgid "Apply"
+msgstr "套用"
+
+msgid "Cancel"
+msgstr "取消"
+
+msgid "Browse"
+msgstr "瀏覽"
+
+msgid "Clear"
+msgstr "清除"
+
+msgid "Auto-detect"
+msgstr "自動偵測"
+
+msgid "Add folder"
+msgstr "新增資料夾"
+
+msgid "Remove"
+msgstr "移除"
+
+msgid "Choose folder"
+msgstr "選擇資料夾"
+
+msgid "Choose file"
+msgstr "選擇檔案"
+
+msgid "GUI release"
+msgstr "GUI 發行版本"
+
+msgid "Installed package version"
+msgstr "已安裝套件版本"
+
+msgid "Repositories and acknowledgements"
+msgstr "程式庫與致謝"
+
+msgid "This repository"
+msgstr "目前程式庫"
+
+msgid "Thanks: upstream project"
+msgstr "感謝上游專案"
+
+msgid "Thanks: Ching-Chiang project"
+msgstr "感謝 Ching-Chiang 專案"
+
+msgid "MIT License"
+msgstr "MIT 授權條款"
+
+msgid "English"
+msgstr "English"
+
+msgid "简体中文"
+msgstr "简体中文"
+
+msgid "繁體中文"
+msgstr "繁體中文"
+
+msgid "Internal settings format name. You do not need to change it."
+msgstr "設定檔內部使用的格式名稱，不需要修改。"
+
+msgid "Settings format version used when this file is saved."
+msgstr "儲存檔案時使用的設定格式版本。"
+
+msgid "Language used by this Settings window."
+msgstr "此設定視窗使用的語言。"
+
+msgid "Size of text and controls. Following Windows is recommended. Other choices are previewed immediately and saved for the next opening."
+msgstr "文字和控制項的大小。建議跟隨 Windows；其他選項會立即預覽，並在下次開啟時繼續使用。"
+
+msgid "Follow Windows display settings"
+msgstr "跟隨 Windows 顯示設定"
+
+msgid "Safety-first default for new users. It offers fewer operations, which lowers the risk of an unintended change. Choose it while learning or when you only need to open and inspect models, manage jobs, run careful single-point checks, or search manuals."
+msgstr "面向新手的安全預設選項。它提供的操作較少，可降低誤操作風險。學習階段，或只需要開啟和查看模型、管理工作、進行謹慎的單點檢查或搜尋手冊時，請選擇此項。"
+
+msgid "Recommended for most users. It covers ordinary FEM model building and result export, and includes tools for making a Windows standalone package. Choose it for general simulation work that does not need a specialist profile."
+msgstr "建議大多數使用者選擇。它涵蓋一般 FEM 建模和結果匯出，也包含製作 Windows standalone 套件的工具。一般模擬不需要專用 profile 時，請選擇此項。"
+
+msgid "For optical and metasurface work. Adds materials, field review, Wave Optics checks, point audits, and staged parameter workflows to Core."
+msgstr "適合光學和超表面工作。在 Core 基礎上增加材料、場結果查看、Wave Optics 檢查、單點稽核和分階段參數流程。"
+
+msgid "For searching prepared local COMSOL manuals with text and meaning-based search. Choose it only after the optional manual indexes and search model have been prepared."
+msgstr "適合搜尋已準備好的本機 COMSOL 手冊，支援文字和語意搜尋。只有在可選手冊索引和搜尋模型準備完成後才選擇此項。"
+
+msgid "For users who want to watch the same model in COMSOL Desktop while MCP takes a turn through a local Server. Choose it only after Desktop and Server are connected and shared mode is enabled."
+msgstr "適合希望在 COMSOL Desktop 中觀看同一模型，並讓 MCP 透過本機 Server 輪流操作的使用者。只有在 Desktop 與 Server 已連線且共用模式已啟用後才選擇此項。"
+
+msgid "For testing extra helpers that are broader or less mature. Use it only when a required tool is missing from the safer profiles, and check every output carefully."
+msgstr "適合測試範圍更廣或尚未成熟的額外工具。只有在較安全的 profile 缺少所需工具時才使用，並仔細檢查每項輸出。"
+
+msgid "For old workflows that need nearly every tool. It keeps older broad path behavior and has weaker file containment. New users should not choose it."
+msgstr "適合需要幾乎全部工具的舊流程。它保留較寬鬆的舊路徑行為，檔案範圍保護較弱；新使用者不應選擇。"
+
+msgid "Folder for working files and locks. Use an ASCII-only path. \nExample: %PROGRAMDATA%\\comsol_mcp\\runtime"
+msgstr "存放執行檔案和鎖定資料的資料夾。路徑只能含 ASCII 字元。\n範例：%PROGRAMDATA%\\comsol_mcp\\runtime"
+
+msgid "Optional separate folder for resumable jobs. Leave it empty to use the runtime folder. \nExample: %PROGRAMDATA%\\comsol_mcp\\runtime\\jobs"
+msgstr "可選的可恢復工作資料夾。留空時使用執行目錄。\n範例：%PROGRAMDATA%\\comsol_mcp\\runtime\\jobs"
+
+msgid "Folders where COMSOL MCP may read your .mph files. Chinese paths are supported. \nExample: %LOCALAPPDATA%\\comsol_mcp\\models"
+msgstr "COMSOL MCP 可以讀取 .mph 檔案的資料夾。支援中文路徑。\n範例：%LOCALAPPDATA%\\comsol_mcp\\models"
+
+msgid "Folder where COMSOL MCP writes results and evidence. Use an ASCII-only path. \nExample: %PROGRAMDATA%\\comsol_mcp\\artifacts"
+msgstr "COMSOL MCP 寫入結果和證據的資料夾。路徑只能含 ASCII 字元。\n範例：%PROGRAMDATA%\\comsol_mcp\\artifacts"
+
+msgid "Folder where COMSOL Multiphysics 6.4 is installed. \nExample: C:\\COMSOL64\\Multiphysics"
+msgstr "COMSOL Multiphysics 6.4 的安裝資料夾。\n範例：C:\\COMSOL64\\Multiphysics"
+
+msgid "Java folder used by COMSOL. Auto-detect can fill this value. \nExample: C:\\COMSOL64\\Multiphysics\\java\\win64\\jre"
+msgstr "COMSOL 使用的 Java 資料夾，可由自動偵測填入。\n範例：C:\\COMSOL64\\Multiphysics\\java\\win64\\jre"
+
+msgid "JDK folder used by COMSOL. Auto-detect can fill this value. \nExample: C:\\COMSOL64\\Multiphysics\\java\\win64\\jre"
+msgstr "COMSOL 使用的 JDK 資料夾，可由自動偵測填入。\n範例：C:\\COMSOL64\\Multiphysics\\java\\win64\\jre"
+
+msgid "Allow MCP to work with a COMSOL Desktop connected to a local Server."
+msgstr "允許 MCP 與連線到本機 Server 的 COMSOL Desktop 協作。"
+
+msgid "Check that execution results and scientific conclusions are reported separately."
+msgstr "檢查執行結果和科學結論是否分開說明。"
+
+msgid "Check saved result files and their hashes."
+msgstr "檢查儲存的結果檔案及其雜湊。"
+
+msgid "Check that summary statements match the saved result values."
+msgstr "檢查摘要說明是否與儲存的結果數值一致。"
+
+msgid "Check that a resumed job uses the same producer and driver."
+msgstr "檢查恢復工作是否使用相同的產生器和驅動程式。"
+
+msgid "Optional folder containing prepared semantic-search files. This is not COMSOL's built-in manual folder. \nExample: %LOCALAPPDATA%\\comsol_mcp\\semantic\\manuals"
+msgstr "存放已準備語意搜尋檔案的可選資料夾。它不是 COMSOL 內建的 manual 資料夾。\n範例：%LOCALAPPDATA%\\comsol_mcp\\semantic\\manuals"
+
+msgid "Optional SQLite file used for manual text search. \nExample: %LOCALAPPDATA%\\comsol_mcp\\semantic\\manuals.sqlite3"
+msgstr "用於手冊文字搜尋的可選 SQLite 檔案。\n範例：%LOCALAPPDATA%\\comsol_mcp\\semantic\\manuals.sqlite3"
+
+msgid "Optional folder containing the local semantic-search model. \nExample: %LOCALAPPDATA%\\comsol_mcp\\semantic\\models"
+msgstr "存放本機語意搜尋模型的可選資料夾。\n範例：%LOCALAPPDATA%\\comsol_mcp\\semantic\\models"
+
+msgid "Optional name that identifies who owns the COMSOL session."
+msgstr "用於說明誰在使用 COMSOL 工作階段的可選名稱。"
+
+msgid "Enter a valid absolute path or clear this setting."
+msgstr "請輸入有效的絕對路徑，或清除此項。"
+
+msgid "Enter an ASCII-only full path, or leave this setting empty."
+msgstr "請輸入僅含 ASCII 字元的完整路徑，或將此項留空。"
+
+msgid "Enter a valid absolute path."
+msgstr "請輸入有效的絕對路徑。"
+
+msgid "Enter a valid value for this setting."
+msgstr "請輸入此設定允許的有效值。"
+
+msgid "Required setting is missing."
+msgstr "缺少必要設定。"
+
+msgid "Unknown setting is not supported."
+msgstr "不支援未知設定。"
+
+msgid "Disable evidence check?"
+msgstr "要停用證據檢查嗎？"
+
+msgid "Disabling an evidence check makes future results not fully verified. Continue?"
+msgstr "停用證據檢查後，後續結果將不再是完整驗證狀態。是否繼續？"
+
+msgid "Restart required"
+msgstr "需要重新啟動"
+
+msgid "Invalid settings"
+msgstr "設定無效"
+
+msgid "Correct every highlighted field before saving."
+msgstr "請先修正所有標紅欄位，再儲存。"
+
+msgid "Save failed"
+msgstr "儲存失敗"
+
+msgid "Settings were not saved. Close conflicting editors and try again."
+msgstr "設定未儲存。請關閉衝突的編輯器後再試一次。"
+
+msgid "Discard changes?"
+msgstr "要捨棄變更嗎？"
+
+msgid "Close without saving the current edits?"
+msgstr "是否捨棄目前的編輯並關閉視窗？"
+
+msgid "The configured COMSOL root is not a supported 6.4 installation."
+msgstr "目前的 COMSOL 根目錄不是受支援的 6.4 安裝。"
+
+msgid "Multiple COMSOL 6.4 installations were found. Choose one manually."
+msgstr "偵測到多個 COMSOL 6.4 安裝，請手動選擇。"
+
+msgid "No supported COMSOL 6.4 installation was found."
+msgstr "找不到受支援的 COMSOL 6.4 安裝。"
+
+msgid "Replace existing values?"
+msgstr "要取代現有值嗎？"
+
+msgid "Auto-detect would replace these settings: {keys}"
+msgstr "自動偵測將取代這些設定：{keys}"
+
+msgid "Settings conflict"
+msgstr "設定衝突"
+
+msgid "The settings file changed outside this editor. Close this window and reopen settings."
+msgstr "設定檔已被其他程式修改。請關閉此視窗並重新開啟設定。"
+
+msgid "The selected language catalog is unavailable; English is active."
+msgstr "所選語言資源無法使用，目前已切換為英文。"
+
+msgid "No writable settings file exists. Rebuild canonical settings now?\n\nChoose No to exit without writing."
+msgstr "目前沒有可寫入的設定檔。現在建立標準設定嗎？\n\n選擇「否」將直接結束且不寫入檔案。"
+
+msgid "Another settings editor is active. Close it and reopen settings."
+msgstr "另一個設定編輯器正在執行。請先關閉它，再重新開啟設定。"
+
+msgid "Settings could not be prepared safely."
+msgstr "無法安全地準備設定檔。"
+
+msgid "Settings are missing or damaged. Preserve them and rebuild defaults?"
+msgstr "設定檔遺失或已損壞。是否保留原檔並重建預設設定？"

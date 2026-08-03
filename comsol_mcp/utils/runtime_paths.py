@@ -23,6 +23,15 @@ def default_runtime_dir(environ: dict[str, str] | None = None) -> Path:
     ``COMSOL_MCP_RUNTIME_DIR`` is authoritative.  For backward compatibility,
     setting only ``COMSOL_MCP_JOBS_DIR`` makes its parent the common root.
     """
+    source = os.environ if environ is None else environ
+    configured = source.get("COMSOL_MCP_RUNTIME_DIR")
+    if configured:
+        return Path(configured)
+
+    configured_jobs = source.get("COMSOL_MCP_JOBS_DIR")
+    if configured_jobs:
+        return Path(configured_jobs).parent
+
     environment = settings_environment(environ)
     configured = environment.get("COMSOL_MCP_RUNTIME_DIR")
     if configured:
@@ -47,7 +56,8 @@ def default_jobs_root(environ: dict[str, str] | None = None) -> Path:
     runtime_dir = default_runtime_dir(environ)
     if configured:
         jobs_dir = Path(configured)
-        explicit_runtime = environment.get("COMSOL_MCP_RUNTIME_DIR")
+        source = os.environ if environ is None else environ
+        explicit_runtime = source.get("COMSOL_MCP_RUNTIME_DIR")
         if explicit_runtime and jobs_dir.parent.resolve(strict=False) != runtime_dir.resolve(
             strict=False
         ):

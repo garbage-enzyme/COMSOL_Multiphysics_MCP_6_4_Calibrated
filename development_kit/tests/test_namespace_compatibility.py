@@ -160,7 +160,10 @@ def test_packaging_keeps_the_shim_source_only_and_distributes_canonical_implemen
 
     assert project["project"]["scripts"]["comsol-mcp"] == "comsol_mcp.server:main"
     assert project["tool"]["hatch"]["version"]["path"] == "comsol_mcp/__init__.py"
-    assert project["tool"]["hatch"]["build"]["targets"]["wheel"]["packages"] == ["comsol_mcp"]
+    assert project["tool"]["hatch"]["build"]["targets"]["wheel"]["packages"] == [
+        "comsol_mcp",
+        "settings_gui",
+    ]
     assert (ROOT / "src" / "__init__.py").is_file()
     assert [path.relative_to(ROOT).as_posix() for path in sorted((ROOT / "src").rglob("*.py"))] == [
         "src/__init__.py"

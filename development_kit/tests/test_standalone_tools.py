@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 import comsol_mcp.standalone.builder as builder_module
+import comsol_mcp.tools.standalone as standalone_tools_module
 from comsol_mcp.durable.io import atomic_write_json
 from comsol_mcp.path_policy import ARTIFACT_WRITE_ROOT_ENV
 from comsol_mcp.server import create_server
@@ -57,6 +58,28 @@ def test_standalone_tool_metadata_is_explicit() -> None:
         ) == values
         assert {"basic_fem", "experimental", "full"} <= set(metadata.intended_profiles)
         assert metadata.requires_model_revision is False
+
+
+def test_standalone_comsol_root_explicit_value_has_precedence(monkeypatch) -> None:
+    monkeypatch.setattr(
+        standalone_tools_module,
+        "load_settings",
+        lambda: {"comsol": {"installation_root": "C:/configured"}},
+    )
+
+    assert standalone_tools_module._resolve_comsol_root("D:/explicit") == "D:/explicit"
+    assert standalone_tools_module._resolve_comsol_root(None) == "C:/configured"
+
+
+def test_standalone_comsol_root_requires_one_source(monkeypatch) -> None:
+    monkeypatch.setattr(
+        standalone_tools_module,
+        "load_settings",
+        lambda: {"comsol": {"installation_root": None}},
+    )
+
+    with pytest.raises(ValueError, match="configure it in settings"):
+        standalone_tools_module._resolve_comsol_root(None)
 
 
 @pytest.mark.skipif(

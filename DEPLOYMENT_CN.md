@@ -25,10 +25,12 @@ git clone https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrat
 Set-Location .\COMSOL_Multiphysics_MCP_6_4_Calibrated
 D:\path\to\python-env\python.exe -m pip install .
 Test-Path "D:\path\to\python-env\Scripts\comsol-mcp.exe"
+Test-Path "D:\path\to\python-env\Scripts\comsol-mcp-settings.exe"
 ```
 
-wheel 只公开 canonical `comsol_mcp` package；仓库源码中的 `src` compatibility
-namespace 不会安装。可移植部署应配置安装后的 console entry point 绝对路径。
+wheel 公开 canonical `comsol_mcp` runtime 和 solver-free `settings_gui` 应用；仓库源码中的
+`src` compatibility namespace 不会安装。可移植部署应配置安装后的 server console entry
+point 绝对路径。
 
 ## 2. 配置统一 settings.json
 
@@ -68,6 +70,28 @@ COMSOL_MCP_SETTINGS_PATH=D:\path\to\COMSOL_Multiphysics_MCP\settings.json
 
 旧的 `COMSOL_MCP_*`、`COMSOL_SEMANTIC_*` 和 Java 环境变量仍保留一个 release 的
 兼容覆盖能力，但正常部署不需要它们，提交的 client 示例也已移除。
+
+安装包尚无持久设置文件时，`capabilities` 会报告：
+
+```json
+{
+  "setup_required": true,
+  "configuration_source": "bundled_template",
+  "setup_methods": ["settings.start", "agent_edit"],
+  "restart_required_after_change": true
+}
+```
+
+先询问用户选择打开 GUI，还是让 agent 编辑 JSON。选择 GUI 时，只调用一次
+`settings.start`，说明改动需要重启 Codex 或所属 MCP client，然后停止继续输出并等待用户
+下一条消息；GUI 打开期间不要直接修改设置。选择 agent edit 时，只修改解析出的可写文件，
+验证后请求重启。GUI 默认写入 `%LOCALAPPDATA%/comsol_mcp/settings.json`，包内文件保持只读
+模板。`comsol-mcp-settings` 是直接命令行备用入口。MCP 响应会要求 agent 暂停，但无法从
+技术上强制任意第三方 agent 遵守。
+
+用户确认首次设置后，支持 Unicode 的模型读取目录创建在 `%LOCALAPPDATA%/comsol_mcp`；
+必须仅含 ASCII 字符的 runtime 和自有 artifact 目录创建在 `%PROGRAMDATA%/comsol_mcp`。
+可选资产保持未设置。
 
 选择 profile 前，先确定仿真怎样运行。独立的
 [五种运行方式指南](docs/simulation_execution_modes/README_CN.md)区分 `interactive`、
