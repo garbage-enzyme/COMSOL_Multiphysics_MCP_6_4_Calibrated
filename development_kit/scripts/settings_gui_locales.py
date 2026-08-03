@@ -42,6 +42,20 @@ ZH_CN = {
     "Choose file": "选择文件",
     "GUI release": "GUI 发布版本",
     "Installed package version": "已安装软件包版本",
+    "Desktop shortcut": "桌面快捷方式",
+    "Create desktop shortcut": "创建桌面快捷方式",
+    "Remove desktop shortcut": "移除桌面快捷方式",
+    "Replace existing desktop shortcut?": "要替换现有桌面快捷方式吗？",
+    "A different shortcut already uses this name. Replace it?": "已有其他快捷方式使用此名称。是否替换？",
+    "Desktop shortcut ready": "桌面快捷方式已就绪",
+    "The desktop shortcut now opens this exact settings file.": "此桌面快捷方式现在会打开当前这一设置文件。",
+    "Desktop shortcut could not be created": "无法创建桌面快捷方式",
+    "The existing Desktop item was preserved.": "现有桌面项目已保留。",
+    "Desktop shortcut removed": "桌面快捷方式已移除",
+    "The owned desktop shortcut was removed.": "本应用创建的桌面快捷方式已移除。",
+    "No owned desktop shortcut was found.": "未找到本应用创建的桌面快捷方式。",
+    "Desktop shortcut not removed": "未移除桌面快捷方式",
+    "The Desktop item is not owned by this application and was preserved.": "该桌面项目不是由本应用创建的，已予保留。",
     "Repositories and acknowledgements": "仓库与致谢",
     "This repository": "当前仓库",
     "Thanks: upstream project": "感谢上游项目",
@@ -131,6 +145,20 @@ ZH_TW = {
     "Choose file": "選擇檔案",
     "GUI release": "GUI 發行版本",
     "Installed package version": "已安裝套件版本",
+    "Desktop shortcut": "桌面捷徑",
+    "Create desktop shortcut": "建立桌面捷徑",
+    "Remove desktop shortcut": "移除桌面捷徑",
+    "Replace existing desktop shortcut?": "要取代現有桌面捷徑嗎？",
+    "A different shortcut already uses this name. Replace it?": "已有其他捷徑使用此名稱。是否取代？",
+    "Desktop shortcut ready": "桌面捷徑已就緒",
+    "The desktop shortcut now opens this exact settings file.": "此桌面捷徑現在會開啟目前這個設定檔。",
+    "Desktop shortcut could not be created": "無法建立桌面捷徑",
+    "The existing Desktop item was preserved.": "現有桌面項目已保留。",
+    "Desktop shortcut removed": "桌面捷徑已移除",
+    "The owned desktop shortcut was removed.": "本應用程式建立的桌面捷徑已移除。",
+    "No owned desktop shortcut was found.": "找不到本應用程式建立的桌面捷徑。",
+    "Desktop shortcut not removed": "未移除桌面捷徑",
+    "The Desktop item is not owned by this application and was preserved.": "該桌面項目不是由本應用程式建立的，已予保留。",
     "Repositories and acknowledgements": "程式庫與致謝",
     "This repository": "目前程式庫",
     "Thanks: upstream project": "感謝上游專案",
@@ -202,7 +230,7 @@ def _header(language: str) -> str:
         "nplurals=1; plural=0;" if language.startswith("zh_") else "nplurals=2; plural=(n != 1);"
     )
     return (
-        "Project-Id-Version: comsol-mcp alpha6\n"
+        "Project-Id-Version: comsol-mcp alpha6.1\n"
         "MIME-Version: 1.0\n"
         "Content-Type: text/plain; charset=UTF-8\n"
         "Content-Transfer-Encoding: 8bit\n"

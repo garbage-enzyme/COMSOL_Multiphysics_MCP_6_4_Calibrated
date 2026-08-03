@@ -729,6 +729,9 @@ def test_hosted_ci_is_dependency_only_and_real_gate_is_explicit():
         encoding="utf-8"
     )
     dependency_report_data = yaml.safe_load(dependency_report)
+    dependency_report_generator = (
+        ROOT / "development_kit" / "scripts" / "dependency_drift_report.py"
+    ).read_text(encoding="utf-8")
     report_job = dependency_report_data["jobs"]["report"]
     report_commands = "\n".join(
         str(step.get("run", "")) for step in report_job["steps"] if isinstance(step, dict)
@@ -786,7 +789,7 @@ def test_hosted_ci_is_dependency_only_and_real_gate_is_explicit():
     assert "List installed direct dependency versions" not in dependency_report
     assert "constraints/tested_versions.json" in report_commands
     assert "constraints/release_locked_py314.txt" in report_commands
-    assert "reviewed release-lock hash differs" in report_commands
+    assert "reviewed release-lock hash differs" in dependency_report_generator
     assert "dependency-drift-report.json" in report_commands
     upload = next(
         step for step in report_job["steps"] if "actions/upload-artifact" in step.get("uses", "")

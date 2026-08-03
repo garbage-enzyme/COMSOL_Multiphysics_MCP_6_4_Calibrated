@@ -13,6 +13,7 @@ from development_kit.scripts.settings_gui_package_probe import (
     ICON_MEMBER,
     LANGUAGES,
     ROOT_LAUNCHER_MEMBER,
+    SHORTCUT_MEMBER,
     inspect_settings_gui_distributions,
 )
 
@@ -24,6 +25,7 @@ def _archives(
     include_launcher: bool = True,
     include_wheel_launcher: bool = False,
     include_test: bool = False,
+    include_shortcut_adapter: bool = True,
 ) -> Path:
     dist = root / "dist"
     dist.mkdir()
@@ -41,6 +43,8 @@ def _archives(
         )
         if include_icon:
             archive.writestr(ICON_MEMBER, b"ico")
+        if include_shortcut_adapter:
+            archive.writestr(SHORTCUT_MEMBER, b"adapter")
         if include_wheel_launcher:
             archive.writestr(ROOT_LAUNCHER_MEMBER, b"launcher")
         if include_test:
@@ -48,6 +52,8 @@ def _archives(
     sdist = dist / "comsol_mcp-0.6.0.tar.gz"
     with tarfile.open(sdist, "w:gz") as archive:
         members = {"settings_gui/locales/settings_gui.pot": b"pot"}
+        if include_shortcut_adapter:
+            members[SHORTCUT_MEMBER] = b"adapter"
         for language in LANGUAGES:
             base = f"settings_gui/locales/{language}/LC_MESSAGES/settings_gui"
             members[f"{base}.po"] = b"po"
@@ -71,6 +77,7 @@ def test_distribution_probe_accepts_exact_gui_membership(tmp_path: Path) -> None
     assert result["console_entry_included"] is True
     assert result["wheel_icon_included"] is True
     assert result["sdist_icon_included"] is True
+    assert result["shortcut_adapter_included"] is True
     assert result["source_logo_excluded"] is True
     assert result["sdist_root_launcher_included"] is True
     assert result["wheel_root_launcher_excluded"] is True
@@ -94,3 +101,8 @@ def test_distribution_probe_rejects_missing_root_launcher(tmp_path: Path) -> Non
 def test_distribution_probe_rejects_root_launcher_in_wheel(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="root launcher"):
         inspect_settings_gui_distributions(_archives(tmp_path, include_wheel_launcher=True))
+
+
+def test_distribution_probe_rejects_missing_shortcut_adapter(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="shortcut adapter"):
+        inspect_settings_gui_distributions(_archives(tmp_path, include_shortcut_adapter=False))

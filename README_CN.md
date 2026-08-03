@@ -115,6 +115,9 @@ shared-server 或 Java 设置需要重启 MCP host；随后调用 `capabilities`
 3.14，也可通过 `-PythonPath` 和 `-SettingsPath` 明确指定；`-ValidateOnly` 只验证启动条件，
 不会打开界面或启动 COMSOL。服务器会返回 `agent_action_required: pause_for_user`，但无法从
 技术上强制任意第三方 agent 遵守暂停。
+安装入口也支持 `--settings-path` 和 `--validate-only`，即使 MCP stdio 已停止也能独立工作。
+“关于”页可由用户明确创建或移除每用户 `COMSOL MCP Settings.lnk`；安装和普通 GUI 操作
+从不自动创建该快捷方式。
 
 ## Profile
 

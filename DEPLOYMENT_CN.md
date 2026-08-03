@@ -89,6 +89,20 @@ COMSOL_MCP_SETTINGS_PATH=D:\path\to\COMSOL_Multiphysics_MCP\settings.json
 模板。`comsol-mcp-settings` 是直接命令行备用入口。MCP 响应会要求 agent 暂停，但无法从
 技术上强制任意第三方 agent 遵守。
 
+安装版应把独立 GUI 可执行文件绑定到实际共享设置文件；即使所有 MCP stdio host 都已停止，
+它也能工作：
+
+```powershell
+comsol-mcp-settings --settings-path "D:\settings\settings.json" --validate-only
+comsol-mcp-settings --settings-path "D:\settings\settings.json"
+comsol-mcp-settings --settings-path "D:\settings\settings.json" --create-desktop-shortcut
+comsol-mcp-settings --settings-path "D:\settings\settings.json" --remove-desktop-shortcut
+```
+
+每用户快捷方式名为 `COMSOL MCP Settings.lnk`，只能由用户明确创建。安装、部署、启动、首次
+打开、“保存”或“应用”都不会自动创建。外来同名项目会保留；只有用户在 GUI 中确认，或在
+创建命令中明确追加 `--replace-existing-shortcut` 后才会替换。
+
 用户确认首次设置后，支持 Unicode 的模型读取目录创建在 `%LOCALAPPDATA%/comsol_mcp`；
 必须仅含 ASCII 字符的 runtime 和自有 artifact 目录创建在 `%PROGRAMDATA%/comsol_mcp`。
 可选资产保持未设置。

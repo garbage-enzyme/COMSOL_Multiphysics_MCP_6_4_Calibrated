@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from comsol_mcp import __version__
 import comsol_mcp.settings as settings_module
+from comsol_mcp import __version__
 from comsol_mcp.server import create_server
 from comsol_mcp.tools.catalog import PROFILE_NAMES, TOOL_SPECS
 
@@ -110,4 +110,4 @@ def test_settings_gui_console_entry_and_packages_are_declared():
     pyproject = root.joinpath("pyproject.toml").read_text(encoding="utf-8")
     assert 'comsol-mcp-settings = "settings_gui.__main__:main"' in pyproject
     assert 'packages = ["comsol_mcp", "settings_gui"]' in pyproject
-    assert __version__ == "0.6.0"
+    assert __version__ == "0.6.1"

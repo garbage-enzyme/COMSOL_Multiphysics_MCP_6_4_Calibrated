@@ -107,6 +107,7 @@ models are intentionally absent.
 - `development_kit/scripts/__init__.py` — This file marks repository-only release utilities as a Python package.
 - `development_kit/scripts/acceptance_cleanup.py` — This module records independent licensed-gate cleanup steps and makes them part of final success.
 - `development_kit/scripts/dependency_license_gate.py` — This script emits a path-free receipt and fails on expired, missing, stale, or unmatched runtime dependency license reviews.
+- `development_kit/scripts/dependency_drift_report.py` — This script builds the deterministic information-only dependency report with declared scopes, project ranges, exact-pair constraints, and complete release-lock drift.
 - `development_kit/scripts/quality_gate.py` — This script runs the ratcheted lint, format, typing, property, coverage, license, cold-start, and response-budget gates, using four isolated pytest workers locally (serial on GitHub-hosted Python 3.14 due upstream pytest-xdist issue #1313), plus a serial process-inventory tail and a unique evidence directory per run.
 - `development_kit/scripts/generate_release_lock.py` — This script generates the complete hashed Windows Python release lock.
 - `development_kit/scripts/installed_package_probe.py` — This script verifies installed discovery, schemas, profiles, and deployment identity without COMSOL startup.
@@ -197,6 +198,7 @@ models are intentionally absent.
 - `development_kit/tests/test_durable_job_control_plane.py` — This module tests durable submission, reconciliation, status, cancellation, and resume behavior.
 - `development_kit/tests/test_durable_primitives.py` — This module tests versioned canonical bytes, bounded hashing, atomic writes, and row recovery.
 - `development_kit/tests/test_dependency_license_gate.py` — This module tests deterministic dependency-license receipts and fail-closed review behavior.
+- `development_kit/tests/test_dependency_drift_report.py` — This module tests dependency scopes, PEP 503 names, project-range exclusions, exact dependency pairs, bootstrap tools, and complete lock drift.
 - `development_kit/tests/test_environment_identity.py` — This module tests redacted solver-free environment identity.
 - `development_kit/tests/test_evidence_contracts.py` — This module tests physical evidence, policies, and immutable migration contracts.
 - `development_kit/tests/test_evidence_integrity_controls.py` — This module tests default-on settings, explicit per-check opt-out, and fail-closed disclosure.
@@ -271,6 +273,7 @@ models are intentionally absent.
 - `development_kit/tests/test_settings.py` — This module tests grouped settings defaults, validation, and fallback errors.
 - `development_kit/tests/test_alpha6_settings_gui_contract.py` — This module locks the alpha6 settings schema, location, launcher, and packaging contracts.
 - `development_kit/tests/test_settings_gui_launcher.py` — This module tests detached Settings GUI launch, handshake, profile discovery, and Tk import isolation.
+- `development_kit/tests/test_settings_gui_direct_entry.py` — This module tests the installed Settings GUI exact-path, validate-only, and explicit shortcut command contract.
 - `development_kit/tests/test_settings_gui_package.py` — This module tests Settings GUI distribution membership receipts.
 - `development_kit/tests/test_settings_gui_root_launcher.py` — This module tests the repository-root manual Settings GUI launcher under both supported PowerShell hosts.
 - `development_kit/tests/test_shared_attach_request.py` — This module tests the complete pre-lease shared-server attach gate.
@@ -519,6 +522,7 @@ models are intentionally absent.
 - `settings_gui/comsol_discovery.py` — This module discovers validated COMSOL 6.4 and Java installations without launching a process.
 - `settings_gui/constants.py` — This module defines bounded Settings GUI runtime constants.
 - `settings_gui/controller.py` — This module coordinates validation, dialogs, discovery, persistence, and close behavior.
+- `settings_gui/desktop_shortcut.py` — This module implements the explicit owned per-user Windows Desktop shortcut lifecycle with exact settings binding.
 - `settings_gui/dialogs.py` — This module adapts native file, folder, confirmation, information, and error dialogs.
 - `settings_gui/fonts.py` — This module selects deterministic Windows CJK system-font fallbacks.
 - `settings_gui/i18n.py` — This module loads complete runtime gettext catalogs and supports language switching.
@@ -536,6 +540,7 @@ models are intentionally absent.
 - `settings_gui/tests/conftest.py` — This file isolates GUI tests under a temporary ASCII ProgramData root.
 - `settings_gui/tests/test_app.py` — This module performs bounded real-Tk construction, invalid-style, language, and startup-version tests.
 - `settings_gui/tests/test_discovery.py` — This module tests COMSOL registry, marker, Java ordering, and ambiguity behavior.
+- `settings_gui/tests/test_desktop_shortcut.py` — This module tests exact shortcut creation, inspection, idempotency, collision protection, removal, and real Shell Link round trips.
 - `settings_gui/tests/test_fonts.py` — This module tests deterministic English and CJK font selection.
 - `settings_gui/tests/test_i18n.py` — This module tests gettext completeness, placeholders, and reproducible PO and MO outputs.
 - `settings_gui/tests/test_icon.py` — This module verifies the packaged ICO dimensions, encoding, transparency-capable depth, and size bound.

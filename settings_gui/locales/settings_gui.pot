@@ -1,6 +1,6 @@
 # Generated deterministic gettext template for COMSOL MCP Settings.
 msgid ""
-msgstr "Project-Id-Version: comsol-mcp alpha6\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\nLanguage: \nPlural-Forms: nplurals=2; plural=(n != 1);\n"
+msgstr "Project-Id-Version: comsol-mcp alpha6.1\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\nLanguage: \nPlural-Forms: nplurals=2; plural=(n != 1);\n"
 
 msgid "COMSOL MCP Settings"
 msgstr ""
@@ -69,6 +69,48 @@ msgid "GUI release"
 msgstr ""
 
 msgid "Installed package version"
+msgstr ""
+
+msgid "Desktop shortcut"
+msgstr ""
+
+msgid "Create desktop shortcut"
+msgstr ""
+
+msgid "Remove desktop shortcut"
+msgstr ""
+
+msgid "Replace existing desktop shortcut?"
+msgstr ""
+
+msgid "A different shortcut already uses this name. Replace it?"
+msgstr ""
+
+msgid "Desktop shortcut ready"
+msgstr ""
+
+msgid "The desktop shortcut now opens this exact settings file."
+msgstr ""
+
+msgid "Desktop shortcut could not be created"
+msgstr ""
+
+msgid "The existing Desktop item was preserved."
+msgstr ""
+
+msgid "Desktop shortcut removed"
+msgstr ""
+
+msgid "The owned desktop shortcut was removed."
+msgstr ""
+
+msgid "No owned desktop shortcut was found."
+msgstr ""
+
+msgid "Desktop shortcut not removed"
+msgstr ""
+
+msgid "The Desktop item is not owned by this application and was preserved."
 msgstr ""
 
 msgid "Repositories and acknowledgements"
