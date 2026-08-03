@@ -183,20 +183,26 @@ def _scenario_scale_rebuild() -> None:
     root, app, controller, _store = _application(document, scaling=system_scaling)
     try:
         assert app.notebook is not None
+        observed_system_scaling = float(root.tk.call("tk", "scaling"))
+        root.tk.call("tk", "scaling", 2.0 * 96.0 / 72.0)
+        observed_200_scaling = float(root.tk.call("tk", "scaling"))
+        root.tk.call("tk", "scaling", observed_system_scaling)
+        assert float(root.tk.call("tk", "scaling")) == pytest.approx(observed_system_scaling)
+
         app.notebook.select(TAB_IDS.index("ownership"))
         controller.update("ownership.owner", "unsaved owner")
         app.variables["gui.scale"].set("200%")
         root.update_idletasks()
 
         assert get_value(controller.model.document, "gui.scale") == "200"
-        assert float(root.tk.call("tk", "scaling")) == pytest.approx(2.0 * 96.0 / 72.0)
+        assert float(root.tk.call("tk", "scaling")) == pytest.approx(observed_200_scaling)
         assert get_value(controller.model.document, "ownership.owner") == "unsaved owner"
         assert app.notebook.index(app.notebook.select()) == TAB_IDS.index("ownership")
 
         app.variables["gui.scale"].set("Follow Windows display settings (system)")
         root.update_idletasks()
         assert get_value(controller.model.document, "gui.scale") == "system"
-        assert float(root.tk.call("tk", "scaling")) == pytest.approx(system_scaling)
+        assert float(root.tk.call("tk", "scaling")) == pytest.approx(observed_system_scaling)
     finally:
         app.close()
 
