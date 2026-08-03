@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -51,6 +52,27 @@ def test_shell_equivalent_path_serializations_have_no_mismatches(tmp_path: Path)
     assert _shortcut_spec_mismatch_fields(observed, expected) == ()
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows command-line parsing contract")
+def test_shell_equivalent_argument_serializations_have_no_mismatches(tmp_path: Path) -> None:
+    settings = tmp_path / "settings path" / "settings.json"
+    expected = ShortcutSpec(
+        target=tmp_path / "python.exe",
+        arguments=subprocess.list2cmdline(["--settings-path", str(settings)]),
+        working_directory=tmp_path,
+        icon_location=f"{tmp_path / 'icon.ico'},0",
+        description=OWNERSHIP_DESCRIPTION,
+    )
+    observed = ShortcutSpec(
+        target=expected.target,
+        arguments=f'  --settings-path   "{settings}"  ',
+        working_directory=expected.working_directory,
+        icon_location=expected.icon_location,
+        description=expected.description,
+    )
+
+    assert _shortcut_spec_mismatch_fields(observed, expected) == ()
+
+
 def test_shell_mismatch_diagnostics_include_only_field_names(tmp_path: Path) -> None:
     expected = ShortcutSpec(
         target=tmp_path / "python.exe",
@@ -69,7 +91,7 @@ def test_shell_mismatch_diagnostics_include_only_field_names(tmp_path: Path) -> 
 
     assert _shortcut_spec_mismatch_fields(observed, expected) == (
         "target",
-        "arguments",
+        "arguments_option",
         "working_directory",
         "icon_location",
         "description",
@@ -228,7 +250,9 @@ def test_replacement_refuses_a_shortcut_changed_during_inspection(tmp_path: Path
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows Shell Link acceptance")
-def test_real_windows_shell_link_round_trip_is_exact_and_cleaned(tmp_path: Path) -> None:
+def test_real_windows_shell_link_round_trip_is_semantically_exact_and_cleaned(
+    tmp_path: Path,
+) -> None:
     desktop = tmp_path / "isolated Desktop"
     desktop.mkdir()
     settings = tmp_path / "用户 settings" / "settings.json"
@@ -243,11 +267,16 @@ def test_real_windows_shell_link_round_trip_is_exact_and_cleaned(tmp_path: Path)
     )
     shortcut = desktop / SHORTCUT_NAME
     spec = inspect_windows_shortcut(shortcut)
+    expected = ShortcutSpec(
+        target=Path(sys.executable),
+        arguments=subprocess.list2cmdline(["--settings-path", str(settings)]),
+        working_directory=Path(sys.executable).parent,
+        icon_location=f"{ICON_PATH},0",
+        description=OWNERSHIP_DESCRIPTION,
+    )
 
     assert created["state"] == "created"
-    assert spec.target == Path(sys.executable)
-    assert spec.arguments == f'--settings-path "{settings}"'
-    assert spec.description == OWNERSHIP_DESCRIPTION
+    assert _shortcut_spec_mismatch_fields(spec, expected) == ()
 
     removed = remove_desktop_shortcut(
         settings_path=settings,

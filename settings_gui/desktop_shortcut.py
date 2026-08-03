@@ -172,6 +172,47 @@ def _icon_location_identity(value: str) -> tuple[str, str | None]:
     return _normalized_path(Path(icon_path)), raw_index
 
 
+def _windows_argument_tokens(value: str) -> tuple[str, ...]:
+    """Parse a Shell Link argument string with the Windows command-line contract."""
+    if os.name != "nt":
+        return (value,)
+    shell32 = ctypes.WinDLL("shell32", use_last_error=True)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    shell32.CommandLineToArgvW.argtypes = [ctypes.c_wchar_p, ctypes.POINTER(ctypes.c_int)]
+    shell32.CommandLineToArgvW.restype = ctypes.POINTER(ctypes.c_wchar_p)
+    kernel32.LocalFree.argtypes = [ctypes.c_void_p]
+    kernel32.LocalFree.restype = ctypes.c_void_p
+    count = ctypes.c_int()
+    arguments = shell32.CommandLineToArgvW(
+        f"comsol-mcp-settings.exe {value}",
+        ctypes.byref(count),
+    )
+    if not arguments:
+        return (value,)
+    try:
+        return tuple(arguments[index] for index in range(1, count.value))
+    finally:
+        kernel32.LocalFree(ctypes.cast(arguments, ctypes.c_void_p))
+
+
+def _arguments_mismatch_field(observed: str, expected: str) -> str | None:
+    observed_tokens = _windows_argument_tokens(observed)
+    expected_tokens = _windows_argument_tokens(expected)
+    if observed_tokens == expected_tokens:
+        return None
+    if len(observed_tokens) != len(expected_tokens):
+        return "arguments_token_count"
+    if not observed_tokens or observed_tokens[0] != expected_tokens[0]:
+        return "arguments_option"
+    if (
+        len(observed_tokens) == 2
+        and expected_tokens[0] == "--settings-path"
+        and _normalized_path(Path(observed_tokens[1])) != _normalized_path(Path(expected_tokens[1]))
+    ):
+        return "arguments_settings_path"
+    return "arguments"
+
+
 def _shortcut_spec_mismatch_fields(
     observed: ShortcutSpec,
     expected: ShortcutSpec,
@@ -180,8 +221,9 @@ def _shortcut_spec_mismatch_fields(
     mismatches: list[str] = []
     if _normalized_path(observed.target) != _normalized_path(expected.target):
         mismatches.append("target")
-    if observed.arguments != expected.arguments:
-        mismatches.append("arguments")
+    arguments_mismatch = _arguments_mismatch_field(observed.arguments, expected.arguments)
+    if arguments_mismatch is not None:
+        mismatches.append(arguments_mismatch)
     if _normalized_path(observed.working_directory) != _normalized_path(expected.working_directory):
         mismatches.append("working_directory")
     if _icon_location_identity(observed.icon_location) != _icon_location_identity(
