@@ -335,7 +335,7 @@ class SettingsFormModel:
                     raw_value = get_value(merged, field.key)
             set_value(merged, field.key, deepcopy(raw_value))
         for key, value in document.items():
-            if key not in merged:
+            if key not in merged and not key.startswith("_comment"):
                 merged[key] = deepcopy(value)
         return cls(merged)
 

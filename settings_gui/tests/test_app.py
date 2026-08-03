@@ -158,6 +158,21 @@ def _scenario_invalid_entry() -> None:
         app.close()
 
 
+def _scenario_legacy_comments() -> None:
+    document = default_settings_document()
+    document["_comment"] = "Shared COMSOL MCP startup settings."
+    document["profile"]["_comment"] = "Static tool profile."
+    root, app, controller, _store = _application(document)
+    try:
+        assert controller.model.valid is True
+        assert app.save_button is not None
+        assert app.apply_button is not None
+        assert "disabled" not in app.save_button.state()
+        assert "disabled" not in app.apply_button.state()
+    finally:
+        app.close()
+
+
 def _scenario_language_rebuild() -> None:
     root, app, controller, _store = _application()
     try:
@@ -273,6 +288,7 @@ _TK_SCENARIOS = {
     "construct": _scenario_constructs_every_tab_and_field,
     "initial-auto-detect": _scenario_initial_auto_detect,
     "invalid": _scenario_invalid_entry,
+    "legacy-comments": _scenario_legacy_comments,
     "language": _scenario_language_rebuild,
     "profile-help": _scenario_profile_help_changes,
     "scale": _scenario_scale_rebuild,
@@ -301,6 +317,10 @@ def test_constructs_every_tab_and_field_without_mainloop() -> None:
 
 def test_invalid_entry_is_red_and_write_actions_are_disabled() -> None:
     _run_tk_scenario("invalid")
+
+
+def test_official_legacy_comments_keep_write_actions_enabled() -> None:
+    _run_tk_scenario("legacy-comments")
 
 
 def test_language_rebuild_preserves_unsaved_values_and_tab() -> None:

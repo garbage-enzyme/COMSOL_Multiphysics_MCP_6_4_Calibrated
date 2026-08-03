@@ -100,6 +100,21 @@ def test_invalid_raw_value_is_preserved_until_corrected() -> None:
     assert get_value(model.canonical, "runtime.directory") is None
 
 
+def test_official_legacy_comments_remain_non_editable_metadata() -> None:
+    document = default_settings_document()
+    document["_comment"] = "Shared COMSOL MCP startup settings."
+    document["profile"]["_comment"] = "Static tool profile."
+
+    model = SettingsFormModel.from_raw(document)
+
+    assert model.valid is True
+    assert model.dirty is False
+    assert model.errors == {}
+    assert model.canonical == default_settings_document()
+    assert "_comment" not in model.document
+    assert "_comment" not in model.document["profile"]
+
+
 def test_gui_scale_is_a_closed_choice() -> None:
     field = next(field for field in FIELDS if field.key == "gui.scale")
     assert field.kind == "choice"
