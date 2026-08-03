@@ -24,6 +24,7 @@ SHORTCUT_SCHEMA = "comsol_mcp.settings_gui_desktop_shortcut"
 SHORTCUT_VERSION = "1.0.0"
 MAX_SHORTCUT_BYTES = 1024 * 1024
 MAX_SETTINGS_PATH_CHARS = 32767
+MAX_SETTINGS_PATH_TOKEN_CHARS = 30000
 ICON_PATH = Path(__file__).resolve().parent / "assets" / "comsol_mcp.ico"
 
 
@@ -61,6 +62,38 @@ def _normalized_path(path: Path) -> str:
 
 def _path_identity(path: Path) -> str:
     return hashlib.sha256(_normalized_path(path).encode("utf-8")).hexdigest()
+
+
+def encode_settings_path_token(path: Path) -> str:
+    """Encode one Unicode settings path as bounded ASCII shortcut transport."""
+    token = base64.urlsafe_b64encode(str(path).encode("utf-8")).decode("ascii").rstrip("=")
+    if not token or len(token) > MAX_SETTINGS_PATH_TOKEN_CHARS:
+        raise ValueError("settings path is too long for a Windows shortcut")
+    return token
+
+
+def decode_settings_path_token(token: str) -> str:
+    """Decode strict ASCII shortcut transport without touching the filesystem."""
+    if (
+        not isinstance(token, str)
+        or not token
+        or len(token) > MAX_SETTINGS_PATH_TOKEN_CHARS
+        or not token.isascii()
+        or any(not (character.isalnum() or character in "-_") for character in token)
+    ):
+        raise ValueError("settings path token is invalid")
+    padding = "=" * (-len(token) % 4)
+    try:
+        decoded = base64.b64decode(
+            token + padding,
+            altchars=b"-_",
+            validate=True,
+        ).decode("utf-8")
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise ValueError("settings path token is invalid") from exc
+    if not decoded:
+        raise ValueError("settings path token is invalid")
+    return decoded
 
 
 def _validated_settings_path(path: Path) -> Path:
@@ -356,7 +389,9 @@ def _desired_spec(settings_path: Path, executable: Path, icon_path: Path) -> Sho
         raise ValueError("packaged Settings GUI icon is unavailable")
     return ShortcutSpec(
         target=executable,
-        arguments=subprocess.list2cmdline(["--settings-path", str(target)]),
+        arguments=subprocess.list2cmdline(
+            ["--settings-path-token", encode_settings_path_token(target)]
+        ),
         working_directory=executable.parent,
         icon_location=f"{icon_path},0",
         description=OWNERSHIP_DESCRIPTION,
@@ -561,6 +596,8 @@ __all__ = [
     "SHORTCUT_NAME",
     "ShortcutSpec",
     "create_desktop_shortcut",
+    "decode_settings_path_token",
+    "encode_settings_path_token",
     "inspect_windows_shortcut",
     "installed_entry_executable",
     "known_desktop_path",

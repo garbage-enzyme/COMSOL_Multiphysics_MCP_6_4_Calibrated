@@ -17,6 +17,8 @@ from settings_gui.desktop_shortcut import (
     _canonical_icon_location,
     _shortcut_spec_mismatch_fields,
     create_desktop_shortcut,
+    decode_settings_path_token,
+    encode_settings_path_token,
     inspect_windows_shortcut,
     remove_desktop_shortcut,
     shortcut_status,
@@ -54,17 +56,17 @@ def test_shell_equivalent_path_serializations_have_no_mismatches(tmp_path: Path)
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows command-line parsing contract")
 def test_shell_equivalent_argument_serializations_have_no_mismatches(tmp_path: Path) -> None:
-    settings = tmp_path / "settings path" / "settings.json"
+    token = encode_settings_path_token(tmp_path / "settings path" / "settings.json")
     expected = ShortcutSpec(
         target=tmp_path / "python.exe",
-        arguments=subprocess.list2cmdline(["--settings-path", str(settings)]),
+        arguments=subprocess.list2cmdline(["--settings-path-token", token]),
         working_directory=tmp_path,
         icon_location=f"{tmp_path / 'icon.ico'},0",
         description=OWNERSHIP_DESCRIPTION,
     )
     observed = ShortcutSpec(
         target=expected.target,
-        arguments=f'  --settings-path   "{settings}"  ',
+        arguments=f"  --settings-path-token   {token}  ",
         working_directory=expected.working_directory,
         icon_location=expected.icon_location,
         description=expected.description,
@@ -158,7 +160,10 @@ def test_create_is_explicit_exact_idempotent_and_removable(tmp_path: Path) -> No
     written_path, spec = backend.writes[0]
     assert written_path.parent == shortcut.parent
     assert spec.target == kwargs["executable"]
-    assert spec.arguments == f'--settings-path "{kwargs["settings_path"]}"'
+    token = encode_settings_path_token(kwargs["settings_path"])
+    assert spec.arguments == f"--settings-path-token {token}"
+    assert decode_settings_path_token(token) == str(kwargs["settings_path"])
+    assert str(kwargs["settings_path"]) not in spec.arguments
     assert spec.working_directory == kwargs["executable"].parent
     assert spec.icon_location == f"{kwargs['icon_path']},0"
     assert spec.description == OWNERSHIP_DESCRIPTION
@@ -269,7 +274,9 @@ def test_real_windows_shell_link_round_trip_is_semantically_exact_and_cleaned(
     spec = inspect_windows_shortcut(shortcut)
     expected = ShortcutSpec(
         target=Path(sys.executable),
-        arguments=subprocess.list2cmdline(["--settings-path", str(settings)]),
+        arguments=subprocess.list2cmdline(
+            ["--settings-path-token", encode_settings_path_token(settings)]
+        ),
         working_directory=Path(sys.executable).parent,
         icon_location=f"{ICON_PATH},0",
         description=OWNERSHIP_DESCRIPTION,

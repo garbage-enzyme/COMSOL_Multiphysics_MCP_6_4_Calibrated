@@ -18,6 +18,7 @@ from comsol_mcp.settings_gui_handshake import publish_handshake
 
 from .desktop_shortcut import (
     create_desktop_shortcut,
+    decode_settings_path_token,
     remove_desktop_shortcut,
     shortcut_prerequisites,
     shortcut_status,
@@ -31,7 +32,9 @@ MAX_SETTINGS_PATH_CHARS = 32767
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="comsol-mcp-settings")
-    parser.add_argument("--settings-path")
+    locations = parser.add_mutually_exclusive_group()
+    locations.add_argument("--settings-path")
+    locations.add_argument("--settings-path-token", help=argparse.SUPPRESS)
     actions = parser.add_mutually_exclusive_group()
     actions.add_argument("--validate-only", action="store_true")
     actions.add_argument("--create-desktop-shortcut", action="store_true")
@@ -145,7 +148,10 @@ def run_cli(
     if action_requested and arguments.settings_path is None:
         return 2
     try:
-        target, override = _settings_target(arguments.settings_path, environment)
+        raw_settings_path = arguments.settings_path
+        if arguments.settings_path_token is not None:
+            raw_settings_path = decode_settings_path_token(arguments.settings_path_token)
+        target, override = _settings_target(raw_settings_path, environment)
     except OSError, RuntimeError, SettingsError, ValueError:
         return 2
     if arguments.validate_only:

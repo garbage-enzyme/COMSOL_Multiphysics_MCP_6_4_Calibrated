@@ -8,6 +8,7 @@ from pathlib import Path
 
 from comsol_mcp.settings import SETTINGS_PATH_ENV
 from settings_gui import __main__ as entry
+from settings_gui.desktop_shortcut import encode_settings_path_token
 
 
 def test_validate_only_is_path_redacted_and_imports_no_tk(
@@ -76,6 +77,48 @@ def test_direct_launch_hands_exact_path_to_gui_process(
     assert code == 0
     assert observed == [str(target.resolve(strict=False))]
     assert not target.exists()
+
+
+def test_shortcut_token_launch_hands_exact_unicode_path_to_gui_process(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    target = tmp_path / "用户 settings" / "settings.json"
+    target.parent.mkdir()
+    environment: dict[str, str] = {}
+    observed: list[str] = []
+    monkeypatch.setattr(
+        entry,
+        "_launch_gui",
+        lambda: observed.append(environment[SETTINGS_PATH_ENV]) or 0,
+    )
+
+    code = entry.run_cli(
+        ["--settings-path-token", encode_settings_path_token(target)],
+        environ=environment,
+    )
+
+    assert code == 0
+    assert observed == [str(target.resolve(strict=False))]
+    assert not target.exists()
+
+
+def test_shortcut_token_rejects_invalid_or_ambiguous_transport(tmp_path: Path) -> None:
+    target = tmp_path / "settings.json"
+
+    assert entry.run_cli(["--settings-path-token", "not+urlsafe"], environ={}) == 2
+    assert (
+        entry.run_cli(
+            [
+                "--settings-path",
+                str(target),
+                "--settings-path-token",
+                encode_settings_path_token(target),
+            ],
+            environ={},
+        )
+        == 2
+    )
 
 
 def test_shortcut_actions_require_an_explicit_settings_path(monkeypatch) -> None:
