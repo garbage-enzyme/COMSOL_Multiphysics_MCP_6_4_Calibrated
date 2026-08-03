@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import os
-import shutil
-import tempfile
 import threading
 from pathlib import Path
 
@@ -14,17 +11,10 @@ from src.path_policy import ARTIFACT_WRITE_ROOT_ENV, MODEL_READ_ROOTS_ENV, PathP
 
 
 @pytest.fixture
-def ascii_root():
-    base = (
-        Path("D:/comsol_runtime")
-        if Path("D:/").exists()
-        else Path(os.environ.get("SystemRoot", "C:/Windows")) / "Temp"
-    )
-    root = Path(tempfile.mkdtemp(prefix="comsol_mcp_shared_dependencies_", dir=base))
-    try:
-        yield root
-    finally:
-        shutil.rmtree(root, ignore_errors=True)
+def ascii_root(ascii_tmp_path: Path):
+    root = ascii_tmp_path / "shared_dependencies"
+    root.mkdir()
+    return root
 
 
 def _arbiter(tmp_path, monkeypatch):

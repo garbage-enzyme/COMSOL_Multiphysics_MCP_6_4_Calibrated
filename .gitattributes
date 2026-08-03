@@ -1,2 +1,6 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Gettext source catalogs are byte-reproducible across Windows checkouts.
+settings_gui/locales/settings_gui.pot text eol=lf
+settings_gui/locales/**/settings_gui.po text eol=lf

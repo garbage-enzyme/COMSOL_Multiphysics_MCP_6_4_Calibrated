@@ -67,7 +67,9 @@ def test_detached_launch_uses_pythonw_devnull_and_ready_handshake(
         "contains_local_path": False,
         "agent_action_required": "pause_for_user",
     }
-    assert os.path.normcase(captured["command"][0]) == os.path.normcase(str(pythonw))
+    assert os.path.normcase(captured["command"][0]) == os.path.normcase(
+        str(pythonw.resolve(strict=False))
+    )
     assert captured["command"][1:] == ["-m", "settings_gui"]
     assert captured["kwargs"]["stdin"] == subprocess.DEVNULL
     assert captured["kwargs"]["stdout"] == subprocess.DEVNULL

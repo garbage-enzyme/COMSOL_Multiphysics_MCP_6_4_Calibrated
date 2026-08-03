@@ -116,3 +116,10 @@ def test_po_and_mo_outputs_are_exactly_reproducible() -> None:
             raw = expected.decode("utf-8")
             assert "#, fuzzy" not in raw
             assert '\nmsgstr ""\n' not in raw
+
+
+def test_gettext_sources_are_forced_to_lf_in_git_checkouts() -> None:
+    attributes = (LOCALE_ROOT.parents[1] / ".gitattributes").read_text(encoding="utf-8")
+
+    assert "settings_gui/locales/settings_gui.pot text eol=lf" in attributes
+    assert "settings_gui/locales/**/settings_gui.po text eol=lf" in attributes

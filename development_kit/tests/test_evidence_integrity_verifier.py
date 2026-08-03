@@ -4,9 +4,6 @@ from __future__ import annotations
 
 import _winapi
 import json
-import os
-import shutil
-import tempfile
 from copy import deepcopy
 from pathlib import Path
 
@@ -55,17 +52,10 @@ def _compatibility(driver: str = "d" * 64) -> dict:
 
 
 @pytest.fixture
-def ascii_artifact_root():
-    base = (
-        Path("D:/comsol_runtime")
-        if Path("D:/").exists()
-        else Path(os.environ.get("SystemRoot", "C:/Windows")) / "Temp"
-    )
-    root = Path(tempfile.mkdtemp(prefix="evidence_integrity_", dir=base))
-    try:
-        yield root
-    finally:
-        shutil.rmtree(root, ignore_errors=True)
+def ascii_artifact_root(ascii_tmp_path: Path):
+    root = ascii_tmp_path / "evidence_integrity"
+    root.mkdir()
+    return root
 
 
 def test_all_default_checks_produce_one_strictly_verified_receipt(tmp_path):

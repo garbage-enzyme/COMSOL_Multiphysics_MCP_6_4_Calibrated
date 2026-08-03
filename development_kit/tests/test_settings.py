@@ -229,7 +229,7 @@ def test_split_defaults_preserve_unicode_models_and_ascii_runtime(
     user_root = local_appdata / "comsol_mcp"
     machine_root = program_data / "comsol_mcp"
 
-    assert Path(settings["runtime"]["directory"]) == machine_root / "runtime"
+    assert Path(settings["runtime"]["directory"]).resolve() == (machine_root / "runtime").resolve()
     assert [Path(item) for item in settings["paths"]["model_read_roots"]] == [user_root / "models"]
     assert Path(settings["paths"]["artifact_write_root"]) == machine_root / "artifacts"
     assert settings["paths"]["model_read_roots"][0].isascii() is False
