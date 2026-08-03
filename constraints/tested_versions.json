@@ -58,7 +58,7 @@
     "hosted_ci_result": "passed"
   },
   "hosted_dependency_ci": {
-    "workflow": "dependency-only-ci",
+    "workflow": "solver-free-ci",
     "run_id": 29575335356,
     "source_commit": "4fe80ec86a7148b52183f2bedb0a58df454a7b96",
     "result": "passed",

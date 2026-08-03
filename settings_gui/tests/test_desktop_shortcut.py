@@ -13,11 +13,22 @@ from settings_gui.desktop_shortcut import (
     OWNERSHIP_DESCRIPTION,
     SHORTCUT_NAME,
     ShortcutSpec,
+    _canonical_icon_location,
     create_desktop_shortcut,
     inspect_windows_shortcut,
     remove_desktop_shortcut,
     shortcut_status,
 )
+
+
+def test_shell_icon_location_spacing_is_canonicalized() -> None:
+    assert _canonical_icon_location("C:\\Program Files\\COMSOL MCP\\icon.ico, 0") == (
+        "C:\\Program Files\\COMSOL MCP\\icon.ico,0"
+    )
+    assert _canonical_icon_location("C:\\icons,archive\\icon.ico, -1") == (
+        "C:\\icons,archive\\icon.ico,-1"
+    )
+    assert _canonical_icon_location("invalid icon location") == "invalid icon location"
 
 
 class FakeShortcutBackend:

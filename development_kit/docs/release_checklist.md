@@ -18,8 +18,8 @@ Before a release:
 
 1. Confirm `git status --short` is empty.
 2. Run the dependency-only gate and archive its sanitized JSON report.
-   When Settings GUI files change, also run `settings-gui-ci`, verify the
-   deterministic locale, multi-size Windows icon, and package receipts, inspect
+   When Settings GUI files change, require the `solver-free-settings-gui` job
+   inside `solver-free-ci`, verify the deterministic locale, multi-size Windows icon, and package receipts, inspect
    the real 100%, 125%, 150%, and 200% three-language screenshots directly, and
    record the user's final rendered-interface acceptance before the GUI-bearing
    commit.

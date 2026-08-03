@@ -152,6 +152,18 @@ def _encoded_command(script: str) -> str:
     return base64.b64encode(script.encode("utf-16-le")).decode("ascii")
 
 
+def _canonical_icon_location(value: str) -> str:
+    """Normalize the Shell Link's optional space before its icon index."""
+    icon_path, separator, raw_index = value.rpartition(",")
+    if not separator:
+        return value
+    try:
+        index = int(raw_index.strip())
+    except ValueError:
+        return value
+    return f"{icon_path.rstrip()},{index}"
+
+
 def _run_powershell(script: str, environment: dict[str, str]) -> str:
     completed = subprocess.run(  # noqa: S603
         [
@@ -231,7 +243,7 @@ def inspect_windows_shortcut(path: Path) -> ShortcutSpec:
             target=Path(value["target"]),
             arguments=str(value["arguments"]),
             working_directory=Path(value["working_directory"]),
-            icon_location=str(value["icon_location"]),
+            icon_location=_canonical_icon_location(str(value["icon_location"])),
             description=str(value["description"]),
         )
     except (KeyError, TypeError, ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:

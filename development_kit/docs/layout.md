@@ -10,8 +10,7 @@ models are intentionally absent.
 - `.gitignore` — This file excludes generated, local, and sensitive artifacts from Git.
 - `AGENTS.md` — This file provides repository development, testing, and safety guidance for coding agents.
 - `CLAUDE.md` — This file provides repository development, testing, and safety guidance for Claude Code.
-- `.github/workflows/ci.yml` — This workflow runs the blocking Python build and test gates.
-- `.github/workflows/settings-gui-ci.yml` — This workflow runs the independent Windows Settings GUI, locale, package, and installed probes.
+- `.github/workflows/ci.yml` — This unified workflow runs the blocking backend, dependency, security, package, and independent Windows Settings GUI jobs under one solver-free run.
 - `.github/workflows/dependency_report.yml` — This workflow produces the scheduled information-only dependency report.
 - `LICENSE` — This file contains the repository MIT license.
 - `Open_Settings_GUI.ps1` — This script opens or validates the Settings GUI through the bounded Python launcher.
