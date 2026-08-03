@@ -28,7 +28,7 @@ from settings_gui.controller import SettingsController
 from settings_gui.model import TAB_IDS, SettingsFormModel, get_value
 from settings_gui.storage import DamagedSettings
 
-pytestmark = pytest.mark.skipif(os.name != "nt", reason="alpha6 GUI supports Windows only")
+pytestmark = pytest.mark.skipif(os.name != "nt", reason="Settings GUI supports Windows only")
 
 
 class FakeOwnership:
@@ -90,7 +90,7 @@ def _application(document: dict | None = None, *, scaling: float | None = None):
 
 
 def _scenario_constructs_every_tab_and_field() -> None:
-    root, app, _controller, store = _application(scaling=2.0 * 96.0 / 72.0)
+    root, app, controller, store = _application(scaling=2.0 * 96.0 / 72.0)
     try:
         assert app.notebook is not None
         assert len(app.notebook.tabs()) == len(TAB_IDS)
@@ -101,7 +101,7 @@ def _scenario_constructs_every_tab_and_field() -> None:
             for child in row.winfo_children()
             if child.winfo_class() == "TLabel"
         }
-        assert "alpha6  |  0.6.0" in header_labels
+        assert "alpha6.1  |  0.6.1" in header_labels
         assert set(app.variables) == {
             "schema_name",
             "schema_version",
@@ -132,6 +132,13 @@ def _scenario_constructs_every_tab_and_field() -> None:
         root.update_idletasks()
         root.update()
         assert app.save_button is not None
+        assert set(app.shortcut_buttons) == {"create", "remove"}
+        assert app.shortcut_buttons["create"].cget("text") == controller.text(
+            "Create desktop shortcut"
+        )
+        assert app.shortcut_buttons["remove"].cget("text") == controller.text(
+            "Remove desktop shortcut"
+        )
         actions = app.save_button.master
         assert actions.winfo_height() >= actions.winfo_reqheight()
         assert (

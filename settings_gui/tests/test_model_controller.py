@@ -26,6 +26,7 @@ class FakeStore:
         self.saved: list[dict] = []
         self.ownership = FakeOwnership()
         self.closed = False
+        self.target = Path("C:/settings.json")
 
     def save(self, document: dict) -> str:
         self.saved.append(deepcopy(document))
@@ -68,6 +69,14 @@ def _controller(*, dialogs: FakeDialogs | None = None, discover=None):
     if discover is not None:
         kwargs["discover"] = discover
     return SettingsController(model, store, **kwargs), store, kwargs["dialogs"]
+
+
+def _shortcut_receipt(state: str, *, success: bool) -> dict:
+    return {
+        "success": success,
+        "state": state,
+        "contains_local_path": False,
+    }
 
 
 def test_every_settings_leaf_has_one_typed_field_binding() -> None:
@@ -282,3 +291,69 @@ def test_external_conflict_is_terminal_and_localized() -> None:
     assert controller.poll_conflict() is True
     assert len(dialogs.errors) == 1
     assert "changed" not in dialogs.errors[0][1]
+
+
+def test_create_shortcut_confirms_before_replacing_foreign_item() -> None:
+    dialogs = FakeDialogs([True])
+    controller, store, _dialogs = _controller(dialogs=dialogs)
+    calls: list[dict] = []
+
+    def create(**kwargs):
+        calls.append(kwargs)
+        if kwargs.get("replace_existing"):
+            return _shortcut_receipt("replaced", success=True)
+        return {
+            **_shortcut_receipt("confirmation_required", success=False),
+            "existing_kind": "foreign",
+        }
+
+    controller._create_shortcut = create
+    controller.create_desktop_shortcut()
+
+    assert calls == [
+        {"settings_path": store.target},
+        {"settings_path": store.target, "replace_existing": True},
+    ]
+    assert len(dialogs.confirm_calls) == 1
+    assert len(dialogs.infos) == 1
+    assert dialogs.errors == []
+
+
+def test_create_shortcut_decline_and_foreign_remove_are_non_destructive() -> None:
+    dialogs = FakeDialogs([False])
+    controller, store, _dialogs = _controller(dialogs=dialogs)
+    create_calls: list[dict] = []
+    remove_calls: list[dict] = []
+
+    def create(**kwargs):
+        create_calls.append(kwargs)
+        return {
+            **_shortcut_receipt("confirmation_required", success=False),
+            "existing_kind": "foreign",
+        }
+
+    def remove(**kwargs):
+        remove_calls.append(kwargs)
+        return _shortcut_receipt("foreign_preserved", success=False)
+
+    controller._create_shortcut = create
+    controller._remove_shortcut = remove
+    controller.create_desktop_shortcut()
+    controller.remove_desktop_shortcut()
+
+    assert create_calls == [{"settings_path": store.target}]
+    assert remove_calls == [{"settings_path": store.target}]
+    assert dialogs.infos == []
+    assert len(dialogs.errors) == 1
+
+
+def test_save_apply_and_initialization_never_create_a_shortcut() -> None:
+    controller, _store, _dialogs = _controller()
+    shortcut_calls: list[bool] = []
+    controller._create_shortcut = lambda **_kwargs: shortcut_calls.append(True)
+
+    assert controller.apply() is True
+    controller.update("ownership.owner", "changed")
+    assert controller.apply() is True
+
+    assert shortcut_calls == []

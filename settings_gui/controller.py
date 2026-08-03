@@ -6,6 +6,7 @@ from collections.abc import Callable
 from typing import Any
 
 from .comsol_discovery import DiscoveryResult, discover_environment
+from .desktop_shortcut import create_desktop_shortcut, remove_desktop_shortcut
 from .dialogs import Dialogs
 from .i18n import Translator
 from .model import SettingsFormModel, get_value
@@ -20,11 +21,15 @@ class SettingsController:
         *,
         dialogs: Dialogs | None = None,
         discover: Callable[..., DiscoveryResult] = discover_environment,
+        create_shortcut: Callable[..., dict[str, Any]] = create_desktop_shortcut,
+        remove_shortcut: Callable[..., dict[str, Any]] = remove_desktop_shortcut,
     ) -> None:
         self.model = model
         self.store = store
         self.dialogs = dialogs or Dialogs()
         self.discover = discover
+        self._create_shortcut = create_shortcut
+        self._remove_shortcut = remove_shortcut
         self.translator = Translator(model.language)
         self.restart_pending = False
         self._dirty_notice_shown = False
@@ -170,6 +175,55 @@ class SettingsController:
             )
             return True
         return False
+
+    def create_desktop_shortcut(self) -> None:
+        try:
+            result = self._create_shortcut(settings_path=self.store.target)
+            if result.get("state") == "confirmation_required":
+                if not self.dialogs.confirm(
+                    title=self.text("Replace existing desktop shortcut?"),
+                    message=self.text("A different shortcut already uses this name. Replace it?"),
+                ):
+                    return
+                result = self._create_shortcut(
+                    settings_path=self.store.target,
+                    replace_existing=True,
+                )
+        except OSError, RuntimeError, ValueError:
+            result = {"success": False}
+        if result.get("success") is True:
+            self.dialogs.info(
+                title=self.text("Desktop shortcut ready"),
+                message=self.text("The desktop shortcut now opens this exact settings file."),
+            )
+            return
+        self.dialogs.error(
+            title=self.text("Desktop shortcut could not be created"),
+            message=self.text("The existing Desktop item was preserved."),
+        )
+
+    def remove_desktop_shortcut(self) -> None:
+        try:
+            result = self._remove_shortcut(settings_path=self.store.target)
+        except OSError, RuntimeError, ValueError:
+            result = {"success": False}
+        if result.get("success") is True:
+            message = (
+                "No owned desktop shortcut was found."
+                if result.get("state") == "not_found"
+                else "The owned desktop shortcut was removed."
+            )
+            self.dialogs.info(
+                title=self.text("Desktop shortcut removed"),
+                message=self.text(message),
+            )
+            return
+        self.dialogs.error(
+            title=self.text("Desktop shortcut not removed"),
+            message=self.text(
+                "The Desktop item is not owned by this application and was preserved."
+            ),
+        )
 
 
 __all__ = ["SettingsController"]

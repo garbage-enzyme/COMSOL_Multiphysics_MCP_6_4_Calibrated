@@ -1,24 +1,28 @@
 {
   "schema_name": "comsol_mcp.tested_versions",
   "schema_version": "2.0.0",
-  "description": "Human-reviewed direct dependency versions for the Python 3.14 production lane. Package metadata in pyproject.toml governs compatible ranges; the complete transitive release lock governs the accepted Windows environment.",
-  "last_reviewed": "2026-07-17",
+  "description": "Human-reviewed runtime and optional dependency versions for the Python 3.14 production lane. Package metadata in pyproject.toml governs compatible ranges; the complete transitive release lock governs the accepted Windows environment.",
+  "last_reviewed": "2026-08-03",
   "production_python_3_14": {
     "python": "3.14.6",
     "abi": "cp314-win_amd64",
     "gil_mode": "standard",
     "platform": "win_amd64",
     "direct_dependencies": {
-      "mcp": "1.28.1",
+      "mcp": "1.29.0",
       "mph": "1.3.1",
-      "matplotlib": "3.11.0",
+      "matplotlib": "3.11.1",
       "numpy": "2.5.1",
       "scipy": "1.18.0",
       "pydantic": "2.13.4",
-      "psutil": "7.2.2",
-      "pymupdf": "1.28.0"
+      "psutil": "7.2.2"
     },
-    "test_result": "674 passed, 13 deselected in 70.84 s; clean locked release gate and pip check passed at source commit 4fe80ec86a7148b52183f2bedb0a58df454a7b96",
+    "optional_dependencies": {
+      "manuals": {
+        "pymupdf": "1.28.0"
+      }
+    },
+    "test_result": "alpha6.1 candidate resolution, focused dependency and GUI suites, three mypy 2.3 strict groups, and pip check passed; final exact-SHA gates pending",
     "licensed_result": {
       "status": "passed",
       "source_commit": "afc466f6fd12a5aba92320081588bc6f788c39c2",
@@ -54,7 +58,7 @@
     "hosted_ci_result": "passed"
   },
   "hosted_dependency_ci": {
-    "workflow": "dependency-only-ci",
+    "workflow": "solver-free-ci",
     "run_id": 29575335356,
     "source_commit": "4fe80ec86a7148b52183f2bedb0a58df454a7b96",
     "result": "passed",
@@ -68,7 +72,7 @@
   },
   "release_lock": {
     "path": "constraints/release_locked_py314.txt",
-    "sha256": "d8304e7416d0be3a8f8c5613740f75c05c28483ddee3e376e4106b4a1db24c76",
+    "sha256": "c876a0e12c23d6e2ded96a1df0f439295c1565410b8c1181fff922924ce8e794",
     "requirement_count": 46,
     "scope": "complete transitive default runtime dependencies",
     "install_mode": "pip --require-hashes followed by local wheel --no-deps"
@@ -76,8 +80,9 @@
   "notes": [
     "Python 3.14 is the only supported runtime; Python 3.15 requires a new compatibility gate.",
     "The standard GIL-enabled CPython ABI is required; the free-threaded ABI is not accepted.",
-    "MCP SDK 1.x remains the production line; 2.x requires a dedicated migration gate.",
+    "MCP SDK 1.29.0 is the accepted production line; 2.x requires a dedicated migration gate.",
     "MPh 1.3.1 is calibrated for COMSOL Multiphysics 6.4.0.293.",
+    "PyMuPDF 1.28.0 is reviewed only for the manuals extra and is outside the default runtime release lock.",
     "Optional semantic dependencies are outside the default runtime release lock."
   ]
 }

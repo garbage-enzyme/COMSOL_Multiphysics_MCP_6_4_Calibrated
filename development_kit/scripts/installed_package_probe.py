@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import struct
+import subprocess
 import sys
 from importlib.metadata import entry_points, requires, version
 from importlib.resources import files
@@ -14,6 +16,16 @@ from pathlib import Path
 
 HEAVY_SEMANTIC_MODULES = {"chromadb", "sentence_transformers", "torch"}
 SETTINGS_GUI_ICON_SIZES = (16, 20, 24, 32, 40, 48, 64, 128, 256)
+FORBIDDEN_PROCESS_NAMES = frozenset(
+    {
+        "comsol-mcp.exe",
+        "comsol-mcp-settings.exe",
+        "comsol.exe",
+        "comsolmphserver.exe",
+        "java.exe",
+        "javaw.exe",
+    }
+)
 
 
 def _load_json(path: Path) -> dict:
@@ -71,11 +83,98 @@ def _consistent_deployment_identity(identities: list[dict]) -> dict:
     return first
 
 
+def _shortcut_bytes_identity(path: Path) -> str | None:
+    if not path.exists():
+        return None
+    if not path.is_file() or path.is_symlink() or path.stat().st_size > 1024 * 1024:
+        raise AssertionError("pre-existing Desktop shortcut is not a bounded regular file")
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _forbidden_process_snapshot() -> dict[int, str]:
+    import psutil
+
+    result: dict[int, str] = {}
+    for process in psutil.process_iter(("pid", "name")):
+        try:
+            name = str(process.info.get("name") or "").casefold()
+            if name in FORBIDDEN_PROCESS_NAMES:
+                result[int(process.info["pid"])] = name
+        except OSError, psutil.Error, TypeError, ValueError:
+            continue
+    return result
+
+
+def _probe_direct_settings_entry(output_parent: Path) -> dict:
+    from settings_gui.desktop_shortcut import (
+        SHORTCUT_NAME,
+        installed_entry_executable,
+        known_desktop_path,
+    )
+
+    executable = installed_entry_executable()
+    probe_root = output_parent / "settings-gui-direct-entry-probe"
+    probe_root.mkdir(parents=True, exist_ok=False)
+    target = probe_root / "settings.json"
+    shortcut = known_desktop_path() / SHORTCUT_NAME
+    shortcut_before = _shortcut_bytes_identity(shortcut)
+    processes_before = _forbidden_process_snapshot()
+    completed = subprocess.run(  # noqa: S603
+        [str(executable), "--settings-path", str(target), "--validate-only"],
+        cwd=probe_root,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    if completed.returncode != 0:
+        raise AssertionError(
+            "installed Settings GUI validate-only entry failed: " + completed.stderr[:512]
+        )
+    try:
+        receipt = json.loads(completed.stdout)
+    except json.JSONDecodeError as exc:
+        raise AssertionError("installed Settings GUI validate-only output is invalid") from exc
+    if (
+        receipt.get("ready") is not True
+        or receipt.get("settings_path_override") is not True
+        or receipt.get("settings_path_included") is not False
+        or receipt.get("contains_local_path") is not False
+        or receipt.get("tkinter_imported") is not False
+        or receipt.get("mcp_started") is not False
+        or receipt.get("solver_started") is not False
+        or str(target) in completed.stdout
+    ):
+        raise AssertionError("installed Settings GUI validate-only contract failed")
+    if target.exists() or any(probe_root.iterdir()):
+        raise AssertionError("validate-only created a settings or temporary file")
+    if _shortcut_bytes_identity(shortcut) != shortcut_before:
+        raise AssertionError("validate-only changed the Desktop shortcut")
+    processes_after = _forbidden_process_snapshot()
+    new_processes = sorted(set(processes_after) - set(processes_before))
+    if new_processes:
+        raise AssertionError("validate-only started a forbidden process")
+    probe_root.rmdir()
+    return {
+        "ready": True,
+        "settings_path_override": True,
+        "settings_path_included": False,
+        "tkinter_imported": False,
+        "shortcut_unchanged": True,
+        "process_inventory_unchanged": True,
+        "mcp_started": False,
+        "solver_started": False,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--snapshot-dir", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
+    args.output.parent.mkdir(parents=True, exist_ok=True)
 
     import mph
 
@@ -169,6 +268,7 @@ def main() -> int:
         raise AssertionError("installed Settings GUI console entry point is unavailable")
     if "tkinter" in sys.modules:
         raise AssertionError("installed solver-free discovery imported tkinter")
+    direct_entry = _probe_direct_settings_entry(args.output.parent)
 
     imported_heavy = sorted(HEAVY_SEMANTIC_MODULES.intersection(sys.modules))
     if imported_heavy:
@@ -192,6 +292,7 @@ def main() -> int:
             "icon_sizes": SETTINGS_GUI_ICON_SIZES,
             "tests_excluded": True,
             "tkinter_imported": False,
+            "direct_entry": direct_entry,
         },
         "profile_counts": actual_counts,
         "deployment_identity": deployment_identity,
@@ -205,7 +306,6 @@ def main() -> int:
             f"probe imported source tree instead of installed wheel: {comsol_mcp.__file__}"
         )
 
-    args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return 0
 

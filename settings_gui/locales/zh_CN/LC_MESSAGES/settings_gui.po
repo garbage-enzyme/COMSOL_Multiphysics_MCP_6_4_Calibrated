@@ -1,6 +1,6 @@
 # Generated deterministically; edit the generator, not this file.
 msgid ""
-msgstr "Project-Id-Version: comsol-mcp alpha6\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\nLanguage: zh_CN\nPlural-Forms: nplurals=1; plural=0;\n"
+msgstr "Project-Id-Version: comsol-mcp alpha6.1\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\nLanguage: zh_CN\nPlural-Forms: nplurals=1; plural=0;\n"
 
 msgid "COMSOL MCP Settings"
 msgstr "COMSOL MCP 设置"
@@ -70,6 +70,48 @@ msgstr "GUI 发布版本"
 
 msgid "Installed package version"
 msgstr "已安装软件包版本"
+
+msgid "Desktop shortcut"
+msgstr "桌面快捷方式"
+
+msgid "Create desktop shortcut"
+msgstr "创建桌面快捷方式"
+
+msgid "Remove desktop shortcut"
+msgstr "移除桌面快捷方式"
+
+msgid "Replace existing desktop shortcut?"
+msgstr "要替换现有桌面快捷方式吗？"
+
+msgid "A different shortcut already uses this name. Replace it?"
+msgstr "已有其他快捷方式使用此名称。是否替换？"
+
+msgid "Desktop shortcut ready"
+msgstr "桌面快捷方式已就绪"
+
+msgid "The desktop shortcut now opens this exact settings file."
+msgstr "此桌面快捷方式现在会打开当前这一设置文件。"
+
+msgid "Desktop shortcut could not be created"
+msgstr "无法创建桌面快捷方式"
+
+msgid "The existing Desktop item was preserved."
+msgstr "现有桌面项目已保留。"
+
+msgid "Desktop shortcut removed"
+msgstr "桌面快捷方式已移除"
+
+msgid "The owned desktop shortcut was removed."
+msgstr "本应用创建的桌面快捷方式已移除。"
+
+msgid "No owned desktop shortcut was found."
+msgstr "未找到本应用创建的桌面快捷方式。"
+
+msgid "Desktop shortcut not removed"
+msgstr "未移除桌面快捷方式"
+
+msgid "The Desktop item is not owned by this application and was preserved."
+msgstr "该桌面项目不是由本应用创建的，已予保留。"
 
 msgid "Repositories and acknowledgements"
 msgstr "仓库与致谢"

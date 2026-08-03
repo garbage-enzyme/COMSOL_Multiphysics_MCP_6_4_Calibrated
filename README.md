@@ -138,6 +138,10 @@ discovers a supported Python 3.14 interpreter, or accepts explicit
 launcher without opening the GUI or starting COMSOL. The server can report
 `agent_action_required: pause_for_user`; it cannot technically force arbitrary
 third-party agents to comply.
+The installed entry also accepts `--settings-path` and `--validate-only` and
+works with MCP stdio stopped. Its About page can explicitly create or remove the
+per-user `COMSOL MCP Settings.lnk`; installation and ordinary GUI actions never
+create that shortcut automatically.
 
 ## Profiles
 

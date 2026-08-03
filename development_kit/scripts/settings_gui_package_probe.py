@@ -11,6 +11,7 @@ from pathlib import Path, PurePosixPath
 LANGUAGES = ("en", "zh_CN", "zh_TW")
 ICON_MEMBER = "settings_gui/assets/comsol_mcp.ico"
 ROOT_LAUNCHER_MEMBER = "Open_Settings_GUI.ps1"
+SHORTCUT_MEMBER = "settings_gui/desktop_shortcut.py"
 
 
 def _wheel_members(path: Path) -> tuple[set[str], str]:
@@ -53,6 +54,8 @@ def inspect_settings_gui_distributions(dist: Path) -> dict:
         raise ValueError("source distribution is missing translator catalogs")
     if ICON_MEMBER not in wheel_names or ICON_MEMBER not in sdist_names:
         raise ValueError("distribution is missing the Settings GUI application icon")
+    if SHORTCUT_MEMBER not in wheel_names or SHORTCUT_MEMBER not in sdist_names:
+        raise ValueError("distribution is missing the Settings GUI shortcut adapter")
     if ROOT_LAUNCHER_MEMBER not in sdist_names:
         raise ValueError("source distribution is missing the root launcher")
     if ROOT_LAUNCHER_MEMBER in wheel_names:
@@ -79,6 +82,7 @@ def inspect_settings_gui_distributions(dist: Path) -> dict:
         "console_entry_included": True,
         "wheel_icon_included": True,
         "sdist_icon_included": True,
+        "shortcut_adapter_included": True,
         "source_logo_excluded": True,
         "sdist_root_launcher_included": True,
         "wheel_root_launcher_excluded": True,

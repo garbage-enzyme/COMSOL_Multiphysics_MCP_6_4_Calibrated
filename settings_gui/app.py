@@ -126,6 +126,7 @@ class SettingsApplication:
         self.error_labels: dict[str, ttk.Label] = {}
         self.entries: dict[str, ttk.Entry] = {}
         self.root_lists: dict[str, tk.Listbox] = {}
+        self.shortcut_buttons: dict[str, ttk.Button] = {}
         self.banner: ttk.Label | None = None
         self.save_button: ttk.Button | None = None
         self.apply_button: ttk.Button | None = None
@@ -177,6 +178,7 @@ class SettingsApplication:
             self.error_labels.clear()
             self.entries.clear()
             self.root_lists.clear()
+            self.shortcut_buttons.clear()
             apply_locale_font(self.root, self.controller.model.language)
             self._build()
         finally:
@@ -411,6 +413,24 @@ class SettingsApplication:
         ttk.Label(parent, text=_("COMSOL MCP Settings"), font="TkHeadingFont").pack(anchor="w")
         ttk.Label(parent, text=f"{_('GUI release')}: {GUI_RELEASE}").pack(anchor="w", pady=(12, 0))
         ttk.Label(parent, text=f"{_('Installed package version')}: {__version__}").pack(anchor="w")
+        ttk.Label(parent, text=_("Desktop shortcut"), font="TkHeadingFont").pack(
+            anchor="w",
+            pady=(18, 6),
+        )
+        shortcut_actions = ttk.Frame(parent)
+        shortcut_actions.pack(anchor="w")
+        self.shortcut_buttons["create"] = ttk.Button(
+            shortcut_actions,
+            text=_("Create desktop shortcut"),
+            command=self.controller.create_desktop_shortcut,
+        )
+        self.shortcut_buttons["create"].pack(side="left")
+        self.shortcut_buttons["remove"] = ttk.Button(
+            shortcut_actions,
+            text=_("Remove desktop shortcut"),
+            command=self.controller.remove_desktop_shortcut,
+        )
+        self.shortcut_buttons["remove"].pack(side="left", padx=(8, 0))
         ttk.Label(parent, text="Copyright (c) 2025").pack(anchor="w", pady=(12, 0))
         ttk.Label(parent, text=_("Repositories and acknowledgements"), font="TkHeadingFont").pack(
             anchor="w",

@@ -304,6 +304,22 @@ def test_deployment_guides_explain_the_shared_settings_file_and_fallbacks():
         )
 
 
+def test_gui_guides_document_exact_path_and_opt_in_shortcut_lifecycle():
+    guides = [
+        (ROOT / "DEPLOYMENT.md").read_text(encoding="utf-8"),
+        (ROOT / "DEPLOYMENT_CN.md").read_text(encoding="utf-8"),
+        (SETTINGS_DOCS / "README.md").read_text(encoding="utf-8"),
+        (SETTINGS_DOCS / "README_CN.md").read_text(encoding="utf-8"),
+    ]
+    for guide in guides:
+        assert "comsol-mcp-settings --settings-path" in guide
+        assert "--validate-only" in guide
+        assert "--create-desktop-shortcut" in guide
+        assert "--remove-desktop-shortcut" in guide
+        assert "--replace-existing-shortcut" in guide
+        assert "COMSOL MCP Settings.lnk" in guide
+
+
 def test_embedded_guidance_no_longer_denies_the_shared_profile():
     documents = [
         ROOT / "docs" / "profile_migration.md",

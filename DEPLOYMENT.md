@@ -101,6 +101,21 @@ package file remains a read-only template. `comsol-mcp-settings` is the direct
 console fallback. The MCP response asks agents to pause, but cannot technically
 enforce arbitrary third-party behavior.
 
+For an installed deployment, bind the independent executable to the exact shared
+file. It works while every MCP stdio host is stopped:
+
+```powershell
+comsol-mcp-settings --settings-path "D:\settings\settings.json" --validate-only
+comsol-mcp-settings --settings-path "D:\settings\settings.json"
+comsol-mcp-settings --settings-path "D:\settings\settings.json" --create-desktop-shortcut
+comsol-mcp-settings --settings-path "D:\settings\settings.json" --remove-desktop-shortcut
+```
+
+The opt-in per-user link is `COMSOL MCP Settings.lnk`. No install, deployment,
+startup, first-launch, Save, or Apply path creates it automatically. A foreign
+same-name item is preserved unless the user explicitly confirms replacement in
+the GUI or adds `--replace-existing-shortcut` to the create command.
+
 Confirmed first-run setup creates the Unicode-capable model-read directory
 under `%LOCALAPPDATA%/comsol_mcp` and the ASCII-only runtime and owned-artifact
 directories under `%PROGRAMDATA%/comsol_mcp`. Optional assets remain unset.

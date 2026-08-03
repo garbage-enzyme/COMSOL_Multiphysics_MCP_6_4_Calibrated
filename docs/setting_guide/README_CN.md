@@ -18,7 +18,27 @@ settings.start
 
 ```powershell
 comsol-mcp-settings
+comsol-mcp-settings --settings-path "D:\settings\settings.json"
+comsol-mcp-settings --settings-path "D:\settings\settings.json" --validate-only
 ```
+
+这个可执行文件会直接启动 GUI，不要求也不会启动 MCP stdio host、COMSOL 或 Java。
+用 `--settings-path` 把它绑定到 MCP client 实际使用的同一设置文件。`--validate-only`
+只验证 package、设置目标、GUI runtime 和快捷方式前提，不导入 Tk，也不写文件。
+
+“关于”页提供明确的“创建桌面快捷方式”和“移除桌面快捷方式”操作；等价命令为：
+
+```powershell
+comsol-mcp-settings --settings-path "D:\settings\settings.json" --create-desktop-shortcut
+comsol-mcp-settings --settings-path "D:\settings\settings.json" --shortcut-status
+comsol-mcp-settings --settings-path "D:\settings\settings.json" --remove-desktop-shortcut
+```
+
+每用户快捷方式固定命名为 `COMSOL MCP Settings.lnk`，并持续绑定创建时的准确设置文件。
+安装、部署、MCP 启动、`settings.start`、首次打开、“保存”和“应用”都不会自动创建它。
+同名快捷方式若已过期或属于其他程序，只有用户在 GUI 中确认，或在创建命令中明确追加
+`--replace-existing-shortcut` 后才会替换；移除操作只删除本应用拥有的快捷方式，并保留
+外来或损坏的桌面项目。
 
 从仓库源码或解压后的源码分发包运行时，也可以使用根目录手动启动器：
 

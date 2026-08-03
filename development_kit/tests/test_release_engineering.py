@@ -729,6 +729,9 @@ def test_hosted_ci_is_dependency_only_and_real_gate_is_explicit():
         encoding="utf-8"
     )
     dependency_report_data = yaml.safe_load(dependency_report)
+    dependency_report_generator = (
+        ROOT / "development_kit" / "scripts" / "dependency_drift_report.py"
+    ).read_text(encoding="utf-8")
     report_job = dependency_report_data["jobs"]["report"]
     report_commands = "\n".join(
         str(step.get("run", "")) for step in report_job["steps"] if isinstance(step, dict)
@@ -741,8 +744,10 @@ def test_hosted_ci_is_dependency_only_and_real_gate_is_explicit():
     )
 
     jobs = workflow_data["jobs"]
+    assert workflow_data["name"] == "solver-free-ci"
     dependency_job = jobs["dependency-compatibility"]
     unit_job = jobs["unit-and-package-py314"]
+    gui_job = jobs["solver-free-settings-gui"]
     dependency_steps = dependency_job["steps"]
     dependency_commands = "\n".join(
         str(step.get("run", "")) for step in dependency_steps if isinstance(step, dict)
@@ -753,6 +758,9 @@ def test_hosted_ci_is_dependency_only_and_real_gate_is_explicit():
     security_job = jobs["locked-runtime-security"]
     security_commands = "\n".join(
         str(step.get("run", "")) for step in security_job["steps"] if isinstance(step, dict)
+    )
+    gui_commands = "\n".join(
+        str(step.get("run", "")) for step in gui_job["steps"] if isinstance(step, dict)
     )
     all_commands = "\n".join(
         str(step.get("run", ""))
@@ -773,7 +781,7 @@ def test_hosted_ci_is_dependency_only_and_real_gate_is_explicit():
         for step in job["steps"]
         if "uses" in step
     ]
-    assert len(action_references) == 11
+    assert len(action_references) == 14
     assert all(re.fullmatch(r"[0-9a-f]{40}", revision) for _action, revision in action_references)
     assert "# actions/checkout v7.0.0" in workflow
     assert "# actions/setup-python v6.2.0" in workflow
@@ -786,7 +794,7 @@ def test_hosted_ci_is_dependency_only_and_real_gate_is_explicit():
     assert "List installed direct dependency versions" not in dependency_report
     assert "constraints/tested_versions.json" in report_commands
     assert "constraints/release_locked_py314.txt" in report_commands
-    assert "reviewed release-lock hash differs" in report_commands
+    assert "reviewed release-lock hash differs" in dependency_report_generator
     assert "dependency-drift-report.json" in report_commands
     upload = next(
         step for step in report_job["steps"] if "actions/upload-artifact" in step.get("uses", "")
@@ -813,6 +821,12 @@ def test_hosted_ci_is_dependency_only_and_real_gate_is_explicit():
     )
     assert "--upgrade-strategy eager" in dependency_commands
     assert security_job["name"] == "locked runtime vulnerability policy"
+    assert gui_job["name"] == "Settings GUI, package, and installed entry"
+    assert "settings_gui/tests" in gui_commands
+    assert "test_settings_gui_direct_entry.py" in gui_commands
+    assert "settings_gui_package_probe.py" in gui_commands
+    assert "installed_package_probe.py" in gui_commands
+    assert "forbidden process" in gui_commands
     assert "pip-audit==2.10.1" in security_commands
     assert "constraints/release_locked_py314.txt --no-deps --format json" in security_commands
     assert "vulnerability_allowlist.json" in security_commands
@@ -1001,7 +1015,7 @@ def test_minimum_supported_lane_matches_reviewed_manifest_and_package_ranges():
     assert lane["local_resolution_result"] == "non-editable package install and pip check passed"
     assert lane["hosted_ci_result"] == "passed"
     hosted = manifest["hosted_dependency_ci"]
-    assert hosted["workflow"] == "dependency-only-ci"
+    assert hosted["workflow"] == "solver-free-ci"
     assert hosted["result"] == "passed"
     assert re.fullmatch(r"[0-9a-f]{40}", hosted["source_commit"])
     assert isinstance(hosted["run_id"], int) and hosted["run_id"] > 0

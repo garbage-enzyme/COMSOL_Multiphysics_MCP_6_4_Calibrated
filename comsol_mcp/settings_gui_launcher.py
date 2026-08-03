@@ -25,7 +25,7 @@ from .settings_gui_handshake import (
     validate_handshake_path,
 )
 
-GUI_RELEASE = "alpha6"
+GUI_RELEASE = "alpha6.1"
 HANDSHAKE_TIMEOUT_SECONDS = 5.0
 HANDSHAKE_POLL_SECONDS = 0.05
 
@@ -195,7 +195,7 @@ def launch_settings_gui(
     pythonw = interpreter.with_name("pythonw.exe")
     if pythonw.is_file():
         interpreter = pythonw
-    command = [str(interpreter), "-m", "settings_gui"]
+    command = [str(interpreter), "-m", "settings_gui", "--settings-path", str(target)]
     flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(
         subprocess, "DETACHED_PROCESS", 0
     )

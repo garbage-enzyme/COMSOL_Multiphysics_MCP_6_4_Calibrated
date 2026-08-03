@@ -19,7 +19,30 @@ The installed command-line fallback is:
 
 ```powershell
 comsol-mcp-settings
+comsol-mcp-settings --settings-path "D:\settings\settings.json"
+comsol-mcp-settings --settings-path "D:\settings\settings.json" --validate-only
 ```
+
+This executable starts the GUI directly; it does not require or start an MCP
+stdio host, COMSOL, or Java. Use `--settings-path` to bind it to the exact file
+used by the MCP client. `--validate-only` verifies the package, settings target,
+GUI runtime, and shortcut prerequisites without importing Tk or writing a file.
+
+The About page provides explicit **Create desktop shortcut** and **Remove desktop
+shortcut** actions. The equivalent commands are:
+
+```powershell
+comsol-mcp-settings --settings-path "D:\settings\settings.json" --create-desktop-shortcut
+comsol-mcp-settings --settings-path "D:\settings\settings.json" --shortcut-status
+comsol-mcp-settings --settings-path "D:\settings\settings.json" --remove-desktop-shortcut
+```
+
+The per-user link is named `COMSOL MCP Settings.lnk` and remains bound to that
+exact settings file. Installation, deployment, MCP startup, `settings.start`,
+first launch, Save, and Apply never create it. A stale or foreign same-name item
+is preserved until the user confirms replacement in the GUI or repeats the
+create command with `--replace-existing-shortcut`. Remove deletes only an owned
+shortcut; it preserves foreign or damaged Desktop items.
 
 From a repository checkout or unpacked source distribution, use the root manual
 launcher:
