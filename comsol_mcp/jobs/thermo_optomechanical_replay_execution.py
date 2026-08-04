@@ -11,6 +11,9 @@ import uuid
 from pathlib import Path
 from typing import Any, Mapping
 
+_WAVELENGTH_READBACK_RELATIVE_TOLERANCE = 1.0e-12
+_WAVELENGTH_READBACK_ABSOLUTE_TOLERANCE_M = 1.0e-15
+
 
 def _sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
@@ -44,6 +47,15 @@ def _scalar(value: Any, name: str) -> float:
     if abs(number.imag) > max(1.0e-12, abs(number.real) * 1.0e-10):
         raise ValueError(f"{name} is not real")
     return float(number.real)
+
+
+def _wavelength_readback_matches(observed: float, requested: float) -> bool:
+    return math.isclose(
+        observed,
+        requested,
+        rel_tol=_WAVELENGTH_READBACK_RELATIVE_TOLERANCE,
+        abs_tol=_WAVELENGTH_READBACK_ABSOLUTE_TOLERANCE_M,
+    )
 
 
 class ThermoOptomechanicalComsolExecutor:
@@ -154,6 +166,13 @@ class ThermoOptomechanicalComsolExecutor:
             raise RuntimeError(f"study {study_tag} must resolve to one computed solution dataset")
         self._active_dataset = computed[0]
 
+    def _rollback_available(self) -> bool:
+        return self.checkpoint_path.is_file() and self.checkpoint_path.stat().st_size > 0
+
+    def _thermal_structure_readbacks(self) -> tuple[float, float]:
+        self._bind_study_dataset(self.spec["model_contract"]["thermal_structure_study_tag"])
+        return self._evaluate("minimum_mesh_quality"), self._evaluate("delta_length")
+
     def _study(self, key: str) -> None:
         tag = self.spec["model_contract"][key]
         self.model.java.study(tag).run()
@@ -220,7 +239,7 @@ class ThermoOptomechanicalComsolExecutor:
 
     def _preflight(self) -> Mapping[str, Any]:
         self._verify_source()
-        model = self._load_source()
+        self._load_source()
         contract = self.spec["model_contract"]
         physics, common, studies, selections = self._tag_inventory()
         expected_physics = {
@@ -275,7 +294,7 @@ class ThermoOptomechanicalComsolExecutor:
             "material_state_id": self.spec["material_state_id"],
             "material_state_readback": self._material_state_readback(),
             "source_unchanged": _sha256_file(self.source) == self.spec["source_model_sha256"],
-            "rollback_available": model is not None,
+            "rollback_available": self._rollback_available(),
         }
 
     def _apply_positive_parameters(self) -> None:
@@ -483,7 +502,9 @@ class ThermoOptomechanicalComsolExecutor:
                     self.model.evaluate(self.spec["model_contract"]["wavelength_parameter"]),
                     "deformed wavelength",
                 )
-                if baseline_wavelength != wavelength or solved_wavelength != wavelength:
+                if not _wavelength_readback_matches(
+                    baseline_wavelength, wavelength
+                ) or not _wavelength_readback_matches(solved_wavelength, wavelength):
                     raise RuntimeError(
                         "COMSOL optical wavelength readback differs from the request"
                     )
@@ -496,10 +517,9 @@ class ThermoOptomechanicalComsolExecutor:
                         "deformed_rta": self._rta(),
                     }
                 )
-        mesh_quality = self._evaluate("minimum_mesh_quality")
-        self._bind_study_dataset(self.spec["model_contract"]["thermal_structure_study_tag"])
+        mesh_quality, observed_delta_length = self._thermal_structure_readbacks()
         expansion_error = abs(
-            self._evaluate("delta_length")
+            observed_delta_length
             - self.spec["thermal_expansion"]["coefficient_per_K"]
             * self.spec["thermal_expansion"]["reference_length_m"]
             * (

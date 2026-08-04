@@ -39,6 +39,20 @@ def test_conflicting_runtime_and_jobs_configuration_fails_closed(monkeypatch):
         default_jobs_root()
 
 
+def test_conflicting_settings_runtime_and_jobs_configuration_fails_closed(monkeypatch):
+    monkeypatch.setattr(
+        runtime_paths,
+        "settings_environment",
+        lambda _environ=None: {
+            "COMSOL_MCP_RUNTIME_DIR": "E:/runtime",
+            "COMSOL_MCP_JOBS_DIR": "F:/other/jobs",
+        },
+    )
+
+    with pytest.raises(ValueError, match="jobs subdirectory"):
+        runtime_paths.default_jobs_root({})
+
+
 def test_equivalent_normalized_runtime_and_jobs_configuration_is_accepted(monkeypatch):
     monkeypatch.setenv("COMSOL_MCP_RUNTIME_DIR", "E:/runtime")
     monkeypatch.setenv("COMSOL_MCP_JOBS_DIR", "E:/runtime/../runtime/jobs")

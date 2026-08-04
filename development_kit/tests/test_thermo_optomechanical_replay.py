@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from pathlib import Path
 
 import pytest
+import src.jobs.thermo_optomechanical_replay as replay_module
+import src.jobs.thermo_optomechanical_replay_execution as replay_execution_module
 from pydantic import ValidationError
 from src.jobs.manager import JobManager, _worker_module
 from src.jobs.store import JobStore
@@ -19,6 +22,7 @@ from src.jobs.thermo_optomechanical_replay_execution import (
     ThermoOptomechanicalComsolExecutor,
 )
 from src.jobs.thermo_optomechanical_replay_rows import (
+    append_thermo_optomechanical_stage_row,
     build_stage_evidence,
     read_thermo_optomechanical_stage_rows,
 )
@@ -197,7 +201,7 @@ def _payload(stage_id: str, spec: dict) -> dict:
                 "application_receipt_sha256": spec["material_state"]["application_receipt_sha256"],
             },
             "source_unchanged": True,
-            "rollback_available": True,
+            "rollback_available": False,
         }
     if stage_id == "thermal_structural_solve":
         return {
@@ -307,6 +311,28 @@ def test_submission_manifest_hash_must_match_before_normalization(ascii_tmp_path
         normalize_thermo_optomechanical_replay_spec(raw)
 
 
+def test_submission_manifest_hash_and_parse_share_one_snapshot(ascii_tmp_path, monkeypatch):
+    raw = _raw_spec(ascii_tmp_path / "manifest-snapshot")
+    manifest_path = Path(raw["specification_path"])
+    original_read = replay_module.read_file_bytes_bounded
+    reads = 0
+
+    def read_once(path, *, max_bytes):
+        nonlocal reads
+        payload = original_read(path, max_bytes=max_bytes)
+        if Path(path).samefile(manifest_path):
+            reads += 1
+            manifest_path.write_text("{}\n", encoding="utf-8")
+        return payload
+
+    monkeypatch.setattr(replay_module, "read_file_bytes_bounded", read_once)
+    spec = normalize_thermo_optomechanical_replay_spec(raw)
+
+    assert reads == 1
+    assert spec["submission_manifest_sha256"] == raw["specification_sha256"]
+    assert spec["declared_optical_point_count"] == 2
+
+
 @pytest.mark.parametrize(
     "mutation,match",
     [
@@ -395,6 +421,29 @@ def test_stage_artifact_tampering_is_rejected_before_resume(ascii_tmp_path):
         )
 
 
+def test_invalid_stage_attempt_is_rejected_before_journal_append(ascii_tmp_path):
+    spec = normalize_thermo_optomechanical_replay_spec(_raw_spec(ascii_tmp_path / "row"))
+    root = ascii_tmp_path / "row-artifacts"
+    evidence = build_stage_evidence(spec, "preflight", _payload("preflight", spec))
+    evidence_path = root / "preflight" / "evidence.json"
+    evidence_path.parent.mkdir(parents=True)
+    evidence_path.write_text(
+        json.dumps(evidence, ensure_ascii=False, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    journal = root / "thermo_optomechanical_stages.jsonl"
+
+    with pytest.raises(ValueError, match="attempt"):
+        append_thermo_optomechanical_stage_row(
+            journal,
+            spec,
+            attempt=0,
+            artifact_root=root,
+        )
+
+    assert not journal.exists() or journal.read_bytes() == b""
+
+
 def test_optical_evidence_preserves_tiny_negative_absorption_but_rejects_active_values(
     ascii_tmp_path,
 ):
@@ -481,6 +530,40 @@ def test_executor_binds_the_study_solution_dataset_before_evaluation(ascii_tmp_p
     executor._bind_study_dataset("std_ts")
     assert executor._evaluate("temperature_min") == 2.5
     assert model.evaluations == [("Tmin", model.datasets[0])]
+
+
+def test_thermal_structure_readbacks_bind_before_mesh_and_expansion(ascii_tmp_path):
+    spec = normalize_thermo_optomechanical_replay_spec(_raw_spec(ascii_tmp_path / "readbacks"))
+    executor = ThermoOptomechanicalComsolExecutor(None, spec, ascii_tmp_path / "job")
+    calls = []
+    executor._bind_study_dataset = lambda tag: calls.append(("bind", tag))
+    executor._evaluate = lambda key: calls.append(("evaluate", key)) or 0.5
+
+    assert executor._thermal_structure_readbacks() == (0.5, 0.5)
+    assert calls == [
+        ("bind", "std_ts"),
+        ("evaluate", "minimum_mesh_quality"),
+        ("evaluate", "delta_length"),
+    ]
+
+
+def test_wavelength_readback_accepts_last_ulp_but_rejects_material_drift():
+    requested = 1.5e-6
+
+    assert replay_execution_module._wavelength_readback_matches(
+        math.nextafter(requested, float("inf")), requested
+    )
+    assert not replay_execution_module._wavelength_readback_matches(1.6e-6, requested)
+
+
+def test_rollback_availability_requires_a_persisted_checkpoint(ascii_tmp_path):
+    spec = normalize_thermo_optomechanical_replay_spec(_raw_spec(ascii_tmp_path / "rollback"))
+    executor = ThermoOptomechanicalComsolExecutor(None, spec, ascii_tmp_path / "job")
+
+    assert executor._rollback_available() is False
+    executor.checkpoint_path.parent.mkdir(parents=True)
+    executor.checkpoint_path.write_bytes(b"checkpoint")
+    assert executor._rollback_available() is True
 
 
 def test_executor_uses_normal_save_for_current_model_and_save_copy_for_checkpoint(
