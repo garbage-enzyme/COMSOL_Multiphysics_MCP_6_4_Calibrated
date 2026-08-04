@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import ctypes
 import json
 import os
 import shutil
 import unicodedata
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Iterator
 
 import pytest
 from src.operation_arbiter import guard_tool_call
@@ -49,9 +52,42 @@ def _policy(tmp_path, ascii_root):
     )
 
 
-def test_uncreated_configured_model_root_allows_startup_but_not_model_read(
-    tmp_path, ascii_root
-):
+@contextmanager
+def _open_directory_reader(path: Path) -> Iterator[None]:
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    create_file = kernel32.CreateFileW
+    create_file.argtypes = (
+        ctypes.c_wchar_p,
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+        ctypes.c_void_p,
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+        ctypes.c_void_p,
+    )
+    create_file.restype = ctypes.c_void_p
+    handle = create_file(
+        str(path),
+        0x00000001,
+        0x00000001 | 0x00000002,
+        None,
+        3,
+        0x02000000,
+        None,
+    )
+    invalid_handle = ctypes.c_void_p(-1).value
+    if handle in (None, invalid_handle):
+        raise ctypes.WinError(ctypes.get_last_error())
+    close_handle = kernel32.CloseHandle
+    close_handle.argtypes = (ctypes.c_void_p,)
+    close_handle.restype = ctypes.c_int
+    try:
+        yield
+    finally:
+        assert close_handle(ctypes.c_void_p(handle)) != 0
+
+
+def test_uncreated_configured_model_root_allows_startup_but_not_model_read(tmp_path, ascii_root):
     read_root = tmp_path / "用户模型"
     write_root = ascii_root / "artifacts"
 
@@ -293,6 +329,43 @@ def test_guarded_model_read_pins_file_and_ancestors_until_consumer_returns(
     )
 
     result = guarded(str(source))
+
+    assert result["success"] is True
+    assert result["bytes"] == b"validated"
+    os.replace(replacement, source)
+    read_root.rename(moved_root)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="requires Windows directory sharing semantics")
+def test_guarded_model_read_coexists_with_preexisting_directory_reader(
+    tmp_path, ascii_root, monkeypatch
+):
+    _policy_value, read_root, write_root = _policy(tmp_path, ascii_root)
+    source = read_root / "source.mph"
+    source.write_bytes(b"validated")
+    replacement = tmp_path / "replacement.mph"
+    replacement.write_bytes(b"replacement")
+    moved_root = tmp_path / "moved-models"
+    monkeypatch.setenv(MODEL_READ_ROOTS_ENV, str(read_root))
+    monkeypatch.setenv(ARTIFACT_WRITE_ROOT_ENV, str(write_root))
+
+    def model_load(file_path: str):
+        with pytest.raises(OSError):
+            os.replace(replacement, file_path)
+        with pytest.raises(OSError):
+            read_root.rename(moved_root)
+        return {"success": True, "bytes": Path(file_path).read_bytes()}
+
+    guarded = guard_tool_call(
+        model_load,
+        tool_name="model_load",
+        side_effect_class="filesystem_read_model_mutation",
+        concurrency_class="solver_free",
+        profile_name="core",
+    )
+
+    with _open_directory_reader(read_root):
+        result = guarded(str(source))
 
     assert result["success"] is True
     assert result["bytes"] == b"validated"

@@ -34,6 +34,14 @@ _WINDOWS_RESERVED = frozenset(
     }
 )
 _DEVICE_PREFIX = re.compile(r"^(?:\\\\[?.]\\|//[?.]/)")
+_FILE_LIST_DIRECTORY = 0x00000001
+_FILE_READ_ATTRIBUTES = 0x00000080
+_FILE_SHARE_READ = 0x00000001
+_FILE_SHARE_WRITE = 0x00000002
+_GENERIC_READ = 0x80000000
+_OPEN_EXISTING = 3
+_FILE_ATTRIBUTE_NORMAL = 0x00000080
+_FILE_FLAG_BACKUP_SEMANTICS = 0x02000000
 
 
 @dataclass(frozen=True)
@@ -139,10 +147,22 @@ def _open_windows_read_pin(
         ctypes.c_void_p,
     )
     create_file.restype = ctypes.c_void_p
-    access = (0x00000080 | 0x00010000) if directory else 0x80000000
-    flags = 0x02000000 if directory else 0x00000080
-    share_mode = 0x00000001 | (0x00000002 if allow_writes else 0)
-    handle = create_file(str(path), access, share_mode, None, 3, flags, None)
+    # A directory pin needs actual read access so omitting FILE_SHARE_DELETE
+    # continues to block rename/delete. Requesting DELETE access here would
+    # conflict with ordinary pre-existing directory readers that do not share
+    # delete, even though those readers do not mutate the directory.
+    access = _FILE_LIST_DIRECTORY | _FILE_READ_ATTRIBUTES if directory else _GENERIC_READ
+    flags = _FILE_FLAG_BACKUP_SEMANTICS if directory else _FILE_ATTRIBUTE_NORMAL
+    share_mode = _FILE_SHARE_READ | (_FILE_SHARE_WRITE if directory or allow_writes else 0)
+    handle = create_file(
+        str(path),
+        access,
+        share_mode,
+        None,
+        _OPEN_EXISTING,
+        flags,
+        None,
+    )
     invalid_handle = ctypes.c_void_p(-1).value
     if handle in (None, invalid_handle):
         error = ctypes.get_last_error()
