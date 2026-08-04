@@ -15,26 +15,35 @@ _SAFE_ID = re.compile(r"^[A-Za-z0-9_.-]{1,160}$")
 def atomic_json(path: Path, value: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f"{path.name}.tmp.{os.getpid()}.{time.time_ns()}")
-    with temporary.open("w", encoding="utf-8", newline="\n") as handle:
-        json.dump(
-            value,
-            handle,
-            ensure_ascii=False,
-            indent=2,
-            sort_keys=True,
-            allow_nan=False,
-        )
-        handle.write("\n")
-        handle.flush()
-        os.fsync(handle.fileno())
-    os.replace(temporary, path)
+    try:
+        with temporary.open("w", encoding="utf-8", newline="\n") as handle:
+            json.dump(
+                value,
+                handle,
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+                allow_nan=False,
+            )
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    except BaseException:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
 
 
 def _validated_request(path: Path, job_id: str, spec_id: str) -> dict[str, Any]:
     try:
         request = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise RuntimeError(f"Unreadable durable control request: {path}") from exc
+    if not isinstance(request, dict):
+        raise RuntimeError(f"Unreadable durable control request: {path}")
     if request.get("schema_name") != REQUEST_SCHEMA:
         raise RuntimeError(f"Unknown durable control schema: {path}")
     if request.get("action") != "pause_after_current_point":
@@ -45,7 +54,7 @@ def _validated_request(path: Path, job_id: str, spec_id: str) -> dict[str, Any]:
     if request.get("job_id") != job_id:
         raise RuntimeError(f"Foreign durable control job identity: {path}")
     expected_spec_id = request.get("expected_spec_id")
-    if expected_spec_id not in {None, "", spec_id}:
+    if expected_spec_id is not None and expected_spec_id != "" and expected_spec_id != spec_id:
         raise RuntimeError(f"Foreign durable control spec identity: {path}")
     return request
 
@@ -56,7 +65,10 @@ def pending_pause_request(control_dir: Path, *, job_id: str, spec_id: str) -> di
     if not requests_dir.is_dir():
         return None
     for path in sorted(requests_dir.glob("*.json"), key=lambda item: item.name):
-        request = _validated_request(path, job_id, spec_id)
+        try:
+            request = _validated_request(path, job_id, spec_id)
+        except RuntimeError:
+            continue
         if (acks_dir / f"{request['request_id']}.json").is_file():
             continue
         request["request_path"] = str(path)

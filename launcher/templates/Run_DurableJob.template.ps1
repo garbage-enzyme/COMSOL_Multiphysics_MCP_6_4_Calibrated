@@ -36,7 +36,10 @@ function Show-LauncherBootstrapFailure {
     try { $CanRead = -not [Console]::IsInputRedirected }
     catch { $CanRead = $true }
     while ($CanRead) {
-        $Command = (Read-Host 'Enter quit to close').Trim().ToLowerInvariant()
+        try { $Raw = Read-Host 'Enter quit to close' }
+        catch { return }
+        if ($null -eq $Raw) { return }
+        $Command = ([string]$Raw).Trim().ToLowerInvariant()
         if ($Command -in @('quit', 'q', 'close')) { return }
         Write-Host ("Invalid input '{0}'. Enter quit." -f $Command) -ForegroundColor Yellow
     }

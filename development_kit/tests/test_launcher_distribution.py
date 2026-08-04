@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import importlib.util
+import json
 import os
 import shutil
 import subprocess
@@ -13,6 +15,71 @@ import pytest
 REPOSITORY = Path(__file__).resolve().parents[2]
 LAUNCHER = REPOSITORY / "launcher"
 TESTS = LAUNCHER / "tests"
+
+
+def _durable_control_module():
+    path = LAUNCHER / "python" / "durable_control.py"
+    spec = importlib.util.spec_from_file_location("launcher_test_durable_control", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_durable_control_skips_stale_foreign_and_malformed_requests(tmp_path: Path) -> None:
+    control = _durable_control_module()
+    requests = tmp_path / "control" / "requests"
+    requests.mkdir(parents=True)
+    (requests / "00-invalid-utf8.json").write_bytes(b"\xff")
+    (requests / "01-array.json").write_text("[]", encoding="utf-8")
+    (requests / "02-foreign.json").write_text(
+        json.dumps(
+            {
+                "schema_name": control.REQUEST_SCHEMA,
+                "action": "pause_after_current_point",
+                "request_id": "foreign",
+                "job_id": "other-job",
+                "expected_spec_id": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    valid = {
+        "schema_name": control.REQUEST_SCHEMA,
+        "action": "pause_after_current_point",
+        "request_id": "valid-request",
+        "job_id": "job-1",
+        "expected_spec_id": "spec-1",
+    }
+    control.atomic_json(requests / "99-valid.json", valid)
+
+    pending = control.pending_pause_request(
+        tmp_path / "control", job_id="job-1", spec_id="spec-1"
+    )
+
+    assert pending is not None
+    assert pending["request_id"] == "valid-request"
+    assert pending["request_path"].endswith("99-valid.json")
+
+
+def test_durable_control_atomic_json_cleans_failed_temporaries(tmp_path: Path, monkeypatch) -> None:
+    control = _durable_control_module()
+    target = tmp_path / "state.json"
+    target.write_text('{"status":"prior"}\n', encoding="utf-8")
+
+    with pytest.raises(TypeError):
+        control.atomic_json(target, {"invalid": object()})
+    assert not list(tmp_path.glob("state.json.tmp.*"))
+    assert json.loads(target.read_text(encoding="utf-8")) == {"status": "prior"}
+
+    def fail_replace(*_args):
+        raise PermissionError
+
+    monkeypatch.setattr(control.os, "replace", fail_replace)
+    with pytest.raises(PermissionError):
+        control.atomic_json(target, {"status": "new"})
+    assert not list(tmp_path.glob("state.json.tmp.*"))
+    assert json.loads(target.read_text(encoding="utf-8")) == {"status": "prior"}
 
 
 def test_launcher_distribution_is_portable_and_outside_runtime_package() -> None:
@@ -66,6 +133,7 @@ def test_launcher_distribution_is_portable_and_outside_runtime_package() -> None
     assert "MinimumFreeOutputDriveGiB" in text
     assert "MinimumFreeCGiB" not in text
     assert "MinimumFreeDGiB" not in text
+    assert "if ($null -eq $Raw) { return }" in text
 
 
 def _run_powershell(script: str, host: str, arguments: list[str], timeout: int = 90) -> str:

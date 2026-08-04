@@ -29,9 +29,15 @@ while ([DateTime]::UtcNow -lt $Deadline) {
     }
     Start-Sleep -Milliseconds 100
 }
+if ($Alive -and $Output -match 'MONITOR REFRESH FAILED' -and $Output -match 'displayed progress is not current') {
+    Start-Sleep -Milliseconds 750
+    $Process.Refresh()
+    $Alive = -not $Process.HasExited
+}
 if ($Alive) {
-    Stop-Process -Id $Process.Id -Force
-    $Process.WaitForExit()
+    Stop-Process -Id $Process.Id -Force -ErrorAction SilentlyContinue
+    try { $Process.WaitForExit() }
+    catch { }
 }
 if (-not $Alive) { throw "Refresh-failure monitor exited instead of latching: $Output" }
 if ($Output -notmatch 'MONITOR REFRESH FAILED' -or $Output -notmatch 'displayed progress is not current') {
