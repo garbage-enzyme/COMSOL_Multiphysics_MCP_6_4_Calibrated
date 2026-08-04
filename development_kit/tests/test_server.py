@@ -136,7 +136,7 @@ def test_partial_tool_registration_rolls_back_and_can_be_retried(monkeypatch):
 def test_model_resources_escape_untrusted_markdown(monkeypatch):
     import src.resources.model_resources as resources_module
 
-    malicious = "node|name\n## Injected *bold* `tick`"
+    malicious = "node|name\n## Injected *bold* `tick` ~~strike~~"
 
     class Model:
         def name(self):
@@ -206,7 +206,14 @@ def test_model_resources_escape_untrusted_markdown(monkeypatch):
         assert "\\|" in document
         assert "\\*bold\\*" in document
         assert "\\`tick\\`" in document
-    assert "``1\\|2 `value```" in parameters
+        assert "\\~\\~strike\\~\\~" in document
+    assert "`` 1\\|2 `value` ``" in parameters
+
+
+def test_markdown_code_preserves_boundary_backticks():
+    import src.resources.model_resources as resources_module
+
+    assert resources_module._markdown_code("`value`") == "`` `value` ``"
 
 
 def test_default_registration_does_not_import_semantic_stack():

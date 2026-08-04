@@ -20,6 +20,7 @@ function ConvertTo-ConsolePython {
         if (Test-Path -LiteralPath $consolePath -PathType Leaf) {
             return [System.IO.Path]::GetFullPath($consolePath)
         }
+        throw 'pythonw.exe requires a python.exe companion for bounded console probing.'
     }
     return $fullPath
 }
@@ -34,7 +35,7 @@ function Test-ComsolMcpPython {
     try {
         $previousErrorAction = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
-        $probeOutput = & $Candidate -c $script:PythonProbe 2>&1
+        $probeOutput = & $Candidate -c $script:PythonProbe 2>$null
         $probeExitCode = $LASTEXITCODE
         $ErrorActionPreference = $previousErrorAction
         if ($probeExitCode -ne 0) {
@@ -108,8 +109,10 @@ function Get-ComsolMcpPython {
     throw 'No supported Python was found. Pass -PythonPath with a CPython 3.14 python.exe.'
 }
 
+$settingsPathWasPresent = Test-Path Env:COMSOL_MCP_SETTINGS_PATH
+$previousSettingsPath = $env:COMSOL_MCP_SETTINGS_PATH
 try {
-    $settingsPathOverride = $false
+    $settingsPathOverride = $settingsPathWasPresent
     if (-not [string]::IsNullOrWhiteSpace($SettingsPath)) {
         if (-not [System.IO.Path]::IsPathRooted($SettingsPath)) {
             throw '-SettingsPath must be an absolute path.'
@@ -146,10 +149,23 @@ try {
     finally {
         Pop-Location
     }
-    $launchResult | Write-Output
+    $jsonLines = @($launchResult | Where-Object { $_ -is [string] -and $_.Trim() -match '^\{.*\}$' })
+    if ($jsonLines.Count -ne 1) {
+        throw 'The Settings GUI launcher did not emit one bounded JSON result.'
+    }
+    $null = $jsonLines[0] | ConvertFrom-Json
+    $jsonLines[0] | Write-Output
     exit $launchExitCode
 }
 catch {
-    Write-Error $_.Exception.Message
+    Write-Error $_.Exception.Message -ErrorAction Continue
     exit 1
+}
+finally {
+    if ($settingsPathWasPresent) {
+        $env:COMSOL_MCP_SETTINGS_PATH = $previousSettingsPath
+    }
+    else {
+        Remove-Item Env:COMSOL_MCP_SETTINGS_PATH -ErrorAction SilentlyContinue
+    }
 }

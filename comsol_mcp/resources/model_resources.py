@@ -17,7 +17,7 @@ def _markdown_text(value: object) -> str:
     """Render one untrusted value as inert single-line Markdown text."""
     text = html.escape(str(value).replace("\r", " ").replace("\n", " "), quote=False)
     text = text.replace("\\", "\\\\")
-    for character in ("`", "*", "_", "[", "]", "|"):
+    for character in ("`", "*", "_", "[", "]", "|", "~"):
         text = text.replace(character, f"\\{character}")
     return text
 
@@ -27,6 +27,8 @@ def _markdown_code(value: object) -> str:
     text = str(value).replace("\r", " ").replace("\n", " ").replace("|", "\\|")
     longest = max((len(match.group(0)) for match in _BACKTICK_RUN.finditer(text)), default=0)
     fence = "`" * (longest + 1)
+    if text.startswith("`") or text.endswith("`"):
+        return f"{fence} {text} {fence}"
     return f"{fence}{text}{fence}"
 
 

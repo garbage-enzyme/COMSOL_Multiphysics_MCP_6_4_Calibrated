@@ -9,10 +9,14 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from comsol_mcp import settings_gui_launcher as launcher
 from comsol_mcp.server import create_server
-from comsol_mcp.settings_gui_handshake import publish_handshake
-
+from comsol_mcp.settings_gui_handshake import (
+    publish_handshake,
+    validate_handshake_path,
+)
 from development_kit.tests.mcp_test_support import decode_tool_result
 
 
@@ -174,6 +178,24 @@ def test_launch_timeout_is_bounded_and_cleans_handshake(ascii_tmp_path, monkeypa
     assert result["state"] == "launch_failed"
     assert now[0] <= 0.15
     assert not list((ascii_tmp_path / "settings_gui").glob("*.json"))
+
+
+def test_handshake_rejects_a_linked_parent_before_resolution(
+    ascii_tmp_path: Path,
+    monkeypatch,
+) -> None:
+    parent = ascii_tmp_path / "settings_gui"
+    parent.mkdir()
+    target = parent / ".settings-gui-0123456789abcdef0123456789abcdef.json"
+    original_is_symlink = Path.is_symlink
+
+    def fake_is_symlink(path: Path) -> bool:
+        return path == parent or original_is_symlink(path)
+
+    monkeypatch.setattr(Path, "is_symlink", fake_is_symlink)
+
+    with pytest.raises(ValueError, match="handshake path is invalid"):
+        validate_handshake_path(target)
 
 
 def test_public_dispatch_has_no_arguments_and_returns_tool_result(monkeypatch) -> None:
