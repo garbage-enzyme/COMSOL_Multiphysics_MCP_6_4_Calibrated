@@ -148,14 +148,27 @@ def test_visual_capture_direct_script_uses_current_source_tab_contract() -> None
 
 def test_visual_capture_matrix_covers_feature_tabs_and_about_at_every_scale() -> None:
     scenarios = set(settings_gui_visual_capture._capture_scenarios())
-
-    for dpi_percent in (100, 125, 150, 200):
-        for language in ("en", "zh-cn", "zh-tw"):
-            assert (language, dpi_percent, "valid", "general") in scenarios
-            assert (language, dpi_percent, "valid", "profile") in scenarios
-            assert (language, dpi_percent, "valid", "semantic") in scenarios
-            assert (language, dpi_percent, "about", "about") in scenarios
-    assert len(scenarios) == 57
+    expected = {
+        (language, dpi_percent, state, tab)
+        for dpi_percent in (100, 125, 150, 200)
+        for language in ("en", "zh-cn", "zh-tw")
+        for state, tab in (
+            ("valid", "general"),
+            ("valid", "profile"),
+            ("valid", "semantic"),
+            ("about", "about"),
+        )
+    }
+    expected.update(
+        (language, dpi_percent, state, tab)
+        for language in ("en", "zh-cn", "zh-tw")
+        for dpi_percent, state, tab in (
+            (200, "invalid", "runtime"),
+            (200, "long_paths", "comsol_java"),
+            (150, "evidence", "evidence"),
+        )
+    )
+    assert scenarios == expected
 
 
 def test_visual_capture_one_mode_creates_fresh_output_root(tmp_path, monkeypatch) -> None:

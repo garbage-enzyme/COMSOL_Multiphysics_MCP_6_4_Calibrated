@@ -331,7 +331,10 @@ def test_coordinator_refuses_collision_before_starting_worker(tmp_path, ascii_tm
         "# mph.Client collision marker for the lightweight scanner\n"
         "import sys, time\n"
         "from pathlib import Path\n"
-        "Path(sys.argv[1]).write_text('ready', encoding='utf-8')\n"
+        "marker = Path(sys.argv[1])\n"
+        "temporary = marker.with_name(marker.name + '.tmp')\n"
+        "temporary.write_text('ready', encoding='utf-8')\n"
+        "temporary.replace(marker)\n"
         "time.sleep(30)\n",
         encoding="utf-8",
     )
@@ -399,11 +402,16 @@ def test_coordinator_refuses_collision_before_starting_worker(tmp_path, ascii_tm
     )
     try:
         deadline = time.monotonic() + 5.0
-        while (
-            not blocker_ready.is_file() and blocker.poll() is None and time.monotonic() < deadline
-        ):
+        ready = None
+        while blocker.poll() is None and time.monotonic() < deadline:
+            try:
+                ready = blocker_ready.read_text(encoding="utf-8")
+            except OSError:
+                ready = None
+            if ready == "ready":
+                break
             time.sleep(0.01)
-        assert blocker_ready.read_text(encoding="utf-8") == "ready"
+        assert ready == "ready"
         assert blocker.poll() is None
         completed = subprocess.run(
             [

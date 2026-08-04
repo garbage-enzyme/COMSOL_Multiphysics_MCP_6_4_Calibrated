@@ -102,7 +102,7 @@ def test_exact_model_ladder_is_canonical_bounded_and_hash_bound(tmp_path):
         for level in raw["levels"]
     ]
     first = normalize_convergence_campaign_spec(raw)
-    second = normalize_convergence_campaign_spec(original)
+    second = normalize_convergence_campaign_spec(deepcopy(raw))
 
     assert raw == original
     assert first == second

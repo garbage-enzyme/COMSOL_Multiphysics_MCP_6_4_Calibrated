@@ -38,8 +38,10 @@ def _resolve_string(node: ast.AST, constants: dict[str, str]) -> str | None:
     return None
 
 
-def _module_string_constants(tree: ast.Module) -> dict[str, str]:
-    constants: dict[str, str] = {}
+def _module_string_constants(
+    tree: ast.Module, seed: dict[str, str] | None = None
+) -> dict[str, str]:
+    constants = dict(seed or {})
     pending = list(tree.body)
     for _pass in range(len(pending) + 1):
         changed = False
@@ -70,11 +72,54 @@ def _module_string_constants(tree: ast.Module) -> dict[str, str]:
     return constants
 
 
+def _module_name(path: Path) -> str:
+    return ".".join(path.relative_to(ROOT).with_suffix("").parts)
+
+
+def _imported_string_constants(
+    module_name: str,
+    tree: ast.Module,
+    constants_by_module: dict[str, dict[str, str]],
+) -> dict[str, str]:
+    imported: dict[str, str] = {}
+    for node in tree.body:
+        if not isinstance(node, ast.ImportFrom) or node.module is None:
+            continue
+        if node.level:
+            package = module_name.split(".")[: -node.level]
+            target_module = ".".join([*package, node.module])
+        else:
+            target_module = node.module
+        target_constants = constants_by_module.get(target_module, {})
+        for alias in node.names:
+            value = target_constants.get(alias.name)
+            if value is not None:
+                imported[alias.asname or alias.name] = value
+    return imported
+
+
 def _emitted_schemas_in_source() -> set[str]:
+    trees = {
+        _module_name(path): ast.parse(path.read_text(encoding="utf-8"))
+        for path in (ROOT / "comsol_mcp").rglob("*.py")
+    }
+    constants_by_module = {
+        module_name: _module_string_constants(tree) for module_name, tree in trees.items()
+    }
+    for _pass in range(len(trees) + 1):
+        changed = False
+        for module_name, tree in trees.items():
+            imported = _imported_string_constants(module_name, tree, constants_by_module)
+            resolved = _module_string_constants(tree, imported)
+            if resolved != constants_by_module[module_name]:
+                constants_by_module[module_name] = resolved
+                changed = True
+        if not changed:
+            break
+
     names: set[str] = set()
-    for path in (ROOT / "comsol_mcp").rglob("*.py"):
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-        constants = _module_string_constants(tree)
+    for module_name, tree in trees.items():
+        constants = constants_by_module[module_name]
         for node in ast.walk(tree):
             candidates: list[ast.AST] = []
             if isinstance(node, ast.Dict):
@@ -120,7 +165,26 @@ def test_registry_is_complete_sorted_and_snapshot_stable():
     assert len(names) == len(set(names))
     emitted = _emitted_schemas_in_source()
     assert emitted
-    assert emitted.issubset(set(names))
+    registry_only = {
+        "comsol_mcp.cleanup_outcome",
+        "comsol_mcp.execution_evidence_outcome",
+        "comsol_mcp.h1_licensed_gate",
+        "comsol_mcp.portfolio_evidence_request",
+        "comsol_mcp.runtime_compatibility",
+        "comsol_mcp.simulation_configuration",
+        "comsol_mcp.standalone_driver_event",
+        "comsol_mcp.standalone_licensed_acceptance",
+        "comsol_mcp.standalone_owner",
+        "comsol_mcp.standalone_pause_ack",
+        "comsol_mcp.standalone_pause_request",
+        "comsol_mcp.standalone_status",
+        "comsol_mcp.standalone_terminal",
+        "comsol_mcp.thermal_material_ledger",
+        "comsol_mcp.thermal_radiation_request",
+        "comsol_mcp.thermo_optomechanical_replay_manifest",
+        "comsol_mcp.wave_optics_point_audit",
+    }
+    assert set(names) == emitted | registry_only
     assert re.fullmatch(r"[0-9a-f]{64}", registry["registry_sha256"])
     assert registry["registry_sha256"] == (
         "c7243969bce0147b5768f77a5753c35370f127fef8048f4fe4086e8d49be6ad2"

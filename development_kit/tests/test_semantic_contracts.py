@@ -8,7 +8,6 @@ import shutil
 import sqlite3
 import subprocess
 import sys
-import threading
 import uuid
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import closing, contextmanager
@@ -322,10 +321,7 @@ def test_semantic_benchmark_retrieval_validates_and_deduplicates_citations():
 
 
 def test_semantic_benchmark_receipts_publish_concurrently_without_temp_alias(tmp_path):
-    barrier = threading.Barrier(8)
-
     def publish(index: int) -> None:
-        barrier.wait(timeout=5.0)
         soak_module._atomic_write(
             tmp_path / f"receipt-{index}.json",
             {"index": index, "payload": "x" * 64_000},

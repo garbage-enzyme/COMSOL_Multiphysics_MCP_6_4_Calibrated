@@ -196,10 +196,14 @@ def test_model_resources_escape_untrusted_markdown(monkeypatch):
     server = MCPServer("escaped-resources")
     resources_module.register_model_resources(server)
 
-    session = server._resource_manager._resources["comsol://session/info"].fn()
-    tree = server._resource_manager._templates["comsol://model/{name}/tree"].fn("model")
-    parameters = server._resource_manager._templates["comsol://model/{name}/parameters"].fn("model")
-    physics = server._resource_manager._templates["comsol://model/{name}/physics"].fn("model")
+    async def read(uri: str) -> str:
+        contents = await server.read_resource(uri)
+        return "".join(item.content for item in contents)
+
+    session = asyncio.run(read("comsol://session/info"))
+    tree = asyncio.run(read("comsol://model/model/tree"))
+    parameters = asyncio.run(read("comsol://model/model/parameters"))
+    physics = asyncio.run(read("comsol://model/model/physics"))
 
     for document in (session, tree, parameters, physics):
         assert "\n## Injected" not in document

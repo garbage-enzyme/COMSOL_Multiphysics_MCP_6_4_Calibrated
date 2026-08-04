@@ -5,8 +5,10 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import queue
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -118,10 +120,24 @@ def test_instance_mutex_reports_a_live_gui_in_another_process(ascii_tmp_path: Pa
     )
     try:
         assert process.stdout is not None
-        assert process.stdout.readline().strip() == "READY"
+        ready_lines: queue.Queue[str] = queue.Queue(maxsize=1)
+        reader = threading.Thread(
+            target=lambda: ready_lines.put(process.stdout.readline()), daemon=True
+        )
+        reader.start()
+        try:
+            assert ready_lines.get(timeout=10).strip() == "READY"
+        except queue.Empty:
+            pytest.fail("Settings GUI mutex child did not publish readiness within 10 seconds")
         assert launcher.settings_gui_is_running(target) is True
     finally:
-        output, errors = process.communicate("done\n", timeout=10)
+        try:
+            output, errors = process.communicate("done\n", timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            output, errors = process.communicate(timeout=10)
+            pytest.fail(f"Settings GUI mutex child did not exit after input: {output}{errors}")
+        reader.join(timeout=1)
         assert process.returncode == 0, output + errors
     assert launcher.settings_gui_is_running(target) is False
 
