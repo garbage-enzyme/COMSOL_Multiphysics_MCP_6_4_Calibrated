@@ -47,7 +47,9 @@ class FakeDialogs:
 
     def confirm(self, *, title: str, message: str) -> bool:
         self.confirm_calls.append((title, message))
-        return self.confirmations.pop(0) if self.confirmations else True
+        if not self.confirmations:
+            raise AssertionError("unexpected confirmation dialog")
+        return self.confirmations.pop(0)
 
     def info(self, *, title: str, message: str) -> None:
         self.infos.append((title, message))

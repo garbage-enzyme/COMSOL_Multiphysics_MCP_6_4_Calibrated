@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+from collections import Counter
 from string import Formatter
 
 from comsol_mcp.settings import GUI_LANGUAGES, GUI_SCALES
@@ -20,29 +21,44 @@ from settings_gui.i18n import (
 from settings_gui.model import FIELDS, PROFILE_HELP_IDS
 
 
-def _placeholders(value: str) -> set[str]:
-    return {
+def _placeholders(value: str) -> Counter[str]:
+    return Counter(
         name
         for _literal, name, _format, _conversion in Formatter().parse(value)
         if name is not None
-    }
+    )
 
 
 def _literal_translation_calls() -> set[str]:
     messages: set[str] = set()
     for name in ("app.py", "controller.py"):
         tree = ast.parse((LOCALE_ROOT.parent / name).read_text(encoding="utf-8"))
+        assigned_literals = {
+            target.id: node.value.value
+            for node in ast.walk(tree)
+            if isinstance(node, (ast.Assign, ast.AnnAssign))
+            and isinstance(node.value, ast.Constant)
+            and isinstance(node.value.value, str)
+            for target in (
+                node.targets if isinstance(node, ast.Assign) else [node.target]
+            )
+            if isinstance(target, ast.Name)
+        }
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call) or not node.args:
                 continue
             first = node.args[0]
-            if not isinstance(first, ast.Constant) or not isinstance(first.value, str):
+            if isinstance(first, ast.Constant) and isinstance(first.value, str):
+                message = first.value
+            elif isinstance(first, ast.Name) and first.id in assigned_literals:
+                message = assigned_literals[first.id]
+            else:
                 continue
             function = node.func
             if isinstance(function, ast.Name) and function.id == "_":
-                messages.add(first.value)
+                messages.add(message)
             elif isinstance(function, ast.Attribute) and function.attr == "text":
-                messages.add(first.value)
+                messages.add(message)
     return messages
 
 

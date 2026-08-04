@@ -57,7 +57,7 @@ def decode_settings_bytes(raw: bytes) -> dict[str, Any]:
             "settings must be UTF-8",
             reason_code="settings_encoding_invalid",
         ) from exc
-    except json.JSONDecodeError as exc:
+    except (json.JSONDecodeError, RecursionError) as exc:
         raise DamagedSettings(
             "settings contain invalid JSON",
             reason_code="settings_json_invalid",
@@ -143,10 +143,11 @@ class SettingsStore:
             if temporary_identity is None:
                 raise OSError("temporary settings identity is unavailable")
 
-            self.ownership.verify_unchanged()
-            self.ownership.release_target_handle()
             deadline = self._clock() + SAVE_RETRY_SECONDS
             while True:
+                self.ownership.reacquire_target_handle()
+                self.ownership.verify_unchanged()
+                self.ownership.release_target_handle()
                 try:
                     os.replace(temporary, self.target)
                     break
@@ -154,7 +155,6 @@ class SettingsStore:
                     if not _sharing_error(exc) or self._clock() >= deadline:
                         raise
                     self._sleeper(SAVE_RETRY_INTERVAL_SECONDS)
-            self.ownership.reacquire_target_handle()
             saved_identity = file_identity(self.target)
             if (
                 saved_identity is None
@@ -165,7 +165,8 @@ class SettingsStore:
                 or self.target.read_bytes() != raw
             ):
                 raise SettingsConflict("saved settings bytes do not match the request")
-            self.ownership.accept_current_identity()
+            self.ownership.baseline = saved_identity
+            self.ownership.reacquire_target_handle()
             return hashlib.sha256(raw).hexdigest()
         finally:
             if descriptor is not None:
