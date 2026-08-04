@@ -8,7 +8,9 @@ from string import Formatter
 
 from comsol_mcp.settings import GUI_LANGUAGES, GUI_SCALES
 from comsol_mcp.tools.profiles import PROFILE_NAMES
+from development_kit.scripts import settings_gui_locales
 from development_kit.scripts.settings_gui_locales import expected_files
+from settings_gui import GUI_RELEASE
 from settings_gui.app import FIXED_LINKS, TAB_TITLES
 from settings_gui.i18n import (
     LANGUAGE_SELF_NAMES,
@@ -39,9 +41,7 @@ def _literal_translation_calls() -> set[str]:
             if isinstance(node, (ast.Assign, ast.AnnAssign))
             and isinstance(node.value, ast.Constant)
             and isinstance(node.value.value, str)
-            for target in (
-                node.targets if isinstance(node, ast.Assign) else [node.target]
-            )
+            for target in (node.targets if isinstance(node, ast.Assign) else [node.target])
             if isinstance(target, ast.Name)
         }
         for node in ast.walk(tree):
@@ -132,6 +132,10 @@ def test_po_and_mo_outputs_are_exactly_reproducible() -> None:
             raw = expected.decode("utf-8")
             assert "#, fuzzy" not in raw
             assert '\nmsgstr ""\n' not in raw
+
+
+def test_catalog_header_uses_the_canonical_gui_release() -> None:
+    assert f"Project-Id-Version: comsol-mcp {GUI_RELEASE}\n" in settings_gui_locales._header("en")
 
 
 def test_gettext_sources_are_forced_to_lf_in_git_checkouts() -> None:

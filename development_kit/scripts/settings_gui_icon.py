@@ -6,10 +6,34 @@ import argparse
 import math
 from pathlib import Path
 
-from PIL import Image, ImageChops
+from PIL import Image
 
 ICON_SIZES = (16, 20, 24, 32, 40, 48, 64, 128, 256)
 DEFAULT_PADDING_FRACTION = 0.06
+BACKGROUND_TOLERANCE = 24
+
+
+def _key_background(image: Image.Image, background: tuple[int, int, int, int]) -> Image.Image:
+    keyed = Image.new("RGBA", image.size)
+    output = []
+    has_source_transparency = image.getchannel("A").getextrema()[0] < 255
+    for red, green, blue, alpha in image.get_flattened_data():
+        if has_source_transparency:
+            output.append((0, 0, 0, 0) if alpha == 0 else (red, green, blue, alpha))
+            continue
+        distance = max(
+            abs(red - background[0]),
+            abs(green - background[1]),
+            abs(blue - background[2]),
+        )
+        if distance <= BACKGROUND_TOLERANCE:
+            output.append((0, 0, 0, 0))
+            continue
+        if distance < 2 * BACKGROUND_TOLERANCE:
+            alpha = round(alpha * (distance - BACKGROUND_TOLERANCE) / BACKGROUND_TOLERANCE)
+        output.append((red, green, blue, alpha))
+    keyed.putdata(output)
+    return keyed
 
 
 def _prepared_square(source: Path, *, padding_fraction: float) -> Image.Image:
@@ -17,15 +41,12 @@ def _prepared_square(source: Path, *, padding_fraction: float) -> Image.Image:
         raise ValueError("padding_fraction must be at least 0 and less than 0.25")
     with Image.open(source) as opened:
         image = opened.convert("RGBA")
-    background = Image.new("RGBA", image.size, image.getpixel((0, 0)))
-    content_box = ImageChops.difference(image, background).getbbox()
+    image = _key_background(image, image.getpixel((0, 0)))
+    content_box = image.getchannel("A").getbbox()
     if content_box is None:
         raise ValueError("source image contains no logo distinct from its corner background")
 
     content = image.crop(content_box)
-    corner = image.getpixel((0, 0))
-    pixels = list(content.get_flattened_data())
-    content.putdata([(*pixel[:3], 0 if pixel == corner else pixel[3]) for pixel in pixels])
     visible_box = content.getchannel("A").getbbox()
     if visible_box is None:
         raise ValueError("source image contains no visible logo")

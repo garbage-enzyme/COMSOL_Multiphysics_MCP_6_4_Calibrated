@@ -32,6 +32,8 @@ from src.jobs.thermo_optomechanical_replay_runner import (
 from src.jobs.thermo_optomechanical_replay_worker import _run as run_worker
 from src.tools.jobs import _preview_job_spec
 
+from development_kit.scripts import thermo_optomechanical_licensed_gate as licensed_gate
+
 
 def _material_state(source: Path) -> dict:
     return {
@@ -59,6 +61,40 @@ def _material_state(source: Path) -> dict:
         "expected_function_tags": [],
         "application_receipt_sha256": "d" * 64,
     }
+
+
+def test_licensed_gate_cleanup_failure_preserves_verdict_and_writes_fallback(
+    tmp_path, monkeypatch
+):
+    class BrokenOwner:
+        def status(self, *, require_fresh_inventory):
+            assert require_fresh_inventory is True
+            raise RuntimeError("injected inventory failure")
+
+    original_atomic_json = licensed_gate._atomic_json
+
+    def fail_primary_receipt(path, value):
+        if path.name == "licensed_acceptance.json":
+            raise OSError("injected primary receipt failure")
+        original_atomic_json(path, value)
+
+    monkeypatch.setattr(licensed_gate, "_atomic_json", fail_primary_receipt)
+    result = {
+        "schema_name": licensed_gate.SCHEMA_NAME,
+        "schema_version": licensed_gate.SCHEMA_VERSION,
+        "success": False,
+        "error": {"type": "RuntimeError", "message": "original gate failure"},
+    }
+
+    finalized = licensed_gate._finalize_gate_result(tmp_path, result, BrokenOwner())
+
+    assert finalized["error"]["message"] == "original gate failure"
+    assert finalized["cleanup"]["inventory_complete"] is False
+    assert finalized["cleanup"]["error"]["message"] == "injected inventory failure"
+    assert finalized["receipt_write_error"]["type"] == "OSError"
+    fallback = json.loads((tmp_path / "licensed_acceptance_failure.json").read_text("utf-8"))
+    assert fallback["success"] is False
+    assert fallback["error"]["message"] == "original gate failure"
 
 
 def _raw_spec(root: Path) -> dict:

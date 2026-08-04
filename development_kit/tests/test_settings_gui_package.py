@@ -8,6 +8,7 @@ import sys
 import tarfile
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -155,3 +156,57 @@ def test_visual_capture_matrix_covers_feature_tabs_and_about_at_every_scale() ->
             assert (language, dpi_percent, "valid", "semantic") in scenarios
             assert (language, dpi_percent, "about", "about") in scenarios
     assert len(scenarios) == 57
+
+
+def test_visual_capture_one_mode_creates_fresh_output_root(tmp_path, monkeypatch) -> None:
+    output_root = tmp_path / "fresh" / "capture"
+
+    def fake_capture(output, **_kwargs):
+        assert output_root.is_dir()
+        return {"file": output.name}
+
+    monkeypatch.setattr(settings_gui_visual_capture, "_capture_one", fake_capture)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "settings_gui_visual_capture",
+            "--output-root",
+            str(output_root),
+            "--one",
+            "--language",
+            "en",
+            "--dpi-percent",
+            "100",
+            "--state",
+            "valid",
+            "--tab",
+            "general",
+        ],
+    )
+
+    assert settings_gui_visual_capture.main() == 0
+
+
+def test_visual_capture_matrix_surfaces_bounded_child_diagnostics(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        settings_gui_visual_capture,
+        "_capture_scenarios",
+        lambda: (("zh-cn", 200, "invalid", "runtime"),),
+    )
+    monkeypatch.setattr(
+        settings_gui_visual_capture.subprocess,
+        "run",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            returncode=7,
+            stdout="out-" + "x" * 3000,
+            stderr="err-" + "y" * 3000,
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="language=zh-cn, dpi=200") as caught:
+        settings_gui_visual_capture.capture_matrix(tmp_path / "matrix")
+
+    assert len(str(caught.value)) < 4300
+    assert "err-" not in str(caught.value)
+    assert "yyyy" in str(caught.value)
