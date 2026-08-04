@@ -82,6 +82,40 @@ def test_durable_control_atomic_json_cleans_failed_temporaries(tmp_path: Path, m
     assert json.loads(target.read_text(encoding="utf-8")) == {"status": "prior"}
 
 
+def test_fake_driver_recovers_stale_lock_and_completes_zero_point_fixture(tmp_path: Path) -> None:
+    root = tmp_path / "zero-point"
+    root.mkdir()
+    (root / "run.lock").write_text(
+        json.dumps({"pid": 2_147_483_647, "spec_id": "stale"}), encoding="utf-8"
+    )
+    environment = {
+        **os.environ,
+        "DURABLE_TEST_ROOT": str(root),
+        "DURABLE_TEST_HELPER_DIR": str(LAUNCHER / "python"),
+        "DURABLE_TEST_JOB_ID": "zero-point-job",
+        "DURABLE_TEST_SPEC_ID": "zero-point-spec",
+        "DURABLE_TEST_POINTS": "0",
+        "DURABLE_TEST_POINT_SECONDS": "0",
+    }
+
+    completed = subprocess.run(
+        [sys.executable, str(TESTS / "fake_durable_driver.py")],
+        cwd=TESTS,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    status = json.loads((root / "status.json").read_text(encoding="utf-8"))
+    assert status["status"] == "complete"
+    assert status["completed"] == status["planned"] == 0
+    assert status["latest_point_id"] is None
+    assert not (root / "run.lock").exists()
+
+
 def test_launcher_distribution_is_portable_and_outside_runtime_package() -> None:
     expected = {
         "README.md",

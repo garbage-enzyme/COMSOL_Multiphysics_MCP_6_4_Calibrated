@@ -17,6 +17,7 @@ Write-DurableAtomicJson -Path $StatusPath -Value ([ordered]@{
     spec_id = 'terminal-hold-test-v1-3'
 })
 [IO.File]::WriteAllText($ResultsPath, "{`"point_id`":`"p1`"}`n", [Text.UTF8Encoding]::new($false))
+[IO.File]::WriteAllText((Join-Path $TestRoot 'monitor.ready'), 'ready', [Text.UTF8Encoding]::new($false))
 $Config = @{
     JobName = 'Durable launcher terminal hold test'
     JobId = 'terminal-hold-test-v1-3'

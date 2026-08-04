@@ -35,24 +35,34 @@ foreach ($State in @('scientific', 'failure', 'paused')) {
     New-Item -ItemType Directory -Path $Root -Force | Out-Null
     $Stdout = Join-Path $Root 'host.stdout.log'
     $Stderr = Join-Path $Root 'host.stderr.log'
-    $Process = Start-Process -FilePath $PowerShellPath -ArgumentList @(
-        '-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
-        ('"' + $Child + '"'), '-TestRoot', ('"' + $Root + '"'), '-State', $State
-    ) -RedirectStandardOutput $Stdout -RedirectStandardError $Stderr -WindowStyle Hidden -PassThru
-    $Deadline = [DateTime]::UtcNow.AddSeconds(20)
-    while ([DateTime]::UtcNow -lt $Deadline) {
+    $Process = $null
+    try {
+        $Process = Start-Process -FilePath $PowerShellPath -ArgumentList @(
+            '-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+            ('"' + $Child + '"'), '-TestRoot', ('"' + $Root + '"'), '-State', $State
+        ) -RedirectStandardOutput $Stdout -RedirectStandardError $Stderr -WindowStyle Hidden -PassThru
+        $Deadline = [DateTime]::UtcNow.AddSeconds(20)
+        while ([DateTime]::UtcNow -lt $Deadline) {
+            $Process.Refresh()
+            if ($Process.HasExited) { throw "$State terminal monitor exited before rendering." }
+            if ((Test-Path -LiteralPath $Stdout -PathType Leaf) -and (Get-Item -LiteralPath $Stdout).Length -gt 0) { break }
+            Start-Sleep -Milliseconds 250
+        }
+        if (-not (Test-Path -LiteralPath $Stdout -PathType Leaf) -or (Get-Item -LiteralPath $Stdout).Length -eq 0) {
+            throw "$State terminal monitor did not render within 20 seconds."
+        }
         $Process.Refresh()
-        if ($Process.HasExited) { throw "$State terminal monitor exited before rendering." }
-        if ((Test-Path -LiteralPath $Stdout -PathType Leaf) -and (Get-Item -LiteralPath $Stdout).Length -gt 0) { break }
-        Start-Sleep -Milliseconds 250
+        if ($Process.HasExited) { throw "$State terminal monitor did not remain latched." }
     }
-    if (-not (Test-Path -LiteralPath $Stdout -PathType Leaf) -or (Get-Item -LiteralPath $Stdout).Length -eq 0) {
-        throw "$State terminal monitor did not render within 20 seconds."
+    finally {
+        if ($null -ne $Process) {
+            try { $Process.Refresh() } catch { }
+            if (-not $Process.HasExited) {
+                Stop-Process -Id $Process.Id -Force -ErrorAction SilentlyContinue
+                try { $Process.WaitForExit() } catch { }
+            }
+        }
     }
-    $Process.Refresh()
-    if ($Process.HasExited) { throw "$State terminal monitor did not remain latched." }
-    Stop-Process -Id $Process.Id -Force
-    $Process.WaitForExit()
     $Output = if (Test-Path -LiteralPath $Stdout) { Get-Content -LiteralPath $Stdout -Raw } else { '' }
     $ErrorOutput = if (Test-Path -LiteralPath $Stderr) { Get-Content -LiteralPath $Stderr -Raw } else { '' }
     if ($null -eq $Output) { $Output = '' }
@@ -70,9 +80,6 @@ $Receipt = [ordered]@{
     status = 'pass'
     powershell_path = $PowerShellPath
     cases = $Cases
-    scientific_banner = 'yellow'
-    failure_banner = 'red'
-    paused_banner = 'blue'
     all_show_reason_and_log_paths = $true
 }
 $ReceiptPath = Join-Path $TestRoot 'terminal_banner_receipt.json'
