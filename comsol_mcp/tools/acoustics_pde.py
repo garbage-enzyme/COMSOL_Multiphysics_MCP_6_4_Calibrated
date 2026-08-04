@@ -252,7 +252,10 @@ def add_pde_interface(
         if normalized_form not in _PDE_INTERFACES:
             raise ValueError("form must be 'coefficient', 'general', or 'weak'")
         spec = _PDE_INTERFACES[normalized_form]
-        tag = _bounded_tag(physics_tag or str(spec["default_tag"]), "physics_tag")
+        tag = _bounded_tag(
+            str(spec["default_tag"]) if physics_tag is None else physics_tag,
+            "physics_tag",
+        )
         variables = _dependent_variables(dependent_variables)
         properties = _pde_properties(normalized_form, equation_properties)
         domains, named = _normalized_selection(

@@ -26,6 +26,7 @@ from src.jobs.thermo_optomechanical_replay_runner import (
     run_thermo_optomechanical_replay,
 )
 from src.jobs.thermo_optomechanical_replay_worker import _run as run_worker
+from src.tools.jobs import _preview_job_spec
 
 
 def _material_state(source: Path) -> dict:
@@ -278,6 +279,10 @@ def test_thermo_optomechanical_spec_is_closed_bounded_hash_bound_and_previewable
     assert len(spec["source_model_sha256"]) == 64
     assert len(spec["material_ledger_sha256"]) == 64
     assert _worker_module(spec["job_type"]).endswith("thermo_optomechanical_replay_worker")
+    preview = _preview_job_spec(raw)
+    assert preview["inventory"]["declared_optical_points"] == 2
+    assert preview["inventory"]["control_count"] == len(THERMO_OPTOMECHANICAL_CONTROLS)
+    assert preview["submission_manifest"]["hash_verified"] is True
 
     manager = JobManager(
         ascii_tmp_path / "manager" / "jobs",

@@ -5,11 +5,16 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
+from itertools import count
 from pathlib import Path
 
+import psutil
 import pytest
 
 import comsol_mcp.standalone.builder as builder_module
+import comsol_mcp.standalone.control as control_module
+import comsol_mcp.standalone.inspection as inspection_module
 from comsol_mcp.durable.io import append_jsonl_record, atomic_write_json
 from comsol_mcp.standalone.builder import (
     BUILD_SCHEMA,
@@ -310,6 +315,34 @@ def test_completed_terminal_must_bind_the_exact_result_journal(
         read_campaign_results(campaign)
 
 
+def test_result_rows_and_hash_share_one_file_snapshot(ascii_tmp_path, monkeypatch) -> None:
+    campaign = _campaign(ascii_tmp_path / "single-snapshot")
+    results_path = campaign / "assets" / "data" / "results.jsonl"
+    append_jsonl_record(results_path, _result("voltage_1V", 1.0))
+    original_read = inspection_module.read_file_bytes_bounded
+    reads = 0
+
+    def counted_read(path, *, max_bytes):
+        nonlocal reads
+        if Path(path) == results_path:
+            reads += 1
+        return original_read(path, max_bytes=max_bytes)
+
+    monkeypatch.setattr(inspection_module, "read_file_bytes_bounded", counted_read)
+    result = read_campaign_results(campaign)
+
+    assert reads == 1
+    assert result["results_sha256"] == inspection_module._sha256(results_path.read_bytes())
+    assert result["rows"][0]["point_id"] == "voltage_1V"
+
+
+def test_embedded_java_driver_has_no_unusable_model_return() -> None:
+    source = builder_module._resource_bytes("CapacitorPointTemplate.java").decode("utf-8")
+
+    assert "public static void run()" in source
+    assert "return null;" not in source
+
+
 @requires_windows_workstation_build
 def test_deployment_verification_rejects_executable_or_source_identity_tampering(
     ascii_tmp_path: Path,
@@ -402,3 +435,100 @@ def test_mcp_launch_uses_fixed_arguments_and_writes_path_free_record(
     serialized = records[0].read_text(encoding="utf-8")
     assert str(comsol_root) not in serialized
     assert json.loads(serialized)["comsol_root_included"] is False
+
+
+@requires_windows_workstation_build
+def test_failed_identity_capture_terminates_process_and_removes_launch_residue(
+    ascii_tmp_path: Path,
+) -> None:
+    deployment = ascii_tmp_path / "failed-launch"
+    build_standalone_executable(deployment)
+    comsol_root = ascii_tmp_path / "COMSOL64" / "Multiphysics"
+    for relative in (
+        Path("bin/win64/comsolcompile.exe"),
+        Path("bin/win64/comsolbatch.exe"),
+        Path("java/win64/jre/bin/java.exe"),
+    ):
+        target = comsol_root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b"fixture")
+
+    class FakeProcess:
+        pid = 12345
+        running = True
+        terminated = False
+
+        def poll(self):
+            return None if self.running else 1
+
+        def terminate(self):
+            self.terminated = True
+            self.running = False
+
+        def wait(self, *, timeout):
+            return 1
+
+    process = FakeProcess()
+    with pytest.raises(psutil.AccessDenied):
+        launch_standalone_campaign(
+            deployment,
+            comsol_root,
+            popen_factory=lambda *_args, **_kwargs: process,
+            identity_provider=lambda _pid: (_ for _ in ()).throw(psutil.AccessDenied(12345)),
+        )
+
+    assert process.terminated is True
+    assert not list((deployment / "assets" / "mcp-launches").iterdir())
+
+
+def test_launch_record_limit_is_serialized_across_concurrent_callers(
+    ascii_tmp_path: Path,
+    monkeypatch,
+) -> None:
+    deployment = ascii_tmp_path / "launch-limit"
+    launch_root = deployment / "assets" / "mcp-launches"
+    launch_root.mkdir(parents=True)
+    for index in range(control_module.MAX_MCP_LAUNCH_RECORDS - 1):
+        (launch_root / f"{index:032x}.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(
+        control_module,
+        "verify_standalone_deployment",
+        lambda _path: {"launcher_sha256": "a" * 64},
+    )
+    monkeypatch.setattr(control_module, "_validate_comsol_root", lambda path: Path(path))
+    pids = count(20000)
+
+    class FakeProcess:
+        def __init__(self):
+            self.pid = next(pids)
+
+        @staticmethod
+        def poll():
+            return 0
+
+    def launch():
+        try:
+            return launch_standalone_campaign(
+                deployment,
+                ascii_tmp_path / "comsol",
+                popen_factory=lambda *_args, **_kwargs: FakeProcess(),
+                identity_provider=lambda pid: {
+                    "pid": pid,
+                    "process_create_time": 1.0,
+                    "command_signature": "b" * 64,
+                },
+            )
+        except RuntimeError as exc:
+            return str(exc)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = list(pool.map(lambda _index: launch(), range(2)))
+
+    assert sum(isinstance(outcome, dict) for outcome in outcomes) == 1
+    assert outcomes.count("standalone MCP launch record limit reached") == 1
+    launch_ids = {
+        path.name.split(".", 1)[0]
+        for path in launch_root.iterdir()
+        if len(path.name.split(".", 1)[0]) == 32
+    }
+    assert len(launch_ids) == control_module.MAX_MCP_LAUNCH_RECORDS
