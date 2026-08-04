@@ -84,14 +84,16 @@ def test_two_shared_model_mutations_cannot_overlap(tmp_path, monkeypatch):
     assert not arbiter.lock_path.exists()
 
 
-def test_status_and_cancel_remain_responsive_during_shared_solve(tmp_path, monkeypatch):
-    read_root = tmp_path / "models"
-    write_root = tmp_path / "artifacts"
+def test_status_and_cancel_remain_responsive_during_shared_solve(ascii_tmp_path, monkeypatch):
+    test_root = ascii_tmp_path / "responsive-control-plane"
+    test_root.mkdir()
+    read_root = test_root / "models"
+    write_root = test_root / "artifacts"
     read_root.mkdir()
     write_root.mkdir()
     monkeypatch.setenv(MODEL_READ_ROOTS_ENV, str(read_root))
     monkeypatch.setenv(ARTIFACT_WRITE_ROOT_ENV, str(write_root))
-    arbiter = _arbiter(tmp_path, monkeypatch)
+    arbiter = _arbiter(test_root, monkeypatch)
     entered = threading.Event()
     release = threading.Event()
 
