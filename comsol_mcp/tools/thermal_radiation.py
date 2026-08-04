@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from comsol_mcp.contracts.thermal_radiation import (
     KirchhoffAssessmentRequest,
@@ -12,7 +12,7 @@ from comsol_mcp.contracts.thermal_radiation import (
 )
 
 
-def register_thermal_radiation_tools(mcp: FastMCP) -> None:
+def register_thermal_radiation_tools(mcp: MCPServer) -> None:
     """Register Kirchhoff assessment and thermal radiation evaluation."""
 
     @mcp.tool()  # type: ignore[untyped-decorator]

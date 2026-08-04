@@ -3,7 +3,7 @@
 import math
 from typing import Optional, Sequence
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from comsol_mcp.utils.validation import strict_json_integer
 
@@ -928,7 +928,7 @@ PHYSICS_INTERFACES = {
 }
 
 
-def register_physics_tools(mcp: FastMCP) -> None:
+def register_physics_tools(mcp: MCPServer) -> None:
     """Register physics tools with the MCP server."""
     
     @mcp.tool()

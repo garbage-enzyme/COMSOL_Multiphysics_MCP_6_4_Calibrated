@@ -6,7 +6,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Optional, Sequence, Union
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from comsol_mcp.durable.io import publish_file_exclusive
 
@@ -121,7 +121,7 @@ def export_result_file(model, node_name: str | None, file_path: str) -> str:
     return str(path)
 
 
-def register_results_tools(mcp: FastMCP) -> None:
+def register_results_tools(mcp: MCPServer) -> None:
     """Register results tools with the MCP server."""
 
     @mcp.tool()

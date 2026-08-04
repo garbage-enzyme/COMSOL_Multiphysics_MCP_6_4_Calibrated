@@ -11,7 +11,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Optional
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from comsol_mcp.durable import atomic_write_json
 
@@ -1278,7 +1278,7 @@ class SessionManager:
 session_manager = SessionManager()
 
 
-def register_session_tools(mcp: FastMCP) -> None:
+def register_session_tools(mcp: MCPServer) -> None:
     """Register session management tools with the MCP server."""
 
     @mcp.tool()

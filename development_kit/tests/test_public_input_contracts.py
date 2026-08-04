@@ -146,7 +146,7 @@ def test_every_full_profile_schema_node_has_a_structural_limit():
     server = create_server("bounded-full-discovery", profile="full")
     issues = []
     for tool in asyncio.run(server.list_tools()):
-        for path, node in _walk_schema(tool.inputSchema, tool.name):
+        for path, node in _walk_schema(tool.input_schema, tool.name):
             node_type = node.get("type")
             if node_type == "string" and "maxLength" not in node:
                 issues.append((path, "unbounded_string"))

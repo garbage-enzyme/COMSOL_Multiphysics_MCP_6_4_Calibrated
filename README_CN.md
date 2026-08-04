@@ -5,7 +5,7 @@
 [![CI](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/actions/workflows/ci.yml)
 [![Python 3.14](https://img.shields.io/badge/python-3.14-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
-![Release: 0.6.2](https://img.shields.io/badge/release-0.6.2-blue)
+![Release: 0.6.3](https://img.shields.io/badge/release-0.6.3-blue)
 ![Status: alpha](https://img.shields.io/badge/status-alpha-red)
 [![GitHub stars](https://img.shields.io/github/stars/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated?style=social)](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/stargazers)
 
@@ -39,7 +39,7 @@ Optics、材料与边界、durable jobs、物理证据、资源安全和故障�
 
 ## Client 兼容性与部署
 
-安装后的 FastMCP stdio server 已通过 Codex CLI 和 opencode 验证。Windows 11 上的
+安装后的 MCPServer stdio server 已通过 Codex CLI 和 opencode 验证。Windows 11 上的
 Claude Code 2.1.220 验收已完成 stdio 初始化，发现测试所用 `wave_optics` profile 的
 完整工具界面，并成功调用 `capabilities`、`comsol_status` 和 `solver_status`；server
 干净退出，未创建 solver lease，也未启动 COMSOL 进程。该结论只覆盖 client transport、
@@ -63,6 +63,15 @@ profile 选择、重启规则和 solver-free 验证请阅读独立指南：
 acceptance 报告应至少包含不启动 COMSOL 的 `initialize`、实时 `list_tools` 和
 `capabilities` 回读，并把 licensed start/solve/cleanup 覆盖单独标注。已安装工具界面
 以实时 discovery 为准，不以文档中复制的数量为准。
+
+`0.6.3` 以保守方式把运行基座更新到 MCP Python SDK `2.0.x`。工具、profile、schema
+和 stdio 配置仍保持已接受的旧协议兼容应用合同；本版本不会让 client opt in MCP
+`2026-07-28` 的 multi-round-trip request、cache hint、subscription 或 Tasks extension。
+
+initialize 响应也会通过旧 MCP initialize schema 携带一段简短安全说明：先 discovery
+和 preflight；只有用户明确要求时才 start、solve 或 mutate；源模型保持只读；执行成功、
+证据完整性和科学验证分开报告。client 可以采用或忽略这段提示；真正的安全边界仍由
+server 内强制执行的 ownership 和 validation 检查提供。
 
 ## 主要能力
 

@@ -20,7 +20,7 @@
     "status": "dependency_only",
     "python": ">=3.14,<3.15",
     "mph": ">=1.3.1,<1.4",
-    "mcp": ">=1.28.1,<2",
+    "mcp": ">=2.0.0,<2.1",
     "comsol_builds": [],
     "establishes_licensed_compatibility": false
   },

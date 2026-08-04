@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from src.evidence.integrity_controls import load_evidence_integrity_status
 from src.evidence.integrity_verifier import verify_evidence_integrity
@@ -19,7 +19,7 @@ SECRET = r"C:\private\model.mph"
 def test_integrity_tool_redacts_artifact_root_exception(monkeypatch):
     from src.tools import evidence_integrity
 
-    server = FastMCP("redaction-integrity")
+    server = MCPServer("redaction-integrity")
     register_evidence_integrity_tools(server)
     monkeypatch.setattr(
         evidence_integrity.PathPolicy,
@@ -37,7 +37,7 @@ def test_integrity_tool_redacts_artifact_root_exception(monkeypatch):
 def test_field_extraction_redacts_backend_exception(monkeypatch):
     from src.tools import field_evidence
 
-    server = FastMCP("redaction-field")
+    server = MCPServer("redaction-field")
     register_field_evidence_tools(server)
     monkeypatch.setattr(field_evidence.session_manager, "get_model", lambda _name: object())
     monkeypatch.setattr(
@@ -78,7 +78,7 @@ def test_model_resource_redacts_backend_exception(monkeypatch):
         def name(self):
             raise RuntimeError(SECRET)
 
-    server = FastMCP("redaction-resource")
+    server = MCPServer("redaction-resource")
     register_model_resources(server)
     monkeypatch.setattr(
         model_resources.session_manager, "get_model", lambda _name: BrokenModel()

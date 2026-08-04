@@ -74,7 +74,7 @@ def test_shared_feature_capabilities_and_tools_are_explicit():
 
 def test_shared_attach_public_schema_requires_confirmation():
     server = _shared_server("shared-schema")
-    schemas = {tool.name: tool.inputSchema for tool in asyncio.run(server.list_tools())}
+    schemas = {tool.name: tool.input_schema for tool in asyncio.run(server.list_tools())}
     attach = schemas["shared_server_attach"]
 
     assert set(attach["required"]) == {"host", "port", "user_confirmed"}

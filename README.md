@@ -5,7 +5,7 @@ English | [中文](README_CN.md)
 [![CI](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/actions/workflows/ci.yml)
 [![Python 3.14](https://img.shields.io/badge/python-3.14-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
-![Release: 0.6.2](https://img.shields.io/badge/release-0.6.2-blue)
+![Release: 0.6.3](https://img.shields.io/badge/release-0.6.3-blue)
 ![Status: alpha](https://img.shields.io/badge/status-alpha-red)
 [![GitHub stars](https://img.shields.io/github/stars/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated?style=social)](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/stargazers)
 
@@ -43,7 +43,7 @@ release procedures remain in this repository's development kit.
 
 ## Client compatibility and deployment
 
-The installed FastMCP stdio server has been validated with Codex CLI and
+The installed MCPServer stdio server has been validated with Codex CLI and
 opencode. A Windows 11 acceptance run with Claude Code 2.1.220 completed stdio
 initialization, discovered the complete tested `wave_optics` tool surface, and
 called `capabilities`, `comsol_status`, and `solver_status` successfully. The
@@ -75,6 +75,19 @@ A real client acceptance report should include `initialize`, live `list_tools`,
 and `capabilities` readback without starting COMSOL, then separately label any
 licensed start/solve/cleanup coverage. Treat live discovery, not a count copied
 from documentation, as the authority for the installed tool surface.
+
+Release `0.6.3` uses the MCP Python SDK `2.0.x` runtime base conservatively.
+Its tools, profiles, schemas, and stdio configuration remain on the accepted
+legacy-compatible application contract; the release does not opt clients into
+MCP `2026-07-28` features such as multi-round-trip requests, cache hints,
+subscriptions, or Tasks extensions.
+
+The initialize response also carries a short safety instruction through the
+legacy MCP initialize schema: discover capabilities and preflight first, require
+an explicit user request before start/solve/mutation, keep source models
+read-only, and separate execution success from evidence integrity and scientific
+validation. Clients may use or ignore this hint; the server's enforced ownership
+and validation checks remain the security boundary.
 
 ## Highlights
 

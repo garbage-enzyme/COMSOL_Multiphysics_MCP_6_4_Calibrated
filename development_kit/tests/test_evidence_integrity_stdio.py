@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import os
 import sys
-from datetime import timedelta
 from pathlib import Path
 
 import anyio
@@ -21,9 +20,13 @@ ROOT = Path(__file__).parents[2]
 
 
 def _decode(result) -> dict:
-    if getattr(result, "isError", False):
+    if getattr(result, "is_error", getattr(result, "isError", False)):
         raise RuntimeError(f"MCP tool returned an error: {result}")
-    structured = getattr(result, "structuredContent", None)
+    structured = getattr(
+        result,
+        "structured_content",
+        getattr(result, "structuredContent", None),
+    )
     if isinstance(structured, dict):
         value = structured.get("result", structured)
         if isinstance(value, dict):
@@ -58,7 +61,7 @@ async def _exercise(request: dict, artifact_root: Path, runtime_root: Path) -> N
         async with ClientSession(
             read,
             write,
-            read_timeout_seconds=timedelta(seconds=30),
+            read_timeout_seconds=30.0,
         ) as session:
             await session.initialize()
             listed = await session.list_tools()

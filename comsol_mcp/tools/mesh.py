@@ -2,7 +2,7 @@
 
 from typing import Optional
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from .session import session_manager
 
@@ -123,7 +123,7 @@ def get_mesh_info(
     return {"success": True, "mesh": info}
 
 
-def register_mesh_tools(mcp: FastMCP) -> None:
+def register_mesh_tools(mcp: MCPServer) -> None:
     """Register mesh tools with the MCP server."""
     
     @mcp.tool()

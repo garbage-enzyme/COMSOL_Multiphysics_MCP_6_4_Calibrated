@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from src.evidence.material_expressions import preview_material_expression
 from src.tools.material_expressions import register_material_expression_tools
 
@@ -270,7 +270,7 @@ assert not any(name.startswith('jpype') for name in sys.modules)
 
 
 def test_public_tool_returns_bounded_validation_error_without_starting_solver():
-    server = FastMCP("material-expression-test")
+    server = MCPServer("material-expression-test")
     register_material_expression_tools(server)
     tool = server._tool_manager._tools["wave_optics_material_expression_preview"]
 
@@ -292,10 +292,10 @@ def test_public_tool_registration_and_invocation_remain_solver_isolated():
     code = r"""
 import math
 import sys
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from comsol_mcp.tools.material_expressions import register_material_expression_tools
 
-server = FastMCP("material-expression-isolation")
+server = MCPServer("material-expression-isolation")
 register_material_expression_tools(server)
 tool = server._tool_manager._tools["wave_optics_material_expression_preview"]
 result = tool.fn(
@@ -324,7 +324,7 @@ assert not any(name.startswith("jpype") for name in sys.modules)
 
 
 def test_public_tool_contains_tiny_wavelength_arithmetic_as_validation_error():
-    server = FastMCP("material-expression-tiny-wavelength-test")
+    server = MCPServer("material-expression-tiny-wavelength-test")
     register_material_expression_tools(server)
     tool = server._tool_manager._tools["wave_optics_material_expression_preview"]
     result = tool.fn(

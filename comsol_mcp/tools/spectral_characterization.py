@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 from typing import Any, Optional
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 
 def _nonfinite_row_summary(bundle_spec: dict[str, Any]) -> dict[str, Any] | None:
@@ -55,7 +55,7 @@ def _nonfinite_row_summary(bundle_spec: dict[str, Any]) -> dict[str, Any] | None
     }
 
 
-def register_spectral_characterization_tools(mcp: FastMCP) -> None:
+def register_spectral_characterization_tools(mcp: MCPServer) -> None:
     """Register bounded solver-free spectral evidence tools."""
 
     @mcp.tool()

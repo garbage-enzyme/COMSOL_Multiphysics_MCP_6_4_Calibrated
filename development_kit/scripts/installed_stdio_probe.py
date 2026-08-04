@@ -8,13 +8,18 @@ import hashlib
 import json
 import os
 import time
-from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
-from mcp.shared.exceptions import McpError
+from mcp.shared.exceptions import MCPError
+
+
+def _sdk_attribute(value: Any, snake_case: str, legacy_alias: str, default: Any = None) -> Any:
+    if hasattr(value, snake_case):
+        return getattr(value, snake_case)
+    return getattr(value, legacy_alias, default)
 
 
 def _object_payload(value: Any) -> dict[str, Any] | None:
@@ -25,7 +30,7 @@ def _object_payload(value: Any) -> dict[str, Any] | None:
 
 
 def _tool_payload(result: Any) -> dict[str, Any]:
-    structured = getattr(result, "structuredContent", None)
+    structured = _sdk_attribute(result, "structured_content", "structuredContent")
     payload = _object_payload(structured)
     if payload is not None:
         return payload
@@ -145,9 +150,9 @@ async def _expect_rejection(
         result = await session.call_tool(
             tool_name,
             arguments,
-            read_timeout_seconds=timedelta(seconds=10),
+            read_timeout_seconds=10.0,
         )
-    except McpError as exc:
+    except MCPError as exc:
         return {
             "case_id": case_id,
             "rejected": True,
@@ -161,7 +166,7 @@ async def _expect_rejection(
             "mode": "client_or_transport_failure",
             "exception_type": type(exc).__name__,
         }
-    rejected = bool(getattr(result, "isError", False))
+    rejected = bool(_sdk_attribute(result, "is_error", "isError", False))
     return {
         "case_id": case_id,
         "rejected": rejected,
@@ -183,7 +188,7 @@ async def _probe(command: Path, workdir: Path, stderr_path: Path) -> dict[str, A
             async with ClientSession(
                 streams[0],
                 streams[1],
-                read_timeout_seconds=timedelta(seconds=15),
+                read_timeout_seconds=15.0,
             ) as session:
                 initialized = await session.initialize()
                 listed = await session.list_tools()
@@ -192,20 +197,20 @@ async def _probe(command: Path, workdir: Path, stderr_path: Path) -> dict[str, A
                 preflight_result = await session.call_tool(
                     "solver_preflight",
                     {},
-                    read_timeout_seconds=timedelta(seconds=15),
+                    read_timeout_seconds=15.0,
                 )
                 preflight_wall = time.perf_counter() - preflight_started
-                if getattr(preflight_result, "isError", False):
+                if _sdk_attribute(preflight_result, "is_error", "isError", False):
                     raise RuntimeError("installed cold solver_preflight call returned a tool error")
                 preflight = _tool_payload(preflight_result)
                 spectral_started = time.perf_counter()
                 spectral_result = await session.call_tool(
                     "spectral_characterize",
                     _spectral_arguments(),
-                    read_timeout_seconds=timedelta(seconds=15),
+                    read_timeout_seconds=15.0,
                 )
                 spectral_wall = time.perf_counter() - spectral_started
-                if getattr(spectral_result, "isError", False):
+                if _sdk_attribute(spectral_result, "is_error", "isError", False):
                     raise RuntimeError(
                         "installed cold spectral_characterize call returned a tool error"
                     )
@@ -217,9 +222,9 @@ async def _probe(command: Path, workdir: Path, stderr_path: Path) -> dict[str, A
                 capabilities_result = await session.call_tool(
                     "capabilities",
                     {},
-                    read_timeout_seconds=timedelta(seconds=15),
+                    read_timeout_seconds=15.0,
                 )
-                if getattr(capabilities_result, "isError", False):
+                if _sdk_attribute(capabilities_result, "is_error", "isError", False):
                     raise RuntimeError("installed capabilities call returned a tool error")
                 capabilities = _tool_payload(capabilities_result)
                 malformed = [
@@ -255,9 +260,11 @@ async def _probe(command: Path, workdir: Path, stderr_path: Path) -> dict[str, A
         "schema_version": "1.1.0",
         "transport": "stdio",
         "initialize": {
-            "protocol_version": initialized.protocolVersion,
-            "server_name": initialized.serverInfo.name,
-            "server_version": initialized.serverInfo.version,
+            "protocol_version": _sdk_attribute(
+                initialized, "protocol_version", "protocolVersion"
+            ),
+            "server_name": _sdk_attribute(initialized, "server_info", "serverInfo").name,
+            "server_version": _sdk_attribute(initialized, "server_info", "serverInfo").version,
         },
         "tool_count": len(tool_names),
         "tool_names_sha256": hashlib.sha256(names_payload).hexdigest(),

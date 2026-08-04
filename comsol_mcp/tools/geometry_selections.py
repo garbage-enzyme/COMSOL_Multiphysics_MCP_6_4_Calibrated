@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any, Optional
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from comsol_mcp.utils.validation import strict_json_integer
 
@@ -280,7 +280,7 @@ def create_side_selections(
     }
 
 
-def register_geometry_selection_tools(mcp: FastMCP) -> None:
+def register_geometry_selection_tools(mcp: MCPServer) -> None:
     """Register bounded named-selection tools."""
 
     @mcp.tool()  # type: ignore[untyped-decorator]

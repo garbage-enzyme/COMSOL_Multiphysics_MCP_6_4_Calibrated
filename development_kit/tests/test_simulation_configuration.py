@@ -14,6 +14,7 @@ from comsol_mcp.evidence.simulation_configuration import (
     normalize_simulation_configuration,
 )
 from comsol_mcp.tools.jobs import _preview_job_spec
+from development_kit.tests.mcp_test_support import decode_tool_result
 
 
 def _quantity(value: float, unit: str, dimension: str = "length") -> dict[str, object]:
@@ -96,15 +97,7 @@ def _configuration() -> dict[str, object]:
 
 
 def _decode_public(result):
-    if isinstance(result, tuple):
-        result = result[0]
-    for block in result:
-        text = getattr(block, "text", None)
-        if isinstance(text, str):
-            value = json.loads(text)
-            if isinstance(value, dict):
-                return value
-    raise AssertionError("public result did not contain a JSON object")
+    return decode_tool_result(result)
 
 
 def test_unit_normalization_is_idempotent_and_semantically_equal():

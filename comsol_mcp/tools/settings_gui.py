@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from comsol_mcp.settings_gui_launcher import launch_settings_gui
 
 
-def register_settings_gui_tools(mcp: FastMCP) -> None:
+def register_settings_gui_tools(mcp: MCPServer) -> None:
     """Register the solver-free detached Settings GUI launcher."""
 
     @mcp.tool(name="settings.start")  # type: ignore[untyped-decorator]

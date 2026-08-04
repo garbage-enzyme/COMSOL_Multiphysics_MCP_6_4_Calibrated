@@ -226,7 +226,7 @@ def _header(language: str) -> str:
         "nplurals=1; plural=0;" if language.startswith("zh_") else "nplurals=2; plural=(n != 1);"
     )
     return (
-        "Project-Id-Version: comsol-mcp alpha6.2\n"
+        "Project-Id-Version: comsol-mcp alpha6.3\n"
         "MIME-Version: 1.0\n"
         "Content-Type: text/plain; charset=UTF-8\n"
         "Content-Transfer-Encoding: 8bit\n"

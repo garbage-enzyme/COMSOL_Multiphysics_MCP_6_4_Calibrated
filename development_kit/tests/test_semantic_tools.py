@@ -12,24 +12,17 @@ import uuid
 from pathlib import Path
 
 import pytest
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from src.knowledge.semantic_runtime import SemanticService, semantic_configuration
 from src.server import create_server
 from src.tools.semantic_docs import register_semantic_doc_tools
 
 from development_kit.tests.semantic_test_support import isolated_semantic_environment
+from development_kit.tests.mcp_test_support import decode_tool_result
 
 
 def _decode_public_tool_result(result):
-    if isinstance(result, dict):
-        return result
-    for block in result:
-        text = getattr(block, "text", None)
-        if isinstance(text, str):
-            value = json.loads(text)
-            if isinstance(value, dict):
-                return value
-    raise ValueError("public FastMCP result did not contain a JSON object")
+    return decode_tool_result(result)
 
 
 @pytest.fixture
@@ -183,7 +176,7 @@ def test_public_tool_schemas_expose_queries_filters_and_controls_but_no_paths(mo
     import src.tools.semantic_docs as module
 
     monkeypatch.setattr(module, "get_semantic_service", lambda: FakeService())
-    server = FastMCP("semantic-tools-test")
+    server = MCPServer("semantic-tools-test")
     register_semantic_doc_tools(server)
 
     async def exercise():
@@ -207,7 +200,7 @@ def test_public_tool_schemas_expose_queries_filters_and_controls_but_no_paths(mo
     result = _decode_public_tool_result(result)
     status = _decode_public_tool_result(status)
     reset = _decode_public_tool_result(reset)
-    schemas = {tool.name: tool.inputSchema for tool in listed}
+    schemas = {tool.name: tool.input_schema for tool in listed}
     serialized = json.dumps(schemas, sort_keys=True)
 
     assert result["success"] is status["success"] is reset["success"] is True
@@ -224,14 +217,7 @@ def test_semantic_profile_discovery_is_static_and_parent_imports_no_ml_stack():
     code = """
 import asyncio, json, sys
 from src.server import create_server
-def decode(result):
-    for block in result:
-        text = getattr(block, 'text', None)
-        if isinstance(text, str):
-            value = json.loads(text)
-            if isinstance(value, dict):
-                return value
-    raise RuntimeError('public FastMCP result did not contain a JSON object')
+from development_kit.tests.mcp_test_support import decode_tool_result as decode
 server = create_server('semantic-feature-subprocess', profile='core')
 tools = asyncio.run(server.list_tools())
 names = sorted(tool.name for tool in tools)

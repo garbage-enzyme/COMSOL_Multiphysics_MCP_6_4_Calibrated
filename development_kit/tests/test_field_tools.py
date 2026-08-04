@@ -4,7 +4,7 @@ import hashlib
 from pathlib import Path
 
 import pytest
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from src.evidence.field_bundle import normalize_field_evidence_request
 from src.tools.field_evidence import register_field_evidence_tools
 
@@ -57,7 +57,7 @@ class _Model:
 
 
 def _tool(name="wave_optics_field_datasets"):
-    server = FastMCP("field-evidence-tools-test")
+    server = MCPServer("field-evidence-tools-test")
     register_field_evidence_tools(server)
     return server._tool_manager._tools[name].fn
 

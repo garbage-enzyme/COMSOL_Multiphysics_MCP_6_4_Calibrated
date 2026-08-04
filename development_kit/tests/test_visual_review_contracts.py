@@ -10,7 +10,7 @@ from copy import deepcopy
 from pathlib import Path
 
 import pytest
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from src.evidence.contracts import canonical_sha256
 from src.evidence.visual_review import (
     build_visual_review_receipt,
@@ -23,6 +23,8 @@ from src.evidence.visual_review import (
     validate_visual_review_request,
 )
 from src.tools.visual_review import register_visual_review_tools
+
+from development_kit.tests.mcp_test_support import decode_tool_result
 
 CONFIG_HASH = "a" * 64
 ON_HASH = "b" * 64
@@ -680,7 +682,7 @@ assert 'src.tools.ownership' not in sys.modules
 
 
 def test_public_visual_review_tools_fail_closed_without_starting_comsol():
-    server = FastMCP("visual-review-tools-test")
+    server = MCPServer("visual-review-tools-test")
     register_visual_review_tools(server)
 
     capability = asyncio.run(
@@ -707,22 +709,8 @@ def test_public_visual_review_tools_fail_closed_without_starting_comsol():
         )
     )
 
-    def decode(result):
-        if isinstance(result, dict):
-            return result
-        if isinstance(result, tuple) and len(result) == 2 and isinstance(result[1], dict):
-            return result[1]
-        blocks = result[0] if isinstance(result, tuple) and len(result) == 2 else result
-        for block in blocks:
-            text = getattr(block, "text", None)
-            if isinstance(text, str):
-                value = json.loads(text)
-                if isinstance(value, dict):
-                    return value
-        raise ValueError("public FastMCP call did not return a JSON object")
-
-    capability = decode(capability)
-    invalid_request = decode(invalid_request)
+    capability = decode_tool_result(capability)
+    invalid_request = decode_tool_result(invalid_request)
 
     assert capability["capability_state"] == "unavailable"
     assert invalid_request["success"] is False

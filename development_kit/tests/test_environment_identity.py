@@ -56,7 +56,19 @@ def test_environment_identity_separates_dependency_and_external_runtime_evidence
     transitive = {item["name"]: item for item in identity["distributions"]["relevant_transitive"]}
 
     assert set(direct) == {"matplotlib", "mcp", "mph", "numpy", "pydantic", "psutil", "scipy"}
-    assert {"jpype1", "pydantic-core", "starlette"} <= set(transitive)
+    assert set(transitive) == {
+        "anyio",
+        "httpcore2",
+        "httpx2",
+        "jpype1",
+        "mcp-types",
+        "opentelemetry-api",
+        "pydantic-core",
+        "starlette",
+        "truststore",
+        "uvicorn",
+    }
+    assert all(transitive[name]["availability"] == "installed" for name in transitive)
     assert direct["mph"]["availability"] == "installed"
     assert identity["licensed_runtime_declaration"] == {
         "status": "exact_licensed_acceptance",

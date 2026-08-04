@@ -15,7 +15,7 @@ topology-mismatch issue that occurs when a patch domain changes the cross-sectio
 
 from typing import Optional, Sequence
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from .session import session_manager
 
@@ -360,7 +360,7 @@ def _build_periodic_mesh(comp, side_pairs: dict):
 # ---------------------------------------------------------------------------
 
 
-def register_mim_patch_tools(mcp: FastMCP) -> None:
+def register_mim_patch_tools(mcp: MCPServer) -> None:
     """Register MIM patch metasurface tools."""
 
     @mcp.tool()

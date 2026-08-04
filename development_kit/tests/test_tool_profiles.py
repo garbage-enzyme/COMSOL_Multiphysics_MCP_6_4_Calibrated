@@ -13,6 +13,8 @@ from src.shared_session.contracts import SHARED_SERVER_FEATURE_ENV
 from src.tools.catalog import FEATURE_NAMES, PROFILE_NAMES, TOOL_METADATA, snapshot_tool_schemas
 from src.tools.profiles import DEFAULT_PROFILE, PROFILE_ENV_VAR, ProfileSelection, resolve_profile
 
+from development_kit.tests.mcp_test_support import decode_tool_result
+
 SNAPSHOT_DIR = Path(__file__).parent / "snapshots"
 ROOT = Path(__file__).parents[2]
 
@@ -22,16 +24,7 @@ def _tool_names(server) -> list[str]:
 
 
 def _call_tool(server, name: str, arguments: dict) -> dict:
-    result = asyncio.run(server.call_tool(name, arguments))
-    if isinstance(result, dict):
-        return result
-    for block in result:
-        text = getattr(block, "text", None)
-        if isinstance(text, str):
-            value = json.loads(text)
-            if isinstance(value, dict):
-                return value
-    raise ValueError("public FastMCP call did not return a JSON object")
+    return decode_tool_result(asyncio.run(server.call_tool(name, arguments)))
 
 
 def test_default_profile_is_core_after_h3_cutover(monkeypatch):

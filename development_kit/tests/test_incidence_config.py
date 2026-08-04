@@ -5,7 +5,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from src.tools import incidence_config
 from src.tools.derived_geometry import _DERIVED, DerivedGeometryRecord
 from src.tools.incidence_config import (
@@ -333,7 +333,7 @@ def test_angle_evaluation_accepts_mph_zero_dimensional_numpy_scalar():
 
 def test_dirty_or_untracked_models_are_rejected_by_public_tool(monkeypatch):
     model, record = fixture()
-    server = FastMCP("incidence-preview-test")
+    server = MCPServer("incidence-preview-test")
     register_incidence_config_tools(server)
     tool = server._tool_manager._tools["wave_optics_incidence_preview"]
     monkeypatch.setattr(incidence_config.session_manager, "get_model", lambda name: model)
@@ -392,7 +392,7 @@ def test_atomic_apply_updates_parent_and_both_ports_with_exact_readback():
 def test_public_apply_uses_one_locked_preview_apply_transaction(monkeypatch):
     model, record = fixture()
     initial = preview(model, record)
-    server = FastMCP("incidence-apply-test")
+    server = MCPServer("incidence-apply-test")
     register_incidence_config_tools(server)
     tool = server._tool_manager._tools["wave_optics_incidence_apply"]
     monkeypatch.setattr(incidence_config.session_manager, "get_model", lambda name: model)

@@ -2,14 +2,14 @@
   "schema_name": "comsol_mcp.tested_versions",
   "schema_version": "2.0.0",
   "description": "Human-reviewed runtime and optional dependency versions for the Python 3.14 production lane. Package metadata in pyproject.toml governs compatible ranges; the complete transitive release lock governs the accepted Windows environment.",
-  "last_reviewed": "2026-08-03",
+  "last_reviewed": "2026-08-04",
   "production_python_3_14": {
     "python": "3.14.6",
     "abi": "cp314-win_amd64",
     "gil_mode": "standard",
     "platform": "win_amd64",
     "direct_dependencies": {
-      "mcp": "1.29.0",
+      "mcp": "2.0.0",
       "mph": "1.3.1",
       "matplotlib": "3.11.1",
       "numpy": "2.5.1",
@@ -22,7 +22,7 @@
         "pymupdf": "1.28.0"
       }
     },
-    "test_result": "alpha6.1 candidate resolution, focused dependency and GUI suites, three mypy 2.3 strict groups, and pip check passed; final exact-SHA gates pending",
+    "test_result": "alpha6.3 MCP SDK 2.0 candidate: minimum and current-compatible lanes, 2530-test final quality suite plus 3-test startup tail, locked package/install/stdio gate, four frozen legacy revisions, MCP 1.28.1 client, and Codex CLI 0.146.0 passed solver-free; exact-SHA CI pending",
     "licensed_result": {
       "status": "passed",
       "source_commit": "afc466f6fd12a5aba92320081588bc6f788c39c2",
@@ -45,7 +45,7 @@
     "platform": "win_amd64",
     "constraints": "constraints/minimum_supported_py314.txt",
     "direct_dependencies": {
-      "mcp": "1.28.1",
+      "mcp": "2.0.0",
       "mph": "1.3.1",
       "matplotlib": "3.10.7",
       "numpy": "2.3.3",
@@ -72,15 +72,15 @@
   },
   "release_lock": {
     "path": "constraints/release_locked_py314.txt",
-    "sha256": "c876a0e12c23d6e2ded96a1df0f439295c1565410b8c1181fff922924ce8e794",
-    "requirement_count": 46,
+    "sha256": "ea3d25f7b97d67bf77fb27be2decc79a4858b4170b539d9e338592422e8fcca6",
+    "requirement_count": 45,
     "scope": "complete transitive default runtime dependencies",
     "install_mode": "pip --require-hashes followed by local wheel --no-deps"
   },
   "notes": [
     "Python 3.14 is the only supported runtime; Python 3.15 requires a new compatibility gate.",
     "The standard GIL-enabled CPython ABI is required; the free-threaded ABI is not accepted.",
-    "MCP SDK 1.29.0 is the accepted production line; 2.x requires a dedicated migration gate.",
+    "MCP SDK 2.0.0 is the conservative candidate base; MCP 2026 application features remain disabled and legacy protocol compatibility is mandatory.",
     "MPh 1.3.1 is calibrated for COMSOL Multiphysics 6.4.0.293.",
     "PyMuPDF 1.28.0 is reviewed only for the manuals extra and is outside the default runtime release lock.",
     "Optional semantic dependencies are outside the default runtime release lock."

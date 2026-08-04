@@ -4,7 +4,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Optional
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from comsol_mcp.durable import read_file_bytes_bounded
 
@@ -400,7 +400,7 @@ def get_best_practices(category: str) -> dict:
 
 
 def register_knowledge_tools(
-    mcp: FastMCP,
+    mcp: MCPServer,
 ) -> None:
     """Register lightweight static knowledge tools.
 

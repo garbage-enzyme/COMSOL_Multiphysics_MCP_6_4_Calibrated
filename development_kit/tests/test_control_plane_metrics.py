@@ -17,13 +17,15 @@ import pytest
 import src.knowledge.lexical_manual as lexical_module
 import src.tools.jobs as jobs_module
 import src.tools.ownership as ownership_module
-from mcp.server.fastmcp import FastMCP
-from mcp.server.fastmcp.exceptions import ToolError
+from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 from src.jobs.store import JOB_SCHEMA_VERSION, JobStore
 from src.tools.capabilities import get_capabilities
 from src.tools.ownership import SolverOwnership
 from src.tools.profiles import register_profiled, resolve_profile
 from src.utils.control_plane import ControlPlaneMetrics, control_plane_metrics, measured_call
+
+from development_kit.tests.mcp_test_support import decode_tool_result
 
 
 @pytest.fixture(autouse=True)
@@ -141,7 +143,7 @@ def test_capability_job_and_manual_tools_attach_bounded_evidence(runtime_root, m
     assert capabilities["control_plane"]["outcome"] == "success"
 
     monkeypatch.setattr(jobs_module, "job_manager", jobs_module.JobManager(runtime_root / "jobs"))
-    job_server = FastMCP("control-plane-jobs")
+    job_server = MCPServer("control-plane-jobs")
     jobs_module.register_job_tools(job_server)
     status = job_server._tool_manager._tools["job_status"].fn("missing")
     tail = job_server._tool_manager._tools["job_tail"].fn("missing", 5)
@@ -156,7 +158,7 @@ def test_capability_job_and_manual_tools_attach_bounded_evidence(runtime_root, m
         ]
     )
     monkeypatch.setattr(lexical_module, "run_bounded", lambda *_args, **_kwargs: next(responses))
-    manual_server = FastMCP("control-plane-manuals")
+    manual_server = MCPServer("control-plane-manuals")
     lexical_module.register_lexical_manual_tools(manual_server)
     busy = manual_server._tool_manager._tools["manual_search"].fn("query")
     timeout = manual_server._tool_manager._tools["manual_read_pages"].fn("manual.pdf", [1])
@@ -217,7 +219,7 @@ def test_concurrent_wrappers_record_bounded_latency_and_overload_outcomes(
     runtime_root, monkeypatch
 ):
     monkeypatch.setattr(jobs_module, "job_manager", jobs_module.JobManager(runtime_root / "jobs"))
-    jobs_server = FastMCP("control-plane-concurrent-jobs")
+    jobs_server = MCPServer("control-plane-concurrent-jobs")
     jobs_module.register_job_tools(jobs_server)
 
     own = SolverOwnership(
@@ -230,7 +232,7 @@ def test_concurrent_wrappers_record_bounded_latency_and_overload_outcomes(
         owner="control-plane-concurrent",
     )
     monkeypatch.setattr(ownership_module, "ownership_manager", own)
-    ownership_server = FastMCP("control-plane-concurrent-ownership")
+    ownership_server = MCPServer("control-plane-concurrent-ownership")
     ownership_module.register_ownership_tools(ownership_server)
 
     response_lock = threading.Lock()
@@ -248,7 +250,7 @@ def test_concurrent_wrappers_record_bounded_latency_and_overload_outcomes(
         return {"success": False, "error_type": "TimeoutError", "error": "deadline exceeded"}
 
     monkeypatch.setattr(lexical_module, "run_bounded", manual_response)
-    manual_server = FastMCP("control-plane-concurrent-manual")
+    manual_server = MCPServer("control-plane-concurrent-manual")
     lexical_module.register_lexical_manual_tools(manual_server)
 
     calls = []
@@ -295,8 +297,8 @@ def test_concurrent_wrappers_record_bounded_latency_and_overload_outcomes(
     )
 
 
-def _profiled_preflight_server() -> FastMCP:
-    server = FastMCP("control-plane-preflight")
+def _profiled_preflight_server() -> MCPServer:
+    server = MCPServer("control-plane-preflight")
     register_profiled(
         server,
         ownership_module.register_ownership_tools,
@@ -332,11 +334,11 @@ def test_public_solver_preflight_runs_entire_callback_off_event_loop(monkeypatch
 
     async def exercise():
         event_loop_thread = threading.get_ident()
-        task = asyncio.create_task(tool.run({}))
+        task = asyncio.create_task(server.call_tool("solver_preflight", {}))
         assert await asyncio.to_thread(entered.wait, 1.0)
         event_loop_progress_thread = threading.get_ident()
         release.set()
-        result = await asyncio.wait_for(task, timeout=2.0)
+        result = decode_tool_result(await asyncio.wait_for(task, timeout=2.0))
         return event_loop_thread, event_loop_progress_thread, result
 
     event_loop_thread, progress_thread, result = asyncio.run(exercise())
@@ -395,11 +397,11 @@ def test_public_solver_preflight_worker_exception_is_transported(monkeypatch):
             raise RuntimeError("bounded preflight failure")
 
     monkeypatch.setattr(ownership_module, "ownership_manager", OwnershipStub())
-    tool = _profiled_preflight_server()._tool_manager._tools["solver_preflight"]
+    server = _profiled_preflight_server()
 
     async def exercise():
         with pytest.raises(ToolError, match="bounded preflight failure"):
-            await asyncio.wait_for(tool.run({}), timeout=2.0)
+            await asyncio.wait_for(server.call_tool("solver_preflight", {}), timeout=2.0)
 
     asyncio.run(exercise())
 

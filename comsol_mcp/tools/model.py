@@ -10,7 +10,7 @@ from pathlib import Path
 from tempfile import mkdtemp
 from typing import Optional
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from comsol_mcp.durable.io import publish_file_exclusive
 
@@ -223,7 +223,7 @@ def create_model_component(model, component_name: str, space_dimension: int) -> 
     }
 
 
-def register_model_tools(mcp: FastMCP) -> None:
+def register_model_tools(mcp: MCPServer) -> None:
     """Register model management tools with the MCP server."""
 
     @mcp.tool()

@@ -9,7 +9,7 @@ import re
 import threading
 from typing import Any, Literal
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from .derived_geometry import DerivedGeometryRecord, _record
 from .session import session_manager
@@ -552,7 +552,7 @@ def apply_incidence(
         )
 
 
-def register_incidence_config_tools(mcp: FastMCP) -> None:
+def register_incidence_config_tools(mcp: MCPServer) -> None:
     """Register the derived-model-only incidence preview/apply surface."""
 
     @mcp.tool()

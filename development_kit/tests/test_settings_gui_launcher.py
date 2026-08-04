@@ -13,18 +13,11 @@ from comsol_mcp import settings_gui_launcher as launcher
 from comsol_mcp.server import create_server
 from comsol_mcp.settings_gui_handshake import publish_handshake
 
+from development_kit.tests.mcp_test_support import decode_tool_result
+
 
 def _call_tool(server, name: str, arguments: dict) -> dict:
-    result = asyncio.run(server.call_tool(name, arguments))
-    if isinstance(result, dict):
-        return result
-    for block in result:
-        text = getattr(block, "text", None)
-        if isinstance(text, str):
-            value = json.loads(text)
-            if isinstance(value, dict):
-                return value
-    raise ValueError("public FastMCP call did not return a JSON object")
+    return decode_tool_result(asyncio.run(server.call_tool(name, arguments)))
 
 
 def test_detached_launch_uses_pythonw_devnull_and_ready_handshake(
@@ -61,7 +54,7 @@ def test_detached_launch_uses_pythonw_devnull_and_ready_handshake(
     assert result == {
         "success": True,
         "state": "launched",
-        "gui_release": "alpha6.2",
+        "gui_release": "alpha6.3",
         "restart_required_after_change": True,
         "message_code": "settings_gui_opened",
         "contains_local_path": False,
@@ -187,7 +180,7 @@ def test_public_dispatch_has_no_arguments_and_returns_tool_result(monkeypatch) -
     expected = {
         "success": True,
         "state": "already_running",
-        "gui_release": "alpha6.2",
+        "gui_release": "alpha6.3",
         "restart_required_after_change": True,
         "message_code": "settings_gui_already_open",
         "contains_local_path": False,

@@ -42,11 +42,11 @@ def test_committed_runtime_dependencies_match_reviewed_license_snapshot() -> Non
     receipt = build_license_receipt(
         PYPROJECT,
         REVIEW,
-        as_of=date(2026, 7, 18),
+        as_of=date(2026, 8, 4),
     )
 
     assert receipt["status"] == "passed"
-    assert receipt["as_of"] == "2026-07-18"
+    assert receipt["as_of"] == "2026-08-04"
     assert receipt["dependency_count"] == 7
     assert receipt["failures"] == []
     assert len(receipt["pyproject_sha256"]) == 64

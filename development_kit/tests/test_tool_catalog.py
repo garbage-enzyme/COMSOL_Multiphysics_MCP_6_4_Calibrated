@@ -14,7 +14,7 @@ from types import SimpleNamespace
 
 import pytest
 import src.tools as tools_module
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from src.contracts.structural import bounded_public_schema
 from src.knowledge import embedded as embedded_module
 from src.knowledge.embedded import register_knowledge_tools
@@ -298,7 +298,7 @@ def test_tool_spec_validation_rejects_high_impact_relationship_breaks(mutated, m
 
 
 def test_schema_snapshot_rejects_duplicate_registered_names():
-    duplicate = SimpleNamespace(name="duplicate", inputSchema={"type": "object"})
+    duplicate = SimpleNamespace(name="duplicate", input_schema={"type": "object"})
 
     class DuplicateServer:
         async def list_tools(self):
@@ -381,7 +381,7 @@ def test_metadata_registrars_match_actual_registration():
     registrars.extend((register_knowledge_tools, register_lexical_manual_tools))
 
     for registrar in registrars:
-        server = FastMCP(f"metadata-{registrar.__name__}")
+        server = MCPServer(f"metadata-{registrar.__name__}")
         registrar(server)
         registrar_name = f"{registrar.__module__}.{registrar.__name__}"
         expected = {

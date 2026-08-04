@@ -17,6 +17,7 @@ from typing import Any
 
 from comsol_mcp.settings import resolve_settings_location
 from comsol_mcp.utils.runtime_paths import default_runtime_dir
+from settings_gui import GUI_RELEASE
 
 from .settings_gui_handshake import (
     HANDSHAKE_ENV,
@@ -25,7 +26,6 @@ from .settings_gui_handshake import (
     validate_handshake_path,
 )
 
-GUI_RELEASE = "alpha6.2"
 HANDSHAKE_TIMEOUT_SECONDS = 5.0
 HANDSHAKE_POLL_SECONDS = 0.05
 

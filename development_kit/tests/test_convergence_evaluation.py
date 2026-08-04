@@ -11,7 +11,7 @@ from copy import deepcopy
 from pathlib import Path
 
 import pytest
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from src.evidence.convergence_evaluation import (
     build_convergence_ladder,
     evaluate_convergence,
@@ -24,6 +24,8 @@ from src.evidence.spectral_characterization import (
     build_spectral_point_bundle,
 )
 from src.tools.convergence_evaluation import register_convergence_evaluation_tools
+
+from development_kit.tests.mcp_test_support import decode_tool_result
 
 MATERIAL_SHA256 = "d" * 64
 INCIDENCE_SHA256 = "e" * 64
@@ -511,7 +513,7 @@ def test_monotonicity_is_observation_and_fixed_reference_is_diagnostic_only():
 
 
 def test_public_tool_returns_separate_ladder_and_policy_artifacts():
-    server = FastMCP("convergence-evaluation-test")
+    server = MCPServer("convergence-evaluation-test")
     register_convergence_evaluation_tools(server)
     result = server._tool_manager._tools["convergence_evaluate"].fn(
         ladder_spec={"ladder_id": "three-mesh-ladder", "levels": _levels()},
@@ -537,7 +539,7 @@ def test_public_tool_returns_separate_ladder_and_policy_artifacts():
 
 def test_public_tool_accepts_canonical_ladder_and_rejects_ambiguous_input():
     ladder = build_convergence_ladder(ladder_id="three-mesh-ladder", levels=_levels())
-    server = FastMCP("convergence-input-test")
+    server = MCPServer("convergence-input-test")
     register_convergence_evaluation_tools(server)
     tool = server._tool_manager._tools["convergence_evaluate"]
 
@@ -551,20 +553,22 @@ def test_public_tool_accepts_canonical_ladder_and_rejects_ambiguous_input():
     assert rejected["solver_started"] is False
 
 
-def test_public_convergence_contract_runs_through_fastmcp_transport():
-    server = FastMCP("convergence-transport-test")
+def test_public_convergence_contract_runs_through_mcp_transport():
+    server = MCPServer("convergence-transport-test")
     register_convergence_evaluation_tools(server)
-    tool = server._tool_manager._tools["convergence_evaluate"]
 
-    result = asyncio.run(
-        tool.run(
-            {
-                "ladder_spec": {
-                    "ladder_id": "transport-ladder",
-                    "levels": _levels(),
+    result = decode_tool_result(
+        asyncio.run(
+            server.call_tool(
+                "convergence_evaluate",
+                {
+                    "ladder_spec": {
+                        "ladder_id": "transport-ladder",
+                        "levels": _levels(),
+                    },
+                    "convergence_policy": _policy(),
                 },
-                "convergence_policy": _policy(),
-            }
+            )
         )
     )
 
@@ -576,7 +580,7 @@ def test_public_convergence_contract_runs_through_fastmcp_transport():
 def test_public_tool_structures_extreme_integer_rejection():
     levels = _levels()
     levels[0]["candidate_measurements"]["candidate"]["peak"]["wavelength_m"] = 10**10_000
-    server = FastMCP("convergence-extreme-input-test")
+    server = MCPServer("convergence-extreme-input-test")
     register_convergence_evaluation_tools(server)
 
     result = server._tool_manager._tools["convergence_evaluate"].fn(
@@ -594,17 +598,17 @@ def test_public_convergence_tool_never_constructs_a_comsol_client():
 import asyncio
 import mph
 mph.Client = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError('Client called'))
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
+from development_kit.tests.mcp_test_support import decode_tool_result
 from development_kit.tests.test_convergence_evaluation import _levels, _policy
 from src.tools.convergence_evaluation import register_convergence_evaluation_tools
-server = FastMCP('solver-free-convergence-subprocess')
+server = MCPServer('solver-free-convergence-subprocess')
 register_convergence_evaluation_tools(server)
 result = asyncio.run(server.call_tool('convergence_evaluate', {
     'ladder_spec': {'ladder_id': 'solver-free-path', 'levels': _levels()},
     'convergence_policy': _policy(),
 }))
-if isinstance(result, tuple):
-    result = result[1]
+result = decode_tool_result(result)
 assert result['success'] is True
 assert result['solver_started'] is False
 """

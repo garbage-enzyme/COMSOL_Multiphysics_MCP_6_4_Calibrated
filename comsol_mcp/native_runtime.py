@@ -84,7 +84,7 @@ NATIVE_RUNTIME_MANIFEST = (
         "pydantic-core",
         "mcp_main_process",
         True,
-        "FastMCP request validation loads Pydantic's native core before dispatch.",
+        "MCPServer request validation loads Pydantic's native core before dispatch.",
     ),
     NativeRuntimeImport(
         "matplotlib",

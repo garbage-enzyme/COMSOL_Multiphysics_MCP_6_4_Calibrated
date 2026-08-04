@@ -1131,7 +1131,7 @@ async def snapshot_tool_schemas(server: Any) -> dict[str, dict[str, Any]]:
     names = [tool.name for tool in tools]
     if len(names) != len(set(names)):
         raise ValueError("duplicate registered tool names prevent a canonical schema snapshot")
-    return {tool.name: tool.inputSchema for tool in sorted(tools, key=lambda item: item.name)}
+    return {tool.name: tool.input_schema for tool in sorted(tools, key=lambda item: item.name)}
 
 
 __all__ = [

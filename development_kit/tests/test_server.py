@@ -11,8 +11,13 @@ from pathlib import Path
 
 import pytest
 import src.server as server_module
-from mcp.server.fastmcp import FastMCP
-from src.server import create_server, register_all_resources, register_all_tools
+from mcp.server.mcpserver import MCPServer
+from src.server import (
+    SERVER_INSTRUCTIONS,
+    create_server,
+    register_all_resources,
+    register_all_tools,
+)
 from src.tools.capabilities import get_capabilities, startup_capability_summary
 
 
@@ -22,6 +27,17 @@ def _public_tool_names(server) -> set[str]:
 
 def _public_resource_uris(server) -> set[str]:
     return {str(resource.uri) for resource in asyncio.run(server.list_resources())}
+
+
+def test_server_advertises_bounded_legacy_compatible_safety_instructions():
+    server = create_server("instructions-test")
+
+    assert server.instructions == SERVER_INSTRUCTIONS
+    assert len(SERVER_INSTRUCTIONS.encode("utf-8")) < 512
+    assert "capabilities and solver_preflight" in SERVER_INSTRUCTIONS
+    assert "unless the user explicitly requests it" in SERVER_INSTRUCTIONS
+    assert "source models as read-only" in SERVER_INSTRUCTIONS
+    assert "scientific validation as separate outcomes" in SERVER_INSTRUCTIONS
 
 
 def test_server_module_configures_logging_only_in_main():
@@ -80,7 +96,7 @@ def test_partial_tool_registration_rolls_back_and_can_be_retried(monkeypatch):
     import src.knowledge.lexical_manual as lexical_module
     import src.tools as tools_module
 
-    server = FastMCP("transactional-registration")
+    server = MCPServer("transactional-registration")
 
     @server.tool(name="existing_tool")
     def existing_tool() -> dict:
@@ -177,7 +193,7 @@ def test_model_resources_escape_untrusted_markdown(monkeypatch):
             "current_model": malicious,
         },
     )
-    server = FastMCP("escaped-resources")
+    server = MCPServer("escaped-resources")
     resources_module.register_model_resources(server)
 
     session = server._resource_manager._resources["comsol://session/info"].fn()
@@ -344,7 +360,7 @@ def test_job_read_tools_are_solver_free(monkeypatch):
             "Client",
             lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("must not start")),
         )
-        server = FastMCP("job-read-test")
+        server = MCPServer("job-read-test")
         jobs_module.register_job_tools(server)
 
         status = server._tool_manager._tools["job_status"].fn("missing")
