@@ -60,7 +60,7 @@ def test_detached_launch_uses_pythonw_devnull_and_ready_handshake(
     assert result == {
         "success": True,
         "state": "launched",
-        "gui_release": "alpha6.3",
+        "gui_release": "alpha6.4",
         "restart_required_after_change": True,
         "message_code": "settings_gui_opened",
         "contains_local_path": False,
@@ -218,7 +218,7 @@ def test_public_dispatch_has_no_arguments_and_returns_tool_result(monkeypatch) -
     expected = {
         "success": True,
         "state": "already_running",
-        "gui_release": "alpha6.3",
+        "gui_release": "alpha6.4",
         "restart_required_after_change": True,
         "message_code": "settings_gui_already_open",
         "contains_local_path": False,

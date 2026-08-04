@@ -1,6 +1,6 @@
 # COMSOL MCP Settings Guide
 
-Applies to COMSOL MCP `0.6.3` and settings schema `1.2.0`.
+Applies to COMSOL MCP `0.6.4` and settings schema `1.2.0`.
 
 The Settings GUI is the primary way to configure COMSOL MCP. Direct JSON editing
 remains supported for developers, agents, automation, recovery, and advanced

@@ -158,6 +158,14 @@ Real COMSOL gates are opt-in, licensed, and serial. Follow
 `development_kit/docs/release_checklist.md`; hosted CI intentionally does not
 run them.
 
+A version-only release identity update does not require a new Settings GUI
+screenshot matrix or rendered-interface acceptance when the only visible change
+is the same-format `0.a.b` / `alphaa.b` version text and no layout, translated
+message, icon, style, widget, state, or capture contract changes. Still require
+deterministic locale regeneration/checks, focused GUI and package tests, release
+facts, artifact membership checks, and exact-SHA CI. Any other visible GUI
+change retains the full screenshot and rendered-interface acceptance gate.
+
 The repository launcher keeps its PowerShell scripts directly runnable for
 focused diagnosis. `development_kit/tests/test_launcher_distribution.py` is
 the canonical pytest wrapper: on Windows it runs the accepted suite serially

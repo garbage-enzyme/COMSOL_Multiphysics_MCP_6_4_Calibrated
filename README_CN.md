@@ -5,7 +5,7 @@
 [![CI](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/actions/workflows/ci.yml)
 [![Python 3.14](https://img.shields.io/badge/python-3.14-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
-![Release: 0.6.3](https://img.shields.io/badge/release-0.6.3-blue)
+![Release: 0.6.4](https://img.shields.io/badge/release-0.6.4-blue)
 ![Status: alpha](https://img.shields.io/badge/status-alpha-red)
 [![GitHub stars](https://img.shields.io/github/stars/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated?style=social)](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/stargazers)
 
@@ -64,7 +64,7 @@ acceptance 报告应至少包含不启动 COMSOL 的 `initialize`、实时 `list
 `capabilities` 回读，并把 licensed start/solve/cleanup 覆盖单独标注。已安装工具界面
 以实时 discovery 为准，不以文档中复制的数量为准。
 
-`0.6.3` 以保守方式把运行基座更新到 MCP Python SDK `2.0.x`。工具、profile、schema
+`0.6.4` 继续以保守方式使用 MCP Python SDK `2.0.x` 运行基座。工具、profile、schema
 和 stdio 配置仍保持已接受的旧协议兼容应用合同；本版本不会让 client opt in MCP
 `2026-07-28` 的 multi-round-trip request、cache hint、subscription 或 Tasks extension。
 
