@@ -88,6 +88,7 @@ internal static class ComsolMcpStandaloneLauncher
         using (FileStream ownerLock = AcquireOwnerLock(paths))
         {
             bool attemptStarted = false;
+            int committedCount = 0;
             try
             {
                 EnterCampaignJob();
@@ -98,6 +99,7 @@ internal static class ComsolMcpStandaloneLauncher
                 List<Dictionary<string, object>> existing = ReadAndValidateResults(
                     paths, identity
                 );
+                committedCount = existing.Count;
                 if (!resume && existing.Count != 0)
                 {
                     throw new InvalidOperationException("fresh_run_refuses_existing_results");
@@ -146,6 +148,7 @@ internal static class ComsolMcpStandaloneLauncher
                     );
                     AppendResult(paths.Results, result);
                     existing.Add(result);
+                    committedCount = existing.Count;
                     WriteStatus(paths, Status(
                         "running",
                         attemptId,
@@ -177,7 +180,7 @@ internal static class ComsolMcpStandaloneLauncher
             {
                 if (attemptStarted)
                 {
-                    TryWriteFailureStatus(exception.Message);
+                    TryWriteFailureStatus(exception.Message, committedCount);
                 }
                 throw;
             }
@@ -323,18 +326,28 @@ internal static class ComsolMcpStandaloneLauncher
         {
             throw new InvalidDataException("driver_event_failed_contract");
         }
+        ValidatePointPhysics(value, point);
+        return value;
+    }
+
+    private static void ValidatePointPhysics(
+        Dictionary<string, object> value,
+        PointSpec point
+    )
+    {
         RequireFinite(value, "voltage_v");
         RequireFinite(value, "capacitance_pf");
         RequireFinite(value, "relative_error");
         RequireFinite(value, "energy_j");
         RequireFinite(value, "energy_relative_error");
         if (Math.Abs(Number(value, "voltage_v") - point.Voltage) > 1e-12
+                || Number(value, "capacitance_pf") <= 0.0
+                || Number(value, "energy_j") <= 0.0
                 || Number(value, "relative_error") > 1e-6
                 || Number(value, "energy_relative_error") > 1e-6)
         {
             throw new InvalidDataException("driver_event_physical_gate_failed");
         }
-        return value;
     }
 
     private static List<Dictionary<string, object>> ReadAndValidateResults(
@@ -375,6 +388,7 @@ internal static class ComsolMcpStandaloneLauncher
             {
                 throw new InvalidDataException("results_journal_identity_mismatch");
             }
+            ValidatePointPhysics(value, Points[expectedIndex]);
             records.Add(value);
         }
         return records;
@@ -391,6 +405,10 @@ internal static class ComsolMcpStandaloneLauncher
         double referenceCapacitance = Number(rows[0], "capacitance_pf");
         double referenceEnergyScale = Number(rows[0], "energy_j")
                 / Math.Pow(Number(rows[0], "voltage_v"), 2.0);
+        if (referenceCapacitance <= 0.0 || referenceEnergyScale <= 0.0)
+        {
+            throw new InvalidDataException("campaign_reference_physics_is_not_positive");
+        }
         double maximumCapacitanceDelta = 0.0;
         double maximumEnergyScaleDelta = 0.0;
         foreach (Dictionary<string, object> row in rows)
@@ -706,6 +724,8 @@ internal static class ComsolMcpStandaloneLauncher
         startInfo.CreateNoWindow = true;
         startInfo.RedirectStandardOutput = true;
         startInfo.RedirectStandardError = true;
+        startInfo.StandardOutputEncoding = new UTF8Encoding(false, true);
+        startInfo.StandardErrorEncoding = new UTF8Encoding(false, true);
 
         using (Process process = new Process())
         {
@@ -724,7 +744,10 @@ internal static class ComsolMcpStandaloneLauncher
                 throw new TimeoutException("owned_process_timeout");
             }
             process.WaitForExit();
-            Task.WaitAll(new Task[] {stdout, stderr}, 5000);
+            if (!Task.WaitAll(new Task[] {stdout, stderr}, 5000))
+            {
+                throw new TimeoutException("owned_process_streams_not_drained");
+            }
             string combined = stdout.Result + stderr.Result;
             byte[] payload = new UTF8Encoding(false).GetBytes(combined);
             if (payload.Length > MaximumLogBytes)
@@ -889,17 +912,35 @@ internal static class ComsolMcpStandaloneLauncher
 
     private static byte[] ReadBounded(string path, int maximumBytes)
     {
-        FileInfo information = new FileInfo(path);
-        if (!information.Exists || information.Length < 0 || information.Length > maximumBytes)
+        using (FileStream stream = new FileStream(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete
+        ))
         {
-            throw new InvalidDataException("bounded file is absent or oversized");
+            long length = stream.Length;
+            if (length < 0 || length > maximumBytes)
+            {
+                throw new InvalidDataException("bounded file is absent or oversized");
+            }
+            byte[] payload = new byte[(int)length];
+            int offset = 0;
+            while (offset < payload.Length)
+            {
+                int read = stream.Read(payload, offset, payload.Length - offset);
+                if (read == 0)
+                {
+                    throw new InvalidDataException("bounded file changed during read");
+                }
+                offset += read;
+            }
+            if (stream.ReadByte() != -1)
+            {
+                throw new InvalidDataException("bounded file grew during read");
+            }
+            return payload;
         }
-        byte[] payload = File.ReadAllBytes(path);
-        if (payload.Length > maximumBytes)
-        {
-            throw new InvalidDataException("bounded file grew during read");
-        }
-        return payload;
     }
 
     private static void AtomicWriteJson(string path, Dictionary<string, object> value)
@@ -958,7 +999,7 @@ internal static class ComsolMcpStandaloneLauncher
         }
     }
 
-    private static void TryWriteFailureStatus(string reason)
+    private static void TryWriteFailureStatus(string reason, int completed)
     {
         try
         {
@@ -969,7 +1010,7 @@ internal static class ComsolMcpStandaloneLauncher
                 {"schema_name", "comsol_mcp.standalone_status"},
                 {"schema_version", "1.0.0"},
                 {"status", "failed"},
-                {"completed", 0},
+                {"completed", completed},
                 {"total", Points.Length},
                 {"phase", "terminal"},
                 {"reason_code", BoundedReason(reason)},

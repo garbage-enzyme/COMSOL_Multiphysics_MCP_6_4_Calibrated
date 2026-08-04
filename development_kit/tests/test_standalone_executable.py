@@ -343,6 +343,20 @@ def test_embedded_java_driver_has_no_unusable_model_return() -> None:
     assert "return null;" not in source
 
 
+def test_embedded_launcher_preserves_bounded_durable_process_and_resume_contracts() -> None:
+    source = builder_module._resource_bytes("Launcher.cs").decode("utf-8")
+
+    assert "if (!Task.WaitAll(new Task[] {stdout, stderr}, 5000))" in source
+    assert 'throw new TimeoutException("owned_process_streams_not_drained")' in source
+    assert "StandardOutputEncoding = new UTF8Encoding(false, true)" in source
+    assert "StandardErrorEncoding = new UTF8Encoding(false, true)" in source
+    assert "FileShare.ReadWrite | FileShare.Delete" in source
+    assert "ValidatePointPhysics(value, Points[expectedIndex]);" in source
+    assert 'throw new InvalidDataException("campaign_reference_physics_is_not_positive")' in source
+    assert "TryWriteFailureStatus(exception.Message, committedCount);" in source
+    assert '{"completed", completed}' in source
+
+
 @requires_windows_workstation_build
 def test_deployment_verification_rejects_executable_or_source_identity_tampering(
     ascii_tmp_path: Path,
