@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import Literal
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from .property_transport import JSONValue, normalize_property_value, validate_property_name
 from .session import session_manager
@@ -199,7 +199,7 @@ def set_existing_property(
         return {"success": False, "error": f"clientapi property set failed: {exc}"}
 
 
-def register_property_tools(mcp: FastMCP) -> None:
+def register_property_tools(mcp: MCPServer) -> None:
     """Register constrained existing-object property tools."""
 
     @mcp.tool()

@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from comsol_mcp.contracts import JobSubmissionSpec, validate_job_submission
 from comsol_mcp.durable import domain_sha256_v2
@@ -270,7 +270,7 @@ def _job_call(operation: str, callback, **error_fields: Any) -> dict[str, Any]:
     return measured_call(operation, run)
 
 
-def register_job_tools(mcp: FastMCP) -> None:
+def register_job_tools(mcp: MCPServer) -> None:
     """Register durable submit/status/tail/cooperative-cancel/resume tools."""
     selection = getattr(mcp, "profile_selection", None)
     profile_name = getattr(selection, "name", "unknown")

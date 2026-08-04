@@ -9,8 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from mcp.shared.exceptions import McpError
-from mcp.types import ErrorData
+from mcp.shared.exceptions import MCPError
 
 from development_kit.scripts.installed_stdio_probe import (
     _expect_rejection,
@@ -130,7 +129,7 @@ def test_client_or_transport_failure_is_not_accepted_as_protocol_rejection():
 def test_explicit_protocol_error_is_accepted_as_rejection():
     class RejectingSession:
         async def call_tool(self, *_args, **_kwargs):
-            raise McpError(ErrorData(code=-32602, message="invalid parameters"))
+            raise MCPError(code=-32602, message="invalid parameters")
 
     result = asyncio.run(
         _expect_rejection(
@@ -145,7 +144,7 @@ def test_explicit_protocol_error_is_accepted_as_rejection():
         "case_id": "invalid_parameters",
         "rejected": True,
         "mode": "protocol_error",
-        "exception_type": "McpError",
+        "exception_type": "MCPError",
     }
 
 

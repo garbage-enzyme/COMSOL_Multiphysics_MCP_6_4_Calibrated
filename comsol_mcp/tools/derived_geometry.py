@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from .ownership import ownership_manager
 from .properties import _read_property
@@ -521,7 +521,7 @@ def apply_blocks(model: Any, record: DerivedGeometryRecord, preview: dict[str, A
     }
 
 
-def register_derived_geometry_tools(mcp: FastMCP) -> None:
+def register_derived_geometry_tools(mcp: MCPServer) -> None:
     """Register provenance clone and typed preview/apply operations."""
 
     @mcp.tool()

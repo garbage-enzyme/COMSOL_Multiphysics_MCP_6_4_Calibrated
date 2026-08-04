@@ -3,7 +3,7 @@
 import math
 from typing import Optional, Sequence
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from ..async_handler.solver import async_solver
 from .session import session_manager
@@ -236,7 +236,7 @@ def solve_study(
     }
 
 
-def register_study_tools(mcp: FastMCP) -> None:
+def register_study_tools(mcp: MCPServer) -> None:
     """Register study and solving tools with the MCP server."""
     
     @mcp.tool()

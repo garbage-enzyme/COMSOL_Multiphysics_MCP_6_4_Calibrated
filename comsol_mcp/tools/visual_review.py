@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal, Optional
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from comsol_mcp.evidence.visual_review import (
     build_visual_review_receipt,
@@ -15,7 +15,7 @@ from comsol_mcp.evidence.visual_review import (
 )
 
 
-def register_visual_review_tools(mcp: FastMCP) -> None:
+def register_visual_review_tools(mcp: MCPServer) -> None:
     """Register bounded host-evidence normalization and review contracts."""
 
     @mcp.tool()

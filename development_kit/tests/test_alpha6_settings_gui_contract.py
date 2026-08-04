@@ -112,4 +112,4 @@ def test_settings_gui_console_entry_and_packages_are_declared():
     assert 'comsol-mcp-settings = "settings_gui.__main__:main"' in pyproject
     assert 'comsol-mcp-settings-gui = "settings_gui.__main__:main"' in pyproject
     assert 'packages = ["comsol_mcp", "settings_gui"]' in pyproject
-    assert __version__ == "0.6.2"
+    assert __version__ == "0.6.3"

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from comsol_mcp.contracts.thermal_material import (
     ThermalMaterialEvaluationRequest,
@@ -12,7 +12,7 @@ from comsol_mcp.contracts.thermal_material import (
 )
 
 
-def register_thermal_material_tools(mcp: FastMCP) -> None:
+def register_thermal_material_tools(mcp: MCPServer) -> None:
     """Register bounded material-ledger validation and evaluation."""
 
     @mcp.tool()  # type: ignore[untyped-decorator]

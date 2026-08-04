@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 import src.evidence.spectral_characterization as spectral_characterization_module
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from src.evidence.spectral_characterization import (
     build_spectral_analysis_decision,
     build_spectral_characterization,
@@ -587,7 +587,7 @@ def _bundle_spec(bundle):
 
 def test_public_tool_returns_three_separate_hash_bound_artifacts():
     bundle = _bundle([0.1, 0.5, 0.9, 0.5, 0.1])
-    server = FastMCP("spectral-characterization-test")
+    server = MCPServer("spectral-characterization-test")
     register_spectral_characterization_tools(server)
     tool = server._tool_manager._tools["spectral_characterize"]
 
@@ -616,7 +616,7 @@ def test_public_tool_returns_three_separate_hash_bound_artifacts():
 @pytest.mark.parametrize("mode", ["both", "neither"])
 def test_public_tool_requires_exactly_one_spectral_input_form(mode):
     bundle = _bundle([0.1, 0.5, 0.9, 0.5, 0.1])
-    server = FastMCP("spectral-input-form-test")
+    server = MCPServer("spectral-input-form-test")
     register_spectral_characterization_tools(server)
     arguments = {
         "analysis_policy": _policy(),
@@ -642,7 +642,7 @@ def test_public_tool_classifies_nonfinite_rows_without_serializing_invalid_numbe
     bundle = _bundle([0.1, 0.5, 0.9, 0.5, 0.1])
     spec = _bundle_spec(bundle)
     spec["rows"][2]["A"] = float("nan")
-    server = FastMCP("spectral-nonfinite-test")
+    server = MCPServer("spectral-nonfinite-test")
     register_spectral_characterization_tools(server)
 
     result = server._tool_manager._tools["spectral_characterize"].fn(
@@ -670,7 +670,7 @@ def test_existing_durable_bundle_bytes_and_timestamp_remain_unchanged(tmp_path):
     before_bytes = path.read_bytes()
     before_stat = path.stat()
     loaded = json.loads(path.read_text(encoding="utf-8"))
-    server = FastMCP("spectral-immutable-input-test")
+    server = MCPServer("spectral-immutable-input-test")
     register_spectral_characterization_tools(server)
 
     result = server._tool_manager._tools["spectral_characterize"].fn(
@@ -687,7 +687,7 @@ def test_existing_durable_bundle_bytes_and_timestamp_remain_unchanged(tmp_path):
 
 
 def test_public_tool_requires_exactly_one_input_form_and_import_is_solver_free():
-    server = FastMCP("spectral-input-form-test")
+    server = MCPServer("spectral-input-form-test")
     register_spectral_characterization_tools(server)
     tool = server._tool_manager._tools["spectral_characterize"]
     rejected = tool.fn(analysis_policy=_policy(), measurement_configuration=_measurement())
@@ -699,9 +699,9 @@ def test_public_tool_requires_exactly_one_input_form_and_import_is_solver_free()
     code = """
 import mph
 mph.Client = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError('Client called'))
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from src.tools.spectral_characterization import register_spectral_characterization_tools
-server = FastMCP('solver-free-spectral-subprocess')
+server = MCPServer('solver-free-spectral-subprocess')
 register_spectral_characterization_tools(server)
 result = server._tool_manager._tools['spectral_characterize'].fn(
     analysis_policy={}, measurement_configuration={}

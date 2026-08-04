@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 import src.evidence.integrity_verifier as integrity_verifier_module
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from src.evidence.integrity_controls import (
     DISABLED_CHECK_WARNING,
     DISABLED_CHECK_WARNING_CODE,
@@ -303,7 +303,7 @@ def test_mcp_verify_tool_enforces_owned_artifact_root_and_returns_no_path(
     request, _raw, _fit = _fixture(artifact_root)
     monkeypatch.delenv(EVIDENCE_SETTINGS_ENV, raising=False)
     monkeypatch.setenv(ARTIFACT_WRITE_ROOT_ENV, str(ascii_artifact_root))
-    server = FastMCP("evidence-integrity-tool-test")
+    server = MCPServer("evidence-integrity-tool-test")
     register_evidence_integrity_tools(server)
 
     result = server._tool_manager._tools["evidence_integrity_verify"].fn(
@@ -337,7 +337,7 @@ def test_mcp_verify_tool_distinguishes_verifier_failures_from_root_rejection(
         "verify_evidence_integrity",
         lambda **_kwargs: (_ for _ in ()).throw(error),
     )
-    server = FastMCP("evidence-integrity-verifier-failure-test")
+    server = MCPServer("evidence-integrity-verifier-failure-test")
     register_evidence_integrity_tools(server)
 
     result = server._tool_manager._tools["evidence_integrity_verify"].fn(
@@ -360,7 +360,7 @@ def test_mcp_verify_tool_rejects_external_and_junction_artifact_roots(
     _winapi.CreateJunction(str(outside), str(junction))
     monkeypatch.delenv(EVIDENCE_SETTINGS_ENV, raising=False)
     monkeypatch.setenv(ARTIFACT_WRITE_ROOT_ENV, str(owned))
-    server = FastMCP("evidence-integrity-path-negative-test")
+    server = MCPServer("evidence-integrity-path-negative-test")
     register_evidence_integrity_tools(server)
     tool = server._tool_manager._tools["evidence_integrity_verify"].fn
 

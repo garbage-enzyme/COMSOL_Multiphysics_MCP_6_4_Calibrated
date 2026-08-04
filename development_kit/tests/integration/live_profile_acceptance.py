@@ -7,7 +7,6 @@ import json
 import os
 import sys
 import time
-from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -56,9 +55,13 @@ def _controlled_cases() -> tuple[dict[str, Any], ...]:
 
 
 def _decode(result: Any) -> dict[str, Any]:
-    if getattr(result, "isError", False):
+    if getattr(result, "is_error", getattr(result, "isError", False)):
         raise RuntimeError(f"MCP tool returned an error: {result}")
-    structured = getattr(result, "structuredContent", None)
+    structured = getattr(
+        result,
+        "structured_content",
+        getattr(result, "structuredContent", None),
+    )
     if isinstance(structured, dict):
         value = structured.get("result", structured)
         if isinstance(value, dict):
@@ -113,7 +116,7 @@ async def _call_before(
     result = await session.call_tool(
         name,
         arguments,
-        read_timeout_seconds=timedelta(seconds=timeout_seconds),
+        read_timeout_seconds=timeout_seconds,
     )
     payload = _decode(result)
     return payload, {
@@ -277,7 +280,7 @@ async def _live_three_call_matrix() -> dict[str, Any]:
     output: dict[str, Any] = {"profile": "wave_optics", "setup": {}, "cases": []}
     loaded_model_names: list[str] = []
     async with stdio_client(_server("wave_optics")) as (read, write):
-        async with ClientSession(read, write, read_timeout_seconds=timedelta(minutes=5)) as session:
+        async with ClientSession(read, write, read_timeout_seconds=300.0) as session:
             await session.initialize()
             try:
                 await _setup_live_session(session, output)

@@ -2,7 +2,7 @@
 
 import pytest
 import src.tools.physics as physics_module
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from src.tools.physics import (
     _resolve_geometry_tag,
     add_boundary_condition,
@@ -187,7 +187,7 @@ def test_add_physics_interface_rolls_back_rejected_named_selection():
 def test_specialized_solid_adder_allocates_live_unique_tags(monkeypatch):
     component = FakeComponent(existing=["solid"])
     model = FakeModel(component)
-    server = FastMCP("physics-specialized-test")
+    server = MCPServer("physics-specialized-test")
     register_physics_tools(server)
     monkeypatch.setattr(physics_module.session_manager, "get_model", lambda name: model)
     tool = server._tool_manager._tools["physics_add_solid_mechanics"]
@@ -1173,7 +1173,7 @@ class WizardComponent(FakeComponent):
 def test_interactive_setup_forwards_model_name_by_keyword(monkeypatch, tool_name):
     model = FakeModel(WizardComponent())
     requested_models = []
-    server = FastMCP(f"{tool_name}-test")
+    server = MCPServer(f"{tool_name}-test")
     register_physics_tools(server)
 
     def get_model(name):

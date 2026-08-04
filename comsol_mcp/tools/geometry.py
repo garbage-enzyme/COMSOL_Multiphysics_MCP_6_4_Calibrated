@@ -3,7 +3,7 @@
 import math
 from typing import Optional, Sequence
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from comsol_mcp.path_policy import PathPolicy
 
@@ -474,7 +474,7 @@ def build_geometry_sequences(
     }
 
 
-def register_geometry_tools(mcp: FastMCP) -> None:
+def register_geometry_tools(mcp: MCPServer) -> None:
     """Register geometry tools with the MCP server."""
 
     @mcp.tool()

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from pathlib import Path
 
 import pytest
@@ -14,6 +13,7 @@ from comsol_mcp.durable.io import atomic_write_json
 from comsol_mcp.path_policy import ARTIFACT_WRITE_ROOT_ENV
 from comsol_mcp.server import create_server
 from comsol_mcp.tools.catalog import TOOL_METADATA
+from development_kit.tests.mcp_test_support import decode_tool_result
 
 
 def _workstation_build_available() -> bool:
@@ -25,18 +25,7 @@ def _workstation_build_available() -> bool:
 
 
 def _call(server, name: str, arguments: dict) -> dict:
-    result = asyncio.run(server.call_tool(name, arguments))
-    if isinstance(result, dict):
-        return result
-    if isinstance(result, tuple) and len(result) == 2 and isinstance(result[1], dict):
-        return result[1]
-    for block in result:
-        text = getattr(block, "text", None)
-        if isinstance(text, str):
-            value = json.loads(text)
-            if isinstance(value, dict):
-                return value
-    raise ValueError("public FastMCP call did not return a JSON object")
+    return decode_tool_result(asyncio.run(server.call_tool(name, arguments)))
 
 
 def test_standalone_tool_metadata_is_explicit() -> None:

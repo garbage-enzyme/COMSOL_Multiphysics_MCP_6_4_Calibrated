@@ -16,6 +16,7 @@ from comsol_mcp.evidence.thermal_radiation import (
     build_kirchhoff_assessment,
     evaluate_thermal_radiation,
 )
+from development_kit.tests.mcp_test_support import decode_tool_result
 
 _C = 299_792_458.0
 _SIGMA = 5.670_374_419e-8
@@ -81,15 +82,7 @@ def _request(
 
 
 def _decode(result):
-    if isinstance(result, tuple):
-        result = result[0]
-    for block in result:
-        text = getattr(block, "text", None)
-        if isinstance(text, str):
-            decoded = json.loads(text)
-            if isinstance(decoded, dict):
-                return decoded
-    raise AssertionError("public result did not contain an object")
+    return decode_tool_result(result)
 
 
 def test_kirchhoff_strict_conditional_unavailable_and_nonreciprocal():

@@ -7,7 +7,7 @@ import time
 from importlib.metadata import PackageNotFoundError, distribution, version
 from pathlib import Path
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from comsol_mcp.build_identity import get_build_identity
 from comsol_mcp.compatibility import load_runtime_compatibility
@@ -555,7 +555,7 @@ def startup_capability_summary(selection: ProfileSelection | None = None) -> str
     )
 
 
-def register_capability_tools(mcp: FastMCP) -> None:
+def register_capability_tools(mcp: MCPServer) -> None:
     """Register dependency-free server capability tools."""
     selection = getattr(mcp, "profile_selection", None) or resolve_profile()
 

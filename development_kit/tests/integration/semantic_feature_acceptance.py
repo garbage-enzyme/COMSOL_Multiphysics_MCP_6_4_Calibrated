@@ -8,7 +8,6 @@ import shutil
 import sys
 import time
 import uuid
-from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -32,9 +31,13 @@ PROFILE_COUNTS = {
 
 
 def _decode(result: Any) -> dict[str, Any]:
-    if getattr(result, "isError", False):
+    if getattr(result, "is_error", getattr(result, "isError", False)):
         raise RuntimeError(f"MCP tool returned an error: {result}")
-    structured = getattr(result, "structuredContent", None)
+    structured = getattr(
+        result,
+        "structured_content",
+        getattr(result, "structuredContent", None),
+    )
     if isinstance(structured, dict):
         value = structured.get("result", structured)
         if isinstance(value, dict):
@@ -70,7 +73,7 @@ def _server(
 
 async def _call(session: ClientSession, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     started = time.perf_counter()
-    result = await session.call_tool(name, arguments, read_timeout_seconds=timedelta(seconds=30))
+    result = await session.call_tool(name, arguments, read_timeout_seconds=30.0)
     payload = _decode(result)
     return {
         "payload": payload,

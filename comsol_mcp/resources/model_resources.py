@@ -4,7 +4,7 @@ import html
 import logging
 import re
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from ..tools.session import session_manager
 
@@ -30,7 +30,7 @@ def _markdown_code(value: object) -> str:
     return f"{fence}{text}{fence}"
 
 
-def register_model_resources(mcp: FastMCP) -> None:
+def register_model_resources(mcp: MCPServer) -> None:
     """Register model resources with the MCP server."""
     
     @mcp.resource("comsol://session/info")

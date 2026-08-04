@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
-def register_convergence_evaluation_tools(mcp: FastMCP) -> None:
+def register_convergence_evaluation_tools(mcp: MCPServer) -> None:
     """Register one read-only convergence evaluation tool."""
 
     @mcp.tool()

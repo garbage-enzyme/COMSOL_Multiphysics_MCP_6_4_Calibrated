@@ -15,6 +15,7 @@ from comsol_mcp.evidence.thermal_material import (
     evaluate_thermal_material,
     normalize_thermal_material_ledger,
 )
+from development_kit.tests.mcp_test_support import decode_tool_result
 
 _C = 299_792_458.0
 
@@ -88,15 +89,7 @@ def _request(ledger, state_id="state_a", wavelength=2.0e-6, temperature=400.0):
 
 
 def _decode(result):
-    if isinstance(result, tuple):
-        result = result[0]
-    for block in result:
-        text = getattr(block, "text", None)
-        if isinstance(text, str):
-            decoded = json.loads(text)
-            if isinstance(decoded, dict):
-                return decoded
-    raise AssertionError("public result did not contain an object")
+    return decode_tool_result(result)
 
 
 def test_ledger_normalization_is_idempotent_and_previews_exact_readback():

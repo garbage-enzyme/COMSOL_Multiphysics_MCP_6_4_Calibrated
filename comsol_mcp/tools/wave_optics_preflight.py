@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from .catalog import get_tool_metadata
 from .ownership import ownership_manager
@@ -1479,7 +1479,7 @@ def collect_wave_optics_preflight(
     return result
 
 
-def register_wave_optics_preflight_tools(mcp: FastMCP) -> None:
+def register_wave_optics_preflight_tools(mcp: MCPServer) -> None:
     """Register the public read-only Wave Optics preflight preflight tool."""
 
     @mcp.tool()

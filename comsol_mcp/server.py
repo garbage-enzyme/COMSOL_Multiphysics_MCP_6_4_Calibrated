@@ -4,8 +4,9 @@ import logging
 import multiprocessing as mp
 from weakref import WeakKeyDictionary, WeakSet
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
+from . import __version__
 from .native_runtime import preload_mcp_native_runtime
 from .settings import apply_java_settings
 from .tools.profiles import (
@@ -17,13 +18,20 @@ from .tools.profiles import (
 
 logger = logging.getLogger(__name__)
 
-mcp = FastMCP("COMSOL MCP")
-_tool_servers: WeakKeyDictionary[FastMCP, ProfileSelection] = WeakKeyDictionary()
-_resource_servers: WeakSet[FastMCP] = WeakSet()
+SERVER_INSTRUCTIONS = (
+    "Start with capabilities and solver_preflight. Do not start COMSOL, solve, or mutate "
+    "a model unless the user explicitly requests it. Treat source models as read-only and "
+    "write only to derived copies. Keep execution success, evidence integrity, and scientific "
+    "validation as separate outcomes."
+)
+
+mcp = MCPServer("COMSOL MCP", instructions=SERVER_INSTRUCTIONS, version=__version__)
+_tool_servers: WeakKeyDictionary[MCPServer, ProfileSelection] = WeakKeyDictionary()
+_resource_servers: WeakSet[MCPServer] = WeakSet()
 
 
 def register_all_tools(
-    server: FastMCP | None = None,
+    server: MCPServer | None = None,
     profile: str | ProfileSelection | None = None,
 ) -> ProfileSelection:
     """Register one static MCP tool profile once on the selected server."""
@@ -68,7 +76,7 @@ def register_all_tools(
     return selection
 
 
-def register_all_resources(server: FastMCP | None = None) -> None:
+def register_all_resources(server: MCPServer | None = None) -> None:
     """Register all MCP resources once on the selected server."""
     target = server or mcp
     if target in _resource_servers:
@@ -83,10 +91,10 @@ def register_all_resources(server: FastMCP | None = None) -> None:
 def create_server(
     name: str = "COMSOL MCP",
     profile: str | ProfileSelection | None = None,
-) -> FastMCP:
+) -> MCPServer:
     """Create a fully registered server without starting its transport."""
     apply_java_settings()
-    server = FastMCP(name)
+    server = MCPServer(name, instructions=SERVER_INSTRUCTIONS, version=__version__)
     register_all_tools(server, profile)
     register_all_resources(server)
     return server

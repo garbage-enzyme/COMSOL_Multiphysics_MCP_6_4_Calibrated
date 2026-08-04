@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from comsol_mcp.knowledge.semantic_runtime import get_semantic_service
 
 
-def register_semantic_doc_tools(mcp: FastMCP) -> None:
+def register_semantic_doc_tools(mcp: MCPServer) -> None:
     @mcp.tool()
     def semantic_search(
         query: str,

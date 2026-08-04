@@ -186,6 +186,7 @@ models are intentionally absent.
 - `development_kit/tests/test_control_plane_metrics.py` — This module tests bounded control-plane latency, overload, and fairness evidence.
 - `development_kit/tests/test_control_plane_startup.py` — This module tests solver-free cold discovery and startup budgets.
 - `development_kit/tests/conftest.py` — This module prepares the shared ASCII runtime parent for dependency-only tests.
+- `development_kit/tests/mcp_test_support.py` — This module decodes public in-process MCP tool results consistently across the legacy SDK 1.x and conservative SDK 2.0 base.
 - `development_kit/tests/semantic_test_support.py` — This module provides sanitized subprocess environments for semantic isolation tests.
 - `development_kit/tests/test_convergence_campaign_job.py` — This module tests immutable bounded durable convergence campaign specifications.
 - `development_kit/tests/test_convergence_campaign_rows.py` — This module tests hash-chained durable convergence level evidence and artifact replay.
@@ -226,6 +227,7 @@ models are intentionally absent.
 - `development_kit/tests/test_launcher_distribution.py` — This module tests launcher portability and runs its PowerShell 5.1 and pwsh acceptance suite on Windows.
 - `development_kit/tests/test_lexical_manual.py` — This module tests bounded SQLite lexical manual search and page reading.
 - `development_kit/tests/test_material_expressions.py` — This module tests solver-free dispersive material-expression previews.
+- `development_kit/tests/test_mcp_sdk2_compatibility.py` — This module locks the conservative MCP SDK 2.0 lane, unchanged wire schemas, absent modern-protocol opt-in, and legacy stdio revisions.
 - `development_kit/tests/test_mesh.py` — This module tests mesh helpers without a COMSOL client.
 - `development_kit/tests/test_mim_patch.py` — This module tests patch-metasurface helper behavior without a COMSOL client.
 - `development_kit/tests/test_mim_recipe_contracts.py` — This module tests solver-free safety contracts shared by the standalone MIM recipes.

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from comsol_mcp.operation_arbiter import get_operation_status
 from comsol_mcp.shared_session.contracts import normalize_shared_server_feature_gate
@@ -16,7 +16,7 @@ from comsol_mcp.shared_session.process_probe import collect_shared_preflight_sna
 shared_session_manager = SharedSessionManager()
 
 
-def register_shared_session_tools(mcp: FastMCP) -> None:
+def register_shared_session_tools(mcp: MCPServer) -> None:
     """Register explicit local attached-server lifecycle tools."""
     selection = getattr(mcp, "profile_selection", None)
     profile_name = getattr(selection, "name", "unknown")

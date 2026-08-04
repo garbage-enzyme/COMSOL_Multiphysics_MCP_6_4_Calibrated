@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Literal
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from comsol_mcp.settings import load_settings
 from comsol_mcp.standalone.builder import build_standalone_executable
@@ -54,7 +54,7 @@ def _resolve_comsol_root(explicit: str | None) -> str:
     return configured
 
 
-def register_standalone_tools(mcp: FastMCP) -> None:
+def register_standalone_tools(mcp: MCPServer) -> None:
     """Register reviewed build, lifecycle, and solver-free inspection tools."""
 
     @mcp.tool()

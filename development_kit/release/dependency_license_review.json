@@ -7,7 +7,7 @@
         "license:MIT"
       ],
       "dependency": "mcp",
-      "reason": "The declared MCP SDK release line is distributed under the MIT license."
+      "reason": "The declared MCP Python SDK 2.0.x release line is distributed under the MIT license."
     },
     {
       "accepted_signals": [
@@ -60,8 +60,8 @@
       "reason": "SciPy is distributed under the BSD three-clause license with bundled notices retained upstream."
     }
   ],
-  "expires_on": "2027-07-18",
-  "reviewed_on": "2026-07-18",
+  "expires_on": "2027-08-04",
+  "reviewed_on": "2026-08-04",
   "schema_name": "comsol_mcp.dependency_license_review",
   "schema_version": "1.0.0"
 }

@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 import psutil
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from comsol_mcp.settings import settings_environment
 from comsol_mcp.utils.control_plane import measured_call
@@ -1562,7 +1562,7 @@ class SolverOwnership:
 ownership_manager = SolverOwnership()
 
 
-def register_ownership_tools(mcp: FastMCP) -> None:
+def register_ownership_tools(mcp: MCPServer) -> None:
     """Register read-only ownership/preflight and explicit stale recovery tools."""
 
     @mcp.tool()

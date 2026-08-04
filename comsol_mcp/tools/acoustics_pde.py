@@ -6,7 +6,7 @@ import re
 from collections.abc import Mapping, Sequence
 from typing import Any, Optional
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from comsol_mcp.utils.validation import strict_json_integer
 
@@ -423,7 +423,7 @@ def _boundary_reference(reference: Mapping[str, Sequence[str]]) -> dict[str, Any
     return {name: {"properties": list(properties)} for name, properties in reference.items()}
 
 
-def register_acoustics_pde_tools(mcp: FastMCP) -> None:
+def register_acoustics_pde_tools(mcp: MCPServer) -> None:
     """Register constrained Acoustics and PDE tools."""
 
     @mcp.tool()  # type: ignore[untyped-decorator]

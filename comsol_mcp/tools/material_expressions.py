@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from typing import Any, Literal, Optional
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from comsol_mcp.evidence.material_expressions import preview_material_expression
 
 
-def register_material_expression_tools(mcp: FastMCP) -> None:
+def register_material_expression_tools(mcp: MCPServer) -> None:
     """Register the solver-free Wave Optics material-expression preview."""
 
     @mcp.tool()

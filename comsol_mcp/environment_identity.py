@@ -2,17 +2,16 @@
 
 from __future__ import annotations
 
-from importlib.metadata import PackageNotFoundError, version
 import platform
 import struct
 import sys
 import sysconfig
+from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
 from comsol_mcp import __version__
 from comsol_mcp.compatibility import load_runtime_compatibility
 from comsol_mcp.durable import canonical_sha256_v1
-
 
 _DIRECT_DISTRIBUTIONS = (
     "matplotlib",
@@ -25,11 +24,14 @@ _DIRECT_DISTRIBUTIONS = (
 )
 _RELEVANT_TRANSITIVE_DISTRIBUTIONS = (
     "anyio",
-    "httpx",
-    "httpx-sse",
+    "httpcore2",
+    "httpx2",
     "jpype1",
+    "mcp-types",
+    "opentelemetry-api",
     "pydantic-core",
     "starlette",
+    "truststore",
     "uvicorn",
 )
 _OPTIONAL_FEATURES = {
@@ -49,9 +51,7 @@ def _distribution_record(name: str) -> dict[str, Any]:
 def get_environment_identity() -> dict[str, Any]:
     """Return installed dependency and platform identity without external probes."""
     direct = [_distribution_record(name) for name in _DIRECT_DISTRIBUTIONS]
-    transitive = [
-        _distribution_record(name) for name in _RELEVANT_TRANSITIVE_DISTRIBUTIONS
-    ]
+    transitive = [_distribution_record(name) for name in _RELEVANT_TRANSITIVE_DISTRIBUTIONS]
     optional_features = {}
     for feature, names in _OPTIONAL_FEATURES.items():
         distributions = [_distribution_record(name) for name in names]

@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from comsol_mcp.path_policy import PathPolicy
 from comsol_mcp.utils.public_errors import public_error
@@ -13,7 +13,7 @@ from comsol_mcp.utils.public_errors import public_error
 logger = logging.getLogger(__name__)
 
 
-def register_evidence_integrity_tools(mcp: FastMCP) -> None:
+def register_evidence_integrity_tools(mcp: MCPServer) -> None:
     """Register path-redacted settings discovery and formal verification."""
 
     @mcp.tool()

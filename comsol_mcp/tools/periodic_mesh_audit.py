@@ -8,7 +8,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Optional
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from .ownership import ownership_manager
 from .session import session_manager
@@ -546,7 +546,7 @@ def run_clone_mesh_smoke(
     }
 
 
-def register_periodic_mesh_audit_tools(mcp: FastMCP) -> None:
+def register_periodic_mesh_audit_tools(mcp: MCPServer) -> None:
     """Register read-only audit and explicit clone-only mesh smoke tools."""
 
     @mcp.tool()

@@ -10,7 +10,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from comsol_mcp.evidence.field_bundle import (
     normalize_field_evidence_request,
@@ -66,7 +66,7 @@ def _loaded_source_path(model: Any) -> Path:
     return path
 
 
-def register_field_evidence_tools(mcp: FastMCP) -> None:
+def register_field_evidence_tools(mcp: MCPServer) -> None:
     """Register field-evidence tools that neither solve nor mutate a model."""
 
     @mcp.tool()

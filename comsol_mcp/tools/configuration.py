@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from comsol_mcp.contracts.simulation_configuration import (
     ConfigurationDiffPolicy,
@@ -12,7 +12,7 @@ from comsol_mcp.contracts.simulation_configuration import (
 )
 
 
-def register_configuration_tools(mcp: FastMCP) -> None:
+def register_configuration_tools(mcp: MCPServer) -> None:
     """Register bounded simulation configuration validation and comparison."""
 
     @mcp.tool()  # type: ignore[untyped-decorator]

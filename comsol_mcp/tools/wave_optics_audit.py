@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Callable, Literal, Optional
 
 import numpy as np
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from typing_extensions import TypedDict
 
 from comsol_mcp.evidence.contracts import (
@@ -2241,7 +2241,7 @@ def run_wave_optics_reference_audit(
     }
 
 
-def register_wave_optics_audit_tools(mcp: FastMCP) -> None:
+def register_wave_optics_audit_tools(mcp: MCPServer) -> None:
     """Register the public one-point Wave Optics physical evidence audit."""
 
     @mcp.tool()

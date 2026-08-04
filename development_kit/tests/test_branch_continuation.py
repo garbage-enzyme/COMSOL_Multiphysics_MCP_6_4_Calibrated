@@ -10,7 +10,7 @@ import subprocess
 import sys
 
 import pytest
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from src.evidence.branch_continuation import (
     BRANCH_CONTINUATION_SCHEMA_VERSION,
@@ -1150,7 +1150,7 @@ class TestBranchContinuationPlanning:
 
 
 def test_public_tool_returns_separate_states_and_plan_artifacts():
-    server = FastMCP("branch-continuation-test")
+    server = MCPServer("branch-continuation-test")
     register_branch_continuation_tools(server)
     result = server._tool_manager._tools["branch_continuation_plan"].fn(
         states_spec={
@@ -1179,7 +1179,7 @@ def test_public_tool_accepts_canonical_states_and_rejects_ambiguous_input():
     states = build_continuation_states(
         states_id="dispersive", states=_build_dispersive_states(3, shift=0.1e-6)
     )
-    server = FastMCP("branch-continuation-input-test")
+    server = MCPServer("branch-continuation-input-test")
     register_branch_continuation_tools(server)
     tool = server._tool_manager._tools["branch_continuation_plan"]
 
@@ -1206,7 +1206,7 @@ def test_public_tool_does_not_misclassify_internal_type_error_as_caller_rejectio
         "build_continuation_states",
         lambda **_kwargs: (_ for _ in ()).throw(TypeError("programming defect")),
     )
-    server = FastMCP("branch-continuation-internal-error-test")
+    server = MCPServer("branch-continuation-internal-error-test")
     register_branch_continuation_tools(server)
     result = server._tool_manager._tools["branch_continuation_plan"].fn(
         continuation_policy={}, states_spec={}
@@ -1221,9 +1221,9 @@ def test_public_branch_continuation_tool_never_constructs_a_comsol_client():
     code = """
 import mph
 mph.Client = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError('Client called'))
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from src.tools.branch_continuation import register_branch_continuation_tools
-server = FastMCP('solver-free-branch-continuation-subprocess')
+server = MCPServer('solver-free-branch-continuation-subprocess')
 register_branch_continuation_tools(server)
 result = server._tool_manager._tools['branch_continuation_plan'].fn(continuation_policy={})
 assert result['success'] is False

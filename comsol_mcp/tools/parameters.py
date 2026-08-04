@@ -2,7 +2,7 @@
 
 from typing import Any, Optional, Sequence, Union
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from .session import session_manager
 from .study import _resolve_study_tag
@@ -193,7 +193,7 @@ def setup_parametric_sweep(
     }
 
 
-def register_parameter_tools(mcp: FastMCP) -> None:
+def register_parameter_tools(mcp: MCPServer) -> None:
     """Register parameter management tools with the MCP server."""
     
     @mcp.tool()

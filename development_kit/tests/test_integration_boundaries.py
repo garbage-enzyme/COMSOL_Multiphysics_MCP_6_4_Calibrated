@@ -150,7 +150,7 @@ def test_live_profile_call_timeout_is_bounded_by_absolute_deadline(monkeypatch):
 
     class Session:
         async def call_tool(self, _name, _arguments, **kwargs):
-            observed.append(kwargs["read_timeout_seconds"].total_seconds())
+            observed.append(kwargs["read_timeout_seconds"])
             return SimpleNamespace(isError=False, structuredContent={"connected": False})
 
     monkeypatch.setattr(live_profile_gate.time, "monotonic", lambda: 90.0)

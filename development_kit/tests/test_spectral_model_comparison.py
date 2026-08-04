@@ -20,6 +20,8 @@ from src.evidence.spectral_model_comparison import (
 )
 from src.server import create_server
 
+from development_kit.tests.mcp_test_support import decode_tool_result
+
 CONFIGURATION_SHA256 = "a" * 64
 
 
@@ -91,16 +93,7 @@ def _configuration(coordinate: str = "wavelength") -> dict:
 
 def _call_tool(name: str, arguments: dict) -> dict:
     server = create_server("spectral-model-comparison-public", profile="core")
-    result = asyncio.run(server.call_tool(name, arguments))
-    if isinstance(result, tuple):
-        result = result[1]
-    if isinstance(result, dict):
-        return result
-    for block in result:
-        text = getattr(block, "text", None)
-        if isinstance(text, str):
-            return json.loads(text)
-    raise AssertionError("public tool did not return JSON")
+    return decode_tool_result(asyncio.run(server.call_tool(name, arguments)))
 
 
 def test_analytic_lorentzian_prefers_lorentzian_on_identical_support():

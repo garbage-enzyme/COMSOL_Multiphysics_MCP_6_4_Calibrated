@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional, Sequence
 
 import numpy as np
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from .results import _json_safe
 from .session import session_manager
@@ -1363,7 +1363,7 @@ def run_mesh_convergence(
     }
 
 
-def register_workflow_tools(mcp: FastMCP) -> None:
+def register_workflow_tools(mcp: MCPServer) -> None:
     """Register generic workflow tools."""
 
     @mcp.tool()
