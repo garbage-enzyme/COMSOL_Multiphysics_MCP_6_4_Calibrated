@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from copy import deepcopy
 
 import pytest
@@ -352,3 +353,22 @@ def test_public_f0_dispatch_is_solver_free():
     assert validate_result["solver_started"] is False
     assert preview_result["success"] is True
     assert preview_result["preview_guarantees"]["submitted"] is False
+
+
+def test_public_configuration_failures_are_logged_and_redacted(caplog):
+    bad = _configuration()
+    bad["geometry"][0]["quantity"] = _quantity(1.0, "private-furlong")
+    server = create_server("f0-redaction", profile="core")
+
+    with caplog.at_level(logging.ERROR, logger="comsol_mcp.tools.configuration"):
+        result = _decode_public(
+            asyncio.run(
+                server.call_tool("simulation_configuration_validate", {"configuration": bad})
+            )
+        )
+
+    assert result["success"] is False
+    assert result["error"] == "Simulation configuration validation failed."
+    assert "private-furlong" not in result["error"]
+    assert "Simulation configuration validation failed" in caplog.text
+    assert "private-furlong" in caplog.text

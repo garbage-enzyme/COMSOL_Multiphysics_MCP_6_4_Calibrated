@@ -19,6 +19,7 @@ from src.evidence.spectral_model_comparison import (
     validate_spectral_model_comparison,
 )
 from src.server import create_server
+from src.tools.spectral_characterization import _nonfinite_row_summary
 
 import comsol_mcp.evidence.spectral_model_comparison as comparison_module
 from development_kit.tests.mcp_test_support import decode_tool_result
@@ -190,6 +191,37 @@ def test_boundary_maximum_is_not_fit_and_public_tool_is_solver_free():
     assert result["model_comparison"]["models"] == []
     assert result["solver_started"] is False
     assert result["filesystem_modified"] is False
+
+
+def test_nonfinite_model_comparison_uses_its_declared_envelope():
+    bundle = _bundle(
+        [4.6e-6 + index * 0.025e-6 for index in range(33)],
+        [0.2] * 33,
+    )
+    bundle_spec = {
+        key: bundle[key]
+        for key in (
+            "bundle_id",
+            "source_model",
+            "configuration_sha256",
+            "parameter_state",
+            "wavelength_convention",
+            "expressions",
+            "rows",
+        )
+    }
+    bundle_spec["rows"][0]["A"] = math.nan
+
+    result = _nonfinite_row_summary(
+        bundle_spec,
+        artifact_key="model_comparison",
+    )
+
+    assert result is not None
+    assert result["success"] is False
+    assert result["classification"] == "non_finite"
+    assert result["model_comparison"] is None
+    assert "candidate_measurements" not in result
 
 
 def test_tampering_unknown_fields_and_duplicate_models_fail_closed():

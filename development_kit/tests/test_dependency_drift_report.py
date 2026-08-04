@@ -6,6 +6,8 @@ import hashlib
 import json
 from pathlib import Path
 
+import pytest
+
 from development_kit.scripts.dependency_drift_report import (
     build_dependency_drift_report,
     canonical_distribution_name,
@@ -104,6 +106,15 @@ def _outdated_environment() -> list[dict[str, str]]:
     ]
 
 
+def _pip_check_evidence(status="passed", exit_code=0) -> dict[str, object]:
+    return {
+        "status": status,
+        "exit_code": exit_code,
+        "command": ["python", "-m", "pip", "check"],
+        "output_sha256": "f" * 64,
+    }
+
+
 def test_pep503_distribution_name_normalization() -> None:
     assert canonical_distribution_name("MPh") == "mph"
     assert canonical_distribution_name("pydantic_core") == "pydantic-core"
@@ -119,7 +130,9 @@ def test_report_classifies_trigger_edge_cases_and_all_lock_drifts(tmp_path: Path
         release_lock_path=lock,
         installed_environment=_installed_environment(),
         outdated_dependencies=_outdated_environment(),
-        installed_requirements={"pydantic": ["pydantic-core==2.46.4"]},
+        installed_requirements={"pydantic": ["pydantic-core==2.46.4; extra == 'dev'"]},
+        installed_extras=["manuals", "dev"],
+        pip_check_evidence=_pip_check_evidence(),
         source_commit="0f2ebbcb4eb953b8e1c86c8b149195ec39cb523f",
         generated_at_utc="2026-08-03T00:00:00Z",
         python_identity={
@@ -160,7 +173,8 @@ def test_report_classifies_trigger_edge_cases_and_all_lock_drifts(tmp_path: Path
     }
     assert lock_drift == LOCK_DRIFTS
     assert report["release_lock_comparison"]["drift_count"] == 7
-    assert report["pip_check"] == "passed"
+    assert report["installed_extras"] == ["dev", "manuals"]
+    assert report["pip_check"] == _pip_check_evidence()
 
 
 def test_report_serialization_is_deterministic_and_utf8(tmp_path: Path) -> None:
@@ -172,6 +186,8 @@ def test_report_serialization_is_deterministic_and_utf8(tmp_path: Path) -> None:
         "installed_environment": _installed_environment(),
         "outdated_dependencies": _outdated_environment(),
         "installed_requirements": {"pydantic": ["pydantic-core==2.46.4"]},
+        "installed_extras": ["dev", "manuals"],
+        "pip_check_evidence": _pip_check_evidence(),
         "source_commit": "a" * 40,
         "generated_at_utc": "2026-08-03T00:00:00Z",
         "python_identity": {
@@ -189,6 +205,24 @@ def test_report_serialization_is_deterministic_and_utf8(tmp_path: Path) -> None:
     assert json.loads(first) == json.loads(second)
 
 
+def test_report_rejects_unverified_pip_check_claim(tmp_path: Path) -> None:
+    pyproject, tested, lock = _write_fixture(tmp_path)
+    with pytest.raises(ValueError, match="pip check evidence"):
+        build_dependency_drift_report(
+            pyproject_path=pyproject,
+            tested_versions_path=tested,
+            release_lock_path=lock,
+            installed_environment=_installed_environment(),
+            outdated_dependencies=_outdated_environment(),
+            installed_requirements={},
+            installed_extras=["dev", "manuals"],
+            pip_check_evidence=_pip_check_evidence("failed", 1),
+            source_commit="a" * 40,
+            generated_at_utc="2026-08-03T00:00:00Z",
+            python_identity={"version": "3.14.6", "abi": "cp314-win_amd64"},
+        )
+
+
 def test_workflow_installs_manuals_and_routes_the_tested_generator() -> None:
     workflow = (ROOT / ".github" / "workflows" / "dependency_report.yml").read_text(
         encoding="utf-8"
@@ -198,4 +232,7 @@ def test_workflow_installs_manuals_and_routes_the_tested_generator() -> None:
     assert "development_kit/scripts/dependency_drift_report.py" in workflow
     assert "--installed installed-environment.json" in workflow
     assert "--outdated outdated-dependencies.json" in workflow
+    assert "--pip-check pip-check-evidence.json" in workflow
+    assert "--installed-extra dev" in workflow
+    assert "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }" in workflow
     assert "ConvertFrom-Json" not in workflow

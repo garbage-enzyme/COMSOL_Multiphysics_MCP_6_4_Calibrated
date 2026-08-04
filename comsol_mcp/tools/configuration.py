@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from mcp.server.mcpserver import MCPServer
@@ -10,6 +11,9 @@ from comsol_mcp.contracts.simulation_configuration import (
     ConfigurationDiffPolicy,
     SimulationConfigurationInput,
 )
+from comsol_mcp.utils.public_errors import public_error
+
+logger = logging.getLogger(__name__)
 
 
 def register_configuration_tools(mcp: MCPServer) -> None:
@@ -31,11 +35,13 @@ def register_configuration_tools(mcp: MCPServer) -> None:
                 "solver_started": False,
                 "filesystem_modified": False,
             }
-        except (TypeError, ValueError) as exc:
+        except TypeError, ValueError:
+            logger.exception("Simulation configuration validation failed")
             return {
-                "success": False,
-                "reason_code": "simulation_configuration_rejected",
-                "error": str(exc)[:2048],
+                **public_error(
+                    "simulation_configuration_rejected",
+                    "Simulation configuration validation failed.",
+                ),
                 "solver_started": False,
                 "filesystem_modified": False,
             }
@@ -58,11 +64,13 @@ def register_configuration_tools(mcp: MCPServer) -> None:
                 "solver_started": False,
                 "filesystem_modified": False,
             }
-        except (TypeError, ValueError) as exc:
+        except TypeError, ValueError:
+            logger.exception("Simulation configuration comparison failed")
             return {
-                "success": False,
-                "reason_code": "simulation_configuration_diff_rejected",
-                "error": str(exc)[:2048],
+                **public_error(
+                    "simulation_configuration_diff_rejected",
+                    "Simulation configuration comparison failed.",
+                ),
                 "solver_started": False,
                 "filesystem_modified": False,
             }

@@ -8,7 +8,9 @@ from typing import Any, Optional
 from mcp.server.mcpserver import MCPServer
 
 
-def _nonfinite_row_summary(bundle_spec: dict[str, Any]) -> dict[str, Any] | None:
+def _nonfinite_row_summary(
+    bundle_spec: dict[str, Any], *, artifact_key: str = "candidate_measurements"
+) -> dict[str, Any] | None:
     rows = bundle_spec.get("rows")
     if not isinstance(rows, list):
         return None
@@ -49,7 +51,7 @@ def _nonfinite_row_summary(bundle_spec: dict[str, Any]) -> dict[str, Any] | None
         "invalid_rows": invalid,
         "raw_bundle": None,
         "analysis_decision": None,
-        "candidate_measurements": None,
+        artifact_key: None,
         "solver_started": False,
         "filesystem_modified": False,
     }
@@ -132,7 +134,7 @@ def register_spectral_characterization_tools(mcp: MCPServer) -> None:
             if (bundle_spec is None) == (spectral_bundle is None):
                 raise ValueError("provide exactly one of bundle_spec or spectral_bundle")
             if bundle_spec is not None:
-                nonfinite = _nonfinite_row_summary(bundle_spec)
+                nonfinite = _nonfinite_row_summary(bundle_spec, artifact_key="model_comparison")
                 if nonfinite is not None:
                     return nonfinite
                 bundle = build_spectral_point_bundle(**bundle_spec)

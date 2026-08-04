@@ -12,14 +12,19 @@ class FakeGeometry:
 
 
 class FakeGeometryList:
-    def __init__(self, dimension=2):
+    def __init__(self, dimension=2, fail_after=None):
         self.geometry = FakeGeometry(dimension)
+        self.fail_after = fail_after
+        self.get_count = 0
 
     def tags(self):
         return ["geom1"]
 
     def get(self, tag):
         assert tag == "geom1"
+        self.get_count += 1
+        if self.fail_after is not None and self.get_count > self.fail_after:
+            raise RuntimeError("injected geometry lookup failure")
         return self.geometry
 
 
@@ -65,8 +70,8 @@ class FakeSelectionList:
 
 
 class FakeComponent:
-    def __init__(self, dimension=2, fail_tag=None, existing=()):
-        self.geometries = FakeGeometryList(dimension)
+    def __init__(self, dimension=2, fail_tag=None, existing=(), fail_geometry_after=None):
+        self.geometries = FakeGeometryList(dimension, fail_geometry_after)
         self.selections = FakeSelectionList(fail_tag, existing)
 
     def tag(self):
@@ -239,6 +244,24 @@ def test_side_selections_roll_back_every_prior_side_on_failure():
         "duct_right",
         "duct_bottom",
     }
+
+
+def test_side_selections_roll_back_after_geometry_lookup_failure():
+    component = FakeComponent(fail_geometry_after=2)
+
+    result = create_side_selections(
+        FakeModel(component),
+        x_min="0",
+        x_max="1",
+        y_min="0",
+        y_max="1",
+        prefix="duct",
+    )
+
+    assert result["success"] is False
+    assert result["failed_side"] == "right"
+    assert result["rolled_back"] is True
+    assert component.selections.items == {}
 
 
 def test_side_selections_are_explicitly_two_dimensional():

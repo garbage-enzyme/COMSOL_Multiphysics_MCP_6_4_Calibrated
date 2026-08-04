@@ -20,7 +20,7 @@ from packaging.requirements import InvalidRequirement, Requirement
 from packaging.version import InvalidVersion, Version
 
 REPORT_SCHEMA = "comsol_mcp.dependency_drift_report"
-REPORT_VERSION = "2.0.0"
+REPORT_VERSION = "2.1.0"
 BOOTSTRAP_TOOLS = frozenset({"pip", "setuptools", "wheel"})
 _NORMALIZE_NAME = re.compile(r"[-_.]+")
 _LOCK_REQUIREMENT = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)==([^\s\\]+)")
@@ -135,6 +135,7 @@ def _satisfies(version: str | None, specifier: str | None) -> bool:
 
 def _exact_requirements(
     installed_requirements: Mapping[str, Sequence[str]],
+    installed_extras: Sequence[str],
 ) -> dict[str, list[dict[str, str]]]:
     result: dict[str, list[dict[str, str]]] = {}
     for parent, requirements in installed_requirements.items():
@@ -144,7 +145,9 @@ def _exact_requirements(
                 requirement = Requirement(raw)
             except InvalidRequirement:
                 continue
-            if requirement.marker is not None and not requirement.marker.evaluate():
+            if requirement.marker is not None and not any(
+                requirement.marker.evaluate({"extra": extra}) for extra in ("", *installed_extras)
+            ):
                 continue
             specifier = str(requirement.specifier)
             if not re.fullmatch(r"==[^,;\s]+", specifier):
@@ -161,6 +164,38 @@ def _canonical_inventory(items: Sequence[Mapping[str, Any]]) -> list[dict[str, A
     return sorted(copied, key=lambda item: canonical_distribution_name(str(item["name"])))
 
 
+def _validated_pip_check(value: Mapping[str, Any]) -> dict[str, Any]:
+    expected_command = ["python", "-m", "pip", "check"]
+    if value.get("status") != "passed" or value.get("exit_code") != 0:
+        raise ValueError("pip check evidence must record a successful command")
+    if value.get("command") != expected_command:
+        raise ValueError("pip check evidence command is invalid")
+    output_sha256 = value.get("output_sha256")
+    if not isinstance(output_sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", output_sha256):
+        raise ValueError("pip check evidence output hash is invalid")
+    return {
+        "status": "passed",
+        "exit_code": 0,
+        "command": expected_command,
+        "output_sha256": output_sha256,
+    }
+
+
+def _validated_installed_extras(
+    pyproject: Mapping[str, Any], installed_extras: Sequence[str]
+) -> list[str]:
+    project = pyproject.get("project")
+    optional = project.get("optional-dependencies", {}) if isinstance(project, dict) else {}
+    if not isinstance(optional, dict):
+        raise ValueError("project.optional-dependencies must be a table")
+    normalized = sorted(set(installed_extras))
+    if not normalized or any(
+        not isinstance(extra, str) or not extra or extra not in optional for extra in normalized
+    ):
+        raise ValueError("installed extras must name declared optional dependency groups")
+    return normalized
+
+
 def build_dependency_drift_report(
     *,
     pyproject_path: Path,
@@ -169,6 +204,8 @@ def build_dependency_drift_report(
     installed_environment: Sequence[Mapping[str, Any]],
     outdated_dependencies: Sequence[Mapping[str, Any]],
     installed_requirements: Mapping[str, Sequence[str]],
+    installed_extras: Sequence[str],
+    pip_check_evidence: Mapping[str, Any],
     source_commit: str,
     generated_at_utc: str,
     python_identity: Mapping[str, str],
@@ -183,6 +220,8 @@ def build_dependency_drift_report(
     release_lock_path = Path(release_lock_path)
     root = pyproject_path.parent
     pyproject = tomllib.loads(pyproject_path.read_text(encoding="utf-8-sig"))
+    extras = _validated_installed_extras(pyproject, installed_extras)
+    pip_check = _validated_pip_check(pip_check_evidence)
     tested = json.loads(tested_versions_path.read_text(encoding="utf-8-sig"))
     if not isinstance(tested, dict):
         raise ValueError("tested versions manifest must be a JSON object")
@@ -190,7 +229,7 @@ def build_dependency_drift_report(
     locked = _parse_release_lock(release_lock_path)
     installed = _version_map(installed_environment, version_key="version")
     latest = _version_map(outdated_dependencies, version_key="latest_version")
-    exact_requirements = _exact_requirements(installed_requirements)
+    exact_requirements = _exact_requirements(installed_requirements, extras)
 
     production = tested.get("production_python_3_14", {})
     reviewed_raw = production.get("direct_dependencies", {}) if isinstance(production, dict) else {}
@@ -306,7 +345,7 @@ def build_dependency_drift_report(
         "generated_at_utc": generated_at_utc,
         "source_commit": source_commit,
         "python_identity": dict(sorted(python_identity.items())),
-        "installed_extras": ["dev", "manuals"],
+        "installed_extras": extras,
         "reviewed_inputs": {
             "pyproject": {
                 "path": _display_path(pyproject_path, root),
@@ -333,7 +372,7 @@ def build_dependency_drift_report(
         },
         "installed_environment": _canonical_inventory(installed_environment),
         "outdated_dependencies": _canonical_inventory(outdated_dependencies),
-        "pip_check": "passed",
+        "pip_check": pip_check,
         "information_only": True,
     }
 
@@ -347,6 +386,13 @@ def _load_json_list(path: Path) -> list[dict[str, Any]]:
     value = json.loads(path.read_text(encoding="utf-8-sig"))
     if not isinstance(value, list) or any(not isinstance(item, dict) for item in value):
         raise ValueError(f"{path.name} must contain a JSON object list")
+    return value
+
+
+def _load_json_object(path: Path) -> dict[str, Any]:
+    value = json.loads(path.read_text(encoding="utf-8-sig"))
+    if not isinstance(value, dict):
+        raise ValueError(f"{path.name} must contain a JSON object")
     return value
 
 
@@ -388,6 +434,8 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--installed", type=Path, required=True)
     parser.add_argument("--outdated", type=Path, required=True)
+    parser.add_argument("--pip-check", type=Path, required=True)
+    parser.add_argument("--installed-extra", action="append", required=True)
     parser.add_argument("--source-commit", required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--generated-at-utc")
@@ -406,6 +454,8 @@ def main(argv: Iterable[str] | None = None) -> int:
         installed_environment=_load_json_list(arguments.installed),
         outdated_dependencies=_load_json_list(arguments.outdated),
         installed_requirements=_installed_requirement_metadata(),
+        installed_extras=arguments.installed_extra,
+        pip_check_evidence=_load_json_object(arguments.pip_check),
         source_commit=arguments.source_commit,
         generated_at_utc=generated_at,
         python_identity=_python_identity(),
