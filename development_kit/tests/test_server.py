@@ -3,6 +3,7 @@
 import ast
 import asyncio
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -231,6 +232,15 @@ print(json.dumps(sorted(
     name for name in ('chromadb', 'sentence_transformers', 'torch') if name in sys.modules
 )))
 """
+    environment = os.environ.copy()
+    environment.pop("COMSOL_MCP_SETTINGS_PATH", None)
+    environment.update(
+        {
+            "COMSOL_MCP_ENABLE_SEMANTIC_DOCS": "false",
+            "COMSOL_MCP_ENABLE_SHARED_SERVER": "false",
+            "COMSOL_MCP_PROFILE": "core",
+        }
+    )
     completed = subprocess.run(
         [sys.executable, "-c", code],
         cwd=Path(__file__).parents[2],
@@ -238,6 +248,7 @@ print(json.dumps(sorted(
         text=True,
         timeout=30,
         check=False,
+        env=environment,
     )
 
     assert completed.returncode == 0, completed.stderr

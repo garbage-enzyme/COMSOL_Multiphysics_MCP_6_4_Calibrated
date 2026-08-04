@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import queue
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -83,6 +85,12 @@ def test_two_shared_model_mutations_cannot_overlap(tmp_path, monkeypatch):
 
 
 def test_status_and_cancel_remain_responsive_during_shared_solve(tmp_path, monkeypatch):
+    read_root = tmp_path / "models"
+    write_root = tmp_path / "artifacts"
+    read_root.mkdir()
+    write_root.mkdir()
+    monkeypatch.setenv(MODEL_READ_ROOTS_ENV, str(read_root))
+    monkeypatch.setenv(ARTIFACT_WRITE_ROOT_ENV, str(write_root))
     arbiter = _arbiter(tmp_path, monkeypatch)
     entered = threading.Event()
     release = threading.Event()
@@ -125,11 +133,32 @@ def test_status_and_cancel_remain_responsive_during_shared_solve(tmp_path, monke
 
     worker = threading.Thread(target=run_solve)
     worker.start()
+
+    def bounded_call(function):
+        outcomes = queue.Queue(maxsize=1)
+
+        def invoke():
+            try:
+                outcomes.put((True, function()))
+            except BaseException as exc:
+                outcomes.put((False, exc))
+
+        started = time.monotonic()
+        caller = threading.Thread(target=invoke, daemon=True)
+        caller.start()
+        caller.join(1.0)
+        elapsed = time.monotonic() - started
+        assert not caller.is_alive(), "control-plane call exceeded one second"
+        succeeded, outcome = outcomes.get_nowait()
+        if not succeeded:
+            raise outcome
+        return outcome, elapsed
+
     try:
         assert entered.wait(1.0)
         assert worker.is_alive()
-        status = status_tool()
-        cancel = cancel_tool()
+        status, status_elapsed = bounded_call(status_tool)
+        cancel, cancel_elapsed = bounded_call(cancel_tool)
         assert worker.is_alive()
     finally:
         release.set()
@@ -162,6 +191,8 @@ def test_status_and_cancel_remain_responsive_during_shared_solve(tmp_path, monke
         },
     }
     assert cancel_calls == [True]
+    assert status_elapsed < 1.0
+    assert cancel_elapsed < 1.0
     assert solve_result["success"] is True
     assert not arbiter.lock_path.exists()
 

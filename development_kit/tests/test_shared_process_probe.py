@@ -7,8 +7,8 @@ import subprocess
 import sys
 from contextlib import nullcontext
 from ctypes import wintypes
-from types import SimpleNamespace
 from pathlib import Path
+from types import SimpleNamespace
 
 import psutil
 import pytest

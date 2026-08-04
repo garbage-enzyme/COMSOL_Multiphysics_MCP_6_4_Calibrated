@@ -14,7 +14,7 @@ from comsol_mcp.evidence.simulation_configuration import (
     compare_simulation_configurations,
     normalize_simulation_configuration,
 )
-from comsol_mcp.tools.jobs import _preview_job_spec
+from comsol_mcp.tools.jobs import _preview_job_spec, _submit_job
 from development_kit.tests.mcp_test_support import decode_tool_result
 
 
@@ -293,8 +293,10 @@ def test_physical_role_quantities_fail_at_the_typed_boundary(mutation):
     ],
 )
 def test_job_preview_is_side_effect_free_and_content_bound(spec):
+    original = deepcopy(spec)
     first = _preview_job_spec(spec)
     second = _preview_job_spec(deepcopy(spec))
+    assert spec == original
     assert first == second
     assert first["preview_guarantees"] == {
         "submitted": False,
@@ -307,8 +309,6 @@ def test_job_preview_is_side_effect_free_and_content_bound(spec):
 
 
 def test_job_preview_and_submit_share_discriminated_input_rejections():
-    with pytest.raises(ValueError):
-        _preview_job_spec({"job_type": "unknown"})
     oversized = {
         "job_type": "convergence_campaign",
         "campaign_id": "too-large",
@@ -318,8 +318,24 @@ def test_job_preview_and_submit_share_discriminated_input_rejections():
         "maximum_total_points": 2048,
         "wall_time_budget_seconds": 60,
     }
-    with pytest.raises(ValueError):
-        _preview_job_spec(oversized)
+    submitted = []
+
+    class Manager:
+        def submit(self, spec):
+            submitted.append(spec)
+            raise AssertionError("invalid job spec reached submission")
+
+    for invalid in ({"job_type": "unknown"}, oversized):
+        with pytest.raises(ValueError):
+            _preview_job_spec(deepcopy(invalid))
+        with pytest.raises(ValueError):
+            _submit_job(
+                deepcopy(invalid),
+                profile_name="core",
+                shared_enabled=False,
+                manager=Manager(),
+            )
+    assert submitted == []
 
 
 def test_public_f0_dispatch_is_solver_free():
