@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from copy import deepcopy
 
 import pytest
+from pydantic import ValidationError
 from src.server import create_server
 
 from comsol_mcp.evidence.simulation_configuration import (
@@ -203,6 +203,38 @@ def test_duplicate_layer_order_and_unrecognized_units_fail_closed():
     bad_unit["geometry"][0]["quantity"] = _quantity(1.0, "furlong")
     with pytest.raises(ValueError, match="unsupported length unit"):
         normalize_simulation_configuration(bad_unit)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda value: value.update(geometry=[]),
+        lambda value: value.update(materials=[], layers=[]),
+        lambda value: value.update(layers=[]),
+    ],
+)
+def test_container_level_physical_changes_are_classified(mutation):
+    right = deepcopy(_configuration())
+    mutation(right)
+    comparison = compare_simulation_configurations(_configuration(), right)
+    assert comparison["physical_disposition"] == "different"
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda value: value["incidence"]["theta"].update(dimension="length", unit="m"),
+        lambda value: value["incidence"]["phi"].update(dimension="temperature", unit="K"),
+        lambda value: value["materials"][0]["temperature"].update(dimension="length", unit="m"),
+        lambda value: value["layers"][0]["thickness"].update(dimension="angle", unit="rad"),
+        lambda value: value["layers"][0]["thickness"].update(value=-1.0),
+    ],
+)
+def test_physical_role_quantities_fail_at_the_typed_boundary(mutation):
+    value = _configuration()
+    mutation(value)
+    with pytest.raises(ValidationError):
+        normalize_simulation_configuration(value)
 
 
 @pytest.mark.parametrize(
