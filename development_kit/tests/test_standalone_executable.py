@@ -324,7 +324,7 @@ def test_result_rows_and_hash_share_one_file_snapshot(ascii_tmp_path, monkeypatc
 
     def counted_read(path, *, max_bytes):
         nonlocal reads
-        if Path(path) == results_path:
+        if Path(path).samefile(results_path):
             reads += 1
         return original_read(path, max_bytes=max_bytes)
 
