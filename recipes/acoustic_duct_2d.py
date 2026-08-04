@@ -18,6 +18,7 @@ import hashlib
 import json
 import math
 import os
+import sys
 import time
 import uuid
 from pathlib import Path
@@ -351,10 +352,12 @@ def main() -> None:
         if cleanup_errors:
             if staging is not None and staging.exists():
                 _retry_permission_error(staging.unlink)
-            raise RuntimeError(f"Acoustic recipe cleanup was incomplete: {cleanup_errors}")
+            message = f"Acoustic recipe cleanup was incomplete: {cleanup_errors}"
+            active_error = sys.exception()
+            if active_error is None:
+                raise RuntimeError(message)
+            active_error.add_note(message)
 
-    if staging is None or build is None or validation is None:
-        raise RuntimeError("acoustic model staging did not complete")
     publish_staged_model(staging, output, overwrite=args.overwrite_output)
     payload = {
         "schema_name": "comsol_mcp.acoustic_duct_recipe_receipt",

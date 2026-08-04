@@ -82,6 +82,51 @@ def test_staged_model_is_published_only_after_client_and_lease_cleanup(tmp_path,
     assert output.read_bytes() == b"model"
 
 
+def test_build_failure_remains_primary_when_cleanup_also_fails(tmp_path, monkeypatch):
+    namespace = _namespace(monkeypatch)
+
+    class Ownership:
+        def preflight(self, **_kwargs):
+            return {"ready": True}
+
+        def acquire(self, **_kwargs):
+            return {"success": True}
+
+        def heartbeat(self, **_kwargs):
+            return None
+
+        def release(self):
+            return {"success": False, "error": "release failed"}
+
+    class Client:
+        port = None
+
+        def create(self, _name):
+            return SimpleNamespace(java=object())
+
+        def clear(self):
+            raise OSError("clear failed")
+
+    namespace["parse_args"] = lambda: SimpleNamespace(
+        output_model=tmp_path / "duct.mph",
+        receipt=tmp_path / "receipt.json",
+        frequency_hz=100.0,
+        maximum_relative_error=0.02,
+        solve=False,
+        overwrite_output=False,
+    )
+    namespace["SolverOwnership"] = lambda owner: Ownership()
+    namespace["mph"] = SimpleNamespace(Client=lambda version: Client())
+    namespace["build_acoustic_duct"] = lambda *_args: (_ for _ in ()).throw(
+        ValueError("build failed")
+    )
+
+    with pytest.raises(ValueError, match="build failed") as caught:
+        namespace["main"]()
+
+    assert any("cleanup was incomplete" in note for note in caught.value.__notes__)
+
+
 def test_publish_never_overwrites_competing_output(tmp_path, monkeypatch):
     namespace = _namespace(monkeypatch)
     staging = tmp_path / ".duct.staging.mph"
