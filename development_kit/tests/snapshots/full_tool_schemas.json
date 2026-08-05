@@ -11108,6 +11108,7 @@
             "type": "array"
           },
           "n_flat": {
+            "description": "Temperature-major values; wavelength varies fastest within each temperature row.",
             "items": {
               "minimum": 0.0,
               "type": "number",
@@ -11119,6 +11120,7 @@
             "type": "array"
           },
           "k_flat": {
+            "description": "Temperature-major values; wavelength varies fastest within each temperature row.",
             "items": {
               "minimum": 0.0,
               "type": "number",
@@ -11186,6 +11188,7 @@
             "type": "array"
           },
           "epsilon_real_flat": {
+            "description": "Temperature-major values; wavelength varies fastest within each temperature row.",
             "items": {
               "type": "number",
               "minimum": -1e+308,
@@ -11197,6 +11200,7 @@
             "type": "array"
           },
           "epsilon_imag_flat": {
+            "description": "Temperature-major values; wavelength varies fastest within each temperature row.",
             "items": {
               "minimum": 0.0,
               "type": "number",
@@ -12264,6 +12268,7 @@
             "type": "array"
           },
           "n_flat": {
+            "description": "Temperature-major values; wavelength varies fastest within each temperature row.",
             "items": {
               "minimum": 0.0,
               "type": "number",
@@ -12275,6 +12280,7 @@
             "type": "array"
           },
           "k_flat": {
+            "description": "Temperature-major values; wavelength varies fastest within each temperature row.",
             "items": {
               "minimum": 0.0,
               "type": "number",
@@ -12342,6 +12348,7 @@
             "type": "array"
           },
           "epsilon_real_flat": {
+            "description": "Temperature-major values; wavelength varies fastest within each temperature row.",
             "items": {
               "type": "number",
               "minimum": -1e+308,
@@ -12353,6 +12360,7 @@
             "type": "array"
           },
           "epsilon_imag_flat": {
+            "description": "Temperature-major values; wavelength varies fastest within each temperature row.",
             "items": {
               "minimum": 0.0,
               "type": "number",

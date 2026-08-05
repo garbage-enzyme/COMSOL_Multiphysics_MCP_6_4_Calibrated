@@ -222,6 +222,13 @@ def test_coordinate_ranges_must_stay_inside_requested_bounds():
         build_field_evidence_manifest(**dict(kwargs, coordinate_ranges=ranges))
 
 
+def test_manifest_numeric_overflow_is_a_validation_error():
+    _, _, kwargs = _kwargs()
+    kwargs["coordinate_ranges"]["x"][0] = 10**400
+    with pytest.raises(ValueError, match="finite"):
+        build_field_evidence_manifest(**kwargs)
+
+
 def test_manifest_rejects_unknown_fields_even_with_recomputed_hash():
     request, manifest = _manifest()
     manifest["semantic_claim"] = "SPP"

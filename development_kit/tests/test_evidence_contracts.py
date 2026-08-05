@@ -180,6 +180,13 @@ def test_physical_evidence_rejects_stale_contract_hash():
         validate_physical_evidence(payload)
 
 
+def test_measured_evidence_rejects_null_value_at_envelope_boundary():
+    payload = _envelope()
+    payload["evidence"]["power.R"]["value"] = None
+    with pytest.raises(ValueError, match="non-null value"):
+        validate_physical_evidence(payload, verify_hash=False)
+
+
 def test_contract_size_is_bounded():
     payload = _envelope()
     payload["limitations"] = ["x" * 5000]
@@ -529,6 +536,32 @@ def test_legacy_declared_flux_state_cannot_substitute_for_nested_measurements():
         "physical_flux_closure_eligible",
     ):
         assert migrated["evidence"][f"flux.{name}"]["state"] == "unknown"
+
+
+@pytest.mark.parametrize("section", [None, 1, []])
+def test_legacy_measured_internal_absorption_requires_object_sections(section):
+    legacy = {
+        "schema_version": "1",
+        "config_id": "legacy-config",
+        "config_sha256": CONFIG_HASH,
+        "source_sha256": SOURCE_HASH,
+        "measurement": {
+            "schema_version": "1",
+            "config_id": "legacy-config",
+            "provenance": {"config_sha256": CONFIG_HASH, "source_sha256_before": SOURCE_HASH},
+            "wavelength": {},
+            "power": {},
+            "polarization": {},
+            "mesh": {},
+            "internal_absorption_consistency": {
+                "state": "measured",
+                "cross_section": section,
+                "volume_loss": {},
+            },
+        },
+    }
+    with pytest.raises(ValueError, match="cross_section must be a JSON object"):
+        migrate_legacy_point_audit(legacy)
 
 
 def test_file_migration_writes_new_hash_bound_artifact_without_touching_source(

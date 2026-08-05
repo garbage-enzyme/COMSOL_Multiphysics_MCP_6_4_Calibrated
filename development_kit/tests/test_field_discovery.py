@@ -271,6 +271,27 @@ def test_discovery_rejects_malformed_dataset_references(reference):
         discover_field_datasets(model)
 
 
+def test_discovery_normalizes_java_metadata_failures():
+    class BrokenNode(_Node):
+        def name(self):
+            raise RuntimeError("stale proxy")
+
+    with pytest.raises(ValueError, match="name is unavailable"):
+        discover_field_datasets(_Model(components=[BrokenNode("x", "comp1", "Component")]))
+
+
+def test_discovery_normalizes_mid_iteration_java_failures():
+    class BrokenCollection:
+        def __iter__(self):
+            yield _Node("Component 1", "comp1", "Component")
+            raise RuntimeError("stale iterator")
+
+    model = _Model()
+    model.groups["components"] = BrokenCollection()
+    with pytest.raises(ValueError, match="collection iteration failed"):
+        discover_field_datasets(model)
+
+
 def test_discovery_does_not_evaluate_or_run_study():
     model = _Model()
     before = _model_snapshot(model)

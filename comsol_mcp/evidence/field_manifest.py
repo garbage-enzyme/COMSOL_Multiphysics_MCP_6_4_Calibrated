@@ -54,7 +54,10 @@ def _exact(value: Mapping[str, Any], fields: set[str], label: str) -> None:
 def _finite(value: object, label: str, *, nonnegative: bool = False) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{label} must be numeric")
-    number = float(value)
+    try:
+        number = float(value)
+    except OverflowError as exc:
+        raise ValueError(f"{label} must be finite") from exc
     if not math.isfinite(number) or (nonnegative and number < 0):
         qualifier = "finite and nonnegative" if nonnegative else "finite"
         raise ValueError(f"{label} must be {qualifier}")

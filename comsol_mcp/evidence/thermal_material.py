@@ -239,9 +239,13 @@ def _table_value(
     w0, w1, wf = _bracket(wavelengths, wavelength)
     t0, t1, tf = _bracket(temperatures, temperature)
     if _crosses_boundary(
-        wavelengths[w0], wavelengths[w1], list(policy.wavelength_discontinuities_m)
+        min(wavelength, wavelengths[w0]),
+        max(wavelength, wavelengths[w1]),
+        list(policy.wavelength_discontinuities_m),
     ) or _crosses_boundary(
-        temperatures[t0], temperatures[t1], list(policy.temperature_discontinuities_K)
+        min(temperature, temperatures[t0]),
+        max(temperature, temperatures[t1]),
+        list(policy.temperature_discontinuities_K),
     ):
         raise ValueError("interpolation would cross a declared discontinuity boundary")
     width = len(wavelengths)

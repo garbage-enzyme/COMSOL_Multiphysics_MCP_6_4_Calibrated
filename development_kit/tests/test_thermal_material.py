@@ -12,6 +12,8 @@ from src.server import create_server
 
 from comsol_mcp.contracts.thermal_material import (
     ExtrapolationPolicy,
+    NkTableModel,
+    PermittivityTableModel,
     ThermalMaterialLedger,
     UncertaintyModel,
 )
@@ -22,6 +24,16 @@ from comsol_mcp.evidence.thermal_material import (
 from development_kit.tests.mcp_test_support import decode_tool_result
 
 _C = 299_792_458.0
+
+
+def test_table_contract_declares_temperature_major_flattening():
+    for model, fields in (
+        (NkTableModel, ("n_flat", "k_flat")),
+        (PermittivityTableModel, ("epsilon_real_flat", "epsilon_imag_flat")),
+    ):
+        properties = model.model_json_schema()["properties"]
+        for field in fields:
+            assert "Temperature-major" in properties[field]["description"]
 
 
 def _source():
@@ -288,6 +300,32 @@ def test_out_of_domain_is_stably_unavailable_and_source_backed_extrapolation_exp
     assert extrapolated["extrapolated"] is True
     assert extrapolated["uncertainty"]["expansion_factor"] > 1.0
     assert len(extrapolated["extrapolation_policy_sha256"]) == 64
+
+
+def test_source_backed_extrapolation_cannot_cross_far_side_discontinuity():
+    model = {
+        "model_kind": "nk_table",
+        "wavelengths_m": [1.0e-6, 2.0e-6],
+        "temperatures_K": [400.0],
+        "n_flat": [2.0, 3.0],
+        "k_flat": [0.1, 0.2],
+        "interpolation": {
+            "wavelength_method": "linear",
+            "temperature_method": "linear",
+            "wavelength_discontinuities_m": [2.1e-6],
+            "temperature_discontinuities_K": [],
+            "extrapolation": {
+                "mode": "source_backed_linear",
+                "policy_source_sha256": "7" * 64,
+                "maximum_fraction_outside_domain": 0.2,
+                "uncertainty_growth_per_fraction": 2.0,
+            },
+        },
+        "table_sha256": "f" * 64,
+    }
+    result = evaluate_thermal_material(_request(_ledger([_state(model=model)]), wavelength=2.2e-6))
+    assert result["available"] is False
+    assert result["reason_code"] == "declared_discontinuity_requires_explicit_state"
 
 
 def test_invalid_table_shape_and_negative_passive_loss_fail_closed():

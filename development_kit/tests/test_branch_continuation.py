@@ -1217,6 +1217,20 @@ def test_public_tool_does_not_misclassify_internal_type_error_as_caller_rejectio
     assert "programming defect" not in json.dumps(result)
 
 
+@pytest.mark.parametrize("field", ["spacing_rule", "stop_policy"])
+def test_continuation_policy_rejects_unhashable_discriminators(field):
+    states = build_continuation_states(
+        states_id="dispersive", states=_build_dispersive_states(3, shift=0.1e-6)
+    )
+    policy = _continuation_policy()
+    if field == "spacing_rule":
+        policy["request_grid"][field] = []
+    else:
+        policy[field] = {}
+    with pytest.raises(ValueError, match="unsupported"):
+        plan_branch_continuation(states, policy)
+
+
 def test_public_branch_continuation_tool_never_constructs_a_comsol_client():
     code = """
 import mph
@@ -1274,6 +1288,25 @@ def test_self_rehashed_noncanonical_states_id_fails_closed():
     malformed["states_sha256"] = _canonical_hash(states_body)
 
     with pytest.raises(ValueError, match="states_id|noncanonical"):
+        validate_continuation_states(malformed)
+
+
+@pytest.mark.parametrize("classification", [[], "flat"])
+def test_self_rehashed_state_rejects_unhashable_or_impossible_measured_classification(
+    classification,
+):
+    malformed = build_continuation_states(
+        states_id="dispersive", states=_build_dispersive_states(3, shift=0.1e-6)
+    )
+    state = malformed["states"][1]
+    state["candidate"]["classification"] = classification
+    state_body = dict(state)
+    state_body.pop("state_sha256")
+    state["state_sha256"] = _canonical_hash(state_body)
+    states_body = dict(malformed)
+    states_body.pop("states_sha256")
+    malformed["states_sha256"] = _canonical_hash(states_body)
+    with pytest.raises(ValueError, match="classification|interior candidate"):
         validate_continuation_states(malformed)
 
 

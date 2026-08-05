@@ -132,8 +132,26 @@ class NkTableModel(_ClosedModel):
     model_kind: Literal["nk_table"]
     wavelengths_m: Annotated[list[PositiveFloat], Field(min_length=2, max_length=512)]
     temperatures_K: Annotated[list[PositiveFloat], Field(min_length=1, max_length=64)]
-    n_flat: Annotated[list[NonnegativeFloat], Field(min_length=2, max_length=2048)]
-    k_flat: Annotated[list[NonnegativeFloat], Field(min_length=2, max_length=2048)]
+    n_flat: Annotated[
+        list[NonnegativeFloat],
+        Field(
+            min_length=2,
+            max_length=2048,
+            description=(
+                "Temperature-major values; wavelength varies fastest within each temperature row."
+            ),
+        ),
+    ]
+    k_flat: Annotated[
+        list[NonnegativeFloat],
+        Field(
+            min_length=2,
+            max_length=2048,
+            description=(
+                "Temperature-major values; wavelength varies fastest within each temperature row."
+            ),
+        ),
+    ]
     interpolation: InterpolationPolicy
     table_sha256: Sha256
 
@@ -149,8 +167,26 @@ class PermittivityTableModel(_ClosedModel):
     model_kind: Literal["permittivity_table"]
     wavelengths_m: Annotated[list[PositiveFloat], Field(min_length=2, max_length=512)]
     temperatures_K: Annotated[list[PositiveFloat], Field(min_length=1, max_length=64)]
-    epsilon_real_flat: Annotated[list[float], Field(min_length=2, max_length=2048)]
-    epsilon_imag_flat: Annotated[list[NonnegativeFloat], Field(min_length=2, max_length=2048)]
+    epsilon_real_flat: Annotated[
+        list[float],
+        Field(
+            min_length=2,
+            max_length=2048,
+            description=(
+                "Temperature-major values; wavelength varies fastest within each temperature row."
+            ),
+        ),
+    ]
+    epsilon_imag_flat: Annotated[
+        list[NonnegativeFloat],
+        Field(
+            min_length=2,
+            max_length=2048,
+            description=(
+                "Temperature-major values; wavelength varies fastest within each temperature row."
+            ),
+        ),
+    ]
     interpolation: InterpolationPolicy
     table_sha256: Sha256
 

@@ -107,6 +107,14 @@ def test_execution_spec_hashes_source_incrementally_under_contract_limit(tmp_pat
         )
 
 
+@pytest.mark.parametrize("sign", [True, 0, "1"])
+def test_execution_spec_rejects_noncanonical_power_sign(tmp_path, ascii_tmp_path, sign):
+    spec = _spec(tmp_path, ascii_tmp_path)
+    spec["declared_plane_flux"]["incident"]["positive_power_sign"] = sign
+    with pytest.raises(ValueError, match="positive_power_sign"):
+        validate_reference_power_execution_spec(spec, _contract())
+
+
 def test_bounded_json_reads_limit_plus_one_from_one_descriptor(tmp_path):
     path = tmp_path / "input.json"
     path.write_bytes(b'{"value":"0123456789"}')

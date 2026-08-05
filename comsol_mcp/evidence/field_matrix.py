@@ -138,6 +138,8 @@ def bind_validation_matrix_field_request(
         or len(collectors) != len(artifacts)
     ):
         raise ValueError("matrix point collector identities are unavailable")
+    if len(artifacts) != len(set(artifacts)):
+        raise ValueError("matrix point artifact identities must be unique")
     field_indices = [
         index
         for index, collector in enumerate(collectors)

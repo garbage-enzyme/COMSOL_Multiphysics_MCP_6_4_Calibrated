@@ -165,7 +165,9 @@ def _validate_flux_declaration(value: Any) -> dict[str, Any]:
     for name, plane in declaration.items():
         item = _object(plane, f"declared_plane_flux.{name}")
         sign = item.get("positive_power_sign")
-        candidate[name] = {**item, "raw_power_w": float(sign) if sign in {-1, 1} else 0.0}
+        if isinstance(sign, bool) or not isinstance(sign, int) or sign not in {-1, 1}:
+            raise ValueError(f"declared_plane_flux.{name}.positive_power_sign must be -1 or 1")
+        candidate[name] = {**item, "raw_power_w": float(sign)}
     normalized = normalize_declared_plane_flux(candidate)
     return {
         name: {

@@ -713,6 +713,18 @@ def test_self_rehashed_equal_but_noncanonical_numeric_form_fails_closed():
         validate_convergence_ladder(malformed)
 
 
+def test_self_rehashed_evaluation_rejects_equal_python_numeric_substitution():
+    ladder = build_convergence_ladder(ladder_id="three-mesh-ladder", levels=_levels())
+    evaluation = evaluate_convergence(ladder, _policy())
+    malformed = deepcopy(evaluation)
+    malformed["fit_sensitive"] = int(malformed["fit_sensitive"])
+    body = dict(malformed)
+    body.pop("evaluation_sha256")
+    malformed["evaluation_sha256"] = _canonical_hash(body)
+    with pytest.raises(ValueError, match="noncanonical"):
+        validate_convergence_evaluation(malformed, ladder=ladder)
+
+
 def test_missing_middle_level_and_non_governing_missing_evidence_fail_closed():
     levels = _levels()
     del levels[1]
