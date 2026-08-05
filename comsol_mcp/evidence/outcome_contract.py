@@ -178,7 +178,7 @@ def _validate_evidence(value: Any, execution_state: str) -> dict[str, Any]:
         raise ValueError("non-complete evidence must list missing evidence")
     if state == "complete" and not raw_ids:
         raise ValueError("complete evidence requires at least one raw artifact")
-    if execution_state != "completed" and diagnostic_ids != raw_ids:
+    if (execution_state != "completed" or state != "complete") and diagnostic_ids != raw_ids:
         raise ValueError("raw artifacts from non-completed execution must remain diagnostic")
     return evidence
 
@@ -237,6 +237,10 @@ def _validate_scientific(
             raise ValueError("invalid_evidence disposition cannot reach a scientific cap")
         if next_action not in {"review_missing_evidence", "repair_evidence_chain"}:
             raise ValueError("invalid_evidence requires an evidence-remediation action")
+    if disposition == "not_evaluated" and (
+        cap_reached or (execution_state == "completed" and evidence_state == "complete")
+    ):
+        raise ValueError("not_evaluated requires incomplete work without a reached cap")
     return scientific
 
 
@@ -300,6 +304,7 @@ def execution_from_terminal_job_state(value: Mapping[str, Any]) -> dict[str, Any
         verdicts = verification.get("verdicts")
         verdicts_absent = bool(
             isinstance(verdicts, list)
+            and verdicts
             and all(
                 isinstance(verdict, Mapping) and verdict.get("state") == "stale"
                 for verdict in verdicts

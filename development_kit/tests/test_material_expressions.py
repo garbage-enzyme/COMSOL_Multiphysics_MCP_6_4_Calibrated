@@ -114,6 +114,16 @@ def test_physics_frequency_expression_requires_valid_dotted_identifiers(name):
         _drude("positive", frequency_source="physics_frequency", physics_frequency_expression=name)
 
 
+def test_blank_fixed_frequency_unit_emits_missing_unit_warning():
+    result = _drude(
+        "positive",
+        frequency_source="fixed_angular_frequency",
+        fixed_angular_frequency=2.0,
+        fixed_angular_frequency_unit=" ",
+    )
+    assert any(item["code"] == "missing_fixed_frequency_unit" for item in result["warnings"])
+
+
 def test_constant_and_nk_forms_preserve_declared_imaginary_sign():
     constant = preview_material_expression(
         **COMMON,

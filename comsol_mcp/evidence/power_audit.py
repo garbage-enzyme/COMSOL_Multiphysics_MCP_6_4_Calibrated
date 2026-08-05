@@ -191,7 +191,7 @@ def normalize_internal_absorption_consistency(
     _reject_unknown(cross, _CROSS_SECTION_FIELDS, "cross_section_absorption")
     normalized_cross = {
         "expression": _text(cross.get("expression"), "cross_section_absorption.expression"),
-        "value_m2": _finite(cross.get("value_m2"), "cross_section_absorption.value_m2"),
+        "value_m2": _positive(cross.get("value_m2"), "cross_section_absorption.value_m2"),
         "unit": _text(cross.get("unit"), "cross_section_absorption.unit"),
         "unit_cell_area_expression": _text(
             cross.get("unit_cell_area_expression"),
@@ -230,7 +230,7 @@ def normalize_internal_absorption_consistency(
             volume.get("selection_ids"),
             "volume_loss_absorption.selection_ids",
         ),
-        "value_w": _finite(volume.get("value_w"), "volume_loss_absorption.value_w"),
+        "value_w": _positive(volume.get("value_w"), "volume_loss_absorption.value_w"),
         "incident_power_w": _positive(
             volume.get("incident_power_w"),
             "volume_loss_absorption.incident_power_w",

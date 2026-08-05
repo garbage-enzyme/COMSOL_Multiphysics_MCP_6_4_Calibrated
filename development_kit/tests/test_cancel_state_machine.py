@@ -625,7 +625,7 @@ def test_cancel_acceptance_waits_use_independent_phase_deadlines():
         "cancel": {
             "verification": {
                 "absent": True,
-                "verdicts": [],
+                "verdicts": [{"state": "stale"}],
                 "solver": {
                     "ok": True,
                     "lease_state": "absent",

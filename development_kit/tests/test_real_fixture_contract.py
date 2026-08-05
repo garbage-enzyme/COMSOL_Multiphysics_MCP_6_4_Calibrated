@@ -136,6 +136,13 @@ def test_reference_power_spec_rejects_malformed_json(tmp_path):
         controlled_fixture_environment_from_reference_power_spec(path, base_environment={})
 
 
+def test_reference_power_spec_rejects_json_array(tmp_path):
+    path = tmp_path / "array.json"
+    path.write_text("[]", encoding="utf-8")
+    with pytest.raises(ValueError, match="JSON object"):
+        controlled_fixture_environment_from_reference_power_spec(path, base_environment={})
+
+
 def test_fixture_rejects_source_bytes_that_differ_from_caller_bound_hash(tmp_path):
     environment = controlled_fixture_environment_from_reference_power_spec(
         _spec(tmp_path), base_environment={}

@@ -60,6 +60,21 @@ def test_isolated_single_field_png_is_hash_bound_and_unlabeled(tmp_path):
     assert descriptor["sha256"] == hashlib.sha256(png.read_bytes()).hexdigest()
 
 
+def test_renderer_rejects_malformed_array_digest_before_worker_start(tmp_path):
+    array = tmp_path / "invalid-hash.npz"
+    _array(array)
+    with pytest.raises(ValueError, match="64-character hex digest"):
+        render_field_png_bundle(
+            views=[_view("target", array, "not-a-digest")],
+            quantity_name="abs_ex",
+            quantity_unit="V/m",
+            coordinate_unit="um",
+            color_scale="linear",
+            shared_color_limits=False,
+            output_root=tmp_path / "invalid-hash-output",
+        )
+
+
 def test_renderer_uses_windows_safe_filename_for_portable_view_id(tmp_path):
     array = tmp_path / "portable.npz"
     digest = _array(array)

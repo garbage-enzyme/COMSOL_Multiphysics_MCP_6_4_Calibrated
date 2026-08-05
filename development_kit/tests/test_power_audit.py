@@ -239,5 +239,5 @@ def test_internal_consistency_rejects_nonfinite_derived_residuals():
     volume["value_w"] = -1.0e308
     volume["incident_power_w"] = 1.0
 
-    with pytest.raises(ValueError, match="finite residuals"):
+    with pytest.raises(ValueError, match="strictly positive"):
         normalize_internal_absorption_consistency(cross, volume)

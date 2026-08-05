@@ -116,6 +116,8 @@ def controlled_fixture_environment_from_reference_power_spec(
 ) -> dict[str, str]:
     """Translate a validated local reference-power spec into subprocess-only fixture inputs."""
     raw = json.loads(spec_path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        raise ValueError("reference-power spec must be a JSON object")
     wavelength = raw.get("wavelength")
     reference = raw.get("reference_air")
     if not isinstance(wavelength, dict) or wavelength.get("unit") != "um":

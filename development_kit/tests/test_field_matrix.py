@@ -125,12 +125,14 @@ def test_matrix_field_collector_requires_preceding_point_audit(tmp_path):
         lambda point: point["collectors"].__setitem__(0, ["not-an-object"]),
         lambda point: point["wavelength"].__setitem__("value", object()),
         lambda point: point["wavelength"].__setitem__("value", 10**10_000),
+        lambda point: point["wavelength"].__setitem__("unit", []),
     ],
     ids=[
         "missing_identity",
         "non_object_collector",
         "non_numeric_wavelength",
         "overflowing_wavelength",
+        "unhashable_wavelength_unit",
     ],
 )
 def test_matrix_field_binding_rejects_malformed_points_without_exception_leaks(tmp_path, mutation):

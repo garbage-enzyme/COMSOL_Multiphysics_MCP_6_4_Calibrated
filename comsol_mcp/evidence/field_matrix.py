@@ -161,7 +161,7 @@ def bind_validation_matrix_field_request(
     if not isinstance(wavelength, Mapping):
         raise ValueError("matrix point wavelength identity is unavailable")
     unit = wavelength.get("unit")
-    if unit not in _WAVELENGTH_TO_METERS:
+    if not isinstance(unit, str) or unit not in _WAVELENGTH_TO_METERS:
         raise ValueError("matrix point wavelength unit cannot be converted to meters")
     wavelength_value = wavelength.get("value")
     if isinstance(wavelength_value, bool) or not isinstance(wavelength_value, (int, float)):

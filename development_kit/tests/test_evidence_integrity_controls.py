@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 
 import pytest
 from src.evidence.integrity_controls import (
@@ -79,6 +80,9 @@ def test_each_check_can_be_explicitly_disabled_without_changing_other_checks(
     assert status["warning_codes"] == [DISABLED_CHECK_WARNING_CODE]
     assert status["warning_messages"] == [DISABLED_CHECK_WARNING]
     assert warning_fields(status)["strictly_verified"] is False
+    assert status["settings_fingerprint_sha256"] == hashlib.sha256(
+        path.read_bytes()
+    ).hexdigest()
 
 
 @pytest.mark.parametrize(

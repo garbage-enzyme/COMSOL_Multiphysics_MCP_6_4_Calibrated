@@ -301,7 +301,7 @@ def preview_material_expression(
                 "message": "The material expression does not vary with wavelength.",
             }
         )
-        if fixed_angular_frequency_unit is None:
+        if not isinstance(fixed_angular_frequency_unit, str) or not fixed_angular_frequency_unit.strip():
             warnings.append({"code": "missing_fixed_frequency_unit", "assumed_unit": "1/s"})
     elif frequency_source == "physics_frequency":
         omega_expression = f"(2*pi*{physics_frequency_expression})"

@@ -40,9 +40,11 @@ def build_field_evidence_from_samples(
         ],
         png_path=png_path,
     )
-    result["rejected_point_count"] = selection["rejected_point_count"]
-    result["interpolation"] = interpolation["interpolation"]
-    return result
+    return {
+        **result,
+        "rejected_point_count": selection["rejected_point_count"],
+        "interpolation": interpolation["interpolation"],
+    }
 
 
 __all__ = ["build_field_evidence_from_samples"]

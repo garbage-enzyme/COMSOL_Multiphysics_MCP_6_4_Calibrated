@@ -23,7 +23,7 @@ def _payload(execution: str, evidence: str, disposition: str) -> dict:
     cleanup_verified = execution in {"completed", "cancelled"}
     missing = [] if evidence == "complete" else ["spectrum.own_peak"]
     raw_ids = ["raw-point-001"]
-    diagnostic = raw_ids if execution != "completed" else []
+    diagnostic = raw_ids if execution != "completed" or evidence != "complete" else []
     next_action = {
         "accepted": "none",
         "residual": "revise_scientific_policy",
@@ -67,6 +67,8 @@ def _compatible(execution: str, evidence: str, disposition: str) -> bool:
         return execution == "completed" and evidence == "complete"
     if disposition == "invalid_evidence":
         return evidence != "complete"
+    if disposition == "not_evaluated":
+        return not (execution == "completed" and evidence == "complete")
     return True
 
 
@@ -182,7 +184,7 @@ def test_verified_cancelled_job_maps_to_terminal_execution_without_losing_diagno
         "cancel": {
             "verification": {
                 "absent": True,
-                "verdicts": [],
+                "verdicts": [{"state": "stale"}],
                 "solver": {
                     "ok": True,
                     "lease_state": "absent",
@@ -211,6 +213,11 @@ def test_cancelled_mapping_fails_closed_without_process_port_or_lease_proof():
         {
             "absent": True,
             "verdicts": [{"state": "uncertain"}],
+            "solver": {"ok": True, "lease_state": "absent", "recorded_port_closed": True},
+        },
+        {
+            "absent": True,
+            "verdicts": [],
             "solver": {"ok": True, "lease_state": "absent", "recorded_port_closed": True},
         },
         {

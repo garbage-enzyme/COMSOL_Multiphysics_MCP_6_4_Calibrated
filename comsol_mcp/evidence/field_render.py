@@ -21,6 +21,7 @@ MAX_RENDER_OUTPUT_BYTES = 32 * 1024 * 1024
 MAX_RENDER_RESPONSE_BYTES = 64 * 1024
 DEFAULT_RENDER_TIMEOUT_SECONDS = 60.0
 _IDENTIFIER = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]{0,127}$")
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
 def _sha256_file(path: Path) -> str:
@@ -119,6 +120,9 @@ def render_field_png_bundle(
             raise ValueError(f"views[{index}].view_id must be portable")
         if not isinstance(artifact_id, str) or not _IDENTIFIER.fullmatch(artifact_id):
             raise ValueError(f"views[{index}].png_artifact_id must be portable")
+        array_sha256 = item["array_sha256"]
+        if not isinstance(array_sha256, str) or not _SHA256.fullmatch(array_sha256.lower()):
+            raise ValueError(f"views[{index}].array_sha256 must be a 64-character hex digest")
         if view_id in seen_ids:
             raise ValueError("view IDs must be unique")
         seen_ids.add(view_id)
@@ -134,7 +138,7 @@ def render_field_png_bundle(
             {
                 "view_id": view_id,
                 "array_path": str(array_path),
-                "array_sha256": str(item["array_sha256"]).lower(),
+                "array_sha256": array_sha256.lower(),
                 "png_artifact_id": artifact_id,
                 "png_path": str(png_path),
             }
@@ -167,7 +171,7 @@ def render_field_png_bundle(
                 )
                 try:
                     process.communicate(input=encoded_input, timeout=float(timeout_seconds))
-                except subprocess.TimeoutExpired:
+                except Exception:
                     process.kill()
                     process.wait()
                     raise
