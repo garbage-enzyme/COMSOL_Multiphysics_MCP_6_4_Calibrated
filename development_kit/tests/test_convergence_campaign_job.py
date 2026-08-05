@@ -7,6 +7,7 @@ from copy import deepcopy
 from pathlib import Path
 
 import pytest
+import src.jobs.convergence_campaign as campaign_module
 from src.jobs.convergence_campaign import (
     current_convergence_campaign_driver_identity,
     normalize_convergence_campaign_spec,
@@ -187,6 +188,31 @@ def test_duplicate_exact_model_bytes_and_configuration_identities_fail_closed(tm
         "configuration_sha256"
     ]
     with pytest.raises(ValueError, match="configuration identities"):
+        normalize_convergence_campaign_spec(raw)
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["governing_pairs", "relative_denominator"],
+)
+def test_campaign_policy_discriminators_require_strings(tmp_path, field):
+    raw = _raw_campaign(tmp_path)
+    raw["convergence_policy"][field] = []
+
+    with pytest.raises(ValueError, match="unsupported"):
+        normalize_convergence_campaign_spec(raw)
+
+
+def test_campaign_size_bound_includes_the_returned_fingerprint(tmp_path, monkeypatch):
+    raw = _raw_campaign(tmp_path)
+    normalized = normalize_convergence_campaign_spec(raw)
+    monkeypatch.setattr(
+        campaign_module,
+        "MAX_CONVERGENCE_CAMPAIGN_SPEC_BYTES",
+        len(campaign_module._canonical_bytes(normalized)) - 1,
+    )
+
+    with pytest.raises(ValueError, match="exceeds"):
         normalize_convergence_campaign_spec(raw)
 
 

@@ -413,6 +413,20 @@ def test_pair_assembler_rejects_windows_device_bundle_name(tmp_path):
         )
 
 
+def test_pair_assembler_rejects_trailing_dot_bundle_name(tmp_path):
+    directory = _create_job(tmp_path)
+
+    with pytest.raises(ValueError, match="portable identifier"):
+        assemble_validation_matrix_field_review(
+            job_directory=directory,
+            point_ids=["off:res", "target"],
+            bundle_id="review.",
+            quantity_name="abs_ex",
+            quantity_unit="V/m",
+            coordinate_unit="um",
+        )
+
+
 def test_pair_assembler_rejects_bundle_ids_the_renderer_cannot_accept(tmp_path):
     directory = _create_job(tmp_path)
 

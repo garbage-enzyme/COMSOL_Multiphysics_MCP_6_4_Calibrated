@@ -127,9 +127,15 @@ def _normalize_campaign_policy(value: object) -> dict[str, Any]:
     names = [item["metric"] for item in normalized_metrics]
     if len(names) != len(set(names)):
         raise ValueError("convergence_policy metrics must be unique")
-    if raw["governing_pairs"] not in {"all_adjacent", "final_pair"}:
+    if not isinstance(raw["governing_pairs"], str) or raw["governing_pairs"] not in {
+        "all_adjacent",
+        "final_pair",
+    }:
         raise ValueError("convergence_policy.governing_pairs is unsupported")
-    if raw["relative_denominator"] not in {"previous_abs", "maximum_abs"}:
+    if not isinstance(raw["relative_denominator"], str) or raw["relative_denominator"] not in {
+        "previous_abs",
+        "maximum_abs",
+    }:
         raise ValueError("convergence_policy.relative_denominator is unsupported")
     if not isinstance(raw["declared_cap_reached"], bool):
         raise ValueError("convergence_policy.declared_cap_reached must be boolean")
@@ -313,11 +319,11 @@ def normalize_convergence_campaign_spec(value: object) -> dict[str, Any]:
         "declared_point_count": total_points,
         "driver_identity": current_convergence_campaign_driver_identity(),
     }
+    spec["spec_fingerprint"] = _fingerprint(spec)
     if len(_canonical_bytes(spec)) > MAX_CONVERGENCE_CAMPAIGN_SPEC_BYTES:
         raise ValueError(
             f"convergence campaign exceeds {MAX_CONVERGENCE_CAMPAIGN_SPEC_BYTES} bytes"
         )
-    spec["spec_fingerprint"] = _fingerprint(spec)
     return spec
 
 

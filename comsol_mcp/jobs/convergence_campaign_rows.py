@@ -8,6 +8,8 @@ import os
 from pathlib import Path
 from typing import Any, Mapping
 
+from comsol_mcp.durable.io import fsync_directory
+
 from .journal import locked_journal
 from .spectral_runner import validate_spectral_completion
 
@@ -318,11 +320,14 @@ def _append_convergence_campaign_level_unlocked(
     if len(payload) > MAX_CONVERGENCE_CAMPAIGN_ROW_BYTES:
         raise ValueError("convergence campaign level row exceeds its bound")
     journal = Path(path)
+    journal_existed = journal.exists()
     journal.parent.mkdir(parents=True, exist_ok=True)
     with journal.open("ab") as handle:
         handle.write(payload)
         handle.flush()
         os.fsync(handle.fileno())
+    if not journal_existed:
+        fsync_directory(journal.parent)
     replayed = _read_convergence_campaign_levels_unlocked(path, spec, artifact_root=root)
     if replayed[-1] != row:
         raise RuntimeError("convergence campaign level row did not replay after append")

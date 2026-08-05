@@ -72,7 +72,13 @@ _DETACHED_REAPER_STARTED = False
 def _reap_detached_processes_once() -> int:
     """Reap completed detached children without waiting for active jobs."""
     with _DETACHED_PROCESS_LOCK:
-        completed = [process for process in _DETACHED_PROCESSES if process.poll() is not None]
+        completed = []
+        for process in _DETACHED_PROCESSES:
+            try:
+                if process.poll() is not None:
+                    completed.append(process)
+            except Exception:
+                completed.append(process)
         _DETACHED_PROCESSES.difference_update(completed)
         return len(completed)
 
@@ -335,6 +341,29 @@ class JobManager:
         else:
             spec = validate_staged_sweep_spec(raw_spec)
         worker_module = _worker_module(spec["job_type"])
+        duplicate_job_types = {
+            "validation_matrix",
+            "spectral_characterization",
+            "convergence_campaign",
+            "branch_continuation_campaign",
+            "thermo_optomechanical_replay",
+        }
+        if spec["job_type"] in duplicate_job_types:
+            with JobLock(self.store.root / ".submit.lock"):
+                duplicate = self._find_exact_duplicate(spec["job_type"], spec["spec_fingerprint"])
+                if duplicate is not None:
+                    existing_state = self.store.read_state(duplicate)
+                    return {
+                        "success": True,
+                        "job_id": duplicate,
+                        "status": existing_state["status"],
+                        "duplicate": True,
+                        "action": (
+                            "resume_existing"
+                            if existing_state["status"] in {"failed", "interrupted", "cancelled"}
+                            else "observe_existing"
+                        ),
+                    }
         if spec["job_type"] != "test_sequence":
             preflight = self._run_preflight(spec)
             if not preflight.get("ready", preflight.get("success", False)):
@@ -355,13 +384,7 @@ class JobManager:
             "progress": {"completed": 0, "total": total_points},
             "last_error": None,
         }
-        if spec["job_type"] in {
-            "validation_matrix",
-            "spectral_characterization",
-            "convergence_campaign",
-            "branch_continuation_campaign",
-            "thermo_optomechanical_replay",
-        }:
+        if spec["job_type"] in duplicate_job_types:
             with JobLock(self.store.root / ".submit.lock"):
                 duplicate = self._find_exact_duplicate(spec["job_type"], spec["spec_fingerprint"])
                 if duplicate is not None:

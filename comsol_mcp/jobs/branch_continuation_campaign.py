@@ -97,8 +97,13 @@ def _normalize_incidence_readback(
     raw = _exact_mapping(
         value,
         {
-            "measurement_state", "source_model_sha256", "configuration_sha256",
-            "requested", "parent", "ports", "evidence_sha256",
+            "measurement_state",
+            "source_model_sha256",
+            "configuration_sha256",
+            "requested",
+            "parent",
+            "ports",
+            "evidence_sha256",
         },
         name,
     )
@@ -124,16 +129,13 @@ def _normalize_incidence_readback(
     if len(set(port_tags)) != 2:
         raise ValueError(f"{name}.ports must identify two distinct periodic ports")
     if parent != requested or any(
-        {"alpha1_deg": port["alpha1_deg"], "alpha2_deg": port["alpha2_deg"]}
-        != requested
+        {"alpha1_deg": port["alpha1_deg"], "alpha2_deg": port["alpha2_deg"]} != requested
         for port in normalized_ports
     ):
         raise ValueError(f"{name} must exactly match requested, parent, and port angles")
     body = {
         "measurement_state": "measured",
-        "source_model_sha256": _sha256(
-            raw["source_model_sha256"], f"{name}.source_model_sha256"
-        ),
+        "source_model_sha256": _sha256(raw["source_model_sha256"], f"{name}.source_model_sha256"),
         "configuration_sha256": _sha256(
             raw["configuration_sha256"], f"{name}.configuration_sha256"
         ),
@@ -170,9 +172,7 @@ def build_branch_continuation_coordinate_identity(
         "coordinate_value": _finite(coordinate_value, "coordinate_value"),
         "coordinate_unit": _identifier(coordinate_unit, "coordinate_unit"),
         "polarization": polarization,
-        "material_identity_sha256": _sha256(
-            material_identity_sha256, "material_identity_sha256"
-        ),
+        "material_identity_sha256": _sha256(material_identity_sha256, "material_identity_sha256"),
         "source_model_sha256": _sha256(source_model_sha256, "source_model_sha256"),
         "configuration_sha256": _sha256(configuration_sha256, "configuration_sha256"),
         "incidence_readback_sha256": _sha256(
@@ -186,13 +186,19 @@ def _normalize_policy(value: object) -> dict[str, Any]:
     raw = _exact_mapping(
         value,
         {
-            "policy_id", "guard_window_m", "absolute_bounds_m", "max_expansions",
-            "max_total_window_m", "request_grid", "stop_policy",
+            "policy_id",
+            "guard_window_m",
+            "absolute_bounds_m",
+            "max_expansions",
+            "max_total_window_m",
+            "request_grid",
+            "stop_policy",
         },
         "continuation_policy",
     )
     bounds = _exact_mapping(
-        raw["absolute_bounds_m"], {"lower_m", "upper_m"},
+        raw["absolute_bounds_m"],
+        {"lower_m", "upper_m"},
         "continuation_policy.absolute_bounds_m",
     )
     lower = _finite(
@@ -204,12 +210,13 @@ def _normalize_policy(value: object) -> dict[str, Any]:
     if upper <= lower:
         raise ValueError("continuation_policy absolute upper bound must exceed its lower bound")
     request_grid = _exact_mapping(
-        raw["request_grid"], {"point_count", "spacing_rule"},
+        raw["request_grid"],
+        {"point_count", "spacing_rule"},
         "continuation_policy.request_grid",
     )
     if request_grid["spacing_rule"] != "uniform_inclusive":
         raise ValueError("continuation_policy.request_grid.spacing_rule is unsupported")
-    if raw["stop_policy"] not in _STOP_POLICIES:
+    if not isinstance(raw["stop_policy"], str) or raw["stop_policy"] not in _STOP_POLICIES:
         raise ValueError("continuation_policy.stop_policy is unsupported")
     return {
         "policy_id": _identifier(raw["policy_id"], "continuation_policy.policy_id"),
@@ -257,15 +264,14 @@ def validate_branch_continuation_campaign_driver_identity(
     if (
         not isinstance(observed, Mapping)
         or set(observed) != set(expected)
-        or any(
-            key != "implementation" and observed[key] != expected[key]
-            for key in expected
-        )
+        or any(key != "implementation" and observed[key] != expected[key] for key in expected)
         or not module_identity_matches(
             expected.get("implementation"), observed.get("implementation")
         )
     ):
-        raise ValueError("branch-continuation campaign driver identity differs from the running package")
+        raise ValueError(
+            "branch-continuation campaign driver identity differs from the running package"
+        )
     return expected
 
 
@@ -274,15 +280,22 @@ def normalize_branch_continuation_campaign_spec(value: object) -> dict[str, Any]
     raw = _exact_mapping(
         value,
         {
-            "job_type", "campaign_id", "states", "continuation_policy",
-            "maximum_total_points", "wall_time_budget_seconds",
+            "job_type",
+            "campaign_id",
+            "states",
+            "continuation_policy",
+            "maximum_total_points",
+            "wall_time_budget_seconds",
         },
         "branch-continuation campaign specification",
     )
     if raw["job_type"] != "branch_continuation_campaign":
         raise ValueError("job_type must be branch_continuation_campaign")
     states = raw["states"]
-    if not isinstance(states, list) or not MIN_BRANCH_CONTINUATION_STATES <= len(states) <= MAX_BRANCH_CONTINUATION_STATES:
+    if (
+        not isinstance(states, list)
+        or not MIN_BRANCH_CONTINUATION_STATES <= len(states) <= MAX_BRANCH_CONTINUATION_STATES
+    ):
         raise ValueError(
             f"states must contain {MIN_BRANCH_CONTINUATION_STATES} to "
             f"{MAX_BRANCH_CONTINUATION_STATES} entries"
@@ -293,14 +306,24 @@ def normalize_branch_continuation_campaign_spec(value: object) -> dict[str, Any]
         state = _exact_mapping(
             value,
             {
-                "state_id", "ordinal", "declared_predecessor_state_id",
-                "model_preparation", "coordinate", "polarization",
-                "material_identity_sha256", "incidence_readback", "spectral_job",
+                "state_id",
+                "ordinal",
+                "declared_predecessor_state_id",
+                "model_preparation",
+                "coordinate",
+                "polarization",
+                "material_identity_sha256",
+                "incidence_readback",
+                "spectral_job",
             },
             name,
         )
         state_id = _identifier(state["state_id"], f"{name}.state_id")
-        if state["ordinal"] != index:
+        if (
+            isinstance(state["ordinal"], bool)
+            or not isinstance(state["ordinal"], int)
+            or state["ordinal"] != index
+        ):
             raise ValueError(f"{name}.ordinal must equal its declared sequence position")
         predecessor = None if index == 0 else normalized_states[-1]["state_id"]
         if state["declared_predecessor_state_id"] != predecessor:
@@ -311,11 +334,12 @@ def normalize_branch_continuation_campaign_spec(value: object) -> dict[str, Any]
         if preparation["mode"] != "exact_model":
             raise ValueError(f"{name}.model_preparation.mode must be exact_model")
         coordinate = _exact_mapping(
-            state["coordinate"], {"name", "value", "unit", "identity_sha256"},
+            state["coordinate"],
+            {"name", "value", "unit", "identity_sha256"},
             f"{name}.coordinate",
         )
         polarization = state["polarization"]
-        if polarization not in _POLARIZATIONS:
+        if not isinstance(polarization, str) or polarization not in _POLARIZATIONS:
             raise ValueError(f"{name}.polarization is unsupported")
         spectral = normalize_spectral_characterization_job_spec(state["spectral_job"])
         material_identity = _sha256(
@@ -401,8 +425,7 @@ def normalize_branch_continuation_campaign_spec(value: object) -> dict[str, Any]
                 f"states[{index}] spectral absolute bounds exceed the continuation policy"
             )
     declared_child_expansions = sum(
-        item["spectral_job"]["expansion_policy"]["maximum_expansions"]
-        for item in normalized_states
+        item["spectral_job"]["expansion_policy"]["maximum_expansions"] for item in normalized_states
     )
     if declared_child_expansions > policy["max_expansions"]:
         raise ValueError("declared spectral expansions exceed the continuation policy")
@@ -439,11 +462,11 @@ def normalize_branch_continuation_campaign_spec(value: object) -> dict[str, Any]
         "declared_point_count": declared_points,
         "driver_identity": current_branch_continuation_campaign_driver_identity(),
     }
+    spec["spec_fingerprint"] = _fingerprint(spec)
     if len(_canonical_bytes(spec)) > MAX_BRANCH_CONTINUATION_SPEC_BYTES:
         raise ValueError(
             f"branch-continuation campaign exceeds {MAX_BRANCH_CONTINUATION_SPEC_BYTES} bytes"
         )
-    spec["spec_fingerprint"] = _fingerprint(spec)
     return spec
 
 

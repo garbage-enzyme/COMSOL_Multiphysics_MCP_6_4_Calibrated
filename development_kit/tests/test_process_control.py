@@ -47,6 +47,18 @@ def test_detached_process_tracker_reaps_completed_child_without_wait():
     assert process.returncode == 0
 
 
+def test_detached_reaper_isolates_poll_exceptions(monkeypatch):
+    class BrokenProcess:
+        def poll(self):
+            raise OSError("injected poll failure")
+
+    process = BrokenProcess()
+    monkeypatch.setattr(manager_module, "_DETACHED_PROCESSES", {process})
+
+    assert manager_module._reap_detached_processes_once() == 1
+    assert manager_module._DETACHED_PROCESSES == set()
+
+
 def test_exact_termination_refuses_a_reused_identity():
     child = subprocess.Popen(
         [sys.executable, "-c", "import time; time.sleep(30)"],

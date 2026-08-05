@@ -3,15 +3,12 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
-import shutil
 from typing import Any
-import uuid
 
 import pytest
 
 from src.jobs import cancel_worker
-from src.jobs.store import JobStore, process_identity, read_json
+from src.jobs.store import JobStore, atomic_write_json, process_identity, read_json
 
 
 class FakeClock:
@@ -119,13 +116,8 @@ class FakeProcesses:
 
 
 @pytest.fixture()
-def jobs_root():
-    root = Path("D:/comsol_runtime_test/cancellation_determinism") / uuid.uuid4().hex
-    root.mkdir(parents=True)
-    try:
-        yield root
-    finally:
-        shutil.rmtree(root, ignore_errors=True)
+def jobs_root(tmp_path):
+    return tmp_path
 
 
 def _prepare_cancel(
@@ -202,6 +194,57 @@ def test_cooperative_exit_inside_native_grace_commits_verified_cancelled(jobs_ro
         "verifying",
         "verified",
         "terminal_commit",
+    }
+
+
+def test_terminal_commit_failure_returns_failure(jobs_root, monkeypatch):
+    clock = FakeClock()
+    processes = FakeProcesses(clock, auto_exit_at=0.5)
+    store = JobStore(jobs_root)
+    job_id, request_id = _prepare_cancel(store, processes)
+    _install_fakes(monkeypatch, clock, processes)
+    monkeypatch.setattr(cancel_worker, "_commit_cancelled", lambda *_args: False)
+
+    assert cancel_worker.run(str(jobs_root), job_id, request_id, 1.0, 2.0) == 1
+
+
+def test_malformed_phase_timestamps_do_not_block_terminal_commit(jobs_root, monkeypatch):
+    clock = FakeClock()
+    processes = FakeProcesses(clock)
+    store = JobStore(jobs_root)
+    job_id, request_id = _prepare_cancel(store, processes)
+    _install_fakes(monkeypatch, clock, processes)
+    assert (
+        cancel_worker._claim(
+            store,
+            job_id,
+            request_id,
+            processes.coordinator,
+            grace_seconds=1.0,
+            terminate_seconds=2.0,
+        )
+        is not None
+    )
+    state = store.read_state(job_id)
+    state["cancel"]["phase_timestamps"] = {
+        "requested": [],
+        "native_grace": {},
+        "verifying": True,
+    }
+    atomic_write_json(store.job_dir(job_id) / "state.json", state)
+
+    assert cancel_worker._commit_cancelled(
+        store,
+        job_id,
+        request_id,
+        processes.coordinator,
+        {"absent": True, "verdicts": []},
+        [],
+    )
+    assert store.read_state(job_id)["cancel"]["teardown_latency"] == {
+        "requested_to_terminal_s": None,
+        "coordinator_to_terminal_s": 0.0,
+        "verification_to_terminal_s": None,
     }
 
 
@@ -541,9 +584,7 @@ def test_cleanup_verification_poll_reaches_the_always_active_timeout(monkeypatch
     assert clock.elapsed == pytest.approx(0.1)
 
 
-def test_coordinator_helper_retries_wrapped_reads_and_uses_action_verdict(
-    jobs_root, monkeypatch
-):
+def test_coordinator_helper_retries_wrapped_reads_and_uses_action_verdict(jobs_root, monkeypatch):
     from development_kit.tests.integration import coordinator_claim_kill
 
     coordinator = FakeProcesses._identity(45101, "restart-coordinator")
@@ -586,9 +627,7 @@ def test_coordinator_helper_retries_wrapped_reads_and_uses_action_verdict(
     assert probe["action"]["acted"] is True
 
 
-def test_coordinator_helper_writes_evidence_when_identity_action_raises(
-    jobs_root, monkeypatch
-):
+def test_coordinator_helper_writes_evidence_when_identity_action_raises(jobs_root, monkeypatch):
     from development_kit.tests.integration import coordinator_claim_kill
 
     coordinator = {"pid": "malformed"}

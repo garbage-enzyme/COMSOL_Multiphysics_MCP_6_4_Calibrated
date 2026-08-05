@@ -47,7 +47,10 @@ def recover_jsonl_tail(path: str | Path, *, max_row_bytes: int) -> None:
         boundary = suffix.rfind(b"\n")
         if boundary < 0:
             if end > max_row_bytes:
-                raise ValueError("unterminated journal row exceeds its byte limit")
+                handle.truncate(0)
+                handle.flush()
+                os.fsync(handle.fileno())
+                return
             record_start = 0
             tail = suffix
         else:
@@ -58,7 +61,7 @@ def recover_jsonl_tail(path: str | Path, *, max_row_bytes: int) -> None:
 
         try:
             json.loads(tail.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError):
+        except UnicodeDecodeError, json.JSONDecodeError:
             handle.truncate(record_start)
         else:
             handle.seek(0, os.SEEK_END)
