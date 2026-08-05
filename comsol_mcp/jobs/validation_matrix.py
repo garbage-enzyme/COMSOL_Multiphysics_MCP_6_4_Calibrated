@@ -4,18 +4,18 @@ from __future__ import annotations
 
 import hashlib
 import json
-from pathlib import Path
 import re
+from pathlib import Path
 from typing import Any, Mapping
 
-from .resource_admission import normalize_resource_policy
-from .store import JOB_SCHEMA_VERSION
 from comsol_mcp.evidence.field_matrix import (
     MATRIX_FIELD_COLLECTOR,
     normalize_validation_matrix_field_inputs,
 )
 from comsol_mcp.utils.validation import strict_json_number
 
+from .resource_admission import normalize_resource_policy
+from .store import JOB_SCHEMA_VERSION
 
 MAX_VALIDATION_MATRIX_POINTS = 32
 MAX_COLLECTORS_PER_POINT = 4
@@ -86,9 +86,7 @@ def _normalize_wavelength(value: object, point_name: str) -> dict[str, Any]:
     allowed = {"value", "unit", "parameter"}
     unknown = sorted(set(raw) - allowed)
     if unknown or set(raw) != allowed:
-        raise ValueError(
-            f"{point_name}.wavelength requires exactly value, unit, and parameter"
-        )
+        raise ValueError(f"{point_name}.wavelength requires exactly value, unit, and parameter")
     unit = raw["unit"]
     if not isinstance(unit, str) or not unit.strip() or len(unit) > 32:
         raise ValueError(f"{point_name}.wavelength.unit must be a bounded nonempty string")
@@ -111,19 +109,13 @@ def _normalize_incidence(value: object, point_name: str) -> dict[str, Any]:
             f"{point_name}.incidence requires exactly theta_degrees, phi_degrees, and polarization"
         )
     polarization = raw["polarization"]
-    if (
-        not isinstance(polarization, str)
-        or not polarization.strip()
-        or len(polarization) > 64
-    ):
+    if not isinstance(polarization, str) or not polarization.strip() or len(polarization) > 64:
         raise ValueError(f"{point_name}.incidence.polarization must be a bounded label")
     return {
         "theta_degrees": _finite_number(
             raw["theta_degrees"], f"{point_name}.incidence.theta_degrees"
         ),
-        "phi_degrees": _finite_number(
-            raw["phi_degrees"], f"{point_name}.incidence.phi_degrees"
-        ),
+        "phi_degrees": _finite_number(raw["phi_degrees"], f"{point_name}.incidence.phi_degrees"),
         "polarization": polarization.strip(),
         "polarization_evidence": "label_only",
     }
@@ -139,7 +131,7 @@ def _normalize_json_object(value: object, name: str) -> dict[str, Any]:
             separators=(",", ":"),
             allow_nan=False,
         ).encode("utf-8")
-    except (TypeError, ValueError) as exc:
+    except (RecursionError, TypeError, ValueError) as exc:
         raise ValueError(f"{name} must contain only finite JSON values") from exc
     if len(payload) > MAX_COLLECTOR_INPUT_BYTES:
         raise ValueError(
@@ -163,7 +155,10 @@ def _normalize_collectors(value: object, point_name: str) -> list[dict[str, Any]
         if set(raw) != {"name", "inputs"}:
             raise ValueError(f"{name} requires exactly name and inputs")
         collector_name = raw["name"]
-        if collector_name not in SUPPORTED_VALIDATION_COLLECTORS:
+        if (
+            not isinstance(collector_name, str)
+            or collector_name not in SUPPORTED_VALIDATION_COLLECTORS
+        ):
             raise ValueError(f"{name}.name is not a supported validation collector")
         if collector_name in names:
             raise ValueError(f"{point_name}.collectors must not contain duplicates")
@@ -192,12 +187,16 @@ def _normalize_point(value: object, index: int, source_sha256: str) -> dict[str,
         "expected_artifact_ids",
     }
     unknown = sorted(set(raw) - allowed)
-    if unknown or not {"point_id", "configuration_sha256", "wavelength", "collectors", "expected_artifact_ids"} <= set(raw):
+    if unknown or not {
+        "point_id",
+        "configuration_sha256",
+        "wavelength",
+        "collectors",
+        "expected_artifact_ids",
+    } <= set(raw):
         raise ValueError(f"{name} has missing or unsupported fields")
     configuration_sha256 = raw["configuration_sha256"]
-    if not isinstance(configuration_sha256, str) or not _SHA256.fullmatch(
-        configuration_sha256
-    ):
+    if not isinstance(configuration_sha256, str) or not _SHA256.fullmatch(configuration_sha256):
         raise ValueError(f"{name}.configuration_sha256 must be exactly 64 hexadecimal characters")
     artifacts = raw["expected_artifact_ids"]
     if not isinstance(artifacts, list) or not artifacts:
@@ -301,9 +300,7 @@ def normalize_validation_matrix_spec(raw_spec: object) -> dict[str, Any]:
     if len(set(fingerprints)) != len(fingerprints):
         raise ValueError("points must have unique exact configuration identities")
     artifact_ids = [
-        artifact
-        for point in normalized_points
-        for artifact in point["expected_artifact_ids"]
+        artifact for point in normalized_points for artifact in point["expected_artifact_ids"]
     ]
     if len(set(artifact_ids)) != len(artifact_ids):
         raise ValueError("expected_artifact_ids must be unique across the matrix")
@@ -324,7 +321,11 @@ def normalize_validation_matrix_spec(raw_spec: object) -> dict[str, Any]:
 
     cores = _positive_integer(raw.get("cores"), "cores")
     max_retries = raw.get("max_retries", 0)
-    if isinstance(max_retries, bool) or not isinstance(max_retries, int) or not 0 <= max_retries <= 3:
+    if (
+        isinstance(max_retries, bool)
+        or not isinstance(max_retries, int)
+        or not 0 <= max_retries <= 3
+    ):
         raise ValueError("max_retries must be an integer between 0 and 3")
     continue_on_error = raw.get("continue_on_error", False)
     if not isinstance(continue_on_error, bool):
@@ -348,6 +349,7 @@ def normalize_validation_matrix_spec(raw_spec: object) -> dict[str, Any]:
         "max_retries": max_retries,
         "continue_on_error": continue_on_error,
     }
+    spec["spec_fingerprint"] = _fingerprint(spec)
     encoded = json.dumps(
         spec,
         ensure_ascii=False,
@@ -357,7 +359,6 @@ def normalize_validation_matrix_spec(raw_spec: object) -> dict[str, Any]:
     ).encode("utf-8")
     if len(encoded) > MAX_SPEC_BYTES:
         raise ValueError(f"validation_matrix specification exceeds {MAX_SPEC_BYTES} bytes")
-    spec["spec_fingerprint"] = _fingerprint(spec)
     return spec
 
 

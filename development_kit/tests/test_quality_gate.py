@@ -13,11 +13,13 @@ import pytest
 
 from development_kit.scripts.quality_gate import (
     POLICY_PATH,
+    _create_short_pytest_roots,
     _main_pytest_command,
     evaluate_coverage,
     load_coverage_policy,
     run_quality_gate,
     validate_quality_target_inventory,
+    validate_windows_gate_root,
 )
 
 
@@ -31,6 +33,72 @@ def test_hosted_quality_main_suite_is_serial_but_local_suite_keeps_four_workers(
     assert "--dist" not in hosted
     assert local[local.index("-n") + 1] == "4"
     assert local[local.index("--dist") + 1] == "loadscope"
+    assert local[local.index("--basetemp") + 1] == str(tmp_path)
+
+
+def test_configured_pytest_roots_remain_direct_short_siblings(monkeypatch) -> None:
+    seed = Path("D:/mcp_tests/a65b13p")
+    monkeypatch.setenv("COMSOL_MCP_TEST_ASCII_ROOT", str(seed))
+    monkeypatch.setattr(Path, "mkdir", lambda self, *args, **kwargs: None)
+
+    observed_main, observed_serial = _create_short_pytest_roots()
+    second_main, second_serial = _create_short_pytest_roots()
+
+    assert observed_main.parent == observed_serial.parent == Path("D:/mcp_tests").resolve()
+    assert observed_main.name[:-1] == observed_serial.name[:-1]
+    assert observed_main.name.endswith("m")
+    assert observed_serial.name.endswith("s")
+    assert len(observed_main.name) <= 12
+    assert len(observed_serial.name) <= 12
+    assert {observed_main, observed_serial}.isdisjoint({second_main, second_serial})
+
+
+def test_local_windows_gate_roots_fail_fast_before_deep_path_generation() -> None:
+    accepted = validate_windows_gate_root(
+        Path("D:/mcp_tests/a65b13q"),
+        label="quality artifact root",
+        platform_name="nt",
+        hosted_ci=False,
+    )
+    assert accepted == Path("D:/mcp_tests/a65b13q").resolve()
+
+    with pytest.raises(ValueError, match="generated-path budget"):
+        validate_windows_gate_root(
+            Path("D:/mcp_tests/descriptive-quality-gate"),
+            label="quality artifact root",
+            platform_name="nt",
+            hosted_ci=False,
+        )
+    with pytest.raises(ValueError, match="direct child"):
+        validate_windows_gate_root(
+            Path("D:/mcp_tests/alpha65/b13q"),
+            label="quality artifact root",
+            platform_name="nt",
+            hosted_ci=False,
+        )
+    with pytest.raises(ValueError, match="must be ASCII"):
+        validate_windows_gate_root(
+            Path("C:/Users/测试/q"),
+            label="quality artifact root",
+            platform_name="nt",
+            hosted_ci=False,
+        )
+
+
+def test_hosted_and_non_windows_gate_roots_are_not_subject_to_local_budget() -> None:
+    long_root = Path("C:/runner/work/project/_temp/descriptive-quality-root")
+    assert (
+        validate_windows_gate_root(
+            long_root, label="quality artifact root", platform_name="nt", hosted_ci=True
+        )
+        == long_root.resolve()
+    )
+    assert (
+        validate_windows_gate_root(
+            long_root, label="quality artifact root", platform_name="posix", hosted_ci=False
+        )
+        == long_root.resolve()
+    )
 
 
 def _passing_report() -> dict:

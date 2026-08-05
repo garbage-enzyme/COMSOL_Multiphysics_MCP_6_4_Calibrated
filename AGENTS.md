@@ -104,10 +104,10 @@ Run commands from the repository root in the declared development environment:
 ```powershell
 python -m pytest -q development_kit/tests/test_<area>.py
 python -m pytest -q -n 4 --dist loadscope `
-  --basetemp D:\comsol_pytest\local-main `
+  --basetemp D:\mcp_tests\main `
   --ignore development_kit/tests/test_control_plane_startup.py
 python -m pytest -q development_kit/tests/test_control_plane_startup.py `
-  --basetemp D:\comsol_pytest\local-serial
+  --basetemp D:\mcp_tests\serial
 python -m compileall -q comsol_mcp src development_kit
 python development_kit/scripts/quality_gate.py --artifact-root <artifact-root>
 python development_kit/scripts/release_gate.py

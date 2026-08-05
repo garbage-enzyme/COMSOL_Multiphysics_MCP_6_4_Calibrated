@@ -1295,7 +1295,10 @@ def test_test_jobs_require_explicit_injection(jobs_root):
         JobManager(jobs_root).submit({"job_type": "test_sequence", "delays": [0.01]})
 
 
-def test_production_worker_bridges_smoke_broad_and_lease_with_mocks(jobs_root, monkeypatch):
+@pytest.mark.parametrize("release_raises", [False, True])
+def test_production_worker_bridges_smoke_broad_and_lease_with_mocks(
+    jobs_root, monkeypatch, release_raises
+):
     import src.tools.ownership as ownership_module
     import src.tools.workflow as workflow_module
 
@@ -1342,6 +1345,8 @@ def test_production_worker_bridges_smoke_broad_and_lease_with_mocks(jobs_root, m
 
         def release(self):
             lease_events.append("released")
+            if release_raises:
+                raise RuntimeError("injected ownership release failure")
             return {"success": True}
 
     class FakeClient:
@@ -1399,6 +1404,79 @@ def test_production_worker_bridges_smoke_broad_and_lease_with_mocks(jobs_root, m
     assert store.read_state(job_id)["progress"] == {"completed": 2, "total": 2}
     assert lease_events[0] == "acquired"
     assert lease_events[-1] == "released"
+
+
+def test_production_worker_rejects_failed_heartbeat_before_model_load(jobs_root, monkeypatch):
+    import src.tools.ownership as ownership_module
+
+    store = JobStore(jobs_root)
+    identity = process_identity(os.getpid())
+    source = jobs_root / "source.mph"
+    source.write_bytes(b"mock")
+    job_id = store.create(
+        {
+            "schema_version": "1",
+            "spec_fingerprint": "heartbeat-config",
+            "job_type": "staged_sweep",
+            "source_model_path": str(source),
+            "source_model_sha256": "0" * 64,
+            "parameter_name": "wl",
+            "parameter_values": [1.0],
+            "expressions": ["A"],
+            "smoke_points": 1,
+        },
+        {
+            "schema_version": "1",
+            "status": "submitted",
+            "attempt": 1,
+            "worker_pid": identity["pid"],
+            "worker_process_create_time": identity["process_create_time"],
+            "worker_command_signature": identity["command_signature"],
+            "progress": {"completed": 0, "total": 1},
+        },
+    )
+    loads = []
+
+    class FailedHeartbeatOwnership:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def preflight(self, **_kwargs):
+            return {"ready": True}
+
+        def acquire(self, **_kwargs):
+            return {"success": True}
+
+        def heartbeat(self, **_kwargs):
+            return False
+
+        def release(self):
+            return {"success": True}
+
+    class FakeClient:
+        port = None
+
+        def __init__(self, **_kwargs):
+            pass
+
+        def load(self, _path):
+            loads.append(_path)
+            return object()
+
+        def clear(self):
+            pass
+
+    monkeypatch.setattr(ownership_module, "SolverOwnership", FailedHeartbeatOwnership)
+    monkeypatch.setitem(sys.modules, "mph", types.SimpleNamespace(Client=FakeClient))
+
+    code = production_worker.run(str(jobs_root), job_id)
+
+    state = store.read_state(job_id)
+    assert code == 1
+    assert loads == []
+    assert state["status"] == "failed"
+    assert state["last_error"]["type"] == "RuntimeError"
+    assert "heartbeat failed before model load" in state["last_error"]["message"]
 
 
 def test_production_worker_resource_gate_interrupts_before_second_solve(jobs_root, monkeypatch):

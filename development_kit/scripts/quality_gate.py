@@ -120,6 +120,8 @@ LINT_EXCLUSIONS_SHA256 = "c3306e6115cbe533a5317054ce1af85cab33bff2147ec1b7feff99
 MYPY_EXCLUSIONS_SHA256 = "8d5b4a970ff2235f0dd3ba3bafc1827d8e6b27975127bac9c221fcf07ae2f7db"
 PARALLEL_TEST_WORKERS = 4
 SERIAL_TEST_TARGETS = ("development_kit/tests/test_control_plane_startup.py",)
+WINDOWS_GATE_ROOT_MAX_CHARS = 32
+WINDOWS_GATE_ROOT_MAX_LEAF_CHARS = 12
 
 
 class QualityCommandError(RuntimeError):
@@ -185,7 +187,7 @@ def _main_pytest_command(pytest_root: Path, *, hosted_ci: bool) -> list[str]:
     command.extend(
         [
             "--basetemp",
-            str(pytest_root / "main"),
+            str(pytest_root),
             *(argument for target in SERIAL_TEST_TARGETS for argument in ("--ignore", target)),
             "--cov=comsol_mcp",
             "--cov-branch",
@@ -200,12 +202,46 @@ def _sha256(path: Path) -> str:
 
 
 def _default_artifact_root() -> Path:
-    configured = os.environ.get("COMSOL_MCP_QUALITY_ROOT") or os.environ.get("RUNNER_TEMP")
+    configured = os.environ.get("COMSOL_MCP_QUALITY_ROOT")
     if configured:
-        return Path(configured) / "comsol_mcp_quality"
-    if os.name == "nt" and Path("D:/").exists():
-        return Path("D:/comsol_runtime/quality_gate")
-    return Path(tempfile.gettempdir()) / "comsol_mcp_quality"
+        return Path(configured)
+    runner_temp = os.environ.get("RUNNER_TEMP")
+    if runner_temp:
+        return Path(runner_temp) / "qgate"
+    if os.name == "nt" and Path("D:/mcp_tests").exists():
+        return Path("D:/mcp_tests/qgate")
+    return Path(tempfile.gettempdir()) / "qgate"
+
+
+def validate_windows_gate_root(
+    value: str | Path,
+    *,
+    label: str,
+    platform_name: str | None = None,
+    hosted_ci: bool | None = None,
+) -> Path:
+    """Reject local Windows gate roots that leave too little generated-path budget."""
+    root = Path(value).expanduser().resolve()
+    current_platform = os.name if platform_name is None else platform_name
+    current_hosted_ci = (
+        os.environ.get("GITHUB_ACTIONS", "").casefold() == "true"
+        if hosted_ci is None
+        else hosted_ci
+    )
+    if current_platform != "nt" or current_hosted_ci:
+        return root
+    text = str(root)
+    if not text.isascii():
+        raise ValueError(f"{label} must be ASCII on local Windows")
+    approved_parent = Path("D:/mcp_tests").resolve()
+    if str(root.parent).casefold() != str(approved_parent).casefold():
+        raise ValueError(f"{label} must be a direct child of D:\\mcp_tests on local Windows")
+    if len(text) > WINDOWS_GATE_ROOT_MAX_CHARS or len(root.name) > WINDOWS_GATE_ROOT_MAX_LEAF_CHARS:
+        raise ValueError(
+            f"{label} leaves insufficient Windows generated-path budget; "
+            f"use a short root such as D:\\mcp_tests\\a65b13q"
+        )
+    return root
 
 
 def _run(
@@ -240,26 +276,51 @@ def _create_quality_run_root(artifact_root: Path) -> Path:
     raise RuntimeError("could not allocate a unique quality evidence directory")
 
 
-def _create_short_pytest_root() -> Path:
-    """Allocate an isolated short ASCII root for deeply nested Windows fixtures."""
-    candidates = []
+def _create_short_pytest_roots() -> tuple[Path, Path]:
+    """Allocate isolated main/serial roots within the validated Windows budget."""
     configured = os.environ.get("COMSOL_MCP_TEST_ASCII_ROOT")
     if configured:
-        candidates.append(Path(configured))
-    if os.name == "nt" and Path("D:/").exists():
-        candidates.append(Path("D:/comsol_pytest"))
-    candidates.append(Path(tempfile.gettempdir()))
-    for parent in candidates:
-        if os.name == "nt" and not str(parent).isascii():
-            continue
+        configured_root = Path(configured).expanduser().resolve()
+        if os.name == "nt" and os.environ.get("GITHUB_ACTIONS", "").casefold() != "true":
+            configured_root = validate_windows_gate_root(
+                configured_root, label="quality pytest root seed"
+            )
+        safe_prefix = "".join(
+            character for character in configured_root.name if character.isalnum()
+        )
+        safe_prefix = (safe_prefix[:2] or "q").casefold()
+        token = uuid.uuid4().hex[:8]
+        main_root = configured_root.with_name(f"{safe_prefix}{token}m")
+        serial_root = configured_root.with_name(f"{safe_prefix}{token}s")
+        if os.name == "nt" and os.environ.get("GITHUB_ACTIONS", "").casefold() != "true":
+            main_root = validate_windows_gate_root(main_root, label="quality main pytest root")
+            serial_root = validate_windows_gate_root(
+                serial_root, label="quality serial pytest root"
+            )
+        candidates = [(main_root, serial_root)]
+    elif os.name == "nt" and Path("D:/mcp_tests").exists():
+        token = uuid.uuid4().hex[:8]
+        parent = Path("D:/mcp_tests")
+        candidates = [
+            (
+                validate_windows_gate_root(parent / f"q{token}m", label="quality main pytest root"),
+                validate_windows_gate_root(
+                    parent / f"q{token}s", label="quality serial pytest root"
+                ),
+            )
+        ]
+    else:
+        parent = Path(tempfile.gettempdir()) / f"q-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+        candidates = [(parent / "main", parent / "serial")]
+    for main_root, serial_root in candidates:
         try:
-            parent.mkdir(parents=True, exist_ok=True)
-            candidate = parent / f"q-{os.getpid()}-{uuid.uuid4().hex[:8]}"
-            candidate.mkdir()
+            main_root.parent.mkdir(parents=True, exist_ok=True)
+            main_root.mkdir()
+            serial_root.mkdir()
         except OSError:
             continue
-        return candidate
-    raise OSError("no short ASCII pytest root is available")
+        return main_root, serial_root
+    raise OSError("no isolated short ASCII pytest roots are available")
 
 
 def _write_quality_receipt(run_root: Path, receipt: dict[str, Any]) -> None:
@@ -412,7 +473,7 @@ def run_quality_gate(artifact_root: Path, *, as_of: date) -> dict[str, Any]:
     run_root = _create_quality_run_root(artifact_root)
     coverage_data = run_root / ".coverage"
     coverage_json = run_root / "coverage.json"
-    pytest_root = _create_short_pytest_root()
+    main_pytest_root, serial_pytest_root = _create_short_pytest_roots()
     environment = dict(os.environ)
     environment["COVERAGE_FILE"] = str(coverage_data)
     run_id = run_root.name
@@ -444,7 +505,7 @@ def run_quality_gate(artifact_root: Path, *, as_of: date) -> dict[str, Any]:
         )
         _run(
             _main_pytest_command(
-                pytest_root,
+                main_pytest_root,
                 hosted_ci=os.environ.get("GITHUB_ACTIONS", "").casefold() == "true",
             ),
             stage="parallel_tests",
@@ -458,7 +519,7 @@ def run_quality_gate(artifact_root: Path, *, as_of: date) -> dict[str, Any]:
                 "-q",
                 *SERIAL_TEST_TARGETS,
                 "--basetemp",
-                str(pytest_root / "serial"),
+                str(serial_pytest_root),
             ],
             stage="serial_tests",
             environment=environment,
@@ -525,7 +586,11 @@ def main() -> int:
     parser.add_argument("--as-of", type=date.fromisoformat, default=date.today())
     args = parser.parse_args()
 
-    receipt = run_quality_gate(args.artifact_root, as_of=args.as_of)
+    artifact_root = validate_windows_gate_root(args.artifact_root, label="quality artifact root")
+    configured_pytest_root = os.environ.get("COMSOL_MCP_TEST_ASCII_ROOT")
+    if configured_pytest_root:
+        validate_windows_gate_root(configured_pytest_root, label="quality pytest root")
+    receipt = run_quality_gate(artifact_root, as_of=args.as_of)
     print(json.dumps(receipt, sort_keys=True))
     return 0 if receipt["status"] == "passed" else 1
 

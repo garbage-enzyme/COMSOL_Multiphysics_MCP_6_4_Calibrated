@@ -20,12 +20,14 @@ if __package__:
         load_planning_code_allowlist,
         verify_planning_code_texts,
     )
+    from .quality_gate import validate_windows_gate_root
 else:
     from planning_code_gate import (  # type: ignore[no-redef]
         TEXT_SUFFIXES,
         load_planning_code_allowlist,
         verify_planning_code_texts,
     )
+    from quality_gate import validate_windows_gate_root  # type: ignore[no-redef]
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -79,9 +81,9 @@ def _default_artifact_root() -> Path:
     configured = os.environ.get("COMSOL_MCP_RELEASE_ROOT")
     if configured:
         return Path(configured)
-    if os.name == "nt" and Path("D:/").exists():
-        return Path("D:/comsol_mcp_release")
-    return Path(tempfile.gettempdir()) / "comsol_mcp_release"
+    if os.name == "nt" and Path("D:/mcp_tests").exists():
+        return Path("D:/mcp_tests/rgate")
+    return Path(tempfile.gettempdir()) / "rgate"
 
 
 def _venv_python(venv_dir: Path) -> Path:
@@ -282,7 +284,7 @@ def main() -> int:
     if dirty and not args.allow_dirty:
         raise SystemExit("release gate requires a clean git tree")
 
-    artifact_root = args.artifact_root.resolve()
+    artifact_root = validate_windows_gate_root(args.artifact_root, label="release artifact root")
     artifact_root.mkdir(parents=True, exist_ok=True)
     run_root = Path(tempfile.mkdtemp(prefix="gate-", dir=artifact_root))
     dist_dir = run_root / "dist"

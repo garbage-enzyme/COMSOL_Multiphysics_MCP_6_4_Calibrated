@@ -263,6 +263,26 @@ def test_tampered_rows_fail_closed(tmp_path, field, value, message):
         read_validation_rows(path, spec)
 
 
+@pytest.mark.parametrize("invalid_sequence", [True, 1.0])
+def test_validation_row_sequence_requires_a_strict_integer(tmp_path, invalid_sequence):
+    spec = _spec(tmp_path)
+    path = tmp_path / "rows.jsonl"
+    append_validation_row(
+        path,
+        spec,
+        attempt=1,
+        point_id="off",
+        status="ok",
+        collector_summaries=[_summary("off")],
+    )
+    row = json.loads(path.read_text(encoding="utf-8"))
+    row["sequence"] = invalid_sequence
+    path.write_text(json.dumps(row) + "\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="sequence is not contiguous"):
+        read_validation_rows(path, spec)
+
+
 @pytest.mark.parametrize(
     "unsafe_path",
     [

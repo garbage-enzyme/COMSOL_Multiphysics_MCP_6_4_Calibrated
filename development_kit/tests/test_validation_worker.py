@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 import shutil
+import threading
 import uuid
+from pathlib import Path
 
 import pytest
-
 from src.jobs.manager import JobManager
 from src.jobs.store import JobStore, process_identity
 from src.jobs.validation_matrix import normalize_validation_matrix_spec
@@ -161,7 +161,10 @@ def test_validation_worker_reuses_one_claim_and_completes_exact_rows(tmp_path, a
     assert ownership.acquired and ownership.released
     assert ownership.heartbeats >= 3
     assert client.cleared
-    assert [row["point_id"] for row in read_validation_rows(store.job_dir(job_id) / "matrix_rows.jsonl", spec)] == [
+    assert [
+        row["point_id"]
+        for row in read_validation_rows(store.job_dir(job_id) / "matrix_rows.jsonl", spec)
+    ] == [
         "point-0",
         "point-1",
     ]
@@ -194,7 +197,9 @@ def test_validation_worker_resource_refusal_is_resumable_without_false_row(tmp_p
     assert client.cleared
 
 
-def test_manager_routes_validation_submit_and_resume_to_dedicated_worker(tmp_path, ascii_root, monkeypatch):
+def test_manager_routes_validation_submit_and_resume_to_dedicated_worker(
+    tmp_path, ascii_root, monkeypatch
+):
     source = tmp_path / "fixture.mph"
     source.write_bytes(b"model")
     manager = JobManager(ascii_root / "jobs", preflight=lambda **_kwargs: {"ready": True})
@@ -222,7 +227,9 @@ def test_manager_routes_validation_submit_and_resume_to_dedicated_worker(tmp_pat
     ]
 
 
-def test_manager_rejects_matrix_bounds_before_preflight_or_launch(tmp_path, ascii_root, monkeypatch):
+def test_manager_rejects_matrix_bounds_before_preflight_or_launch(
+    tmp_path, ascii_root, monkeypatch
+):
     source = tmp_path / "fixture.mph"
     source.write_bytes(b"model")
     calls = []
@@ -240,7 +247,9 @@ def test_manager_rejects_matrix_bounds_before_preflight_or_launch(tmp_path, asci
     assert calls == []
 
 
-def test_exact_duplicate_submit_returns_existing_job_without_second_launch(tmp_path, ascii_root, monkeypatch):
+def test_exact_duplicate_submit_returns_existing_job_without_second_launch(
+    tmp_path, ascii_root, monkeypatch
+):
     source = tmp_path / "fixture.mph"
     source.write_bytes(b"model")
     manager = JobManager(ascii_root / "jobs", preflight=lambda **_kwargs: {"ready": True})
@@ -404,3 +413,42 @@ def test_validation_transition_error_remains_bound_to_concurrent_cancel(
     assert state["status"] == "cancel_requested"
     assert state["cancel"]["worker_error"]["type"] == "ValueError"
     assert "Invalid job state transition" in state["cancel"]["worker_error"]["message"]
+
+
+def test_native_cancel_monitor_failure_is_recorded_durably(tmp_path, ascii_root, monkeypatch):
+    from src.jobs import native_cancel_probe
+
+    source = tmp_path / "fixture.mph"
+    source.write_bytes(b"model")
+    spec = normalize_validation_matrix_spec(_raw_spec(source, points=1))
+    store, job_id = _create_job(ascii_root / "jobs", spec)
+    monitor_failed = threading.Event()
+
+    def fail_native_cancel():
+        monitor_failed.set()
+        raise RuntimeError("injected native monitor failure")
+
+    def request_cancel_then_wait(point, collector, artifact_dir):
+        store.request_cancel(job_id, requester_identity=process_identity(os.getpid()))
+        assert monitor_failed.wait(timeout=1.0)
+        return _collector(point, collector, artifact_dir)
+
+    monkeypatch.setattr(native_cancel_probe, "request_native_cancel_once", fail_native_cancel)
+    code = _run(
+        str(store.root),
+        job_id,
+        ownership_factory=lambda *_args: FakeOwnership(),
+        client_factory=lambda _spec: FakeClient(),
+        collector_executor=request_cancel_then_wait,
+        telemetry_provider=_telemetry(),
+        native_cancel_enabled=True,
+    )
+
+    state = store.read_state(job_id)
+    assert code == 0
+    assert state["status"] == "cancel_requested"
+    assert state["cancel"]["worker_error"] == {
+        "type": "RuntimeError",
+        "message": "injected native monitor failure",
+        "cleanup_errors": [],
+    }

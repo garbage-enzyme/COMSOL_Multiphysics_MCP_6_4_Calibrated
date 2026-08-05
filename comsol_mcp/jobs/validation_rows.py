@@ -206,7 +206,12 @@ def _normalize_row(
         raise ValueError(f"validation row {sequence} has missing or unsupported fields")
     if raw.get("schema_version") != VALIDATION_ROW_SCHEMA_VERSION:
         raise ValueError("unsupported validation row schema_version")
-    if raw.get("sequence") != sequence:
+    raw_sequence = raw.get("sequence")
+    if (
+        isinstance(raw_sequence, bool)
+        or not isinstance(raw_sequence, int)
+        or raw_sequence != sequence
+    ):
         raise ValueError("validation row sequence is not contiguous")
     attempt = raw.get("attempt")
     if isinstance(attempt, bool) or not isinstance(attempt, int) or attempt <= 0:

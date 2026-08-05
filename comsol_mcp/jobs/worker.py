@@ -462,13 +462,16 @@ def _run(root: str, job_id: str) -> int:
             client = mph.Client(
                 **{key: value for key, value in client_kwargs.items() if value is not None}
             )
-            ownership.heartbeat(
+            heartbeat = ownership.heartbeat(
                 model_path=spec["source_model_path"],
                 refresh_server_processes=True,
             )
+            if heartbeat is not True:
+                raise RuntimeError("Solver ownership heartbeat failed before model load")
             model = client.load(spec["source_model_path"])
 
         resource_adapter = None
+        completed_point_id_cache: set[str] = set()
         if spec.get("resource_policy") is not None:
             results_path = directory / "results.csv"
 
@@ -483,6 +486,11 @@ def _run(root: str, job_id: str) -> int:
                         and row.get("config_id") == spec["spec_fingerprint"]
                         and row.get("parameter_value")
                     }
+
+            completed_point_id_cache = completed_point_ids()
+
+            def cached_completed_point_ids() -> set[str]:
+                return set(completed_point_id_cache)
 
             def telemetry_provider(stage: str, _point_id: str) -> dict[str, Any]:
                 mesh_elements = None
@@ -512,7 +520,7 @@ def _run(root: str, job_id: str) -> int:
                 attempt=attempt,
                 policy=spec["resource_policy"],
                 telemetry_provider=telemetry_provider,
-                completed_point_ids_provider=completed_point_ids,
+                completed_point_ids_provider=cached_completed_point_ids,
             )
 
         def resource_hook(context: dict[str, Any]) -> dict[str, Any]:
@@ -567,9 +575,15 @@ def _run(root: str, job_id: str) -> int:
         native_monitor.start()
 
         def on_row(row: dict[str, Any]) -> None:
-            progress["completed"] = _valid_row_count(
-                directory / "results.csv", spec["spec_fingerprint"]
-            )
+            if row.get("status") == "ok" and resource_adapter is not None:
+                completed_point_id_cache.add(
+                    _sweep_point_id(spec["parameter_name"], str(row["parameter_value"]))
+                )
+                progress["completed"] = len(completed_point_id_cache)
+            else:
+                progress["completed"] = _valid_row_count(
+                    directory / "results.csv", spec["spec_fingerprint"]
+                )
             patch = {"progress": dict(progress), "last_row": row}
             event_data = {
                 "status": row.get("status"),
@@ -783,9 +797,12 @@ def _run(root: str, job_id: str) -> int:
                     except Exception as exc:
                         print(f"Client disconnect warning: {exc}", file=sys.stderr, flush=True)
         if attached_target is None and ownership is not None and lease_acquired:
-            release = ownership.release()
-            if not release.get("success"):
-                print(json.dumps(release, ensure_ascii=False), file=sys.stderr, flush=True)
+            try:
+                release = ownership.release()
+                if not release.get("success"):
+                    print(json.dumps(release, ensure_ascii=False), file=sys.stderr, flush=True)
+            except Exception as exc:
+                print(f"Ownership release warning: {exc}", file=sys.stderr, flush=True)
 
 
 def run(root: str, job_id: str) -> int:

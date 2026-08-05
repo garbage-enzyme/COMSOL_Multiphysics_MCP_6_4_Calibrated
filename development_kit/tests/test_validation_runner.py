@@ -335,6 +335,25 @@ def test_empty_exception_message_still_produces_a_durable_error_row(tmp_path):
     }
 
 
+def test_real_interrupted_error_is_persisted_as_an_error_not_control(tmp_path):
+    spec = _spec(tmp_path)
+    directory = tmp_path / "real-interrupted-error"
+
+    result = run_pending_validation_points(
+        spec,
+        directory,
+        attempt=1,
+        collector_executor=lambda *_args: (_ for _ in ()).throw(
+            InterruptedError("injected filesystem interruption")
+        ),
+    )
+
+    assert result["success"] is False
+    assert result["stop_reason"] == "point_error"
+    row = read_validation_rows(directory / "matrix_rows.jsonl", spec)[0]
+    assert row["error"]["type"] == "InterruptedError"
+
+
 def test_same_attempt_reentry_uses_a_new_bounded_artifact_directory(tmp_path):
     spec = _spec(tmp_path)
     directory = tmp_path / "same-attempt-reentry"
