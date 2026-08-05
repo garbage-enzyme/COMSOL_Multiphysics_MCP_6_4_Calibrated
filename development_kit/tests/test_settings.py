@@ -19,8 +19,8 @@ from src.settings import (
 )
 
 
-def _safe_defaults() -> dict:
-    return default_settings_document()
+def _safe_defaults(environ=None) -> dict:
+    return default_settings_document(environ=environ)
 
 
 def _settings_path(tmp_path: Path, payload: object) -> Path:
@@ -76,7 +76,7 @@ def test_deleted_entries_use_safe_defaults_without_an_error(tmp_path):
 
     settings = load_settings(environment)
     status = settings_status(environment)
-    defaults = default_settings_document()
+    defaults = default_settings_document(environ=environment)
 
     assert settings["profile"]["name"] == "core"
     assert settings["runtime"] == defaults["runtime"]
@@ -111,7 +111,9 @@ def test_invalid_value_keeps_only_that_setting_at_default_and_reports_it(tmp_pat
     status = settings_status(environment)
 
     assert settings["profile"]["name"] == "core"
-    assert settings["runtime"]["directory"] == default_settings_document()["runtime"]["directory"]
+    assert settings["runtime"]["directory"] == default_settings_document(environ=environment)[
+        "runtime"
+    ]["directory"]
     assert settings["runtime"]["jobs_directory"] == str(Path("D:/valid/jobs"))
     assert settings["shared_server"]["enabled"] is False
     assert status["configuration_state"] == "degraded"
@@ -128,10 +130,11 @@ def test_invalid_value_keeps_only_that_setting_at_default_and_reports_it(tmp_pat
 def test_malformed_json_falls_back_to_the_complete_safe_defaults(tmp_path):
     path = tmp_path / "malformed.json"
     path.write_text('{"profile":', encoding="utf-8")
-    status = settings_status({SETTINGS_PATH_ENV: str(path)})
-    settings = load_settings({SETTINGS_PATH_ENV: str(path)})
+    environment = {SETTINGS_PATH_ENV: str(path)}
+    status = settings_status(environment)
+    settings = load_settings(environment)
 
-    assert settings == _safe_defaults()
+    assert settings == _safe_defaults(environment)
     assert status["configuration_state"] == "degraded"
     assert status["reason_code"] == "settings_json_invalid"
     assert status["settings_errors"][0]["path"] == "settings"
@@ -147,7 +150,7 @@ def test_deeply_nested_json_falls_back_without_recursion_escape(tmp_path):
     environment = {SETTINGS_PATH_ENV: str(path)}
     status = settings_status(environment)
 
-    assert load_settings(environment) == _safe_defaults()
+    assert load_settings(environment) == _safe_defaults(environment)
     assert status["configuration_state"] == "degraded"
     assert status["settings_errors"][0]["error_type"] == "RecursionError"
 
@@ -175,7 +178,9 @@ def test_expanduser_runtime_error_isolated_to_the_invalid_path(tmp_path, monkeyp
     status = settings_status(environment)
 
     assert settings["profile"]["name"] == "wave_optics"
-    assert settings["runtime"]["directory"] == default_settings_document()["runtime"]["directory"]
+    assert settings["runtime"]["directory"] == default_settings_document(environ=environment)[
+        "runtime"
+    ]["directory"]
     assert settings["shared_server"]["enabled"] is True
     assert [item["path"] for item in status["settings_errors"]] == ["settings.runtime.directory"]
 
