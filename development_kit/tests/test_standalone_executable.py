@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from itertools import count
 from pathlib import Path
@@ -207,6 +208,32 @@ def test_default_compiler_capture_is_file_backed_and_bounded(
     assert overflow is True
     assert len(stdout) <= 17
     assert stderr == b""
+
+
+def test_builder_output_overflow_preserves_only_bounded_diagnostics(
+    ascii_tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    compiler = ascii_tmp_path / "csc.exe"
+    compiler.write_bytes(b"fake-compiler")
+    output = ascii_tmp_path / "overflow-build"
+    monkeypatch.setattr(builder_module, "_validate_build_host", lambda _path: None)
+
+    def noisy(command, **kwargs):
+        return subprocess.CompletedProcess(
+            command,
+            1,
+            b"x" * (builder_module.MAX_BUILD_LOG_BYTES + 1),
+            b"diagnostic",
+        )
+
+    with pytest.raises(RuntimeError, match="output exceeded"):
+        build_standalone_executable(output, csc_path=compiler, run_command=noisy)
+
+    assert (output / "build.stdout.log").stat().st_size == builder_module.MAX_BUILD_LOG_BYTES
+    assert (output / "build.stderr.log").stat().st_size == 0
+    assert not (output / "build-sources").exists()
+    assert not (output / EXECUTABLE_NAME).exists()
+    assert not (output / MANIFEST_NAME).exists()
 
 
 def test_status_and_results_are_bounded_schema_checked_snapshots(ascii_tmp_path: Path) -> None:
@@ -426,6 +453,9 @@ def test_embedded_launcher_preserves_bounded_durable_process_and_resume_contract
     assert 'throw new InvalidDataException("campaign_reference_physics_is_not_positive")' in source
     assert "TryWriteFailureStatus(exception.Message, committedCount);" in source
     assert '{"completed", completed}' in source
+    assert source.index("ReadToEndAsync()") < source.index(
+        "process.WaitForExit(timeoutMilliseconds)"
+    )
 
 
 @requires_windows_workstation_build
@@ -620,6 +650,59 @@ def test_launch_record_limit_is_serialized_across_concurrent_callers(
         if len(path.name.split(".", 1)[0]) == 32
     }
     assert len(launch_ids) == control_module.MAX_MCP_LAUNCH_RECORDS
+
+
+def test_launch_capacity_is_reserved_before_identity_capture(
+    ascii_tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    deployment = ascii_tmp_path / "launch-reservation"
+    (deployment / "assets" / "mcp-launches").mkdir(parents=True)
+    monkeypatch.setattr(
+        control_module,
+        "verify_standalone_deployment",
+        lambda _path: {"launcher_sha256": "a" * 64},
+    )
+    monkeypatch.setattr(control_module, "_validate_comsol_root", lambda path: Path(path))
+    monkeypatch.setattr(control_module, "MAX_MCP_LAUNCH_RECORDS", 1)
+    identity_started = threading.Event()
+    release_identity = threading.Event()
+
+    class FakeProcess:
+        pid = 21001
+
+        @staticmethod
+        def poll():
+            return 0
+
+    def delayed_identity(pid):
+        identity_started.set()
+        assert release_identity.wait(timeout=5)
+        return {
+            "pid": pid,
+            "process_create_time": 1.0,
+            "command_signature": "b" * 64,
+        }
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        first = pool.submit(
+            launch_standalone_campaign,
+            deployment,
+            ascii_tmp_path / "comsol",
+            popen_factory=lambda *_args, **_kwargs: FakeProcess(),
+            identity_provider=delayed_identity,
+        )
+        assert identity_started.wait(timeout=5)
+        with pytest.raises(RuntimeError, match="launch record limit reached"):
+            launch_standalone_campaign(
+                deployment,
+                ascii_tmp_path / "comsol",
+                popen_factory=lambda *_args, **_kwargs: FakeProcess(),
+                identity_provider=lambda _pid: pytest.fail(
+                    "second launch must not reach identity capture"
+                ),
+            )
+        release_identity.set()
+        assert first.result(timeout=5)["success"] is True
 
 
 def test_stale_launch_records_are_retired_with_their_logs(
