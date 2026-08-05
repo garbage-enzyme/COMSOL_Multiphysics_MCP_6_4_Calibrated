@@ -47,8 +47,8 @@ def test_acceptance_runner_composes_pause_resume_and_path_free_receipt(
         launches.append(resume)
         return {
             "owner": {
-                "pid": 1,
-                "process_create_time": 1.0,
+                "pid": 2 if resume else 1,
+                "process_create_time": 2.0 if resume else 1.0,
                 "command_signature": "b" * 64,
             }
         }

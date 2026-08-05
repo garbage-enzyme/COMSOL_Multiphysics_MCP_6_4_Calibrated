@@ -1,6 +1,6 @@
 # Codex MCP example. Replace paths for the local non-editable installation.
 [mcp_servers.comsol]
-command = 'D:\path\to\python-env\Scripts\comsol-mcp.exe'
+command = '<python-env>/Scripts/comsol-mcp.exe'
 args = []
 
 [mcp_servers.comsol.env]

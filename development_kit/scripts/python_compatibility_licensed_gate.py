@@ -50,20 +50,15 @@ def _sha256_file(path: Path) -> str:
 
 
 def _git_identity() -> dict:
-    commit = subprocess.run(
-        ["git", "rev-parse", "HEAD"],
-        cwd=ROOT,
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
-    dirty = subprocess.run(
-        ["git", "status", "--porcelain"],
-        cwd=ROOT,
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.splitlines()
+    try:
+        commit = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=ROOT, check=True, capture_output=True, text=True
+        ).stdout.strip()
+        dirty = subprocess.run(
+            ["git", "status", "--porcelain"], cwd=ROOT, check=True, capture_output=True, text=True
+        ).stdout.splitlines()
+    except (OSError, subprocess.CalledProcessError) as exc:
+        return {"commit": None, "dirty_entry_count": None, "error_type": type(exc).__name__}
     return {"commit": commit, "dirty_entry_count": len(dirty)}
 
 

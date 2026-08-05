@@ -41,7 +41,10 @@ def main() -> int:
     receipt = build_reference_power_dry_run_receipt(contract, spec, verify_files=args.verify_files)
     text = json.dumps(receipt, indent=2, sort_keys=True) + "\n"
     if args.output is not None:
-        atomic_write_json_exclusive(args.output, receipt)
+        try:
+            atomic_write_json_exclusive(args.output, receipt)
+        except FileExistsError as exc:
+            raise SystemExit("reference-power preflight output already exists") from exc
     print(text, end="")
     return 0
 

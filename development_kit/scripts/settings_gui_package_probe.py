@@ -7,6 +7,7 @@ import configparser
 import json
 import tarfile
 import zipfile
+from packaging.utils import canonicalize_name, parse_wheel_filename
 from pathlib import Path, PurePosixPath
 
 LANGUAGES = ("en", "zh_CN", "zh_TW")
@@ -52,6 +53,15 @@ def inspect_settings_gui_distributions(dist: Path) -> dict:
     if len(wheels) != 1 or len(sdists) != 1:
         raise ValueError("expected exactly one wheel and one source distribution")
     wheel, sdist = wheels[0], sdists[0]
+    wheel_name, wheel_version, _build, _tags = parse_wheel_filename(wheel.name)
+    sdist_root = sdist.name.removesuffix(".tar.gz")
+    sdist_parts = sdist_root.rsplit("-", 1)
+    if (
+        len(sdist_parts) != 2
+        or canonicalize_name(sdist_parts[0]) != canonicalize_name(str(wheel_name))
+        or sdist_parts[1] != str(wheel_version)
+    ):
+        raise ValueError("wheel and source distribution package identities differ")
     wheel_names, entry_points = _wheel_members(wheel)
     sdist_names = _sdist_members(sdist)
 
@@ -95,8 +105,12 @@ def inspect_settings_gui_distributions(dist: Path) -> dict:
     return {
         "schema_name": "comsol_mcp.settings_gui_package_receipt",
         "schema_version": "1.0.0",
-        "wheel_locale_count": len(expected_mo),
-        "sdist_po_count": len(expected_po),
+        "wheel_locale_count": len(
+            {name for name in wheel_names if name.endswith("/settings_gui.mo")}
+        ),
+        "sdist_po_count": len({name for name in sdist_names if name.endswith("/settings_gui.po")}),
+        "package_name": str(wheel_name),
+        "package_version": str(wheel_version),
         "sdist_pot_included": True,
         "wheel_tests_excluded": True,
         "wheel_translation_sources_excluded": True,

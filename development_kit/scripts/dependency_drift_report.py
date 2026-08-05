@@ -244,7 +244,9 @@ def build_dependency_drift_report(
         if not isinstance(name, str) or not isinstance(version, str) or not version:
             raise ValueError("reviewed direct dependency names and versions must be strings")
         reviewed[canonical_distribution_name(name)] = version
-    optional_reviewed = production.get("optional_dependencies", {})
+    optional_reviewed = (
+        production.get("optional_dependencies", {}) if isinstance(production, dict) else {}
+    )
     if not isinstance(optional_reviewed, dict):
         raise ValueError("reviewed optional dependencies must be an object")
     for group in optional_reviewed.values():

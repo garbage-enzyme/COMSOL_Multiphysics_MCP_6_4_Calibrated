@@ -117,6 +117,9 @@ jobs:
 
   solver-free-settings-gui:
     name: Settings GUI, package, and installed entry
+    permissions:
+      contents: read
+      actions: write
     runs-on: windows-latest
     timeout-minutes: 15
     steps:

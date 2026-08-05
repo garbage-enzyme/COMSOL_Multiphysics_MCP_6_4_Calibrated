@@ -18,16 +18,12 @@ ROOT_TEXT = str(ROOT)
 sys.path[:] = [ROOT_TEXT, *(item for item in sys.path if item != ROOT_TEXT)]
 
 _replay = importlib.import_module("comsol_mcp.jobs.thermo_optomechanical_replay")
-_execution = importlib.import_module(
-    "comsol_mcp.jobs.thermo_optomechanical_replay_execution"
-)
+_execution = importlib.import_module("comsol_mcp.jobs.thermo_optomechanical_replay_execution")
 _runner = importlib.import_module("comsol_mcp.jobs.thermo_optomechanical_replay_runner")
 _ownership = importlib.import_module("comsol_mcp.tools.ownership")
 _thermal_material = importlib.import_module("comsol_mcp.evidence.thermal_material")
 THERMO_OPTOMECHANICAL_CONTROLS = _replay.THERMO_OPTOMECHANICAL_CONTROLS
-normalize_thermo_optomechanical_replay_spec = (
-    _replay.normalize_thermo_optomechanical_replay_spec
-)
+normalize_thermo_optomechanical_replay_spec = _replay.normalize_thermo_optomechanical_replay_spec
 ThermoOptomechanicalComsolExecutor = _execution.ThermoOptomechanicalComsolExecutor
 run_thermo_optomechanical_replay = _runner.run_thermo_optomechanical_replay
 SolverOwnership = _ownership.SolverOwnership
@@ -197,9 +193,7 @@ def _executor_diagnostic(executor: Any) -> dict[str, Any]:
                 }
             )
         studies[study_tag] = {
-            "solver_sequences": [
-                str(value) for value in list(study.getSolverSequences("All"))
-            ],
+            "solver_sequences": [str(value) for value in list(study.getSolverSequences("All"))],
             "steps": step_rows,
         }
     datasets = []
@@ -598,13 +592,11 @@ def _material_state_reference(source_path: Path) -> dict[str, Any]:
     }
 
 
-def _raw_spec(source_path: Path, specification_path: Path) -> dict[str, Any]:
+def _raw_spec(source_path: Path, specification_path: Path, *, cores: int = 2) -> dict[str, Any]:
     manifest = {
         "job_type": "thermo_optomechanical_replay",
         "source_model_path": str(source_path),
-        "source_model_relative_identity": (
-            "generated/thermo_optomechanical_synthetic_source.mph"
-        ),
+        "source_model_relative_identity": ("generated/thermo_optomechanical_synthetic_source.mph"),
         "optical_configuration_sha256": "c" * 64,
         "material_state": _material_state_reference(source_path),
         "model_contract": {
@@ -687,7 +679,7 @@ def _raw_spec(source_path: Path, specification_path: Path) -> dict[str, Any]:
             "wall_time_budget_seconds": 900.0,
             "minimum_next_point_seconds": 1.0,
         },
-        "cores": 2,
+        "cores": cores,
         "wall_time_budget_seconds": 900,
         "version": "6.4",
         "max_retries": 1,
@@ -775,9 +767,7 @@ def run_gate(output: Path, *, cores: int) -> dict[str, Any]:
         raise ValueError("licensed thermo-optomechanical gate output must not already exist")
     output.mkdir(parents=True)
     source_path = output / "source" / "thermo_optomechanical_synthetic_source.mph"
-    owner = SolverOwnership(
-        "D:/comsol_runtime", owner="v4.1-thermo-optomechanical-licensed-gate"
-    )
+    owner = SolverOwnership("D:/comsol_runtime", owner="v4.1-thermo-optomechanical-licensed-gate")
     result: dict[str, Any] = {
         "schema_name": SCHEMA_NAME,
         "schema_version": SCHEMA_VERSION,
@@ -802,8 +792,7 @@ def run_gate(output: Path, *, cores: int) -> dict[str, Any]:
         result["preflight"] = preflight
         if not preflight.get("ready"):
             raise RuntimeError(
-                "licensed thermo-optomechanical preflight failed: "
-                f"{preflight.get('blockers')}"
+                f"licensed thermo-optomechanical preflight failed: {preflight.get('blockers')}"
             )
         claim = owner.acquire(mode="thermo-optomechanical-licensed-gate")
         result["lease_claim"] = claim
@@ -821,7 +810,7 @@ def run_gate(output: Path, *, cores: int) -> dict[str, Any]:
         result["fixture"] = build_fixture(client, source_path)
         source_before = _sha256(source_path)
         spec = normalize_thermo_optomechanical_replay_spec(
-            _raw_spec(source_path, output / "submission_specification.json")
+            _raw_spec(source_path, output / "submission_specification.json", cores=cores)
         )
         _atomic_json(output / "normalized_spec.json", spec)
         client.clear()
@@ -844,8 +833,7 @@ def run_gate(output: Path, *, cores: int) -> dict[str, Any]:
         result["success"] = replay["summary"]["scientific_disposition"] == "accepted"
         if not result["success"]:
             raise RuntimeError(
-                "licensed thermo-optomechanical scientific gate failed: "
-                f"{replay['summary']}"
+                f"licensed thermo-optomechanical scientific gate failed: {replay['summary']}"
             )
     except Exception as exc:
         result["error"] = {"type": type(exc).__name__, "message": str(exc)[:3000]}
@@ -896,9 +884,7 @@ def main() -> int:
     parser.add_argument("--confirm", required=True)
     args = parser.parse_args()
     if args.confirm != "RUN_REAL_COMSOL":
-        raise SystemExit(
-            "licensed thermo-optomechanical gate requires --confirm RUN_REAL_COMSOL"
-        )
+        raise SystemExit("licensed thermo-optomechanical gate requires --confirm RUN_REAL_COMSOL")
     output = args.output.resolve()
     if not str(output).isascii():
         raise SystemExit("licensed thermo-optomechanical gate output must use an ASCII path")

@@ -94,6 +94,7 @@ def run_acceptance(
     deadline = time.monotonic() + timeout_seconds
     first_launch = launch_standalone_campaign(output_directory, comsol_root)
     owner = first_launch["owner"]
+    first_owner = owner
     try:
         _wait_for_status(
             output_directory,
@@ -114,6 +115,10 @@ def run_acceptance(
             raise RuntimeError("standalone pause was not acknowledged after one durable point")
         resumed = launch_standalone_campaign(output_directory, comsol_root, resume=True)
         owner = resumed["owner"]
+        if owner.get("pid") == first_owner.get("pid") and owner.get(
+            "process_create_time"
+        ) == first_owner.get("process_create_time"):
+            raise RuntimeError("standalone resume did not create a new owner")
         completed = _wait_for_status(
             output_directory,
             lambda value: value.get("status") == "completed",

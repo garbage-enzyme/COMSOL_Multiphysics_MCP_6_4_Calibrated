@@ -188,8 +188,14 @@ def build_security_receipt(
     allowlist_file = Path(allowlist_path)
     report_bytes = report_file.read_bytes()
     allowlist_bytes = allowlist_file.read_bytes()
-    report = json.loads(report_bytes.decode("utf-8"))
-    allowlist_value = json.loads(allowlist_bytes.decode("utf-8"))
+    try:
+        report = json.loads(report_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("pip-audit report must be valid UTF-8 JSON") from exc
+    try:
+        allowlist_value = json.loads(allowlist_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("vulnerability allowlist must be valid UTF-8 JSON") from exc
     # Reuse the public validator without re-reading the policy path.
     allowlist = _load_vulnerability_allowlist_value(allowlist_value)
     receipt = evaluate_security_report(report, allowlist, as_of=as_of)
