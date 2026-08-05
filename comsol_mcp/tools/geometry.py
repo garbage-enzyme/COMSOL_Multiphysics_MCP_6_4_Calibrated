@@ -1,7 +1,7 @@
 """Geometry tools for COMSOL MCP Server."""
 
 import math
-from typing import Optional, Sequence
+from typing import Literal, Optional, Sequence
 
 from mcp.server.mcpserver import MCPServer
 
@@ -526,7 +526,7 @@ def register_geometry_tools(mcp: MCPServer) -> None:
     @mcp.tool()
     def geometry_create(
         geometry_name: Optional[str] = None,
-        space_dimension: int = 3,
+        space_dimension: Literal[1, 2, 3] = 3,
         component_name: str = "comp1",
         model_name: Optional[str] = None,
     ) -> dict:
@@ -544,6 +544,14 @@ def register_geometry_tools(mcp: MCPServer) -> None:
         Returns:
             Created geometry info
         """
+        if geometry_name is not None and (
+            not isinstance(geometry_name, str) or not geometry_name.strip()
+        ):
+            return {"success": False, "error": "geometry_name must be nonempty"}
+        if not isinstance(component_name, str) or not component_name.strip():
+            return {"success": False, "error": "component_name must be nonempty"}
+        if type(space_dimension) is not int or space_dimension not in {1, 2, 3}:
+            return {"success": False, "error": "space_dimension must be 1, 2, or 3"}
         model = session_manager.get_model(model_name)
         if model is None:
             return {
@@ -566,7 +574,13 @@ def register_geometry_tools(mcp: MCPServer) -> None:
                     ),
                 }
 
-            comp.geom().create(geom_name, space_dimension)
+            geometries = comp.geom()
+            if geom_name in {str(tag) for tag in geometries.tags()}:
+                return {
+                    "success": False,
+                    "error": f"Geometry already exists: {geom_name}",
+                }
+            geometries.create(geom_name, space_dimension)
 
             return {
                 "success": True,

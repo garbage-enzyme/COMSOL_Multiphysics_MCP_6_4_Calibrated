@@ -35,6 +35,8 @@ def create_study(
             if not math.isfinite(number):
                 return {"success": False, "error": "time_list must be finite"}
             normalized_times.append(number)
+        if not normalized_times:
+            return {"success": False, "error": "time_list must not be empty"}
     aliases = {
         "stat": "Stationary",
         "time": "Transient",

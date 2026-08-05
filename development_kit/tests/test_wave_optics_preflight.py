@@ -526,6 +526,25 @@ def test_selected_boundary_probes_obey_global_budget(monkeypatch):
     }
 
 
+def test_selected_boundary_topology_failure_remains_partial_evidence(monkeypatch):
+    class UnreadableGeometry:
+        @staticmethod
+        def getNBoundaries():
+            raise RuntimeError("topology unavailable")
+
+    monkeypatch.setattr(
+        "src.tools.wave_optics_preflight._probe_boundary_read_only",
+        lambda *_args, **_kwargs: pytest.fail("unreadable topology must not be probed"),
+    )
+    ledger = EvidenceLedger()
+
+    _extend_boundary_map(UnreadableGeometry(), {}, [1], ledger)
+
+    assert [item["code"] for item in ledger.unknowns] == [
+        "selected_boundary_topology_unreadable"
+    ]
+
+
 def test_complete_preflight_does_not_recommend_tool_outside_profile(tmp_path, monkeypatch):
     result = _full_result(tmp_path, monkeypatch, active_profile="core")
 

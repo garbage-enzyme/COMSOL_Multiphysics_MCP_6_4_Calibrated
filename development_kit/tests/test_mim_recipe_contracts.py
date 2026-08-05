@@ -134,6 +134,16 @@ def test_required_properties_fail_on_any_set_or_readback_error():
         contracts.require_required_properties(node, {"plist": "wl"})
 
 
+def test_required_properties_accept_equivalent_numeric_readback():
+    contracts = _load_contracts()
+
+    class NumericReadback(Properties):
+        def getString(self, _name):
+            return "0.001"
+
+    contracts.require_required_properties(NumericReadback(), {"value": 1.0e-3})
+
+
 def test_spectrum_requires_one_finite_real_value_per_wavelength():
     contracts = _load_contracts()
 

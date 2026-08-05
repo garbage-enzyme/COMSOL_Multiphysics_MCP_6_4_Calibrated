@@ -134,6 +134,32 @@ def test_partial_tool_registration_rolls_back_and_can_be_retried(monkeypatch):
     assert _public_tool_names(server) == {"existing_tool", "completed_tool"}
 
 
+def test_tool_registration_preserves_primary_error_when_registry_restore_fails(monkeypatch):
+    import src.knowledge.embedded as embedded_module
+    import src.knowledge.lexical_manual as lexical_module
+    import src.tools as tools_module
+
+    server = MCPServer("restore-failure-registration")
+
+    class RestoreFailureDict(dict):
+        def clear(self):
+            raise OSError("injected restore failure")
+
+    server._tool_manager._tools = RestoreFailureDict(server._tool_manager._tools)
+
+    def fail_registration(_target, _selection):
+        raise RuntimeError("primary registration failure")
+
+    monkeypatch.setattr(tools_module, "register_tool_modules", fail_registration)
+    monkeypatch.setattr(embedded_module, "register_knowledge_tools", lambda _server: None)
+    monkeypatch.setattr(lexical_module, "register_lexical_manual_tools", lambda _server: None)
+
+    with pytest.raises(RuntimeError, match="primary registration failure") as caught:
+        register_all_tools(server, "core")
+
+    assert any("rollback failed: OSError" in note for note in caught.value.__notes__)
+
+
 def test_partial_resource_registration_rolls_back_and_can_be_retried(monkeypatch):
     import src.resources.model_resources as resources_module
 

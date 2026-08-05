@@ -22,6 +22,10 @@ def create_mesh_sequence(
         return {"success": False, "error": "element_type must be nonempty"}
     if not isinstance(build, bool):
         return {"success": False, "error": "build must be boolean"}
+    if component_name is not None and (
+        not isinstance(component_name, str) or not component_name.strip()
+    ):
+        return {"success": False, "error": "component_name must be nonempty"}
     from .physics import _first_component
 
     jm = model.java
@@ -73,6 +77,10 @@ def get_mesh_info(
     component_name: Optional[str] = None,
 ) -> dict:
     """Return mesh metadata through the COMSOL 6.4 clientapi."""
+    if component_name is not None and (
+        not isinstance(component_name, str) or not component_name.strip()
+    ):
+        return {"success": False, "error": "component_name must be nonempty"}
     from .physics import _first_component
 
     jm = model.java

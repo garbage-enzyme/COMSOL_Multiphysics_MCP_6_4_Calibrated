@@ -327,8 +327,17 @@ def _extend_boundary_map(
         )
     if not missing:
         return
-    n_boundaries = int(geom.getNBoundaries())
-    sdim = int(geom.getSDim())
+    try:
+        n_boundaries = int(geom.getNBoundaries())
+        sdim = int(geom.getSDim())
+    except Exception as exc:
+        ledger.add(
+            "unknown",
+            "selected_boundary_topology_unreadable",
+            "Selected-boundary topology could not be read.",
+            error=_error(exc),
+        )
+        return
     try:
         up_down = geom.getUpDown()
         ups = [int(item) for item in list(up_down[0])]

@@ -126,6 +126,11 @@ def _metadata_path(model_path: Path) -> Path:
     return model_path.with_suffix(".metadata.json")
 
 
+def _fsync_file(path: Path) -> None:
+    with path.open("r+b") as handle:
+        os.fsync(handle.fileno())
+
+
 def _save_model_version_bundle(
     model,
     versioned_path: str,
@@ -172,6 +177,8 @@ def _save_model_version_bundle(
         encoded = json.dumps(metadata, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
         stages[version_metadata].write_text(encoded, encoding="utf-8")
         stages[latest_metadata].write_text(encoded, encoding="utf-8")
+        for stage in stages.values():
+            _fsync_file(stage)
         for target, backup in backups.items():
             os.replace(target, backup)
         for target in (version, version_metadata, latest, latest_metadata):

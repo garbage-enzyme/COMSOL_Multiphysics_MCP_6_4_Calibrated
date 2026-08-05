@@ -62,9 +62,14 @@ def register_all_tools(
         register_tool_modules(target, selection)
         register_profiled(target, register_knowledge_tools, enabled_names, selection)
         register_profiled(target, register_lexical_manual_tools, enabled_names, selection)
-    except Exception:
-        target._tool_manager._tools.clear()
-        target._tool_manager._tools.update(original_tools)
+    except Exception as registration_error:
+        try:
+            target._tool_manager._tools.clear()
+            target._tool_manager._tools.update(original_tools)
+        except Exception as rollback_error:
+            registration_error.add_note(
+                f"tool registry rollback failed: {type(rollback_error).__name__}"
+            )
         raise
     _tool_servers[target] = selection
     logger.info(

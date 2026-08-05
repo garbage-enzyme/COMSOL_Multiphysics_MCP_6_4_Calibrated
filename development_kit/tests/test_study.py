@@ -270,6 +270,17 @@ def test_create_study_validates_before_creation_and_uses_first_free_tag():
     assert created["study"] == "std2"
 
 
+def test_transient_study_rejects_empty_time_list_before_creation():
+    studies = MutableStudyList()
+
+    result = create_study(
+        MutableStudyModel(studies), study_type="Transient", time_list=[]
+    )
+
+    assert result == {"success": False, "error": "time_list must not be empty"}
+    assert studies.studies == {}
+
+
 def test_create_study_never_uses_collection_size_for_default_tag():
     class SizeTrapStudyList(MutableStudyList):
         def size(self):

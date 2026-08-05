@@ -1,6 +1,8 @@
 """Unit tests for geometry helpers without a COMSOL client."""
 
 import pytest
+from mcp.server.mcpserver import MCPServer
+import src.tools.geometry as geometry_module
 from src.tools.geometry import (
     add_circle_feature,
     add_difference_feature,
@@ -10,6 +12,7 @@ from src.tools.geometry import (
     add_union_feature,
     build_geometry_sequences,
     list_geometry_features,
+    register_geometry_tools,
 )
 
 
@@ -77,6 +80,34 @@ class JavaStringLike:
 class JavaTagFeatureList(FakeFeatureList):
     def tags(self):
         return [JavaStringLike(tag) for tag in self.features]
+
+
+def test_geometry_create_validates_dimension_and_rejects_duplicate_tag(monkeypatch):
+    class Geometries:
+        def __init__(self):
+            self.created = []
+
+        def tags(self):
+            return ["geom1"]
+
+        def create(self, tag, dimension):
+            self.created.append((tag, dimension))
+
+    geometries = Geometries()
+    component = type("Component", (), {"geom": lambda self: geometries})()
+    java = type(
+        "Java", (), {"component": lambda self, name: component if name == "comp1" else None}
+    )()
+    model = type("Model", (), {"java": java})()
+    monkeypatch.setattr(geometry_module.session_manager, "get_model", lambda _name: model)
+    server = MCPServer("geometry-create-contract")
+    register_geometry_tools(server)
+    create = server._tool_manager._tools["geometry_create"].fn
+
+    assert create(space_dimension=2.0)["success"] is False
+    assert create(space_dimension=4)["success"] is False
+    assert create(geometry_name="geom1")["success"] is False
+    assert geometries.created == []
 
 
 class FakeGeometry:

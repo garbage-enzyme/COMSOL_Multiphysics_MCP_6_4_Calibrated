@@ -35,7 +35,7 @@ _FORBIDDEN_PROPERTY_NAMES = frozenset(
 
 
 def validate_property_name(name: str) -> str:
-    """Validate one non-callable, non-file-executing clientapi property name."""
+    """Validate bounded syntax and reject known callable/file property controls."""
     if not isinstance(name, str):
         raise TypeError("property names must be strings")
     if not name or len(name) > MAX_PROPERTY_KEY_LENGTH:

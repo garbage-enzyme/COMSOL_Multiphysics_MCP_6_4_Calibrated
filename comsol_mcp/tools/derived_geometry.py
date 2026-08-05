@@ -8,6 +8,7 @@ import math
 import re
 import shutil
 import tempfile
+import threading
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -38,6 +39,7 @@ class DerivedGeometryRecord:
 
 
 _DERIVED: dict[str, DerivedGeometryRecord] = {}
+_DERIVED_LOCK = threading.RLock()
 
 
 def _sha256(path: Path) -> str:
@@ -166,12 +168,15 @@ def _state_hash(record: DerivedGeometryRecord, snapshot: dict[str, Any]) -> str:
 
 
 def _record(derived_model_id: str, model_name: str) -> DerivedGeometryRecord:
-    record = _DERIVED.get(derived_model_id)
-    if record is None or record.model_name != model_name:
-        raise ValueError("unknown or mismatched provenance-tracked derived_model_id")
-    if record.dirty:
-        raise ValueError(f"derived model is dirty and unusable for validation: {record.dirty_reason}")
-    return record
+    with _DERIVED_LOCK:
+        record = _DERIVED.get(derived_model_id)
+        if record is None or record.model_name != model_name:
+            raise ValueError("unknown or mismatched provenance-tracked derived_model_id")
+        if record.dirty:
+            raise ValueError(
+                f"derived model is dirty and unusable for validation: {record.dirty_reason}"
+            )
+        return record
 
 
 def _validate_vector(values: object, *, positive: bool) -> list[str]:
@@ -263,9 +268,10 @@ def create_derived_geometry_clone(
 
 
 def _discard_derived_model(model_name: str) -> None:
-    for derived_model_id, record in list(_DERIVED.items()):
-        if record.model_name == model_name:
-            _DERIVED.pop(derived_model_id, None)
+    with _DERIVED_LOCK:
+        for derived_model_id, record in list(_DERIVED.items()):
+            if record.model_name == model_name:
+                _DERIVED.pop(derived_model_id, None)
 
 
 session_manager.add_model_removal_listener(_discard_derived_model)
@@ -292,7 +298,8 @@ def _create_registered_derived_geometry_clone(
             clone, cleanup_path=record.backing_path
         )
         record.model_name = registered_name
-        _DERIVED[record.derived_model_id] = record
+        with _DERIVED_LOCK:
+            _DERIVED[record.derived_model_id] = record
         if not hasattr(clone, "java"):
             snapshot = _snapshot(clone, "comp1", "geom1")
         else:
@@ -307,7 +314,8 @@ def _create_registered_derived_geometry_clone(
             snapshot = _snapshot(clone, component_tag, geometry_tags[0])
         return clone, record, snapshot
     except Exception as exc:
-        _DERIVED.pop(record.derived_model_id, None)
+        with _DERIVED_LOCK:
+            _DERIVED.pop(record.derived_model_id, None)
         cleanup_errors = []
         removed = False
         if registered_name is not None:
@@ -333,7 +341,8 @@ def _create_registered_derived_geometry_clone(
 
 def derived_model_validation_status(model_name: str) -> dict[str, Any]:
     """Return tracked dirty-state evidence for validation entry points."""
-    matches = [record for record in _DERIVED.values() if record.model_name == model_name]
+    with _DERIVED_LOCK:
+        matches = [record for record in _DERIVED.values() if record.model_name == model_name]
     if not matches:
         return {"tracked": False, "validation_allowed": True}
     record = matches[-1]
@@ -466,8 +475,9 @@ def apply_fin(model: Any, record: DerivedGeometryRecord, preview: dict[str, Any]
         except Exception as rollback_exc:
             rollback_errors.append(f"rollback_snapshot: {rollback_exc}")
         if rollback_errors:
-            record.dirty = True
-            record.dirty_reason = "; ".join(rollback_errors)[:500]
+            with _DERIVED_LOCK:
+                record.dirty = True
+                record.dirty_reason = "; ".join(rollback_errors)[:500]
         return {
             "success": False,
             "error": str(exc)[:300],
@@ -518,8 +528,9 @@ def apply_blocks(model: Any, record: DerivedGeometryRecord, preview: dict[str, A
         except Exception as rollback_exc:
             rollback_errors.append(f"rollback_snapshot: {rollback_exc}")
         if rollback_errors:
-            record.dirty = True
-            record.dirty_reason = "; ".join(rollback_errors)[:500]
+            with _DERIVED_LOCK:
+                record.dirty = True
+                record.dirty_reason = "; ".join(rollback_errors)[:500]
         return {
             "success": False,
             "error": str(exc)[:300],

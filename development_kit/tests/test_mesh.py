@@ -181,6 +181,13 @@ def test_get_mesh_info_rejects_wrong_component_tag():
     assert "component" in result["error"].lower()
 
 
+def test_mesh_helpers_reject_explicit_empty_component_name():
+    model = FakeModel({"mesh1": FakeMesh()})
+
+    assert create_mesh_sequence(model, component_name="")["success"] is False
+    assert get_mesh_info(model, component_name="")["success"] is False
+
+
 def test_get_mesh_info_normalizes_java_string_tags():
     model = FakeModel({"mesh1": JavaTagMesh()})
     model.java = JavaTagJava(JavaTagComponent({"mesh1": JavaTagMesh()}))

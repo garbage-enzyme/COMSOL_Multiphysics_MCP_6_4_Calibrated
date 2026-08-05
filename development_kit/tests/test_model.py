@@ -261,6 +261,30 @@ def test_version_bundle_uses_one_save_copy_and_persists_metadata(tmp_path):
     assert version_metadata["description"] == "accepted state"
 
 
+def test_version_bundle_fsyncs_every_stage_before_publication(tmp_path, monkeypatch):
+    model = FakeModel()
+    model.name = lambda: "Model"
+    synced = set()
+    original_publish = model_module.publish_file_exclusive
+
+    monkeypatch.setattr(model_module, "_fsync_file", lambda path: synced.add(path.name))
+
+    def assert_synced_then_publish(staging, target):
+        assert staging.name in synced
+        return original_publish(staging, target)
+
+    monkeypatch.setattr(model_module, "publish_file_exclusive", assert_synced_then_publish)
+
+    _save_model_version_bundle(
+        model,
+        str(tmp_path / "Model_1.mph"),
+        str(tmp_path / "Model_latest.mph"),
+        description=None,
+    )
+
+    assert len(synced) == 4
+
+
 def test_version_bundle_failure_restores_existing_latest_and_removes_version(
     tmp_path, monkeypatch
 ):

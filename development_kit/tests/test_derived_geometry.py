@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import threading
 
 import pytest
 import src.tools.derived_geometry as derived_geometry_module
@@ -494,6 +495,36 @@ def test_initial_snapshot_failure_rolls_back_session_registry_and_clone(monkeypa
     assert removed == [clone.name()]
     assert record.derived_model_id not in _DERIVED
     assert not backing.exists() and not backing_dir.exists()
+
+
+def test_derived_registry_reads_wait_for_the_registry_lock():
+    record = DerivedGeometryRecord(
+        "derived-lock-id",
+        "derived-lock-model",
+        "source.mph",
+        "a" * 64,
+        "clone.mph",
+        "b" * 64,
+    )
+    _DERIVED[record.derived_model_id] = record
+    started = threading.Event()
+    completed = threading.Event()
+
+    def inspect():
+        started.set()
+        derived_model_validation_status(record.model_name)
+        completed.set()
+
+    try:
+        with derived_geometry_module._DERIVED_LOCK:
+            thread = threading.Thread(target=inspect)
+            thread.start()
+            assert started.wait(1.0)
+            assert not completed.wait(0.05)
+        assert completed.wait(1.0)
+        thread.join(timeout=1.0)
+    finally:
+        _DERIVED.pop(record.derived_model_id, None)
 
 
 def test_initial_snapshot_uses_the_clone_actual_component_and_geometry_tags(monkeypatch):

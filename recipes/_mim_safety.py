@@ -124,6 +124,13 @@ def require_required_properties(node: object, values: Mapping[str, object]) -> N
             if isinstance(value, bool):
                 accepted = {"true", "on", "1"} if value else {"false", "off", "0"}
                 matches = observed.casefold() in accepted
+            elif isinstance(value, (int, float)):
+                try:
+                    matches = math.isclose(
+                        float(observed), float(value), rel_tol=1.0e-9, abs_tol=1.0e-12
+                    )
+                except ValueError:
+                    matches = False
             else:
                 matches = observed == expected
             if not matches:
