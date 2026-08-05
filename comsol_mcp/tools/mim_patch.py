@@ -697,9 +697,21 @@ def register_mim_patch_tools(mcp: MCPServer) -> None:
                         entry["wl_um"] = vals[i] * 1e6
                     else:
                         entry[expr] = vals[i]
-                # Compute emissivity = 1 - R if R present
+                # Use exact absorptivity when available; otherwise preserve
+                # transmission in the energy closure before applying the
+                # opaque fallback.
                 if "ewfd.Rtotal" in entry:
-                    entry["emissivity"] = 1.0 - entry["ewfd.Rtotal"]
+                    if "ewfd.Atotal" in entry:
+                        entry["emissivity"] = entry["ewfd.Atotal"]
+                        entry["emissivity_basis"] = "evaluated_absorptivity"
+                    elif "ewfd.Ttotal" in entry:
+                        entry["emissivity"] = (
+                            1.0 - entry["ewfd.Rtotal"] - entry["ewfd.Ttotal"]
+                        )
+                        entry["emissivity_basis"] = "one_minus_reflectance_transmittance"
+                    else:
+                        entry["emissivity"] = 1.0 - entry["ewfd.Rtotal"]
+                        entry["emissivity_basis"] = "opaque_one_minus_reflectance"
                 spectral.append(entry)
 
             return {

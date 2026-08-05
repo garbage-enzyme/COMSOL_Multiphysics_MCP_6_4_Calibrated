@@ -281,7 +281,7 @@ def test_circular_preview_uses_verified_comsol_enums(polarization):
         ({"periodic_count": 0}, "found 0"),
         ({"periodic_count": 2}, "found 2"),
         ({"port_count": 1}, "two PeriodicPort"),
-        ({"rdir_entities": ()}, "non-empty rdir1"),
+        ({"rdir_entities": ()}, "non-empty reference-direction"),
     ],
 )
 def test_missing_ambiguous_and_incomplete_periodic_structure_fail_closed(changes, match):
@@ -329,6 +329,26 @@ def test_angle_evaluation_accepts_mph_zero_dimensional_numpy_scalar():
 
     assert result["evaluated_angles"]["alpha1_inc"]["evaluated_value"] == 20.0
     assert result["evaluated_angles"]["alpha2_inc"]["evaluated_value"] == 0.0
+
+
+def test_angle_evaluation_accepts_nested_zero_dimensional_numpy_scalar():
+    import numpy as np
+
+    model, record = fixture(
+        values={"theta": [np.asarray(20.0)], "phi": (np.asarray(0.0),)}
+    )
+
+    result = preview(model, record)
+
+    assert result["evaluated_angles"]["alpha1_inc"]["evaluated_value"] == 20.0
+    assert result["evaluated_angles"]["alpha2_inc"]["evaluated_value"] == 0.0
+
+
+def test_angle_evaluation_contains_complex_conversion_overflow():
+    model, record = fixture(values={"theta": 10**400})
+
+    with pytest.raises(ValueError, match="not numeric"):
+        preview(model, record)
 
 
 def test_dirty_or_untracked_models_are_rejected_by_public_tool(monkeypatch):

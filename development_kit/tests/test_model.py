@@ -4,12 +4,15 @@ import json
 from pathlib import Path
 
 import pytest
+from mcp.server.mcpserver import MCPServer
+from src.tools import model as model_module
 from src.tools.model import (
     _clone_model,
     _list_model_components,
     _save_model_file,
     _save_model_version_bundle,
     create_model_component,
+    register_model_tools,
 )
 
 
@@ -190,6 +193,52 @@ def test_clone_rejects_name_collision_before_save(tmp_path):
         )
 
     assert source.java.saved == []
+
+
+def test_model_clone_cleans_unregistered_clone_after_session_rejection(
+    tmp_path, monkeypatch
+):
+    source = CloneModel("Source")
+    cloned = CloneModel("Clone")
+    client = CloneClient(cloned)
+    backing_dir = tmp_path / "comsol_mcp_clone_failed_registration"
+    backing_dir.mkdir()
+    backing = backing_dir / "clone.mph"
+    backing.write_bytes(b"clone")
+
+    class Session:
+        models = {}
+        current_model = "Source"
+
+        def __init__(self):
+            self.client = client
+
+        def get_model(self, name=None):
+            return source if name in {None, "Source"} else None
+
+        def add_model(self, _model, *, cleanup_path=None):
+            assert cleanup_path == str(backing)
+            raise ValueError("registration rejected")
+
+        def remove_model(self, _name):
+            return False
+
+    monkeypatch.setattr(model_module, "session_manager", Session())
+    monkeypatch.setattr(
+        model_module,
+        "_clone_model",
+        lambda *_args, **_kwargs: (cloned, str(backing)),
+    )
+    server = MCPServer("model-clone-registration-failure-test")
+    register_model_tools(server)
+
+    result = server._tool_manager._tools["model_clone"].fn(model_name="Source")
+
+    assert result["success"] is False
+    assert "registration rejected" in result["error"]
+    assert client.removed == [cloned]
+    assert not backing.exists()
+    assert not backing_dir.exists()
     assert client.loaded == []
 
 

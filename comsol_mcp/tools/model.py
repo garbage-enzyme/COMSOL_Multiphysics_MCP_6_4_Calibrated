@@ -102,6 +102,26 @@ def _clone_model(
     return cloned_model, str(copy_path)
 
 
+def _cleanup_unregistered_clone(client, cloned_model, cleanup_path: str) -> list[str]:
+    """Release a clone that failed before session ownership was published."""
+    errors: list[str] = []
+    try:
+        client.remove(cloned_model)
+    except Exception as exc:
+        errors.append(f"clone_remove: {type(exc).__name__}")
+    path = Path(cleanup_path)
+    try:
+        path.unlink(missing_ok=True)
+    except OSError as exc:
+        errors.append(f"backing_remove: {type(exc).__name__}")
+    try:
+        if path.parent.name.startswith("comsol_mcp_clone_"):
+            path.parent.rmdir()
+    except OSError as exc:
+        errors.append(f"clone_directory_remove: {type(exc).__name__}")
+    return errors
+
+
 def _metadata_path(model_path: Path) -> Path:
     return model_path.with_suffix(".metadata.json")
 
@@ -571,6 +591,8 @@ def register_model_tools(mcp: MCPServer) -> None:
                 "error": f"Model not found: {model_name or 'no current model'}",
             }
 
+        cloned_model = None
+        cleanup_path = None
         try:
             client = session_manager.client
             if client is None:
@@ -597,7 +619,24 @@ def register_model_tools(mcp: MCPServer) -> None:
                 "is_current": clone_name == session_manager.current_model,
             }
         except Exception as e:
-            return {"success": False, "error": f"Failed to clone model: {str(e)}"}
+            cleanup_errors = []
+            if cloned_model is not None and cleanup_path is not None:
+                try:
+                    tracked_name = str(cloned_model.name())
+                    tracked = session_manager.get_model(tracked_name) is cloned_model
+                except Exception:
+                    tracked_name = ""
+                    tracked = False
+                if tracked and session_manager.remove_model(tracked_name):
+                    cleanup_errors = []
+                else:
+                    cleanup_errors = _cleanup_unregistered_clone(
+                        client, cloned_model, cleanup_path
+                    )
+            result = {"success": False, "error": f"Failed to clone model: {str(e)}"}
+            if cleanup_errors:
+                result["cleanup_errors"] = cleanup_errors
+            return result
 
     @mcp.tool()
     def model_remove(model_name: str) -> dict:

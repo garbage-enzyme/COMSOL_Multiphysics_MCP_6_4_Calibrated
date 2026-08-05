@@ -46,20 +46,29 @@ def _bounded_text(value: object, *, name: str, limit: int) -> str:
 
 
 def _real_scalar(value: Any, *, expression: str) -> float:
-    if getattr(value, "shape", None) == () and hasattr(value, "item"):
-        # MPh 1.3.1 returns a zero-dimensional NumPy array for a scalar
-        # clientapi evaluation.  It advertises ``shape`` but ``len(value)`` is
-        # invalid, so unwrap it before handling one-element vectors.
-        value = value.item()
-    while isinstance(value, (list, tuple)) or (
-        hasattr(value, "shape") and hasattr(value, "__len__")
-    ):
-        if len(value) != 1:
+    while True:
+        if getattr(value, "shape", None) == () and hasattr(value, "item"):
+            # A zero-dimensional NumPy value can also be nested inside a
+            # one-element container, so unwrap it on every iteration.
+            value = value.item()
+            continue
+        if not (
+            isinstance(value, (list, tuple))
+            or (hasattr(value, "shape") and hasattr(value, "__len__"))
+        ):
+            break
+        try:
+            length = len(value)
+        except TypeError as exc:
+            raise ValueError(
+                f"angle expression did not evaluate to one scalar: {expression!r}"
+            ) from exc
+        if length != 1:
             raise ValueError(f"angle expression did not evaluate to one scalar: {expression!r}")
         value = value[0]
     try:
         scalar = complex(value)
-    except (TypeError, ValueError) as exc:
+    except (OverflowError, TypeError, ValueError) as exc:
         raise ValueError(f"angle expression is not numeric: {expression!r}") from exc
     if not math.isfinite(scalar.real) or not math.isfinite(scalar.imag):
         raise ValueError(f"angle expression is not finite: {expression!r}")
@@ -143,7 +152,7 @@ def _incidence_snapshot(model: Any, component_tag: str, physics_tag: str) -> dic
             selected_references.append({"tag": tag, "edge_ids": entities})
     if len(selected_references) != 1:
         raise ValueError(
-            "exactly one non-empty rdir1/reference-direction selection is required; "
+            "exactly one non-empty reference-direction selection is required; "
             f"found {len(selected_references)}"
         )
     return {
@@ -267,7 +276,8 @@ def _preview_incidence_unlocked(
         "reference_edge_ids": snapshot["reference_direction"]["edge_ids"],
         "physical_polarization_evidence": "label_only",
         "physical_polarization_limitation": (
-            "The S/P or circular label and rdir1 do not prove the physical incident field vector."
+            "The S/P or circular label and reference-direction selection do not prove the "
+            "physical incident field vector."
         ),
         "evidence_codes": [
             "periodic_structure_unique",

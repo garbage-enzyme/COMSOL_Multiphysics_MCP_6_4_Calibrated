@@ -194,6 +194,37 @@ def test_fin_geometry_failure_restores_properties_but_reports_unproven_build():
     assert record.dirty is True
 
 
+def test_fin_rollback_fails_closed_when_entity_identity_cannot_be_proved():
+    model, geom, record, state = fixture()
+    preview = preview_fin(
+        model,
+        record,
+        expected_state_sha256=state,
+        component_tag="comp1",
+        geometry_tag="geom1",
+        action="assembly",
+        imprint=True,
+        create_pairs=True,
+    )
+    calls = 0
+
+    def fail_first_run_only():
+        nonlocal calls
+        calls += 1
+        geom.run_count += 1
+        if calls == 1:
+            raise RuntimeError("first rebuild failed")
+
+    geom.run = fail_first_run_only
+
+    result = apply_fin(model, record, preview, "comp1", "geom1")
+
+    assert result["success"] is False
+    assert result["rollback_proved"] is False
+    assert result["derived_model_dirty"] is True
+    assert any("entity identity" in item for item in result["rollback_errors"])
+
+
 def test_dirty_derived_record_is_forbidden_from_validation():
     record = DerivedGeometryRecord("derived-dirty", "dirty-clone", "source.mph", "a" * 64, "clone.mph", "b" * 64, dirty=True, dirty_reason="rollback unproven")
     previous = _DERIVED.get(record.derived_model_id)

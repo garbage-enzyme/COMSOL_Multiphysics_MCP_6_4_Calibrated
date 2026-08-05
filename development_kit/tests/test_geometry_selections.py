@@ -296,3 +296,16 @@ def test_side_selections_are_explicitly_two_dimensional():
 
     assert result["success"] is False
     assert "2D" in result["error"]
+
+
+def test_side_selection_preflight_contains_backend_lookup_failure():
+    result = create_side_selections(
+        FakeModel(FakeComponent(fail_geometry_after=0)),
+        x_min="0",
+        x_max="1",
+        y_min="0",
+        y_max="1",
+    )
+
+    assert result["success"] is False
+    assert "injected geometry lookup failure" in result["error"]

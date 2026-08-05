@@ -367,3 +367,21 @@ def test_public_tool_contains_tiny_wavelength_arithmetic_as_validation_error():
 
     assert result["success"] is False
     assert "converted wavelength" in result["error"]
+
+
+def test_public_tool_contains_overflowing_angular_frequency_as_validation_error():
+    server = MCPServer("material-expression-angular-frequency-test")
+    register_material_expression_tools(server)
+    tool = server._tool_manager._tools["wave_optics_material_expression_preview"]
+    result = tool.fn(
+        model_kind="constant",
+        parameters={"epsilon_real": 2.0, "epsilon_imag": 0.1},
+        test_wavelengths=[1e-300],
+        wavelength_unit="m",
+        harmonic_convention="exp(+i*omega*t)",
+        imaginary_sign="positive",
+        formulation="volumetric_material",
+    )
+
+    assert result["success"] is False
+    assert "angular frequency" in result["error"]

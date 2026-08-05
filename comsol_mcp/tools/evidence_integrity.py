@@ -39,13 +39,48 @@ def register_evidence_integrity_tools(mcp: MCPServer) -> None:
 
         status = load_evidence_integrity_status()
         if status.get("configuration_state") != "valid":
-            return verify_evidence_integrity(
-                portfolio_request=portfolio_request,
-                artifact_roots={},
-                resumed=resumed,
-                producer_compatibility=producer_compatibility,
-                settings_status=status,
-            )
+            try:
+                return verify_evidence_integrity(
+                    portfolio_request=portfolio_request,
+                    artifact_roots={},
+                    resumed=resumed,
+                    producer_compatibility=producer_compatibility,
+                    settings_status=status,
+                )
+            except (TypeError, ValueError):
+                logger.exception("Evidence integrity request was rejected")
+                result = {
+                    **public_error(
+                        "integrity_verification_rejected",
+                        "Evidence integrity request was rejected.",
+                    ),
+                    "verification_state": "blocked",
+                    "strictly_verified": False,
+                    "artifact_root_validation": {
+                        "enforced": False,
+                        "accepted": False,
+                        "paths_included": False,
+                    },
+                }
+                result.update(warning_fields(status))
+                return result
+            except (OSError, RuntimeError):
+                logger.exception("Evidence integrity verification failed")
+                result = {
+                    **public_error(
+                        "integrity_verification_failed",
+                        "Evidence integrity verification failed safely.",
+                    ),
+                    "verification_state": "blocked",
+                    "strictly_verified": False,
+                    "artifact_root_validation": {
+                        "enforced": False,
+                        "accepted": False,
+                        "paths_included": False,
+                    },
+                }
+                result.update(warning_fields(status))
+                return result
         try:
             policy = PathPolicy.from_environment()
             filesystem_checks_enabled = any(

@@ -23,6 +23,7 @@ from src.evidence.integrity_verifier import verify_evidence_integrity
 from src.path_policy import ARTIFACT_WRITE_ROOT_ENV
 from src.tools.evidence_integrity import register_evidence_integrity_tools
 
+import comsol_mcp.evidence.integrity_controls as integrity_controls_module
 from development_kit.tests.test_portfolio_verifier import _fixture, _rehash_request
 
 
@@ -347,6 +348,27 @@ def test_mcp_verify_tool_distinguishes_verifier_failures_from_root_rejection(
     assert result["success"] is False
     assert result["reason_code"] == reason_code
     assert result["artifact_root_validation"]["accepted"] is True
+
+
+def test_mcp_verify_tool_contains_invalid_request_when_settings_are_degraded(monkeypatch):
+    degraded = load_evidence_integrity_status({})
+    degraded["configuration_state"] = "degraded"
+    monkeypatch.setattr(
+        integrity_controls_module,
+        "load_evidence_integrity_status",
+        lambda: degraded,
+    )
+    server = MCPServer("evidence-integrity-degraded-request-test")
+    register_evidence_integrity_tools(server)
+
+    result = server._tool_manager._tools["evidence_integrity_verify"].fn(
+        [], {}, resumed="yes"
+    )
+
+    assert result["success"] is False
+    assert result["reason_code"] == "integrity_verification_rejected"
+    assert result["verification_state"] == "blocked"
+    assert result["artifact_root_validation"]["accepted"] is False
 
 
 def test_mcp_verify_tool_rejects_external_and_junction_artifact_roots(

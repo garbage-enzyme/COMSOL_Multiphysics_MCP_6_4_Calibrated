@@ -453,6 +453,27 @@ def test_import_type_failure_removes_created_feature(tmp_path, monkeypatch):
     assert geometry.features.features == {}
 
 
+def test_numeric_and_primitive_shape_validation_contains_extreme_inputs():
+    geometry = FakeGeometry()
+    model = FakeModel(geometry)
+
+    huge = add_primitive_feature(model, "Block", [10**400, 0, 0], [1, 1, 1])
+    short_cylinder = add_primitive_feature(model, "Cylinder", [0, 0, 0], [1])
+    long_sphere = add_primitive_feature(model, "Sphere", [0, 0, 0], [1, 2])
+
+    assert huge["success"] is False and "finite" in huge["error"]
+    assert short_cylinder["success"] is False and "exactly 2" in short_cylinder["error"]
+    assert long_sphere["success"] is False and "exactly 1" in long_sphere["error"]
+    assert geometry.features.features == {}
+
+
+def test_union_rejects_non_string_tags_before_model_access():
+    result = add_union_feature(object(), ["blk1", None])
+
+    assert result["success"] is False
+    assert "input_objects" in result["error"]
+
+
 def test_build_without_name_runs_every_geometry():
     first = FakeGeometry("geom1")
     second = FakeGeometry("geom2")

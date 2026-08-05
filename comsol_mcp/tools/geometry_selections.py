@@ -212,7 +212,7 @@ def create_side_selections(
         collisions = sorted(set(tags) & _selection_tags(component))
         if collisions:
             raise ValueError(f"Selection tags already exist: {collisions}")
-    except (TypeError, ValueError) as exc:
+    except Exception as exc:
         return {"success": False, "error": str(exc)}
 
     expanded_x_min = f"({limits['x_min']})-({tolerance_value})"

@@ -418,7 +418,10 @@ def _topology(geom: Any) -> dict[str, Any]:
         return {
             "domains": int(geom.getNDomains()),
             "boundaries": int(geom.getNBoundaries()),
-            "pairs": None,
+            # Entity counts cannot prove that COMSOL preserved entity identity
+            # across a failed rebuild.  Keep that limitation explicit so the
+            # rollback boundary can fail closed.
+            "entity_identity_verified": False,
         }
     except Exception as exc:
         return {"error": str(exc)[:300]}
@@ -453,8 +456,13 @@ def apply_fin(model: Any, record: DerivedGeometryRecord, preview: dict[str, Any]
             rollback_snapshot = _snapshot(model, component_tag, geometry_tag)
             if rollback_snapshot != current:
                 rollback_errors.append("restored geometry does not match the complete pre-state")
-            if _topology(geom) != before_topology:
+            restored_topology = _topology(geom)
+            if restored_topology != before_topology:
                 rollback_errors.append("restored topology does not match the pre-state")
+            elif not before_topology.get("entity_identity_verified", False):
+                rollback_errors.append(
+                    "restored entity identity cannot be independently verified"
+                )
         except Exception as rollback_exc:
             rollback_errors.append(f"rollback_snapshot: {rollback_exc}")
         if rollback_errors:
