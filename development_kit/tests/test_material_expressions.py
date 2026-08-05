@@ -124,6 +124,24 @@ def test_blank_fixed_frequency_unit_emits_missing_unit_warning():
     assert any(item["code"] == "missing_fixed_frequency_unit" for item in result["warnings"])
 
 
+def test_irrelevant_frequency_names_are_not_validated():
+    fixed = _drude(
+        "positive",
+        frequency_source="fixed_angular_frequency",
+        fixed_angular_frequency=2.0,
+        wavelength_parameter=None,
+        physics_frequency_expression=None,
+    )
+    wavelength = _drude(
+        "positive",
+        frequency_source="wavelength_parameter",
+        physics_frequency_expression=None,
+    )
+
+    assert fixed["convention_ledger"]["wavelength_parameter"] is None
+    assert "c_const/wl" in wavelength["expression"]
+
+
 def test_constant_and_nk_forms_preserve_declared_imaginary_sign():
     constant = preview_material_expression(
         **COMMON,

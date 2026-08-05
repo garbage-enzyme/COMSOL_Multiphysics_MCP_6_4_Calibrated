@@ -145,7 +145,11 @@ def _pointer_value(document: Any, tokens: list[str], label: str) -> Any:
                 raise ValueError(f"{label} does not exist in the cited artifact")
             current = current[token]
         elif isinstance(current, list):
-            if not token.isdigit() or (len(token) > 1 and token.startswith("0")):
+            if (
+                not token.isascii()
+                or not token.isdigit()
+                or (len(token) > 1 and token.startswith("0"))
+            ):
                 raise ValueError(f"{label} contains an invalid array index")
             index = int(token)
             if index >= len(current):

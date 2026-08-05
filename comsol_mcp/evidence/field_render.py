@@ -38,6 +38,16 @@ def _mapping(value: object, label: str) -> dict[str, Any]:
     return dict(value)
 
 
+def _finite_float(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    try:
+        result = float(value)
+    except OverflowError:
+        return None
+    return result if math.isfinite(result) else None
+
+
 def _validate_worker_response(
     value: object, *, expected_view_ids: list[str]
 ) -> dict[str, list[float]]:
@@ -58,12 +68,7 @@ def _validate_worker_response(
             or view_id in limits_by_view
             or not isinstance(limits, list)
             or len(limits) != 2
-            or any(
-                isinstance(limit, bool)
-                or not isinstance(limit, (int, float))
-                or not math.isfinite(float(limit))
-                for limit in limits
-            )
+            or any(_finite_float(limit) is None for limit in limits)
         ):
             raise RuntimeError("field plot worker response view is invalid")
         normalized_limits = [float(limits[0]), float(limits[1])]

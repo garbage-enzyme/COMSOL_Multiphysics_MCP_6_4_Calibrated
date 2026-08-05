@@ -115,6 +115,14 @@ def test_normalization_is_solver_free_deterministic_and_binds_sources(monkeypatc
     )
 
 
+def test_render_color_scale_unhashable_value_is_a_validation_error():
+    request = _request()
+    request["render"]["color_scale"] = []
+
+    with pytest.raises(ValueError, match="color_scale"):
+        normalize_field_evidence_request(request)
+
+
 def test_source_or_extraction_changes_change_request_identity():
     first = normalize_field_evidence_request(_request())
     changed = _request()

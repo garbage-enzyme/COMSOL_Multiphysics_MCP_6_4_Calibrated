@@ -76,9 +76,7 @@ def _validate_assessment(value: KirchhoffAssessmentReceipt) -> dict[str, Any]:
         or any(state != "verified" for state in checks.values())
     ):
         raise ValueError("applicable Kirchhoff assessment contains unverified checks")
-    normalized = value.model_dump(mode="python")
-    if not isinstance(normalized, dict):
-        raise ValueError("Kirchhoff assessment must normalize to an object")
+    normalized: dict[str, Any] = value.model_dump(mode="python")
     return normalized
 
 

@@ -393,8 +393,9 @@ def test_worker_timeout_stays_bounded_and_removes_partial_png(tmp_path, monkeypa
         },
         {"success": True, "views": [{"view_id": "target", "color_limits": [0]}]},
         {"success": True, "views": [{"view_id": "target", "color_limits": [0, float("inf")]}]},
+        {"success": True, "views": [{"view_id": "target", "color_limits": [0, 10**400]}]},
     ],
-    ids=["non_object", "wrong_view", "extra_field", "short_limits", "nonfinite"],
+    ids=["non_object", "wrong_view", "extra_field", "short_limits", "nonfinite", "overflow"],
 )
 def test_renderer_rejects_unbounded_or_mismatched_worker_responses(tmp_path, monkeypatch, response):
     array = tmp_path / "response.npz"

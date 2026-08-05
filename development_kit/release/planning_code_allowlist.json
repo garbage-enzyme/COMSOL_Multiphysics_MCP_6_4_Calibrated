@@ -40,7 +40,7 @@
     {
       "path": "comsol_mcp/evidence/reference_power_acceptance.py",
       "match_count": 31,
-      "match_sha256": "d252ff6ed894fc03ae639f2877e5ffb18d469e3766c2d747d862066e829d1501"
+      "match_sha256": "363bdc5c164253c874f7ef7f973669a450e4bf8f76366b51e310278daa304ff8"
     }
   ]
 }

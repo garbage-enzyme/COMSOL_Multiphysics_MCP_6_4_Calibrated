@@ -246,6 +246,11 @@ def test_missing_artifact_wrong_hash_pointer_or_dimension_fails_closed(tmp_path)
         _rehash_request(wrong_dimension)
 
 
+def test_json_pointer_array_indices_require_ascii_digits():
+    with pytest.raises(ValueError, match="invalid array index"):
+        portfolio_verifier_module._pointer_value(["value"], ["²"], "citation")
+
+
 @pytest.mark.parametrize(
     "dimension,pointer",
     [

@@ -123,6 +123,16 @@ def test_execution_spec_normalizes_huge_numbers_to_validation_errors(tmp_path, a
         validate_reference_power_execution_spec(spec, _contract())
 
 
+def test_execution_spec_rejects_huge_coordinate_bounds_as_validation_errors(
+    tmp_path, ascii_tmp_path
+):
+    spec = _spec(tmp_path, ascii_tmp_path)
+    spec["reference_air"]["top_air_coordinate_range"]["x"][0] = -(10**400)
+
+    with pytest.raises(ValueError, match=r"coordinate_range.x\[0\].*finite"):
+        validate_reference_power_execution_spec(spec, _contract())
+
+
 def test_bounded_json_reads_limit_plus_one_from_one_descriptor(tmp_path):
     path = tmp_path / "input.json"
     path.write_bytes(b'{"value":"0123456789"}')
