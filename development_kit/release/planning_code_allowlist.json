@@ -20,7 +20,7 @@
     {
       "path": "development_kit/tests/test_durable_job_control_plane.py",
       "match_count": 1,
-      "match_sha256": "b4d37e83fc3851f05a56266d052c6531734f52cd0f70d8f7be5c0bd58faddceb"
+        "match_sha256": "a1a1bdae01d44c43bf67e8321205834467f36f63c4c9b4c69bc526daed19de82"
     },
     {
       "path": "development_kit/tests/test_reference_power_acceptance.py",

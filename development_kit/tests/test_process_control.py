@@ -345,17 +345,34 @@ def test_exact_termination_validates_and_acts_through_one_process_object(monkeyp
         def kill(self):
             actions.append("kill")
 
+    class ApiCall:
+        def __init__(self, function):
+            self.function = function
+            self.argtypes = None
+            self.restype = None
+
+        def __call__(self, *args):
+            return self.function(*args)
+
+    class Kernel32:
+        OpenProcess = ApiCall(lambda _access, _inherit, pid: 9001 if pid == identity["pid"] else 0)
+        TerminateProcess = ApiCall(
+            lambda handle, _code: actions.append("terminate_handle") or handle == 9001
+        )
+        CloseHandle = ApiCall(lambda handle: actions.append("close_handle") or handle == 9001)
+
     def construct(pid):
         constructions.append(pid)
         return Process()
 
     monkeypatch.setattr(process_control_module.psutil, "Process", construct)
+    monkeypatch.setattr(process_control_module.ctypes, "WinDLL", lambda *_args, **_kwargs: Kernel32)
 
     result = terminate_exact(identity)
 
     assert result["acted"] is True
     assert constructions == [identity["pid"]]
-    assert actions == ["terminate"]
+    assert actions == ["terminate_handle", "close_handle"]
 
 
 @pytest.mark.parametrize("member", [None, "server", 7, []])

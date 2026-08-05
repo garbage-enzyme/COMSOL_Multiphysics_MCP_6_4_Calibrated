@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import io
 import os
 import sys
 import time
@@ -10,6 +11,44 @@ from pathlib import Path
 
 from .process_control import contain_current_process_tree
 from .store import JobStore, cancel_request_targets_attempt, process_identity
+
+MAX_SEQUENCE_RESULTS_BYTES = 64 * 1024
+
+
+def _read_completed_results(path: Path, *, total: int) -> set[int]:
+    if not path.is_file() or path.stat().st_size == 0:
+        return set()
+    if path.stat().st_size > MAX_SEQUENCE_RESULTS_BYTES:
+        raise ValueError("sequence results exceed their byte limit")
+    with path.open("r+b") as handle:
+        payload = handle.read(MAX_SEQUENCE_RESULTS_BYTES + 1)
+        if not payload.endswith(b"\n"):
+            boundary = payload.rfind(b"\n")
+            handle.truncate(0 if boundary < 0 else boundary + 1)
+            handle.flush()
+            os.fsync(handle.fileno())
+            payload = b"" if boundary < 0 else payload[: boundary + 1]
+    if not payload:
+        return set()
+    try:
+        text = payload.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError("sequence results are not UTF-8") from exc
+    reader = csv.DictReader(io.StringIO(text, newline=""))
+    if reader.fieldnames != ["index", "status"]:
+        raise ValueError("sequence results header is invalid")
+    completed: set[int] = set()
+    for row in reader:
+        if set(row) != {"index", "status"} or row["status"] != "ok":
+            raise ValueError("sequence result row is invalid")
+        try:
+            index = int(row["index"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError("sequence result index is invalid") from exc
+        if index != len(completed) or not 0 <= index < total:
+            raise ValueError("sequence result order is invalid")
+        completed.add(index)
+    return completed
 
 
 def _run(root: str, job_id: str) -> int:
@@ -52,12 +91,7 @@ def _run(root: str, job_id: str) -> int:
     store.update_state(job_id, "smoke_running", event="smoke_started")
     delays = spec["delays"]
     results_path = store.job_dir(job_id) / "results.csv"
-    completed = set()
-    if results_path.is_file() and results_path.stat().st_size:
-        with results_path.open(newline="", encoding="utf-8") as handle:
-            completed = {
-                int(row["index"]) for row in csv.DictReader(handle) if row.get("status") == "ok"
-            }
+    completed = _read_completed_results(results_path, total=len(delays))
     if 0 in completed:
         store.update_state(job_id, "smoke_validated", event="smoke_revalidated")
         if len(delays) > 1:

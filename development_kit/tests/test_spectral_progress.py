@@ -227,6 +227,18 @@ def test_next_stage_identity_is_independent_of_caller_row_order(tmp_path):
 
     assert ordered["next_stage_plan"] == reversed_input["next_stage_plan"]
     assert ordered["next_stage_plan"]["evidence_row_sha256"] == rows[-1]["row_sha256"]
+    assert ordered["last_row_sha256"] == reversed_input["last_row_sha256"]
+    assert ordered["progress_sha256"] == reversed_input["progress_sha256"]
+
+
+def test_invalid_sequence_cannot_be_shadowed_by_a_later_valid_row(tmp_path):
+    spec = _spec(tmp_path)
+    initial = build_initial_spectral_stage(spec)
+    rows = _rows(spec, initial, [0.1, 0.3, 0.9, 0.3, 0.1])
+    rows[0]["sequence"] = None
+
+    with pytest.raises(ValueError, match="sequence is invalid"):
+        build_spectral_progress(spec, [initial], rows)
 
 
 def test_each_refinement_shrinks_the_latest_stage_window(tmp_path):

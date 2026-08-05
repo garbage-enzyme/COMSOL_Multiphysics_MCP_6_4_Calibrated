@@ -80,6 +80,40 @@ def test_sequence_resume_reconciles_progress_from_all_durable_rows(jobs_root):
     assert final["progress"] == {"completed": 2, "total": 2}
 
 
+@pytest.mark.parametrize(
+    "payload,expected",
+    [
+        (b"index,status\n0,ok\n1,", {0}),
+        (b"index,sta", set()),
+    ],
+)
+def test_sequence_results_repair_only_an_unterminated_crash_tail(tmp_path, payload, expected):
+    path = tmp_path / "results.csv"
+    path.write_bytes(payload)
+
+    assert sequence_worker._read_completed_results(path, total=2) == expected
+    if expected:
+        assert path.read_bytes().endswith(b"\n")
+    else:
+        assert path.read_bytes() == b""
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b"index,wrong\n0,ok\n",
+        b"index,status\nnot-an-index,ok\n",
+        b"index,status\n1,ok\n",
+    ],
+)
+def test_sequence_results_reject_complete_corrupt_records(tmp_path, payload):
+    path = tmp_path / "results.csv"
+    path.write_bytes(payload)
+
+    with pytest.raises(ValueError, match="sequence result"):
+        sequence_worker._read_completed_results(path, total=2)
+
+
 def test_submit_returns_promptly_and_second_manager_observes_completion(jobs_root):
     first = JobManager(jobs_root, allow_test_jobs=True)
     started = time.monotonic()

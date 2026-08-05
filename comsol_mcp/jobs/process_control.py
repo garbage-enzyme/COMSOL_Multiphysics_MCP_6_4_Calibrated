@@ -316,22 +316,52 @@ def terminate_exact(identity: dict[str, Any], *, force: bool = False) -> dict[st
     except psutil.NoSuchProcess:
         before = {"identity": identity, "state": "stale", "reason": "worker PID no longer exists"}
         return {"acted": False, "before": before, "reason": "identity_not_active"}
-    before = _inspect_open_process(process, identity)
-    if before["state"] != "active":
-        return {"acted": False, "before": before, "reason": "identity_not_active"}
+    pinned_handle = None
+    kernel32 = None
+    if os.name == "nt":
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.TerminateProcess.argtypes = (wintypes.HANDLE, wintypes.UINT)
+        kernel32.TerminateProcess.restype = wintypes.BOOL
+        kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+        kernel32.CloseHandle.restype = wintypes.BOOL
+        # PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION. Holding this
+        # handle pins the kernel process object across identity validation and
+        # termination, so PID reuse cannot retarget the action.
+        pinned_handle = kernel32.OpenProcess(0x0001 | 0x1000, False, int(identity["pid"]))
+        if not pinned_handle:
+            before = inspect_identity(identity)
+            return {
+                "acted": False,
+                "before": before,
+                "reason": f"process_handle_open_failed: {ctypes.get_last_error()}",
+            }
     try:
-        if force:
+        before = _inspect_open_process(process, identity)
+        if before["state"] != "active":
+            return {"acted": False, "before": before, "reason": "identity_not_active"}
+        action = "kill" if force else "terminate"
+        if pinned_handle is not None and kernel32 is not None:
+            if not kernel32.TerminateProcess(pinned_handle, 1):
+                return {
+                    "acted": False,
+                    "before": before,
+                    "reason": f"process_action_failed: winerror {ctypes.get_last_error()}",
+                }
+        elif force:
             process.kill()
-            action = "kill"
         else:
             process.terminate()
-            action = "terminate"
     except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, OSError) as exc:
         return {
             "acted": False,
             "before": before,
             "reason": f"process_action_failed: {type(exc).__name__}: {exc}",
         }
+    finally:
+        if pinned_handle is not None and kernel32 is not None:
+            kernel32.CloseHandle(pinned_handle)
     return {"acted": True, "action": action, "before": before}
 
 

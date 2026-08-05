@@ -213,17 +213,14 @@ def _new_targets(
 
 
 def _latest_row_sha256(rows: list[Mapping[str, Any]]) -> str:
+    for row in rows:
+        sequence = row.get("sequence")
+        if isinstance(sequence, bool) or not isinstance(sequence, int) or sequence <= 0:
+            raise ValueError("spectral row sequence is invalid")
     latest = max(
         rows,
-        key=lambda row: (
-            row["sequence"]
-            if isinstance(row.get("sequence"), int) and not isinstance(row.get("sequence"), bool)
-            else -1
-        ),
+        key=lambda row: row["sequence"],
     )
-    sequence = latest.get("sequence")
-    if isinstance(sequence, bool) or not isinstance(sequence, int) or sequence <= 0:
-        raise ValueError("spectral row sequence is invalid")
     return str(latest["row_sha256"])
 
 
@@ -568,7 +565,7 @@ def build_spectral_progress(
         "stage_count": len(plans),
         "row_count": len(normalized_rows),
         "last_stage_sha256": plans[-1]["stage_sha256"] if plans else None,
-        "last_row_sha256": normalized_rows[-1]["row_sha256"] if normalized_rows else None,
+        "last_row_sha256": _latest_row_sha256(normalized_rows) if normalized_rows else None,
         **action,
         "analysis": artifacts,
     }

@@ -103,6 +103,35 @@ def test_empty_jar_mapping_never_selects_a_native_profile(monkeypatch):
     assert probe.select_progress_context_profile(_matching_environment(profile)) is None
 
 
+@pytest.mark.parametrize(
+    "payload",
+    [None, "{", "[]"],
+)
+def test_malformed_native_profile_documents_degrade_to_no_profiles(monkeypatch, payload):
+    class FakeProfilesPath:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def with_name(self, _name):
+            return self
+
+        def read_text(self, **_kwargs):
+            if payload is None:
+                raise FileNotFoundError("injected missing profile document")
+            return payload
+
+    monkeypatch.setattr(probe, "Path", FakeProfilesPath)
+
+    assert probe._load_native_cancel_profiles() == []
+
+
+def test_native_profile_requires_a_named_identity():
+    profile = _profile()
+    profile.pop("profile_id")
+
+    assert probe._profile_matches_environment(profile, _matching_environment(_profile())) is False
+
+
 def test_matching_environment_selects_the_named_profile():
     profile = _profile()
 
