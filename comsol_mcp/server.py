@@ -83,7 +83,16 @@ def register_all_resources(server: MCPServer | None = None) -> None:
         return
     from .resources.model_resources import register_model_resources
 
-    register_model_resources(target)
+    original_resources = dict(target._resource_manager._resources)
+    original_templates = dict(target._resource_manager._templates)
+    try:
+        register_model_resources(target)
+    except Exception:
+        target._resource_manager._resources.clear()
+        target._resource_manager._resources.update(original_resources)
+        target._resource_manager._templates.clear()
+        target._resource_manager._templates.update(original_templates)
+        raise
     _resource_servers.add(target)
     logger.info("Registered all resources")
 

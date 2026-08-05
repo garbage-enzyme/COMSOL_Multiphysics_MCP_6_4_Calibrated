@@ -58,8 +58,10 @@ def set_parameter(
             model.description(name, description)
         actual_value = str(model.parameter(name, evaluate=False))
         actual_description = str(model.description(name))
-        expected_description = old_description if description is None else description
-        if actual_value != value or actual_description != expected_description:
+        description_matches = (
+            description is None and (not existed or actual_description == old_description)
+        ) or (description is not None and actual_description == description)
+        if actual_value != value or not description_matches:
             raise ValueError("parameter readback mismatch")
     except Exception as exc:
         rollback_errors = []

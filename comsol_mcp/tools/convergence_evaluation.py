@@ -16,13 +16,13 @@ def register_convergence_evaluation_tools(mcp: MCPServer) -> None:
         convergence_ladder: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
         """Compare an ordered configuration ladder at each level's own peak."""
-        from comsol_mcp.evidence.convergence_evaluation import (
-            build_convergence_ladder,
-            evaluate_convergence,
-            validate_convergence_ladder,
-        )
-
         try:
+            from comsol_mcp.evidence.convergence_evaluation import (
+                build_convergence_ladder,
+                evaluate_convergence,
+                validate_convergence_ladder,
+            )
+
             if (ladder_spec is None) == (convergence_ladder is None):
                 raise ValueError(
                     "provide exactly one of ladder_spec or convergence_ladder"
@@ -47,7 +47,7 @@ def register_convergence_evaluation_tools(mcp: MCPServer) -> None:
                 "solver_started": False,
                 "filesystem_modified": False,
             }
-        except (TypeError, ValueError) as exc:
+        except (ImportError, TypeError, ValueError) as exc:
             return {
                 "success": False,
                 "scientific_disposition": "invalid_evidence",

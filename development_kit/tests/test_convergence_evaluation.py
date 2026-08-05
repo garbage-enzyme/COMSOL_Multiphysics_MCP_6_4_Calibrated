@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import builtins
 import hashlib
 import json
 import subprocess
@@ -591,6 +592,26 @@ def test_public_tool_structures_extreme_integer_rejection():
     assert result["success"] is False
     assert result["reason_code"] == "convergence_input_rejected"
     assert result["solver_started"] is False
+
+
+def test_public_tool_structures_lazy_import_failure(monkeypatch):
+    real_import = builtins.__import__
+
+    def fail_import(name, *args, **kwargs):
+        if name == "comsol_mcp.evidence.convergence_evaluation":
+            raise ImportError("injected import failure")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fail_import)
+    server = MCPServer("convergence-import-failure-test")
+    register_convergence_evaluation_tools(server)
+    result = server._tool_manager._tools["convergence_evaluate"].fn(
+        convergence_policy=_policy(), ladder_spec={}
+    )
+
+    assert result["success"] is False
+    assert result["reason_code"] == "convergence_input_rejected"
+    assert "injected import failure" in result["error"]
 
 
 def test_public_convergence_tool_never_constructs_a_comsol_client():

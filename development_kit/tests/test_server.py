@@ -134,6 +134,41 @@ def test_partial_tool_registration_rolls_back_and_can_be_retried(monkeypatch):
     assert _public_tool_names(server) == {"existing_tool", "completed_tool"}
 
 
+def test_partial_resource_registration_rolls_back_and_can_be_retried(monkeypatch):
+    import src.resources.model_resources as resources_module
+
+    server = MCPServer("transactional-resource-registration")
+
+    @server.resource("fixture://existing")
+    def existing_resource() -> str:
+        return "existing"
+
+    original = _public_resource_uris(server)
+
+    def fail_after_partial_registration(target):
+        @target.resource("fixture://partial")
+        def partial_resource() -> str:
+            return "partial"
+
+        raise RuntimeError("injected resource registrar failure")
+
+    monkeypatch.setattr(
+        resources_module, "register_model_resources", fail_after_partial_registration
+    )
+    with pytest.raises(RuntimeError, match="registrar failure"):
+        register_all_resources(server)
+    assert _public_resource_uris(server) == original
+
+    def complete_registration(target):
+        @target.resource("fixture://complete")
+        def complete_resource() -> str:
+            return "complete"
+
+    monkeypatch.setattr(resources_module, "register_model_resources", complete_registration)
+    register_all_resources(server)
+    assert _public_resource_uris(server) == original | {"fixture://complete"}
+
+
 def test_model_resources_escape_untrusted_markdown(monkeypatch):
     import src.resources.model_resources as resources_module
 

@@ -10,13 +10,7 @@ from mcp.server.mcpserver import MCPServer
 
 from comsol_mcp.utils.validation import strict_json_integer
 
-from .physics import (
-    _component_sdim,
-    _find_physics_context,
-    _first_component,
-    _make_tag,
-    _resolve_geometry_tag,
-)
+from .physics import _component_sdim, _find_physics_context, _first_component, _resolve_geometry_tag
 from .property_transport import JSONValue, validate_properties
 from .session import session_manager
 
@@ -328,6 +322,9 @@ def _normalize_boundary_condition(
     unknown_properties = sorted(set(properties) - set(reference[feature_type]))
     if unknown_properties:
         raise ValueError(f"unsupported properties for {feature_type}: {unknown_properties}")
+    missing_properties = sorted(set(reference[feature_type]) - set(properties))
+    if missing_properties:
+        raise ValueError(f"missing required properties for {feature_type}: {missing_properties}")
     tag = condition.get("tag")
     if tag is not None:
         tag = _bounded_tag(tag, "boundary tag")
@@ -367,12 +364,19 @@ def configure_boundaries(
             _validate_named_selection(component, condition["selection_name"])
         feature_list = physics.feature()
         existing = {str(tag) for tag in list(feature_list.tags())}
-        explicit = [condition["tag"] for condition in normalized if condition["tag"] is not None]
-        if len(explicit) != len(set(explicit)):
-            raise ValueError("boundary tags must be unique")
-        collisions = sorted(set(explicit) & existing)
-        if collisions:
-            raise ValueError(f"Physics feature tags already exist: {collisions}")
+        reserved = set(existing)
+        for condition in normalized:
+            tag = condition["tag"]
+            if tag is None:
+                prefix = condition["type"].lower()
+                index = 1
+                while f"{prefix}_{index}" in reserved:
+                    index += 1
+                tag = f"{prefix}_{index}"
+            if tag in reserved:
+                raise ValueError(f"Physics feature tag already exists or is duplicated: {tag}")
+            condition["resolved_tag"] = tag
+            reserved.add(tag)
     except (TypeError, ValueError) as exc:
         return {"success": False, "error": str(exc)}
 
@@ -381,7 +385,7 @@ def configure_boundaries(
     results: list[dict[str, Any]] = []
     try:
         for condition in normalized:
-            tag = condition["tag"] or _make_tag(condition["type"].lower(), feature_list)
+            tag = condition["resolved_tag"]
             feature = feature_list.create(tag, condition["type"], entity_dimension)
             created.append(tag)
             _apply_selection(feature, condition["boundaries"], condition["selection_name"])

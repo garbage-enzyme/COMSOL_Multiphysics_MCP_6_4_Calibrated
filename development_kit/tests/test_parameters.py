@@ -331,3 +331,16 @@ def test_new_parameter_is_removed_when_description_fails():
     assert result["rolled_back"] is True
     assert "theta" not in model.values
     assert "theta" not in model.descriptions
+
+
+def test_new_parameter_without_description_accepts_clientapi_empty_readback():
+    model = FakeParameterModel()
+
+    result = parameters.set_parameter(model, "theta", "10[deg]", description=None)
+
+    assert result == {
+        "success": True,
+        "parameter": "theta",
+        "value": "10[deg]",
+        "description": "",
+    }

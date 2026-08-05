@@ -1933,19 +1933,6 @@
         ],
         "default": null,
         "title": "Model Name"
-      },
-      "expected_model_revision": {
-        "anyOf": [
-          {
-            "type": "string",
-            "maxLength": 16384
-          },
-          {
-            "type": "null"
-          }
-        ],
-        "default": null,
-        "title": "Expected Model Revision"
       }
     },
     "title": "geometry_get_boundariesArguments",
@@ -1997,6 +1984,19 @@
         ],
         "default": null,
         "title": "Feature Name"
+      },
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "type": "string",
+            "maxLength": 16384
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
       },
       "model_name": {
         "anyOf": [
@@ -2114,19 +2114,6 @@
         ],
         "default": null,
         "title": "Model Name"
-      },
-      "expected_model_revision": {
-        "anyOf": [
-          {
-            "type": "string",
-            "maxLength": 16384
-          },
-          {
-            "type": "null"
-          }
-        ],
-        "default": null,
-        "title": "Expected Model Revision"
       }
     },
     "title": "geometry_probe_domainsArguments",

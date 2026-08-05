@@ -263,12 +263,13 @@ def create_side_selections(
             component_name=component_name,
         )
         if not result.get("success"):
-            rolled_back = _remove_selections(component.selection(), created)
+            prior_rolled_back = _remove_selections(component.selection(), created)
+            failed_side_rolled_back = result.get("rolled_back") is not False
             return {
                 "success": False,
-                "error": f"Side selection setup failed at {side}.",
+                "error": result.get("error") or f"Side selection setup failed at {side}.",
                 "failed_side": side,
-                "rolled_back": rolled_back,
+                "rolled_back": prior_rolled_back and failed_side_rolled_back,
             }
         created.append(tag)
         outcomes[side] = result["selection"]

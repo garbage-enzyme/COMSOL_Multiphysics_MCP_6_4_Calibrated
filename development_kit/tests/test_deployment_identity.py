@@ -94,6 +94,19 @@ def test_nonobject_deployment_manifest_fails_closed(tmp_path, monkeypatch):
     assert "deployment manifest unavailable" in identity["error"]
 
 
+def test_deployment_identity_does_not_mask_manifest_path_classification(tmp_path, monkeypatch):
+    manifest = json.loads(capabilities_module._DEPLOYMENT_MANIFEST.read_text(encoding="utf-8"))
+    manifest["contains_local_path"] = True
+    path = tmp_path / "deployment_manifest.json"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    monkeypatch.setattr(capabilities_module, "_DEPLOYMENT_MANIFEST", path)
+
+    identity = get_capabilities(_selection("core"))["deployment_identity"]
+
+    assert identity["available"] is True
+    assert identity["contains_local_path"] is True
+
+
 def test_deployment_classification_is_bound_to_the_distribution_root(tmp_path, monkeypatch):
     distribution_root = tmp_path / "runtime" / "site-packages"
     source_lookalike = tmp_path / "workspace" / "site-packages" / "source"

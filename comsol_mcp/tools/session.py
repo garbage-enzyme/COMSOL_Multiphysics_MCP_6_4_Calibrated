@@ -808,8 +808,18 @@ class SessionManager:
                     "lease_release": release,
                 }
             try:
-                if getattr(candidate, "port", None) is None:
+                candidate_port = getattr(candidate, "port", None)
+                candidate_host = getattr(candidate, "host", None)
+                if candidate_port is None:
                     candidate.connect(port, host)
+                elif (
+                    int(candidate_port) != int(port)
+                    or str(candidate_host).casefold() != str(host).casefold()
+                ):
+                    return self._rollback_remote_activation(
+                        candidate,
+                        error="Existing process-global MPh client endpoint does not match.",
+                    )
             except Exception as exc:
                 return self._rollback_remote_activation(candidate, error=str(exc))
             return self._publish_remote_client(

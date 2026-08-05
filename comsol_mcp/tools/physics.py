@@ -1277,11 +1277,11 @@ def register_physics_tools(mcp: MCPServer) -> None:
         """
         Assign a material to physics domains.
 
-        This tool tries to add the material from COMSOL's built-in library
-        if it's not already in the model. If ``properties`` is provided those
-        values are written into the material's Basic property group (tag
-        ``def``) so domain features with ``materialType=from_mat`` will use
-        them.
+        Existing materials are reused by tag or label. Creating a missing
+        Common material requires explicit ``properties``; this tool does not
+        import from COMSOL's built-in material libraries. Supplied values are
+        written into the material's Basic property group (tag ``def``) so
+        domain features with ``materialType=from_mat`` will use them.
 
         Recognised property names (Heat Transfer / Electrostatics):
         - "thermalconductivity": e.g. "130[W/(m*K)]"

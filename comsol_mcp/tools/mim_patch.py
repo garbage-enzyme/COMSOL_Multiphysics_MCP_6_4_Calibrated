@@ -98,9 +98,8 @@ def _identify_side_pairs(boundaries, P_val=None, bbox=None, tol=1e-12):
     if bbox is None and P_val is not None:
         bbox = (0.0, P_val, 0.0, P_val, 0.0, P_val)
     if bbox is None:
-        # Fall back to pure-normal classification (legacy behaviour, no filtering)
-        bbox = None
-    xmin, xmax, ymin, ymax, zmin, zmax = list(bbox) if bbox is not None else [None] * 6
+        raise ValueError("cell bbox or period is required for side classification")
+    xmin, xmax, ymin, ymax, zmin, zmax = list(bbox)
 
     def _on_edge(coord, edge, tol):
         if edge is None:
@@ -168,7 +167,7 @@ def _find_air_block_tag(geom) -> Optional[str]:
             size_text = str(feature.getString("size"))
             size = [float(value) for value in size_text.replace(",", " ").split()]
             if len(size) == 3 and all(value > 0 for value in size) and size[2] > 1e-7:
-                candidates.append((size[0] * size[1] * size[2], tag))
+                candidates.append((size[2], tag))
         except Exception:  # noqa: S110 - unsupported geometry features are not candidates
             pass
     if not candidates:

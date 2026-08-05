@@ -463,3 +463,47 @@ def test_initial_snapshot_failure_rolls_back_session_registry_and_clone(monkeypa
     assert removed == [clone.name()]
     assert record.derived_model_id not in _DERIVED
     assert not backing.exists() and not backing_dir.exists()
+
+
+def test_initial_snapshot_uses_the_clone_actual_component_and_geometry_tags(monkeypatch):
+    geometry = object()
+    component = type("Component", (), {"geom": lambda self: Container({"geom2": geometry})})()
+    components = Container({"comp2": component})
+
+    class Clone:
+        java = type("Java", (), {"component": lambda self: components})()
+
+        def name(self):
+            return "renamed-clone"
+
+    clone = Clone()
+    record = DerivedGeometryRecord(
+        "derived-renamed", clone.name(), "source.mph", "a" * 64, "clone.mph", "b" * 64
+    )
+    observed = []
+    monkeypatch.setattr(
+        derived_geometry_module,
+        "create_derived_geometry_clone",
+        lambda *_args, **_kwargs: (clone, record),
+    )
+    monkeypatch.setattr(
+        derived_geometry_module.session_manager,
+        "add_model",
+        lambda _clone, cleanup_path=None: clone.name(),
+    )
+    monkeypatch.setattr(
+        derived_geometry_module,
+        "_snapshot",
+        lambda _model, component_tag, geometry_tag: (
+            observed.append((component_tag, geometry_tag)) or {"state_sha256": "c" * 64}
+        ),
+    )
+
+    try:
+        _clone, _record, snapshot = _create_registered_derived_geometry_clone(
+            object(), object(), new_name="renamed-clone"
+        )
+        assert observed == [("comp2", "geom2")]
+        assert snapshot["state_sha256"] == "c" * 64
+    finally:
+        _DERIVED.pop(record.derived_model_id, None)

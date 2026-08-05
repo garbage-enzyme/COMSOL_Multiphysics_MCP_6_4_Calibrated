@@ -1116,6 +1116,40 @@ class TestSessionManager:
         assert sm._owns_solver_lease is False
         assert permissive_session_ownership._ownership.releases == 1
 
+    def test_connect_rejects_mismatched_existing_mph_endpoint(
+        self, monkeypatch, permissive_session_ownership
+    ):
+        import src.tools.session as session_module
+
+        sm = session_module.SessionManager()
+
+        class RemoteClient:
+            standalone = False
+            version = "6.4"
+            port = 9999
+            host = "localhost"
+
+            def __init__(self):
+                self.disconnected = False
+
+            def disconnect(self):
+                self.disconnected = True
+
+        client = RemoteClient()
+        monkeypatch.setattr(
+            session_module,
+            "_load_mph",
+            lambda: (SimpleNamespace(Client=pytest.fail), SimpleNamespace(client=client)),
+        )
+
+        result = sm.connect(port=2036, host="localhost")
+
+        assert result["success"] is False
+        assert "endpoint does not match" in result["error"]
+        assert client.disconnected is True
+        assert sm.client is None
+        assert permissive_session_ownership._ownership.releases == 1
+
     def test_disconnect_retains_client_and_lease_until_retirement_is_verified(
         self, permissive_session_ownership
     ):

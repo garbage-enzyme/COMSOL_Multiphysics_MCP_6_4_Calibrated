@@ -1217,6 +1217,21 @@ def test_public_tool_does_not_misclassify_internal_type_error_as_caller_rejectio
     assert "programming defect" not in json.dumps(result)
 
 
+def test_public_tool_distinguishes_policy_rejection_from_invalid_evidence():
+    server = MCPServer("branch-continuation-policy-error-test")
+    register_branch_continuation_tools(server)
+    result = server._tool_manager._tools["branch_continuation_plan"].fn(
+        continuation_policy={"bad": True},
+        continuation_states=build_continuation_states(
+            states_id="policy-test", states=_build_dispersive_states(3, shift=0.1e-6)
+        ),
+    )
+
+    assert result["success"] is False
+    assert result["scientific_disposition"] == "invalid_policy"
+    assert result["reason_code"] == "continuation_policy_rejected"
+
+
 @pytest.mark.parametrize("field", ["spacing_rule", "stop_policy"])
 def test_continuation_policy_rejects_unhashable_discriminators(field):
     states = build_continuation_states(

@@ -186,7 +186,18 @@ class AsyncSolver:
             self._thread = threading.Thread(target=solve_thread, daemon=True)
             self._launch_gate = launch_gate
             self._launch_owner_ident = threading.get_ident()
-            self._thread.start()
+            try:
+                self._thread.start()
+            except Exception as exc:
+                self._progress.status = SolverStatus.FAILED
+                self._progress.error = str(exc)
+                self._progress.message = f"Solver thread failed to start: {exc}"
+                self._progress.end_time = datetime.now()
+                self._thread = None
+                self._launch_gate = None
+                self._launch_owner_ident = None
+                launch_gate.set()
+                raise
         try:
             self._notify_progress(progress_callback, 0.0, "Starting solver...")
         finally:
@@ -265,6 +276,8 @@ class AsyncSolver:
             and not launch_gate.is_set()
             and launch_owner_ident == threading.get_ident()
         ):
+            return False
+        if thread is threading.current_thread():
             return False
 
         thread.join(timeout=timeout)

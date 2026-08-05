@@ -431,3 +431,25 @@ def test_public_configuration_failures_are_logged_and_redacted(caplog):
     assert "private-furlong" not in result["error"]
     assert "Simulation configuration validation failed" in caplog.text
     assert "private-furlong" in caplog.text
+
+
+@pytest.mark.parametrize("failure", [OverflowError("huge"), RecursionError("deep")])
+def test_public_configuration_contains_numeric_and_depth_failures(monkeypatch, failure):
+    import src.evidence.simulation_configuration as evidence_module
+
+    monkeypatch.setattr(
+        evidence_module,
+        "normalize_simulation_configuration",
+        lambda _configuration: (_ for _ in ()).throw(failure),
+    )
+    server = create_server("f0-contained-input-failure", profile="core")
+    result = _decode_public(
+        asyncio.run(
+            server.call_tool(
+                "simulation_configuration_validate", {"configuration": _configuration()}
+            )
+        )
+    )
+
+    assert result["success"] is False
+    assert result["error"] == "Simulation configuration validation failed."

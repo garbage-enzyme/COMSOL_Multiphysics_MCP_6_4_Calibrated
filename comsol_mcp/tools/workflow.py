@@ -803,7 +803,6 @@ def run_staged_parametric_sweep(
         )
         if adopted_legacy:
             _migrate_legacy_sweep_csv(csv_path, fieldnames, manifest)
-            adopted_legacy = False
         validate_existing_csv = bool(
             resume_csv or (append_csv and csv_path and Path(csv_path).is_file())
         )

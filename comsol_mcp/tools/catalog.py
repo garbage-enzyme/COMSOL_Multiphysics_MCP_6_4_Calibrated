@@ -434,7 +434,7 @@ _SIDE_EFFECTS = {
     "physics_setup_acoustic_boundaries": "model_mutation",
     "physics_configure_pde_boundary": "model_mutation",
     "physics_setup_pde_boundaries": "model_mutation",
-    "geometry_get_boundaries": "model_mutation",
+    "geometry_get_boundaries": "read_only",
     "mesh_create": "model_mutation",
     "mesh_sequence_create": "model_mutation",
     "study_create": "model_mutation",
@@ -445,7 +445,7 @@ _SIDE_EFFECTS = {
     "results_export_data": "filesystem_write",
     "results_export_image": "filesystem_write",
     "mim_patch_build": "model_mutation",
-    "geometry_probe_domains": "model_mutation",
+    "geometry_probe_domains": "read_only",
     "study_staged_parametric_sweep": "solver_execution",
     "mesh_convergence_study": "solver_execution",
     "clientapi_property_set": "model_mutation",
@@ -649,6 +649,7 @@ _MODEL_REVISION_REQUIRED_CLASSES = frozenset(
         "destructive_session",
         "solver_execution",
         "filesystem_write_model_mutation",
+        "filesystem_read_model_mutation",
     }
 )
 

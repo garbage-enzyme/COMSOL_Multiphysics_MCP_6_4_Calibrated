@@ -246,6 +246,27 @@ def test_side_selections_roll_back_every_prior_side_on_failure():
     }
 
 
+def test_side_selections_include_the_failed_side_rollback_result(monkeypatch):
+    component = FakeComponent()
+    calls = 0
+
+    def fail_on_second(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            return {"success": False, "error": "inner rollback failed", "rolled_back": False}
+        return {"success": True, "selection": {"tag": _kwargs["selection_name"]}}
+
+    monkeypatch.setattr("src.tools.geometry_selections.create_box_selection", fail_on_second)
+    result = create_side_selections(
+        FakeModel(component), x_min="0", x_max="1", y_min="0", y_max="1"
+    )
+
+    assert result["success"] is False
+    assert result["error"] == "inner rollback failed"
+    assert result["rolled_back"] is False
+
+
 def test_side_selections_roll_back_after_geometry_lookup_failure():
     component = FakeComponent(fail_geometry_after=2)
 

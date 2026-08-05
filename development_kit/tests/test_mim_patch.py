@@ -6,6 +6,7 @@ import pytest
 from src.tools.mim_patch import (
     _build_periodic_mesh,
     _find_air_block_tag,
+    _identify_side_pairs,
     _identify_patch_topology,
     _list_pair_metadata,
     _normalize_spectral_rows,
@@ -105,6 +106,24 @@ def test_equal_largest_air_candidates_require_an_explicit_tag():
     geometry = type("AmbiguousGeometry", (), {"feature": lambda self: features})()
 
     assert _find_air_block_tag(geometry) is None
+
+
+def test_air_block_detection_prefers_height_over_volume():
+    features = GeometryFeatures()
+    features.nodes = {
+        "wide_substrate": GeometryFeature("20e-6, 20e-6, 0.5e-6"),
+        "air": GeometryFeature("2e-6, 2e-6, 2e-6"),
+    }
+    geometry = type("HeightGeometry", (), {"feature": lambda self: features})()
+
+    assert _find_air_block_tag(geometry) == "air"
+
+
+def test_side_pair_classification_requires_cell_coordinates():
+    with pytest.raises(ValueError, match="bbox or period"):
+        _identify_side_pairs(
+            [{"boundary_number": 1, "normal": [1.0, 0.0, 0.0], "center": [0.5, 0, 0]}]
+        )
 
 
 def _side_pairs():

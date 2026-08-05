@@ -293,7 +293,18 @@ def _create_registered_derived_geometry_clone(
         )
         record.model_name = registered_name
         _DERIVED[record.derived_model_id] = record
-        snapshot = _snapshot(clone, "comp1", "geom1")
+        if not hasattr(clone, "java"):
+            snapshot = _snapshot(clone, "comp1", "geom1")
+        else:
+            component_tags = _tags(clone.java.component())
+            if not component_tags:
+                raise ValueError("derived clone has no component")
+            component_tag = component_tags[0]
+            component = _get(clone.java.component(), component_tag)
+            geometry_tags = _tags(component.geom())
+            if not geometry_tags:
+                raise ValueError("derived clone component has no geometry")
+            snapshot = _snapshot(clone, component_tag, geometry_tags[0])
         return clone, record, snapshot
     except Exception as exc:
         _DERIVED.pop(record.derived_model_id, None)
