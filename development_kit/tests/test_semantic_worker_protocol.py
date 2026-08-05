@@ -129,6 +129,37 @@ def test_non_object_startup_handshake_is_contained_and_reaped(monkeypatch):
     assert result["cleanup"]["absent"] is True
 
 
+@pytest.mark.parametrize("port", [True, 0, 65_536, "1234"])
+def test_invalid_startup_port_is_contained_and_reaped(monkeypatch, port):
+    manager = SemanticWorkerManager(startup_deadline=2.0)
+    handshake = json.dumps(
+        {
+            "schema_version": WORKER_PROTOCOL_SCHEMA_VERSION,
+            "event": "ready",
+            "pid": "__PID__",
+            "host": "127.0.0.1",
+            "port": port,
+        }
+    )
+    command = [
+        sys.executable,
+        "-c",
+        (
+            "import json,os,time; "
+            f"payload=json.loads({handshake!r}); payload['pid']=os.getpid(); "
+            "print(json.dumps(payload), flush=True); "
+            "time.sleep(30)"
+        ),
+    ]
+    monkeypatch.setattr(manager, "_command", lambda: command)
+
+    result = manager.start()
+
+    assert result["success"] is False
+    assert result["error"]["code"] == "startup_failed"
+    assert result["cleanup"]["absent"] is True
+
+
 def test_nested_query_filters_are_rejected_before_worker_start(monkeypatch):
     manager = SemanticWorkerManager()
     starts = []
@@ -277,6 +308,58 @@ def test_lightweight_identity_hashes_loaded_manifest_and_contains_invalid_utf8(r
     ] is False
     (index / "manifest.json").write_bytes(b"\xff")
     assert _lightweight_deployment_identity(configuration)["readable"] is False
+
+
+@pytest.mark.parametrize(
+    ("document_name", "field"),
+    [
+        ("pointer", "manifest_sha256"),
+        ("pointer", "build_id"),
+        ("pointer", "model_fingerprint"),
+        ("manifest", "build_id"),
+        ("manifest", "model_fingerprint"),
+        ("model", "model_sha256"),
+    ],
+)
+def test_lightweight_identity_rejects_missing_required_fields(
+    request, document_name, field
+):
+    root = Path("D:/mcp_tests/a65b15id") / uuid.uuid4().hex
+    request.addfinalizer(lambda: shutil.rmtree(root, ignore_errors=True))
+    index = root / "indexes" / "corpus" / "model" / "build"
+    model_root = root / "model"
+    index.mkdir(parents=True)
+    model_root.mkdir()
+    documents = {
+        "manifest": {
+            "build_id": "build",
+            "model_fingerprint": "b" * 64,
+        },
+        "model": {"model_sha256": "b" * 64},
+    }
+    manifest_bytes = json.dumps(documents["manifest"]).encode("utf-8")
+    documents["pointer"] = {
+        "index_path": str(index),
+        "manifest_sha256": hashlib.sha256(manifest_bytes).hexdigest(),
+        "build_id": "build",
+        "model_fingerprint": "b" * 64,
+    }
+    documents[document_name].pop(field)
+    (index / "manifest.json").write_text(
+        json.dumps(documents["manifest"]), encoding="utf-8"
+    )
+    (model_root / "model_manifest.json").write_text(
+        json.dumps(documents["model"]), encoding="utf-8"
+    )
+    (root / "current.json").write_text(
+        json.dumps(documents["pointer"]), encoding="utf-8"
+    )
+
+    result = _lightweight_deployment_identity(
+        {"configured": True, "root": str(root), "model_path": str(model_root)}
+    )
+
+    assert result["readable"] is False
 
 
 def test_authentication_schema_and_message_bounds_do_not_kill_worker():
@@ -513,25 +596,65 @@ def test_request_uses_one_monotonic_deadline_across_trickled_receives(monkeypatc
     assert elapsed < 0.08
 
 
-def test_stale_identity_refuses_action_until_exact_record_is_restored():
+def test_stale_identity_cleanup_reclaims_the_exact_spawned_process():
     with SemanticWorkerManager(startup_deadline=2.0) as manager:
         assert manager.start()["success"] is True
-        original = dict(manager._identity)
-        try:
-            manager._identity["process_create_time"] -= 10.0
+        process = manager._process
+        manager._identity["process_create_time"] -= 10.0
 
-            refused = manager.reset()
-            assert refused["success"] is False
-            assert refused["reset"]["refused"] is True
-            assert manager._process is not None and manager._process.poll() is None
-            restart = manager.start()
-            assert restart["success"] is False
-            assert restart["error"]["code"] == "worker_identity_uncertain"
-            assert manager._process is not None and manager._process.pid == original["pid"]
-        finally:
-            manager._identity = original
-            cleanup = manager.reset()
+        cleanup = manager.reset()
+
         assert cleanup["success"] is True
+        assert cleanup["reset"]["identity_state"] == "uncertain"
+        assert cleanup["reset"]["absent"] is True
+        assert process is not None and process.poll() is not None
+
+
+def test_query_limit_applies_to_the_transmitted_trimmed_value(monkeypatch):
+    manager = SemanticWorkerManager()
+    observed = []
+    monkeypatch.setattr(
+        manager,
+        "_request",
+        lambda operation, fields, deadline: observed.append(
+            (operation, fields, deadline)
+        )
+        or {"success": True},
+    )
+    query = " " + "x" * PUBLIC_LIMITS["maximum_query_characters"] + " "
+
+    result = manager.query(query)
+
+    assert result["success"] is True
+    assert observed[0][1]["query"] == query.strip()
+
+
+@pytest.mark.parametrize(
+    ("payload", "code"),
+    [
+        ({"operation": []}, "unknown_operation"),
+        (
+            {
+                "operation": "query",
+                "query": "bounded",
+                "limit": 1,
+                "filters": None,
+                "retrieval_mode": {},
+            },
+            "invalid_retrieval_mode",
+        ),
+    ],
+)
+def test_unhashable_worker_discriminators_return_structured_errors(payload, code):
+    handler = object.__new__(_RequestHandler)
+    handler.server = SimpleNamespace(state=_WorkerState("0" * 64, None, 0.0))
+    handler.wfile = BytesIO()
+
+    handler._dispatch("malformed-discriminator", payload)
+
+    response = json.loads(handler.wfile.getvalue())
+    assert response["success"] is False
+    assert response["error"]["code"] == code
 
 
 def test_crash_after_response_is_observed_without_process_leak():

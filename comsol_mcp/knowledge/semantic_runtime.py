@@ -84,6 +84,19 @@ def _lightweight_deployment_identity(configuration: Mapping[str, Any]) -> dict[s
         model = json.loads((Path(str(configuration["model_path"])) / "model_manifest.json").read_text(encoding="utf-8"))
         if not isinstance(model, dict):
             raise TypeError("model manifest must be a JSON object")
+        required_identity = (
+            (pointer, "manifest_sha256"),
+            (pointer, "build_id"),
+            (pointer, "model_fingerprint"),
+            (manifest, "build_id"),
+            (manifest, "model_fingerprint"),
+            (model, "model_sha256"),
+        )
+        if any(
+            not isinstance(document.get(field), str) or not document[field]
+            for document, field in required_identity
+        ):
+            raise ValueError("semantic deployment identity is incomplete")
     except (OSError, KeyError, TypeError, ValueError, UnicodeError, json.JSONDecodeError) as exc:
         return {"readable": False, "error": f"{type(exc).__name__}: {exc}"}
     matches = (
@@ -142,7 +155,9 @@ class SemanticService:
                     health = manager.health()
                     worker = {"state": manager.status(probe=False)["state"], "health": health}
                 self._health_gate_passed = bool(health.get("success"))
-                if not health.get("success"):
+                if health.get("success"):
+                    self._last_error = None
+                else:
                     self._last_error = health.get("error") or {"message": str(health)}
             elif self._manager is None:
                 worker = {"state": "stopped", "health": None}
@@ -208,15 +223,19 @@ class SemanticService:
             if not result.get("success"):
                 self._last_error = result.get("error") or {"message": str(result)}
                 return {**result, "fallback_tool": "manual_search"}
+            self._last_error = None
             return result
 
     def reset(self) -> dict[str, Any]:
         with self._lock:
             if self._manager is None:
                 self._health_gate_passed = False
+                self._last_error = None
                 return {"success": True, "reset": False, "message": "semantic worker is already stopped"}
             result = self._manager.reset()
             self._health_gate_passed = False
+            if result.get("success"):
+                self._last_error = None
             return result
 
 

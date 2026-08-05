@@ -113,7 +113,7 @@ class _RequestHandler(socketserver.StreamRequestHandler):
 
     def _dispatch(self, request_id: str, request: dict[str, Any]) -> None:
         operation = request.get("operation")
-        if operation in {"health", "status"}:
+        if isinstance(operation, str) and operation in {"health", "status"}:
             response = _response(request_id, success=True, status=self.server.state.status())
         elif operation == "query":
             query = request.get("query")
@@ -126,7 +126,7 @@ class _RequestHandler(socketserver.StreamRequestHandler):
                 response = _response(request_id, success=False, error={"code": "invalid_limit", "message": "limit violates public limits"})
             elif filters is not None and not isinstance(filters, dict):
                 response = _response(request_id, success=False, error={"code": "invalid_filters", "message": "filters must be an object"})
-            elif retrieval_mode not in {"hybrid", "vector", "lexical"}:
+            elif not isinstance(retrieval_mode, str) or retrieval_mode not in {"hybrid", "vector", "lexical"}:
                 response = _response(request_id, success=False, error={"code": "invalid_retrieval_mode", "message": "retrieval_mode is unsupported"})
             else:
                 try:

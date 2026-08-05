@@ -142,6 +142,13 @@ def test_model_and_index_manifests_require_ascii_absolute_identity_paths():
         validate_index_manifest({**index, "chunk_count": 0})
 
 
+@pytest.mark.parametrize("validator", [validate_model_manifest, validate_index_manifest])
+@pytest.mark.parametrize("payload", [None, [], "manifest"])
+def test_semantic_manifest_validators_require_objects(validator, payload):
+    with pytest.raises(ValueError, match="must be an object"):
+        validator(payload)
+
+
 def test_contract_json_rejects_nonfinite_values_and_limits_are_bounded():
     with pytest.raises(ValueError):
         canonical_json_bytes({"distance": float("nan")})
@@ -168,6 +175,18 @@ def test_semantic_continuation_gate_requires_a_material_target_slice_gap():
 
     assert blocked["continue_to_semantic_worker"] is False
     assert continuing["continue_to_semantic_worker"] is True
+    continuing["thresholds"]["minimum_target_queries"] = 0
+    repeated = evaluate_semantic_continuation(
+        {
+            "target_styles": {
+                "query_count": 0,
+                "recall_at_5": 0.0,
+                "misses_at_5": 0,
+            }
+        }
+    )
+    assert repeated["continue_to_semantic_worker"] is False
+    assert SEMANTIC_CONTINUATION_GATE["minimum_target_queries"] > 0
 
 
 @pytest.mark.parametrize(

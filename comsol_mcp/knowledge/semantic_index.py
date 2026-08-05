@@ -211,6 +211,8 @@ def pin_model_snapshot(
     target = _require_ascii_absolute(destination, "model destination")
     if not source.is_dir():
         raise ValueError("source model snapshot does not exist")
+    if source == target or source in target.parents:
+        raise ValueError("model destination must be outside the source snapshot")
     if target.exists():
         raise FileExistsError(f"model destination already exists: {target}")
     staging = target.with_name(target.name + f".building-{uuid.uuid4().hex}")
@@ -519,9 +521,17 @@ def build_index(
         validated = validate_index_directory(final)
         switch_current(root, final)
         return {"success": True, "index": validated, "lexical_unchanged": True}
-    except Exception:
+    except Exception as exc:
         # Preserve .building evidence for interrupted/corrupt builds. It is never
         # referenced by current.json and can be removed by an offline operator.
+        if final.exists() and not staging.exists():
+            try:
+                os.replace(final, staging)
+            except OSError as rollback_error:
+                exc.add_note(
+                    "failed to restore semantic build staging evidence: "
+                    f"{type(rollback_error).__name__}"
+                )
         raise
 
 
@@ -609,23 +619,27 @@ def validate_index_against_lexical(
     """Prove every semantic citation belongs to the immutable lexical corpus."""
     validated = validate_index_directory(index_path, expected_final_path=expected_final_path)
     lexical_path = _require_ascii_absolute(lexical_index, "lexical_index")
-    lexical = _lexical_identity(lexical_path)
-    manifest = validated["manifest"]
-    expected_identity = {
-        "sha256": manifest["lexical_index_sha256"],
-        "corpus_fingerprint": manifest["corpus_fingerprint"],
-        "page_count": int(manifest["lexical_index_page_count"]),
-        "schema_version": manifest["lexical_index_schema_version"],
-    }
-    for field, expected in expected_identity.items():
-        if lexical[field] != expected:
-            raise ValueError(f"lexical {field} does not match the semantic manifest")
-    uri = lexical_path.resolve().as_uri() + "?mode=ro"
-    with closing(sqlite3.connect(uri, uri=True, timeout=0.25)) as connection:
-        citations = {
-            (validate_citation_source(source), int(page))
-            for source, page in connection.execute("SELECT source, page FROM pages")
+    lexical_pin = validated_read_pin(lexical_path, lexical_path.parent)
+    with pin_validated_reads((lexical_pin,)):
+        lexical = _lexical_identity(lexical_path)
+        manifest = validated["manifest"]
+        expected_identity = {
+            "sha256": manifest["lexical_index_sha256"],
+            "corpus_fingerprint": manifest["corpus_fingerprint"],
+            "page_count": int(manifest["lexical_index_page_count"]),
+            "schema_version": manifest["lexical_index_schema_version"],
         }
+        for field, expected in expected_identity.items():
+            if lexical[field] != expected:
+                raise ValueError(f"lexical {field} does not match the semantic manifest")
+        uri = lexical_path.resolve().as_uri() + "?mode=ro"
+        with closing(sqlite3.connect(uri, uri=True, timeout=0.25)) as connection:
+            citations = {
+                (validate_citation_source(source), int(page))
+                for source, page in connection.execute("SELECT source, page FROM pages")
+            }
+        if _sha256_file(lexical_path) != lexical["sha256"]:
+            raise RuntimeError("lexical index changed during citation validation")
     semantic_citations: set[tuple[str, int]] = set()
     with (Path(index_path) / "chunks.jsonl").open("r", encoding="utf-8") as handle:
         for line in handle:
@@ -678,6 +692,8 @@ def read_current(deployment_root: str | Path) -> dict[str, Any]:
         index.relative_to((root / "indexes").resolve())
     except ValueError as exc:
         raise ValueError("current pointer index path is outside the deployment index root") from exc
+    if index.name.endswith(".building"):
+        raise ValueError("current pointer cannot reference a staging index")
     validated = validate_index_directory(index)
     if validated["manifest_sha256"] != pointer.get("manifest_sha256"):
         raise ValueError("current pointer manifest identity mismatch")

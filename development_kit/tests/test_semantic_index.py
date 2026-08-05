@@ -141,6 +141,24 @@ def test_chunking_is_deterministic_bounded_and_page_local():
     assert all("\n" not in item for item in first)
 
 
+def test_model_snapshot_destination_must_be_outside_source(semantic_index_root):
+    source = semantic_index_root / "source"
+    source.mkdir()
+    (source / "model.bin").write_bytes(b"model")
+
+    with pytest.raises(ValueError, match="outside the source snapshot"):
+        pin_model_snapshot(
+            source,
+            source / "nested" / "model",
+            model_id="fixture/model",
+            revision="r1",
+            dimension=4,
+            license_name="test-only",
+        )
+
+    assert not (source / "nested").exists()
+
+
 def test_model_pin_is_ascii_immutable_and_revision_bound(semantic_index_assets):
     model = validate_pinned_model(semantic_index_assets["model"])
     assert model["revision"] == "revision-1"
@@ -220,6 +238,25 @@ def test_build_validates_then_atomically_publishes_current(semantic_index_assets
     assert not list(semantic_index_assets["root"].rglob("*.tmp"))
 
 
+def test_publish_failure_restores_building_evidence(
+    semantic_index_assets, monkeypatch
+):
+    monkeypatch.setattr(
+        index_module,
+        "switch_current",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("injected pointer failure")
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="injected pointer failure"):
+        _build(semantic_index_assets, "pointer-failure")
+
+    building = list(semantic_index_assets["root"].rglob("pointer-failure.building"))
+    assert len(building) == 1
+    assert not list(semantic_index_assets["root"].rglob("pointer-failure"))
+
+
 def test_read_current_rejects_pointer_outside_deployment_indexes(semantic_index_assets):
     _build(semantic_index_assets, "outside-pointer")
     pointer_path = semantic_index_assets["root"] / "current.json"
@@ -229,6 +266,49 @@ def test_read_current_rejects_pointer_outside_deployment_indexes(semantic_index_
 
     with pytest.raises(ValueError, match="outside the deployment index root"):
         read_current(semantic_index_assets["root"])
+
+
+def test_read_current_rejects_staging_pointer(semantic_index_assets):
+    pointer_path = semantic_index_assets["root"] / "current.json"
+    staging = (
+        semantic_index_assets["root"]
+        / "indexes"
+        / "corpus"
+        / "model"
+        / "bad.building"
+    )
+    staging.parent.mkdir(parents=True, exist_ok=True)
+    pointer_path.write_text(
+        json.dumps({"schema_version": "1", "index_path": str(staging)}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="staging index"):
+        read_current(semantic_index_assets["root"])
+
+
+def test_citation_validation_rechecks_pinned_lexical_identity(
+    semantic_index_assets, monkeypatch
+):
+    result = _build(semantic_index_assets, "citation-recheck")
+    index = Path(result["index"]["path"])
+    lexical = semantic_index_assets["lexical"].resolve()
+    real_sha256 = index_module._sha256_file
+    lexical_hashes = 0
+
+    def changing_sha256(path):
+        nonlocal lexical_hashes
+        value = real_sha256(path)
+        if Path(path).resolve() == lexical:
+            lexical_hashes += 1
+            if lexical_hashes >= 2:
+                return "0" * 64
+        return value
+
+    monkeypatch.setattr(index_module, "_sha256_file", changing_sha256)
+
+    with pytest.raises(RuntimeError, match="changed during citation validation"):
+        validate_index_against_lexical(index, lexical)
 
 
 def test_read_only_semantic_connections_close_deterministically(semantic_index_assets, monkeypatch):

@@ -289,6 +289,12 @@ def _fts_query(query: str, operator: str = "AND") -> str:
     return f" {operator} ".join(f'"{part}"' for part in escaped)
 
 
+def _coverage_matches(parts: Sequence[str], text: str) -> list[str]:
+    """Match FTS phrases across the same whitespace boundaries as unicode61."""
+    haystack = " ".join(text.casefold().split())
+    return [part for part in parts if " ".join(part.casefold().split()) in haystack]
+
+
 def _validated_index_metadata(connection: sqlite3.Connection) -> dict[str, str]:
     metadata = dict(connection.execute("SELECT key, value FROM metadata"))
     missing = {"schema_version", "corpus_fingerprint", "page_count"} - set(metadata)
@@ -379,8 +385,7 @@ def search_index(
             minimum_matches = max(1, min(3, math.ceil(len(parts) * 0.35)))
             scored = []
             for row in candidates:
-                haystack = row["match_text"].casefold()
-                matched = [part for part in parts if part.casefold() in haystack]
+                matched = _coverage_matches(parts, row["match_text"])
                 row["matched_terms"] = matched
                 row["coverage"] = len(matched) / len(parts)
                 if len(matched) >= minimum_matches:
@@ -389,8 +394,8 @@ def search_index(
             rows = scored[:limit]
             strategy = "relaxed_coverage_bm25"
     for row in rows:
-        haystack = row.pop("match_text").casefold()
-        row.setdefault("matched_terms", [part for part in parts if part.casefold() in haystack])
+        match_text = row.pop("match_text")
+        row.setdefault("matched_terms", _coverage_matches(parts, match_text))
         row.setdefault("coverage", len(row["matched_terms"]) / len(parts))
         row["coverage"] = round(row["coverage"], 3)
     return {

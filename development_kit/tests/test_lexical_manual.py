@@ -52,6 +52,13 @@ def manual_index() -> Path:
                 "heading": "Copy Face",
                 "text": "CopyFace copies a mesh from source faces to destination faces.",
             },
+            {
+                "source": "Wave_Optics_Module/WaveOpticsModuleUsersGuide.pdf",
+                "module": "Wave_Optics_Module",
+                "page": 152,
+                "heading": "Wrapped phrase",
+                "text": "Periodic\nStructure supports bounded optical ports.",
+            },
         ],
         index,
         corpus_fingerprint="fixture-v1",
@@ -104,6 +111,18 @@ def test_long_agent_query_relaxes_and_reranks_by_term_coverage(manual_index: Pat
     assert {"CopyFace", "source", "destination", "mesh", "faces"} <= set(
         automatic["results"][0]["matched_terms"]
     )
+
+
+def test_relaxed_phrase_coverage_matches_fts_whitespace(manual_index: Path):
+    result = search_index(
+        '"Periodic Structure" unavailable',
+        mode="auto",
+        index_path=manual_index,
+    )
+
+    assert result["strategy"] == "relaxed_coverage_bm25"
+    wrapped = next(row for row in result["results"] if row["page"] == 152)
+    assert "Periodic Structure" in wrapped["matched_terms"]
 
 
 def test_read_pages_reports_missing_pages(manual_index: Path):

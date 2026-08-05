@@ -141,6 +141,33 @@ def test_failed_warm_health_degrades_without_leaving_worker(lightweight_deployme
     assert cleanup["success"] is True
 
 
+def test_successful_semantic_operations_clear_stale_errors(lightweight_deployment):
+    class Manager:
+        def health(self):
+            return {"success": True}
+
+        def status(self, *, probe=False):
+            return {"state": "active"}
+
+        def query(self, *_args, **_kwargs):
+            return {"success": True, "results": []}
+
+        def reset(self):
+            return {"success": True, "reset": {"absent": True}}
+
+    service = SemanticService(lightweight_deployment)
+    service._manager = Manager()
+    service._last_error = {"code": "stale"}
+
+    assert service.status(warm=True)["last_error"] is None
+    service._last_error = {"code": "stale"}
+    assert service.search("CopyFace")["success"] is True
+    assert service._last_error is None
+    service._last_error = {"code": "stale"}
+    assert service.reset()["success"] is True
+    assert service._last_error is None
+
+
 def test_unconfigured_search_returns_explicit_lexical_fallback():
     service = SemanticService(
         {
