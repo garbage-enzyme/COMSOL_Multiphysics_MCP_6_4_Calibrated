@@ -214,6 +214,18 @@ def test_public_schema_clamps_nullable_and_prebounded_nodes() -> None:
     assert result["properties"]["number"]["maximum"] == MAX_PUBLIC_NUMBER_MAGNITUDE
 
 
+@pytest.mark.parametrize(
+    "schema",
+    [
+        {"type": "string", "maxLength": "unbounded"},
+        {"type": "number", "minimum": True},
+    ],
+)
+def test_public_schema_rejects_non_numeric_explicit_bounds(schema) -> None:
+    with pytest.raises(ValueError, match="must be numeric"):
+        bounded_public_schema(schema)
+
+
 def test_public_schema_rejects_cycles_and_overdeep_graphs() -> None:
     cyclic: dict[str, object] = {"type": "object"}
     cyclic["properties"] = {"self": cyclic}
@@ -316,6 +328,13 @@ def test_structural_guard_skips_only_declared_method_receivers() -> None:
 
     with pytest.raises(ValueError, match="unsupported public input type"):
         self(object())
+
+    @structurally_guarded
+    def orphan(self: object) -> object:
+        return self
+
+    with pytest.raises(ValueError, match="unsupported public input type"):
+        orphan(object())
 
 
 def test_frozen_dict_rejects_in_place_union() -> None:

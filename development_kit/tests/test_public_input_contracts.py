@@ -119,6 +119,23 @@ def test_staged_sweep_contract_rejects_incompatible_cross_fields(fields, match):
         TypeAdapter(JobSubmissionSpec).validate_python(value)
 
 
+def test_staged_sweep_contract_accepts_compatible_cross_fields():
+    normalized = validate_job_submission(
+        {
+            "job_type": "staged_sweep",
+            "source_model_path": "fixture.mph",
+            "parameter_name": "p",
+            "parameter_values": [1.0, 2.0],
+            "expressions": ["es.V"],
+            "physical_bounds": {"es.V": [0.0, 1.0]},
+            "smoke_points": 2,
+        }
+    )
+
+    assert normalized["physical_bounds"] == {"es.V": [0.0, 1.0]}
+    assert normalized["smoke_points"] == 2
+
+
 def test_runtime_job_validator_uses_the_same_discriminated_contract():
     with pytest.raises(ValidationError, match="union_tag_invalid"):
         validate_job_submission({"job_type": "unsupported"})
