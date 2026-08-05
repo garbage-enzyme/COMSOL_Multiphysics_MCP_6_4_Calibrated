@@ -126,10 +126,11 @@ hosted CI execution, and these timeouts together when collected tests reach
 2,750, or after another execution stall occurs and that stall's cause has been
 repaired, whichever happens first.
 
-For any test or gate with an estimated duration above three minutes, wait once
-for the current ETA plus one minute. Do not poll early or send intermediate
-progress updates during that wait; if the command is still active afterward,
-derive a new ETA from the observed progress and repeat the same bounded wait.
+For regression tests, gates, CI, builds, or any other wait with a usable ETA,
+wait once for the current ETA plus one minute. Do not poll early or send
+intermediate progress updates during that wait, inspect status/logs, or spend
+tokens on progress checks. If the command is still active afterward, derive a
+new ETA from observed progress and again wait for that ETA plus one minute.
 
 The quality gate applies the same local split while collecting coverage: four
 workers for the isolated main suite and a serial startup/process-inventory
