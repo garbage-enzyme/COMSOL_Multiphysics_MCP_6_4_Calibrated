@@ -398,7 +398,9 @@ class ThermoOptomechanicalComsolExecutor:
             "frame": {
                 "identity_sha256": frame_identity,
                 "displacement_frame": "spatial",
-                "topology_unchanged": True,
+                "topology_change_allowed": self.spec["deformation_transfer"][
+                    "topology_change_allowed"
+                ],
             },
             "deformation_scale": self.spec["deformation_transfer"]["deformation_scale"],
             "displacement_to_length": displacement / reference_length,
@@ -426,12 +428,14 @@ class ThermoOptomechanicalComsolExecutor:
             }
         )
         self._save(self.derived_path)
+        self._bind_study_dataset(self.spec["model_contract"]["thermal_structure_study_tag"])
+        displacement_readback = abs(self._evaluate("displacement_max"))
         return {
             "method": self.spec["deformation_transfer"]["method"],
             "material_frame_semantics": "spatial_deformation_preserves_material",
             "source_geometry_sha256": source_geometry,
             "deformed_geometry_sha256": deformed_geometry,
-            "readback_exact": displacement >= 0.0,
+            "readback_exact": displacement_readback == displacement,
             "rollback_verified": _sha256_file(self.checkpoint_path) == checkpoint_sha,
         }
 

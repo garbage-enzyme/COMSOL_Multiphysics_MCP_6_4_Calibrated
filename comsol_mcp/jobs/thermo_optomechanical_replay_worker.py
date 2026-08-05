@@ -99,7 +99,17 @@ def _run(
         ):
             raise _CooperativeCancellation("Stopped before thermo-optomechanical startup")
         if state["status"] == "submitted":
-            store.update_state(job_id, "starting", event="worker_started")
+            try:
+                store.update_state(job_id, "starting", event="worker_started")
+            except ValueError:
+                current = store.read_state(job_id)
+                if current.get("status") == "cancel_requested" or cancel_request_targets_attempt(
+                    store.read_control(job_id), attempt
+                ):
+                    raise _CooperativeCancellation(
+                        "Stopped during thermo-optomechanical startup"
+                    ) from None
+                raise
         elif state["status"] != "starting":
             raise ValueError(f"Thermo-optomechanical worker cannot start from {state['status']}")
 

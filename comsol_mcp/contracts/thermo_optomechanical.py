@@ -14,7 +14,7 @@ _Positive = Annotated[float, Field(gt=0.0, le=1.0e300)]
 
 
 class _ClosedModel(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
+    model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
 
 
 class ThermoOpticalEvidenceExpressions(_ClosedModel):

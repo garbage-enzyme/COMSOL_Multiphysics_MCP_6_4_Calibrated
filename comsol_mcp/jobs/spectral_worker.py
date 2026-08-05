@@ -91,6 +91,7 @@ def _run(
     lease_acquired = False
     cancel_stop = threading.Event()
     cancel_thread: threading.Thread | None = None
+    native_monitor_errors: list[Exception] = []
     pending_terminal: dict[str, Any] | None = None
     worker_error: Exception | None = None
     cleanup_errors: list[str] = []
@@ -102,7 +103,7 @@ def _run(
         source_pins.enter_context(pin_validated_reads((validated_read_pin(source, source.parent),)))
         if _sha256_file(source) != spec["source_model_sha256"]:
             raise RuntimeError("Immutable spectral source hash changed before client startup")
-        completed_spectral_point_fingerprints(
+        completed_fingerprints = completed_spectral_point_fingerprints(
             directory / "spectral_rows.jsonl", spec, artifact_root=directory
         )
         ownership = ownership_factory(store.root.parent, f"job:{job_id}")
@@ -134,7 +135,7 @@ def _run(
         rows_path = directory / "spectral_rows.jsonl"
 
         def completed_ids() -> set[str]:
-            return completed_spectral_point_fingerprints(rows_path, spec, artifact_root=directory)
+            return set(completed_fingerprints)
 
         def sample(stage: str, point_id: str) -> dict[str, Any]:
             if telemetry_provider is not None:
@@ -194,13 +195,16 @@ def _run(
             }
 
         def native_monitor() -> None:
-            while not cancel_stop.wait(0.05):
-                if not should_stop():
-                    continue
-                from comsol_mcp.jobs.native_cancel_probe import request_native_cancel_once
+            try:
+                while not cancel_stop.wait(0.05):
+                    if not should_stop():
+                        continue
+                    from comsol_mcp.jobs.native_cancel_probe import request_native_cancel_once
 
-                _record_native_cancel(store, job_id, attempt, request_native_cancel_once())
-                return
+                    _record_native_cancel(store, job_id, attempt, request_native_cancel_once())
+                    return
+            except Exception as exc:
+                native_monitor_errors.append(exc)
 
         if native_cancel_enabled:
             cancel_thread = threading.Thread(
@@ -228,6 +232,7 @@ def _run(
             )
 
         def on_row(row: Mapping[str, Any]) -> None:
+            completed_fingerprints.add(str(row["point_fingerprint"]))
             completed = len(completed_ids())
             current = store.read_state(job_id)["status"]
             if current == "smoke_running":
@@ -316,6 +321,10 @@ def _run(
         cancel_stop.set()
         if cancel_thread is not None:
             cancel_thread.join(timeout=1.0)
+        if native_monitor_errors and worker_error is None:
+            worker_error = RuntimeError(
+                f"native cancel monitor failed: {type(native_monitor_errors[0]).__name__}"
+            )
         if client is not None:
             try:
                 client.clear()
@@ -343,12 +352,19 @@ def _run(
             except Exception as exc:
                 cleanup_errors.append(f"lease_release:{type(exc).__name__}:{exc}")
         try:
-            if worker_error is None and _sha256_file(source) != spec["source_model_sha256"]:
+            if _sha256_file(source) != spec["source_model_sha256"] and worker_error is None:
                 worker_error = RuntimeError(
                     "Immutable spectral source hash changed after execution"
                 )
-        finally:
+        except Exception as exc:
+            if worker_error is None:
+                worker_error = exc
+            else:
+                cleanup_errors.append(f"final_source_verification:{type(exc).__name__}:{exc}")
+        try:
             source_pins.close()
+        except Exception as exc:
+            cleanup_errors.append(f"source_pin_close:{type(exc).__name__}:{exc}")
     if cleanup_errors and worker_error is None:
         worker_error = RuntimeError("; ".join(cleanup_errors)[:2000])
     current = store.read_state(job_id)["status"]

@@ -49,11 +49,29 @@ def _mapping(value: object, name: str) -> dict[str, Any]:
 def _finite(value: object, name: str, *, positive: bool = False) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{name} must be numeric")
-    number = float(value)
+    try:
+        number = float(value)
+    except (OverflowError, TypeError) as exc:
+        qualifier = "positive and finite" if positive else "finite"
+        raise ValueError(f"{name} must be {qualifier}") from exc
     if not math.isfinite(number) or (positive and number <= 0.0):
         qualifier = "positive and finite" if positive else "finite"
         raise ValueError(f"{name} must be {qualifier}")
     return number
+
+
+def _maximum_points(spec: Mapping[str, Any]) -> int:
+    value = spec.get("maximum_points")
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ValueError("maximum_points must be a positive integer")
+    return value
+
+
+def _spec_fingerprint(spec: Mapping[str, Any]) -> str:
+    value = _hex_or_none(spec.get("spec_fingerprint"), "spec_fingerprint")
+    if value is None:
+        raise ValueError("spec_fingerprint must contain exactly 64 hexadecimal characters")
+    return value
 
 
 def _hex_or_none(value: object, name: str) -> str | None:
@@ -137,13 +155,15 @@ def build_spectral_stage_plan(
         raise ValueError("requested wavelengths must be sorted and unique")
     if wavelengths[0] < lower or wavelengths[-1] > upper:
         raise ValueError("requested wavelengths must remain inside the stage window")
-    if len(wavelengths) > int(spec["maximum_points"]):
+    maximum_points = _maximum_points(spec)
+    spec_fingerprint = _spec_fingerprint(spec)
+    if len(wavelengths) > maximum_points:
         raise ValueError("stage request exceeds the declared total point cap")
     points = [spectral_point_identity(spec, wavelength) for wavelength in wavelengths]
     body = {
         "schema_name": SPECTRAL_STAGE_SCHEMA_NAME,
         "schema_version": SPECTRAL_STAGE_SCHEMA_VERSION,
-        "spec_fingerprint": spec["spec_fingerprint"],
+        "spec_fingerprint": spec_fingerprint,
         "stage_index": stage_index,
         "stage_kind": stage_kind,
         "planning_reason": planning_reason,
@@ -256,6 +276,8 @@ def _read_spectral_stage_plans_unlocked(
     job_dir: str | Path, spec: Mapping[str, Any]
 ) -> list[dict[str, Any]]:
     """Read one contiguous immutable stage chain from its durable directory."""
+    maximum_points = _maximum_points(spec)
+    _spec_fingerprint(spec)
     root = Path(job_dir) / "stage_plans"
     if not root.exists():
         return []
@@ -283,7 +305,7 @@ def _read_spectral_stage_plans_unlocked(
         if fingerprints & seen_points:
             raise ValueError("spectral stage plans request a duplicate exact point")
         seen_points.update(fingerprints)
-        if len(seen_points) > int(spec["maximum_points"]):
+        if len(seen_points) > maximum_points:
             raise ValueError("spectral stage chain exceeds the declared point cap")
         plans.append(plan)
         previous = plan["stage_sha256"]

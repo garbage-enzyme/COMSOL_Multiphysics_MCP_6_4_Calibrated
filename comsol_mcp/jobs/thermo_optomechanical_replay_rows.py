@@ -40,10 +40,23 @@ def _sha256_file(path: Path) -> str:
 def _finite(value: object, name: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{name} must be numeric")
-    number = float(value)
+    try:
+        number = float(value)
+    except (OverflowError, TypeError) as exc:
+        raise ValueError(f"{name} must be finite") from exc
     if not math.isfinite(number):
         raise ValueError(f"{name} must be finite")
     return number
+
+
+def _hex_digest(value: object, name: str) -> str:
+    if (
+        not isinstance(value, str)
+        or len(value) != 64
+        or any(character not in "0123456789abcdef" for character in value.lower())
+    ):
+        raise ValueError(f"{name} must contain exactly 64 hexadecimal characters")
+    return value.lower()
 
 
 def _exact(value: object, fields: set[str], name: str) -> dict[str, Any]:
@@ -207,6 +220,7 @@ def _validate_stage_payload(stage_id: str, value: object, spec: Mapping[str, Any
             or _finite(displacement["maximum_m"], "maximum displacement") < 0
         ):
             raise ValueError("displacement evidence is invalid")
+        displacement_delta = _finite(displacement["delta_length_m"], "displacement delta length")
         stress = _exact(payload["stress"], {"maximum_abs_Pa"}, "stress")
         if _finite(stress["maximum_abs_Pa"], "maximum stress") < 0:
             raise ValueError("stress evidence is invalid")
@@ -230,12 +244,33 @@ def _validate_stage_payload(stage_id: str, value: object, spec: Mapping[str, Any
             "expansion",
         )
         declared = spec["thermal_expansion"]
+        expected_delta = _finite(expansion["expected_delta_length_m"], "expected delta length")
+        observed_delta = _finite(expansion["observed_delta_length_m"], "observed delta length")
+        relative_error = _finite(expansion["relative_error"], "expansion relative error")
+        calculated_expected = (
+            declared["coefficient_per_K"]
+            * declared["reference_length_m"]
+            * (spec["thermal_load"]["applied_temperature_K"] - declared["reference_temperature_K"])
+        )
+        calculated_relative_error = abs(observed_delta - expected_delta) / max(
+            abs(expected_delta), 1.0e-30
+        )
         if (
             expansion["coefficient_input_type"] != declared["coefficient_input_type"]
             or _finite(expansion["coefficient_per_K"], "coefficient")
             != declared["coefficient_per_K"]
             or _finite(expansion["reference_temperature_K"], "reference temperature")
             != declared["reference_temperature_K"]
+            or not math.isclose(
+                expected_delta, calculated_expected, rel_tol=1.0e-12, abs_tol=1.0e-30
+            )
+            or not math.isclose(
+                observed_delta, displacement_delta, rel_tol=1.0e-12, abs_tol=1.0e-30
+            )
+            or relative_error < 0.0
+            or not math.isclose(
+                relative_error, calculated_relative_error, rel_tol=1.0e-12, abs_tol=1.0e-15
+            )
         ):
             raise ValueError("thermal expansion readback differs from the job")
         return
@@ -261,16 +296,21 @@ def _validate_stage_payload(stage_id: str, value: object, spec: Mapping[str, Any
                 isinstance(mesh[key], bool) or not isinstance(mesh[key], int) or mesh[key] <= 0
                 for key in ("element_count", "vertex_count")
             )
+            or isinstance(mesh["inverted_element_count"], bool)
+            or not isinstance(mesh["inverted_element_count"], int)
             or mesh["inverted_element_count"] != 0
             or not 0.0 < _finite(mesh["minimum_quality"], "mesh quality") <= 1.0
         ):
             raise ValueError("mesh evidence is invalid")
         frame = _exact(
             payload["frame"],
-            {"identity_sha256", "displacement_frame", "topology_unchanged"},
+            {"identity_sha256", "displacement_frame", "topology_change_allowed"},
             "frame evidence",
         )
-        if frame["displacement_frame"] != "spatial" or frame["topology_unchanged"] is not True:
+        if (
+            frame["displacement_frame"] != "spatial"
+            or frame["topology_change_allowed"] is not False
+        ):
             raise ValueError("frame evidence is invalid")
         _finite(payload["deformation_scale"], "deformation scale")
         _finite(payload["displacement_to_length"], "displacement ratio")
@@ -303,6 +343,7 @@ def _validate_stage_payload(stage_id: str, value: object, spec: Mapping[str, Any
             {"rows", "control_results", "source_unchanged", "derived_model_sha256"},
             "optical replay payload",
         )
+        _hex_digest(payload["derived_model_sha256"], "derived_model_sha256")
         rows = payload["rows"]
         expected_count = spec["declared_optical_point_count"]
         if not isinstance(rows, list) or len(rows) != expected_count:
@@ -333,7 +374,17 @@ def _validate_stage_payload(stage_id: str, value: object, spec: Mapping[str, Any
             for name in ("baseline_rta", "deformed_rta"):
                 rta = _exact(row[name], {"R", "T", "A", "closure_residual", "passive"}, name)
                 values = [_finite(rta[key], f"{name}.{key}") for key in ("R", "T", "A")]
-                if any(item < -1.0e-10 for item in values) or rta["passive"] is not True:
+                closure_residual = _finite(rta["closure_residual"], f"{name}.closure_residual")
+                if (
+                    any(item < -1.0e-10 for item in values)
+                    or rta["passive"] is not True
+                    or not math.isclose(
+                        closure_residual,
+                        sum(values) - 1.0,
+                        rel_tol=1.0e-12,
+                        abs_tol=1.0e-15,
+                    )
+                ):
                     raise ValueError("optical replay contains non-passive R/T/A")
         if observed != expected:
             raise ValueError("optical replay coordinates differ from the declared grid")

@@ -295,7 +295,7 @@ def _payload(stage_id: str, spec: dict) -> dict:
             "frame": {
                 "identity_sha256": "e" * 64,
                 "displacement_frame": "spatial",
-                "topology_unchanged": True,
+                "topology_change_allowed": False,
             },
             "deformation_scale": 1.0,
             "displacement_to_length": 0.001,
@@ -368,6 +368,19 @@ def test_submission_manifest_hash_must_match_before_normalization(ascii_tmp_path
     raw = _raw_spec(ascii_tmp_path / "manifest-hash")
     raw["specification_sha256"] = "0" * 64
     with pytest.raises(ValueError, match="specification_sha256"):
+        normalize_thermo_optomechanical_replay_spec(raw)
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_manifest_rejects_nonfinite_physical_values_at_the_typed_boundary(ascii_tmp_path, value):
+    raw = _raw_spec(ascii_tmp_path / "manifest-nonfinite")
+    specification = Path(raw["specification_path"])
+    manifest = json.loads(specification.read_text(encoding="utf-8"))
+    manifest["thermal_load"]["initial_temperature_K"] = value
+    specification.write_text(json.dumps(manifest), encoding="utf-8")
+    raw["specification_sha256"] = hashlib.sha256(specification.read_bytes()).hexdigest()
+
+    with pytest.raises(ValidationError, match="finite number"):
         normalize_thermo_optomechanical_replay_spec(raw)
 
 
@@ -460,6 +473,7 @@ def test_stage_evidence_resume_never_executes_a_completed_or_orphaned_stage_twic
     result = run_thermo_optomechanical_replay(spec, root, attempt=2, stage_executor=executor)
     assert result["completed"] is True
     assert result["skipped_complete"] == 1
+    assert result["recovered_from_evidence"] == 1
     assert calls.count("preflight") == 1
     assert calls.count("thermal_structural_solve") == 1
     assert calls == list(THERMO_OPTOMECHANICAL_STAGES)
@@ -519,12 +533,58 @@ def test_optical_evidence_preserves_tiny_negative_absorption_but_rejects_active_
     spec = normalize_thermo_optomechanical_replay_spec(_raw_spec(ascii_tmp_path / "rta"))
     payload = _payload("optical_replay", spec)
     payload["rows"][0]["deformed_rta"]["A"] = -1.0e-18
+    payload["rows"][0]["deformed_rta"]["closure_residual"] = (
+        sum(payload["rows"][0]["deformed_rta"][key] for key in ("R", "T", "A")) - 1.0
+    )
     evidence = build_stage_evidence(spec, "optical_replay", payload)
     assert evidence["payload"]["rows"][0]["deformed_rta"]["A"] == -1.0e-18
 
     payload["rows"][0]["deformed_rta"]["A"] = -1.0e-8
     with pytest.raises(ValueError, match="non-passive"):
         build_stage_evidence(spec, "optical_replay", payload)
+
+
+@pytest.mark.parametrize(
+    "stage_id,mutation,match",
+    [
+        (
+            "thermal_structural_solve",
+            lambda payload: payload["displacement"].__setitem__("delta_length_m", "bad"),
+            "displacement delta length",
+        ),
+        (
+            "thermal_structural_solve",
+            lambda payload: payload["expansion"].__setitem__("expected_delta_length_m", 2.0e-5),
+            "thermal expansion readback",
+        ),
+        (
+            "state_evidence",
+            lambda payload: payload["mesh"].__setitem__("inverted_element_count", False),
+            "mesh evidence",
+        ),
+        (
+            "optical_replay",
+            lambda payload: payload.__setitem__("derived_model_sha256", None),
+            "derived_model_sha256",
+        ),
+        (
+            "optical_replay",
+            lambda payload: payload["rows"][0]["baseline_rta"].__setitem__("closure_residual", 0.5),
+            "non-passive R/T/A",
+        ),
+    ],
+)
+def test_stage_evidence_rejects_unbound_or_malformed_scientific_values(
+    ascii_tmp_path, stage_id, mutation, match
+):
+    spec = normalize_thermo_optomechanical_replay_spec(
+        _raw_spec(ascii_tmp_path / f"invalid-{stage_id}")
+    )
+    payload = _payload(stage_id, spec)
+    mutation(payload)
+
+    with pytest.raises(ValueError, match=match):
+        build_stage_evidence(spec, stage_id, payload)
 
 
 class _Dataset:
@@ -656,6 +716,27 @@ def test_rollback_availability_requires_a_persisted_checkpoint(ascii_tmp_path):
     executor.checkpoint_path.parent.mkdir(parents=True)
     executor.checkpoint_path.write_bytes(b"checkpoint")
     assert executor._rollback_available() is True
+
+
+def test_deformation_transfer_readback_is_observed_twice_not_tautological(ascii_tmp_path):
+    spec = normalize_thermo_optomechanical_replay_spec(
+        _raw_spec(ascii_tmp_path / "deformation-readback")
+    )
+    executor = ThermoOptomechanicalComsolExecutor(None, spec, ascii_tmp_path / "job")
+    values = iter((1.0e-6, 2.0e-6))
+    executor._load_derived = lambda: None
+    executor._set_moving_mesh_active = lambda _enabled: None
+    executor._study = lambda _key: None
+    executor._bind_study_dataset = lambda _tag: None
+    executor._evaluate = lambda key: next(values) if key == "displacement_max" else 0.0
+
+    def save(path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"model")
+
+    executor._save = save
+
+    assert executor._deformation_transfer()["readback_exact"] is False
 
 
 def test_executor_uses_normal_save_for_current_model_and_save_copy_for_checkpoint(
@@ -830,3 +911,46 @@ def test_worker_rejects_changed_submission_manifest_before_client_start(ascii_tm
     assert state["status"] == "failed"
     assert "manifest changed before client startup" in state["last_error"]["message"]
     assert owner.acquired is False
+
+
+def test_worker_reconciles_cancellation_racing_the_starting_transition(ascii_tmp_path, monkeypatch):
+    spec = normalize_thermo_optomechanical_replay_spec(
+        _raw_spec(ascii_tmp_path / "startup-cancel-race")
+    )
+    store = JobStore(ascii_tmp_path / "startup-cancel-runtime" / "jobs")
+    job_id = store.create(
+        spec,
+        {
+            "schema_version": "2",
+            "status": "submitted",
+            "attempt": 1,
+            "worker_pid": None,
+            "worker_process_create_time": None,
+            "worker_command_signature": None,
+            "progress": {"completed": 0, "total": 5},
+            "last_error": None,
+        },
+    )
+    original_update = JobStore.update_state
+    injected = False
+
+    def racing_update(self, current_job_id, new_status=None, **kwargs):
+        nonlocal injected
+        if current_job_id == job_id and new_status == "starting" and not injected:
+            injected = True
+            self.request_cancel(current_job_id, requester_identity=process_identity(os.getpid()))
+        return original_update(self, current_job_id, new_status, **kwargs)
+
+    monkeypatch.setattr(JobStore, "update_state", racing_update)
+    code = run_worker(
+        str(store.root),
+        job_id,
+        ownership_factory=lambda *_args: pytest.fail("ownership must not start"),
+        client_factory=lambda _spec: pytest.fail("client must not start"),
+        native_cancel_enabled=False,
+    )
+    state = store.read_state(job_id)
+
+    assert code == 0
+    assert state["status"] == "cancel_requested"
+    assert state["cancel"]["cooperative_observation"]["target_attempt"] == 1

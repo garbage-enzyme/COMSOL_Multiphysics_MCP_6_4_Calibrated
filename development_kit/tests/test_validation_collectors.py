@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -42,7 +43,12 @@ def _normalized_point(tmp_path, collector_name="wave_optics_point_audit", inputs
     return spec, spec["points"][0], spec["points"][0]["collectors"][0]
 
 
-def _complete_runner(captured, artifact_name="inner.json"):
+def _complete_runner(
+    captured,
+    artifact_name="inner.json",
+    *,
+    producer="wave_optics_point_audit",
+):
     def run(*args, **kwargs):
         captured["args"] = args
         captured["kwargs"] = kwargs
@@ -53,9 +59,9 @@ def _complete_runner(captured, artifact_name="inner.json"):
             {
                 "schema_name": "comsol_mcp.physical_evidence",
                 "schema_version": "1.1.0",
-                "artifact_type": "wave_optics_point_audit",
+                "artifact_type": producer,
                 "producer": {
-                    "tool": "wave_optics_point_audit",
+                    "tool": producer,
                     "tool_schema_version": "test",
                 },
                 "identity": {
@@ -213,12 +219,52 @@ def test_reference_audit_uses_same_loaded_model_and_client(tmp_path):
         expected_source_sha256=spec["source_model_sha256"],
         session_state={"connected": True},
         ownership_preflight={"ready": True},
-        reference_audit_runner=_complete_runner(captured),
+        reference_audit_runner=_complete_runner(captured, producer="wave_optics_reference_audit"),
     )
 
     assert captured["args"] == ("MODEL", "CLIENT")
     assert "session_state" not in captured["kwargs"]
     assert "ownership_preflight" not in captured["kwargs"]
+
+
+def test_reference_audit_rejects_an_inner_manifest_with_wrong_identity(tmp_path):
+    spec, point, collector = _normalized_point(
+        tmp_path, collector_name="wave_optics_reference_audit"
+    )
+    runner = _complete_runner({}, producer="wave_optics_reference_audit")
+
+    def wrong_identity(*args, **kwargs):
+        result = runner(*args, **kwargs)
+        manifest = Path(result["artifacts"]["manifest"])
+        document = json.loads(manifest.read_text(encoding="utf-8"))
+        physical = document["physical_evidence"]
+        physical["identity"]["source_sha256"] = "0" * 64
+        body = {key: value for key, value in physical.items() if key != "contract_sha256"}
+        physical["contract_sha256"] = hashlib.sha256(
+            json.dumps(
+                body,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode("utf-8")
+        ).hexdigest()
+        manifest.write_text(json.dumps(document), encoding="utf-8")
+        return result
+
+    with pytest.raises(ValueError, match="identity differs"):
+        execute_physical_audit_collector(
+            point,
+            collector,
+            tmp_path / "reference-wrong-identity",
+            model="MODEL",
+            client="CLIENT",
+            model_name="fixture",
+            expected_source_sha256=spec["source_model_sha256"],
+            session_state={"connected": True},
+            ownership_preflight={"ready": True},
+            reference_audit_runner=wrong_identity,
+        )
 
 
 @pytest.mark.parametrize(

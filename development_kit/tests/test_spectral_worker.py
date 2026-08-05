@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import os
-import shutil
 import time
-import uuid
 from pathlib import Path
 
 import pytest
+import src.jobs.spectral_worker as spectral_worker_module
 from src.jobs.manager import JobManager
 from src.jobs.spectral_characterization import _SPECTRAL_CHARACTERIZATION_INPUT_FIELDS
 from src.jobs.spectral_worker import _run
@@ -78,13 +77,10 @@ def _telemetry(stage, _point_id, _model, _directory, elapsed):
 
 
 @pytest.fixture
-def ascii_root():
-    root = Path("D:/comsol_runtime_test") / f"pytest-spectral-{uuid.uuid4().hex}"
+def ascii_root(ascii_tmp_path):
+    root = ascii_tmp_path / "spectral"
     root.mkdir(parents=True)
-    try:
-        yield root
-    finally:
-        shutil.rmtree(root, ignore_errors=True)
+    return root
 
 
 def _created_job(tmp_path, ascii_root):
@@ -120,10 +116,23 @@ def test_worker_boolean_controls_require_exact_booleans(tmp_path, value):
         _run(str(tmp_path), "missing", native_cancel_enabled=value)
 
 
-def test_injected_worker_reuses_ownership_resource_and_cleanup_paths(tmp_path, ascii_root):
+def test_injected_worker_reuses_ownership_resource_and_cleanup_paths(
+    tmp_path, ascii_root, monkeypatch
+):
     store, spec, job_id = _created_job(tmp_path, ascii_root)
     ownership = _Ownership()
     client = _Client(spec["source_model_path"], attempt_mutation=True)
+    original_completed = spectral_worker_module.completed_spectral_point_fingerprints
+    completed_scans = 0
+
+    def counted_completed(*args, **kwargs):
+        nonlocal completed_scans
+        completed_scans += 1
+        return original_completed(*args, **kwargs)
+
+    monkeypatch.setattr(
+        spectral_worker_module, "completed_spectral_point_fingerprints", counted_completed
+    )
 
     def collect(point, _collector, artifact_dir):
         wavelength = point["wavelength"]["value"]
@@ -148,6 +157,7 @@ def test_injected_worker_reuses_ownership_resource_and_cleanup_paths(tmp_path, a
     assert client.mutation_blocked is True
     assert ownership.released is True
     assert len(store.read_resource_journal(job_id)) > 0
+    assert completed_scans == 1
 
 
 def test_all_durable_rows_can_complete_from_smoke_state_on_resume(tmp_path, ascii_root):
@@ -275,6 +285,74 @@ def test_spectral_error_remains_bound_while_cancellation_is_coordinating(tmp_pat
     assert state["status"] == "cancelling"
     assert state["cancel"]["worker_error"]["type"] == "RuntimeError"
     assert state["cancel"]["worker_error"]["message"] == "independent spectral failure"
+
+
+def test_native_cancel_monitor_failure_is_bound_to_the_attempt(tmp_path, ascii_root, monkeypatch):
+    store, spec, job_id = _created_job(tmp_path, ascii_root)
+    monkeypatch.setattr(
+        "src.jobs.native_cancel_probe.request_native_cancel_once",
+        lambda: (_ for _ in ()).throw(RuntimeError("injected native monitor failure")),
+    )
+    requested = False
+
+    def collect(point, _collector, artifact_dir):
+        nonlocal requested
+        if not requested:
+            requested = True
+            store.request_cancel(job_id, requester_identity=process_identity(os.getpid()))
+            time.sleep(0.1)
+        return write_fake_point_audit(artifact_dir, spec, point, absorption=0.5)
+
+    code = _run(
+        str(store.root),
+        job_id,
+        ownership_factory=lambda _root, _owner: _Ownership(),
+        client_factory=lambda _spec: _Client(spec["source_model_path"]),
+        collector_executor=collect,
+        telemetry_provider=_telemetry,
+        native_cancel_enabled=True,
+    )
+    state = store.read_state(job_id)
+
+    assert code == 1
+    assert state["status"] == "cancel_requested"
+    assert "native cancel monitor failed" in state["cancel"]["worker_error"]["message"]
+
+
+def test_final_source_rehash_failure_still_publishes_terminal_failure(
+    tmp_path, ascii_root, monkeypatch
+):
+    store, spec, job_id = _created_job(tmp_path, ascii_root)
+    original_hash = spectral_worker_module._sha256_file
+    calls = 0
+
+    def fail_final_hash(path):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise OSError("injected final source read failure")
+        return original_hash(path)
+
+    monkeypatch.setattr(spectral_worker_module, "_sha256_file", fail_final_hash)
+
+    def collect(point, _collector, artifact_dir):
+        return write_fake_point_audit(artifact_dir, spec, point, absorption=0.5)
+
+    code = _run(
+        str(store.root),
+        job_id,
+        ownership_factory=lambda _root, _owner: _Ownership(),
+        client_factory=lambda _spec: _Client(spec["source_model_path"]),
+        collector_executor=collect,
+        telemetry_provider=_telemetry,
+        native_cancel_enabled=False,
+    )
+    state = store.read_state(job_id)
+
+    assert code == 1
+    assert state["status"] == "failed"
+    assert state["last_error"]["type"] == "OSError"
+    assert "final source read failure" in state["last_error"]["message"]
 
 
 def test_manager_routes_exact_spectral_submissions_and_changed_specs(

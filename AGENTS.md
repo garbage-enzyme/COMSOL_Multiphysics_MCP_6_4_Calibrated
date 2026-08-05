@@ -126,6 +126,13 @@ hosted CI execution, and these timeouts together when collected tests reach
 2,750, or after another execution stall occurs and that stall's cause has been
 repaired, whichever happens first.
 
+On Windows, complete quality/release gates and their pytest basetemps must use
+a direct short child of `D:\mcp_tests` whose leaf is at most 12 characters, for
+example `D:\mcp_tests\a65b12q`. The gate adds deep run, xdist, test-name, job,
+and artifact components; descriptive nested roots can exceed Win32 path limits
+and cause misleading temporary-file `FileNotFoundError` failures. Treat a long
+artifact root as an invalid gate invocation, not as a test failure.
+
 For regression tests, gates, CI, builds, or any other wait with a usable ETA,
 wait once for the current ETA plus one minute. Do not poll early or send
 intermediate progress updates during that wait, inspect status/logs, or spend
