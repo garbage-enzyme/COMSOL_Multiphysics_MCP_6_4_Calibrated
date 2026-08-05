@@ -124,6 +124,15 @@ def test_absorptivity_requires_content_bound_applicable_assessment():
         )
 
 
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_thermal_radiation_contract_rejects_nonfinite_values(value):
+    request = _request([1.0e-6, 2.0e-6], [1.0, 1.0])
+    request["values_flat"][0] = value
+
+    with pytest.raises(ValidationError):
+        ThermalRadiationRequest.model_validate(request)
+
+
 def test_unit_emissivity_recovers_stefan_boltzmann_on_finite_domain():
     temperature = 500.0
     wavelengths = np.geomspace(0.1e-6, 1000.0e-6, 1800)

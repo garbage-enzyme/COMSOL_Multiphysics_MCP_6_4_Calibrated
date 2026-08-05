@@ -297,7 +297,7 @@ def _migrate_legacy_document(document: Any) -> Any:
     elif normalized_profile == "desktop_shared":
         migrated.setdefault("profile", {})["name"] = "core"
         shared["enabled"] = True
-    elif normalized_profile == "full" and raw_version in {None, "1.0.0", "1.1.0"}:
+    elif normalized_profile == "full" and raw_version in (None, "1.0.0", "1.1.0"):
         semantic.setdefault("enabled", True)
     else:
         semantic.setdefault("enabled", False)

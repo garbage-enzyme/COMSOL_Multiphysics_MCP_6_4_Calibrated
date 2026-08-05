@@ -56,8 +56,13 @@ def default_jobs_root(environ: dict[str, str] | None = None) -> Path:
     runtime_dir = default_runtime_dir(environ)
     if configured:
         jobs_dir = Path(configured)
-        explicit_runtime = environment.get("COMSOL_MCP_RUNTIME_DIR")
-        if explicit_runtime and jobs_dir.parent.resolve(strict=False) != runtime_dir.resolve(
+        source = os.environ if environ is None else environ
+        comparison_runtime = (
+            source.get("COMSOL_MCP_RUNTIME_DIR")
+            if "COMSOL_MCP_JOBS_DIR" in source
+            else environment.get("COMSOL_MCP_RUNTIME_DIR")
+        )
+        if comparison_runtime and jobs_dir.parent.resolve(strict=False) != runtime_dir.resolve(
             strict=False
         ):
             raise ValueError(

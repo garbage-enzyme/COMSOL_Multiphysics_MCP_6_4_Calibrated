@@ -40,6 +40,24 @@ def bounded_public_schema(value: dict[str, Any]) -> dict[str, Any]:
     validate_graph(value, 0)
     schema = deepcopy(value)
 
+    def clamp_maximum(node: dict[str, Any], key: str, limit: int | float) -> None:
+        current = node.get(key)
+        if current is None:
+            node[key] = limit
+        elif isinstance(current, bool) or not isinstance(current, (int, float)):
+            raise ValueError(f"public schema {key} must be numeric")
+        else:
+            node[key] = min(current, limit)
+
+    def clamp_minimum(node: dict[str, Any], key: str, limit: int | float) -> None:
+        current = node.get(key)
+        if current is None:
+            node[key] = limit
+        elif isinstance(current, bool) or not isinstance(current, (int, float)):
+            raise ValueError(f"public schema {key} must be numeric")
+        else:
+            node[key] = max(current, limit)
+
     def visit(node: Any) -> None:
         if isinstance(node, list):
             for item in node:
@@ -48,17 +66,20 @@ def bounded_public_schema(value: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(node, dict):
             return
         node_type = node.get("type")
-        if node_type == "string":
-            node.setdefault("maxLength", MAX_PUBLIC_STRING_LENGTH)
-        elif node_type == "array":
-            node.setdefault("maxItems", MAX_PUBLIC_COLLECTION_ITEMS)
-        elif node_type == "object":
-            node.setdefault("maxProperties", MAX_PUBLIC_OBJECT_FIELDS)
-            if "additionalProperties" not in node:
+        node_types = node_type if isinstance(node_type, list) else [node_type]
+        if "string" in node_types:
+            clamp_maximum(node, "maxLength", MAX_PUBLIC_STRING_LENGTH)
+        if "array" in node_types:
+            clamp_maximum(node, "maxItems", MAX_PUBLIC_COLLECTION_ITEMS)
+        if "object" in node_types:
+            clamp_maximum(node, "maxProperties", MAX_PUBLIC_OBJECT_FIELDS)
+            if node.get("additionalProperties") is True:
                 node["additionalProperties"] = False
-        elif node_type in {"integer", "number"}:
-            node.setdefault("minimum", -MAX_PUBLIC_NUMBER_MAGNITUDE)
-            node.setdefault("maximum", MAX_PUBLIC_NUMBER_MAGNITUDE)
+            elif "additionalProperties" not in node:
+                node["additionalProperties"] = False
+        if "integer" in node_types or "number" in node_types:
+            clamp_minimum(node, "minimum", -MAX_PUBLIC_NUMBER_MAGNITUDE)
+            clamp_maximum(node, "maximum", MAX_PUBLIC_NUMBER_MAGNITUDE)
         for nested in node.values():
             visit(nested)
 
@@ -108,10 +129,22 @@ def validate_public_structure(value: Any, *, path: str = "arguments", depth: int
 def structurally_guarded(function: Callable[..., Any]) -> Callable[..., Any]:
     """Validate all supplied arguments before entering a public tool function."""
     parameters = tuple(inspect.signature(function).parameters.values())
-    has_receiver = bool(parameters and parameters[0].name in {"self", "cls"})
+
+    def has_bound_receiver(args: tuple[Any, ...]) -> bool:
+        if not parameters or not args or parameters[0].name not in {"self", "cls"}:
+            return False
+        receiver = args[0]
+        owner = receiver if isinstance(receiver, type) else type(receiver)
+        try:
+            attribute = inspect.getattr_static(owner, function.__name__)
+        except AttributeError:
+            return False
+        if isinstance(attribute, (classmethod, staticmethod)):
+            attribute = attribute.__func__
+        return inspect.unwrap(attribute) is function
 
     def supplied_positional(args: tuple[Any, ...]) -> list[Any]:
-        return list(args[1:] if has_receiver and args else args)
+        return list(args[1:] if has_bound_receiver(args) else args)
 
     if inspect.iscoroutinefunction(function):
 

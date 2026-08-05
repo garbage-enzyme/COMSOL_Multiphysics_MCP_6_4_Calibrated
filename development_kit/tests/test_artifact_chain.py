@@ -284,3 +284,35 @@ def test_chain_rechecks_size_after_validating_supplied_producer(tmp_path, monkey
 
     with pytest.raises(ValueError, match="oversized"):
         validate_artifact_chain_manifest(manifest)
+
+
+def test_chain_rejects_recursion_missing_artifact_and_final_manifest_oversize(
+    tmp_path, monkeypatch
+):
+    nested = b'{"x":' * 10_000 + b"0" + b"}" * 10_000
+    with pytest.raises(ValueError, match="UTF-8 JSON"):
+        artifact_chain_module._decode_strict_json_object(nested, "artifact")
+
+    manifest = _chain(tmp_path)
+    (tmp_path / "raw.json").unlink()
+    with pytest.raises(ValueError, match="does not exist under artifact_root"):
+        verify_artifact_chain(manifest, artifact_root=tmp_path)
+
+    manifest = _chain(tmp_path)
+    final_size = len(artifact_chain_module._canonical_bytes(manifest))
+    monkeypatch.setattr(artifact_chain_module, "MAX_CHAIN_MANIFEST_BYTES", final_size - 1)
+    with pytest.raises(ValueError, match="oversized"):
+        build_artifact_chain_manifest(
+            chain_id=manifest["chain_id"],
+            artifacts=manifest["artifacts"],
+            terminal_artifact_ids=manifest["terminal_artifact_ids"],
+        )
+
+
+def test_chain_accepts_hash_bound_historical_producer_version(tmp_path, monkeypatch):
+    manifest = _chain(tmp_path)
+    manifest["producer"]["version"] = "0.1.0"
+    _rehash_manifest(manifest)
+    monkeypatch.setattr(artifact_chain_module, "__version__", "99.0.0")
+
+    assert validate_artifact_chain_manifest(manifest) == manifest

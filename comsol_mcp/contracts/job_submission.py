@@ -6,7 +6,7 @@ from typing import Annotated, Any, Literal, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
-from .structural import validate_public_structure
+from .structural import MAX_PUBLIC_NUMBER_MAGNITUDE, validate_public_structure
 from .thermo_optomechanical import ThermoOptomechanicalReplayInput
 
 MAX_PUBLIC_TEXT = 4096
@@ -24,10 +24,18 @@ BoundedObjectList: TypeAlias = Annotated[
     list[BoundedObject],
     Field(min_length=1, max_length=MAX_JOB_COLLECTION),
 ]
+BoundedSweepNumber: TypeAlias = Annotated[
+    int | float,
+    Field(
+        ge=-MAX_PUBLIC_NUMBER_MAGNITUDE,
+        le=MAX_PUBLIC_NUMBER_MAGNITUDE,
+        allow_inf_nan=False,
+    ),
+]
 
 
 class _JobInput(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
+    model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
 
 
 class StagedSweepInput(_JobInput):
@@ -35,7 +43,7 @@ class StagedSweepInput(_JobInput):
     source_model_path: BoundedPath
     parameter_name: BoundedText
     parameter_values: Annotated[
-        list[int | float],
+        list[BoundedSweepNumber],
         Field(min_length=1, max_length=MAX_JOB_COLLECTION),
     ]
     expressions: Annotated[

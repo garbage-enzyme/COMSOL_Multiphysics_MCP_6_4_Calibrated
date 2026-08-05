@@ -14,7 +14,7 @@ MAX_DATA_VALUES = 2048
 
 
 class _ClosedModel(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
+    model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
 
 
 class KirchhoffAssessmentRequest(_ClosedModel):

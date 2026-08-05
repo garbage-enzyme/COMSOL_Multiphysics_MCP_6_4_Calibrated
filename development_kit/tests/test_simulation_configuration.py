@@ -238,6 +238,27 @@ def test_physical_role_quantities_fail_at_the_typed_boundary(mutation):
         normalize_simulation_configuration(value)
 
 
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_configuration_rejects_nonfinite_declared_quantities(value):
+    configuration = _configuration()
+    configuration["layers"][0]["thickness"]["value"] = value
+
+    with pytest.raises(ValidationError):
+        normalize_simulation_configuration(configuration)
+
+
+def test_configuration_rejects_geometry_dimension_and_missing_material_reference():
+    wrong_dimension = _configuration()
+    wrong_dimension["geometry"][0]["quantity"] = _quantity(1.0, "eV", "energy")
+    with pytest.raises(ValidationError, match="length quantities"):
+        normalize_simulation_configuration(wrong_dimension)
+
+    missing_material = _configuration()
+    missing_material["layers"][0]["material_id"] = "missing"
+    with pytest.raises(ValidationError, match="declared material_id"):
+        normalize_simulation_configuration(missing_material)
+
+
 @pytest.mark.parametrize(
     "spec",
     [

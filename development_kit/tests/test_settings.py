@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from src.settings import (
     MAX_SETTINGS_BYTES,
     SETTINGS_PATH_ENV,
@@ -340,6 +341,20 @@ def test_legacy_synthetic_profiles_migrate_to_independent_feature_gates() -> Non
     assert full["errors"] == []
     assert full["settings"]["profile"]["name"] == "full"
     assert full["settings"]["semantic_docs"]["enabled"] is True
+
+
+@pytest.mark.parametrize("schema_version", [[], {}])
+def test_malformed_legacy_schema_version_falls_back_without_type_error(schema_version) -> None:
+    report = normalize_settings_document(
+        {
+            "schema_name": SETTINGS_SCHEMA,
+            "schema_version": schema_version,
+            "profile": {"name": "full"},
+        }
+    )
+
+    assert report["errors"]
+    assert report["settings"]["schema_version"] == SETTINGS_VERSION
 
 
 def test_current_feature_gates_are_boolean_composable_and_environment_visible(tmp_path) -> None:

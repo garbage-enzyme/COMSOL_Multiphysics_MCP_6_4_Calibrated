@@ -47,6 +47,7 @@ from comsol_mcp.tools.catalog import (
     validate_tool_specs,
 )
 from comsol_mcp.tools.session_status import get_session_status, set_session_status
+from comsol_mcp.utils.immutability import deep_freeze
 
 _TEXT = st.text(
     alphabet=st.characters(blacklist_categories=("Cs",)),
@@ -185,7 +186,7 @@ def test_public_schema_adds_limits_without_overwriting_explicit_policy() -> None
     assert result["properties"]["text"]["maxLength"] == MAX_PUBLIC_STRING_LENGTH
     assert result["properties"]["limited_text"]["maxLength"] == 7
     assert result["properties"]["items"]["maxItems"] == MAX_PUBLIC_COLLECTION_ITEMS
-    assert result["properties"]["closed"]["additionalProperties"] is True
+    assert result["properties"]["closed"]["additionalProperties"] is False
     assert result["properties"]["implicit_closed"]["additionalProperties"] is False
     assert result["properties"]["number"]["minimum"] == (-MAX_PUBLIC_NUMBER_MAGNITUDE)
     assert result["properties"]["bounded"] == {
@@ -193,6 +194,24 @@ def test_public_schema_adds_limits_without_overwriting_explicit_policy() -> None
         "minimum": 0,
         "maximum": 9,
     }
+
+
+def test_public_schema_clamps_nullable_and_prebounded_nodes() -> None:
+    result = bounded_public_schema(
+        {
+            "type": "object",
+            "properties": {
+                "nullable": {"type": ["string", "null"], "maxLength": 999_999},
+                "items": {"type": "array", "maxItems": 999_999},
+                "number": {"type": "number", "minimum": -1.0e309, "maximum": 1.0e309},
+            },
+        }
+    )
+
+    assert result["properties"]["nullable"]["maxLength"] == MAX_PUBLIC_STRING_LENGTH
+    assert result["properties"]["items"]["maxItems"] == MAX_PUBLIC_COLLECTION_ITEMS
+    assert result["properties"]["number"]["minimum"] == -MAX_PUBLIC_NUMBER_MAGNITUDE
+    assert result["properties"]["number"]["maximum"] == MAX_PUBLIC_NUMBER_MAGNITUDE
 
 
 def test_public_schema_rejects_cycles_and_overdeep_graphs() -> None:
@@ -290,6 +309,22 @@ def test_structural_guard_skips_only_declared_method_receivers() -> None:
 
     with pytest.raises(ValueError, match="unsupported public input type"):
         ordinary(object())
+
+    @structurally_guarded
+    def self(value: object) -> object:
+        return value
+
+    with pytest.raises(ValueError, match="unsupported public input type"):
+        self(object())
+
+
+def test_frozen_dict_rejects_in_place_union() -> None:
+    frozen = deep_freeze({"stable": True})
+
+    with pytest.raises(TypeError, match="cannot be mutated"):
+        frozen |= {"injected": True}
+
+    assert frozen == {"stable": True}
 
 
 @seed(20260721)

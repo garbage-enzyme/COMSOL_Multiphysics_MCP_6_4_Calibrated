@@ -132,6 +132,21 @@ class TestVersioning:
         assert result == tmp_path / "model" / "model_latest.mph"
         assert result.parent.is_dir()
 
+    def test_dotted_model_names_use_one_consistent_directory(self, tmp_path):
+        from src.utils.versioning import (
+            generate_latest_path,
+            generate_version_path,
+            get_model_directory,
+        )
+
+        version = Path(generate_version_path("v1.0.mph", base_path=tmp_path))
+        latest = Path(generate_latest_path("v1.0.mph", base_path=tmp_path))
+
+        assert get_model_directory("v1.0.mph", base_path=tmp_path) == tmp_path / "v1.0"
+        assert version.parent == tmp_path / "v1.0"
+        assert version.name.startswith("v1.0_")
+        assert latest == tmp_path / "v1.0" / "v1.0_latest.mph"
+
     def test_version_paths_reject_dot_model_names_and_avoid_same_second_collisions(self, tmp_path):
         from src.utils.versioning import generate_version_path
 

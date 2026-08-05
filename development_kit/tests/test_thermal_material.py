@@ -10,7 +10,11 @@ import pytest
 from pydantic import ValidationError
 from src.server import create_server
 
-from comsol_mcp.contracts.thermal_material import ThermalMaterialLedger
+from comsol_mcp.contracts.thermal_material import (
+    ExtrapolationPolicy,
+    ThermalMaterialLedger,
+    UncertaintyModel,
+)
 from comsol_mcp.evidence.thermal_material import (
     evaluate_thermal_material,
     normalize_thermal_material_ledger,
@@ -86,6 +90,33 @@ def _request(ledger, state_id="state_a", wavelength=2.0e-6, temperature=400.0):
         "wavelength_m": wavelength,
         "temperature_K": temperature,
     }
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        {"kind": "nk_absolute"},
+        {"kind": "epsilon_absolute"},
+        {"kind": "relative"},
+        {"kind": "relative", "relative_fraction": 0.1, "n_abs": 0.1},
+    ],
+)
+def test_uncertainty_kind_requires_only_its_meaningful_fields(value):
+    with pytest.raises(ValidationError):
+        UncertaintyModel.model_validate(value)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        {"mode": "none", "policy_source_sha256": "a" * 64},
+        {"mode": "none", "uncertainty_growth_per_fraction": 1.0},
+        {"mode": "source_backed_linear", "policy_source_sha256": "a" * 64},
+    ],
+)
+def test_extrapolation_policy_rejects_contradictory_fields(value):
+    with pytest.raises(ValidationError):
+        ExtrapolationPolicy.model_validate(value)
 
 
 def _decode(result):

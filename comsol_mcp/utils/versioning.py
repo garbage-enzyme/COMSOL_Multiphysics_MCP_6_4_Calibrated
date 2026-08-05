@@ -7,6 +7,14 @@ from pathlib import Path
 from .runtime_paths import default_runtime_dir
 
 
+def _model_stem(model_name: str) -> str:
+    name = Path(model_name).name
+    clean_name = name[:-4] if name.casefold().endswith(".mph") else name
+    if clean_name in {"", ".", ".."}:
+        raise ValueError("model_name must identify one safe model directory")
+    return clean_name
+
+
 def default_models_root() -> Path:
     """Return the writable runtime directory for versioned model copies."""
     return default_runtime_dir() / "models"
@@ -28,9 +36,7 @@ def get_model_directory(
         Path to the model directory
     """
     # Clean model name (remove .mph extension if present)
-    clean_name = Path(model_name).stem
-    if clean_name in {"", ".", ".."}:
-        raise ValueError("model_name must identify one safe model directory")
+    clean_name = _model_stem(model_name)
     root = Path(base_path).expanduser() if base_path is not None else default_models_root()
     return root / clean_name
 
@@ -66,10 +72,10 @@ def generate_version_path(model_name: str, base_path: str | Path | None = None) 
         Versioned file path with timestamp
     """
     # Clean model name
-    clean_name = Path(model_name).stem
+    clean_name = _model_stem(model_name)
 
     # Get model directory
-    model_dir = get_model_directory(clean_name, base_path=base_path)
+    model_dir = get_model_directory(model_name, base_path=base_path)
     model_dir.mkdir(parents=True, exist_ok=True)
 
     # Generate versioned filename
@@ -95,8 +101,8 @@ def generate_latest_path(
     Returns:
         Path for the latest version
     """
-    clean_name = Path(model_name).stem
-    model_dir = get_model_directory(clean_name, base_path=base_path)
+    clean_name = _model_stem(model_name)
+    model_dir = get_model_directory(model_name, base_path=base_path)
     model_dir.mkdir(parents=True, exist_ok=True)
     return str(model_dir / f"{clean_name}_latest.mph")
 
@@ -120,7 +126,7 @@ def list_model_versions(
     if not model_dir.exists():
         return []
 
-    clean_name = Path(model_name).stem
+    clean_name = _model_stem(model_name)
     latest_name = f"{clean_name}_latest.mph"
     versions = []
     for f in model_dir.glob("*.mph"):

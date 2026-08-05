@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 _Text = Annotated[str, Field(min_length=1, max_length=4096)]
 _Path = Annotated[str, Field(min_length=1, max_length=1024)]
@@ -64,6 +64,14 @@ class ThermoOpticalMaterialValidity(_ClosedModel):
     wavelength_max_m: _Positive
     temperature_min_K: _Positive
     temperature_max_K: _Positive
+
+    @model_validator(mode="after")
+    def validate_ranges(self) -> ThermoOpticalMaterialValidity:
+        if self.wavelength_max_m < self.wavelength_min_m:
+            raise ValueError("wavelength validity maximum must not be below minimum")
+        if self.temperature_max_K < self.temperature_min_K:
+            raise ValueError("temperature validity maximum must not be below minimum")
+        return self
 
 
 class ThermoOpticalMaterialTarget(_ClosedModel):

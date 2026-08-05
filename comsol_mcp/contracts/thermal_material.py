@@ -18,7 +18,7 @@ NonnegativeFloat = Annotated[float, Field(ge=0.0)]
 
 
 class _ClosedModel(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
+    model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
 
 
 class SourceRecord(_ClosedModel):
@@ -66,6 +66,24 @@ class UncertaintyModel(_ClosedModel):
     epsilon_imag_abs: NonnegativeFloat = 0.0
     relative_fraction: Annotated[float, Field(ge=0.0, le=10.0)] = 0.0
 
+    @model_validator(mode="after")
+    def validate_kind_fields(self) -> UncertaintyModel:
+        nk = (self.n_abs, self.k_abs)
+        epsilon = (self.epsilon_real_abs, self.epsilon_imag_abs)
+        if self.kind == "nk_absolute":
+            if not any(value > 0.0 for value in nk) or any(value != 0.0 for value in epsilon):
+                raise ValueError("nk_absolute uncertainty requires only nonzero n/k bounds")
+            if self.relative_fraction != 0.0:
+                raise ValueError("absolute uncertainty cannot declare relative_fraction")
+        elif self.kind == "epsilon_absolute":
+            if not any(value > 0.0 for value in epsilon) or any(value != 0.0 for value in nk):
+                raise ValueError("epsilon_absolute uncertainty requires only epsilon bounds")
+            if self.relative_fraction != 0.0:
+                raise ValueError("absolute uncertainty cannot declare relative_fraction")
+        elif self.relative_fraction <= 0.0 or any(value != 0.0 for value in (*nk, *epsilon)):
+            raise ValueError("relative uncertainty requires only a positive relative_fraction")
+        return self
+
 
 class ExtrapolationPolicy(_ClosedModel):
     mode: Literal["none", "source_backed_linear"] = "none"
@@ -75,10 +93,17 @@ class ExtrapolationPolicy(_ClosedModel):
 
     @model_validator(mode="after")
     def validate_source_backing(self) -> ExtrapolationPolicy:
-        if self.mode == "source_backed_linear" and self.policy_source_sha256 is None:
-            raise ValueError("source-backed extrapolation requires policy_source_sha256")
-        if self.mode == "none" and self.maximum_fraction_outside_domain != 0.0:
-            raise ValueError("disabled extrapolation cannot declare a nonzero range")
+        if self.mode == "source_backed_linear":
+            if self.policy_source_sha256 is None:
+                raise ValueError("source-backed extrapolation requires policy_source_sha256")
+            if self.maximum_fraction_outside_domain <= 0.0:
+                raise ValueError("source-backed extrapolation requires a positive range")
+        elif (
+            self.policy_source_sha256 is not None
+            or self.maximum_fraction_outside_domain != 0.0
+            or self.uncertainty_growth_per_fraction != 0.0
+        ):
+            raise ValueError("disabled extrapolation cannot declare source-backed fields")
         return self
 
 

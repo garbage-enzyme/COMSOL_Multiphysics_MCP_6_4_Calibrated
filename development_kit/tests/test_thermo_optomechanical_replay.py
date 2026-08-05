@@ -32,6 +32,7 @@ from src.jobs.thermo_optomechanical_replay_runner import (
 from src.jobs.thermo_optomechanical_replay_worker import _run as run_worker
 from src.tools.jobs import _preview_job_spec
 
+from comsol_mcp.contracts.thermo_optomechanical import ThermoOpticalMaterialValidity
 from development_kit.scripts import thermo_optomechanical_licensed_gate as licensed_gate
 
 
@@ -63,9 +64,27 @@ def _material_state(source: Path) -> dict:
     }
 
 
-def test_licensed_gate_cleanup_failure_preserves_verdict_and_writes_fallback(
-    tmp_path, monkeypatch
-):
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"wavelength_min_m": 3.0e-6, "wavelength_max_m": 1.0e-6},
+        {"temperature_min_K": 500.0, "temperature_max_K": 250.0},
+    ],
+)
+def test_material_validity_rejects_inverted_ranges(overrides):
+    value = {
+        "wavelength_min_m": 1.0e-6,
+        "wavelength_max_m": 3.0e-6,
+        "temperature_min_K": 250.0,
+        "temperature_max_K": 500.0,
+        **overrides,
+    }
+
+    with pytest.raises(ValidationError):
+        ThermoOpticalMaterialValidity.model_validate(value)
+
+
+def test_licensed_gate_cleanup_failure_preserves_verdict_and_writes_fallback(tmp_path, monkeypatch):
     class BrokenOwner:
         def status(self, *, require_fresh_inventory):
             assert require_fresh_inventory is True
