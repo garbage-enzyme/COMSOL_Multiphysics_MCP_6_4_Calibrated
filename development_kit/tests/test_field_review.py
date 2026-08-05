@@ -27,7 +27,7 @@ def test_field_review_uses_the_isolated_renderer_timeout_default():
         .parameters["render_timeout_seconds"]
         .default
     )
-    assert default == field_review_module.DEFAULT_RENDER_TIMEOUT_SECONDS == 60.0
+    assert default == field_review_module.DEFAULT_RENDER_TIMEOUT_SECONDS == 120.0
 
 
 def _sha256(path: Path) -> str:

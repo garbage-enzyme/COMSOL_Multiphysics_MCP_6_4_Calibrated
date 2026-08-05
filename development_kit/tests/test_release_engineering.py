@@ -962,6 +962,29 @@ def test_installed_direct_entry_probe_cleans_root_after_child_failure(tmp_path, 
     assert not (tmp_path / "settings-gui-direct-entry-probe").exists()
 
 
+def test_installed_probe_accepts_transient_waited_launcher_enumeration(monkeypatch):
+    snapshots = iter([{101: "comsol-mcp-settings.exe"}, {}])
+    monkeypatch.setattr(
+        installed_package_probe,
+        "_forbidden_process_snapshot",
+        lambda: next(snapshots),
+    )
+
+    assert installed_package_probe._wait_for_forbidden_process_exit({}) == {}
+
+
+def test_installed_probe_rejects_persistent_forbidden_process(monkeypatch):
+    monkeypatch.setattr(
+        installed_package_probe,
+        "_forbidden_process_snapshot",
+        lambda: {101: "comsol-mcp-settings.exe"},
+    )
+
+    assert installed_package_probe._wait_for_forbidden_process_exit({}, settle_seconds=0) == {
+        101: "comsol-mcp-settings.exe"
+    }
+
+
 def test_release_receipt_accepts_external_lock_and_probes_drop_pythonpath(
     tmp_path,
     monkeypatch,

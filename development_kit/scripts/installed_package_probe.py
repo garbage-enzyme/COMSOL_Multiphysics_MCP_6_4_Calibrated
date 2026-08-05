@@ -11,6 +11,7 @@ import shutil
 import struct
 import subprocess
 import sys
+import time
 from importlib.metadata import entry_points, requires, version
 from importlib.resources import files
 from importlib.util import find_spec
@@ -130,6 +131,22 @@ def _forbidden_process_snapshot() -> dict[int, str]:
     return result
 
 
+def _wait_for_forbidden_process_exit(
+    baseline: dict[int, str],
+    *,
+    settle_seconds: float = 2.0,
+    poll_seconds: float = 0.05,
+) -> dict[int, str]:
+    """Allow an already-waited Windows launcher to leave process enumeration."""
+    deadline = time.monotonic() + settle_seconds
+    while True:
+        observed = _forbidden_process_snapshot()
+        new_processes = {pid: name for pid, name in observed.items() if pid not in baseline}
+        if not new_processes or time.monotonic() >= deadline:
+            return new_processes
+        time.sleep(poll_seconds)
+
+
 def _probe_direct_settings_entry(output_parent: Path) -> dict:
     from settings_gui.desktop_shortcut import (
         SHORTCUT_NAME,
@@ -178,8 +195,7 @@ def _probe_direct_settings_entry(output_parent: Path) -> dict:
             raise AssertionError("validate-only created a settings or temporary file")
         if _shortcut_bytes_identity(shortcut) != shortcut_before:
             raise AssertionError("validate-only changed the Desktop shortcut")
-        processes_after = _forbidden_process_snapshot()
-        new_processes = sorted(set(processes_after) - set(processes_before))
+        new_processes = _wait_for_forbidden_process_exit(processes_before)
         if new_processes:
             raise AssertionError("validate-only started a forbidden process")
     finally:

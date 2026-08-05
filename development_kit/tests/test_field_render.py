@@ -11,6 +11,10 @@ import src.evidence.field_render as field_render_module
 from src.evidence.field_render import render_field_png_bundle
 
 
+def test_field_renderer_default_timeout_covers_hosted_cold_start():
+    assert field_render_module.DEFAULT_RENDER_TIMEOUT_SECONDS == 120.0
+
+
 def _array(path: Path, offset: float = 0.0, *, negative: bool = False):
     x = np.linspace(-1.0, 1.0, 16)
     y = np.linspace(-2.0, 2.0, 12)
