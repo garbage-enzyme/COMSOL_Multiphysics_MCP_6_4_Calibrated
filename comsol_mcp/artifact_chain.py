@@ -20,6 +20,7 @@ MAX_CHAIN_ARTIFACTS = 256
 MAX_CHAIN_MANIFEST_BYTES = 1024 * 1024
 MAX_ARTIFACT_BYTES = 16 * 1024 * 1024
 MAX_CHAIN_BYTES = 256 * 1024 * 1024
+MAX_ARTIFACT_JSON_NESTING_DEPTH = 64
 
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 _IDENTIFIER = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]{0,127}$")
@@ -75,6 +76,18 @@ def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return result
 
 
+def _validate_json_nesting(value: Any, label: str) -> None:
+    pending = [(value, 0)]
+    while pending:
+        node, depth = pending.pop()
+        if depth > MAX_ARTIFACT_JSON_NESTING_DEPTH:
+            raise ValueError(f"{label} exceeds the JSON nesting limit")
+        if isinstance(node, dict):
+            pending.extend((item, depth + 1) for item in node.values())
+        elif isinstance(node, list):
+            pending.extend((item, depth + 1) for item in node)
+
+
 def _decode_strict_json_object(payload: bytes, label: str) -> dict[str, Any]:
     try:
         document = json.loads(
@@ -87,6 +100,7 @@ def _decode_strict_json_object(payload: bytes, label: str) -> dict[str, Any]:
         raise ValueError(f"{label} must contain UTF-8 JSON") from exc
     if not isinstance(document, dict):
         raise ValueError(f"{label} JSON must contain one object")
+    _validate_json_nesting(document, label)
     return document
 
 

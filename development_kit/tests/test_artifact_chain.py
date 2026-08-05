@@ -289,8 +289,13 @@ def test_chain_rechecks_size_after_validating_supplied_producer(tmp_path, monkey
 def test_chain_rejects_recursion_missing_artifact_and_final_manifest_oversize(
     tmp_path, monkeypatch
 ):
-    nested = b'{"x":' * 10_000 + b"0" + b"}" * 10_000
-    with pytest.raises(ValueError, match="UTF-8 JSON"):
+    accepted_depth = artifact_chain_module.MAX_ARTIFACT_JSON_NESTING_DEPTH
+    accepted = b'{"x":' * accepted_depth + b"0" + b"}" * accepted_depth
+    assert artifact_chain_module._decode_strict_json_object(accepted, "artifact")
+
+    depth = artifact_chain_module.MAX_ARTIFACT_JSON_NESTING_DEPTH + 1
+    nested = b'{"x":' * depth + b"0" + b"}" * depth
+    with pytest.raises(ValueError, match="nesting limit"):
         artifact_chain_module._decode_strict_json_object(nested, "artifact")
 
     manifest = _chain(tmp_path)
