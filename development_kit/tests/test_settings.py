@@ -51,6 +51,14 @@ def test_project_settings_is_grouped_and_contains_no_embedded_comments():
     assert status["configuration_state"] == "valid"
     assert status["settings_errors"] == []
     assert all(not key.startswith("_comment") for key in _walk_keys(document))
+    serialized = json.dumps(document, sort_keys=True)
+    assert len(serialized.encode("utf-8")) <= 64 * 1024
+    assert str(Path.home()).casefold() not in serialized.casefold()
+    assert not any(
+        marker in key.casefold()
+        for key in _walk_keys(document)
+        for marker in ("password", "secret", "api_key", "access_token")
+    )
 
 
 def _walk_keys(value):
@@ -111,9 +119,10 @@ def test_invalid_value_keeps_only_that_setting_at_default_and_reports_it(tmp_pat
     status = settings_status(environment)
 
     assert settings["profile"]["name"] == "core"
-    assert settings["runtime"]["directory"] == default_settings_document(environ=environment)[
-        "runtime"
-    ]["directory"]
+    assert (
+        settings["runtime"]["directory"]
+        == default_settings_document(environ=environment)["runtime"]["directory"]
+    )
     assert settings["runtime"]["jobs_directory"] == str(Path("D:/valid/jobs"))
     assert settings["shared_server"]["enabled"] is False
     assert status["configuration_state"] == "degraded"
@@ -178,9 +187,10 @@ def test_expanduser_runtime_error_isolated_to_the_invalid_path(tmp_path, monkeyp
     status = settings_status(environment)
 
     assert settings["profile"]["name"] == "wave_optics"
-    assert settings["runtime"]["directory"] == default_settings_document(environ=environment)[
-        "runtime"
-    ]["directory"]
+    assert (
+        settings["runtime"]["directory"]
+        == default_settings_document(environ=environment)["runtime"]["directory"]
+    )
     assert settings["shared_server"]["enabled"] is True
     assert [item["path"] for item in status["settings_errors"]] == ["settings.runtime.directory"]
 

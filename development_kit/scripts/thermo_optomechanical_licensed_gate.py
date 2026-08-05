@@ -170,15 +170,34 @@ def _executor_diagnostic(executor: Any) -> dict[str, Any]:
     if model is None:
         return {"model_available": False}
     java = model.java
-    component = java.component("comp1")
-    entities = {
-        "heat_transfer": component.physics("ht"),
-        "solid_mechanics": component.physics("solid"),
-        "wave_optics": component.physics("ewfd"),
-    }
+    errors = []
+    try:
+        component = java.component("comp1")
+    except Exception as exc:
+        return {
+            "model_available": True,
+            "component_available": False,
+            "errors": [{"tag": "comp1", "error_type": type(exc).__name__}],
+            "studies": {},
+            "datasets": [],
+        }
+    entities = {}
+    for name, tag in (
+        ("heat_transfer", "ht"),
+        ("solid_mechanics", "solid"),
+        ("wave_optics", "ewfd"),
+    ):
+        try:
+            entities[name] = component.physics(tag)
+        except Exception as exc:
+            errors.append({"tag": tag, "error_type": type(exc).__name__})
     studies = {}
     for study_tag in ("std_ts", "std_ale", "std_opt"):
-        study = java.study(study_tag)
+        try:
+            study = java.study(study_tag)
+        except Exception as exc:
+            errors.append({"tag": study_tag, "error_type": type(exc).__name__})
+            continue
         step_tags = [str(value) for value in list(study.feature().tags())]
         step_rows = []
         for step_tag in step_tags:
@@ -223,9 +242,15 @@ def _executor_diagnostic(executor: Any) -> dict[str, Any]:
         datasets.append(row)
     return {
         "model_available": True,
-        "solid_field_readback": _physics_field_readback(entities["solid_mechanics"]),
+        "component_available": True,
+        "solid_field_readback": (
+            _physics_field_readback(entities["solid_mechanics"])
+            if "solid_mechanics" in entities
+            else []
+        ),
         "studies": studies,
         "datasets": datasets,
+        "errors": errors,
     }
 
 
