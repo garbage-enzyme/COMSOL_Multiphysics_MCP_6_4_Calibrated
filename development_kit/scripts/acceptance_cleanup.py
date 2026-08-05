@@ -6,6 +6,14 @@ from collections.abc import Callable
 from typing import Any
 
 
+def _default_cleanup_passed(value: Any) -> bool:
+    if value is False:
+        return False
+    if isinstance(value, dict) and "success" in value:
+        return value.get("success") is True
+    return True
+
+
 class CleanupRecorder:
     """Run independent cleanup steps and make their outcome part of success."""
 
@@ -18,7 +26,7 @@ class CleanupRecorder:
         name: str,
         operation: Callable[[], Any],
         *,
-        passed: Callable[[Any], bool] = lambda _value: True,
+        passed: Callable[[Any], bool] = _default_cleanup_passed,
         expose_result: bool = True,
     ) -> Any:
         try:
@@ -42,25 +50,19 @@ class CleanupRecorder:
         return value
 
     def finalize(self) -> int:
-        cleanup_passed = all(
-            step.get("passed") is True for step in self.steps.values()
-        )
+        cleanup_passed = all(step.get("passed") is True for step in self.steps.values())
         self.result["cleanup"] = {
             "passed": cleanup_passed,
             "steps": dict(self.steps),
         }
-        self.result["success"] = (
-            self.result.get("success") is True and cleanup_passed
-        )
+        self.result["success"] = self.result.get("success") is True and cleanup_passed
         return 0 if self.result["success"] else 1
 
 
 def lease_released(value: Any) -> bool:
     """Require an owned lease to report both successful and actual release."""
     return (
-        isinstance(value, dict)
-        and value.get("success") is True
-        and value.get("released") is True
+        isinstance(value, dict) and value.get("success") is True and value.get("released") is True
     )
 
 

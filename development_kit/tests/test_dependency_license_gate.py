@@ -154,6 +154,32 @@ def test_review_schema_and_dependency_declarations_are_bounded(tmp_path: Path) -
     with pytest.raises(ValueError, match="invalid"):
         declared_runtime_dependencies(malformed)
 
+    marked = tmp_path / "marked.toml"
+    marked.write_text(
+        "[project]\ndependencies = [\n"
+        "  \"same_pkg>=1; sys_platform == 'win32'\",\n"
+        "  \"same-pkg<2; sys_platform != 'win32'\",\n"
+        "]\n",
+        encoding="utf-8",
+    )
+    assert declared_runtime_dependencies(marked) == ("same-pkg",)
+
+
+@pytest.mark.parametrize(
+    "signal",
+    ["x" * 510 + ":MIT", "license:MIT\rhidden", "license:MIT\0hidden"],
+)
+def test_review_rejects_signals_that_installed_metadata_cannot_emit(
+    tmp_path: Path, signal: str
+) -> None:
+    value = json.loads(REVIEW.read_text(encoding="utf-8"))
+    value["entries"][0]["accepted_signals"] = [signal]
+    review = tmp_path / "review.json"
+    review.write_text(json.dumps(value), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="entry is invalid"):
+        load_license_review(review)
+
 
 def test_future_review_date_fails_closed() -> None:
     receipt = build_license_receipt(
@@ -181,6 +207,51 @@ def test_installed_license_expression_and_classifiers_are_bounded() -> None:
         classifiers["Classifier"] = f"License :: Example :: {index}"
     with pytest.raises(ValueError, match="classifiers"):
         distribution_license_record(SimpleNamespace(metadata=classifiers))
+
+
+def test_invalid_installed_metadata_is_a_structured_receipt_failure(tmp_path: Path) -> None:
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text('[project]\ndependencies = ["alpha>=1"]\n', encoding="utf-8")
+    review_value = json.loads(REVIEW.read_text(encoding="utf-8"))
+    review_value["entries"] = [
+        {"dependency": "alpha", "accepted_signals": ["license:MIT"], "reason": "Reviewed."}
+    ]
+    review = tmp_path / "review.json"
+    review.write_text(json.dumps(review_value), encoding="utf-8")
+
+    receipt = build_license_receipt(
+        pyproject,
+        review,
+        as_of=date(2026, 8, 4),
+        distribution_provider=lambda _name: _metadata("invalid name", "1.0", "MIT"),
+    )
+
+    assert {item["reason_code"] for item in receipt["failures"]} == {"installed_metadata_invalid"}
+
+
+def test_every_observed_license_signal_requires_review_coverage(tmp_path: Path) -> None:
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text('[project]\ndependencies = ["alpha>=1"]\n', encoding="utf-8")
+    review_value = json.loads(REVIEW.read_text(encoding="utf-8"))
+    review_value["entries"] = [
+        {"dependency": "alpha", "accepted_signals": ["license:MIT"], "reason": "Reviewed."}
+    ]
+    review = tmp_path / "review.json"
+    review.write_text(json.dumps(review_value), encoding="utf-8")
+    metadata = Message()
+    metadata["Name"] = "alpha"
+    metadata["Version"] = "1.0"
+    metadata["License"] = "MIT"
+    metadata["License-Expression"] = "MIT"
+
+    receipt = build_license_receipt(
+        pyproject,
+        review,
+        as_of=date(2026, 8, 4),
+        distribution_provider=lambda _name: SimpleNamespace(metadata=metadata),
+    )
+
+    assert {item["reason_code"] for item in receipt["failures"]} == {"license_metadata_unmatched"}
 
 
 def test_license_receipt_hashes_the_same_single_input_snapshots(

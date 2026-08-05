@@ -48,7 +48,7 @@ def _relevant_processes() -> list[dict[str, Any]]:
     processes: list[dict[str, Any]] = []
     for process in psutil.process_iter(("pid", "name", "create_time")):
         try:
-            name = str(process.info.get("name") or "").removesuffix(".exe").casefold()
+            name = str(process.info.get("name") or "").casefold().removesuffix(".exe")
             if name in PROCESS_NAMES:
                 processes.append(
                     {

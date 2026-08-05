@@ -4,8 +4,16 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 from development_kit.scripts import standalone_licensed_gate as gate
+
+
+def test_relevant_processes_normalize_uppercase_executable_suffix(monkeypatch) -> None:
+    process = SimpleNamespace(info={"pid": 17, "name": "JAVA.EXE", "create_time": 2.0})
+    monkeypatch.setattr(gate.psutil, "process_iter", lambda _fields: [process])
+
+    assert gate._relevant_processes() == [{"pid": 17, "name": "java", "process_create_time": 2.0}]
 
 
 def test_acceptance_runner_composes_pause_resume_and_path_free_receipt(

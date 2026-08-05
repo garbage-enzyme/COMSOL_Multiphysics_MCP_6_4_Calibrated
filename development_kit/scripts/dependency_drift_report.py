@@ -23,7 +23,9 @@ REPORT_SCHEMA = "comsol_mcp.dependency_drift_report"
 REPORT_VERSION = "2.1.0"
 BOOTSTRAP_TOOLS = frozenset({"pip", "setuptools", "wheel"})
 _NORMALIZE_NAME = re.compile(r"[-_.]+")
-_LOCK_REQUIREMENT = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)==([^\s\\]+)")
+_LOCK_REQUIREMENT = re.compile(
+    r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)==([^\s\\;#]+)\s*(?:\\\s*)?(?:#.*)?$"
+)
 _COMMIT = re.compile(r"^[0-9a-f]{40}$")
 
 
@@ -51,6 +53,8 @@ def _display_path(path: Path, root: Path) -> str:
 
 
 def _declared_specifier(raw: str, requirement: Requirement) -> str | None:
+    if requirement.url is not None:
+        return None
     declaration = raw.partition(";")[0].strip()
     match = re.match(r"^[A-Za-z0-9][A-Za-z0-9._-]*(?:\[[^]]+\])?\s*(.*)$", declaration)
     if match is not None and match.group(1).strip():
@@ -235,10 +239,11 @@ def build_dependency_drift_report(
     reviewed_raw = production.get("direct_dependencies", {}) if isinstance(production, dict) else {}
     if not isinstance(reviewed_raw, dict):
         raise ValueError("reviewed direct dependencies must be an object")
-    reviewed = {
-        canonical_distribution_name(str(name)): str(version)
-        for name, version in reviewed_raw.items()
-    }
+    reviewed: dict[str, str] = {}
+    for name, version in reviewed_raw.items():
+        if not isinstance(name, str) or not isinstance(version, str) or not version:
+            raise ValueError("reviewed direct dependency names and versions must be strings")
+        reviewed[canonical_distribution_name(name)] = version
     optional_reviewed = production.get("optional_dependencies", {})
     if not isinstance(optional_reviewed, dict):
         raise ValueError("reviewed optional dependencies must be an object")
@@ -246,7 +251,9 @@ def build_dependency_drift_report(
         if not isinstance(group, dict):
             raise ValueError("reviewed optional dependency group must be an object")
         for name, version in group.items():
-            reviewed[canonical_distribution_name(str(name))] = str(version)
+            if not isinstance(name, str) or not isinstance(version, str) or not version:
+                raise ValueError("reviewed optional dependency names and versions must be strings")
+            reviewed[canonical_distribution_name(name)] = version
     lock_record = tested.get("release_lock")
     if not isinstance(lock_record, dict):
         raise ValueError("tested versions manifest is missing release_lock")

@@ -189,6 +189,21 @@ def test_saved_readback_mode_uses_distinct_source_and_working_paths():
     assert os.path.normcase(str(source)) != os.path.normcase(str(working))
 
 
+def test_saved_model_readback_requires_exact_shared_edit_value(monkeypatch):
+    monkeypatch.setattr(
+        gate,
+        "_parameter_expressions",
+        lambda _model: {
+            gate.MCP_PARAMETER: gate.MCP_PARAMETER_VALUE,
+            gate.DESKTOP_PARAMETER: "29[mm]",
+            gate.SAVED_MODEL_PARAMETER: "wrong",
+        },
+    )
+
+    with pytest.raises(RuntimeError, match="shared edit parameter"):
+        gate._saved_model_readback(object(), "29[mm]")
+
+
 def test_saved_mode_rejects_lexically_distinct_aliases_of_one_path():
     source = Path(_ascii_source())
     aliased_working = source.parent / "unused" / ".." / source.name

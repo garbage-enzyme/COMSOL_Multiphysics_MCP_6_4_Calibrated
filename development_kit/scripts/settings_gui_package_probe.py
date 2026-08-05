@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import configparser
 import json
 import tarfile
 import zipfile
@@ -31,6 +32,18 @@ def _sdist_members(path: Path) -> set[str]:
         raise ValueError("sdist must contain one archive root")
     root = next(iter(roots))
     return {name.removeprefix(root + "/") for name in names}
+
+
+def _entry_point_target(value: str, section: str, name: str) -> str | None:
+    parser = configparser.ConfigParser(interpolation=None)
+    parser.optionxform = str
+    try:
+        parser.read_string(value)
+    except configparser.Error as exc:
+        raise ValueError("wheel entry_points.txt is invalid") from exc
+    if not parser.has_section(section):
+        return None
+    return parser.get(section, name, fallback=None)
 
 
 def inspect_settings_gui_distributions(dist: Path) -> dict:
@@ -69,9 +82,15 @@ def inspect_settings_gui_distributions(dist: Path) -> dict:
         raise ValueError("wheel contains Settings GUI tests")
     if any(name.endswith((".po", ".pot")) for name in wheel_names):
         raise ValueError("wheel contains translator source catalogs")
-    if "comsol-mcp-settings = settings_gui.__main__:main" not in entry_points:
+    if (
+        _entry_point_target(entry_points, "console_scripts", "comsol-mcp-settings")
+        != "settings_gui.__main__:main"
+    ):
         raise ValueError("wheel is missing the Settings GUI console entry point")
-    if "comsol-mcp-settings-gui = settings_gui.__main__:main" not in entry_points:
+    if (
+        _entry_point_target(entry_points, "gui_scripts", "comsol-mcp-settings-gui")
+        != "settings_gui.__main__:main"
+    ):
         raise ValueError("wheel is missing the Settings GUI GUI entry point")
     return {
         "schema_name": "comsol_mcp.settings_gui_package_receipt",

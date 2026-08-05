@@ -33,6 +33,7 @@ def _archives(
     include_test: bool = False,
     include_shortcut_adapter: bool = True,
     include_gui_entry: bool = True,
+    entry_points_text: str | None = None,
 ) -> Path:
     dist = root / "dist"
     dist.mkdir()
@@ -44,12 +45,11 @@ def _archives(
                 f"settings_gui/locales/{language}/LC_MESSAGES/settings_gui.mo",
                 b"mo",
             )
-        entry_points = "[console_scripts]\ncomsol-mcp-settings = settings_gui.__main__:main\n"
-        if include_gui_entry:
-            entry_points += (
-                "[gui_scripts]\n"
-                "comsol-mcp-settings-gui = settings_gui.__main__:main\n"
-            )
+        entry_points = entry_points_text
+        if entry_points is None:
+            entry_points = "[console_scripts]\ncomsol-mcp-settings = settings_gui.__main__:main\n"
+        if include_gui_entry and entry_points_text is None:
+            entry_points += "[gui_scripts]\ncomsol-mcp-settings-gui = settings_gui.__main__:main\n"
         archive.writestr("comsol_mcp-0.6.0.dist-info/entry_points.txt", entry_points)
         if include_icon:
             archive.writestr(ICON_MEMBER, b"ico")
@@ -122,6 +122,29 @@ def test_distribution_probe_rejects_missing_shortcut_adapter(tmp_path: Path) -> 
 def test_distribution_probe_rejects_missing_gui_subsystem_entry(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="GUI entry point"):
         inspect_settings_gui_distributions(_archives(tmp_path, include_gui_entry=False))
+
+
+@pytest.mark.parametrize(
+    "entry_points",
+    [
+        (
+            "[console_scripts]\n"
+            "comsol-mcp-settings2 = settings_gui.__main__:main\n"
+            "[gui_scripts]\n"
+            "comsol-mcp-settings-gui = settings_gui.__main__:main_gui\n"
+        ),
+        (
+            "[console_scripts]\n"
+            "comsol-mcp-settings = settings_gui.__main__:main\n"
+            "comsol-mcp-settings-gui = settings_gui.__main__:main\n"
+        ),
+    ],
+)
+def test_distribution_probe_requires_exact_section_bound_entry_points(
+    tmp_path: Path, entry_points: str
+) -> None:
+    with pytest.raises(ValueError, match="entry point"):
+        inspect_settings_gui_distributions(_archives(tmp_path, entry_points_text=entry_points))
 
 
 def test_visual_capture_direct_script_uses_current_source_tab_contract() -> None:

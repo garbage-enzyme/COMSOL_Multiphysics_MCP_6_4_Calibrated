@@ -110,6 +110,8 @@ jobs:
       - name: Audit the exact locked runtime and apply review policy
         run: |
           python -m pip_audit --requirement constraints/release_locked_py314.txt --no-deps --format json --output pip-audit.json
+          $auditExitCode = $LASTEXITCODE
+          if ($auditExitCode -gt 1) { exit $auditExitCode }
           if (-not (Test-Path pip-audit.json)) { exit 1 }
           python development_kit/scripts/security_gate.py --report pip-audit.json --allowlist development_kit/release/vulnerability_allowlist.json --output security-receipt.json
 
@@ -141,6 +143,7 @@ jobs:
       - name: Check GUI formatting and lint
         run: |
           python -m ruff format --check settings_gui comsol_mcp/settings_gui_handshake.py comsol_mcp/settings_gui_launcher.py comsol_mcp/tools/settings_gui.py development_kit/scripts/installed_package_probe.py development_kit/scripts/settings_gui_icon.py development_kit/scripts/settings_gui_locales.py development_kit/scripts/settings_gui_package_probe.py development_kit/tests/test_settings_gui_root_launcher.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m ruff check settings_gui comsol_mcp/settings_gui_handshake.py comsol_mcp/settings_gui_launcher.py comsol_mcp/tools/settings_gui.py development_kit/scripts/installed_package_probe.py development_kit/scripts/settings_gui_icon.py development_kit/scripts/settings_gui_locales.py development_kit/scripts/settings_gui_package_probe.py development_kit/tests/test_settings_gui_root_launcher.py
       - name: Run independent GUI and backend contract tests
         env:

@@ -1006,7 +1006,7 @@ def test_release_lock_binds_the_declared_platform_to_the_target_interpreter(monk
 
     def fake_run(command, *, cwd=lock_generator.ROOT, capture=False):
         calls.append((command, cwd, capture))
-        return "win-amd64\n"
+        return "CPython\n3.14\nwin-amd64\n"
 
     monkeypatch.setattr(lock_generator, "_run", fake_run)
     target = Path("C:/Python314/python.exe")
@@ -1014,7 +1014,16 @@ def test_release_lock_binds_the_declared_platform_to_the_target_interpreter(monk
     assert lock_generator._validated_target_platform(target) == "win-amd64"
     assert calls == [
         (
-            [str(target), "-c", "import sysconfig; print(sysconfig.get_platform())"],
+            [
+                str(target),
+                "-c",
+                (
+                    "import platform, sys, sysconfig; "
+                    "print(platform.python_implementation()); "
+                    "print(f'{sys.version_info.major}.{sys.version_info.minor}'); "
+                    "print(sysconfig.get_platform())"
+                ),
+            ],
             lock_generator.ROOT,
             True,
         )
@@ -1023,10 +1032,49 @@ def test_release_lock_binds_the_declared_platform_to_the_target_interpreter(monk
 
 @pytest.mark.parametrize("platform_name", ["win32", "win-arm64", "linux-x86_64", ""])
 def test_release_lock_rejects_a_non_amd64_target_interpreter(monkeypatch, platform_name):
-    monkeypatch.setattr(lock_generator, "_run", lambda *_args, **_kwargs: platform_name)
+    monkeypatch.setattr(
+        lock_generator,
+        "_run",
+        lambda *_args, **_kwargs: f"CPython\n3.14\n{platform_name}\n",
+    )
 
     with pytest.raises(SystemExit, match="win-amd64 target interpreter"):
         lock_generator._validated_target_platform(Path("C:/Python314/python.exe"))
+
+
+@pytest.mark.parametrize("identity", ["PyPy\n3.14\nwin-amd64\n", "CPython\n3.13\nwin-amd64\n"])
+def test_release_lock_rejects_unsupported_interpreter_identity(monkeypatch, identity):
+    monkeypatch.setattr(lock_generator, "_run", lambda *_args, **_kwargs: identity)
+
+    with pytest.raises(SystemExit, match="CPython 3.14"):
+        lock_generator._validated_target_platform(Path("C:/Python314/python.exe"))
+
+
+def test_release_lock_surfaces_bounded_captured_command_diagnostics(monkeypatch):
+    monkeypatch.setattr(
+        lock_generator.subprocess,
+        "run",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            subprocess.CalledProcessError(7, ["pip"], stderr="resolver failed")
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="resolver failed"):
+        lock_generator._run(["pip"], capture=True)
+
+
+def test_ci_and_local_ignore_preserve_failure_and_secret_boundaries():
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    ignored = (ROOT / ".gitignore").read_text(encoding="utf-8")
+
+    assert "$auditExitCode = $LASTEXITCODE" in ci
+    assert "if ($auditExitCode -gt 1) { exit $auditExitCode }" in ci
+    format_command = "python -m ruff format --check settings_gui"
+    format_tail = ci.split(format_command, 1)[1].split("python -m ruff check", 1)[0]
+    assert "if ($LASTEXITCODE -ne 0)" in format_tail
+    assert ".env\n" in ignored
+    assert ".env.*\n" in ignored
+    assert "!.env.example\n" in ignored
 
 
 def test_release_lock_installs_from_the_exact_downloaded_wheelhouse(tmp_path, monkeypatch):
