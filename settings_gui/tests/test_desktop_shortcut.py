@@ -151,6 +151,16 @@ class FakeShortcutBackend:
         self.writes: list[tuple[Path, ShortcutSpec]] = []
 
     def inspect(self, path: Path) -> ShortcutSpec:
+        if path not in self.specs and path.exists():
+            staged = [
+                candidate
+                for candidate in self.specs
+                if candidate.parent == path.parent
+                and candidate.suffix == path.suffix
+                and not candidate.exists()
+            ]
+            if len(staged) == 1:
+                self.specs[path] = self.specs.pop(staged[0])
         return self.specs[path]
 
     def write(self, path: Path, spec: ShortcutSpec) -> None:
@@ -351,6 +361,43 @@ def test_replacement_refuses_a_shortcut_changed_during_inspection(tmp_path: Path
     assert result["state"] == "conflict"
     assert shortcut.read_bytes() == b"foreign replacement"
     assert backend.writes == []
+
+
+def test_initial_create_refuses_a_shortcut_that_appears_at_publish(
+    tmp_path: Path, monkeypatch
+) -> None:
+    backend = FakeShortcutBackend()
+    kwargs = _kwargs(tmp_path, backend)
+    shortcut = kwargs["desktop_path"] / SHORTCUT_NAME
+    real_rename = os.rename
+
+    def collide(source, destination):
+        if Path(destination) == shortcut:
+            shortcut.write_bytes(b"foreign")
+            raise FileExistsError("injected collision")
+        return real_rename(source, destination)
+
+    monkeypatch.setattr(os, "rename", collide)
+
+    result = create_desktop_shortcut(**kwargs)
+
+    assert result["state"] == "conflict"
+    assert result["existing_kind"] == "appeared_during_create"
+    assert shortcut.read_bytes() == b"foreign"
+    assert not list(shortcut.parent.glob("*.tmp.lnk"))
+
+
+def test_powershell_timeout_is_normalized(monkeypatch) -> None:
+    monkeypatch.setattr(
+        shortcut_module.subprocess,
+        "run",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            subprocess.TimeoutExpired("pwsh", 15)
+        ),
+    )
+
+    with pytest.raises(OSError, match="timed out"):
+        shortcut_module._run_powershell("", {})
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows Shell Link acceptance")

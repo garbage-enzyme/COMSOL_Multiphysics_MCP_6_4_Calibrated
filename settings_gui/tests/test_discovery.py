@@ -123,8 +123,9 @@ def test_java_fallback_order_is_java_home_then_jdk_then_path(tmp_path: Path) -> 
     jdk_home = tmp_path / "jdk-home"
     path_home = tmp_path / "path-home"
     for home in (java_home, jdk_home, path_home):
-        (home / "bin").mkdir(parents=True)
+        (home / "bin" / "server").mkdir(parents=True)
         (home / "bin" / "java.exe").write_bytes(b"")
+        (home / "bin" / "server" / "jvm.dll").write_bytes(b"")
 
     assert discover_java_home(
         root,
@@ -153,6 +154,31 @@ def test_quoted_java_home_is_normalized(tmp_path: Path) -> None:
         environ={"JAVA_HOME": f'"{java_home}\\"'},
         which=lambda _name: None,
     ) == (java_home.resolve(), "system_java_home")
+
+
+def test_same_line_quoted_vm_path_is_normalized(tmp_path: Path) -> None:
+    root, java_home = _installation(tmp_path / "COMSOL64" / "Multiphysics")
+    ini = root / "bin" / "win64" / "comsol.ini"
+    ini.write_text(
+        f'-vm="{java_home / "bin" / "server" / "jvm.dll"}"\n',
+        encoding="utf-8",
+    )
+
+    assert discover_java_home(root, environ={}, which=lambda _name: None) == (
+        java_home.resolve(),
+        "comsol_bundled",
+    )
+
+
+def test_path_java_requires_a_complete_runtime(tmp_path: Path) -> None:
+    shim = tmp_path / "shim" / "bin" / "java.exe"
+    shim.parent.mkdir(parents=True)
+    shim.write_bytes(b"")
+
+    assert discover_java_home(None, environ={}, which=lambda _name: str(shim)) == (
+        None,
+        None,
+    )
 
 
 def test_bundled_java_wins_over_every_system_candidate(tmp_path: Path) -> None:

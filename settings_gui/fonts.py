@@ -7,7 +7,7 @@ from tkinter import TclError
 
 
 def apply_locale_font(root, language: str) -> str:
-    current = tkfont.nametofont("TkDefaultFont").actual("family")
+    current = tkfont.nametofont("TkDefaultFont", root=root).actual("family")
     families = set(tkfont.families(root))
     preferred = {
         "zh-cn": "Microsoft YaHei UI",
@@ -26,7 +26,7 @@ def apply_locale_font(root, language: str) -> str:
             "TkTooltipFont",
         ):
             try:
-                tkfont.nametofont(name).configure(family=selected)
+                tkfont.nametofont(name, root=root).configure(family=selected)
             except TclError:
                 continue
     return selected

@@ -289,7 +289,7 @@ def test_auto_detect_fills_empty_values_without_replace_prompt(tmp_path: Path) -
     assert controller.model.dirty is True
 
     controller.update("ownership.owner", "operator")
-    assert dialogs.infos == []
+    assert len(dialogs.infos) == 1
 
 
 def test_manual_auto_detect_keeps_the_single_dirty_notice(tmp_path: Path) -> None:

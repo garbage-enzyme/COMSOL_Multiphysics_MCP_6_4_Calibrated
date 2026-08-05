@@ -62,6 +62,31 @@ def test_named_mutex_rejects_a_second_live_editor(tmp_path):
             SettingsOwnership(target).acquire()
 
 
+def test_sidecar_cleanup_failure_still_releases_mutex_and_registration(
+    tmp_path, monkeypatch
+):
+    target = tmp_path / "settings.json"
+    target.write_text(json.dumps(default_settings_document()), encoding="utf-8")
+    owner = SettingsOwnership(target).acquire()
+    original_unlink = Path.unlink
+    monkeypatch.setattr(
+        Path,
+        "unlink",
+        lambda path, *args, **kwargs: (
+            (_ for _ in ()).throw(PermissionError("injected sidecar failure"))
+            if path == owner.sidecar
+            else original_unlink(path, *args, **kwargs)
+        ),
+    )
+
+    with pytest.raises(PermissionError, match="sidecar failure"):
+        owner.close()
+
+    assert owner._mutex is None
+    assert owner._registered is False
+    original_unlink(owner.sidecar)
+
+
 def test_named_mutex_rejects_a_second_process(tmp_path):
     target = tmp_path / "settings.json"
     target.write_text(json.dumps(default_settings_document()), encoding="utf-8")

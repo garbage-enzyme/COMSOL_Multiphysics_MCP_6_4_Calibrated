@@ -40,7 +40,6 @@ class SettingsController:
         return self.translator(message)
 
     def update(self, key: str, value: Any, *, show_dirty_notice: bool = True) -> bool:
-        previous_restart_required = self.model.restart_required
         if key.startswith("evidence_integrity.checks.") and value is False:
             if not self.dialogs.confirm(
                 title=self.text("Disable evidence check?"),
@@ -54,18 +53,17 @@ class SettingsController:
             self.translator = Translator(str(value))
         if (
             self.model.restart_required
-            and not previous_restart_required
             and not self.restart_pending
             and not self._dirty_notice_shown
+            and show_dirty_notice
         ):
             self._dirty_notice_shown = True
-            if show_dirty_notice:
-                self.dialogs.info(
-                    title=self.text("Restart required"),
-                    message=self.text(
-                        "Changes take effect only after restarting Codex or the owning MCP client."
-                    ),
-                )
+            self.dialogs.info(
+                title=self.text("Restart required"),
+                message=self.text(
+                    "Changes take effect only after restarting Codex or the owning MCP client."
+                ),
+            )
         self.on_refresh()
         return True
 

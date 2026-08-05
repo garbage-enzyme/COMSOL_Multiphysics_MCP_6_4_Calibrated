@@ -94,7 +94,13 @@ def _java_home_from_runtime(runtime: Path) -> Path | None:
         home = runtime.parent.parent.parent
     else:
         return None
-    return home.resolve(strict=True) if _regular_directory(home) else None
+    if not _regular_directory(home):
+        return None
+    java = home / "bin" / "java.exe"
+    jvm = home / "bin" / "server" / "jvm.dll"
+    if not java.is_file() or not jvm.is_file():
+        return None
+    return home.resolve(strict=True)
 
 
 def _ini_java_home(root: Path) -> Path | None:
@@ -111,7 +117,7 @@ def _ini_java_home(root: Path) -> Path | None:
         if line == "-vm" and index + 1 < len(lines):
             candidate = lines[index + 1]
         elif line.startswith("-vm="):
-            candidate = line.partition("=")[2]
+            candidate = line.partition("=")[2].strip().strip('"')
         if not candidate:
             continue
         executable = Path(candidate)

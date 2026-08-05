@@ -475,6 +475,15 @@ class SettingsApplication:
         try:
             for field in FIELDS:
                 if field.kind == "roots":
+                    error = self.controller.model.errors.get(field.key, "")
+                    if field.key in self.help_labels:
+                        self.help_labels[field.key].configure(
+                            text=self.controller.text(field.help_id)
+                        )
+                    if field.key in self.error_labels:
+                        self.error_labels[field.key].configure(
+                            text=self.controller.text(error) if error else ""
+                        )
                     continue
                 variable = self.variables.get(field.key)
                 if variable is None:
@@ -579,7 +588,11 @@ def _prepare_store(
         )
         return None
     if location.setup_required:
-        store.save(default_settings_document(user_root=target.parent))
+        try:
+            store.save(default_settings_document(user_root=target.parent))
+        except Exception:
+            store.close()
+            raise
     return store
 
 

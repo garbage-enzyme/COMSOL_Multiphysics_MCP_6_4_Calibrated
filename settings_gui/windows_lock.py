@@ -118,8 +118,13 @@ class SettingsOwnership:
             self.reacquire_target_handle()
             self.baseline = file_identity(self.target)
             return self
-        except Exception:
-            self.close()
+        except Exception as exc:
+            try:
+                self.close()
+            except Exception as cleanup_error:
+                exc.add_note(
+                    f"settings ownership cleanup failed: {type(cleanup_error).__name__}"
+                )
             raise
 
     def _configure_kernel32(self) -> None:
@@ -175,24 +180,38 @@ class SettingsOwnership:
         self.baseline = file_identity(self.target)
 
     def close(self) -> None:
-        self.release_target_handle()
+        errors: list[Exception] = []
+        try:
+            self.release_target_handle()
+        except Exception as exc:
+            errors.append(exc)
         if self._sidecar_fd is not None:
-            os.close(self._sidecar_fd)
+            try:
+                os.close(self._sidecar_fd)
+            except Exception as exc:
+                errors.append(exc)
             self._sidecar_fd = None
             try:
                 self.sidecar.unlink()
             except FileNotFoundError:
                 pass
+            except Exception as exc:
+                errors.append(exc)
         if self._mutex is not None:
-            if self._mutex_acquired:
-                self._kernel32.ReleaseMutex(self._mutex)
-            self._kernel32.CloseHandle(self._mutex)
+            try:
+                if self._mutex_acquired:
+                    self._kernel32.ReleaseMutex(self._mutex)
+                self._kernel32.CloseHandle(self._mutex)
+            except Exception as exc:
+                errors.append(exc)
             self._mutex = None
             self._mutex_acquired = False
         if self._registered:
             with _HELD_MUTEXES_GUARD:
                 _HELD_MUTEXES.discard(self.mutex_name)
             self._registered = False
+        if errors:
+            raise errors[0]
 
     def __enter__(self) -> "SettingsOwnership":
         return self.acquire()

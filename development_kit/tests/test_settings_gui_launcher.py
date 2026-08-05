@@ -13,10 +13,12 @@ from pathlib import Path
 
 import pytest
 
+from comsol_mcp import settings_gui_handshake as handshake_module
 from comsol_mcp import settings_gui_launcher as launcher
 from comsol_mcp.server import create_server
 from comsol_mcp.settings_gui_handshake import (
     publish_handshake,
+    read_handshake,
     validate_handshake_path,
 )
 from development_kit.tests.mcp_test_support import decode_tool_result
@@ -173,19 +175,26 @@ def test_launch_timeout_is_bounded_and_cleans_handshake(ascii_tmp_path, monkeypa
     now = [0.0]
 
     class FakeProcess:
-        def poll(self):
-            return None
+        terminated = False
 
-        def wait(self):
+        def poll(self):
+            return 0 if self.terminated else None
+
+        def terminate(self):
+            self.terminated = True
+
+        def wait(self, timeout=None):
             return 0
 
     def sleep(seconds: float) -> None:
         now[0] += seconds
 
+    process = FakeProcess()
+
     result = launcher.launch_settings_gui(
         environ={},
         runtime_dir=ascii_tmp_path,
-        popen_factory=lambda *_args, **_kwargs: FakeProcess(),
+        popen_factory=lambda *_args, **_kwargs: process,
         clock=lambda: now[0],
         sleeper=sleep,
         timeout_seconds=0.1,
@@ -193,7 +202,112 @@ def test_launch_timeout_is_bounded_and_cleans_handshake(ascii_tmp_path, monkeypa
 
     assert result["state"] == "launch_failed"
     assert now[0] <= 0.15
+    assert result["success"] is False
+    assert process.terminated is True
     assert not list((ascii_tmp_path / "settings_gui").glob("*.json"))
+
+
+def test_handshake_rejects_unhashable_state(ascii_tmp_path: Path) -> None:
+    root = ascii_tmp_path / "settings_gui"
+    root.mkdir()
+    path = root / ".settings-gui-0123456789abcdef0123456789abcdef.json"
+    path.write_text('{"state":[]}', encoding="ascii")
+
+    assert read_handshake(path) is None
+
+
+def test_publish_handshake_rechecks_pending_state_before_replace(
+    ascii_tmp_path: Path, monkeypatch
+) -> None:
+    root = ascii_tmp_path / "settings_gui"
+    root.mkdir()
+    path = root / ".settings-gui-0123456789abcdef0123456789abcdef.json"
+    path.write_bytes(handshake_module.handshake_bytes("pending"))
+    observed = [
+        handshake_module.handshake_payload("pending"),
+        handshake_module.handshake_payload("already_running"),
+    ]
+    monkeypatch.setattr(
+        handshake_module, "read_handshake", lambda _path: observed.pop(0)
+    )
+
+    assert publish_handshake("ready", {handshake_module.HANDSHAKE_ENV: str(path)}) is False
+    assert path.read_bytes() == handshake_module.handshake_bytes("pending")
+    assert not list(root.glob("*.tmp"))
+
+
+def test_publish_handshake_cleanup_error_does_not_replace_success(
+    ascii_tmp_path: Path, monkeypatch
+) -> None:
+    root = ascii_tmp_path / "settings_gui"
+    root.mkdir()
+    path = root / ".settings-gui-0123456789abcdef0123456789abcdef.json"
+    path.write_bytes(handshake_module.handshake_bytes("pending"))
+    original_unlink = Path.unlink
+
+    def fail_missing_temporary(candidate: Path, *args, **kwargs):
+        if candidate.name.endswith(".tmp") and not candidate.exists():
+            raise PermissionError("injected cleanup sharing failure")
+        return original_unlink(candidate, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", fail_missing_temporary)
+
+    assert publish_handshake("ready", {handshake_module.HANDSHAKE_ENV: str(path)}) is True
+
+
+def test_launcher_cleanup_error_does_not_replace_ready_result(
+    ascii_tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setattr(launcher, "settings_gui_is_running", lambda _target: False)
+    original_unlink = Path.unlink
+    handshake = None
+
+    class Process:
+        def poll(self):
+            return None
+
+        def wait(self):
+            return 0
+
+    def start(_command, **kwargs):
+        nonlocal handshake
+        handshake = Path(kwargs["env"][handshake_module.HANDSHAKE_ENV])
+        assert publish_handshake("ready", kwargs["env"]) is True
+        return Process()
+
+    def deny_cleanup(candidate: Path, *args, **kwargs):
+        if handshake is not None and candidate == handshake:
+            raise PermissionError("injected launcher cleanup sharing failure")
+        return original_unlink(candidate, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", deny_cleanup)
+
+    result = launcher.launch_settings_gui(
+        environ={}, runtime_dir=ascii_tmp_path, popen_factory=start
+    )
+
+    assert result["state"] == "launched"
+    assert handshake is not None
+    original_unlink(handshake)
+
+
+def test_instance_mutex_distinguishes_wait_api_failure(monkeypatch, tmp_path) -> None:
+    class Kernel:
+        def CreateMutexW(self, *_args):
+            return 1
+
+        def WaitForSingleObject(self, *_args):
+            return 0xFFFFFFFF
+
+    lock = object.__new__(launcher.SettingsGuiInstanceLock)
+    lock.name = "test"
+    lock._kernel32 = Kernel()
+    lock._handle = None
+    lock._acquired = False
+    monkeypatch.setattr(lock, "close", lambda: setattr(lock, "_handle", None))
+
+    with pytest.raises(OSError, match="WaitForSingleObject"):
+        lock.acquire()
 
 
 def test_handshake_rejects_a_linked_parent_before_resolution(
