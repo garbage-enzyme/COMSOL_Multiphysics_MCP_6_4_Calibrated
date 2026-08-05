@@ -103,7 +103,7 @@ def test_recipe_output_rejects_preexisting_or_dangling_reparse_root(
 def test_recipe_output_revalidates_after_directory_creation(monkeypatch, ascii_tmp_path):
     module = _load_recipe_paths()
     configured = ascii_tmp_path / "race-root"
-    output = configured / "recipes"
+    output = configured.resolve() / "recipes"
     armed = False
     original_mkdir = Path.mkdir
 
