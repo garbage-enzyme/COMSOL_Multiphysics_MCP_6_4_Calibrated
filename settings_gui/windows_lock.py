@@ -33,10 +33,10 @@ class FileIdentity:
 
 
 def file_identity(path: Path) -> FileIdentity | None:
-    if not path.exists():
-        return None
     if path.is_symlink() or getattr(path, "is_junction", lambda: False)():
         raise SettingsConflict("settings target must not be a link or junction")
+    if not path.exists():
+        return None
     if not path.is_file():
         raise SettingsConflict("settings target must be a regular file")
     stat = path.stat()
@@ -86,6 +86,11 @@ class SettingsOwnership:
             raise SettingsConflict("settings target parent must not contain a link or junction")
         if not self.target.parent.is_dir():
             raise SettingsConflict("settings target parent does not exist")
+        if os.path.lexists(self.sidecar) and (
+            self.sidecar.is_symlink()
+            or getattr(self.sidecar, "is_junction", lambda: False)()
+        ):
+            raise SettingsConflict("settings ownership sidecar must not be a link or junction")
         self._configure_kernel32()
         with _HELD_MUTEXES_GUARD:
             if self.mutex_name in _HELD_MUTEXES:

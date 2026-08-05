@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from settings_gui import GUI_RELEASE
 from settings_gui.i18n import MESSAGE_IDS
 
 LOCALE_ROOT = ROOT / "settings_gui" / "locales"
@@ -226,7 +227,7 @@ def _header(language: str) -> str:
         "nplurals=1; plural=0;" if language.startswith("zh_") else "nplurals=2; plural=(n != 1);"
     )
     return (
-        "Project-Id-Version: comsol-mcp alpha6.3\n"
+        f"Project-Id-Version: comsol-mcp {GUI_RELEASE}\n"
         "MIME-Version: 1.0\n"
         "Content-Type: text/plain; charset=UTF-8\n"
         "Content-Transfer-Encoding: 8bit\n"

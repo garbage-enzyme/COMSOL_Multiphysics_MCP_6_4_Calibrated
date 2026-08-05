@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from comsol_mcp.durable.canonical import validate_finite_json
-from comsol_mcp.durable.io import read_complete_jsonl, read_file_bytes_bounded
+from comsol_mcp.durable.io import read_file_bytes_bounded
 
 from .builder import (
     BUILD_SCHEMA,
@@ -204,8 +204,40 @@ def read_campaign_results(
         raise ValueError(f"limit must be an integer from 1 through {MAX_RESULT_ROWS}")
     root = _campaign_root(campaign_directory)
     results_path = root / "assets" / "data" / "results.jsonl"
-    outcome = read_complete_jsonl(results_path, max_bytes=MAX_RESULTS_BYTES)
-    records = outcome.get("records", [])
+    if results_path.is_file():
+        result_payload = read_file_bytes_bounded(results_path, max_bytes=MAX_RESULTS_BYTES)
+        complete_end = result_payload.rfind(b"\n") + 1
+        complete = result_payload[:complete_end]
+        trailing = result_payload[complete_end:]
+        parsed_records: list[Any] = []
+        try:
+            for line_number, line in enumerate(complete.splitlines(), start=1):
+                if not line:
+                    raise ValueError(f"empty JSONL record at line {line_number}")
+                value = json.loads(line.decode("utf-8"))
+                validate_finite_json(value)
+                parsed_records.append(value)
+        except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+            outcome = {
+                "state": "corrupt",
+                "records": [],
+                "complete_byte_count": 0,
+                "error_type": type(exc).__name__,
+            }
+        else:
+            outcome = {
+                "state": "incomplete" if trailing else "current_valid",
+                "records": parsed_records,
+                "complete_byte_count": complete_end,
+                "trailing_byte_count": len(trailing),
+            }
+    else:
+        result_payload = b""
+        outcome = {"state": "absent", "records": [], "complete_byte_count": 0}
+    raw_records = outcome.get("records", [])
+    if not isinstance(raw_records, list):
+        raise ValueError("standalone result snapshot records are invalid")
+    records = raw_records
     if len(records) > MAX_RESULT_ROWS:
         raise ValueError("standalone result row count exceeds its bound")
     accepted: list[dict[str, Any]] = []
@@ -248,11 +280,6 @@ def read_campaign_results(
             raise ValueError("standalone result rows have mixed execution identities")
         point_ids.add(point_id)
         accepted.append(json.loads(json.dumps(value)))
-    result_payload = (
-        read_file_bytes_bounded(results_path, max_bytes=MAX_RESULTS_BYTES)
-        if results_path.is_file()
-        else b""
-    )
     journal_sha256 = _sha256(result_payload)
     result = {
         "state": outcome["state"],

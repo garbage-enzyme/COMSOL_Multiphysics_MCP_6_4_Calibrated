@@ -11,7 +11,6 @@ _Path = Annotated[str, Field(min_length=1, max_length=1024)]
 _Identifier = Annotated[str, Field(pattern=r"^[A-Za-z][A-Za-z0-9_]{0,127}$")]
 _Sha256 = Annotated[str, Field(pattern=r"^[0-9a-fA-F]{64}$")]
 _Positive = Annotated[float, Field(gt=0.0, le=1.0e300)]
-_Nonnegative = Annotated[float, Field(ge=0.0, le=1.0e300)]
 
 
 class _ClosedModel(BaseModel):

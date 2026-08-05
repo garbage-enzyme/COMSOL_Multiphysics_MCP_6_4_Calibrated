@@ -110,3 +110,85 @@ def test_root_launcher_discovers_supported_python_from_path(
     assert result["settings_path_override"] is True
     assert result["solver_started"] is False
     assert not target.exists()
+
+
+@pytest.mark.parametrize("shell_name", ["powershell.exe", "pwsh.exe"])
+def test_root_launcher_restores_inherited_settings_override(
+    shell_name: str,
+    tmp_path: Path,
+) -> None:
+    shell = shutil.which(shell_name)
+    if shell is None:
+        pytest.skip(f"{shell_name} is not installed")
+    inherited = tmp_path / "inherited.json"
+    requested = tmp_path / "requested.json"
+    environment = dict(os.environ)
+    environment["OCR_TEST_INHERITED"] = str(inherited)
+    environment["OCR_TEST_LAUNCHER"] = str(LAUNCHER)
+    environment["OCR_TEST_PYTHON"] = sys.executable
+    environment["OCR_TEST_REQUESTED"] = str(requested)
+    command = (
+        "$env:COMSOL_MCP_SETTINGS_PATH=$env:OCR_TEST_INHERITED; "
+        "& $env:OCR_TEST_LAUNCHER -PythonPath $env:OCR_TEST_PYTHON "
+        "-SettingsPath $env:OCR_TEST_REQUESTED -ValidateOnly; "
+        "[Console]::Out.WriteLine('AFTER=' + $env:COMSOL_MCP_SETTINGS_PATH)"
+    )
+    completed = subprocess.run(  # noqa: S603
+        [
+            shell,
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            command,
+        ],
+        cwd=ROOT,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    lines = completed.stdout.splitlines()
+    assert json.loads(lines[0])["settings_path_override"] is True
+    assert lines[-1] == f"AFTER={inherited}"
+
+
+@pytest.mark.parametrize("shell_name", ["powershell.exe", "pwsh.exe"])
+def test_root_launcher_ignores_benign_probe_stderr(
+    shell_name: str,
+    tmp_path: Path,
+) -> None:
+    shell = shutil.which(shell_name)
+    if shell is None:
+        pytest.skip(f"{shell_name} is not installed")
+    fake_python = tmp_path / "python.cmd"
+    fake_python.write_text(
+        "@echo benign warning 1>&2\r\n@echo COMSOL_MCP_SETTINGS_GUI_PYTHON_READY\r\n@exit /b 0\r\n",
+        encoding="ascii",
+    )
+    completed = subprocess.run(  # noqa: S603
+        [
+            shell,
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(LAUNCHER),
+            "-PythonPath",
+            str(fake_python),
+            "-ValidateOnly",
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert json.loads(completed.stdout)["ready"] is True

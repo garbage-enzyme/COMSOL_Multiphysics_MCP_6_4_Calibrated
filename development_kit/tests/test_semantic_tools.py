@@ -17,8 +17,8 @@ from src.knowledge.semantic_runtime import SemanticService, semantic_configurati
 from src.server import create_server
 from src.tools.semantic_docs import register_semantic_doc_tools
 
-from development_kit.tests.semantic_test_support import isolated_semantic_environment
 from development_kit.tests.mcp_test_support import decode_tool_result
+from development_kit.tests.semantic_test_support import isolated_semantic_environment
 
 
 def _decode_public_tool_result(result):
@@ -244,7 +244,9 @@ print(json.dumps({'count': len(names), 'configured': status['configured']}))
     assert json.loads(completed.stdout)["count"] == 50
 
 
-def test_semantic_and_other_profile_counts_match_declared_discovery():
+def test_semantic_and_other_profile_counts_match_declared_discovery(monkeypatch):
+    monkeypatch.setenv("COMSOL_MCP_ENABLE_SEMANTIC_DOCS", "false")
+    monkeypatch.setenv("COMSOL_MCP_ENABLE_SHARED_SERVER", "false")
     counts = {}
     for profile in (
         "core",

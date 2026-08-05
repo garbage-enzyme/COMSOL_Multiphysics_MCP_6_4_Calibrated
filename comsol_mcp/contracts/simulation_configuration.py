@@ -77,6 +77,12 @@ class MaterialState(_ClosedModel):
     loss_sign_convention: Literal["positive_imaginary_loss", "negative_imaginary_loss", "unknown"]
     label: BoundedLabel | None = None
 
+    @model_validator(mode="after")
+    def validate_temperature_dimension(self) -> MaterialState:
+        if self.temperature.dimension != "temperature":
+            raise ValueError("material temperatures must use temperature quantities")
+        return self
+
 
 class LayerDeclaration(_ClosedModel):
     layer_id: BoundedName
@@ -84,6 +90,18 @@ class LayerDeclaration(_ClosedModel):
     order: Annotated[int, Field(ge=0, le=2047)]
     thickness: DeclaredQuantity
     label: BoundedLabel | None = None
+
+    @model_validator(mode="after")
+    def validate_thickness(self) -> LayerDeclaration:
+        if self.thickness.dimension != "length":
+            raise ValueError("layer thickness must use a length quantity")
+        if (
+            self.thickness.status == "known"
+            and self.thickness.value is not None
+            and self.thickness.value < 0.0
+        ):
+            raise ValueError("layer thickness must be nonnegative")
+        return self
 
 
 class IncidenceDeclaration(_ClosedModel):
@@ -99,6 +117,12 @@ class IncidenceDeclaration(_ClosedModel):
         "not_applicable",
         "unknown",
     ]
+
+    @model_validator(mode="after")
+    def validate_angle_dimensions(self) -> IncidenceDeclaration:
+        if self.theta.dimension != "angle" or self.phi.dimension != "angle":
+            raise ValueError("incidence theta and phi must use angle quantities")
+        return self
 
 
 class WavelengthControlDeclaration(_ClosedModel):

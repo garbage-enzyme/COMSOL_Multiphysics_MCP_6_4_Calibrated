@@ -246,6 +246,13 @@ def test_coefficient_pde_sets_exact_equation_properties_and_variables():
     }
 
 
+def test_explicit_empty_pde_tag_is_rejected_instead_of_defaulted():
+    result = add_pde_interface(FakeModel(), "coefficient", physics_tag="")
+
+    assert result["success"] is False
+    assert "physics_tag" in result["error"]
+
+
 def test_pde_rejects_unknown_properties_and_duplicate_variables_before_creation():
     model = FakeModel()
 

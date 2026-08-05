@@ -215,40 +215,55 @@ if ($FailureDisposition -ne 'failed') { throw 'Failed terminal disposition was n
 $PausedDisposition = Get-DurableTerminalDisposition -Snapshot ([pscustomobject]@{ Running = $false; Status = 'paused_after_point'; Completed = 3; Planned = 8 })
 if ($PausedDisposition -ne 'paused') { throw 'Paused terminal disposition was not recognized.' }
 
-$First = Start-FakeDriver
-Wait-Until -Condition {
-    if (-not (Test-Path -LiteralPath $Config.StatusPath -PathType Leaf)) { return $false }
-    try { return $null -ne ((Get-Content -LiteralPath $Config.StatusPath -Raw | ConvertFrom-Json).active_point_id) }
-    catch { return $false }
+$First = $null
+$Second = $null
+try {
+    $First = Start-FakeDriver
+    Wait-Until -Condition {
+        if (-not (Test-Path -LiteralPath $Config.StatusPath -PathType Leaf)) { return $false }
+        try { return $null -ne ((Get-Content -LiteralPath $Config.StatusPath -Raw | ConvertFrom-Json).active_point_id) }
+        catch { return $false }
+    }
+    $Detected = @(Get-DurableDriverProcesses -DriverPath $Driver)
+    if ($Detected.Count -ne 1 -or $Detected[0].ProcessId -ne $First.Id) { throw 'Exact duplicate-driver detection failed.' }
+    $Request = Write-DurablePauseRequest -Config $Config -ExpectedSpecId 'fake-spec-v1'
+    Wait-Until -Condition { $First.Refresh(); return $First.HasExited }
+    $First.WaitForExit()
+    if ($null -ne $First.ExitCode -and $First.ExitCode -ne 0) { throw "First fake driver failed with exit code $($First.ExitCode)." }
+    $Paused = Get-Content -LiteralPath $Config.StatusPath -Raw | ConvertFrom-Json
+    $PausedRows = @(Get-Content -LiteralPath $Config.ResultsPath).Count
+    if ($Paused.status -ne 'paused_after_point') { throw 'Pause did not reach a terminal durable-boundary state.' }
+    if ($Paused.completed -lt 1 -or $Paused.completed -ge 8) { throw 'Pause did not occur after exactly a partial set of durable points.' }
+    if ($PausedRows -ne $Paused.completed) { throw 'Pause status and durable row count disagree.' }
+    if (Test-Path -LiteralPath (Join-Path $TestRoot 'run.lock')) { throw 'Pause left the fake owner lock behind.' }
+    $Ack = Join-Path $Config.ControlDirectory ("acks\$($Request.RequestId).json")
+    if (-not (Test-Path -LiteralPath $Ack -PathType Leaf)) { throw 'Pause acknowledgement is missing.' }
+
+    $Second = & (Get-Module DurableLauncher) { param($Value) Start-DurableDriver -Config $Value } $Config
+    Wait-Until -Condition { $Second.Refresh(); return $Second.HasExited }
+    $Second.WaitForExit()
+    if ($null -ne $Second.ExitCode -and $Second.ExitCode -ne 0) { throw "Resume fake driver failed with exit code $($Second.ExitCode)." }
+    $Complete = Get-Content -LiteralPath $Config.StatusPath -Raw | ConvertFrom-Json
+    $FinalRows = @(Get-Content -LiteralPath $Config.ResultsPath).Count
+    if ($Complete.status -ne 'complete' -or $Complete.completed -ne 8 -or $FinalRows -ne 8) { throw 'Exact resume did not complete all eight unique rows.' }
+    if (Test-Path -LiteralPath (Join-Path $TestRoot 'run.lock')) { throw 'Resume left the fake owner lock behind.' }
+
+    $Snapshot = Get-DurableJobSnapshot -Config $Config
+    if ($Snapshot.Running -or $Snapshot.Completed -ne 8 -or $Snapshot.Status -ne 'complete') { throw 'Completed snapshot is inconsistent.' }
+    $TerminalDisposition = Get-DurableTerminalDisposition -Snapshot $Snapshot
+    if ($TerminalDisposition -ne 'success') { throw 'Completed live snapshot was not latched as success.' }
 }
-$Detected = @(Get-DurableDriverProcesses -DriverPath $Driver)
-if ($Detected.Count -ne 1 -or $Detected[0].ProcessId -ne $First.Id) { throw 'Exact duplicate-driver detection failed.' }
-$Request = Write-DurablePauseRequest -Config $Config -ExpectedSpecId 'fake-spec-v1'
-Wait-Until -Condition { $First.Refresh(); return $First.HasExited }
-$First.WaitForExit()
-if ($null -ne $First.ExitCode -and $First.ExitCode -ne 0) { throw "First fake driver failed with exit code $($First.ExitCode)." }
-$Paused = Get-Content -LiteralPath $Config.StatusPath -Raw | ConvertFrom-Json
-$PausedRows = @(Get-Content -LiteralPath $Config.ResultsPath).Count
-if ($Paused.status -ne 'paused_after_point') { throw 'Pause did not reach a terminal durable-boundary state.' }
-if ($Paused.completed -lt 1 -or $Paused.completed -ge 8) { throw 'Pause did not occur after exactly a partial set of durable points.' }
-if ($PausedRows -ne $Paused.completed) { throw 'Pause status and durable row count disagree.' }
-if (Test-Path -LiteralPath (Join-Path $TestRoot 'run.lock')) { throw 'Pause left the fake owner lock behind.' }
-$Ack = Join-Path $Config.ControlDirectory ("acks\$($Request.RequestId).json")
-if (-not (Test-Path -LiteralPath $Ack -PathType Leaf)) { throw 'Pause acknowledgement is missing.' }
-
-$Second = & (Get-Module DurableLauncher) { param($Value) Start-DurableDriver -Config $Value } $Config
-Wait-Until -Condition { $Second.Refresh(); return $Second.HasExited }
-$Second.WaitForExit()
-if ($null -ne $Second.ExitCode -and $Second.ExitCode -ne 0) { throw "Resume fake driver failed with exit code $($Second.ExitCode)." }
-$Complete = Get-Content -LiteralPath $Config.StatusPath -Raw | ConvertFrom-Json
-$FinalRows = @(Get-Content -LiteralPath $Config.ResultsPath).Count
-if ($Complete.status -ne 'complete' -or $Complete.completed -ne 8 -or $FinalRows -ne 8) { throw 'Exact resume did not complete all eight unique rows.' }
-if (Test-Path -LiteralPath (Join-Path $TestRoot 'run.lock')) { throw 'Resume left the fake owner lock behind.' }
-
-$Snapshot = Get-DurableJobSnapshot -Config $Config
-if ($Snapshot.Running -or $Snapshot.Completed -ne 8 -or $Snapshot.Status -ne 'complete') { throw 'Completed snapshot is inconsistent.' }
-$TerminalDisposition = Get-DurableTerminalDisposition -Snapshot $Snapshot
-if ($TerminalDisposition -ne 'success') { throw 'Completed live snapshot was not latched as success.' }
+finally {
+    foreach ($OwnedProcess in @($First, $Second)) {
+        if ($null -eq $OwnedProcess) { continue }
+        try { $OwnedProcess.Refresh() } catch { }
+        if (-not $OwnedProcess.HasExited) {
+            Stop-Process -Id $OwnedProcess.Id -Force -ErrorAction SilentlyContinue
+            try { $OwnedProcess.WaitForExit() } catch { }
+        }
+    }
+    Remove-Item -LiteralPath (Join-Path $TestRoot 'run.lock') -Force -ErrorAction SilentlyContinue
+}
 $Receipt = [ordered]@{
     schema_name = 'durable_launcher.synthetic_test_receipt.v1'
     status = 'pass'

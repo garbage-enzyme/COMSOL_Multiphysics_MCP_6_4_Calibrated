@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import runpy
 import sys
 from pathlib import Path
@@ -10,6 +11,12 @@ from types import SimpleNamespace
 import pytest
 
 RECIPE = Path(__file__).parents[2] / "recipes" / "parallel_plate_capacitor.py"
+CAPACITOR_FIXTURE = (
+    Path(__file__).parents[1]
+    / "release"
+    / "integration_fixtures"
+    / "capacitor_clientapi_regression.json"
+)
 
 
 def _namespace(monkeypatch):
@@ -20,13 +27,14 @@ def _namespace(monkeypatch):
 
 def test_theory_and_parameterized_geometry_match_release_fixture(monkeypatch):
     namespace = _namespace(monkeypatch)
+    fixture = json.loads(CAPACITOR_FIXTURE.read_text(encoding="utf-8"))
 
     assert namespace["_geometry_size_expressions"]() == (
         "plate_side",
         "plate_side",
         "plate_gap",
     )
-    expected = 8.8541878128e-12 * 2.1 * (0.01**2) / 0.001 * 1e12
+    expected = fixture["acceptance"]["theory_capacitance_pf"]
     assert namespace["_theoretical_capacitance_pf"]() == pytest.approx(expected)
 
 
@@ -124,7 +132,9 @@ def test_staged_model_is_published_only_after_client_and_lease_cleanup(ascii_tmp
         ("maximum_relative_error", 0.2, "must not exceed 0.1"),
     ],
 )
-def test_invalid_inputs_fail_before_solver_ownership(monkeypatch, field, value, message):
+def test_invalid_inputs_fail_before_solver_ownership(
+    ascii_tmp_path, monkeypatch, field, value, message
+):
     namespace = _namespace(monkeypatch)
     values = {
         "plate_side_m": 0.01,
@@ -134,6 +144,16 @@ def test_invalid_inputs_fail_before_solver_ownership(monkeypatch, field, value, 
         "maximum_relative_error": 1e-6,
     }
     values[field] = value
+    ownership_calls = []
+    namespace["parse_args"] = lambda: SimpleNamespace(
+        output_model=ascii_tmp_path / "invalid.mph",
+        receipt=ascii_tmp_path / "invalid.receipt.json",
+        overwrite_output=False,
+        solve=False,
+        **values,
+    )
+    namespace["SolverOwnership"] = lambda **_kwargs: ownership_calls.append(True)
 
     with pytest.raises(ValueError, match=message):
-        namespace["_validate_inputs"](**values)
+        namespace["main"]()
+    assert ownership_calls == []

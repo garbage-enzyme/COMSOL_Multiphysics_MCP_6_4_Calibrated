@@ -942,6 +942,26 @@ def test_installed_gui_launcher_pe_subsystem_is_read_without_execution(tmp_path)
         installed_package_probe._windows_pe_subsystem(launcher)
 
 
+def test_installed_direct_entry_probe_cleans_root_after_child_failure(tmp_path, monkeypatch):
+    import settings_gui.desktop_shortcut as shortcut_module
+
+    monkeypatch.setattr(shortcut_module, "installed_entry_executable", lambda: tmp_path / "x.exe")
+    monkeypatch.setattr(shortcut_module, "known_desktop_path", lambda: tmp_path / "desktop")
+    monkeypatch.setattr(installed_package_probe, "_shortcut_bytes_identity", lambda _path: None)
+    monkeypatch.setattr(installed_package_probe, "_forbidden_process_snapshot", lambda: {})
+
+    def fail_child(*_args, cwd, **_kwargs):
+        (Path(cwd) / "child-residue.tmp").write_text("residue", encoding="utf-8")
+        raise subprocess.TimeoutExpired("settings", 20)
+
+    monkeypatch.setattr(installed_package_probe.subprocess, "run", fail_child)
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        installed_package_probe._probe_direct_settings_entry(tmp_path)
+
+    assert not (tmp_path / "settings-gui-direct-entry-probe").exists()
+
+
 def test_release_receipt_accepts_external_lock_and_probes_drop_pythonpath(
     tmp_path,
     monkeypatch,

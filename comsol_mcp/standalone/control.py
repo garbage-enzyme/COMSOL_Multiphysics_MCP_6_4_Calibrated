@@ -13,7 +13,7 @@ from typing import Any, Callable
 
 import psutil
 
-from comsol_mcp.jobs.store import process_identity
+from comsol_mcp.jobs.store import JobLock, process_identity
 
 from .builder import EXECUTABLE_NAME
 from .inspection import (
@@ -149,15 +149,11 @@ def launch_standalone_campaign(
     comsol = _validate_comsol_root(comsol_root)
     launch_root = deployment / "assets" / "mcp-launches"
     launch_root.mkdir(parents=True, exist_ok=True)
-    existing_launch_ids = {
-        path.name.split(".", 1)[0] for path in launch_root.iterdir() if path.is_file()
-    }
-    if len(existing_launch_ids) >= MAX_MCP_LAUNCH_RECORDS:
-        raise RuntimeError("standalone MCP launch record limit reached")
-    launch_id = uuid.uuid4().hex
-    stdout_path = launch_root / f"{launch_id}.stdout.log"
-    stderr_path = launch_root / f"{launch_id}.stderr.log"
-    record_path = launch_root / f"{launch_id}.json"
+    launch_id = ""
+    stdout_path: Path | None = None
+    stderr_path: Path | None = None
+    record_path: Path | None = None
+    process: Any = None
     command = [
         str(deployment / EXECUTABLE_NAME),
         "resume" if resume else "run",
@@ -171,42 +167,71 @@ def launch_standalone_campaign(
             | getattr(subprocess, "CREATE_NO_WINDOW", 0)
             | getattr(subprocess, "DETACHED_PROCESS", 0)
         )
-    with (
-        stdout_path.open("xb", buffering=0) as stdout,
-        stderr_path.open("xb", buffering=0) as stderr,
-    ):
-        process = popen_factory(
-            command,
-            cwd=deployment,
-            stdin=subprocess.DEVNULL,
-            stdout=stdout,
-            stderr=stderr,
-            close_fds=True,
-            creationflags=flags,
-            start_new_session=(os.name != "nt"),
-        )
-    _track(process)
-    deadline = time.monotonic() + 2.0
-    while True:
-        try:
-            owner = identity_provider(int(process.pid))
-            break
-        except psutil.NoSuchProcess:
-            if time.monotonic() >= deadline:
-                raise RuntimeError("standalone launcher exited before identity capture")
-            time.sleep(0.01)
-    record = {
-        "schema_name": "comsol_mcp.standalone_mcp_launch",
-        "schema_version": "1.0.0",
-        "launch_id": launch_id,
-        "operation": "resume" if resume else "run",
-        "owner": owner,
-        "launcher_sha256": build["launcher_sha256"],
-        "comsol_root_included": False,
-    }
-    from comsol_mcp.durable.io import atomic_write_json
+    try:
+        lock_path = deployment / "assets" / "locks" / "mcp-launches.lock"
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with JobLock(lock_path):
+            existing_launch_ids = {
+                path.name.split(".", 1)[0]
+                for path in launch_root.iterdir()
+                if path.is_file()
+                and len(path.name.split(".", 1)[0]) == 32
+                and all(character in "0123456789abcdef" for character in path.name[:32])
+            }
+            if len(existing_launch_ids) >= MAX_MCP_LAUNCH_RECORDS:
+                raise RuntimeError("standalone MCP launch record limit reached")
+            launch_id = uuid.uuid4().hex
+            stdout_path = launch_root / f"{launch_id}.stdout.log"
+            stderr_path = launch_root / f"{launch_id}.stderr.log"
+            record_path = launch_root / f"{launch_id}.json"
+            with (
+                stdout_path.open("xb", buffering=0) as stdout,
+                stderr_path.open("xb", buffering=0) as stderr,
+            ):
+                process = popen_factory(
+                    command,
+                    cwd=deployment,
+                    stdin=subprocess.DEVNULL,
+                    stdout=stdout,
+                    stderr=stderr,
+                    close_fds=True,
+                    creationflags=flags,
+                    start_new_session=(os.name != "nt"),
+                )
+        _track(process)
+        deadline = time.monotonic() + 2.0
+        while True:
+            try:
+                owner = identity_provider(int(process.pid))
+                break
+            except psutil.NoSuchProcess:
+                if time.monotonic() >= deadline:
+                    raise RuntimeError("standalone launcher exited before identity capture")
+                time.sleep(0.01)
+        record = {
+            "schema_name": "comsol_mcp.standalone_mcp_launch",
+            "schema_version": "1.0.0",
+            "launch_id": launch_id,
+            "operation": "resume" if resume else "run",
+            "owner": owner,
+            "launcher_sha256": build["launcher_sha256"],
+            "comsol_root_included": False,
+        }
+        from comsol_mcp.durable.io import atomic_write_json
 
-    atomic_write_json(record_path, record)
+        atomic_write_json(record_path, record)
+    except BaseException:
+        if process is not None and process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=2.0)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=2.0)
+        for residue in (record_path, stdout_path, stderr_path):
+            if residue is not None:
+                residue.unlink(missing_ok=True)
+        raise
     return {
         "success": True,
         "state": "launch_requested",

@@ -10,7 +10,7 @@ public class __CLASS_NAME__ {
     private static final double EPSILON_R = 2.1;
     private static final double VOLTAGE_V = __VOLTAGE_LITERAL__;
 
-    public static Model run() {
+    public static void run() {
         Model model = ModelUtil.create("Model");
         try {
             model.label("COMSOL MCP standalone capacitor point");
@@ -139,7 +139,6 @@ public class __CLASS_NAME__ {
                     potentialEntities[0],
                     elements
             ));
-            return null;
         } finally {
             if (ModelUtil.tags().length > 0) {
                 ModelUtil.remove("Model");

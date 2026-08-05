@@ -25,6 +25,8 @@ STANDALONE_PROBES = tuple(
     for path in sorted((ROOT / "development_kit/tests/integration/probes").glob("*.py"))
     if path.name != "__init__.py"
 )
+if not STANDALONE_PROBES:
+    raise RuntimeError("standalone integration probe collection must not be empty")
 
 
 def test_clientapi_property_acceptance_uses_explicit_runtime_checks():
@@ -257,8 +259,6 @@ def test_unicode_cleanup_continues_after_unlink_failure():
     STANDALONE_PROBES,
 )
 def test_loading_standalone_probe_does_not_create_client(monkeypatch, script_path):
-    assert STANDALONE_PROBES
-
     def fail_client_creation(*args, **kwargs):
         raise AssertionError("mph.Client must not be called while loading a probe")
 

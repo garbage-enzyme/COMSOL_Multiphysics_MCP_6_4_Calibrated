@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from src.server import create_server, register_all_tools
@@ -25,6 +26,20 @@ def _tool_names(server) -> list[str]:
 
 def _call_tool(server, name: str, arguments: dict) -> dict:
     return decode_tool_result(asyncio.run(server.call_tool(name, arguments)))
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        None,
+        "not-content-blocks",
+        [SimpleNamespace(text="Error: unavailable")],
+        ([SimpleNamespace(text="not-json")], None),
+    ],
+)
+def test_public_tool_decoder_normalizes_malformed_results(result):
+    with pytest.raises(ValueError, match="public MCP tool result"):
+        decode_tool_result(result)
 
 
 def test_default_profile_is_core_after_h3_cutover(monkeypatch):

@@ -8,6 +8,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
+import pytest
 from src.evidence.integrity_controls import (
     DISABLED_CHECK_WARNING,
     EVIDENCE_CHECKS,
@@ -73,10 +74,17 @@ def _json_fence_blocks(text: str) -> list[str]:
             active = None
             body = []
         else:
+            if opening.fullmatch(line) is not None:
+                raise AssertionError("nested Markdown fence opened before the active fence closed")
             body.append(line)
-    if active is not None and active[2]:
-        raise AssertionError("unclosed JSON fence")
+    if active is not None:
+        raise AssertionError("unclosed Markdown fence")
     return blocks
+
+
+def test_documentation_fence_parser_rejects_unclosed_non_json_blocks():
+    with pytest.raises(AssertionError, match="Markdown fence"):
+        _json_fence_blocks("```text\nnot closed\n```json\n{\"hidden\": true}\n```")
 
 
 def test_documented_default_and_exploration_settings_are_executable():

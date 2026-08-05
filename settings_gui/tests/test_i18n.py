@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import ast
+from collections import Counter
 from string import Formatter
 
 from comsol_mcp.settings import GUI_LANGUAGES, GUI_SCALES
 from comsol_mcp.tools.profiles import PROFILE_NAMES
+from development_kit.scripts import settings_gui_locales
 from development_kit.scripts.settings_gui_locales import expected_files
+from settings_gui import GUI_RELEASE
 from settings_gui.app import FIXED_LINKS, TAB_TITLES
 from settings_gui.i18n import (
     LANGUAGE_SELF_NAMES,
@@ -20,29 +23,42 @@ from settings_gui.i18n import (
 from settings_gui.model import FIELDS, PROFILE_HELP_IDS
 
 
-def _placeholders(value: str) -> set[str]:
-    return {
+def _placeholders(value: str) -> Counter[str]:
+    return Counter(
         name
         for _literal, name, _format, _conversion in Formatter().parse(value)
         if name is not None
-    }
+    )
 
 
 def _literal_translation_calls() -> set[str]:
     messages: set[str] = set()
     for name in ("app.py", "controller.py"):
         tree = ast.parse((LOCALE_ROOT.parent / name).read_text(encoding="utf-8"))
+        assigned_literals = {
+            target.id: node.value.value
+            for node in ast.walk(tree)
+            if isinstance(node, (ast.Assign, ast.AnnAssign))
+            and isinstance(node.value, ast.Constant)
+            and isinstance(node.value.value, str)
+            for target in (node.targets if isinstance(node, ast.Assign) else [node.target])
+            if isinstance(target, ast.Name)
+        }
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call) or not node.args:
                 continue
             first = node.args[0]
-            if not isinstance(first, ast.Constant) or not isinstance(first.value, str):
+            if isinstance(first, ast.Constant) and isinstance(first.value, str):
+                message = first.value
+            elif isinstance(first, ast.Name) and first.id in assigned_literals:
+                message = assigned_literals[first.id]
+            else:
                 continue
             function = node.func
             if isinstance(function, ast.Name) and function.id == "_":
-                messages.add(first.value)
+                messages.add(message)
             elif isinstance(function, ast.Attribute) and function.attr == "text":
-                messages.add(first.value)
+                messages.add(message)
     return messages
 
 
@@ -116,6 +132,10 @@ def test_po_and_mo_outputs_are_exactly_reproducible() -> None:
             raw = expected.decode("utf-8")
             assert "#, fuzzy" not in raw
             assert '\nmsgstr ""\n' not in raw
+
+
+def test_catalog_header_uses_the_canonical_gui_release() -> None:
+    assert f"Project-Id-Version: comsol-mcp {GUI_RELEASE}\n" in settings_gui_locales._header("en")
 
 
 def test_gettext_sources_are_forced_to_lf_in_git_checkouts() -> None:

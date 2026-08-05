@@ -30,11 +30,24 @@ jobs:
       - name: Install package for metadata inspection
         run: python -m pip install ".[dev,manuals]"
       - name: Capture complete installed environment
-        run: python -m pip list --format=json | Set-Content -Encoding utf8 installed-environment.json
+        run: |
+          python -m pip list --format=json | Set-Content -Encoding utf8 installed-environment.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Capture outdated dependencies
-        run: python -m pip list --outdated --format=json | Set-Content -Encoding utf8 outdated-dependencies.json
+        run: |
+          python -m pip list --outdated --format=json | Set-Content -Encoding utf8 outdated-dependencies.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Verify pip check
-        run: python -m pip check
+        run: |
+          python -m pip check 2>&1 | Set-Content -Encoding utf8 pip-check.txt
+          $pipCheckExitCode = $LASTEXITCODE
+          [ordered]@{
+            command = @("python", "-m", "pip", "check")
+            exit_code = $pipCheckExitCode
+            output_sha256 = (Get-FileHash -Algorithm SHA256 pip-check.txt).Hash.ToLowerInvariant()
+            status = if ($pipCheckExitCode -eq 0) { "passed" } else { "failed" }
+          } | ConvertTo-Json | Set-Content -Encoding utf8 pip-check-evidence.json
+          if ($pipCheckExitCode -ne 0) { exit $pipCheckExitCode }
       - name: Build reviewed dependency drift report
         run: |
           python development_kit/scripts/dependency_drift_report.py `
@@ -43,8 +56,12 @@ jobs:
             --release-lock constraints/release_locked_py314.txt `
             --installed installed-environment.json `
             --outdated outdated-dependencies.json `
+            --pip-check pip-check-evidence.json `
+            --installed-extra dev `
+            --installed-extra manuals `
             --source-commit "$env:GITHUB_SHA" `
             --output dependency-drift-report.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           "Dependency drift report generated for commit ``$env:GITHUB_SHA`` and uploaded as a workflow artifact." | Add-Content $env:GITHUB_STEP_SUMMARY
       # actions/upload-artifact v7.0.1
       - name: Upload dependency drift report

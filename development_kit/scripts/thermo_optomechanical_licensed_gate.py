@@ -711,6 +711,65 @@ def _cleanup_inventory(owner: SolverOwnership) -> dict[str, Any]:
     }
 
 
+def _finalize_gate_result(
+    output: Path,
+    result: dict[str, Any],
+    owner: SolverOwnership,
+) -> dict[str, Any]:
+    try:
+        result["cleanup"] = _cleanup_inventory(owner)
+    except Exception as exc:
+        result["cleanup"] = {
+            "lease_state": "unknown",
+            "collision": True,
+            "external_solver_processes": [],
+            "inventory_complete": False,
+            "error": {"type": type(exc).__name__, "message": str(exc)[:1000]},
+        }
+        result["success"] = False
+    if (
+        result["cleanup"]["lease_state"] != "absent"
+        or result["cleanup"]["collision"]
+        or not result["cleanup"]["inventory_complete"]
+    ):
+        result["success"] = False
+    result["finished_at_epoch"] = time.time()
+    try:
+        body = dict(result)
+        result["receipt_sha256"] = _canonical_hash(body)
+    except Exception as exc:
+        result["success"] = False
+        result["receipt_hash_error"] = {
+            "type": type(exc).__name__,
+            "message": str(exc)[:1000],
+        }
+    try:
+        _atomic_json(output / "licensed_acceptance.json", result)
+    except Exception as exc:
+        result["success"] = False
+        result["receipt_write_error"] = {
+            "type": type(exc).__name__,
+            "message": str(exc)[:1000],
+        }
+        fallback = {
+            "schema_name": SCHEMA_NAME,
+            "schema_version": SCHEMA_VERSION,
+            "success": False,
+            "error": result.get("error"),
+            "cleanup": result.get("cleanup"),
+            "receipt_write_error": result["receipt_write_error"],
+            "finished_at_epoch": result["finished_at_epoch"],
+        }
+        try:
+            _atomic_json(output / "licensed_acceptance_failure.json", fallback)
+        except Exception as fallback_exc:
+            result["receipt_fallback_write_error"] = {
+                "type": type(fallback_exc).__name__,
+                "message": str(fallback_exc)[:1000],
+            }
+    return result
+
+
 def run_gate(output: Path, *, cores: int) -> dict[str, Any]:
     if output.exists():
         raise ValueError("licensed thermo-optomechanical gate output must not already exist")
@@ -826,17 +885,7 @@ def run_gate(output: Path, *, cores: int) -> dict[str, Any]:
         except Exception as exc:
             result["lease_release"] = {"success": False, "error": str(exc)[:1000]}
             result["success"] = False
-        result["cleanup"] = _cleanup_inventory(owner)
-        if (
-            result["cleanup"]["lease_state"] != "absent"
-            or result["cleanup"]["collision"]
-            or not result["cleanup"]["inventory_complete"]
-        ):
-            result["success"] = False
-        result["finished_at_epoch"] = time.time()
-        body = dict(result)
-        result["receipt_sha256"] = _canonical_hash(body)
-        _atomic_json(output / "licensed_acceptance.json", result)
+        _finalize_gate_result(output, result, owner)
     return result
 
 

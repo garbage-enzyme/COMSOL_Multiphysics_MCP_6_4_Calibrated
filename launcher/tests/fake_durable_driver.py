@@ -18,6 +18,37 @@ sys.path.insert(0, str(HELPER_DIR))
 durable_control = importlib.import_module("durable_control")
 
 
+def process_is_alive(pid: object) -> bool:
+    if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0 or pid == os.getpid():
+        return False
+    try:
+        os.kill(pid, 0)
+    except (ProcessLookupError, OverflowError):
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def claim_lock(lock_path: Path) -> None:
+    if lock_path.is_file():
+        try:
+            owner = json.loads(lock_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            owner = None
+        owner_pid = owner.get("pid") if isinstance(owner, dict) else None
+        if process_is_alive(owner_pid):
+            raise RuntimeError(f"fake durable driver is already active: pid={owner_pid}")
+        lock_path.unlink(missing_ok=True)
+    with lock_path.open("x", encoding="utf-8", newline="\n") as handle:
+        json.dump({"pid": os.getpid(), "spec_id": SPEC_ID}, handle)
+        handle.write("\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
 def append_jsonl(path: Path, value: object) -> None:
     encoded = json.dumps(value, sort_keys=True, separators=(",", ":"))
     with path.open("a", encoding="utf-8", newline="\n") as handle:
@@ -38,11 +69,7 @@ def main() -> None:
     status_path = ROOT / "status.json"
     control_dir = ROOT / "control"
     lock_path = ROOT / "run.lock"
-    with lock_path.open("x", encoding="utf-8", newline="\n") as handle:
-        json.dump({"pid": os.getpid(), "spec_id": SPEC_ID}, handle)
-        handle.write("\n")
-        handle.flush()
-        os.fsync(handle.fileno())
+    claim_lock(lock_path)
     started = time.time()
     try:
         completed = completed_rows(results_path)
@@ -114,7 +141,7 @@ def main() -> None:
                 "spec_id": SPEC_ID,
                 "completed": len(completed),
                 "planned": POINTS,
-                "latest_point_id": completed[-1]["point_id"],
+                "latest_point_id": None if not completed else completed[-1]["point_id"],
                 "elapsed_seconds": time.time() - started,
             },
         )

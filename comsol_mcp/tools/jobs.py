@@ -78,6 +78,12 @@ def _job_point_inventory(spec: dict[str, Any]) -> dict[str, Any]:
 
 def _preview_job_spec(spec: JobSubmissionSpec | dict[str, Any]) -> dict[str, Any]:
     normalized = validate_job_submission(spec)
+    if normalized["job_type"] == "thermo_optomechanical_replay":
+        from comsol_mcp.jobs.thermo_optomechanical_replay import (
+            normalize_thermo_optomechanical_replay_spec,
+        )
+
+        normalized = normalize_thermo_optomechanical_replay_spec(normalized)
     from comsol_mcp.tools.catalog import get_tool_metadata
 
     source_path = normalized.get("source_model_path")

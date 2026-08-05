@@ -135,7 +135,7 @@ def create_box_selection(
             raise ValueError("z bounds are not valid for a 2D geometry")
         if request["tag"] in _selection_tags(component):
             raise ValueError(f"Selection tag already exists: {request['tag']}")
-    except (TypeError, ValueError) as exc:
+    except Exception as exc:
         return {"success": False, "error": str(exc)}
 
     selections = component.selection()

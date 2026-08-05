@@ -7,6 +7,7 @@ import asyncio
 import hashlib
 import json
 import os
+import shutil
 import struct
 import subprocess
 import sys
@@ -139,48 +140,50 @@ def _probe_direct_settings_entry(output_parent: Path) -> dict:
     executable = installed_entry_executable()
     probe_root = output_parent / "settings-gui-direct-entry-probe"
     probe_root.mkdir(parents=True, exist_ok=False)
-    target = probe_root / "settings.json"
-    shortcut = known_desktop_path() / SHORTCUT_NAME
-    shortcut_before = _shortcut_bytes_identity(shortcut)
-    processes_before = _forbidden_process_snapshot()
-    completed = subprocess.run(  # noqa: S603
-        [str(executable), "--settings-path", str(target), "--validate-only"],
-        cwd=probe_root,
-        stdin=subprocess.DEVNULL,
-        capture_output=True,
-        text=True,
-        timeout=20,
-        check=False,
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-    )
-    if completed.returncode != 0:
-        raise AssertionError(
-            "installed Settings GUI validate-only entry failed: " + completed.stderr[:512]
-        )
     try:
-        receipt = json.loads(completed.stdout)
-    except json.JSONDecodeError as exc:
-        raise AssertionError("installed Settings GUI validate-only output is invalid") from exc
-    if (
-        receipt.get("ready") is not True
-        or receipt.get("settings_path_override") is not True
-        or receipt.get("settings_path_included") is not False
-        or receipt.get("contains_local_path") is not False
-        or receipt.get("tkinter_imported") is not False
-        or receipt.get("mcp_started") is not False
-        or receipt.get("solver_started") is not False
-        or str(target) in completed.stdout
-    ):
-        raise AssertionError("installed Settings GUI validate-only contract failed")
-    if target.exists() or any(probe_root.iterdir()):
-        raise AssertionError("validate-only created a settings or temporary file")
-    if _shortcut_bytes_identity(shortcut) != shortcut_before:
-        raise AssertionError("validate-only changed the Desktop shortcut")
-    processes_after = _forbidden_process_snapshot()
-    new_processes = sorted(set(processes_after) - set(processes_before))
-    if new_processes:
-        raise AssertionError("validate-only started a forbidden process")
-    probe_root.rmdir()
+        target = probe_root / "settings.json"
+        shortcut = known_desktop_path() / SHORTCUT_NAME
+        shortcut_before = _shortcut_bytes_identity(shortcut)
+        processes_before = _forbidden_process_snapshot()
+        completed = subprocess.run(  # noqa: S603
+            [str(executable), "--settings-path", str(target), "--validate-only"],
+            cwd=probe_root,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        if completed.returncode != 0:
+            raise AssertionError(
+                "installed Settings GUI validate-only entry failed: " + completed.stderr[:512]
+            )
+        try:
+            receipt = json.loads(completed.stdout)
+        except json.JSONDecodeError as exc:
+            raise AssertionError("installed Settings GUI validate-only output is invalid") from exc
+        if (
+            receipt.get("ready") is not True
+            or receipt.get("settings_path_override") is not True
+            or receipt.get("settings_path_included") is not False
+            or receipt.get("contains_local_path") is not False
+            or receipt.get("tkinter_imported") is not False
+            or receipt.get("mcp_started") is not False
+            or receipt.get("solver_started") is not False
+            or str(target) in completed.stdout
+        ):
+            raise AssertionError("installed Settings GUI validate-only contract failed")
+        if target.exists() or any(probe_root.iterdir()):
+            raise AssertionError("validate-only created a settings or temporary file")
+        if _shortcut_bytes_identity(shortcut) != shortcut_before:
+            raise AssertionError("validate-only changed the Desktop shortcut")
+        processes_after = _forbidden_process_snapshot()
+        new_processes = sorted(set(processes_after) - set(processes_before))
+        if new_processes:
+            raise AssertionError("validate-only started a forbidden process")
+    finally:
+        shutil.rmtree(probe_root)
     return {
         "ready": True,
         "settings_path_override": True,

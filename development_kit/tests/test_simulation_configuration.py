@@ -3,17 +3,18 @@
 from __future__ import annotations
 
 import asyncio
-import json
+import logging
 from copy import deepcopy
 
 import pytest
+from pydantic import ValidationError
 from src.server import create_server
 
 from comsol_mcp.evidence.simulation_configuration import (
     compare_simulation_configurations,
     normalize_simulation_configuration,
 )
-from comsol_mcp.tools.jobs import _preview_job_spec
+from comsol_mcp.tools.jobs import _preview_job_spec, _submit_job
 from development_kit.tests.mcp_test_support import decode_tool_result
 
 
@@ -206,6 +207,38 @@ def test_duplicate_layer_order_and_unrecognized_units_fail_closed():
 
 
 @pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda value: value.update(geometry=[]),
+        lambda value: value.update(materials=[], layers=[]),
+        lambda value: value.update(layers=[]),
+    ],
+)
+def test_container_level_physical_changes_are_classified(mutation):
+    right = deepcopy(_configuration())
+    mutation(right)
+    comparison = compare_simulation_configurations(_configuration(), right)
+    assert comparison["physical_disposition"] == "different"
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda value: value["incidence"]["theta"].update(dimension="length", unit="m"),
+        lambda value: value["incidence"]["phi"].update(dimension="temperature", unit="K"),
+        lambda value: value["materials"][0]["temperature"].update(dimension="length", unit="m"),
+        lambda value: value["layers"][0]["thickness"].update(dimension="angle", unit="rad"),
+        lambda value: value["layers"][0]["thickness"].update(value=-1.0),
+    ],
+)
+def test_physical_role_quantities_fail_at_the_typed_boundary(mutation):
+    value = _configuration()
+    mutation(value)
+    with pytest.raises(ValidationError):
+        normalize_simulation_configuration(value)
+
+
+@pytest.mark.parametrize(
     "spec",
     [
         {
@@ -260,8 +293,10 @@ def test_duplicate_layer_order_and_unrecognized_units_fail_closed():
     ],
 )
 def test_job_preview_is_side_effect_free_and_content_bound(spec):
+    original = deepcopy(spec)
     first = _preview_job_spec(spec)
     second = _preview_job_spec(deepcopy(spec))
+    assert spec == original
     assert first == second
     assert first["preview_guarantees"] == {
         "submitted": False,
@@ -274,8 +309,6 @@ def test_job_preview_is_side_effect_free_and_content_bound(spec):
 
 
 def test_job_preview_and_submit_share_discriminated_input_rejections():
-    with pytest.raises(ValueError):
-        _preview_job_spec({"job_type": "unknown"})
     oversized = {
         "job_type": "convergence_campaign",
         "campaign_id": "too-large",
@@ -285,8 +318,24 @@ def test_job_preview_and_submit_share_discriminated_input_rejections():
         "maximum_total_points": 2048,
         "wall_time_budget_seconds": 60,
     }
-    with pytest.raises(ValueError):
-        _preview_job_spec(oversized)
+    submitted = []
+
+    class Manager:
+        def submit(self, spec):
+            submitted.append(spec)
+            raise AssertionError("invalid job spec reached submission")
+
+    for invalid in ({"job_type": "unknown"}, oversized):
+        with pytest.raises(ValueError):
+            _preview_job_spec(deepcopy(invalid))
+        with pytest.raises(ValueError):
+            _submit_job(
+                deepcopy(invalid),
+                profile_name="core",
+                shared_enabled=False,
+                manager=Manager(),
+            )
+    assert submitted == []
 
 
 def test_public_f0_dispatch_is_solver_free():
@@ -320,3 +369,22 @@ def test_public_f0_dispatch_is_solver_free():
     assert validate_result["solver_started"] is False
     assert preview_result["success"] is True
     assert preview_result["preview_guarantees"]["submitted"] is False
+
+
+def test_public_configuration_failures_are_logged_and_redacted(caplog):
+    bad = _configuration()
+    bad["geometry"][0]["quantity"] = _quantity(1.0, "private-furlong")
+    server = create_server("f0-redaction", profile="core")
+
+    with caplog.at_level(logging.ERROR, logger="comsol_mcp.tools.configuration"):
+        result = _decode_public(
+            asyncio.run(
+                server.call_tool("simulation_configuration_validate", {"configuration": bad})
+            )
+        )
+
+    assert result["success"] is False
+    assert result["error"] == "Simulation configuration validation failed."
+    assert "private-furlong" not in result["error"]
+    assert "Simulation configuration validation failed" in caplog.text
+    assert "private-furlong" in caplog.text

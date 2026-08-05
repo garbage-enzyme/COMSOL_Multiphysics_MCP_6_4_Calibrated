@@ -85,6 +85,21 @@ def test_registry_candidates_are_normalized_and_deduplicated(tmp_path: Path) -> 
     assert registry_comsol_roots(registry) == (root.resolve(),)
 
 
+def test_unreadable_registry_candidate_is_ignored(tmp_path: Path, monkeypatch) -> None:
+    root, _java_home = _installation(tmp_path / "COMSOL64" / "Multiphysics")
+    registry = FakeRegistry({r"SOFTWARE\COMSOL\COMSOL64": str(root)})
+    original_read_text = Path.read_text
+
+    def unreadable_ini(path: Path, *args, **kwargs):
+        if path.name == "comsol.ini":
+            raise PermissionError("locked")
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", unreadable_ini)
+
+    assert registry_comsol_roots(registry) == ()
+
+
 def test_ambiguous_registry_roots_are_never_selected(tmp_path: Path) -> None:
     first, _ = _installation(tmp_path / "one")
     second, _ = _installation(tmp_path / "two")
@@ -126,6 +141,18 @@ def test_java_fallback_order_is_java_home_then_jdk_then_path(tmp_path: Path) -> 
         environ={},
         which=lambda _name: str(path_home / "bin" / "java.exe"),
     ) == (path_home.resolve(), "system_path")
+
+
+def test_quoted_java_home_is_normalized(tmp_path: Path) -> None:
+    java_home = tmp_path / "Java Home"
+    (java_home / "bin").mkdir(parents=True)
+    (java_home / "bin" / "java.exe").write_bytes(b"")
+
+    assert discover_java_home(
+        None,
+        environ={"JAVA_HOME": f'"{java_home}\\"'},
+        which=lambda _name: None,
+    ) == (java_home.resolve(), "system_java_home")
 
 
 def test_bundled_java_wins_over_every_system_candidate(tmp_path: Path) -> None:

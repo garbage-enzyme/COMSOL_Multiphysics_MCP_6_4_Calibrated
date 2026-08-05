@@ -260,11 +260,12 @@ def compare_simulation_configurations(
         "wavelength_control.",
         "solver.boundary_termination",
     )
+    physical_containers = {"geometry", "materials", "layers", "incidence", "wavelength_control"}
     physical_changes = [
         item
         for item in changes
         if item["classification"] in {"semantic", "unavailable"}
-        and item["path"].startswith(physical_prefixes)
+        and (item["path"] in physical_containers or item["path"].startswith(physical_prefixes))
     ]
     body = {
         "schema_name": "comsol_mcp.simulation_configuration_diff",

@@ -38,6 +38,8 @@ def _coordinate(wavelength_m: float, coordinate: str) -> float:
 
 
 def _wavelength(coordinate_value: float, coordinate: str) -> float:
+    if not math.isfinite(coordinate_value) or coordinate_value <= 0.0:
+        raise ValueError("fitted coordinate must be finite and positive")
     if coordinate == "wavelength":
         return coordinate_value
     if coordinate == "frequency":

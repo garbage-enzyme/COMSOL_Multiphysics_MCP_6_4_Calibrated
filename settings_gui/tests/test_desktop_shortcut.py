@@ -120,6 +120,31 @@ def test_shell_mismatch_diagnostics_include_only_field_names(tmp_path: Path) -> 
     )
 
 
+def test_settings_token_mismatch_has_specific_diagnostic(tmp_path: Path) -> None:
+    expected = ShortcutSpec(
+        target=tmp_path / "python.exe",
+        arguments=subprocess.list2cmdline(
+            ["--settings-path-token", encode_settings_path_token(tmp_path / "expected.json")]
+        ),
+        working_directory=tmp_path,
+        icon_location=f"{tmp_path / 'icon.ico'},0",
+        description=OWNERSHIP_DESCRIPTION,
+    )
+    observed = ShortcutSpec(
+        target=expected.target,
+        arguments=subprocess.list2cmdline(
+            ["--settings-path-token", encode_settings_path_token(tmp_path / "other.json")]
+        ),
+        working_directory=expected.working_directory,
+        icon_location=expected.icon_location,
+        description=expected.description,
+    )
+
+    assert _shortcut_spec_mismatch_fields(observed, expected) == (
+        "arguments_settings_path",
+    )
+
+
 class FakeShortcutBackend:
     def __init__(self) -> None:
         self.specs: dict[Path, ShortcutSpec] = {}
@@ -223,7 +248,61 @@ def test_foreign_shortcut_requires_confirmation_and_remove_preserves_it(tmp_path
     replaced = create_desktop_shortcut(**kwargs, replace_existing=True)
     assert replaced["success"] is True
     assert replaced["state"] == "replaced"
-    assert backend.inspect(shortcut).description == OWNERSHIP_DESCRIPTION
+    assert backend.writes[-1][1].description == OWNERSHIP_DESCRIPTION
+    assert shortcut.read_bytes() == b"shortcut"
+
+
+def test_failed_replacement_preserves_original_shortcut(tmp_path: Path) -> None:
+    backend = FakeShortcutBackend()
+    kwargs = _kwargs(tmp_path, backend)
+    shortcut = kwargs["desktop_path"] / SHORTCUT_NAME
+    shortcut.write_bytes(b"original")
+    backend.specs[shortcut] = ShortcutSpec(
+        target=kwargs["executable"],
+        arguments="--stale",
+        working_directory=kwargs["executable"].parent,
+        icon_location=f"{kwargs['icon_path']},0",
+        description=OWNERSHIP_DESCRIPTION,
+    )
+
+    def failed_write(path: Path, _spec: ShortcutSpec) -> None:
+        path.write_bytes(b"partial replacement")
+        raise OSError("write failed")
+
+    kwargs["write_shortcut"] = failed_write
+    with pytest.raises(OSError, match="write failed"):
+        create_desktop_shortcut(**kwargs, replace_existing=True)
+
+    assert shortcut.read_bytes() == b"original"
+    assert not list(shortcut.parent.glob(".*.tmp.lnk"))
+
+
+def test_status_and_remove_work_after_settings_assets_are_removed(tmp_path: Path) -> None:
+    backend = FakeShortcutBackend()
+    kwargs = _kwargs(tmp_path, backend)
+    shortcut = kwargs["desktop_path"] / SHORTCUT_NAME
+    shortcut.write_bytes(b"owned")
+    backend.specs[shortcut] = ShortcutSpec(
+        target=kwargs["executable"],
+        arguments=subprocess.list2cmdline(
+            ["--settings-path-token", encode_settings_path_token(kwargs["settings_path"])]
+        ),
+        working_directory=kwargs["executable"].parent,
+        icon_location=f"{kwargs['icon_path']},0",
+        description=OWNERSHIP_DESCRIPTION,
+    )
+    kwargs["settings_path"].unlink()
+    kwargs["settings_path"].parent.rmdir()
+    kwargs["executable"].unlink()
+    kwargs["icon_path"].unlink()
+
+    status = shortcut_status(**kwargs)
+    removed = remove_desktop_shortcut(**kwargs)
+
+    assert status["state"] == "stale"
+    assert status["existing_kind"] == "owned_stale"
+    assert removed["state"] == "removed"
+    assert not shortcut.exists()
 
 
 def test_stale_owned_shortcut_is_reported_and_never_silently_retargeted(tmp_path: Path) -> None:

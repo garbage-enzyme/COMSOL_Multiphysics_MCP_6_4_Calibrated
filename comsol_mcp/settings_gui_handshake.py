@@ -42,17 +42,25 @@ def handshake_bytes(state: str) -> bytes:
 
 def validate_handshake_path(value: str | Path) -> Path:
     path = Path(value)
+    parent = path.parent
     if (
         not path.is_absolute()
         or not str(path).isascii()
         or not _HANDSHAKE_NAME.fullmatch(path.name)
-        or path.parent.name != "settings_gui"
+        or parent.name != "settings_gui"
         or path.is_symlink()
         or getattr(path, "is_junction", lambda: False)()
+        or parent.is_symlink()
+        or getattr(parent, "is_junction", lambda: False)()
+        or not parent.is_dir()
     ):
         raise ValueError("settings GUI handshake path is invalid")
-    parent = path.parent.resolve(strict=True)
-    if not parent.is_dir() or parent.is_symlink():
+    parent = parent.resolve(strict=True)
+    if (
+        not parent.is_dir()
+        or parent.is_symlink()
+        or getattr(parent, "is_junction", lambda: False)()
+    ):
         raise ValueError("settings GUI handshake parent is invalid")
     return parent / path.name
 

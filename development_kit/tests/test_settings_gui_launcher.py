@@ -5,14 +5,20 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import queue
 import subprocess
 import sys
+import threading
 from pathlib import Path
+
+import pytest
 
 from comsol_mcp import settings_gui_launcher as launcher
 from comsol_mcp.server import create_server
-from comsol_mcp.settings_gui_handshake import publish_handshake
-
+from comsol_mcp.settings_gui_handshake import (
+    publish_handshake,
+    validate_handshake_path,
+)
 from development_kit.tests.mcp_test_support import decode_tool_result
 
 
@@ -54,7 +60,7 @@ def test_detached_launch_uses_pythonw_devnull_and_ready_handshake(
     assert result == {
         "success": True,
         "state": "launched",
-        "gui_release": "alpha6.3",
+        "gui_release": "alpha6.4",
         "restart_required_after_change": True,
         "message_code": "settings_gui_opened",
         "contains_local_path": False,
@@ -114,10 +120,24 @@ def test_instance_mutex_reports_a_live_gui_in_another_process(ascii_tmp_path: Pa
     )
     try:
         assert process.stdout is not None
-        assert process.stdout.readline().strip() == "READY"
+        ready_lines: queue.Queue[str] = queue.Queue(maxsize=1)
+        reader = threading.Thread(
+            target=lambda: ready_lines.put(process.stdout.readline()), daemon=True
+        )
+        reader.start()
+        try:
+            assert ready_lines.get(timeout=10).strip() == "READY"
+        except queue.Empty:
+            pytest.fail("Settings GUI mutex child did not publish readiness within 10 seconds")
         assert launcher.settings_gui_is_running(target) is True
     finally:
-        output, errors = process.communicate("done\n", timeout=10)
+        try:
+            output, errors = process.communicate("done\n", timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            output, errors = process.communicate(timeout=10)
+            pytest.fail(f"Settings GUI mutex child did not exit after input: {output}{errors}")
+        reader.join(timeout=1)
         assert process.returncode == 0, output + errors
     assert launcher.settings_gui_is_running(target) is False
 
@@ -176,11 +196,29 @@ def test_launch_timeout_is_bounded_and_cleans_handshake(ascii_tmp_path, monkeypa
     assert not list((ascii_tmp_path / "settings_gui").glob("*.json"))
 
 
+def test_handshake_rejects_a_linked_parent_before_resolution(
+    ascii_tmp_path: Path,
+    monkeypatch,
+) -> None:
+    parent = ascii_tmp_path / "settings_gui"
+    parent.mkdir()
+    target = parent / ".settings-gui-0123456789abcdef0123456789abcdef.json"
+    original_is_symlink = Path.is_symlink
+
+    def fake_is_symlink(path: Path) -> bool:
+        return path == parent or original_is_symlink(path)
+
+    monkeypatch.setattr(Path, "is_symlink", fake_is_symlink)
+
+    with pytest.raises(ValueError, match="handshake path is invalid"):
+        validate_handshake_path(target)
+
+
 def test_public_dispatch_has_no_arguments_and_returns_tool_result(monkeypatch) -> None:
     expected = {
         "success": True,
         "state": "already_running",
-        "gui_release": "alpha6.3",
+        "gui_release": "alpha6.4",
         "restart_required_after_change": True,
         "message_code": "settings_gui_already_open",
         "contains_local_path": False,

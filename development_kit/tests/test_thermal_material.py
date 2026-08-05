@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import math
 from copy import deepcopy
 
@@ -11,6 +10,7 @@ import pytest
 from pydantic import ValidationError
 from src.server import create_server
 
+from comsol_mcp.contracts.thermal_material import ThermalMaterialLedger
 from comsol_mcp.evidence.thermal_material import (
     evaluate_thermal_material,
     normalize_thermal_material_ledger,
@@ -292,6 +292,63 @@ def test_invalid_table_shape_and_negative_passive_loss_fail_closed():
     }
     with pytest.raises(ValidationError):
         normalize_thermal_material_ledger(_ledger([_state(model=negative_loss)]))
+
+
+@pytest.mark.parametrize("model_kind", ["nk_table", "permittivity_table"])
+def test_table_shape_fails_at_the_typed_boundary(model_kind):
+    model = {
+        "model_kind": model_kind,
+        "wavelengths_m": [1.0e-6, 2.0e-6],
+        "temperatures_K": [300.0, 400.0],
+        "interpolation": {
+            "wavelength_method": "linear",
+            "temperature_method": "linear",
+            "wavelength_discontinuities_m": [],
+            "temperature_discontinuities_K": [],
+        },
+        "table_sha256": "8" * 64,
+    }
+    if model_kind == "nk_table":
+        model.update(n_flat=[2.0, 2.0], k_flat=[0.1, 0.1])
+    else:
+        model.update(epsilon_real_flat=[2.0, 2.0], epsilon_imag_flat=[0.1, 0.1])
+    with pytest.raises(ValidationError, match="declared grid shape"):
+        ThermalMaterialLedger.model_validate(_ledger([_state(model=model)]))
+
+
+@pytest.mark.parametrize(
+    ("mutate", "message"),
+    [
+        (lambda ledger: ledger["states"].append(deepcopy(ledger["states"][0])), "unique"),
+        (
+            lambda ledger: ledger["phase_boundaries"][0].update(upper_state_id="missing"),
+            "declared states",
+        ),
+        (
+            lambda ledger: ledger["phase_boundaries"][0].update(upper_state_id="solid"),
+            "distinct",
+        ),
+        (
+            lambda ledger: ledger["phase_boundaries"][0].update(boundary_temperature_K=650.0),
+            "covered",
+        ),
+    ],
+)
+def test_phase_boundary_references_fail_at_the_typed_boundary(mutate, message):
+    lower = _state("solid", t_min=300.0, t_max=500.0)
+    upper = _state("liquid", t_min=500.0, t_max=700.0)
+    upper["phase_id"] = "liquid"
+    boundary = {
+        "lower_state_id": "solid",
+        "upper_state_id": "liquid",
+        "boundary_temperature_K": 500.0,
+        "smoothing_allowed": False,
+        "source_sha256": "e" * 64,
+    }
+    ledger = _ledger([lower, upper], [boundary])
+    mutate(ledger)
+    with pytest.raises(ValidationError, match=message):
+        ThermalMaterialLedger.model_validate(ledger)
 
 
 def test_public_m2_dispatch_is_solver_free():

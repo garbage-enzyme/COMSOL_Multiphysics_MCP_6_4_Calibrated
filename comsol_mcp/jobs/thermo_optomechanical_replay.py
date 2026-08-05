@@ -13,6 +13,7 @@ from comsol_mcp.contracts.thermo_optomechanical import (
     ThermoOptomechanicalReplayInput,
     ThermoOptomechanicalReplayManifest,
 )
+from comsol_mcp.durable.io import read_file_bytes_bounded
 
 from .resource_admission import normalize_resource_policy
 from .store import JOB_SCHEMA_VERSION
@@ -108,14 +109,20 @@ def normalize_thermo_optomechanical_replay_spec(value: object) -> dict[str, Any]
         or manifest_path.suffix.casefold() != ".json"
     ):
         raise ValueError("specification_path must name an existing ASCII-safe JSON file")
-    if manifest_path.stat().st_size > MAX_THERMO_OPTOMECHANICAL_SPEC_BYTES:
-        raise ValueError("thermo-optomechanical replay specification exceeds its bound")
-    manifest_sha256 = _sha256_file(manifest_path)
+    try:
+        manifest_payload = read_file_bytes_bounded(
+            manifest_path, max_bytes=MAX_THERMO_OPTOMECHANICAL_SPEC_BYTES
+        )
+    except (OSError, ValueError) as exc:
+        raise ValueError(
+            "thermo-optomechanical replay specification is absent or exceeds its bound"
+        ) from exc
+    manifest_sha256 = hashlib.sha256(manifest_payload).hexdigest()
     if manifest_sha256 != submission_raw["specification_sha256"].lower():
         raise ValueError("specification_sha256 does not match specification_path")
     try:
-        manifest_value = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        manifest_value = json.loads(manifest_payload.decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError) as exc:
         raise ValueError("thermo-optomechanical specification JSON is invalid") from exc
     parsed = ThermoOptomechanicalReplayManifest.model_validate(manifest_value)
     raw = parsed.model_dump(mode="python", exclude_unset=True)

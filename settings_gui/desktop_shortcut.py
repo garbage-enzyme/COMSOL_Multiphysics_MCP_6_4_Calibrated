@@ -249,10 +249,15 @@ def _arguments_mismatch_field(observed: str, expected: str) -> str | None:
         return "arguments_option"
     if (
         len(observed_tokens) == 2
-        and expected_tokens[0] == "--settings-path"
-        and _normalized_path(Path(observed_tokens[1])) != _normalized_path(Path(expected_tokens[1]))
+        and expected_tokens[0] == "--settings-path-token"
     ):
-        return "arguments_settings_path"
+        try:
+            if decode_settings_path_token(observed_tokens[1]) != decode_settings_path_token(
+                expected_tokens[1]
+            ):
+                return "arguments_settings_path"
+        except ValueError:
+            return "arguments"
     return "arguments"
 
 
@@ -447,6 +452,24 @@ def _resolved_inputs(
     return settings, desktop / SHORTCUT_NAME, _desired_spec(settings, entry, icon)
 
 
+def _resolved_lifecycle_inputs(
+    settings_path: Path,
+    desktop_path: Path | None,
+) -> tuple[Path, Path]:
+    settings = Path(settings_path).expanduser()
+    if (
+        not settings.is_absolute()
+        or len(str(settings)) > MAX_SETTINGS_PATH_CHARS
+        or any(ord(character) < 32 for character in str(settings))
+    ):
+        raise ValueError("settings path must be a bounded absolute path")
+    settings = Path(os.path.abspath(settings))
+    desktop = Path(desktop_path) if desktop_path is not None else known_desktop_path()
+    if not desktop.is_absolute() or not desktop.is_dir() or path_has_linked_component(desktop):
+        raise ValueError("Desktop folder is unavailable")
+    return settings, desktop / SHORTCUT_NAME
+
+
 def _existing_kind(existing: ShortcutSpec | None, desired: ShortcutSpec) -> str:
     if existing is None or existing.description != OWNERSHIP_DESCRIPTION:
         return "foreign"
@@ -477,16 +500,26 @@ def shortcut_status(
     write_shortcut: Callable[[Path, ShortcutSpec], None] = _write_windows_shortcut,
 ) -> dict[str, Any]:
     del write_shortcut
-    settings, shortcut, desired = _resolved_inputs(
-        settings_path, desktop_path, executable, icon_path
-    )
+    settings, shortcut = _resolved_lifecycle_inputs(settings_path, desktop_path)
     if not shortcut.exists():
         return _receipt("not_found", success=True, settings_path=settings)
     try:
         existing = inspect_shortcut(shortcut)
     except OSError, RuntimeError, ValueError:
         existing = None
-    kind = _existing_kind(existing, desired)
+    try:
+        entry = executable if executable is not None else installed_gui_entry_executable()
+        icon = icon_path if icon_path is not None else ICON_PATH
+        desired = _desired_spec(settings, entry, icon)
+    except (OSError, RuntimeError, ValueError):
+        desired = None
+    kind = (
+        "foreign"
+        if existing is None or existing.description != OWNERSHIP_DESCRIPTION
+        else "owned_stale"
+        if desired is None
+        else _existing_kind(existing, desired)
+    )
     state = (
         "current" if kind == "owned_current" else "stale" if kind == "owned_stale" else "foreign"
     )
@@ -532,11 +565,21 @@ def create_desktop_shortcut(
         current_identity = None
     if current_identity != baseline_identity:
         return _receipt("conflict", success=False, settings_path=settings, existing_kind=kind)
-    shortcut.unlink()
+    candidate = shortcut.with_name(f".{shortcut.stem}.{uuid.uuid4().hex}.tmp{shortcut.suffix}")
     try:
-        write_shortcut(shortcut, desired)
-    except FileExistsError:
-        return _receipt("conflict", success=False, settings_path=settings, existing_kind=kind)
+        write_shortcut(candidate, desired)
+        candidate_identity = _shortcut_identity(candidate)
+        try:
+            current_identity = _shortcut_identity(shortcut)
+        except (OSError, RuntimeError, ValueError):
+            current_identity = None
+        if current_identity != baseline_identity:
+            return _receipt("conflict", success=False, settings_path=settings, existing_kind=kind)
+        os.replace(candidate, shortcut)
+        if _shortcut_identity(shortcut) != candidate_identity:
+            raise OSError("replacement shortcut identity changed")
+    finally:
+        candidate.unlink(missing_ok=True)
     return _receipt("replaced", success=True, settings_path=settings, existing_kind=kind)
 
 
@@ -550,9 +593,8 @@ def remove_desktop_shortcut(
     write_shortcut: Callable[[Path, ShortcutSpec], None] = _write_windows_shortcut,
 ) -> dict[str, Any]:
     del write_shortcut
-    settings, shortcut, desired = _resolved_inputs(
-        settings_path, desktop_path, executable, icon_path
-    )
+    del executable, icon_path
+    settings, shortcut = _resolved_lifecycle_inputs(settings_path, desktop_path)
     if not shortcut.exists():
         return _receipt("not_found", success=True, settings_path=settings)
     try:
@@ -563,7 +605,11 @@ def remove_desktop_shortcut(
         existing = inspect_shortcut(shortcut)
     except OSError, RuntimeError, ValueError:
         existing = None
-    kind = _existing_kind(existing, desired)
+    kind = (
+        "foreign"
+        if existing is None or existing.description != OWNERSHIP_DESCRIPTION
+        else "owned_current"
+    )
     if kind == "foreign":
         return _receipt(
             "foreign_preserved", success=False, settings_path=settings, existing_kind=kind

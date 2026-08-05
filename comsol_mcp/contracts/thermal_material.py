@@ -112,6 +112,13 @@ class NkTableModel(_ClosedModel):
     interpolation: InterpolationPolicy
     table_sha256: Sha256
 
+    @model_validator(mode="after")
+    def validate_table_shape(self) -> NkTableModel:
+        expected = len(self.wavelengths_m) * len(self.temperatures_K)
+        if len(self.n_flat) != expected or len(self.k_flat) != expected:
+            raise ValueError("nk table arrays must match the declared grid shape")
+        return self
+
 
 class PermittivityTableModel(_ClosedModel):
     model_kind: Literal["permittivity_table"]
@@ -121,6 +128,13 @@ class PermittivityTableModel(_ClosedModel):
     epsilon_imag_flat: Annotated[list[NonnegativeFloat], Field(min_length=2, max_length=2048)]
     interpolation: InterpolationPolicy
     table_sha256: Sha256
+
+    @model_validator(mode="after")
+    def validate_table_shape(self) -> PermittivityTableModel:
+        expected = len(self.wavelengths_m) * len(self.temperatures_K)
+        if len(self.epsilon_real_flat) != expected or len(self.epsilon_imag_flat) != expected:
+            raise ValueError("permittivity table arrays must match the declared grid shape")
+        return self
 
 
 class DrudeModel(_ClosedModel):
@@ -229,6 +243,34 @@ class ThermalMaterialLedger(_ClosedModel):
     )
     comsol_target: ComsolMaterialTarget
     ledger_sha256: Sha256 | None = None
+
+    @model_validator(mode="after")
+    def validate_phase_boundaries(self) -> ThermalMaterialLedger:
+        state_ids = [state.state_id for state in self.states]
+        if len(state_ids) != len(set(state_ids)):
+            raise ValueError("material state_id values must be unique")
+        by_state = {state.state_id: state for state in self.states}
+        for boundary in self.phase_boundaries:
+            if boundary.lower_state_id not in by_state or boundary.upper_state_id not in by_state:
+                raise ValueError("phase boundaries must reference declared states")
+            if boundary.lower_state_id == boundary.upper_state_id:
+                raise ValueError("phase boundary states must be distinct")
+            lower = by_state[boundary.lower_state_id]
+            upper = by_state[boundary.upper_state_id]
+            if lower.phase_id == upper.phase_id:
+                raise ValueError("phase boundaries must connect distinct phase_id values")
+            if not (
+                lower.validity.temperature_min_K
+                <= boundary.boundary_temperature_K
+                <= lower.validity.temperature_max_K
+                and upper.validity.temperature_min_K
+                <= boundary.boundary_temperature_K
+                <= upper.validity.temperature_max_K
+            ):
+                raise ValueError(
+                    "phase boundary temperature must be covered by both adjacent states"
+                )
+        return self
 
 
 class ThermalMaterialEvaluationRequest(_ClosedModel):

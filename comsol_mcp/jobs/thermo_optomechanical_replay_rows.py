@@ -151,7 +151,9 @@ def _validate_stage_payload(stage_id: str, value: object, spec: Mapping[str, Any
             or not material["property_value_type"]
         ):
             raise ValueError("preflight material state readback does not match the job")
-        if payload["source_unchanged"] is not True or payload["rollback_available"] is not True:
+        if payload["source_unchanged"] is not True or not isinstance(
+            payload["rollback_available"], bool
+        ):
             raise ValueError("preflight immutability or rollback evidence is incomplete")
         contract = spec["model_contract"]
         tags = payload["interface_tags"]
@@ -213,8 +215,8 @@ def _validate_stage_payload(stage_id: str, value: object, spec: Mapping[str, Any
             {"source_W", "loss_W", "residual_W", "relative_residual"},
             "energy balance",
         )
-        if any(not math.isfinite(_finite(item, "energy value")) for item in energy.values()):
-            raise ValueError("energy evidence is invalid")
+        for item in energy.values():
+            _finite(item, "energy value")
         expansion = _exact(
             payload["expansion"],
             {
@@ -522,6 +524,13 @@ def append_thermo_optomechanical_stage_row(
             "previous_row_sha256": rows[-1]["row_sha256"] if rows else None,
         }
         row = {**body, "row_sha256": _fingerprint(body)}
+        row = _validate_row(
+            row,
+            spec,
+            ordinal=ordinal,
+            previous_row_sha256=rows[-1]["row_sha256"] if rows else None,
+            artifact_root=root,
+        )
         payload = _canonical_bytes(row) + b"\n"
         if len(payload) > MAX_THERMO_OPTOMECHANICAL_STAGE_ROW_BYTES:
             raise ValueError("thermo-optomechanical stage row exceeds its bound")

@@ -170,9 +170,17 @@ def capture_matrix(output_root: Path) -> dict:
             capture_output=True,
             text=True,
             timeout=20,
-            check=True,
+            check=False,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
+        if completed.returncode != 0:
+            stdout = completed.stdout[-2048:]
+            stderr = completed.stderr[-2048:]
+            raise RuntimeError(
+                "Settings GUI capture failed for "
+                f"language={language}, dpi={dpi}, state={state}, tab={tab}, "
+                f"exit={completed.returncode}; stdout={stdout!r}; stderr={stderr!r}"
+            )
         captures.append(json.loads(completed.stdout))
     receipt = {
         "schema_name": "comsol_mcp.settings_gui_visual_matrix",
@@ -202,6 +210,7 @@ def main() -> int:
     if args.one:
         if None in (args.language, args.dpi_percent, args.state, args.tab):
             parser.error("--one requires language, DPI, state, and tab")
+        args.output_root.mkdir(parents=True, exist_ok=True)
         name = f"{args.dpi_percent:03d}-{args.language}-{args.state}-{args.tab}.png"
         receipt = _capture_one(
             args.output_root / name,

@@ -19,7 +19,9 @@ from src.evidence.spectral_model_comparison import (
     validate_spectral_model_comparison,
 )
 from src.server import create_server
+from src.tools.spectral_characterization import _nonfinite_row_summary
 
+import comsol_mcp.evidence.spectral_model_comparison as comparison_module
 from development_kit.tests.mcp_test_support import decode_tool_result
 
 CONFIGURATION_SHA256 = "a" * 64
@@ -191,6 +193,37 @@ def test_boundary_maximum_is_not_fit_and_public_tool_is_solver_free():
     assert result["filesystem_modified"] is False
 
 
+def test_nonfinite_model_comparison_uses_its_declared_envelope():
+    bundle = _bundle(
+        [4.6e-6 + index * 0.025e-6 for index in range(33)],
+        [0.2] * 33,
+    )
+    bundle_spec = {
+        key: bundle[key]
+        for key in (
+            "bundle_id",
+            "source_model",
+            "configuration_sha256",
+            "parameter_state",
+            "wavelength_convention",
+            "expressions",
+            "rows",
+        )
+    }
+    bundle_spec["rows"][0]["A"] = math.nan
+
+    result = _nonfinite_row_summary(
+        bundle_spec,
+        artifact_key="model_comparison",
+    )
+
+    assert result is not None
+    assert result["success"] is False
+    assert result["classification"] == "non_finite"
+    assert result["model_comparison"] is None
+    assert "candidate_measurements" not in result
+
+
 def test_tampering_unknown_fields_and_duplicate_models_fail_closed():
     center = 5.0e-6
     wavelengths = [4.6e-6 + index * 0.025e-6 for index in range(33)]
@@ -212,3 +245,23 @@ def test_tampering_unknown_fields_and_duplicate_models_fail_closed():
     unknown["automatic_mechanism"] = True
     with pytest.raises(ValueError, match="fields"):
         build_spectral_model_comparison(bundle, decision, unknown)
+
+
+def test_degenerate_fitted_frequency_is_isolated_per_model(monkeypatch):
+    wavelengths = [4.6e-6 + index * 0.025e-6 for index in range(33)]
+    absorption = [0.1 + 0.8 / (1.0 + ((value - 5.0e-6) / 0.08e-6) ** 2) for value in wavelengths]
+    bundle = _bundle(wavelengths, absorption)
+    decision = build_spectral_analysis_decision(bundle, _policy())
+    monkeypatch.setattr(
+        comparison_module,
+        "_fit_candidate",
+        lambda **_kwargs: {"peak_wavelength_m": 0.0},
+    )
+
+    result = build_spectral_model_comparison(
+        bundle, decision, _configuration(coordinate="frequency")
+    )
+
+    assert result["state"] == "not_compared"
+    assert all(item["state"] == "fit_failed" for item in result["models"])
+    assert all("finite and positive" in item["failure_reason"] for item in result["models"])

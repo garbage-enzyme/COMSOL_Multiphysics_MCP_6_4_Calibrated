@@ -181,6 +181,19 @@ class ThermalRadiationRequest(_ClosedModel):
             raise ValueError("values_flat length does not match the declared grid shape")
         if self.uncertainty_flat and len(self.uncertainty_flat) != expected:
             raise ValueError("uncertainty_flat length does not match values_flat")
+        spectral_count = len(self.axis.coordinates)
+        for field_name in (
+            "gas_absorption_per_m",
+            "aperture_weights",
+            "optics_transmission",
+            "analyzer_response",
+            "detector_response",
+            "reference_response",
+            "background_response",
+        ):
+            series = getattr(self.detector_path, field_name)
+            if series and len(series) != spectral_count:
+                raise ValueError(f"detector_path.{field_name} length must match the spectral axis")
         if self.angular_grid.mode == "lambertian_pi" and dimensions[1:3] != (1, 1):
             raise ValueError("lambertian_pi requires one declared angular sample")
         if self.polarization.mode == "scalar":

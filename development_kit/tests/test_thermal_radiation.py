@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import math
 from copy import deepcopy
 
@@ -12,6 +11,7 @@ import pytest
 from pydantic import ValidationError
 from src.server import create_server
 
+from comsol_mcp.contracts.thermal_radiation import ThermalRadiationRequest
 from comsol_mcp.evidence.thermal_radiation import (
     build_kirchhoff_assessment,
     evaluate_thermal_radiation,
@@ -256,6 +256,25 @@ def test_detector_gas_and_boxcar_kernels_are_bounded_and_monotonic():
     )
     with pytest.raises(ValidationError):
         evaluate_thermal_radiation(bad)
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    [
+        "gas_absorption_per_m",
+        "aperture_weights",
+        "optics_transmission",
+        "analyzer_response",
+        "detector_response",
+        "reference_response",
+        "background_response",
+    ],
+)
+def test_detector_series_shape_fails_at_the_typed_boundary(field_name):
+    request = _request([1.0e-6, 2.0e-6], [0.5, 0.5])
+    request["detector_path"] = {field_name: [1.0]}
+    with pytest.raises(ValidationError, match="spectral axis"):
+        ThermalRadiationRequest.model_validate(request)
 
 
 def test_uncertainty_and_provenance_are_bound_to_evidence():

@@ -10,6 +10,7 @@ dist/
 # Local environment / config
 opencode.json
 .claude/
+.opencodereview/
 
 # COMSOL-generated local artifacts
 *.mph.lock
