@@ -251,9 +251,7 @@ class SettingsStore:
                 self.preserve_damaged_copy()
             else:
                 stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-                backup = self.target.with_name(
-                    f"{self.target.stem}.damaged-{stamp}-unbounded.json"
-                )
+                backup = self.target.with_name(f"{self.target.stem}.damaged-{stamp}-unbounded.json")
                 os.replace(self.target, backup)
                 self.ownership.baseline = None
         ensure_default_directories(self.target.parent)

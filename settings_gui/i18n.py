@@ -165,7 +165,7 @@ class Translator:
                 languages=[LANGUAGE_LOCALES[self.language]],
                 fallback=False,
             )
-        except (FileNotFoundError, OSError, struct.error):
+        except FileNotFoundError, OSError, struct.error:
             self._catalog = gettext.NullTranslations()
             if self.language != "en":
                 self.warning = "The selected language catalog is unavailable; English is active."

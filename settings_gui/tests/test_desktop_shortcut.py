@@ -140,9 +140,7 @@ def test_settings_token_mismatch_has_specific_diagnostic(tmp_path: Path) -> None
         description=expected.description,
     )
 
-    assert _shortcut_spec_mismatch_fields(observed, expected) == (
-        "arguments_settings_path",
-    )
+    assert _shortcut_spec_mismatch_fields(observed, expected) == ("arguments_settings_path",)
 
 
 class FakeShortcutBackend:
@@ -391,9 +389,7 @@ def test_powershell_timeout_is_normalized(monkeypatch) -> None:
     monkeypatch.setattr(
         shortcut_module.subprocess,
         "run",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            subprocess.TimeoutExpired("pwsh", 15)
-        ),
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(subprocess.TimeoutExpired("pwsh", 15)),
     )
 
     with pytest.raises(OSError, match="timed out"):

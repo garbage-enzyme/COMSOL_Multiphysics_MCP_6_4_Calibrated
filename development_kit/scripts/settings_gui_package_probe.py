@@ -7,8 +7,9 @@ import configparser
 import json
 import tarfile
 import zipfile
-from packaging.utils import canonicalize_name, parse_wheel_filename
 from pathlib import Path, PurePosixPath
+
+from packaging.utils import canonicalize_name, parse_wheel_filename
 
 LANGUAGES = ("en", "zh_CN", "zh_TW")
 ICON_MEMBER = "settings_gui/assets/comsol_mcp.ico"

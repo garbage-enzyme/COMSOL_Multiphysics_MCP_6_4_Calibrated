@@ -247,10 +247,7 @@ def _arguments_mismatch_field(observed: str, expected: str) -> str | None:
         return "arguments_token_count"
     if not observed_tokens or observed_tokens[0] != expected_tokens[0]:
         return "arguments_option"
-    if (
-        len(observed_tokens) == 2
-        and expected_tokens[0] == "--settings-path-token"
-    ):
+    if len(observed_tokens) == 2 and expected_tokens[0] == "--settings-path-token":
         try:
             if decode_settings_path_token(observed_tokens[1]) != decode_settings_path_token(
                 expected_tokens[1]
@@ -287,14 +284,14 @@ def _run_powershell(script: str, environment: dict[str, str]) -> str:
     try:
         completed = subprocess.run(  # noqa: S603
             [
-            str(_powershell_executable()),
-            "-NoLogo",
-            "-NoProfile",
-            "-NonInteractive",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-EncodedCommand",
-            _encoded_command(script),
+                str(_powershell_executable()),
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-EncodedCommand",
+                _encoded_command(script),
             ],
             env={**os.environ, **environment},
             stdin=subprocess.DEVNULL,
@@ -514,7 +511,7 @@ def shortcut_status(
         entry = executable if executable is not None else installed_gui_entry_executable()
         icon = icon_path if icon_path is not None else ICON_PATH
         desired = _desired_spec(settings, entry, icon)
-    except (OSError, RuntimeError, ValueError):
+    except OSError, RuntimeError, ValueError:
         desired = None
     kind = (
         "foreign"
@@ -543,9 +540,7 @@ def create_desktop_shortcut(
         settings_path, desktop_path, executable, icon_path
     )
     if not shortcut.exists():
-        candidate = shortcut.with_name(
-            f".{shortcut.stem}.{uuid.uuid4().hex}.tmp{shortcut.suffix}"
-        )
+        candidate = shortcut.with_name(f".{shortcut.stem}.{uuid.uuid4().hex}.tmp{shortcut.suffix}")
         try:
             write_shortcut(candidate, desired)
             try:
@@ -592,7 +587,7 @@ def create_desktop_shortcut(
         candidate_identity = _shortcut_identity(candidate)
         try:
             current_identity = _shortcut_identity(shortcut)
-        except (OSError, RuntimeError, ValueError):
+        except OSError, RuntimeError, ValueError:
             current_identity = None
         if current_identity != baseline_identity:
             return _receipt("conflict", success=False, settings_path=settings, existing_kind=kind)

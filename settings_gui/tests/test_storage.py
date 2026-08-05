@@ -62,9 +62,7 @@ def test_named_mutex_rejects_a_second_live_editor(tmp_path):
             SettingsOwnership(target).acquire()
 
 
-def test_sidecar_cleanup_failure_still_releases_mutex_and_registration(
-    tmp_path, monkeypatch
-):
+def test_sidecar_cleanup_failure_still_releases_mutex_and_registration(tmp_path, monkeypatch):
     target = tmp_path / "settings.json"
     target.write_text(json.dumps(default_settings_document()), encoding="utf-8")
     owner = SettingsOwnership(target).acquire()
@@ -192,9 +190,7 @@ def test_sharing_retry_rechecks_external_change(tmp_path, monkeypatch):
             raise error
         original_replace(source, destination)
 
-    monkeypatch.setattr(
-        storage_module, "_replace_write_through", foreign_change_during_retry
-    )
+    monkeypatch.setattr(storage_module, "_replace_write_through", foreign_change_during_retry)
     with SettingsStore(target, sleeper=lambda _seconds: None) as store:
         with pytest.raises(SettingsConflict, match="changed outside"):
             store.save(default_settings_document())
@@ -271,9 +267,7 @@ def test_rebuild_preserves_one_exact_damaged_copy(tmp_path, monkeypatch):
     [b"", b"x" * (storage_module.MAX_SETTINGS_BYTES + 1)],
     ids=("empty", "oversized"),
 )
-def test_rebuild_preserves_unbounded_damage_by_atomic_move(
-    tmp_path, monkeypatch, damaged
-):
+def test_rebuild_preserves_unbounded_damage_by_atomic_move(tmp_path, monkeypatch, damaged):
     monkeypatch.setenv("PROGRAMDATA", str(tmp_path / "program-data"))
     target = tmp_path / "settings.json"
     target.write_bytes(damaged)
@@ -287,9 +281,7 @@ def test_rebuild_preserves_unbounded_damage_by_atomic_move(
     assert backups[0].read_bytes() == damaged
 
 
-def test_load_uses_bounded_reader_and_rejects_linked_ancestry(
-    tmp_path, monkeypatch
-):
+def test_load_uses_bounded_reader_and_rejects_linked_ancestry(tmp_path, monkeypatch):
     target = tmp_path / "settings.json"
     target.write_text(json.dumps(default_settings_document()), encoding="utf-8")
     monkeypatch.setattr(storage_module, "path_has_linked_component", lambda _path: True)

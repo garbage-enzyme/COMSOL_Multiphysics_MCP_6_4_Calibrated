@@ -76,7 +76,7 @@ def registry_comsol_roots(registry: Any | None = None) -> tuple[Path, ...]:
         if isinstance(raw, str) and raw.strip():
             try:
                 candidates.append(validate_comsol_root(raw.strip()))
-            except (OSError, RuntimeError, ValueError):
+            except OSError, RuntimeError, ValueError:
                 continue
     unique: dict[str, Path] = {}
     for candidate in candidates:
@@ -149,11 +149,7 @@ def discover_java_home(
         if not raw:
             continue
         normalized = raw.strip()
-        if (
-            len(normalized) >= 2
-            and normalized[0] == normalized[-1]
-            and normalized[0] in {'"', "'"}
-        ):
+        if len(normalized) >= 2 and normalized[0] == normalized[-1] and normalized[0] in {'"', "'"}:
             normalized = normalized[1:-1].strip()
         if not normalized:
             continue

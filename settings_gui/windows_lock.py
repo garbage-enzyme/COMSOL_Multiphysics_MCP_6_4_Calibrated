@@ -104,8 +104,7 @@ class SettingsOwnership:
         if not self.target.parent.is_dir():
             raise SettingsConflict("settings target parent does not exist")
         if os.path.lexists(self.sidecar) and (
-            self.sidecar.is_symlink()
-            or getattr(self.sidecar, "is_junction", lambda: False)()
+            self.sidecar.is_symlink() or getattr(self.sidecar, "is_junction", lambda: False)()
         ):
             raise SettingsConflict("settings ownership sidecar must not be a link or junction")
         self._configure_kernel32()
@@ -156,9 +155,7 @@ class SettingsOwnership:
             try:
                 self.close()
             except Exception as cleanup_error:
-                exc.add_note(
-                    f"settings ownership cleanup failed: {type(cleanup_error).__name__}"
-                )
+                exc.add_note(f"settings ownership cleanup failed: {type(cleanup_error).__name__}")
             raise
 
     def _configure_kernel32(self) -> None:

@@ -331,15 +331,11 @@ class SettingsFormModel:
                     raw_value = get_value(merged, field.key)
             if field.kind == "roots" and isinstance(raw_value, list):
                 normalized_roots = get_value(merged, field.key)
-                if isinstance(normalized_roots, list) and len(normalized_roots) == len(
-                    raw_value
-                ):
+                if isinstance(normalized_roots, list) and len(normalized_roots) == len(raw_value):
                     raw_value = [
                         normalized_roots[index]
                         if isinstance(item, str)
-                        and item.casefold().startswith(
-                            ("%localappdata%", "%programdata%")
-                        )
+                        and item.casefold().startswith(("%localappdata%", "%programdata%"))
                         else item
                         for index, item in enumerate(raw_value)
                     ]

@@ -165,7 +165,7 @@ def run_cli(
     if arguments.validate_only:
         try:
             receipt = _validation_receipt(target, override=override)
-        except (OSError, RuntimeError, ValueError):
+        except OSError, RuntimeError, ValueError:
             receipt = _action_failure(target)
         _emit(receipt, output)
         return 0 if receipt.get("ready") is True else 2
