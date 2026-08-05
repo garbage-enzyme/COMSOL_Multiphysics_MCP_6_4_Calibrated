@@ -537,6 +537,19 @@ def test_attached_job_handoff_recovery_reattaches_and_re_adopts_exact_model(tmp_
     assert ownership.releases == 1
 
 
+def test_attached_job_handoff_recovery_returns_structured_invalid_backend(tmp_path):
+    manager, _ownership, _client = _manager(tmp_path)
+
+    result = manager.recover_attached_job_handoff(
+        {},
+        profile="core",
+        feature_enabled=True,
+    )
+
+    assert result["success"] is False
+    assert result["state"] == "attached_handoff_backend_invalid"
+
+
 @pytest.mark.parametrize("changed_identity", ["server", "model"])
 def test_attached_job_handoff_recovery_fails_closed_and_detaches_changed_target(
     tmp_path,
@@ -1141,6 +1154,35 @@ def test_snapshot_manifest_failure_removes_snapshot_and_partial_manifest(tmp_pat
     assert result["complete_manifest_exists"] is False
     assert result["artifacts_removed"] is True
     assert list(tmp_path.glob("Model_1-snapshot*")) == []
+
+
+def test_snapshot_cleanup_reports_non_oserror_without_skipping_later_cleanup(
+    tmp_path, monkeypatch
+):
+    def partial_manifest(path, _value):
+        path.write_text("{", encoding="utf-8")
+        raise OSError("simulated manifest publication failure")
+
+    manager, _ownership, _client = _manager(tmp_path, manifest_writer=partial_manifest)
+    lock = _attach_and_lock(manager)
+    original_unlink = Path.unlink
+
+    def selective_unlink(path, *args, **kwargs):
+        if path.name.endswith(".manifest.json"):
+            raise ValueError("simulated non-OSError cleanup failure")
+        return original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", selective_unlink)
+
+    result = manager.snapshot_model(
+        expected_lock_sha256=lock["lock_sha256"],
+        expected_revision_sha256=lock["revision"]["revision_sha256"],
+        max_snapshot_bytes=1024,
+    )
+
+    assert result["success"] is False
+    assert any("ValueError" in error for error in result["cleanup_errors"])
+    assert result["partial_snapshot_exists"] is False
 
 
 @pytest.mark.parametrize("collision", ["snapshot", "manifest"])

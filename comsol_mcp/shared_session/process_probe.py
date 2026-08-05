@@ -84,9 +84,13 @@ def _process_records() -> tuple[list[dict[str, Any]], bool]:
     return records, complete
 
 
-def _listener_records() -> list[dict[str, Any]]:
+def _listener_records() -> tuple[list[dict[str, Any]], bool]:
     listeners: list[dict[str, Any]] = []
-    for connection in psutil.net_connections(kind="tcp"):
+    try:
+        connections = psutil.net_connections(kind="tcp")
+    except psutil.AccessDenied:
+        return [], False
+    for connection in connections:
         if connection.status != psutil.CONN_LISTEN or connection.pid is None:
             continue
         host = getattr(connection.laddr, "ip", None)
@@ -106,7 +110,7 @@ def _listener_records() -> list[dict[str, Any]]:
         )
         if len(listeners) > MAX_LISTENER_RECORDS:
             raise RuntimeError("listener inventory exceeds the bounded maximum")
-    return listeners
+    return listeners, True
 
 
 def _is_primary_desktop_window(*, title: str, class_name: str) -> bool:
@@ -263,7 +267,8 @@ def _kind(record: dict[str, Any], window_count: int) -> str | None:
     command_basenames = {Path(part).name.casefold() for part in command_parts}
     explicit_server_command = bool(command_basenames & _SERVER_EXECUTABLES)
     if process_names & _SERVER_EXECUTABLES or (
-        process_names & {"java", "java.exe"} and explicit_server_command
+        process_names & {"java", "java.exe", "javaw", "javaw.exe"}
+        and explicit_server_command
     ):
         return "comsol_server"
     if any(pattern in command for pattern in ("mph.client", "import mph", "from mph", "-m mph")):
@@ -280,7 +285,9 @@ def collect_shared_preflight_snapshot(
     process_provider: Callable[
         [], list[dict[str, Any]] | tuple[list[dict[str, Any]], bool]
     ] = _process_records,
-    listener_provider: Callable[[], list[dict[str, Any]]] = _listener_records,
+    listener_provider: Callable[
+        [], list[dict[str, Any]] | tuple[list[dict[str, Any]], bool]
+    ] = _listener_records,
     window_provider: Callable[[], dict[int, dict[str, Any]]] = _window_state_by_pid,
     version_provider: Callable[[str | None], str | None] = _windows_file_version,
     clock: Callable[[], float] = time.time,
@@ -293,11 +300,31 @@ def collect_shared_preflight_snapshot(
     else:
         records = provided_records
         inventory_complete = True
-    listeners = listener_provider()
+    provided_listeners = listener_provider()
+    if isinstance(provided_listeners, tuple):
+        listeners, listener_inventory_complete = provided_listeners
+        inventory_complete = inventory_complete and listener_inventory_complete
+    else:
+        listeners = provided_listeners
     if len(listeners) > MAX_LISTENER_RECORDS:
         raise RuntimeError("listener inventory exceeds the bounded maximum")
     windows = window_provider()
     excluded = {int(pid) for pid in exclude_pids}
+    valid_records = []
+    for record in records:
+        pid = record.get("pid")
+        create_time = record.get("create_time")
+        if (
+            isinstance(pid, bool)
+            or not isinstance(pid, int)
+            or pid <= 0
+            or isinstance(create_time, bool)
+            or not isinstance(create_time, (int, float))
+        ):
+            inventory_complete = False
+            continue
+        valid_records.append(record)
+    records = valid_records
     parent_map = {
         int(record["pid"]): int(record.get("parent_pid") or 0)
         for record in records

@@ -6,7 +6,10 @@ from copy import deepcopy
 
 import pytest
 
-from src.shared_session.preflight import classify_shared_server_preflight
+from src.shared_session.preflight import (
+    classify_shared_server_preflight,
+    normalize_comsol_version_readback,
+)
 
 
 def _process(
@@ -264,3 +267,27 @@ def test_incomplete_inventory_fails_and_unreadable_version_is_classified():
     with pytest.raises(ValueError, match="complete"):
         _classify(incomplete)
     assert _classify(unreadable)["state"] == ("unsupported_or_ambiguous_comsol_version")
+
+
+def test_display_version_fallback_is_anchored_and_maintenance_exact():
+    assert normalize_comsol_version_readback(
+        "COMSOL Multiphysics 6.4.0 (Build: 293)",
+        expected_file_version="6.4.0.293",
+    ) == ("6.4.0.293", (6, 4, 0, 293))
+    assert normalize_comsol_version_readback(
+        "COMSOL Multiphysics 6.4 (Build: 293)",
+        expected_file_version="6.4.7.293",
+    ) == ("unreadable", None)
+
+
+def test_collision_and_identity_change_precede_unreadable_version():
+    collision = _ready()
+    collision["processes"].append(_process(30, "other_comsol", version="unknown"))
+    assert _classify(collision)["state"] == "unclassified_comsol_or_mph_collision"
+
+    first = _ready()
+    second = deepcopy(first)
+    second["observed_at_epoch"] = 1001.0
+    second["processes"][0]["create_time"] = 99.0
+    second["processes"][0]["file_version"] = "unknown"
+    assert _classify(first, second)["state"] == "process_identity_changed_between_probes"

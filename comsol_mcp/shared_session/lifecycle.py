@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import heapq
 import math
 import os
 from pathlib import Path
@@ -93,8 +94,8 @@ def _default_model_inventory_reader(client: Any) -> list[dict[str, Any]]:
         java = model.java
         tag = str(java.tag())
         label = str(java.label())
-        raw_path = str(java.getFilePath())
-        path = raw_path if raw_path else None
+        raw_path = java.getFilePath()
+        path = None if raw_path is None else str(raw_path) or None
         inventory.append({
             "tag": tag,
             "label": label,
@@ -164,10 +165,15 @@ def _hash_revision_tree_group(
         raise ValueError(
             f"model revision tree exceeds {MAX_REVISION_TREE_NODES} nodes"
         )
-    nodes = sorted(root_children, key=lambda node: (str(node), node.tag() or ""))
+    nodes = [
+        ((str(node), node.tag() or ""), index, node)
+        for index, node in enumerate(root_children)
+    ]
+    heapq.heapify(nodes)
+    sequence = len(nodes)
     count = 0
     while nodes:
-        node = nodes.pop(0)
+        _key, _sequence, node = heapq.heappop(nodes)
         remaining_nodes[0] -= 1
         if remaining_nodes[0] < 0:
             raise ValueError(
@@ -203,8 +209,9 @@ def _hash_revision_tree_group(
             raise ValueError(
                 f"model revision tree exceeds {MAX_REVISION_TREE_NODES} nodes"
             )
-        nodes.extend(children)
-        nodes.sort(key=lambda child: (str(child), child.tag() or ""))
+        for child in children:
+            heapq.heappush(nodes, ((str(child), child.tag() or ""), sequence, child))
+            sequence += 1
     return (
         {"node_count": count, "tree_sha256": structural_digest.hexdigest()},
         {"node_count": count, "tree_sha256": state_digest.hexdigest()},
@@ -1044,7 +1051,7 @@ class SharedSessionManager:
                         continue
                     try:
                         artifact.unlink(missing_ok=True)
-                    except OSError as cleanup_exc:
+                    except Exception as cleanup_exc:
                         cleanup_errors.append(
                             f"{artifact.name}: {type(cleanup_exc).__name__}: "
                             f"{cleanup_exc}"
@@ -1177,7 +1184,14 @@ class SharedSessionManager:
         )
 
         with self._lock:
-            backend = normalize_attached_execution_backend(execution_backend)
+            try:
+                backend = normalize_attached_execution_backend(execution_backend)
+            except (TypeError, ValueError) as exc:
+                return {
+                    "success": False,
+                    "state": "attached_handoff_backend_invalid",
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
             server = backend["attached_server"]
             model = backend["model"]
             attached = self.attach(

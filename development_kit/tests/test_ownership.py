@@ -73,6 +73,22 @@ def owner(runtime_dir: Path, pid: int, created: float, command: list[str], recor
     )
 
 
+@pytest.mark.parametrize("reason", ["missing", "changed"])
+def test_collision_rollback_does_not_report_a_foreign_or_missing_lease_as_retained(
+    runtime_dir, monkeypatch, reason
+):
+    manager = owner(runtime_dir, 10, 100.0, ["python.exe"], [])
+    monkeypatch.setattr(manager, "_create_lease", lambda _payload: {"success": True})
+    monkeypatch.setattr(manager, "status", lambda **_kwargs: {"collision": True})
+    monkeypatch.setattr(ownership_module, "_unlink_retry", lambda *_args, **_kwargs: (False, reason))
+
+    result = manager._create_lease_if_collision_free({"pid": 10})
+
+    assert result["success"] is False
+    assert result["acquired"] is False
+    assert result["lease_retained"] is False
+
+
 def test_external_mph_client_blocks_acquisition(runtime_dir):
     own = process(10, 100.0, ["python.exe", "-m", "src.server"])
     external = process(20, 200.0, ["python.exe", "-c", "import mph; mph.Client()"])

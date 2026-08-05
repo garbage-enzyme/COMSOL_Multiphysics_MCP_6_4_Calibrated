@@ -322,7 +322,7 @@ def test_lock_builder_rejects_directly_fabricated_identity_dataclasses(
         )
 
 
-@pytest.mark.parametrize("mode", ["interactive", "exclusive", ""])
+@pytest.mark.parametrize("mode", ["interactive", "exclusive", "", [], {}])
 def test_lock_rejects_implicit_collaboration_modes(mode):
     with pytest.raises(ValueError, match="collaboration mode"):
         build_shared_model_lock(
@@ -332,6 +332,23 @@ def test_lock_rejects_implicit_collaboration_modes(mode):
             revision=_revision(),
             collaboration_mode=mode,
             lock_created_at_epoch=3456.7,
+            mcp_process={
+                "pid": 5000,
+                "process_create_time": 3000.0,
+                "command_signature": "d" * 64,
+            },
+        )
+
+
+def test_lock_rejects_integer_timestamp_overflow_as_validation_error():
+    with pytest.raises(ValueError, match="positive and finite"):
+        build_shared_model_lock(
+            attached_server=_server(),
+            session_acquisition_id="b" * 32,
+            model=_model(),
+            revision=_revision(),
+            collaboration_mode="interactive_inspection",
+            lock_created_at_epoch=10**400,
             mcp_process={
                 "pid": 5000,
                 "process_create_time": 3000.0,

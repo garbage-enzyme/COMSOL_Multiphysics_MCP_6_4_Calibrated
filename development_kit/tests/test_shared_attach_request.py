@@ -35,6 +35,13 @@ def test_attach_request_requires_all_static_and_per_call_gates():
         normalize_shared_server_attach_request(
             unconfirmed, profile="core", environ=enabled
         )
+    for non_boolean in (1, 1.0):
+        with pytest.raises(ValueError, match="user_confirmed=true"):
+            normalize_shared_server_attach_request(
+                {**_request(), "user_confirmed": non_boolean},
+                profile="core",
+                environ=enabled,
+            )
 
 
 def test_attach_request_normalizes_exact_endpoint():

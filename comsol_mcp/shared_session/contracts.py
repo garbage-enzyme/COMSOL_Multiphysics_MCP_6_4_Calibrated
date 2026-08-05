@@ -13,8 +13,6 @@ SHARED_SERVER_FEATURE_ENV = "COMSOL_MCP_ENABLE_SHARED_SERVER"
 MAX_ENDPOINT_HOST_CHARACTERS = 253
 LISTENER_BIND_SCOPE_LOOPBACK = "loopback"
 LISTENER_BIND_SCOPE_WILDCARD = "wildcard"
-WILDCARD_LISTENER_HOSTS = frozenset({"0.0.0.0", "::"})
-
 _ENDPOINT_FIELDS = frozenset({"host", "port"})
 _TRUE = "true"
 _FALSE = "false"
@@ -144,8 +142,12 @@ def normalize_shared_listener_bind_host(value: Any) -> tuple[str, str]:
     if not isinstance(value, str) or not value.strip():
         raise ValueError("shared server listener host must be a non-empty string")
     host = value.strip().casefold()
-    if host in WILDCARD_LISTENER_HOSTS:
-        return host, LISTENER_BIND_SCOPE_WILDCARD
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        address = None
+    if address is not None and address.is_unspecified:
+        return address.compressed, LISTENER_BIND_SCOPE_WILDCARD
     endpoint = normalize_shared_server_endpoint({"host": host, "port": 1})
     return endpoint.host, LISTENER_BIND_SCOPE_LOOPBACK
 

@@ -117,6 +117,8 @@ def test_endpoint_public_constructor_enforces_and_canonicalizes_loopback_contrac
         ("::1", ("::1", "loopback")),
         ("0.0.0.0", ("0.0.0.0", "wildcard")),
         ("::", ("::", "wildcard")),
+        ("::0", ("::", "wildcard")),
+        ("0:0:0:0:0:0:0:0", ("::", "wildcard")),
     ],
 )
 def test_listener_bind_host_preserves_scope(host, expected):

@@ -33,6 +33,12 @@ def test_attached_server_identity_is_exact_stable_and_non_owned():
     assert first.listener_bind_scope == "loopback"
     assert len(first.identity_sha256) == 64
     assert first.to_dict()["endpoint"]["scope"] == "loopback"
+    assert normalize_attached_server_identity(first.to_dict()) == first
+
+    tampered = first.to_dict()
+    tampered["identity_sha256"] = "0" * 64
+    with pytest.raises(ValueError, match="SHA-256"):
+        normalize_attached_server_identity(tampered)
 
 
 def test_listener_observation_time_is_evidence_not_process_identity():
