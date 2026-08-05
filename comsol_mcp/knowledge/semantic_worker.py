@@ -114,7 +114,22 @@ class _RequestHandler(socketserver.StreamRequestHandler):
     def _dispatch(self, request_id: str, request: dict[str, Any]) -> None:
         operation = request.get("operation")
         if isinstance(operation, str) and operation in {"health", "status"}:
-            response = _response(request_id, success=True, status=self.server.state.status())
+            try:
+                status = self.server.state.status()
+            except Exception as exc:
+                self.server.state.last_error = (
+                    f"{type(exc).__name__}: backend status failed"
+                )
+                response = _response(
+                    request_id,
+                    success=False,
+                    error={
+                        "code": "backend_failure",
+                        "message": "semantic backend status failed",
+                    },
+                )
+            else:
+                response = _response(request_id, success=True, status=status)
         elif operation == "query":
             query = request.get("query")
             limit = request.get("limit", 5)

@@ -491,6 +491,28 @@ def test_backend_exception_returns_structured_failure_without_killing_handler():
     assert state.last_error == "RuntimeError: backend query failed"
 
 
+@pytest.mark.parametrize("operation", ["health", "status"])
+def test_backend_status_exception_returns_structured_failure(operation):
+    class Backend:
+        def status(self):
+            raise RuntimeError("private status detail")
+
+    state = _WorkerState("0" * 64, None, 0.0, backend=Backend())
+    handler = object.__new__(_RequestHandler)
+    handler.server = SimpleNamespace(state=state)
+    handler.wfile = BytesIO()
+
+    handler._dispatch("backend-status-error", {"operation": operation})
+
+    response = json.loads(handler.wfile.getvalue())
+    assert response["error"] == {
+        "code": "backend_failure",
+        "message": "semantic backend status failed",
+    }
+    assert "private status detail" not in json.dumps(response)
+    assert state.last_error == "RuntimeError: backend status failed"
+
+
 def test_health_remains_observable_while_query_holds_backend_lock():
     with SemanticWorkerManager(startup_deadline=2.0, query_delay=0.75) as manager:
         assert manager.start()["success"] is True
