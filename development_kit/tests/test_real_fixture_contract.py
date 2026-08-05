@@ -8,7 +8,6 @@ import re
 from pathlib import Path
 
 import pytest
-from src.utils.validation import strict_json_number
 from src.evidence.real_fixture import (
     DOMAINS_ENV,
     MODEL_ENV,
@@ -18,6 +17,7 @@ from src.evidence.real_fixture import (
     controlled_fixture_environment_from_reference_power_spec,
     controlled_fixture_from_environment,
 )
+from src.utils.validation import strict_json_number
 
 ROOT = Path(__file__).parents[2]
 _PRIVATE_HOME_PATH = re.compile(
@@ -151,6 +151,16 @@ def test_fixture_rejects_source_bytes_that_differ_from_caller_bound_hash(tmp_pat
 
     with pytest.raises(ValueError, match="source SHA-256 mismatch"):
         controlled_fixture_from_environment(environment)
+
+
+def test_fixture_rejects_relative_source_instead_of_resolving_against_process_cwd(tmp_path):
+    environment = controlled_fixture_environment_from_reference_power_spec(
+        _spec(tmp_path), base_environment={}
+    )
+    environment[MODEL_ENV] = "controlled.mph"
+
+    with pytest.raises(ValueError, match="absolute path"):
+        controlled_fixture_from_environment(environment, verify_file=False)
 
 
 @pytest.mark.parametrize(

@@ -93,8 +93,9 @@ def _normalize_configuration(value: Any) -> dict[str, Any]:
         "fit_max_evaluations": item["fit_max_evaluations"],
         "fit_quality_policy": item["fit_quality_policy"],
     }
+    validated_shared: dict[str, Any] | None = None
     for model in normalized_models:
-        _normalize_measurement_configuration(
+        validated = _normalize_measurement_configuration(
             {
                 "peak_method": model,
                 "baseline_rule": normalized["baseline_rule"],
@@ -111,6 +112,19 @@ def _normalize_configuration(value: Any) -> dict[str, Any]:
                 "fit_quality_policy": normalized["fit_quality_policy"],
             }
         )
+        if validated_shared is None:
+            validated_shared = validated
+    if validated_shared is None:
+        raise RuntimeError("validated model comparison has no models")
+    normalized.update(
+        {
+            "baseline_response_value": validated_shared["baseline_response_value"],
+            "fit_support_points": validated_shared["fit_support_points"],
+            "fit_support_sensitivity_points": validated_shared["fit_support_sensitivity_points"],
+            "fit_max_evaluations": validated_shared["fit_max_evaluations"],
+            "fit_quality_policy": validated_shared["fit_quality_policy"],
+        }
+    )
     return normalized
 
 
@@ -189,6 +203,7 @@ def build_spectral_model_comparison(
     ordered_coordinates = [coordinate_values[index] for index in order]
     ordered_oriented = [oriented_original[index] for index in order]
     candidate_index = order.index(original_candidate_index)
+
     model_results = []
     for model in configuration["models"]:
         try:

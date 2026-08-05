@@ -99,6 +99,22 @@ def _request(review_mode: str = "single"):
     )
 
 
+def test_visual_review_huge_numbers_become_validation_errors():
+    views = _views()
+    views[0]["wavelength_m"] = 10**400
+
+    with pytest.raises(ValueError, match="numeric"):
+        build_visual_review_request(
+            request_id="overflow-boundary",
+            configuration_sha256=CONFIG_HASH,
+            artifacts=_artifacts(),
+            views=views,
+            numerical_summary={},
+            questions=["Is this bounded?"],
+            review_mode="single",
+        )
+
+
 def _refs():
     return [
         {"artifact_id": "field.on", "sha256": ON_HASH},

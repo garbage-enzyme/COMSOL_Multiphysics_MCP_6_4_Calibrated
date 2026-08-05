@@ -32,6 +32,14 @@ PHYSICAL_EVIDENCE_READABLE_VERSIONS = frozenset({"1.0.0", "1.1.0"})
 VALIDATION_POLICY_SCHEMA_NAME = "comsol_mcp.validation_policy"
 VALIDATION_POLICY_SCHEMA_VERSION = "1.0.0"
 
+
+def _finite_float(value: Any) -> float | None:
+    try:
+        result = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return result if math.isfinite(result) else None
+
 EVIDENCE_STATES = frozenset(
     {
         "measured",
@@ -451,7 +459,7 @@ def _legacy_declared_flux_is_complete(value: Mapping[str, Any]) -> bool:
             if (
                 isinstance(number, bool)
                 or not isinstance(number, (int, float))
-                or not math.isfinite(float(number))
+                or _finite_float(number) is None
             ):
                 return False
         sign = plane.get("positive_power_sign")

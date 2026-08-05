@@ -157,6 +157,16 @@ def test_negative_controls_reuse_raw_evidence_and_must_fail_policy():
     assert point["physical_evidence"] == original
 
 
+def test_negative_control_rejects_boolean_power_sign():
+    _reference, point, policies = _results()
+    point["physical_evidence"]["evidence"]["flux.reflected_positive_power_sign"]["value"] = True
+
+    with pytest.raises(ValueError, match="positive-power sign"):
+        evaluate_reference_power_negative_controls(
+            point["physical_evidence"], policies["declared_flux"]
+        )
+
+
 def test_combined_reference_power_evaluation_requires_every_physical_and_negative_gate():
     reference, point, _policies = _results()
     passed = evaluate_reference_power_results(CONTRACT, reference, point)
@@ -167,6 +177,24 @@ def test_combined_reference_power_evaluation_requires_every_physical_and_negativ
     failed = evaluate_reference_power_results(CONTRACT, failed_reference, point)
     assert failed["passed"] is False
     assert failed["checks"]["reference_air"]["reflection"] is False
+
+
+@pytest.mark.parametrize(
+    ("target", "field", "group", "check"),
+    [
+        ("reference", "assessment", "reference_air", "policy_pass"),
+        ("reference", "cleanup", "reference_air", "clone_cleanup"),
+        ("point", "assessment", "physical_point", "policy_pass"),
+    ],
+)
+def test_null_nested_result_sections_fail_closed(target, field, group, check):
+    reference, point, _policies = _results()
+    (reference if target == "reference" else point)[field] = None
+
+    result = evaluate_reference_power_results(CONTRACT, reference, point)
+
+    assert result["passed"] is False
+    assert result["checks"][group][check] is False
 
 
 def test_positive_physical_policy_is_recomputed_instead_of_trusting_reported_verdict():

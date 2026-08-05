@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 import json
 import math
-from pathlib import Path
 import re
+from copy import deepcopy
+from pathlib import Path
 from typing import Any, Mapping
 
 from comsol_mcp.durable import read_file_bytes_bounded, sha256_file_bounded
@@ -75,7 +75,10 @@ def _tag(value: Any, label: str) -> str:
 def _finite_nonnegative(value: Any, label: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{label} must be finite and non-negative")
-    result = float(value)
+    try:
+        result = float(value)
+    except OverflowError as exc:
+        raise ValueError(f"{label} must be finite and non-negative") from exc
     if not math.isfinite(result) or result < 0.0:
         raise ValueError(f"{label} must be finite and non-negative")
     return result

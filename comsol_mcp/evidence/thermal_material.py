@@ -15,6 +15,10 @@ from comsol_mcp.durable import canonical_json_v1, domain_sha256_v2
 _C = 299_792_458.0
 
 
+class DeclaredDiscontinuityError(ValueError):
+    """Interpolation crossed a declared material discontinuity."""
+
+
 def _strictly_increasing(values: list[float], label: str) -> None:
     if any(right <= left for left, right in zip(values, values[1:])):
         raise ValueError(f"{label} must be strictly increasing")
@@ -247,7 +251,9 @@ def _table_value(
         max(temperature, temperatures[t1]),
         list(policy.temperature_discontinuities_K),
     ):
-        raise ValueError("interpolation would cross a declared discontinuity boundary")
+        raise DeclaredDiscontinuityError(
+            "interpolation would cross a declared discontinuity boundary"
+        )
     width = len(wavelengths)
 
     def at_temperature(index: int) -> float:
@@ -444,9 +450,7 @@ def evaluate_thermal_material(
         }
     try:
         epsilon, model_kind = _evaluate_model(state, request.wavelength_m, request.temperature_K)
-    except ValueError as exc:
-        if "discontinuity" not in str(exc):
-            raise
+    except DeclaredDiscontinuityError:
         body = {
             **base,
             "available": False,

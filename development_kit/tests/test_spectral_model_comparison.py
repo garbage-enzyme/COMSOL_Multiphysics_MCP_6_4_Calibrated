@@ -124,6 +124,22 @@ def test_analytic_lorentzian_prefers_lorentzian_on_identical_support():
     assert validate_spectral_model_comparison(result, bundle=bundle, decision=decision) == result
 
 
+def test_comparison_retains_canonicalized_measurement_configuration():
+    center = 5.0e-6
+    wavelengths = [4.6e-6 + index * 0.025e-6 for index in range(33)]
+    absorption = [
+        0.1 + 0.8 / (1.0 + ((value - center) / 0.08e-6) ** 2) for value in wavelengths
+    ]
+    bundle = _bundle(wavelengths, absorption)
+    decision = build_spectral_analysis_decision(bundle, _policy())
+    configuration = _configuration()
+    configuration["fit_support_sensitivity_points"] = [31, 21]
+
+    result = build_spectral_model_comparison(bundle, decision, configuration)
+
+    assert result["comparison_configuration"]["fit_support_sensitivity_points"] == [21, 31]
+
+
 def test_frequency_coordinate_reverses_rows_and_maps_peak_back_to_wavelength():
     center_frequency = c / 5.0e-6
     half_width = center_frequency * 0.008

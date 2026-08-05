@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 import re
+from pathlib import Path
 from typing import Any, Mapping
 
 from comsol_mcp.utils.validation import strict_json_number
@@ -88,7 +88,13 @@ def controlled_fixture_from_environment(
     ]
     if missing:
         raise ValueError(f"controlled licensed fixture environment is incomplete: {missing}")
-    source = Path(values[MODEL_ENV]).expanduser().resolve()
+    source_value = values[MODEL_ENV]
+    if not isinstance(source_value, str) or not source_value.strip():
+        raise ValueError(f"{MODEL_ENV} must be a non-empty absolute path")
+    source_candidate = Path(source_value).expanduser()
+    if not source_candidate.is_absolute():
+        raise ValueError(f"{MODEL_ENV} must be an absolute path")
+    source = source_candidate.resolve()
     if verify_file and not source.is_file():
         raise FileNotFoundError(source)
     expected_source_sha256 = _source_sha256(values[SOURCE_SHA256_ENV])

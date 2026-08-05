@@ -116,6 +116,20 @@ def test_unit_normalization_is_idempotent_and_semantically_equal():
     assert comparison["classification_counts"]["semantic"] == 0
 
 
+def test_celsius_symbol_alias_normalizes_to_kelvin():
+    value = _configuration()
+    value["materials"][0]["temperature"] = _quantity(26.85, "°C", "temperature")
+
+    normalized = normalize_simulation_configuration(value)
+
+    assert normalized["materials"][0]["temperature"] == {
+        "status": "known",
+        "dimension": "temperature",
+        "value": 300.0,
+        "unit": "K",
+    }
+
+
 @pytest.mark.parametrize(
     ("mutation", "path_fragment"),
     [

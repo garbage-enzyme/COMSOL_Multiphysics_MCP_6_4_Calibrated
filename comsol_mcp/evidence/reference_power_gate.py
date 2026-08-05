@@ -38,6 +38,10 @@ def _at_least(value: Any, threshold: float) -> bool:
     return result is not None and result >= threshold
 
 
+def _mapping_or_empty(value: Any) -> Mapping[str, Any]:
+    return value if isinstance(value, Mapping) else {}
+
+
 def build_reference_power_policies(contract: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
     strict = validate_reference_power_acceptance_contract(contract)
     acceptance = strict["acceptance"]
@@ -88,7 +92,7 @@ def evaluate_reference_power_negative_controls(
 ) -> dict[str, Any]:
     sign_record = physical_evidence["evidence"].get("flux.reflected_positive_power_sign")
     sign = sign_record.get("value") if isinstance(sign_record, dict) else None
-    if sign not in {-1, 1}:
+    if isinstance(sign, bool) or not isinstance(sign, int) or sign not in {-1, 1}:
         raise ValueError("reflected positive-power sign is unavailable for the negative control")
     reversed_evidence = _rebuilt_with_record_value(
         physical_evidence,
@@ -135,7 +139,9 @@ def evaluate_reference_power_results(
     )
     reference_checks = {
         "audit_complete": reference_result.get("audit_status") == "measurement_complete",
-        "policy_pass": reference_result.get("assessment", {}).get("overall") == "pass",
+        "policy_pass": (
+            _mapping_or_empty(reference_result.get("assessment")).get("overall") == "pass"
+        ),
         "reflection": _at_most(reference.get("R"), acceptance["reference_air"]["reflection_max"]),
         "r_plus_t_residual": _at_most(
             reference.get("R_plus_T_residual_abs"),
@@ -145,13 +151,13 @@ def evaluate_reference_power_results(
             reference.get("target_to_transverse_ratio"),
             acceptance["reference_air"]["target_to_transverse_ratio_min"],
         ),
-        "clone_cleanup": reference_result.get("cleanup", {}).get("removed") is True,
+        "clone_cleanup": _mapping_or_empty(reference_result.get("cleanup")).get("removed") is True,
     }
     point_checks = {
         "audit_complete": point_result.get("audit_status") == "policy_evaluated",
         "policy_pass": (
             positive_policy["overall"] == "pass"
-            and point_result.get("assessment", {}).get("project_verdict") == "pass"
+            and _mapping_or_empty(point_result.get("assessment")).get("project_verdict") == "pass"
         ),
         "wavelength_absolute": _at_most(
             wavelength.get("absolute_difference_m"),
@@ -161,7 +167,10 @@ def evaluate_reference_power_results(
             wavelength.get("relative_difference"),
             acceptance["wavelength"]["relative_max"],
         ),
-        "source_unchanged": point_measurement.get("integrity", {}).get("source_unchanged") is True,
+        "source_unchanged": (
+            _mapping_or_empty(point_measurement.get("integrity")).get("source_unchanged")
+            is True
+        ),
     }
     negative_checks = {
         "reversed_sign_rejected": negative["reversed_sign"]["passed_rejection_gate"],
@@ -197,7 +206,9 @@ def inventory_reference_power_artifacts(root: Path, limits: Mapping[str, Any]) -
     resolved = root.resolve()
     if not resolved.is_dir():
         raise ValueError("reference-power artifact root does not exist")
-    files = sorted(path for path in resolved.rglob("*") if path.is_file())
+    files = sorted(path for path in resolved.rglob("*") if path.is_file() and not path.is_symlink())
+    if any(path.is_symlink() for path in resolved.rglob("*")):
+        raise ValueError("reference-power artifact root must not contain symlinks")
     if len(files) > int(limits["max_artifact_files"]):
         raise ValueError("reference-power artifact file count exceeds the contract")
     maximum_bytes = int(limits["max_artifact_bytes"])
