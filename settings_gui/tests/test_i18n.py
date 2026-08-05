@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import struct
 from collections import Counter
 from string import Formatter
 
@@ -60,6 +61,18 @@ def _literal_translation_calls() -> set[str]:
             elif isinstance(function, ast.Attribute) and function.attr == "text":
                 messages.add(message)
     return messages
+
+
+def test_corrupt_catalog_falls_back_without_crashing(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "settings_gui.i18n.gettext.translation",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(struct.error("corrupt")),
+    )
+
+    translator = Translator("zh-cn")
+
+    assert translator.warning is not None
+    assert translator("message") == "message"
 
 
 def test_message_inventory_covers_runtime_labels_and_help() -> None:

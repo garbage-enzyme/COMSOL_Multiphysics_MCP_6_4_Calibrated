@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import gettext
+import struct
 from pathlib import Path
 
 from comsol_mcp.settings import GUI_LANGUAGES, GUI_SCALES
@@ -164,7 +165,7 @@ class Translator:
                 languages=[LANGUAGE_LOCALES[self.language]],
                 fallback=False,
             )
-        except FileNotFoundError, OSError:
+        except (FileNotFoundError, OSError, struct.error):
             self._catalog = gettext.NullTranslations()
             if self.language != "en":
                 self.warning = "The selected language catalog is unavailable; English is active."

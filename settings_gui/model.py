@@ -326,18 +326,23 @@ class SettingsFormModel:
                 normalized = raw_value.casefold().replace("_", "-")
                 if normalized in GUI_LANGUAGES:
                     raw_value = normalized
-            if field.key == "profile.name" and raw_value not in field.choices:
-                continue
             if field.kind in {"directory", "file"} and isinstance(raw_value, str):
                 if raw_value.casefold().startswith(("%localappdata%", "%programdata%")):
                     raw_value = get_value(merged, field.key)
             if field.kind == "roots" and isinstance(raw_value, list):
-                if any(
-                    isinstance(item, str)
-                    and item.casefold().startswith(("%localappdata%", "%programdata%"))
-                    for item in raw_value
+                normalized_roots = get_value(merged, field.key)
+                if isinstance(normalized_roots, list) and len(normalized_roots) == len(
+                    raw_value
                 ):
-                    raw_value = get_value(merged, field.key)
+                    raw_value = [
+                        normalized_roots[index]
+                        if isinstance(item, str)
+                        and item.casefold().startswith(
+                            ("%localappdata%", "%programdata%")
+                        )
+                        else item
+                        for index, item in enumerate(raw_value)
+                    ]
             set_value(merged, field.key, deepcopy(raw_value))
         for key, value in document.items():
             if key not in merged and not key.startswith("_comment"):

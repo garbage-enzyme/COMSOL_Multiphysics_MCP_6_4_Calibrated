@@ -150,7 +150,7 @@ def test_hostile_same_byte_handoff_is_detected(tmp_path, monkeypatch):
         foreign.write_bytes(raw)
         real_replace(foreign, destination)
 
-    monkeypatch.setattr(storage_module.os, "replace", hostile_replace)
+    monkeypatch.setattr(storage_module, "_replace_write_through", hostile_replace)
     with SettingsStore(target) as store:
         with pytest.raises(SettingsConflict, match="saved settings bytes"):
             store.save(default_settings_document())
@@ -170,7 +170,7 @@ def test_transient_sharing_error_uses_bounded_retry(tmp_path, monkeypatch):
             raise error
         real_replace(source, destination)
 
-    monkeypatch.setattr(storage_module.os, "replace", delayed_replace)
+    monkeypatch.setattr(storage_module, "_replace_write_through", delayed_replace)
     with SettingsStore(target, sleeper=lambda _seconds: None) as store:
         store.save(default_settings_document())
 
@@ -192,7 +192,9 @@ def test_sharing_retry_rechecks_external_change(tmp_path, monkeypatch):
             raise error
         original_replace(source, destination)
 
-    monkeypatch.setattr(storage_module.os, "replace", foreign_change_during_retry)
+    monkeypatch.setattr(
+        storage_module, "_replace_write_through", foreign_change_during_retry
+    )
     with SettingsStore(target, sleeper=lambda _seconds: None) as store:
         with pytest.raises(SettingsConflict, match="changed outside"):
             store.save(default_settings_document())
@@ -220,6 +222,7 @@ def test_post_replace_reacquire_failure_keeps_new_baseline(tmp_path, monkeypatch
             store.save(document)
         assert store.ownership.baseline == storage_module.file_identity(target)
         assert store.load()["profile"]["name"] == "wave_optics"
+        assert not list(tmp_path.glob("*.tmp"))
 
 
 def test_mutex_creation_failure_cleans_process_registry(tmp_path):
@@ -261,6 +264,38 @@ def test_rebuild_preserves_one_exact_damaged_copy(tmp_path, monkeypatch):
         program_root = program_data / "comsol_mcp"
         assert (program_root / "runtime").is_dir()
         assert (program_root / "artifacts").is_dir()
+
+
+@pytest.mark.parametrize(
+    "damaged",
+    [b"", b"x" * (storage_module.MAX_SETTINGS_BYTES + 1)],
+    ids=("empty", "oversized"),
+)
+def test_rebuild_preserves_unbounded_damage_by_atomic_move(
+    tmp_path, monkeypatch, damaged
+):
+    monkeypatch.setenv("PROGRAMDATA", str(tmp_path / "program-data"))
+    target = tmp_path / "settings.json"
+    target.write_bytes(damaged)
+
+    with SettingsStore(target) as store:
+        store.ownership.release_target_handle()
+        store.rebuild()
+
+    backups = list(tmp_path.glob("settings.damaged-*-unbounded.json"))
+    assert len(backups) == 1
+    assert backups[0].read_bytes() == damaged
+
+
+def test_load_uses_bounded_reader_and_rejects_linked_ancestry(
+    tmp_path, monkeypatch
+):
+    target = tmp_path / "settings.json"
+    target.write_text(json.dumps(default_settings_document()), encoding="utf-8")
+    monkeypatch.setattr(storage_module, "path_has_linked_component", lambda _path: True)
+
+    with pytest.raises(DamagedSettings, match="link or junction"):
+        storage_module.load_raw_document(target)
 
 
 def test_non_ascii_parent_is_supported(tmp_path):

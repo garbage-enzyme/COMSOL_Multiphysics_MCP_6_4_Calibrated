@@ -139,6 +139,37 @@ def test_gui_scale_is_a_closed_choice() -> None:
     assert set(model.errors) == {"gui.scale"}
 
 
+def test_invalid_profile_remains_visible_instead_of_saving_a_default() -> None:
+    document = default_settings_document()
+    document["profile"]["name"] = "invalid-profile"
+
+    model = SettingsFormModel.from_raw(document)
+
+    assert model.valid is False
+    assert get_value(model.document, "profile.name") == "invalid-profile"
+    assert set(model.errors) == {"profile.name"}
+
+
+def test_roots_tokens_are_normalized_without_discarding_other_raw_values(
+    tmp_path: Path, monkeypatch
+) -> None:
+    local = tmp_path / "local"
+    explicit = str((tmp_path / "explicit").resolve())
+    monkeypatch.setenv("LOCALAPPDATA", str(local))
+    document = default_settings_document()
+    document["paths"]["model_read_roots"] = [
+        "%LOCALAPPDATA%/models",
+        explicit,
+    ]
+
+    model = SettingsFormModel.from_raw(document)
+
+    assert get_value(model.document, "paths.model_read_roots") == [
+        str(local / "models"),
+        explicit,
+    ]
+
+
 def test_non_ascii_runtime_and_artifact_paths_are_rejected_before_save(tmp_path: Path) -> None:
     model = SettingsFormModel(default_settings_document())
 

@@ -39,10 +39,27 @@ def file_identity(path: Path) -> FileIdentity | None:
         return None
     if not path.is_file():
         raise SettingsConflict("settings target must be a regular file")
-    stat = path.stat()
-    if stat.st_size > MAX_SETTINGS_BYTES:
-        raise SettingsConflict("settings target exceeds the bounded size")
-    raw = path.read_bytes()
+    before = path.lstat()
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_BINARY", 0))
+    try:
+        stat = os.fstat(descriptor)
+        if (stat.st_dev, stat.st_ino) != (before.st_dev, before.st_ino):
+            raise SettingsConflict("settings target changed during identity read")
+        if stat.st_size > MAX_SETTINGS_BYTES:
+            raise SettingsConflict("settings target exceeds the bounded size")
+        remaining = MAX_SETTINGS_BYTES + 1
+        chunks = bytearray()
+        while remaining:
+            block = os.read(descriptor, min(65_536, remaining))
+            if not block:
+                break
+            chunks.extend(block)
+            remaining -= len(block)
+        raw = bytes(chunks)
+        if len(raw) != stat.st_size or len(raw) > MAX_SETTINGS_BYTES:
+            raise SettingsConflict("settings target changed during identity read")
+    finally:
+        os.close(descriptor)
     return FileIdentity(
         device=int(stat.st_dev),
         inode=int(stat.st_ino),
@@ -82,7 +99,7 @@ class SettingsOwnership:
         return self._target_handle is not None
 
     def acquire(self) -> "SettingsOwnership":
-        if path_has_linked_component(self.target.parent):
+        if path_has_linked_component(self.target):
             raise SettingsConflict("settings target parent must not contain a link or junction")
         if not self.target.parent.is_dir():
             raise SettingsConflict("settings target parent does not exist")
@@ -116,7 +133,24 @@ class SettingsOwnership:
             os.write(self._sidecar_fd, payload)
             os.fsync(self._sidecar_fd)
             self.reacquire_target_handle()
-            self.baseline = file_identity(self.target)
+            try:
+                self.baseline = file_identity(self.target)
+            except SettingsConflict:
+                stat = self.target.lstat()
+                if (
+                    self.target.is_symlink()
+                    or getattr(self.target, "is_junction", lambda: False)()
+                    or not self.target.is_file()
+                    or stat.st_size <= MAX_SETTINGS_BYTES
+                ):
+                    raise
+                self.baseline = FileIdentity(
+                    device=int(stat.st_dev),
+                    inode=int(stat.st_ino),
+                    size=int(stat.st_size),
+                    modified_ns=int(stat.st_mtime_ns),
+                    sha256="unbounded",
+                )
             return self
         except Exception as exc:
             try:
