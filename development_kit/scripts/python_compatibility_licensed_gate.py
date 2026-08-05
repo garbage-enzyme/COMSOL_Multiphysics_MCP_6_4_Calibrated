@@ -267,22 +267,22 @@ def _select_expected_backend(backends: list[dict]) -> dict:
 
 
 def _run_worker(output: Path, cores: int) -> int:
-    import jpype
-    import mph
-
     result = {
         "schema_name": "comsol_mcp.python_compatibility_capacitor_probe",
         "schema_version": "1.0.0",
         "success": False,
         "python": platform.python_version(),
         "python_executable": sys.executable,
-        "packages": {
-            name: version(name) for name in ("jpype1", "mcp", "mph", "psutil", "pydantic")
-        },
     }
     client = None
     started = time.monotonic()
     try:
+        import jpype
+        import mph
+
+        result["packages"] = {
+            name: version(name) for name in ("jpype1", "mcp", "mph", "psutil", "pydantic")
+        }
         backend = _select_expected_backend(mph.discovery.find_backends())
         result["backend"] = backend
         client = mph.Client(cores=cores, version="6.4")
@@ -471,6 +471,8 @@ def _run_parent(args) -> int:
             sys.executable,
             str(Path(__file__).resolve()),
             "--worker",
+            "--confirm",
+            "RUN_REAL_COMSOL",
             "--worker-output",
             str(worker_output),
             "--cores",
@@ -628,16 +630,18 @@ def main() -> int:
     parser.add_argument("--worker", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--worker-output", type=Path, help=argparse.SUPPRESS)
     args = parser.parse_args()
+    if not 1 <= args.cores <= 64:
+        raise SystemExit("--cores must be in 1..64")
+    if not 1.0 <= args.timeout_seconds <= 7200.0:
+        raise SystemExit("--timeout-seconds must be in 1..7200")
     if args.worker:
+        if args.confirm != "RUN_REAL_COMSOL":
+            raise SystemExit("worker mode requires --confirm RUN_REAL_COMSOL")
         if args.worker_output is None:
             raise SystemExit("worker mode requires --worker-output")
         return _run_worker(args.worker_output.resolve(), args.cores)
     if args.confirm != "RUN_REAL_COMSOL" or args.output is None:
         raise SystemExit("licensed gate requires --confirm RUN_REAL_COMSOL and --output")
-    if not 1 <= args.cores <= 64:
-        raise SystemExit("--cores must be in 1..64")
-    if not 1.0 <= args.timeout_seconds <= 7200.0:
-        raise SystemExit("--timeout-seconds must be in 1..7200")
     try:
         return _run_parent(args)
     except (RuntimeError, ValueError) as exc:

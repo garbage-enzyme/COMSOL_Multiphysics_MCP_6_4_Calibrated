@@ -126,6 +126,15 @@ def evaluate_security_report(
     as_of: date,
 ) -> dict[str, Any]:
     findings = _findings(report)
+    if any(
+        not isinstance(item, dict)
+        or not isinstance(item.get("dependency"), str)
+        or not isinstance(item.get("vulnerability_id"), str)
+        or not isinstance(item.get("expires_on"), date)
+        or not isinstance(item.get("reason"), str)
+        for item in allowlist
+    ):
+        raise ValueError("security allowlist entries must be validated objects")
     allowed_by_id = {
         (item["dependency"], item["vulnerability_id"].casefold()): item for item in allowlist
     }

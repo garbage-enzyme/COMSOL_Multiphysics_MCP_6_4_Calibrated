@@ -12,7 +12,7 @@ import struct
 import subprocess
 import sys
 import time
-from importlib.metadata import entry_points, requires, version
+from importlib.metadata import distribution, entry_points, requires, version
 from importlib.resources import files
 from importlib.util import find_spec
 from pathlib import Path
@@ -155,7 +155,7 @@ def _probe_direct_settings_entry(output_parent: Path) -> dict:
     )
 
     executable = installed_entry_executable()
-    probe_root = output_parent / "settings-gui-direct-entry-probe"
+    probe_root = output_parent.resolve() / "settings-gui-direct-entry-probe"
     probe_root.mkdir(parents=True, exist_ok=False)
     try:
         target = probe_root / "settings.json"
@@ -354,7 +354,8 @@ def main() -> int:
     if deployment_identity.get("contains_local_path") is not False:
         raise AssertionError("installed deployment identity leaks a local path")
 
-    if find_spec("src") is not None:
+    distribution_files = distribution("comsol-mcp").files or ()
+    if any(Path(str(item)).parts[:1] == ("src",) for item in distribution_files):
         raise AssertionError("installed wheel exposes a generic top-level src package")
     if find_spec("settings_gui.tests") is not None:
         raise AssertionError("installed wheel exposes Settings GUI tests")

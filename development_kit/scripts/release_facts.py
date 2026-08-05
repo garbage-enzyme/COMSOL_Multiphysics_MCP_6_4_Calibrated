@@ -35,33 +35,22 @@ def _canonical_sha256(value: Any) -> str:
 
 def build_release_facts() -> dict[str, Any]:
     """Build the machine-readable release view from live implementation data."""
-    profiles = {
-        profile: sorted(tool_names_for_profile(profile))
-        for profile in PROFILE_NAMES
-    }
+    profiles = {profile: sorted(tool_names_for_profile(profile)) for profile in PROFILE_NAMES}
     features = {
         feature: sorted(
-            name
-            for name, metadata in TOOL_METADATA.items()
-            if metadata.feature_gate == feature
+            name for name, metadata in TOOL_METADATA.items() if metadata.feature_gate == feature
         )
         for feature in FEATURE_NAMES
     }
     schema_registry = get_schema_registry()
     compatibility = load_runtime_compatibility()
-    catalog = {
-        name: metadata.to_dict()
-        for name, metadata in sorted(TOOL_METADATA.items())
-    }
+    catalog = {name: metadata.to_dict() for name, metadata in sorted(TOOL_METADATA.items())}
     body = {
         "schema_name": "comsol_mcp.release_facts",
         "schema_version": "1.0.0",
         "package_version": __version__,
         "tool_count": len(catalog),
-        "profiles": {
-            name: {"tool_count": len(tools)}
-            for name, tools in profiles.items()
-        },
+        "profiles": {name: {"tool_count": len(tools)} for name, tools in profiles.items()},
         "features": {
             name: {"tool_count": len(tools), "default_enabled": False}
             for name, tools in features.items()
@@ -83,11 +72,12 @@ def build_release_facts() -> dict[str, Any]:
 def check_release_facts(path: Path = FACTS_PATH) -> None:
     """Fail if a committed release-facts view differs from live source data."""
     expected = build_release_facts()
-    actual = json.loads(path.read_text(encoding="utf-8"))
+    try:
+        actual = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise SystemExit("committed release facts are missing or corrupt") from exc
     if actual != expected:
-        raise SystemExit(
-            f"release facts differ from live implementation: {path}"
-        )
+        raise SystemExit(f"release facts differ from live implementation: {path}")
 
 
 def main() -> int:

@@ -998,7 +998,7 @@ def test_release_receipt_accepts_external_lock_and_probes_drop_pythonpath(
     monkeypatch.setenv("PYTHONPATH", str(tmp_path / "shadow"))
     assert "PYTHONPATH" not in _sanitized_probe_environment()
     source = Path(release_gate_module.__file__).read_text(encoding="utf-8")
-    assert source.count("env=environment") == 3
+    assert source.count("env=environment") == 7
 
 
 def test_release_lock_binds_the_declared_platform_to_the_target_interpreter(monkeypatch):

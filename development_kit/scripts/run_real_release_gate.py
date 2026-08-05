@@ -10,7 +10,7 @@ import platform
 import subprocess
 import sys
 import time
-from importlib.metadata import version
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 import psutil
@@ -21,6 +21,13 @@ from comsol_mcp.evidence.real_fixture import (
 from comsol_mcp.tools.ownership import SolverOwnership
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def _package_version(name: str) -> str | None:
+    try:
+        return version(name)
+    except PackageNotFoundError:
+        return None
 
 
 def _comsol_pids() -> set[int]:
@@ -250,7 +257,7 @@ def run_release_gate(
                 suite_completed = subprocess.CompletedProcess(
                     licensed_command, 124, exc.stdout or b"", exc.stderr or b""
                 )
-    except BaseException as exc:
+    except Exception as exc:
         phase_error = {"type": type(exc).__name__, "message": str(exc)}
     finally:
         try:
@@ -278,6 +285,11 @@ def run_release_gate(
         "receipt_path": reference_power_receipt_path.name if require_reference_power else None,
         "receipt_sha256": reference_power_receipt_sha256,
     }
+    legacy_phase = {
+        **reference_power_phase,
+        "passed": require_reference_power and reference_power_passed,
+        "skipped_reason": None if require_reference_power else "not required",
+    }
     return {
         "schema_version": "1.3.0",
         "gate": "serial_real_comsol_release",
@@ -286,7 +298,7 @@ def run_release_gate(
         "returncode": 0 if overall else 1,
         "phases": {
             "reference_power": reference_power_phase,
-            "h1": reference_power_phase,
+            "h1": legacy_phase,
             "licensed_regression": {
                 **_completed_summary(suite_completed),
                 "test_target": "development_kit/tests/integration/test_real_comsol.py",
@@ -321,8 +333,8 @@ def run_release_gate(
         },
         "environment": {
             "python": platform.python_version(),
-            "mph": version("mph"),
-            "mcp": version("mcp"),
+            "mph": _package_version("mph"),
+            "mcp": _package_version("mcp"),
             "comsol_build": (
                 "must match development_kit/release/support_matrix.json and probe evidence"
             ),
