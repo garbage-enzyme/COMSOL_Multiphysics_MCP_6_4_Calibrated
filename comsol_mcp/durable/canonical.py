@@ -29,10 +29,10 @@ def validate_finite_json(value: Any) -> None:
             return
         if isinstance(item, str):
             try:
-                size = len(item.encode("utf-8"))
+                encoded = json.dumps(item, ensure_ascii=False).encode("utf-8")
             except UnicodeEncodeError as exc:
                 raise ValueError("JSON strings must be valid UTF-8") from exc
-            if size > MAX_CANONICAL_STRING_BYTES:
+            if len(encoded) - 2 > MAX_CANONICAL_STRING_BYTES:
                 raise ValueError("JSON string exceeds the canonical byte limit")
             return
         if isinstance(item, int):

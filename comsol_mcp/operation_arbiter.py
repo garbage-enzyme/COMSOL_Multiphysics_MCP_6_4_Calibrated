@@ -15,6 +15,7 @@ from typing import Any, Callable, get_type_hints
 
 import psutil
 
+from comsol_mcp.durable.io import unlink_if_content
 from comsol_mcp.utils.runtime_paths import default_runtime_dir
 
 OPERATION_LOCK_SCHEMA = "comsol_mcp.operation_lock"
@@ -126,13 +127,7 @@ class OperationArbiter:
         return "active", "recorded process identity is active"
 
     def _remove_stale(self, expected_bytes: bytes) -> bool:
-        try:
-            if self.lock_path.read_bytes() != expected_bytes:
-                return False
-            self.lock_path.unlink()
-            return True
-        except FileNotFoundError, OSError:
-            return False
+        return unlink_if_content(self.lock_path, expected_bytes)
 
     def inspect(self) -> dict[str, Any]:
         """Inspect the operation lock without acquiring or recovering it."""
@@ -200,10 +195,11 @@ class OperationArbiter:
                 except FileExistsError:
                     lock, original, error = self._read_lock()
                     if error or lock is None or original is None:
+                        retryable = error == "operation lock is malformed"
                         return None, {
                             "state": "uncertain",
-                            "retryable": False,
-                            "retry_after_ms": None,
+                            "retryable": retryable,
+                            "retry_after_ms": RETRY_AFTER_MS if retryable else None,
                             "error": error or "operation lock identity is unavailable",
                         }
                     state, reason = self._owner_state(lock)
@@ -239,14 +235,13 @@ class OperationArbiter:
                     except OSError as exc:
                         write_error = exc
                     finally:
-                        os.close(descriptor)
-                    if write_error is not None:
                         try:
-                            partial = self.lock_path.read_bytes()
-                            if len(partial) <= len(payload) and payload.startswith(partial):
-                                self.lock_path.unlink()
-                        except OSError:
-                            pass
+                            os.close(descriptor)
+                        except OSError as exc:
+                            if write_error is None:
+                                write_error = exc
+                    if write_error is not None:
+                        unlink_if_content(self.lock_path, payload, allow_prefix=True)
                         return None, {
                             "state": "uncertain",
                             "retryable": False,
@@ -266,11 +261,7 @@ class OperationArbiter:
                             "error": f"operation lock cannot be verified: {type(exc).__name__}",
                         }
                     if written != len(payload) or published != payload:
-                        try:
-                            if len(published) <= len(payload) and payload.startswith(published):
-                                self.lock_path.unlink()
-                        except OSError:
-                            pass
+                        unlink_if_content(self.lock_path, payload, allow_prefix=True)
                         return None, {
                             "state": "uncertain",
                             "retryable": False,
@@ -305,13 +296,11 @@ class OperationArbiter:
                 }
             if current != claim.lock_bytes:
                 return {"released": False, "verified": False, "reason": "lock_changed"}
-            try:
-                self.lock_path.unlink()
-            except OSError as exc:
+            if not unlink_if_content(self.lock_path, claim.lock_bytes):
                 return {
                     "released": False,
                     "verified": False,
-                    "reason": f"unlink_failed:{type(exc).__name__}",
+                    "reason": "lock_changed_or_unlink_failed",
                 }
             return {"released": True, "verified": True}
 

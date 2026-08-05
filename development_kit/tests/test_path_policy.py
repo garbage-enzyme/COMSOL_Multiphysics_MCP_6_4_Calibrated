@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Iterator
 
 import pytest
+from src.durable.io import publish_file_exclusive
 from src.operation_arbiter import guard_tool_call
 from src.path_policy import (
     ARTIFACT_WRITE_ROOT_ENV,
@@ -101,6 +102,39 @@ def test_uncreated_configured_model_root_allows_startup_but_not_model_read(tmp_p
     assert policy.model_read_roots == (read_root.resolve(strict=False),)
     with pytest.raises(ValueError, match="model input cannot be resolved"):
         policy.validate_model_read(str(read_root / "missing.mph"), suffixes=(".mph",))
+
+
+@pytest.mark.parametrize("configured", ["read", "write"])
+def test_existing_regular_file_cannot_be_a_configured_root(tmp_path, ascii_root, configured):
+    read_root = tmp_path / "models"
+    read_root.mkdir()
+    write_root = ascii_root / "artifacts"
+    invalid = ascii_root / "not-a-directory"
+    invalid.write_bytes(b"file")
+
+    with pytest.raises(ValueError, match="must be a directory"):
+        PathPolicy.from_environment(
+            {
+                MODEL_READ_ROOTS_ENV: str(invalid if configured == "read" else read_root),
+                ARTIFACT_WRITE_ROOT_ENV: str(invalid if configured == "write" else write_root),
+            }
+        )
+
+
+def test_dangling_configured_symlink_is_rejected(tmp_path, ascii_root):
+    linked_root = tmp_path / "dangling-models"
+    try:
+        linked_root.symlink_to(tmp_path / "missing-models", target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"symlink creation unavailable: {exc}")
+
+    with pytest.raises(ValueError, match="symlink or junction"):
+        PathPolicy.from_environment(
+            {
+                MODEL_READ_ROOTS_ENV: str(linked_root),
+                ARTIFACT_WRITE_ROOT_ENV: str(ascii_root / "artifacts"),
+            }
+        )
 
 
 def _selection(name):
@@ -428,6 +462,44 @@ def test_write_pin_rejects_ancestor_replacement_before_acquisition(tmp_path, asc
     with pytest.raises(ReadPinError, match="identity changed"):
         with pin_validated_writes((decision.write_pin,)):
             pytest.fail("replacement ancestor must not reach the writer")
+
+
+def test_staged_writer_refuses_a_symlink_inserted_after_path_validation(
+    tmp_path, ascii_root, monkeypatch
+):
+    _policy_value, read_root, write_root = _policy(tmp_path, ascii_root)
+    target = write_root / "saved.mph"
+    outside = ascii_root / "outside.mph"
+    outside.write_bytes(b"sentinel")
+    monkeypatch.setenv(MODEL_READ_ROOTS_ENV, str(read_root))
+    monkeypatch.setenv(ARTIFACT_WRITE_ROOT_ENV, str(write_root))
+
+    def staged_writer(file_path: str):
+        staging = write_root / ".staged.mph"
+        staging.write_bytes(b"owned")
+        try:
+            Path(file_path).symlink_to(outside)
+        except OSError as exc:
+            pytest.skip(f"symlink creation unavailable: {exc}")
+        try:
+            publish_file_exclusive(staging, file_path)
+        except FileExistsError:
+            return {"success": False, "reason": "target_changed"}
+        return {"success": True}
+
+    guarded = guard_tool_call(
+        staged_writer,
+        tool_name="model_save",
+        side_effect_class="filesystem_write",
+        concurrency_class="solver_free",
+        profile_name="core",
+    )
+
+    result = guarded(file_path=str(target))
+
+    assert result["success"] is False
+    assert result["reason"] == "target_changed"
+    assert outside.read_bytes() == b"sentinel"
 
 
 def test_full_profile_visibly_preserves_legacy_path_compatibility(tmp_path):

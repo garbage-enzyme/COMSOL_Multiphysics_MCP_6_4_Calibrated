@@ -224,8 +224,39 @@ def test_malformed_lock_fails_closed(tmp_path):
 
     assert claim is None
     assert evidence["state"] == "uncertain"
-    assert evidence["retryable"] is False
+    assert evidence["retryable"] is True
+    assert evidence["retry_after_ms"] == 250
     assert (tmp_path / "operation.lock").read_bytes() == b"not-json"
+
+
+def test_lock_close_failure_returns_uncertain_and_removes_owned_partial(tmp_path, monkeypatch):
+    arbiter = OperationArbiter(
+        tmp_path,
+        pid=200,
+        process_create_time=20.0,
+        process_probe=lambda _pid: 20.0,
+    )
+    real_close = arbiter_module.os.close
+    calls = 0
+
+    def fail_first_close(descriptor):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            real_close(descriptor)
+            raise OSError("simulated close uncertainty")
+        return real_close(descriptor)
+
+    monkeypatch.setattr(arbiter_module.os, "close", fail_first_close)
+
+    claim, evidence = arbiter.try_acquire(
+        tool_name="study_solve", side_effect_class="solver_execution"
+    )
+
+    assert claim is None
+    assert evidence["state"] == "uncertain"
+    assert "OSError" in evidence["error"]
+    assert not arbiter.lock_path.exists()
 
 
 def test_operation_lock_retries_short_writes_until_publication_is_exact(
