@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import os
+import shutil
 import struct
 import subprocess
 import sys
+import tempfile
 from copy import deepcopy
 from importlib.resources import files
 from pathlib import Path
@@ -69,11 +71,52 @@ def _prepare_output_directory(output_directory: str | Path) -> Path:
     if target.exists():
         if target.is_symlink() or not target.is_dir():
             raise ValueError("standalone output must be a regular directory")
-        if any(target.iterdir()):
+        entries = list(target.iterdir())
+        retry_logs = {"build.stdout.log", "build.stderr.log"}
+        if any(entry.name not in retry_logs or not entry.is_file() for entry in entries):
             raise FileExistsError("standalone output directory must be empty")
+        for entry in entries:
+            entry.unlink()
     else:
         target.mkdir(parents=True, exist_ok=False)
     return target.resolve(strict=True)
+
+
+def _run_compiler_bounded(
+    command: list[str], *, cwd: Path, run_command: Any
+) -> tuple[Any, bytes, bytes, bool]:
+    if run_command is not subprocess.run:
+        completed = run_command(
+            command,
+            cwd=cwd,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            timeout=BUILD_TIMEOUT_SECONDS,
+            check=False,
+        )
+        stdout = bytes(completed.stdout or b"")
+        stderr = bytes(completed.stderr or b"")
+        return completed, stdout, stderr, len(stdout) + len(stderr) > MAX_BUILD_LOG_BYTES
+
+    with tempfile.TemporaryFile() as stdout_file, tempfile.TemporaryFile() as stderr_file:
+        completed = run_command(
+            command,
+            cwd=cwd,
+            stdin=subprocess.DEVNULL,
+            stdout=stdout_file,
+            stderr=stderr_file,
+            timeout=BUILD_TIMEOUT_SECONDS,
+            check=False,
+        )
+        stdout_file.seek(0)
+        stdout = stdout_file.read(MAX_BUILD_LOG_BYTES + 1)
+        remaining = max(0, MAX_BUILD_LOG_BYTES + 1 - len(stdout))
+        stderr_file.seek(0)
+        stderr = stderr_file.read(remaining)
+        stdout_file.seek(0, os.SEEK_END)
+        stderr_file.seek(0, os.SEEK_END)
+        overflow = stdout_file.tell() + stderr_file.tell() > MAX_BUILD_LOG_BYTES
+        return completed, stdout, stderr, overflow
 
 
 def build_standalone_executable(
@@ -108,22 +151,23 @@ def build_standalone_executable(
         f"/resource:{driver_path},CapacitorPointTemplate.java",
         str(launcher_path),
     ]
-    completed = run_command(
-        command,
-        cwd=source_root,
-        stdin=subprocess.DEVNULL,
-        capture_output=True,
-        timeout=BUILD_TIMEOUT_SECONDS,
-        check=False,
-    )
-    stdout = bytes(completed.stdout or b"")
-    stderr = bytes(completed.stderr or b"")
-    if len(stdout) + len(stderr) > MAX_BUILD_LOG_BYTES:
-        raise RuntimeError("standalone compiler output exceeded its bound")
-    (target / "build.stdout.log").write_bytes(stdout)
-    (target / "build.stderr.log").write_bytes(stderr)
-    if completed.returncode != 0 or not executable.is_file():
-        raise RuntimeError("standalone launcher compilation failed")
+    try:
+        completed, stdout, stderr, overflow = _run_compiler_bounded(
+            command, cwd=source_root, run_command=run_command
+        )
+        (target / "build.stdout.log").write_bytes(stdout[:MAX_BUILD_LOG_BYTES])
+        (target / "build.stderr.log").write_bytes(
+            stderr[: max(0, MAX_BUILD_LOG_BYTES - min(len(stdout), MAX_BUILD_LOG_BYTES))]
+        )
+        if overflow:
+            raise RuntimeError("standalone compiler output exceeded its bound")
+        if completed.returncode != 0 or not executable.is_file():
+            raise RuntimeError("standalone launcher compilation failed")
+    except BaseException:
+        shutil.rmtree(source_root, ignore_errors=True)
+        executable.unlink(missing_ok=True)
+        (target / MANIFEST_NAME).unlink(missing_ok=True)
+        raise
 
     executable_hash, executable_bytes = _sha256_file(executable, maximum_bytes=MAX_EXECUTABLE_BYTES)
     compiler_hash, compiler_bytes = _sha256_file(compiler, maximum_bytes=16 * 1024 * 1024)

@@ -67,7 +67,7 @@ internal static class ComsolMcpStandaloneLauncher
         }
         catch (Exception exception)
         {
-            Console.Error.WriteLine("COMSOL MCP standalone launcher failed: " + exception.Message);
+            Console.Error.WriteLine("COMSOL MCP standalone launcher failed: " + exception);
             return 1;
         }
     }
@@ -619,6 +619,7 @@ internal static class ComsolMcpStandaloneLauncher
         receipt["schema_name"] = "comsol_mcp.standalone_terminal";
         receipt["schema_version"] = "1.0.0";
         receipt["status_schema_name"] = "comsol_mcp.standalone_status";
+        receipt["status_schema_version"] = "1.0.0";
         AtomicWriteJson(paths.Terminal, receipt);
     }
 
@@ -737,16 +738,35 @@ internal static class ComsolMcpStandaloneLauncher
             }
             Task<string> stdout = process.StandardOutput.ReadToEndAsync();
             Task<string> stderr = process.StandardError.ReadToEndAsync();
-            if (!process.WaitForExit(timeoutMilliseconds))
+            bool timedOut = !process.WaitForExit(timeoutMilliseconds);
+            if (timedOut)
             {
                 process.Kill();
                 process.WaitForExit();
-                throw new TimeoutException("owned_process_timeout");
             }
-            process.WaitForExit();
-            if (!Task.WaitAll(new Task[] {stdout, stderr}, 5000))
+            else
             {
-                throw new TimeoutException("owned_process_streams_not_drained");
+                process.WaitForExit();
+            }
+            Exception drainFailure = null;
+            bool streamsDrained = false;
+            try
+            {
+                streamsDrained = Task.WaitAll(new Task[] {stdout, stderr}, 5000);
+            }
+            catch (AggregateException exception)
+            {
+                drainFailure = exception.Flatten();
+            }
+            if (timedOut)
+            {
+                throw new TimeoutException("owned_process_timeout", drainFailure);
+            }
+            if (!streamsDrained)
+            {
+                throw new InvalidOperationException(
+                    "owned_process_streams_not_drained", drainFailure
+                );
             }
             string combined = stdout.Result + stderr.Result;
             byte[] payload = new UTF8Encoding(false).GetBytes(combined);
@@ -1028,8 +1048,12 @@ internal static class ComsolMcpStandaloneLauncher
             WriteTerminalStatus(paths, value);
             Log(paths, "campaign_failed", BoundedReason(reason));
         }
-        catch
+        catch (Exception statusException)
         {
+            Console.Error.WriteLine(
+                "COMSOL MCP standalone failure status could not be written: "
+                + statusException
+            );
         }
     }
 

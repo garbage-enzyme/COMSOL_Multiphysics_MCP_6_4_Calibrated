@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import tempfile
 import threading
 import time
 import uuid
@@ -13,7 +14,8 @@ from typing import Any, Callable
 
 import psutil
 
-from comsol_mcp.jobs.store import JobLock, process_identity
+from comsol_mcp.durable.io import atomic_write_json, read_file_bytes_bounded
+from comsol_mcp.jobs.store import JobLock, process_identity, process_identity_state
 
 from .builder import EXECUTABLE_NAME
 from .inspection import (
@@ -98,20 +100,26 @@ def _decode_json_output(payload: bytes, *, contract: str) -> dict[str, Any]:
 def _run_control(deployment_directory: str | Path, command: str) -> dict[str, Any]:
     deployment = Path(deployment_directory)
     identity = verify_standalone_deployment(deployment)
-    completed = subprocess.run(  # noqa: S603
-        [str(deployment / EXECUTABLE_NAME), command],
-        cwd=deployment,
-        stdin=subprocess.DEVNULL,
-        capture_output=True,
-        timeout=CONTROL_TIMEOUT_SECONDS,
-        check=False,
-        creationflags=(getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0),
-    )
-    if len(completed.stdout) + len(completed.stderr) > MAX_STATUS_BYTES:
-        raise RuntimeError("standalone control output exceeded its bound")
+    with tempfile.TemporaryFile() as stdout_file, tempfile.TemporaryFile() as stderr_file:
+        completed = subprocess.run(  # noqa: S603
+            [str(deployment / EXECUTABLE_NAME), command],
+            cwd=deployment,
+            stdin=subprocess.DEVNULL,
+            stdout=stdout_file,
+            stderr=stderr_file,
+            timeout=CONTROL_TIMEOUT_SECONDS,
+            check=False,
+            creationflags=(getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0),
+        )
+        stdout_file.seek(0, os.SEEK_END)
+        stderr_file.seek(0, os.SEEK_END)
+        if stdout_file.tell() + stderr_file.tell() > MAX_STATUS_BYTES:
+            raise RuntimeError("standalone control output exceeded its bound")
+        stdout_file.seek(0)
+        stdout = stdout_file.read(MAX_STATUS_BYTES + 1)
     if completed.returncode != 0:
         raise RuntimeError("standalone control command failed")
-    value = _decode_json_output(completed.stdout, contract="standalone control")
+    value = _decode_json_output(stdout, contract="standalone control")
     value["deployment_identity"] = identity
     return value
 
@@ -133,6 +141,35 @@ def request_standalone_pause(deployment_directory: str | Path) -> dict[str, Any]
     if value.get("schema_name") != "comsol_mcp.standalone_pause_request":
         raise RuntimeError("standalone pause acknowledgement contract failed")
     return {"success": True, **value}
+
+
+def _launch_record_ids(launch_root: Path) -> set[str]:
+    return {
+        path.name.split(".", 1)[0]
+        for path in launch_root.iterdir()
+        if path.is_file()
+        and len(path.name.split(".", 1)[0]) == 32
+        and all(character in "0123456789abcdef" for character in path.name[:32])
+    }
+
+
+def _retire_stale_launch_records(launch_root: Path) -> None:
+    for launch_id in sorted(_launch_record_ids(launch_root)):
+        record_path = launch_root / f"{launch_id}.json"
+        try:
+            record = json.loads(
+                read_file_bytes_bounded(record_path, max_bytes=MAX_STATUS_BYTES).decode("utf-8")
+            )
+        except OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError:
+            continue
+        if not isinstance(record, dict) or not isinstance(record.get("owner"), dict):
+            continue
+        state, _reason = process_identity_state(record["owner"])
+        if state != "stale":
+            continue
+        for residue in launch_root.glob(f"{launch_id}.*"):
+            if residue.is_file():
+                residue.unlink(missing_ok=True)
 
 
 def launch_standalone_campaign(
@@ -171,19 +208,24 @@ def launch_standalone_campaign(
         lock_path = deployment / "assets" / "locks" / "mcp-launches.lock"
         lock_path.parent.mkdir(parents=True, exist_ok=True)
         with JobLock(lock_path):
-            existing_launch_ids = {
-                path.name.split(".", 1)[0]
-                for path in launch_root.iterdir()
-                if path.is_file()
-                and len(path.name.split(".", 1)[0]) == 32
-                and all(character in "0123456789abcdef" for character in path.name[:32])
-            }
+            _retire_stale_launch_records(launch_root)
+            existing_launch_ids = _launch_record_ids(launch_root)
             if len(existing_launch_ids) >= MAX_MCP_LAUNCH_RECORDS:
                 raise RuntimeError("standalone MCP launch record limit reached")
             launch_id = uuid.uuid4().hex
             stdout_path = launch_root / f"{launch_id}.stdout.log"
             stderr_path = launch_root / f"{launch_id}.stderr.log"
             record_path = launch_root / f"{launch_id}.json"
+            atomic_write_json(
+                record_path,
+                {
+                    "schema_name": "comsol_mcp.standalone_mcp_launch",
+                    "schema_version": "1.0.0",
+                    "launch_id": launch_id,
+                    "operation": "resume" if resume else "run",
+                    "state": "identity_pending",
+                },
+            )
             with (
                 stdout_path.open("xb", buffering=0) as stdout,
                 stderr_path.open("xb", buffering=0) as stderr,
@@ -217,8 +259,6 @@ def launch_standalone_campaign(
             "launcher_sha256": build["launcher_sha256"],
             "comsol_root_included": False,
         }
-        from comsol_mcp.durable.io import atomic_write_json
-
         atomic_write_json(record_path, record)
     except BaseException:
         if process is not None and process.poll() is None:

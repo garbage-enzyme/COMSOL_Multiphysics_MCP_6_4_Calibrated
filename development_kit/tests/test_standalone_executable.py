@@ -184,6 +184,30 @@ def test_builder_failure_preserves_bounded_logs_and_no_false_manifest(
     assert (output / "build.stderr.log").read_bytes() == b"compile-error"
     assert not (output / MANIFEST_NAME).exists()
 
+    def succeed(command, **kwargs):
+        executable = Path(next(item[5:] for item in command if item.startswith("/out:")))
+        executable.write_bytes(b"fixture-executable")
+        return subprocess.CompletedProcess(command, 0, b"retry-out", b"")
+
+    receipt = build_standalone_executable(output, csc_path=compiler, run_command=succeed)
+    assert receipt["status"] == "passed"
+    assert (output / "build.stdout.log").read_bytes() == b"retry-out"
+
+
+def test_default_compiler_capture_is_file_backed_and_bounded(
+    ascii_tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(builder_module, "MAX_BUILD_LOG_BYTES", 16)
+    completed, stdout, stderr, overflow = builder_module._run_compiler_bounded(
+        [os.sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'x' * 64)"],
+        cwd=ascii_tmp_path,
+        run_command=subprocess.run,
+    )
+    assert completed.returncode == 0
+    assert overflow is True
+    assert len(stdout) <= 17
+    assert stderr == b""
+
 
 def test_status_and_results_are_bounded_schema_checked_snapshots(ascii_tmp_path: Path) -> None:
     campaign = _campaign(ascii_tmp_path / "campaign")
@@ -201,6 +225,26 @@ def test_status_and_results_are_bounded_schema_checked_snapshots(ascii_tmp_path:
     assert read_campaign_results(campaign, limit=1)["rows"][0]["point_id"] == "voltage_2V"
     assert outcome["state"] == "current_valid"
     assert outcome["total_rows"] == 2
+
+
+def test_control_output_is_file_backed_and_checked_before_decode(
+    ascii_tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        control_module,
+        "verify_standalone_deployment",
+        lambda _path: {"launcher_sha256": "a" * 64},
+    )
+
+    def noisy(command, **kwargs):
+        kwargs["stdout"].write(b"x" * (inspection_module.MAX_STATUS_BYTES + 1))
+        kwargs["stdout"].flush()
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(control_module.subprocess, "run", noisy)
+
+    with pytest.raises(RuntimeError, match="control output exceeded"):
+        control_module._run_control(ascii_tmp_path, "status")
 
 
 def test_partial_result_tail_is_reported_and_never_returned(ascii_tmp_path: Path) -> None:
@@ -284,6 +328,7 @@ def test_terminal_receipt_is_separate_and_schema_checked(ascii_tmp_path: Path) -
         **_status(state="completed", completed=3),
         "schema_name": "comsol_mcp.standalone_terminal",
         "status_schema_name": "comsol_mcp.standalone_status",
+        "status_schema_version": "1.0.0",
     }
     atomic_write_json(campaign / "assets" / "state" / "terminal.json", terminal)
 
@@ -292,6 +337,12 @@ def test_terminal_receipt_is_separate_and_schema_checked(ascii_tmp_path: Path) -
     terminal["status_schema_name"] = "unknown"
     atomic_write_json(campaign / "assets" / "state" / "terminal.json", terminal)
     with pytest.raises(ValueError, match="bind the status schema"):
+        read_campaign_terminal(campaign)
+
+    terminal["status_schema_name"] = "comsol_mcp.standalone_status"
+    terminal["status_schema_version"] = "2.0.0"
+    atomic_write_json(campaign / "assets" / "state" / "terminal.json", terminal)
+    with pytest.raises(ValueError, match="status schema version"):
         read_campaign_terminal(campaign)
 
 
@@ -307,11 +358,30 @@ def test_completed_terminal_must_bind_the_exact_result_journal(
         **_status(state="completed", completed=1),
         "schema_name": "comsol_mcp.standalone_terminal",
         "status_schema_name": "comsol_mcp.standalone_status",
+        "status_schema_version": "1.0.0",
         "results_sha256": "0" * 64,
     }
     atomic_write_json(campaign / "assets" / "state" / "terminal.json", terminal)
 
     with pytest.raises(ValueError, match="does not bind the result journal"):
+        read_campaign_results(campaign)
+
+
+def test_terminal_identity_must_match_result_rows(ascii_tmp_path: Path) -> None:
+    campaign = _campaign(ascii_tmp_path / "terminal-identity-binding")
+    results = campaign / "assets" / "data" / "results.jsonl"
+    append_jsonl_record(results, _result("voltage_1V", 1.0))
+    terminal = {
+        **_status(state="completed", completed=1),
+        "schema_name": "comsol_mcp.standalone_terminal",
+        "status_schema_name": "comsol_mcp.standalone_status",
+        "status_schema_version": "1.0.0",
+        "results_sha256": inspection_module._sha256(results.read_bytes()),
+        "campaign_spec_sha256": "9" * 64,
+    }
+    atomic_write_json(campaign / "assets" / "state" / "terminal.json", terminal)
+
+    with pytest.raises(ValueError, match="terminal and result identities disagree"):
         read_campaign_results(campaign)
 
 
@@ -346,8 +416,9 @@ def test_embedded_java_driver_has_no_unusable_model_return() -> None:
 def test_embedded_launcher_preserves_bounded_durable_process_and_resume_contracts() -> None:
     source = builder_module._resource_bytes("Launcher.cs").decode("utf-8")
 
-    assert "if (!Task.WaitAll(new Task[] {stdout, stderr}, 5000))" in source
-    assert 'throw new TimeoutException("owned_process_streams_not_drained")' in source
+    assert "streamsDrained = Task.WaitAll(new Task[] {stdout, stderr}, 5000);" in source
+    assert 'throw new TimeoutException("owned_process_timeout", drainFailure);' in source
+    assert '"owned_process_streams_not_drained", drainFailure' in source
     assert "StandardOutputEncoding = new UTF8Encoding(false, true)" in source
     assert "StandardErrorEncoding = new UTF8Encoding(false, true)" in source
     assert "FileShare.ReadWrite | FileShare.Delete" in source
@@ -510,6 +581,9 @@ def test_launch_record_limit_is_serialized_across_concurrent_callers(
         lambda _path: {"launcher_sha256": "a" * 64},
     )
     monkeypatch.setattr(control_module, "_validate_comsol_root", lambda path: Path(path))
+    monkeypatch.setattr(
+        control_module, "process_identity_state", lambda _identity: ("active", "fixture")
+    )
     pids = count(20000)
 
     class FakeProcess:
@@ -546,3 +620,23 @@ def test_launch_record_limit_is_serialized_across_concurrent_callers(
         if len(path.name.split(".", 1)[0]) == 32
     }
     assert len(launch_ids) == control_module.MAX_MCP_LAUNCH_RECORDS
+
+
+def test_stale_launch_records_are_retired_with_their_logs(
+    ascii_tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    launch_root = ascii_tmp_path / "launch-records"
+    launch_root.mkdir()
+    launch_id = "a" * 32
+    atomic_write_json(
+        launch_root / f"{launch_id}.json",
+        {"owner": {"pid": 123, "process_create_time": 1.0, "command_signature": "b" * 64}},
+    )
+    (launch_root / f"{launch_id}.stdout.log").write_bytes(b"done")
+    monkeypatch.setattr(
+        control_module, "process_identity_state", lambda _identity: ("stale", "exited")
+    )
+
+    control_module._retire_stale_launch_records(launch_root)
+
+    assert not list(launch_root.iterdir())
