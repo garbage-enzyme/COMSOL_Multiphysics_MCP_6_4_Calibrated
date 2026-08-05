@@ -552,6 +552,7 @@ def test_dual_blind_review_requires_two_independent_complete_receipts():
     )
 
     assert agreement["state"] == "dual_review_complete"
+    assert agreement["comparison_evidence"] == "caller_declared_unverified"
     assert disagreement["state"] == "adjudication_required"
     assert disagreement["numerical_policy_authority"] is False
 

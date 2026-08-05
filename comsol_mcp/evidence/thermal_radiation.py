@@ -82,9 +82,10 @@ def _validate_assessment(value: KirchhoffAssessmentReceipt) -> dict[str, Any]:
 
 def _planck_wavelength(wavelength_m: float, temperature_K: float) -> float:
     exponent = _H * _C / (wavelength_m * _K_B * temperature_K)
-    numerator = 2.0 * _H * _C * _C / wavelength_m**5
     if exponent > 700.0:
-        return numerator * math.exp(-exponent)
+        log_radiance = math.log(2.0 * _H * _C * _C) - 5.0 * math.log(wavelength_m) - exponent
+        return math.exp(log_radiance)
+    numerator = 2.0 * _H * _C * _C / wavelength_m**5
     return numerator / math.expm1(exponent)
 
 

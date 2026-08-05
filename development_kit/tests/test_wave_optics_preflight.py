@@ -6,7 +6,9 @@ import hashlib
 
 import pytest
 from src.tools.wave_optics_preflight import (
+    MAX_BOUNDARIES,
     EvidenceLedger,
+    _extend_boundary_map,
     _point_audit_next_call,
     collect_preflight_foundation,
     collect_wave_optics_preflight,
@@ -92,7 +94,10 @@ def test_foundation_reports_evidence_only_and_preserves_source(tmp_path, monkeyp
     }
     assert result["provenance"]["source_sha256"] == source_hash
     assert result["ownership"]["solve_permitted"] is True
-    assert result["incidence"]["physical_polarization_evidence"] == "label_only"
+    assert result["incidence"] == {}
+    assert "incidence_not_inspected" in {
+        item["code"] for item in result["evidence"]["unknowns"]
+    }
     assert result["next_call"]["available"] is False
     assert result["next_call"]["missing_evidence"] == [
         "topology",
@@ -380,10 +385,10 @@ class FakeComponent:
 
 
 class FakeStudy:
-    def __init__(self, linked=True):
+    def __init__(self, linked=True, empty=False):
         props = {"plist": "wl" if linked else "5e-6", "punit": "m"}
         self._features = FakeContainer(
-            {"wl_step": FakeFeature("wl_step", "Wavelength", props=props)}
+            {} if empty else {"wl_step": FakeFeature("wl_step", "Wavelength", props=props)}
         )
 
     def feature(self):
@@ -391,9 +396,9 @@ class FakeStudy:
 
 
 class FakeJavaModel:
-    def __init__(self, component, linked=True):
+    def __init__(self, component, linked=True, empty_steps=False):
         self._components = FakeContainer({"comp1": component})
-        self._studies = FakeContainer({"std1": FakeStudy(linked)})
+        self._studies = FakeContainer({"std1": FakeStudy(linked, empty=empty_steps)})
 
     def component(self):
         return self._components
@@ -409,7 +414,10 @@ class FullFakeModel(MetadataOnlyModel):
     def __init__(self, path, **fixture):
         super().__init__(path)
         linked = fixture.pop("linked", True)
-        self._java = FakeJavaModel(FakeComponent(**fixture), linked=linked)
+        empty_steps = fixture.pop("empty_steps", False)
+        self._java = FakeJavaModel(
+            FakeComponent(**fixture), linked=linked, empty_steps=empty_steps
+        )
         self._linked = linked
 
     @property
@@ -471,6 +479,51 @@ def test_full_preflight_collects_read_only_wave_optics_evidence(tmp_path, monkey
     assert result["next_call"]["available"] is True
     assert result["next_call"]["implementation_status"] == "experimental"
     assert result["next_call"]["missing_evidence"] == []
+
+
+def test_empty_study_steps_are_explicit_unknown_evidence(tmp_path, monkeypatch):
+    result = _full_result(tmp_path, monkeypatch, empty_steps=True)
+
+    assert result["wavelength"]["structurally_linked"] is None
+    assert "study_steps_missing" in {
+        item["code"] for item in result["evidence"]["unknowns"]
+    }
+
+
+def test_selected_boundary_probes_obey_global_budget(monkeypatch):
+    class LargeGeometry:
+        @staticmethod
+        def getNBoundaries():
+            return MAX_BOUNDARIES * 3
+
+        @staticmethod
+        def getSDim():
+            return 3
+
+        @staticmethod
+        def getUpDown():
+            count = MAX_BOUNDARIES * 3
+            return [[1] * count, [0] * count]
+
+    probed = []
+
+    def probe(_geom, number, **_kwargs):
+        probed.append(number)
+        return {"number": number}
+
+    monkeypatch.setattr("src.tools.wave_optics_preflight._probe_boundary_read_only", probe)
+    ledger = EvidenceLedger()
+    boundary_map = {}
+
+    _extend_boundary_map(
+        LargeGeometry(), boundary_map, range(1, MAX_BOUNDARIES * 2 + 1), ledger
+    )
+
+    assert len(probed) == MAX_BOUNDARIES
+    assert len(boundary_map) == MAX_BOUNDARIES
+    assert "selected_boundary_probe_budget_exceeded" in {
+        item["code"] for item in ledger.unknowns
+    }
 
 
 def test_complete_preflight_does_not_recommend_tool_outside_profile(tmp_path, monkeypatch):

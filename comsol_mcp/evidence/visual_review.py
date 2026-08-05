@@ -898,6 +898,7 @@ def evaluate_dual_visual_review(
         "request_sha256": request["contract_sha256"],
         "receipt_sha256s": [first["contract_sha256"], second["contract_sha256"]],
         "comparison": comparison,
+        "comparison_evidence": "caller_declared_unverified",
         "state": state,
         "reasons": reasons,
         "numerical_policy_authority": False,

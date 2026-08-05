@@ -87,3 +87,37 @@ def test_recipe_output_does_not_hide_an_unwritable_explicit_root(monkeypatch, as
 
     with pytest.raises(PermissionError, match="synthetic unwritable root"):
         module.recipe_output_dir()
+
+
+def test_recipe_output_rejects_preexisting_or_dangling_reparse_root(
+    monkeypatch, ascii_tmp_path
+):
+    module = _load_recipe_paths()
+    configured = ascii_tmp_path / "linked-root"
+    monkeypatch.setattr(module, "_is_reparse_point", lambda path: path == configured)
+
+    with pytest.raises(ValueError, match="links or reparse"):
+        module._create_recipe_output(configured)
+
+
+def test_recipe_output_revalidates_after_directory_creation(monkeypatch, ascii_tmp_path):
+    module = _load_recipe_paths()
+    configured = ascii_tmp_path / "race-root"
+    output = configured / "recipes"
+    armed = False
+    original_mkdir = Path.mkdir
+
+    def mkdir_then_arm(path, *args, **kwargs):
+        nonlocal armed
+        result = original_mkdir(path, *args, **kwargs)
+        if path == output:
+            armed = True
+        return result
+
+    monkeypatch.setattr(Path, "mkdir", mkdir_then_arm)
+    monkeypatch.setattr(
+        module, "_is_reparse_point", lambda path: armed and path == output
+    )
+
+    with pytest.raises(ValueError, match="links or reparse"):
+        module._create_recipe_output(configured)

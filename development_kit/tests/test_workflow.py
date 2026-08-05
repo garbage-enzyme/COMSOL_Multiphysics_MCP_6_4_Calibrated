@@ -635,6 +635,25 @@ def test_incremental_csv_append_reads_only_header_when_schema_matches(tmp_path, 
     assert path.read_text(encoding="utf-8").count("\n") == 3
 
 
+def test_csv_schema_migration_is_atomic_on_replace_failure(tmp_path, monkeypatch):
+    path = tmp_path / "legacy.csv"
+    original = b"value\n1\n"
+    path.write_bytes(original)
+
+    def fail_replace(_source, _destination):
+        raise OSError("injected replace failure")
+
+    monkeypatch.setattr(workflow_module.os, "replace", fail_replace)
+
+    with pytest.raises(OSError, match="replace failure"):
+        workflow_module._write_rows_csv(
+            str(path), ["value", "status"], [{"value": 2, "status": "ok"}], append=True
+        )
+
+    assert path.read_bytes() == original
+    assert list(tmp_path.glob(".legacy.csv.*.tmp")) == []
+
+
 @pytest.mark.parametrize(
     ("parameter_name", "expressions"),
     [

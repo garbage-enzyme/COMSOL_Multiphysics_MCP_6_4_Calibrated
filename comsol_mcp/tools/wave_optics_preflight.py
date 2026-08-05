@@ -305,7 +305,26 @@ def _extend_boundary_map(
     requested: Iterable[int],
     ledger: EvidenceLedger,
 ) -> None:
-    missing = sorted({int(value) for value in requested if int(value) not in boundary_map})
+    missing: list[int] = []
+    seen = set(boundary_map)
+    truncated = False
+    for value in requested:
+        number = int(value)
+        if number in seen:
+            continue
+        seen.add(number)
+        if len(missing) >= MAX_BOUNDARIES:
+            truncated = True
+            continue
+        missing.append(number)
+    missing.sort()
+    if truncated:
+        ledger.add(
+            "unknown",
+            "selected_boundary_probe_budget_exceeded",
+            "Selected boundary evidence exceeded the bounded topology probe budget.",
+            probe_budget=MAX_BOUNDARIES,
+        )
     if not missing:
         return
     n_boundaries = int(geom.getNBoundaries())
@@ -1014,6 +1033,13 @@ def _collect_wavelength(
             error=_error(exc),
         )
     structurally_linked: bool | None = bool(linked_locations) if steps else None
+    if not steps:
+        ledger.add(
+            "unknown",
+            "study_steps_missing",
+            "The selected study contains no readable study steps for wavelength-link inspection.",
+            study_tag=study_tag,
+        )
     if structurally_linked is False:
         ledger.add(
             "unknown",
@@ -1296,7 +1322,7 @@ def collect_preflight_foundation(
         "topology": {},
         "periodicity": {},
         "ports": {},
-        "incidence": {"physical_polarization_evidence": "label_only"},
+        "incidence": {},
         "wavelength": {},
         "mesh_study_results": {},
         "next_call": _point_audit_next_call(

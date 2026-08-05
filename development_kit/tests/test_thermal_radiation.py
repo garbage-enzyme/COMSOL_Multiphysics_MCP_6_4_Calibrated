@@ -13,6 +13,7 @@ from src.server import create_server
 
 from comsol_mcp.contracts.thermal_radiation import AngularGrid, ThermalRadiationRequest
 from comsol_mcp.evidence.thermal_radiation import (
+    _planck_wavelength,
     build_kirchhoff_assessment,
     evaluate_thermal_radiation,
 )
@@ -20,6 +21,10 @@ from development_kit.tests.mcp_test_support import decode_tool_result
 
 _C = 299_792_458.0
 _SIGMA = 5.670_374_419e-8
+
+
+def test_planck_wavelength_contains_tiny_positive_coordinates():
+    assert _planck_wavelength(1.0e-100, 500.0) == 0.0
 
 
 def _kirchhoff(**overrides):
