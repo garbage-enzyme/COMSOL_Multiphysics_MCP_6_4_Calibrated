@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
+import time
 from pathlib import Path
 
 import pytest
@@ -12,7 +14,7 @@ import src.jobs.thermo_optomechanical_replay as replay_module
 import src.jobs.thermo_optomechanical_replay_execution as replay_execution_module
 from pydantic import ValidationError
 from src.jobs.manager import JobManager, _worker_module
-from src.jobs.store import JobStore
+from src.jobs.store import JobStore, process_identity
 from src.jobs.thermo_optomechanical_replay import (
     THERMO_OPTOMECHANICAL_CONTROLS,
     THERMO_OPTOMECHANICAL_STAGES,
@@ -614,6 +616,29 @@ def test_thermal_structure_readbacks_bind_before_mesh_and_expansion(ascii_tmp_pa
     ]
 
 
+def test_zero_temperature_control_resets_every_temperature_driver(ascii_tmp_path):
+    spec = normalize_thermo_optomechanical_replay_spec(
+        _raw_spec(ascii_tmp_path / "zero-temperature")
+    )
+    executor = ThermoOptomechanicalComsolExecutor(None, spec, ascii_tmp_path / "job")
+    calls = []
+    executor._load_derived = lambda: None
+    executor._apply_positive_parameters = lambda: None
+    executor._parameter = lambda key, value, unit=None: calls.append((key, value, unit))
+    executor._set_moving_mesh_active = lambda _enabled: None
+    executor._study = lambda _key: None
+    executor._bind_study_dataset = lambda _tag: None
+    executor._evaluate = lambda _key: 0.0
+
+    assert executor._zero_control(zero_cte=False) == 0.0
+    reference = spec["thermal_expansion"]["reference_temperature_K"]
+    assert calls == [
+        ("initial_temperature_parameter", reference, "K"),
+        ("ambient_temperature_parameter", reference, "K"),
+        ("applied_temperature_parameter", reference, "K"),
+    ]
+
+
 def test_wavelength_readback_accepts_last_ulp_but_rejects_material_drift():
     requested = 1.5e-6
 
@@ -720,6 +745,56 @@ def test_worker_publishes_completion_only_after_client_and_lease_cleanup(ascii_t
     assert client.clear_count == 1
     assert owner.acquired is True
     assert owner.released is True
+
+
+def test_native_cancel_monitor_failure_becomes_durable_worker_error(ascii_tmp_path, monkeypatch):
+    spec = normalize_thermo_optomechanical_replay_spec(
+        _raw_spec(ascii_tmp_path / "native-monitor-error")
+    )
+    store = JobStore(ascii_tmp_path / "native-monitor-runtime" / "jobs")
+    job_id = store.create(
+        spec,
+        {
+            "schema_version": "2",
+            "status": "submitted",
+            "attempt": 1,
+            "worker_pid": None,
+            "worker_process_create_time": None,
+            "worker_command_signature": None,
+            "progress": {"completed": 0, "total": 5},
+            "last_error": None,
+        },
+    )
+    monkeypatch.setattr(
+        "src.jobs.native_cancel_probe.request_native_cancel_once",
+        lambda: (_ for _ in ()).throw(RuntimeError("injected native monitor failure")),
+    )
+    requested = False
+
+    def factory(_client, current_spec, _root):
+        def execute(stage, _directory, _spec):
+            nonlocal requested
+            if not requested:
+                requested = True
+                store.request_cancel(job_id, requester_identity=process_identity(os.getpid()))
+                time.sleep(0.1)
+            return _payload(stage, current_spec)
+
+        return execute
+
+    code = run_worker(
+        str(store.root),
+        job_id,
+        ownership_factory=lambda *_args: _Ownership(),
+        client_factory=lambda _spec: _Client(),
+        stage_executor_factory=factory,
+        native_cancel_enabled=True,
+    )
+    state = store.read_state(job_id)
+
+    assert code == 1
+    assert state["status"] == "cancel_requested"
+    assert "native cancel monitor failed" in state["cancel"]["worker_error"]["message"]
 
 
 def test_worker_rejects_changed_submission_manifest_before_client_start(ascii_tmp_path):

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import uuid
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
@@ -158,10 +160,9 @@ def build_branch_continuation_campaign_progress(
     )
     last = rows[-1]
     observed_expansion_count = sum(row["expansion_count"] for row in rows)
-    declared_cap_reached = completed == total or last["scientific_disposition"] in {
-        "unresolved_at_declared_cap",
-        "invalid_evidence",
-    }
+    declared_cap_reached = (
+        completed == total or last["scientific_disposition"] == "unresolved_at_declared_cap"
+    )
     plan = plan_branch_continuation(
         states,
         _planner_policy(
@@ -350,7 +351,8 @@ def run_branch_continuation_campaign(
                     artifact_root=root,
                 )
             except OSError, ValueError:
-                pass
+                quarantine = state_dir.with_name(f".{state_dir.name}.invalid-{uuid.uuid4().hex}")
+                os.replace(state_dir, quarantine)
             else:
                 if on_durable_state is not None:
                     on_durable_state(dict(row))

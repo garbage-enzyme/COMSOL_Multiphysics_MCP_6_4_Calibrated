@@ -167,6 +167,8 @@ def _validate_row(
         row["schema_name"] != BRANCH_CONTINUATION_CAMPAIGN_STATE_SCHEMA_NAME
         or row["schema_version"] != BRANCH_CONTINUATION_CAMPAIGN_STATE_SCHEMA_VERSION
         or row["spec_fingerprint"] != spec["spec_fingerprint"]
+        or isinstance(row["ordinal"], bool)
+        or not isinstance(row["ordinal"], int)
         or row["ordinal"] != expected_ordinal
         or row["previous_row_sha256"] != previous_row_sha256
     ):
@@ -334,7 +336,10 @@ def append_branch_continuation_campaign_state(
         if isinstance(attempt, bool) or not isinstance(attempt, int) or attempt <= 0:
             raise ValueError("attempt must be a positive integer")
         state = spec["states"][ordinal]
-        loaded = _load_state_artifacts(root, Path(state_dir).resolve(), state)
+        state_path = Path(state_dir)
+        if not state_path.is_absolute():
+            raise ValueError("state_dir must be absolute")
+        loaded = _load_state_artifacts(root, state_path.resolve(), state)
         summary = loaded["summary"]
         body = {
             "schema_name": BRANCH_CONTINUATION_CAMPAIGN_STATE_SCHEMA_NAME,
@@ -360,6 +365,13 @@ def append_branch_continuation_campaign_state(
             "previous_row_sha256": existing[-1]["row_sha256"] if existing else None,
         }
         row = {**body, "row_sha256": _fingerprint(body)}
+        row = _validate_row(
+            row,
+            spec,
+            expected_ordinal=ordinal,
+            previous_row_sha256=body["previous_row_sha256"],
+            artifact_root=root,
+        )
         payload = _canonical_bytes(row) + b"\n"
         if len(payload) > MAX_BRANCH_CONTINUATION_CAMPAIGN_ROW_BYTES:
             raise ValueError("branch-continuation campaign state row exceeds its bound")

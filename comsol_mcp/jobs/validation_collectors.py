@@ -51,7 +51,12 @@ def _contained_manifest(result: Mapping[str, Any], artifact_root: Path) -> Path:
     value = artifacts.get("manifest")
     if not isinstance(value, str) or not value:
         raise ValueError("physical audit collector did not return a manifest path")
-    manifest = Path(value).resolve()
+    manifest_value = Path(value)
+    manifest = (
+        manifest_value.resolve()
+        if manifest_value.is_absolute()
+        else (artifact_root / manifest_value).resolve()
+    )
     try:
         manifest.relative_to(artifact_root.resolve())
     except ValueError as exc:

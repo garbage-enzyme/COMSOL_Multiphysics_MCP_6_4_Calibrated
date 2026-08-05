@@ -988,6 +988,88 @@ def test_job_lock_acquire_retries_transient_windows_sharing_violation(jobs_root,
     assert not lock_path.exists()
 
 
+def test_job_lock_acquire_removes_owned_partial_publication(jobs_root, monkeypatch):
+    lock_path = jobs_root / ".partial.lock"
+    real_fsync = store_module.os.fsync
+
+    def fail_lock_fsync(descriptor):
+        if lock_path.exists():
+            raise OSError("injected lock fsync failure")
+        return real_fsync(descriptor)
+
+    monkeypatch.setattr(store_module.os, "fsync", fail_lock_fsync)
+    with pytest.raises(OSError, match="injected lock fsync failure"):
+        JobLock(lock_path, timeout=0.5).acquire()
+    assert not lock_path.exists()
+
+    monkeypatch.setattr(store_module.os, "fsync", real_fsync)
+    with JobLock(lock_path, timeout=0.5):
+        assert lock_path.exists()
+
+
+def test_cancel_launch_failure_is_reported_and_next_idempotent_call_retries(jobs_root, monkeypatch):
+    manager = JobManager(jobs_root, allow_test_jobs=True, reconcile_on_start=False)
+    identity = process_identity(os.getpid())
+    job_id = manager.store.create(
+        {"schema_version": "2", "job_type": "test"},
+        {
+            "schema_version": "2",
+            "status": "running",
+            "attempt": 1,
+            "worker_pid": identity["pid"],
+            "worker_process_create_time": identity["process_create_time"],
+            "worker_command_signature": identity["command_signature"],
+        },
+    )
+    monkeypatch.setattr(
+        manager,
+        "_launch_cancel_coordinator",
+        lambda *_args: (_ for _ in ()).throw(OSError("injected launch failure")),
+    )
+
+    failed = manager.cancel(job_id)
+    assert failed["success"] is False
+    assert failed["error"] == "Cancellation coordinator could not be started"
+
+    launches = []
+    monkeypatch.setattr(manager, "_launch_cancel_coordinator", lambda *args: launches.append(args))
+    retried = manager.cancel(job_id)
+    assert retried["success"] is True
+    assert retried["idempotent"] is True
+    assert launches == [(job_id, failed["request_id"])]
+
+
+def test_cancel_claim_rejects_a_malformed_attempt_without_crashing(jobs_root):
+    store = JobStore(jobs_root)
+    identity = process_identity(os.getpid())
+    job_id = store.create(
+        {"schema_version": "2", "job_type": "test"},
+        {
+            "schema_version": "2",
+            "status": "cancel_requested",
+            "attempt": [],
+            "cancel": {"request_id": "cancel-malformed", "target_attempt": None},
+        },
+    )
+    store.write_control(
+        job_id,
+        "cancel_requested",
+        fields={"request_id": "cancel-malformed", "target_attempt": None},
+    )
+
+    assert (
+        cancel_worker._claim(
+            store,
+            job_id,
+            "cancel-malformed",
+            identity,
+            grace_seconds=0.1,
+            terminate_seconds=0.1,
+        )
+        is None
+    )
+
+
 def test_job_lock_guard_prevents_replacement_during_release(jobs_root, monkeypatch):
     from threading import Event, Thread
 
@@ -1644,9 +1726,7 @@ def test_sequence_transition_error_remains_bound_to_concurrent_cancel(jobs_root,
     assert "Invalid job state transition" in state["cancel"]["worker_error"]["message"]
 
 
-def test_default_reconciliation_includes_an_older_accepted_cancellation(
-    jobs_root, monkeypatch
-):
+def test_default_reconciliation_includes_an_older_accepted_cancellation(jobs_root, monkeypatch):
     manager = JobManager(jobs_root, reconcile_on_start=False)
     identity = process_identity(os.getpid())
     old_job_id = manager.store.create(

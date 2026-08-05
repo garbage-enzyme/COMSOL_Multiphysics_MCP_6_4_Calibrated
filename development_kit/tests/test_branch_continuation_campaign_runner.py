@@ -233,3 +233,20 @@ def test_initial_terminal_state_preserves_row_derived_expansion_counts(tmp_path)
     assert progress["remaining_expansion_count"] == max(
         0, spec["continuation_policy"]["max_expansions"] - 1
     )
+
+
+def test_invalid_evidence_does_not_claim_the_declared_cap(tmp_path):
+    spec = _spec(tmp_path)
+    progress = build_branch_continuation_campaign_progress(
+        spec,
+        [
+            {
+                "scientific_disposition": "invalid_evidence",
+                "reason_code": "invalid_measurement",
+                "expansion_count": 0,
+            }
+        ],
+        artifact_root=tmp_path,
+    )
+
+    assert progress["declared_cap_reached"] is False

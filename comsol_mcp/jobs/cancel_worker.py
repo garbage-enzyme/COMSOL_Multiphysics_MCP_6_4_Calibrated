@@ -41,9 +41,14 @@ def _owns_cancel_write(
     cancel = state.get("cancel")
     if not isinstance(cancel, dict):
         return False
+    raw_attempt = state.get("attempt", 1)
+    if isinstance(raw_attempt, bool):
+        return False
     try:
-        attempt = int(state.get("attempt", 1))
+        attempt = int(raw_attempt)
     except TypeError, ValueError, OverflowError:
+        return False
+    if attempt <= 0:
         return False
     return bool(
         state.get("status") == "cancelling"
@@ -146,7 +151,15 @@ def _claim(
         state = store.read_state(job_id)
         control = store.read_control(job_id)
         cancel = state.get("cancel") if isinstance(state.get("cancel"), dict) else {}
-        attempt = int(state.get("attempt", 1))
+        raw_attempt = state.get("attempt", 1)
+        if isinstance(raw_attempt, bool):
+            return None
+        try:
+            attempt = int(raw_attempt)
+        except TypeError, ValueError, OverflowError:
+            return None
+        if attempt <= 0:
+            return None
         if (
             control.get("request") != "cancel_requested"
             or control.get("request_id") != request_id
@@ -360,9 +373,7 @@ def _verify_solver_cleanup(store: JobStore, job_id: str) -> dict[str, Any]:
         return {
             **result,
             "ok": bool(
-                result.get("ok")
-                and preservation.get("success")
-                and model_identity_preserved
+                result.get("ok") and preservation.get("success") and model_identity_preserved
             ),
             "attached_external_resources": attached,
         }

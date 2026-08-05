@@ -110,6 +110,27 @@ def test_append_fsync_journal_replays_exact_complete_identities(tmp_path, monkey
     }
 
 
+def test_append_hashes_the_normalized_collector_summary(tmp_path):
+    spec = _spec(tmp_path)
+    summary = _summary("off")
+    summary["manifest_relative_path"] = "artifacts//artifact-off/manifest.json"
+
+    row = append_validation_row(
+        tmp_path / "rows.jsonl",
+        spec,
+        attempt=1,
+        point_id="off",
+        status="ok",
+        collector_summaries=[summary],
+        created_at_epoch=1.0,
+    )
+
+    assert row["collector_summaries"][0]["manifest_relative_path"] == (
+        "artifacts/artifact-off/manifest.json"
+    )
+    assert read_validation_rows(tmp_path / "rows.jsonl", spec) == [row]
+
+
 def test_error_rows_are_durable_but_never_resume_skips(tmp_path):
     spec = _spec(tmp_path)
     path = tmp_path / "rows.jsonl"

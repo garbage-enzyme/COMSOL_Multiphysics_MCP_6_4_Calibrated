@@ -459,6 +459,8 @@ class ThermoOptomechanicalComsolExecutor:
             self._parameter("cte_parameter", 0.0, "1/K")
         else:
             reference = self.spec["thermal_expansion"]["reference_temperature_K"]
+            self._parameter("initial_temperature_parameter", reference, "K")
+            self._parameter("ambient_temperature_parameter", reference, "K")
             self._parameter("applied_temperature_parameter", reference, "K")
         self._set_moving_mesh_active(False)
         self._study("thermal_structure_study_tag")

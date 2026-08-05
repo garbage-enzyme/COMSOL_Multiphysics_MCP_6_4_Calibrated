@@ -344,6 +344,15 @@ def append_validation_row(
             row["point_fingerprint"] for row in rows if row["status"] == "ok"
         }:
             raise ValueError("an exact complete validation row already exists")
+        if status == "ok" and error is not None:
+            raise ValueError("ok validation rows must not contain error evidence")
+        if status == "error" and error is None:
+            raise ValueError("error validation rows require error evidence")
+        normalized_summaries = [
+            _normalize_collector_summary(item, point=point, index=index)
+            for index, item in enumerate(collector_summaries or [])
+        ]
+        normalized_error = None if status == "ok" else _normalize_error(error)
         row = {
             "schema_version": VALIDATION_ROW_SCHEMA_VERSION,
             "sequence": len(rows) + 1,
@@ -357,8 +366,8 @@ def append_validation_row(
             "point_fingerprint": point["point_fingerprint"],
             "configuration_sha256": point["configuration_sha256"],
             "status": status,
-            "collector_summaries": list(collector_summaries or []),
-            "error": error,
+            "collector_summaries": normalized_summaries,
+            "error": normalized_error,
             "previous_row_sha256": rows[-1]["row_sha256"] if rows else None,
         }
         row["row_sha256"] = _fingerprint(row)

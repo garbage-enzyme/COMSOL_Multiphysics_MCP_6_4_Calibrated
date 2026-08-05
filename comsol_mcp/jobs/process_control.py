@@ -207,6 +207,9 @@ def capture_owned_descendants(worker_identity: dict[str, Any]) -> dict[str, Any]
         return {"worker": verdict, "descendants": [], "capture_complete": False}
     try:
         worker = psutil.Process(int(worker_identity["pid"]))
+        reopened = _inspect_open_process(worker, worker_identity)
+        if reopened["state"] != "active":
+            return {"worker": reopened, "descendants": [], "capture_complete": False}
         children = worker.children(recursive=True)
     except psutil.NoSuchProcess as exc:
         # The worker can exit between the exact identity check and children().

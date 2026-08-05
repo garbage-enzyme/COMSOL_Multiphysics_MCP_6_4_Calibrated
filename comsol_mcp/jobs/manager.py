@@ -574,7 +574,11 @@ class JobManager:
                 "status": state["status"],
                 "error": error,
             }
-        if not request["idempotent"]:
+        prior_launch_failed = bool(
+            isinstance(state.get("cancel"), dict)
+            and state["cancel"].get("coordinator_launch_error")
+        )
+        if not request["idempotent"] or prior_launch_failed:
             try:
                 self._launch_cancel_coordinator(job_id, control["request_id"])
             except Exception as exc:
@@ -587,6 +591,26 @@ class JobManager:
                         }
                     },
                     event="cancel_coordinator_launch_failed",
+                )
+                return {
+                    "success": False,
+                    "job_id": job_id,
+                    "status": state["status"],
+                    "request_id": control["request_id"],
+                    "target_attempt": control["target_attempt"],
+                    "idempotent": bool(request["idempotent"]),
+                    "error": "Cancellation coordinator could not be started",
+                }
+            if prior_launch_failed:
+                self.store.update_state(
+                    job_id,
+                    patch={
+                        "cancel": {
+                            **state["cancel"],
+                            "coordinator_launch_error": None,
+                        }
+                    },
+                    event="cancel_coordinator_relaunched",
                 )
         return {
             "success": True,

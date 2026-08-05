@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 from typing import Any, Mapping
 
+from .journal import locked_journal
 from .spectral_runner import validate_spectral_completion
 
 CONVERGENCE_CAMPAIGN_LEVEL_SCHEMA_NAME = "comsol_mcp.convergence_campaign_level"
@@ -220,7 +221,7 @@ def _validate_row(
     return row
 
 
-def read_convergence_campaign_levels(
+def _read_convergence_campaign_levels_unlocked(
     path: str | Path,
     spec: Mapping[str, Any],
     *,
@@ -263,7 +264,19 @@ def read_convergence_campaign_levels(
     return result
 
 
-def append_convergence_campaign_level(
+def read_convergence_campaign_levels(
+    path: str | Path,
+    spec: Mapping[str, Any],
+    *,
+    artifact_root: str | Path,
+) -> list[dict[str, Any]]:
+    with locked_journal(path) as journal:
+        return _read_convergence_campaign_levels_unlocked(
+            journal, spec, artifact_root=artifact_root
+        )
+
+
+def _append_convergence_campaign_level_unlocked(
     path: str | Path,
     spec: Mapping[str, Any],
     *,
@@ -272,7 +285,7 @@ def append_convergence_campaign_level(
     artifact_root: str | Path,
 ) -> dict[str, Any]:
     root = Path(artifact_root).resolve()
-    existing = read_convergence_campaign_levels(path, spec, artifact_root=root)
+    existing = _read_convergence_campaign_levels_unlocked(path, spec, artifact_root=root)
     ordinal = len(existing)
     if ordinal >= len(spec["levels"]):
         raise ValueError("all declared convergence levels are already complete")
@@ -310,10 +323,28 @@ def append_convergence_campaign_level(
         handle.write(payload)
         handle.flush()
         os.fsync(handle.fileno())
-    replayed = read_convergence_campaign_levels(path, spec, artifact_root=root)
+    replayed = _read_convergence_campaign_levels_unlocked(path, spec, artifact_root=root)
     if replayed[-1] != row:
         raise RuntimeError("convergence campaign level row did not replay after append")
     return row
+
+
+def append_convergence_campaign_level(
+    path: str | Path,
+    spec: Mapping[str, Any],
+    *,
+    attempt: int,
+    level_dir: str | Path,
+    artifact_root: str | Path,
+) -> dict[str, Any]:
+    with locked_journal(path) as journal:
+        return _append_convergence_campaign_level_unlocked(
+            journal,
+            spec,
+            attempt=attempt,
+            level_dir=level_dir,
+            artifact_root=artifact_root,
+        )
 
 
 __all__ = [

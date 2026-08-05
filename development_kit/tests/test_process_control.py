@@ -169,9 +169,9 @@ def test_worker_job_object_kills_inherited_child_on_worker_exit_windows_only():
     finally:
         if worker.poll() is None:
             try:
-                timeout_descendants = capture_owned_descendants(
-                    process_identity(worker.pid)
-                ).get("descendants", [])
+                timeout_descendants = capture_owned_descendants(process_identity(worker.pid)).get(
+                    "descendants", []
+                )
             except psutil.NoSuchProcess:
                 pass
             worker.kill()
@@ -242,6 +242,15 @@ def test_descendant_exit_during_capture_preserves_other_exact_identities(monkeyp
         lambda identity: {"identity": identity, "state": "active", "reason": "exact"},
     )
     monkeypatch.setattr(process_control_module.psutil, "Process", lambda _pid: Worker())
+    monkeypatch.setattr(
+        process_control_module,
+        "_inspect_open_process",
+        lambda _process, identity: {
+            "identity": identity,
+            "state": "active",
+            "reason": "exact",
+        },
+    )
 
     def identity_for(pid):
         if pid == 44002:
@@ -258,6 +267,35 @@ def test_descendant_exit_during_capture_preserves_other_exact_identities(monkeyp
 
     assert captured["capture_complete"] is True
     assert [item["pid"] for item in captured["descendants"]] == [44001, 44003]
+
+
+def test_descendant_capture_revalidates_the_reopened_worker_identity(monkeypatch):
+    identity = {
+        "pid": 45000,
+        "process_create_time": 45000.0,
+        "command_signature": "a" * 64,
+    }
+
+    class Worker:
+        def children(self, recursive):
+            raise AssertionError("changed identity must not enumerate descendants")
+
+    monkeypatch.setattr(
+        process_control_module,
+        "inspect_identity",
+        lambda value: {"identity": value, "state": "active", "reason": "initial"},
+    )
+    monkeypatch.setattr(process_control_module.psutil, "Process", lambda _pid: Worker())
+    monkeypatch.setattr(
+        process_control_module,
+        "_inspect_open_process",
+        lambda _process, value: {"identity": value, "state": "stale", "reason": "PID reused"},
+    )
+
+    captured = capture_owned_descendants(identity)
+
+    assert captured["capture_complete"] is False
+    assert captured["worker"]["state"] == "stale"
 
 
 def test_exact_termination_validates_and_acts_through_one_process_object(monkeypatch):

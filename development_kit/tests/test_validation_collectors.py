@@ -170,6 +170,32 @@ def test_point_audit_identity_fields_are_matrix_locked_and_wrapped(tmp_path):
     assert "measurement" not in wrapper
 
 
+def test_relative_inner_manifest_resolves_from_the_assigned_artifact_root(tmp_path):
+    spec, point, collector = _normalized_point(tmp_path)
+    captured = {}
+    real_runner = _complete_runner(captured)
+
+    def relative_runner(*args, **kwargs):
+        result = real_runner(*args, **kwargs)
+        result["artifacts"]["manifest"] = "inner.json"
+        return result
+
+    result = execute_physical_audit_collector(
+        point,
+        collector,
+        tmp_path / "relative-artifact",
+        model="MODEL",
+        client="CLIENT",
+        model_name="fixture",
+        expected_source_sha256=spec["source_model_sha256"],
+        session_state={"connected": True},
+        ownership_preflight={"ready": True},
+        point_audit_runner=relative_runner,
+    )
+
+    assert Path(result["artifacts"]["manifest"]).is_file()
+
+
 def test_reference_audit_uses_same_loaded_model_and_client(tmp_path):
     spec, point, collector = _normalized_point(
         tmp_path,

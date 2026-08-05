@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 
 import pytest
@@ -64,6 +65,31 @@ def test_completed_levels_append_in_declared_order_and_replay_exact_artifacts(tm
         "spectral_characterization",
         "spectral_rows",
     }
+
+
+def test_concurrent_level_append_has_one_process_locked_winner(tmp_path):
+    spec = normalize_convergence_campaign_spec(_raw_campaign(tmp_path / "sources"))
+    root = tmp_path / "campaign"
+    journal = root / "convergence_levels.jsonl"
+    first_dir = _complete_level(spec, root, 0)
+
+    def append_once():
+        try:
+            return append_convergence_campaign_level(
+                journal,
+                spec,
+                attempt=1,
+                level_dir=first_dir,
+                artifact_root=root,
+            )
+        except ValueError:
+            return None
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(lambda _index: append_once(), range(2)))
+
+    assert sum(item is not None for item in results) == 1
+    assert len(read_convergence_campaign_levels(journal, spec, artifact_root=root)) == 1
 
 
 def test_duplicate_append_and_out_of_order_level_directory_fail_closed(tmp_path):
