@@ -690,6 +690,31 @@ def test_completed_point_is_never_authorized_for_a_duplicate_valid_row():
     assert replay["duplicate_valid_rows_authorized"] is False
 
 
+def test_completed_point_shortcut_validates_resource_journal(ascii_jobs_root, monkeypatch):
+    store = JobStore(ascii_jobs_root / "jobs")
+    job_id = store.create(
+        {"resource_policy": normalize_resource_policy(POLICY)},
+        {"attempt": 1, "status": "running"},
+        job_id="job-completed-journal",
+    )
+    completed = {"wl:4.25"}
+    adapter = ResourceStageAdapter(
+        store=store,
+        job_id=job_id,
+        attempt=1,
+        policy=POLICY,
+        telemetry_provider=lambda stage, _point_id: sample(stage=stage),
+        completed_point_ids_provider=lambda: completed,
+    )
+
+    def fail_read(_job_id):
+        raise ValueError("corrupt resource journal")
+
+    monkeypatch.setattr(store, "read_resource_journal", fail_read)
+    with pytest.raises(ValueError, match="corrupt resource journal"):
+        adapter.evaluate(stage="pre_solve", point_id="wl:4.25")
+
+
 def test_completed_row_does_not_hide_its_post_solve_resource_refusal():
     entries = build_resource_admission_entries(
         attempt=1,

@@ -1216,16 +1216,24 @@ class ResourceStageAdapter:
         """Persist one stage sample/decision and return a bounded worker action."""
         stage = _stage(stage)
         point_id = _identifier(point_id, "point_id")
+        current = self.store.read_resource_journal(self.job_id)
         completed = self._completed()
         if stage == "pre_solve" and point_id in completed:
-            return {
-                "stage": stage,
-                "point_id": point_id,
-                "action": "skip_completed",
-                "start_authorized": False,
-                "journal_entries_appended": 0,
-            }
-        current = self.store.read_resource_journal(self.job_id)
+            replay = replay_resource_journal(
+                current,
+                attempt=self.attempt,
+                expected_policy=self.policy,
+                completed_point_ids=completed,
+            )
+            point = replay["points"].get(point_id)
+            if point is not None and point["action"] == "skip_completed":
+                return {
+                    "stage": stage,
+                    "point_id": point_id,
+                    "action": "skip_completed",
+                    "start_authorized": False,
+                    "journal_entries_appended": 0,
+                }
         sequence = self._next_sequence(current)
         sample = normalize_telemetry_sample(self.telemetry_provider(stage, point_id))
         if sample["values"]["stage"] != stage:
