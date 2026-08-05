@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Annotated, Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -180,6 +180,15 @@ class ThermoOptomechanicalReplayManifest(_ClosedModel):
     version: _Text | None = None
     max_retries: Annotated[int, Field(ge=0, le=3)] | None = None
     continue_on_error: bool | None = None
+
+    @model_validator(mode="after")
+    def validate_control_inventory(self) -> ThermoOptomechanicalReplayManifest:
+        expected = set(get_args(ThermoOpticalControl))
+        if set(self.validation_controls) != expected:
+            raise ValueError(
+                "validation_controls must contain each thermo-optomechanical control exactly once"
+            )
+        return self
 
 
 class ThermoOptomechanicalReplayInput(_ClosedModel):

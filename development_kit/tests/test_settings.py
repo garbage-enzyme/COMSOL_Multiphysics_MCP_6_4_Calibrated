@@ -228,7 +228,13 @@ def test_split_defaults_preserve_unicode_models_and_ascii_runtime(
         },
     )
 
-    settings = load_settings({SETTINGS_PATH_ENV: str(path)})
+    settings = load_settings(
+        {
+            SETTINGS_PATH_ENV: str(path),
+            "LOCALAPPDATA": str(local_appdata),
+            "PROGRAMDATA": str(program_data),
+        }
+    )
     user_root = local_appdata / "comsol_mcp"
     machine_root = program_data / "comsol_mcp"
 
@@ -243,6 +249,30 @@ def test_split_defaults_preserve_unicode_models_and_ascii_runtime(
     assert settings["paths"]["model_read_roots"][0].isascii() is False
     assert settings["runtime"]["directory"].isascii() is True
     assert settings["paths"]["artifact_write_root"].isascii() is True
+
+
+def test_load_settings_expands_tokens_from_the_supplied_environment(tmp_path):
+    local_appdata = tmp_path / "injected-local"
+    program_data = tmp_path / "injected-program"
+    path = _settings_path(
+        tmp_path,
+        {
+            "runtime": {"directory": "%PROGRAMDATA%/runtime"},
+            "paths": {"model_read_roots": ["%LOCALAPPDATA%/models"]},
+        },
+    )
+    environment = {
+        SETTINGS_PATH_ENV: str(path),
+        "LOCALAPPDATA": str(local_appdata),
+        "PROGRAMDATA": str(program_data),
+    }
+
+    settings = load_settings(environment)
+
+    assert Path(settings["runtime"]["directory"]) == program_data / "runtime"
+    assert [Path(item) for item in settings["paths"]["model_read_roots"]] == [
+        local_appdata / "models"
+    ]
 
 
 def test_non_ascii_durable_paths_fall_back_without_rejecting_unicode_models(tmp_path):

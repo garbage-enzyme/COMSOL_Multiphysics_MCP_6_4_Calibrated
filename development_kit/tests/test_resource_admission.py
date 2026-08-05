@@ -250,6 +250,11 @@ def test_invalid_telemetry_fails_closed(changes, match):
         normalize_telemetry_sample(sample(**changes))
 
 
+def test_unhashable_telemetry_stage_is_a_bounded_validation_error():
+    with pytest.raises(ValueError, match="stage must be"):
+        normalize_telemetry_sample({"stage": []})
+
+
 def test_green_policy_allows_without_cleanup_side_effects():
     result = evaluate_resource_admission(POLICY, sample())
 
@@ -269,6 +274,15 @@ def test_warning_requires_explicit_continuation_and_never_becomes_green():
     assert blocked["decision"] == "require_confirmation"
     assert continued["state"] == "warning"
     assert continued["decision"] == "allow_with_warning"
+
+
+def test_warning_continuation_requires_an_exact_boolean():
+    with pytest.raises(ValueError, match="must be boolean"):
+        evaluate_resource_admission(
+            POLICY,
+            sample(available_memory_bytes=20),
+            continue_on_warning="false",
+        )
 
 
 @pytest.mark.parametrize(

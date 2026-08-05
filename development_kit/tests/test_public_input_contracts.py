@@ -98,6 +98,27 @@ def test_direct_job_contract_rejects_unbounded_sweep_numbers(value):
         )
 
 
+@pytest.mark.parametrize(
+    "fields,match",
+    [
+        ({"parameter_values": [1.0], "smoke_points": 2}, "must not exceed"),
+        ({"physical_bounds": {"other": [0.0, 1.0]}}, "requested expressions"),
+    ],
+)
+def test_staged_sweep_contract_rejects_incompatible_cross_fields(fields, match):
+    value = {
+        "job_type": "staged_sweep",
+        "source_model_path": "fixture.mph",
+        "parameter_name": "p",
+        "parameter_values": [1.0, 2.0],
+        "expressions": ["es.V"],
+        **fields,
+    }
+
+    with pytest.raises(ValidationError, match=match):
+        TypeAdapter(JobSubmissionSpec).validate_python(value)
+
+
 def test_runtime_job_validator_uses_the_same_discriminated_contract():
     with pytest.raises(ValidationError, match="union_tag_invalid"):
         validate_job_submission({"job_type": "unsupported"})

@@ -32,7 +32,10 @@ from src.jobs.thermo_optomechanical_replay_runner import (
 from src.jobs.thermo_optomechanical_replay_worker import _run as run_worker
 from src.tools.jobs import _preview_job_spec
 
-from comsol_mcp.contracts.thermo_optomechanical import ThermoOpticalMaterialValidity
+from comsol_mcp.contracts.thermo_optomechanical import (
+    ThermoOpticalMaterialValidity,
+    ThermoOptomechanicalReplayManifest,
+)
 from development_kit.scripts import thermo_optomechanical_licensed_gate as licensed_gate
 
 
@@ -364,6 +367,15 @@ def test_submission_manifest_hash_must_match_before_normalization(ascii_tmp_path
     raw["specification_sha256"] = "0" * 64
     with pytest.raises(ValueError, match="specification_sha256"):
         normalize_thermo_optomechanical_replay_spec(raw)
+
+
+def test_manifest_contract_requires_each_validation_control_exactly_once(ascii_tmp_path):
+    raw = _raw_spec(ascii_tmp_path / "typed-controls")
+    manifest = json.loads(Path(raw["specification_path"]).read_text(encoding="utf-8"))
+    manifest["validation_controls"][0] = manifest["validation_controls"][1]
+
+    with pytest.raises(ValidationError, match="exactly once"):
+        ThermoOptomechanicalReplayManifest.model_validate(manifest)
 
 
 def test_submission_manifest_hash_and_parse_share_one_snapshot(ascii_tmp_path, monkeypatch):

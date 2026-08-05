@@ -200,6 +200,7 @@ def _absolute_string(
     location: str,
     allow_none: bool,
     require_ascii: bool = False,
+    environment: Mapping[str, str] | None = None,
 ) -> str | None:
     if value is None and allow_none:
         return None
@@ -211,18 +212,19 @@ def _absolute_string(
             reason_code="settings_value_invalid",
         )
     raw = value.strip()
+    effective_environment = os.environ if environment is None else environment
     if raw.casefold().startswith(_LOCALAPPDATA_REFERENCE.casefold()):
         suffix_with_separator = raw[len(_LOCALAPPDATA_REFERENCE) :]
         if suffix_with_separator and suffix_with_separator[0] not in "\\/":
             raise SettingsError(f"{location} contains an unsupported environment token")
         suffix = suffix_with_separator.lstrip("\\/")
-        path = _local_appdata_root(os.environ, None) / suffix.replace("\\", "/")
+        path = _local_appdata_root(effective_environment, None) / suffix.replace("\\", "/")
     elif raw.casefold().startswith(_PROGRAMDATA_REFERENCE.casefold()):
         suffix_with_separator = raw[len(_PROGRAMDATA_REFERENCE) :]
         if suffix_with_separator and suffix_with_separator[0] not in "\\/":
             raise SettingsError(f"{location} contains an unsupported environment token")
         suffix = suffix_with_separator.lstrip("\\/")
-        path = _program_data_root(os.environ, None) / suffix.replace("\\", "/")
+        path = _program_data_root(effective_environment, None) / suffix.replace("\\", "/")
     else:
         path = Path(raw).expanduser()
     if not path.is_absolute():
@@ -313,7 +315,7 @@ def _parse_bool(value: Any, *, location: str) -> bool:
     return value
 
 
-def _parse_roots(value: Any) -> list[str]:
+def _parse_roots(value: Any, *, environment: Mapping[str, str] | None = None) -> list[str]:
     if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
         raise SettingsError(
             "settings.paths.model_read_roots must be a JSON string list",
@@ -325,6 +327,7 @@ def _parse_roots(value: Any) -> list[str]:
             item,
             location=f"settings.paths.model_read_roots[{index}]",
             allow_none=False,
+            environment=environment,
         )
         if normalized is None:
             raise SettingsError("model read roots cannot contain null values")
@@ -357,6 +360,7 @@ def _normalize(
     document: Any,
     *,
     errors: list[dict[str, str]],
+    environment: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     document = _migrate_legacy_document(document)
     if not isinstance(document, dict):
@@ -424,6 +428,7 @@ def _normalize(
             location="settings.runtime.directory",
             allow_none=True,
             require_ascii=True,
+            environment=environment,
         ),
         errors=errors,
     )
@@ -436,6 +441,7 @@ def _normalize(
             location="settings.runtime.jobs_directory",
             allow_none=True,
             require_ascii=True,
+            environment=environment,
         ),
         errors=errors,
     )
@@ -450,7 +456,7 @@ def _normalize(
         paths["model_read_roots"],
         location="settings.paths.model_read_roots",
         default=_DEFAULT_SETTINGS["paths"]["model_read_roots"],
-        parser=_parse_roots,
+        parser=lambda value: _parse_roots(value, environment=environment),
         errors=errors,
     )
     artifact_root = _read_value(
@@ -462,6 +468,7 @@ def _normalize(
             location="settings.paths.artifact_write_root",
             allow_none=True,
             require_ascii=True,
+            environment=environment,
         ),
         errors=errors,
     )
@@ -517,7 +524,10 @@ def _normalize(
         location="settings.semantic_docs.root",
         default=_DEFAULT_SETTINGS["semantic_docs"]["root"],
         parser=lambda value: _absolute_string(
-            value, location="settings.semantic_docs.root", allow_none=True
+            value,
+            location="settings.semantic_docs.root",
+            allow_none=True,
+            environment=environment,
         ),
         errors=errors,
     )
@@ -526,7 +536,10 @@ def _normalize(
         location="settings.semantic_docs.lexical_index",
         default=_DEFAULT_SETTINGS["semantic_docs"]["lexical_index"],
         parser=lambda value: _absolute_string(
-            value, location="settings.semantic_docs.lexical_index", allow_none=True
+            value,
+            location="settings.semantic_docs.lexical_index",
+            allow_none=True,
+            environment=environment,
         ),
         errors=errors,
     )
@@ -535,7 +548,10 @@ def _normalize(
         location="settings.semantic_docs.model_path",
         default=_DEFAULT_SETTINGS["semantic_docs"]["model_path"],
         parser=lambda value: _absolute_string(
-            value, location="settings.semantic_docs.model_path", allow_none=True
+            value,
+            location="settings.semantic_docs.model_path",
+            allow_none=True,
+            environment=environment,
         ),
         errors=errors,
     )
@@ -565,7 +581,10 @@ def _normalize(
         location="settings.java.java_home",
         default=_DEFAULT_SETTINGS["java"]["java_home"],
         parser=lambda value: _absolute_string(
-            value, location="settings.java.java_home", allow_none=True
+            value,
+            location="settings.java.java_home",
+            allow_none=True,
+            environment=environment,
         ),
         errors=errors,
     )
@@ -574,7 +593,10 @@ def _normalize(
         location="settings.java.jdk_home",
         default=_DEFAULT_SETTINGS["java"]["jdk_home"],
         parser=lambda value: _absolute_string(
-            value, location="settings.java.jdk_home", allow_none=True
+            value,
+            location="settings.java.jdk_home",
+            allow_none=True,
+            environment=environment,
         ),
         errors=errors,
     )
@@ -593,6 +615,7 @@ def _normalize(
             value,
             location="settings.comsol.installation_root",
             allow_none=True,
+            environment=environment,
         ),
         errors=errors,
     )
@@ -700,17 +723,19 @@ def default_settings_document(
     *,
     user_root: Path | str | None = None,
     program_root: Path | str | None = None,
+    environ: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     """Return canonical Unicode-safe user and ASCII-safe machine defaults."""
+    environment = os.environ if environ is None else environ
     local_root = (
-        _local_appdata_root(os.environ, None) / _DEFAULT_USER_DIR
+        _local_appdata_root(environment, None) / _DEFAULT_USER_DIR
         if user_root is None
         else Path(user_root).expanduser()
     )
     if not local_root.is_absolute():
         raise SettingsError("default settings user root must be an absolute path")
     machine_root = (
-        _program_data_root(os.environ, None) / _DEFAULT_USER_DIR
+        _program_data_root(environment, None) / _DEFAULT_USER_DIR
         if program_root is None
         else Path(program_root).expanduser()
     )
@@ -796,6 +821,7 @@ def _report_error(error: Exception, *, location: str = "settings") -> dict[str, 
 
 def load_settings_report(environ: Mapping[str, str] | None = None) -> dict[str, Any]:
     """Load settings and return safe defaults plus bounded validation errors."""
+    environment = os.environ if environ is None else environ
     try:
         path = default_settings_path(environ)
         raw = read_file_bytes_bounded(path, max_bytes=MAX_SETTINGS_BYTES)
@@ -806,16 +832,16 @@ def load_settings_report(environ: Mapping[str, str] | None = None) -> dict[str, 
                 reason_code="settings_size_invalid",
             )
             return {
-                "settings": default_settings_document(),
+                "settings": default_settings_document(environ=environment),
                 "errors": [_report_error(error)],
             }
         return {
-            "settings": default_settings_document(),
+            "settings": default_settings_document(environ=environment),
             "errors": [_report_error(exc)],
         }
     except (OSError, RuntimeError, SettingsError) as exc:
         return {
-            "settings": default_settings_document(),
+            "settings": default_settings_document(environ=environment),
             "errors": [_report_error(exc)],
         }
     if not raw:
@@ -823,38 +849,51 @@ def load_settings_report(environ: Mapping[str, str] | None = None) -> dict[str, 
             f"settings.json must contain 1..{MAX_SETTINGS_BYTES} bytes",
             reason_code="settings_size_invalid",
         )
-        return {"settings": default_settings_document(), "errors": [_report_error(error)]}
+        return {
+            "settings": default_settings_document(environ=environment),
+            "errors": [_report_error(error)],
+        }
     try:
         document = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_object)
     except UnicodeDecodeError:
         error = SettingsError(
             "settings.json must be UTF-8", reason_code="settings_encoding_invalid"
         )
-        return {"settings": default_settings_document(), "errors": [_report_error(error)]}
+        return {
+            "settings": default_settings_document(environ=environment),
+            "errors": [_report_error(error)],
+        }
     except json.JSONDecodeError, _DuplicateJsonKey:
         error = SettingsError(
             "settings.json contains invalid or duplicate JSON",
             reason_code="settings_json_invalid",
         )
-        return {"settings": default_settings_document(), "errors": [_report_error(error)]}
+        return {
+            "settings": default_settings_document(environ=environment),
+            "errors": [_report_error(error)],
+        }
     except RecursionError as exc:
         return {
-            "settings": default_settings_document(),
+            "settings": default_settings_document(environ=environment),
             "errors": [_report_error(exc)],
         }
     try:
-        return normalize_settings_document(document)
+        return normalize_settings_document(document, environ=environment)
     except RecursionError as exc:
         return {
-            "settings": default_settings_document(),
+            "settings": default_settings_document(environ=environment),
             "errors": [_report_error(exc)],
         }
 
 
-def normalize_settings_document(document: Any) -> dict[str, Any]:
+def normalize_settings_document(
+    document: Any,
+    *,
+    environ: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
     """Normalize one decoded document without reading or writing the filesystem."""
     errors: list[dict[str, str]] = []
-    settings = _normalize(document, errors=errors)
+    settings = _normalize(document, errors=errors, environment=environ)
     return {"settings": settings, "errors": errors}
 
 

@@ -123,6 +123,12 @@ def _positive_integer(value: object, name: str) -> int:
     return value
 
 
+def _stage(value: object) -> str:
+    if not isinstance(value, str) or value not in _STAGES:
+        raise ValueError(f"stage must be one of: {', '.join(sorted(_STAGES))}")
+    return value
+
+
 def normalize_resource_policy(policy: object | None) -> dict[str, Any] | None:
     """Validate one caller-supplied policy without adding host defaults."""
     if policy is None:
@@ -279,9 +285,7 @@ def normalize_telemetry_sample(sample: object) -> dict[str, Any]:
     unknown = sorted(set(raw) - _SAMPLE_FIELDS)
     if unknown:
         raise ValueError(f"unknown telemetry_sample fields: {', '.join(unknown)}")
-    stage = raw.get("stage")
-    if stage not in _STAGES:
-        raise ValueError(f"stage must be one of: {', '.join(sorted(_STAGES))}")
+    stage = _stage(raw.get("stage"))
     normalized: dict[str, Any] = {"stage": stage}
     integer_fields = {
         "available_memory_bytes",
@@ -580,6 +584,8 @@ def evaluate_resource_admission(
     continue_on_warning: bool = False,
 ) -> dict[str, Any]:
     """Return allow/confirmation/refuse from explicit policy and one sample."""
+    if not isinstance(continue_on_warning, bool):
+        raise ValueError("continue_on_warning must be boolean")
     normalized_policy = normalize_resource_policy(policy)
     telemetry = normalize_telemetry_sample(sample)
     if normalized_policy is None:
@@ -968,8 +974,7 @@ def _validate_resource_journal_entry(entry: object) -> dict[str, Any]:
     raw["attempt"] = _attempt(raw.get("attempt"))
     raw["point_id"] = _identifier(raw.get("point_id"), "point_id")
     raw["attempt_sequence"] = _attempt_sequence(raw.get("attempt_sequence"))
-    if raw.get("stage") not in _STAGES:
-        raise ValueError("resource journal entry has an invalid stage")
+    raw["stage"] = _stage(raw.get("stage"))
     supplied_hash = raw.pop("entry_sha256")
     if not isinstance(supplied_hash, str) or supplied_hash != _sha256(raw):
         raise ValueError("resource journal entry hash mismatch")
@@ -1209,8 +1214,7 @@ class ResourceStageAdapter:
 
     def evaluate(self, *, stage: str, point_id: str) -> dict[str, Any]:
         """Persist one stage sample/decision and return a bounded worker action."""
-        if stage not in _STAGES:
-            raise ValueError("resource stage is invalid")
+        stage = _stage(stage)
         point_id = _identifier(point_id, "point_id")
         completed = self._completed()
         if stage == "pre_solve" and point_id in completed:

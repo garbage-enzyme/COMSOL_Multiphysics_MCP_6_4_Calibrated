@@ -128,14 +128,19 @@ def list_model_versions(
 
     clean_name = _model_stem(model_name)
     latest_name = f"{clean_name}_latest.mph"
-    versions = []
+    versions: list[tuple[float, str]] = []
     for f in model_dir.glob("*.mph"):
-        if f.name != latest_name:
-            versions.append(str(f))
+        if f.name == latest_name:
+            continue
+        try:
+            modified = f.stat().st_mtime
+        except FileNotFoundError:
+            continue
+        versions.append((modified, str(f)))
 
     # Sort by modification time, newest first
-    versions.sort(key=lambda x: Path(x).stat().st_mtime, reverse=True)
-    return versions
+    versions.sort(key=lambda item: item[0], reverse=True)
+    return [path for _modified, path in versions]
 
 
 def parse_version_info(name: str) -> dict | None:

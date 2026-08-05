@@ -11,7 +11,7 @@ import pytest
 from pydantic import ValidationError
 from src.server import create_server
 
-from comsol_mcp.contracts.thermal_radiation import ThermalRadiationRequest
+from comsol_mcp.contracts.thermal_radiation import AngularGrid, ThermalRadiationRequest
 from comsol_mcp.evidence.thermal_radiation import (
     build_kirchhoff_assessment,
     evaluate_thermal_radiation,
@@ -131,6 +131,27 @@ def test_thermal_radiation_contract_rejects_nonfinite_values(value):
 
     with pytest.raises(ValidationError):
         ThermalRadiationRequest.model_validate(request)
+
+
+@pytest.mark.parametrize(
+    "field,coordinates",
+    [
+        ("theta_rad", [0.5, 0.25]),
+        ("theta_rad", [0.25, 0.25]),
+        ("phi_rad", [1.0, 0.0]),
+        ("phi_rad", [1.0, 1.0]),
+    ],
+)
+def test_trapezoid_angular_coordinates_are_strictly_increasing(field, coordinates):
+    value = {
+        "mode": "grid_trapezoid",
+        "theta_rad": [0.0, 0.5],
+        "phi_rad": [0.0, 2.0 * math.pi],
+    }
+    value[field] = coordinates
+
+    with pytest.raises(ValidationError, match="strictly increasing"):
+        AngularGrid.model_validate(value)
 
 
 def test_unit_emissivity_recovers_stefan_boltzmann_on_finite_domain():

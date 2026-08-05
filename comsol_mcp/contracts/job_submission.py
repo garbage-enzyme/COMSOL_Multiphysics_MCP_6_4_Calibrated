@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal, TypeAlias
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
 from .structural import MAX_PUBLIC_NUMBER_MAGNITUDE, validate_public_structure
 from .thermo_optomechanical import ThermoOptomechanicalReplayInput
@@ -66,6 +66,16 @@ class StagedSweepInput(_JobInput):
     record_wavelength_controls: bool | None = None
     resource_policy: BoundedObject | None = None
     execution_backend: BoundedObject | None = None
+
+    @model_validator(mode="after")
+    def validate_cross_field_contract(self) -> StagedSweepInput:
+        if self.smoke_points is not None and self.smoke_points > len(self.parameter_values):
+            raise ValueError("smoke_points must not exceed the parameter_values count")
+        if self.physical_bounds is not None:
+            unknown = sorted(set(self.physical_bounds) - set(self.expressions))
+            if unknown:
+                raise ValueError("physical_bounds keys must be requested expressions")
+        return self
 
 
 class ValidationMatrixInput(_JobInput):

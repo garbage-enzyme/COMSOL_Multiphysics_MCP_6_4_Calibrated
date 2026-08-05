@@ -12,23 +12,27 @@ def strict_json_number(
     *,
     positive: bool = False,
     nonnegative: bool = False,
-) -> float:
+) -> int | float:
     """Return a finite JSON number without accepting booleans or strings."""
     if positive and nonnegative:
         raise ValueError("positive and nonnegative constraints are mutually exclusive")
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{label} must be numeric")
-    try:
-        number = float(value)
-    except OverflowError as exc:
-        raise ValueError(f"{label} must be finite") from exc
+    number = value
+    if isinstance(number, int):
+        try:
+            finite = math.isfinite(float(number))
+        except OverflowError:
+            finite = False
+    else:
+        finite = math.isfinite(number)
     if positive:
-        if not math.isfinite(number) or number <= 0:
+        if not finite or number <= 0:
             raise ValueError(f"{label} must be finite and positive")
     elif nonnegative:
-        if not math.isfinite(number) or number < 0:
+        if not finite or number < 0:
             raise ValueError(f"{label} must be finite and non-negative")
-    elif not math.isfinite(number):
+    elif not finite:
         raise ValueError(f"{label} must be finite")
     return number
 

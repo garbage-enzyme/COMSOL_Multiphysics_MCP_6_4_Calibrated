@@ -143,6 +143,8 @@ class WavelengthControlDeclaration(_ClosedModel):
             raise ValueError("wavelength controls must use length quantities")
         if self.driver == "parameter" and self.parameter_name is None:
             raise ValueError("parameter wavelength control requires parameter_name")
+        if self.driver != "parameter" and self.parameter_name is not None:
+            raise ValueError("non-parameter wavelength controls cannot declare parameter_name")
         return self
 
 

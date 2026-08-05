@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 
 import pytest
+from src.utils.validation import strict_json_number
 from src.evidence.real_fixture import (
     DOMAINS_ENV,
     MODEL_ENV,
@@ -27,6 +28,15 @@ _PRIVATE_HOME_PATH = re.compile(
 
 def _contains_private_home_path(text: str) -> bool:
     return _PRIVATE_HOME_PATH.search(text.replace("\\", "/")) is not None
+
+
+def test_strict_json_number_preserves_exact_integer_values():
+    value = 2**53 + 1
+
+    assert strict_json_number(value, "value") == value
+    assert isinstance(strict_json_number(value, "value"), int)
+    with pytest.raises(ValueError, match="finite"):
+        strict_json_number(10**400, "huge")
 
 
 def _spec(tmp_path: Path) -> Path:

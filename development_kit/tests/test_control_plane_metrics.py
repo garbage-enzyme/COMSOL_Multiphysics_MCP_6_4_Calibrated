@@ -111,6 +111,8 @@ def test_metrics_prefer_structured_codes_and_restrict_text_fallback():
     metrics = ControlPlaneMetrics(window_size=8)
     cases = [
         ({"success": False, "error": {"code": "queue_full", "message": "full"}}, "busy"),
+        ({"success": False, "error": {"code": "worker_queue_full"}}, "busy"),
+        ({"success": False, "error": {"code": "resource_busy"}}, "busy"),
         (
             {
                 "success": False,
@@ -118,6 +120,7 @@ def test_metrics_prefer_structured_codes_and_restrict_text_fallback():
             },
             "timeout",
         ),
+        ({"success": False, "error": {"code": "timed_out"}}, "timeout"),
         (
             {
                 "success": False,

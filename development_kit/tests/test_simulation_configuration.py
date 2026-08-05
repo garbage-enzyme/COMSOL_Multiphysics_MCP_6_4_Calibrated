@@ -259,6 +259,14 @@ def test_configuration_rejects_geometry_dimension_and_missing_material_reference
         normalize_simulation_configuration(missing_material)
 
 
+def test_non_parameter_wavelength_driver_rejects_residual_parameter_name():
+    configuration = _configuration()
+    configuration["wavelength_control"]["driver"] = "frequency"
+
+    with pytest.raises(ValidationError, match="cannot declare parameter_name"):
+        normalize_simulation_configuration(configuration)
+
+
 @pytest.mark.parametrize(
     "spec",
     [

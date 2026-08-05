@@ -195,6 +195,26 @@ class TestVersioning:
 
         assert list_model_versions(model_name, base_path=tmp_path) == [str(version)]
 
+    def test_list_versions_skips_file_removed_during_stat(self, tmp_path, monkeypatch):
+        from src.utils.versioning import list_model_versions
+
+        model_dir = tmp_path / "model"
+        model_dir.mkdir()
+        retained = model_dir / "model_20260101_000000.mph"
+        removed = model_dir / "model_20260102_000000.mph"
+        retained.touch()
+        removed.touch()
+        original_stat = Path.stat
+
+        def racing_stat(path, *args, **kwargs):
+            if path == removed:
+                raise FileNotFoundError(str(path))
+            return original_stat(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "stat", racing_stat)
+
+        assert list_model_versions("model", base_path=tmp_path) == [str(retained)]
+
     def test_parse_version_info_valid(self):
         from src.utils.versioning import parse_version_info
 
