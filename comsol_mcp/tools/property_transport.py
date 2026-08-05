@@ -7,7 +7,6 @@ import math
 import re
 from typing import TypeAlias
 
-
 JSONScalar: TypeAlias = str | int | float | bool | None
 JSONValue: TypeAlias = JSONScalar | list[JSONScalar] | list[list[JSONScalar]]
 
@@ -62,10 +61,7 @@ def _normalize_scalar(value: object) -> JSONScalar:
             raise ValueError(f"property strings may contain at most {MAX_SCALAR_BYTES} bytes")
         return value
     if isinstance(value, int):
-        estimated_decimal_bytes = (value.bit_length() * 30103) // 100000 + 1
-        if value < 0:
-            estimated_decimal_bytes += 1
-        if estimated_decimal_bytes > MAX_SCALAR_BYTES:
+        if _integer_serialized_bytes(value) > MAX_SCALAR_BYTES:
             raise ValueError(f"property integers may contain at most {MAX_SCALAR_BYTES} bytes")
         return value
     if isinstance(value, float):
@@ -75,10 +71,49 @@ def _normalize_scalar(value: object) -> JSONScalar:
     raise TypeError("property values must be JSON scalars, scalar lists, or scalar matrices")
 
 
+def _integer_decimal_digits(value: int) -> int:
+    magnitude = abs(value)
+    if magnitude == 0:
+        return 1
+    digits = (magnitude.bit_length() * 30103) // 100000 + 1
+    power = 10 ** (digits - 1)
+    while magnitude < power:
+        digits -= 1
+        power //= 10
+    while magnitude >= power * 10:
+        digits += 1
+        power *= 10
+    return digits
+
+
+def _integer_serialized_bytes(value: int) -> int:
+    return _integer_decimal_digits(value) + (1 if value < 0 else 0)
+
+
+def _serialized_value_bytes(value: JSONValue) -> int:
+    if value is None:
+        return 4
+    if isinstance(value, bool):
+        return 4 if value else 5
+    if isinstance(value, str):
+        return len(json.dumps(value, ensure_ascii=False).encode("utf-8"))
+    if isinstance(value, int):
+        return _integer_serialized_bytes(value)
+    if isinstance(value, float):
+        return len(json.dumps(value, allow_nan=False).encode("ascii"))
+    return 2 + max(0, len(value) - 1) + sum(_serialized_value_bytes(item) for item in value)
+
+
+def _enforce_serialized_value_bound(value: JSONValue) -> JSONValue:
+    if _serialized_value_bytes(value) > MAX_SERIALIZED_BYTES:
+        raise ValueError(f"serialized property value exceeds {MAX_SERIALIZED_BYTES} bytes")
+    return value
+
+
 def normalize_property_value(value: object) -> JSONValue:
     """Normalize one bounded scalar, vector, or rectangular scalar matrix."""
     if not isinstance(value, (list, tuple)):
-        return _normalize_scalar(value)
+        return _enforce_serialized_value_bound(_normalize_scalar(value))
     if len(value) > MAX_LIST_ITEMS:
         raise ValueError(f"property lists may contain at most {MAX_LIST_ITEMS} items")
     if not value:
@@ -88,7 +123,7 @@ def normalize_property_value(value: object) -> JSONValue:
     if any(contains_rows) and not all(contains_rows):
         raise TypeError("property lists cannot mix scalars and nested rows")
     if not any(contains_rows):
-        return [_normalize_scalar(item) for item in value]
+        return _enforce_serialized_value_bound([_normalize_scalar(item) for item in value])
 
     rows = []
     width: int | None = None
@@ -109,7 +144,7 @@ def normalize_property_value(value: object) -> JSONValue:
         if item_count > MAX_LIST_ITEMS:
             raise ValueError(f"property matrices may contain at most {MAX_LIST_ITEMS} scalar items")
         rows.append([_normalize_scalar(item) for item in row])
-    return rows
+    return _enforce_serialized_value_bound(rows)
 
 
 def validate_properties(properties: object | None) -> dict[str, JSONValue]:
@@ -125,13 +160,17 @@ def validate_properties(properties: object | None) -> dict[str, JSONValue]:
         validate_property_name(name): normalize_property_value(value)
         for name, value in properties.items()
     }
-    payload = json.dumps(
-        normalized,
-        ensure_ascii=False,
-        allow_nan=False,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    if len(payload) > MAX_SERIALIZED_BYTES:
+    payload_bytes = (
+        2
+        + max(0, len(normalized) - 1)
+        + sum(
+            len(json.dumps(name, ensure_ascii=False).encode("utf-8"))
+            + 1
+            + _serialized_value_bytes(value)
+            for name, value in normalized.items()
+        )
+    )
+    if payload_bytes > MAX_SERIALIZED_BYTES:
         raise ValueError(f"serialized properties exceed {MAX_SERIALIZED_BYTES} bytes")
     return normalized
 

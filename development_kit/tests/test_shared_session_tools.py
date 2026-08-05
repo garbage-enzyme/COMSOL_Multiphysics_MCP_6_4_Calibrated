@@ -82,6 +82,39 @@ def test_shared_attach_public_schema_requires_confirmation():
     assert set(schemas["shared_model_adopt"]["required"]) == {"model_tag"}
 
 
+def test_shared_preflight_samples_across_a_bounded_settling_interval(monkeypatch):
+    import src.tools.shared_session as module
+
+    events = []
+    snapshots = iter([{"sample": 1}, {"sample": 2}])
+    monkeypatch.setattr(
+        module,
+        "collect_shared_preflight_snapshot",
+        lambda: events.append("probe") or next(snapshots),
+    )
+    monkeypatch.setattr(
+        module.time,
+        "sleep",
+        lambda seconds: events.append(("sleep", seconds)),
+    )
+    monkeypatch.setattr(
+        module,
+        "classify_shared_server_preflight",
+        lambda **kwargs: kwargs,
+    )
+    server = _shared_server("shared-preflight-settling")
+
+    result = server._tool_manager._tools["shared_server_preflight"].fn(host="localhost", port=2036)
+
+    assert events == [
+        "probe",
+        ("sleep", module.PREFLIGHT_SETTLING_SECONDS),
+        "probe",
+    ]
+    assert result["first_probe"] == {"sample": 1}
+    assert result["second_probe"] == {"sample": 2}
+
+
 def test_shared_status_uses_manager_without_constructing_client(monkeypatch):
     server = _shared_server("shared-status")
     import src.tools.shared_session as module

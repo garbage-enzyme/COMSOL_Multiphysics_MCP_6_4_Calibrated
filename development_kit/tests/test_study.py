@@ -126,9 +126,7 @@ def test_resolve_study_tag_propagates_backend_label_failure():
 
 
 def test_study_helpers_normalize_java_string_tags():
-    model = FakeModel(
-        {"std1": JavaEntity("研究 1", {"step1": FakeEntity("稳态 1")})}
-    )
+    model = FakeModel({"std1": JavaEntity("研究 1", {"step1": FakeEntity("稳态 1")})})
     model.java = JavaTagJava(model.java.studies)
 
     result = list_studies(model)
@@ -185,8 +183,16 @@ class MutableStudy:
 
 
 class MutableStudyList:
-    def __init__(self, existing=(), *, fail_create=False, fail_set=False):
+    def __init__(
+        self,
+        existing=(),
+        *,
+        fail_list_create=False,
+        fail_create=False,
+        fail_set=False,
+    ):
         self.studies = {tag: object() for tag in existing}
+        self.fail_list_create = fail_list_create
         self.fail_create = fail_create
         self.fail_set = fail_set
 
@@ -194,6 +200,8 @@ class MutableStudyList:
         return list(self.studies)
 
     def create(self, tag):
+        if self.fail_list_create:
+            raise RuntimeError("study list creation failure")
         study = MutableStudy(
             fail_create=self.fail_create,
             fail_set=self.fail_set,
@@ -233,6 +241,21 @@ def test_create_study_rolls_back_step_and_tlist_failures():
         assert result["success"] is False
         assert result["rolled_back"] is True
         assert studies.studies == {}
+
+
+def test_create_study_reports_when_creation_failed_before_rollback():
+    studies = MutableStudyList(fail_list_create=True)
+
+    result = create_study(MutableStudyModel(studies))
+
+    assert result == {
+        "success": False,
+        "error": "Study creation failed before a study was created.",
+        "error_type": "RuntimeError",
+        "rollback_attempted": False,
+        "rolled_back": False,
+    }
+    assert studies.studies == {}
 
 
 def test_create_study_validates_before_creation_and_uses_first_free_tag():

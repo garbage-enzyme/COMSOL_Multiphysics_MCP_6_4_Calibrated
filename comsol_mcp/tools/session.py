@@ -371,12 +371,13 @@ class SessionManager:
         return result
 
     def _release_owned_lease(self) -> Optional[dict]:
-        if not self._owns_solver_lease:
-            return None
-        result = self._ownership.release()
-        if result.get("success"):
-            self._owns_solver_lease = False
-        return result
+        with self._start_lock:
+            if not self._owns_solver_lease:
+                return None
+            result = self._ownership.release()
+            if result.get("success"):
+                self._owns_solver_lease = False
+            return result
 
     def start(
         self,
@@ -385,19 +386,17 @@ class SessionManager:
         products: Optional[list[str]] = None,
     ) -> dict:
         """Start a COMSOL client session (non-blocking)."""
-        # Already connected — clear and reuse.
-        if self._client is not None:
-            return {
-                "success": True,
-                "connected": True,
-                "version": self._client.version,
-                "cores": self._client.cores,
-                "standalone": self._client.standalone,
-                "message": "COMSOL session is already connected; no action taken.",
-            }
-
-        # A background start is in flight — tell caller to poll status.
         with self._start_lock:
+            if self._client is not None:
+                return {
+                    "success": True,
+                    "connected": True,
+                    "version": self._client.version,
+                    "cores": self._client.cores,
+                    "standalone": self._client.standalone,
+                    "message": "COMSOL session is already connected; no action taken.",
+                }
+            # A background start is in flight — tell caller to poll status.
             if self._starting:
                 return {
                     "success": True,
@@ -740,6 +739,11 @@ class SessionManager:
                     )
 
     def connect(self, port: int, host: str = "localhost") -> dict:
+        """Serialize remote activation against local start and disconnect."""
+        with self._start_lock:
+            return self._connect_locked(port, host)
+
+    def _connect_locked(self, port: int, host: str) -> dict:
         """Connect to a remote COMSOL server."""
         with self._start_lock:
             if self._starting:
@@ -865,16 +869,15 @@ class SessionManager:
                 }
             self._start_error = None
             self._start_message = ""
-        if self._client is None:
-            release = self._release_owned_lease()
-            with self._start_lock:
+            if self._client is None:
+                release = self._release_owned_lease()
                 self._publish_control_plane_status_locked()
-            result = {"success": True, "message": "No active session."}
-            if release is not None:
-                result["lease_release"] = release
-            return result
+                result = {"success": True, "message": "No active session."}
+                if release is not None:
+                    result["lease_release"] = release
+                return result
+            client = self._client
 
-        client = self._client
         reusable, cleanup_errors = self._retire_client(client)
         if cleanup_errors:
             return {

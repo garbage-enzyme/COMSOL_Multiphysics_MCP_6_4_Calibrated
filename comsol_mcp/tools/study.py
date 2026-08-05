@@ -19,9 +19,7 @@ def create_study(
     """Create one study and remove it if step configuration cannot complete."""
     if not isinstance(study_type, str) or not study_type.strip():
         return {"success": False, "error": "study_type must be nonempty"}
-    if study_name is not None and (
-        not isinstance(study_name, str) or not study_name.strip()
-    ):
+    if study_name is not None and (not isinstance(study_name, str) or not study_name.strip()):
         return {"success": False, "error": "study_name must be nonempty"}
     if not isinstance(time_unit, str) or not time_unit.strip():
         return {"success": False, "error": "time_unit must be nonempty"}
@@ -38,9 +36,13 @@ def create_study(
                 return {"success": False, "error": "time_list must be finite"}
             normalized_times.append(number)
     aliases = {
-        "stat": "Stationary", "time": "Transient", "timedependent": "Transient",
-        "transient": "Transient", "eig": "Eigenfrequency",
-        "freq": "FrequencyDomain", "frequency": "FrequencyDomain",
+        "stat": "Stationary",
+        "time": "Transient",
+        "timedependent": "Transient",
+        "transient": "Transient",
+        "eig": "Eigenfrequency",
+        "freq": "FrequencyDomain",
+        "frequency": "FrequencyDomain",
         "pert": "Perturbation",
     }
     step_type = aliases.get(study_type.casefold(), study_type)
@@ -64,14 +66,40 @@ def create_study(
             study.feature("step1").set(
                 "tlist", " ".join(f"{value}[{time_unit}]" for value in normalized_times)
             )
-    except Exception:
+    except Exception as exc:
         if created:
             try:
                 study_list.remove(study_tag)
-            except Exception:
-                return {"success": False, "error": "Study setup failed and rollback was incomplete.", "rolled_back": False}
-        return {"success": False, "error": "Study setup failed.", "rolled_back": True}
-    result = {"success": True, "study": study_tag, "type": study_type, "step_type": step_type, "model": model.name()}
+            except Exception as rollback_exc:
+                return {
+                    "success": False,
+                    "error": "Study setup failed and rollback was incomplete.",
+                    "error_type": type(exc).__name__,
+                    "rollback_error_type": type(rollback_exc).__name__,
+                    "rollback_attempted": True,
+                    "rolled_back": False,
+                }
+            return {
+                "success": False,
+                "error": "Study setup failed.",
+                "error_type": type(exc).__name__,
+                "rollback_attempted": True,
+                "rolled_back": True,
+            }
+        return {
+            "success": False,
+            "error": "Study creation failed before a study was created.",
+            "error_type": type(exc).__name__,
+            "rollback_attempted": False,
+            "rolled_back": False,
+        }
+    result = {
+        "success": True,
+        "study": study_tag,
+        "type": study_type,
+        "step_type": step_type,
+        "model": model.name(),
+    }
     if step_type == "Transient" and normalized_times is None:
         result["warning"] = "Transient study created without time_list."
     return result
@@ -106,12 +134,8 @@ def _resolve_study_tag(model, study_name: Optional[str]) -> Optional[str]:
     if len(matches) == 1:
         return matches[0]
     if len(matches) > 1:
-        raise ValueError(
-            f"Study label {study_name!r} is ambiguous across tags: {matches}"
-        )
-    raise ValueError(
-        f"Study '{study_name}' not found. Available tags: {tags}"
-    )
+        raise ValueError(f"Study label {study_name!r} is ambiguous across tags: {matches}")
+    raise ValueError(f"Study '{study_name}' not found. Available tags: {tags}")
 
 
 def list_studies(model) -> dict:
@@ -238,7 +262,7 @@ def solve_study(
 
 def register_study_tools(mcp: MCPServer) -> None:
     """Register study and solving tools with the MCP server."""
-    
+
     @mcp.tool()
     def study_list(model_name: Optional[str] = None) -> dict:
         """
@@ -254,7 +278,7 @@ def register_study_tools(mcp: MCPServer) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
 
         try:
@@ -268,7 +292,7 @@ def register_study_tools(mcp: MCPServer) -> None:
         study_name: Optional[str] = None,
         time_list: Optional[Sequence] = None,
         time_unit: str = "s",
-        model_name: Optional[str] = None
+        model_name: Optional[str] = None,
     ) -> dict:
         """
         Create a new study in the model.
@@ -297,7 +321,7 @@ def register_study_tools(mcp: MCPServer) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
 
         try:
@@ -310,23 +334,23 @@ def register_study_tools(mcp: MCPServer) -> None:
             )
         except Exception as e:
             return {"success": False, "error": f"Failed to create study: {str(e)}"}
-    
+
     @mcp.tool()
     def study_solve(
         study_name: Optional[str] = None,
         model_name: Optional[str] = None,
         wait: bool = True,
-        timeout: Optional[float] = None
+        timeout: Optional[float] = None,
     ) -> dict:
         """
         Solve a study (synchronous by default).
-        
+
         Args:
             study_name: Study to solve (None for all studies)
             model_name: Model name (default: current model)
             wait: If True, wait for completion; if False, return immediately
             timeout: Maximum wait time in seconds (only used if wait=True)
-        
+
         Returns:
             Solution status, or error message
         """
@@ -334,9 +358,9 @@ def register_study_tools(mcp: MCPServer) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
-        
+
         try:
             return solve_study(
                 model,
@@ -346,23 +370,22 @@ def register_study_tools(mcp: MCPServer) -> None:
             )
         except Exception as e:
             return {"success": False, "error": f"Failed to solve: {str(e)}"}
-    
+
     @mcp.tool()
     def study_solve_async(
-        study_name: Optional[str] = None,
-        model_name: Optional[str] = None
+        study_name: Optional[str] = None, model_name: Optional[str] = None
     ) -> dict:
         """
         Start solving a study in the background (asynchronous).
-        
+
         Use study_get_progress to inspect synthetic lifecycle checkpoints.
         study_cancel records a cooperative request but cannot interrupt a
         blocking COMSOL study.run() call.
-        
+
         Args:
             study_name: Study to solve (None for all studies)
             model_name: Model name (default: current model)
-        
+
         Returns:
             Confirmation that solving started, or error message
         """
@@ -370,9 +393,9 @@ def register_study_tools(mcp: MCPServer) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
-        
+
         if async_solver.is_running:
             progress = async_solver.get_progress()
             return {
@@ -380,7 +403,7 @@ def register_study_tools(mcp: MCPServer) -> None:
                 "error": "Another solving operation is already in progress.",
                 "current_progress": progress,
             }
-        
+
         try:
             tag = _resolve_study_tag(model, study_name)
             started = async_solver.start_solve(model, tag)
@@ -393,13 +416,10 @@ def register_study_tools(mcp: MCPServer) -> None:
                     "message": "Solving started in background.",
                 }
             else:
-                return {
-                    "success": False,
-                    "error": "Failed to start async solver."
-                }
+                return {"success": False, "error": "Failed to start async solver."}
         except Exception as e:
             return {"success": False, "error": f"Failed to start solving: {str(e)}"}
-    
+
     @mcp.tool()
     def study_get_progress() -> dict:
         """
@@ -407,7 +427,7 @@ def register_study_tools(mcp: MCPServer) -> None:
 
         The numeric progress field is not COMSOL solver percentage. While
         study.run() is blocking, it remains at the pre-solve checkpoint.
-        
+
         Returns:
             Status, synthetic checkpoint value, and elapsed time
         """
@@ -416,7 +436,7 @@ def register_study_tools(mcp: MCPServer) -> None:
             "success": True,
             "progress": progress,
         }
-    
+
     @mcp.tool()
     def study_cancel() -> dict:
         """
@@ -424,7 +444,7 @@ def register_study_tools(mcp: MCPServer) -> None:
 
         This cannot interrupt a blocking COMSOL study.run() call. It can only
         stop work before the blocking call begins or between separate studies.
-        
+
         Returns:
             Cancellation status
         """
@@ -442,35 +462,35 @@ def register_study_tools(mcp: MCPServer) -> None:
             "success": False,
             "message": "No solving operation in progress.",
         }
-    
+
     @mcp.tool()
     def study_wait(timeout: Optional[float] = None) -> dict:
         """
         Wait for the current solving operation to complete.
-        
+
         Args:
             timeout: Maximum time to wait in seconds (None for indefinite)
-        
+
         Returns:
             Final progress status
         """
         completed = async_solver.wait(timeout=timeout)
         progress = async_solver.get_progress()
-        
+
         return {
             "success": True,
             "completed": completed,
             "progress": progress,
         }
-    
+
     @mcp.tool()
     def solutions_list(model_name: Optional[str] = None) -> dict:
         """
         List all solutions in a model.
-        
+
         Args:
             model_name: Model name (default: current model)
-        
+
         Returns:
             List of solution configurations
         """
@@ -478,9 +498,9 @@ def register_study_tools(mcp: MCPServer) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
-        
+
         try:
             solutions = model.solutions()
             return {
@@ -490,17 +510,17 @@ def register_study_tools(mcp: MCPServer) -> None:
             }
         except Exception as e:
             return {"success": False, "error": f"Failed to list solutions: {str(e)}"}
-    
+
     @mcp.tool()
     def datasets_list(model_name: Optional[str] = None) -> dict:
         """
         List all datasets in a model.
-        
+
         Datasets represent solution data that can be evaluated or visualized.
-        
+
         Args:
             model_name: Model name (default: current model)
-        
+
         Returns:
             List of dataset names
         """
@@ -508,9 +528,9 @@ def register_study_tools(mcp: MCPServer) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
-        
+
         try:
             datasets = model.datasets()
             return {

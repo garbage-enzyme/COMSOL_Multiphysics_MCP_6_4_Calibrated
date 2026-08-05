@@ -27,7 +27,7 @@ def register_thermal_material_tools(mcp: MCPServer) -> None:
                 "solver_started": False,
                 "filesystem_modified": False,
             }
-        except (TypeError, ValueError) as exc:
+        except ValueError as exc:
             return {
                 "success": False,
                 "reason_code": "thermal_material_ledger_rejected",
@@ -50,7 +50,7 @@ def register_thermal_material_tools(mcp: MCPServer) -> None:
                 "solver_started": False,
                 "filesystem_modified": False,
             }
-        except (TypeError, ValueError) as exc:
+        except ValueError as exc:
             return {
                 "success": False,
                 "reason_code": "thermal_material_evaluation_rejected",

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import inspect
 import json
@@ -661,6 +662,41 @@ def test_public_tool_classifies_nonfinite_rows_without_serializing_invalid_numbe
     ]
     assert result["raw_bundle"] is None
     assert "NaN" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("tool_name", ["spectral_characterize", "spectral_model_compare"])
+def test_public_tool_classifies_oversized_integer_as_nonfinite(tool_name):
+    bundle = _bundle([0.1, 0.5, 0.9, 0.5, 0.1])
+    spec = _bundle_spec(bundle)
+    spec["rows"][2]["A"] = 10**400
+    server = MCPServer("spectral-overflow-test")
+    register_spectral_characterization_tools(server)
+    arguments = {
+        "bundle_spec": spec,
+        "analysis_policy": _policy(),
+        (
+            "measurement_configuration"
+            if tool_name == "spectral_characterize"
+            else "comparison_configuration"
+        ): _measurement() if tool_name == "spectral_characterize" else {},
+    }
+
+    result = server._tool_manager._tools[tool_name].fn(**arguments)
+
+    assert result["success"] is False
+    assert result["classification"] == "non_finite"
+    assert result["invalid_rows"][0]["row_id"] == "point-002"
+
+
+def test_public_spectral_schema_rejects_non_object_bundle_specs_before_adapter():
+    server = MCPServer("spectral-object-schema-test")
+    register_spectral_characterization_tools(server)
+    schemas = {tool.name: tool.input_schema for tool in asyncio.run(server.list_tools())}
+
+    for tool_name in ("spectral_characterize", "spectral_model_compare"):
+        bundle_schema = schemas[tool_name]["properties"]["bundle_spec"]
+        accepted_types = {branch.get("type") for branch in bundle_schema["anyOf"]}
+        assert accepted_types == {"object", "null"}
 
 
 def test_existing_durable_bundle_bytes_and_timestamp_remain_unchanged(tmp_path):

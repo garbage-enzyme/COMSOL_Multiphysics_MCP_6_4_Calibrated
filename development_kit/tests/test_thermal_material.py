@@ -438,3 +438,22 @@ def test_public_m2_dispatch_is_solver_free():
     assert evaluated["success"] is True
     assert evaluated["evaluation"]["available"] is True
     assert evaluated["solver_started"] is False
+
+
+@pytest.mark.parametrize("error_type", [TypeError, RecursionError])
+def test_internal_material_failures_are_not_misclassified_as_input_rejections(
+    monkeypatch, error_type
+):
+    import src.evidence.thermal_material as material_module
+
+    server = create_server("m2-internal-failure", profile="basic_fem")
+    tool = server._tool_manager._tools["thermal_material_validate"].fn
+    typed = ThermalMaterialLedger.model_validate(_ledger())
+    monkeypatch.setattr(
+        material_module,
+        "normalize_thermal_material_ledger",
+        lambda _ledger: (_ for _ in ()).throw(error_type("internal failure")),
+    )
+
+    with pytest.raises(error_type, match="internal failure"):
+        tool(typed)

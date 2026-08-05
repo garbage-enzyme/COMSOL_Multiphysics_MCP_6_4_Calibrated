@@ -1075,6 +1075,110 @@ class TestSessionManager:
         assert result["success"] is False
         assert result["cleanup_pending"] is True
 
+    def test_remote_connect_serializes_against_a_concurrent_local_start(
+        self, monkeypatch, permissive_session_ownership
+    ):
+        import src.tools.session as session_module
+
+        sm = permissive_session_ownership
+        entered = threading.Event()
+        release = threading.Event()
+
+        class RemoteClient:
+            standalone = False
+            version = "6.4"
+            cores = 2
+
+            def clear(self):
+                return None
+
+            def disconnect(self):
+                return None
+
+        client = RemoteClient()
+
+        def create_client(**_kwargs):
+            entered.set()
+            assert release.wait(timeout=2)
+            return client
+
+        monkeypatch.setattr(
+            session_module,
+            "_load_mph",
+            lambda: (
+                SimpleNamespace(Client=create_client),
+                SimpleNamespace(client=None),
+            ),
+        )
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            connecting = pool.submit(sm.connect, 2036)
+            assert entered.wait(timeout=1)
+            starting = pool.submit(sm.start)
+            assert not starting.done()
+            release.set()
+            connected = connecting.result(timeout=2)
+            started = starting.result(timeout=2)
+
+        assert connected["success"] is True
+        assert started["connected"] is True
+        assert sm.client is client
+        assert sm.disconnect()["success"] is True
+
+    def test_disconnect_cannot_release_a_connecting_clients_lease(
+        self, monkeypatch, permissive_session_ownership
+    ):
+        import src.tools.session as session_module
+
+        sm = permissive_session_ownership
+        entered = threading.Event()
+        release = threading.Event()
+        disconnect_entered = threading.Event()
+
+        class RemoteClient:
+            standalone = False
+            version = "6.4"
+
+            def clear(self):
+                return None
+
+            def disconnect(self):
+                return None
+
+        def create_client(**_kwargs):
+            entered.set()
+            assert release.wait(timeout=2)
+            return RemoteClient()
+
+        monkeypatch.setattr(
+            session_module,
+            "_load_mph",
+            lambda: (
+                SimpleNamespace(Client=create_client),
+                SimpleNamespace(client=None),
+            ),
+        )
+
+        def disconnect():
+            disconnect_entered.set()
+            return sm.disconnect()
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            connecting = pool.submit(sm.connect, 2036)
+            assert entered.wait(timeout=1)
+            disconnecting = pool.submit(disconnect)
+            assert disconnect_entered.wait(timeout=1)
+            assert not disconnecting.done()
+            release.set()
+            connected = connecting.result(timeout=2)
+            disconnected = disconnecting.result(timeout=2)
+
+        assert connected["success"] is True
+        assert disconnected["success"] is True
+        assert sm.client is None
+        assert sm._owns_solver_lease is False
+        assert sm._ownership.releases == 1
+
     def test_connect_rolls_back_client_when_lease_heartbeat_is_unverified(
         self, monkeypatch, permissive_session_ownership
     ):

@@ -302,13 +302,14 @@ def register_results_tools(mcp: MCPServer) -> None:
                 "success": False,
                 "error": f"Model not found: {model_name or 'no current model'}",
             }
+        if file_path is None:
+            return {
+                "success": False,
+                "error": "file_path is required so the exported artifact is caller-visible",
+            }
 
         try:
-            if file_path is None:
-                model.export(node_name, file_path)
-                exported = None
-            else:
-                exported = export_result_file(model, node_name, file_path)
+            exported = export_result_file(model, node_name, file_path)
 
             return {
                 "success": True,
@@ -342,13 +343,14 @@ def register_results_tools(mcp: MCPServer) -> None:
                 "success": False,
                 "error": f"Model not found: {model_name or 'no current model'}",
             }
+        if file_path is None:
+            return {
+                "success": False,
+                "error": "file_path is required so the exported artifact is caller-visible",
+            }
 
         try:
-            if file_path is None:
-                model.export(node_name, file_path)
-                exported = None
-            else:
-                exported = export_result_file(model, node_name, file_path)
+            exported = export_result_file(model, node_name, file_path)
 
             return {
                 "success": True,

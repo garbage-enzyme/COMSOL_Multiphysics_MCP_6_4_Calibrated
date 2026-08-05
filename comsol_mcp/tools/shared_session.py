@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from mcp.server.mcpserver import MCPServer
@@ -12,17 +13,15 @@ from comsol_mcp.shared_session.lifecycle import SharedSessionManager
 from comsol_mcp.shared_session.preflight import classify_shared_server_preflight
 from comsol_mcp.shared_session.process_probe import collect_shared_preflight_snapshot
 
-
 shared_session_manager = SharedSessionManager()
+PREFLIGHT_SETTLING_SECONDS = 0.25
 
 
 def register_shared_session_tools(mcp: MCPServer) -> None:
     """Register explicit local attached-server lifecycle tools."""
     selection = getattr(mcp, "profile_selection", None)
     profile_name = getattr(selection, "name", "unknown")
-    shared_enabled = bool(
-        selection is not None and selection.feature_enabled("shared_server")
-    )
+    shared_enabled = bool(selection is not None and selection.feature_enabled("shared_server"))
 
     @mcp.tool()
     def shared_server_preflight(host: str, port: int) -> dict[str, Any]:
@@ -40,6 +39,7 @@ def register_shared_session_tools(mcp: MCPServer) -> None:
                 "client_constructed": False,
             }
         first = collect_shared_preflight_snapshot()
+        time.sleep(PREFLIGHT_SETTLING_SECONDS)
         second = collect_shared_preflight_snapshot()
         return classify_shared_server_preflight(
             endpoint={"host": host, "port": port},

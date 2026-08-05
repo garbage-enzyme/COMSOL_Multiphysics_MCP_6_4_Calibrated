@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -69,6 +70,16 @@ def test_standalone_comsol_root_requires_one_source(monkeypatch) -> None:
 
     with pytest.raises(ValueError, match="configure it in settings"):
         standalone_tools_module._resolve_comsol_root(None)
+
+
+def test_public_standalone_timeout_maps_subprocess_timeout_expired() -> None:
+    def timeout():
+        raise subprocess.TimeoutExpired(["standalone"], 1)
+
+    result = standalone_tools_module._call(timeout)
+
+    assert result["success"] is False
+    assert result["reason_code"] == "standalone_control_timeout"
 
 
 @pytest.mark.skipif(

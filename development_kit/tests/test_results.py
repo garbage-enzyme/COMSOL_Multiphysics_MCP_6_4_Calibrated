@@ -4,11 +4,14 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+import src.tools.results as results_module
+from mcp.server.mcpserver import MCPServer
 from src.tools.results import (
     _json_safe_solution_axis,
     evaluate_global_result,
     evaluate_result,
     export_result_file,
+    register_results_tools,
 )
 
 
@@ -100,3 +103,21 @@ def test_result_export_preserves_a_target_created_during_staging(tmp_path):
 
     assert target.read_bytes() == b"competitor"
     assert not list(tmp_path.glob(".*.export"))
+
+
+@pytest.mark.parametrize("tool_name", ["results_export_data", "results_export_image"])
+def test_public_export_requires_a_caller_visible_destination(monkeypatch, tool_name):
+    class ExportTrap:
+        def export(self, *_args):
+            raise AssertionError("export must not run without a destination")
+
+    monkeypatch.setattr(results_module.session_manager, "get_model", lambda _name: ExportTrap())
+    server = MCPServer("result-export-destination-test")
+    register_results_tools(server)
+
+    result = server._tool_manager._tools[tool_name].fn()
+
+    assert result == {
+        "success": False,
+        "error": "file_path is required so the exported artifact is caller-visible",
+    }
