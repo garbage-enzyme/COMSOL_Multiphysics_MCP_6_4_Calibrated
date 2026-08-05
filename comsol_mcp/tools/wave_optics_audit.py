@@ -942,6 +942,17 @@ def _mesh_state(component: Any) -> dict[str, Any]:
     }
 
 
+def _strict_positive_entity_ids(value: Any, label: str) -> list[int]:
+    if not isinstance(value, list) or len(value) > MAX_DOMAIN_IDS:
+        raise ValueError(f"{label} must be a bounded integer list")
+    normalized: list[int] = []
+    for index, item in enumerate(value):
+        if isinstance(item, bool) or type(item) is not int or item <= 0:
+            raise ValueError(f"{label}[{index}] must be a positive integer")
+        normalized.append(item)
+    return sorted(set(normalized))
+
+
 def _validate_loss_map(loss_map: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
     if loss_map is None:
         return []
@@ -963,11 +974,7 @@ def _validate_loss_map(loss_map: list[dict[str, Any]] | None) -> list[dict[str, 
             raise ValueError(f"loss_map[{index}] requires non-empty label and expression")
         if len(label) > 128 or len(expression) > 1024:
             raise ValueError(f"loss_map[{index}] label/expression exceeds the bounded length")
-        if not isinstance(domains, list) or len(domains) > MAX_DOMAIN_IDS:
-            raise ValueError(f"loss_map[{index}].domains must be a bounded integer list")
-        normalized_domains = sorted({int(value) for value in domains})
-        if any(value <= 0 for value in normalized_domains):
-            raise ValueError(f"loss_map[{index}].domains must contain positive entity IDs")
+        normalized_domains = _strict_positive_entity_ids(domains, f"loss_map[{index}].domains")
         normalization_expression = item.get("normalization_expression")
         if normalization_expression is not None and (
             not isinstance(normalization_expression, str)
@@ -1187,7 +1194,10 @@ def _run_wave_optics_point_audit_impl(
     ):
         raise ValueError("wavelength_unit must be non-empty")
     coordinate_range = _validate_coordinate_range(top_air_coordinate_range)
-    explicit_domains = sorted({int(value) for value in (top_air_domain_ids or [])})
+    explicit_domains = _strict_positive_entity_ids(
+        [] if top_air_domain_ids is None else top_air_domain_ids,
+        "top_air_domain_ids",
+    )
     if len(explicit_domains) > MAX_DOMAIN_IDS:
         raise ValueError(f"top_air_domain_ids exceeds {MAX_DOMAIN_IDS} entries")
     if any(value <= 0 for value in explicit_domains):
@@ -1930,8 +1940,8 @@ def run_wave_optics_reference_audit(
     if target_axis not in {"x", "y", "z"} or aggregation not in {"rms_abs", "median_abs"}:
         raise ValueError("target_axis/aggregation is unsupported")
     coordinate_range = _validate_coordinate_range(top_air_coordinate_range)
-    domains = sorted({int(value) for value in all_domain_ids})
-    top_domains = sorted({int(value) for value in top_air_domain_ids})
+    domains = _strict_positive_entity_ids(all_domain_ids, "all_domain_ids")
+    top_domains = _strict_positive_entity_ids(top_air_domain_ids, "top_air_domain_ids")
     if not domains or not top_domains or any(value <= 0 for value in domains + top_domains):
         raise ValueError(
             "all_domain_ids and top_air_domain_ids must be non-empty positive integer lists"

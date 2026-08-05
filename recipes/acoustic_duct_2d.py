@@ -259,7 +259,14 @@ def save_staged_model(java_model: Any, output: Path) -> Path:
             raise RuntimeError("COMSOL did not create a complete staging model")
         return staging
     except BaseException:
-        staging.unlink(missing_ok=True)
+        active_error = sys.exception()
+        try:
+            _retry_permission_error(staging.unlink)
+        except Exception as cleanup_error:
+            if active_error is not None:
+                active_error.add_note(f"staging cleanup failed: {type(cleanup_error).__name__}")
+            else:
+                raise
         raise
 
 

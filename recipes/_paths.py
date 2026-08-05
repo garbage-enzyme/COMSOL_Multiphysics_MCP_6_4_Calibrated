@@ -73,7 +73,7 @@ def recipe_output_dir() -> Path:
     """Return an ASCII-safe output directory outside the source tree."""
     environment = settings_environment()
     configured = environment.get("COMSOL_MCP_RUNTIME_DIR")
-    if configured:
+    if configured is not None:
         return _create_recipe_output(configured)
 
     failures = []

@@ -356,6 +356,38 @@ def test_recipe_main_removes_loaded_model_after_intermediate_failure(tmp_path, m
     assert events == [("remove", model)]
 
 
+def test_recipe_main_preserves_build_failure_when_client_remove_fails(tmp_path, monkeypatch):
+    namespace = _behavior_namespace(monkeypatch)
+    baseline = tmp_path / "baseline.mph"
+    baseline.write_bytes(b"immutable")
+    model = object()
+
+    class Client:
+        def load(self, _path):
+            return model
+
+        def remove(self, _value):
+            raise OSError("remove failed")
+
+    namespace["parse_args"] = lambda: SimpleNamespace(
+        baseline_model=baseline,
+        output_model=tmp_path / "derived.mph",
+        frequency_khz=1.0,
+        solve=False,
+        overwrite_output=False,
+    )
+    namespace["mph"] = SimpleNamespace(Client=lambda version: Client())
+    namespace["sha256_file"] = lambda _path: "a" * 64
+    namespace["require_baseline_contract"] = lambda _model: (object(), object(), object())
+    namespace["replace_geometry"] = lambda _geometry: (_ for _ in ()).throw(
+        RuntimeError("injected build failure")
+    )
+
+    with pytest.raises(RuntimeError, match="injected build failure") as caught:
+        namespace["main"]()
+    assert any("client.remove cleanup failed" in note for note in caught.value.__notes__)
+
+
 def test_recipe_staging_never_overwrites_a_competing_output(tmp_path, monkeypatch):
     namespace = _behavior_namespace(monkeypatch)
     output = tmp_path / "derived.mph"

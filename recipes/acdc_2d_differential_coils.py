@@ -259,7 +259,28 @@ def main() -> None:
             print(f"Solved; max mf.normB = {max(values):.6g} T", flush=True)
         staging = save_staged_model(java_model, output)
     finally:
-        client.remove(model)
+        active_error = sys.exception()
+        remove_error = None
+        try:
+            client.remove(model)
+        except Exception as exc:
+            remove_error = exc
+        if staging is not None and staging.exists():
+            try:
+                staging.unlink(missing_ok=True)
+            except Exception as cleanup_error:
+                if active_error is not None:
+                    active_error.add_note(
+                        f"staging cleanup failed: {type(cleanup_error).__name__}"
+                    )
+                elif remove_error is None:
+                    remove_error = cleanup_error
+        if remove_error is not None:
+            message = f"client.remove cleanup failed: {type(remove_error).__name__}"
+            if active_error is not None:
+                active_error.add_note(message)
+            else:
+                raise RuntimeError(message) from remove_error
 
     if sha256_file(baseline) != baseline_sha256:
         if staging is not None:
