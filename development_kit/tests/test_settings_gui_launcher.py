@@ -148,6 +148,10 @@ def test_instance_mutex_reports_a_live_gui_in_another_process(ascii_tmp_path: Pa
         reader.join(timeout=1)
         output = process.stdout.read() if process.stdout is not None else ""
         errors = process.stderr.read() if process.stderr is not None else ""
+        if process.stdout is not None:
+            process.stdout.close()
+        if process.stderr is not None:
+            process.stderr.close()
         assert process.returncode == 0, output + errors
     assert launcher.settings_gui_is_running(target) is False
 
