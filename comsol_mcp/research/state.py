@@ -47,8 +47,12 @@ def _identifier_list(value: object, name: str, maximum: int) -> list[str]:
 
 def normalize_optimizer_checkpoint(value: object) -> dict[str, Any]:
     """Normalize backend-neutral optimizer state without importing its backend."""
+    bounded = _bounded_json(value, "optimizer checkpoint", 2 * 1024 * 1024)
+    supplied_fingerprint = None
+    if isinstance(bounded, dict) and "checkpoint_fingerprint" in bounded:
+        supplied_fingerprint = bounded.pop("checkpoint_fingerprint")
     raw = _object(
-        _bounded_json(value, "optimizer checkpoint", 2 * 1024 * 1024),
+        bounded,
         {
             "schema_name",
             "schema_version",
@@ -96,10 +100,10 @@ def normalize_optimizer_checkpoint(value: object) -> dict[str, Any]:
         ),
         "created_at": _timestamp(raw["created_at"], "created_at"),
     }
-    return {
-        **body,
-        "checkpoint_fingerprint": domain_sha256_v2(OPTIMIZER_CHECKPOINT_SCHEMA_NAME, body),
-    }
+    calculated = domain_sha256_v2(OPTIMIZER_CHECKPOINT_SCHEMA_NAME, body)
+    if supplied_fingerprint is not None and supplied_fingerprint != calculated:
+        raise ValueError("optimizer checkpoint fingerprint is invalid")
+    return {**body, "checkpoint_fingerprint": calculated}
 
 
 def normalize_portfolio(value: object) -> dict[str, Any]:
