@@ -116,6 +116,7 @@ models are intentionally absent.
 - `development_kit/scripts/research_adapter_template_probe.py` — This repository-only licensed probe launches the current source tree with isolated settings, audits one immutable COMSOL template read-only over serial stdio, and emits separate path-redacted and private receipts.
 - `development_kit/scripts/research_adapter_gate_server.py` — This repository-only candidate server adds two private calls that bind the trusted periodic-MIM backend to a provenance-tracked derived model during the licensed S4 gate.
 - `development_kit/scripts/research_adapter_licensed_gate.py` — This isolated serial stdio gate applies one trusted MIM candidate to a derived copy, collects one-point Wave Optics evidence, and proves source and solver cleanup.
+- `development_kit/scripts/research_campaign_licensed_gate.py` — This isolated serial gate runs frozen feasible or impossible adaptive MIM campaign acceptance with provenance-bound peak and quality-factor evidence.
 - `development_kit/scripts/planning_code_gate.py` — This script verifies the exact frozen planning-code compatibility surface.
 - `development_kit/scripts/python_compatibility_licensed_gate.py` — This script runs the pinned Python and COMSOL compatibility regression on a licensed host.
 - `development_kit/scripts/reference_power_gate_preflight.py` — This script validates reference-power gate inputs without starting COMSOL.

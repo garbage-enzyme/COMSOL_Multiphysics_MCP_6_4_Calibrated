@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import multiprocessing as mp
 import math
+import multiprocessing as mp
 import sys
 from importlib import import_module
 from pathlib import Path
