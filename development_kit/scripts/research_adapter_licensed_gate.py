@@ -227,7 +227,7 @@ async def _run(spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
                     model_names.append(source_name)
                     clone = await call(
                         session,
-                        "geometry_derived_clone",
+                        "research_adapter_gate_clone",
                         {"source_model_name": source_name, "new_name": "S4Candidate"},
                     )
                     if clone.get("success") is not True:
