@@ -20,6 +20,8 @@ from comsol_mcp.research import (
     EVALUATION_RECORD_SCHEMA_VERSION,
     MATERIAL_CATALOG_SCHEMA_NAME,
     MATERIAL_CATALOG_SCHEMA_VERSION,
+    OBJECTIVE_SCORE_SCHEMA_NAME,
+    OBJECTIVE_SCORE_SCHEMA_VERSION,
     OPTIMIZER_CHECKPOINT_SCHEMA_NAME,
     OPTIMIZER_CHECKPOINT_SCHEMA_VERSION,
     PORTFOLIO_SCHEMA_NAME,
@@ -396,6 +398,11 @@ def _entries() -> list[dict[str, Any]]:
             OPERATION_LOCK_VERSION,
             "comsol_mcp.operation_arbiter",
             artifact_kind="durable_artifact",
+        ),
+        _entry(
+            OBJECTIVE_SCORE_SCHEMA_NAME,
+            OBJECTIVE_SCORE_SCHEMA_VERSION,
+            "comsol_mcp.research.objectives",
         ),
         _entry(
             OPTIMIZER_CHECKPOINT_SCHEMA_NAME,

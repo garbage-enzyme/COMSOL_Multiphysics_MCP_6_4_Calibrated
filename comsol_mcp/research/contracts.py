@@ -167,8 +167,12 @@ def _normalize_constraint(value: object, index: int) -> dict[str, Any]:
 
 def normalize_research_goal(value: object) -> dict[str, Any]:
     """Normalize a complete goal without loading an optimizer or solver."""
+    bounded = _bounded_json(value, "research goal", MAX_GOAL_BYTES)
+    supplied_fingerprint = None
+    if isinstance(bounded, dict) and "goal_fingerprint" in bounded:
+        supplied_fingerprint = bounded.pop("goal_fingerprint")
     raw = _object(
-        _bounded_json(value, "research goal", MAX_GOAL_BYTES),
+        bounded,
         {
             "schema_name",
             "schema_version",
@@ -264,6 +268,8 @@ def normalize_research_goal(value: object) -> dict[str, Any]:
         "evidence_policy": _bounded_json(raw["evidence_policy"], "evidence_policy", 32 * 1024),
     }
     normalized["goal_fingerprint"] = domain_sha256_v2(RESEARCH_GOAL_SCHEMA_NAME, normalized)
+    if supplied_fingerprint is not None and supplied_fingerprint != normalized["goal_fingerprint"]:
+        raise ValueError("research-goal fingerprint is invalid")
     return normalized
 
 
