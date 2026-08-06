@@ -5,6 +5,7 @@ import json
 import os
 import sys
 import time
+import uuid
 from pathlib import Path
 
 ROOT = Path(os.environ["DURABLE_TEST_ROOT"])
@@ -23,7 +24,7 @@ def process_is_alive(pid: object) -> bool:
         return False
     try:
         os.kill(pid, 0)
-    except (ProcessLookupError, OverflowError):
+    except ProcessLookupError, OverflowError:
         return False
     except PermissionError:
         return True
@@ -32,21 +33,40 @@ def process_is_alive(pid: object) -> bool:
     return True
 
 
-def claim_lock(lock_path: Path) -> None:
-    if lock_path.is_file():
+def _read_lock(lock_path: Path) -> dict[str, object] | None:
+    try:
+        owner = json.loads(lock_path.read_text(encoding="utf-8"))
+    except OSError, UnicodeDecodeError, json.JSONDecodeError:
+        return None
+    return owner if isinstance(owner, dict) else None
+
+
+def claim_lock(lock_path: Path) -> str:
+    claim_id = uuid.uuid4().hex
+    for attempt in range(20):
+        if lock_path.is_file():
+            owner = _read_lock(lock_path)
+            if owner is None:
+                if attempt == 19:
+                    raise RuntimeError("fake durable driver lock publication did not complete")
+                time.sleep(0.01)
+                continue
+            owner_pid = owner.get("pid")
+            if process_is_alive(owner_pid):
+                raise RuntimeError(f"fake durable driver is already active: pid={owner_pid}")
+            lock_path.unlink(missing_ok=True)
         try:
-            owner = json.loads(lock_path.read_text(encoding="utf-8"))
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-            owner = None
-        owner_pid = owner.get("pid") if isinstance(owner, dict) else None
-        if process_is_alive(owner_pid):
-            raise RuntimeError(f"fake durable driver is already active: pid={owner_pid}")
-        lock_path.unlink(missing_ok=True)
-    with lock_path.open("x", encoding="utf-8", newline="\n") as handle:
-        json.dump({"pid": os.getpid(), "spec_id": SPEC_ID}, handle)
-        handle.write("\n")
-        handle.flush()
-        os.fsync(handle.fileno())
+            with lock_path.open("x", encoding="utf-8", newline="\n") as handle:
+                json.dump({"pid": os.getpid(), "spec_id": SPEC_ID, "claim_id": claim_id}, handle)
+                handle.write("\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            return claim_id
+        except FileExistsError:
+            if attempt == 19:
+                raise RuntimeError("fake durable driver lock claim remained contended")
+            time.sleep(0.01)
+    raise RuntimeError("fake durable driver lock claim failed")
 
 
 def append_jsonl(path: Path, value: object) -> None:
@@ -69,7 +89,7 @@ def main() -> None:
     status_path = ROOT / "status.json"
     control_dir = ROOT / "control"
     lock_path = ROOT / "run.lock"
-    claim_lock(lock_path)
+    claim_id = claim_lock(lock_path)
     started = time.time()
     try:
         completed = completed_rows(results_path)
@@ -146,8 +166,9 @@ def main() -> None:
             },
         )
     finally:
-        if lock_path.is_file():
-            lock_path.unlink()
+        owner = _read_lock(lock_path)
+        if owner is not None and owner.get("claim_id") == claim_id:
+            lock_path.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

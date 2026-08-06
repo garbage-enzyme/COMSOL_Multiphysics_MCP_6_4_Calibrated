@@ -3,9 +3,6 @@
 from __future__ import annotations
 
 import json
-import shutil
-import uuid
-from pathlib import Path
 
 import pytest
 
@@ -14,13 +11,8 @@ from development_kit.tests.test_convergence_campaign_job import _raw_campaign
 
 
 @pytest.fixture
-def ascii_root():
-    root = Path("D:/comsol_runtime_test") / f"convergence-acceptance-{uuid.uuid4().hex}"
-    root.mkdir(parents=True)
-    try:
-        yield root
-    finally:
-        shutil.rmtree(root, ignore_errors=True)
+def ascii_root(ascii_tmp_path):
+    return ascii_tmp_path / "convergence-acceptance"
 
 
 def _raw(tmp_path):
@@ -82,3 +74,47 @@ def test_real_execution_requires_confirmation_at_importable_boundary(tmp_path, a
 
     assert worker_called is False
     assert not (ascii_root / "jobs").exists()
+
+
+def test_worker_failure_publishes_a_bounded_failure_receipt(tmp_path, ascii_root):
+    output = tmp_path / "failure.json"
+
+    receipt = run_acceptance(
+        raw_spec=_raw(tmp_path),
+        runtime_root=ascii_root,
+        output=output,
+        confirmation="RUN_REAL_COMSOL",
+        worker_runner=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("injected worker failure")
+        ),
+    )
+
+    assert receipt["success"] is False
+    assert receipt["error"] == {
+        "type": "RuntimeError",
+        "message": "injected worker failure",
+    }
+    assert json.loads(output.read_text(encoding="utf-8")) == receipt
+
+
+def test_completed_state_requires_one_row_per_declared_level(tmp_path, ascii_root, monkeypatch):
+    from development_kit.tests.integration import convergence_campaign_acceptance as runner
+
+    monkeypatch.setattr(
+        runner.JobStore,
+        "read_state",
+        lambda _self, _job_id: {"status": "completed", "cleanup": {"verified": True}},
+    )
+    monkeypatch.setattr(runner, "read_convergence_campaign_levels", lambda *_args, **_kwargs: [])
+    output = tmp_path / "empty-levels.json"
+
+    receipt = run_acceptance(
+        raw_spec=_raw(tmp_path),
+        runtime_root=ascii_root,
+        output=output,
+        confirmation="RUN_REAL_COMSOL",
+        worker_runner=lambda *_args, **_kwargs: 0,
+    )
+
+    assert receipt["success"] is False
+    assert receipt["levels_complete"] is False

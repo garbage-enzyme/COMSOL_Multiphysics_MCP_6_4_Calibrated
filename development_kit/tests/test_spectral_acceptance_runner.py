@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import json
-import shutil
-import uuid
 from pathlib import Path
 
 import pytest
@@ -19,13 +17,8 @@ from development_kit.tests.spectral_job_fixtures import spectral_job_spec
 
 
 @pytest.fixture
-def ascii_root():
-    root = Path("D:/comsol_runtime_test") / f"pytest-spectral-acceptance-{uuid.uuid4().hex}"
-    root.mkdir(parents=True)
-    try:
-        yield root
-    finally:
-        shutil.rmtree(root, ignore_errors=True)
+def ascii_root(ascii_tmp_path):
+    return ascii_tmp_path / "spectral-acceptance"
 
 
 def _raw_spec(spec: dict) -> dict:

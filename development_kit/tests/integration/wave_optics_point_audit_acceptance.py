@@ -5,9 +5,9 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from pathlib import Path
 import sys
 import traceback
+from pathlib import Path
 
 import mph
 
@@ -15,9 +15,14 @@ ROOT = Path(__file__).parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from src.evidence.real_fixture import controlled_fixture_from_environment
 from src.tools.ownership import SolverOwnership
 from src.tools.wave_optics_audit import run_wave_optics_point_audit
-from src.evidence.real_fixture import controlled_fixture_from_environment
+
+
+def _require(condition: object, detail: object) -> None:
+    if not condition:
+        raise RuntimeError(str(detail))
 
 
 def _sha256(path: Path) -> str:
@@ -158,13 +163,15 @@ def main() -> None:
             output["solve_count"] += int(
                 audit.get("measurement", {}).get("solve", {}).get("ran", False)
             )
-            assert audit["success"], audit
-            assert Path(audit["artifacts"]["csv"]).is_file()
-            assert Path(audit["artifacts"]["manifest"]).is_file()
-            assert _sha256(source) == source_hash
+            _require(audit["success"], audit)
+            _require(audit.get("audit_status") == "measurement_complete", audit)
+            _require(audit.get("assessment", {}).get("project_verdict") is True, audit)
+            _require(Path(audit["artifacts"]["csv"]).is_file(), "audit CSV is missing")
+            _require(Path(audit["artifacts"]["manifest"]).is_file(), "audit manifest is missing")
+            _require(_sha256(source) == source_hash, "controlled source hash changed")
             final_stat = source.stat()
-            assert final_stat.st_mtime_ns == source_stat.st_mtime_ns
-            assert final_stat.st_size == source_stat.st_size
+            _require(final_stat.st_mtime_ns == source_stat.st_mtime_ns, "source mtime changed")
+            _require(final_stat.st_size == source_stat.st_size, "source size changed")
             output["cases"].append(
                 {
                     "name": case["name"],
@@ -186,7 +193,7 @@ def main() -> None:
                 }
             )
             client.remove(model)
-        assert output["solve_count"] == len(active_cases)
+        _require(output["solve_count"] == len(active_cases), "solve count mismatch")
         output["success"] = True
         exit_code = 0
     except Exception as exc:

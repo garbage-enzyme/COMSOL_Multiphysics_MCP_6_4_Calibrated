@@ -362,6 +362,39 @@ def test_semantic_benchmark_retrieval_validates_and_deduplicates_citations():
         )
 
 
+def test_semantic_soak_raw_request_classifies_truncated_worker_response(monkeypatch):
+    class Connection:
+        calls = 0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def settimeout(self, _timeout):
+            return None
+
+        def sendall(self, _payload):
+            return None
+
+        def recv(self, _size):
+            self.calls += 1
+            return b'{"success":true}' if self.calls == 1 else b""
+
+    monkeypatch.setattr(
+        soak_module.socket,
+        "create_connection",
+        lambda *_args, **_kwargs: Connection(),
+    )
+    manager = SimpleNamespace(_token="token", _port=1234)
+
+    result = soak_module._raw_request(manager, "request", "query")
+
+    assert result["success"] is False
+    assert result["error"]["code"] == "worker_protocol_failure"
+
+
 def test_semantic_benchmark_receipts_publish_concurrently_without_temp_alias(tmp_path):
     def publish(index: int) -> None:
         soak_module._atomic_write(

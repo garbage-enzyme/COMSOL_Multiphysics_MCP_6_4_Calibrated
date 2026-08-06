@@ -170,6 +170,44 @@ def test_builder_timeout_closes_required_process_tree_containment(monkeypatch):
     assert containment.closed is True
 
 
+def test_builder_assignment_failure_still_reaps_the_started_process(monkeypatch):
+    class Process:
+        pid = 44002
+        returncode = None
+
+        def poll(self):
+            return self.returncode
+
+        def wait(self, *, timeout):
+            self.returncode = 1
+            return 1
+
+        def kill(self):
+            self.returncode = 1
+
+        def communicate(self, *, timeout):
+            return "", ""
+
+    process = Process()
+    monkeypatch.setattr(acceptance.subprocess, "Popen", lambda *_args, **_kwargs: process)
+    monkeypatch.setattr(
+        acceptance.OwnedJobObject,
+        "assign",
+        lambda _pid: (_ for _ in ()).throw(OSError("injected assign failure")),
+    )
+    monkeypatch.setattr(
+        acceptance.subprocess,
+        "run",
+        lambda *_args, **_kwargs: type("Completed", (), {"returncode": 0})(),
+    )
+
+    result = acceptance._run_builder_process(["python", "builder.py"])
+
+    assert result["success"] is False
+    assert process.returncode == 1
+    assert result["cleanup"]["root_absent"] is True
+
+
 @pytest.fixture
 def ascii_jobs_root():
     root = Path("D:/comsol_runtime_test/resource_admission_journal") / uuid.uuid4().hex

@@ -237,15 +237,17 @@ def test_real_windows_exclusive_reader_does_not_corrupt_durable_state(ascii_tmp_
                 time.sleep(0.002)
 
         def writer() -> None:
-            assert first_lock.wait(timeout=2)
-            for sequence in range(1, 61):
-                store.update_state(job_id, patch={"sequence": sequence})
-            store.update_state(
-                job_id,
-                "completed",
-                patch={"terminal_marker": True},
-            )
-            stop.set()
+            try:
+                assert first_lock.wait(timeout=2)
+                for sequence in range(1, 61):
+                    store.update_state(job_id, patch={"sequence": sequence})
+                store.update_state(
+                    job_id,
+                    "completed",
+                    patch={"terminal_marker": True},
+                )
+            finally:
+                stop.set()
 
         def reader() -> None:
             trailing = 0

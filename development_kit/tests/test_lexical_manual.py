@@ -2,7 +2,6 @@ import shutil
 import sqlite3
 import subprocess
 import sys
-import uuid
 from contextlib import closing
 from pathlib import Path
 from types import SimpleNamespace
@@ -19,8 +18,8 @@ from src.tools.session import session_manager
 
 
 @pytest.fixture()
-def manual_index() -> Path:
-    root = Path("D:/comsol_docs_fts_test") / uuid.uuid4().hex
+def manual_index(ascii_tmp_path) -> Path:
+    root = ascii_tmp_path / "lexical"
     index = root / "manuals.sqlite3"
     build_index_from_records(
         [

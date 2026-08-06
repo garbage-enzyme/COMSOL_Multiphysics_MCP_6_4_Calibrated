@@ -35,6 +35,11 @@ CONTROL_PLANE_READ_LIMIT_SECONDS = 15.0
 LIVE_CLEANUP_LIMIT_SECONDS = 30.0
 
 
+def _require(condition: object, detail: object) -> None:
+    if not condition:
+        raise RuntimeError(str(detail))
+
+
 def _controlled_cases() -> tuple[dict[str, Any], ...]:
     fixture = controlled_fixture_from_environment()
     fixture["validation_policy"] = {
@@ -138,12 +143,12 @@ async def _discover_profile(profile: str) -> dict[str, Any]:
             capabilities_result = await session.call_tool("capabilities", {})
             capabilities = _decode(capabilities_result)
     expected = PROFILE_COUNTS[profile]
-    assert len(names) == expected, (profile, len(names), expected)
-    assert capabilities["profile"] == profile, capabilities
-    assert capabilities["tool_count"] == expected, capabilities
+    _require(len(names) == expected, (profile, len(names), expected))
+    _require(capabilities["profile"] == profile, capabilities)
+    _require(capabilities["tool_count"] == expected, capabilities)
     identity = capabilities["deployment_identity"]
-    assert identity["source_classification"] == "installed_site_package", identity
-    assert identity["contains_local_path"] is False, identity
+    _require(identity["source_classification"] == "installed_site_package", identity)
+    _require(identity["contains_local_path"] is False, identity)
     return {
         "profile": profile,
         "tool_count": len(names),
@@ -174,8 +179,8 @@ async def _setup_live_session(session: ClientSession, output: dict[str, Any]) ->
         {"cores": 8, "version": "6.4"},
         deadline=time.monotonic() + COLD_START_RESPONSE_LIMIT_SECONDS,
     )
-    assert start_result.get("success"), start_result
-    assert start_timing["elapsed_seconds"] <= COLD_START_RESPONSE_LIMIT_SECONDS, start_timing
+    _require(start_result.get("success"), start_result)
+    _require(start_timing["elapsed_seconds"] <= COLD_START_RESPONSE_LIMIT_SECONDS, start_timing)
     output["setup"]["comsol_start"] = {"result": start_result, **start_timing}
     output["setup"]["status_polls"] = await _wait_for_comsol(session)
 
@@ -185,23 +190,23 @@ async def _setup_live_session(session: ClientSession, output: dict[str, Any]) ->
         {},
         deadline=time.monotonic() + CONTROL_PLANE_READ_LIMIT_SECONDS,
     )
-    assert first_disconnect.get("success"), first_disconnect
-    assert first_disconnect.get("client_reusable") is True, first_disconnect
+    _require(first_disconnect.get("success"), first_disconnect)
+    _require(first_disconnect.get("client_reusable") is True, first_disconnect)
     between_status, between_status_timing = await _call_before(
         session,
         "solver_status",
         {},
         deadline=time.monotonic() + CONTROL_PLANE_READ_LIMIT_SECONDS,
     )
-    assert between_status.get("lease", {}).get("state") == "absent", between_status
+    _require(between_status.get("lease", {}).get("state") == "absent", between_status)
     restart_result, restart_timing = await _call_before(
         session,
         "comsol_start",
         {"cores": 8, "version": "6.4"},
         deadline=time.monotonic() + COLD_START_RESPONSE_LIMIT_SECONDS,
     )
-    assert restart_result.get("success"), restart_result
-    assert restart_timing["elapsed_seconds"] <= COLD_START_RESPONSE_LIMIT_SECONDS, restart_timing
+    _require(restart_result.get("success"), restart_result)
+    _require(restart_timing["elapsed_seconds"] <= COLD_START_RESPONSE_LIMIT_SECONDS, restart_timing)
     restart_polls = await _wait_for_comsol(session)
     output["setup"]["same_host_start_disconnect_start"] = {
         "response_limit_seconds": COLD_START_RESPONSE_LIMIT_SECONDS,
@@ -238,9 +243,7 @@ async def _cleanup_live_session(session: ClientSession, model_names: list[str]) 
                 "error_type": type(exc).__name__,
             }
     try:
-        result, timing = await _call_before(
-            session, "comsol_disconnect", {}, deadline=deadline
-        )
+        result, timing = await _call_before(session, "comsol_disconnect", {}, deadline=deadline)
         step_passed = result.get("success") is True
         steps["comsol_disconnect"] = {"passed": step_passed, "result": result, **timing}
         passed = passed and step_passed
@@ -293,14 +296,14 @@ async def _live_three_call_matrix() -> dict[str, Any]:
                     loaded, load_timing = await _call(
                         session, "model_load", {"file_path": str(source)}
                     )
-                    assert loaded.get("success"), loaded
+                    _require(loaded.get("success"), loaded)
                     model_name = loaded["model"]["name"]
                     loaded_model_names.append(model_name)
 
                     calls: list[dict[str, Any]] = []
                     ownership, timing = await _call(session, "solver_status", {})
                     calls.append({"summary": ownership, **timing})
-                    assert ownership.get("success") and not ownership.get("collision"), ownership
+                    _require(ownership.get("success") and not ownership.get("collision"), ownership)
 
                     preflight, timing = await _call(
                         session,
@@ -336,7 +339,7 @@ async def _live_three_call_matrix() -> dict[str, Any]:
                             **timing,
                         }
                     )
-                    assert preflight.get("success"), preflight
+                    _require(preflight.get("success"), preflight)
 
                     audit, timing = await _call(
                         session,
@@ -375,11 +378,13 @@ async def _live_three_call_matrix() -> dict[str, Any]:
                             **timing,
                         }
                     )
-                    assert audit.get("success"), audit
-                    assert _sha256(source) == source_hash
+                    _require(audit.get("success"), audit)
+                    _require(_sha256(source) == source_hash, "controlled source hash changed")
                     final_stat = source.stat()
-                    assert final_stat.st_mtime_ns == source_stat.st_mtime_ns
-                    assert final_stat.st_size == source_stat.st_size
+                    _require(
+                        final_stat.st_mtime_ns == source_stat.st_mtime_ns, "source mtime changed"
+                    )
+                    _require(final_stat.st_size == source_stat.st_size, "source size changed")
                     output["cases"].append(
                         {
                             "name": case["name"],
@@ -393,7 +398,7 @@ async def _live_three_call_matrix() -> dict[str, Any]:
                     removed, remove_timing = await _call(
                         session, "model_remove", {"model_name": model_name}
                     )
-                    assert removed.get("success"), removed
+                    _require(removed.get("success"), removed)
                     loaded_model_names.remove(model_name)
                     output["cases"][-1]["cleanup"] = {"model_remove": removed, **remove_timing}
             finally:
@@ -401,7 +406,7 @@ async def _live_three_call_matrix() -> dict[str, Any]:
             if output["cleanup"]["passed"] is not True:
                 raise RuntimeError("live-profile cleanup did not complete")
     output["elapsed_seconds"] = time.perf_counter() - started
-    assert len(output["cases"]) == len(cases)
+    _require(len(output["cases"]) == len(cases), "live case count mismatch")
     return output
 
 

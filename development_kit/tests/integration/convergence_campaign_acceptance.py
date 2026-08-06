@@ -6,9 +6,9 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path
 import sys
 import time
+from pathlib import Path
 from typing import Any, Callable
 
 from src.build_identity import get_build_identity
@@ -16,7 +16,6 @@ from src.jobs.convergence_campaign import normalize_convergence_campaign_spec
 from src.jobs.convergence_campaign_rows import read_convergence_campaign_levels
 from src.jobs.convergence_campaign_worker import _run
 from src.jobs.store import JobStore, process_identity
-
 
 MAX_INPUT_BYTES = 4 * 1024 * 1024
 
@@ -111,21 +110,36 @@ def run_acceptance(
         },
     )
     started = time.perf_counter()
-    exit_code = worker_runner(str(store.root), job_id, native_cancel_enabled=True)
     directory = store.job_dir(job_id)
-    state = store.read_state(job_id)
-    rows = read_convergence_campaign_levels(
-        directory / "convergence_levels.jsonl", spec, artifact_root=directory
-    )
+    state = None
+    rows = []
+    exit_code = None
+    error = None
+    try:
+        exit_code = worker_runner(str(store.root), job_id, native_cancel_enabled=True)
+        state = store.read_state(job_id)
+        rows = read_convergence_campaign_levels(
+            directory / "convergence_levels.jsonl", spec, artifact_root=directory
+        )
+    except Exception as exc:
+        error = {"type": type(exc).__name__, "message": str(exc)[-1000:]}
+        try:
+            state = store.read_state(job_id)
+        except Exception:
+            state = None
     source_after = {
         level["level_id"]: _sha256_file(Path(level["spectral_job"]["source_model_path"]))
         for level in spec["levels"]
     }
     lease_absent = not (runtime / "solver_owner.json").exists()
+    complete_rows = len(rows) == len(spec["levels"])
     receipt = {
         "success": (
-            exit_code == 0
-            and state["status"] == "completed"
+            error is None
+            and exit_code == 0
+            and isinstance(state, dict)
+            and state.get("status") == "completed"
+            and complete_rows
             and source_after == source_before
             and lease_absent
         ),
@@ -140,9 +154,11 @@ def run_acceptance(
         "source_unchanged": source_after == source_before,
         "state": state,
         "levels": rows,
+        "levels_complete": complete_rows,
+        "error": error,
         "cleanup": {
             "lease_absent": lease_absent,
-            "worker_state_cleanup": state.get("cleanup"),
+            "worker_state_cleanup": state.get("cleanup") if isinstance(state, dict) else None,
             "external_process_absence": "parent_must_verify_after_runner_exit",
         },
     }

@@ -91,6 +91,49 @@ def test_property_acceptance_restores_after_temporary_readback_mismatch(monkeypa
     assert writes == ["temporary", "old"]
 
 
+def test_property_acceptance_rejects_a_noop_setter_and_restores(monkeypatch):
+    reads = iter(("old", "old", "old"))
+    writes = []
+    monkeypatch.setattr(
+        property_gate,
+        "get_existing_property",
+        lambda *_args: {"success": True, "value": next(reads)},
+    )
+    monkeypatch.setattr(
+        property_gate,
+        "set_existing_property",
+        lambda *_args: writes.append(_args[-1]) or {"success": True, "new_value": "old"},
+    )
+
+    with pytest.raises(RuntimeError, match="did not apply"):
+        property_gate._round_trip_case(
+            object(), "geometry_feature", "geom1/blk1", "base", "temporary"
+        )
+
+    assert writes == ["temporary", "old"]
+
+
+def test_property_acceptance_clears_client_when_gate_fails(tmp_path, monkeypatch):
+    calls = []
+
+    class Client:
+        def clear(self):
+            calls.append("clear")
+
+    monkeypatch.setenv("COMSOL_MCP_RUNTIME_DIR", str(tmp_path))
+    monkeypatch.setattr(property_gate.mph, "Client", lambda **_kwargs: Client())
+    monkeypatch.setattr(
+        property_gate,
+        "_run_gate",
+        lambda *_args: (_ for _ in ()).throw(RuntimeError("injected gate failure")),
+    )
+
+    with pytest.raises(RuntimeError, match="gate failure"):
+        property_gate.main()
+
+    assert calls == ["clear"]
+
+
 def test_property_acceptance_verifies_exact_runtime_and_observes_solution_tags():
     class Java:
         @staticmethod
