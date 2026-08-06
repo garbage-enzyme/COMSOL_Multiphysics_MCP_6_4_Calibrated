@@ -10,6 +10,7 @@ import pytest
 
 from comsol_mcp.durable import domain_sha256_v2
 from comsol_mcp.research.optimizers import (
+    DeterministicGridOptimizer,
     DeterministicLatinHypercubeOptimizer,
     DeterministicRandomOptimizer,
     ResearchOptimizerProtocol,
@@ -164,11 +165,74 @@ def test_lhs_rejects_random_checkpoint_and_cross_backend_proposal():
         DeterministicLatinHypercubeOptimizer.restore(_space(), random_checkpoint)
 
 
+def test_grid_enumerates_exact_unique_cartesian_product_and_exhausts():
+    optimizer = DeterministicGridOptimizer(_mixed_space(), levels=3)
+    proposals = [optimizer.ask() for _ in range(54)]
+    values = [tuple(proposal["values"].items()) for proposal in proposals]
+    assert len(values) == len(set(values)) == 54
+    assert {proposal["values"]["patch_length_x"] for proposal in proposals} == {
+        75.0,
+        100.0,
+        125.0,
+    }
+    assert {proposal["values"]["patch_length_y"] for proposal in proposals} == {
+        60.0,
+        80.0,
+        100.0,
+    }
+    assert {proposal["values"]["mesh_level"] for proposal in proposals} == {1, 3, 4}
+    assert {proposal["values"]["material_state"] for proposal in proposals} == {
+        "gold",
+        "silver",
+    }
+    with pytest.raises(ValueError, match="grid sample limit is exhausted"):
+        optimizer.ask()
+
+
+@pytest.mark.parametrize("levels", [False, 0, 65])
+def test_grid_rejects_invalid_levels(levels):
+    with pytest.raises(ValueError, match="levels"):
+        DeterministicGridOptimizer(_space(), levels=levels)
+
+
+def test_grid_rejects_oversized_cartesian_product():
+    with pytest.raises(ValueError, match="more than 4096 samples"):
+        DeterministicGridOptimizer(_mixed_space(), levels=32)
+
+
+def test_grid_checkpoint_restore_preserves_next_cartesian_point():
+    optimizer = DeterministicGridOptimizer(_space(), levels=3)
+    first = optimizer.ask()
+    optimizer.tell(
+        first,
+        candidate_fingerprint="a" * 64,
+        status="completed",
+        score_fingerprint="b" * 64,
+        losses={"peak": 2.0, "q": 0.5},
+    )
+    checkpoint = optimizer.checkpoint(
+        campaign_fingerprint="c" * 64,
+        decision_fingerprint="d" * 64,
+        created_at="2026-08-06T00:00:00Z",
+    )
+    restored = DeterministicGridOptimizer.restore(_space(), checkpoint)
+    assert restored.axes == optimizer.axes
+    assert restored.observations == optimizer.observations
+    assert restored.ask() == optimizer.ask()
+    explanation = restored.explain(restored.ask())
+    assert explanation["parameters"]["sample_count"] == 9
+    assert set(explanation["parameters"]["axis_positions"]) == {
+        "patch_length_x",
+        "patch_length_y",
+    }
+
+
 @pytest.mark.parametrize(
     "optimizer",
     [
         DeterministicRandomOptimizer(_space(), seed=1),
         DeterministicLatinHypercubeOptimizer(_space(), seed=1, sample_count=8),
+        DeterministicGridOptimizer(_space(), levels=3),
     ],
 )
 def test_baselines_implement_runtime_optimizer_protocol(optimizer):

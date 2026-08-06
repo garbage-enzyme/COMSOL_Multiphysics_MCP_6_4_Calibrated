@@ -23,8 +23,12 @@ RANDOM_BACKEND_NAME = "deterministic_random"
 RANDOM_BACKEND_VERSION = "1.0.0"
 LHS_BACKEND_NAME = "deterministic_latin_hypercube"
 LHS_BACKEND_VERSION = "1.0.0"
+GRID_BACKEND_NAME = "deterministic_grid"
+GRID_BACKEND_VERSION = "1.0.0"
 MAX_PROPOSALS = 1_000_000_000
 MAX_LHS_SAMPLES = 4096
+MAX_GRID_LEVELS = 64
+MAX_GRID_SAMPLES = 4096
 MAX_OBJECTIVE_LOSSES = 128
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _RESULT_STATUSES = {"completed", "failed", "infeasible"}
@@ -154,6 +158,65 @@ def _lhs_proposal_values(
             continuous_lower + (continuous_upper - continuous_lower) * unit, digits
         )
     return {key: values[key] for key in sorted(values)}
+
+
+def _grid_levels(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= MAX_GRID_LEVELS:
+        raise ValueError(f"levels must be an integer from 1 to {MAX_GRID_LEVELS}")
+    return value
+
+
+def _grid_axes(space: Mapping[str, Any], levels: int) -> dict[str, list[Any]]:
+    digits = space["canonicalization"]["float_digits"]
+    axes: dict[str, list[Any]] = {}
+    for variable in space["variables"]:
+        variable_id = variable["variable_id"]
+        kind = variable["kind"]
+        if kind in {"categorical", "ordinal"}:
+            axis = list(variable["allowed_values"])
+        elif levels == 1:
+            axis = [variable["baseline"]]
+        elif kind == "integer":
+            integer_lower = int(variable["lower"])
+            integer_upper = int(variable["upper"])
+            available = integer_upper - integer_lower + 1
+            count = min(levels, available)
+            axis = [
+                integer_lower + round(index * (available - 1) / (count - 1))
+                for index in range(count)
+            ]
+        else:
+            continuous_lower = float(variable["lower"])
+            continuous_upper = float(variable["upper"])
+            axis = [
+                round(
+                    continuous_lower + index * (continuous_upper - continuous_lower) / (levels - 1),
+                    digits,
+                )
+                for index in range(levels)
+            ]
+        if len(axis) != len({repr(item) for item in axis}):
+            raise ValueError("grid levels collapse under design-space canonicalization")
+        axes[variable_id] = axis
+    sample_count = math.prod(len(axis) for axis in axes.values())
+    if sample_count > MAX_GRID_SAMPLES:
+        raise ValueError(f"grid contains more than {MAX_GRID_SAMPLES} samples")
+    return {key: axes[key] for key in sorted(axes)}
+
+
+def _grid_axis_positions(axes: Mapping[str, list[Any]], index: int) -> dict[str, int]:
+    positions: dict[str, int] = {}
+    remaining = index
+    for variable_id in reversed(list(axes)):
+        size = len(axes[variable_id])
+        positions[variable_id] = remaining % size
+        remaining //= size
+    return {key: positions[key] for key in sorted(positions)}
+
+
+def _grid_proposal_values(axes: Mapping[str, list[Any]], index: int) -> dict[str, Any]:
+    positions = _grid_axis_positions(axes, index)
+    return {key: axes[key][positions[key]] for key in sorted(axes)}
 
 
 def _normalize_proposal(value: object) -> dict[str, Any]:
@@ -584,7 +647,140 @@ class DeterministicLatinHypercubeOptimizer(DeterministicRandomOptimizer):
         return optimizer
 
 
+class DeterministicGridOptimizer(DeterministicRandomOptimizer):
+    """Finite deterministic Cartesian-grid baseline for mixed design spaces."""
+
+    backend_name = GRID_BACKEND_NAME
+    backend_version = GRID_BACKEND_VERSION
+    strategy = "lexicographic_cartesian_product"
+
+    def __init__(self, design_space: object, *, levels: int) -> None:
+        self.space = normalize_design_space(design_space)
+        self.levels = _grid_levels(levels)
+        self.axes = _grid_axes(self.space, self.levels)
+        self.sample_count = math.prod(len(axis) for axis in self.axes.values())
+        axes_fingerprint = domain_sha256_v2("comsol_mcp.research_optimizer_grid_axes", self.axes)
+        backend_body = {
+            "name": GRID_BACKEND_NAME,
+            "version": GRID_BACKEND_VERSION,
+            "space_fingerprint": self.space["space_fingerprint"],
+            "levels": self.levels,
+            "axes_fingerprint": axes_fingerprint,
+        }
+        self.backend_identity = domain_sha256_v2(
+            "comsol_mcp.research_optimizer_backend", backend_body
+        )
+        self.next_index = 0
+        self.observations: dict[str, dict[str, Any]] = {}
+
+    def _proposal(self, index: int) -> dict[str, Any]:
+        body = {
+            "schema_name": OPTIMIZER_PROPOSAL_SCHEMA_NAME,
+            "schema_version": OPTIMIZER_PROPOSAL_SCHEMA_VERSION,
+            "backend_identity": self.backend_identity,
+            "space_fingerprint": self.space["space_fingerprint"],
+            "proposal_index": index,
+            "values": _grid_proposal_values(self.axes, index),
+        }
+        return {
+            **body,
+            "proposal_fingerprint": domain_sha256_v2(OPTIMIZER_PROPOSAL_SCHEMA_NAME, body),
+        }
+
+    def ask(self) -> dict[str, Any]:
+        if self.next_index >= self.sample_count:
+            raise ValueError("grid sample limit is exhausted")
+        proposal = self._proposal(self.next_index)
+        self.next_index += 1
+        return proposal
+
+    def _proposal_limit(self) -> int:
+        return self.sample_count
+
+    def _explanation_parameters(self, index: int) -> dict[str, Any]:
+        return {
+            "levels": self.levels,
+            "sample_count": self.sample_count,
+            "axis_positions": _grid_axis_positions(self.axes, index),
+        }
+
+    def checkpoint(
+        self,
+        *,
+        campaign_fingerprint: str,
+        decision_fingerprint: str,
+        created_at: str,
+    ) -> dict[str, Any]:
+        observations = [self.observations[key] for key in sorted(self.observations)]
+        history_fingerprint = domain_sha256_v2(
+            "comsol_mcp.research_optimizer_history", observations
+        )
+        return normalize_optimizer_checkpoint(
+            {
+                "schema_name": "comsol_mcp.research_optimizer_checkpoint",
+                "schema_version": "1.0.0",
+                "campaign_fingerprint": campaign_fingerprint,
+                "sequence": self.next_index,
+                "decision_fingerprint": decision_fingerprint,
+                "backend": {
+                    "name": GRID_BACKEND_NAME,
+                    "version": GRID_BACKEND_VERSION,
+                    "identity": self.backend_identity,
+                },
+                "random_state": {"levels": self.levels, "next_index": self.next_index},
+                "optimizer_state": {"observations": observations},
+                "history_fingerprint": history_fingerprint,
+                "candidate_fingerprints": sorted(self.observations),
+                "created_at": _timestamp(created_at, "created_at"),
+            }
+        )
+
+    @classmethod
+    def restore(cls, design_space: object, checkpoint: object) -> "DeterministicGridOptimizer":
+        normalized = normalize_optimizer_checkpoint(checkpoint)
+        random_state = _object(
+            normalized["random_state"], {"levels", "next_index"}, "checkpoint.random_state"
+        )
+        optimizer = cls(design_space, levels=_grid_levels(random_state["levels"]))
+        if (
+            normalized["backend"]["name"] != GRID_BACKEND_NAME
+            or normalized["backend"]["version"] != GRID_BACKEND_VERSION
+            or normalized["backend"]["identity"] != optimizer.backend_identity
+        ):
+            raise ValueError("optimizer checkpoint backend identity is incompatible")
+        next_index = random_state["next_index"]
+        if (
+            isinstance(next_index, bool)
+            or not isinstance(next_index, int)
+            or not 0 <= next_index <= optimizer.sample_count
+            or next_index != normalized["sequence"]
+        ):
+            raise ValueError("optimizer checkpoint proposal sequence is invalid")
+        state = _object(normalized["optimizer_state"], {"observations"}, "optimizer_state")
+        observations = state["observations"]
+        if not isinstance(observations, list):
+            raise ValueError("optimizer checkpoint observations must be a list")
+        restored: dict[str, dict[str, Any]] = {}
+        for observation in observations:
+            if not isinstance(observation, dict):
+                raise ValueError("optimizer checkpoint observations must be objects")
+            candidate = _fingerprint(
+                observation.get("candidate_fingerprint"), "candidate_fingerprint"
+            )
+            restored[str(candidate)] = dict(observation)
+        ordered = [restored[key] for key in sorted(restored)]
+        if normalized["history_fingerprint"] != domain_sha256_v2(
+            "comsol_mcp.research_optimizer_history", ordered
+        ) or normalized["candidate_fingerprints"] != sorted(restored):
+            raise ValueError("optimizer checkpoint history identity is invalid")
+        optimizer.next_index = next_index
+        optimizer.observations = restored
+        return optimizer
+
+
 __all__ = [
+    "GRID_BACKEND_NAME",
+    "GRID_BACKEND_VERSION",
     "LHS_BACKEND_NAME",
     "LHS_BACKEND_VERSION",
     "OPTIMIZER_EXPLANATION_SCHEMA_NAME",
@@ -593,6 +789,7 @@ __all__ = [
     "OPTIMIZER_PROPOSAL_SCHEMA_VERSION",
     "OPTIMIZER_STATE_SCHEMA_NAME",
     "OPTIMIZER_STATE_SCHEMA_VERSION",
+    "DeterministicGridOptimizer",
     "DeterministicLatinHypercubeOptimizer",
     "DeterministicRandomOptimizer",
     "ResearchOptimizerProtocol",
