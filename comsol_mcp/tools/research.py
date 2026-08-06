@@ -73,5 +73,96 @@ def register_research_tools(mcp: MCPServer) -> None:
                 "filesystem_modified": False,
             }
 
+    @mcp.tool()  # type: ignore[untyped-decorator]
+    def research_optimizer_advance(
+        design_space: dict[str, Any],
+        campaign_fingerprint: str,
+        decision_fingerprint: str,
+        created_at: str,
+        seed: int = 17001,
+        warmup_count: int = 8,
+        candidate_pool_count: int = 256,
+        checkpoint: dict[str, Any] | None = None,
+        feedback: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Restore optional state, apply one exact result, and return the next proposal."""
+        try:
+            from comsol_mcp.research.adaptive_acquisition import (
+                GaussianProcessExpectedImprovementOptimizer,
+            )
+
+            if checkpoint is None:
+                if feedback is not None:
+                    raise ValueError("feedback requires a prior optimizer checkpoint")
+                optimizer = GaussianProcessExpectedImprovementOptimizer(
+                    design_space,
+                    seed=seed,
+                    warmup_count=warmup_count,
+                    candidate_pool_count=candidate_pool_count,
+                )
+            else:
+                optimizer = GaussianProcessExpectedImprovementOptimizer.restore(
+                    design_space, checkpoint
+                )
+                if feedback is not None:
+                    required = {
+                        "proposal_index",
+                        "proposal_fingerprint",
+                        "candidate_fingerprint",
+                        "status",
+                        "score_fingerprint",
+                        "losses",
+                    }
+                    if set(feedback) != required:
+                        raise ValueError("feedback fields are incomplete or unknown")
+                    proposal = optimizer.proposals.get(feedback["proposal_index"])
+                    if (
+                        proposal is None
+                        or proposal["proposal_fingerprint"] != feedback["proposal_fingerprint"]
+                    ):
+                        raise ValueError("feedback does not bind an exact prior proposal")
+                    optimizer.tell(
+                        proposal,
+                        candidate_fingerprint=feedback["candidate_fingerprint"],
+                        status=feedback["status"],
+                        score_fingerprint=feedback["score_fingerprint"],
+                        losses=feedback["losses"],
+                    )
+            if optimizer.state()["remaining_proposals"] <= 0:
+                return {
+                    "success": True,
+                    "state": "exhausted",
+                    "proposal": None,
+                    "checkpoint": optimizer.checkpoint(
+                        campaign_fingerprint=campaign_fingerprint,
+                        decision_fingerprint=decision_fingerprint,
+                        created_at=created_at,
+                    ),
+                    "solver_started": False,
+                    "filesystem_modified": False,
+                }
+            proposal = optimizer.ask()
+            return {
+                "success": True,
+                "state": "proposal_ready",
+                "proposal": proposal,
+                "explanation": optimizer.explain(proposal),
+                "checkpoint": optimizer.checkpoint(
+                    campaign_fingerprint=campaign_fingerprint,
+                    decision_fingerprint=decision_fingerprint,
+                    created_at=created_at,
+                ),
+                "solver_started": False,
+                "filesystem_modified": False,
+            }
+        except (KeyError, TypeError, ValueError) as exc:
+            return {
+                "success": False,
+                "reason_code": "research_optimizer_rejected",
+                "error": str(exc)[:2048],
+                "solver_started": False,
+                "filesystem_modified": False,
+            }
+
 
 __all__ = ["register_research_tools"]

@@ -185,6 +185,9 @@ preparation tools. `research_campaign_compile` turns a complete goal, frozen
 design space, and explicit approval into a fingerprinted manifest; it never
 starts a solver. `research_robustness_plan` creates a centered one-axis-at-a-time
 perturbation matrix and rejects candidates that would require bound clipping.
+`research_optimizer_advance` is a stateless checkpoint/feedback step for the
+experimental adaptive backend; clients own the returned checkpoint and can
+resume exact proposals after a restart.
 These tools prepare evidence-safe work; they do not start an autonomous
 campaign, change materials, claim success without caller tolerances, or make
 RCWA mandatory when an independent adapter is not applicable.

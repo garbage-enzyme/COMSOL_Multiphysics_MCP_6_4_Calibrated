@@ -151,7 +151,9 @@ GUI 打开期间不要同时编辑 JSON。只有用户明确要求 agent 管理�
 fingerprint 的 manifest，且不会启动求解器；`research_robustness_plan` 创建以候选点为
 中心的单轴正负扰动矩阵，并拒绝任何需要越界 clipping 的候选。它们只用于安全准备，
 不会自行启动自主 campaign、改变材料、在缺少调用方阈值时宣称成功，也不会在独立
-adapter 不适用时强制要求 RCWA。
+adapter 不适用时强制要求 RCWA。`research_optimizer_advance` 是无状态的
+checkpoint/feedback 步骤；客户端负责保存返回的 checkpoint，因此重启后仍可恢复
+完全一致的 proposal。
 
 Profile 只控制 COMSOL 自动化仿真工具以及未来自主探索工具的可见性。其他正交功能使用
 独立、默认关闭的 Boolean 开关；它们可与任意 profile 组合，也可同时开启：

@@ -7322,6 +7322,90 @@
     "title": "research_campaign_compileArguments",
     "type": "object"
   },
+  "research_optimizer_advance": {
+    "additionalProperties": false,
+    "maxProperties": 256,
+    "properties": {
+      "campaign_fingerprint": {
+        "maxLength": 16384,
+        "title": "Campaign Fingerprint",
+        "type": "string"
+      },
+      "candidate_pool_count": {
+        "default": 256,
+        "maximum": 1e+308,
+        "minimum": -1e+308,
+        "title": "Candidate Pool Count",
+        "type": "integer"
+      },
+      "checkpoint": {
+        "anyOf": [
+          {
+            "additionalProperties": false,
+            "maxProperties": 256,
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Checkpoint"
+      },
+      "created_at": {
+        "maxLength": 16384,
+        "title": "Created At",
+        "type": "string"
+      },
+      "decision_fingerprint": {
+        "maxLength": 16384,
+        "title": "Decision Fingerprint",
+        "type": "string"
+      },
+      "design_space": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "title": "Design Space",
+        "type": "object"
+      },
+      "feedback": {
+        "anyOf": [
+          {
+            "additionalProperties": false,
+            "maxProperties": 256,
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Feedback"
+      },
+      "seed": {
+        "default": 17001,
+        "maximum": 1e+308,
+        "minimum": -1e+308,
+        "title": "Seed",
+        "type": "integer"
+      },
+      "warmup_count": {
+        "default": 8,
+        "maximum": 1e+308,
+        "minimum": -1e+308,
+        "title": "Warmup Count",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "design_space",
+      "campaign_fingerprint",
+      "decision_fingerprint",
+      "created_at"
+    ],
+    "title": "research_optimizer_advanceArguments",
+    "type": "object"
+  },
   "research_robustness_plan": {
     "additionalProperties": false,
     "maxProperties": 256,

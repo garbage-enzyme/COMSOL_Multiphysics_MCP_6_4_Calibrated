@@ -262,6 +262,7 @@ _TOOLS_BY_REGISTRAR = {
     ),
     "comsol_mcp.tools.research.register_research_tools": (
         "research_campaign_compile",
+        "research_optimizer_advance",
         "research_robustness_plan",
     ),
     "comsol_mcp.tools.shared_session.register_shared_session_tools": (
@@ -375,6 +376,7 @@ _EXPERIMENTAL_TOOLS = frozenset(
         "shared_model_snapshot",
         "shared_model_adopt",
         "research_campaign_compile",
+        "research_optimizer_advance",
         "research_robustness_plan",
     }
 )
@@ -551,6 +553,7 @@ _EXPLICIT_READ_ONLY_TOOLS = frozenset(
         "thermal_material_validate",
         "thermal_material_evaluate",
         "research_campaign_compile",
+        "research_optimizer_advance",
         "research_robustness_plan",
         "study_get_progress",
         "study_list",
@@ -618,6 +621,7 @@ _SOLVER_FREE_TOOLS = frozenset(
         "convergence_evaluate",
         "branch_continuation_plan",
         "research_campaign_compile",
+        "research_optimizer_advance",
         "research_robustness_plan",
         "geometry_fin_preview",
         "geometry_blocks_preview",
@@ -631,6 +635,7 @@ _SOLVER_FREE_TOOLS = frozenset(
         "thermal_material_validate",
         "thermal_material_evaluate",
         "research_campaign_compile",
+        "research_optimizer_advance",
         "research_robustness_plan",
     }
 )

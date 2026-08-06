@@ -31,3 +31,36 @@ def test_robustness_plan_dispatches_and_rejects_boundary_clipping():
     assert len(accepted["robustness_matrix"]["points"]) == 5
     assert rejected["success"] is False
     assert rejected["reason_code"] == "research_robustness_rejected"
+
+
+def test_optimizer_advance_round_trips_checkpoint_and_exact_feedback():
+    tool = _tools()["research_optimizer_advance"]
+    first = tool.fn(
+        _space(),
+        "a" * 64,
+        "b" * 64,
+        "2026-08-07T00:00:00Z",
+        warmup_count=2,
+        candidate_pool_count=8,
+    )
+    proposal = first["proposal"]
+    feedback = {
+        "proposal_index": proposal["proposal_index"],
+        "proposal_fingerprint": proposal["proposal_fingerprint"],
+        "candidate_fingerprint": "c" * 64,
+        "status": "completed",
+        "score_fingerprint": "d" * 64,
+        "losses": {"peak": 1.0},
+    }
+    second = tool.fn(
+        _space(),
+        "a" * 64,
+        "e" * 64,
+        "2026-08-07T00:00:01Z",
+        checkpoint=first["checkpoint"],
+        feedback=feedback,
+    )
+    assert first["success"] is True
+    assert second["success"] is True
+    assert second["state"] == "proposal_ready"
+    assert second["proposal"]["proposal_index"] == proposal["proposal_index"] + 1
