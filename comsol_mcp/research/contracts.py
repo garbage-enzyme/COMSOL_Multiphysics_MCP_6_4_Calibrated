@@ -343,8 +343,12 @@ def _normalize_variable(value: object, index: int) -> dict[str, Any]:
 
 def normalize_design_space(value: object) -> dict[str, Any]:
     """Normalize one closed design space and derive an optimizer-independent fingerprint."""
+    bounded = _bounded_json(value, "design space", MAX_DESIGN_SPACE_BYTES)
+    supplied_fingerprint = None
+    if isinstance(bounded, dict) and "space_fingerprint" in bounded:
+        supplied_fingerprint = bounded.pop("space_fingerprint")
     raw = _object(
-        _bounded_json(value, "design space", MAX_DESIGN_SPACE_BYTES),
+        bounded,
         {
             "schema_name",
             "schema_version",
@@ -425,6 +429,8 @@ def normalize_design_space(value: object) -> dict[str, Any]:
         "adapter_mappings": sorted(normalized_mappings, key=lambda item: item["variable_id"]),
     }
     normalized["space_fingerprint"] = domain_sha256_v2(DESIGN_SPACE_SCHEMA_NAME, normalized)
+    if supplied_fingerprint is not None and supplied_fingerprint != normalized["space_fingerprint"]:
+        raise ValueError("design-space fingerprint is invalid")
     return normalized
 
 

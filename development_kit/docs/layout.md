@@ -271,6 +271,7 @@ models are intentionally absent.
 - `development_kit/tests/test_research_state.py` — This module tests backend-neutral checkpoints and bounded evidence-separated candidate portfolios.
 - `development_kit/tests/test_research_journal.py` — This module tests fsync'd appends, stale-tail rejection, partial-tail truncation, and exact hash-chain recovery.
 - `development_kit/tests/test_research_evaluations.py` — This module tests durable started and terminal evaluation authority and journal replay.
+- `development_kit/tests/test_research_coordinator.py` — This module tests solver-free budget admission, duplicate suppression, cancellation, and exact crash replay.
 - `development_kit/tests/test_resource_admission.py` — This module tests resource policy normalization, telemetry, and admission decisions.
 - `development_kit/tests/test_results.py` — This module tests result normalization without a COMSOL client.
 - `development_kit/tests/test_runtime_paths.py` — This module tests shared ASCII-safe runtime and lease paths.
@@ -343,6 +344,7 @@ models are intentionally absent.
 - `comsol_mcp/research/state.py` — This module normalizes backend-neutral optimizer checkpoints and candidate portfolios.
 - `comsol_mcp/research/journal.py` — This module implements the append-only hash-chained authority for durable research artifacts.
 - `comsol_mcp/research/evaluations.py` — This module normalizes started and terminal candidate evaluation records without interpreting results.
+- `comsol_mcp/research/coordinator.py` — This module serializes injected evaluators behind durable admission, cancellation, and replay contracts.
 
 - `src/__init__.py` — This compatibility package aliases legacy imports to the canonical implementation modules.
 - `comsol_mcp/__init__.py` — This module defines the single authored package version.

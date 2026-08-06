@@ -131,6 +131,11 @@ def test_d0_bounds_and_fingerprints_are_stable():
     second = normalize_design_space(reordered)
     assert first["space_fingerprint"] == second["space_fingerprint"]
     assert first["variables"][0]["variable_id"] == "patch_length_x"
+    assert normalize_design_space(first) == first
+    tampered = copy.deepcopy(first)
+    tampered["variables"][0]["baseline"] = 101.0
+    with pytest.raises(ValueError, match="fingerprint is invalid"):
+        normalize_design_space(tampered)
 
 
 def test_goal_fingerprint_is_domain_separated_and_order_independent():

@@ -80,6 +80,7 @@ LINT_TARGETS = (
     "development_kit/tests/test_research_state.py",
     "development_kit/tests/test_research_journal.py",
     "development_kit/tests/test_research_evaluations.py",
+    "development_kit/tests/test_research_coordinator.py",
     "development_kit/tests/test_schema_registry.py",
     "development_kit/tests/test_standalone_acceptance_runner.py",
     "development_kit/tests/test_standalone_executable.py",
