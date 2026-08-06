@@ -7,6 +7,9 @@ from statistics import fmean, median
 from typing import Any, Mapping
 
 from comsol_mcp.durable import domain_sha256_v2, validate_finite_json
+from comsol_mcp.research.adaptive_acquisition import (
+    GaussianProcessExpectedImprovementOptimizer,
+)
 from comsol_mcp.research.optimizers import (
     DeterministicGridOptimizer,
     DeterministicLatinHypercubeOptimizer,
@@ -17,6 +20,8 @@ BENCHMARK_SUITE_SCHEMA = "comsol_mcp.synthetic_research_benchmark_suite"
 BENCHMARK_SUITE_VERSION = "1.0.0"
 OPTIMIZER_BENCHMARK_SCHEMA = "comsol_mcp.synthetic_optimizer_benchmark_receipt"
 OPTIMIZER_BENCHMARK_VERSION = "1.0.0"
+ADAPTIVE_BENCHMARK_SCHEMA = "comsol_mcp.synthetic_adaptive_optimizer_benchmark_receipt"
+ADAPTIVE_BENCHMARK_VERSION = "1.0.0"
 OPTIMIZER_BENCHMARK_SEEDS = (17001, 17002, 17003, 17004, 17005, 17006, 17007, 17008)
 _MATERIAL_STATES = {"gold_reference", "gold_low_loss"}
 
@@ -285,14 +290,93 @@ def frozen_optimizer_baseline_benchmark() -> dict[str, Any]:
     return deepcopy(body)
 
 
+def _evaluate_adaptive(spec: Mapping[str, Any], space: Mapping[str, Any], seed: int) -> dict:
+    optimizer = GaussianProcessExpectedImprovementOptimizer(
+        space,
+        seed=seed,
+        warmup_count=8,
+        candidate_pool_count=256,
+    )
+    rows = []
+    for _index in range(spec["evaluation_budget"]):
+        proposal = optimizer.ask()
+        score = _baseline_score(proposal["values"], spec)
+        optimizer.tell(
+            proposal,
+            candidate_fingerprint=domain_sha256_v2(
+                "comsol_mcp.synthetic_candidate", proposal["values"]
+            ),
+            status="completed",
+            score_fingerprint=domain_sha256_v2("comsol_mcp.synthetic_score", score),
+            losses={"peak": score["peak_loss"], "q": score["q_loss"]},
+        )
+        rows.append({"proposal": proposal, "score": score})
+    best = min(
+        rows,
+        key=lambda item: (item["score"]["total_loss"], item["proposal"]["proposal_fingerprint"]),
+    )
+    return {
+        "backend": "internal_gaussian_process_expected_improvement",
+        "seed": seed,
+        "backend_identity": optimizer.backend_identity,
+        "evaluation_count": len(rows),
+        "best_proposal": best["proposal"],
+        "best_score": best["score"],
+    }
+
+
+def frozen_adaptive_optimizer_benchmark() -> dict[str, Any]:
+    """Compare the selected adaptive backend against the frozen baseline receipt."""
+    baseline = frozen_optimizer_baseline_benchmark()
+    suite = frozen_benchmark_suite()
+    spec = next(item for item in suite["benchmarks"] if item["kind"] == "feasible_hidden_target")
+    space = optimizer_benchmark_design_space()
+    runs = [_evaluate_adaptive(spec, space, seed) for seed in OPTIMIZER_BENCHMARK_SEEDS]
+    losses = [run["best_score"]["total_loss"] for run in runs]
+    adaptive = {
+        "run_count": len(runs),
+        "total_evaluations": sum(run["evaluation_count"] for run in runs),
+        "success_count": sum(run["best_score"]["success"] for run in runs),
+        "mean_best_total_loss": fmean(losses),
+        "median_best_total_loss": median(losses),
+        "minimum_best_total_loss": min(losses),
+        "maximum_best_total_loss": max(losses),
+    }
+    comparisons = {
+        name: {
+            "mean_loss_delta": adaptive["mean_best_total_loss"] - values["mean_best_total_loss"],
+            "success_count_delta": adaptive["success_count"] - values["success_count"],
+        }
+        for name, values in baseline["aggregates"].items()
+    }
+    body = {
+        "schema_name": ADAPTIVE_BENCHMARK_SCHEMA,
+        "schema_version": ADAPTIVE_BENCHMARK_VERSION,
+        "suite_fingerprint": suite["suite_fingerprint"],
+        "baseline_benchmark_fingerprint": baseline["benchmark_fingerprint"],
+        "benchmark_id": spec["benchmark_id"],
+        "seeds": list(OPTIMIZER_BENCHMARK_SEEDS),
+        "evaluation_budget": spec["evaluation_budget"],
+        "runs": runs,
+        "adaptive_aggregate": adaptive,
+        "baseline_comparisons": comparisons,
+    }
+    validate_finite_json(body)
+    body["benchmark_fingerprint"] = domain_sha256_v2(ADAPTIVE_BENCHMARK_SCHEMA, body)
+    return deepcopy(body)
+
+
 __all__ = [
     "BENCHMARK_SUITE_SCHEMA",
     "BENCHMARK_SUITE_VERSION",
+    "ADAPTIVE_BENCHMARK_SCHEMA",
+    "ADAPTIVE_BENCHMARK_VERSION",
     "OPTIMIZER_BENCHMARK_SCHEMA",
     "OPTIMIZER_BENCHMARK_SEEDS",
     "OPTIMIZER_BENCHMARK_VERSION",
     "fake_mim_response",
     "frozen_benchmark_suite",
+    "frozen_adaptive_optimizer_benchmark",
     "frozen_optimizer_baseline_benchmark",
     "optimizer_benchmark_design_space",
 ]

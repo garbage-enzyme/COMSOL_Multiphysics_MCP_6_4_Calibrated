@@ -12,9 +12,23 @@ import pytest
 
 from development_kit.benchmarks.research_campaign import (
     fake_mim_response,
+    frozen_adaptive_optimizer_benchmark,
     frozen_benchmark_suite,
     frozen_optimizer_baseline_benchmark,
 )
+
+
+def test_adaptive_benchmark_is_replayable_and_improves_frozen_baselines():
+    first = frozen_adaptive_optimizer_benchmark()
+    second = frozen_adaptive_optimizer_benchmark()
+    assert first == second
+    assert first["adaptive_aggregate"]["run_count"] == 8
+    assert first["adaptive_aggregate"]["total_evaluations"] == 256
+    assert first["adaptive_aggregate"]["success_count"] >= 7
+    assert all(
+        comparison["mean_loss_delta"] < 0.0 for comparison in first["baseline_comparisons"].values()
+    )
+
 
 ROOT = Path(__file__).parents[2]
 
