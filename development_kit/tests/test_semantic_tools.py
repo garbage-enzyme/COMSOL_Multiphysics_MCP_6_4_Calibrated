@@ -247,7 +247,7 @@ from development_kit.tests.mcp_test_support import decode_tool_result as decode
 server = create_server('semantic-feature-subprocess', profile='core')
 tools = asyncio.run(server.list_tools())
 names = sorted(tool.name for tool in tools)
-assert len(names) == 50
+assert len(names) == 48
 assert {'semantic_search','semantic_status','semantic_worker_reset'} <= set(names)
 for name in ('chromadb','torch','sentence_transformers'):
     assert name not in sys.modules, name

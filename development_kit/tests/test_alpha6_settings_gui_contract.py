@@ -42,11 +42,8 @@ def test_alpha6_settings_schema_and_defaults_are_current_and_backward_readable(t
     assert str(user_root / "models").isascii() is False
     assert str(program_root / "runtime").isascii() is True
     assert str(program_root / "artifacts").isascii() is True
-    assert user_defaults["manuals"] == {
-        "enabled": False,
-        "pdf_root": None,
-        "lexical_index": None,
-    }
+    assert user_defaults["manuals"] == {"root": None}
+    assert user_defaults["lexical_docs"] == {"enabled": False, "index_path": None}
     assert user_defaults["semantic_docs"] == {
         "enabled": False,
         "root": None,

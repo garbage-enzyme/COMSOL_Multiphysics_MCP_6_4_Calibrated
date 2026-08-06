@@ -346,7 +346,7 @@ def test_capabilities_report_risky_operations_without_starting_comsol(monkeypatc
     ]
     assert result["enabled_features"] == []
     assert [item["name"] for item in result["available_features"]] == [
-        "manuals",
+        "lexical_docs",
         "semantic_docs",
         "shared_server",
     ]
@@ -421,7 +421,6 @@ def test_startup_capability_summary_is_compact_and_truthful(monkeypatch):
     assert "tools=45" in summary
     assert "lexical_manual=disabled" in summary
     assert "semantic_docs=disabled" in summary
-    assert "lexical_manual=enabled" in summary
     assert "durable_jobs=staged_sweep" in summary
     assert "convergence_campaign" in summary
     assert "durable_job_cancellation=verified" in summary
