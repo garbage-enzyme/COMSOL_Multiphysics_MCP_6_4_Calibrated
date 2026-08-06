@@ -268,6 +268,7 @@ models are intentionally absent.
 - `development_kit/tests/test_research_materials.py` — This module tests provenance, validity, approval, strict verification, and campaign material binding.
 - `development_kit/tests/test_research_candidates.py` — This module tests pre-side-effect candidate normalization, bounds, lifecycle, and deduplication.
 - `development_kit/tests/test_research_decisions.py` — This module tests hash-chained adaptive decisions, exact references, and derived budget exhaustion.
+- `development_kit/tests/test_research_state.py` — This module tests backend-neutral checkpoints and bounded evidence-separated candidate portfolios.
 - `development_kit/tests/test_resource_admission.py` — This module tests resource policy normalization, telemetry, and admission decisions.
 - `development_kit/tests/test_results.py` — This module tests result normalization without a COMSOL client.
 - `development_kit/tests/test_runtime_paths.py` — This module tests shared ASCII-safe runtime and lease paths.
@@ -337,6 +338,7 @@ models are intentionally absent.
 - `comsol_mcp/research/materials.py` — This module normalizes provenance-bound material catalogs and derives approval and strict-verification sets.
 - `comsol_mcp/research/records.py` — This module normalizes canonical candidate records and point identities before side effects.
 - `comsol_mcp/research/decisions.py` — This module normalizes hash-chained adaptive decisions and bounded budget snapshots.
+- `comsol_mcp/research/state.py` — This module normalizes backend-neutral optimizer checkpoints and candidate portfolios.
 
 - `src/__init__.py` — This compatibility package aliases legacy imports to the canonical implementation modules.
 - `comsol_mcp/__init__.py` — This module defines the single authored package version.

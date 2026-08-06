@@ -18,6 +18,10 @@ from comsol_mcp.research import (
     DESIGN_SPACE_SCHEMA_VERSION,
     MATERIAL_CATALOG_SCHEMA_NAME,
     MATERIAL_CATALOG_SCHEMA_VERSION,
+    OPTIMIZER_CHECKPOINT_SCHEMA_NAME,
+    OPTIMIZER_CHECKPOINT_SCHEMA_VERSION,
+    PORTFOLIO_SCHEMA_NAME,
+    PORTFOLIO_SCHEMA_VERSION,
     RESEARCH_GOAL_SCHEMA_NAME,
     RESEARCH_GOAL_SCHEMA_VERSION,
     WORKFLOW_CAPSULE_SCHEMA_NAME,
@@ -384,6 +388,12 @@ def _entries() -> list[dict[str, Any]]:
             artifact_kind="durable_artifact",
         ),
         _entry(
+            OPTIMIZER_CHECKPOINT_SCHEMA_NAME,
+            OPTIMIZER_CHECKPOINT_SCHEMA_VERSION,
+            "comsol_mcp.research.state",
+            artifact_kind="durable_artifact",
+        ),
+        _entry(
             PATH_POLICY_SCHEMA,
             PATH_POLICY_VERSION,
             "comsol_mcp.path_policy",
@@ -400,6 +410,12 @@ def _entries() -> list[dict[str, Any]]:
             "comsol_mcp.portfolio_evidence_request",
             "1.0.0",
             "comsol_mcp.evidence.portfolio_verifier",
+        ),
+        _entry(
+            PORTFOLIO_SCHEMA_NAME,
+            PORTFOLIO_SCHEMA_VERSION,
+            "comsol_mcp.research.state",
+            artifact_kind="durable_artifact",
         ),
         _entry(
             "comsol_mcp.portfolio_evidence_verification",

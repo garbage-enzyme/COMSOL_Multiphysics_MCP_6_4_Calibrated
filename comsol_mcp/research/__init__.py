@@ -29,6 +29,14 @@ from .records import (
     CANDIDATE_RECORD_SCHEMA_VERSION,
     normalize_candidate_record,
 )
+from .state import (
+    OPTIMIZER_CHECKPOINT_SCHEMA_NAME,
+    OPTIMIZER_CHECKPOINT_SCHEMA_VERSION,
+    PORTFOLIO_SCHEMA_NAME,
+    PORTFOLIO_SCHEMA_VERSION,
+    normalize_optimizer_checkpoint,
+    normalize_portfolio,
+)
 from .workflow import (
     WORKFLOW_CAPSULE_SCHEMA_NAME,
     WORKFLOW_CAPSULE_SCHEMA_VERSION,
@@ -42,6 +50,10 @@ __all__ = [
     "DECISION_RECORD_SCHEMA_VERSION",
     "MATERIAL_CATALOG_SCHEMA_NAME",
     "MATERIAL_CATALOG_SCHEMA_VERSION",
+    "OPTIMIZER_CHECKPOINT_SCHEMA_NAME",
+    "OPTIMIZER_CHECKPOINT_SCHEMA_VERSION",
+    "PORTFOLIO_SCHEMA_NAME",
+    "PORTFOLIO_SCHEMA_VERSION",
     "CAMPAIGN_MANIFEST_SCHEMA_NAME",
     "CAMPAIGN_MANIFEST_SCHEMA_VERSION",
     "CANDIDATE_RECORD_SCHEMA_NAME",
@@ -53,6 +65,8 @@ __all__ = [
     "normalize_design_space",
     "normalize_decision_record",
     "normalize_material_catalog",
+    "normalize_optimizer_checkpoint",
+    "normalize_portfolio",
     "normalize_candidate_record",
     "normalize_research_goal",
     "normalize_workflow_capsule",

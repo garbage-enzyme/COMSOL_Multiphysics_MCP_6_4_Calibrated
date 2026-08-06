@@ -77,6 +77,7 @@ LINT_TARGETS = (
     "development_kit/tests/test_research_materials.py",
     "development_kit/tests/test_research_candidates.py",
     "development_kit/tests/test_research_decisions.py",
+    "development_kit/tests/test_research_state.py",
     "development_kit/tests/test_schema_registry.py",
     "development_kit/tests/test_standalone_acceptance_runner.py",
     "development_kit/tests/test_standalone_executable.py",
