@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import multiprocessing as mp
+import math
 import sys
 from importlib import import_module
 from pathlib import Path
@@ -20,6 +21,8 @@ create_server = import_module("comsol_mcp.server").create_server
 _derived_geometry = import_module("comsol_mcp.tools.derived_geometry")
 get_derived_geometry_record = _derived_geometry.get_derived_geometry_record
 session_manager = import_module("comsol_mcp.tools.session").session_manager
+_parameters = import_module("comsol_mcp.tools.parameters")
+_mim_patch = import_module("comsol_mcp.tools.mim_patch")
 
 
 def _backend(model_name: str, derived_model_id: str, manifest: dict[str, Any]):
@@ -127,6 +130,107 @@ def register_gate_tools(server: Any) -> None:
                 "error_type": type(exc).__name__,
                 "error": str(exc)[:2048],
             }
+
+    @server.tool()
+    def research_adapter_gate_spectrum(
+        model_name: str,
+        wavelengths_m: list[float],
+        wavelength_sync_abs_m: float = 1.0e-15,
+    ) -> dict[str, Any]:
+        """Run one derived-copy wavelength sweep and restore its study controls."""
+        model = session_manager.get_model(model_name)
+        if model is None:
+            return {"success": False, "error_type": "ModelUnavailable"}
+        try:
+            values = [float(value) for value in wavelengths_m]
+            tolerance = float(wavelength_sync_abs_m)
+        except (OverflowError, TypeError, ValueError) as exc:
+            return {"success": False, "error_type": type(exc).__name__}
+        if (
+            not 3 <= len(values) <= 129
+            or any(not math.isfinite(value) or value <= 0.0 for value in values)
+            or any(right <= left for left, right in zip(values, values[1:]))
+            or not math.isfinite(tolerance)
+            or tolerance < 0.0
+        ):
+            return {"success": False, "error_type": "InvalidWavelengthGrid"}
+
+        study = model.java.study("std1")
+        features = study.feature()
+        sweep = features.get("sweep1")
+        wavelength_step = features.get("step1")
+        if sweep is None or wavelength_step is None:
+            return {"success": False, "error_type": "StudyContractUnavailable"}
+        sweep_before = _parameters._sweep_state(sweep)
+        step_before = str(wavelength_step.getString("plist"))
+        restored = False
+        try:
+            expressions = [
+                "ewfd.Rtotal",
+                "ewfd.Ttotal",
+                "ewfd.Atotal",
+                "wl",
+                "c_const/ewfd.freq",
+            ]
+            rows = []
+            for index, requested_value in enumerate(values):
+                value_expression = format(requested_value, ".17g")
+                planned = {
+                    "pname": ["wl"],
+                    "plistarr": [value_expression],
+                    "punit": ["m"],
+                    "sweeptype": "sparse",
+                    "active": True,
+                }
+                _parameters._set_sweep_state(sweep, planned)
+                wavelength_step.set("plist", value_expression)
+                if _parameters._sweep_state(sweep) != planned:
+                    raise ValueError("parametric sweep readback mismatch")
+                if str(wavelength_step.getString("plist")) != value_expression:
+                    raise ValueError("wavelength step readback mismatch")
+                study.run()
+                raw = model.evaluate(expressions)
+                normalized = _mim_patch._normalize_spectral_rows(raw, len(expressions))
+                if len(normalized) != 1:
+                    raise ValueError("one-point solve produced an ambiguous spectral result")
+                numeric = [float(value) for value in normalized[0]]
+                requested = numeric[3]
+                solved = numeric[4]
+                rows.append(
+                    {
+                        "point_index": index,
+                        "R": numeric[0],
+                        "T": numeric[1],
+                        "A": numeric[2],
+                        "requested_wavelength_m": requested,
+                        "evaluated_wavelength_m": requested,
+                        "solved_frequency_wavelength_m": solved,
+                        "wavelength_sync_abs_m": abs(requested - solved),
+                        "closure_abs": abs(numeric[0] + numeric[1] + numeric[2] - 1.0),
+                    }
+                )
+            if any(row["wavelength_sync_abs_m"] > tolerance for row in rows):
+                raise ValueError("requested and solved wavelength grids are not synchronized")
+            result = {"success": True, "rows": rows}
+        except Exception as exc:
+            result = {
+                "success": False,
+                "error_type": type(exc).__name__,
+                "error": str(exc)[:2048],
+            }
+        finally:
+            try:
+                _parameters._set_sweep_state(sweep, sweep_before)
+                wavelength_step.set("plist", step_before)
+                restored = (
+                    _parameters._sweep_state(sweep) == sweep_before
+                    and str(wavelength_step.getString("plist")) == step_before
+                )
+            except Exception:
+                restored = False
+        result["study_controls_restored"] = restored
+        result["success"] = result["success"] is True and restored
+        return result
 
 
 def main() -> None:
