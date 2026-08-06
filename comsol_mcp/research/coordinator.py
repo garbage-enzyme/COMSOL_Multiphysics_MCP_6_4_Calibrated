@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import time
 from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
@@ -73,6 +74,15 @@ class ResearchCampaignCoordinator:
         self.lock_path = self.root / ".coordinator.lock"
         self._initialize_identity()
 
+    def _now(self) -> float:
+        value = self.clock()
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError("clock must return a finite nonnegative epoch")
+        epoch = float(value)
+        if not math.isfinite(epoch) or epoch < 0.0:
+            raise ValueError("clock must return a finite nonnegative epoch")
+        return epoch
+
     def _initialize_identity(self) -> None:
         if self.manifest_path.exists():
             existing = json.loads(self.manifest_path.read_text(encoding="utf-8"))
@@ -85,9 +95,7 @@ class ResearchCampaignCoordinator:
             if runtime.get("campaign_fingerprint") != self.campaign_fingerprint:
                 raise ValueError("campaign runtime identity is inconsistent")
         else:
-            now = float(self.clock())
-            if not now >= 0.0:
-                raise ValueError("clock must return a nonnegative epoch")
+            now = self._now()
             atomic_write_json(
                 self.runtime_path,
                 {"campaign_fingerprint": self.campaign_fingerprint, "started_at_epoch": now},
@@ -117,7 +125,7 @@ class ResearchCampaignCoordinator:
         control = {
             "campaign_fingerprint": self.campaign_fingerprint,
             "request_id": request_id,
-            "requested_at": _utc_text(float(self.clock())),
+            "requested_at": _utc_text(self._now()),
         }
         atomic_write_json(self.control_path, control)
         return control
@@ -127,12 +135,14 @@ class ResearchCampaignCoordinator:
             return False
         try:
             value = json.loads(self.control_path.read_text(encoding="utf-8"))
-        except OSError, UnicodeDecodeError, json.JSONDecodeError:
-            return False
-        return bool(
-            isinstance(value, dict)
-            and value.get("campaign_fingerprint") == self.campaign_fingerprint
-        )
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError("cancel request is unreadable or corrupt") from exc
+        if (
+            not isinstance(value, dict)
+            or value.get("campaign_fingerprint") != self.campaign_fingerprint
+        ):
+            raise ValueError("cancel request belongs to a different campaign")
+        return True
 
     def _consume_cancel(self) -> None:
         if not self.control_path.exists():
@@ -140,8 +150,8 @@ class ResearchCampaignCoordinator:
         observed = self.control_path.read_bytes()
         try:
             value = json.loads(observed.decode("utf-8"))
-        except UnicodeDecodeError, json.JSONDecodeError:
-            return
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError("cancel request is unreadable or corrupt") from exc
         if (
             not isinstance(value, dict)
             or value.get("campaign_fingerprint") != self.campaign_fingerprint
@@ -178,7 +188,7 @@ class ResearchCampaignCoordinator:
     def status(self) -> dict[str, Any]:
         with JobLock(self.lock_path):
             records = self._records()
-            budget = self._budget(records, float(self.clock()))
+            budget = self._budget(records, self._now())
             terminal = sum(
                 1
                 for record in records
@@ -219,7 +229,7 @@ class ResearchCampaignCoordinator:
             orphaned = sorted(started_attempts - terminal_attempts)
             if orphaned:
                 return {"status": "orphaned_started", "attempts": orphaned, "replayed": True}
-            now = float(self.clock())
+            now = self._now()
             budget = self._budget(records, now)
             if (
                 budget["started_fem_evaluations"] >= budget["max_fem_evaluations"]
@@ -282,7 +292,7 @@ class ResearchCampaignCoordinator:
                             if key != "evaluation_fingerprint"
                         },
                         "status": status,
-                        "completed_at": _utc_text(float(self.clock())),
+                        "completed_at": _utc_text(self._now()),
                         "response": response_value,
                         "failure_reason": failure_reason,
                     }
@@ -297,7 +307,7 @@ class ResearchCampaignCoordinator:
                             if key != "evaluation_fingerprint"
                         },
                         "status": "failed",
-                        "completed_at": _utc_text(float(self.clock())),
+                        "completed_at": _utc_text(self._now()),
                         "response": None,
                         "failure_reason": type(exc).__name__,
                     }
@@ -336,7 +346,7 @@ class ResearchCampaignCoordinator:
                     {
                         **{k: v for k, v in source.items() if k != "evaluation_fingerprint"},
                         "status": "failed",
-                        "completed_at": _utc_text(float(self.clock())),
+                        "completed_at": _utc_text(self._now()),
                         "response": None,
                         "failure_reason": reason,
                     }

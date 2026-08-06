@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import threading
 
 import pytest
@@ -143,6 +144,8 @@ def test_cancel_before_start_consumes_no_budget_and_cancel_during_evaluator_is_t
     assert result["status"] == "cancelled"
     assert result["evaluation"]["response"] is None
     assert during.status()["cancel_requested"] is False
+    assert not during.control_path.exists()
+    assert not during.lock_path.exists()
 
 
 def test_concurrent_duplicate_callers_share_one_started_evaluation(tmp_path):
@@ -224,3 +227,46 @@ def test_runtime_refuses_manifest_reuse_and_non_ascii_root(tmp_path):
             evaluator_identity="d" * 64,
             clock=lambda: 1000.0,
         )
+
+
+def test_corrupt_or_foreign_cancel_control_blocks_evaluation_without_budget_use(tmp_path):
+    manifest = _manifest()
+    coordinator = ResearchCampaignCoordinator(
+        tmp_path,
+        manifest,
+        _response,
+        evaluator_identity="d" * 64,
+        clock=lambda: 1000.0,
+    )
+    coordinator.control_path.write_bytes(b"{corrupt")
+    with pytest.raises(ValueError, match="corrupt"):
+        coordinator.evaluate(_bound_candidate(manifest))
+    assert not coordinator.journal_path.exists()
+    coordinator.control_path.write_text(
+        json.dumps(
+            {
+                "campaign_fingerprint": "0" * 64,
+                "request_id": "foreign",
+                "requested_at": "2026-08-06T00:00:00Z",
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="different campaign"):
+        coordinator.evaluate(_bound_candidate(manifest))
+    assert not coordinator.journal_path.exists()
+
+
+@pytest.mark.parametrize("invalid", [True, -1.0, float("nan"), float("inf"), "1000"])
+def test_invalid_clock_fails_before_runtime_or_evaluation_side_effect(tmp_path, invalid):
+    manifest = _manifest()
+    root = tmp_path / str(type(invalid).__name__)
+    with pytest.raises(ValueError, match="finite nonnegative"):
+        ResearchCampaignCoordinator(
+            root,
+            manifest,
+            _response,
+            evaluator_identity="d" * 64,
+            clock=lambda: invalid,
+        )
+    assert not (root / "campaign_runtime.json").exists()
