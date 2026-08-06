@@ -14,6 +14,8 @@ from comsol_mcp.research import (
     DESIGN_SPACE_SCHEMA_VERSION,
     RESEARCH_GOAL_SCHEMA_NAME,
     RESEARCH_GOAL_SCHEMA_VERSION,
+    WORKFLOW_CAPSULE_SCHEMA_NAME,
+    WORKFLOW_CAPSULE_SCHEMA_VERSION,
 )
 from comsol_mcp.settings_gui_handshake import HANDSHAKE_SCHEMA, HANDSHAKE_VERSION
 
@@ -574,6 +576,12 @@ def _entries() -> list[dict[str, Any]]:
             "comsol_mcp.visual_reviewer_capability",
             "1.0.0",
             "comsol_mcp.evidence.visual_review",
+        ),
+        _entry(
+            WORKFLOW_CAPSULE_SCHEMA_NAME,
+            WORKFLOW_CAPSULE_SCHEMA_VERSION,
+            "comsol_mcp.research.workflow",
+            artifact_kind="configuration",
         ),
         _entry(
             legacy_point_audit,
