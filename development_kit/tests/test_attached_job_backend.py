@@ -1013,6 +1013,54 @@ def test_public_job_submit_recovers_handoff_after_prelaunch_failure(ascii_job_ro
     assert recovered == [(backend, "wave_optics", True)]
 
 
+def test_public_job_submit_rejects_invalid_handoff_recovery_result(ascii_job_root):
+    source = ascii_job_root / "immutable-source.mph"
+    source.write_bytes(b"immutable source")
+    backend = normalize_attached_execution_backend(_backend())
+
+    class InvalidRecoverySessionManager:
+        def prepare_attached_job_handoff(self, **_kwargs):
+            return {
+                "success": True,
+                "state": "attached_job_handoff_ready",
+                "execution_backend": backend,
+                "detach": {"state": "detached", "external_resources_preserved": True},
+            }
+
+        def recover_attached_job_handoff(self, *_args, **_kwargs):
+            return None
+
+    class PreflightFailingJobManager:
+        def submit(self, _spec):
+            raise RuntimeError("preflight refused")
+
+    result = _submit_job(
+        {
+            "job_type": "staged_sweep",
+            "source_model_path": str(source),
+            "parameter_name": "gap",
+            "parameter_values": [10.0],
+            "expressions": ["A"],
+            "execution_backend": {
+                "kind": "attached_shared_server",
+                "expected_lock_sha256": "a" * 64,
+                "expected_revision_sha256": "b" * 64,
+                "user_confirmed_automation_exclusive": True,
+            },
+        },
+        profile_name="wave_optics",
+        shared_enabled=True,
+        manager=PreflightFailingJobManager(),
+        session_manager=InvalidRecoverySessionManager(),
+    )
+
+    assert result["success"] is False
+    assert result["handoff_recovery"] == {
+        "success": False,
+        "state": "attached_handoff_recovery_returned_invalid_result",
+    }
+
+
 def test_public_job_submit_reconciles_durable_launch_failure_without_reclaim(
     ascii_job_root,
 ):

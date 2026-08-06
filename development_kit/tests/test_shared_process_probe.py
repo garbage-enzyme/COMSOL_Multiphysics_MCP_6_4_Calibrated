@@ -394,7 +394,7 @@ def test_listener_collector_preserves_wildcard_and_discards_remote_bind(monkeypa
     ]
     monkeypatch.setattr(psutil, "net_connections", lambda kind: connections)
 
-    assert _listener_records() == [{"host": "::", "port": 2036, "pid": 20}]
+    assert _listener_records() == ([{"host": "::", "port": 2036, "pid": 20}], True)
 
 
 def test_listener_inventory_is_bounded_at_consumer_limit(monkeypatch):
@@ -411,7 +411,9 @@ def test_listener_inventory_is_bounded_at_consumer_limit(monkeypatch):
         "net_connections",
         lambda kind: [connection(1), connection(2)],
     )
-    assert len(_listener_records()) == 2
+    listeners, complete = _listener_records()
+    assert len(listeners) == 2
+    assert complete is True
 
     monkeypatch.setattr(
         psutil,
@@ -430,6 +432,46 @@ def test_listener_inventory_is_bounded_at_consumer_limit(monkeypatch):
             window_provider=dict,
             version_provider=lambda _path: None,
         )
+
+
+def test_listener_access_denied_marks_snapshot_incomplete(monkeypatch):
+    monkeypatch.setattr(
+        psutil,
+        "net_connections",
+        lambda **_kwargs: (_ for _ in ()).throw(psutil.AccessDenied()),
+    )
+
+    snapshot = collect_shared_preflight_snapshot(
+        process_provider=list,
+        listener_provider=_listener_records,
+        window_provider=dict,
+        version_provider=lambda _path: None,
+    )
+
+    assert snapshot["listeners"] == []
+    assert snapshot["inventory_complete"] is False
+
+
+def test_javaw_server_and_malformed_provider_records_are_classified_safely():
+    records = [
+        _record(
+            20,
+            0,
+            "javaw.exe",
+            ["javaw.exe", "C:/COMSOL/bin/comsolserver.exe"],
+        ),
+        {"name": "missing-identity.exe", "command_line": []},
+    ]
+
+    snapshot = collect_shared_preflight_snapshot(
+        process_provider=lambda: records,
+        listener_provider=list,
+        window_provider=dict,
+        version_provider=lambda _path: "6.4.0.293",
+    )
+
+    assert [item["kind"] for item in snapshot["processes"]] == ["comsol_server"]
+    assert snapshot["inventory_complete"] is False
 
 
 class _FakeWinFunction:

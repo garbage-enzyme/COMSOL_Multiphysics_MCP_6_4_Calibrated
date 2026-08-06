@@ -350,13 +350,13 @@ def test_changed_configuration_cannot_reuse_rows(tmp_path):
         read_spectral_rows(journal, changed, artifact_root=root)
 
 
-def test_newline_free_oversized_row_is_rejected_at_binary_read_limit(tmp_path):
+def test_newline_free_oversized_tail_is_repaired_to_empty_journal(tmp_path):
     spec = _spec(tmp_path)
     journal = tmp_path / "spectral_rows.jsonl"
     journal.write_bytes(b"x" * (MAX_SPECTRAL_ROW_BYTES + 1))
 
-    with pytest.raises(ValueError, match="row exceeds its byte limit"):
-        read_spectral_rows(journal, spec, artifact_root=tmp_path)
+    assert read_spectral_rows(journal, spec, artifact_root=tmp_path) == []
+    assert journal.read_bytes() == b""
 
 
 def test_one_ulp_wavelength_variants_share_one_canonical_point_identity(tmp_path):

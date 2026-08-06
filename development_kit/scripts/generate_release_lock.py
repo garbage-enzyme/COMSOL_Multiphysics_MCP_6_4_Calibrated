@@ -17,13 +17,21 @@ SUPPORTED_RELEASE_PLATFORM = "win-amd64"
 
 
 def _run(command: list[str], *, cwd: Path = ROOT, capture: bool = False) -> str:
-    completed = subprocess.run(
-        command,
-        cwd=cwd,
-        check=True,
-        capture_output=capture,
-        text=True,
-    )
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=cwd,
+            check=True,
+            capture_output=capture,
+            text=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        diagnostic = exc.stderr if isinstance(exc.stderr, str) else exc.stdout
+        detail = diagnostic.strip()[-4096:] if isinstance(diagnostic, str) else ""
+        message = f"release-lock command failed with exit code {exc.returncode}"
+        if detail:
+            message = f"{message}: {detail}"
+        raise RuntimeError(message) from exc
     return completed.stdout if capture else ""
 
 
@@ -77,10 +85,22 @@ def _wheel_hashes(download_dir: Path) -> dict[tuple[str, str], list[str]]:
 
 
 def _validated_target_platform(target_python: Path) -> str:
-    platform_name = _run(
-        [str(target_python), "-c", "import sysconfig; print(sysconfig.get_platform())"],
+    identity = _run(
+        [
+            str(target_python),
+            "-c",
+            (
+                "import platform, sys, sysconfig; "
+                "print(platform.python_implementation()); "
+                "print(f'{sys.version_info.major}.{sys.version_info.minor}'); "
+                "print(sysconfig.get_platform())"
+            ),
+        ],
         capture=True,
-    ).strip()
+    ).splitlines()
+    if len(identity) != 3 or identity[0] != "CPython" or identity[1] != "3.14":
+        raise SystemExit("release locks require a standard CPython 3.14 target interpreter")
+    platform_name = identity[2].strip()
     if platform_name != SUPPORTED_RELEASE_PLATFORM:
         raise SystemExit(
             "release locks require a win-amd64 target interpreter; "

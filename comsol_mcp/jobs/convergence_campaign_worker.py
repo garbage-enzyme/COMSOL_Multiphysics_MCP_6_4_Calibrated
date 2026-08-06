@@ -101,9 +101,7 @@ def _run(
         elif state["status"] != "starting":
             raise ValueError(f"Convergence worker cannot start from {state['status']}")
 
-        sources = [
-            Path(level["spectral_job"]["source_model_path"]) for level in spec["levels"]
-        ]
+        sources = [Path(level["spectral_job"]["source_model_path"]) for level in spec["levels"]]
         source_pins.enter_context(
             pin_validated_reads(
                 tuple(validated_read_pin(source, source.parent) for source in sources)
@@ -129,8 +127,12 @@ def _run(
         lease_acquired = True
         client = client_factory(spec)
 
-        from comsol_mcp.jobs.convergence_campaign_runner import run_convergence_campaign
+        from comsol_mcp.jobs.convergence_campaign_runner import (
+            convergence_level_directory,
+            run_convergence_campaign,
+        )
         from comsol_mcp.jobs.spectral_level_execution import execute_loaded_spectral_level
+        from comsol_mcp.jobs.spectral_rows import read_spectral_rows
         from comsol_mcp.jobs.worker import _record_native_cancel
 
         def should_stop() -> bool:
@@ -153,7 +155,17 @@ def _run(
             )
             cancel_thread.start()
 
-        completed_points = int(store.read_state(job_id).get("progress", {}).get("completed", 0))
+        completed_points = sum(
+            len(
+                read_spectral_rows(
+                    convergence_level_directory(directory, level["ordinal"])
+                    / "spectral_rows.jsonl",
+                    level["spectral_job"],
+                    artifact_root=convergence_level_directory(directory, level["ordinal"]),
+                )
+            )
+            for level in spec["levels"]
+        )
 
         def point_persisted(level: Mapping[str, Any], row: Mapping[str, Any]) -> None:
             nonlocal completed_points

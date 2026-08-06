@@ -284,7 +284,14 @@ class SemanticWorkerManager:
                     raise RuntimeError("worker startup handshake must be a JSON object")
                 if ready.get("schema_version") != WORKER_PROTOCOL_SCHEMA_VERSION or ready.get("event") != "ready" or ready.get("pid") != process.pid or ready.get("host") != "127.0.0.1":
                     raise RuntimeError("invalid worker startup handshake")
-                self._port = int(ready["port"])
+                port = ready["port"]
+                if (
+                    not isinstance(port, int)
+                    or isinstance(port, bool)
+                    or not 1 <= port <= 65_535
+                ):
+                    raise RuntimeError("worker startup port is invalid")
+                self._port = port
                 self._last_activity = time.monotonic()
                 self._start_pipe_drain(stdout, "stdout")
                 return {"success": True, "started": True, "identity": dict(self._identity), "port": self._port, "job_object_contained": self._job is not None}
@@ -303,16 +310,7 @@ class SemanticWorkerManager:
         identity = dict(self._identity or {})
         acted = False
         cleanup_errors = []
-        if self._process is not None and self._process.poll() is None and state != "active":
-            return {
-                "reason": reason,
-                "identity": identity,
-                "identity_state": state,
-                "acted": False,
-                "absent": False,
-                "refused": True,
-            }
-        if self._process is not None and state == "active":
+        if self._process is not None and self._process.poll() is None:
             if self._job is not None:
                 try:
                     self._job.close()
@@ -328,7 +326,7 @@ class SemanticWorkerManager:
             try:
                 self._process.wait(timeout=2.0)
             except subprocess.TimeoutExpired:
-                if self._identity_state() == "active":
+                if self._process.poll() is None:
                     try:
                         self._process.kill()
                         acted = True
@@ -337,7 +335,7 @@ class SemanticWorkerManager:
                         cleanup_errors.append(type(exc).__name__)
             except (OSError, subprocess.SubprocessError) as exc:
                 cleanup_errors.append(type(exc).__name__)
-                if self._identity_state() == "active":
+                if self._process.poll() is None:
                     try:
                         self._process.kill()
                         acted = True
@@ -433,7 +431,8 @@ class SemanticWorkerManager:
             return {"success": False, "error": error, "cleanup": cleanup, "request_id": request_id, "retried": False}
 
     def query(self, query: str, *, limit: int = 5, filters: dict[str, Any] | None = None, retrieval_mode: str = "hybrid") -> dict[str, Any]:
-        if not isinstance(query, str) or not query.strip() or len(query) > PUBLIC_LIMITS["maximum_query_characters"]:
+        normalized_query = query.strip() if isinstance(query, str) else ""
+        if not normalized_query or len(normalized_query) > PUBLIC_LIMITS["maximum_query_characters"]:
             return {"success": False, "error": {"code": "invalid_query", "message": "query violates public limits"}}
         if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= PUBLIC_LIMITS["maximum_results"]:
             return {"success": False, "error": {"code": "invalid_limit", "message": "limit violates public limits"}}
@@ -444,10 +443,14 @@ class SemanticWorkerManager:
                 "success": False,
                 "error": {"code": "invalid_filters", "message": str(exc)},
             }
-        if retrieval_mode not in {"hybrid", "vector", "lexical"}:
+        if not isinstance(retrieval_mode, str) or retrieval_mode not in {
+            "hybrid",
+            "vector",
+            "lexical",
+        }:
             return {"success": False, "error": {"code": "invalid_retrieval_mode", "message": "retrieval_mode is unsupported"}}
         with self._lock:
-            return self._request("query", {"query": query.strip(), "limit": limit, "filters": normalized_filters, "retrieval_mode": retrieval_mode}, self.query_deadline)
+            return self._request("query", {"query": normalized_query, "limit": limit, "filters": normalized_filters, "retrieval_mode": retrieval_mode}, self.query_deadline)
 
     def health(self) -> dict[str, Any]:
         with self._lock:

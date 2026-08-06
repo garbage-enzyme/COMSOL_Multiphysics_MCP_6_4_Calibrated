@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import builtins
+import math
+from copy import deepcopy
 
 import pytest
 import src.evidence.field_bundle as field_bundle_module
@@ -115,6 +117,14 @@ def test_normalization_is_solver_free_deterministic_and_binds_sources(monkeypatc
     )
 
 
+def test_render_color_scale_unhashable_value_is_a_validation_error():
+    request = _request()
+    request["render"]["color_scale"] = []
+
+    with pytest.raises(ValueError, match="color_scale"):
+        normalize_field_evidence_request(request)
+
+
 def test_source_or_extraction_changes_change_request_identity():
     first = normalize_field_evidence_request(_request())
     changed = _request()
@@ -208,8 +218,13 @@ def test_expression_view_and_grid_limits_accept_the_exact_maximum():
         {"name": f"field_{index}", "expression": f"ewfd.field{index}", "unit": "1"}
         for index in range(MAX_FIELD_EXPRESSIONS)
     ]
-    assert len(request["views"]) == MAX_FIELD_VIEWS
-    request["grid"]["shape"] = [1024, 1024]
+    request["views"] = [
+        _view(f"view{index}", source_kind="validation_matrix_point")
+        for index in range(MAX_FIELD_VIEWS)
+    ]
+    grid_side = math.isqrt(MAX_GRID_FIELD_POINTS)
+    assert grid_side * grid_side == MAX_GRID_FIELD_POINTS
+    request["grid"]["shape"] = [grid_side, grid_side]
     request["limits"]["max_grid_points"] = MAX_GRID_FIELD_POINTS
 
     normalized = normalize_field_evidence_request(request)
@@ -296,7 +311,7 @@ def test_nonfinite_values_duplicate_expressions_and_duplicate_sources_are_reject
     duplicate_expression = _request()
     duplicate_expression["expressions"][1]["name"] = "electric_norm"
     duplicate_source = _request()
-    duplicate_source["views"][1]["source"] = duplicate_source["views"][0]["source"]
+    duplicate_source["views"][1]["source"] = deepcopy(duplicate_source["views"][0]["source"])
     duplicate_source["views"][1]["wavelength_m"] = duplicate_source["views"][0]["wavelength_m"]
 
     with pytest.raises(ValueError, match="positive and finite"):

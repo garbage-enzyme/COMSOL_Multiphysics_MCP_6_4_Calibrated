@@ -51,7 +51,12 @@ def _contained_manifest(result: Mapping[str, Any], artifact_root: Path) -> Path:
     value = artifacts.get("manifest")
     if not isinstance(value, str) or not value:
         raise ValueError("physical audit collector did not return a manifest path")
-    manifest = Path(value).resolve()
+    manifest_value = Path(value)
+    manifest = (
+        manifest_value.resolve()
+        if manifest_value.is_absolute()
+        else (artifact_root / manifest_value).resolve()
+    )
     try:
         manifest.relative_to(artifact_root.resolve())
     except ValueError as exc:
@@ -124,6 +129,35 @@ def _validate_point_audit_inner_manifest(
         or not math.isclose(float(requested), float(value) * scales[unit], rel_tol=1e-12)
     ):
         raise ValueError("point audit inner manifest wavelength differs from the matrix point")
+    return dict(document)
+
+
+def _validate_reference_audit_inner_manifest(
+    path: Path,
+    *,
+    expected_status: object,
+    point: Mapping[str, Any],
+    expected_source_sha256: str,
+) -> dict[str, Any]:
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("reference audit inner manifest is not valid JSON") from exc
+    if not isinstance(document, Mapping):
+        raise ValueError("reference audit inner manifest must be a JSON object")
+    if document.get("audit_status") != expected_status or expected_status != "measurement_complete":
+        raise ValueError("reference audit inner manifest status is incomplete or inconsistent")
+    try:
+        physical = validate_physical_evidence(document.get("physical_evidence"))
+    except ValueError as exc:
+        raise ValueError("reference audit inner manifest physical evidence is invalid") from exc
+    if physical["producer"]["tool"] != "wave_optics_reference_audit":
+        raise ValueError("reference audit inner manifest producer is unsupported")
+    identity = physical["identity"]
+    if identity["source_sha256"] != expected_source_sha256.lower() or identity[
+        "config_id"
+    ] != point.get("point_fingerprint"):
+        raise ValueError("reference audit inner manifest identity differs from the matrix point")
     return dict(document)
 
 
@@ -215,6 +249,13 @@ def execute_physical_audit_collector(
     inner_manifest = _contained_manifest(result, root)
     if name == "wave_optics_point_audit":
         _validate_point_audit_inner_manifest(
+            inner_manifest,
+            expected_status=result.get("audit_status"),
+            point=point,
+            expected_source_sha256=expected_source_sha256,
+        )
+    else:
+        _validate_reference_audit_inner_manifest(
             inner_manifest,
             expected_status=result.get("audit_status"),
             point=point,

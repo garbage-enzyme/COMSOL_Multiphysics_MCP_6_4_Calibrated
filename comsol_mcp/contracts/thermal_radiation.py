@@ -14,7 +14,7 @@ MAX_DATA_VALUES = 2048
 
 
 class _ClosedModel(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
+    model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
 
 
 class KirchhoffAssessmentRequest(_ClosedModel):
@@ -93,6 +93,21 @@ class AngularGrid(_ClosedModel):
         list[Annotated[float, Field(ge=0.0, le=6.283185307179586)]],
         Field(min_length=1, max_length=128),
     ]
+
+    @model_validator(mode="after")
+    def validate_trapezoid_coordinates(self) -> AngularGrid:
+        if self.mode == "grid_trapezoid":
+            for name, coordinates in (
+                ("theta_rad", self.theta_rad),
+                ("phi_rad", self.phi_rad),
+            ):
+                if len(coordinates) < 2:
+                    raise ValueError(f"grid_trapezoid requires at least two {name} coordinates")
+                if any(left >= right for left, right in zip(coordinates, coordinates[1:])):
+                    raise ValueError(
+                        f"grid_trapezoid {name} coordinates must be strictly increasing"
+                    )
+        return self
 
 
 class PolarizationContract(_ClosedModel):

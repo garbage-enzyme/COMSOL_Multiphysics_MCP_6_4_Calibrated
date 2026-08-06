@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import ctypes
 import hashlib
 import io
 import json
@@ -19,6 +20,16 @@ from .canonical import validate_finite_json
 DEFAULT_REPLACE_RETRY_SECONDS = 3.0
 DEFAULT_MAX_JSONL_BYTES = 256 * 1024 * 1024
 WriteStageHook = Callable[[str, Path], None]
+
+_DELETE = 0x00010000
+_GENERIC_READ = 0x80000000
+_FILE_SHARE_READ = 0x00000001
+_FILE_SHARE_WRITE = 0x00000002
+_FILE_SHARE_DELETE = 0x00000004
+_OPEN_EXISTING = 3
+_FILE_ATTRIBUTE_NORMAL = 0x00000080
+_FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000
+_FILE_DISPOSITION_INFO_CLASS = 4
 
 
 class _FileSizeLimitError(ValueError):
@@ -232,17 +243,109 @@ def publish_file_exclusive(
     return identity
 
 
+def _windows_unlink_opened_file_if(
+    path: Path,
+    predicate: Callable[[int, os.stat_result], bool],
+) -> bool:
+    """Delete the opened Windows file identity only when ``predicate`` accepts it."""
+    if os.name != "nt":
+        raise OSError("opened-identity deletion requires Windows")
+    import msvcrt
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    create_file = kernel32.CreateFileW
+    create_file.argtypes = (
+        ctypes.c_wchar_p,
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+        ctypes.c_void_p,
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+        ctypes.c_void_p,
+    )
+    create_file.restype = ctypes.c_void_p
+    handle = create_file(
+        str(path),
+        _GENERIC_READ | _DELETE,
+        _FILE_SHARE_READ | _FILE_SHARE_WRITE | _FILE_SHARE_DELETE,
+        None,
+        _OPEN_EXISTING,
+        _FILE_ATTRIBUTE_NORMAL | _FILE_FLAG_OPEN_REPARSE_POINT,
+        None,
+    )
+    invalid_handle = ctypes.c_void_p(-1).value
+    if handle in (None, invalid_handle):
+        return False
+    descriptor: int | None = None
+    try:
+        descriptor = msvcrt.open_osfhandle(int(handle), os.O_RDONLY | getattr(os, "O_BINARY", 0))
+        handle = None
+        opened = os.fstat(descriptor)
+        if not stat.S_ISREG(opened.st_mode) or not predicate(descriptor, opened):
+            return False
+
+        class FileDispositionInfo(ctypes.Structure):
+            _fields_ = [("delete_file", ctypes.c_int)]
+
+        set_information = kernel32.SetFileInformationByHandle
+        set_information.argtypes = (
+            ctypes.c_void_p,
+            ctypes.c_int,
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+        )
+        set_information.restype = ctypes.c_int
+        disposition = FileDispositionInfo(1)
+        os_handle = msvcrt.get_osfhandle(descriptor)
+        return bool(
+            set_information(
+                ctypes.c_void_p(os_handle),
+                _FILE_DISPOSITION_INFO_CLASS,
+                ctypes.byref(disposition),
+                ctypes.sizeof(disposition),
+            )
+        )
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+        elif handle not in (None, invalid_handle):
+            close_handle = kernel32.CloseHandle
+            close_handle.argtypes = (ctypes.c_void_p,)
+            close_handle.restype = ctypes.c_int
+            close_handle(ctypes.c_void_p(handle))
+
+
+def _read_descriptor_bounded(descriptor: int, maximum: int) -> bytes:
+    os.lseek(descriptor, 0, os.SEEK_SET)
+    chunks = bytearray()
+    while len(chunks) <= maximum:
+        block = os.read(descriptor, min(64 * 1024, maximum - len(chunks) + 1))
+        if not block:
+            break
+        chunks.extend(block)
+    return bytes(chunks)
+
+
+def unlink_if_content(path: str | Path, expected: bytes, *, allow_prefix: bool = False) -> bool:
+    """Remove only an opened regular file whose bytes match the expected publication."""
+    if not isinstance(expected, bytes):
+        raise ValueError("expected content must be bytes")
+    target = Path(path)
+
+    def matches(descriptor: int, _opened: os.stat_result) -> bool:
+        observed = _read_descriptor_bounded(descriptor, len(expected))
+        return expected.startswith(observed) if allow_prefix else observed == expected
+
+    return _windows_unlink_opened_file_if(target, matches)
+
+
 def unlink_if_identity(path: str | Path, identity: tuple[int, int]) -> bool:
     """Remove only the exact file identity published by the current operation."""
     target = Path(path)
-    try:
-        observed = os.stat(target, follow_symlinks=False)
-    except FileNotFoundError:
-        return False
-    if target.is_symlink() or (observed.st_dev, observed.st_ino) != identity:
-        return False
-    target.unlink()
-    return True
+    return _windows_unlink_opened_file_if(
+        target,
+        lambda _descriptor, opened: (opened.st_dev, opened.st_ino) == identity,
+    )
 
 
 def atomic_write_bytes_exclusive(
@@ -403,9 +506,15 @@ def read_complete_jsonl(
     if version_field is not None:
         if not current_version:
             raise ValueError("current_version is required for versioned JSONL recovery")
-        versions = {
-            record.get(version_field) if isinstance(record, dict) else None for record in records
-        }
+        try:
+            versions = {
+                record.get(version_field) if isinstance(record, dict) else None
+                for record in records
+            }
+        except TypeError:
+            versions = set()
+            state = "corrupt"
+            records = []
         if versions == {current_version}:
             state = "incomplete" if trailing else "current_valid"
         elif not trailing and len(versions) == 1 and versions <= set(legacy_versions):
@@ -436,5 +545,6 @@ __all__ = [
     "read_file_bytes_bounded",
     "read_complete_jsonl",
     "sha256_file_bounded",
+    "unlink_if_content",
     "unlink_if_identity",
 ]

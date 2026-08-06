@@ -76,7 +76,7 @@ def registry_comsol_roots(registry: Any | None = None) -> tuple[Path, ...]:
         if isinstance(raw, str) and raw.strip():
             try:
                 candidates.append(validate_comsol_root(raw.strip()))
-            except (OSError, RuntimeError, ValueError):
+            except OSError, RuntimeError, ValueError:
                 continue
     unique: dict[str, Path] = {}
     for candidate in candidates:
@@ -94,7 +94,13 @@ def _java_home_from_runtime(runtime: Path) -> Path | None:
         home = runtime.parent.parent.parent
     else:
         return None
-    return home.resolve(strict=True) if _regular_directory(home) else None
+    if not _regular_directory(home):
+        return None
+    java = home / "bin" / "java.exe"
+    jvm = home / "bin" / "server" / "jvm.dll"
+    if not java.is_file() or not jvm.is_file():
+        return None
+    return home.resolve(strict=True)
 
 
 def _ini_java_home(root: Path) -> Path | None:
@@ -111,7 +117,7 @@ def _ini_java_home(root: Path) -> Path | None:
         if line == "-vm" and index + 1 < len(lines):
             candidate = lines[index + 1]
         elif line.startswith("-vm="):
-            candidate = line.partition("=")[2]
+            candidate = line.partition("=")[2].strip().strip('"')
         if not candidate:
             continue
         executable = Path(candidate)
@@ -143,11 +149,7 @@ def discover_java_home(
         if not raw:
             continue
         normalized = raw.strip()
-        if (
-            len(normalized) >= 2
-            and normalized[0] == normalized[-1]
-            and normalized[0] in {'"', "'"}
-        ):
+        if len(normalized) >= 2 and normalized[0] == normalized[-1] and normalized[0] in {'"', "'"}:
             normalized = normalized[1:-1].strip()
         if not normalized:
             continue

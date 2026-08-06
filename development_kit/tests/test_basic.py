@@ -132,6 +132,21 @@ class TestVersioning:
         assert result == tmp_path / "model" / "model_latest.mph"
         assert result.parent.is_dir()
 
+    def test_dotted_model_names_use_one_consistent_directory(self, tmp_path):
+        from src.utils.versioning import (
+            generate_latest_path,
+            generate_version_path,
+            get_model_directory,
+        )
+
+        version = Path(generate_version_path("v1.0.mph", base_path=tmp_path))
+        latest = Path(generate_latest_path("v1.0.mph", base_path=tmp_path))
+
+        assert get_model_directory("v1.0.mph", base_path=tmp_path) == tmp_path / "v1.0"
+        assert version.parent == tmp_path / "v1.0"
+        assert version.name.startswith("v1.0_")
+        assert latest == tmp_path / "v1.0" / "v1.0_latest.mph"
+
     def test_version_paths_reject_dot_model_names_and_avoid_same_second_collisions(self, tmp_path):
         from src.utils.versioning import generate_version_path
 
@@ -179,6 +194,26 @@ class TestVersioning:
         latest.touch()
 
         assert list_model_versions(model_name, base_path=tmp_path) == [str(version)]
+
+    def test_list_versions_skips_file_removed_during_stat(self, tmp_path, monkeypatch):
+        from src.utils.versioning import list_model_versions
+
+        model_dir = tmp_path / "model"
+        model_dir.mkdir()
+        retained = model_dir / "model_20260101_000000.mph"
+        removed = model_dir / "model_20260102_000000.mph"
+        retained.touch()
+        removed.touch()
+        original_stat = Path.stat
+
+        def racing_stat(path, *args, **kwargs):
+            if path == removed:
+                raise FileNotFoundError(str(path))
+            return original_stat(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "stat", racing_stat)
+
+        assert list_model_versions("model", base_path=tmp_path) == [str(retained)]
 
     def test_parse_version_info_valid(self):
         from src.utils.versioning import parse_version_info
@@ -1040,6 +1075,110 @@ class TestSessionManager:
         assert result["success"] is False
         assert result["cleanup_pending"] is True
 
+    def test_remote_connect_serializes_against_a_concurrent_local_start(
+        self, monkeypatch, permissive_session_ownership
+    ):
+        import src.tools.session as session_module
+
+        sm = permissive_session_ownership
+        entered = threading.Event()
+        release = threading.Event()
+
+        class RemoteClient:
+            standalone = False
+            version = "6.4"
+            cores = 2
+
+            def clear(self):
+                return None
+
+            def disconnect(self):
+                return None
+
+        client = RemoteClient()
+
+        def create_client(**_kwargs):
+            entered.set()
+            assert release.wait(timeout=2)
+            return client
+
+        monkeypatch.setattr(
+            session_module,
+            "_load_mph",
+            lambda: (
+                SimpleNamespace(Client=create_client),
+                SimpleNamespace(client=None),
+            ),
+        )
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            connecting = pool.submit(sm.connect, 2036)
+            assert entered.wait(timeout=1)
+            starting = pool.submit(sm.start)
+            assert not starting.done()
+            release.set()
+            connected = connecting.result(timeout=2)
+            started = starting.result(timeout=2)
+
+        assert connected["success"] is True
+        assert started["connected"] is True
+        assert sm.client is client
+        assert sm.disconnect()["success"] is True
+
+    def test_disconnect_cannot_release_a_connecting_clients_lease(
+        self, monkeypatch, permissive_session_ownership
+    ):
+        import src.tools.session as session_module
+
+        sm = permissive_session_ownership
+        entered = threading.Event()
+        release = threading.Event()
+        disconnect_entered = threading.Event()
+
+        class RemoteClient:
+            standalone = False
+            version = "6.4"
+
+            def clear(self):
+                return None
+
+            def disconnect(self):
+                return None
+
+        def create_client(**_kwargs):
+            entered.set()
+            assert release.wait(timeout=2)
+            return RemoteClient()
+
+        monkeypatch.setattr(
+            session_module,
+            "_load_mph",
+            lambda: (
+                SimpleNamespace(Client=create_client),
+                SimpleNamespace(client=None),
+            ),
+        )
+
+        def disconnect():
+            disconnect_entered.set()
+            return sm.disconnect()
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            connecting = pool.submit(sm.connect, 2036)
+            assert entered.wait(timeout=1)
+            disconnecting = pool.submit(disconnect)
+            assert disconnect_entered.wait(timeout=1)
+            assert not disconnecting.done()
+            release.set()
+            connected = connecting.result(timeout=2)
+            disconnected = disconnecting.result(timeout=2)
+
+        assert connected["success"] is True
+        assert disconnected["success"] is True
+        assert sm.client is None
+        assert sm._owns_solver_lease is False
+        assert sm._ownership.releases == 1
+
     def test_connect_rolls_back_client_when_lease_heartbeat_is_unverified(
         self, monkeypatch, permissive_session_ownership
     ):
@@ -1079,6 +1218,40 @@ class TestSessionManager:
         assert sm.client is None
         assert sm._reusable_client is client
         assert sm._owns_solver_lease is False
+        assert permissive_session_ownership._ownership.releases == 1
+
+    def test_connect_rejects_mismatched_existing_mph_endpoint(
+        self, monkeypatch, permissive_session_ownership
+    ):
+        import src.tools.session as session_module
+
+        sm = session_module.SessionManager()
+
+        class RemoteClient:
+            standalone = False
+            version = "6.4"
+            port = 9999
+            host = "localhost"
+
+            def __init__(self):
+                self.disconnected = False
+
+            def disconnect(self):
+                self.disconnected = True
+
+        client = RemoteClient()
+        monkeypatch.setattr(
+            session_module,
+            "_load_mph",
+            lambda: (SimpleNamespace(Client=pytest.fail), SimpleNamespace(client=client)),
+        )
+
+        result = sm.connect(port=2036, host="localhost")
+
+        assert result["success"] is False
+        assert "endpoint does not match" in result["error"]
+        assert client.disconnected is True
+        assert sm.client is None
         assert permissive_session_ownership._ownership.releases == 1
 
     def test_disconnect_retains_client_and_lease_until_retirement_is_verified(

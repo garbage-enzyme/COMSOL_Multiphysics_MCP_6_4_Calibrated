@@ -104,10 +104,10 @@ Run commands from the repository root in the declared development environment:
 ```powershell
 python -m pytest -q development_kit/tests/test_<area>.py
 python -m pytest -q -n 4 --dist loadscope `
-  --basetemp D:\comsol_pytest\local-main `
+  --basetemp D:\mcp_tests\main `
   --ignore development_kit/tests/test_control_plane_startup.py
 python -m pytest -q development_kit/tests/test_control_plane_startup.py `
-  --basetemp D:\comsol_pytest\local-serial
+  --basetemp D:\mcp_tests\serial
 python -m compileall -q comsol_mcp src development_kit
 python development_kit/scripts/quality_gate.py --artifact-root <artifact-root>
 python development_kit/scripts/release_gate.py
@@ -126,10 +126,18 @@ hosted CI execution, and these timeouts together when collected tests reach
 2,750, or after another execution stall occurs and that stall's cause has been
 repaired, whichever happens first.
 
-For any test or gate with an estimated duration above three minutes, wait once
-for the current ETA plus one minute. Do not poll early or send intermediate
-progress updates during that wait; if the command is still active afterward,
-derive a new ETA from the observed progress and repeat the same bounded wait.
+On Windows, complete quality/release gates and their pytest basetemps must use
+a direct short child of `D:\mcp_tests` whose leaf is at most 12 characters, for
+example `D:\mcp_tests\a65b12q`. The gate adds deep run, xdist, test-name, job,
+and artifact components; descriptive nested roots can exceed Win32 path limits
+and cause misleading temporary-file `FileNotFoundError` failures. Treat a long
+artifact root as an invalid gate invocation, not as a test failure.
+
+For regression tests, gates, CI, builds, or any other wait with a usable ETA,
+wait once for the current ETA plus one minute. Do not poll early or send
+intermediate progress updates during that wait, inspect status/logs, or spend
+tokens on progress checks. If the command is still active afterward, derive a
+new ETA from observed progress and again wait for that ETA plus one minute.
 
 The quality gate applies the same local split while collecting coverage: four
 workers for the isolated main suite and a serial startup/process-inventory

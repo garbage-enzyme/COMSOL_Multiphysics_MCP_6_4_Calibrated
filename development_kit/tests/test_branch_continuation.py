@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from copy import deepcopy
 import hashlib
 import json
@@ -27,11 +28,16 @@ from src.evidence.spectral_characterization import (
     build_spectral_point_bundle,
 )
 from src.tools.branch_continuation import register_branch_continuation_tools
+from development_kit.tests.mcp_test_support import decode_tool_result
 
 
 MATERIAL_SHA256 = "a" * 64
 COORDINATE_IDENTITY = "b" * 64
 SOURCE_SHA = "c" * 64
+
+
+def _call_public_tool(server, arguments):
+    return decode_tool_result(asyncio.run(server.call_tool("branch_continuation_plan", arguments)))
 
 
 def _hex_id(text: str) -> str:
@@ -45,19 +51,21 @@ def _spectral_artifacts(index: int, center: float, amplitude: float = 0.9):
     rows = []
     for row_index, (wavelength, absorption) in enumerate(zip(wavelengths, values)):
         raw = {"state": index, "row": row_index, "wavelength": wavelength}
-        rows.append({
-            "row_id": f"state-{index}-point-{row_index}",
-            "raw_row_sha256": hashlib.sha256(
-                json.dumps(raw, sort_keys=True).encode("utf-8")
-            ).hexdigest(),
-            "configuration_sha256": configuration,
-            "requested_wavelength_m": wavelength,
-            "evaluated_wavelength_m": wavelength,
-            "frequency_wavelength_m": wavelength,
-            "R": 0.95 - absorption,
-            "T": 0.05,
-            "A": absorption,
-        })
+        rows.append(
+            {
+                "row_id": f"state-{index}-point-{row_index}",
+                "raw_row_sha256": hashlib.sha256(
+                    json.dumps(raw, sort_keys=True).encode("utf-8")
+                ).hexdigest(),
+                "configuration_sha256": configuration,
+                "requested_wavelength_m": wavelength,
+                "evaluated_wavelength_m": wavelength,
+                "frequency_wavelength_m": wavelength,
+                "R": 0.95 - absorption,
+                "T": 0.05,
+                "A": absorption,
+            }
+        )
     bundle = build_spectral_point_bundle(
         bundle_id=f"spectrum-state-{index}",
         source_model={
@@ -115,19 +123,21 @@ def _custom_state(
         zip(wavelengths, absorption_values, strict=True)
     ):
         raw = {"label": label, "state": index, "row": row_index}
-        rows.append({
-            "row_id": f"{label}-{index}-point-{row_index}",
-            "raw_row_sha256": hashlib.sha256(
-                json.dumps(raw, sort_keys=True).encode("utf-8")
-            ).hexdigest(),
-            "configuration_sha256": configuration,
-            "requested_wavelength_m": wavelength,
-            "evaluated_wavelength_m": wavelength,
-            "frequency_wavelength_m": wavelength,
-            "R": 0.95 - absorption,
-            "T": 0.05,
-            "A": absorption,
-        })
+        rows.append(
+            {
+                "row_id": f"{label}-{index}-point-{row_index}",
+                "raw_row_sha256": hashlib.sha256(
+                    json.dumps(raw, sort_keys=True).encode("utf-8")
+                ).hexdigest(),
+                "configuration_sha256": configuration,
+                "requested_wavelength_m": wavelength,
+                "evaluated_wavelength_m": wavelength,
+                "frequency_wavelength_m": wavelength,
+                "R": 0.95 - absorption,
+                "T": 0.05,
+                "A": absorption,
+            }
+        )
     bundle = build_spectral_point_bundle(
         bundle_id=f"{label}-spectrum-{index}",
         source_model={
@@ -166,9 +176,7 @@ def _custom_state(
         "fit_max_evaluations": None,
     }
     decision = build_spectral_analysis_decision(bundle, analysis_policy)
-    characterization = build_spectral_characterization(
-        bundle, decision, measurement_policy
-    )
+    characterization = build_spectral_characterization(bundle, decision, measurement_policy)
     return {
         "state_id": f"coord-{index}",
         "ordinal": index,
@@ -203,12 +211,8 @@ def _state(
     search_upper: float | None = None,
     amplitude: float = 0.9,
 ):
-    bundle, decision, characterization = _spectral_artifacts(
-        index, center, amplitude=amplitude
-    )
-    requested_wavelengths = [
-        row["requested_wavelength_m"] for row in bundle["rows"]
-    ]
+    bundle, decision, characterization = _spectral_artifacts(index, center, amplitude=amplitude)
+    requested_wavelengths = [row["requested_wavelength_m"] for row in bundle["rows"]]
     return {
         "state_id": f"coord-{index}",
         "ordinal": index,
@@ -375,9 +379,7 @@ class TestContinuationStateBinding:
         states = []
         for index in range(MAX_CONTINUATION_STATES + 1):
             predecessor = None if index == 0 else f"coord-{index - 1}"
-            states.append(
-                _state(index, 5.0e-6, predecessor, coordinate_value=float(index))
-            )
+            states.append(_state(index, 5.0e-6, predecessor, coordinate_value=float(index)))
         with pytest.raises(ValueError, match="2.."):
             build_continuation_states(states_id="angle-sweep", states=states)
 
@@ -433,19 +435,21 @@ class TestContinuationStateBinding:
         rows = []
         for row_index, (wavelength, absorption) in enumerate(zip(wavelengths, flat_values)):
             raw = {"state": 0, "row": row_index, "wavelength": wavelength}
-            rows.append({
-                "row_id": f"state-0-flat-{row_index}",
-                "raw_row_sha256": hashlib.sha256(
-                    json.dumps(raw, sort_keys=True).encode("utf-8")
-                ).hexdigest(),
-                "configuration_sha256": configuration,
-                "requested_wavelength_m": wavelength,
-                "evaluated_wavelength_m": wavelength,
-                "frequency_wavelength_m": wavelength,
-                "R": 0.95 - absorption,
-                "T": 0.05,
-                "A": absorption,
-            })
+            rows.append(
+                {
+                    "row_id": f"state-0-flat-{row_index}",
+                    "raw_row_sha256": hashlib.sha256(
+                        json.dumps(raw, sort_keys=True).encode("utf-8")
+                    ).hexdigest(),
+                    "configuration_sha256": configuration,
+                    "requested_wavelength_m": wavelength,
+                    "evaluated_wavelength_m": wavelength,
+                    "frequency_wavelength_m": wavelength,
+                    "R": 0.95 - absorption,
+                    "T": 0.05,
+                    "A": absorption,
+                }
+            )
         bundle = build_spectral_point_bundle(
             bundle_id="spectrum-flat",
             source_model={
@@ -538,19 +542,21 @@ class TestContinuationStateBinding:
             zip(wavelengths, monotonically_increasing)
         ):
             raw = {"state": 0, "row": row_index, "wavelength": wavelength}
-            rows.append({
-                "row_id": f"boundary-0-point-{row_index}",
-                "raw_row_sha256": hashlib.sha256(
-                    json.dumps(raw, sort_keys=True).encode("utf-8")
-                ).hexdigest(),
-                "configuration_sha256": configuration,
-                "requested_wavelength_m": wavelength,
-                "evaluated_wavelength_m": wavelength,
-                "frequency_wavelength_m": wavelength,
-                "R": 0.95 - absorption,
-                "T": 0.05,
-                "A": absorption,
-            })
+            rows.append(
+                {
+                    "row_id": f"boundary-0-point-{row_index}",
+                    "raw_row_sha256": hashlib.sha256(
+                        json.dumps(raw, sort_keys=True).encode("utf-8")
+                    ).hexdigest(),
+                    "configuration_sha256": configuration,
+                    "requested_wavelength_m": wavelength,
+                    "evaluated_wavelength_m": wavelength,
+                    "frequency_wavelength_m": wavelength,
+                    "R": 0.95 - absorption,
+                    "T": 0.05,
+                    "A": absorption,
+                }
+            )
         bundle = build_spectral_point_bundle(
             bundle_id="spectrum-boundary-0",
             source_model={
@@ -612,16 +618,24 @@ class TestContinuationStateBinding:
             "optional_field_metrics": {},
         }
         normal = _state(1, 5.1e-6, "coord-0", coordinate_value=5.0)
-        result = build_continuation_states(states_id="boundary-then-peak", states=[boundary_state, normal])
+        result = build_continuation_states(
+            states_id="boundary-then-peak", states=[boundary_state, normal]
+        )
         assert result["states"][0]["candidate"]["classification"] == "boundary_high"
         assert result["states"][0]["candidate"]["boundary_side"] == "upper"
 
 
-def _continuation_policy(*, guard_window_m=0.5e-6, max_expansions=3,
-                         max_total_window_m=4.0e-6, declared_cap_reached=False,
-                         point_budget=64, request_point_count=7,
-                         continuity_evidence=None,
-                         stop_policy="continue_all_declared"):
+def _continuation_policy(
+    *,
+    guard_window_m=0.5e-6,
+    max_expansions=3,
+    max_total_window_m=4.0e-6,
+    declared_cap_reached=False,
+    point_budget=64,
+    request_point_count=7,
+    continuity_evidence=None,
+    stop_policy="continue_all_declared",
+):
     return {
         "policy_id": "continuation-policy-test",
         "guard_window_m": guard_window_m,
@@ -634,9 +648,7 @@ def _continuation_policy(*, guard_window_m=0.5e-6, max_expansions=3,
             "spacing_rule": "uniform_inclusive",
         },
         "stop_policy": stop_policy,
-        "continuity_evidence": (
-            [] if continuity_evidence is None else continuity_evidence
-        ),
+        "continuity_evidence": ([] if continuity_evidence is None else continuity_evidence),
         "declared_cap_reached": declared_cap_reached,
     }
 
@@ -722,8 +734,7 @@ class TestBranchContinuationPlanning:
         expanded_lower = boundary_wavelengths[0]
         expanded_upper = boundary_wavelengths[-1] + guard
         recovery_wavelengths = [
-            expanded_lower + index * (expanded_upper - expanded_lower) / 6
-            for index in range(7)
+            expanded_lower + index * (expanded_upper - expanded_lower) / 6 for index in range(7)
         ]
         recovered = _custom_state(
             2,
@@ -804,9 +815,7 @@ class TestBranchContinuationPlanning:
             coordinate_value=5.0,
             label=f"bounded-{flag}",
         )
-        states = build_continuation_states(
-            states_id=f"bounded-{flag}", states=[normal, boundary]
-        )
+        states = build_continuation_states(states_id=f"bounded-{flag}", states=[normal, boundary])
         policy = _continuation_policy(guard_window_m=0.2e-6)
         policy.update(policy_changes)
 
@@ -834,9 +843,10 @@ class TestBranchContinuationPlanning:
             states, _continuation_policy(continuity_evidence=[evidence])
         )
         transition = with_evidence["coordinate_transitions"][0]
-        assert transition["selected_candidate_wavelength_m"] == evidence[
-            "selected_candidate_wavelength_m"
-        ]
+        assert (
+            transition["selected_candidate_wavelength_m"]
+            == evidence["selected_candidate_wavelength_m"]
+        )
         assert transition["continuity_evidence_sha256"] == evidence["evidence_sha256"]
         assert transition["measured_continuity_verified"] is True
         assert transition["branch_followed"] is True
@@ -857,23 +867,19 @@ class TestBranchContinuationPlanning:
         evidence_body.pop("evidence_sha256")
         evidence["evidence_sha256"] = _canonical_hash(evidence_body)
         with pytest.raises(ValueError, match="does not match the bound measurements"):
-            plan_branch_continuation(
-                states, _continuation_policy(continuity_evidence=[evidence])
-            )
+            plan_branch_continuation(states, _continuation_policy(continuity_evidence=[evidence]))
 
     def test_continuity_evidence_rejects_non_candidate_raw_row(self):
         states = _multi_candidate_states()
         evidence = _measured_continuity_evidence(states)
-        evidence["supporting_raw_row_sha256"] = states["states"][0][
-            "spectral_artifacts"
-        ]["raw_rows"][0]["raw_row_sha256"]
+        evidence["supporting_raw_row_sha256"] = states["states"][0]["spectral_artifacts"][
+            "raw_rows"
+        ][0]["raw_row_sha256"]
         evidence_body = dict(evidence)
         evidence_body.pop("evidence_sha256")
         evidence["evidence_sha256"] = _canonical_hash(evidence_body)
         with pytest.raises(ValueError, match="not a measured candidate"):
-            plan_branch_continuation(
-                states, _continuation_policy(continuity_evidence=[evidence])
-            )
+            plan_branch_continuation(states, _continuation_policy(continuity_evidence=[evidence]))
 
     def test_continuity_evidence_rejects_transition_replay_and_duplicates(self):
         states = _multi_candidate_states(include_later_state=True)
@@ -1004,9 +1010,7 @@ class TestBranchContinuationPlanning:
         transition = plan["coordinate_transitions"][0]
         request = transition["next_request_window_m"]
         previous_peak = transition["previous_peak_wavelength_m"]
-        assert (request["lower_m"] + request["upper_m"]) / 2 == pytest.approx(
-            previous_peak
-        )
+        assert (request["lower_m"] + request["upper_m"]) / 2 == pytest.approx(previous_peak)
 
     def test_peak_beyond_guard_at_declared_cap_is_unresolved(self):
         states_input = _build_dispersive_states(3, shift=0.8e-6)
@@ -1024,19 +1028,21 @@ class TestBranchContinuationPlanning:
         rows = []
         for row_index, (wavelength, absorption) in enumerate(zip(wavelengths, flat_values)):
             raw = {"state": 1, "row": row_index, "wavelength": wavelength}
-            rows.append({
-                "row_id": f"flat-1-{row_index}",
-                "raw_row_sha256": hashlib.sha256(
-                    json.dumps(raw, sort_keys=True).encode("utf-8")
-                ).hexdigest(),
-                "configuration_sha256": configuration,
-                "requested_wavelength_m": wavelength,
-                "evaluated_wavelength_m": wavelength,
-                "frequency_wavelength_m": wavelength,
-                "R": 0.95 - absorption,
-                "T": 0.05,
-                "A": absorption,
-            })
+            rows.append(
+                {
+                    "row_id": f"flat-1-{row_index}",
+                    "raw_row_sha256": hashlib.sha256(
+                        json.dumps(raw, sort_keys=True).encode("utf-8")
+                    ).hexdigest(),
+                    "configuration_sha256": configuration,
+                    "requested_wavelength_m": wavelength,
+                    "evaluated_wavelength_m": wavelength,
+                    "frequency_wavelength_m": wavelength,
+                    "R": 0.95 - absorption,
+                    "T": 0.05,
+                    "A": absorption,
+                }
+            )
         flat_bundle = build_spectral_point_bundle(
             bundle_id="flat-1",
             source_model={
@@ -1103,9 +1109,7 @@ class TestBranchContinuationPlanning:
         states = build_continuation_states(
             states_id="peak-then-flat", states=[normal_state, flat_state]
         )
-        plan = plan_branch_continuation(
-            states, _continuation_policy(declared_cap_reached=True)
-        )
+        plan = plan_branch_continuation(states, _continuation_policy(declared_cap_reached=True))
         assert plan["branch_disappearance_claimed"] is False
         assert plan["scientific_disposition"] == "unresolved_at_declared_cap"
         assert plan["coordinate_transitions"][0]["current_peak_wavelength_m"] is None
@@ -1130,9 +1134,7 @@ class TestBranchContinuationPlanning:
         states_input = _build_dispersive_states(3)
         states = build_continuation_states(states_id="test", states=states_input)
         with pytest.raises(ValueError, match="guard_window_m"):
-            plan_branch_continuation(
-                states, _continuation_policy(guard_window_m=-0.1e-6)
-            )
+            plan_branch_continuation(states, _continuation_policy(guard_window_m=-0.1e-6))
 
     def test_invalid_policy_bounds_not_containing_search_windows(self):
         states_input = _build_dispersive_states(3)
@@ -1152,12 +1154,15 @@ class TestBranchContinuationPlanning:
 def test_public_tool_returns_separate_states_and_plan_artifacts():
     server = MCPServer("branch-continuation-test")
     register_branch_continuation_tools(server)
-    result = server._tool_manager._tools["branch_continuation_plan"].fn(
-        states_spec={
-            "states_id": "dispersive",
-            "states": _build_dispersive_states(3, shift=0.1e-6),
+    result = _call_public_tool(
+        server,
+        {
+            "states_spec": {
+                "states_id": "dispersive",
+                "states": _build_dispersive_states(3, shift=0.1e-6),
+            },
+            "continuation_policy": _continuation_policy(guard_window_m=0.3e-6),
         },
-        continuation_policy=_continuation_policy(guard_window_m=0.3e-6),
     )
 
     assert result["success"] is True
@@ -1166,9 +1171,10 @@ def test_public_tool_returns_separate_states_and_plan_artifacts():
         "ordered_evidence": "continuation_states",
         "policy_plan": "branch_continuation_plan",
     }
-    assert result["branch_continuation_plan"]["states_sha256"] == result[
-        "continuation_states"
-    ]["states_sha256"]
+    assert (
+        result["branch_continuation_plan"]["states_sha256"]
+        == result["continuation_states"]["states_sha256"]
+    )
     assert result["branch_disappearance_claimed"] is False
     assert result["undeclared_coordinate_started"] is False
     assert result["solver_started"] is False
@@ -1181,13 +1187,14 @@ def test_public_tool_accepts_canonical_states_and_rejects_ambiguous_input():
     )
     server = MCPServer("branch-continuation-input-test")
     register_branch_continuation_tools(server)
-    tool = server._tool_manager._tools["branch_continuation_plan"]
-
-    accepted = tool.fn(
-        continuation_states=states,
-        continuation_policy=_continuation_policy(guard_window_m=0.3e-6),
+    accepted = _call_public_tool(
+        server,
+        {
+            "continuation_states": states,
+            "continuation_policy": _continuation_policy(guard_window_m=0.3e-6),
+        },
     )
-    rejected = tool.fn(continuation_policy=_continuation_policy())
+    rejected = _call_public_tool(server, {"continuation_policy": _continuation_policy()})
 
     assert accepted["success"] is True
     assert rejected["success"] is False
@@ -1208,31 +1215,76 @@ def test_public_tool_does_not_misclassify_internal_type_error_as_caller_rejectio
     )
     server = MCPServer("branch-continuation-internal-error-test")
     register_branch_continuation_tools(server)
-    result = server._tool_manager._tools["branch_continuation_plan"].fn(
-        continuation_policy={}, states_spec={}
-    )
+    result = _call_public_tool(server, {"continuation_policy": {}, "states_spec": {}})
 
     assert result["success"] is False
     assert result["reason_code"] == "continuation_planning_failed"
     assert "programming defect" not in json.dumps(result)
 
 
+def test_public_tool_distinguishes_policy_rejection_from_invalid_evidence():
+    server = MCPServer("branch-continuation-policy-error-test")
+    register_branch_continuation_tools(server)
+    result = _call_public_tool(
+        server,
+        {
+            "continuation_policy": {"bad": True},
+            "continuation_states": build_continuation_states(
+                states_id="policy-test",
+                states=_build_dispersive_states(3, shift=0.1e-6),
+            ),
+        },
+    )
+
+    assert result["success"] is False
+    assert result["scientific_disposition"] == "invalid_policy"
+    assert result["reason_code"] == "continuation_policy_rejected"
+
+
+@pytest.mark.parametrize("field", ["spacing_rule", "stop_policy"])
+def test_continuation_policy_rejects_unhashable_discriminators(field):
+    states = build_continuation_states(
+        states_id="dispersive", states=_build_dispersive_states(3, shift=0.1e-6)
+    )
+    policy = _continuation_policy()
+    if field == "spacing_rule":
+        policy["request_grid"][field] = []
+    else:
+        policy[field] = {}
+    with pytest.raises(ValueError, match="unsupported"):
+        plan_branch_continuation(states, policy)
+
+
 def test_public_branch_continuation_tool_never_constructs_a_comsol_client():
     code = """
-import mph
-mph.Client = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError('Client called'))
+import asyncio
+import sys
+
+class BlockNativeImports:
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.split('.', 1)[0] in {'mph', 'jpype'}:
+            raise AssertionError(f'native solver import attempted: {fullname}')
+        return None
+
+sys.meta_path.insert(0, BlockNativeImports())
 from mcp.server.mcpserver import MCPServer
 from src.tools.branch_continuation import register_branch_continuation_tools
+from development_kit.tests.mcp_test_support import decode_tool_result
 server = MCPServer('solver-free-branch-continuation-subprocess')
 register_branch_continuation_tools(server)
-result = server._tool_manager._tools['branch_continuation_plan'].fn(continuation_policy={})
+result = decode_tool_result(asyncio.run(server.call_tool(
+    'branch_continuation_plan', {'continuation_policy': {}}
+)))
 assert result['success'] is False
 assert result['solver_started'] is False
 """
     completed = subprocess.run(
         [sys.executable, "-c", code],
-        cwd=Path(__file__).parents[2], capture_output=True, text=True,
-        timeout=20, check=False,
+        cwd=Path(__file__).parents[2],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
     )
     assert completed.returncode == 0, completed.stderr
 
@@ -1240,7 +1292,10 @@ assert result['solver_started'] is False
 def _canonical_hash(value):
     return hashlib.sha256(
         json.dumps(
-            value, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
             allow_nan=False,
         ).encode("utf-8")
     ).hexdigest()
@@ -1274,6 +1329,25 @@ def test_self_rehashed_noncanonical_states_id_fails_closed():
     malformed["states_sha256"] = _canonical_hash(states_body)
 
     with pytest.raises(ValueError, match="states_id|noncanonical"):
+        validate_continuation_states(malformed)
+
+
+@pytest.mark.parametrize("classification", [[], "flat"])
+def test_self_rehashed_state_rejects_unhashable_or_impossible_measured_classification(
+    classification,
+):
+    malformed = build_continuation_states(
+        states_id="dispersive", states=_build_dispersive_states(3, shift=0.1e-6)
+    )
+    state = malformed["states"][1]
+    state["candidate"]["classification"] = classification
+    state_body = dict(state)
+    state_body.pop("state_sha256")
+    state["state_sha256"] = _canonical_hash(state_body)
+    states_body = dict(malformed)
+    states_body.pop("states_sha256")
+    malformed["states_sha256"] = _canonical_hash(states_body)
+    with pytest.raises(ValueError, match="classification|interior candidate"):
         validate_continuation_states(malformed)
 
 

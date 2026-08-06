@@ -283,10 +283,9 @@ def _load_knowledge_file(name: str) -> str:
             file_path,
             max_bytes=MAX_EMBEDDED_KNOWLEDGE_BYTES,
         )
-    except FileNotFoundError:
+        return payload.decode("utf-8")
+    except (OSError, ValueError, UnicodeError):
         return ""
-
-    return payload.decode("utf-8")
 
 
 # Module-level functions for testing and direct use

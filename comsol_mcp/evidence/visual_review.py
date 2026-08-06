@@ -154,7 +154,10 @@ def _utc_timestamp(value: Any, label: str) -> str:
 def _finite(value: Any, label: str, *, positive: bool = False) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{label} must be numeric")
-    result = float(value)
+    try:
+        result = float(value)
+    except OverflowError as exc:
+        raise ValueError(f"{label} must be numeric") from exc
     if not math.isfinite(result):
         raise ValueError(f"{label} must be finite")
     if positive and result <= 0:
@@ -895,6 +898,7 @@ def evaluate_dual_visual_review(
         "request_sha256": request["contract_sha256"],
         "receipt_sha256s": [first["contract_sha256"], second["contract_sha256"]],
         "comparison": comparison,
+        "comparison_evidence": "caller_declared_unverified",
         "state": state,
         "reasons": reasons,
         "numerical_policy_authority": False,

@@ -8,7 +8,6 @@ import json
 import shutil
 import subprocess
 import sys
-import uuid
 from pathlib import Path
 
 import pytest
@@ -26,8 +25,8 @@ def _decode_public_tool_result(result):
 
 
 @pytest.fixture
-def lightweight_deployment():
-    root = Path("D:/comsol_semantic_profile_test") / uuid.uuid4().hex
+def lightweight_deployment(ascii_tmp_path):
+    root = ascii_tmp_path / "semantic-profile"
     index = root / "indexes" / "corpus" / "model" / "build-1"
     model = root / "models" / "model" / "r1"
     lexical = root / "lexical" / "manuals.sqlite3"
@@ -141,6 +140,33 @@ def test_failed_warm_health_degrades_without_leaving_worker(lightweight_deployme
     assert cleanup["success"] is True
 
 
+def test_successful_semantic_operations_clear_stale_errors(lightweight_deployment):
+    class Manager:
+        def health(self):
+            return {"success": True}
+
+        def status(self, *, probe=False):
+            return {"state": "active"}
+
+        def query(self, *_args, **_kwargs):
+            return {"success": True, "results": []}
+
+        def reset(self):
+            return {"success": True, "reset": {"absent": True}}
+
+    service = SemanticService(lightweight_deployment)
+    service._manager = Manager()
+    service._last_error = {"code": "stale"}
+
+    assert service.status(warm=True)["last_error"] is None
+    service._last_error = {"code": "stale"}
+    assert service.search("CopyFace")["success"] is True
+    assert service._last_error is None
+    service._last_error = {"code": "stale"}
+    assert service.reset()["success"] is True
+    assert service._last_error is None
+
+
 def test_unconfigured_search_returns_explicit_lexical_fallback():
     service = SemanticService(
         {
@@ -235,9 +261,7 @@ print(json.dumps({'count': len(names), 'configured': status['configured']}))
         capture_output=True,
         text=True,
         timeout=20,
-        env=isolated_semantic_environment(
-            {"COMSOL_MCP_ENABLE_SEMANTIC_DOCS": "true"}
-        ),
+        env=isolated_semantic_environment({"COMSOL_MCP_ENABLE_SEMANTIC_DOCS": "true"}),
     )
 
     assert completed.returncode == 0, completed.stderr

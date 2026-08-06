@@ -335,6 +335,35 @@ def test_embedded_knowledge_uses_one_bounded_regular_file_read(tmp_path, monkeyp
     assert embedded_module._load_knowledge_file("mph_api") == "bounded guidance"
 
 
+@pytest.mark.parametrize(
+    "failure",
+    [ValueError("oversized"), PermissionError("unreadable")],
+)
+def test_embedded_knowledge_contains_bounded_read_failures(monkeypatch, failure):
+    monkeypatch.setattr(
+        embedded_module,
+        "read_file_bytes_bounded",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(failure),
+    )
+
+    result = embedded_module.get_docs("mph_api")
+
+    assert result == {
+        "success": False,
+        "error": "Could not load documentation for: mph_api",
+    }
+
+
+def test_embedded_knowledge_contains_invalid_utf8(monkeypatch):
+    monkeypatch.setattr(
+        embedded_module,
+        "read_file_bytes_bounded",
+        lambda *_args, **_kwargs: b"\xff",
+    )
+
+    assert embedded_module.get_docs("mph_api")["success"] is False
+
+
 def test_embedded_knowledge_responses_do_not_expose_module_state():
     docs = embedded_module.list_docs()
     docs["topics"][0]["keywords"].append("injected")

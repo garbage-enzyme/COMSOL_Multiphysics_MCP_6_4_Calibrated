@@ -82,7 +82,10 @@ def _positive_integer(value: Any, label: str) -> int:
 def _positive_finite(value: Any, label: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{label} must be positive and finite")
-    number = float(value)
+    try:
+        number = float(value)
+    except OverflowError as exc:
+        raise ValueError(f"{label} must be positive and finite") from exc
     if not math.isfinite(number) or number <= 0:
         raise ValueError(f"{label} must be positive and finite")
     return number
@@ -385,7 +388,7 @@ def build_shared_model_lock(
         revision,
         model_identity_sha256=normalized_model.identity_sha256,
     )
-    if collaboration_mode not in _COLLABORATION_MODES:
+    if not isinstance(collaboration_mode, str) or collaboration_mode not in _COLLABORATION_MODES:
         raise ValueError("shared model collaboration mode is unsupported")
     process = _normalize_process_identity(mcp_process)
     source = _normalize_immutable_source(immutable_source)

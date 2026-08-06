@@ -1,6 +1,8 @@
 """Unit tests for geometry helpers without a COMSOL client."""
 
 import pytest
+import src.tools.geometry as geometry_module
+from mcp.server.mcpserver import MCPServer
 from src.tools.geometry import (
     add_circle_feature,
     add_difference_feature,
@@ -10,6 +12,7 @@ from src.tools.geometry import (
     add_union_feature,
     build_geometry_sequences,
     list_geometry_features,
+    register_geometry_tools,
 )
 
 
@@ -77,6 +80,34 @@ class JavaStringLike:
 class JavaTagFeatureList(FakeFeatureList):
     def tags(self):
         return [JavaStringLike(tag) for tag in self.features]
+
+
+def test_geometry_create_validates_dimension_and_rejects_duplicate_tag(monkeypatch):
+    class Geometries:
+        def __init__(self):
+            self.created = []
+
+        def tags(self):
+            return ["geom1"]
+
+        def create(self, tag, dimension):
+            self.created.append((tag, dimension))
+
+    geometries = Geometries()
+    component = type("Component", (), {"geom": lambda self: geometries})()
+    java = type(
+        "Java", (), {"component": lambda self, name: component if name == "comp1" else None}
+    )()
+    model = type("Model", (), {"java": java})()
+    monkeypatch.setattr(geometry_module.session_manager, "get_model", lambda _name: model)
+    server = MCPServer("geometry-create-contract")
+    register_geometry_tools(server)
+    create = server._tool_manager._tools["geometry_create"].fn
+
+    assert create(space_dimension=2.0)["success"] is False
+    assert create(space_dimension=4)["success"] is False
+    assert create(geometry_name="geom1")["success"] is False
+    assert geometries.created == []
 
 
 class FakeGeometry:
@@ -289,9 +320,11 @@ def test_add_union_feature_sets_input_selection():
 
 
 def test_add_union_feature_requires_inputs():
-    result = add_union_feature(FakeModel(FakeGeometry()), [])
+    geometry = FakeGeometry()
+    result = add_union_feature(FakeModel(geometry), [])
 
     assert result["success"] is False
+    assert geometry.features.features == {}
 
 
 def test_union_uses_first_free_tag_and_rolls_back_selection_failure():
@@ -317,9 +350,7 @@ def test_union_uses_first_free_tag_and_rolls_back_selection_failure():
         return feature
 
     geometry.features.create = create
-    failed = add_union_feature(
-        FakeModel(geometry), ["blk1", "blk2"], feature_name="uni4"
-    )
+    failed = add_union_feature(FakeModel(geometry), ["blk1", "blk2"], feature_name="uni4")
     assert failed["success"] is False
     assert failed["rolled_back"] is True
     assert "uni4" not in geometry.features.features
@@ -346,12 +377,14 @@ def test_add_import_feature_sets_absolute_filename(tmp_path, monkeypatch):
 
 def test_add_import_feature_requires_existing_file(tmp_path, monkeypatch):
     monkeypatch.setenv("COMSOL_MCP_MODEL_READ_ROOTS", str(tmp_path))
+    geometry = FakeGeometry()
     result = add_import_feature(
-        FakeModel(FakeGeometry()),
+        FakeModel(geometry),
         str(tmp_path / "missing.step"),
     )
 
     assert result["success"] is False
+    assert geometry.features.features == {}
 
 
 def test_missing_import_is_rejected_before_model_access(tmp_path, monkeypatch):
@@ -453,15 +486,34 @@ def test_import_type_failure_removes_created_feature(tmp_path, monkeypatch):
     assert geometry.features.features == {}
 
 
+def test_numeric_and_primitive_shape_validation_contains_extreme_inputs():
+    geometry = FakeGeometry()
+    model = FakeModel(geometry)
+
+    huge = add_primitive_feature(model, "Block", [10**400, 0, 0], [1, 1, 1])
+    short_cylinder = add_primitive_feature(model, "Cylinder", [0, 0, 0], [1])
+    long_sphere = add_primitive_feature(model, "Sphere", [0, 0, 0], [1, 2])
+
+    assert huge["success"] is False and "finite" in huge["error"]
+    assert short_cylinder["success"] is False and "exactly 2" in short_cylinder["error"]
+    assert long_sphere["success"] is False and "exactly 1" in long_sphere["error"]
+    assert geometry.features.features == {}
+
+
+def test_union_rejects_non_string_tags_before_model_access():
+    result = add_union_feature(object(), ["blk1", None])
+
+    assert result["success"] is False
+    assert "input_objects" in result["error"]
+
+
 def test_build_without_name_runs_every_geometry():
     first = FakeGeometry("geom1")
     second = FakeGeometry("geom2")
     model = FakeModel(first)
     model.java.component_node.geometries["geom2"] = second
 
-    result = build_geometry_sequences(
-        model, geometry_name=None, component_name="comp1"
-    )
+    result = build_geometry_sequences(model, geometry_name=None, component_name="comp1")
 
     assert result["success"] is True
     assert result["geometries"] == ["geom1", "geom2"]

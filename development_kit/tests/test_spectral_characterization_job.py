@@ -199,6 +199,37 @@ def test_invalid_or_hidden_policy_inputs_fail_closed(tmp_path, mutation, match):
 
 
 @pytest.mark.parametrize(
+    "mutation,match",
+    [
+        (
+            lambda spec: (
+                spec.__setitem__("maximum_points", 5),
+                spec["refinement_policy"].__setitem__("maximum_stages", 2),
+                spec["refinement_policy"].__setitem__("points_per_stage", 7),
+            ),
+            "refinement stage",
+        ),
+        (
+            lambda spec: (
+                spec.__setitem__("maximum_points", 5),
+                spec["refinement_policy"].__setitem__("maximum_stages", 1),
+                spec["expansion_policy"].__setitem__("maximum_expansions", 1),
+                spec["expansion_policy"].__setitem__("points_per_expansion", 7),
+            ),
+            "expansion stage",
+        ),
+    ],
+)
+def test_optional_stage_point_counts_fit_the_global_job_cap(tmp_path, mutation, match):
+    raw = _raw_spec(tmp_path)
+    raw["initial_grid"]["point_count"] = 5
+    mutation(raw)
+
+    with pytest.raises(ValueError, match=match):
+        normalize_spectral_characterization_job_spec(raw)
+
+
+@pytest.mark.parametrize(
     "mutation",
     [
         lambda inputs: inputs.__setitem__("top_air_domain_ids", "1"),

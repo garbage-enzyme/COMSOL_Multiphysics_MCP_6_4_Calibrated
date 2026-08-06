@@ -20,6 +20,7 @@ MAX_CHAIN_ARTIFACTS = 256
 MAX_CHAIN_MANIFEST_BYTES = 1024 * 1024
 MAX_ARTIFACT_BYTES = 16 * 1024 * 1024
 MAX_CHAIN_BYTES = 256 * 1024 * 1024
+MAX_ARTIFACT_JSON_NESTING_DEPTH = 64
 
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 _IDENTIFIER = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]{0,127}$")
@@ -75,6 +76,18 @@ def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return result
 
 
+def _validate_json_nesting(value: Any, label: str) -> None:
+    pending = [(value, 0)]
+    while pending:
+        node, depth = pending.pop()
+        if depth > MAX_ARTIFACT_JSON_NESTING_DEPTH:
+            raise ValueError(f"{label} exceeds the JSON nesting limit")
+        if isinstance(node, dict):
+            pending.extend((item, depth + 1) for item in node.values())
+        elif isinstance(node, list):
+            pending.extend((item, depth + 1) for item in node)
+
+
 def _decode_strict_json_object(payload: bytes, label: str) -> dict[str, Any]:
     try:
         document = json.loads(
@@ -83,10 +96,11 @@ def _decode_strict_json_object(payload: bytes, label: str) -> dict[str, Any]:
         )
     except _DuplicateJsonKey as exc:
         raise ValueError(f"{label} contains duplicate JSON key {exc.args[0]!r}") from exc
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as exc:
         raise ValueError(f"{label} must contain UTF-8 JSON") from exc
     if not isinstance(document, dict):
         raise ValueError(f"{label} JSON must contain one object")
+    _validate_json_nesting(document, label)
     return document
 
 
@@ -234,9 +248,10 @@ def build_artifact_chain_manifest(
         "artifacts": normalized,
         "terminal_artifact_ids": terminals,
     }
-    if len(_canonical_bytes(body)) > MAX_CHAIN_MANIFEST_BYTES:
+    manifest = {**body, "manifest_sha256": _sha256(body)}
+    if len(_canonical_bytes(manifest)) > MAX_CHAIN_MANIFEST_BYTES:
         raise ValueError("artifact chain manifest is oversized")
-    return {**body, "manifest_sha256": _sha256(body)}
+    return manifest
 
 
 def validate_artifact_chain_manifest(value: Any) -> dict[str, Any]:
@@ -277,9 +292,9 @@ def validate_artifact_chain_manifest(value: Any) -> dict[str, Any]:
     rebuilt["producer"] = producer
     unhashed = dict(rebuilt)
     unhashed.pop("manifest_sha256")
-    if len(_canonical_bytes(unhashed)) > MAX_CHAIN_MANIFEST_BYTES:
-        raise ValueError("artifact chain manifest is oversized")
     rebuilt["manifest_sha256"] = _sha256(unhashed)
+    if len(_canonical_bytes(rebuilt)) > MAX_CHAIN_MANIFEST_BYTES:
+        raise ValueError("artifact chain manifest is oversized")
     if rebuilt["manifest_sha256"] != supplied_hash or rebuilt != item:
         raise ValueError("artifact chain is noncanonical or its hash does not match")
     return deepcopy(rebuilt)
@@ -297,14 +312,24 @@ def _verify_artifact_chain_snapshot(
     documents = {}
     for item in manifest["artifacts"]:
         candidate = root.joinpath(*PurePosixPath(item["relative_path"]).parts)
-        resolved = candidate.resolve(strict=True)
+        try:
+            resolved = candidate.resolve(strict=True)
+        except OSError as exc:
+            raise ValueError("artifact path does not exist under artifact_root") from exc
         try:
             resolved.relative_to(root)
         except ValueError as exc:
             raise ValueError("artifact path escapes artifact_root") from exc
         if candidate.is_symlink() or not resolved.is_file():
             raise ValueError("artifact path must be a regular non-symlink file")
-        snapshot = read_contained_file_snapshot(resolved, root=root, max_bytes=MAX_ARTIFACT_BYTES)
+        try:
+            snapshot = read_contained_file_snapshot(
+                resolved,
+                root=root,
+                max_bytes=MAX_ARTIFACT_BYTES,
+            )
+        except OSError as exc:
+            raise ValueError("artifact path could not be read under artifact_root") from exc
         verified_bytes += snapshot["byte_count"]
         if verified_bytes > MAX_CHAIN_BYTES:
             raise ValueError("artifact chain exceeds the total byte limit")

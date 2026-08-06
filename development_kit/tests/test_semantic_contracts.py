@@ -28,6 +28,7 @@ from src.knowledge.semantic_contracts import (
 )
 
 from development_kit.benchmarks.semantic_benchmark import (
+    _aggregate,
     _query_metrics,
     evaluate_lexical_baseline,
 )
@@ -45,6 +46,28 @@ EVALUATION_PATH = (
 SHA_A = "a" * 64
 SHA_B = "b" * 64
 SHA_C = "c" * 64
+
+
+def test_empty_semantic_benchmark_aggregate_is_serializable_and_schema_complete():
+    aggregate = _aggregate([])
+
+    assert aggregate == {
+        "query_count": 0,
+        "judged_query_count": 0,
+        "recall_at_5": 0.0,
+        "recall_at_10": 0.0,
+        "mrr_at_10": 0.0,
+        "ndcg_at_10": 0.0,
+        "zero_result_rate": 0.0,
+        "misses_at_5": 0,
+        "negative_query_count": 0,
+        "negative_abstention_rate": None,
+    }
+    assert json.loads(json.dumps(aggregate, allow_nan=False)) == aggregate
+    assert (
+        evaluate_semantic_continuation({"target_styles": aggregate})["continue_to_semantic_worker"]
+        is False
+    )
 
 
 def _absent_ownership():
@@ -142,6 +165,13 @@ def test_model_and_index_manifests_require_ascii_absolute_identity_paths():
         validate_index_manifest({**index, "chunk_count": 0})
 
 
+@pytest.mark.parametrize("validator", [validate_model_manifest, validate_index_manifest])
+@pytest.mark.parametrize("payload", [None, [], "manifest"])
+def test_semantic_manifest_validators_require_objects(validator, payload):
+    with pytest.raises(ValueError, match="must be an object"):
+        validator(payload)
+
+
 def test_contract_json_rejects_nonfinite_values_and_limits_are_bounded():
     with pytest.raises(ValueError):
         canonical_json_bytes({"distance": float("nan")})
@@ -168,6 +198,18 @@ def test_semantic_continuation_gate_requires_a_material_target_slice_gap():
 
     assert blocked["continue_to_semantic_worker"] is False
     assert continuing["continue_to_semantic_worker"] is True
+    continuing["thresholds"]["minimum_target_queries"] = 0
+    repeated = evaluate_semantic_continuation(
+        {
+            "target_styles": {
+                "query_count": 0,
+                "recall_at_5": 0.0,
+                "misses_at_5": 0,
+            }
+        }
+    )
+    assert repeated["continue_to_semantic_worker"] is False
+    assert SEMANTIC_CONTINUATION_GATE["minimum_target_queries"] > 0
 
 
 @pytest.mark.parametrize(
@@ -241,11 +283,15 @@ def test_lexical_baseline_computes_rank_metrics_without_semantic_dependencies():
             "queries": [
                 {
                     "id": f"q{number:02d}",
-                    "query": "CopyFace source destination",
+                    "query": (
+                        "CopyFace source destination"
+                        if number < 30
+                        else "CopyFace copies mesh between source and destination faces"
+                    ),
                     "category": "exact_clientapi",
                     "style": "exact" if number < 30 else "paraphrase",
                     "relevant": [{"source": source, "page": 10}],
-                    "judge_note": "Synthetic exact citation for rank-metric testing.",
+                    "judge_note": "Synthetic citation for rank-metric testing.",
                 }
                 for number in range(60)
             ],
@@ -255,6 +301,8 @@ def test_lexical_baseline_computes_rank_metrics_without_semantic_dependencies():
     assert result["query_count"] == 60
     assert result["summary"]["overall"]["recall_at_5"] == 1.0
     assert result["summary"]["overall"]["mrr_at_10"] == 1.0
+    assert result["summary"]["by_style"]["paraphrase"]["recall_at_5"] == 1.0
+    assert result["summary"]["by_style"]["paraphrase"]["mrr_at_10"] == 1.0
     assert result["continuation_gate"]["continue_to_semantic_worker"] is False
 
 
@@ -320,6 +368,39 @@ def test_semantic_benchmark_retrieval_validates_and_deduplicates_citations():
         )
 
 
+def test_semantic_soak_raw_request_classifies_truncated_worker_response(monkeypatch):
+    class Connection:
+        calls = 0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def settimeout(self, _timeout):
+            return None
+
+        def sendall(self, _payload):
+            return None
+
+        def recv(self, _size):
+            self.calls += 1
+            return b'{"success":true}' if self.calls == 1 else b""
+
+    monkeypatch.setattr(
+        soak_module.socket,
+        "create_connection",
+        lambda *_args, **_kwargs: Connection(),
+    )
+    manager = SimpleNamespace(_token="token", _port=1234)
+
+    result = soak_module._raw_request(manager, "request", "query")
+
+    assert result["success"] is False
+    assert result["error"]["code"] == "worker_protocol_failure"
+
+
 def test_semantic_benchmark_receipts_publish_concurrently_without_temp_alias(tmp_path):
     def publish(index: int) -> None:
         soak_module._atomic_write(
@@ -383,7 +464,7 @@ def test_semantic_worker_inventory_matches_actual_module_command(monkeypatch):
 
 
 def test_semantic_acceptance_uses_isolated_runtime_and_run_lock():
-    runtime = Path("D:/comsol_runtime/semantic_feature/runs/test-run")
+    runtime = Path("D:/mcp_tests/semantic_feature/runs/test-run")
     parameters = feature_module._server("core", runtime, semantic_enabled=True)
 
     assert parameters.env["COMSOL_MCP_RUNTIME_DIR"] == str(runtime)
@@ -391,6 +472,7 @@ def test_semantic_acceptance_uses_isolated_runtime_and_run_lock():
     assert parameters.env["COMSOL_MCP_ENABLE_SEMANTIC_DOCS"] == "true"
     assert feature_module.RUN_LOCK.name == "acceptance.lock"
     assert feature_module.RUN_LOCK.is_absolute()
+    assert feature_module.OUTPUT.is_relative_to(Path("D:/mcp_tests"))
 
 
 def test_concurrent_burst_requires_success_busy_and_no_unexpected_failures():
@@ -531,6 +613,9 @@ def test_retrieval_acceptance_preserves_primary_failure_through_reset_failure(tm
 
 
 def test_retrieval_acceptance_rejects_unsuccessful_worker_reset(tmp_path):
+    expected_by_query = {item[1]: item[3] for item in retrieval_module.QUERIES}
+    assert len(expected_by_query) == len(retrieval_module.QUERIES)
+
     class Manager:
         def __init__(self):
             self.query_count = 0
@@ -541,7 +626,8 @@ def test_retrieval_acceptance_rejects_unsuccessful_worker_reset(tmp_path):
 
         def query(self, query, **_kwargs):
             self.query_count += 1
-            expected = next(item[3] for item in retrieval_module.QUERIES if item[1] == query)
+            assert query in expected_by_query, f"missing retrieval expectation for {query!r}"
+            expected = expected_by_query[query]
             return {
                 "success": True,
                 "count": 1,

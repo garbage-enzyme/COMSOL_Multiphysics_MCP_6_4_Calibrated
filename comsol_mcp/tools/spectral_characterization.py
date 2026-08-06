@@ -8,6 +8,15 @@ from typing import Any, Optional
 from mcp.server.mcpserver import MCPServer
 
 
+def _is_nonfinite_number(value: object) -> bool:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return not math.isfinite(float(value))
+    except OverflowError:
+        return True
+
+
 def _nonfinite_row_summary(
     bundle_spec: dict[str, Any], *, artifact_key: str = "candidate_measurements"
 ) -> dict[str, Any] | None:
@@ -26,12 +35,7 @@ def _nonfinite_row_summary(
     for index, row in enumerate(rows):
         if not isinstance(row, dict):
             continue
-        if any(
-            isinstance(row.get(field), (int, float))
-            and not isinstance(row.get(field), bool)
-            and not math.isfinite(float(row[field]))
-            for field in numeric_fields
-        ):
+        if any(_is_nonfinite_number(row.get(field)) for field in numeric_fields):
             invalid.append(
                 {
                     "row_id": row.get("row_id")

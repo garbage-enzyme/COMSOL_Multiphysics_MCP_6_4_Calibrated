@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 import subprocess
@@ -107,6 +108,32 @@ def test_execution_spec_hashes_source_incrementally_under_contract_limit(tmp_pat
         )
 
 
+@pytest.mark.parametrize("sign", [True, 0, "1"])
+def test_execution_spec_rejects_noncanonical_power_sign(tmp_path, ascii_tmp_path, sign):
+    spec = _spec(tmp_path, ascii_tmp_path)
+    spec["declared_plane_flux"]["incident"]["positive_power_sign"] = sign
+    with pytest.raises(ValueError, match="positive_power_sign"):
+        validate_reference_power_execution_spec(spec, _contract())
+
+
+def test_execution_spec_normalizes_huge_numbers_to_validation_errors(tmp_path, ascii_tmp_path):
+    spec = _spec(tmp_path, ascii_tmp_path)
+    spec["wavelength"]["value"] = 10**400
+
+    with pytest.raises(ValueError, match="finite and non-negative"):
+        validate_reference_power_execution_spec(spec, _contract())
+
+
+def test_execution_spec_rejects_huge_coordinate_bounds_as_validation_errors(
+    tmp_path, ascii_tmp_path
+):
+    spec = _spec(tmp_path, ascii_tmp_path)
+    spec["reference_air"]["top_air_coordinate_range"]["x"][0] = -(10**400)
+
+    with pytest.raises(ValueError, match=r"coordinate_range.x\[0\].*finite"):
+        validate_reference_power_execution_spec(spec, _contract())
+
+
 def test_bounded_json_reads_limit_plus_one_from_one_descriptor(tmp_path):
     path = tmp_path / "input.json"
     path.write_bytes(b'{"value":"0123456789"}')
@@ -156,9 +183,19 @@ def test_preflight_cli_validates_fixture_without_importing_mph():
     assert receipt["contract_valid"] is True
     assert receipt["spec_valid"] is None
     assert receipt["real_comsol_started"] is False
-    assert "mph" not in (
-        ROOT / "development_kit" / "scripts" / "reference_power_gate_preflight.py"
-    ).read_text(encoding="utf-8")
+    preflight = ROOT / "development_kit" / "scripts" / "reference_power_gate_preflight.py"
+    imports = [
+        node
+        for node in ast.walk(ast.parse(preflight.read_text(encoding="utf-8")))
+        if isinstance(node, (ast.Import, ast.ImportFrom))
+    ]
+    assert all(
+        not (
+            (isinstance(node, ast.Import) and any(alias.name == "mph" for alias in node.names))
+            or (isinstance(node, ast.ImportFrom) and node.module == "mph")
+        )
+        for node in imports
+    )
 
 
 def test_preflight_cli_never_truncates_an_existing_receipt(tmp_path):

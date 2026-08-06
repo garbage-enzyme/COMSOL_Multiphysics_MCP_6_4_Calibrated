@@ -31,7 +31,9 @@ from src.knowledge.semantic_process import SemanticWorkerManager
 from development_kit.benchmarks.semantic_benchmark import evaluate_lexical_baseline
 
 ROOT = Path(__file__).parents[3]
-EVALUATION_PATH = ROOT / "development_kit" / "tests" / "fixtures" / "semantic_retrieval_evaluation.json"
+EVALUATION_PATH = (
+    ROOT / "development_kit" / "tests" / "fixtures" / "semantic_retrieval_evaluation.json"
+)
 DEPLOYMENT = Path("D:/comsol_semantic")
 LEXICAL = Path("D:/comsol_docs_fts/manuals.sqlite3")
 MODEL = DEPLOYMENT / "models" / "all-MiniLM-L6-v2" / "1110a243fdf4706b3f48f1d95db1a4f5529b4d41"
@@ -87,12 +89,24 @@ def _aggregate(rows: list[Mapping[str, Any]]) -> dict[str, Any]:
         "query_count": len(rows),
         "positive_query_count": len(positive),
         "negative_query_count": len(negative),
-        "recall_at_5": statistics.fmean(row["metrics"]["recall_at_5"] for row in positive) if positive else None,
-        "recall_at_10": statistics.fmean(row["metrics"]["recall_at_10"] for row in positive) if positive else None,
-        "mrr_at_10": statistics.fmean(row["metrics"]["reciprocal_rank_at_10"] for row in positive) if positive else None,
-        "ndcg_at_10": statistics.fmean(row["metrics"]["ndcg_at_10"] for row in positive) if positive else None,
+        "recall_at_5": statistics.fmean(row["metrics"]["recall_at_5"] for row in positive)
+        if positive
+        else None,
+        "recall_at_10": statistics.fmean(row["metrics"]["recall_at_10"] for row in positive)
+        if positive
+        else None,
+        "mrr_at_10": statistics.fmean(row["metrics"]["reciprocal_rank_at_10"] for row in positive)
+        if positive
+        else None,
+        "ndcg_at_10": statistics.fmean(row["metrics"]["ndcg_at_10"] for row in positive)
+        if positive
+        else None,
         "misses_at_5": sum(1 for row in positive if row["metrics"]["miss_at_5"]),
-        "negative_abstention_rate": statistics.fmean(1.0 if row["metrics"]["negative_abstained"] else 0.0 for row in negative) if negative else None,
+        "negative_abstention_rate": statistics.fmean(
+            1.0 if row["metrics"]["negative_abstained"] else 0.0 for row in negative
+        )
+        if negative
+        else None,
     }
 
 
@@ -107,9 +121,9 @@ def _summaries(rows: list[Mapping[str, Any]]) -> dict[str, Any]:
             category: _aggregate([row for row in rows if row["category"] == category])
             for category in sorted({row["category"] for row in rows})
         },
-        "paraphrase_multi": _aggregate([
-            row for row in rows if row["style"] in {"paraphrase", "multi_concept"}
-        ]),
+        "paraphrase_multi": _aggregate(
+            [row for row in rows if row["style"] in {"paraphrase", "multi_concept"}]
+        ),
     }
 
 
@@ -155,10 +169,18 @@ def _corpus_citations(lexical_path: Path = LEXICAL) -> set[tuple[str, int]]:
     with closing(
         sqlite3.connect(lexical_path.resolve().as_uri() + "?mode=ro", uri=True)
     ) as connection:
-        return {(str(source), int(page)) for source, page in connection.execute("SELECT source, page FROM pages")}
+        return {
+            (str(source), int(page))
+            for source, page in connection.execute("SELECT source, page FROM pages")
+        }
 
 
-def _evaluate_mode(manager: SemanticWorkerManager, evaluation: Mapping[str, Any], mode: str, corpus: set[tuple[str, int]]) -> dict[str, Any]:
+def _evaluate_mode(
+    manager: SemanticWorkerManager,
+    evaluation: Mapping[str, Any],
+    mode: str,
+    corpus: set[tuple[str, int]],
+) -> dict[str, Any]:
     rows = []
     latencies = []
     response_bytes = []
@@ -182,17 +204,25 @@ def _evaluate_mode(manager: SemanticWorkerManager, evaluation: Mapping[str, Any]
         relevant = {(row["source"], int(row["page"])) for row in item["relevant"]}
         returned += len(ranked)
         valid += sum(1 for citation in ranked if citation in corpus)
-        encoded_size = len(json.dumps(response, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode("utf-8"))
+        encoded_size = len(
+            json.dumps(response, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode(
+                "utf-8"
+            )
+        )
         latencies.append(elapsed)
         response_bytes.append(encoded_size)
-        rows.append({
-            "id": item["id"], "category": item["category"], "style": item["style"],
-            "relevant": item["relevant"],
-            "ranked_citations": [{"source": source, "page": page} for source, page in ranked],
-            "metrics": _metrics(ranked, relevant, corpus),
-            "elapsed_seconds": elapsed,
-            "response_bytes": encoded_size,
-        })
+        rows.append(
+            {
+                "id": item["id"],
+                "category": item["category"],
+                "style": item["style"],
+                "relevant": item["relevant"],
+                "ranked_citations": [{"source": source, "page": page} for source, page in ranked],
+                "metrics": _metrics(ranked, relevant, corpus),
+                "elapsed_seconds": elapsed,
+                "response_bytes": encoded_size,
+            }
+        )
         if number % 20 == 0:
             print(json.dumps({"phase": "benchmark", "mode": mode, "completed": number}), flush=True)
     return {
@@ -203,7 +233,10 @@ def _evaluate_mode(manager: SemanticWorkerManager, evaluation: Mapping[str, Any]
             "p95": _percentile(latencies, 0.95),
             "maximum": max(latencies),
         },
-        "response_bytes": {"maximum": max(response_bytes), "p95": _percentile([float(value) for value in response_bytes], 0.95)},
+        "response_bytes": {
+            "maximum": max(response_bytes),
+            "p95": _percentile([float(value) for value in response_bytes], 0.95),
+        },
         "citation_validity": valid / returned if returned else 1.0,
         "rows": rows,
     }
@@ -220,8 +253,10 @@ def _promotion(lexical: Mapping[str, Any], hybrid: Mapping[str, Any]) -> dict[st
     absolute_gain = hybrid_target - lexical_target
     relative_gain = absolute_gain / lexical_target if lexical_target > 0.0 else None
     gates = {
-        "citation_validity": hybrid["citation_validity"] == SEMANTIC_PROMOTION_GATE["citation_validity"],
-        "exact_recall_regression": hybrid_exact - lexical_exact >= -SEMANTIC_PROMOTION_GATE["maximum_exact_symbol_recall_at_5_regression"],
+        "citation_validity": hybrid["citation_validity"]
+        == SEMANTIC_PROMOTION_GATE["citation_validity"],
+        "exact_recall_regression": hybrid_exact - lexical_exact
+        >= -SEMANTIC_PROMOTION_GATE["maximum_exact_symbol_recall_at_5_regression"],
         "target_recall_gain": (
             absolute_gain >= SEMANTIC_PROMOTION_GATE["minimum_target_recall_at_5_absolute_gain"]
             or (
@@ -230,8 +265,10 @@ def _promotion(lexical: Mapping[str, Any], hybrid: Mapping[str, Any]) -> dict[st
                 >= SEMANTIC_PROMOTION_GATE["minimum_target_recall_at_5_relative_gain"]
             )
         ),
-        "warm_p95": hybrid["latency_seconds"]["p95"] < SEMANTIC_PROMOTION_GATE["maximum_warm_p95_seconds"],
-        "hard_deadline": hybrid["latency_seconds"]["maximum"] < SEMANTIC_PROMOTION_GATE["hard_query_deadline_seconds"],
+        "warm_p95": hybrid["latency_seconds"]["p95"]
+        < SEMANTIC_PROMOTION_GATE["maximum_warm_p95_seconds"],
+        "hard_deadline": hybrid["latency_seconds"]["maximum"]
+        < SEMANTIC_PROMOTION_GATE["hard_query_deadline_seconds"],
         "negative_abstention": hybrid["summary"]["overall"]["negative_abstention_rate"] == 1.0,
     }
     return {
@@ -245,7 +282,9 @@ def _promotion(lexical: Mapping[str, Any], hybrid: Mapping[str, Any]) -> dict[st
             "hybrid_paraphrase_multi_recall_at_5": hybrid_target,
             "absolute_gain": absolute_gain,
             "relative_gain": relative_gain,
-            "hybrid_negative_abstention_rate": hybrid["summary"]["overall"]["negative_abstention_rate"],
+            "hybrid_negative_abstention_rate": hybrid["summary"]["overall"][
+                "negative_abstention_rate"
+            ],
         },
         "thresholds": SEMANTIC_PROMOTION_GATE,
         "decision": "promote" if all(gates.values()) else "retain_experimental_lexical_default",
@@ -263,16 +302,32 @@ def _raw_request(manager: SemanticWorkerManager, request_id: str, query: str) ->
         "filters": None,
         "retrieval_mode": "hybrid",
     }
-    with socket.create_connection(("127.0.0.1", int(manager._port)), timeout=15.0) as connection:
-        connection.settimeout(15.0)
-        connection.sendall(json.dumps(payload, separators=(",", ":")).encode("utf-8") + b"\n")
-        data = bytearray()
-        while not data.endswith(b"\n"):
-            block = connection.recv(4096)
-            if not block:
-                break
-            data.extend(block)
-    return json.loads(bytes(data).decode("utf-8"))
+    try:
+        with socket.create_connection(
+            ("127.0.0.1", int(manager._port)), timeout=15.0
+        ) as connection:
+            connection.settimeout(15.0)
+            connection.sendall(json.dumps(payload, separators=(",", ":")).encode("utf-8") + b"\n")
+            data = bytearray()
+            while not data.endswith(b"\n"):
+                block = connection.recv(4096)
+                if not block:
+                    break
+                data.extend(block)
+        if not data.endswith(b"\n"):
+            raise RuntimeError("semantic worker response was not newline terminated")
+        value = json.loads(bytes(data).decode("utf-8"))
+        if not isinstance(value, dict):
+            raise ValueError("semantic worker response must be an object")
+        return value
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, RuntimeError, ValueError) as exc:
+        return {
+            "success": False,
+            "error": {
+                "code": "worker_protocol_failure",
+                "type": type(exc).__name__,
+            },
+        }
 
 
 def _classify_burst(responses: list[Mapping[str, Any]]) -> dict[str, int]:
@@ -280,8 +335,7 @@ def _classify_burst(responses: list[Mapping[str, Any]]) -> dict[str, int]:
     busy = sum(
         1
         for response in responses
-        if response.get("success") is False
-        and response.get("error", {}).get("code") == "busy"
+        if response.get("success") is False and response.get("error", {}).get("code") == "busy"
     )
     return {
         "requests": len(responses),
@@ -311,19 +365,27 @@ def _soak(
             response = manager.query(item["query"], limit=5, retrieval_mode="hybrid")
             elapsed = time.perf_counter() - started
             latencies.append(elapsed)
-            sizes.append(len(json.dumps(response, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode("utf-8")))
+            sizes.append(
+                len(
+                    json.dumps(
+                        response, ensure_ascii=False, allow_nan=False, separators=(",", ":")
+                    ).encode("utf-8")
+                )
+            )
             if not response.get("success"):
                 errors.append({"iteration": number, "response": response})
             if number % 50 == 0:
-                samples.append({
-                    "iteration": number,
-                    "query_id": item["id"],
-                    "count": response.get("count"),
-                    "top": [
-                        {"source": row["source"], "page": row["page"]}
-                        for row in response.get("results", [])[:2]
-                    ],
-                })
+                samples.append(
+                    {
+                        "iteration": number,
+                        "query_id": item["id"],
+                        "count": response.get("count"),
+                        "top": [
+                            {"source": row["source"], "page": row["page"]}
+                            for row in response.get("results", [])[:2]
+                        ],
+                    }
+                )
             if (number + 1) % 100 == 0:
                 print(json.dumps({"phase": "soak", "completed": number + 1}), flush=True)
         barrier = threading.Barrier(12)
@@ -344,10 +406,14 @@ def _soak(
         "sequential_queries": 500,
         "errors": errors,
         "latency_seconds": {
-            "p50": _percentile(latencies, 0.50), "p95": _percentile(latencies, 0.95),
+            "p50": _percentile(latencies, 0.50),
+            "p95": _percentile(latencies, 0.95),
             "maximum": max(latencies),
         },
-        "response_bytes": {"maximum": max(sizes), "p95": _percentile([float(value) for value in sizes], 0.95)},
+        "response_bytes": {
+            "maximum": max(sizes),
+            "p95": _percentile([float(value) for value in sizes], 0.95),
+        },
         "samples": samples,
         "rss_bytes": {"start": rss_start, "end": rss_end, "growth": rss_end - rss_start},
         "load_count": health["status"]["load_count"],
@@ -360,8 +426,7 @@ def _soak(
 
 def _atomic_write(path: Path, value: Mapping[str, Any]) -> None:
     payload = (
-        json.dumps(value, ensure_ascii=False, allow_nan=False, indent=2).encode("utf-8")
-        + b"\n"
+        json.dumps(value, ensure_ascii=False, allow_nan=False, indent=2).encode("utf-8") + b"\n"
     )
     atomic_write_bytes(path, payload)
 
@@ -381,10 +446,13 @@ def _run_benchmark(output_path: Path) -> None:
             "mode": "lexical",
             "summary": {
                 **lexical_full["summary"],
-                "paraphrase_multi": _aggregate([
-                    row for row in lexical_full["queries"]
-                    if row["style"] in {"paraphrase", "multi_concept"}
-                ]),
+                "paraphrase_multi": _aggregate(
+                    [
+                        row
+                        for row in lexical_full["queries"]
+                        if row["style"] in {"paraphrase", "multi_concept"}
+                    ]
+                ),
             },
             "latency_seconds": lexical_full["summary"]["latency_seconds"],
             "citation_validity": lexical_full["summary"]["citation_validity"],
@@ -411,9 +479,7 @@ def _run_benchmark(output_path: Path) -> None:
             raise RuntimeError("semantic lexical snapshot changed during benchmark")
     finally:
         for suffix in ("", "-shm", "-wal"):
-            lexical_snapshot.with_name(lexical_snapshot.name + suffix).unlink(
-                missing_ok=True
-            )
+            lexical_snapshot.with_name(lexical_snapshot.name + suffix).unlink(missing_ok=True)
     output = {
         "schema_version": "1",
         "phase": "semantic soak",
@@ -428,7 +494,11 @@ def _run_benchmark(output_path: Path) -> None:
         "hybrid": hybrid,
         "promotion": promotion,
         "benchmark_worker": {
-            "rss_bytes": {"before": rss_before, "after": rss_after, "growth": rss_after - rss_before},
+            "rss_bytes": {
+                "before": rss_before,
+                "after": rss_after,
+                "growth": rss_after - rss_before,
+            },
             "load_count": benchmark_health["status"]["load_count"],
             "query_count": benchmark_health["status"]["query_count"],
             "reset": benchmark_reset,
@@ -450,19 +520,35 @@ def _run_benchmark(output_path: Path) -> None:
     ):
         raise RuntimeError("concurrent burst result classification gate failed")
     _atomic_write(output_path, output)
-    print(json.dumps({
-        "success": True,
-        "promotion": promotion,
-        "lexical": lexical["summary"],
-        "vector": vector["summary"],
-        "hybrid": hybrid["summary"],
-        "hybrid_latency_seconds": hybrid["latency_seconds"],
-        "soak": {key: soak[key] for key in (
-            "sequential_queries", "latency_seconds", "response_bytes", "rss_bytes",
-            "load_count", "query_count", "burst", "index_immutable",
-        )},
-        "artifact": str(output_path),
-    }, ensure_ascii=False, allow_nan=False, indent=2))
+    print(
+        json.dumps(
+            {
+                "success": True,
+                "promotion": promotion,
+                "lexical": lexical["summary"],
+                "vector": vector["summary"],
+                "hybrid": hybrid["summary"],
+                "hybrid_latency_seconds": hybrid["latency_seconds"],
+                "soak": {
+                    key: soak[key]
+                    for key in (
+                        "sequential_queries",
+                        "latency_seconds",
+                        "response_bytes",
+                        "rss_bytes",
+                        "load_count",
+                        "query_count",
+                        "burst",
+                        "index_immutable",
+                    )
+                },
+                "artifact": str(output_path),
+            },
+            ensure_ascii=False,
+            allow_nan=False,
+            indent=2,
+        )
+    )
 
 
 def main() -> None:

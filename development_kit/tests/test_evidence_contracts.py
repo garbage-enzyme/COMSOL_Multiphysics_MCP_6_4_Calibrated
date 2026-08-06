@@ -141,8 +141,12 @@ def test_same_evidence_and_policy_serialize_byte_stably_across_mapping_orders():
         tolerances={"margin": 0.0},
         assumptions={"passive": True, "power_normalized": True},
     )
-    second_evidence = _reverse_mapping_order(first_evidence)
-    second_policy = _reverse_mapping_order(first_policy)
+    evidence_payload = deepcopy(first_evidence)
+    evidence_payload.pop("contract_sha256")
+    policy_payload = deepcopy(first_policy)
+    policy_payload.pop("policy_sha256")
+    second_evidence = build_physical_evidence(_reverse_mapping_order(evidence_payload))
+    second_policy = build_validation_policy(_reverse_mapping_order(policy_payload))
 
     assert canonical_json_bytes(first_evidence) == canonical_json_bytes(second_evidence)
     assert canonical_json_bytes(first_policy) == canonical_json_bytes(second_policy)
@@ -178,6 +182,13 @@ def test_physical_evidence_rejects_stale_contract_hash():
 
     with pytest.raises(ValueError, match="contract_sha256 does not match"):
         validate_physical_evidence(payload)
+
+
+def test_measured_evidence_rejects_null_value_at_envelope_boundary():
+    payload = _envelope()
+    payload["evidence"]["power.R"]["value"] = None
+    with pytest.raises(ValueError, match="non-null value"):
+        validate_physical_evidence(payload, verify_hash=False)
 
 
 def test_contract_size_is_bounded():
@@ -529,6 +540,32 @@ def test_legacy_declared_flux_state_cannot_substitute_for_nested_measurements():
         "physical_flux_closure_eligible",
     ):
         assert migrated["evidence"][f"flux.{name}"]["state"] == "unknown"
+
+
+@pytest.mark.parametrize("section", [None, 1, []])
+def test_legacy_measured_internal_absorption_requires_object_sections(section):
+    legacy = {
+        "schema_version": "1",
+        "config_id": "legacy-config",
+        "config_sha256": CONFIG_HASH,
+        "source_sha256": SOURCE_HASH,
+        "measurement": {
+            "schema_version": "1",
+            "config_id": "legacy-config",
+            "provenance": {"config_sha256": CONFIG_HASH, "source_sha256_before": SOURCE_HASH},
+            "wavelength": {},
+            "power": {},
+            "polarization": {},
+            "mesh": {},
+            "internal_absorption_consistency": {
+                "state": "measured",
+                "cross_section": section,
+                "volume_loss": {},
+            },
+        },
+    }
+    with pytest.raises(ValueError, match="cross_section must be a JSON object"):
+        migrate_legacy_point_audit(legacy)
 
 
 def test_file_migration_writes_new_hash_bound_artifact_without_touching_source(

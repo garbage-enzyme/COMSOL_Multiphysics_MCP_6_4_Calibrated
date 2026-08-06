@@ -116,6 +116,20 @@ def test_unit_normalization_is_idempotent_and_semantically_equal():
     assert comparison["classification_counts"]["semantic"] == 0
 
 
+def test_celsius_symbol_alias_normalizes_to_kelvin():
+    value = _configuration()
+    value["materials"][0]["temperature"] = _quantity(26.85, "°C", "temperature")
+
+    normalized = normalize_simulation_configuration(value)
+
+    assert normalized["materials"][0]["temperature"] == {
+        "status": "known",
+        "dimension": "temperature",
+        "value": 300.0,
+        "unit": "K",
+    }
+
+
 @pytest.mark.parametrize(
     ("mutation", "path_fragment"),
     [
@@ -218,7 +232,10 @@ def test_container_level_physical_changes_are_classified(mutation):
     right = deepcopy(_configuration())
     mutation(right)
     comparison = compare_simulation_configurations(_configuration(), right)
+    assert comparison["disposition"] == "different"
     assert comparison["physical_disposition"] == "different"
+    assert comparison["changes"]
+    assert {item["classification"] for item in comparison["changes"]} == {"semantic"}
 
 
 @pytest.mark.parametrize(
@@ -236,6 +253,35 @@ def test_physical_role_quantities_fail_at_the_typed_boundary(mutation):
     mutation(value)
     with pytest.raises(ValidationError):
         normalize_simulation_configuration(value)
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_configuration_rejects_nonfinite_declared_quantities(value):
+    configuration = _configuration()
+    configuration["layers"][0]["thickness"]["value"] = value
+
+    with pytest.raises(ValidationError):
+        normalize_simulation_configuration(configuration)
+
+
+def test_configuration_rejects_geometry_dimension_and_missing_material_reference():
+    wrong_dimension = _configuration()
+    wrong_dimension["geometry"][0]["quantity"] = _quantity(1.0, "eV", "energy")
+    with pytest.raises(ValidationError, match="length quantities"):
+        normalize_simulation_configuration(wrong_dimension)
+
+    missing_material = _configuration()
+    missing_material["layers"][0]["material_id"] = "missing"
+    with pytest.raises(ValidationError, match="declared material_id"):
+        normalize_simulation_configuration(missing_material)
+
+
+def test_non_parameter_wavelength_driver_rejects_residual_parameter_name():
+    configuration = _configuration()
+    configuration["wavelength_control"]["driver"] = "frequency"
+
+    with pytest.raises(ValidationError, match="cannot declare parameter_name"):
+        normalize_simulation_configuration(configuration)
 
 
 @pytest.mark.parametrize(
@@ -388,3 +434,25 @@ def test_public_configuration_failures_are_logged_and_redacted(caplog):
     assert "private-furlong" not in result["error"]
     assert "Simulation configuration validation failed" in caplog.text
     assert "private-furlong" in caplog.text
+
+
+@pytest.mark.parametrize("failure", [OverflowError("huge"), RecursionError("deep")])
+def test_public_configuration_contains_numeric_and_depth_failures(monkeypatch, failure):
+    import src.evidence.simulation_configuration as evidence_module
+
+    monkeypatch.setattr(
+        evidence_module,
+        "normalize_simulation_configuration",
+        lambda _configuration: (_ for _ in ()).throw(failure),
+    )
+    server = create_server("f0-contained-input-failure", profile="core")
+    result = _decode_public(
+        asyncio.run(
+            server.call_tool(
+                "simulation_configuration_validate", {"configuration": _configuration()}
+            )
+        )
+    )
+
+    assert result["success"] is False
+    assert result["error"] == "Simulation configuration validation failed."

@@ -11,7 +11,8 @@ import shutil
 import struct
 import subprocess
 import sys
-from importlib.metadata import entry_points, requires, version
+import time
+from importlib.metadata import distribution, entry_points, requires, version
 from importlib.resources import files
 from importlib.util import find_spec
 from pathlib import Path
@@ -130,6 +131,22 @@ def _forbidden_process_snapshot() -> dict[int, str]:
     return result
 
 
+def _wait_for_forbidden_process_exit(
+    baseline: dict[int, str],
+    *,
+    settle_seconds: float = 2.0,
+    poll_seconds: float = 0.05,
+) -> dict[int, str]:
+    """Allow an already-waited Windows launcher to leave process enumeration."""
+    deadline = time.monotonic() + settle_seconds
+    while True:
+        observed = _forbidden_process_snapshot()
+        new_processes = {pid: name for pid, name in observed.items() if pid not in baseline}
+        if not new_processes or time.monotonic() >= deadline:
+            return new_processes
+        time.sleep(poll_seconds)
+
+
 def _probe_direct_settings_entry(output_parent: Path) -> dict:
     from settings_gui.desktop_shortcut import (
         SHORTCUT_NAME,
@@ -138,7 +155,7 @@ def _probe_direct_settings_entry(output_parent: Path) -> dict:
     )
 
     executable = installed_entry_executable()
-    probe_root = output_parent / "settings-gui-direct-entry-probe"
+    probe_root = output_parent.resolve() / "settings-gui-direct-entry-probe"
     probe_root.mkdir(parents=True, exist_ok=False)
     try:
         target = probe_root / "settings.json"
@@ -178,8 +195,7 @@ def _probe_direct_settings_entry(output_parent: Path) -> dict:
             raise AssertionError("validate-only created a settings or temporary file")
         if _shortcut_bytes_identity(shortcut) != shortcut_before:
             raise AssertionError("validate-only changed the Desktop shortcut")
-        processes_after = _forbidden_process_snapshot()
-        new_processes = sorted(set(processes_after) - set(processes_before))
+        new_processes = _wait_for_forbidden_process_exit(processes_before)
         if new_processes:
             raise AssertionError("validate-only started a forbidden process")
     finally:
@@ -338,7 +354,8 @@ def main() -> int:
     if deployment_identity.get("contains_local_path") is not False:
         raise AssertionError("installed deployment identity leaks a local path")
 
-    if find_spec("src") is not None:
+    distribution_files = distribution("comsol-mcp").files or ()
+    if any(Path(str(item)).parts[:1] == ("src",) for item in distribution_files):
         raise AssertionError("installed wheel exposes a generic top-level src package")
     if find_spec("settings_gui.tests") is not None:
         raise AssertionError("installed wheel exposes Settings GUI tests")

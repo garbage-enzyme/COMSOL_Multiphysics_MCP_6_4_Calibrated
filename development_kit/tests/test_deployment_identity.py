@@ -8,6 +8,7 @@ import json
 import re
 import subprocess
 import sys
+import threading
 import tomllib
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -94,6 +95,19 @@ def test_nonobject_deployment_manifest_fails_closed(tmp_path, monkeypatch):
     assert "deployment manifest unavailable" in identity["error"]
 
 
+def test_deployment_identity_does_not_mask_manifest_path_classification(tmp_path, monkeypatch):
+    manifest = json.loads(capabilities_module._DEPLOYMENT_MANIFEST.read_text(encoding="utf-8"))
+    manifest["contains_local_path"] = True
+    path = tmp_path / "deployment_manifest.json"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    monkeypatch.setattr(capabilities_module, "_DEPLOYMENT_MANIFEST", path)
+
+    identity = get_capabilities(_selection("core"))["deployment_identity"]
+
+    assert identity["available"] is True
+    assert identity["contains_local_path"] is True
+
+
 def test_deployment_classification_is_bound_to_the_distribution_root(tmp_path, monkeypatch):
     distribution_root = tmp_path / "runtime" / "site-packages"
     source_lookalike = tmp_path / "workspace" / "site-packages" / "source"
@@ -172,6 +186,67 @@ def test_build_identity_ignores_interpreter_caches_and_covers_generated_package_
     )
 
 
+def test_build_identity_recomputes_after_each_package_change(tmp_path):
+    package = tmp_path / "package"
+    package.mkdir()
+    target = package / "module.py"
+    target.write_text("value = 1\n", encoding="utf-8")
+    first = package_content_sha256(package)
+
+    target.write_text("value = 2\n", encoding="utf-8")
+
+    assert package_content_sha256(package) != first
+
+
+def test_concurrent_build_identity_requests_share_only_the_inflight_hash(tmp_path, monkeypatch):
+    import comsol_mcp.build_identity as build_identity_module
+
+    package = tmp_path / "package"
+    package.mkdir()
+    (package / "module.py").write_text("value = 1\n", encoding="utf-8")
+    original_hash = build_identity_module._hash_package_content
+    calls = 0
+    entered = threading.Event()
+    all_requests_registered = threading.Event()
+    release = threading.Event()
+
+    class CountingLock:
+        def __init__(self):
+            self._lock = threading.Lock()
+            self._completed_entries = 0
+
+        def __enter__(self):
+            self._lock.acquire()
+            return self
+
+        def __exit__(self, _exc_type, _exc, _traceback):
+            self._completed_entries += 1
+            if self._completed_entries == 8:
+                all_requests_registered.set()
+            self._lock.release()
+
+    def bounded_hash(root):
+        nonlocal calls
+        calls += 1
+        entered.set()
+        assert release.wait(5)
+        return original_hash(root)
+
+    monkeypatch.setattr(build_identity_module, "_INFLIGHT_HASHES_LOCK", CountingLock())
+    monkeypatch.setattr(build_identity_module, "_hash_package_content", bounded_hash)
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        futures = [executor.submit(package_content_sha256, package) for _ in range(8)]
+        assert entered.wait(5)
+        assert all_requests_registered.wait(5)
+        release.set()
+        results = [future.result(timeout=5) for future in futures]
+
+    assert len(set(results)) == 1
+    assert calls == 1
+    package_content_sha256(package)
+    assert calls == 2
+
+
 def test_build_identity_length_prefixes_paths_and_payloads(tmp_path):
     single = tmp_path / "single"
     multiple = tmp_path / "multiple"
@@ -198,6 +273,41 @@ def test_build_identity_rejects_package_junctions(tmp_path):
             package_content_sha256(package)
     finally:
         junction.rmdir()
+
+
+def test_build_identity_rejects_a_junction_in_package_root_ancestry(tmp_path):
+    outside = tmp_path / "outside"
+    package = outside / "package"
+    package.mkdir(parents=True)
+    (package / "module.py").write_text("value = 1\n", encoding="utf-8")
+    junction = tmp_path / "linked"
+    _winapi.CreateJunction(str(outside), str(junction))
+    try:
+        with pytest.raises(ValueError, match="symlink or junction"):
+            package_content_sha256(junction / "package")
+    finally:
+        junction.rmdir()
+
+
+def test_build_identity_rejects_content_changed_during_read(tmp_path, monkeypatch):
+    import comsol_mcp.build_identity as build_identity_module
+
+    package = tmp_path / "package"
+    package.mkdir()
+    target = package / "module.py"
+    target.write_text("value = 1\n", encoding="utf-8")
+    original_read_bytes = Path.read_bytes
+
+    def mutate_after_read(path):
+        payload = original_read_bytes(path)
+        if path == target:
+            path.write_text("value = 200\n", encoding="utf-8")
+        return payload
+
+    monkeypatch.setattr(build_identity_module.Path, "read_bytes", mutate_after_read)
+
+    with pytest.raises(ValueError, match="changed during identity collection"):
+        package_content_sha256(package)
 
 
 def test_package_version_has_one_authoritative_source():

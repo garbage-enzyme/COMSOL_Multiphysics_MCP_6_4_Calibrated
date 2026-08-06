@@ -6,7 +6,6 @@ import asyncio
 import json
 import math
 import os
-import tempfile
 from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
@@ -47,6 +46,7 @@ from comsol_mcp.tools.catalog import (
     validate_tool_specs,
 )
 from comsol_mcp.tools.session_status import get_session_status, set_session_status
+from comsol_mcp.utils.immutability import deep_freeze
 
 _TEXT = st.text(
     alphabet=st.characters(blacklist_categories=("Cs",)),
@@ -110,6 +110,10 @@ def test_finite_json_accepts_every_supported_shape(value: object) -> None:
     canonical.validate_finite_json(value)
 
 
+def test_tuple_is_an_explicit_json_array_normalization() -> None:
+    assert canonical.canonical_json_v1((1, "two")) == canonical.canonical_json_v1([1, "two"])
+
+
 @pytest.mark.parametrize(
     "value",
     [float("nan"), float("inf"), {1: "invalid"}, object()],
@@ -131,8 +135,11 @@ def test_finite_json_limits_fail_closed(monkeypatch: pytest.MonkeyPatch) -> None
 
     monkeypatch.setattr(canonical, "MAX_CANONICAL_DEPTH", 64)
     monkeypatch.setattr(canonical, "MAX_CANONICAL_STRING_BYTES", 3)
+    canonical.validate_finite_json("abc")
     with pytest.raises(ValueError, match="string.*byte limit"):
         canonical.validate_finite_json("éé")
+    with pytest.raises(ValueError, match="string.*byte limit"):
+        canonical.validate_finite_json("\x00")
     with pytest.raises(ValueError, match="string.*byte limit"):
         canonical.validate_finite_json({"éé": None})
     with pytest.raises(ValueError, match="valid UTF-8"):
@@ -185,7 +192,7 @@ def test_public_schema_adds_limits_without_overwriting_explicit_policy() -> None
     assert result["properties"]["text"]["maxLength"] == MAX_PUBLIC_STRING_LENGTH
     assert result["properties"]["limited_text"]["maxLength"] == 7
     assert result["properties"]["items"]["maxItems"] == MAX_PUBLIC_COLLECTION_ITEMS
-    assert result["properties"]["closed"]["additionalProperties"] is True
+    assert result["properties"]["closed"]["additionalProperties"] is False
     assert result["properties"]["implicit_closed"]["additionalProperties"] is False
     assert result["properties"]["number"]["minimum"] == (-MAX_PUBLIC_NUMBER_MAGNITUDE)
     assert result["properties"]["bounded"] == {
@@ -193,6 +200,36 @@ def test_public_schema_adds_limits_without_overwriting_explicit_policy() -> None
         "minimum": 0,
         "maximum": 9,
     }
+
+
+def test_public_schema_clamps_nullable_and_prebounded_nodes() -> None:
+    result = bounded_public_schema(
+        {
+            "type": "object",
+            "properties": {
+                "nullable": {"type": ["string", "null"], "maxLength": 999_999},
+                "items": {"type": "array", "maxItems": 999_999},
+                "number": {"type": "number", "minimum": -1.0e309, "maximum": 1.0e309},
+            },
+        }
+    )
+
+    assert result["properties"]["nullable"]["maxLength"] == MAX_PUBLIC_STRING_LENGTH
+    assert result["properties"]["items"]["maxItems"] == MAX_PUBLIC_COLLECTION_ITEMS
+    assert result["properties"]["number"]["minimum"] == -MAX_PUBLIC_NUMBER_MAGNITUDE
+    assert result["properties"]["number"]["maximum"] == MAX_PUBLIC_NUMBER_MAGNITUDE
+
+
+@pytest.mark.parametrize(
+    "schema",
+    [
+        {"type": "string", "maxLength": "unbounded"},
+        {"type": "number", "minimum": True},
+    ],
+)
+def test_public_schema_rejects_non_numeric_explicit_bounds(schema) -> None:
+    with pytest.raises(ValueError, match="must be numeric"):
+        bounded_public_schema(schema)
 
 
 def test_public_schema_rejects_cycles_and_overdeep_graphs() -> None:
@@ -291,16 +328,40 @@ def test_structural_guard_skips_only_declared_method_receivers() -> None:
     with pytest.raises(ValueError, match="unsupported public input type"):
         ordinary(object())
 
+    @structurally_guarded
+    def self(value: object) -> object:
+        return value
+
+    with pytest.raises(ValueError, match="unsupported public input type"):
+        self(object())
+
+    @structurally_guarded
+    def orphan(self: object) -> object:
+        return self
+
+    with pytest.raises(ValueError, match="unsupported public input type"):
+        orphan(object())
+
+
+def test_frozen_dict_rejects_in_place_union() -> None:
+    frozen = deep_freeze({"stable": True})
+
+    with pytest.raises(TypeError, match="cannot be mutated"):
+        frozen |= {"injected": True}
+
+    assert frozen == {"stable": True}
+
 
 @seed(20260721)
-@settings(max_examples=50, deadline=None, print_blob=True)
+@settings(
+    max_examples=50,
+    deadline=None,
+    print_blob=True,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
 @given(segment=_ASCII_SEGMENTS)
-def test_owned_paths_are_absolute_ascii_and_contained(segment: str) -> None:
-    base = (
-        Path("D:/comsol_runtime/property_paths")
-        if Path("D:/").exists()
-        else Path(tempfile.gettempdir()) / "comsol_mcp_property_paths"
-    )
+def test_owned_paths_are_absolute_ascii_and_contained(segment: str, ascii_tmp_path) -> None:
+    base = ascii_tmp_path / "property-paths"
     root = base / "owned"
     root.mkdir(parents=True, exist_ok=True)
     policy = PathPolicy((), root)
@@ -377,6 +438,37 @@ def test_versioned_recovery_state_machine(
     )
 
     assert result["state"] == expected
+
+
+def test_jsonl_reader_preserves_unicode_line_separator_bytes(tmp_path: Path) -> None:
+    path = tmp_path / "unicode-separator.jsonl"
+    durable_io.append_jsonl_record(path, {"schema_version": "2", "value": "left\u0085right"})
+
+    result = read_complete_jsonl(
+        path,
+        version_field="schema_version",
+        current_version="2",
+    )
+
+    assert result["state"] == "current_valid"
+    assert result["records"] == [{"schema_version": "2", "value": "left\u0085right"}]
+
+
+@pytest.mark.parametrize("version", [["2"], {"value": "2"}])
+def test_versioned_recovery_classifies_unhashable_versions_as_corrupt(
+    tmp_path: Path, version: object
+) -> None:
+    path = tmp_path / "unhashable-version.jsonl"
+    durable_io.append_jsonl_record(path, {"schema_version": version})
+
+    result = read_complete_jsonl(
+        path,
+        version_field="schema_version",
+        current_version="2",
+    )
+
+    assert result["state"] == "corrupt"
+    assert result["records"] == []
 
 
 def test_jsonl_recovery_rejects_missing_version_policy_and_oversized_files(
@@ -584,6 +676,57 @@ def test_identity_cleanup_never_removes_a_replacement(tmp_path: Path) -> None:
 
     assert durable_io.unlink_if_identity(target, identity) is False
     assert target.read_bytes() == b"competitor"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows handle identity semantics")
+def test_opened_identity_cleanup_never_unlinks_a_late_replacement(tmp_path: Path) -> None:
+    target = tmp_path / "published.bin"
+    target.write_bytes(b"ours")
+    replacement = tmp_path / "replacement.bin"
+    replacement.write_bytes(b"competitor")
+    expected = os.stat(target, follow_symlinks=False)
+
+    def replacement_is_blocked_while_open(_descriptor: int, opened: os.stat_result) -> bool:
+        with pytest.raises(PermissionError):
+            os.replace(replacement, target)
+        return (opened.st_dev, opened.st_ino) == (expected.st_dev, expected.st_ino)
+
+    assert durable_io._windows_unlink_opened_file_if(target, replacement_is_blocked_while_open)
+    assert not target.exists()
+    assert replacement.read_bytes() == b"competitor"
+
+
+def test_content_cleanup_validates_inputs_identity_and_prefix(tmp_path: Path) -> None:
+    missing = tmp_path / "missing.bin"
+    with pytest.raises(ValueError, match="expected content"):
+        durable_io.unlink_if_content(missing, "not-bytes")  # type: ignore[arg-type]
+    assert durable_io.unlink_if_content(missing, b"expected") is False
+
+    target = tmp_path / "partial.bin"
+    target.write_bytes(b"prefix")
+    assert durable_io.unlink_if_content(target, b"different") is False
+    assert target.read_bytes() == b"prefix"
+    assert durable_io.unlink_if_content(target, b"prefix-complete", allow_prefix=True) is True
+    assert not target.exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows handle identity semantics")
+def test_opened_identity_cleanup_closes_raw_handle_after_fd_conversion_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import msvcrt
+
+    target = tmp_path / "published.bin"
+    target.write_bytes(b"ours")
+
+    def fail_conversion(_handle: int, _flags: int) -> int:
+        raise OSError("simulated descriptor conversion failure")
+
+    monkeypatch.setattr(msvcrt, "open_osfhandle", fail_conversion)
+
+    with pytest.raises(OSError, match="descriptor conversion"):
+        durable_io._windows_unlink_opened_file_if(target, lambda _fd, _stat: True)
+    target.unlink()
 
 
 def test_exclusive_publish_rejects_invalid_sources_and_identity_mismatch(
@@ -899,6 +1042,23 @@ def test_compatibility_manifest_validation_fails_closed(
     monkeypatch.setattr(compatibility, "_MANIFEST_PATH", path)
 
     with pytest.raises(ValueError):
+        compatibility.load_runtime_compatibility()
+
+
+def test_unknown_compatibility_builds_has_an_explicit_string_contract(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    value = compatibility.load_runtime_compatibility()
+    value["unknown_compatibility"]["comsol_builds"] = []
+    path = tmp_path / "compatibility.json"
+    path.write_text(json.dumps(value), encoding="utf-8")
+    monkeypatch.setattr(compatibility, "_MANIFEST_PATH", path)
+
+    with pytest.raises(
+        ValueError,
+        match="unknown compatibility comsol_builds must be a bounded nonempty string",
+    ):
         compatibility.load_runtime_compatibility()
 
 

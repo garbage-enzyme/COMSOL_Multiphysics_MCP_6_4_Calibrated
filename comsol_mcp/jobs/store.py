@@ -234,6 +234,7 @@ class JobLock:
         deadline = time.monotonic() + self.timeout
         payload = _json_bytes(self.identity)
         self._acquire_guard(deadline=deadline)
+        created = False
         try:
             while True:
                 try:
@@ -257,6 +258,7 @@ class JobLock:
                         raise TimeoutError(f"Timed out waiting for durable job lock: {self.path}")
                     time.sleep(self.poll_interval)
                     continue
+                created = True
                 with os.fdopen(descriptor, "wb") as handle:
                     handle.write(payload)
                     handle.flush()
@@ -264,7 +266,16 @@ class JobLock:
                 self._owned_bytes = payload
                 return
         except Exception:
-            self._release_guard()
+            try:
+                if created:
+                    try:
+                        partial = self.path.read_bytes()
+                    except FileNotFoundError:
+                        partial = None
+                    if partial is not None:
+                        self._unlink_with_retry(expected=partial)
+            finally:
+                self._release_guard()
             raise
 
     def _unlink_with_retry(self, *, expected: bytes) -> bool:

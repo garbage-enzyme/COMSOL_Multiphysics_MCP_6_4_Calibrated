@@ -332,7 +332,8 @@ def test_boundary_batch_rolls_back_every_created_feature_on_property_failure():
 
     assert result["success"] is False
     assert result["rolled_back"] is True
-    assert {"wall", "imp"}.isdisjoint(physics.features.items)
+    assert physics.features.items == {}
+    assert physics.features.removed == ["imp", "wall"]
 
 
 def test_custom_boundary_type_and_property_are_rejected_before_mutation():
@@ -367,4 +368,41 @@ def test_custom_boundary_type_and_property_are_rejected_before_mutation():
     assert custom_property["success"] is False
     assert dimension_specific["success"] is False
     assert indexed_weak_expression["success"] is False
+    assert physics.features.items == {}
+
+
+def test_boundary_required_properties_are_rejected_before_mutation():
+    model, physics = _model_with_physics()
+
+    result = configure_boundaries(
+        model,
+        "acpr",
+        [{"type": "Pressure", "boundaries": [1], "properties": {}}],
+        family="acoustic",
+    )
+
+    assert result["success"] is False
+    assert "missing required properties" in result["error"]
+    assert physics.features.items == {}
+
+
+def test_explicit_boundary_tag_cannot_collide_with_prior_auto_tag():
+    model, physics = _model_with_physics()
+
+    result = configure_boundaries(
+        model,
+        "acpr",
+        [
+            {"type": "Pressure", "boundaries": [1], "properties": {"p0": "1[Pa]"}},
+            {
+                "type": "SoundHard",
+                "boundaries": [2],
+                "tag": "pressure_1",
+            },
+        ],
+        family="acoustic",
+    )
+
+    assert result["success"] is False
+    assert "duplicated" in result["error"]
     assert physics.features.items == {}

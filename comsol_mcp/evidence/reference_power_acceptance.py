@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 import json
 import math
-from pathlib import Path
 import re
+from copy import deepcopy
+from pathlib import Path
 from typing import Any, Mapping
 
 from comsol_mcp.durable import read_file_bytes_bounded, sha256_file_bounded
@@ -22,27 +22,61 @@ MAX_INPUT_BYTES = 256 * 1024
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 _TAG = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 _TOP_CONTRACT = {
-    "schema_name", "schema_version", "fixture_id", "real_comsol_required",
-    "runner", "execution_spec_environment", "limits", "acceptance",
+    "schema_name",
+    "schema_version",
+    "fixture_id",
+    "real_comsol_required",
+    "runner",
+    "execution_spec_environment",
+    "limits",
+    "acceptance",
 }
 _LIMIT_FIELDS = {"max_contract_bytes", "max_spec_bytes", "max_artifact_files", "max_artifact_bytes"}
 _ACCEPTANCE_FIELDS = {
-    "reference_air", "declared_flux", "wavelength", "source_unchanged",
-    "clone_cleanup_proved", "reversed_sign_must_fail", "internal_consistency_cannot_substitute",
+    "reference_air",
+    "declared_flux",
+    "wavelength",
+    "source_unchanged",
+    "clone_cleanup_proved",
+    "reversed_sign_must_fail",
+    "internal_consistency_cannot_substitute",
 }
-_REFERENCE_ACCEPTANCE_FIELDS = {"reflection_max", "r_plus_t_residual_max", "target_to_transverse_ratio_min"}
+_REFERENCE_ACCEPTANCE_FIELDS = {
+    "reflection_max",
+    "r_plus_t_residual_max",
+    "target_to_transverse_ratio_min",
+}
 _FLUX_ACCEPTANCE_FIELDS = {"margin", "closure_abs_max"}
 _WAVELENGTH_ACCEPTANCE_FIELDS = {"absolute_m_max", "relative_max"}
 _TOP_SPEC = {
-    "schema_name", "schema_version", "config_id", "source_model_path",
-    "expected_source_sha256", "artifact_dir", "model", "wavelength",
-    "reference_air", "declared_plane_flux",
+    "schema_name",
+    "schema_version",
+    "config_id",
+    "source_model_path",
+    "expected_source_sha256",
+    "artifact_dir",
+    "model",
+    "wavelength",
+    "reference_air",
+    "declared_plane_flux",
 }
-_MODEL_FIELDS = {"component_tag", "physics_tag", "study_tag", "study_step_tag", "study_step_property"}
+_MODEL_FIELDS = {
+    "component_tag",
+    "physics_tag",
+    "study_tag",
+    "study_step_tag",
+    "study_step_property",
+}
 _WAVELENGTH_FIELDS = {"value", "unit", "parameter"}
 _REFERENCE_FIELDS = {
-    "expected_material_tags", "all_domain_ids", "top_air_domain_ids",
-    "top_air_coordinate_range", "target_axis", "aggregation", "r_expression", "t_expression",
+    "expected_material_tags",
+    "all_domain_ids",
+    "top_air_domain_ids",
+    "top_air_coordinate_range",
+    "target_axis",
+    "aggregation",
+    "r_expression",
+    "t_expression",
 }
 
 
@@ -72,13 +106,22 @@ def _tag(value: Any, label: str) -> str:
     return result
 
 
-def _finite_nonnegative(value: Any, label: str) -> float:
+def _finite(value: Any, label: str, *, nonnegative: bool = False) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError(f"{label} must be finite and non-negative")
-    result = float(value)
-    if not math.isfinite(result) or result < 0.0:
-        raise ValueError(f"{label} must be finite and non-negative")
+        raise ValueError(f"{label} must be finite" + (" and non-negative" if nonnegative else ""))
+    try:
+        result = float(value)
+    except OverflowError as exc:
+        raise ValueError(
+            f"{label} must be finite" + (" and non-negative" if nonnegative else "")
+        ) from exc
+    if not math.isfinite(result) or (nonnegative and result < 0.0):
+        raise ValueError(f"{label} must be finite" + (" and non-negative" if nonnegative else ""))
     return result
+
+
+def _finite_nonnegative(value: Any, label: str) -> float:
+    return _finite(value, label, nonnegative=True)
 
 
 def _positive_int(value: Any, label: str) -> int:
@@ -103,9 +146,11 @@ def _coordinate_range(value: Any) -> dict[str, list[float]]:
     for axis in ("x", "y", "z"):
         bounds = item[axis]
         if not isinstance(bounds, list) or len(bounds) != 2:
-            raise ValueError(f"reference_air.top_air_coordinate_range.{axis} must contain two numbers")
-        low = float(bounds[0])
-        high = float(bounds[1])
+            raise ValueError(
+                f"reference_air.top_air_coordinate_range.{axis} must contain two numbers"
+            )
+        low = _finite(bounds[0], f"reference_air.top_air_coordinate_range.{axis}[0]")
+        high = _finite(bounds[1], f"reference_air.top_air_coordinate_range.{axis}[1]")
         if not math.isfinite(low) or not math.isfinite(high) or low > high:
             raise ValueError(f"reference_air.top_air_coordinate_range.{axis} is invalid")
         result[axis] = [low, high]
@@ -123,13 +168,20 @@ def _relative_repo_path(value: Any, label: str) -> str:
 def validate_reference_power_acceptance_contract(value: Mapping[str, Any]) -> dict[str, Any]:
     contract = _object(dict(value), "h1_acceptance_contract")
     _exact_fields(contract, _TOP_CONTRACT, "h1_acceptance_contract")
-    if contract["schema_name"] != REFERENCE_POWER_CONTRACT_SCHEMA or contract["schema_version"] != REFERENCE_POWER_SCHEMA_VERSION:
+    if (
+        contract["schema_name"] != REFERENCE_POWER_CONTRACT_SCHEMA
+        or contract["schema_version"] != REFERENCE_POWER_SCHEMA_VERSION
+    ):
         raise ValueError("h1_acceptance_contract schema is unsupported")
     _text(contract["fixture_id"], "h1_acceptance_contract.fixture_id", 128)
     if contract["real_comsol_required"] is not True:
         raise ValueError("h1_acceptance_contract.real_comsol_required must be true")
     _relative_repo_path(contract["runner"], "h1_acceptance_contract.runner")
-    _text(contract["execution_spec_environment"], "h1_acceptance_contract.execution_spec_environment", 128)
+    _text(
+        contract["execution_spec_environment"],
+        "h1_acceptance_contract.execution_spec_environment",
+        128,
+    )
     limits = _object(contract["limits"], "h1_acceptance_contract.limits")
     _exact_fields(limits, _LIMIT_FIELDS, "h1_acceptance_contract.limits")
     for name in _LIMIT_FIELDS:
@@ -144,16 +196,24 @@ def validate_reference_power_acceptance_contract(value: Mapping[str, Any]) -> di
     _exact_fields(flux, _FLUX_ACCEPTANCE_FIELDS, "acceptance.declared_flux")
     wavelength = _object(acceptance["wavelength"], "acceptance.wavelength")
     _exact_fields(wavelength, _WAVELENGTH_ACCEPTANCE_FIELDS, "acceptance.wavelength")
-    for label, item in (("reference_air", reference), ("declared_flux", flux), ("wavelength", wavelength)):
+    for label, item in (
+        ("reference_air", reference),
+        ("declared_flux", flux),
+        ("wavelength", wavelength),
+    ):
         for name, number in item.items():
             _finite_nonnegative(number, f"acceptance.{label}.{name}")
     for name in (
-        "source_unchanged", "clone_cleanup_proved", "reversed_sign_must_fail",
+        "source_unchanged",
+        "clone_cleanup_proved",
+        "reversed_sign_must_fail",
         "internal_consistency_cannot_substitute",
     ):
         if acceptance[name] is not True:
             raise ValueError(f"acceptance.{name} must be true")
-    encoded = json.dumps(contract, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    encoded = json.dumps(
+        contract, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")
     if len(encoded) > limits["max_contract_bytes"]:
         raise ValueError("h1_acceptance_contract exceeds its declared byte limit")
     return deepcopy(contract)
@@ -165,14 +225,20 @@ def _validate_flux_declaration(value: Any) -> dict[str, Any]:
     for name, plane in declaration.items():
         item = _object(plane, f"declared_plane_flux.{name}")
         sign = item.get("positive_power_sign")
-        candidate[name] = {**item, "raw_power_w": float(sign) if sign in {-1, 1} else 0.0}
+        if isinstance(sign, bool) or not isinstance(sign, int) or sign not in {-1, 1}:
+            raise ValueError(f"declared_plane_flux.{name}.positive_power_sign must be -1 or 1")
+        candidate[name] = {**item, "raw_power_w": float(sign)}
     normalized = normalize_declared_plane_flux(candidate)
     return {
         name: {
             key: plane[key]
             for key in (
-                "expression", "selection_ids", "plane_coordinate_m", "normal",
-                "medium_id", "positive_power_sign",
+                "expression",
+                "selection_ids",
+                "plane_coordinate_m",
+                "normal",
+                "medium_id",
+                "positive_power_sign",
             )
         }
         for name, plane in normalized["planes"].items()
@@ -188,16 +254,23 @@ def validate_reference_power_execution_spec(
     strict_contract = validate_reference_power_acceptance_contract(contract)
     spec = _object(dict(value), "h1_execution_spec")
     _exact_fields(spec, _TOP_SPEC, "h1_execution_spec")
-    if spec["schema_name"] != REFERENCE_POWER_EXECUTION_SCHEMA or spec["schema_version"] != REFERENCE_POWER_SCHEMA_VERSION:
+    if (
+        spec["schema_name"] != REFERENCE_POWER_EXECUTION_SCHEMA
+        or spec["schema_version"] != REFERENCE_POWER_SCHEMA_VERSION
+    ):
         raise ValueError("h1_execution_spec schema is unsupported")
     config_id = _text(spec["config_id"], "h1_execution_spec.config_id", 128)
-    source_path = Path(_text(spec["source_model_path"], "h1_execution_spec.source_model_path")).expanduser()
+    source_path = Path(
+        _text(spec["source_model_path"], "h1_execution_spec.source_model_path")
+    ).expanduser()
     artifact_dir = Path(_text(spec["artifact_dir"], "h1_execution_spec.artifact_dir")).expanduser()
     if not source_path.is_absolute() or not artifact_dir.is_absolute():
         raise ValueError("source_model_path and artifact_dir must be absolute")
     if not str(artifact_dir).isascii():
         raise ValueError("artifact_dir must be ASCII-only")
-    expected_hash = _text(spec["expected_source_sha256"], "h1_execution_spec.expected_source_sha256", 64).lower()
+    expected_hash = _text(
+        spec["expected_source_sha256"], "h1_execution_spec.expected_source_sha256", 64
+    ).lower()
     if not _HEX64.fullmatch(expected_hash):
         raise ValueError("expected_source_sha256 must be exactly 64 hexadecimal characters")
     model = _object(spec["model"], "h1_execution_spec.model")
@@ -218,7 +291,9 @@ def validate_reference_power_execution_spec(
     material_tags = reference["expected_material_tags"]
     if not isinstance(material_tags, list) or len(material_tags) > 128:
         raise ValueError("reference_air.expected_material_tags must be a bounded list")
-    normalized_material_tags = sorted(_tag(item, "reference_air.expected_material_tags item") for item in material_tags)
+    normalized_material_tags = sorted(
+        _tag(item, "reference_air.expected_material_tags item") for item in material_tags
+    )
     if len(normalized_material_tags) != len(set(normalized_material_tags)):
         raise ValueError("reference_air.expected_material_tags must not contain duplicates")
     all_domains = _positive_ids(reference["all_domain_ids"], "reference_air.all_domain_ids")
@@ -251,7 +326,9 @@ def validate_reference_power_execution_spec(
         "reference_air": normalized_reference,
         "declared_plane_flux": _validate_flux_declaration(spec["declared_plane_flux"]),
     }
-    encoded = json.dumps(normalized, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    encoded = json.dumps(
+        normalized, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")
     if len(encoded) > strict_contract["limits"]["max_spec_bytes"]:
         raise ValueError("h1_execution_spec exceeds its declared byte limit")
     if verify_files:
@@ -272,9 +349,7 @@ def load_bounded_json(path: Path, maximum_bytes: int) -> dict[str, Any]:
         raw = read_file_bytes_bounded(path, max_bytes=maximum_bytes)
     except ValueError as exc:
         if "reading limit" in str(exc):
-            raise ValueError(
-                f"JSON input exceeds {maximum_bytes} bytes: {path.name}"
-            ) from exc
+            raise ValueError(f"JSON input exceeds {maximum_bytes} bytes: {path.name}") from exc
         raise
     try:
         value = json.loads(raw.decode("utf-8"))
@@ -300,7 +375,9 @@ def build_reference_power_dry_run_receipt(
         "spec_valid": None,
     }
     if spec is not None:
-        normalized = validate_reference_power_execution_spec(spec, strict_contract, verify_files=verify_files)
+        normalized = validate_reference_power_execution_spec(
+            spec, strict_contract, verify_files=verify_files
+        )
         path_free = deepcopy(normalized)
         path_free.pop("source_model_path")
         path_free.pop("artifact_dir")

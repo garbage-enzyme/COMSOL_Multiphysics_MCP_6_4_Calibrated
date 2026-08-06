@@ -482,6 +482,16 @@ def normalize_spectral_characterization_job_spec(raw_spec: object) -> dict[str, 
     )
     if initial["point_count"] > maximum_points:
         raise ValueError("initial grid exceeds maximum_points")
+    if (
+        refinement["maximum_stages"] > 1
+        and refinement["points_per_stage"] > maximum_points
+    ):
+        raise ValueError("refinement stage exceeds maximum_points")
+    if (
+        expansion["maximum_expansions"] > 0
+        and expansion["points_per_expansion"] > maximum_points
+    ):
+        raise ValueError("expansion stage exceeds maximum_points")
     analysis_policy = normalize_spectral_analysis_policy(raw["analysis_policy"])
     if analysis_policy["minimum_point_count"] > initial["point_count"]:
         raise ValueError("analysis_policy.minimum_point_count exceeds the initial grid")

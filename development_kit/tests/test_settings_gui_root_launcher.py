@@ -7,6 +7,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -192,3 +193,116 @@ def test_root_launcher_ignores_benign_probe_stderr(
 
     assert completed.returncode == 0, completed.stderr
     assert json.loads(completed.stdout)["ready"] is True
+
+
+@pytest.mark.parametrize("shell_name", ["powershell.exe", "pwsh.exe"])
+@pytest.mark.parametrize("settings_path", [r"\settings.json", "/settings.json"])
+def test_root_launcher_rejects_drive_relative_rooted_settings_paths(
+    shell_name: str, settings_path: str
+) -> None:
+    shell = shutil.which(shell_name)
+    if shell is None:
+        pytest.skip(f"{shell_name} is not installed")
+
+    completed = subprocess.run(  # noqa: S603
+        [
+            shell,
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(LAUNCHER),
+            "-PythonPath",
+            sys.executable,
+            "-SettingsPath",
+            settings_path,
+            "-ValidateOnly",
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+
+    assert completed.returncode == 1
+    assert "must be an absolute path" in completed.stderr
+
+
+@pytest.mark.parametrize("shell_name", ["powershell.exe", "pwsh.exe"])
+def test_root_launcher_selects_only_the_typed_launch_result(
+    shell_name: str, tmp_path: Path
+) -> None:
+    shell = shutil.which(shell_name)
+    if shell is None:
+        pytest.skip(f"{shell_name} is not installed")
+    fake_python = tmp_path / "python.cmd"
+    fake_python.write_text(
+        "@echo off\r\n"
+        'echo %* | findstr /C:"COMSOL_MCP_SETTINGS_GUI_PYTHON_READY" >nul\r\n'
+        "if not errorlevel 1 (\r\n"
+        "  echo COMSOL_MCP_SETTINGS_GUI_PYTHON_READY\r\n"
+        "  exit /b 0\r\n"
+        ")\r\n"
+        'echo {"noise":"braced"}\r\n'
+        'echo {"success":true,"state":"launched"}\r\n'
+        "exit /b 0\r\n",
+        encoding="ascii",
+    )
+
+    completed = subprocess.run(  # noqa: S603
+        [
+            shell,
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(LAUNCHER),
+            "-PythonPath",
+            str(fake_python),
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert json.loads(completed.stdout) == {"success": True, "state": "launched"}
+
+
+@pytest.mark.parametrize("shell_name", ["powershell.exe", "pwsh.exe"])
+def test_root_launcher_times_out_a_hung_requested_python(shell_name: str, tmp_path: Path) -> None:
+    shell = shutil.which(shell_name)
+    if shell is None:
+        pytest.skip(f"{shell_name} is not installed")
+    fake_python = tmp_path / "python.cmd"
+    fake_python.write_text("@echo off\r\n:loop\r\ngoto loop\r\n", encoding="ascii")
+
+    started = time.monotonic()
+    completed = subprocess.run(  # noqa: S603
+        [
+            shell,
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(LAUNCHER),
+            "-PythonPath",
+            str(fake_python),
+            "-ValidateOnly",
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=12,
+        check=False,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+
+    assert completed.returncode == 1
+    assert time.monotonic() - started < 9
+    assert "selected Python must be CPython 3.14" in completed.stderr

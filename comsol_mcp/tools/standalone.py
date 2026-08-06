@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from typing import Any, Literal
 
@@ -31,7 +32,7 @@ def _call(callback) -> dict[str, Any]:
             "standalone_artifact_unavailable",
             "A required standalone artifact is absent or the target is not empty.",
         )
-    except TimeoutError:
+    except TimeoutError, subprocess.TimeoutExpired:
         return public_error(
             "standalone_control_timeout",
             "The standalone control command exceeded its bounded deadline.",

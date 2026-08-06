@@ -259,7 +259,14 @@ def save_staged_model(java_model: Any, output: Path) -> Path:
             raise RuntimeError("COMSOL did not create a complete staging model")
         return staging
     except BaseException:
-        staging.unlink(missing_ok=True)
+        active_error = sys.exception()
+        try:
+            _retry_permission_error(staging.unlink)
+        except Exception as cleanup_error:
+            if active_error is not None:
+                active_error.add_note(f"staging cleanup failed: {type(cleanup_error).__name__}")
+            else:
+                raise
         raise
 
 
@@ -279,15 +286,22 @@ def _retry_permission_error(
 
 def publish_staged_model(staging: Path, output: Path, *, overwrite: bool) -> None:
     """Publish only after COMSOL releases the staged model file."""
+    linked = False
     try:
         if overwrite:
             _retry_permission_error(lambda: os.replace(staging, output))
             return
         _retry_permission_error(lambda: os.link(staging, output))
+        linked = True
         _retry_permission_error(staging.unlink)
     except BaseException:
+        published_link = linked and output.exists() and (
+            not staging.exists() or os.path.samefile(staging, output)
+        )
         if staging.exists():
             _retry_permission_error(staging.unlink)
+        if published_link:
+            return
         raise
 
 
@@ -336,6 +350,7 @@ def main() -> None:
         )
         staging = save_staged_model(model.java, output)
     finally:
+        active_error = sys.exception()
         if client is not None:
             try:
                 client.clear()
@@ -346,14 +361,19 @@ def main() -> None:
                     client.disconnect()
                 except Exception as exc:
                     cleanup_errors.append(f"client.disconnect: {type(exc).__name__}")
-        release = ownership.release()
-        if not release.get("success"):
-            cleanup_errors.append(f"lease.release: {release.get('error', 'unknown error')}")
+        try:
+            release = ownership.release()
+            if not release.get("success"):
+                cleanup_errors.append(f"lease.release: {release.get('error', 'unknown error')}")
+        except Exception as exc:
+            cleanup_errors.append(f"lease.release: {type(exc).__name__}")
         if cleanup_errors:
             if staging is not None and staging.exists():
-                _retry_permission_error(staging.unlink)
+                try:
+                    _retry_permission_error(staging.unlink)
+                except Exception as exc:
+                    cleanup_errors.append(f"staging.cleanup: {type(exc).__name__}")
             message = f"Acoustic recipe cleanup was incomplete: {cleanup_errors}"
-            active_error = sys.exception()
             if active_error is None:
                 raise RuntimeError(message)
             active_error.add_note(message)

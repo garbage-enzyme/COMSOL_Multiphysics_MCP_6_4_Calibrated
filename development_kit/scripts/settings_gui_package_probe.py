@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import configparser
 import json
 import tarfile
 import zipfile
 from pathlib import Path, PurePosixPath
+
+from packaging.utils import canonicalize_name, parse_wheel_filename
 
 LANGUAGES = ("en", "zh_CN", "zh_TW")
 ICON_MEMBER = "settings_gui/assets/comsol_mcp.ico"
@@ -33,12 +36,33 @@ def _sdist_members(path: Path) -> set[str]:
     return {name.removeprefix(root + "/") for name in names}
 
 
+def _entry_point_target(value: str, section: str, name: str) -> str | None:
+    parser = configparser.ConfigParser(interpolation=None)
+    parser.optionxform = str
+    try:
+        parser.read_string(value)
+    except configparser.Error as exc:
+        raise ValueError("wheel entry_points.txt is invalid") from exc
+    if not parser.has_section(section):
+        return None
+    return parser.get(section, name, fallback=None)
+
+
 def inspect_settings_gui_distributions(dist: Path) -> dict:
     wheels = sorted(dist.glob("*.whl"))
     sdists = sorted(dist.glob("*.tar.gz"))
     if len(wheels) != 1 or len(sdists) != 1:
         raise ValueError("expected exactly one wheel and one source distribution")
     wheel, sdist = wheels[0], sdists[0]
+    wheel_name, wheel_version, _build, _tags = parse_wheel_filename(wheel.name)
+    sdist_root = sdist.name.removesuffix(".tar.gz")
+    sdist_parts = sdist_root.rsplit("-", 1)
+    if (
+        len(sdist_parts) != 2
+        or canonicalize_name(sdist_parts[0]) != canonicalize_name(str(wheel_name))
+        or sdist_parts[1] != str(wheel_version)
+    ):
+        raise ValueError("wheel and source distribution package identities differ")
     wheel_names, entry_points = _wheel_members(wheel)
     sdist_names = _sdist_members(sdist)
 
@@ -69,15 +93,25 @@ def inspect_settings_gui_distributions(dist: Path) -> dict:
         raise ValueError("wheel contains Settings GUI tests")
     if any(name.endswith((".po", ".pot")) for name in wheel_names):
         raise ValueError("wheel contains translator source catalogs")
-    if "comsol-mcp-settings = settings_gui.__main__:main" not in entry_points:
+    if (
+        _entry_point_target(entry_points, "console_scripts", "comsol-mcp-settings")
+        != "settings_gui.__main__:main"
+    ):
         raise ValueError("wheel is missing the Settings GUI console entry point")
-    if "comsol-mcp-settings-gui = settings_gui.__main__:main" not in entry_points:
+    if (
+        _entry_point_target(entry_points, "gui_scripts", "comsol-mcp-settings-gui")
+        != "settings_gui.__main__:main"
+    ):
         raise ValueError("wheel is missing the Settings GUI GUI entry point")
     return {
         "schema_name": "comsol_mcp.settings_gui_package_receipt",
         "schema_version": "1.0.0",
-        "wheel_locale_count": len(expected_mo),
-        "sdist_po_count": len(expected_po),
+        "wheel_locale_count": len(
+            {name for name in wheel_names if name.endswith("/settings_gui.mo")}
+        ),
+        "sdist_po_count": len({name for name in sdist_names if name.endswith("/settings_gui.po")}),
+        "package_name": str(wheel_name),
+        "package_version": str(wheel_version),
         "sdist_pot_included": True,
         "wheel_tests_excluded": True,
         "wheel_translation_sources_excluded": True,

@@ -160,6 +160,11 @@ def _normalize_sensitivity(value: Any, label: str) -> dict[str, Any]:
     measurements = item["measurements"]
     if not isinstance(measurements, list) or len(measurements) > 16:
         raise ValueError(f"{label}.measurements must be a bounded list")
+    sensitivity_state = item["state"]
+    if sensitivity_state not in {"not_requested", "measured_not_classified", "unavailable"}:
+        raise ValueError(f"{label}.state is invalid")
+    if item["policy_authority"] is not False:
+        raise ValueError(f"{label}.policy_authority must be false")
     normalized_measurements = []
     for index, measurement in enumerate(measurements):
         measurement_label = f"{label}.measurements[{index}]"
@@ -226,9 +231,9 @@ def _normalize_sensitivity(value: Any, label: str) -> dict[str, Any]:
     if counts != sorted(counts) or len(counts) != len(set(counts)):
         raise ValueError(f"{label} support counts must be sorted and unique")
     return {
-        "state": _bounded_text(item["state"], f"{label}.state"),
+        "state": sensitivity_state,
         "measurements": normalized_measurements,
-        "policy_authority": item["policy_authority"] is True,
+        "policy_authority": False,
     }
 
 
@@ -1029,7 +1034,7 @@ def validate_convergence_evaluation(
     if set(item) != expected:
         raise ValueError("convergence evaluation fields are invalid")
     rebuilt = evaluate_convergence(ladder, item["convergence_policy"])
-    if item != rebuilt:
+    if _canonical_bytes(item) != _canonical_bytes(rebuilt):
         raise ValueError("convergence evaluation is noncanonical or its hash does not match")
     return deepcopy(rebuilt)
 

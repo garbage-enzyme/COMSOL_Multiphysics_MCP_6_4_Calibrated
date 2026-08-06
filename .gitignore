@@ -8,6 +8,9 @@ dist/
 .DS_Store
 
 # Local environment / config
+.env
+.env.*
+!.env.example
 opencode.json
 .claude/
 .opencodereview/

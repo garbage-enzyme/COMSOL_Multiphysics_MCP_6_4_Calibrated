@@ -75,7 +75,13 @@ print(json.dumps({{'same': first is second is canonical, 'before': before, 'afte
     )
 
     assert completed.returncode == 0, completed.stderr
-    result = json.loads(completed.stdout)
+    try:
+        result = json.loads(completed.stdout)
+    except json.JSONDecodeError as exc:
+        raise AssertionError(
+            "namespace child did not emit one JSON object; "
+            f"stdout={completed.stdout!r}; stderr={completed.stderr!r}"
+        ) from exc
     assert result["same"] is True
     assert result["after"] == result["before"]
     assert result["after"]["spec_name"] == "comsol_mcp.tools.session"
@@ -194,3 +200,13 @@ def test_reloading_legacy_package_retains_one_alias_finder():
         if getattr(item, "alias_finder_identity", None) == "comsol_mcp.src_alias_finder.v1"
     ]
     assert len(finders) == 1
+
+
+def test_reloading_legacy_submodule_retains_the_canonical_object():
+    canonical = importlib.import_module("comsol_mcp.tools.session_status")
+    legacy = importlib.import_module("src.tools.session_status")
+
+    reloaded = importlib.reload(legacy)
+
+    assert reloaded is canonical
+    assert importlib.import_module("src.tools.session_status") is canonical

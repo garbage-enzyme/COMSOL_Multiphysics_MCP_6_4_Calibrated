@@ -39,10 +39,27 @@ def file_identity(path: Path) -> FileIdentity | None:
         return None
     if not path.is_file():
         raise SettingsConflict("settings target must be a regular file")
-    stat = path.stat()
-    if stat.st_size > MAX_SETTINGS_BYTES:
-        raise SettingsConflict("settings target exceeds the bounded size")
-    raw = path.read_bytes()
+    before = path.lstat()
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_BINARY", 0))
+    try:
+        stat = os.fstat(descriptor)
+        if (stat.st_dev, stat.st_ino) != (before.st_dev, before.st_ino):
+            raise SettingsConflict("settings target changed during identity read")
+        if stat.st_size > MAX_SETTINGS_BYTES:
+            raise SettingsConflict("settings target exceeds the bounded size")
+        remaining = MAX_SETTINGS_BYTES + 1
+        chunks = bytearray()
+        while remaining:
+            block = os.read(descriptor, min(65_536, remaining))
+            if not block:
+                break
+            chunks.extend(block)
+            remaining -= len(block)
+        raw = bytes(chunks)
+        if len(raw) != stat.st_size or len(raw) > MAX_SETTINGS_BYTES:
+            raise SettingsConflict("settings target changed during identity read")
+    finally:
+        os.close(descriptor)
     return FileIdentity(
         device=int(stat.st_dev),
         inode=int(stat.st_ino),
@@ -82,13 +99,12 @@ class SettingsOwnership:
         return self._target_handle is not None
 
     def acquire(self) -> "SettingsOwnership":
-        if path_has_linked_component(self.target.parent):
+        if path_has_linked_component(self.target):
             raise SettingsConflict("settings target parent must not contain a link or junction")
         if not self.target.parent.is_dir():
             raise SettingsConflict("settings target parent does not exist")
         if os.path.lexists(self.sidecar) and (
-            self.sidecar.is_symlink()
-            or getattr(self.sidecar, "is_junction", lambda: False)()
+            self.sidecar.is_symlink() or getattr(self.sidecar, "is_junction", lambda: False)()
         ):
             raise SettingsConflict("settings ownership sidecar must not be a link or junction")
         self._configure_kernel32()
@@ -116,10 +132,30 @@ class SettingsOwnership:
             os.write(self._sidecar_fd, payload)
             os.fsync(self._sidecar_fd)
             self.reacquire_target_handle()
-            self.baseline = file_identity(self.target)
+            try:
+                self.baseline = file_identity(self.target)
+            except SettingsConflict:
+                stat = self.target.lstat()
+                if (
+                    self.target.is_symlink()
+                    or getattr(self.target, "is_junction", lambda: False)()
+                    or not self.target.is_file()
+                    or stat.st_size <= MAX_SETTINGS_BYTES
+                ):
+                    raise
+                self.baseline = FileIdentity(
+                    device=int(stat.st_dev),
+                    inode=int(stat.st_ino),
+                    size=int(stat.st_size),
+                    modified_ns=int(stat.st_mtime_ns),
+                    sha256="unbounded",
+                )
             return self
-        except Exception:
-            self.close()
+        except Exception as exc:
+            try:
+                self.close()
+            except Exception as cleanup_error:
+                exc.add_note(f"settings ownership cleanup failed: {type(cleanup_error).__name__}")
             raise
 
     def _configure_kernel32(self) -> None:
@@ -175,24 +211,38 @@ class SettingsOwnership:
         self.baseline = file_identity(self.target)
 
     def close(self) -> None:
-        self.release_target_handle()
+        errors: list[Exception] = []
+        try:
+            self.release_target_handle()
+        except Exception as exc:
+            errors.append(exc)
         if self._sidecar_fd is not None:
-            os.close(self._sidecar_fd)
+            try:
+                os.close(self._sidecar_fd)
+            except Exception as exc:
+                errors.append(exc)
             self._sidecar_fd = None
             try:
                 self.sidecar.unlink()
             except FileNotFoundError:
                 pass
+            except Exception as exc:
+                errors.append(exc)
         if self._mutex is not None:
-            if self._mutex_acquired:
-                self._kernel32.ReleaseMutex(self._mutex)
-            self._kernel32.CloseHandle(self._mutex)
+            try:
+                if self._mutex_acquired:
+                    self._kernel32.ReleaseMutex(self._mutex)
+                self._kernel32.CloseHandle(self._mutex)
+            except Exception as exc:
+                errors.append(exc)
             self._mutex = None
             self._mutex_acquired = False
         if self._registered:
             with _HELD_MUTEXES_GUARD:
                 _HELD_MUTEXES.discard(self.mutex_name)
             self._registered = False
+        if errors:
+            raise errors[0]
 
     def __enter__(self) -> "SettingsOwnership":
         return self.acquire()

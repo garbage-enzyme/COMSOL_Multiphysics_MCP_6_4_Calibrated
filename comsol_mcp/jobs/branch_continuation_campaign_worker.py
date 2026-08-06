@@ -105,9 +105,7 @@ def _run(
         elif state["status"] != "starting":
             raise ValueError(f"Branch-continuation worker cannot start from {state['status']}")
 
-        sources = [
-            Path(item["spectral_job"]["source_model_path"]) for item in spec["states"]
-        ]
+        sources = [Path(item["spectral_job"]["source_model_path"]) for item in spec["states"]]
         source_pins.enter_context(
             pin_validated_reads(
                 tuple(validated_read_pin(source, source.parent) for source in sources)
@@ -369,13 +367,11 @@ def _run(
         print(f"{type(worker_error).__name__}: {worker_error}", file=sys.stderr, flush=True)
         return 1
     if cancel_observation_message is not None:
-        current = store.read_state(job_id)["status"]
-        if current in {"cancel_requested", "cancelling"}:
-            store.record_cooperative_cancel_observed(
-                job_id,
-                attempt=attempt,
-                message=cancel_observation_message,
-            )
+        store.record_cooperative_cancel_observed(
+            job_id,
+            attempt=attempt,
+            message=cancel_observation_message,
+        )
         return 0
     if pending_terminal is not None:
         current = store.read_state(job_id)["status"]

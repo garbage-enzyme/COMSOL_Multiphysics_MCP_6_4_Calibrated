@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 from src.evidence.contracts import example_validation_policies
 from src.tools.wave_optics_audit import (
+    _strict_positive_entity_ids,
     _load_air_reference,
     _load_policy,
     _replace_clone_materials_with_air,
@@ -19,6 +20,12 @@ from src.tools.wave_optics_audit import (
     run_wave_optics_point_audit,
     run_wave_optics_reference_audit,
 )
+
+
+@pytest.mark.parametrize("value", [[True], [1.5], ["2"]])
+def test_wave_optics_entity_ids_reject_coercible_non_integer_values(value):
+    with pytest.raises(ValueError, match="positive integer"):
+        _strict_positive_entity_ids(value, "entity_ids")
 
 
 def _hash(path):

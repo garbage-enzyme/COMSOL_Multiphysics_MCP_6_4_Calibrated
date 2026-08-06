@@ -17,16 +17,27 @@ from src.evidence.real_fixture import (
     controlled_fixture_environment_from_reference_power_spec,
     controlled_fixture_from_environment,
 )
+from src.utils.validation import strict_json_number
 
 ROOT = Path(__file__).parents[2]
 _PRIVATE_HOME_PATH = re.compile(
-    r"(?:(?<![a-z0-9_])[a-z]:)?/(?:users|documents and settings|home)/[^/\s\"']+",
+    r"(?:^|(?<![a-z0-9_]))(?:~(?:/|$)|(?:[a-z]:)?/"
+    r"(?:users|documents and settings|home)/+[^/\s\"']+|(?<![:/])//[^/\s]+/[^/\s]+)",
     re.IGNORECASE,
 )
 
 
 def _contains_private_home_path(text: str) -> bool:
     return _PRIVATE_HOME_PATH.search(text.replace("\\", "/")) is not None
+
+
+def test_strict_json_number_preserves_exact_integer_values():
+    value = 2**53 + 1
+
+    assert strict_json_number(value, "value") == value
+    assert isinstance(strict_json_number(value, "value"), int)
+    with pytest.raises(ValueError, match="finite"):
+        strict_json_number(10**400, "huge")
 
 
 def _spec(tmp_path: Path) -> Path:
@@ -82,7 +93,14 @@ def test_reference_power_spec_overrides_inherited_reserved_fixture_environment(t
     )
 
     assert environment["PRESERVED"] == "yes"
-    assert all(environment[name] != inherited for name, inherited in reserved.items())
+    source = (tmp_path / "controlled.mph").resolve()
+    assert {name: environment[name] for name in reserved} == {
+        MODEL_ENV: str(source),
+        SOURCE_SHA256_ENV: hashlib.sha256(source.read_bytes()).hexdigest(),
+        WAVELENGTH_ENV: format(5.292, ".17g"),
+        DOMAINS_ENV: "[6]",
+        RANGE_ENV: '{"x":[-1e-07,3.4e-06],"y":[-1.5e-06,1.5e-06],"z":[2.25e-06,2.55e-06]}',
+    }
     assert controlled_fixture_from_environment(environment)["source"].name == "controlled.mph"
 
 
@@ -126,6 +144,13 @@ def test_reference_power_spec_rejects_malformed_json(tmp_path):
         controlled_fixture_environment_from_reference_power_spec(path, base_environment={})
 
 
+def test_reference_power_spec_rejects_json_array(tmp_path):
+    path = tmp_path / "array.json"
+    path.write_text("[]", encoding="utf-8")
+    with pytest.raises(ValueError, match="JSON object"):
+        controlled_fixture_environment_from_reference_power_spec(path, base_environment={})
+
+
 def test_fixture_rejects_source_bytes_that_differ_from_caller_bound_hash(tmp_path):
     environment = controlled_fixture_environment_from_reference_power_spec(
         _spec(tmp_path), base_environment={}
@@ -134,6 +159,16 @@ def test_fixture_rejects_source_bytes_that_differ_from_caller_bound_hash(tmp_pat
 
     with pytest.raises(ValueError, match="source SHA-256 mismatch"):
         controlled_fixture_from_environment(environment)
+
+
+def test_fixture_rejects_relative_source_instead_of_resolving_against_process_cwd(tmp_path):
+    environment = controlled_fixture_environment_from_reference_power_spec(
+        _spec(tmp_path), base_environment={}
+    )
+    environment[MODEL_ENV] = "controlled.mph"
+
+    with pytest.raises(ValueError, match="absolute path"):
+        controlled_fixture_from_environment(environment, verify_file=False)
 
 
 @pytest.mark.parametrize(
@@ -227,7 +262,21 @@ def test_real_probe_sources_contain_no_private_model_defaults():
         "C:\\Documents and Settings\\Carol\\model.mph",
         "/home/dave/project/model.mph",
         "/Users/Erin/project/model.mph",
+        "\\\\laptop\\Users\\Owner\\model.mph",
+        "~/project/model.mph",
+        "/home//dave/project/model.mph",
     ],
 )
 def test_private_path_scan_normalizes_drive_case_and_separators(private_path):
     assert _contains_private_home_path(private_path)
+
+
+@pytest.mark.parametrize(
+    "public_url",
+    [
+        "https://example.com/reference/manual.pdf",
+        "http://localhost:8000/status",
+    ],
+)
+def test_private_path_scan_does_not_classify_public_urls(public_url):
+    assert not _contains_private_home_path(public_url)

@@ -160,7 +160,7 @@ def _collect_dataset_field_evidence(
     except ImportError as exc:  # pragma: no cover - field tools require NumPy
         raise RuntimeError("NumPy is required to bind field dataset components") from exc
     if any(
-        not np.array_equal(local, scoped)
+        not np.allclose(local, scoped, rtol=1.0e-12, atol=1.0e-15, equal_nan=True)
         for local, scoped in zip(local_vectors, component_vectors)
     ):
         raise ValueError("dataset coordinates do not bind to the declared component_tag")

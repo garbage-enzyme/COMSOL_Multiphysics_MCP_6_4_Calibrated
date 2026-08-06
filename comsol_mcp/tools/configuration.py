@@ -35,7 +35,7 @@ def register_configuration_tools(mcp: MCPServer) -> None:
                 "solver_started": False,
                 "filesystem_modified": False,
             }
-        except TypeError, ValueError:
+        except TypeError, ValueError, OverflowError, RecursionError:
             logger.exception("Simulation configuration validation failed")
             return {
                 **public_error(
@@ -64,7 +64,7 @@ def register_configuration_tools(mcp: MCPServer) -> None:
                 "solver_started": False,
                 "filesystem_modified": False,
             }
-        except TypeError, ValueError:
+        except TypeError, ValueError, OverflowError, RecursionError:
             logger.exception("Simulation configuration comparison failed")
             return {
                 **public_error(

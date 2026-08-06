@@ -10,7 +10,6 @@ from mcp.server.mcpserver import MCPServer
 from .property_transport import JSONValue, normalize_property_value, validate_property_name
 from .session import session_manager
 
-
 ClientAPIContainer = Literal[
     "geometry_feature",
     "physics_feature",
@@ -19,13 +18,22 @@ ClientAPIContainer = Literal[
     "result_feature",
 ]
 
-_CONTAINERS = frozenset({
-    "geometry_feature", "physics_feature", "mesh_feature", "study_step",
-    "result_feature",
-})
-_COMPONENT_SCOPED_CONTAINERS = frozenset({
-    "geometry_feature", "physics_feature", "mesh_feature",
-})
+_CONTAINERS = frozenset(
+    {
+        "geometry_feature",
+        "physics_feature",
+        "mesh_feature",
+        "study_step",
+        "result_feature",
+    }
+)
+_COMPONENT_SCOPED_CONTAINERS = frozenset(
+    {
+        "geometry_feature",
+        "physics_feature",
+        "mesh_feature",
+    }
+)
 _TAG = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 
 
@@ -66,15 +74,18 @@ def _resolve_existing_target(
             raise ValueError(f"component does not exist: {component_name}")
 
     if container == "geometry_feature":
-        target = component.geom(parent_tag).feature().get(child_tag)
+        parent = component.geom(parent_tag)
     elif container == "physics_feature":
-        target = component.physics(parent_tag).feature().get(child_tag)
+        parent = component.physics(parent_tag)
     elif container == "mesh_feature":
-        target = component.mesh(parent_tag).feature().get(child_tag)
+        parent = component.mesh(parent_tag)
     elif container == "study_step":
-        target = jm.study(parent_tag).feature().get(child_tag)
+        parent = jm.study(parent_tag)
     else:
-        target = jm.result(parent_tag).feature().get(child_tag)
+        parent = jm.result(parent_tag)
+    if parent is None:
+        raise ValueError(f"clientapi parent does not exist: {container}:{parent_tag}")
+    target = parent.feature().get(child_tag)
     if target is None:
         raise ValueError(f"clientapi target does not exist: {container}:{feature_tag}")
 
@@ -83,9 +94,7 @@ def _resolve_existing_target(
     except Exception as exc:
         raise ValueError(f"cannot inventory target properties: {exc}") from exc
     if property_name not in property_names:
-        raise ValueError(
-            f"unknown property {property_name!r} on {container}:{feature_tag}"
-        )
+        raise ValueError(f"unknown property {property_name!r} on {container}:{feature_tag}")
     return target
 
 
@@ -117,6 +126,26 @@ def _read_property(target, property_name: str) -> tuple[JSONValue, str]:
     else:
         value = str(target.getString(property_name))
     return normalize_property_value(value), value_type
+
+
+def _exact_json_value_equal(left: JSONValue, right: JSONValue) -> bool:
+    if type(left) is not type(right):
+        return False
+    if isinstance(left, list):
+        return len(left) == len(right) and all(
+            _exact_json_value_equal(left_item, right_item)
+            for left_item, right_item in zip(left, right, strict=True)
+        )
+    return left == right
+
+
+def _restore_property(target, property_name: str, old_value: JSONValue, value_type: str) -> bool:
+    try:
+        target.set(property_name, old_value)
+        restored_value, restored_type = _read_property(target, property_name)
+    except Exception:
+        return False
+    return restored_type == value_type and _exact_json_value_equal(restored_value, old_value)
 
 
 def get_existing_property(
@@ -163,23 +192,29 @@ def set_existing_property(
             model, component_name, container, feature_tag, property_name
         )
         old_value, value_type = _read_property(target, property_name)
-        target.set(property_name, normalized_value)
+        try:
+            target.set(property_name, normalized_value)
+        except Exception:
+            return {
+                "success": False,
+                "error": "clientapi property set failed",
+                "rolled_back": _restore_property(target, property_name, old_value, value_type),
+            }
         try:
             new_value, new_value_type = _read_property(target, property_name)
         except Exception as readback_exc:
-            rolled_back = False
-            try:
-                target.set(property_name, old_value)
-                restored_value, restored_type = _read_property(target, property_name)
-                rolled_back = (
-                    restored_value == old_value and restored_type == value_type
-                )
-            except Exception:
-                rolled_back = False
             return {
                 "success": False,
                 "error": f"clientapi property readback failed: {readback_exc}",
-                "rolled_back": rolled_back,
+                "rolled_back": _restore_property(target, property_name, old_value, value_type),
+            }
+        if new_value_type != value_type or not _exact_json_value_equal(new_value, normalized_value):
+            return {
+                "success": False,
+                "error": "clientapi property assignment did not match the requested value",
+                "old_value": old_value,
+                "observed_value": new_value,
+                "rolled_back": _restore_property(target, property_name, old_value, value_type),
             }
         return {
             "success": True,
@@ -216,9 +251,7 @@ def register_property_tools(mcp: MCPServer) -> None:
         model = session_manager.get_model(model_name)
         if model is None:
             return {"success": False, "error": f"Model not found: {model_name}"}
-        return get_existing_property(
-            model, component_name, container, feature_tag, property_name
-        )
+        return get_existing_property(model, component_name, container, feature_tag, property_name)
 
     @mcp.tool()
     def clientapi_property_set(
@@ -241,6 +274,8 @@ def register_property_tools(mcp: MCPServer) -> None:
 
 
 __all__ = [
-    "ClientAPIContainer", "get_existing_property", "register_property_tools",
+    "ClientAPIContainer",
+    "get_existing_property",
+    "register_property_tools",
     "set_existing_property",
 ]

@@ -8,6 +8,8 @@ import uuid
 from pathlib import Path
 from typing import Iterable, Mapping, Sequence
 
+PASSIVE_REFLECTION_TOLERANCE = 1.0e-6
+
 
 def require_entities(values: Iterable[object], label: str) -> list[int]:
     """Return a unique nonempty positive entity selection."""
@@ -38,12 +40,18 @@ def require_port_pair(
     if geometry is not None:
         expected_top = set(require_entities(top_domains, "top port domains"))
         expected_bottom = set(require_entities(bottom_domains, "bottom port domains"))
+        if expected_top & expected_bottom:
+            raise ValueError("top and bottom port domains must not overlap")
         up_down = geometry.getUpDown()
         up = list(up_down[0])
         down = list(up_down[1])
+        if len(up) != len(down) or len(up) != int(geometry.getNBoundaries()):
+            raise ValueError("geometry adjacency arrays are incomplete")
 
         def require_exterior(boundaries: Sequence[int], domains: set[int], label: str) -> None:
             for boundary in boundaries:
+                if boundary > len(up):
+                    raise ValueError(f"{label} contains a boundary outside the built topology")
                 adjacent = {int(up[boundary - 1]), int(down[boundary - 1])}
                 if 0 not in adjacent or not (adjacent & domains):
                     raise ValueError(f"{label} does not match its intended exterior domain")
@@ -75,6 +83,8 @@ def require_interface_boundaries(
     """Find boundaries adjacent to both exact domain groups, independent of orientation."""
     first = set(require_entities(first_domains, "first domain group"))
     second = set(require_entities(second_domains, "second domain group"))
+    if first & second:
+        raise ValueError("interface domain groups must not overlap")
     up_down = geometry.getUpDown()
     up = list(up_down[0])
     down = list(up_down[1])
@@ -91,6 +101,18 @@ def require_interface_boundaries(
     return boundaries
 
 
+def require_passive_reflection(values: Sequence[float], label: str) -> list[float]:
+    """Require passive reflection within a small numerical solve tolerance."""
+    normalized = [float(value) for value in values]
+    if any(
+        value < -PASSIVE_REFLECTION_TOLERANCE
+        or value > 1.0 + PASSIVE_REFLECTION_TOLERANCE
+        for value in normalized
+    ):
+        raise ValueError(f"{label} lies outside the passive reflection range")
+    return normalized
+
+
 def require_required_properties(node: object, values: Mapping[str, object]) -> None:
     """Apply every required property and verify string readback when supported."""
     for name, value in values.items():
@@ -102,6 +124,13 @@ def require_required_properties(node: object, values: Mapping[str, object]) -> N
             if isinstance(value, bool):
                 accepted = {"true", "on", "1"} if value else {"false", "off", "0"}
                 matches = observed.casefold() in accepted
+            elif isinstance(value, (int, float)):
+                try:
+                    matches = math.isclose(
+                        float(observed), float(value), rel_tol=1.0e-9, abs_tol=1.0e-12
+                    )
+                except ValueError:
+                    matches = False
             else:
                 matches = observed == expected
             if not matches:

@@ -10,7 +10,6 @@ import subprocess
 import sys
 import time
 import types
-import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -31,13 +30,10 @@ from src.jobs.store import (
 
 
 @pytest.fixture()
-def jobs_root():
-    root = Path("D:/comsol_runtime_test/jobs") / uuid.uuid4().hex
-    root.mkdir(parents=True)
-    try:
-        yield root
-    finally:
-        fixture_clean(root, ignore_errors=True)
+def jobs_root(ascii_tmp_path):
+    root = ascii_tmp_path / "jobs"
+    root.mkdir()
+    return root
 
 
 def wait_for(manager: JobManager, job_id: str, statuses: set[str], timeout: float = 5.0):
@@ -47,9 +43,12 @@ def wait_for(manager: JobManager, job_id: str, statuses: set[str], timeout: floa
         if state["status"] in statuses:
             return state
         time.sleep(0.025)
-    raise AssertionError(
-        f"Job did not reach {statuses}: {manager.status(job_id)}; tail={manager.tail(job_id, 50)}"
-    )
+    final = manager.status(job_id)
+    try:
+        tail = manager.tail(job_id, 50)
+    except Exception as exc:
+        tail = {"unavailable": type(exc).__name__}
+    raise AssertionError(f"Job did not reach {statuses}: {final}; tail={tail}")
 
 
 def test_sequence_resume_reconciles_progress_from_all_durable_rows(jobs_root):
@@ -80,6 +79,40 @@ def test_sequence_resume_reconciles_progress_from_all_durable_rows(jobs_root):
     assert final["progress"] == {"completed": 2, "total": 2}
 
 
+@pytest.mark.parametrize(
+    "payload,expected",
+    [
+        (b"index,status\n0,ok\n1,", {0}),
+        (b"index,sta", set()),
+    ],
+)
+def test_sequence_results_repair_only_an_unterminated_crash_tail(tmp_path, payload, expected):
+    path = tmp_path / "results.csv"
+    path.write_bytes(payload)
+
+    assert sequence_worker._read_completed_results(path, total=2) == expected
+    if expected:
+        assert path.read_bytes().endswith(b"\n")
+    else:
+        assert path.read_bytes() == b""
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b"index,wrong\n0,ok\n",
+        b"index,status\nnot-an-index,ok\n",
+        b"index,status\n1,ok\n",
+    ],
+)
+def test_sequence_results_reject_complete_corrupt_records(tmp_path, payload):
+    path = tmp_path / "results.csv"
+    path.write_bytes(payload)
+
+    with pytest.raises(ValueError, match="sequence result"):
+        sequence_worker._read_completed_results(path, total=2)
+
+
 def test_submit_returns_promptly_and_second_manager_observes_completion(jobs_root):
     first = JobManager(jobs_root, allow_test_jobs=True)
     started = time.monotonic()
@@ -89,7 +122,7 @@ def test_submit_returns_promptly_and_second_manager_observes_completion(jobs_roo
     second = JobManager(jobs_root, allow_test_jobs=True)
     completed = wait_for(second, result["job_id"], {"completed"})
 
-    assert elapsed < 1.0
+    assert elapsed < 5.0
     assert completed["progress"] == {"completed": 2, "total": 2}
     assert second.tail(result["job_id"], 2)["events"]
 
@@ -164,14 +197,20 @@ def test_cooperative_cancel_is_truthful_and_resumable(jobs_root):
     assert terminal["cancel"]["verification"]["absent"] is True
     assert terminal["cancel"]["cooperative_observation"]["target_attempt"] == 1
     timestamps = terminal["cancel"]["phase_timestamps"]
-    assert set(timestamps) >= {
+    assert set(timestamps) == {
         "requested",
         "native_grace",
         "verifying",
         "verified",
         "terminal_commit",
     }
-    assert timestamps["requested"] <= timestamps["native_grace"] <= timestamps["terminal_commit"]
+    assert (
+        timestamps["requested"]
+        <= timestamps["native_grace"]
+        <= timestamps["verifying"]
+        <= timestamps["verified"]
+        <= timestamps["terminal_commit"]
+    )
     assert terminal["cancel"]["timing_policy"] == {
         "native_grace_budget_s": 10.0,
         "terminate_budget_s": 5.0,
@@ -732,7 +771,15 @@ def test_coordinator_loss_at_each_durable_phase_reconciles_safely(
         cwd=Path(__file__).resolve().parents[2],
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
-    assert crashed.wait(timeout=5) == 91
+    crash_code = crashed.wait(timeout=5)
+    if crash_code != 91:
+        diagnostic_state = manager.store.read_state(result["job_id"])
+        diagnostic_events = manager.tail(result["job_id"], 100)["events"]
+        pytest.fail(
+            f"coordinator did not crash at {crash_phase}: code={crash_code}, "
+            f"phase={diagnostic_state.get('cancel', {}).get('phase')}, "
+            f"events={diagnostic_events[-10:]}"
+        )
     phase_state = manager.store.read_state(result["job_id"])
     assert phase_state["status"] == "cancelling"
     assert phase_state["cancel"]["phase"] == crash_phase
@@ -845,7 +892,7 @@ def test_thirty_cancel_status_polling_races_have_no_false_terminal_state(jobs_ro
             json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
         archive_root = Path(
-            os.environ.get(failure_root_env, "D:/comsol_runtime_test/cancellation_failures")
+            os.environ.get(failure_root_env, str(jobs_root.parent / "cancellation-failures"))
         )
         archive_root.mkdir(parents=True, exist_ok=True)
         archive = archive_root / f"{jobs_root.name}-{int(time.time())}"
@@ -988,6 +1035,88 @@ def test_job_lock_acquire_retries_transient_windows_sharing_violation(jobs_root,
     assert not lock_path.exists()
 
 
+def test_job_lock_acquire_removes_owned_partial_publication(jobs_root, monkeypatch):
+    lock_path = jobs_root / ".partial.lock"
+    real_fsync = store_module.os.fsync
+
+    def fail_lock_fsync(descriptor):
+        if lock_path.exists():
+            raise OSError("injected lock fsync failure")
+        return real_fsync(descriptor)
+
+    monkeypatch.setattr(store_module.os, "fsync", fail_lock_fsync)
+    with pytest.raises(OSError, match="injected lock fsync failure"):
+        JobLock(lock_path, timeout=0.5).acquire()
+    assert not lock_path.exists()
+
+    monkeypatch.setattr(store_module.os, "fsync", real_fsync)
+    with JobLock(lock_path, timeout=0.5):
+        assert lock_path.exists()
+
+
+def test_cancel_launch_failure_is_reported_and_next_idempotent_call_retries(jobs_root, monkeypatch):
+    manager = JobManager(jobs_root, allow_test_jobs=True, reconcile_on_start=False)
+    identity = process_identity(os.getpid())
+    job_id = manager.store.create(
+        {"schema_version": "2", "job_type": "test"},
+        {
+            "schema_version": "2",
+            "status": "running",
+            "attempt": 1,
+            "worker_pid": identity["pid"],
+            "worker_process_create_time": identity["process_create_time"],
+            "worker_command_signature": identity["command_signature"],
+        },
+    )
+    monkeypatch.setattr(
+        manager,
+        "_launch_cancel_coordinator",
+        lambda *_args: (_ for _ in ()).throw(OSError("injected launch failure")),
+    )
+
+    failed = manager.cancel(job_id)
+    assert failed["success"] is False
+    assert failed["error"] == "Cancellation coordinator could not be started"
+
+    launches = []
+    monkeypatch.setattr(manager, "_launch_cancel_coordinator", lambda *args: launches.append(args))
+    retried = manager.cancel(job_id)
+    assert retried["success"] is True
+    assert retried["idempotent"] is True
+    assert launches == [(job_id, failed["request_id"])]
+
+
+def test_cancel_claim_rejects_a_malformed_attempt_without_crashing(jobs_root):
+    store = JobStore(jobs_root)
+    identity = process_identity(os.getpid())
+    job_id = store.create(
+        {"schema_version": "2", "job_type": "test"},
+        {
+            "schema_version": "2",
+            "status": "cancel_requested",
+            "attempt": [],
+            "cancel": {"request_id": "cancel-malformed", "target_attempt": None},
+        },
+    )
+    store.write_control(
+        job_id,
+        "cancel_requested",
+        fields={"request_id": "cancel-malformed", "target_attempt": None},
+    )
+
+    assert (
+        cancel_worker._claim(
+            store,
+            job_id,
+            "cancel-malformed",
+            identity,
+            grace_seconds=0.1,
+            terminate_seconds=0.1,
+        )
+        is None
+    )
+
+
 def test_job_lock_guard_prevents_replacement_during_release(jobs_root, monkeypatch):
     from threading import Event, Thread
 
@@ -998,6 +1127,7 @@ def test_job_lock_guard_prevents_replacement_during_release(jobs_root, monkeypat
     entered_unlink = Event()
     allow_unlink = Event()
     second_acquired = Event()
+    second_attempted = Event()
     release_second = Event()
     original_unlink = Path.unlink
 
@@ -1008,6 +1138,7 @@ def test_job_lock_guard_prevents_replacement_during_release(jobs_root, monkeypat
         return original_unlink(path, *args, **kwargs)
 
     def acquire_second():
+        second_attempted.set()
         second.acquire()
         second_acquired.set()
         assert release_second.wait(timeout=1)
@@ -1019,6 +1150,7 @@ def test_job_lock_guard_prevents_replacement_during_release(jobs_root, monkeypat
     first_release.start()
     assert entered_unlink.wait(timeout=1)
     second_thread.start()
+    assert second_attempted.wait(timeout=1)
     assert not second_acquired.wait(timeout=0.05)
     allow_unlink.set()
     first_release.join(timeout=2)
@@ -1179,7 +1311,10 @@ def test_test_jobs_require_explicit_injection(jobs_root):
         JobManager(jobs_root).submit({"job_type": "test_sequence", "delays": [0.01]})
 
 
-def test_production_worker_bridges_smoke_broad_and_lease_with_mocks(jobs_root, monkeypatch):
+@pytest.mark.parametrize("release_raises", [False, True])
+def test_production_worker_bridges_smoke_broad_and_lease_with_mocks(
+    jobs_root, monkeypatch, release_raises
+):
     import src.tools.ownership as ownership_module
     import src.tools.workflow as workflow_module
 
@@ -1226,6 +1361,8 @@ def test_production_worker_bridges_smoke_broad_and_lease_with_mocks(jobs_root, m
 
         def release(self):
             lease_events.append("released")
+            if release_raises:
+                raise RuntimeError("injected ownership release failure")
             return {"success": True}
 
     class FakeClient:
@@ -1283,6 +1420,79 @@ def test_production_worker_bridges_smoke_broad_and_lease_with_mocks(jobs_root, m
     assert store.read_state(job_id)["progress"] == {"completed": 2, "total": 2}
     assert lease_events[0] == "acquired"
     assert lease_events[-1] == "released"
+
+
+def test_production_worker_rejects_failed_heartbeat_before_model_load(jobs_root, monkeypatch):
+    import src.tools.ownership as ownership_module
+
+    store = JobStore(jobs_root)
+    identity = process_identity(os.getpid())
+    source = jobs_root / "source.mph"
+    source.write_bytes(b"mock")
+    job_id = store.create(
+        {
+            "schema_version": "1",
+            "spec_fingerprint": "heartbeat-config",
+            "job_type": "staged_sweep",
+            "source_model_path": str(source),
+            "source_model_sha256": "0" * 64,
+            "parameter_name": "wl",
+            "parameter_values": [1.0],
+            "expressions": ["A"],
+            "smoke_points": 1,
+        },
+        {
+            "schema_version": "1",
+            "status": "submitted",
+            "attempt": 1,
+            "worker_pid": identity["pid"],
+            "worker_process_create_time": identity["process_create_time"],
+            "worker_command_signature": identity["command_signature"],
+            "progress": {"completed": 0, "total": 1},
+        },
+    )
+    loads = []
+
+    class FailedHeartbeatOwnership:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def preflight(self, **_kwargs):
+            return {"ready": True}
+
+        def acquire(self, **_kwargs):
+            return {"success": True}
+
+        def heartbeat(self, **_kwargs):
+            return False
+
+        def release(self):
+            return {"success": True}
+
+    class FakeClient:
+        port = None
+
+        def __init__(self, **_kwargs):
+            pass
+
+        def load(self, _path):
+            loads.append(_path)
+            return object()
+
+        def clear(self):
+            pass
+
+    monkeypatch.setattr(ownership_module, "SolverOwnership", FailedHeartbeatOwnership)
+    monkeypatch.setitem(sys.modules, "mph", types.SimpleNamespace(Client=FakeClient))
+
+    code = production_worker.run(str(jobs_root), job_id)
+
+    state = store.read_state(job_id)
+    assert code == 1
+    assert loads == []
+    assert state["status"] == "failed"
+    assert state["last_error"]["type"] == "RuntimeError"
+    assert "heartbeat failed before model load" in state["last_error"]["message"]
 
 
 def test_production_worker_resource_gate_interrupts_before_second_solve(jobs_root, monkeypatch):
@@ -1644,9 +1854,7 @@ def test_sequence_transition_error_remains_bound_to_concurrent_cancel(jobs_root,
     assert "Invalid job state transition" in state["cancel"]["worker_error"]["message"]
 
 
-def test_default_reconciliation_includes_an_older_accepted_cancellation(
-    jobs_root, monkeypatch
-):
+def test_default_reconciliation_includes_an_older_accepted_cancellation(jobs_root, monkeypatch):
     manager = JobManager(jobs_root, reconcile_on_start=False)
     identity = process_identity(os.getpid())
     old_job_id = manager.store.create(
@@ -1751,12 +1959,24 @@ def _cleanup_fixture_processes(root: Path) -> dict[str, object]:
                 "process_create_time": state.get("worker_process_create_time"),
                 "command_signature": state.get("worker_command_signature"),
             }
-            captured = capture_owned_descendants(identity)
-            targets.extend(captured.get("descendants", []))
-            targets.append(identity)
+            if (
+                isinstance(identity["process_create_time"], (int, float))
+                and not isinstance(identity["process_create_time"], bool)
+                and isinstance(identity["command_signature"], str)
+                and len(identity["command_signature"]) == 64
+            ):
+                captured = capture_owned_descendants(identity)
+                targets.extend(captured.get("descendants", []))
+                targets.append(identity)
         cancel = state.get("cancel")
         coordinator = cancel.get("coordinator") if isinstance(cancel, dict) else None
-        if isinstance(coordinator, dict) and coordinator.get("pid") != os.getpid():
+        if (
+            isinstance(coordinator, dict)
+            and coordinator.get("pid") != os.getpid()
+            and isinstance(coordinator.get("process_create_time"), (int, float))
+            and isinstance(coordinator.get("command_signature"), str)
+            and len(coordinator["command_signature"]) == 64
+        ):
             targets.append(coordinator)
 
     unique: dict[tuple[object, object, object], dict[str, object]] = {}

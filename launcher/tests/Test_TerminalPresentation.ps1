@@ -66,8 +66,24 @@ if ((Get-DurableTerminalDisposition -Snapshot $Scientific) -ne 'not_accepted') {
 if ($Scientific.TerminalReason -ne 'symmetry_gate_failed') {
     throw "Scientific terminal reason was not preserved: $($Scientific.TerminalReason)"
 }
-if ($Scientific.TerminalDetails -notmatch 'max_cross_helicity_absorption_absolute_difference=0.021967') {
-    throw "Scientific terminal details omitted the failing metric: $($Scientific.TerminalDetails)"
+$DetailValues = @{}
+foreach ($Part in @($Scientific.TerminalDetails -split '; ')) {
+    $Pair = @($Part -split '=', 2)
+    if ($Pair.Count -eq 2) { $DetailValues[$Pair[0]] = $Pair[1] }
+}
+$ObservedMetric = 0.0
+$MetricText = $DetailValues['max_cross_helicity_absorption_absolute_difference']
+if (
+    [string]::IsNullOrWhiteSpace($MetricText) -or
+    -not [double]::TryParse(
+        $MetricText,
+        [Globalization.NumberStyles]::Float,
+        [Globalization.CultureInfo]::InvariantCulture,
+        [ref]$ObservedMetric
+    ) -or
+    -not $ObservedMetric.Equals([double]0.021967938937959675)
+) {
+    throw "Scientific terminal details omitted the exact failing metric: $($Scientific.TerminalDetails)"
 }
 if ($Scientific.TerminalDetails -match 'omitted_from_bounded_summary') {
     throw 'Scientific terminal details leaked an evidence array.'
@@ -132,9 +148,7 @@ $Receipt = [ordered]@{
     explicit_pause_disposition = 'paused'
     explicit_pause_color = 'Blue'
     explicit_pause_reason = $Paused.TerminalReason
-    bounded_nested_gate_summary = $true
     evidence_arrays_excluded = $true
-    red_and_yellow_show_status_driver_and_error_paths = $true
     module_sha256 = Get-TestSha256 -Path $Module
 }
 $ReceiptPath = Join-Path $TestRoot 'terminal_presentation_receipt.json'

@@ -5,12 +5,14 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import sys
 import time
 from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from comsol_mcp.durable import read_file_bytes_bounded
 from comsol_mcp.settings import (
     MAX_SETTINGS_BYTES,
     SettingsError,
@@ -71,11 +73,37 @@ def decode_settings_bytes(raw: bytes) -> dict[str, Any]:
 
 
 def load_raw_document(path: Path) -> dict[str, Any]:
-    if path.is_symlink() or getattr(path, "is_junction", lambda: False)():
+    if path_has_linked_component(path):
         raise DamagedSettings("settings target must not be a link or junction")
     if not path.is_file():
         raise FileNotFoundError(path.name)
-    return decode_settings_bytes(path.read_bytes())
+    try:
+        raw = read_file_bytes_bounded(path, max_bytes=MAX_SETTINGS_BYTES)
+    except ValueError as exc:
+        raise DamagedSettings(
+            f"settings must contain 1..{MAX_SETTINGS_BYTES} bytes",
+            reason_code="settings_size_invalid",
+        ) from exc
+    return decode_settings_bytes(raw)
+
+
+def _replace_write_through(source: Path, target: Path) -> None:
+    if os.name != "nt":
+        os.replace(source, target)
+        descriptor = os.open(target.parent, os.O_RDONLY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+        return
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.MoveFileExW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD]
+    kernel32.MoveFileExW.restype = wintypes.BOOL
+    if not kernel32.MoveFileExW(str(source), str(target), 0x1 | 0x8):
+        raise OSError(ctypes.get_last_error(), "MoveFileExW failed")
 
 
 def _sharing_error(error: OSError) -> bool:
@@ -149,7 +177,7 @@ class SettingsStore:
                 self.ownership.verify_unchanged()
                 self.ownership.release_target_handle()
                 try:
-                    os.replace(temporary, self.target)
+                    _replace_write_through(temporary, self.target)
                     break
                 except OSError as exc:
                     if not _sharing_error(exc) or self._clock() >= deadline:
@@ -169,14 +197,31 @@ class SettingsStore:
             self.ownership.reacquire_target_handle()
             return hashlib.sha256(raw).hexdigest()
         finally:
+            active_error = sys.exception()
+            cleanup_errors: list[Exception] = []
             if descriptor is not None:
-                os.close(descriptor)
-            if not self.ownership.target_handle_held and self.target.exists():
-                self.ownership.reacquire_target_handle()
+                try:
+                    os.close(descriptor)
+                except Exception as exc:
+                    cleanup_errors.append(exc)
             try:
                 temporary.unlink()
             except FileNotFoundError:
                 pass
+            except Exception as exc:
+                cleanup_errors.append(exc)
+            if not self.ownership.target_handle_held and self.target.exists():
+                try:
+                    self.ownership.reacquire_target_handle()
+                except Exception as exc:
+                    cleanup_errors.append(exc)
+            if active_error is not None:
+                for cleanup_error in cleanup_errors:
+                    active_error.add_note(
+                        f"settings cleanup failed: {type(cleanup_error).__name__}"
+                    )
+            elif cleanup_errors:
+                raise cleanup_errors[0]
 
     def preserve_damaged_copy(self) -> Path:
         raw = self.target.read_bytes()
@@ -201,7 +246,14 @@ class SettingsStore:
 
     def rebuild(self) -> str:
         if self.target.exists():
-            self.preserve_damaged_copy()
+            size = self.target.stat().st_size
+            if 1 <= size <= MAX_SETTINGS_BYTES:
+                self.preserve_damaged_copy()
+            else:
+                stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+                backup = self.target.with_name(f"{self.target.stem}.damaged-{stamp}-unbounded.json")
+                os.replace(self.target, backup)
+                self.ownership.baseline = None
         ensure_default_directories(self.target.parent)
         return self.save(default_settings_document(user_root=self.target.parent))
 

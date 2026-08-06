@@ -112,19 +112,22 @@ def _aggregate(rows: list[Mapping[str, Any]]) -> dict[str, Any]:
     if not rows:
         return {
             "query_count": 0,
-            "recall_at_5": math.nan,
-            "recall_at_10": math.nan,
-            "mrr_at_10": math.nan,
-            "ndcg_at_10": math.nan,
-            "zero_result_rate": math.nan,
+            "judged_query_count": 0,
+            "recall_at_5": 0.0,
+            "recall_at_10": 0.0,
+            "mrr_at_10": 0.0,
+            "ndcg_at_10": 0.0,
+            "zero_result_rate": 0.0,
             "misses_at_5": 0,
             "negative_query_count": 0,
             "negative_abstention_rate": None,
         }
     judged = [row for row in rows if row["relevant"]]
     negative = [row for row in rows if not row["relevant"]]
+
     def mean_metric(name: str) -> float | None:
         return statistics.fmean(row["metrics"][name] for row in judged) if judged else None
+
     return {
         "query_count": len(rows),
         "judged_query_count": len(judged),
@@ -132,12 +135,17 @@ def _aggregate(rows: list[Mapping[str, Any]]) -> dict[str, Any]:
         "recall_at_10": mean_metric("recall_at_10"),
         "mrr_at_10": mean_metric("reciprocal_rank_at_10"),
         "ndcg_at_10": mean_metric("ndcg_at_10"),
-        "zero_result_rate": statistics.fmean(1.0 if row["result_count"] == 0 else 0.0 for row in rows),
+        "zero_result_rate": statistics.fmean(
+            1.0 if row["result_count"] == 0 else 0.0 for row in rows
+        ),
         "misses_at_5": sum(1 for row in judged if row["metrics"]["miss_at_5"]),
         "negative_query_count": len(negative),
         "negative_abstention_rate": (
-            statistics.fmean(1.0 if row["metrics"]["negative_abstained"] else 0.0 for row in negative)
-            if negative else None
+            statistics.fmean(
+                1.0 if row["metrics"]["negative_abstained"] else 0.0 for row in negative
+            )
+            if negative
+            else None
         ),
     }
 
@@ -190,20 +198,20 @@ def evaluate_lexical_baseline(
             index["citations"],
         )
         relevant = {(row["source"], int(row["page"])) for row in item["relevant"]}
-        rows.append({
-            "id": item["id"],
-            "query": item["query"],
-            "category": item["category"],
-            "style": item["style"],
-            "relevant": item["relevant"],
-            "ranked_citations": [{"source": source, "page": page} for source, page in ranked],
-            "result_count": len(ranked),
-            "strategy": result["strategy"],
-            "elapsed_seconds": elapsed,
-            "metrics": _query_metrics(
-                ranked, relevant, valid_citations=index["citations"]
-            ),
-        })
+        rows.append(
+            {
+                "id": item["id"],
+                "query": item["query"],
+                "category": item["category"],
+                "style": item["style"],
+                "relevant": item["relevant"],
+                "ranked_citations": [{"source": source, "page": page} for source, page in ranked],
+                "result_count": len(ranked),
+                "strategy": result["strategy"],
+                "elapsed_seconds": elapsed,
+                "metrics": _query_metrics(ranked, relevant, valid_citations=index["citations"]),
+            }
+        )
 
     by_category = {
         category: _aggregate([row for row in rows if row["category"] == category])
@@ -214,10 +222,7 @@ def evaluate_lexical_baseline(
         for style in sorted({row["style"] for row in rows})
     }
     target_style_names = set(SEMANTIC_CONTINUATION_GATE["target_styles"])
-    target_rows = [
-        row for row in rows
-        if row["style"] in target_style_names and row["relevant"]
-    ]
+    target_rows = [row for row in rows if row["style"] in target_style_names and row["relevant"]]
     latencies = [row["elapsed_seconds"] for row in rows]
     summary = {
         "overall": _aggregate(rows),
@@ -250,7 +255,9 @@ def evaluate_lexical_baseline(
 def _atomic_write_json(path: Path, value: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + f".tmp-{os.getpid()}")
-    temporary.write_bytes(json.dumps(value, indent=2, ensure_ascii=False, allow_nan=False).encode("utf-8") + b"\n")
+    temporary.write_bytes(
+        json.dumps(value, indent=2, ensure_ascii=False, allow_nan=False).encode("utf-8") + b"\n"
+    )
     os.replace(temporary, path)
 
 

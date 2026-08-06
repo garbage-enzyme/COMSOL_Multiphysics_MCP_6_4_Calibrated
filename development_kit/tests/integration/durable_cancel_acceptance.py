@@ -105,7 +105,11 @@ def main() -> int:
     )
     job_id = submitted["job_id"]
     _wait_for_running(manager, job_id, timeout_seconds=150.0)
-    print(json.dumps(manager.cancel(job_id)), flush=True)
+    cancelled = manager.cancel(job_id)
+    print(json.dumps(cancelled), flush=True)
+    if cancelled.get("success") is not True:
+        reason = cancelled.get("reason_code") or cancelled.get("error") or "cancel_refused"
+        raise RuntimeError(f"durable cancellation request was refused: {reason}")
     status = _wait_for_verified_cancelled(manager, job_id, timeout_seconds=150.0)
     print(json.dumps(status), flush=True)
     return 0

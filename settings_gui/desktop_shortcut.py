@@ -247,10 +247,7 @@ def _arguments_mismatch_field(observed: str, expected: str) -> str | None:
         return "arguments_token_count"
     if not observed_tokens or observed_tokens[0] != expected_tokens[0]:
         return "arguments_option"
-    if (
-        len(observed_tokens) == 2
-        and expected_tokens[0] == "--settings-path-token"
-    ):
+    if len(observed_tokens) == 2 and expected_tokens[0] == "--settings-path-token":
         try:
             if decode_settings_path_token(observed_tokens[1]) != decode_settings_path_token(
                 expected_tokens[1]
@@ -284,25 +281,28 @@ def _shortcut_spec_mismatch_fields(
 
 
 def _run_powershell(script: str, environment: dict[str, str]) -> str:
-    completed = subprocess.run(  # noqa: S603
-        [
-            str(_powershell_executable()),
-            "-NoLogo",
-            "-NoProfile",
-            "-NonInteractive",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-EncodedCommand",
-            _encoded_command(script),
-        ],
-        env={**os.environ, **environment},
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        timeout=15,
-        check=False,
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-    )
+    try:
+        completed = subprocess.run(  # noqa: S603
+            [
+                str(_powershell_executable()),
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-EncodedCommand",
+                _encoded_command(script),
+            ],
+            env={**os.environ, **environment},
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=15,
+            check=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise OSError("Windows shortcut operation timed out") from exc
     if completed.returncode != 0:
         raise OSError("Windows shortcut operation failed")
     return completed.stdout.decode("ascii", errors="strict").strip()
@@ -511,7 +511,7 @@ def shortcut_status(
         entry = executable if executable is not None else installed_gui_entry_executable()
         icon = icon_path if icon_path is not None else ICON_PATH
         desired = _desired_spec(settings, entry, icon)
-    except (OSError, RuntimeError, ValueError):
+    except OSError, RuntimeError, ValueError:
         desired = None
     kind = (
         "foreign"
@@ -540,8 +540,24 @@ def create_desktop_shortcut(
         settings_path, desktop_path, executable, icon_path
     )
     if not shortcut.exists():
-        write_shortcut(shortcut, desired)
-        return _receipt("created", success=True, settings_path=settings)
+        candidate = shortcut.with_name(f".{shortcut.stem}.{uuid.uuid4().hex}.tmp{shortcut.suffix}")
+        try:
+            write_shortcut(candidate, desired)
+            try:
+                os.rename(candidate, shortcut)
+            except FileExistsError:
+                return _receipt(
+                    "conflict",
+                    success=False,
+                    settings_path=settings,
+                    existing_kind="appeared_during_create",
+                )
+            return _receipt("created", success=True, settings_path=settings)
+        finally:
+            try:
+                candidate.unlink()
+            except FileNotFoundError:
+                pass
     try:
         baseline_identity = _shortcut_identity(shortcut)
     except OSError, RuntimeError, ValueError:
@@ -571,7 +587,7 @@ def create_desktop_shortcut(
         candidate_identity = _shortcut_identity(candidate)
         try:
             current_identity = _shortcut_identity(shortcut)
-        except (OSError, RuntimeError, ValueError):
+        except OSError, RuntimeError, ValueError:
             current_identity = None
         if current_identity != baseline_identity:
             return _receipt("conflict", success=False, settings_path=settings, existing_kind=kind)

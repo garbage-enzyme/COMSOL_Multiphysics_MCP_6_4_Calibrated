@@ -56,7 +56,7 @@ def normalize_shared_server_attach_request(
         raise ValueError(
             f"shared server attach request fields are invalid; missing={missing}, unknown={unknown}"
         )
-    if value["user_confirmed"] is not True:
+    if not isinstance(value["user_confirmed"], bool) or value["user_confirmed"] is not True:
         raise ValueError("shared server attach requires user_confirmed=true")
     endpoint = normalize_shared_server_endpoint(value["endpoint"])
     return SharedServerAttachRequest(

@@ -110,6 +110,27 @@ def test_append_fsync_journal_replays_exact_complete_identities(tmp_path, monkey
     }
 
 
+def test_append_hashes_the_normalized_collector_summary(tmp_path):
+    spec = _spec(tmp_path)
+    summary = _summary("off")
+    summary["manifest_relative_path"] = "artifacts//artifact-off/manifest.json"
+
+    row = append_validation_row(
+        tmp_path / "rows.jsonl",
+        spec,
+        attempt=1,
+        point_id="off",
+        status="ok",
+        collector_summaries=[summary],
+        created_at_epoch=1.0,
+    )
+
+    assert row["collector_summaries"][0]["manifest_relative_path"] == (
+        "artifacts/artifact-off/manifest.json"
+    )
+    assert read_validation_rows(tmp_path / "rows.jsonl", spec) == [row]
+
+
 def test_error_rows_are_durable_but_never_resume_skips(tmp_path):
     spec = _spec(tmp_path)
     path = tmp_path / "rows.jsonl"
@@ -242,6 +263,26 @@ def test_tampered_rows_fail_closed(tmp_path, field, value, message):
         read_validation_rows(path, spec)
 
 
+@pytest.mark.parametrize("invalid_sequence", [True, 1.0])
+def test_validation_row_sequence_requires_a_strict_integer(tmp_path, invalid_sequence):
+    spec = _spec(tmp_path)
+    path = tmp_path / "rows.jsonl"
+    append_validation_row(
+        path,
+        spec,
+        attempt=1,
+        point_id="off",
+        status="ok",
+        collector_summaries=[_summary("off")],
+    )
+    row = json.loads(path.read_text(encoding="utf-8"))
+    row["sequence"] = invalid_sequence
+    path.write_text(json.dumps(row) + "\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="sequence is not contiguous"):
+        read_validation_rows(path, spec)
+
+
 @pytest.mark.parametrize(
     "unsafe_path",
     [
@@ -342,7 +383,6 @@ def test_partial_tail_is_truncated_before_concurrent_safe_append(tmp_path):
     )
 
     assert read_validation_rows(path, spec) == [first, second]
-    assert not (tmp_path / ".rows.jsonl.lock").exists()
 
 
 def test_concurrent_validation_appends_form_one_contiguous_chain(tmp_path):

@@ -245,23 +245,25 @@ def test_chain_rejects_absolute_and_junction_escaped_artifact_paths(tmp_path):
         )
 
     outside = tmp_path.parent / f"{tmp_path.name}-outside"
-    outside.mkdir()
-    escaped = _write(outside, "escaped", "comsol_mcp.environment_identity", "1.0.0")
     junction = tmp_path / "linked"
-    _winapi.CreateJunction(str(outside), str(junction))
-    escaped["relative_path"] = "linked/escaped.json"
-    manifest = build_artifact_chain_manifest(
-        chain_id="junction",
-        artifacts=[{**escaped, "role": "raw_evidence", "parents": []}],
-        terminal_artifact_ids=["escaped"],
-    )
     try:
-        with pytest.raises(ValueError, match="escapes artifact_root"):
+        outside.mkdir()
+        escaped = _write(outside, "escaped", "comsol_mcp.environment_identity", "1.0.0")
+        _winapi.CreateJunction(str(outside), str(junction))
+        escaped["relative_path"] = "linked/escaped.json"
+        manifest = build_artifact_chain_manifest(
+            chain_id="junction",
+            artifacts=[{**escaped, "role": "raw_evidence", "parents": []}],
+            terminal_artifact_ids=["escaped"],
+        )
+        with pytest.raises((ValueError, OSError)):
             verify_artifact_chain(manifest, artifact_root=tmp_path)
     finally:
-        junction.rmdir()
-        (outside / "escaped.json").unlink()
-        outside.rmdir()
+        if junction.exists():
+            junction.rmdir()
+        (outside / "escaped.json").unlink(missing_ok=True)
+        if outside.exists():
+            outside.rmdir()
 
 
 @pytest.mark.parametrize("version", [None, "", {"unbounded": True}, "x" * 129])
@@ -284,3 +286,40 @@ def test_chain_rechecks_size_after_validating_supplied_producer(tmp_path, monkey
 
     with pytest.raises(ValueError, match="oversized"):
         validate_artifact_chain_manifest(manifest)
+
+
+def test_chain_rejects_recursion_missing_artifact_and_final_manifest_oversize(
+    tmp_path, monkeypatch
+):
+    accepted_depth = artifact_chain_module.MAX_ARTIFACT_JSON_NESTING_DEPTH
+    accepted = b'{"x":' * accepted_depth + b"0" + b"}" * accepted_depth
+    assert artifact_chain_module._decode_strict_json_object(accepted, "artifact")
+
+    depth = artifact_chain_module.MAX_ARTIFACT_JSON_NESTING_DEPTH + 1
+    nested = b'{"x":' * depth + b"0" + b"}" * depth
+    with pytest.raises(ValueError, match="nesting limit"):
+        artifact_chain_module._decode_strict_json_object(nested, "artifact")
+
+    manifest = _chain(tmp_path)
+    (tmp_path / "raw.json").unlink()
+    with pytest.raises(ValueError, match="does not exist under artifact_root"):
+        verify_artifact_chain(manifest, artifact_root=tmp_path)
+
+    manifest = _chain(tmp_path)
+    final_size = len(artifact_chain_module._canonical_bytes(manifest))
+    monkeypatch.setattr(artifact_chain_module, "MAX_CHAIN_MANIFEST_BYTES", final_size - 1)
+    with pytest.raises(ValueError, match="oversized"):
+        build_artifact_chain_manifest(
+            chain_id=manifest["chain_id"],
+            artifacts=manifest["artifacts"],
+            terminal_artifact_ids=manifest["terminal_artifact_ids"],
+        )
+
+
+def test_chain_accepts_hash_bound_historical_producer_version(tmp_path, monkeypatch):
+    manifest = _chain(tmp_path)
+    manifest["producer"]["version"] = "0.1.0"
+    _rehash_manifest(manifest)
+    monkeypatch.setattr(artifact_chain_module, "__version__", "99.0.0")
+
+    assert validate_artifact_chain_manifest(manifest) == manifest

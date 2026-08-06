@@ -143,7 +143,11 @@ class FakeModel:
     def evaluate(self, expressions):
         raw = self.java.parameters.values.get("wl", "0")
         value = float(str(raw).split("[", 1)[0])
-        arrays = [np.array([value + index]) for index, _ in enumerate(expressions)]
+        values = {
+            "wl": value + 1,
+            "c_const/ewfd.freq": value + 2,
+        }
+        arrays = [np.array([values.get(expression, value)]) for expression in expressions]
         return arrays[0] if len(arrays) == 1 else arrays
 
 
@@ -581,16 +585,17 @@ def test_mesh_convergence_resumes_completed_levels(tmp_path):
     csv_path = tmp_path / "mesh.csv"
     source = tmp_path / "source.mph"
     source.write_bytes(b"immutable mesh source")
-    model = FakeModel()
+    first_model = FakeModel()
     first = run_mesh_convergence(
-        model,
+        first_model,
         [{"name": "coarse", "properties": {"hmax": "0.1"}}],
         ["A"],
         csv_path=str(csv_path),
         source_model_path=str(source),
     )
+    resumed_model = FakeModel()
     resumed = run_mesh_convergence(
-        model,
+        resumed_model,
         [
             {"name": "coarse", "properties": {"hmax": "0.1"}},
             {"name": "fine", "properties": {"hmax": "0.05"}},
@@ -606,6 +611,8 @@ def test_mesh_convergence_resumes_completed_levels(tmp_path):
     assert type(first["resolved_study_tag"]) is str
     assert resumed["n_skipped"] == 1
     assert resumed["n_levels"] == 1
+    assert first_model.java.study_node.run_count == 1
+    assert resumed_model.java.study_node.run_count == 1
     assert [row["level"] for row in read_csv(csv_path)] == ["coarse", "fine"]
 
 
@@ -633,6 +640,25 @@ def test_incremental_csv_append_reads_only_header_when_schema_matches(tmp_path, 
     )
 
     assert path.read_text(encoding="utf-8").count("\n") == 3
+
+
+def test_csv_schema_migration_is_atomic_on_replace_failure(tmp_path, monkeypatch):
+    path = tmp_path / "legacy.csv"
+    original = b"value\n1\n"
+    path.write_bytes(original)
+
+    def fail_replace(_source, _destination):
+        raise OSError("injected replace failure")
+
+    monkeypatch.setattr(workflow_module.os, "replace", fail_replace)
+
+    with pytest.raises(OSError, match="replace failure"):
+        workflow_module._write_rows_csv(
+            str(path), ["value", "status"], [{"value": 2, "status": "ok"}], append=True
+        )
+
+    assert path.read_bytes() == original
+    assert list(tmp_path.glob(".legacy.csv.*.tmp")) == []
 
 
 @pytest.mark.parametrize(

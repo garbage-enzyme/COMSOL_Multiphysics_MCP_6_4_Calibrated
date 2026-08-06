@@ -68,6 +68,9 @@ def test_named_domains_and_interface_are_orientation_independent():
 
     assert contracts.require_interface_boundaries(geometry, al2, air) == [3]
 
+    with pytest.raises(ValueError, match="must not overlap"):
+        contracts.require_interface_boundaries(geometry, [7], [7, 3])
+
 
 @pytest.mark.parametrize("top,bottom", [([], [2]), ([1], []), ([1, 2], [2, 3])])
 def test_ports_must_be_nonempty_and_disjoint(top, bottom):
@@ -96,6 +99,28 @@ def test_ports_must_match_the_intended_exterior_domains():
             top_domains=[9],
             bottom_domains=[4],
         )
+    with pytest.raises(ValueError, match="outside the built topology"):
+        contracts.require_port_pair(
+            [3],
+            [2],
+            geometry=geometry,
+            top_domains=[9],
+            bottom_domains=[4],
+        )
+
+
+def test_ports_reject_out_of_range_boundaries_and_overlapping_domain_groups():
+    contracts = _load_contracts()
+    geometry = Geometry([9, 0], [0, 4])
+
+    with pytest.raises(ValueError, match="outside the built topology"):
+        contracts.require_port_pair(
+            [3], [2], geometry=geometry, top_domains=[9], bottom_domains=[4]
+        )
+    with pytest.raises(ValueError, match="domains must not overlap"):
+        contracts.require_port_pair(
+            [1], [2], geometry=geometry, top_domains=[9], bottom_domains=[9]
+        )
 
 
 def test_wavelength_step_is_bound_to_the_swept_parameter_with_readback():
@@ -117,6 +142,16 @@ def test_required_properties_fail_on_any_set_or_readback_error():
         contracts.require_required_properties(node, {"plist": "wl"})
 
 
+def test_required_properties_accept_equivalent_numeric_readback():
+    contracts = _load_contracts()
+
+    class NumericReadback(Properties):
+        def getString(self, _name):
+            return "0.001"
+
+    contracts.require_required_properties(NumericReadback(), {"value": 1.0e-3})
+
+
 def test_spectrum_requires_one_finite_real_value_per_wavelength():
     contracts = _load_contracts()
 
@@ -125,6 +160,17 @@ def test_spectrum_requires_one_finite_real_value_per_wavelength():
         contracts.require_spectrum([0.1], [1e-6, 2e-6], "R")
     with pytest.raises(ValueError, match="finite real"):
         contracts.require_spectrum([0.1 + 0.2j], [1e-6], "R")
+
+
+def test_passive_reflection_allows_solver_tolerance_but_rejects_nonphysical_values():
+    contracts = _load_contracts()
+
+    assert contracts.require_passive_reflection([-5e-7, 1.0000005], "R") == [
+        -5e-7,
+        1.0000005,
+    ]
+    with pytest.raises(ValueError, match="passive reflection"):
+        contracts.require_passive_reflection([1.01], "R")
 
 
 def test_partition_requires_an_observed_split_and_unique_patch_boundary():
@@ -216,3 +262,26 @@ def test_partition_recipe_has_no_all_face_or_highest_boundary_fallback():
     assert "[1,2,3,4,5,6]" not in source.replace(" ", "")
     assert "highest bnd number" not in source
     assert "both MIM mesh strategies failed" in source
+    assert "pf.selection('face').set('b_air', [5])" in source
+    assert "after_partition_boundaries" in source
+
+
+def test_layered_transition_retains_layer_stack_and_explicit_material_properties():
+    source = (Path(__file__).parents[2] / "recipes" / "mim_lml_continuous.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "LayeredMaterialLink" in source
+    assert "lml_au.set('link','lm_au')" in source
+    assert "'epsilonr_mat': 'userdef'" in source
+    assert "'lth': str(t_au)" in source
+
+
+@pytest.mark.parametrize(
+    "name", ["mim_drude_sweep.py", "mim_lml_continuous.py", "mim_patch_partition.py"]
+)
+def test_mim_sweep_mesh_uses_verified_named_domains(name):
+    source = (Path(__file__).parents[2] / "recipes" / name).read_text(encoding="utf-8")
+
+    assert "sw.selection().set(al2_domains + air_domains)" in source
+    assert "sw.selection().set([1,2])" not in source

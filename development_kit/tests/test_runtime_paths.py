@@ -31,6 +31,21 @@ def test_jobs_override_also_sets_lease_root_when_runtime_is_not_explicit(monkeyp
     assert default_jobs_root() == Path("E:/durable/jobs")
 
 
+def test_jobs_override_takes_precedence_over_settings_runtime(monkeypatch):
+    monkeypatch.setattr(
+        runtime_paths,
+        "settings_environment",
+        lambda _environ=None: {
+            "COMSOL_MCP_RUNTIME_DIR": "C:/ProgramData/comsol_mcp/runtime",
+            "COMSOL_MCP_JOBS_DIR": "E:/durable/jobs",
+        },
+    )
+
+    assert runtime_paths.default_jobs_root({"COMSOL_MCP_JOBS_DIR": "E:/durable/jobs"}) == Path(
+        "E:/durable/jobs"
+    )
+
+
 def test_conflicting_runtime_and_jobs_configuration_fails_closed(monkeypatch):
     monkeypatch.setenv("COMSOL_MCP_RUNTIME_DIR", "E:/runtime")
     monkeypatch.setenv("COMSOL_MCP_JOBS_DIR", "F:/other/jobs")

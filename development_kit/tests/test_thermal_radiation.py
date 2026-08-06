@@ -11,8 +11,9 @@ import pytest
 from pydantic import ValidationError
 from src.server import create_server
 
-from comsol_mcp.contracts.thermal_radiation import ThermalRadiationRequest
+from comsol_mcp.contracts.thermal_radiation import AngularGrid, ThermalRadiationRequest
 from comsol_mcp.evidence.thermal_radiation import (
+    _planck_wavelength,
     build_kirchhoff_assessment,
     evaluate_thermal_radiation,
 )
@@ -20,6 +21,10 @@ from development_kit.tests.mcp_test_support import decode_tool_result
 
 _C = 299_792_458.0
 _SIGMA = 5.670_374_419e-8
+
+
+def test_planck_wavelength_contains_tiny_positive_coordinates():
+    assert _planck_wavelength(1.0e-100, 500.0) == 0.0
 
 
 def _kirchhoff(**overrides):
@@ -124,6 +129,36 @@ def test_absorptivity_requires_content_bound_applicable_assessment():
         )
 
 
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_thermal_radiation_contract_rejects_nonfinite_values(value):
+    request = _request([1.0e-6, 2.0e-6], [1.0, 1.0])
+    request["values_flat"][0] = value
+
+    with pytest.raises(ValidationError):
+        ThermalRadiationRequest.model_validate(request)
+
+
+@pytest.mark.parametrize(
+    "field,coordinates",
+    [
+        ("theta_rad", [0.5, 0.25]),
+        ("theta_rad", [0.25, 0.25]),
+        ("phi_rad", [1.0, 0.0]),
+        ("phi_rad", [1.0, 1.0]),
+    ],
+)
+def test_trapezoid_angular_coordinates_are_strictly_increasing(field, coordinates):
+    value = {
+        "mode": "grid_trapezoid",
+        "theta_rad": [0.0, 0.5],
+        "phi_rad": [0.0, 2.0 * math.pi],
+    }
+    value[field] = coordinates
+
+    with pytest.raises(ValidationError, match="strictly increasing"):
+        AngularGrid.model_validate(value)
+
+
 def test_unit_emissivity_recovers_stefan_boltzmann_on_finite_domain():
     temperature = 500.0
     wavelengths = np.geomspace(0.1e-6, 1000.0e-6, 1800)
@@ -135,8 +170,8 @@ def test_unit_emissivity_recovers_stefan_boltzmann_on_finite_domain():
 
 
 def test_lambertian_grid_recovers_pi_projected_solid_angle():
-    theta = np.linspace(0.0, math.pi / 2.0, 16)
-    phi = np.linspace(0.0, 2.0 * math.pi, 32)
+    theta = np.linspace(0.0, math.pi / 2.0, 64)
+    phi = np.linspace(0.0, 2.0 * math.pi, 16)
     angular = {
         "mode": "grid_trapezoid",
         "theta_rad": [float(item) for item in theta],

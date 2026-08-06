@@ -26,7 +26,9 @@ def _object_payload(value: Any) -> dict[str, Any] | None:
     if not isinstance(value, dict):
         return None
     nested = value.get("result")
-    return nested if isinstance(nested, dict) else value
+    if isinstance(nested, dict):
+        return {**nested, **{key: item for key, item in value.items() if key != "result"}}
+    return value
 
 
 def _tool_payload(result: Any) -> dict[str, Any]:
@@ -53,7 +55,9 @@ def _tool_payload(result: Any) -> dict[str, Any]:
 
 
 def _stdio_environment(workdir: Path) -> dict[str, str]:
-    environment = os.environ.copy()
+    environment = {
+        key: value for key, value in os.environ.items() if not key.startswith("COMSOL_MCP_")
+    }
     environment.pop("PYTHONPATH", None)
     environment.update(
         {
@@ -260,9 +264,7 @@ async def _probe(command: Path, workdir: Path, stderr_path: Path) -> dict[str, A
         "schema_version": "1.1.0",
         "transport": "stdio",
         "initialize": {
-            "protocol_version": _sdk_attribute(
-                initialized, "protocol_version", "protocolVersion"
-            ),
+            "protocol_version": _sdk_attribute(initialized, "protocol_version", "protocolVersion"),
             "server_name": _sdk_attribute(initialized, "server_info", "serverInfo").name,
             "server_version": _sdk_attribute(initialized, "server_info", "serverInfo").version,
         },

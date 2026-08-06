@@ -219,6 +219,18 @@ def test_adapter_rejects_dataset_not_bound_to_declared_component(tmp_path):
             view_id="on",
             artifact_root=tmp_path,
         )
+    assert len(model.calls) == 1
+    assert not list(tmp_path.rglob("*"))
+
+
+def test_adapter_allows_only_rounding_scale_coordinate_differences(tmp_path):
+    request = _normalized_request()
+    values = _Model().values
+    values[-3] = values[-3] + 1.0e-14
+    result = collect_existing_dataset_field_evidence(
+        model=_Model(values=values), request=request, view_id="on", artifact_root=tmp_path
+    )
+    assert result["dataset_identity"]["readback_state"] == "verified"
 
 
 def test_adapter_rejects_complex_nonfinite_and_mismatched_evaluation_arrays(tmp_path):

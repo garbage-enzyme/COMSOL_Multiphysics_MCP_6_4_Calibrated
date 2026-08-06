@@ -115,6 +115,7 @@ def _run(
     lease_acquired = False
     cancel_stop = threading.Event()
     cancel_thread: threading.Thread | None = None
+    native_monitor_errors: list[Exception] = []
     try:
         source = Path(spec["source_model_path"])
         if _sha256_file(source) != spec["source_model_sha256"]:
@@ -190,13 +191,29 @@ def _run(
             return cancel_request_targets_attempt(store.read_control(job_id), attempt)
 
         def native_monitor() -> None:
-            while not cancel_stop.wait(0.05):
-                if not should_stop():
-                    continue
-                from comsol_mcp.jobs.native_cancel_probe import request_native_cancel_once
+            try:
+                while not cancel_stop.wait(0.05):
+                    if not should_stop():
+                        continue
+                    from comsol_mcp.jobs.native_cancel_probe import request_native_cancel_once
 
-                _record_native_cancel(store, job_id, attempt, request_native_cancel_once())
-                return
+                    _record_native_cancel(store, job_id, attempt, request_native_cancel_once())
+                    return
+            except Exception as exc:
+                native_monitor_errors.append(exc)
+                try:
+                    store.record_cooperative_cancel_observed(
+                        job_id,
+                        attempt=attempt,
+                        message="Native cancellation monitor failed",
+                        worker_error={
+                            "type": type(exc).__name__,
+                            "message": str(exc) or "native cancellation monitor failed",
+                            "cleanup_errors": [],
+                        },
+                    )
+                except Exception as record_exc:
+                    native_monitor_errors.append(record_exc)
 
         if native_cancel_enabled:
             cancel_thread = threading.Thread(
@@ -304,6 +321,12 @@ def _run(
         cancel_stop.set()
         if cancel_thread is not None:
             cancel_thread.join(timeout=1.0)
+        if native_monitor_errors:
+            print(
+                f"Native cancel monitor warning: {type(native_monitor_errors[0]).__name__}",
+                file=sys.stderr,
+                flush=True,
+            )
         if client is not None:
             try:
                 client.clear()

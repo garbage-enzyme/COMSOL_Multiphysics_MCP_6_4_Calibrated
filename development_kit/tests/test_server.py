@@ -7,7 +7,6 @@ import os
 import shutil
 import subprocess
 import sys
-import uuid
 from pathlib import Path
 
 import pytest
@@ -134,6 +133,67 @@ def test_partial_tool_registration_rolls_back_and_can_be_retried(monkeypatch):
     assert _public_tool_names(server) == {"existing_tool", "completed_tool"}
 
 
+def test_tool_registration_preserves_primary_error_when_registry_restore_fails(monkeypatch):
+    import src.knowledge.embedded as embedded_module
+    import src.knowledge.lexical_manual as lexical_module
+    import src.tools as tools_module
+
+    server = MCPServer("restore-failure-registration")
+
+    class RestoreFailureDict(dict):
+        def clear(self):
+            raise OSError("injected restore failure")
+
+    server._tool_manager._tools = RestoreFailureDict(server._tool_manager._tools)
+
+    def fail_registration(_target, _selection):
+        raise RuntimeError("primary registration failure")
+
+    monkeypatch.setattr(tools_module, "register_tool_modules", fail_registration)
+    monkeypatch.setattr(embedded_module, "register_knowledge_tools", lambda _server: None)
+    monkeypatch.setattr(lexical_module, "register_lexical_manual_tools", lambda _server: None)
+
+    with pytest.raises(RuntimeError, match="primary registration failure") as caught:
+        register_all_tools(server, "core")
+
+    assert any("rollback failed: OSError" in note for note in caught.value.__notes__)
+
+
+def test_partial_resource_registration_rolls_back_and_can_be_retried(monkeypatch):
+    import src.resources.model_resources as resources_module
+
+    server = MCPServer("transactional-resource-registration")
+
+    @server.resource("fixture://existing")
+    def existing_resource() -> str:
+        return "existing"
+
+    original = _public_resource_uris(server)
+
+    def fail_after_partial_registration(target):
+        @target.resource("fixture://partial")
+        def partial_resource() -> str:
+            return "partial"
+
+        raise RuntimeError("injected resource registrar failure")
+
+    monkeypatch.setattr(
+        resources_module, "register_model_resources", fail_after_partial_registration
+    )
+    with pytest.raises(RuntimeError, match="registrar failure"):
+        register_all_resources(server)
+    assert _public_resource_uris(server) == original
+
+    def complete_registration(target):
+        @target.resource("fixture://complete")
+        def complete_resource() -> str:
+            return "complete"
+
+    monkeypatch.setattr(resources_module, "register_model_resources", complete_registration)
+    register_all_resources(server)
+    assert _public_resource_uris(server) == original | {"fixture://complete"}
+
+
 def test_model_resources_escape_untrusted_markdown(monkeypatch):
     import src.resources.model_resources as resources_module
 
@@ -219,6 +279,12 @@ def test_markdown_code_preserves_boundary_backticks():
     import src.resources.model_resources as resources_module
 
     assert resources_module._markdown_code("`value`") == "`` `value` ``"
+
+
+def test_markdown_code_escapes_backslashes_before_table_pipes():
+    import src.resources.model_resources as resources_module
+
+    assert resources_module._markdown_code(r"a\|b") == r"`a\\\|b`"
 
 
 def test_default_registration_does_not_import_semantic_stack():
@@ -369,12 +435,12 @@ def test_spawn_child_is_not_a_server_transport_entrypoint(monkeypatch):
     assert server_module._is_transport_entrypoint() is False
 
 
-def test_job_read_tools_are_solver_free(monkeypatch):
+def test_job_read_tools_are_solver_free(ascii_tmp_path, monkeypatch):
     import mph
     import src.tools.jobs as jobs_module
     from src.jobs.manager import JobManager
 
-    root = Path("D:/comsol_runtime_test/jobs") / uuid.uuid4().hex
+    root = ascii_tmp_path / "jobs"
     try:
         monkeypatch.setattr(jobs_module, "job_manager", JobManager(root))
         monkeypatch.setattr(

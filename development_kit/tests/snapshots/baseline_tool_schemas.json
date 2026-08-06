@@ -695,6 +695,11 @@
       },
       "space_dimension": {
         "default": 3,
+        "enum": [
+          1,
+          2,
+          3
+        ],
         "title": "Space Dimension",
         "type": "integer"
       }

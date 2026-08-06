@@ -41,13 +41,15 @@ def _terminate_owned_process_tree(
             errors.append({"stage": "job_object_close", "type": type(exc).__name__})
     if process.poll() is None:
         try:
-            subprocess.run(
+            completed = subprocess.run(
                 ["taskkill", "/PID", str(process.pid), "/T", "/F"],
                 check=False,
                 capture_output=True,
                 text=True,
                 timeout=15,
             )
+            if completed.returncode != 0 and process.poll() is None:
+                errors.append({"stage": "taskkill", "type": "nonzero_exit"})
         except (OSError, subprocess.SubprocessError) as exc:
             errors.append({"stage": "taskkill", "type": type(exc).__name__})
     try:

@@ -80,8 +80,18 @@ class FakeRunner:
     def __call__(self, command, **kwargs):
         self.commands.append(list(command))
         self.kwargs.append(kwargs)
-        if "reference_power_acceptance.py" in " ".join(command):
-            output = Path(command[command.index("--output") + 1])
+        is_reference_power = (
+            "--confirm" in command
+            and command[command.index("--confirm") + 1] == "RUN_REAL_COMSOL"
+            and any(Path(part).name == "reference_power_acceptance.py" for part in command)
+        )
+        if is_reference_power:
+            try:
+                output = Path(command[command.index("--output") + 1])
+            except (ValueError, IndexError) as exc:
+                raise AssertionError(
+                    "reference-power command must provide an --output value"
+                ) from exc
             output.write_text(
                 json.dumps(
                     {
@@ -348,30 +358,33 @@ def test_phase_exception_still_runs_final_ownership_and_pid_assessment(tmp_path)
     assert receipt["cleanup"]["passed"] is True
 
 
-def test_fixture_interrupt_is_contained_until_final_assessment(tmp_path, monkeypatch):
+def test_fixture_interrupt_propagates_after_final_cleanup(tmp_path, monkeypatch):
     monkeypatch.setattr(
         release_orchestrator,
         "controlled_fixture_environment_from_reference_power_spec",
         lambda _path: (_ for _ in ()).throw(KeyboardInterrupt()),
     )
 
-    receipt = run_release_gate(
-        _args(
-            tmp_path,
-            require_reference_power=False,
-            reference_power_spec=None,
-            reference_power_cores=None,
-            reference_power_timeout_seconds=None,
-        ),
-        command_runner=FakeRunner(),
-        owner=object(),
-        pid_provider=lambda: set(),
-        wait_clean=_clean,
-    )
+    waits = []
+    pid_calls = []
 
-    assert receipt["returncode"] == 1
-    assert receipt["phase_error"]["type"] == "KeyboardInterrupt"
-    assert receipt["cleanup"]["passed"] is True
+    with pytest.raises(KeyboardInterrupt):
+        run_release_gate(
+            _args(
+                tmp_path,
+                require_reference_power=False,
+                reference_power_spec=None,
+                reference_power_cores=None,
+                reference_power_timeout_seconds=None,
+            ),
+            command_runner=FakeRunner(),
+            owner=object(),
+            pid_provider=lambda: pid_calls.append(True) or set(),
+            wait_clean=lambda owner: waits.append(owner) or _clean(owner),
+        )
+
+    assert len(waits) == 2
+    assert len(pid_calls) == 2
 
 
 def test_licensed_regression_timeout_is_bounded_and_byte_streams_are_serializable(tmp_path):

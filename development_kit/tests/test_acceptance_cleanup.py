@@ -61,6 +61,24 @@ def test_complete_cleanup_preserves_success_and_zero_exit():
     assert result["cleanup"]["passed"] is True
 
 
+def test_default_cleanup_predicate_rejects_explicit_failure_sentinels():
+    for sentinel in (False, {"success": False}):
+        result = {"success": True}
+        cleanup = CleanupRecorder(result)
+        cleanup.run("reported_failure", lambda: sentinel)
+
+        assert cleanup.finalize() == 1
+        assert result["cleanup"]["steps"]["reported_failure"]["passed"] is False
+
+
+def test_zero_resource_cleanup_does_not_invent_a_failure():
+    result = {"success": True}
+    cleanup = CleanupRecorder(result)
+
+    assert cleanup.finalize() == 0
+    assert result["cleanup"] == {"passed": True, "steps": {}}
+
+
 def test_target_acceptance_scripts_finalize_after_cleanup():
     for relative in (
         "development_kit/tests/integration/derived_geometry_acceptance.py",

@@ -40,6 +40,32 @@ def _remove_sweep(feature_list: Any, sweep_tag: str) -> None:
     feature_list.remove(sweep_tag)
 
 
+def _raw_parameter_description(model: Any, name: str) -> Any:
+    """Read the clientapi value without turning Java null into the text ``None``."""
+    try:
+        return model.java.param().descr(name)
+    except (AttributeError, TypeError):
+        return model.description(name)
+
+
+def _restore_parameter(
+    model: Any,
+    name: str,
+    value: str,
+    description: Any,
+) -> None:
+    """Restore an existing parameter while preserving an unset description."""
+    if description is None:
+        try:
+            model.java.param().set(name, value, None)
+            return
+        except (AttributeError, TypeError):
+            pass
+    model.parameter(name, value)
+    if description is not None:
+        model.description(name, description)
+
+
 def set_parameter(
     model: Any,
     name: str,
@@ -51,25 +77,26 @@ def set_parameter(
     existing = {str(key): str(item) for key, item in model.parameters(evaluate=False).items()}
     existed = name in existing
     old_value = existing.get(name)
-    old_description = str(model.description(name)) if existed else None
+    old_description = _raw_parameter_description(model, name) if existed else None
     try:
         model.parameter(name, value)
         if description is not None:
             model.description(name, description)
         actual_value = str(model.parameter(name, evaluate=False))
-        actual_description = str(model.description(name))
-        expected_description = old_description if description is None else description
-        if actual_value != value or actual_description != expected_description:
+        actual_description = _raw_parameter_description(model, name)
+        description_matches = (
+            description is None and (not existed or actual_description == old_description)
+        ) or (description is not None and actual_description == description)
+        if actual_value != value or not description_matches:
             raise ValueError("parameter readback mismatch")
     except Exception as exc:
         rollback_errors = []
         try:
             if existed:
-                model.parameter(name, old_value)
-                model.description(name, old_description)
+                _restore_parameter(model, name, old_value, old_description)
                 if (
                     str(model.parameter(name, evaluate=False)) != old_value
-                    or str(model.description(name)) != old_description
+                    or _raw_parameter_description(model, name) != old_description
                 ):
                     raise ValueError("restored parameter readback mismatch")
             else:
@@ -88,7 +115,7 @@ def set_parameter(
         "success": True,
         "parameter": name,
         "value": actual_value,
-        "description": actual_description,
+        "description": "" if actual_description is None else str(actual_description),
     }
 
 

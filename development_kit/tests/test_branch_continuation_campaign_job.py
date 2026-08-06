@@ -8,6 +8,7 @@ from copy import deepcopy
 from pathlib import Path
 
 import pytest
+import src.jobs.branch_continuation_campaign as campaign_module
 from src.jobs.branch_continuation_campaign import (
     current_branch_continuation_campaign_driver_identity,
     normalize_branch_continuation_campaign_spec,
@@ -177,6 +178,35 @@ def test_coordinate_identity_rejects_a_stale_bound_configuration(tmp_path):
     state["incidence_readback"]["evidence_sha256"] = _hash(readback_body)
 
     with pytest.raises(ValueError, match="coordinate.identity_sha256"):
+        normalize_branch_continuation_campaign_spec(raw)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda value: value["continuation_policy"].__setitem__("stop_policy", []),
+        lambda value: value["states"][0].__setitem__("ordinal", False),
+        lambda value: value["states"][0].__setitem__("polarization", []),
+    ],
+)
+def test_campaign_malformed_discriminators_are_validation_errors(tmp_path, mutation):
+    raw = _raw_campaign(tmp_path)
+    mutation(raw)
+
+    with pytest.raises(ValueError):
+        normalize_branch_continuation_campaign_spec(raw)
+
+
+def test_campaign_size_bound_includes_the_returned_fingerprint(tmp_path, monkeypatch):
+    raw = _raw_campaign(tmp_path)
+    normalized = normalize_branch_continuation_campaign_spec(raw)
+    monkeypatch.setattr(
+        campaign_module,
+        "MAX_BRANCH_CONTINUATION_SPEC_BYTES",
+        len(campaign_module._canonical_bytes(normalized)) - 1,
+    )
+
+    with pytest.raises(ValueError, match="exceeds"):
         normalize_branch_continuation_campaign_spec(raw)
 
 

@@ -46,12 +46,11 @@ def _semantic_worker_pids() -> list[int]:
         try:
             command = process.info.get("cmdline") or []
             if any(
-                command[index:index + 2]
-                == ["-m", "comsol_mcp.knowledge.semantic_worker"]
+                command[index : index + 2] == ["-m", "comsol_mcp.knowledge.semantic_worker"]
                 for index in range(max(0, len(command) - 1))
             ):
                 found.append(int(process.info["pid"]))
-        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+        except psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess:
             continue
     return found
 
@@ -70,12 +69,16 @@ def _collect_controls(runtime: Path, job_id: str) -> dict:
     job = job_manager.status(job_id)
     timings["job_status"] = time.perf_counter() - started
     started = time.perf_counter()
-    lexical = run_bounded("search", {
-        "query": "CopyFace source destination",
-        "limit": 3,
-        "index_path": "D:/comsol_docs_fts/manuals.sqlite3",
-        "mode": "auto",
-    }, timeout=2.0)
+    lexical = run_bounded(
+        "search",
+        {
+            "query": "CopyFace source destination",
+            "limit": 3,
+            "index_path": "D:/comsol_docs_fts/manuals.sqlite3",
+            "mode": "auto",
+        },
+        timeout=2.0,
+    )
     timings["manual_search"] = time.perf_counter() - started
     if capabilities.get("success") is not True:
         raise RuntimeError("capabilities control probe failed")
@@ -87,7 +90,11 @@ def _collect_controls(runtime: Path, job_id: str) -> dict:
         raise RuntimeError("solver control probe changed or found ownership")
     if job.get("success") is not True or job.get("status") != "completed":
         raise RuntimeError("job control probe failed")
-    if lexical.get("success") is not True or not lexical.get("results"):
+    if (
+        lexical.get("success") is not True
+        or not lexical.get("results")
+        or lexical.get("count", 0) <= 0
+    ):
         raise RuntimeError("manual-search control probe failed")
     return {"timings": timings, "lexical_count": lexical["count"]}
 
@@ -109,12 +116,11 @@ def _poll_controls(runtime: Path, job_id: str) -> dict:
         capture_output=True,
         text=True,
         timeout=CONTROL_WATCHDOG_SECONDS,
-        creationflags=(
-            getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
-        ),
+        creationflags=(getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0),
     )
     if completed.returncode != 0:
-        raise RuntimeError("control-plane watchdog subprocess failed")
+        diagnostic = (completed.stderr or completed.stdout or "no output")[-2000:]
+        raise RuntimeError(f"control-plane watchdog subprocess failed: {diagnostic}")
     lines = [line for line in completed.stdout.splitlines() if line.strip()]
     if len(lines) != 1:
         raise RuntimeError("control-plane watchdog returned malformed output")
@@ -139,7 +145,10 @@ def _atomic_write(path: Path, value: dict) -> None:
     temporary = path.with_name(f".tmp-{uuid.uuid4().hex[:8]}")
     try:
         with temporary.open("wb") as handle:
-            handle.write(json.dumps(value, ensure_ascii=False, allow_nan=False, indent=2).encode("utf-8") + b"\n")
+            handle.write(
+                json.dumps(value, ensure_ascii=False, allow_nan=False, indent=2).encode("utf-8")
+                + b"\n"
+            )
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary, path)
@@ -160,7 +169,7 @@ def _run_containment() -> None:
         with _manager(fault="query_hang", deadline=30.0) as hanging:
             with ThreadPoolExecutor(max_workers=1) as pool:
                 future = pool.submit(hanging.query, "forced thirty second hang")
-                deadline = time.monotonic() + 15.0
+                deadline = time.monotonic() + hanging.startup_deadline + 5.0
                 while (
                     hanging._process is None or hanging._port is None
                 ) and time.monotonic() < deadline:
@@ -182,7 +191,11 @@ def _run_containment() -> None:
 
         with _manager(fault="crash_before_response", deadline=5.0) as crashing:
             crash_started = time.perf_counter()
-            crash = crashing.query("forced crash")
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                crash = _require_future_result(
+                    pool.submit(crashing.query, "forced crash"),
+                    crashing.startup_deadline + crashing.query_deadline + 5.0,
+                )
             crash_wall = time.perf_counter() - crash_started
             assert crash["success"] is False
             assert crash["cleanup"]["absent"] is True
@@ -208,19 +221,24 @@ def _run_containment() -> None:
             },
         }
         _atomic_write(ROOT / "containment.json", output)
-        print(json.dumps({
-            "success": True,
-            "hang_wall_seconds": hang_wall,
-            "crash_wall_seconds": crash_wall,
-            "poll_max_seconds": {
-                key: max(poll["timings"][key] for poll in polls)
-                for key in polls[0]["timings"]
-            },
-            "hang_cleanup_absent": result["cleanup"]["absent"],
-            "crash_cleanup_absent": crash["cleanup"]["absent"],
-            "final": output["final"],
-            "artifact": str(ROOT / "containment.json"),
-        }, indent=2))
+        print(
+            json.dumps(
+                {
+                    "success": True,
+                    "hang_wall_seconds": hang_wall,
+                    "crash_wall_seconds": crash_wall,
+                    "poll_max_seconds": {
+                        key: max(poll["timings"][key] for poll in polls)
+                        for key in polls[0]["timings"]
+                    },
+                    "hang_cleanup_absent": result["cleanup"]["absent"],
+                    "crash_cleanup_absent": crash["cleanup"]["absent"],
+                    "final": output["final"],
+                    "artifact": str(ROOT / "containment.json"),
+                },
+                indent=2,
+            )
+        )
     finally:
         shutil.rmtree(runtime, ignore_errors=True)
 

@@ -45,6 +45,23 @@ function Show-LauncherBootstrapFailure {
     }
 }
 
+function Resolve-LauncherFile {
+    param([string]$Value, [string]$Label, [switch]$AllowCommand)
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        throw [System.ArgumentException]::new("$Label is required.")
+    }
+    if (Test-Path -LiteralPath $Value -PathType Leaf) {
+        return [System.IO.Path]::GetFullPath($Value)
+    }
+    if ($AllowCommand) {
+        $Command = Get-Command -Name $Value -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($null -ne $Command) {
+            return [System.IO.Path]::GetFullPath($Command.Source)
+        }
+    }
+    throw [System.IO.FileNotFoundException]::new("$Label is missing: $Value")
+}
+
 try {
     $PackageRoot = Split-Path -Parent $PSScriptRoot
     if ([string]::IsNullOrWhiteSpace($ModulePath)) {
@@ -70,10 +87,34 @@ try {
             'Output is required. Pass -Output or set DURABLE_LAUNCHER_OUTPUT.'
         )
     }
-    $Python = [System.IO.Path]::GetFullPath($Python)
-    $Driver = [System.IO.Path]::GetFullPath($Driver)
+    $ModulePath = Resolve-LauncherFile -Value $ModulePath -Label 'Launcher module'
+    $Python = Resolve-LauncherFile -Value $Python -Label 'Python executable' -AllowCommand
+    $Driver = Resolve-LauncherFile -Value $Driver -Label 'Required file'
     $Output = [System.IO.Path]::GetFullPath($Output)
-    $Required = @($ModulePath, $Driver) + @($RequiredFiles)
+    if (Test-Path -LiteralPath $Output) {
+        if (-not (Test-Path -LiteralPath $Output -PathType Container)) {
+            throw [System.IO.IOException]::new("Output is not a directory: $Output")
+        }
+    }
+    else {
+        [void](New-Item -ItemType Directory -Path $Output -ErrorAction Stop)
+    }
+    $ProbePath = Join-Path $Output ('.launcher-write-probe-' + [Guid]::NewGuid().ToString('N'))
+    $Probe = [System.IO.File]::Open(
+        $ProbePath,
+        [System.IO.FileMode]::CreateNew,
+        [System.IO.FileAccess]::Write,
+        [System.IO.FileShare]::None,
+        4096,
+        [System.IO.FileOptions]::DeleteOnClose
+    )
+    $Probe.Dispose()
+    $ResolvedRequired = @(
+        foreach ($RequiredFile in $RequiredFiles) {
+            Resolve-LauncherFile -Value $RequiredFile -Label 'Required file'
+        }
+    )
+    $Required = @($ModulePath, $Driver) + $ResolvedRequired
 
     $Config = @{
         JobName = $JobName
@@ -110,18 +151,33 @@ try {
     Invoke-DurableJobLauncher -Config $Config -Run:$Run -ValidateOnly:$ValidateOnly -Monitor:$Monitor -NoTopMost:$NoTopMost
 }
 catch {
-    if ($null -ne (Get-Command Show-DurableLauncherFailure -ErrorAction SilentlyContinue)) {
-        $DriverState = 'unknown'
-        if ($null -ne $Config -and $Config.ContainsKey('Driver')) {
-            try {
-                $DriverState = if (@(Get-DurableDriverProcesses -DriverPath $Config.Driver).Count -gt 0) { 'active' } else { 'absent' }
+    $OriginalError = $_
+    try {
+        if ($null -ne (Get-Command Show-DurableLauncherFailure -ErrorAction SilentlyContinue)) {
+            $DriverState = 'unknown'
+            $DriverCandidate = $null
+            if ($null -ne $Config -and $Config.ContainsKey('Driver')) {
+                $DriverCandidate = $Config.Driver
             }
-            catch { $DriverState = 'unknown' }
+            elseif (-not [string]::IsNullOrWhiteSpace($Driver)) {
+                try { $DriverCandidate = [System.IO.Path]::GetFullPath($Driver) }
+                catch { $DriverCandidate = $null }
+            }
+            if ($null -ne $DriverCandidate) {
+                try {
+                    $DriverState = if (@(Get-DurableDriverProcesses -DriverPath $DriverCandidate).Count -gt 0) { 'active' } else { 'absent' }
+                }
+                catch { $DriverState = 'unknown' }
+            }
+            [void](Show-DurableLauncherFailure -ErrorRecord $OriginalError -LauncherPath $PSCommandPath -DriverState $DriverState -NoHold:$EffectiveNoErrorHold -NoTopMost:$NoTopMost)
         }
-        [void](Show-DurableLauncherFailure -ErrorRecord $_ -LauncherPath $PSCommandPath -DriverState $DriverState -NoHold:$EffectiveNoErrorHold -NoTopMost:$NoTopMost)
+        else {
+            Show-LauncherBootstrapFailure -Record $OriginalError -NoHold:$EffectiveNoErrorHold
+        }
     }
-    else {
-        Show-LauncherBootstrapFailure -Record $_ -NoHold:$EffectiveNoErrorHold
+    catch {
+        try { Show-LauncherBootstrapFailure -Record $OriginalError -NoHold:$EffectiveNoErrorHold }
+        catch { }
     }
     exit 1
 }

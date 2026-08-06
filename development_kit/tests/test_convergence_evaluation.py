@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import builtins
 import hashlib
 import json
 import subprocess
@@ -593,6 +594,26 @@ def test_public_tool_structures_extreme_integer_rejection():
     assert result["solver_started"] is False
 
 
+def test_public_tool_structures_lazy_import_failure(monkeypatch):
+    real_import = builtins.__import__
+
+    def fail_import(name, *args, **kwargs):
+        if name == "comsol_mcp.evidence.convergence_evaluation":
+            raise ImportError("injected import failure")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fail_import)
+    server = MCPServer("convergence-import-failure-test")
+    register_convergence_evaluation_tools(server)
+    result = server._tool_manager._tools["convergence_evaluate"].fn(
+        convergence_policy=_policy(), ladder_spec={}
+    )
+
+    assert result["success"] is False
+    assert result["reason_code"] == "convergence_input_rejected"
+    assert "injected import failure" in result["error"]
+
+
 def test_public_convergence_tool_never_constructs_a_comsol_client():
     code = """
 import asyncio
@@ -711,6 +732,18 @@ def test_self_rehashed_equal_but_noncanonical_numeric_form_fails_closed():
 
     with pytest.raises(ValueError, match="noncanonical"):
         validate_convergence_ladder(malformed)
+
+
+def test_self_rehashed_evaluation_rejects_equal_python_numeric_substitution():
+    ladder = build_convergence_ladder(ladder_id="three-mesh-ladder", levels=_levels())
+    evaluation = evaluate_convergence(ladder, _policy())
+    malformed = deepcopy(evaluation)
+    malformed["fit_sensitive"] = int(malformed["fit_sensitive"])
+    body = dict(malformed)
+    body.pop("evaluation_sha256")
+    malformed["evaluation_sha256"] = _canonical_hash(body)
+    with pytest.raises(ValueError, match="noncanonical"):
+        validate_convergence_evaluation(malformed, ladder=ladder)
 
 
 def test_missing_middle_level_and_non_governing_missing_evidence_fail_closed():

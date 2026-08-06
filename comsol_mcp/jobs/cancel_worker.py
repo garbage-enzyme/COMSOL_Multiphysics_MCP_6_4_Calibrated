@@ -41,9 +41,14 @@ def _owns_cancel_write(
     cancel = state.get("cancel")
     if not isinstance(cancel, dict):
         return False
+    raw_attempt = state.get("attempt", 1)
+    if isinstance(raw_attempt, bool):
+        return False
     try:
-        attempt = int(state.get("attempt", 1))
+        attempt = int(raw_attempt)
     except TypeError, ValueError, OverflowError:
+        return False
+    if attempt <= 0:
         return False
     return bool(
         state.get("status") == "cancelling"
@@ -146,7 +151,15 @@ def _claim(
         state = store.read_state(job_id)
         control = store.read_control(job_id)
         cancel = state.get("cancel") if isinstance(state.get("cancel"), dict) else {}
-        attempt = int(state.get("attempt", 1))
+        raw_attempt = state.get("attempt", 1)
+        if isinstance(raw_attempt, bool):
+            return None
+        try:
+            attempt = int(raw_attempt)
+        except TypeError, ValueError, OverflowError:
+            return None
+        if attempt <= 0:
+            return None
         if (
             control.get("request") != "cancel_requested"
             or control.get("request_id") != request_id
@@ -270,16 +283,29 @@ def _commit_cancelled(
         cancel = _enter_phase(cancel, "verified", completed_at)
         cancel = _enter_phase(cancel, "terminal_commit", completed_at)
         timestamps = dict(cancel.get("phase_timestamps") or {})
-        requested_at = timestamps.get("requested", cancel.get("requested_at_epoch"))
+
+        def finite_timestamp(value: object) -> float | None:
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                return None
+            try:
+                parsed = float(value)
+            except OverflowError:
+                return None
+            return parsed if math.isfinite(parsed) else None
+
+        requested_at = finite_timestamp(
+            timestamps.get("requested", cancel.get("requested_at_epoch"))
+        )
         coordinator_at = min(
             (
-                float(value)
+                parsed
                 for phase, value in timestamps.items()
                 if phase not in {"requested", "terminal_commit"}
+                if (parsed := finite_timestamp(value)) is not None
             ),
             default=None,
         )
-        verifying_at = timestamps.get("verifying")
+        verifying_at = finite_timestamp(timestamps.get("verifying"))
         cancel.update(
             {
                 "phase": "verified",
@@ -288,9 +314,7 @@ def _commit_cancelled(
                 "completed_at_epoch": completed_at,
                 "teardown_latency": {
                     "requested_to_terminal_s": (
-                        max(0.0, completed_at - float(requested_at))
-                        if requested_at is not None
-                        else None
+                        max(0.0, completed_at - requested_at) if requested_at is not None else None
                     ),
                     "coordinator_to_terminal_s": (
                         max(0.0, completed_at - coordinator_at)
@@ -298,9 +322,7 @@ def _commit_cancelled(
                         else None
                     ),
                     "verification_to_terminal_s": (
-                        max(0.0, completed_at - float(verifying_at))
-                        if verifying_at is not None
-                        else None
+                        max(0.0, completed_at - verifying_at) if verifying_at is not None else None
                     ),
                 },
             }
@@ -360,9 +382,7 @@ def _verify_solver_cleanup(store: JobStore, job_id: str) -> dict[str, Any]:
         return {
             **result,
             "ok": bool(
-                result.get("ok")
-                and preservation.get("success")
-                and model_identity_preserved
+                result.get("ok") and preservation.get("success") and model_identity_preserved
             ),
             "attached_external_resources": attached,
         }
@@ -683,7 +703,7 @@ def run(
                             verification,
                             [],
                         )
-                        else 0
+                        else 1
                     )
                 _record_blocker(
                     store,
@@ -747,7 +767,7 @@ def run(
                     verification,
                     [],
                 )
-                else 0
+                else 1
             )
         _record_blocker(
             store,
@@ -847,7 +867,7 @@ def run(
             verification,
             actions,
         )
-        else 0
+        else 1
     )
 
 

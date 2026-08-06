@@ -1,6 +1,7 @@
 import json
 import re
 import subprocess
+import threading
 from pathlib import Path
 
 import pytest
@@ -101,6 +102,35 @@ def test_empty_jar_mapping_never_selects_a_native_profile(monkeypatch):
     monkeypatch.setattr(probe, "_load_native_cancel_profiles", lambda: [malformed])
 
     assert probe.select_progress_context_profile(_matching_environment(profile)) is None
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [None, "{", "[]"],
+)
+def test_malformed_native_profile_documents_degrade_to_no_profiles(monkeypatch, payload):
+    class FakeProfilesPath:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def with_name(self, _name):
+            return self
+
+        def read_text(self, **_kwargs):
+            if payload is None:
+                raise FileNotFoundError("injected missing profile document")
+            return payload
+
+    monkeypatch.setattr(probe, "Path", FakeProfilesPath)
+
+    assert probe._load_native_cancel_profiles() == []
+
+
+def test_native_profile_requires_a_named_identity():
+    profile = _profile()
+    profile.pop("profile_id")
+
+    assert probe._profile_matches_environment(profile, _matching_environment(_profile())) is False
 
 
 def test_matching_environment_selects_the_named_profile():
@@ -300,42 +330,45 @@ def test_cancel_gate_preserves_resources_while_solve_thread_is_alive(monkeypatch
     temporary_root.mkdir()
     removed = []
 
+    solve_started = threading.Event()
+    solve_release = threading.Event()
+
+    class BlockingStudy:
+        def run(self):
+            solve_started.set()
+            assert solve_release.wait(timeout=5)
+
+    class BlockingJavaModel(_FakeJavaModel):
+        def study(self, _tag):
+            return BlockingStudy()
+
+    class BlockingModel:
+        java = BlockingJavaModel()
+
     class FakeClient:
         def load(self, _path):
-            return _FakeModel()
+            return BlockingModel()
 
         def remove(self, model):
             removed.append(model)
-
-    class FakeThread:
-        def __init__(self, **_kwargs):
-            pass
-
-        def start(self):
-            return None
-
-        def is_alive(self):
-            return True
-
-        def join(self, timeout):
-            assert timeout == 0.01
 
     class FakeContext:
         def cancel(self):
             return None
 
-    monkeypatch.setattr(acceptance_probe.threading, "Thread", FakeThread)
-    monkeypatch.setattr(acceptance_probe.time, "sleep", lambda _seconds: None)
     monkeypatch.setattr("jpype.JClass", lambda _name: FakeContext)
+    try:
+        result = acceptance_probe._progress_context_cancel_gate(
+            FakeClient(),
+            source,
+            temporary_root,
+            startup_wait_seconds=0.05,
+            join_timeout_seconds=0.01,
+        )
+    finally:
+        solve_release.set()
 
-    result = acceptance_probe._progress_context_cancel_gate(
-        FakeClient(),
-        source,
-        temporary_root,
-        startup_wait_seconds=0.0,
-        join_timeout_seconds=0.01,
-    )
-
+    assert solve_started.is_set()
     assert result["cleanup_safe"] is False
     assert result["model_remove"] == "skipped_solve_thread_active"
     assert removed == []
@@ -352,25 +385,10 @@ def test_cancel_gate_does_not_convert_base_exception_to_candidate_outcome(monkey
         def load(self, _path):
             return _FakeModel()
 
-    class FakeThread:
-        def __init__(self, target, **_kwargs):
-            self.target = target
-
-        def start(self):
-            self.target()
-
-        def is_alive(self):
-            return False
-
-        def join(self, timeout):
-            return None
-
     class FakeContext:
         def cancel(self):
             raise KeyboardInterrupt
 
-    monkeypatch.setattr(acceptance_probe.threading, "Thread", FakeThread)
-    monkeypatch.setattr(acceptance_probe.time, "sleep", lambda _seconds: None)
     monkeypatch.setattr("jpype.JClass", lambda _name: FakeContext)
 
     with pytest.raises(KeyboardInterrupt):

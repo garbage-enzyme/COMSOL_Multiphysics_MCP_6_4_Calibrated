@@ -151,8 +151,14 @@ def _build_and_validate_poisson(client: mph.Client) -> dict:
         "status": "verified",
         "side_entities": {side: list(values) for side, values in side_entities.items()},
         "coefficient": coefficient["physics"],
-        "general": general["physics"],
-        "weak": weak["physics"],
+        "general": {
+            "physics": general["physics"],
+            "evidence_status": "created_not_exercised",
+        },
+        "weak": {
+            "physics": weak["physics"],
+            "evidence_status": "created_not_exercised",
+        },
         "boundary_count": boundaries["configured_count"],
         "mesh": mesh,
         "sample": {

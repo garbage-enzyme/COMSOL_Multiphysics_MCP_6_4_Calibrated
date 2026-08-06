@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 from copy import deepcopy
 
@@ -63,7 +62,7 @@ def _manifest(*, missing: int = 0) -> tuple[dict, dict]:
             "z": [0.5, 0.5],
             "unit": "um",
         },
-        quantity_summaries=_summaries(missing=missing),
+        quantity_summaries=_summaries(grid_points=request["grid_point_count"], missing=missing),
         array_artifact=_artifact("field-on-npz", "on/fields.npz", "application/x-npz"),
         png_artifact=_artifact("field-on-png", "on/fields.png", "image/png"),
     )
@@ -147,13 +146,21 @@ def test_artifacts_must_match_request_be_relative_and_fit_total_size_limit():
     wrong_id["array_artifact"]["artifact_id"] = "other-array"
     escaping = deepcopy(kwargs)
     escaping["array_artifact"]["relative_path"] = "../private/fields.npz"
-    oversized = deepcopy(kwargs)
-    oversized["array_artifact"]["byte_count"] = request["limits"]["max_artifact_bytes"]
+    exact_total = deepcopy(kwargs)
+    exact_total["array_artifact"]["byte_count"] = (
+        request["limits"]["max_artifact_bytes"] - exact_total["png_artifact"]["byte_count"]
+    )
+    oversized = deepcopy(exact_total)
+    oversized["array_artifact"]["byte_count"] += 1
 
     with pytest.raises(ValueError, match="does not match the field request"):
         build_field_evidence_manifest(**wrong_id)
     with pytest.raises(ValueError, match="relative and traversal-free"):
         build_field_evidence_manifest(**escaping)
+    assert (
+        build_field_evidence_manifest(**exact_total)["artifacts"]["array"]["byte_count"]
+        == (exact_total["array_artifact"]["byte_count"])
+    )
     with pytest.raises(ValueError, match="caller-declared byte limit"):
         build_field_evidence_manifest(**oversized)
 
@@ -222,20 +229,16 @@ def test_coordinate_ranges_must_stay_inside_requested_bounds():
         build_field_evidence_manifest(**dict(kwargs, coordinate_ranges=ranges))
 
 
+def test_manifest_numeric_overflow_is_a_validation_error():
+    _, _, kwargs = _kwargs()
+    kwargs["coordinate_ranges"]["x"][0] = 10**400
+    with pytest.raises(ValueError, match="finite"):
+        build_field_evidence_manifest(**kwargs)
+
+
 def test_manifest_rejects_unknown_fields_even_with_recomputed_hash():
     request, manifest = _manifest()
     manifest["semantic_claim"] = "SPP"
-    unhashed = dict(manifest)
-    unhashed.pop("manifest_sha256")
-    manifest["manifest_sha256"] = hashlib.sha256(
-        json.dumps(
-            unhashed,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        ).encode("utf-8")
-    ).hexdigest()
 
     with pytest.raises(ValueError, match="unsupported fields"):
         validate_field_evidence_manifest(manifest, request=request)

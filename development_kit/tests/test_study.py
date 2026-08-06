@@ -126,9 +126,7 @@ def test_resolve_study_tag_propagates_backend_label_failure():
 
 
 def test_study_helpers_normalize_java_string_tags():
-    model = FakeModel(
-        {"std1": JavaEntity("研究 1", {"step1": FakeEntity("稳态 1")})}
-    )
+    model = FakeModel({"std1": JavaEntity("研究 1", {"step1": FakeEntity("稳态 1")})})
     model.java = JavaTagJava(model.java.studies)
 
     result = list_studies(model)
@@ -185,8 +183,16 @@ class MutableStudy:
 
 
 class MutableStudyList:
-    def __init__(self, existing=(), *, fail_create=False, fail_set=False):
+    def __init__(
+        self,
+        existing=(),
+        *,
+        fail_list_create=False,
+        fail_create=False,
+        fail_set=False,
+    ):
         self.studies = {tag: object() for tag in existing}
+        self.fail_list_create = fail_list_create
         self.fail_create = fail_create
         self.fail_set = fail_set
 
@@ -194,6 +200,8 @@ class MutableStudyList:
         return list(self.studies)
 
     def create(self, tag):
+        if self.fail_list_create:
+            raise RuntimeError("study list creation failure")
         study = MutableStudy(
             fail_create=self.fail_create,
             fail_set=self.fail_set,
@@ -235,6 +243,21 @@ def test_create_study_rolls_back_step_and_tlist_failures():
         assert studies.studies == {}
 
 
+def test_create_study_reports_when_creation_failed_before_rollback():
+    studies = MutableStudyList(fail_list_create=True)
+
+    result = create_study(MutableStudyModel(studies))
+
+    assert result == {
+        "success": False,
+        "error": "Study creation failed before a study was created.",
+        "error_type": "RuntimeError",
+        "rollback_attempted": False,
+        "rolled_back": False,
+    }
+    assert studies.studies == {}
+
+
 def test_create_study_validates_before_creation_and_uses_first_free_tag():
     studies = MutableStudyList(existing=("std1", "std3"))
     model = MutableStudyModel(studies)
@@ -245,6 +268,15 @@ def test_create_study_validates_before_creation_and_uses_first_free_tag():
     assert invalid["success"] is False
     assert list(studies.studies) == ["std1", "std3", "std2"]
     assert created["study"] == "std2"
+
+
+def test_transient_study_rejects_empty_time_list_before_creation():
+    studies = MutableStudyList()
+
+    result = create_study(MutableStudyModel(studies), study_type="Transient", time_list=[])
+
+    assert result == {"success": False, "error": "time_list must not be empty"}
+    assert studies.studies == {}
 
 
 def test_create_study_never_uses_collection_size_for_default_tag():
@@ -264,14 +296,14 @@ def test_finite_study_wait_uses_managed_solver_and_honors_deadline():
     model = make_model()
 
     class Solver:
-        is_running = False
-
         def __init__(self):
+            self.is_running = False
             self.started = []
             self.waited = []
 
         def start_solve(self, active_model, tag):
             self.started.append((active_model, tag))
+            self.is_running = True
             return True
 
         def wait(self, timeout):
@@ -295,6 +327,20 @@ def test_finite_study_wait_uses_managed_solver_and_honors_deadline():
     assert result["background_continues"] is True
     assert solver.started == [(model, "std1")]
     assert solver.waited == [0.25]
+    assert solver.is_running is True
+
+
+def test_study_wait_rejects_an_already_running_solver_before_start():
+    class Solver:
+        is_running = True
+
+        def start_solve(self, *_args):
+            raise AssertionError("a running solver must not start another solve")
+
+    result = solve_study(make_model(), "std1", timeout=1.0, solver=Solver())
+
+    assert result["success"] is False
+    assert "Another solving operation is in progress" in result["error"]
 
 
 @pytest.mark.parametrize("timeout", [True, -1, float("inf"), "1"])
@@ -308,4 +354,4 @@ def test_study_wait_rejects_invalid_timeout_without_starting(timeout):
     result = solve_study(make_model(), "std1", timeout=timeout, solver=Solver())
 
     assert result["success"] is False
-    assert "timeout" in result["error"]
+    assert result["error"] == "timeout must be a finite non-negative number"

@@ -32,6 +32,14 @@ PHYSICAL_EVIDENCE_READABLE_VERSIONS = frozenset({"1.0.0", "1.1.0"})
 VALIDATION_POLICY_SCHEMA_NAME = "comsol_mcp.validation_policy"
 VALIDATION_POLICY_SCHEMA_VERSION = "1.0.0"
 
+
+def _finite_float(value: Any) -> float | None:
+    try:
+        result = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return result if math.isfinite(result) else None
+
 EVIDENCE_STATES = frozenset(
     {
         "measured",
@@ -240,8 +248,10 @@ def _validate_record(key: str, record: Any) -> None:
     state = item.get("state")
     if state not in EVIDENCE_STATES:
         raise ValueError(f"evidence.{key}.state must be one of {sorted(EVIDENCE_STATES)}")
-    if state in {"measured", "derived_from_declared_convention"} and "value" not in item:
-        raise ValueError(f"evidence.{key} with state {state!r} requires value")
+    if state in {"measured", "derived_from_declared_convention"} and (
+        "value" not in item or item["value"] is None
+    ):
+        raise ValueError(f"evidence.{key} with state {state!r} requires a non-null value")
     if state in {"unknown", "not_requested", "not_applicable"} and "value" in item:
         raise ValueError(f"evidence.{key} with state {state!r} cannot contain value")
     for field in ("unit", "expression", "sign_convention", "source"):
@@ -449,7 +459,7 @@ def _legacy_declared_flux_is_complete(value: Mapping[str, Any]) -> bool:
             if (
                 isinstance(number, bool)
                 or not isinstance(number, (int, float))
-                or not math.isfinite(float(number))
+                or _finite_float(number) is None
             ):
                 return False
         sign = plane.get("positive_power_sign")
@@ -674,21 +684,29 @@ def _point_audit_envelope(
             evidence[f"flux.{name}"] = _record(state, limitations=[limitation])
 
     if internal_absorption.get("state") == "measured":
+        cross_section = _require_mapping(
+            internal_absorption.get("cross_section"),
+            "legacy_point_audit.measurement.internal_absorption_consistency.cross_section",
+        )
+        volume_loss = _require_mapping(
+            internal_absorption.get("volume_loss"),
+            "legacy_point_audit.measurement.internal_absorption_consistency.volume_loss",
+        )
         evidence["absorption.cross_section_normalized"] = _record(
             "derived_from_declared_convention",
-            value=internal_absorption.get("cross_section", {}).get("normalized_absorption"),
+            value=cross_section.get("normalized_absorption"),
             value_present=True,
             unit="1",
-            expression=internal_absorption.get("cross_section", {}).get("expression"),
+            expression=cross_section.get("expression"),
             source=record_source,
         )
         evidence["absorption.volume_loss_normalized"] = _record(
             "derived_from_declared_convention",
-            value=internal_absorption.get("volume_loss", {}).get("normalized_absorption"),
+            value=volume_loss.get("normalized_absorption"),
             value_present=True,
             unit="1",
-            expression=internal_absorption.get("volume_loss", {}).get("expression"),
-            selection_ids=internal_absorption.get("volume_loss", {}).get("selection_ids"),
+            expression=volume_loss.get("expression"),
+            selection_ids=volume_loss.get("selection_ids"),
             source=record_source,
         )
         evidence["absorption.internal_relative_residual"] = _record(

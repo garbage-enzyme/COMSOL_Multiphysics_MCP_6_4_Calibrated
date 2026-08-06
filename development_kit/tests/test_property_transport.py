@@ -116,3 +116,17 @@ def test_property_scalars_are_bounded_before_aggregate_serialization():
         normalize_property_value("界" * (MAX_SCALAR_BYTES // 3 + 1))
     with pytest.raises(ValueError, match="integers may contain at most"):
         normalize_property_value(1 << (MAX_SCALAR_BYTES * 4))
+
+
+def test_property_integer_limit_uses_exact_decimal_size():
+    exact = 2**217705
+    assert normalize_property_value(exact) == exact
+    with pytest.raises(ValueError, match="integers may contain at most"):
+        normalize_property_value(10**MAX_SCALAR_BYTES)
+
+
+def test_direct_property_normalization_enforces_escaped_aggregate_size():
+    with pytest.raises(ValueError, match="serialized property value exceeds"):
+        normalize_property_value("\0" * MAX_SCALAR_BYTES)
+    with pytest.raises(ValueError, match="serialized property value exceeds"):
+        normalize_property_value(["x" * MAX_SCALAR_BYTES] * 5)

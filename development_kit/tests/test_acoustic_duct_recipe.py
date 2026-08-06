@@ -124,7 +124,8 @@ def test_build_failure_remains_primary_when_cleanup_also_fails(tmp_path, monkeyp
     with pytest.raises(ValueError, match="build failed") as caught:
         namespace["main"]()
 
-    assert any("cleanup was incomplete" in note for note in caught.value.__notes__)
+    assert any("client.clear" in note for note in caught.value.__notes__)
+    assert any("lease.release" in note for note in caught.value.__notes__)
 
 
 def test_publish_never_overwrites_competing_output(tmp_path, monkeypatch):
@@ -162,3 +163,78 @@ def test_publish_retries_transient_windows_file_lock(tmp_path, monkeypatch):
 
     assert len(attempts) == 3
     assert output.read_bytes() == b"model"
+
+
+def test_publish_succeeds_when_second_cleanup_removes_published_hardlink_source(
+    tmp_path, monkeypatch
+):
+    namespace = _namespace(monkeypatch)
+    staging = tmp_path / ".duct.staging.mph"
+    output = tmp_path / "duct.mph"
+    staging.write_bytes(b"model")
+    unlink_attempts = 0
+
+    def retry(operation, **_kwargs):
+        nonlocal unlink_attempts
+        if getattr(operation, "__name__", "") == "unlink":
+            unlink_attempts += 1
+            if unlink_attempts == 1:
+                raise PermissionError(32, "simulated exhausted sharing retry")
+        operation()
+
+    namespace["_retry_permission_error"] = retry
+
+    namespace["publish_staged_model"](staging, output, overwrite=False)
+
+    assert unlink_attempts == 2
+    assert output.read_bytes() == b"model"
+    assert not staging.exists()
+
+
+def test_save_failure_preserves_primary_error_when_staging_retry_fails(tmp_path, monkeypatch):
+    namespace = _namespace(monkeypatch)
+
+    class Java:
+        def save(self, staging):
+            Path(staging).write_bytes(b"partial")
+            raise RuntimeError("save failed")
+
+    namespace["_retry_permission_error"] = lambda *_args, **_kwargs: (
+        _ for _ in ()
+    ).throw(PermissionError("sharing violation"))
+
+    with pytest.raises(RuntimeError, match="save failed") as caught:
+        namespace["save_staged_model"](Java(), tmp_path / "duct.mph")
+    assert any("staging cleanup failed" in note for note in caught.value.__notes__)
+
+
+def test_release_exception_does_not_mask_active_build_failure(tmp_path, monkeypatch):
+    namespace = _namespace(monkeypatch)
+
+    class Ownership:
+        def preflight(self, **_kwargs):
+            return {"ready": True}
+
+        def acquire(self, **_kwargs):
+            return {"success": True}
+
+        def release(self):
+            raise OSError("release failed")
+
+    namespace["parse_args"] = lambda: SimpleNamespace(
+        output_model=tmp_path / "duct.mph",
+        receipt=tmp_path / "receipt.json",
+        frequency_hz=100.0,
+        maximum_relative_error=0.02,
+        solve=False,
+        overwrite_output=False,
+    )
+    namespace["SolverOwnership"] = lambda owner: Ownership()
+    namespace["mph"] = SimpleNamespace(
+        Client=lambda version: (_ for _ in ()).throw(ValueError("build failed"))
+    )
+
+    with pytest.raises(ValueError, match="build failed") as caught:
+        namespace["main"]()
+
+    assert any("lease.release: OSError" in note for note in caught.value.__notes__)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import inspect
 from typing import Any, Optional
 
 from mcp.server.mcpserver import MCPServer
@@ -34,9 +35,50 @@ def register_branch_continuation_tools(mcp: MCPServer) -> None:
                     "provide exactly one of states_spec or continuation_states"
                 )
             if states_spec is not None:
+                if not isinstance(states_spec, dict):
+                    raise ValueError("states_spec must be an object")
+                parameters = inspect.signature(build_continuation_states).parameters
+                required = {
+                    name
+                    for name, parameter in parameters.items()
+                    if parameter.default is inspect.Parameter.empty
+                    and parameter.kind
+                    in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+                }
+                unknown = sorted(set(states_spec) - set(parameters))
+                missing = sorted(required - set(states_spec))
+                if unknown or missing:
+                    raise ValueError(
+                        f"invalid states_spec keys; unknown={unknown}, missing={missing}"
+                    )
                 states = build_continuation_states(**states_spec)
             else:
                 states = validate_continuation_states(continuation_states)
+        except ValueError as exc:
+            return {
+                "success": False,
+                "scientific_disposition": "invalid_evidence",
+                "reason_code": "continuation_input_rejected",
+                "error": str(exc)[:2048],
+                "branch_disappearance_claimed": False,
+                "undeclared_coordinate_started": False,
+                "solver_started": False,
+                "filesystem_modified": False,
+            }
+        except Exception:
+            logger.exception("Branch-continuation evidence normalization failed")
+            return {
+                **public_error(
+                    "continuation_planning_failed",
+                    "Branch-continuation planning failed safely.",
+                ),
+                "scientific_disposition": "internal_error",
+                "branch_disappearance_claimed": False,
+                "undeclared_coordinate_started": False,
+                "solver_started": False,
+                "filesystem_modified": False,
+            }
+        try:
             plan = plan_branch_continuation(states, continuation_policy)
             return {
                 "success": True,
@@ -55,8 +97,8 @@ def register_branch_continuation_tools(mcp: MCPServer) -> None:
         except ValueError as exc:
             return {
                 "success": False,
-                "scientific_disposition": "invalid_evidence",
-                "reason_code": "continuation_input_rejected",
+                "scientific_disposition": "invalid_policy",
+                "reason_code": "continuation_policy_rejected",
                 "error": str(exc)[:2048],
                 "branch_disappearance_claimed": False,
                 "undeclared_coordinate_started": False,
@@ -70,7 +112,7 @@ def register_branch_continuation_tools(mcp: MCPServer) -> None:
                     "continuation_planning_failed",
                     "Branch-continuation planning failed safely.",
                 ),
-                "scientific_disposition": "invalid_evidence",
+                "scientific_disposition": "internal_error",
                 "branch_disappearance_claimed": False,
                 "undeclared_coordinate_started": False,
                 "solver_started": False,

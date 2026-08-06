@@ -20,7 +20,7 @@ QuantityDimension = Literal[
 
 
 class _ClosedModel(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
+    model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
 
 
 class DeclaredQuantity(_ClosedModel):
@@ -67,6 +67,12 @@ class GeometryDimension(_ClosedModel):
     ]
     quantity: DeclaredQuantity
     label: BoundedLabel | None = None
+
+    @model_validator(mode="after")
+    def validate_semantic_dimension(self) -> GeometryDimension:
+        if self.semantic != "other" and self.quantity.dimension != "length":
+            raise ValueError("named geometry dimensions must use length quantities")
+        return self
 
 
 class MaterialState(_ClosedModel):
@@ -137,6 +143,8 @@ class WavelengthControlDeclaration(_ClosedModel):
             raise ValueError("wavelength controls must use length quantities")
         if self.driver == "parameter" and self.parameter_name is None:
             raise ValueError("parameter wavelength control requires parameter_name")
+        if self.driver != "parameter" and self.parameter_name is not None:
+            raise ValueError("non-parameter wavelength controls cannot declare parameter_name")
         return self
 
 
@@ -205,6 +213,14 @@ class SimulationConfigurationInput(_ClosedModel):
     unit_contracts: Annotated[list[UnitContract], Field(max_length=256)] = []
     artifact_chains: Annotated[list[ArtifactChainReference], Field(max_length=256)] = []
     configuration_sha256: Sha256 | None = None
+
+    @model_validator(mode="after")
+    def validate_material_references(self) -> SimulationConfigurationInput:
+        material_ids = {material.material_id for material in self.materials}
+        missing = sorted({layer.material_id for layer in self.layers} - material_ids)
+        if missing:
+            raise ValueError("layers must reference declared material_id values")
+        return self
 
 
 class ConfigurationDiffTolerance(_ClosedModel):

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 import pytest
 from pydantic import BaseModel, TypeAdapter, ValidationError
@@ -63,7 +64,12 @@ def test_legacy_job_fields_reach_the_existing_normalizer_byte_identically(tmp_pa
     parsed = TypeAdapter(JobSubmissionSpec).validate_python(raw)
     transported = job_submission_dict(parsed)
 
-    assert transported == raw
+    def canonical(value):
+        return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode(
+            "utf-8"
+        )
+
+    assert canonical(transported) == canonical(raw)
     assert (
         validate_staged_sweep_spec(transported)["spec_fingerprint"]
         == (validate_staged_sweep_spec(raw)["spec_fingerprint"])
@@ -82,6 +88,58 @@ def test_unknown_job_fields_fail_at_the_contract_boundary():
                 "unknown_field": True,
             }
         )
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf"), 10**400])
+def test_direct_job_contract_rejects_unbounded_sweep_numbers(value):
+    with pytest.raises(ValidationError):
+        TypeAdapter(JobSubmissionSpec).validate_python(
+            {
+                "job_type": "staged_sweep",
+                "source_model_path": "fixture.mph",
+                "parameter_name": "p",
+                "parameter_values": [value],
+                "expressions": ["es.V"],
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    "fields,match",
+    [
+        ({"parameter_values": [1.0], "smoke_points": 2}, "must not exceed"),
+        ({"physical_bounds": {"other": [0.0, 1.0]}}, "requested expressions"),
+    ],
+)
+def test_staged_sweep_contract_rejects_incompatible_cross_fields(fields, match):
+    value = {
+        "job_type": "staged_sweep",
+        "source_model_path": "fixture.mph",
+        "parameter_name": "p",
+        "parameter_values": [1.0, 2.0],
+        "expressions": ["es.V"],
+        **fields,
+    }
+
+    with pytest.raises(ValidationError, match=match):
+        TypeAdapter(JobSubmissionSpec).validate_python(value)
+
+
+def test_staged_sweep_contract_accepts_compatible_cross_fields():
+    normalized = validate_job_submission(
+        {
+            "job_type": "staged_sweep",
+            "source_model_path": "fixture.mph",
+            "parameter_name": "p",
+            "parameter_values": [1.0, 2.0],
+            "expressions": ["es.V"],
+            "physical_bounds": {"es.V": [0.0, 1.0]},
+            "smoke_points": 2,
+        }
+    )
+
+    assert normalized["physical_bounds"] == {"es.V": [0.0, 1.0]}
+    assert normalized["smoke_points"] == 2
 
 
 def test_runtime_job_validator_uses_the_same_discriminated_contract():

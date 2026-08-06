@@ -6,6 +6,7 @@ import hashlib
 import json
 
 import pytest
+import src.jobs.spectral_audit as spectral_audit_module
 from src.evidence.contracts import build_physical_evidence
 from src.jobs.spectral_audit import build_spectral_audit_point, extract_spectral_audit_result
 from src.jobs.spectral_characterization import normalize_spectral_characterization_job_spec
@@ -281,6 +282,24 @@ def test_point_incidence_is_detached_from_the_normalized_spec(tmp_path):
     assert point["incidence"] == {"polarization": "S", "angles": [20.0, 0.0]}
 
 
+def test_point_collector_is_deeply_detached_from_the_normalized_spec(tmp_path):
+    spec = _spec(tmp_path)
+    point = build_spectral_audit_point(spec, 5e-6)
+    frozen_range = point["collectors"][0]["inputs"]["top_air_coordinate_range"]["x"][:]
+
+    spec["collector"]["inputs"]["top_air_coordinate_range"]["x"][0] = -99.0
+
+    assert point["collectors"][0]["inputs"]["top_air_coordinate_range"]["x"] == frozen_range
+
+
+def test_point_builder_rejects_a_non_object_parameter_state(tmp_path):
+    spec = _spec(tmp_path)
+    spec["parameter_state"] = None
+
+    with pytest.raises(ValueError, match="parameter_state must be an object"):
+        build_spectral_audit_point(spec, 5e-6)
+
+
 def test_incomplete_audit_is_not_projected(tmp_path):
     spec = _spec(tmp_path)
     job = tmp_path / "job"
@@ -327,19 +346,24 @@ def test_artifact_must_remain_inside_job_directory(tmp_path):
     outside.mkdir()
     wrapper = artifact / "matrix_collector.json"
     moved = outside / wrapper.name
-    moved.write_bytes(wrapper.read_bytes())
+    wrapper.replace(moved)
     result["artifacts"]["manifest"] = str(moved)
-    with pytest.raises(ValueError, match="assigned artifact"):
+    with pytest.raises(ValueError, match="durable job"):
         extract_spectral_audit_result(
-            job_dir=job, artifact_dir=artifact, spec=spec, point=point, result=result
+            job_dir=job, artifact_dir=outside, spec=spec, point=point, result=result
         )
 
 
-def test_assigned_artifact_root_must_remain_inside_durable_job(tmp_path):
+def test_assigned_artifact_root_must_remain_inside_durable_job(tmp_path, monkeypatch):
     spec = _spec(tmp_path)
     job = tmp_path / "job"
     point = build_spectral_audit_point(spec, 5e-6)
     artifact, result = _result(tmp_path / "other-job", spec, point)
+
+    def unexpected_read(*_args, **_kwargs):
+        raise AssertionError("escaped artifact was read before durable-job containment")
+
+    monkeypatch.setattr(spectral_audit_module, "read_contained_file_snapshot", unexpected_read)
 
     with pytest.raises(ValueError, match="escapes the durable job"):
         extract_spectral_audit_result(

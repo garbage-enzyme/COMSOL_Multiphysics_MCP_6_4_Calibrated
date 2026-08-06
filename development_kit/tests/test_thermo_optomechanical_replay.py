@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
+import time
 from pathlib import Path
 
 import pytest
@@ -12,7 +14,7 @@ import src.jobs.thermo_optomechanical_replay as replay_module
 import src.jobs.thermo_optomechanical_replay_execution as replay_execution_module
 from pydantic import ValidationError
 from src.jobs.manager import JobManager, _worker_module
-from src.jobs.store import JobStore
+from src.jobs.store import JobStore, process_identity
 from src.jobs.thermo_optomechanical_replay import (
     THERMO_OPTOMECHANICAL_CONTROLS,
     THERMO_OPTOMECHANICAL_STAGES,
@@ -32,6 +34,10 @@ from src.jobs.thermo_optomechanical_replay_runner import (
 from src.jobs.thermo_optomechanical_replay_worker import _run as run_worker
 from src.tools.jobs import _preview_job_spec
 
+from comsol_mcp.contracts.thermo_optomechanical import (
+    ThermoOpticalMaterialValidity,
+    ThermoOptomechanicalReplayManifest,
+)
 from development_kit.scripts import thermo_optomechanical_licensed_gate as licensed_gate
 
 
@@ -63,9 +69,27 @@ def _material_state(source: Path) -> dict:
     }
 
 
-def test_licensed_gate_cleanup_failure_preserves_verdict_and_writes_fallback(
-    tmp_path, monkeypatch
-):
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"wavelength_min_m": 3.0e-6, "wavelength_max_m": 1.0e-6},
+        {"temperature_min_K": 500.0, "temperature_max_K": 250.0},
+    ],
+)
+def test_material_validity_rejects_inverted_ranges(overrides):
+    value = {
+        "wavelength_min_m": 1.0e-6,
+        "wavelength_max_m": 3.0e-6,
+        "temperature_min_K": 250.0,
+        "temperature_max_K": 500.0,
+        **overrides,
+    }
+
+    with pytest.raises(ValidationError):
+        ThermoOpticalMaterialValidity.model_validate(value)
+
+
+def test_licensed_gate_cleanup_failure_preserves_verdict_and_writes_fallback(tmp_path, monkeypatch):
     class BrokenOwner:
         def status(self, *, require_fresh_inventory):
             assert require_fresh_inventory is True
@@ -271,7 +295,7 @@ def _payload(stage_id: str, spec: dict) -> dict:
             "frame": {
                 "identity_sha256": "e" * 64,
                 "displacement_frame": "spatial",
-                "topology_unchanged": True,
+                "topology_change_allowed": False,
             },
             "deformation_scale": 1.0,
             "displacement_to_length": 0.001,
@@ -345,6 +369,28 @@ def test_submission_manifest_hash_must_match_before_normalization(ascii_tmp_path
     raw["specification_sha256"] = "0" * 64
     with pytest.raises(ValueError, match="specification_sha256"):
         normalize_thermo_optomechanical_replay_spec(raw)
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_manifest_rejects_nonfinite_physical_values_at_the_typed_boundary(ascii_tmp_path, value):
+    raw = _raw_spec(ascii_tmp_path / "manifest-nonfinite")
+    specification = Path(raw["specification_path"])
+    manifest = json.loads(specification.read_text(encoding="utf-8"))
+    manifest["thermal_load"]["initial_temperature_K"] = value
+    specification.write_text(json.dumps(manifest), encoding="utf-8")
+    raw["specification_sha256"] = hashlib.sha256(specification.read_bytes()).hexdigest()
+
+    with pytest.raises(ValidationError, match="finite number"):
+        normalize_thermo_optomechanical_replay_spec(raw)
+
+
+def test_manifest_contract_requires_each_validation_control_exactly_once(ascii_tmp_path):
+    raw = _raw_spec(ascii_tmp_path / "typed-controls")
+    manifest = json.loads(Path(raw["specification_path"]).read_text(encoding="utf-8"))
+    manifest["validation_controls"][0] = manifest["validation_controls"][1]
+
+    with pytest.raises(ValidationError, match="exactly once"):
+        ThermoOptomechanicalReplayManifest.model_validate(manifest)
 
 
 def test_submission_manifest_hash_and_parse_share_one_snapshot(ascii_tmp_path, monkeypatch):
@@ -427,6 +473,7 @@ def test_stage_evidence_resume_never_executes_a_completed_or_orphaned_stage_twic
     result = run_thermo_optomechanical_replay(spec, root, attempt=2, stage_executor=executor)
     assert result["completed"] is True
     assert result["skipped_complete"] == 1
+    assert result["recovered_from_evidence"] == 1
     assert calls.count("preflight") == 1
     assert calls.count("thermal_structural_solve") == 1
     assert calls == list(THERMO_OPTOMECHANICAL_STAGES)
@@ -486,12 +533,58 @@ def test_optical_evidence_preserves_tiny_negative_absorption_but_rejects_active_
     spec = normalize_thermo_optomechanical_replay_spec(_raw_spec(ascii_tmp_path / "rta"))
     payload = _payload("optical_replay", spec)
     payload["rows"][0]["deformed_rta"]["A"] = -1.0e-18
+    payload["rows"][0]["deformed_rta"]["closure_residual"] = (
+        sum(payload["rows"][0]["deformed_rta"][key] for key in ("R", "T", "A")) - 1.0
+    )
     evidence = build_stage_evidence(spec, "optical_replay", payload)
     assert evidence["payload"]["rows"][0]["deformed_rta"]["A"] == -1.0e-18
 
     payload["rows"][0]["deformed_rta"]["A"] = -1.0e-8
     with pytest.raises(ValueError, match="non-passive"):
         build_stage_evidence(spec, "optical_replay", payload)
+
+
+@pytest.mark.parametrize(
+    "stage_id,mutation,match",
+    [
+        (
+            "thermal_structural_solve",
+            lambda payload: payload["displacement"].__setitem__("delta_length_m", "bad"),
+            "displacement delta length",
+        ),
+        (
+            "thermal_structural_solve",
+            lambda payload: payload["expansion"].__setitem__("expected_delta_length_m", 2.0e-5),
+            "thermal expansion readback",
+        ),
+        (
+            "state_evidence",
+            lambda payload: payload["mesh"].__setitem__("inverted_element_count", False),
+            "mesh evidence",
+        ),
+        (
+            "optical_replay",
+            lambda payload: payload.__setitem__("derived_model_sha256", None),
+            "derived_model_sha256",
+        ),
+        (
+            "optical_replay",
+            lambda payload: payload["rows"][0]["baseline_rta"].__setitem__("closure_residual", 0.5),
+            "non-passive R/T/A",
+        ),
+    ],
+)
+def test_stage_evidence_rejects_unbound_or_malformed_scientific_values(
+    ascii_tmp_path, stage_id, mutation, match
+):
+    spec = normalize_thermo_optomechanical_replay_spec(
+        _raw_spec(ascii_tmp_path / f"invalid-{stage_id}")
+    )
+    payload = _payload(stage_id, spec)
+    mutation(payload)
+
+    with pytest.raises(ValueError, match=match):
+        build_stage_evidence(spec, stage_id, payload)
 
 
 class _Dataset:
@@ -583,6 +676,29 @@ def test_thermal_structure_readbacks_bind_before_mesh_and_expansion(ascii_tmp_pa
     ]
 
 
+def test_zero_temperature_control_resets_every_temperature_driver(ascii_tmp_path):
+    spec = normalize_thermo_optomechanical_replay_spec(
+        _raw_spec(ascii_tmp_path / "zero-temperature")
+    )
+    executor = ThermoOptomechanicalComsolExecutor(None, spec, ascii_tmp_path / "job")
+    calls = []
+    executor._load_derived = lambda: None
+    executor._apply_positive_parameters = lambda: None
+    executor._parameter = lambda key, value, unit=None: calls.append((key, value, unit))
+    executor._set_moving_mesh_active = lambda _enabled: None
+    executor._study = lambda _key: None
+    executor._bind_study_dataset = lambda _tag: None
+    executor._evaluate = lambda _key: 0.0
+
+    assert executor._zero_control(zero_cte=False) == 0.0
+    reference = spec["thermal_expansion"]["reference_temperature_K"]
+    assert calls == [
+        ("initial_temperature_parameter", reference, "K"),
+        ("ambient_temperature_parameter", reference, "K"),
+        ("applied_temperature_parameter", reference, "K"),
+    ]
+
+
 def test_wavelength_readback_accepts_last_ulp_but_rejects_material_drift():
     requested = 1.5e-6
 
@@ -600,6 +716,27 @@ def test_rollback_availability_requires_a_persisted_checkpoint(ascii_tmp_path):
     executor.checkpoint_path.parent.mkdir(parents=True)
     executor.checkpoint_path.write_bytes(b"checkpoint")
     assert executor._rollback_available() is True
+
+
+def test_deformation_transfer_readback_is_observed_twice_not_tautological(ascii_tmp_path):
+    spec = normalize_thermo_optomechanical_replay_spec(
+        _raw_spec(ascii_tmp_path / "deformation-readback")
+    )
+    executor = ThermoOptomechanicalComsolExecutor(None, spec, ascii_tmp_path / "job")
+    values = iter((1.0e-6, 2.0e-6))
+    executor._load_derived = lambda: None
+    executor._set_moving_mesh_active = lambda _enabled: None
+    executor._study = lambda _key: None
+    executor._bind_study_dataset = lambda _tag: None
+    executor._evaluate = lambda key: next(values) if key == "displacement_max" else 0.0
+
+    def save(path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"model")
+
+    executor._save = save
+
+    assert executor._deformation_transfer()["readback_exact"] is False
 
 
 def test_executor_uses_normal_save_for_current_model_and_save_copy_for_checkpoint(
@@ -691,6 +828,56 @@ def test_worker_publishes_completion_only_after_client_and_lease_cleanup(ascii_t
     assert owner.released is True
 
 
+def test_native_cancel_monitor_failure_becomes_durable_worker_error(ascii_tmp_path, monkeypatch):
+    spec = normalize_thermo_optomechanical_replay_spec(
+        _raw_spec(ascii_tmp_path / "native-monitor-error")
+    )
+    store = JobStore(ascii_tmp_path / "native-monitor-runtime" / "jobs")
+    job_id = store.create(
+        spec,
+        {
+            "schema_version": "2",
+            "status": "submitted",
+            "attempt": 1,
+            "worker_pid": None,
+            "worker_process_create_time": None,
+            "worker_command_signature": None,
+            "progress": {"completed": 0, "total": 5},
+            "last_error": None,
+        },
+    )
+    monkeypatch.setattr(
+        "src.jobs.native_cancel_probe.request_native_cancel_once",
+        lambda: (_ for _ in ()).throw(RuntimeError("injected native monitor failure")),
+    )
+    requested = False
+
+    def factory(_client, current_spec, _root):
+        def execute(stage, _directory, _spec):
+            nonlocal requested
+            if not requested:
+                requested = True
+                store.request_cancel(job_id, requester_identity=process_identity(os.getpid()))
+                time.sleep(0.1)
+            return _payload(stage, current_spec)
+
+        return execute
+
+    code = run_worker(
+        str(store.root),
+        job_id,
+        ownership_factory=lambda *_args: _Ownership(),
+        client_factory=lambda _spec: _Client(),
+        stage_executor_factory=factory,
+        native_cancel_enabled=True,
+    )
+    state = store.read_state(job_id)
+
+    assert code == 1
+    assert state["status"] == "cancel_requested"
+    assert "native cancel monitor failed" in state["cancel"]["worker_error"]["message"]
+
+
 def test_worker_rejects_changed_submission_manifest_before_client_start(ascii_tmp_path):
     spec = normalize_thermo_optomechanical_replay_spec(
         _raw_spec(ascii_tmp_path / "changed-manifest")
@@ -724,3 +911,46 @@ def test_worker_rejects_changed_submission_manifest_before_client_start(ascii_tm
     assert state["status"] == "failed"
     assert "manifest changed before client startup" in state["last_error"]["message"]
     assert owner.acquired is False
+
+
+def test_worker_reconciles_cancellation_racing_the_starting_transition(ascii_tmp_path, monkeypatch):
+    spec = normalize_thermo_optomechanical_replay_spec(
+        _raw_spec(ascii_tmp_path / "startup-cancel-race")
+    )
+    store = JobStore(ascii_tmp_path / "startup-cancel-runtime" / "jobs")
+    job_id = store.create(
+        spec,
+        {
+            "schema_version": "2",
+            "status": "submitted",
+            "attempt": 1,
+            "worker_pid": None,
+            "worker_process_create_time": None,
+            "worker_command_signature": None,
+            "progress": {"completed": 0, "total": 5},
+            "last_error": None,
+        },
+    )
+    original_update = JobStore.update_state
+    injected = False
+
+    def racing_update(self, current_job_id, new_status=None, **kwargs):
+        nonlocal injected
+        if current_job_id == job_id and new_status == "starting" and not injected:
+            injected = True
+            self.request_cancel(current_job_id, requester_identity=process_identity(os.getpid()))
+        return original_update(self, current_job_id, new_status, **kwargs)
+
+    monkeypatch.setattr(JobStore, "update_state", racing_update)
+    code = run_worker(
+        str(store.root),
+        job_id,
+        ownership_factory=lambda *_args: pytest.fail("ownership must not start"),
+        client_factory=lambda _spec: pytest.fail("client must not start"),
+        native_cancel_enabled=False,
+    )
+    state = store.read_state(job_id)
+
+    assert code == 0
+    assert state["status"] == "cancel_requested"
+    assert state["cancel"]["cooperative_observation"]["target_attempt"] == 1

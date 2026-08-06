@@ -3,14 +3,18 @@
 import json
 
 import pytest
+from mcp.server.mcpserver import MCPServer
+from src.tools import mim_patch as mim_patch_module
 from src.tools.mim_patch import (
     _build_periodic_mesh,
     _find_air_block_tag,
+    _identify_side_pairs,
     _identify_patch_topology,
     _list_pair_metadata,
     _normalize_spectral_rows,
     _require_mim_selections,
     _set_copy_face_selections,
+    register_mim_patch_tools,
 )
 
 
@@ -105,6 +109,24 @@ def test_equal_largest_air_candidates_require_an_explicit_tag():
     geometry = type("AmbiguousGeometry", (), {"feature": lambda self: features})()
 
     assert _find_air_block_tag(geometry) is None
+
+
+def test_air_block_detection_prefers_height_over_volume():
+    features = GeometryFeatures()
+    features.nodes = {
+        "wide_substrate": GeometryFeature("20e-6, 20e-6, 0.5e-6"),
+        "air": GeometryFeature("2e-6, 2e-6, 2e-6"),
+    }
+    geometry = type("HeightGeometry", (), {"feature": lambda self: features})()
+
+    assert _find_air_block_tag(geometry) == "air"
+
+
+def test_side_pair_classification_requires_cell_coordinates():
+    with pytest.raises(ValueError, match="bbox or period"):
+        _identify_side_pairs(
+            [{"boundary_number": 1, "normal": [1.0, 0.0, 0.0], "center": [0.5, 0, 0]}]
+        )
 
 
 def _side_pairs():
@@ -237,6 +259,44 @@ def test_expression_major_spectral_values_are_transposed_to_wavelength_rows():
         [0.2, 0.5, 0.3, 4.1e-6],
         [0.3, 0.6, 0.1, 4.2e-6],
     ]
+
+
+def test_spectral_emissivity_preserves_transmission_and_prefers_absorptivity(monkeypatch):
+    class Model:
+        def evaluate(self, expressions):
+            values = {
+                "ewfd.Rtotal": [0.2],
+                "ewfd.Ttotal": [0.3],
+                "ewfd.Atotal": [0.5],
+                "wl": [4.0e-6],
+            }
+            return [values[expression] for expression in expressions]
+
+    monkeypatch.setattr(
+        mim_patch_module.session_manager,
+        "get_model",
+        lambda _name: Model(),
+    )
+    server = MCPServer("mim-emissivity-closure-test")
+    register_mim_patch_tools(server)
+    tool = server._tool_manager._tools["mim_evaluate_spectral"]
+
+    evaluated = tool.fn(model_name="model")
+    derived = tool.fn(
+        model_name="model",
+        expressions=["ewfd.Rtotal", "ewfd.Ttotal", "wl"],
+    )
+
+    assert evaluated["spectral_data"][0]["emissivity"] == 0.5
+    assert (
+        evaluated["spectral_data"][0]["emissivity_basis"]
+        == "evaluated_absorptivity"
+    )
+    assert derived["spectral_data"][0]["emissivity"] == pytest.approx(0.5)
+    assert (
+        derived["spectral_data"][0]["emissivity_basis"]
+        == "one_minus_reflectance_transmittance"
+    )
 
 
 class MeshFeatures:

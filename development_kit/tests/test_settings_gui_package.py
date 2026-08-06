@@ -20,6 +20,7 @@ from development_kit.scripts.settings_gui_package_probe import (
     SHORTCUT_MEMBER,
     inspect_settings_gui_distributions,
 )
+from settings_gui.model import TAB_IDS
 
 ROOT = Path(__file__).parents[2]
 
@@ -33,6 +34,7 @@ def _archives(
     include_test: bool = False,
     include_shortcut_adapter: bool = True,
     include_gui_entry: bool = True,
+    entry_points_text: str | None = None,
 ) -> Path:
     dist = root / "dist"
     dist.mkdir()
@@ -44,12 +46,11 @@ def _archives(
                 f"settings_gui/locales/{language}/LC_MESSAGES/settings_gui.mo",
                 b"mo",
             )
-        entry_points = "[console_scripts]\ncomsol-mcp-settings = settings_gui.__main__:main\n"
-        if include_gui_entry:
-            entry_points += (
-                "[gui_scripts]\n"
-                "comsol-mcp-settings-gui = settings_gui.__main__:main\n"
-            )
+        entry_points = entry_points_text
+        if entry_points is None:
+            entry_points = "[console_scripts]\ncomsol-mcp-settings = settings_gui.__main__:main\n"
+        if include_gui_entry and entry_points_text is None:
+            entry_points += "[gui_scripts]\ncomsol-mcp-settings-gui = settings_gui.__main__:main\n"
         archive.writestr("comsol_mcp-0.6.0.dist-info/entry_points.txt", entry_points)
         if include_icon:
             archive.writestr(ICON_MEMBER, b"ico")
@@ -124,6 +125,29 @@ def test_distribution_probe_rejects_missing_gui_subsystem_entry(tmp_path: Path) 
         inspect_settings_gui_distributions(_archives(tmp_path, include_gui_entry=False))
 
 
+@pytest.mark.parametrize(
+    "entry_points",
+    [
+        (
+            "[console_scripts]\n"
+            "comsol-mcp-settings2 = settings_gui.__main__:main\n"
+            "[gui_scripts]\n"
+            "comsol-mcp-settings-gui = settings_gui.__main__:main_gui\n"
+        ),
+        (
+            "[console_scripts]\n"
+            "comsol-mcp-settings = settings_gui.__main__:main\n"
+            "comsol-mcp-settings-gui = settings_gui.__main__:main\n"
+        ),
+    ],
+)
+def test_distribution_probe_requires_exact_section_bound_entry_points(
+    tmp_path: Path, entry_points: str
+) -> None:
+    with pytest.raises(ValueError, match="entry point"):
+        inspect_settings_gui_distributions(_archives(tmp_path, entry_points_text=entry_points))
+
+
 def test_visual_capture_direct_script_uses_current_source_tab_contract() -> None:
     completed = subprocess.run(
         [
@@ -140,14 +164,14 @@ def test_visual_capture_direct_script_uses_current_source_tab_contract() -> None
 
     assert completed.returncode == 0, completed.stderr
     assert "shared_server" not in completed.stdout
-    assert (
-        "--tab {general,profile,runtime,comsol_java,evidence,semantic,ownership,about}"
-        in completed.stdout
-    )
+    for tab in TAB_IDS:
+        assert tab in completed.stdout
 
 
 def test_visual_capture_matrix_covers_feature_tabs_and_about_at_every_scale() -> None:
     scenarios = set(settings_gui_visual_capture._capture_scenarios())
+    # This independent golden is intentional: it must detect drift in the
+    # scenario generator rather than derive its expectation from that generator.
     expected = {
         (language, dpi_percent, state, tab)
         for dpi_percent in (100, 125, 150, 200)

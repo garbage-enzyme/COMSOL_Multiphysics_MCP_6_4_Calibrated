@@ -135,6 +135,64 @@ def test_shortcut_actions_require_an_explicit_settings_path(monkeypatch) -> None
     assert calls == []
 
 
+def test_shortcut_action_accepts_the_exact_settings_path_token(tmp_path: Path, monkeypatch) -> None:
+    target = tmp_path / "settings.json"
+    observed = []
+    monkeypatch.setattr(
+        entry,
+        "create_desktop_shortcut",
+        lambda **kwargs: (
+            observed.append(kwargs["settings_path"]) or {"success": True, "state": "created"}
+        ),
+    )
+
+    code = entry.run_cli(
+        [
+            "--settings-path-token",
+            encode_settings_path_token(target),
+            "--create-desktop-shortcut",
+        ],
+        environ={},
+        output=lambda _value: None,
+    )
+
+    assert code == 0
+    assert observed == [target.resolve(strict=False)]
+
+
+def test_validate_only_backend_failure_is_bounded(tmp_path: Path, monkeypatch) -> None:
+    target = tmp_path / "settings.json"
+    output = []
+    monkeypatch.setattr(
+        entry,
+        "_validation_receipt",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError(str(target))),
+    )
+
+    code = entry.run_cli(
+        ["--settings-path", str(target), "--validate-only"],
+        environ={},
+        output=output.append,
+    )
+
+    assert code == 2
+    assert json.loads(output[0])["state"] == "action_failed"
+    assert str(target) not in output[0]
+
+
+def test_explicit_dangling_settings_link_is_rejected(tmp_path: Path, monkeypatch) -> None:
+    target = tmp_path / "settings.json"
+    monkeypatch.setattr(entry.os.path, "lexists", lambda path: Path(path) == target)
+    original_is_symlink = Path.is_symlink
+    monkeypatch.setattr(
+        Path,
+        "is_symlink",
+        lambda path: path == target or original_is_symlink(path),
+    )
+
+    assert entry.run_cli(["--settings-path", str(target), "--validate-only"], environ={}) == 2
+
+
 def test_explicit_settings_path_is_absolute_bounded_and_not_a_directory(tmp_path: Path) -> None:
     assert entry.run_cli(["--settings-path", "relative.json", "--validate-only"], environ={}) == 2
     assert (
@@ -164,7 +222,7 @@ def test_create_and_remove_shortcut_are_explicit_cli_actions(
         }
 
     def fake_remove(**kwargs):
-        calls.append((str(kwargs["settings_path"]), False))
+        calls.append((str(kwargs["settings_path"]), kwargs.get("replace_existing", False)))
         return {
             "success": True,
             "state": "removed",

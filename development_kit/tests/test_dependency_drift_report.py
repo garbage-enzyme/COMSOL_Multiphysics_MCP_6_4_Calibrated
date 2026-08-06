@@ -7,8 +7,11 @@ import json
 from pathlib import Path
 
 import pytest
+from packaging.requirements import Requirement
 
 from development_kit.scripts.dependency_drift_report import (
+    _declared_specifier,
+    _parse_release_lock,
     build_dependency_drift_report,
     canonical_distribution_name,
     serialize_dependency_drift_report,
@@ -121,6 +124,22 @@ def test_pep503_distribution_name_normalization() -> None:
     assert canonical_distribution_name("A..B__C---D") == "a-b-c-d"
 
 
+def test_direct_reference_has_no_declared_version_specifier() -> None:
+    declaration = "example @ https://packages.invalid/example-1.0.whl"
+
+    assert _declared_specifier(declaration, Requirement(declaration)) is None
+
+
+def test_release_lock_parser_rejects_markers_and_strips_inline_comments(tmp_path: Path) -> None:
+    lock = tmp_path / "lock.txt"
+    lock.write_text(
+        "valid==1.0 \\\ninvalid==2.0; python_version >= '3.14'\ncommented==3.0#bad\n",
+        encoding="utf-8",
+    )
+
+    assert _parse_release_lock(lock) == {"commented": "3.0", "valid": "1.0"}
+
+
 def test_report_classifies_trigger_edge_cases_and_all_lock_drifts(tmp_path: Path) -> None:
     pyproject, tested, lock = _write_fixture(tmp_path)
 
@@ -223,6 +242,28 @@ def test_report_rejects_unverified_pip_check_claim(tmp_path: Path) -> None:
         )
 
 
+def test_report_rejects_non_string_reviewed_versions(tmp_path: Path) -> None:
+    pyproject, tested, lock = _write_fixture(tmp_path)
+    value = json.loads(tested.read_text(encoding="utf-8"))
+    value["production_python_3_14"]["direct_dependencies"]["mcp"] = 1.28
+    tested.write_text(json.dumps(value), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="names and versions must be strings"):
+        build_dependency_drift_report(
+            pyproject_path=pyproject,
+            tested_versions_path=tested,
+            release_lock_path=lock,
+            installed_environment=_installed_environment(),
+            outdated_dependencies=_outdated_environment(),
+            installed_requirements={},
+            installed_extras=["dev", "manuals"],
+            pip_check_evidence=_pip_check_evidence(),
+            source_commit="a" * 40,
+            generated_at_utc="2026-08-03T00:00:00Z",
+            python_identity={"version": "3.14.6", "abi": "cp314-win_amd64"},
+        )
+
+
 def test_workflow_installs_manuals_and_routes_the_tested_generator() -> None:
     workflow = (ROOT / ".github" / "workflows" / "dependency_report.yml").read_text(
         encoding="utf-8"
@@ -236,3 +277,4 @@ def test_workflow_installs_manuals_and_routes_the_tested_generator() -> None:
     assert "--installed-extra dev" in workflow
     assert "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }" in workflow
     assert "ConvertFrom-Json" not in workflow
+    assert workflow.count("Set-Content -Encoding utf8 -ErrorAction Stop") >= 2

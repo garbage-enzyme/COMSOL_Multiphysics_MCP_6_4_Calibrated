@@ -1,5 +1,7 @@
 """Tests for bounded named geometry selections without COMSOL."""
 
+import pytest
+
 from src.tools.geometry_selections import create_box_selection, create_side_selections
 
 
@@ -29,14 +31,17 @@ class FakeGeometryList:
 
 
 class FakeSelection:
-    def __init__(self, tag, fail_property=None):
+    def __init__(self, tag, fail_property=None, fail_geometry=False):
         self.tag = tag
         self.fail_property = fail_property
+        self.fail_geometry = fail_geometry
         self.geometry = None
         self.dimension = None
         self.properties = {}
 
     def geom(self, geometry, dimension):
+        if self.fail_geometry:
+            raise RuntimeError("injected selection geometry failure")
         self.geometry = geometry
         self.dimension = dimension
 
@@ -50,8 +55,9 @@ class FakeSelection:
 
 
 class FakeSelectionList:
-    def __init__(self, fail_tag=None, existing=()):
+    def __init__(self, fail_tag=None, existing=(), fail_step="condition"):
         self.fail_tag = fail_tag
+        self.fail_step = fail_step
         self.items = {tag: FakeSelection(tag) for tag in existing}
         self.removed = []
 
@@ -60,7 +66,13 @@ class FakeSelectionList:
 
     def create(self, tag, selection_type):
         assert selection_type == "Box"
-        selection = FakeSelection(tag, "condition" if tag == self.fail_tag else None)
+        if tag == self.fail_tag and self.fail_step == "create":
+            raise RuntimeError("injected selection creation failure")
+        selection = FakeSelection(
+            tag,
+            self.fail_step if tag == self.fail_tag and self.fail_step != "geom" else None,
+            fail_geometry=tag == self.fail_tag and self.fail_step == "geom",
+        )
         self.items[tag] = selection
         return selection
 
@@ -70,9 +82,16 @@ class FakeSelectionList:
 
 
 class FakeComponent:
-    def __init__(self, dimension=2, fail_tag=None, existing=(), fail_geometry_after=None):
+    def __init__(
+        self,
+        dimension=2,
+        fail_tag=None,
+        existing=(),
+        fail_geometry_after=None,
+        fail_step="condition",
+    ):
         self.geometries = FakeGeometryList(dimension, fail_geometry_after)
-        self.selections = FakeSelectionList(fail_tag, existing)
+        self.selections = FakeSelectionList(fail_tag, existing, fail_step)
 
     def tag(self):
         return "comp1"
@@ -175,8 +194,9 @@ def test_box_selection_rejects_invalid_inputs_before_mutation():
     assert set(component.selections.items) == {"taken"}
 
 
-def test_box_selection_rolls_back_failed_property_setup():
-    component = FakeComponent(fail_tag="bad_box")
+@pytest.mark.parametrize("fail_step", ["create", "geom", "xmin", "condition"])
+def test_box_selection_rolls_back_failed_setup_steps(fail_step):
+    component = FakeComponent(fail_tag="bad_box", fail_step=fail_step)
 
     result = create_box_selection(
         FakeModel(component),
@@ -246,6 +266,27 @@ def test_side_selections_roll_back_every_prior_side_on_failure():
     }
 
 
+def test_side_selections_include_the_failed_side_rollback_result(monkeypatch):
+    component = FakeComponent()
+    calls = 0
+
+    def fail_on_second(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            return {"success": False, "error": "inner rollback failed", "rolled_back": False}
+        return {"success": True, "selection": {"tag": _kwargs["selection_name"]}}
+
+    monkeypatch.setattr("src.tools.geometry_selections.create_box_selection", fail_on_second)
+    result = create_side_selections(
+        FakeModel(component), x_min="0", x_max="1", y_min="0", y_max="1"
+    )
+
+    assert result["success"] is False
+    assert result["error"] == "inner rollback failed"
+    assert result["rolled_back"] is False
+
+
 def test_side_selections_roll_back_after_geometry_lookup_failure():
     component = FakeComponent(fail_geometry_after=2)
 
@@ -262,6 +303,7 @@ def test_side_selections_roll_back_after_geometry_lookup_failure():
     assert result["failed_side"] == "right"
     assert result["rolled_back"] is True
     assert component.selections.items == {}
+    assert component.selections.removed == ["duct_left"]
 
 
 def test_side_selections_are_explicitly_two_dimensional():
@@ -275,3 +317,16 @@ def test_side_selections_are_explicitly_two_dimensional():
 
     assert result["success"] is False
     assert "2D" in result["error"]
+
+
+def test_side_selection_preflight_contains_backend_lookup_failure():
+    result = create_side_selections(
+        FakeModel(FakeComponent(fail_geometry_after=0)),
+        x_min="0",
+        x_max="1",
+        y_min="0",
+        y_max="1",
+    )
+
+    assert result["success"] is False
+    assert "injected geometry lookup failure" in result["error"]

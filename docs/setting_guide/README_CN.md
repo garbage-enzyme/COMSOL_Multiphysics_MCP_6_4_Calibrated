@@ -1,6 +1,6 @@
 # COMSOL MCP 设置指南
 
-适用于 COMSOL MCP `0.6.4` 和设置 schema `1.2.0`。
+适用于 COMSOL MCP `0.6.5` 和设置 schema `1.2.0`。
 
 普通用户优先使用设置界面，不需要手工编辑 JSON。直接修改 `settings.json` 的方式仍然
 保留，适合开发者、获得用户明确授权的 agent、批量安装、自动部署，以及界面无法打开时

@@ -16,7 +16,7 @@ from typing import Any
 from packaging.requirements import InvalidRequirement, Requirement
 
 _NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
-_SIGNAL = re.compile(r"^[a-z-]+:.{1,512}$")
+_SIGNAL = re.compile(r"^[a-z-]+:[^\r\n\0]+$")
 MAXIMUM_LICENSE_SIGNAL_CHARACTERS = 512
 MAXIMUM_LICENSE_CLASSIFIERS = 128
 
@@ -41,6 +41,7 @@ def _declared_runtime_dependencies(value_bytes: bytes) -> tuple[str, ...]:
     if not isinstance(requirements, list) or not requirements:
         raise ValueError("pyproject runtime dependencies are missing")
     names = []
+    declarations = set()
     for requirement in requirements:
         if not isinstance(requirement, str):
             raise ValueError("pyproject runtime dependency is invalid")
@@ -48,10 +49,13 @@ def _declared_runtime_dependencies(value_bytes: bytes) -> tuple[str, ...]:
             parsed = Requirement(requirement)
         except InvalidRequirement as exc:
             raise ValueError("pyproject runtime dependency is invalid") from exc
-        names.append(_normalize_name(parsed.name))
-    if len(names) != len(set(names)):
-        raise ValueError("pyproject runtime dependencies contain duplicate names")
-    return tuple(sorted(names))
+        name = _normalize_name(parsed.name)
+        declaration = (name, str(parsed.marker) if parsed.marker is not None else "")
+        if declaration in declarations:
+            raise ValueError("pyproject runtime dependencies contain duplicate declarations")
+        declarations.add(declaration)
+        names.append(name)
+    return tuple(sorted(set(names)))
 
 
 def declared_runtime_dependencies(path: str | Path) -> tuple[str, ...]:
@@ -101,7 +105,12 @@ def _load_license_review(value_bytes: bytes) -> dict[str, Any]:
             not isinstance(signals, list)
             or not signals
             or len(signals) != len(set(signals))
-            or not all(isinstance(signal, str) and _SIGNAL.fullmatch(signal) for signal in signals)
+            or not all(
+                isinstance(signal, str)
+                and len(signal) <= MAXIMUM_LICENSE_SIGNAL_CHARACTERS
+                and _SIGNAL.fullmatch(signal)
+                for signal in signals
+            )
             or not isinstance(reason, str)
             or not reason.strip()
             or len(reason) > 1024
@@ -206,6 +215,9 @@ def build_license_receipt(
         except PackageNotFoundError:
             failures.append({"dependency": name, "reason_code": "not_installed"})
             continue
+        except ValueError:
+            failures.append({"dependency": name, "reason_code": "installed_metadata_invalid"})
+            continue
         if installed["dependency"] != name:
             failures.append({"dependency": name, "reason_code": "metadata_name_mismatch"})
             continue
@@ -217,7 +229,7 @@ def build_license_receipt(
         )
         if not installed["signals"]:
             failures.append({"dependency": name, "reason_code": "license_metadata_missing"})
-        elif entry is not None and not matched:
+        elif entry is not None and set(installed["signals"]) - set(entry["accepted_signals"]):
             failures.append({"dependency": name, "reason_code": "license_metadata_unmatched"})
         records.append(
             {

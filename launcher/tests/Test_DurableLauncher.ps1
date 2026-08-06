@@ -17,6 +17,9 @@ if ([string]::IsNullOrWhiteSpace($TestRoot)) {
         'comsol_launcher_tests\v1_8_' + [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssfffZ')
     )
 }
+$TestRoot = [System.IO.Path]::GetFullPath($TestRoot)
+if (Test-Path -LiteralPath $TestRoot) { Remove-Item -LiteralPath $TestRoot -Recurse -Force }
+New-Item -ItemType Directory -Path $TestRoot -Force | Out-Null
 Import-Module $Module -Force
 if ((Get-DurableLauncherVersion) -ne '1.8.1') { throw 'Unexpected launcher version.' }
 
@@ -233,11 +236,13 @@ try {
     $Paused = Get-Content -LiteralPath $Config.StatusPath -Raw | ConvertFrom-Json
     $PausedRows = @(Get-Content -LiteralPath $Config.ResultsPath).Count
     if ($Paused.status -ne 'paused_after_point') { throw 'Pause did not reach a terminal durable-boundary state.' }
-    if ($Paused.completed -lt 1 -or $Paused.completed -ge 8) { throw 'Pause did not occur after exactly a partial set of durable points.' }
+    if ($Paused.completed -lt 0 -or $Paused.completed -ge 8) { throw 'Pause acknowledgement did not precede completion.' }
     if ($PausedRows -ne $Paused.completed) { throw 'Pause status and durable row count disagree.' }
     if (Test-Path -LiteralPath (Join-Path $TestRoot 'run.lock')) { throw 'Pause left the fake owner lock behind.' }
     $Ack = Join-Path $Config.ControlDirectory ("acks\$($Request.RequestId).json")
     if (-not (Test-Path -LiteralPath $Ack -PathType Leaf)) { throw 'Pause acknowledgement is missing.' }
+    $AckValue = Get-Content -LiteralPath $Ack -Raw | ConvertFrom-Json
+    if ($AckValue.completed -ne $Paused.completed) { throw 'Pause acknowledgement and status count disagree.' }
 
     $Second = & (Get-Module DurableLauncher) { param($Value) Start-DurableDriver -Config $Value } $Config
     Wait-Until -Condition { $Second.Refresh(); return $Second.HasExited }

@@ -44,7 +44,7 @@ _PROCESS_KINDS = frozenset(
 _HEX64 = re.compile(r"^[0-9a-fA-F]{64}$")
 _VERSION = re.compile(r"(?<!\d)(\d+)\.(\d+)\.(\d+)\.(\d+)(?!\d)")
 _CLIENTAPI_DISPLAY_VERSION = re.compile(
-    r"(?<!\d)(\d+)\.(\d+)(?!\.\d).*?\([^\d)]*(\d+)[^)]*\)"
+    r"^[^\d]*(\d+)\.(\d+)(?:\.(\d+))?.*?\([^\d)]*(\d+)[^)]*\)"
 )
 
 
@@ -108,10 +108,17 @@ def normalize_comsol_version_readback(
     expected_normalized, expected_parts = _normalize_version(expected_file_version)
     if expected_parts is None:
         return normalized, parts
-    major, minor, build = (int(item) for item in display.groups())
-    if (major, minor, build) != (
+    major_text, minor_text, maintenance_text, build_text = display.groups()
+    observed = (
+        int(major_text),
+        int(minor_text),
+        0 if maintenance_text is None else int(maintenance_text),
+        int(build_text),
+    )
+    if observed != (
         expected_parts[0],
         expected_parts[1],
+        expected_parts[2],
         expected_parts[3],
     ):
         return "unreadable", None
@@ -263,18 +270,20 @@ def classify_shared_server_preflight(
         violations.append("probe_chronology_invalid")
         state = "probe_chronology_invalid"
         retryable = True
+    elif changed:
+        violations.append("process_identity_changed_between_probes")
+        state = "process_identity_changed_between_probes"
+        retryable = True
+    elif collisions:
+        violations.append("unclassified_comsol_or_mph_collision")
+        state = "unclassified_comsol_or_mph_collision"
+        retryable = True
     elif any(
         parts is None or parts[:3] != ACCEPTED_RELEASE_LINE
         for parts in comsol_versions
     ):
         violations.append("unsupported_or_ambiguous_comsol_version")
         state = "unsupported_or_ambiguous_comsol_version"
-    elif changed:
-        violations.append("process_identity_changed_between_probes")
-        state = "process_identity_changed_between_probes"
-    elif collisions:
-        violations.append("unclassified_comsol_or_mph_collision")
-        state = "unclassified_comsol_or_mph_collision"
     elif len(desktops) > 1 or sum(item["window_count"] for item in desktops) > 1:
         violations.append("ambiguous_gui_clients")
         state = "ambiguous_gui_clients"

@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
 import hashlib
 import json
 import subprocess
+import shutil
 import sys
 import time
 import tkinter as tk
@@ -71,7 +73,7 @@ def _document(language: str, state: str) -> dict:
     return document
 
 
-def _capture_one(
+def _capture_one_impl(
     output: Path,
     *,
     language: str,
@@ -79,6 +81,11 @@ def _capture_one(
     state: str,
     tab: str,
 ) -> dict:
+    if sys.platform == "win32":
+        try:
+            ctypes.windll.shcore.SetProcessDpiAwareness(2)
+        except AttributeError, OSError:
+            pass
     root = tk.Tk()
     root.withdraw()
     root.tk.call("tk", "scaling", (96.0 * dpi_percent / 100.0) / 72.0)
@@ -122,6 +129,41 @@ def _capture_one(
     return receipt
 
 
+def _capture_one(
+    output: Path,
+    *,
+    language: str,
+    dpi_percent: int,
+    state: str,
+    tab: str,
+) -> dict:
+    """Capture one scenario and always destroy a Tk root on failure."""
+    roots: list[tk.Tk] = []
+    original_tk = tk.Tk
+
+    def tracked_tk(*args: object, **kwargs: object) -> tk.Tk:
+        root = original_tk(*args, **kwargs)
+        roots.append(root)
+        return root
+
+    tk.Tk = tracked_tk  # type: ignore[assignment]
+    try:
+        return _capture_one_impl(
+            output,
+            language=language,
+            dpi_percent=dpi_percent,
+            state=state,
+            tab=tab,
+        )
+    finally:
+        tk.Tk = original_tk  # type: ignore[assignment]
+        for root in roots:
+            try:
+                root.destroy()
+            except tk.TclError:
+                pass
+
+
 def _capture_scenarios() -> tuple[tuple[str, int, str, str], ...]:
     scenarios: list[tuple[str, int, str, str]] = []
     for dpi_percent in (100, 125, 150, 200):
@@ -146,7 +188,7 @@ def _capture_scenarios() -> tuple[tuple[str, int, str, str], ...]:
 
 
 def capture_matrix(output_root: Path) -> dict:
-    output_root.mkdir(parents=True, exist_ok=False)
+    output_root.mkdir(parents=True, exist_ok=True)
     captures = []
     for language, dpi, state, tab in _capture_scenarios():
         completed = subprocess.run(  # noqa: S603
@@ -174,6 +216,7 @@ def capture_matrix(output_root: Path) -> dict:
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         if completed.returncode != 0:
+            shutil.rmtree(output_root, ignore_errors=True)
             stdout = completed.stdout[-2048:]
             stderr = completed.stderr[-2048:]
             raise RuntimeError(

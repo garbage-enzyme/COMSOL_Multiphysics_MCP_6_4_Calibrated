@@ -320,16 +320,18 @@ def _normalize_root(value: str, *, require_ascii: bool, must_exist: bool) -> Pat
     text = _reject_lexical_path(value, require_ascii=require_ascii)
     path = Path(text)
     for candidate in (path, *path.parents):
-        if not candidate.exists():
-            continue
         is_junction = getattr(candidate, "is_junction", lambda: False)
         if candidate.is_symlink() or is_junction():
             raise ValueError("configured path root contains a symlink or junction")
+        if not candidate.exists():
+            continue
     try:
         resolved = path.resolve(strict=must_exist)
     except (OSError, RuntimeError) as exc:
         raise ValueError(f"configured path root cannot be resolved: {type(exc).__name__}") from exc
-    if must_exist and not resolved.is_dir():
+    if resolved.exists() and not resolved.is_dir():
+        raise ValueError("configured path root must be a directory")
+    if must_exist and not resolved.exists():
         raise ValueError("configured model read root must be an existing directory")
     return resolved
 

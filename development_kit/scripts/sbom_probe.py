@@ -42,12 +42,12 @@ def build_cyclonedx_sbom(
     package_version: str,
     lock_sha256: str,
 ) -> dict:
+    if "comsol-mcp" in locked_pins:
+        raise ValueError("release lock must not contain the root comsol-mcp package")
     normalized_installed = {
         _canonical_name(name): value for name, value in installed_versions.items()
     }
-    if dict(locked_pins) != {
-        name: normalized_installed.get(name) for name in locked_pins
-    }:
+    if dict(locked_pins) != {name: normalized_installed.get(name) for name in locked_pins}:
         mismatches = {
             name: {"locked": expected, "installed": normalized_installed.get(name)}
             for name, expected in locked_pins.items()

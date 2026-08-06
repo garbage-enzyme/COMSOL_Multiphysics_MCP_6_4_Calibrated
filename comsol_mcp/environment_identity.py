@@ -45,6 +45,13 @@ def _distribution_record(name: str) -> dict[str, Any]:
         installed_version = version(name)
     except PackageNotFoundError:
         return {"name": name, "availability": "not_installed", "version": None}
+    except Exception as exc:
+        return {
+            "name": name,
+            "availability": "metadata_error",
+            "version": None,
+            "error_type": type(exc).__name__,
+        }
     return {"name": name, "availability": "installed", "version": installed_version}
 
 

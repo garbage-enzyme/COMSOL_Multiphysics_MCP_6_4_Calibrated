@@ -125,12 +125,14 @@ def test_matrix_field_collector_requires_preceding_point_audit(tmp_path):
         lambda point: point["collectors"].__setitem__(0, ["not-an-object"]),
         lambda point: point["wavelength"].__setitem__("value", object()),
         lambda point: point["wavelength"].__setitem__("value", 10**10_000),
+        lambda point: point["wavelength"].__setitem__("unit", []),
     ],
     ids=[
         "missing_identity",
         "non_object_collector",
         "non_numeric_wavelength",
         "overflowing_wavelength",
+        "unhashable_wavelength_unit",
     ],
 )
 def test_matrix_field_binding_rejects_malformed_points_without_exception_leaks(tmp_path, mutation):
@@ -153,6 +155,19 @@ def test_matrix_field_binding_requires_one_to_one_collector_artifact_alignment(t
     point["expected_artifact_ids"].pop()
 
     with pytest.raises(ValueError, match="collector identities"):
+        bind_validation_matrix_field_request(
+            point["collectors"][1]["inputs"],
+            job_id="job-123",
+            point=point,
+            source_model_sha256=spec["source_model_sha256"],
+        )
+
+
+def test_matrix_field_binding_rejects_duplicate_artifact_identity(tmp_path):
+    spec = _spec(tmp_path)
+    point = spec["points"][0]
+    point["expected_artifact_ids"] = ["audit-target", "audit-target"]
+    with pytest.raises(ValueError, match="artifact identities must be unique"):
         bind_validation_matrix_field_request(
             point["collectors"][1]["inputs"],
             job_id="job-123",
@@ -186,7 +201,11 @@ def test_matrix_field_template_rejects_png_and_unknown_fields_before_client(tmp_
 
 
 def _fake_field_runner(status="measurement_complete", request_mutator=None):
-    def run(*, request, artifact_root, **_kwargs):
+    observed_calls = []
+
+    def run(*, model, request, view_id, artifact_root):
+        observed_calls.append({"model": model, "view_id": view_id})
+        assert view_id == request["views"][0]["view_id"]
         manifest_request = request
         if request_mutator is not None:
             raw = {
@@ -273,6 +292,7 @@ def _fake_field_runner(status="measurement_complete", request_mutator=None):
             "manifest_artifact": descriptor(manifest, view["outputs"]["manifest_artifact_id"]),
         }
 
+    run.observed_calls = observed_calls
     return run
 
 

@@ -55,8 +55,11 @@ def _optional_count(value: object, name: str) -> int | None:
 def build_spectral_audit_point(spec: Mapping[str, Any], wavelength_m: object) -> dict[str, Any]:
     """Build one validation-collector point from an immutable spectral identity."""
     identity = spectral_point_identity(spec, wavelength_m)
-    collector = _mapping(spec.get("collector"), "collector")
-    incidence = spec.get("parameter_state", {}).get("incidence")
+    collector = deepcopy(_mapping(spec.get("collector"), "collector"))
+    parameter_state = spec.get("parameter_state")
+    if not isinstance(parameter_state, Mapping):
+        raise ValueError("parameter_state must be an object")
+    incidence = parameter_state.get("incidence")
     return {
         "point_id": identity["point_id"],
         "point_fingerprint": identity["point_fingerprint"],
@@ -93,6 +96,10 @@ def extract_spectral_audit_result(
     job_root = Path(job_dir).resolve()
     assigned_root = Path(artifact_dir).resolve()
     wrapper_path = _contained_file(Path(manifest_value), assigned_root, "point audit wrapper")
+    try:
+        wrapper_path.relative_to(job_root)
+    except ValueError as exc:
+        raise ValueError("point audit wrapper artifact escapes the durable job") from exc
     wrapper_snapshot = read_contained_file_snapshot(
         wrapper_path,
         root=assigned_root,
@@ -124,6 +131,10 @@ def extract_spectral_audit_result(
     inner_path = _contained_file(
         assigned_root / relative, assigned_root, "point audit inner manifest"
     )
+    try:
+        inner_path.relative_to(job_root)
+    except ValueError as exc:
+        raise ValueError("point audit inner artifact escapes the durable job") from exc
     inner_snapshot = read_contained_file_snapshot(
         inner_path,
         root=assigned_root,
@@ -186,11 +197,6 @@ def extract_spectral_audit_result(
     if abs(frequency - frozen) > tolerance:
         raise ValueError("point audit frequency wavelength differs from the frozen point")
 
-    for path, name in ((wrapper_path, "wrapper"), (inner_path, "inner")):
-        try:
-            path.relative_to(job_root)
-        except ValueError as exc:
-            raise ValueError(f"point audit {name} artifact escapes the durable job") from exc
     return {
         "requested_wavelength_m": frozen,
         "evaluated_wavelength_m": evaluated,

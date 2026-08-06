@@ -121,7 +121,12 @@ def reflect_candidate_signatures() -> dict[str, dict[str, Any]]:
 
 def _load_native_cancel_profiles() -> list[dict[str, Any]]:
     profiles_path = Path(__file__).with_name("native_cancel_profiles.json")
-    document = json.loads(profiles_path.read_text(encoding="utf-8"))
+    try:
+        document = json.loads(profiles_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return []
+    if not isinstance(document, Mapping):
+        return []
     profiles = document.get("profiles", [])
     if not isinstance(profiles, list):
         return []
@@ -136,11 +141,14 @@ def _profile_matches_environment(
     jars = profile.get("jars")
     observed_jars = environment.get("jars")
     candidate = profile.get("candidate")
+    profile_id = profile.get("profile_id")
     expected_candidate = NATIVE_CANCEL_CANDIDATES["progress_context"]
     if not all(
         isinstance(value, Mapping)
         for value in (backend, observed_backend, jars, observed_jars, candidate)
     ):
+        return False
+    if not isinstance(profile_id, str) or not profile_id:
         return False
     if set(jars) != set(_REQUIRED_JARS):
         return False

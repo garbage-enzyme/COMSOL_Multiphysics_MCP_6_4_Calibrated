@@ -207,7 +207,7 @@ def verify_evidence_integrity(
                     "verification_sha256": receipt["verification_sha256"],
                     "case_count": receipt["case_count"],
                 }
-        except (KeyError, OSError, RuntimeError, TypeError, ValueError) as exc:
+        except (KeyError, OSError, TypeError, ValueError) as exc:
             for check_name in enabled_portfolio_checks:
                 check_results[check_name] = {
                     "state": "failed",
@@ -264,6 +264,9 @@ def verify_evidence_integrity(
         )
     )
     verification_state = "verified" if strictly_verified else "failed" if failures else "unverified"
+    producer_only_failure = bool(failures) and all(
+        item["check"] == producer_check for item in failures
+    )
     result = {
         **base,
         "success": not failures,
@@ -272,6 +275,8 @@ def verify_evidence_integrity(
         "reason_code": (
             "all_enabled_checks_passed"
             if strictly_verified
+            else "resume_compatibility_failed"
+            if producer_only_failure
             else "deterministic_check_failed"
             if failures
             else "checks_disabled_by_settings"

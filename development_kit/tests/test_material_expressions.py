@@ -114,6 +114,34 @@ def test_physics_frequency_expression_requires_valid_dotted_identifiers(name):
         _drude("positive", frequency_source="physics_frequency", physics_frequency_expression=name)
 
 
+def test_blank_fixed_frequency_unit_emits_missing_unit_warning():
+    result = _drude(
+        "positive",
+        frequency_source="fixed_angular_frequency",
+        fixed_angular_frequency=2.0,
+        fixed_angular_frequency_unit=" ",
+    )
+    assert any(item["code"] == "missing_fixed_frequency_unit" for item in result["warnings"])
+
+
+def test_irrelevant_frequency_names_are_not_validated():
+    fixed = _drude(
+        "positive",
+        frequency_source="fixed_angular_frequency",
+        fixed_angular_frequency=2.0,
+        wavelength_parameter=None,
+        physics_frequency_expression=None,
+    )
+    wavelength = _drude(
+        "positive",
+        frequency_source="wavelength_parameter",
+        physics_frequency_expression=None,
+    )
+
+    assert fixed["convention_ledger"]["wavelength_parameter"] is None
+    assert "c_const/wl" in wavelength["expression"]
+
+
 def test_constant_and_nk_forms_preserve_declared_imaginary_sign():
     constant = preview_material_expression(
         **COMMON,
@@ -339,3 +367,21 @@ def test_public_tool_contains_tiny_wavelength_arithmetic_as_validation_error():
 
     assert result["success"] is False
     assert "converted wavelength" in result["error"]
+
+
+def test_public_tool_contains_overflowing_angular_frequency_as_validation_error():
+    server = MCPServer("material-expression-angular-frequency-test")
+    register_material_expression_tools(server)
+    tool = server._tool_manager._tools["wave_optics_material_expression_preview"]
+    result = tool.fn(
+        model_kind="constant",
+        parameters={"epsilon_real": 2.0, "epsilon_imag": 0.1},
+        test_wavelengths=[1e-300],
+        wavelength_unit="m",
+        harmonic_convention="exp(+i*omega*t)",
+        imaginary_sign="positive",
+        formulation="volumetric_material",
+    )
+
+    assert result["success"] is False
+    assert "angular frequency" in result["error"]

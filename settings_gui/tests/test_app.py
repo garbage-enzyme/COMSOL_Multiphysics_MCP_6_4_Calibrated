@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+import settings_gui.app as app_module
 from comsol_mcp.settings import (
     SettingsLocation,
     default_settings_document,
@@ -104,6 +105,16 @@ def _boolean_widget(app: SettingsApplication, key: str):
     )
 
 
+def test_roots_field_refreshes_visible_validation_error() -> None:
+    root, app, controller, store = _application()
+    try:
+        controller.update("paths.model_read_roots", ["relative"])
+
+        assert app.error_labels["paths.model_read_roots"].cget("text")
+    finally:
+        app.close()
+
+
 def _scenario_constructs_every_tab_and_field() -> None:
     root, app, controller, store = _application(scaling=2.0 * 96.0 / 72.0)
     try:
@@ -116,7 +127,7 @@ def _scenario_constructs_every_tab_and_field() -> None:
             for child in row.winfo_children()
             if child.winfo_class() == "TLabel"
         }
-        assert "alpha6.4  |  0.6.4" in header_labels
+        assert "alpha6.5  |  0.6.5" in header_labels
         assert set(app.variables) == {
             "schema_name",
             "schema_version",
@@ -499,6 +510,36 @@ def test_first_run_writes_only_after_rebuild_confirmation(tmp_path: Path) -> Non
         assert (program_root / "artifacts").is_dir()
     finally:
         store.close()
+
+
+def test_first_run_save_failure_closes_open_store(tmp_path: Path, monkeypatch) -> None:
+    target = tmp_path / "new-parent" / "settings.json"
+    template = tmp_path / "bundled-settings.json"
+    template.write_text("{}", encoding="utf-8")
+    location = SettingsLocation(template, target, "bundled_template", True)
+
+    class FailingStore:
+        closed = False
+
+        def __init__(self, _target):
+            pass
+
+        def open(self):
+            return self
+
+        def save(self, _document):
+            raise OSError("injected save failure")
+
+        def close(self):
+            self.closed = True
+
+    store = FailingStore(target)
+    monkeypatch.setattr(app_module, "SettingsStore", lambda _target: store)
+
+    with pytest.raises(OSError, match="injected save failure"):
+        _prepare_store(object(), QuietDialogs(), location=location)
+
+    assert store.closed is True
 
 
 if __name__ == "__main__":

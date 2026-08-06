@@ -18,6 +18,8 @@ _UNIT_ALIASES = {
     "μm": "um",
     "µm": "um",
     "°": "deg",
+    "°C": "degC",
+    "ºC": "degC",
 }
 _SCALES: dict[str, dict[str, tuple[float, float]]] = {
     "length": {

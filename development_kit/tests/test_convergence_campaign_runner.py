@@ -106,7 +106,13 @@ def test_excessive_own_peak_shift_completes_with_residual(tmp_path):
     assert result["completed"] is True
     assert result["summary"]["execution_state"] == "completed"
     assert result["summary"]["scientific_disposition"] == "residual"
-    comparison = result["progress"]["evaluation"]["pair_comparisons"][-1]["comparisons"][0]
+    evaluation = result["progress"].get("evaluation")
+    assert isinstance(evaluation, dict), "campaign progress omitted convergence evaluation"
+    pairs = evaluation.get("pair_comparisons")
+    assert isinstance(pairs, list) and pairs, "campaign evaluation omitted pair comparisons"
+    comparisons = pairs[-1].get("comparisons")
+    assert isinstance(comparisons, list) and comparisons, "latest pair omitted metric comparisons"
+    comparison = comparisons[0]
     assert comparison["absolute_change"] > 1e-9
     assert comparison["passed"] is False
 

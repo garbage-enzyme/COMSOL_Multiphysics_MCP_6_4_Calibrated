@@ -7,6 +7,7 @@ import shutil
 from copy import deepcopy
 
 import pytest
+import src.jobs.branch_continuation_campaign_rows as rows_module
 from src.jobs.branch_continuation_campaign import normalize_branch_continuation_campaign_spec
 from src.jobs.branch_continuation_campaign_rows import (
     MAX_BRANCH_CONTINUATION_CAMPAIGN_ROW_BYTES,
@@ -58,6 +59,19 @@ def test_completed_states_append_in_order_and_replay_exact_artifacts(tmp_path):
         first["incidence_readback_sha256"]
         == spec["states"][0]["incidence_readback"]["evidence_sha256"]
     )
+
+
+def test_state_directory_must_be_absolute(tmp_path):
+    spec = normalize_branch_continuation_campaign_spec(_raw_campaign(tmp_path / "sources"))
+
+    with pytest.raises(ValueError, match="state_dir must be absolute"):
+        append_branch_continuation_campaign_state(
+            tmp_path / "rows.jsonl",
+            spec,
+            attempt=1,
+            state_dir="relative-state",
+            artifact_root=tmp_path,
+        )
 
 
 def test_duplicate_append_with_previous_state_directory_fails_closed(tmp_path):
@@ -113,6 +127,24 @@ def test_changed_campaign_identity_cannot_reuse_state_rows(tmp_path):
         read_branch_continuation_campaign_states(journal, changed, artifact_root=root)
 
 
+def test_boolean_ordinal_cannot_substitute_for_zero(tmp_path):
+    spec = normalize_branch_continuation_campaign_spec(_raw_campaign(tmp_path / "sources"))
+    root = tmp_path / "campaign-boolean-ordinal"
+    journal = root / "continuation_states.jsonl"
+    state_dir = _complete_state(spec, root, 0)
+    append_branch_continuation_campaign_state(
+        journal, spec, attempt=1, state_dir=state_dir, artifact_root=root
+    )
+    row = json.loads(journal.read_text(encoding="utf-8"))
+    row["ordinal"] = False
+    body = {key: value for key, value in row.items() if key != "row_sha256"}
+    row["row_sha256"] = rows_module._fingerprint(body)
+    journal.write_text(json.dumps(row) + "\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="chain identity"):
+        read_branch_continuation_campaign_states(journal, spec, artifact_root=root)
+
+
 def test_partial_campaign_tail_is_removed_before_next_state(tmp_path):
     spec = normalize_branch_continuation_campaign_spec(_raw_campaign(tmp_path / "sources"))
     root = tmp_path / "campaign"
@@ -155,18 +187,20 @@ def test_stale_summary_self_hash_cannot_authorize_changed_outcome(tmp_path):
 def test_analysis_from_another_valid_row_set_cannot_replace_row_authority(tmp_path):
     spec = normalize_branch_continuation_campaign_spec(_raw_campaign(tmp_path / "sources"))
     root = tmp_path / "campaign-analysis-binding"
+    journal = root / "continuation_states.jsonl"
     state_dir = _complete_state(spec, root, 0)
     alternate = _complete_state(spec, tmp_path / "alternate", 0, center_shift=0.2e-6)
     shutil.copytree(alternate / "analysis", state_dir / "analysis", dirs_exist_ok=True)
 
     with pytest.raises(ValueError, match="differs from durable spectral replay"):
         append_branch_continuation_campaign_state(
-            root / "continuation_states.jsonl",
+            journal,
             spec,
             attempt=1,
             state_dir=state_dir,
             artifact_root=root,
         )
+    assert not journal.exists()
 
 
 def test_reader_rejects_one_oversized_row_before_unbounded_json_materialization(tmp_path):

@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal, TypeAlias
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
-from .structural import validate_public_structure
+from .structural import MAX_PUBLIC_NUMBER_MAGNITUDE, validate_public_structure
 from .thermo_optomechanical import ThermoOptomechanicalReplayInput
 
 MAX_PUBLIC_TEXT = 4096
@@ -24,10 +24,18 @@ BoundedObjectList: TypeAlias = Annotated[
     list[BoundedObject],
     Field(min_length=1, max_length=MAX_JOB_COLLECTION),
 ]
+BoundedSweepNumber: TypeAlias = Annotated[
+    int | float,
+    Field(
+        ge=-MAX_PUBLIC_NUMBER_MAGNITUDE,
+        le=MAX_PUBLIC_NUMBER_MAGNITUDE,
+        allow_inf_nan=False,
+    ),
+]
 
 
 class _JobInput(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
+    model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
 
 
 class StagedSweepInput(_JobInput):
@@ -35,7 +43,7 @@ class StagedSweepInput(_JobInput):
     source_model_path: BoundedPath
     parameter_name: BoundedText
     parameter_values: Annotated[
-        list[int | float],
+        list[BoundedSweepNumber],
         Field(min_length=1, max_length=MAX_JOB_COLLECTION),
     ]
     expressions: Annotated[
@@ -58,6 +66,16 @@ class StagedSweepInput(_JobInput):
     record_wavelength_controls: bool | None = None
     resource_policy: BoundedObject | None = None
     execution_backend: BoundedObject | None = None
+
+    @model_validator(mode="after")
+    def validate_cross_field_contract(self) -> StagedSweepInput:
+        if self.smoke_points is not None and self.smoke_points > len(self.parameter_values):
+            raise ValueError("smoke_points must not exceed the parameter_values count")
+        if self.physical_bounds is not None:
+            unknown = sorted(set(self.physical_bounds) - set(self.expressions))
+            if unknown:
+                raise ValueError("physical_bounds keys must be requested expressions")
+        return self
 
 
 class ValidationMatrixInput(_JobInput):

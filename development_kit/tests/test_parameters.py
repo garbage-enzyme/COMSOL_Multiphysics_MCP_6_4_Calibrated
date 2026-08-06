@@ -276,6 +276,16 @@ class FakeParameterJava:
         self.model.values.pop(name, None)
         self.model.descriptions.pop(name, None)
 
+    def descr(self, name):
+        return self.model.descriptions.get(name)
+
+    def set(self, name, value, description):
+        self.model.values[name] = value
+        if description is None:
+            self.model.descriptions[name] = None
+        else:
+            self.model.descriptions[name] = description
+
 
 class FakeParameterModel:
     def __init__(self, *, fail_description=False):
@@ -331,3 +341,28 @@ def test_new_parameter_is_removed_when_description_fails():
     assert result["rolled_back"] is True
     assert "theta" not in model.values
     assert "theta" not in model.descriptions
+
+
+def test_new_parameter_without_description_accepts_clientapi_empty_readback():
+    model = FakeParameterModel()
+
+    result = parameters.set_parameter(model, "theta", "10[deg]", description=None)
+
+    assert result == {
+        "success": True,
+        "parameter": "theta",
+        "value": "10[deg]",
+        "description": "",
+    }
+
+
+def test_parameter_rollback_preserves_unset_clientapi_description():
+    model = FakeParameterModel(fail_description=True)
+    model.descriptions["wl"] = None
+
+    result = parameters.set_parameter(model, "wl", "2[m]", description="new")
+
+    assert result["success"] is False
+    assert result["rolled_back"] is True
+    assert model.values["wl"] == "1[m]"
+    assert model.descriptions["wl"] is None

@@ -17,6 +17,7 @@ from _mim_safety import (
     require_named_domains,
     require_partition_result,
     require_port_pair,
+    require_passive_reflection,
     require_required_properties,
     require_spectrum,
     save_required,
@@ -168,7 +169,7 @@ sz = mesh.feature().create('size1','Size')
 sz.set('hmax', float(H_air/10)); sz.set('hmaxactive', True)
 sz.set('hmin', float(t_al2o3/2)); sz.set('hminactive', True)
 ftri = mesh.feature().create('ftri1','FreeTri'); ftri.selection().set(p2b)
-sw = mesh.feature().create('sw1','Sweep'); sw.selection().set([1,2])
+sw = mesh.feature().create('sw1','Sweep'); sw.selection().set(al2_domains + air_domains)
 try:
     mesh.run(); print(f'Mesh: {mesh.getNumElem()} elements', flush=True)
 except Exception as e:
@@ -191,7 +192,7 @@ sweep = study.feature('sweep1'); sweep.set('pname','wl')
 sweep.set('plist', ' '.join(str(w) for w in wls))
 print(f'Sweeping {len(wls)} wavelengths: {wls}', flush=True)
 t0=time.time(); jm.study('std1').run(); t1=time.time()
-R = require_spectrum(m.evaluate('ewfd.Rtotal'), wls, 'Rtotal')
+R = require_passive_reflection(require_spectrum(m.evaluate('ewfd.Rtotal'), wls, 'Rtotal'), 'Rtotal')
 print(f'Solve OK in {t1-t0:.2f}s', flush=True)
 for wl, value in zip(wls, R):
     print(f'  wl={wl*1e6:.1f}um R={value:.6f}', flush=True)

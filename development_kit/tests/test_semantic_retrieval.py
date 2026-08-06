@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import shutil
-import uuid
 from pathlib import Path
 
 import numpy as np
@@ -56,8 +55,8 @@ class NonFiniteEncoder(ControlledEncoder):
 
 
 @pytest.fixture
-def retrieval_assets():
-    root = Path("D:/comsol_semantic_retrieval_test") / uuid.uuid4().hex
+def retrieval_assets(ascii_tmp_path):
+    root = ascii_tmp_path / "retrieval"
     source_model = root / "source-model"
     source_model.mkdir(parents=True)
     (source_model / "config.json").write_text("{}\n", encoding="utf-8")
@@ -255,15 +254,17 @@ def test_exact_api_symbol_tier_outranks_loose_semantic_page():
 
 
 def test_partial_technical_token_does_not_receive_exact_match_bonus():
-    lexical = [{
-        "source": "api.pdf",
-        "module": "api",
-        "page": 1,
-        "heading": "getUpDownstream helper",
-        "snippet": "This is not the requested API symbol.",
-        "rank": -1.0,
-        "coverage": 1.0,
-    }]
+    lexical = [
+        {
+            "source": "api.pdf",
+            "module": "api",
+            "page": 1,
+            "heading": "getUpDownstream helper",
+            "snippet": "This is not the requested API symbol.",
+            "rank": -1.0,
+            "coverage": 1.0,
+        }
+    ]
     result = fuse_candidates(
         "getUpDown",
         lexical,
@@ -278,9 +279,7 @@ def test_partial_technical_token_does_not_receive_exact_match_bonus():
             "model_revision": "r1",
             "model_fingerprint": "e" * 64,
         },
-        pinned_chunks={
-            "chunk": {"source": "api.pdf", "page": 1, "ordinal": 0}
-        },
+        pinned_chunks={"chunk": {"source": "api.pdf", "page": 1, "ordinal": 0}},
     )
 
     assert result[0]["matched_technical_tokens"] == []
@@ -335,9 +334,7 @@ def test_page_dedup_abstention_and_nonfinite_scores_are_bounded():
         provenance=provenance,
         pinned_chunks=pinned_chunks,
     )
-    assert [(row["source"], row["page"]) for row in accepted_result] == [
-        ("one.pdf", 1)
-    ]
+    assert [(row["source"], row["page"]) for row in accepted_result] == [("one.pdf", 1)]
 
     assert (
         fuse_candidates(
@@ -426,9 +423,7 @@ def test_vector_cutoff_orders_all_ties_before_truncation():
     retriever = object.__new__(HybridRetriever)
     retriever.encoder = EqualEncoder()
     retriever.manifest = {"vector_dimension": 2}
-    retriever.embeddings = np.asarray(
-        [[1.0, 0.0], [1.0, 0.0], [1.0, 0.0]], dtype=np.float32
-    )
+    retriever.embeddings = np.asarray([[1.0, 0.0], [1.0, 0.0], [1.0, 0.0]], dtype=np.float32)
     retriever.chunks = [
         {"id": chunk_id, "page": page}
         for chunk_id, page in (("c" * 64, 1), ("a" * 64, 2), ("b" * 64, 3))

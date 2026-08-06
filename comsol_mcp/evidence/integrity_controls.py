@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from comsol_mcp.settings import load_settings, settings_fingerprint, settings_status
+from comsol_mcp.durable import read_file_bytes_bounded
 
 EVIDENCE_SETTINGS_ENV = "COMSOL_MCP_EVIDENCE_SETTINGS_PATH"
 EVIDENCE_SETTINGS_SCHEMA = "comsol_mcp.evidence_integrity_settings"
@@ -244,8 +245,8 @@ def load_evidence_integrity_status(
     raw: bytes | None = None
     try:
         path = _settings_path(configured_path)
-        raw = path.read_bytes()
-        if not raw or len(raw) > MAX_EVIDENCE_SETTINGS_BYTES:
+        raw = read_file_bytes_bounded(path, max_bytes=MAX_EVIDENCE_SETTINGS_BYTES)
+        if not raw:
             raise ValueError(
                 f"evidence-integrity settings must contain 1..{MAX_EVIDENCE_SETTINGS_BYTES} bytes"
             )
@@ -270,7 +271,7 @@ def load_evidence_integrity_status(
         effective,
         checks,
         source="explicit_settings",
-        fingerprint=_sha256(_canonical_bytes(effective)),
+        fingerprint=_sha256(raw),
     )
 
 

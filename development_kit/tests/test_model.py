@@ -4,12 +4,15 @@ import json
 from pathlib import Path
 
 import pytest
+from mcp.server.mcpserver import MCPServer
+from src.tools import model as model_module
 from src.tools.model import (
     _clone_model,
     _list_model_components,
     _save_model_file,
     _save_model_version_bundle,
     create_model_component,
+    register_model_tools,
 )
 
 
@@ -164,9 +167,7 @@ def test_clone_failures_remove_loaded_model_and_backing_artifacts(tmp_path, fail
     if failure == "load":
         client.load = lambda _path: (_ for _ in ()).throw(RuntimeError("load failure"))
     if failure == "label":
-        cloned.java.label = lambda _value: (_ for _ in ()).throw(
-            RuntimeError("label failure")
-        )
+        cloned.java.label = lambda _value: (_ for _ in ()).throw(RuntimeError("label failure"))
 
     root = tmp_path / "clones"
     with pytest.raises(RuntimeError, match=failure):
@@ -190,6 +191,50 @@ def test_clone_rejects_name_collision_before_save(tmp_path):
         )
 
     assert source.java.saved == []
+
+
+def test_model_clone_cleans_unregistered_clone_after_session_rejection(tmp_path, monkeypatch):
+    source = CloneModel("Source")
+    cloned = CloneModel("Clone")
+    client = CloneClient(cloned)
+    backing_dir = tmp_path / "comsol_mcp_clone_failed_registration"
+    backing_dir.mkdir()
+    backing = backing_dir / "clone.mph"
+    backing.write_bytes(b"clone")
+
+    class Session:
+        models = {}
+        current_model = "Source"
+
+        def __init__(self):
+            self.client = client
+
+        def get_model(self, name=None):
+            return source if name in {None, "Source"} else None
+
+        def add_model(self, _model, *, cleanup_path=None):
+            assert cleanup_path == str(backing)
+            raise ValueError("registration rejected")
+
+        def remove_model(self, _name):
+            return False
+
+    monkeypatch.setattr(model_module, "session_manager", Session())
+    monkeypatch.setattr(
+        model_module,
+        "_clone_model",
+        lambda *_args, **_kwargs: (cloned, str(backing)),
+    )
+    server = MCPServer("model-clone-registration-failure-test")
+    register_model_tools(server)
+
+    result = server._tool_manager._tools["model_clone"].fn(model_name="Source")
+
+    assert result["success"] is False
+    assert "registration rejected" in result["error"]
+    assert client.removed == [cloned]
+    assert not backing.exists()
+    assert not backing_dir.exists()
     assert client.loaded == []
 
 
@@ -212,9 +257,31 @@ def test_version_bundle_uses_one_save_copy_and_persists_metadata(tmp_path):
     assert version_metadata["description"] == "accepted state"
 
 
-def test_version_bundle_failure_restores_existing_latest_and_removes_version(
-    tmp_path, monkeypatch
-):
+def test_version_bundle_fsyncs_every_stage_before_publication(tmp_path, monkeypatch):
+    model = FakeModel()
+    model.name = lambda: "Model"
+    synced = set()
+    original_publish = model_module.publish_file_exclusive
+
+    monkeypatch.setattr(model_module, "_fsync_file", lambda path: synced.add(path.name))
+
+    def assert_synced_then_publish(staging, target):
+        assert staging.name in synced
+        return original_publish(staging, target)
+
+    monkeypatch.setattr(model_module, "publish_file_exclusive", assert_synced_then_publish)
+
+    _save_model_version_bundle(
+        model,
+        str(tmp_path / "Model_1.mph"),
+        str(tmp_path / "Model_latest.mph"),
+        description=None,
+    )
+
+    assert len(synced) == 4
+
+
+def test_version_bundle_failure_restores_existing_latest_and_removes_version(tmp_path, monkeypatch):
     model = FakeModel()
     model.name = lambda: "Model"
     version = tmp_path / "Model_1.mph"
@@ -225,16 +292,13 @@ def test_version_bundle_failure_restores_existing_latest_and_removes_version(
     original_publish = __import__(
         "src.tools.model", fromlist=["publish_file_exclusive"]
     ).publish_file_exclusive
-    calls = 0
 
-    def fail_third(staging, target):
-        nonlocal calls
-        calls += 1
-        if calls == 3:
+    def fail_latest(staging, target):
+        if Path(target) == latest:
             raise OSError("latest publication failure")
         return original_publish(staging, target)
 
-    monkeypatch.setattr("src.tools.model.publish_file_exclusive", fail_third)
+    monkeypatch.setattr("src.tools.model.publish_file_exclusive", fail_latest)
 
     with pytest.raises(OSError, match="latest publication failure"):
         _save_model_version_bundle(model, str(version), str(latest), description=None)

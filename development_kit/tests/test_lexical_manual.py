@@ -1,8 +1,8 @@
+import os
 import shutil
 import sqlite3
 import subprocess
 import sys
-import uuid
 from contextlib import closing
 from pathlib import Path
 from types import SimpleNamespace
@@ -19,8 +19,8 @@ from src.tools.session import session_manager
 
 
 @pytest.fixture()
-def manual_index() -> Path:
-    root = Path("D:/comsol_docs_fts_test") / uuid.uuid4().hex
+def manual_index(ascii_tmp_path) -> Path:
+    root = ascii_tmp_path / "lexical"
     index = root / "manuals.sqlite3"
     build_index_from_records(
         [
@@ -51,6 +51,13 @@ def manual_index() -> Path:
                 "page": 2033,
                 "heading": "Copy Face",
                 "text": "CopyFace copies a mesh from source faces to destination faces.",
+            },
+            {
+                "source": "Wave_Optics_Module/WaveOpticsModuleUsersGuide.pdf",
+                "module": "Wave_Optics_Module",
+                "page": 152,
+                "heading": "Wrapped phrase",
+                "text": "Periodic\nStructure supports bounded optical ports.",
             },
         ],
         index,
@@ -106,6 +113,18 @@ def test_long_agent_query_relaxes_and_reranks_by_term_coverage(manual_index: Pat
     )
 
 
+def test_relaxed_phrase_coverage_matches_fts_whitespace(manual_index: Path):
+    result = search_index(
+        '"Periodic Structure" unavailable',
+        mode="auto",
+        index_path=manual_index,
+    )
+
+    assert result["strategy"] == "relaxed_coverage_bm25"
+    wrapped = next(row for row in result["results"] if row["page"] == 152)
+    assert "Periodic Structure" in wrapped["matched_terms"]
+
+
 def test_read_pages_reports_missing_pages(manual_index: Path):
     result = read_index_pages(
         "COMSOL_Multiphysics/COMSOL_ReferenceManual.pdf",
@@ -159,11 +178,19 @@ def test_pdf_index_build_rejects_a_manual_changed_during_extraction(
         def __iter__(self):
             return iter([Page()])
 
-    monkeypatch.setitem(sys.modules, "fitz", SimpleNamespace(open=lambda _path: Document()))
+    opened = []
+
+    def open_document(path):
+        opened.append(path)
+        return Document()
+
+    monkeypatch.setitem(sys.modules, "fitz", SimpleNamespace(open=open_document))
 
     with pytest.raises(RuntimeError, match="changed during extraction"):
         manual_module.build_index_from_pdfs(pdf_root, index)
 
+    assert len(opened) == 1
+    assert os.path.samefile(opened[0], source)
     assert not index.exists()
     assert not list(ascii_tmp_path.glob("manuals.sqlite3.tmp-*"))
 

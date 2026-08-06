@@ -230,10 +230,18 @@ def _submit_job(
             recover = getattr(session_manager, "recover_attached_job_handoff", None)
             if callable(recover):
                 try:
-                    recovery = recover(
+                    observed_recovery = recover(
                         handoff["execution_backend"],
                         profile=profile_name,
                         feature_enabled=shared_enabled,
+                    )
+                    recovery = (
+                        dict(observed_recovery)
+                        if isinstance(observed_recovery, dict)
+                        else {
+                            "success": False,
+                            "state": "attached_handoff_recovery_returned_invalid_result",
+                        }
                     )
                 except Exception as recovery_exc:
                     recovery = {
@@ -280,9 +288,7 @@ def register_job_tools(mcp: MCPServer) -> None:
     """Register durable submit/status/tail/cooperative-cancel/resume tools."""
     selection = getattr(mcp, "profile_selection", None)
     profile_name = getattr(selection, "name", "unknown")
-    shared_enabled = bool(
-        selection is not None and selection.feature_enabled("shared_server")
-    )
+    shared_enabled = bool(selection is not None and selection.feature_enabled("shared_server"))
 
     @mcp.tool()
     def job_submit(spec: JobSubmissionSpec) -> dict[str, Any]:

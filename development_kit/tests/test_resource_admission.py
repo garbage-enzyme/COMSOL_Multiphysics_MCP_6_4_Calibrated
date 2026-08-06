@@ -5,8 +5,6 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
-import shutil
-import uuid
 from pathlib import Path
 
 import pytest
@@ -170,14 +168,47 @@ def test_builder_timeout_closes_required_process_tree_containment(monkeypatch):
     assert containment.closed is True
 
 
+def test_builder_assignment_failure_still_reaps_the_started_process(monkeypatch):
+    class Process:
+        pid = 44002
+        returncode = None
+
+        def poll(self):
+            return self.returncode
+
+        def wait(self, *, timeout):
+            self.returncode = 1
+            return 1
+
+        def kill(self):
+            self.returncode = 1
+
+        def communicate(self, *, timeout):
+            return "", ""
+
+    process = Process()
+    monkeypatch.setattr(acceptance.subprocess, "Popen", lambda *_args, **_kwargs: process)
+    monkeypatch.setattr(
+        acceptance.OwnedJobObject,
+        "assign",
+        lambda _pid: (_ for _ in ()).throw(OSError("injected assign failure")),
+    )
+    monkeypatch.setattr(
+        acceptance.subprocess,
+        "run",
+        lambda *_args, **_kwargs: type("Completed", (), {"returncode": 0})(),
+    )
+
+    result = acceptance._run_builder_process(["python", "builder.py"])
+
+    assert result["success"] is False
+    assert process.returncode == 1
+    assert result["cleanup"]["root_absent"] is True
+
+
 @pytest.fixture
-def ascii_jobs_root():
-    root = Path("D:/comsol_runtime_test/resource_admission_journal") / uuid.uuid4().hex
-    root.mkdir(parents=True)
-    try:
-        yield root
-    finally:
-        shutil.rmtree(root, ignore_errors=True)
+def ascii_jobs_root(ascii_tmp_path):
+    yield ascii_tmp_path
 
 
 def sample(**overrides):
@@ -250,6 +281,11 @@ def test_invalid_telemetry_fails_closed(changes, match):
         normalize_telemetry_sample(sample(**changes))
 
 
+def test_unhashable_telemetry_stage_is_a_bounded_validation_error():
+    with pytest.raises(ValueError, match="stage must be"):
+        normalize_telemetry_sample({"stage": []})
+
+
 def test_green_policy_allows_without_cleanup_side_effects():
     result = evaluate_resource_admission(POLICY, sample())
 
@@ -269,6 +305,15 @@ def test_warning_requires_explicit_continuation_and_never_becomes_green():
     assert blocked["decision"] == "require_confirmation"
     assert continued["state"] == "warning"
     assert continued["decision"] == "allow_with_warning"
+
+
+def test_warning_continuation_requires_an_exact_boolean():
+    with pytest.raises(ValueError, match="must be boolean"):
+        evaluate_resource_admission(
+            POLICY,
+            sample(available_memory_bytes=20),
+            continue_on_warning="false",
+        )
 
 
 @pytest.mark.parametrize(
@@ -674,6 +719,31 @@ def test_completed_point_is_never_authorized_for_a_duplicate_valid_row():
     assert replay["points"]["wl:4.25"]["action"] == "skip_completed"
     assert replay["points"]["wl:4.25"]["start_authorized"] is False
     assert replay["duplicate_valid_rows_authorized"] is False
+
+
+def test_completed_point_shortcut_validates_resource_journal(ascii_jobs_root, monkeypatch):
+    store = JobStore(ascii_jobs_root / "jobs")
+    job_id = store.create(
+        {"resource_policy": normalize_resource_policy(POLICY)},
+        {"attempt": 1, "status": "running"},
+        job_id="job-completed-journal",
+    )
+    completed = {"wl:4.25"}
+    adapter = ResourceStageAdapter(
+        store=store,
+        job_id=job_id,
+        attempt=1,
+        policy=POLICY,
+        telemetry_provider=lambda stage, _point_id: sample(stage=stage),
+        completed_point_ids_provider=lambda: completed,
+    )
+
+    def fail_read(_job_id):
+        raise ValueError("corrupt resource journal")
+
+    monkeypatch.setattr(store, "read_resource_journal", fail_read)
+    with pytest.raises(ValueError, match="corrupt resource journal"):
+        adapter.evaluate(stage="pre_solve", point_id="wl:4.25")
 
 
 def test_completed_row_does_not_hide_its_post_solve_resource_refusal():

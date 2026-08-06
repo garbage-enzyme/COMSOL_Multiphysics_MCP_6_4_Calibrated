@@ -43,12 +43,13 @@ def main() -> None:
             raise AssertionError(f"COMSOL did not create a non-empty file: {output_file}")
         print("unicode save OK:", output_file, output_file.stat().st_size)
         result["success"] = True
-    except BaseException as exc:
-        primary_error = exc
+    except BaseException:
+        primary_error = sys.exc_info()
     finally:
         exit_code = _cleanup_probe(client, output_file, output_dir, result)
     if primary_error is not None:
-        raise primary_error
+        _type, error, traceback = primary_error
+        raise error.with_traceback(traceback)
     if exit_code != 0:
         raise RuntimeError("Unicode save probe cleanup did not complete")
 

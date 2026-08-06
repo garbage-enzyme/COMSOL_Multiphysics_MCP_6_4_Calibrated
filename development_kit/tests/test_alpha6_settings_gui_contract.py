@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 
@@ -10,14 +11,18 @@ from comsol_mcp import __version__
 from comsol_mcp.server import create_server
 from comsol_mcp.tools.catalog import PROFILE_NAMES, TOOL_SPECS
 
+RELEASED_SETTINGS_VERSION = "1.2.0"
+RELEASED_SETTINGS_READABLE_VERSIONS = ("1.0.0", "1.1.0", RELEASED_SETTINGS_VERSION)
+RELEASED_PACKAGE_VERSION = "0.6.5"
+
 
 def test_alpha6_settings_schema_and_defaults_are_current_and_backward_readable(tmp_path):
-    assert settings_module.SETTINGS_VERSION == "1.2.0"
-    assert settings_module.SETTINGS_READABLE_VERSIONS == ("1.0.0", "1.1.0", "1.2.0")
+    assert settings_module.SETTINGS_VERSION == RELEASED_SETTINGS_VERSION
+    assert settings_module.SETTINGS_READABLE_VERSIONS == RELEASED_SETTINGS_READABLE_VERSIONS
 
     defaults = settings_module.default_settings_document()
     assert defaults["schema_name"] == "comsol_mcp.settings"
-    assert defaults["schema_version"] == "1.2.0"
+    assert defaults["schema_version"] == RELEASED_SETTINGS_VERSION
     assert defaults["comsol"] == {"installation_root": None}
     assert defaults["gui"] == {"language": "zh-cn", "scale": "system"}
     user_root = tmp_path / "用户配置" / "comsol_mcp"
@@ -52,7 +57,7 @@ def test_alpha6_settings_schema_and_defaults_are_current_and_backward_readable(t
     )
     report = settings_module.load_settings_report({settings_module.SETTINGS_PATH_ENV: str(legacy)})
     assert report["errors"] == []
-    assert report["settings"]["schema_version"] == "1.2.0"
+    assert report["settings"]["schema_version"] == RELEASED_SETTINGS_VERSION
     assert report["settings"]["comsol"]["installation_root"] is None
     assert report["settings"]["gui"]["language"] == "zh-cn"
 
@@ -100,10 +105,11 @@ def test_settings_start_is_profile_independent_and_solver_free(monkeypatch):
 
     for profile in PROFILE_NAMES:
         server = create_server(f"alpha6-{profile}", profile=profile)
-        tools = server._tool_manager._tools
+        tools = {tool.name: tool for tool in asyncio.run(server.list_tools())}
         assert "settings.start" in tools
-        assert tools["settings.start"].parameters["properties"] == {}
-        assert tools["settings.start"].parameters["additionalProperties"] is False
+        schema = tools["settings.start"].input_schema
+        assert schema["properties"] == {}
+        assert schema["additionalProperties"] is False
 
 
 def test_settings_gui_console_entry_and_packages_are_declared():
@@ -112,4 +118,4 @@ def test_settings_gui_console_entry_and_packages_are_declared():
     assert 'comsol-mcp-settings = "settings_gui.__main__:main"' in pyproject
     assert 'comsol-mcp-settings-gui = "settings_gui.__main__:main"' in pyproject
     assert 'packages = ["comsol_mcp", "settings_gui"]' in pyproject
-    assert __version__ == "0.6.4"
+    assert __version__ == RELEASED_PACKAGE_VERSION

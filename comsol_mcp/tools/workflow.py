@@ -18,6 +18,7 @@ import json
 import math
 import os
 import time
+import uuid
 from pathlib import Path
 from typing import Any, Callable, Optional, Sequence
 
@@ -147,19 +148,26 @@ def _write_rows_csv(
         if existing_fields != active_fieldnames:
             with path.open(newline="", encoding="utf-8-sig") as existing:
                 existing_rows = list(csv.DictReader(existing))
-            with path.open("w", newline="", encoding="utf-8") as migrated:
-                writer = csv.DictWriter(
-                    migrated,
-                    fieldnames=active_fieldnames,
-                    extrasaction="ignore",
-                )
-                writer.writeheader()
-                for row in existing_rows:
-                    if "status" in active_fieldnames and not row.get("status"):
-                        row["status"] = "success"
-                    writer.writerow({key: _csv_value(row.get(key)) for key in active_fieldnames})
-                migrated.flush()
-                os.fsync(migrated.fileno())
+            migration = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+            try:
+                with migration.open("x", newline="", encoding="utf-8") as migrated:
+                    writer = csv.DictWriter(
+                        migrated,
+                        fieldnames=active_fieldnames,
+                        extrasaction="ignore",
+                    )
+                    writer.writeheader()
+                    for row in existing_rows:
+                        if "status" in active_fieldnames and not row.get("status"):
+                            row["status"] = "success"
+                        writer.writerow(
+                            {key: _csv_value(row.get(key)) for key in active_fieldnames}
+                        )
+                    migrated.flush()
+                    os.fsync(migrated.fileno())
+                os.replace(migration, path)
+            finally:
+                migration.unlink(missing_ok=True)
     with path.open(mode, newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(
             handle,
@@ -803,7 +811,6 @@ def run_staged_parametric_sweep(
         )
         if adopted_legacy:
             _migrate_legacy_sweep_csv(csv_path, fieldnames, manifest)
-            adopted_legacy = False
         validate_existing_csv = bool(
             resume_csv or (append_csv and csv_path and Path(csv_path).is_file())
         )

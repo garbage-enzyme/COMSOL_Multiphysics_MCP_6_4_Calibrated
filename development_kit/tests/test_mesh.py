@@ -159,11 +159,33 @@ def test_get_mesh_info_reports_available_tags():
     assert "mesh1" in result["error"]
 
 
+def test_get_mesh_info_distinguishes_label_lookup_failure_from_absence():
+    class FailingLabelMesh(FakeMesh):
+        def label(self):
+            raise RuntimeError("backend label failure")
+
+    result = get_mesh_info(
+        FakeModel({"mesh1": FailingLabelMesh()}), mesh_name="named mesh"
+    )
+
+    assert result["success"] is False
+    assert result["error"] == "Mesh label lookup failed."
+    assert result["mesh_tag"] == "mesh1"
+    assert result["error_type"] == "RuntimeError"
+
+
 def test_get_mesh_info_rejects_wrong_component_tag():
     result = get_mesh_info(FakeModel({"mesh1": FakeMesh()}), component_name="missing")
 
     assert result["success"] is False
     assert "component" in result["error"].lower()
+
+
+def test_mesh_helpers_reject_explicit_empty_component_name():
+    model = FakeModel({"mesh1": FakeMesh()})
+
+    assert create_mesh_sequence(model, component_name="")["success"] is False
+    assert get_mesh_info(model, component_name="")["success"] is False
 
 
 def test_get_mesh_info_normalizes_java_string_tags():
@@ -190,9 +212,10 @@ class MutableMeshFeatureList:
 
 
 class MutableMeshSequence:
-    def __init__(self, *, fail_feature=False, fail_run=False):
+    def __init__(self, *, fail_feature=False, fail_run=False, fail_statistics=False):
         self.features = MutableMeshFeatureList(fail_feature)
         self.fail_run = fail_run
+        self.fail_statistics = fail_statistics
 
     def feature(self):
         return self.features
@@ -202,6 +225,8 @@ class MutableMeshSequence:
             raise RuntimeError("build failure")
 
     def getNumElem(self):
+        if self.fail_statistics:
+            raise RuntimeError("statistics unavailable")
         return 12
 
     def getNumVertex(self):
@@ -209,10 +234,13 @@ class MutableMeshSequence:
 
 
 class MutableMeshList:
-    def __init__(self, existing=(), *, fail_feature=False, fail_run=False):
+    def __init__(
+        self, existing=(), *, fail_feature=False, fail_run=False, fail_statistics=False
+    ):
         self.meshes = {tag: object() for tag in existing}
         self.fail_feature = fail_feature
         self.fail_run = fail_run
+        self.fail_statistics = fail_statistics
 
     def tags(self):
         return list(self.meshes)
@@ -221,6 +249,7 @@ class MutableMeshList:
         sequence = MutableMeshSequence(
             fail_feature=self.fail_feature,
             fail_run=self.fail_run,
+            fail_statistics=self.fail_statistics,
         )
         self.meshes[tag] = sequence
         return sequence
@@ -266,3 +295,17 @@ def test_create_mesh_sequence_validates_before_creation_and_builds_successfully(
     assert created["success"] is True
     assert created["built"] is True
     assert created["num_elements"] == 12
+
+
+def test_create_mesh_sequence_preserves_built_mesh_when_statistics_fail():
+    mesh_list = MutableMeshList(fail_statistics=True)
+    model = FakeModel({})
+    model.java = FakeJava(MutableMeshComponent(mesh_list))
+
+    result = create_mesh_sequence(model, mesh_name="mesh2")
+
+    assert result["success"] is True
+    assert result["built"] is True
+    assert result["statistics_complete"] is False
+    assert result["statistics_error_type"] == "RuntimeError"
+    assert "mesh2" in mesh_list.meshes

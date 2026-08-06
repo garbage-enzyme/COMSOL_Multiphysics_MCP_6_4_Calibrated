@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 
@@ -242,6 +243,31 @@ def test_float_precision_collapse_and_out_of_window_targets_are_rejected(tmp_pat
         )
 
 
+def test_stage_numeric_and_spec_validation_normalizes_public_failures(tmp_path):
+    with pytest.raises(ValueError, match="positive and finite"):
+        inclusive_wavelength_grid(10**400, 2.0, 2)
+
+    spec = _spec(tmp_path)
+    plan = build_initial_spectral_stage(spec)
+    for field, value in (("maximum_points", "10"), ("spec_fingerprint", None)):
+        malformed = dict(spec)
+        malformed[field] = value
+        with pytest.raises(ValueError, match=field):
+            build_spectral_stage_plan(
+                malformed,
+                stage_index=0,
+                stage_kind="initial_locator",
+                planning_reason="malformed_spec",
+                window_lower_m=4e-6,
+                window_upper_m=6e-6,
+                requested_wavelengths_m=plan["requested_wavelengths_m"],
+                previous_stage_sha256=None,
+                evidence_row_sha256=None,
+            )
+        with pytest.raises(ValueError, match=field):
+            read_spectral_stage_plans(tmp_path / field, malformed)
+
+
 def test_stage_targets_deduplicate_one_ulp_center_variants(tmp_path):
     spec = _spec(tmp_path)
     initial = build_initial_spectral_stage(spec)
@@ -288,6 +314,8 @@ def test_concurrent_different_next_stages_cannot_overwrite(tmp_path, monkeypatch
         lambda *_args: {"action": "solve_current_stage"},
     )
 
+    start_gate = threading.Barrier(2)
+
     def candidate(wavelength):
         return build_spectral_stage_plan(
             spec,
@@ -302,8 +330,13 @@ def test_concurrent_different_next_stages_cannot_overwrite(tmp_path, monkeypatch
         )
 
     candidates = [candidate(4.1e-6), candidate(4.2e-6)]
+
+    def write_candidate(plan):
+        start_gate.wait(timeout=5)
+        return write_spectral_stage_plan(job, spec, plan)
+
     with ThreadPoolExecutor(max_workers=2) as pool:
-        futures = [pool.submit(write_spectral_stage_plan, job, spec, plan) for plan in candidates]
+        futures = [pool.submit(write_candidate, plan) for plan in candidates]
     outcomes = []
     for future in futures:
         try:

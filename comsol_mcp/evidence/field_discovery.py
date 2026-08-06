@@ -53,12 +53,24 @@ def _children(model: Any, group: str, limit: int) -> list[Any]:
     except Exception as exc:
         raise ValueError(f"MPh {group} collection is unavailable") from exc
     children = []
-    for index, child in enumerate(collection):
-        if index >= limit:
-            singular = group[:-1] if group.endswith("s") else group
-            raise ValueError(f"{singular} count exceeds its discovery limit")
-        children.append(child)
+    try:
+        for index, child in enumerate(collection):
+            if index >= limit:
+                singular = group[:-1] if group.endswith("s") else group
+                raise ValueError(f"{singular} count exceeds its discovery limit")
+            children.append(child)
+    except ValueError:
+        raise
+    except Exception as exc:
+        raise ValueError(f"MPh {group} collection iteration failed") from exc
     return children
+
+
+def _node_call(node: Any, method: str, label: str) -> Any:
+    try:
+        return getattr(node, method)()
+    except Exception as exc:
+        raise ValueError(f"{label} is unavailable") from exc
 
 
 def validate_field_discovery_limits(
@@ -89,8 +101,14 @@ def discover_field_datasets(
 
     component_rows = [
         {
-            "component_name": _bounded_text(node.name(), f"components[{index}].name"),
-            "component_tag": _tag(node.tag(), f"components[{index}].tag"),
+            "component_name": _bounded_text(
+                _node_call(node, "name", f"components[{index}].name"),
+                f"components[{index}].name",
+            ),
+            "component_tag": _tag(
+                _node_call(node, "tag", f"components[{index}].tag"),
+                f"components[{index}].tag",
+            ),
         }
         for index, node in enumerate(components)
     ]
@@ -102,7 +120,10 @@ def discover_field_datasets(
     solution_by_tag: dict[str, dict[str, Any]] = {}
     solution_diagnostics: list[dict[str, str]] = []
     for index, node in enumerate(solutions):
-        tag = _tag(node.tag(), f"solutions[{index}].tag")
+        tag = _tag(
+            _node_call(node, "tag", f"solutions[{index}].tag"),
+            f"solutions[{index}].tag",
+        )
         if tag in solution_by_tag:
             raise ValueError("solution tags must be unique")
         try:
@@ -119,15 +140,27 @@ def discover_field_datasets(
             )
         solution_by_tag[tag] = {
             "solution_tag": tag,
-            "solution_name": _bounded_text(node.name(), f"solutions[{index}].name"),
+            "solution_name": _bounded_text(
+                _node_call(node, "name", f"solutions[{index}].name"),
+                f"solutions[{index}].name",
+            ),
             "computed_state": computed_state,
         }
 
     dataset_nodes: list[dict[str, Any]] = []
     for index, node in enumerate(datasets):
-        name = _bounded_text(node.name(), f"datasets[{index}].name")
-        tag = _tag(node.tag(), f"datasets[{index}].tag")
-        dataset_type = _bounded_text(node.type(), f"datasets[{index}].type")
+        name = _bounded_text(
+            _node_call(node, "name", f"datasets[{index}].name"),
+            f"datasets[{index}].name",
+        )
+        tag = _tag(
+            _node_call(node, "tag", f"datasets[{index}].tag"),
+            f"datasets[{index}].tag",
+        )
+        dataset_type = _bounded_text(
+            _node_call(node, "type", f"datasets[{index}].type"),
+            f"datasets[{index}].type",
+        )
         try:
             properties = {str(item) for item in node.properties()}
         except Exception as exc:

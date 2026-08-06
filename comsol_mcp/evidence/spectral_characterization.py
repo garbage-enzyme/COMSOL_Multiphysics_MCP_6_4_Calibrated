@@ -866,6 +866,12 @@ def _fit_candidate(
                 )
             except RuntimeError, ValueError:
                 continue
+            candidate_peak = float(parameters[2] + parameters[3] / parameters[4])
+            if not -1.0 < candidate_peak < 1.0:
+                continue
+            candidate_peak_response = float(fano(candidate_peak, *parameters))
+            if not math.isfinite(candidate_peak_response) or candidate_peak_response <= baseline:
+                continue
             residual = y - fano(z, *parameters)
             attempts.append(
                 (

@@ -15,6 +15,10 @@ _HOOK_ACTIONS = frozenset(
 )
 
 
+class _ControlRequest(Exception):
+    """Internal signal for one matching durable control request."""
+
+
 def _sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -174,7 +178,7 @@ def run_pending_validation_points(
             artifact_ids = point["expected_artifact_ids"]
             for index, collector_value in enumerate(collectors):
                 if stop():
-                    raise InterruptedError("matching control request observed between collectors")
+                    raise _ControlRequest("matching control request observed between collectors")
                 collector = dict(collector_value)
                 artifact_id = str(artifact_ids[index])
                 artifact_base = directory / "artifacts" / artifact_id
@@ -212,7 +216,7 @@ def run_pending_validation_points(
                 collector_summaries=summaries,
             )
             completed.add(point["point_fingerprint"])
-        except InterruptedError:
+        except _ControlRequest:
             return {
                 "success": True,
                 "stop_reason": "control_request",

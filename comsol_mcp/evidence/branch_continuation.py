@@ -195,11 +195,13 @@ def _extract_candidate(
     bundle: Mapping[str, Any],
 ) -> dict[str, Any]:
     classification = decision["classification"]
-    if classification not in _VALID_CLASSIFICATIONS:
+    if not isinstance(classification, str) or classification not in _VALID_CLASSIFICATIONS:
         raise ValueError(f"spectral decision classification {classification!r} is unsupported")
     measurement_state = characterization["measurement_state"]
     if measurement_state not in ("measured", "not_measured"):
         raise ValueError("spectral characterization measurement_state is invalid")
+    if measurement_state == "measured" and classification != "interior_candidate":
+        raise ValueError("only an interior spectral candidate may be measured")
     boundary_side = None
     if classification == "boundary_high":
         boundary_ids = set(decision["boundary_row_ids"])
@@ -432,7 +434,7 @@ def _validate_state_summary(value: Any, expected_ordinal: int) -> dict[str, Any]
     normalized_artifacts["candidate_row_sha256s"] = normalized_candidate_hashes
     candidate = _exact_fields(item["candidate"], _CANDIDATE_FIELDS, f"{label}.candidate")
     classification = candidate["classification"]
-    if classification not in _VALID_CLASSIFICATIONS:
+    if not isinstance(classification, str) or classification not in _VALID_CLASSIFICATIONS:
         raise ValueError(f"{label}.candidate.classification is unsupported")
     if classification == "multi_candidate" and len(normalized_candidate_hashes) < 2:
         raise ValueError(f"{label} multi-candidate state lacks candidate row bindings")
@@ -442,6 +444,8 @@ def _validate_state_summary(value: Any, expected_ordinal: int) -> dict[str, Any]
     if measurement_state not in ("measured", "not_measured"):
         raise ValueError(f"{label}.candidate.measurement_state is invalid")
     complete = measurement_state == "measured"
+    if complete and classification != "interior_candidate":
+        raise ValueError(f"{label} only an interior candidate may be measured")
     normalized_candidate = {
         "classification": classification,
         "measurement_state": measurement_state,
@@ -726,9 +730,12 @@ def _normalize_continuation_policy(value: Any, *, states: Mapping[str, Any]) -> 
         raise ValueError(
             "continuation_policy.request_grid.point_count must be an integer from 2 to 1024"
         )
-    if request_grid["spacing_rule"] not in _REQUEST_GRID_RULES:
+    if (
+        not isinstance(request_grid["spacing_rule"], str)
+        or request_grid["spacing_rule"] not in _REQUEST_GRID_RULES
+    ):
         raise ValueError("continuation_policy.request_grid.spacing_rule is unsupported")
-    if item["stop_policy"] not in _STOP_POLICIES:
+    if not isinstance(item["stop_policy"], str) or item["stop_policy"] not in _STOP_POLICIES:
         raise ValueError("continuation_policy.stop_policy is unsupported")
     if not isinstance(item["declared_cap_reached"], bool):
         raise ValueError("continuation_policy.declared_cap_reached must be boolean")
@@ -788,7 +795,7 @@ def _normalize_continuation_policy(value: Any, *, states: Mapping[str, Any]) -> 
                 f"{evidence_label} selected candidate is not bound to its raw spectral row"
             )
         metric_name = evidence["metric_name"]
-        if metric_name not in _CONTINUITY_METRICS:
+        if not isinstance(metric_name, str) or metric_name not in _CONTINUITY_METRICS:
             raise ValueError(f"{evidence_label}.metric_name is unsupported")
         measured_value = _finite(evidence["measured_value"], f"{evidence_label}.measured_value")
         tolerance = _finite(evidence["tolerance"], f"{evidence_label}.tolerance")

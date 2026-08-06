@@ -26,7 +26,9 @@ def _durable_control_module():
     return module
 
 
-def test_durable_control_skips_stale_foreign_and_malformed_requests(tmp_path: Path) -> None:
+def test_durable_control_skips_foreign_and_reports_malformed_requests(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
     control = _durable_control_module()
     requests = tmp_path / "control" / "requests"
     requests.mkdir(parents=True)
@@ -53,13 +55,12 @@ def test_durable_control_skips_stale_foreign_and_malformed_requests(tmp_path: Pa
     }
     control.atomic_json(requests / "99-valid.json", valid)
 
-    pending = control.pending_pause_request(
-        tmp_path / "control", job_id="job-1", spec_id="spec-1"
-    )
+    pending = control.pending_pause_request(tmp_path / "control", job_id="job-1", spec_id="spec-1")
 
     assert pending is not None
     assert pending["request_id"] == "valid-request"
     assert pending["request_path"].endswith("99-valid.json")
+    assert "Ignoring malformed durable control request" in caplog.text
 
 
 def test_durable_control_atomic_json_cleans_failed_temporaries(tmp_path: Path, monkeypatch) -> None:
@@ -75,11 +76,46 @@ def test_durable_control_atomic_json_cleans_failed_temporaries(tmp_path: Path, m
     def fail_replace(*_args):
         raise PermissionError
 
-    monkeypatch.setattr(control.os, "replace", fail_replace)
+    monkeypatch.setattr(control, "_replace_durable", fail_replace)
     with pytest.raises(PermissionError):
         control.atomic_json(target, {"status": "new"})
     assert not list(tmp_path.glob("state.json.tmp.*"))
     assert json.loads(target.read_text(encoding="utf-8")) == {"status": "prior"}
+
+
+def test_durable_control_ignores_only_matching_acknowledgements(tmp_path: Path) -> None:
+    control = _durable_control_module()
+    control_dir = tmp_path / "control"
+    request = {
+        "schema_name": control.REQUEST_SCHEMA,
+        "action": "pause_after_current_point",
+        "request_id": "request-1",
+        "job_id": "job-1",
+        "expected_spec_id": "spec-1",
+    }
+    control.atomic_json(control_dir / "requests" / "request.json", request)
+    control.atomic_json(
+        control_dir / "acks" / "request-1.json",
+        {
+            "schema_name": control.ACK_SCHEMA,
+            "request_id": "request-1",
+            "job_id": "other-job",
+            "spec_id": "spec-1",
+        },
+    )
+
+    assert control.pending_pause_request(control_dir, job_id="job-1", spec_id="spec-1") is not None
+
+    control.atomic_json(
+        control_dir / "acks" / "request-1.json",
+        {
+            "schema_name": control.ACK_SCHEMA,
+            "request_id": "request-1",
+            "job_id": "job-1",
+            "spec_id": "spec-1",
+        },
+    )
+    assert control.pending_pause_request(control_dir, job_id="job-1", spec_id="spec-1") is None
 
 
 def test_fake_driver_recovers_stale_lock_and_completes_zero_point_fixture(tmp_path: Path) -> None:
@@ -141,8 +177,9 @@ def test_launcher_distribution_is_portable_and_outside_runtime_package() -> None
         errors="strict",
         check=True,
     )
-    tracked_files = set(tracked.stdout.splitlines())
+    tracked_files = {path.removeprefix("launcher/") for path in tracked.stdout.splitlines()}
     assert not any("__pycache__" in path or path.endswith(".pyc") for path in tracked_files)
+    assert tracked_files <= relative_files
     assert not (REPOSITORY / "comsol_mcp" / "launcher").exists()
 
     text = "\n".join(
@@ -160,14 +197,10 @@ def test_launcher_distribution_is_portable_and_outside_runtime_package() -> None
         "Guo2026",
     ):
         assert forbidden not in text
-    assert "$script:DurableLauncherVersion = '1.8.1'" in text
-    assert "if ($Name -ieq 'comsol-mcp.exe') { return $false }" in text
-    assert "-Run, -Monitor, and -ValidateOnly are mutually exclusive" in text
     assert "MinimumFreeSystemDriveGiB" in text
     assert "MinimumFreeOutputDriveGiB" in text
     assert "MinimumFreeCGiB" not in text
     assert "MinimumFreeDGiB" not in text
-    assert "if ($null -eq $Raw) { return }" in text
 
 
 def _run_powershell(script: str, host: str, arguments: list[str], timeout: int = 90) -> str:

@@ -73,6 +73,7 @@ def _run(
     cancel_message: str | None = None
     worker_error: Exception | None = None
     cleanup_errors: list[str] = []
+    native_monitor_errors: list[Exception] = []
     source_pins = ExitStack()
     try:
         spec = store.read_spec(job_id)
@@ -98,7 +99,17 @@ def _run(
         ):
             raise _CooperativeCancellation("Stopped before thermo-optomechanical startup")
         if state["status"] == "submitted":
-            store.update_state(job_id, "starting", event="worker_started")
+            try:
+                store.update_state(job_id, "starting", event="worker_started")
+            except ValueError:
+                current = store.read_state(job_id)
+                if current.get("status") == "cancel_requested" or cancel_request_targets_attempt(
+                    store.read_control(job_id), attempt
+                ):
+                    raise _CooperativeCancellation(
+                        "Stopped during thermo-optomechanical startup"
+                    ) from None
+                raise
         elif state["status"] != "starting":
             raise ValueError(f"Thermo-optomechanical worker cannot start from {state['status']}")
 
@@ -147,13 +158,16 @@ def _run(
             return bool(cancel_request_targets_attempt(store.read_control(job_id), attempt))
 
         def native_monitor() -> None:
-            while not cancel_stop.wait(0.05):
-                if not should_stop():
-                    continue
-                from .native_cancel_probe import request_native_cancel_once
+            try:
+                while not cancel_stop.wait(0.05):
+                    if not should_stop():
+                        continue
+                    from .native_cancel_probe import request_native_cancel_once
 
-                _record_native_cancel(store, job_id, attempt, request_native_cancel_once())
-                return
+                    _record_native_cancel(store, job_id, attempt, request_native_cancel_once())
+                    return
+            except Exception as exc:
+                native_monitor_errors.append(exc)
 
         if native_cancel_enabled:
             cancel_thread = threading.Thread(
@@ -241,6 +255,10 @@ def _run(
             native_cancel_inflight = cancel_thread.is_alive()
             if native_cancel_inflight:
                 cleanup_errors.append("native_cancel_thread:still_active_after_join_timeout")
+        if native_monitor_errors and worker_error is None:
+            worker_error = RuntimeError(
+                f"native cancel monitor failed: {type(native_monitor_errors[0]).__name__}"
+            )
         if client is not None and not native_cancel_inflight:
             try:
                 client.clear()

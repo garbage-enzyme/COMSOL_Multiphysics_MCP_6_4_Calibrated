@@ -98,9 +98,8 @@ def _identify_side_pairs(boundaries, P_val=None, bbox=None, tol=1e-12):
     if bbox is None and P_val is not None:
         bbox = (0.0, P_val, 0.0, P_val, 0.0, P_val)
     if bbox is None:
-        # Fall back to pure-normal classification (legacy behaviour, no filtering)
-        bbox = None
-    xmin, xmax, ymin, ymax, zmin, zmax = list(bbox) if bbox is not None else [None] * 6
+        raise ValueError("cell bbox or period is required for side classification")
+    xmin, xmax, ymin, ymax, zmin, zmax = list(bbox)
 
     def _on_edge(coord, edge, tol):
         if edge is None:
@@ -168,7 +167,7 @@ def _find_air_block_tag(geom) -> Optional[str]:
             size_text = str(feature.getString("size"))
             size = [float(value) for value in size_text.replace(",", " ").split()]
             if len(size) == 3 and all(value > 0 for value in size) and size[2] > 1e-7:
-                candidates.append((size[0] * size[1] * size[2], tag))
+                candidates.append((size[2], tag))
         except Exception:  # noqa: S110 - unsupported geometry features are not candidates
             pass
     if not candidates:
@@ -698,9 +697,21 @@ def register_mim_patch_tools(mcp: MCPServer) -> None:
                         entry["wl_um"] = vals[i] * 1e6
                     else:
                         entry[expr] = vals[i]
-                # Compute emissivity = 1 - R if R present
+                # Use exact absorptivity when available; otherwise preserve
+                # transmission in the energy closure before applying the
+                # opaque fallback.
                 if "ewfd.Rtotal" in entry:
-                    entry["emissivity"] = 1.0 - entry["ewfd.Rtotal"]
+                    if "ewfd.Atotal" in entry:
+                        entry["emissivity"] = entry["ewfd.Atotal"]
+                        entry["emissivity_basis"] = "evaluated_absorptivity"
+                    elif "ewfd.Ttotal" in entry:
+                        entry["emissivity"] = (
+                            1.0 - entry["ewfd.Rtotal"] - entry["ewfd.Ttotal"]
+                        )
+                        entry["emissivity_basis"] = "one_minus_reflectance_transmittance"
+                    else:
+                        entry["emissivity"] = 1.0 - entry["ewfd.Rtotal"]
+                        entry["emissivity_basis"] = "opaque_one_minus_reflectance"
                 spectral.append(entry)
 
             return {

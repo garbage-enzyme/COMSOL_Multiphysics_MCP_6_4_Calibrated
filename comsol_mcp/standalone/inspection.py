@@ -123,6 +123,8 @@ def read_campaign_terminal(campaign_directory: str | Path) -> dict[str, Any]:
         raise ValueError("standalone terminal receipt schema is unsupported")
     if value.get("status_schema_name") != STATUS_SCHEMA:
         raise ValueError("standalone terminal receipt does not bind the status schema")
+    if value.get("status_schema_version") != STATUS_SCHEMA_VERSION:
+        raise ValueError("standalone terminal receipt does not bind the status schema version")
     _validate_execution_identity(value, artifact="terminal")
     return deepcopy(value)
 
@@ -294,6 +296,19 @@ def read_campaign_results(
     if terminal is not None and terminal.get("status") == "completed":
         if terminal.get("results_sha256") != journal_sha256:
             raise ValueError("standalone terminal receipt does not bind the result journal")
+    if terminal is not None and shared_identity is not None:
+        terminal_identity = tuple(
+            str(terminal[field])
+            for field in (
+                "launcher_sha256",
+                "campaign_spec_sha256",
+                "comsol_version",
+                "comsol_compile_sha256",
+                "comsol_batch_sha256",
+            )
+        )
+        if terminal_identity != shared_identity:
+            raise ValueError("standalone terminal and result identities disagree")
     result["terminal"] = terminal
     return result
 

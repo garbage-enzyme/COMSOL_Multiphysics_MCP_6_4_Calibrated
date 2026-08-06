@@ -122,6 +122,15 @@ def _deployment_identity() -> dict:
             "error": "TypeError: deployment manifest unavailable",
         }
     source_classification = _deployment_source_classification()
+    contains_local_path = manifest.get("contains_local_path", False)
+    if not isinstance(contains_local_path, bool):
+        return {
+            "schema_name": "comsol_mcp.deployment_identity",
+            "schema_version": "1.0.0",
+            "available": False,
+            "source_classification": source_classification,
+            "error": "TypeError: deployment path classification is invalid",
+        }
     if source_classification == "source_tree":
         from comsol_mcp import __version__
 
@@ -140,7 +149,7 @@ def _deployment_identity() -> dict:
         "build_identity": get_build_identity(),
         "source_classification": source_classification,
         "catalog_contract_sha256": _catalog_contract_sha256(),
-        "contains_local_path": False,
+        "contains_local_path": contains_local_path,
     }
 
 
@@ -512,9 +521,7 @@ def get_capabilities(selection: ProfileSelection | None = None) -> dict:
             "can_start_comsol": False,
             "model_scope": "one_exact_server_model",
             "durable_execution": {
-                "available": bool(
-                    shared_gate.gate_open
-                ),
+                "available": bool(shared_gate.gate_open),
                 "execution_backend": "attached_shared_server",
                 "job_types": ["staged_sweep"],
                 "control_tools": [

@@ -10,8 +10,10 @@ from pathlib import Path
 import src.jobs.convergence_campaign_worker as worker_module
 from src.jobs.convergence_campaign import normalize_convergence_campaign_spec
 from src.jobs.convergence_campaign_rows import read_convergence_campaign_levels
+from src.jobs.convergence_campaign_runner import convergence_level_directory
 from src.jobs.convergence_campaign_worker import _run
 from src.jobs.manager import JobManager
+from src.jobs.spectral_rows import read_spectral_rows
 from src.jobs.store import JobStore, atomic_write_json, process_identity
 
 from development_kit.tests.spectral_job_fixtures import write_fake_point_audit
@@ -196,6 +198,7 @@ def test_failed_later_level_resumes_without_rerunning_completed_level(tmp_path, 
             "worker_process_create_time": identity["process_create_time"],
             "worker_command_signature": identity["command_signature"],
             "last_error": None,
+            "progress": {"completed": 0, "total": spec["maximum_total_points"]},
         },
         event="test_resume",
     )
@@ -221,6 +224,21 @@ def test_failed_later_level_resumes_without_rerunning_completed_level(tmp_path, 
         artifact_root=store.job_dir(job_id),
     )
     assert [row["level_id"] for row in rows] == ["mesh-0", "mesh-1", "mesh-2"]
+    expected_points = sum(
+        len(
+            read_spectral_rows(
+                convergence_level_directory(store.job_dir(job_id), level["ordinal"])
+                / "spectral_rows.jsonl",
+                level["spectral_job"],
+                artifact_root=convergence_level_directory(store.job_dir(job_id), level["ordinal"]),
+            )
+        )
+        for level in spec["levels"]
+    )
+    assert store.read_state(job_id)["progress"] == {
+        "completed": expected_points,
+        "total": expected_points,
+    }
 
 
 def test_cleanup_failure_prevents_false_completed_state(tmp_path, ascii_tmp_path):
@@ -245,9 +263,15 @@ def test_manager_exact_resubmission_observes_existing_campaign(
 ):
     raw = _raw_campaign(tmp_path / "sources")
     raw["convergence_policy"]["declared_cap_reached"] = False
+    preflight_calls = []
+
+    def preflight(**_kwargs):
+        preflight_calls.append(True)
+        return {"ready": True}
+
     manager = JobManager(
         ascii_tmp_path / "manager" / "jobs",
-        preflight=lambda **_kwargs: {"ready": True},
+        preflight=preflight,
         reconcile_on_start=False,
     )
     launches = []
@@ -270,6 +294,7 @@ def test_manager_exact_resubmission_observes_existing_campaign(
         "action": "observe_existing",
     }
     assert launches == [True]
+    assert preflight_calls == [True]
     assert status["convergence_progress"] == {
         "declared_levels": 3,
         "completed_levels": 0,
@@ -357,7 +382,7 @@ def test_native_cancel_timeout_blocks_client_and_lease_cleanup(
 
     def blocked_native_cancel():
         native_started.set()
-        native_release.wait(timeout=5)
+        native_release.wait()
         return {"attempted": True, "supported": False}
 
     real_record = production_worker._record_native_cancel

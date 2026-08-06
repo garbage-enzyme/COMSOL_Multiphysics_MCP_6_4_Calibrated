@@ -208,6 +208,56 @@ def test_property_set_readback_failure_restores_old_value():
     assert target.set_calls == [("label", "new"), ("label", "old")]
 
 
+def test_property_set_exception_restores_and_verifies_old_value():
+    class PartialSetFailure(FakeFeature):
+        def set(self, name, value):
+            super().set(name, value)
+            if value == "new":
+                raise RuntimeError("partial clientapi mutation")
+
+    target = PartialSetFailure({"label": "old"}, {"label": "String"})
+
+    result = set_existing_property(
+        FakeModel(target),
+        "comp1",
+        "geometry_feature",
+        "parent1/child1",
+        "label",
+        "new",
+    )
+
+    assert result == {
+        "success": False,
+        "error": "clientapi property set failed",
+        "rolled_back": True,
+    }
+    assert target.values["label"] == "old"
+    assert target.set_calls == [("label", "new"), ("label", "old")]
+
+
+def test_property_set_coercion_is_not_reported_as_success_and_rolls_back():
+    class CoercingFeature(FakeFeature):
+        def set(self, name, value):
+            self.set_calls.append((name, value))
+            self.values[name] = "coerced" if value == "new" else value
+
+    target = CoercingFeature({"label": "old"}, {"label": "String"})
+
+    result = set_existing_property(
+        FakeModel(target),
+        "comp1",
+        "geometry_feature",
+        "parent1/child1",
+        "label",
+        "new",
+    )
+
+    assert result["success"] is False
+    assert result["observed_value"] == "coerced"
+    assert result["rolled_back"] is True
+    assert target.values["label"] == "old"
+
+
 def test_property_access_rejects_unknown_targets_and_properties(feature):
     model = FakeModel(feature)
 
@@ -235,6 +285,19 @@ def test_property_access_rejects_missing_parent_tag(feature, container):
     )
 
     assert result["success"] is False
+    assert result["error"] == f"clientapi parent does not exist: {container}:missing"
+
+
+@pytest.mark.parametrize("container", ["study_step", "result_feature"])
+def test_property_access_rejects_missing_model_level_parent_tag(feature, container):
+    result = get_existing_property(
+        FakeModel(feature), "comp1", container, "missing/child1", "label"
+    )
+
+    assert result == {
+        "success": False,
+        "error": f"clientapi parent does not exist: {container}:missing",
+    }
 
 
 @pytest.mark.parametrize(

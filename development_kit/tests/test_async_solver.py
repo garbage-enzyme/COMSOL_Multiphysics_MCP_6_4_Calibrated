@@ -2,6 +2,8 @@
 
 import threading
 
+import pytest
+
 from src.async_handler.solver import AsyncSolver, SolverStatus
 
 
@@ -114,6 +116,24 @@ def test_running_state_always_has_a_started_waitable_thread():
     assert solver.wait(timeout=2) is True
 
 
+def test_worker_progress_callback_can_query_wait_without_joining_itself():
+    solver = AsyncSolver()
+    worker_wait_results = []
+
+    assert solver.start_solve(
+        FakeModel(FakeStudy()),
+        "std1",
+        progress_callback=lambda _progress, message: (
+            worker_wait_results.append(solver.wait(timeout=0))
+            if message == "Building geometry..."
+            else None
+        ),
+    )
+
+    assert solver.wait(timeout=2) is True
+    assert worker_wait_results == [False]
+
+
 def test_progress_property_returns_snapshot():
     solver = AsyncSolver()
 
@@ -199,3 +219,34 @@ def test_cancellation_request_is_reported_to_progress_callback():
 
     release.set()
     assert solver.wait(timeout=2)
+
+
+def test_thread_start_failure_leaves_solver_resettable(monkeypatch):
+    solver = AsyncSolver()
+    monkeypatch.setattr(
+        threading.Thread, "start", lambda _thread: (_ for _ in ()).throw(RuntimeError("limit"))
+    )
+
+    with pytest.raises(RuntimeError, match="limit"):
+        solver.start_solve(FakeModel(FakeStudy()), "std1")
+
+    assert solver.progress.status is SolverStatus.FAILED
+    assert solver.wait(timeout=0) is True
+    assert solver.reset() is True
+
+
+def test_progress_callback_cannot_join_its_worker_thread():
+    solver = AsyncSolver()
+    observations = []
+
+    assert solver.start_solve(
+        FakeModel(FakeStudy()),
+        "std1",
+        progress_callback=lambda _progress, message: (
+            observations.append(solver.wait(timeout=0))
+            if message == "Building geometry..."
+            else None
+        ),
+    )
+    assert solver.wait(timeout=2) is True
+    assert observations == [False]

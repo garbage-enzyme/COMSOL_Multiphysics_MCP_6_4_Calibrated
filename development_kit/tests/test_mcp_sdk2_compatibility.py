@@ -100,6 +100,8 @@ async def _legacy_stdio_exchange(protocol_version: str, runtime_root: Path) -> d
         stderr=asyncio.subprocess.PIPE,
         limit=8 * 1024 * 1024,
     )
+    assert process.stderr is not None
+    stderr_task = asyncio.create_task(process.stderr.read())
     try:
         await _write_message(
             process,
@@ -143,17 +145,21 @@ async def _legacy_stdio_exchange(protocol_version: str, runtime_root: Path) -> d
         )
         resources = await _read_response(process, 3)
     finally:
+        active_error = sys.exception()
         if process.stdin is not None:
             process.stdin.close()
             await process.stdin.wait_closed()
+        assert process.stdout is not None
+        stdout_tail_task = asyncio.create_task(process.stdout.read())
         try:
             await asyncio.wait_for(process.wait(), timeout=15)
         except TimeoutError:
             process.kill()
             await process.wait()
-            raise
-    assert process.stderr is not None
-    stderr = (await process.stderr.read()).decode(errors="replace")
+            if active_error is None:
+                raise
+        await stdout_tail_task
+    stderr = (await stderr_task).decode(errors="replace")
     assert process.returncode == 0, stderr
     assert "Traceback" not in stderr
     return {
@@ -166,7 +172,7 @@ async def _legacy_stdio_exchange(protocol_version: str, runtime_root: Path) -> d
 
 def test_mcp_dependency_and_package_identity_are_the_conservative_2_0_lane() -> None:
     assert "mcp>=2.0.0,<2.1" in _runtime_dependencies()
-    assert __version__ == "0.6.4"
+    assert __version__ == "0.6.5"
 
 
 def test_server_uses_official_mcpserver_and_preserves_wire_schema_aliases() -> None:
@@ -199,7 +205,7 @@ def test_sdk2_server_preserves_legacy_stdio_protocols(
     assert initialized["protocolVersion"] == protocol_version
     assert initialized["serverInfo"] == {
         "name": "COMSOL MCP legacy compatibility",
-        "version": "0.6.4",
+        "version": "0.6.5",
     }
     assert initialized["instructions"] == SERVER_INSTRUCTIONS
 

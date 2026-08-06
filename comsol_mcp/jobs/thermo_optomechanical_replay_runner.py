@@ -143,6 +143,7 @@ def run_thermo_optomechanical_replay(
     rows = read_thermo_optomechanical_stage_rows(journal, spec, artifact_root=root)
     skipped = len(rows)
     executed = 0
+    recovered = 0
     while len(rows) < len(THERMO_OPTOMECHANICAL_STAGES):
         ordinal = len(rows)
         stage_id = THERMO_OPTOMECHANICAL_STAGES[ordinal]
@@ -162,6 +163,7 @@ def run_thermo_optomechanical_replay(
                 "stop_reason": f"before_stage_{action}",
                 "executed_this_attempt": executed,
                 "skipped_complete": skipped,
+                "recovered_from_evidence": recovered,
             }
         stage_dir = root / stage_id
         evidence_path = stage_dir / "evidence.json"
@@ -169,6 +171,7 @@ def run_thermo_optomechanical_replay(
             row = append_thermo_optomechanical_stage_row(
                 journal, spec, attempt=attempt, artifact_root=root
             )
+            recovered += 1
         else:
             if fault_hook is not None:
                 fault_hook("before_stage", {"stage_id": stage_id, "ordinal": ordinal})
@@ -200,6 +203,7 @@ def run_thermo_optomechanical_replay(
         "stop_reason": "thermo_optomechanical_replay_complete",
         "executed_this_attempt": executed,
         "skipped_complete": skipped,
+        "recovered_from_evidence": recovered,
         "summary": summary,
         "summary_artifact": _descriptor(summary_path, root),
     }

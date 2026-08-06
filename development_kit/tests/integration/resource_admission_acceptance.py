@@ -6,11 +6,11 @@ import csv
 import hashlib
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
 import time
 import traceback
+from pathlib import Path
 
 ROOT = Path(__file__).parents[3]
 if str(ROOT) not in sys.path:
@@ -79,21 +79,25 @@ def _run_builder_process(command: list[str]) -> dict[str, object]:
     creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(
         subprocess, "CREATE_NEW_PROCESS_GROUP", 0
     )
-    process = subprocess.Popen(
-        command,
-        cwd=ROOT,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        creationflags=creation_flags,
-    )
-    containment = OwnedJobObject.assign(process.pid)
+    process = None
+    containment = None
     timed_out = False
     communication_errors = []
     stdout = ""
     stderr = ""
     try:
-        stdout, stderr = process.communicate(timeout=120)
+        process = subprocess.Popen(
+            command,
+            cwd=ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            creationflags=creation_flags,
+        )
+        containment = OwnedJobObject.assign(process.pid)
+        stdout, stderr = process.communicate(
+            timeout=float(_resource_policy()["wall_time_budget_seconds"]) + 60.0
+        )
     except subprocess.TimeoutExpired as exc:
         timed_out = True
         stdout = _timeout_text(exc.stdout)
@@ -101,8 +105,17 @@ def _run_builder_process(command: list[str]) -> dict[str, object]:
     except (OSError, ValueError, subprocess.SubprocessError) as exc:
         communication_errors.append(type(exc).__name__)
     finally:
-        cleanup = _terminate_builder_tree(process, containment)
-    if timed_out or communication_errors:
+        cleanup = (
+            _terminate_builder_tree(process, containment)
+            if process is not None
+            else {
+                "passed": False,
+                "root_absent": True,
+                "job_object_contained": False,
+                "errors": [{"stage": "process_start", "type": "unavailable"}],
+            }
+        )
+    if process is not None and (timed_out or communication_errors):
         try:
             tail_stdout, tail_stderr = process.communicate(timeout=30)
             stdout += tail_stdout or ""
@@ -110,11 +123,12 @@ def _run_builder_process(command: list[str]) -> dict[str, object]:
         except (OSError, ValueError, subprocess.SubprocessError) as exc:
             communication_errors.append(type(exc).__name__)
     return {
-        "success": not timed_out
+        "success": process is not None
+        and not timed_out
         and process.returncode == 0
         and cleanup["passed"] is True
         and not communication_errors,
-        "returncode": process.returncode,
+        "returncode": process.returncode if process is not None else None,
         "timed_out": timed_out,
         "communication_errors": communication_errors,
         "stdout_tail": stdout[-2000:],
@@ -128,8 +142,7 @@ def _resource_journal_acceptance(journal: list[dict]) -> dict[str, object]:
     admissions = [entry for entry in journal if entry.get("entry_type") == "admission"]
     expected_stages = ["pre_solve", "post_solve"]
     checks = {
-        "telemetry_stages_complete": [entry.get("stage") for entry in telemetry]
-        == expected_stages,
+        "telemetry_stages_complete": [entry.get("stage") for entry in telemetry] == expected_stages,
         "admission_stages_complete": [entry.get("stage") for entry in admissions]
         == expected_stages,
         "admissions_allow": bool(admissions)
@@ -188,9 +201,7 @@ def _build_source(runtime: Path, source_path: Path, mesh_receipt: Path) -> None:
         block.set("pos", jpype.JArray(jpype.JDouble)([0.0, 0.0, 0.0]))
         geometry.run()
 
-        electrostatics = component.physics().create(
-            "es", "Electrostatics", str(geometry.getSDim())
-        )
+        electrostatics = component.physics().create("es", "Electrostatics", str(geometry.getSDim()))
         conservation = electrostatics.feature().create(
             "ccn1", "ChargeConservation", int(geometry.getSDim())
         )
@@ -349,12 +360,11 @@ def _run_gate() -> None:
             result["builder_lease_recovery"] = SolverOwnership(
                 runtime, owner="resource-admission-builder-recovery"
             ).recover_stale()
-            raise RuntimeError(
-                "resource admission source builder failed: "
-                + str(builder)[-2000:]
-            )
+            raise RuntimeError("resource admission source builder failed: " + str(builder)[-2000:])
         mesh_receipt = json.loads(mesh_receipt_path.read_text(encoding="utf-8"))
-        if not mesh_receipt.get("success") or not mesh_receipt.get("lease_release", {}).get("success"):
+        if not mesh_receipt.get("success") or not mesh_receipt.get("lease_release", {}).get(
+            "success"
+        ):
             raise AssertionError(f"resource admission mesh receipt failed: {mesh_receipt}")
         source_hash = _sha256(source_path)
         source_stat = source_path.stat()
@@ -388,9 +398,7 @@ def _run_gate() -> None:
                 f"tail={manager.tail(job_id, 50)}"
             )
         job_dir = manager.store.job_dir(job_id)
-        with (job_dir / "results.csv").open(
-            newline="", encoding="utf-8-sig"
-        ) as handle:
+        with (job_dir / "results.csv").open(newline="", encoding="utf-8-sig") as handle:
             rows = list(csv.DictReader(handle))
         if len(rows) != 1 or rows[0].get("status") != "ok":
             raise AssertionError(f"resource admission result row mismatch: {rows}")
@@ -430,9 +438,16 @@ def _run_gate() -> None:
         result["error"] = str(exc)
         result["traceback"] = traceback.format_exc(limit=10)
         if manager is not None and job_id is not None:
-            result["post_submit_recovery"] = _recover_submitted_job(
-                manager, job_id, runtime
-            )
+            result["post_submit_recovery"] = _recover_submitted_job(manager, job_id, runtime)
+        try:
+            result["failure_lease_recovery"] = SolverOwnership(
+                runtime, owner="resource-admission-failure-recovery"
+            ).recover_stale()
+        except Exception as recovery_exc:
+            result["failure_lease_recovery"] = {
+                "success": False,
+                "error_type": type(recovery_exc).__name__,
+            }
     finally:
         result_path.write_text(
             json.dumps(result, indent=2, ensure_ascii=False) + "\n",

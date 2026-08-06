@@ -44,9 +44,7 @@ def _fingerprint(value: object) -> str:
 
 
 def _mapping(value: object, label: str) -> dict[str, Any]:
-    if not isinstance(value, Mapping) or not all(
-        isinstance(key, str) for key in value
-    ):
+    if not isinstance(value, Mapping) or not all(isinstance(key, str) for key in value):
         raise ValueError(f"{label} must be an object with string keys")
     return dict(value)
 
@@ -60,9 +58,7 @@ def _exact_fields(
     unknown = sorted(set(value) - allowed)
     missing = sorted(required - set(value))
     if unknown or missing:
-        raise ValueError(
-            f"{label} has unsupported fields {unknown} or missing fields {missing}"
-        )
+        raise ValueError(f"{label} has unsupported fields {unknown} or missing fields {missing}")
 
 
 def _text(value: object, label: str, *, identifier: bool = False) -> str:
@@ -105,12 +101,7 @@ def _finite(value: object, label: str, *, positive: bool = False) -> float:
 
 
 def _positive_integer(value: object, label: str, maximum: int) -> int:
-    if (
-        isinstance(value, bool)
-        or not isinstance(value, int)
-        or value <= 0
-        or value > maximum
-    ):
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0 or value > maximum:
         raise ValueError(f"{label} must be an integer between 1 and {maximum}")
     return value
 
@@ -187,21 +178,15 @@ def _normalize_source(value: object, label: str) -> dict[str, Any]:
             ),
             "job_id": _text(raw["job_id"], f"{label}.job_id", identifier=True),
             "point_id": _text(raw["point_id"], f"{label}.point_id", identifier=True),
-            "point_fingerprint": _sha256(
-                raw["point_fingerprint"], f"{label}.point_fingerprint"
-            ),
-            "artifact_id": _text(
-                raw["artifact_id"], f"{label}.artifact_id", identifier=True
-            ),
+            "point_fingerprint": _sha256(raw["point_fingerprint"], f"{label}.point_fingerprint"),
+            "artifact_id": _text(raw["artifact_id"], f"{label}.artifact_id", identifier=True),
             "component_tag": _tag(raw["component_tag"], f"{label}.component_tag"),
             "dataset_name": _text(raw["dataset_name"], f"{label}.dataset_name"),
             "dataset_tag": _tag(raw["dataset_tag"], f"{label}.dataset_tag"),
             "solution_tag": _tag(raw["solution_tag"], f"{label}.solution_tag"),
         }
     else:
-        raise ValueError(
-            f"{label}.kind must be existing_dataset or validation_matrix_point"
-        )
+        raise ValueError(f"{label}.kind must be existing_dataset or validation_matrix_point")
     result["source_fingerprint"] = _fingerprint(result)
     return result
 
@@ -249,9 +234,7 @@ def _normalize_view(value: object, index: int, render_png: bool) -> dict[str, An
     _exact_fields(raw, allowed, allowed, label)
     result = {
         "view_id": _text(raw["view_id"], f"{label}.view_id", identifier=True),
-        "wavelength_m": _finite(
-            raw["wavelength_m"], f"{label}.wavelength_m", positive=True
-        ),
+        "wavelength_m": _finite(raw["wavelength_m"], f"{label}.wavelength_m", positive=True),
         "source": _normalize_source(raw["source"], f"{label}.source"),
         "outputs": _normalize_outputs(raw["outputs"], f"{label}.outputs", render_png),
     }
@@ -277,9 +260,7 @@ def normalize_field_evidence_request(value: object) -> dict[str, Any]:
 
     expressions = raw["expressions"]
     if not isinstance(expressions, list) or not 1 <= len(expressions) <= MAX_FIELD_EXPRESSIONS:
-        raise ValueError(
-            f"expressions must contain 1..{MAX_FIELD_EXPRESSIONS} entries"
-        )
+        raise ValueError(f"expressions must contain 1..{MAX_FIELD_EXPRESSIONS} entries")
     normalized_expressions: list[dict[str, str]] = []
     for index, value_item in enumerate(expressions):
         label = f"expressions[{index}]"
@@ -307,7 +288,10 @@ def normalize_field_evidence_request(value: object) -> dict[str, Any]:
         render_raw["shared_color_limits"], bool
     ):
         raise ValueError("render.png and render.shared_color_limits must be boolean")
-    if render_raw["color_scale"] not in {"linear", "log"}:
+    if not isinstance(render_raw["color_scale"], str) or render_raw["color_scale"] not in {
+        "linear",
+        "log",
+    }:
         raise ValueError("render.color_scale must be linear or log")
     render = {
         "png": render_raw["png"],
@@ -318,10 +302,7 @@ def normalize_field_evidence_request(value: object) -> dict[str, Any]:
     views_raw = raw["views"]
     if not isinstance(views_raw, list) or not 1 <= len(views_raw) <= MAX_FIELD_VIEWS:
         raise ValueError(f"views must contain 1..{MAX_FIELD_VIEWS} entries")
-    views = [
-        _normalize_view(item, index, render["png"])
-        for index, item in enumerate(views_raw)
-    ]
+    views = [_normalize_view(item, index, render["png"]) for index, item in enumerate(views_raw)]
     view_ids = [item["view_id"] for item in views]
     if len(view_ids) != len(set(view_ids)):
         raise ValueError("views must have unique view_id values")
@@ -353,9 +334,7 @@ def normalize_field_evidence_request(value: object) -> dict[str, Any]:
     slice_spec = {
         "axis": slice_raw["axis"],
         "value": _finite(slice_raw["value"], "slice.value"),
-        "tolerance": _finite(
-            slice_raw["tolerance"], "slice.tolerance", positive=True
-        ),
+        "tolerance": _finite(slice_raw["tolerance"], "slice.tolerance", positive=True),
         "unit": _text(slice_raw["unit"], "slice.unit"),
     }
 
@@ -389,8 +368,7 @@ def normalize_field_evidence_request(value: object) -> dict[str, Any]:
     if not isinstance(shape, list) or len(shape) != 2:
         raise ValueError("grid.shape must contain exactly two positive integers")
     normalized_shape = [
-        _positive_integer(item, f"grid.shape[{index}]", 8192)
-        for index, item in enumerate(shape)
+        _positive_integer(item, f"grid.shape[{index}]", 8192) for index, item in enumerate(shape)
     ]
     if grid_raw["interpolation"] not in {"linear", "nearest"}:
         raise ValueError("grid.interpolation must be linear or nearest")
@@ -430,9 +408,7 @@ def normalize_field_evidence_request(value: object) -> dict[str, Any]:
         "schema_name": FIELD_EVIDENCE_REQUEST_SCHEMA,
         "schema_version": FIELD_EVIDENCE_SCHEMA_VERSION,
         "request_id": _text(raw["request_id"], "request_id", identifier=True),
-        "configuration_sha256": _sha256(
-            raw["configuration_sha256"], "configuration_sha256"
-        ),
+        "configuration_sha256": _sha256(raw["configuration_sha256"], "configuration_sha256"),
         "expressions": normalized_expressions,
         "views": views,
         "slice": slice_spec,
@@ -445,9 +421,7 @@ def normalize_field_evidence_request(value: object) -> dict[str, Any]:
     }
     result["request_fingerprint"] = _fingerprint(result)
     if len(_canonical_bytes(result)) > MAX_FIELD_REQUEST_BYTES:
-        raise ValueError(
-            f"field-evidence request exceeds {MAX_FIELD_REQUEST_BYTES} bytes"
-        )
+        raise ValueError(f"field-evidence request exceeds {MAX_FIELD_REQUEST_BYTES} bytes")
     return deepcopy(result)
 
 
@@ -485,12 +459,8 @@ def validate_field_evidence_request(value: object) -> dict[str, Any]:
     raw_views: list[dict[str, Any]] = []
     for index, value_item in enumerate(views):
         view = _mapping(value_item, f"field_evidence_request.views[{index}]")
-        source = _mapping(
-            view.get("source"), f"field_evidence_request.views[{index}].source"
-        )
-        outputs = _mapping(
-            view.get("outputs"), f"field_evidence_request.views[{index}].outputs"
-        )
+        source = _mapping(view.get("source"), f"field_evidence_request.views[{index}].source")
+        outputs = _mapping(view.get("outputs"), f"field_evidence_request.views[{index}].outputs")
         raw_source = dict(source)
         raw_source.pop("source_fingerprint", None)
         raw_outputs = dict(outputs)

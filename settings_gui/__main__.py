@@ -60,7 +60,11 @@ def _settings_target(raw: str | None, environment: MutableMapping[str, str]) -> 
         raise SettingsError("the settings parent directory must already exist")
     if path_has_linked_component(target.parent):
         raise SettingsError("the settings path must not contain a link or junction")
-    if target.exists() and (not target.is_file() or target.is_symlink()):
+    if os.path.lexists(target) and (
+        target.is_symlink() or getattr(target, "is_junction", lambda: False)()
+    ):
+        raise SettingsError("--settings-path must not identify a link or junction")
+    if target.exists() and not target.is_file():
         raise SettingsError("--settings-path must identify a regular file")
     return target, True
 
@@ -145,7 +149,11 @@ def run_cli(
     )
     if arguments.replace_existing_shortcut and not arguments.create_desktop_shortcut:
         return 2
-    if action_requested and arguments.settings_path is None:
+    if (
+        action_requested
+        and arguments.settings_path is None
+        and arguments.settings_path_token is None
+    ):
         return 2
     try:
         raw_settings_path = arguments.settings_path
@@ -155,9 +163,12 @@ def run_cli(
     except OSError, RuntimeError, SettingsError, ValueError:
         return 2
     if arguments.validate_only:
-        receipt = _validation_receipt(target, override=override)
+        try:
+            receipt = _validation_receipt(target, override=override)
+        except OSError, RuntimeError, ValueError:
+            receipt = _action_failure(target)
         _emit(receipt, output)
-        return 0 if receipt["ready"] else 2
+        return 0 if receipt.get("ready") is True else 2
     if arguments.create_desktop_shortcut:
         try:
             receipt = create_desktop_shortcut(

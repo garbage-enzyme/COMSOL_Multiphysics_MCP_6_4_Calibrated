@@ -20,12 +20,14 @@ if __package__:
         load_planning_code_allowlist,
         verify_planning_code_texts,
     )
+    from .quality_gate import validate_windows_gate_root
 else:
     from planning_code_gate import (  # type: ignore[no-redef]
         TEXT_SUFFIXES,
         load_planning_code_allowlist,
         verify_planning_code_texts,
     )
+    from quality_gate import validate_windows_gate_root  # type: ignore[no-redef]
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -79,9 +81,9 @@ def _default_artifact_root() -> Path:
     configured = os.environ.get("COMSOL_MCP_RELEASE_ROOT")
     if configured:
         return Path(configured)
-    if os.name == "nt" and Path("D:/").exists():
-        return Path("D:/comsol_mcp_release")
-    return Path(tempfile.gettempdir()) / "comsol_mcp_release"
+    if os.name == "nt" and Path("D:/mcp_tests").exists():
+        return Path("D:/mcp_tests/rgate")
+    return Path(tempfile.gettempdir()) / "rgate"
 
 
 def _venv_python(venv_dir: Path) -> Path:
@@ -134,7 +136,14 @@ def _normalized_archive_path(
 ) -> str:
     raw = name.replace("\\", "/")
     pure = PurePosixPath(raw)
-    if pure.is_absolute() or PureWindowsPath(raw).is_absolute() or ".." in pure.parts:
+    windows = PureWindowsPath(raw)
+    if (
+        pure.is_absolute()
+        or windows.is_absolute()
+        or windows.drive
+        or any(":" in part for part in pure.parts)
+        or ".." in pure.parts
+    ):
         raise RuntimeError(f"distribution contains unsafe path: {name}")
     parts = list(pure.parts)
     if sdist_root is not None:
@@ -159,7 +168,7 @@ def _normalized_archive_members(
 
 
 def _distribution_files(path: Path) -> tuple[list[str], dict[str, bytes]]:
-    if path.suffix == ".whl":
+    if path.suffix.casefold() == ".whl":
         with zipfile.ZipFile(path) as archive:
             infos = archive.infolist()
             members = [info.filename for info in infos]
@@ -205,7 +214,7 @@ def _distribution_files(path: Path) -> tuple[list[str], dict[str, bytes]]:
 
 def _distribution_artifacts(dist_dir: Path) -> list[Path]:
     artifacts = sorted(path for path in dist_dir.iterdir() if path.is_file())
-    wheels = [path for path in artifacts if path.suffix == ".whl"]
+    wheels = [path for path in artifacts if path.suffix.casefold() == ".whl"]
     sdists = [path for path in artifacts if path.name.endswith(".tar.gz")]
     if len(wheels) != 1 or len(sdists) != 1 or len(artifacts) != 2:
         raise RuntimeError(
@@ -282,7 +291,7 @@ def main() -> int:
     if dirty and not args.allow_dirty:
         raise SystemExit("release gate requires a clean git tree")
 
-    artifact_root = args.artifact_root.resolve()
+    artifact_root = validate_windows_gate_root(args.artifact_root, label="release artifact root")
     artifact_root.mkdir(parents=True, exist_ok=True)
     run_root = Path(tempfile.mkdtemp(prefix="gate-", dir=artifact_root))
     dist_dir = run_root / "dist"
@@ -316,7 +325,8 @@ def main() -> int:
         venv_dir = run_root / "venv"
         _run([sys.executable, "-m", "venv", str(venv_dir)])
         python = _venv_python(venv_dir)
-        wheels = [path for path in distribution_paths if path.suffix == ".whl"]
+        wheels = [path for path in distribution_paths if path.suffix.casefold() == ".whl"]
+        environment = _sanitized_probe_environment()
         if dependency_lock is not None:
             _run(
                 [
@@ -329,17 +339,22 @@ def main() -> int:
                     str(dependency_lock),
                 ],
                 cwd=run_root,
+                env=environment,
             )
             _run(
                 [str(python), "-m", "pip", "install", "--no-deps", str(wheels[0])],
                 cwd=run_root,
+                env=environment,
             )
         else:
-            _run([str(python), "-m", "pip", "install", str(wheels[0])], cwd=run_root)
-        _run([str(python), "-m", "pip", "check"], cwd=run_root)
+            _run(
+                [str(python), "-m", "pip", "install", str(wheels[0])],
+                cwd=run_root,
+                env=environment,
+            )
+        _run([str(python), "-m", "pip", "check"], cwd=run_root, env=environment)
         probe_workdir = run_root / "probe_workdir"
         probe_workdir.mkdir()
-        environment = _sanitized_probe_environment()
         _run(
             [
                 str(python),

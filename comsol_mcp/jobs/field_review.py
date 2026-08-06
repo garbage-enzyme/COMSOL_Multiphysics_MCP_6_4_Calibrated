@@ -60,6 +60,7 @@ def _portable_path_identifier(value: object) -> bool:
     return (
         isinstance(value, str)
         and _PATH_IDENTIFIER.fullmatch(value) is not None
+        and not value.endswith(".")
         and value.split(".", 1)[0].casefold() not in _WINDOWS_DEVICE_NAMES
     )
 

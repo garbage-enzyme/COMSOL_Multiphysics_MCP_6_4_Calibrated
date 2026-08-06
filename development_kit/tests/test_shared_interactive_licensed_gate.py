@@ -141,8 +141,8 @@ def test_shared_interactive_saved_mode_binds_exact_source_path():
         "expected_file_path": str(Path(_ascii_working_model())),
     }
     assert result["spec"]["saved_model_parameter"] == {
-        "name": "saved_model_agent_value",
-        "value": "31[mm]",
+        "name": gate.SAVED_MODEL_PARAMETER,
+        "value": gate.SAVED_MODEL_PARAMETER_VALUE,
     }
     assert result["spec"]["immutable_source_path"] == str(Path(_ascii_source()))
 
@@ -187,6 +187,21 @@ def test_saved_readback_mode_uses_distinct_source_and_working_paths():
     assert result["spec"]["selector"]["expected_file_path"] == str(working)
     assert source != working
     assert os.path.normcase(str(source)) != os.path.normcase(str(working))
+
+
+def test_saved_model_readback_requires_exact_shared_edit_value(monkeypatch):
+    monkeypatch.setattr(
+        gate,
+        "_parameter_expressions",
+        lambda _model: {
+            gate.MCP_PARAMETER: gate.MCP_PARAMETER_VALUE,
+            gate.DESKTOP_PARAMETER: "29[mm]",
+            gate.SAVED_MODEL_PARAMETER: "wrong",
+        },
+    )
+
+    with pytest.raises(RuntimeError, match="shared edit parameter"):
+        gate._saved_model_readback(object(), "29[mm]")
 
 
 def test_saved_mode_rejects_lexically_distinct_aliases_of_one_path():

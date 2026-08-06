@@ -70,6 +70,10 @@ class SettingsGuiInstanceLock:
             raise OSError(ctypes.get_last_error(), "CreateMutexW failed")
         self._handle = handle
         wait = self._kernel32.WaitForSingleObject(handle, 0)
+        if wait == 0xFFFFFFFF:
+            error = ctypes.get_last_error()
+            self.close()
+            raise OSError(error, "WaitForSingleObject failed")
         if wait not in (0x00000000, 0x00000080):
             self.close()
             raise GuiAlreadyRunning("settings GUI is already running")
@@ -114,6 +118,23 @@ def _track_process(process: Any) -> None:
             return
 
     threading.Thread(target=wait, name="settings-gui-reaper", daemon=True).start()
+
+
+def _terminate_failed_launch(process: Any) -> None:
+    """Bound cleanup of the exact GUI child when startup never completes."""
+    try:
+        if process.poll() is not None:
+            return
+        process.terminate()
+        process.wait(timeout=1.0)
+    except subprocess.TimeoutExpired:
+        try:
+            process.kill()
+            process.wait(timeout=1.0)
+        except OSError, subprocess.SubprocessError:
+            pass
+    except AttributeError, OSError, subprocess.SubprocessError:
+        pass
 
 
 def _result(state: str) -> dict[str, Any]:
@@ -228,6 +249,7 @@ def launch_settings_gui(
             "settings_conflict",
         }:
             return _result(child_state)
+        _terminate_failed_launch(process)
         return _result("launch_failed")
     except OSError, RuntimeError, ValueError:
         return _result("launch_failed")
@@ -235,7 +257,7 @@ def launch_settings_gui(
         if handshake is not None:
             try:
                 handshake.unlink()
-            except FileNotFoundError:
+            except OSError:
                 pass
 
 

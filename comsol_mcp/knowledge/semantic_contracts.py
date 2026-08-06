@@ -272,6 +272,8 @@ def validate_evaluation_set(
 
 def validate_model_manifest(payload: Mapping[str, Any]) -> dict[str, Any]:
     """Validate the immutable offline embedding-model identity contract."""
+    if not isinstance(payload, Mapping):
+        raise ValueError("model manifest must be an object")
     required = {"schema_version", "model_id", "revision", "model_path", "model_sha256", "dimension"}
     missing = sorted(required - set(payload))
     if missing:
@@ -295,6 +297,8 @@ def validate_model_manifest(payload: Mapping[str, Any]) -> dict[str, Any]:
 
 def validate_index_manifest(payload: Mapping[str, Any]) -> dict[str, Any]:
     """Validate the versioned read-only semantic-index identity contract."""
+    if not isinstance(payload, Mapping):
+        raise ValueError("index manifest must be an object")
     required = {
         "schema_version",
         "build_id",
@@ -371,7 +375,7 @@ def evaluate_semantic_continuation(baseline: Mapping[str, Any]) -> dict[str, Any
             "recall_at_5": recall_at_5,
             "misses_at_5": misses_at_5,
         },
-        "thresholds": SEMANTIC_CONTINUATION_GATE,
+        "thresholds": dict(SEMANTIC_CONTINUATION_GATE),
         "reason": (
             "material_lexical_gap_demonstrated"
             if passed

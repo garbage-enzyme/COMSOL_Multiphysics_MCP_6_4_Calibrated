@@ -157,11 +157,11 @@ def preview_material_expression(
     harmonic_convention: str,
     imaginary_sign: str,
     formulation: str,
-    wavelength_parameter: str = "wl",
+    wavelength_parameter: str | None = "wl",
     parameter_names: dict[str, str] | None = None,
     parameter_units: dict[str, str] | None = None,
     frequency_source: str = "wavelength_parameter",
-    physics_frequency_expression: str = "ewfd.freq",
+    physics_frequency_expression: str | None = "ewfd.freq",
     fixed_angular_frequency: float | None = None,
     fixed_angular_frequency_unit: str | None = None,
 ) -> dict[str, Any]:
@@ -182,9 +182,19 @@ def preview_material_expression(
         "fixed_angular_frequency",
     }:
         raise ValueError("frequency_source is unsupported")
-    wavelength_parameter = _validate_name(wavelength_parameter, "wavelength_parameter")
-    physics_frequency_expression = _validate_name(
-        physics_frequency_expression, "physics_frequency_expression", dotted=True
+    wavelength_parameter = (
+        _validate_name(wavelength_parameter, "wavelength_parameter")
+        if frequency_source == "wavelength_parameter"
+        else None
+    )
+    physics_frequency_expression = (
+        _validate_name(
+            physics_frequency_expression,
+            "physics_frequency_expression",
+            dotted=True,
+        )
+        if frequency_source == "physics_frequency"
+        else None
     )
 
     required = _PARAMETERS[model_kind]
@@ -301,7 +311,10 @@ def preview_material_expression(
                 "message": "The material expression does not vary with wavelength.",
             }
         )
-        if fixed_angular_frequency_unit is None:
+        if (
+            not isinstance(fixed_angular_frequency_unit, str)
+            or not fixed_angular_frequency_unit.strip()
+        ):
             warnings.append({"code": "missing_fixed_frequency_unit", "assumed_unit": "1/s"})
     elif frequency_source == "physics_frequency":
         omega_expression = f"(2*pi*{physics_frequency_expression})"

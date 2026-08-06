@@ -12,6 +12,10 @@ if ([string]::IsNullOrWhiteSpace($TestRoot)) {
 }
 $Child = Join-Path $PSScriptRoot 'Test_TerminalHoldChild.ps1'
 New-Item -ItemType Directory -Path $TestRoot -Force | Out-Null
+$KnownArtifacts = @('monitor.ready', 'host.stdout.log', 'host.stderr.log', 'terminal_hold_receipt.json')
+foreach ($Name in $KnownArtifacts) {
+    Remove-Item -LiteralPath (Join-Path $TestRoot $Name) -Force -ErrorAction SilentlyContinue
+}
 $Stdout = Join-Path $TestRoot 'host.stdout.log'
 $Stderr = Join-Path $TestRoot 'host.stderr.log'
 $Ready = Join-Path $TestRoot 'monitor.ready'
@@ -27,17 +31,18 @@ try {
         $Process.Refresh()
         if ($Process.HasExited) { throw 'Successful terminal monitor exited before rendering.' }
         $ReadyPublished = Test-Path -LiteralPath $Ready -PathType Leaf
-        try { $Output = if (Test-Path -LiteralPath $Stdout) { Get-Content -LiteralPath $Stdout -Raw -ErrorAction Stop } else { '' } }
-        catch [System.IO.IOException] { $Output = '' }
-        catch [System.UnauthorizedAccessException] { $Output = '' }
+    try { if (Test-Path -LiteralPath $Stdout) { $Output = Get-Content -LiteralPath $Stdout -Raw -ErrorAction Stop } }
+    catch [System.IO.IOException] { }
+    catch [System.UnauthorizedAccessException] { }
         if ($ReadyPublished -and $Output -match 'COMPLETED SUCCESSFULLY') { break }
         Start-Sleep -Milliseconds 250
     }
     $Process.Refresh()
     try { $Output = if (Test-Path -LiteralPath $Stdout) { Get-Content -LiteralPath $Stdout -Raw -ErrorAction Stop } else { '' } }
-    catch { $Output = '' }
-    try { $ErrorOutput = if (Test-Path -LiteralPath $Stderr) { Get-Content -LiteralPath $Stderr -Raw -ErrorAction Stop } else { '' } }
-    catch { $ErrorOutput = '' }
+    catch { }
+    $ErrorOutput = ''
+    try { if (Test-Path -LiteralPath $Stderr) { $ErrorOutput = Get-Content -LiteralPath $Stderr -Raw -ErrorAction Stop } }
+    catch { }
     if ($Process.HasExited) { throw 'Successful terminal monitor did not remain latched.' }
     if (-not (Test-Path -LiteralPath $Ready -PathType Leaf) -or $Output -notmatch 'COMPLETED SUCCESSFULLY') {
         throw "Successful terminal readiness and banner did not render: $Output"
@@ -53,6 +58,16 @@ finally {
             Stop-Process -Id $Process.Id -Force -ErrorAction SilentlyContinue
             try { $Process.WaitForExit() } catch { }
         }
+    }
+}
+Import-Module (Join-Path (Split-Path -Parent $PSScriptRoot) 'powershell\DurableLauncher.psm1') -Force
+$Driver = Join-Path $PSScriptRoot 'fake_durable_driver.py'
+if (@(Get-DurableDriverProcesses -DriverPath $Driver).Count -ne 0) {
+    throw 'Terminal hold left a durable driver process behind.'
+}
+foreach ($Owned in @('launcher_owner.json', 'run.lock')) {
+    if (Test-Path -LiteralPath (Join-Path $TestRoot $Owned)) {
+        throw "Terminal hold left an ownership artifact: $Owned"
     }
 }
 $Receipt = [ordered]@{

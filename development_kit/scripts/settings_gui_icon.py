@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import math
+import statistics
 from pathlib import Path
 
 from PIL import Image
@@ -16,7 +17,7 @@ BACKGROUND_TOLERANCE = 24
 def _key_background(image: Image.Image, background: tuple[int, int, int, int]) -> Image.Image:
     keyed = Image.new("RGBA", image.size)
     output = []
-    has_source_transparency = image.getchannel("A").getextrema()[0] < 255
+    has_source_transparency = background[3] < 255
     for red, green, blue, alpha in image.get_flattened_data():
         if has_source_transparency:
             output.append((0, 0, 0, 0) if alpha == 0 else (red, green, blue, alpha))
@@ -41,7 +42,19 @@ def _prepared_square(source: Path, *, padding_fraction: float) -> Image.Image:
         raise ValueError("padding_fraction must be at least 0 and less than 0.25")
     with Image.open(source) as opened:
         image = opened.convert("RGBA")
-    image = _key_background(image, image.getpixel((0, 0)))
+    patch = max(1, min(image.size) // 16)
+    samples = []
+    for left, top in (
+        (0, 0),
+        (image.width - patch, 0),
+        (0, image.height - patch),
+        (image.width - patch, image.height - patch),
+    ):
+        samples.extend(image.crop((left, top, left + patch, top + patch)).getdata())
+    background = tuple(
+        round(statistics.median(pixel[index] for pixel in samples)) for index in range(4)
+    )
+    image = _key_background(image, background)
     content_box = image.getchannel("A").getbbox()
     if content_box is None:
         raise ValueError("source image contains no logo distinct from its corner background")

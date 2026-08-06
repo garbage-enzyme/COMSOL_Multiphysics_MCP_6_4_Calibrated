@@ -32,6 +32,7 @@ _ATTACHED_IDENTITY_FIELDS = frozenset(
         "listener_observed_at_epoch",
     }
 )
+_ATTACHED_IDENTITY_DERIVED_FIELDS = frozenset({"identity_sha256", "ownership"})
 _MODEL_SELECTOR_FIELDS = frozenset(
     {"tag", "expected_label", "expected_file_path", "expected_unsaved"}
 )
@@ -58,7 +59,10 @@ def _positive_integer(value: Any, label: str) -> int:
 def _positive_finite(value: Any, label: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{label} must be positive and finite")
-    normalized = float(value)
+    try:
+        normalized = float(value)
+    except OverflowError as exc:
+        raise ValueError(f"{label} must be positive and finite") from exc
     if not math.isfinite(normalized) or normalized <= 0:
         raise ValueError(f"{label} must be positive and finite")
     return normalized
@@ -106,11 +110,20 @@ class SharedModelSelector:
 
 def normalize_attached_server_identity(value: Any) -> AttachedServerIdentity:
     """Normalize fresh process evidence without treating it as owned state."""
-    raw = _mapping(value, _ATTACHED_IDENTITY_FIELDS, "attached server identity")
+    raw = _mapping(
+        value,
+        _ATTACHED_IDENTITY_FIELDS | _ATTACHED_IDENTITY_DERIVED_FIELDS,
+        "attached server identity",
+    )
     missing = sorted(_ATTACHED_IDENTITY_FIELDS - set(raw))
     if missing:
         raise ValueError(f"attached server identity is missing required fields: {missing}")
-    endpoint = normalize_shared_server_endpoint(raw["endpoint"])
+    endpoint_value = raw["endpoint"]
+    if isinstance(endpoint_value, Mapping) and "scope" in endpoint_value:
+        if endpoint_value["scope"] != LISTENER_BIND_SCOPE_LOOPBACK:
+            raise ValueError("attached server endpoint scope is invalid")
+        endpoint_value = {key: item for key, item in endpoint_value.items() if key != "scope"}
+    endpoint = normalize_shared_server_endpoint(endpoint_value)
     signature = raw["server_command_signature"]
     if not isinstance(signature, str) or not _HEX64.fullmatch(signature):
         raise ValueError("server command signature must be exactly 64 hexadecimal characters")
@@ -131,7 +144,7 @@ def normalize_attached_server_identity(value: Any) -> AttachedServerIdentity:
         "ownership": "external_user_owned",
     }
     observed_at = _positive_finite(raw["listener_observed_at_epoch"], "listener observation time")
-    return AttachedServerIdentity(
+    normalized = AttachedServerIdentity(
         endpoint=endpoint,
         server_pid=identity_body["server_pid"],
         server_process_create_time=identity_body["server_process_create_time"],
@@ -140,6 +153,11 @@ def normalize_attached_server_identity(value: Any) -> AttachedServerIdentity:
         listener_observed_at_epoch=observed_at,
         identity_sha256=canonical_sha256_v1(identity_body),
     )
+    if "ownership" in raw and raw["ownership"] != normalized.ownership:
+        raise ValueError("attached server identity ownership is invalid")
+    if "identity_sha256" in raw and raw["identity_sha256"] != normalized.identity_sha256:
+        raise ValueError("attached server identity SHA-256 does not match its canonical content")
+    return normalized
 
 
 def _normalize_confirmed_model_path(value: Any) -> str:

@@ -4,6 +4,7 @@ import _winapi
 import hashlib
 import inspect
 import json
+import shutil
 from copy import deepcopy
 from pathlib import Path
 
@@ -27,7 +28,7 @@ def test_field_review_uses_the_isolated_renderer_timeout_default():
         .parameters["render_timeout_seconds"]
         .default
     )
-    assert default == field_review_module.DEFAULT_RENDER_TIMEOUT_SECONDS == 60.0
+    assert default == field_review_module.DEFAULT_RENDER_TIMEOUT_SECONDS == 120.0
 
 
 def _sha256(path: Path) -> str:
@@ -303,7 +304,11 @@ def test_pair_assembler_rejects_junctioned_publication_parent(tmp_path):
             )
         assert list(outside.iterdir()) == []
     finally:
-        visual_root.rmdir()
+        try:
+            visual_root.rmdir()
+        except OSError:
+            pass
+        shutil.rmtree(outside, ignore_errors=True)
 
 
 def test_pair_assembler_rejects_tampered_wrapper_before_rendering(tmp_path, monkeypatch):
@@ -407,6 +412,20 @@ def test_pair_assembler_rejects_windows_device_bundle_name(tmp_path):
             job_directory=directory,
             point_ids=["off:res", "target"],
             bundle_id="CON.json",
+            quantity_name="abs_ex",
+            quantity_unit="V/m",
+            coordinate_unit="um",
+        )
+
+
+def test_pair_assembler_rejects_trailing_dot_bundle_name(tmp_path):
+    directory = _create_job(tmp_path)
+
+    with pytest.raises(ValueError, match="portable identifier"):
+        assemble_validation_matrix_field_review(
+            job_directory=directory,
+            point_ids=["off:res", "target"],
+            bundle_id="review.",
             quantity_name="abs_ex",
             quantity_unit="V/m",
             coordinate_unit="um",

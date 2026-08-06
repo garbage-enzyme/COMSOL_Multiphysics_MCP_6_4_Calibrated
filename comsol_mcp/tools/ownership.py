@@ -1221,10 +1221,11 @@ class SolverOwnership:
             missing_ok=False,
             expected_bytes=expected,
         )
+        lease_retained = not removed and reason not in {"missing", "changed"}
         return {
             "success": False,
-            "acquired": not removed,
-            "lease_retained": not removed,
+            "acquired": lease_retained,
+            "lease_retained": lease_retained,
             "error": (
                 "Solver collision appeared during lease publication."
                 if removed

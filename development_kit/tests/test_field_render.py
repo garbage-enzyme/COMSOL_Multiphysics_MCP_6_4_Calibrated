@@ -11,6 +11,10 @@ import src.evidence.field_render as field_render_module
 from src.evidence.field_render import render_field_png_bundle
 
 
+def test_field_renderer_default_timeout_covers_hosted_cold_start():
+    assert field_render_module.DEFAULT_RENDER_TIMEOUT_SECONDS == 120.0
+
+
 def _array(path: Path, offset: float = 0.0, *, negative: bool = False):
     x = np.linspace(-1.0, 1.0, 16)
     y = np.linspace(-2.0, 2.0, 12)
@@ -58,6 +62,21 @@ def test_isolated_single_field_png_is_hash_bound_and_unlabeled(tmp_path):
     assert result["semantic_mode_label"] == "not_assigned"
     assert png.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
     assert descriptor["sha256"] == hashlib.sha256(png.read_bytes()).hexdigest()
+
+
+def test_renderer_rejects_malformed_array_digest_before_worker_start(tmp_path):
+    array = tmp_path / "invalid-hash.npz"
+    _array(array)
+    with pytest.raises(ValueError, match="64-character hex digest"):
+        render_field_png_bundle(
+            views=[_view("target", array, "not-a-digest")],
+            quantity_name="abs_ex",
+            quantity_unit="V/m",
+            coordinate_unit="um",
+            color_scale="linear",
+            shared_color_limits=False,
+            output_root=tmp_path / "invalid-hash-output",
+        )
 
 
 def test_renderer_uses_windows_safe_filename_for_portable_view_id(tmp_path):
@@ -378,8 +397,9 @@ def test_worker_timeout_stays_bounded_and_removes_partial_png(tmp_path, monkeypa
         },
         {"success": True, "views": [{"view_id": "target", "color_limits": [0]}]},
         {"success": True, "views": [{"view_id": "target", "color_limits": [0, float("inf")]}]},
+        {"success": True, "views": [{"view_id": "target", "color_limits": [0, 10**400]}]},
     ],
-    ids=["non_object", "wrong_view", "extra_field", "short_limits", "nonfinite"],
+    ids=["non_object", "wrong_view", "extra_field", "short_limits", "nonfinite", "overflow"],
 )
 def test_renderer_rejects_unbounded_or_mismatched_worker_responses(tmp_path, monkeypatch, response):
     array = tmp_path / "response.npz"

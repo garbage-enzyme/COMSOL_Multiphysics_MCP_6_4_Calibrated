@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import inspect
 import json
@@ -11,7 +12,6 @@ from copy import deepcopy
 from pathlib import Path
 
 import pytest
-import src.evidence.spectral_characterization as spectral_characterization_module
 from mcp.server.mcpserver import MCPServer
 from src.evidence.spectral_characterization import (
     build_spectral_analysis_decision,
@@ -25,7 +25,13 @@ from src.evidence.spectral_characterization import (
 )
 from src.tools.spectral_characterization import register_spectral_characterization_tools
 
+from development_kit.tests.mcp_test_support import decode_tool_result
+
 CONFIGURATION_SHA256 = "a" * 64
+
+
+def _call_tool(server: MCPServer, name: str, arguments: dict) -> dict:
+    return decode_tool_result(asyncio.run(server.call_tool(name, arguments)))
 
 
 def _row(index: int, wavelength: float, absorption: float) -> dict:
@@ -564,9 +570,7 @@ def test_derived_spectral_arithmetic_rejects_finite_input_overflow():
 
 
 def test_measurement_normalizer_return_annotation_matches_its_mixed_values():
-    annotation = inspect.signature(
-        spectral_characterization_module._normalize_measurement_configuration
-    ).return_annotation
+    annotation = inspect.signature(normalize_spectral_measurement_configuration).return_annotation
     assert annotation == "dict[str, Any]"
 
 
@@ -589,12 +593,14 @@ def test_public_tool_returns_three_separate_hash_bound_artifacts():
     bundle = _bundle([0.1, 0.5, 0.9, 0.5, 0.1])
     server = MCPServer("spectral-characterization-test")
     register_spectral_characterization_tools(server)
-    tool = server._tool_manager._tools["spectral_characterize"]
-
-    result = tool.fn(
-        spectral_bundle=bundle,
-        analysis_policy=_policy(),
-        measurement_configuration=_measurement(),
+    result = _call_tool(
+        server,
+        "spectral_characterize",
+        {
+            "spectral_bundle": bundle,
+            "analysis_policy": _policy(),
+            "measurement_configuration": _measurement(),
+        },
     )
 
     assert result["success"] is True
@@ -625,7 +631,7 @@ def test_public_tool_requires_exactly_one_spectral_input_form(mode):
     if mode == "both":
         arguments.update(bundle_spec=_bundle_spec(bundle), spectral_bundle=bundle)
 
-    result = server._tool_manager._tools["spectral_characterize"].fn(**arguments)
+    result = _call_tool(server, "spectral_characterize", arguments)
 
     assert result["success"] is False
     assert result["reason_code"] == "spectral_input_rejected"
@@ -645,10 +651,14 @@ def test_public_tool_classifies_nonfinite_rows_without_serializing_invalid_numbe
     server = MCPServer("spectral-nonfinite-test")
     register_spectral_characterization_tools(server)
 
-    result = server._tool_manager._tools["spectral_characterize"].fn(
-        bundle_spec=spec,
-        analysis_policy=_policy(),
-        measurement_configuration=_measurement(),
+    result = _call_tool(
+        server,
+        "spectral_characterize",
+        {
+            "bundle_spec": spec,
+            "analysis_policy": _policy(),
+            "measurement_configuration": _measurement(),
+        },
     )
 
     assert result["success"] is False
@@ -663,6 +673,41 @@ def test_public_tool_classifies_nonfinite_rows_without_serializing_invalid_numbe
     assert "NaN" not in json.dumps(result)
 
 
+@pytest.mark.parametrize("tool_name", ["spectral_characterize", "spectral_model_compare"])
+def test_public_tool_classifies_oversized_integer_as_nonfinite(tool_name):
+    bundle = _bundle([0.1, 0.5, 0.9, 0.5, 0.1])
+    spec = _bundle_spec(bundle)
+    spec["rows"][2]["A"] = 10**400
+    server = MCPServer("spectral-overflow-test")
+    register_spectral_characterization_tools(server)
+    arguments = {
+        "bundle_spec": spec,
+        "analysis_policy": _policy(),
+        (
+            "measurement_configuration"
+            if tool_name == "spectral_characterize"
+            else "comparison_configuration"
+        ): _measurement() if tool_name == "spectral_characterize" else {},
+    }
+
+    result = _call_tool(server, tool_name, arguments)
+
+    assert result["success"] is False
+    assert result["classification"] == "non_finite"
+    assert result["invalid_rows"][0]["row_id"] == "point-002"
+
+
+def test_public_spectral_schema_rejects_non_object_bundle_specs_before_adapter():
+    server = MCPServer("spectral-object-schema-test")
+    register_spectral_characterization_tools(server)
+    schemas = {tool.name: tool.input_schema for tool in asyncio.run(server.list_tools())}
+
+    for tool_name in ("spectral_characterize", "spectral_model_compare"):
+        bundle_schema = schemas[tool_name]["properties"]["bundle_spec"]
+        accepted_types = {branch.get("type") for branch in bundle_schema["anyOf"]}
+        assert accepted_types == {"object", "null"}
+
+
 def test_existing_durable_bundle_bytes_and_timestamp_remain_unchanged(tmp_path):
     bundle = _bundle([0.1, 0.5, 0.9, 0.5, 0.1])
     path = tmp_path / "durable_spectrum.json"
@@ -673,10 +718,14 @@ def test_existing_durable_bundle_bytes_and_timestamp_remain_unchanged(tmp_path):
     server = MCPServer("spectral-immutable-input-test")
     register_spectral_characterization_tools(server)
 
-    result = server._tool_manager._tools["spectral_characterize"].fn(
-        spectral_bundle=loaded,
-        analysis_policy=_policy(),
-        measurement_configuration=_measurement(),
+    result = _call_tool(
+        server,
+        "spectral_characterize",
+        {
+            "spectral_bundle": loaded,
+            "analysis_policy": _policy(),
+            "measurement_configuration": _measurement(),
+        },
     )
 
     after_stat = path.stat()
@@ -689,24 +738,36 @@ def test_existing_durable_bundle_bytes_and_timestamp_remain_unchanged(tmp_path):
 def test_public_tool_requires_exactly_one_input_form_and_import_is_solver_free():
     server = MCPServer("spectral-input-form-test")
     register_spectral_characterization_tools(server)
-    tool = server._tool_manager._tools["spectral_characterize"]
-    rejected = tool.fn(analysis_policy=_policy(), measurement_configuration=_measurement())
+    rejected = _call_tool(
+        server,
+        "spectral_characterize",
+        {
+            "analysis_policy": _policy(),
+            "measurement_configuration": _measurement(),
+        },
+    )
 
     assert rejected["success"] is False
     assert rejected["classification"] == "invalid_input"
     assert "exactly one" in rejected["error"]
 
-    code = """
+    bundle = _bundle([0.1, 0.5, 0.9, 0.5, 0.1])
+    code = f"""
+import asyncio
+import json
 import mph
 mph.Client = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError('Client called'))
 from mcp.server.mcpserver import MCPServer
 from src.tools.spectral_characterization import register_spectral_characterization_tools
+from development_kit.tests.mcp_test_support import decode_tool_result
 server = MCPServer('solver-free-spectral-subprocess')
 register_spectral_characterization_tools(server)
-result = server._tool_manager._tools['spectral_characterize'].fn(
-    analysis_policy={}, measurement_configuration={}
-)
-assert result['success'] is False
+result = decode_tool_result(asyncio.run(server.call_tool('spectral_characterize', {{
+    'spectral_bundle': json.loads({json.dumps(bundle)!r}),
+    'analysis_policy': json.loads({json.dumps(_policy())!r}),
+    'measurement_configuration': json.loads({json.dumps(_measurement())!r}),
+}})))
+assert result['success'] is True
 assert result['solver_started'] is False
 """
     completed = subprocess.run(
@@ -714,7 +775,7 @@ assert result['solver_started'] is False
         cwd=Path(__file__).parents[2],
         capture_output=True,
         text=True,
-        timeout=20,
+        timeout=30,
         check=False,
     )
     assert completed.returncode == 0, completed.stderr

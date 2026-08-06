@@ -359,8 +359,8 @@ def _saved_model_readback(model: Any, expected_desktop_value: str) -> dict[str, 
         raise RuntimeError("saved model does not preserve the MCP-written parameter")
     if parameters.get(DESKTOP_PARAMETER) != expected_desktop_value:
         raise RuntimeError("saved model does not preserve the Desktop-edited parameter")
-    if SAVED_MODEL_PARAMETER not in parameters:
-        raise RuntimeError("saved working model is missing the shared edit parameter")
+    if parameters.get(SAVED_MODEL_PARAMETER) != SAVED_MODEL_PARAMETER_VALUE:
+        raise RuntimeError("saved working model does not preserve the shared edit parameter")
     return {
         "parameters": {
             MCP_PARAMETER: parameters[MCP_PARAMETER],

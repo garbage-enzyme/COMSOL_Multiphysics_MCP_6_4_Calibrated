@@ -72,9 +72,12 @@ def read_handshake(path: Path) -> dict[str, Any] | None:
         value = json.loads(path.read_bytes().decode("ascii"))
     except OSError, UnicodeDecodeError, json.JSONDecodeError, RecursionError:
         return None
-    if not isinstance(value, dict) or value.get("state") not in _STATES:
+    if not isinstance(value, dict):
         return None
-    if value != handshake_payload(value["state"]):
+    state = value.get("state")
+    if not isinstance(state, str) or state not in _STATES:
+        return None
+    if value != handshake_payload(state):
         return None
     return value
 
@@ -106,7 +109,7 @@ def publish_handshake(
             os.fsync(descriptor)
         finally:
             os.close(descriptor)
-        if read_handshake(path) is None:
+        if read_handshake(path) != handshake_payload("pending"):
             temporary.unlink(missing_ok=True)
             return False
         os.replace(temporary, path)
@@ -117,7 +120,7 @@ def publish_handshake(
         if temporary is not None:
             try:
                 temporary.unlink()
-            except FileNotFoundError:
+            except OSError:
                 pass
 
 

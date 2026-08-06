@@ -14,6 +14,7 @@ from _mim_safety import (
     require_interface_boundaries,
     require_named_domains,
     require_port_pair,
+    require_passive_reflection,
     require_required_properties,
     require_spectrum,
     save_required,
@@ -136,7 +137,7 @@ mesh = comp.mesh().create('mesh1')
 sz = mesh.feature().create('size1','Size')
 sz.set('hmax', float(H_air/10)); sz.set('hmaxactive', True)
 ftri = mesh.feature().create('ftri1','FreeTri'); ftri.selection().set(p2b)
-sw = mesh.feature().create('sw1','Sweep'); sw.selection().set([1,2])
+sw = mesh.feature().create('sw1','Sweep'); sw.selection().set(al2_domains + air_domains)
 mesh.run(); print('Mesh:', mesh.getNumElem(), flush=True)
 try: print('shelllist after mesh=', ltr.getString('shelllist'), flush=True)
 except Exception: pass
@@ -147,7 +148,9 @@ step = study.feature('step1'); bind_wavelength_step(step, 'wl')
 jm.param().set('wl', f'{wl0}[m]')
 print('Solving wl=5um eps=2.1...', flush=True)
 t0=time.time(); jm.study('std1').run(); t1=time.time()
-R = require_spectrum(m.evaluate('ewfd.Rtotal'), [wl0], 'Rtotal')[0]
+R = require_passive_reflection(
+    require_spectrum(m.evaluate('ewfd.Rtotal'), [wl0], 'Rtotal'), 'Rtotal'
+)[0]
 print(f'Solve OK {t1-t0:.2f}s Rtotal={R:.6f}', flush=True)
 
 output_dir = recipe_output_dir()

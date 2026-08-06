@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import src.jobs.validation_matrix as validation_matrix_module
 from src.jobs.validation_matrix import (
     MAX_VALIDATION_MATRIX_POINTS,
     normalize_validation_matrix_spec,
@@ -140,6 +141,42 @@ def test_expected_artifact_ids_participate_in_matrix_identity(tmp_path):
 
     assert changed["points"][0]["point_fingerprint"] == baseline["points"][0]["point_fingerprint"]
     assert changed["spec_fingerprint"] != baseline["spec_fingerprint"]
+
+
+def test_collector_name_and_json_recursion_fail_with_validation_errors(tmp_path, monkeypatch):
+    source = tmp_path / "fixture.mph"
+    source.write_bytes(b"model")
+    unhashable = _point()
+    unhashable["collectors"][0]["name"] = []
+    with pytest.raises(ValueError, match="supported validation collector"):
+        normalize_validation_matrix_spec(_spec(source, points=[unhashable]))
+
+    def raise_recursion(*_args, **_kwargs):
+        raise RecursionError("injected encoder recursion")
+
+    monkeypatch.setattr(validation_matrix_module.json, "dumps", raise_recursion)
+    with pytest.raises(ValueError, match="finite JSON values"):
+        normalize_validation_matrix_spec(_spec(source))
+
+
+def test_spec_byte_limit_covers_the_returned_fingerprint(tmp_path, monkeypatch):
+    source = tmp_path / "fixture.mph"
+    source.write_bytes(b"model")
+    raw = _spec(source)
+    normalized = normalize_validation_matrix_spec(raw)
+    final_size = len(
+        json.dumps(
+            normalized,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    )
+    monkeypatch.setattr(validation_matrix_module, "MAX_SPEC_BYTES", final_size - 1)
+
+    with pytest.raises(ValueError, match="specification exceeds"):
+        normalize_validation_matrix_spec(raw)
 
 
 @pytest.mark.parametrize(

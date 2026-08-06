@@ -10,6 +10,56 @@ $ErrorActionPreference = 'Stop'
 
 $script:PythonProbe = 'import sys; from comsol_mcp.settings_gui_launcher import launch_settings_gui; ready = sys.version_info[:2] == (3, 14) and callable(launch_settings_gui); print(''COMSOL_MCP_SETTINGS_GUI_PYTHON_READY'') if ready else sys.exit(2)'
 $script:LaunchCode = 'import json; from comsol_mcp.settings_gui_launcher import launch_settings_gui; result = launch_settings_gui(); print(json.dumps(result, sort_keys=True, separators=('','', '':''))); raise SystemExit(0 if result.get(''success'') is True else 2)'
+$script:PythonProbeTimeoutMilliseconds = 5000
+
+function Invoke-BoundedPython {
+    param(
+        [Parameter(Mandatory = $true)][string]$Executable,
+        [string[]]$PrefixArguments = @(),
+        [Parameter(Mandatory = $true)][string]$Code
+    )
+
+    $quotedCode = '"' + $Code.Replace('"', '\"') + '"'
+    $arguments = (@($PrefixArguments) + @('-c', $quotedCode)) -join ' '
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    if ([System.IO.Path]::GetExtension($Executable) -in @('.cmd', '.bat')) {
+        $startInfo.FileName = $env:ComSpec
+        $escapedExecutable = '"' + $Executable.Replace('"', '""') + '"'
+        $startInfo.Arguments = '/D /S /C "' + $escapedExecutable + ' ' + $arguments + '"'
+    }
+    else {
+        $startInfo.FileName = $Executable
+        $startInfo.Arguments = $arguments
+    }
+    $startInfo.WorkingDirectory = $PSScriptRoot
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $process = [System.Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    try {
+        if (-not $process.Start()) { return $null }
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        if (-not $process.WaitForExit($script:PythonProbeTimeoutMilliseconds)) {
+            try { $process.Kill() }
+            catch { }
+            try { $process.WaitForExit() }
+            catch { }
+            return $null
+        }
+        $process.WaitForExit()
+        return [pscustomobject]@{
+            ExitCode = $process.ExitCode
+            Stdout = $stdoutTask.GetAwaiter().GetResult()
+            Stderr = $stderrTask.GetAwaiter().GetResult()
+        }
+    }
+    finally {
+        $process.Dispose()
+    }
+}
 
 function ConvertTo-ConsolePython {
     param([Parameter(Mandatory = $true)][string]$Candidate)
@@ -31,24 +81,18 @@ function Test-ComsolMcpPython {
     if (-not (Test-Path -LiteralPath $Candidate -PathType Leaf)) {
         return $false
     }
-    Push-Location -LiteralPath $PSScriptRoot
     try {
-        $previousErrorAction = $ErrorActionPreference
-        $ErrorActionPreference = 'Continue'
-        $probeOutput = & $Candidate -c $script:PythonProbe 2>$null
-        $probeExitCode = $LASTEXITCODE
-        $ErrorActionPreference = $previousErrorAction
-        if ($probeExitCode -ne 0) {
-            Write-Verbose ("Python probe failed: {0}" -f ($probeOutput -join "`n"))
+        $probe = Invoke-BoundedPython -Executable $Candidate -Code $script:PythonProbe
+        if ($null -eq $probe -or $probe.ExitCode -ne 0) {
+            if ($null -ne $probe) {
+                Write-Verbose ("Python probe failed: {0}" -f $probe.Stdout)
+            }
             return $false
         }
-        return (($probeOutput -join "`n").Trim() -eq 'COMSOL_MCP_SETTINGS_GUI_PYTHON_READY')
+        return ($probe.Stdout.Trim() -eq 'COMSOL_MCP_SETTINGS_GUI_PYTHON_READY')
     }
     catch {
         return $false
-    }
-    finally {
-        Pop-Location
     }
 }
 
@@ -84,9 +128,9 @@ function Get-ComsolMcpPython {
     $pyCommand = Get-Command 'py.exe' -ErrorAction SilentlyContinue
     if ($null -ne $pyCommand) {
         try {
-            $pyExecutable = & $pyCommand.Source -3.14 -c 'import sys; print(sys.executable)' 2>$null
-            if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($pyExecutable)) {
-                [void]$candidates.Add(($pyExecutable -join "`n").Trim())
+            $pyProbe = Invoke-BoundedPython -Executable $pyCommand.Source -PrefixArguments @('-3.14') -Code 'import sys; print(sys.executable)'
+            if ($null -ne $pyProbe -and $pyProbe.ExitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace($pyProbe.Stdout)) {
+                [void]$candidates.Add($pyProbe.Stdout.Trim())
             }
         }
         catch {
@@ -114,7 +158,10 @@ $previousSettingsPath = $env:COMSOL_MCP_SETTINGS_PATH
 try {
     $settingsPathOverride = $settingsPathWasPresent
     if (-not [string]::IsNullOrWhiteSpace($SettingsPath)) {
-        if (-not [System.IO.Path]::IsPathRooted($SettingsPath)) {
+        $settingsRoot = [System.IO.Path]::GetPathRoot($SettingsPath)
+        $hasDriveRoot = $settingsRoot -match '^[A-Za-z]:[\\/]$'
+        $hasUncRoot = $settingsRoot -match '^\\\\[^\\]+\\[^\\]+'
+        if (-not ($hasDriveRoot -or $hasUncRoot)) {
             throw '-SettingsPath must be an absolute path.'
         }
         $resolvedSettingsPath = [System.IO.Path]::GetFullPath($SettingsPath)
@@ -149,11 +196,19 @@ try {
     finally {
         Pop-Location
     }
-    $jsonLines = @($launchResult | Where-Object { $_ -is [string] -and $_.Trim() -match '^\{.*\}$' })
+    $jsonLines = @(
+        foreach ($line in $launchResult) {
+            if ($line -isnot [string] -or $line.Length -gt 65536) { continue }
+            try { $candidateResult = $line | ConvertFrom-Json -ErrorAction Stop }
+            catch { continue }
+            if ($null -ne $candidateResult.PSObject.Properties['success'] -and $candidateResult.success -is [bool]) {
+                $line
+            }
+        }
+    )
     if ($jsonLines.Count -ne 1) {
         throw 'The Settings GUI launcher did not emit one bounded JSON result.'
     }
-    $null = $jsonLines[0] | ConvertFrom-Json
     $jsonLines[0] | Write-Output
     exit $launchExitCode
 }

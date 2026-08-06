@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
+from pathlib import Path
 
 import pytest
+import src.jobs.convergence_campaign_rows as rows_module
 from src.jobs.convergence_campaign import normalize_convergence_campaign_spec
 from src.jobs.convergence_campaign_rows import (
     append_convergence_campaign_level,
@@ -66,18 +69,69 @@ def test_completed_levels_append_in_declared_order_and_replay_exact_artifacts(tm
     }
 
 
+def test_first_journal_publication_fsyncs_its_directory(tmp_path, monkeypatch):
+    spec = normalize_convergence_campaign_spec(_raw_campaign(tmp_path / "sources"))
+    root = tmp_path / "campaign"
+    journal = root / "convergence_levels.jsonl"
+    calls = []
+    monkeypatch.setattr(rows_module, "fsync_directory", lambda path: calls.append(Path(path)))
+
+    append_convergence_campaign_level(
+        journal,
+        spec,
+        attempt=1,
+        level_dir=_complete_level(spec, root, 0),
+        artifact_root=root,
+    )
+    append_convergence_campaign_level(
+        journal,
+        spec,
+        attempt=1,
+        level_dir=_complete_level(spec, root, 1),
+        artifact_root=root,
+    )
+
+    assert calls == [root]
+
+
+def test_concurrent_level_append_has_one_process_locked_winner(tmp_path):
+    spec = normalize_convergence_campaign_spec(_raw_campaign(tmp_path / "sources"))
+    root = tmp_path / "campaign"
+    journal = root / "convergence_levels.jsonl"
+    first_dir = _complete_level(spec, root, 0)
+
+    def append_once():
+        try:
+            return append_convergence_campaign_level(
+                journal,
+                spec,
+                attempt=1,
+                level_dir=first_dir,
+                artifact_root=root,
+            )
+        except ValueError:
+            return None
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(lambda _index: append_once(), range(2)))
+
+    assert sum(item is not None for item in results) == 1
+    assert len(read_convergence_campaign_levels(journal, spec, artifact_root=root)) == 1
+
+
 def test_duplicate_append_and_out_of_order_level_directory_fail_closed(tmp_path):
     spec = normalize_convergence_campaign_spec(_raw_campaign(tmp_path / "sources"))
     root = tmp_path / "campaign"
     journal = root / "convergence_levels.jsonl"
     first_dir = _complete_level(spec, root, 0)
-    append_convergence_campaign_level(
+    first = append_convergence_campaign_level(
         journal, spec, attempt=1, level_dir=first_dir, artifact_root=root
     )
     with pytest.raises(ValueError, match="spectral|stage|summary"):
         append_convergence_campaign_level(
             journal, spec, attempt=1, level_dir=first_dir, artifact_root=root
         )
+    assert read_convergence_campaign_levels(journal, spec, artifact_root=root) == [first]
     second_dir = _complete_level(spec, root, 1)
     second = append_convergence_campaign_level(
         journal, spec, attempt=1, level_dir=second_dir, artifact_root=root

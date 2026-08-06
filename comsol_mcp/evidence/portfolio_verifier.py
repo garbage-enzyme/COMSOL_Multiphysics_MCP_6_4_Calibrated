@@ -145,7 +145,11 @@ def _pointer_value(document: Any, tokens: list[str], label: str) -> Any:
                 raise ValueError(f"{label} does not exist in the cited artifact")
             current = current[token]
         elif isinstance(current, list):
-            if not token.isdigit() or (len(token) > 1 and token.startswith("0")):
+            if (
+                not token.isascii()
+                or not token.isdigit()
+                or (len(token) > 1 and token.startswith("0"))
+            ):
                 raise ValueError(f"{label} contains an invalid array index")
             index = int(token)
             if index >= len(current):
@@ -164,7 +168,7 @@ def _validate_claim(value: Any, case_index: int, claim_index: int) -> dict[str, 
         raise ValueError(f"{label} fields are incomplete")
     _identifier(claim["claim_id"], f"{label}.claim_id")
     dimension = claim["dimension"]
-    if dimension not in CLAIM_DIMENSIONS:
+    if not isinstance(dimension, str) or dimension not in CLAIM_DIMENSIONS:
         raise ValueError(f"{label}.dimension must be one of {sorted(CLAIM_DIMENSIONS)}")
     canonical_json_bytes(claim["value"])
     citation = _mapping(claim["citation"], f"{label}.citation")
@@ -260,12 +264,15 @@ def _read_cited_artifact(
     root: Path,
     artifact: Mapping[str, Any],
 ) -> dict[str, Any]:
-    path = (root / artifact["relative_path"]).resolve(strict=True)
+    candidate = root / artifact["relative_path"]
+    if candidate.is_symlink():
+        raise ValueError("cited artifact must be a regular non-symlink file")
+    path = candidate.resolve(strict=True)
     try:
         path.relative_to(root)
     except ValueError as exc:
         raise ValueError("cited artifact path escapes its artifact root") from exc
-    if not path.is_file() or path.is_symlink():
+    if not path.is_file():
         raise ValueError("cited artifact must be a regular non-symlink file")
     payload = path.read_bytes()
     if len(payload) != artifact["byte_count"]:

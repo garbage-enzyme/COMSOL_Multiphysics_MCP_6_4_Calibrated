@@ -22,6 +22,10 @@ def create_mesh_sequence(
         return {"success": False, "error": "element_type must be nonempty"}
     if not isinstance(build, bool):
         return {"success": False, "error": "build must be boolean"}
+    if component_name is not None and (
+        not isinstance(component_name, str) or not component_name.strip()
+    ):
+        return {"success": False, "error": "component_name must be nonempty"}
     from .physics import _first_component
 
     jm = model.java
@@ -47,10 +51,15 @@ def create_mesh_sequence(
         if build:
             mesh_seq.run()
             result["built"] = True
-            if hasattr(mesh_seq, "getNumElem"):
-                result["num_elements"] = int(mesh_seq.getNumElem())
-            if hasattr(mesh_seq, "getNumVertex"):
-                result["num_vertices"] = int(mesh_seq.getNumVertex())
+            try:
+                if hasattr(mesh_seq, "getNumElem"):
+                    result["num_elements"] = int(mesh_seq.getNumElem())
+                if hasattr(mesh_seq, "getNumVertex"):
+                    result["num_vertices"] = int(mesh_seq.getNumVertex())
+                result["statistics_complete"] = True
+            except Exception as exc:
+                result["statistics_complete"] = False
+                result["statistics_error_type"] = type(exc).__name__
         return result
     except Exception:
         if created:
@@ -68,6 +77,10 @@ def get_mesh_info(
     component_name: Optional[str] = None,
 ) -> dict:
     """Return mesh metadata through the COMSOL 6.4 clientapi."""
+    if component_name is not None and (
+        not isinstance(component_name, str) or not component_name.strip()
+    ):
+        return {"success": False, "error": "component_name must be nonempty"}
     from .physics import _first_component
 
     jm = model.java
@@ -91,8 +104,13 @@ def get_mesh_info(
                 if str(mesh_list.get(tag).label()) == mesh_name:
                     target_tag = tag
                     break
-            except Exception:
-                pass
+            except Exception as exc:
+                return {
+                    "success": False,
+                    "error": "Mesh label lookup failed.",
+                    "mesh_tag": tag,
+                    "error_type": type(exc).__name__,
+                }
     if target_tag is None:
         return {
             "success": False,

@@ -7,6 +7,7 @@ from copy import deepcopy
 from pathlib import Path
 
 import pytest
+import src.jobs.convergence_campaign as campaign_module
 from src.jobs.convergence_campaign import (
     current_convergence_campaign_driver_identity,
     normalize_convergence_campaign_spec,
@@ -46,7 +47,10 @@ def _raw_spectral(tmp_path, index: int) -> dict:
         key: deepcopy(item) for key, item in normalized.items() if key in _SPECTRAL_INPUT_FIELDS
     }
     value["source_model_relative_identity"] = f"fixtures/level-{index}.mph"
-    value["configuration_sha256"] = f"{index + 1:x}" * 64
+    configuration_payload = repr(
+        (value["source_model_relative_identity"], value["parameter_state"])
+    ).encode("utf-8")
+    value["configuration_sha256"] = hashlib.sha256(configuration_payload).hexdigest()
     return value
 
 
@@ -101,6 +105,12 @@ def test_exact_model_ladder_is_canonical_bounded_and_hash_bound(tmp_path):
         hashlib.sha256(Path(level["spectral_job"]["source_model_path"]).read_bytes()).hexdigest()
         for level in raw["levels"]
     ]
+    expected_relative_identities = [
+        level["spectral_job"]["source_model_relative_identity"] for level in raw["levels"]
+    ]
+    expected_configuration_hashes = [
+        level["spectral_job"]["configuration_sha256"] for level in raw["levels"]
+    ]
     first = normalize_convergence_campaign_spec(raw)
     second = normalize_convergence_campaign_spec(deepcopy(raw))
 
@@ -114,6 +124,12 @@ def test_exact_model_ladder_is_canonical_bounded_and_hash_bound(tmp_path):
     assert [
         item["spectral_job"]["source_model_sha256"] for item in first["levels"]
     ] == expected_source_hashes
+    assert [
+        item["spectral_job"]["source_model_relative_identity"] for item in first["levels"]
+    ] == expected_relative_identities
+    assert [
+        item["spectral_job"]["configuration_sha256"] for item in first["levels"]
+    ] == expected_configuration_hashes
 
 
 @pytest.mark.parametrize("ordinal", [True, 1.0])
@@ -187,6 +203,31 @@ def test_duplicate_exact_model_bytes_and_configuration_identities_fail_closed(tm
         "configuration_sha256"
     ]
     with pytest.raises(ValueError, match="configuration identities"):
+        normalize_convergence_campaign_spec(raw)
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["governing_pairs", "relative_denominator"],
+)
+def test_campaign_policy_discriminators_require_strings(tmp_path, field):
+    raw = _raw_campaign(tmp_path)
+    raw["convergence_policy"][field] = []
+
+    with pytest.raises(ValueError, match="unsupported"):
+        normalize_convergence_campaign_spec(raw)
+
+
+def test_campaign_size_bound_includes_the_returned_fingerprint(tmp_path, monkeypatch):
+    raw = _raw_campaign(tmp_path)
+    normalized = normalize_convergence_campaign_spec(raw)
+    monkeypatch.setattr(
+        campaign_module,
+        "MAX_CONVERGENCE_CAMPAIGN_SPEC_BYTES",
+        len(campaign_module._canonical_bytes(normalized)) - 1,
+    )
+
+    with pytest.raises(ValueError, match="exceeds"):
         normalize_convergence_campaign_spec(raw)
 
 

@@ -10,6 +10,7 @@ from _mim_safety import (
     require_interface_boundaries,
     require_named_domains,
     require_port_pair,
+    require_passive_reflection,
     require_required_properties,
     require_spectrum,
     save_required,
@@ -112,7 +113,7 @@ mesh = comp.mesh().create('mesh1')
 sz = mesh.feature().create('size1','Size')
 sz.set('hmax', float(H_air/10)); sz.set('hmaxactive', True)
 ftri = mesh.feature().create('ftri1','FreeTri'); ftri.selection().set(p2b)
-sw = mesh.feature().create('sw1','Sweep'); sw.selection().set([1,2])
+sw = mesh.feature().create('sw1','Sweep'); sw.selection().set(al2_domains + air_domains)
 mesh.run(); print('Mesh:', mesh.getNumElem(), flush=True)
 
 # Wavelength sweep via Parametric Sweep (wl parameter)
@@ -126,7 +127,10 @@ sweep.set('pname', 'wl')
 sweep.set('plist', ' '.join(str(w) for w in wls))
 def solve_required(label):
     t0=time.time(); jm.study('std1').run(); elapsed=time.time()-t0
-    reflection = require_spectrum(m.evaluate('ewfd.Rtotal'), wls, f'{label} Rtotal')
+    reflection = require_passive_reflection(
+        require_spectrum(m.evaluate('ewfd.Rtotal'), wls, f'{label} Rtotal'),
+        f'{label} Rtotal',
+    )
     print(f'{label} solve OK {elapsed:.2f}s', flush=True)
     return reflection
 
