@@ -253,6 +253,45 @@ def test_patch_topology_uses_bottom_top_intersection_when_face_counts_tie():
     assert footprint == [1]
 
 
+def test_trusted_footprint_disambiguates_coincident_bottom_interfaces():
+    boundaries = [
+        {
+            "boundary_number": 6,
+            "up_domain": 2,
+            "down_domain": 1,
+            "interior": True,
+            "center": [0.5, 0.5, 0.0],
+            "normal": [0.0, 0.0, 1.0],
+        },
+        {
+            "boundary_number": 12,
+            "up_domain": 3,
+            "down_domain": 1,
+            "interior": True,
+            "center": [0.5, 0.5, 0.0],
+            "normal": [0.0, 0.0, 1.0],
+        },
+        {
+            "boundary_number": 13,
+            "up_domain": 2,
+            "down_domain": 3,
+            "interior": True,
+            "center": [0.5, 0.5, 1.0],
+            "normal": [0.0, 0.0, 1.0],
+        },
+    ]
+
+    domain, footprint = _identify_patch_topology(
+        boundaries,
+        [1.0, 1.0, 1.0],
+        [0.0, 0.0, 0.0],
+        preferred_footprint=[12],
+    )
+
+    assert domain == 3
+    assert footprint == [12]
+
+
 class MeshSelection:
     def __init__(self):
         self.entities = None

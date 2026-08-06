@@ -156,7 +156,12 @@ def _default_topology_observer(
         raise ValueError("x periodic side partitions are not cardinality matched")
     if len(side_pairs["y_src"]) != len(side_pairs["y_dst"]):
         raise ValueError("y periodic side partitions are not cardinality matched")
-    patch_domain, patch_footprint = _identify_patch_topology(boundaries, patch_size, patch_position)
+    patch_domain, patch_footprint = _identify_patch_topology(
+        boundaries,
+        patch_size,
+        patch_position,
+        preferred_footprint=_trusted_patch_footprint(component, manifest),
+    )
     topology = {
         "domain_count": int(domains),
         "boundary_count": int(boundary_count),
@@ -179,6 +184,30 @@ def _default_topology_observer(
         },
     )
     return topology, identity
+
+
+def _trusted_patch_footprint(component: Any, manifest: Mapping[str, Any]) -> list[int]:
+    paths = [
+        item["tag_path"]
+        for item in manifest["required_features"]
+        if item["scope"] == "physics"
+        and item["feature_type"] == "LayeredTransitionBoundaryCondition"
+        and len(item["tag_path"]) == 2
+    ]
+    if len(paths) != 1:
+        raise ValueError("trusted manifest must identify one layered transition boundary")
+    physics_tag, feature_tag = paths[0]
+    physics = component.physics()
+    if physics_tag not in _clientapi_tags(physics):
+        raise ValueError("trusted Wave Optics interface is absent")
+    interface = _clientapi_get(physics, physics_tag)
+    feature = _clientapi_get(interface.feature(), feature_tag)
+    if feature is None:
+        raise ValueError("trusted layered transition feature is absent")
+    entities = [int(value) for value in list(feature.selection().entities())]
+    if len(entities) != 1:
+        raise ValueError("trusted layered transition selection must contain one footprint")
+    return entities
 
 
 def _manifest_mesh_tag(manifest: Mapping[str, Any]) -> str:

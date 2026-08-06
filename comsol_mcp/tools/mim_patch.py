@@ -237,6 +237,7 @@ def _identify_patch_topology(
     boundaries: Sequence[dict],
     patch_size: Sequence[float],
     patch_pos: Sequence[float],
+    preferred_footprint: Optional[Sequence[int]] = None,
 ) -> tuple[int, list[int]]:
     """Identify the patch domain and its footprint from box geometry and adjacency."""
     if len(patch_size) != 3 or len(patch_pos) != 3:
@@ -279,6 +280,37 @@ def _identify_patch_topology(
             patch_faces.append(boundary)
     if len(patch_faces) < 2:
         raise ValueError("patch topology could not be bound to the requested box")
+
+    if preferred_footprint is not None:
+        footprint = sorted({int(value) for value in preferred_footprint})
+        by_number = {int(item["boundary_number"]): item for item in boundaries}
+        if len(footprint) != 1 or any(value not in by_number for value in footprint):
+            raise ValueError("trusted patch footprint selection is missing or ambiguous")
+        footprint_face = by_number[footprint[0]]
+        if footprint_face.get("interior") is not True:
+            raise ValueError("trusted patch footprint must remain an interior boundary")
+
+        def adjacent_domains(items: Sequence[dict]) -> set[int]:
+            return {
+                int(item[name])
+                for item in items
+                for name in ("up_domain", "down_domain")
+                if isinstance(item.get(name), int)
+                and not isinstance(item.get(name), bool)
+                and int(item[name]) > 0
+            }
+
+        footprint_domains = adjacent_domains([footprint_face])
+        top_faces = [
+            item
+            for item in patch_faces
+            if abs(float(item["normal"][2])) > 0.5
+            and abs(float(item["center"][2]) - high[2]) <= tolerance
+        ]
+        candidates = footprint_domains & adjacent_domains(top_faces)
+        if len(candidates) != 1:
+            raise ValueError("trusted footprint does not identify one patch domain")
+        return next(iter(candidates)), footprint
 
     counts: dict[int, int] = {}
     bottom_domains: set[int] = set()
