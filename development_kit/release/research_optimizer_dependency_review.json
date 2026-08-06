@@ -1,0 +1,28 @@
+{
+  "schema_name": "comsol_mcp.research_optimizer_dependency_review",
+  "schema_version": "1.0.0",
+  "reviewed_on": "2026-08-06",
+  "selected_backend": {
+    "backend_id": "internal_gaussian_process_expected_improvement_v1",
+    "status": "selected_not_implemented",
+    "uncertainty_contract": "posterior_mean_and_standard_deviation",
+    "acquisition_contract": "bounded_expected_improvement",
+    "dependencies": [
+      "numpy",
+      "scipy"
+    ],
+    "reason": "Reuse the already declared and licensed numerical stack while keeping the optimizer algorithm and evidence contract under repository control."
+  },
+  "rejected_expansion": {
+    "decision": "no_new_optimizer_package",
+    "reason": "S3 does not justify another runtime dependency before the frozen baselines and adapter evidence establish the required behavior."
+  },
+  "isolation_gates": [
+    "load the uncertainty-aware backend only on an explicit research path",
+    "keep ordinary MCP discovery free of NumPy and SciPy imports",
+    "bind backend version, normalized history, seed, and acquisition settings into checkpoints",
+    "reject nonfinite uncertainty, duplicate candidates, and out-of-domain acquisition results",
+    "prove deterministic replay and multi-seed improvement before campaign promotion"
+  ],
+  "implementation_boundary": "An S5 feature must implement and independently gate the selected backend before any licensed autonomous campaign uses it."
+}

@@ -77,7 +77,7 @@ models are intentionally absent.
 - `development_kit/README.md` — This file is the starting guide for tests, release gates, fixtures, and handoff work.
 - `development_kit/benchmarks/__init__.py` — This file marks repository-only benchmark drivers as a Python package.
 - `development_kit/benchmarks/semantic_benchmark.py` — This script runs the frozen lexical and semantic retrieval benchmark.
-- `development_kit/benchmarks/research_campaign.py` — This module defines the frozen solver-free research-campaign benchmark suite and fake MIM evaluator.
+- `development_kit/benchmarks/research_campaign.py` — This module defines the frozen solver-free research-campaign suite, fake MIM evaluator, and multi-seed optimizer baseline comparison.
 - `development_kit/docs/layout.md` — This file maps every tracked repository file to one concise purpose statement.
 - `development_kit/docs/legacy_phase_compatibility.md` — This file records the frozen compatibility allowlist for historical aliases.
 - `development_kit/docs/release_checklist.md` — This file gives the ordered dependency, package, licensed, install, and restart release checklist.
@@ -89,6 +89,7 @@ models are intentionally absent.
 - `development_kit/release/profile_migration.json` — This receipt records the exact recommended-profile tool diff and compatibility replacement.
 - `development_kit/release/vulnerability_allowlist.json` — This file records exact reviewed vulnerabilities with mandatory expiry dates.
 - `development_kit/release/dependency_license_review.json` — This file records accepted license metadata for every declared runtime dependency.
+- `development_kit/release/research_optimizer_dependency_review.json` — This file freezes the uncertainty-aware optimizer dependency decision and isolation gates.
 - `development_kit/release/coverage_policy.json` — This file records the non-decreasing global coverage floor and owned per-file safety targets.
 - `development_kit/release/planning_code_allowlist.json` — This file freezes historical planning-code matches by path, count, and hash.
 - `development_kit/release/integration_fixtures/manifest.json` — This file inventories sanitized integration contracts and their canonical hashes.
