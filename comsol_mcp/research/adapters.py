@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
 import math
 import re
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any, Protocol
 
 from comsol_mcp.durable import domain_sha256_v2
@@ -51,6 +53,275 @@ class PeriodicMimPatchBackend(Protocol):
     def restore(self, snapshot: dict[str, Any]) -> None: ...
 
     def mark_dirty(self, reason_code: str) -> None: ...
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _clientapi_tags(container: Any) -> list[str]:
+    return [str(value) for value in list(container.tags())]
+
+
+def _clientapi_get(container: Any, tag: str) -> Any:
+    try:
+        return container.get(tag)
+    except Exception:
+        return container(tag)
+
+
+def _clientapi_feature_type(feature: Any) -> str:
+    errors = []
+    for getter in ("getType", "type"):
+        try:
+            return str(getattr(feature, getter)())
+        except Exception as exc:
+            errors.append(type(exc).__name__)
+    raise ValueError(f"trusted feature type is unreadable ({','.join(errors)})")
+
+
+def _clientapi_set_vector(feature: Any, name: str, values: list[str]) -> None:
+    from comsol_mcp.tools.derived_geometry import _set_vector
+
+    _set_vector(feature, name, values)
+
+
+def _clientapi_patch_feature(model: Any, manifest: Mapping[str, Any]) -> tuple[Any, Any, Any]:
+    component_tag = manifest["component_tag"]
+    geometry_tag = manifest["geometry_tag"]
+    components = model.java.component()
+    if component_tag not in _clientapi_tags(components):
+        raise ValueError("trusted adapter component is absent")
+    component = _clientapi_get(components, component_tag)
+    geometries = component.geom()
+    if geometry_tag not in _clientapi_tags(geometries):
+        raise ValueError("trusted adapter geometry is absent")
+    geometry = _clientapi_get(geometries, geometry_tag)
+    path = manifest["patch_feature"]["tag_path"]
+    if len(path) != 1:
+        raise ValueError("first concrete periodic MIM backend requires one top-level feature")
+    features = geometry.feature()
+    if path[0] not in _clientapi_tags(features):
+        raise ValueError("trusted patch feature is absent")
+    feature = _clientapi_get(features, path[0])
+    observed_type = _clientapi_feature_type(feature)
+    if observed_type != manifest["patch_feature"]["feature_types"][0]:
+        raise ValueError("trusted patch feature type changed")
+    if observed_type != "Block":
+        raise ValueError("first concrete periodic MIM backend supports only an existing Block")
+    return component, geometry, feature
+
+
+def _clientapi_vector(feature: Any, property_name: str) -> list[float]:
+    try:
+        value_type = str(feature.getValueType(property_name))
+        value = [float(item) for item in feature.getDoubleArray(property_name)]
+    except Exception as exc:
+        raise ValueError("trusted patch property is unreadable") from exc
+    if value_type.casefold().replace("[]", "array") not in {
+        "doublearray",
+        "floatarray",
+    }:
+        raise ValueError("trusted patch property must remain a floating-point array")
+    if not isinstance(value, list) or len(value) != 3:
+        raise ValueError("trusted Block size and position must contain exactly three values")
+    result = [_finite(item, f"clientapi vector[{index}]") for index, item in enumerate(value)]
+    return result
+
+
+def _default_topology_observer(
+    model: Any,
+    manifest: Mapping[str, Any],
+    patch_size: list[float],
+    patch_position: list[float],
+) -> tuple[dict[str, int], str]:
+    from comsol_mcp.tools.mim_patch import (
+        _identify_patch_topology,
+        _identify_side_pairs,
+        _list_pair_metadata,
+        _probe_boundaries,
+    )
+
+    component, geometry, _feature = _clientapi_patch_feature(model, manifest)
+    boundaries, domains, boundary_count, _sdim = _probe_boundaries(geometry)
+    bounding_box = [float(value) for value in list(geometry.getBoundingBox())]
+    if len(bounding_box) != 6:
+        raise ValueError("trusted adapter geometry bounding box is incomplete")
+    side_pairs = _identify_side_pairs(boundaries, bbox=tuple(bounding_box))
+    if len(side_pairs["x_src"]) != len(side_pairs["x_dst"]):
+        raise ValueError("x periodic side partitions are not cardinality matched")
+    if len(side_pairs["y_src"]) != len(side_pairs["y_dst"]):
+        raise ValueError("y periodic side partitions are not cardinality matched")
+    patch_domain, patch_footprint = _identify_patch_topology(boundaries, patch_size, patch_position)
+    topology = {
+        "domain_count": int(domains),
+        "boundary_count": int(boundary_count),
+        "x_pair_count": len(side_pairs["x_src"]),
+        "y_pair_count": len(side_pairs["y_src"]),
+        "top_port_count": len(side_pairs["top"]),
+        "bottom_port_count": len(side_pairs["bottom"]),
+    }
+    if any(value < 1 for value in topology.values()):
+        raise ValueError("trusted topology observation is incomplete")
+    identity = domain_sha256_v2(
+        "comsol_mcp.research_periodic_mim_selection_state",
+        {
+            "bounding_box": bounding_box,
+            "boundaries": boundaries,
+            "side_pairs": side_pairs,
+            "component_pairs": _list_pair_metadata(component),
+            "patch_domain": patch_domain,
+            "patch_footprint": patch_footprint,
+        },
+    )
+    return topology, identity
+
+
+def _manifest_mesh_tag(manifest: Mapping[str, Any]) -> str:
+    paths = [
+        item["tag_path"]
+        for item in manifest["required_features"]
+        if item["scope"] == "mesh" and len(item["tag_path"]) == 1
+    ]
+    if len(paths) != 1:
+        raise ValueError("trusted adapter manifest must identify exactly one mesh sequence")
+    return _identifier(paths[0][0], "trusted mesh tag")
+
+
+def _clientapi_mesh(model: Any, manifest: Mapping[str, Any]) -> Any:
+    component_tag = manifest["component_tag"]
+    component = _clientapi_get(model.java.component(), component_tag)
+    meshes = component.mesh()
+    mesh_tag = _manifest_mesh_tag(manifest)
+    if mesh_tag not in _clientapi_tags(meshes):
+        raise ValueError("trusted adapter mesh is absent")
+    return _clientapi_get(meshes, mesh_tag)
+
+
+def _default_mesh_observer(model: Any, manifest: Mapping[str, Any]) -> str:
+    mesh = _clientapi_mesh(model, manifest)
+    features = mesh.feature()
+    feature_inventory = [
+        {"tag": tag, "type": _clientapi_feature_type(_clientapi_get(features, tag))}
+        for tag in _clientapi_tags(features)
+    ]
+    return str(
+        domain_sha256_v2(
+            "comsol_mcp.research_periodic_mim_mesh_state",
+            {
+                "mesh_tag": _manifest_mesh_tag(manifest),
+                "features": feature_inventory,
+                "num_elements": int(mesh.getNumElem()),
+                "num_vertices": int(mesh.getNumVertex()),
+            },
+        )
+    )
+
+
+class ClientapiPeriodicMimPatchBackend:
+    """Concrete atomic backend for a tracked derived model's existing Block patch."""
+
+    def __init__(
+        self,
+        model: Any,
+        derived_record: Any,
+        manifest: object,
+        *,
+        topology_observer: Any = _default_topology_observer,
+        mesh_observer: Any = _default_mesh_observer,
+    ) -> None:
+        self.model = model
+        self.record = derived_record
+        self.manifest = normalize_structure_adapter_manifest(manifest)
+        self._topology_observer = topology_observer
+        self._mesh_observer = mesh_observer
+        self._topology: dict[str, int] | None = None
+        self._selection_identity: str | None = None
+        source = Path(str(derived_record.source_path)).resolve(strict=True)
+        backing = Path(str(derived_record.backing_path)).resolve(strict=True)
+        if source == backing or Path(str(model.file())).resolve(strict=True) != backing:
+            raise ValueError("adapter requires one distinct provenance-tracked derived model")
+        if getattr(derived_record, "dirty", False):
+            raise ValueError("derived model is dirty and unusable for trusted adapter work")
+        if _file_sha256(source) != self.manifest["source_identity"]["source_sha256"]:
+            raise ValueError("derived record source bytes do not match the trusted manifest")
+        _component, _geometry, feature = _clientapi_patch_feature(model, self.manifest)
+        self._fixed_size = _clientapi_vector(
+            feature, self.manifest["patch_feature"]["size_property"]
+        )
+        self._fixed_position = _clientapi_vector(
+            feature, self.manifest["patch_feature"]["position_property"]
+        )
+
+    def source_sha256(self) -> str:
+        return _file_sha256(Path(str(self.record.source_path)).resolve(strict=True))
+
+    def _vectors(self) -> tuple[list[float], list[float]]:
+        _component, _geometry, feature = _clientapi_patch_feature(self.model, self.manifest)
+        size = _clientapi_vector(feature, self.manifest["patch_feature"]["size_property"])
+        position = _clientapi_vector(feature, self.manifest["patch_feature"]["position_property"])
+        if size[2] != self._fixed_size[2] or position[2] != self._fixed_position[2]:
+            raise ValueError("adapter fixed z geometry changed")
+        return size, position
+
+    def _observe_topology(self, size: list[float], position: list[float]) -> dict[str, int]:
+        topology, identity = self._topology_observer(self.model, self.manifest, size, position)
+        self._topology = _topology(topology, "clientapi topology")
+        self._selection_identity = _sha(identity, "clientapi selection identity")
+        return dict(self._topology)
+
+    def snapshot(self) -> dict[str, Any]:
+        size, position = self._vectors()
+        topology = self._observe_topology(size, position)
+        mesh_identity = _sha(
+            self._mesh_observer(self.model, self.manifest), "clientapi mesh identity"
+        )
+        return {
+            "patch_size": size[:2],
+            "patch_position": position[:2],
+            "topology": topology,
+            "selection_identity": self._selection_identity,
+            "mesh_identity": mesh_identity,
+        }
+
+    def apply_patch(self, size: list[float], position: list[float]) -> None:
+        _component, _geometry, feature = _clientapi_patch_feature(self.model, self.manifest)
+        full_size = [*size, self._fixed_size[2]]
+        full_position = [*position, self._fixed_position[2]]
+        _clientapi_set_vector(
+            feature,
+            self.manifest["patch_feature"]["size_property"],
+            [format(value, ".17g") for value in full_size],
+        )
+        _clientapi_set_vector(
+            feature,
+            self.manifest["patch_feature"]["position_property"],
+            [format(value, ".17g") for value in full_position],
+        )
+
+    def rebuild_geometry(self) -> None:
+        _component, geometry, _feature = _clientapi_patch_feature(self.model, self.manifest)
+        geometry.run()
+
+    def reprobe_selections(self) -> dict[str, int]:
+        size, position = self._vectors()
+        return self._observe_topology(size, position)
+
+    def rebuild_mesh(self) -> str:
+        mesh = _clientapi_mesh(self.model, self.manifest)
+        mesh.run()
+        return _sha(self._mesh_observer(self.model, self.manifest), "clientapi mesh identity")
+
+    def restore(self, snapshot: dict[str, Any]) -> None:
+        self.apply_patch(list(snapshot["patch_size"]), list(snapshot["patch_position"]))
+
+    def mark_dirty(self, reason_code: str) -> None:
+        self.record.dirty = True
+        self.record.dirty_reason = _identifier(reason_code, "adapter dirty reason")
 
 
 def _sha(value: object, name: str) -> str:
@@ -500,6 +771,7 @@ def apply_periodic_mim_patch_candidate(
 
 
 __all__ = [
+    "ClientapiPeriodicMimPatchBackend",
     "PERIODIC_MIM_PATCH_ADAPTER_ID",
     "STRUCTURE_ADAPTER_APPLICATION_SCHEMA_NAME",
     "STRUCTURE_ADAPTER_APPLICATION_SCHEMA_VERSION",

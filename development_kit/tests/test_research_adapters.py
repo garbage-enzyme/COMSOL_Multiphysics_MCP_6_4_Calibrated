@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import copy
+import hashlib
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -11,6 +14,7 @@ from comsol_mcp.research.adapters import (
     STRUCTURE_ADAPTER_MANIFEST_SCHEMA_VERSION,
     STRUCTURE_TREE_AUDIT_SCHEMA_NAME,
     STRUCTURE_TREE_AUDIT_SCHEMA_VERSION,
+    ClientapiPeriodicMimPatchBackend,
     adapter_state_sha256,
     apply_periodic_mim_patch_candidate,
     normalize_structure_adapter_manifest,
@@ -342,3 +346,180 @@ def test_unproved_rollback_marks_derived_model_dirty():
     assert result["rollback_proved"] is False
     assert result["derived_model_dirty"] is True
     assert backend.dirty_reason == "adapter_rollback_unproved"
+
+
+class _Container:
+    def __init__(self, values):
+        self.values = values
+
+    def tags(self):
+        return list(self.values)
+
+    def get(self, tag):
+        return self.values.get(str(tag))
+
+
+class _Block:
+    def __init__(self):
+        self.values = {
+            "size": [856e-9, 856e-9, 100e-9],
+            "pos": [247e-9, 247e-9, 40e-9],
+        }
+
+    def getType(self):
+        return "Block"
+
+    def properties(self):
+        return list(self.values)
+
+    def getValueType(self, _name):
+        return "DoubleArray"
+
+    def getDoubleArray(self, name):
+        return list(self.values[name])
+
+    def set(self, name, values):
+        self.values[name] = [float(value) for value in values]
+
+
+class _Sequence:
+    def __init__(self, features, *, elements=19808, vertices=3858):
+        self.features = _Container(features)
+        self.run_count = 0
+        self.elements = elements
+        self.vertices = vertices
+
+    def feature(self):
+        return self.features
+
+    def run(self):
+        self.run_count += 1
+
+    def getNumElem(self):
+        return self.elements
+
+    def getNumVertex(self):
+        return self.vertices
+
+
+class _Component:
+    def __init__(self, geometry, mesh):
+        self.geometries = _Container({"geom1": geometry})
+        self.meshes = _Container({"mesh1": mesh})
+
+    def geom(self):
+        return self.geometries
+
+    def mesh(self):
+        return self.meshes
+
+
+class _Java:
+    def __init__(self, component):
+        self.components = _Container({"comp1": component})
+
+    def component(self):
+        return self.components
+
+
+class _ClientapiModel:
+    def __init__(self, backing: Path):
+        self.block = _Block()
+        self.geometry = _Sequence({"b_pat": self.block})
+        self.mesh = _Sequence({"size": SimpleNamespace(getType=lambda: "Size")})
+        self.java = _Java(_Component(self.geometry, self.mesh))
+        self.backing = backing
+
+    def file(self):
+        return str(self.backing)
+
+
+def _clientapi_fixture(tmp_path: Path):
+    source = tmp_path / "source.mph"
+    backing = tmp_path / "derived.mph"
+    source.write_bytes(b"immutable source")
+    backing.write_bytes(source.read_bytes())
+    manifest = _manifest()
+    manifest["source_identity"]["source_sha256"] = hashlib.sha256(source.read_bytes()).hexdigest()
+    manifest["patch_feature"] = {
+        "tag_path": ["b_pat"],
+        "feature_types": ["Block"],
+        "size_property": "size",
+        "position_property": "pos",
+    }
+    manifest["required_features"] = [
+        {"scope": "geometry", "tag_path": ["b_pat"], "feature_type": "Block"},
+        {"scope": "physics", "tag_path": ["ewfd"], "feature_type": "EWFD"},
+        {"scope": "mesh", "tag_path": ["mesh1"], "feature_type": "MeshSequence"},
+        {"scope": "study", "tag_path": ["std1"], "feature_type": "Study"},
+    ]
+    manifest["mutable_dimensions"][0].update(
+        baseline=856e-9, lower=0.75 * 856e-9, upper=1.25 * 856e-9
+    )
+    manifest["mutable_dimensions"][1].update(
+        baseline=856e-9, lower=0.75 * 856e-9, upper=1.25 * 856e-9
+    )
+    manifest["patch_center"] = [675e-9, 675e-9]
+    normalized = normalize_structure_adapter_manifest(manifest)
+    model = _ClientapiModel(backing)
+    record = SimpleNamespace(
+        source_path=str(source),
+        backing_path=str(backing),
+        dirty=False,
+        dirty_reason=None,
+    )
+
+    def topology(_model, expected, _size, _position):
+        return copy.deepcopy(expected["topology_invariants"]), "8" * 64
+
+    def mesh(_model, _expected):
+        return "9" * 64
+
+    backend = ClientapiPeriodicMimPatchBackend(
+        model,
+        record,
+        normalized,
+        topology_observer=topology,
+        mesh_observer=mesh,
+    )
+    return normalized, model, record, backend
+
+
+def test_concrete_clientapi_backend_mutates_only_xy_and_rebuilds(tmp_path: Path):
+    manifest, model, record, backend = _clientapi_fixture(tmp_path)
+    audit = normalize_structure_tree_audit(_audit(manifest), manifest)
+    expected = adapter_state_sha256(manifest, backend.snapshot())
+
+    result = apply_periodic_mim_patch_candidate(
+        backend,
+        manifest,
+        audit,
+        {"patch_length_x": 900e-9, "patch_length_y": 700e-9},
+        expected_state_sha256=expected,
+    )
+
+    assert result["success"] is True
+    assert model.block.values["size"] == pytest.approx([900e-9, 700e-9, 100e-9])
+    assert model.block.values["pos"] == pytest.approx([225e-9, 325e-9, 40e-9])
+    assert model.geometry.run_count == 1
+    assert model.mesh.run_count == 1
+    assert record.dirty is False
+    assert backend.source_sha256() == manifest["source_identity"]["source_sha256"]
+
+
+def test_concrete_backend_requires_distinct_clean_derived_backing(tmp_path: Path):
+    manifest, model, record, _backend = _clientapi_fixture(tmp_path)
+    record.backing_path = record.source_path
+    model.backing = Path(record.source_path)
+
+    with pytest.raises(ValueError, match="distinct provenance"):
+        ClientapiPeriodicMimPatchBackend(model, record, manifest)
+
+
+def test_concrete_backend_marks_the_derived_record_dirty(tmp_path: Path):
+    _manifest_value, _model, record, backend = _clientapi_fixture(tmp_path)
+
+    backend.mark_dirty("adapter_rollback_unproved")
+
+    assert record.dirty is True
+    assert record.dirty_reason == "adapter_rollback_unproved"

@@ -7,6 +7,7 @@ from .adapters import (
     STRUCTURE_ADAPTER_MANIFEST_SCHEMA_VERSION,
     STRUCTURE_TREE_AUDIT_SCHEMA_NAME,
     STRUCTURE_TREE_AUDIT_SCHEMA_VERSION,
+    ClientapiPeriodicMimPatchBackend,
     adapter_state_sha256,
     apply_periodic_mim_patch_candidate,
     normalize_structure_adapter_manifest,
@@ -84,6 +85,7 @@ from .workflow import (
 )
 
 __all__ = [
+    "ClientapiPeriodicMimPatchBackend",
     "STRUCTURE_ADAPTER_APPLICATION_SCHEMA_NAME",
     "STRUCTURE_ADAPTER_APPLICATION_SCHEMA_VERSION",
     "STRUCTURE_ADAPTER_MANIFEST_SCHEMA_NAME",
