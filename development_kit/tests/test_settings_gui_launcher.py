@@ -131,15 +131,23 @@ def test_instance_mutex_reports_a_live_gui_in_another_process(ascii_tmp_path: Pa
             assert ready_lines.get(timeout=10).strip() == "READY"
         except queue.Empty:
             pytest.fail("Settings GUI mutex child did not publish readiness within 10 seconds")
+        reader.join(timeout=1)
+        assert not reader.is_alive()
         assert launcher.settings_gui_is_running(target) is True
     finally:
+        assert process.stdin is not None
+        process.stdin.write("done\n")
+        process.stdin.flush()
+        process.stdin.close()
         try:
-            output, errors = process.communicate("done\n", timeout=10)
+            process.wait(timeout=10)
         except subprocess.TimeoutExpired:
             process.kill()
-            output, errors = process.communicate(timeout=10)
-            pytest.fail(f"Settings GUI mutex child did not exit after input: {output}{errors}")
+            process.wait(timeout=10)
+            pytest.fail("Settings GUI mutex child did not exit after input")
         reader.join(timeout=1)
+        output = process.stdout.read() if process.stdout is not None else ""
+        errors = process.stderr.read() if process.stderr is not None else ""
         assert process.returncode == 0, output + errors
     assert launcher.settings_gui_is_running(target) is False
 
@@ -227,9 +235,7 @@ def test_publish_handshake_rechecks_pending_state_before_replace(
         handshake_module.handshake_payload("pending"),
         handshake_module.handshake_payload("already_running"),
     ]
-    monkeypatch.setattr(
-        handshake_module, "read_handshake", lambda _path: observed.pop(0)
-    )
+    monkeypatch.setattr(handshake_module, "read_handshake", lambda _path: observed.pop(0))
 
     assert publish_handshake("ready", {handshake_module.HANDSHAKE_ENV: str(path)}) is False
     assert path.read_bytes() == handshake_module.handshake_bytes("pending")

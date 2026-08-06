@@ -7,7 +7,6 @@ import os
 import shutil
 import subprocess
 import sys
-import uuid
 from pathlib import Path
 
 import pytest
@@ -436,12 +435,12 @@ def test_spawn_child_is_not_a_server_transport_entrypoint(monkeypatch):
     assert server_module._is_transport_entrypoint() is False
 
 
-def test_job_read_tools_are_solver_free(monkeypatch):
+def test_job_read_tools_are_solver_free(ascii_tmp_path, monkeypatch):
     import mph
     import src.tools.jobs as jobs_module
     from src.jobs.manager import JobManager
 
-    root = Path("D:/comsol_runtime_test/jobs") / uuid.uuid4().hex
+    root = ascii_tmp_path / "jobs"
     try:
         monkeypatch.setattr(jobs_module, "job_manager", JobManager(root))
         monkeypatch.setattr(

@@ -179,10 +179,13 @@ def test_smallest_actionable_periodic_mesh_mismatch_is_reported(
 
 def test_unrelated_freetet_does_not_prove_periodic_mesh_recipe(tmp_path, monkeypatch):
     result = _audit(tmp_path, monkeypatch)
-    result["mesh_sequence"]["features_in_execution_order"][-1]["selection"] = [99]
+    features = [
+        {**item, "selection": [99]} if item["tag"] == "ftet1" else item
+        for item in result["mesh_sequence"]["features_in_execution_order"]
+    ]
     recipe = _recipe_for_group(
         result["periodic_groups"][0],
-        result["mesh_sequence"]["features_in_execution_order"],
+        features,
     )
 
     assert recipe["mesh_recipe_present"] is False

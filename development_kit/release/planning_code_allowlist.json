@@ -25,7 +25,7 @@
     {
       "path": "development_kit/tests/test_reference_power_acceptance.py",
       "match_count": 1,
-      "match_sha256": "9056bba1570062fae6f7a91ed0f73d2e937b9a41431243259abf909c32ed8fd9"
+      "match_sha256": "19b708edc7960d8e539cd8f61b84182f4d69b8a21293fe236ad4de9a82456a05"
     },
     {
       "path": "development_kit/tests/test_reference_power_runner.py",

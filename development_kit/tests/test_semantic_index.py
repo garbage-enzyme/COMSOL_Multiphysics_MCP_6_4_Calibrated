@@ -7,7 +7,6 @@ import json
 import shutil
 import subprocess
 import sys
-import uuid
 from pathlib import Path
 
 import numpy as np
@@ -50,13 +49,10 @@ class FakeEncoder:
 
 
 @pytest.fixture
-def semantic_index_root():
-    root = Path("D:/comsol_semantic_index_test") / uuid.uuid4().hex
-    root.mkdir(parents=True)
-    try:
-        yield root
-    finally:
-        shutil.rmtree(root, ignore_errors=True)
+def semantic_index_root(ascii_tmp_path):
+    root = ascii_tmp_path / "semantic-index"
+    root.mkdir()
+    return root
 
 
 @pytest.fixture
@@ -238,15 +234,11 @@ def test_build_validates_then_atomically_publishes_current(semantic_index_assets
     assert not list(semantic_index_assets["root"].rglob("*.tmp"))
 
 
-def test_publish_failure_restores_building_evidence(
-    semantic_index_assets, monkeypatch
-):
+def test_publish_failure_restores_building_evidence(semantic_index_assets, monkeypatch):
     monkeypatch.setattr(
         index_module,
         "switch_current",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            RuntimeError("injected pointer failure")
-        ),
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("injected pointer failure")),
     )
 
     with pytest.raises(RuntimeError, match="injected pointer failure"):
@@ -270,13 +262,7 @@ def test_read_current_rejects_pointer_outside_deployment_indexes(semantic_index_
 
 def test_read_current_rejects_staging_pointer(semantic_index_assets):
     pointer_path = semantic_index_assets["root"] / "current.json"
-    staging = (
-        semantic_index_assets["root"]
-        / "indexes"
-        / "corpus"
-        / "model"
-        / "bad.building"
-    )
+    staging = semantic_index_assets["root"] / "indexes" / "corpus" / "model" / "bad.building"
     staging.parent.mkdir(parents=True, exist_ok=True)
     pointer_path.write_text(
         json.dumps({"schema_version": "1", "index_path": str(staging)}),
@@ -287,9 +273,7 @@ def test_read_current_rejects_staging_pointer(semantic_index_assets):
         read_current(semantic_index_assets["root"])
 
 
-def test_citation_validation_rechecks_pinned_lexical_identity(
-    semantic_index_assets, monkeypatch
-):
+def test_citation_validation_rechecks_pinned_lexical_identity(semantic_index_assets, monkeypatch):
     result = _build(semantic_index_assets, "citation-recheck")
     index = Path(result["index"]["path"])
     lexical = semantic_index_assets["lexical"].resolve()

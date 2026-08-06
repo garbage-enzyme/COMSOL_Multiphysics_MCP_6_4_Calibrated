@@ -135,16 +135,15 @@ def test_shortcut_actions_require_an_explicit_settings_path(monkeypatch) -> None
     assert calls == []
 
 
-def test_shortcut_action_accepts_the_exact_settings_path_token(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_shortcut_action_accepts_the_exact_settings_path_token(tmp_path: Path, monkeypatch) -> None:
     target = tmp_path / "settings.json"
     observed = []
     monkeypatch.setattr(
         entry,
         "create_desktop_shortcut",
-        lambda **kwargs: observed.append(kwargs["settings_path"])
-        or {"success": True, "state": "created"},
+        lambda **kwargs: (
+            observed.append(kwargs["settings_path"]) or {"success": True, "state": "created"}
+        ),
     )
 
     code = entry.run_cli(
@@ -223,7 +222,7 @@ def test_create_and_remove_shortcut_are_explicit_cli_actions(
         }
 
     def fake_remove(**kwargs):
-        calls.append((str(kwargs["settings_path"]), False))
+        calls.append((str(kwargs["settings_path"]), kwargs.get("replace_existing", False)))
         return {
             "success": True,
             "state": "removed",

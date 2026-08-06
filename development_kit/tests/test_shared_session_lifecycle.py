@@ -8,7 +8,6 @@ from pathlib import Path
 
 import pytest
 import src.shared_session.lifecycle as lifecycle_module
-
 from src.shared_session.contracts import SHARED_SERVER_FEATURE_ENV
 from src.shared_session.lifecycle import (
     SharedSessionManager,
@@ -199,9 +198,11 @@ def _revision_tree_model():
 
 
 def _inventory(models=None):
-    return models if models is not None else [
-        {"tag": "Model_1", "label": "Shared", "file_path": None, "unsaved": True}
-    ]
+    return (
+        models
+        if models is not None
+        else [{"tag": "Model_1", "label": "Shared", "file_path": None, "unsaved": True}]
+    )
 
 
 def _manager(
@@ -223,43 +224,51 @@ def _manager(
         {**snapshot, "observed_at_epoch": 1000.0 + index}
         for index, snapshot in enumerate(snapshots)
     ]
-    values = iter(snapshots)
+
+    class ScriptedSnapshots:
+        def __init__(self, values):
+            self.values = values
+            self.calls = 0
+
+        def __call__(self):
+            if self.calls >= len(self.values):
+                raise AssertionError("unexpected extra shared-session snapshot read")
+            value = self.values[self.calls]
+            self.calls += 1
+            return value
+
+    provider = ScriptedSnapshots(snapshots)
     ownership = ownership or FakeOwnership(tmp_path)
     client = client or FakeClient()
     revision_state = revision_state or {
         "structural": {"components": ["comp1"], "studies": ["std1"]},
         "state": {"parameters": {"gap": "10[nm]"}},
     }
-    return (
-        SharedSessionManager(
-            snapshot_provider=lambda: next(values),
-            ownership_factory=lambda: ownership,
-            client_factory=client_factory or (lambda host, port: client),
-            client_version_reader=lambda value: client_version,
-            model_inventory_reader=lambda value: _inventory(models),
-            model_revision_reader=lambda value, tag: (
-                revision_state["structural"], revision_state["state"]
-            ),
-            mcp_process_identity_provider=lambda: {
-                "pid": 5000,
-                "process_create_time": 900.0,
-                "command_signature": "f" * 64,
-            },
-            snapshot_target_factory=lambda tag: tmp_path / f"{tag}-snapshot.mph",
-            save_copy_writer=snapshot_writer or (
-                lambda value, tag, target: target.write_bytes(b"snapshot fixture")
-            ),
-            save_copy_writer_is_bounded=bounded_snapshot_writer,
-            manifest_writer=manifest_writer or (
-                lambda path, value: path.write_text(
-                    json.dumps(value), encoding="utf-8"
-                )
-            ),
-            clock=lambda: 1100.0,
+    manager = SharedSessionManager(
+        snapshot_provider=provider,
+        ownership_factory=lambda: ownership,
+        client_factory=client_factory or (lambda host, port: client),
+        client_version_reader=lambda value: client_version,
+        model_inventory_reader=lambda value: _inventory(models),
+        model_revision_reader=lambda value, tag: (
+            revision_state["structural"],
+            revision_state["state"],
         ),
-        ownership,
-        client,
+        mcp_process_identity_provider=lambda: {
+            "pid": 5000,
+            "process_create_time": 900.0,
+            "command_signature": "f" * 64,
+        },
+        snapshot_target_factory=lambda tag: tmp_path / f"{tag}-snapshot.mph",
+        save_copy_writer=snapshot_writer
+        or (lambda value, tag, target: target.write_bytes(b"snapshot fixture")),
+        save_copy_writer_is_bounded=bounded_snapshot_writer,
+        manifest_writer=manifest_writer
+        or (lambda path, value: path.write_text(json.dumps(value), encoding="utf-8")),
+        clock=lambda: 1100.0,
     )
+    manager._test_snapshot_provider = provider
+    return (manager, ownership, client)
 
 
 def test_default_inventory_uses_raw_java_path_for_unsaved_models():
@@ -287,9 +296,7 @@ def test_default_snapshot_writer_uses_clientapi_save_copy_overload(tmp_path):
     model = FakeMphModel("Model_1", "Shared", "")
     target = tmp_path / "copy.mph"
 
-    _default_save_copy_writer(
-        InventoryClient([model]), "Model_1", target
-    )
+    _default_save_copy_writer(InventoryClient([model]), "Model_1", target)
 
     assert model.java.save_calls == [(str(target), True)]
 
@@ -314,9 +321,7 @@ def test_default_revision_reader_hashes_consequential_model_tree_state():
             InventoryClient([changed_model]), "Model_1"
         )
         assert changed_structural == baseline_structural
-        assert changed_state["model_tree"][group] != (
-            baseline_state["model_tree"][group]
-        )
+        assert changed_state["model_tree"][group] != (baseline_state["model_tree"][group])
 
     structural_model = _revision_tree_model()
     structural_model.groups["physics"]._children.append(
@@ -325,8 +330,9 @@ def test_default_revision_reader_hashes_consequential_model_tree_state():
     changed_structural, _changed_state = _default_model_revision_reader(
         InventoryClient([structural_model]), "Model_1"
     )
-    assert changed_structural["model_tree"]["physics"] != (
-        baseline_structural["model_tree"]["physics"]
+    assert (
+        changed_structural["model_tree"]["physics"]
+        != (baseline_structural["model_tree"]["physics"])
     )
 
     parameter_model = _revision_tree_model()
@@ -351,11 +357,14 @@ def test_attached_inventory_is_bounded_sorted_and_keeps_duplicate_metadata(tmp_p
         {"tag": "Model_1", "label": "Shared", "file_path": None, "unsaved": True},
     ]
     manager, _ownership, _client = _manager(tmp_path, models=models)
-    assert manager.attach(
-        _request(),
-        profile="core",
-        environ={SHARED_SERVER_FEATURE_ENV: "true"},
-    )["success"] is True
+    assert (
+        manager.attach(
+            _request(),
+            profile="core",
+            environ={SHARED_SERVER_FEATURE_ENV: "true"},
+        )["success"]
+        is True
+    )
 
     result = manager.models()
 
@@ -452,11 +461,14 @@ def test_model_inventory_requires_an_attached_client(tmp_path):
 
 
 def _attach_and_lock(manager):
-    assert manager.attach(
-        _request(),
-        profile="core",
-        environ={SHARED_SERVER_FEATURE_ENV: "true"},
-    )["success"] is True
+    assert (
+        manager.attach(
+            _request(),
+            profile="core",
+            environ={SHARED_SERVER_FEATURE_ENV: "true"},
+        )["success"]
+        is True
+    )
     assert manager.adopt_model(_selector())["success"] is True
     locked = manager.lock_model(collaboration_mode="interactive_inspection")
     assert locked["success"] is True
@@ -464,18 +476,24 @@ def _attach_and_lock(manager):
 
 
 def _attach_saved_and_lock(manager, source, *, collaboration_mode):
-    assert manager.attach(
-        _request(),
-        profile="core",
-        environ={SHARED_SERVER_FEATURE_ENV: "true"},
-    )["success"] is True
-    assert manager.adopt_model(
-        {
-            "tag": "Model_1",
-            "expected_label": "Working",
-            "expected_file_path": "D:/models/working.mph",
-        }
-    )["success"] is True
+    assert (
+        manager.attach(
+            _request(),
+            profile="core",
+            environ={SHARED_SERVER_FEATURE_ENV: "true"},
+        )["success"]
+        is True
+    )
+    assert (
+        manager.adopt_model(
+            {
+                "tag": "Model_1",
+                "expected_label": "Working",
+                "expected_file_path": "D:/models/working.mph",
+            }
+        )["success"]
+        is True
+    )
     locked = manager.lock_model(
         collaboration_mode=collaboration_mode,
         immutable_source={
@@ -525,11 +543,13 @@ def test_attached_job_handoff_recovery_reattaches_and_re_adopts_exact_model(tmp_
 
     assert recovered["success"] is True
     assert recovered["state"] == "attached_handoff_reclaimed_pending_lock"
-    assert recovered["server_identity_sha256"] == (
-        handoff["execution_backend"]["attached_server"]["identity_sha256"]
+    assert (
+        recovered["server_identity_sha256"]
+        == (handoff["execution_backend"]["attached_server"]["identity_sha256"])
     )
-    assert recovered["model_identity_sha256"] == (
-        handoff["execution_backend"]["model"]["identity_sha256"]
+    assert (
+        recovered["model_identity_sha256"]
+        == (handoff["execution_backend"]["model"]["identity_sha256"])
     )
     assert recovered["model_lock_restored"] is False
     assert manager.status()["state"] == "attached_model_pending_lock"
@@ -619,11 +639,14 @@ def test_model_lock_binds_fresh_server_model_revision_and_process(tmp_path):
 
 def test_model_lock_verifies_immutable_source_bytes(tmp_path):
     manager, _ownership, _client = _manager(tmp_path)
-    assert manager.attach(
-        _request(),
-        profile="core",
-        environ={SHARED_SERVER_FEATURE_ENV: "true"},
-    )["success"] is True
+    assert (
+        manager.attach(
+            _request(),
+            profile="core",
+            environ={SHARED_SERVER_FEATURE_ENV: "true"},
+        )["success"]
+        is True
+    )
     assert manager.adopt_model(_selector())["success"] is True
     source = tmp_path / "source.mph"
     source.write_bytes(b"immutable model fixture")
@@ -656,9 +679,7 @@ def test_automation_handoff_verifies_target_then_detaches_without_clear(tmp_path
         }
     ]
     manager, ownership, client = _manager(tmp_path, models=models)
-    lock = _attach_saved_and_lock(
-        manager, source, collaboration_mode="automation_exclusive"
-    )
+    lock = _attach_saved_and_lock(manager, source, collaboration_mode="automation_exclusive")
 
     result = manager.prepare_attached_job_handoff(
         expected_lock_sha256=lock["lock_sha256"],
@@ -670,12 +691,8 @@ def test_automation_handoff_verifies_target_then_detaches_without_clear(tmp_path
     assert result["success"] is True
     assert result["state"] == "attached_job_handoff_ready"
     assert result["execution_backend"]["kind"] == "attached_shared_server"
-    assert result["execution_backend"]["source_model_lock_sha256"] == (
-        lock["lock_sha256"]
-    )
-    assert result["execution_backend"]["model"]["file_path"] == (
-        "D:\\models\\working.mph"
-    )
+    assert result["execution_backend"]["source_model_lock_sha256"] == (lock["lock_sha256"])
+    assert result["execution_backend"]["model"]["file_path"] == ("D:\\models\\working.mph")
     assert result["detach"]["external_resources_preserved"] is True
     assert manager.status()["state"] == "detached"
     assert client.calls == ["disconnect"]
@@ -694,9 +711,7 @@ def test_automation_handoff_requires_exclusive_lock_and_confirmation(tmp_path):
         }
     ]
     manager, ownership, client = _manager(tmp_path, models=models)
-    lock = _attach_saved_and_lock(
-        manager, source, collaboration_mode="interactive_inspection"
-    )
+    lock = _attach_saved_and_lock(manager, source, collaboration_mode="interactive_inspection")
 
     confirmation = manager.prepare_attached_job_handoff(
         expected_lock_sha256=lock["lock_sha256"],
@@ -734,9 +749,7 @@ def test_automation_handoff_rejects_mismatched_immutable_source_before_detach(
         }
     ]
     manager, ownership, client = _manager(tmp_path, models=models)
-    lock = _attach_saved_and_lock(
-        manager, source, collaboration_mode="automation_exclusive"
-    )
+    lock = _attach_saved_and_lock(manager, source, collaboration_mode="automation_exclusive")
 
     result = manager.prepare_attached_job_handoff(
         expected_lock_sha256=lock["lock_sha256"],
@@ -756,16 +769,16 @@ def test_automation_handoff_rejects_mismatched_immutable_source_before_detach(
 def test_automation_handoff_rejects_stale_lock_and_revision_identities(tmp_path):
     source = tmp_path / "immutable-source.mph"
     source.write_bytes(b"immutable source")
-    models = [{
-        "tag": "Model_1",
-        "label": "Working",
-        "file_path": "D:/models/working.mph",
-        "unsaved": False,
-    }]
+    models = [
+        {
+            "tag": "Model_1",
+            "label": "Working",
+            "file_path": "D:/models/working.mph",
+            "unsaved": False,
+        }
+    ]
     manager, ownership, client = _manager(tmp_path, models=models)
-    lock = _attach_saved_and_lock(
-        manager, source, collaboration_mode="automation_exclusive"
-    )
+    lock = _attach_saved_and_lock(manager, source, collaboration_mode="automation_exclusive")
 
     stale_lock = manager.prepare_attached_job_handoff(
         expected_lock_sha256="0" * 64,
@@ -781,9 +794,7 @@ def test_automation_handoff_rejects_stale_lock_and_revision_identities(tmp_path)
     )
 
     assert stale_lock["state"] == "handoff_precondition_failed"
-    assert stale_lock["model_lock_verification"]["changed_fields"] == [
-        "expected_lock_sha256"
-    ]
+    assert stale_lock["model_lock_verification"]["changed_fields"] == ["expected_lock_sha256"]
     assert stale_revision["state"] == "handoff_precondition_failed"
     assert stale_revision["model_lock_verification"]["changed_fields"] == [
         "expected_revision_sha256"
@@ -796,21 +807,17 @@ def test_automation_handoff_rejects_stale_lock_and_revision_identities(tmp_path)
 def test_automation_handoff_rejects_immediate_server_identity_change(tmp_path):
     source = tmp_path / "immutable-source.mph"
     source.write_bytes(b"immutable source")
-    models = [{
-        "tag": "Model_1",
-        "label": "Working",
-        "file_path": "D:/models/working.mph",
-        "unsaved": False,
-    }]
-    snapshots = [_snapshot() for _ in range(4)] + [
-        _snapshot(server_created=999.0)
+    models = [
+        {
+            "tag": "Model_1",
+            "label": "Working",
+            "file_path": "D:/models/working.mph",
+            "unsaved": False,
+        }
     ]
-    manager, ownership, client = _manager(
-        tmp_path, models=models, snapshots=snapshots
-    )
-    lock = _attach_saved_and_lock(
-        manager, source, collaboration_mode="automation_exclusive"
-    )
+    snapshots = [_snapshot() for _ in range(4)] + [_snapshot(server_created=999.0)]
+    manager, ownership, client = _manager(tmp_path, models=models, snapshots=snapshots)
+    lock = _attach_saved_and_lock(manager, source, collaboration_mode="automation_exclusive")
 
     result = manager.prepare_attached_job_handoff(
         expected_lock_sha256=lock["lock_sha256"],
@@ -820,36 +827,31 @@ def test_automation_handoff_rejects_immediate_server_identity_change(tmp_path):
     )
 
     assert result["state"] == "handoff_precondition_failed"
-    assert result["model_lock_verification"]["changed_fields"] == [
-        "attached_server"
-    ]
+    assert result["model_lock_verification"]["changed_fields"] == ["attached_server"]
     assert manager.status()["state"] == "attached_model_locked"
     assert client.calls == []
     assert ownership.releases == 0
+    assert manager._test_snapshot_provider.calls == len(snapshots)
 
 
 @pytest.mark.parametrize("changed_part", ["model", "revision"])
-def test_automation_handoff_rejects_immediate_model_or_revision_change(
-    tmp_path, changed_part
-):
+def test_automation_handoff_rejects_immediate_model_or_revision_change(tmp_path, changed_part):
     source = tmp_path / "immutable-source.mph"
     source.write_bytes(b"immutable source")
-    models = [{
-        "tag": "Model_1",
-        "label": "Working",
-        "file_path": "D:/models/working.mph",
-        "unsaved": False,
-    }]
+    models = [
+        {
+            "tag": "Model_1",
+            "label": "Working",
+            "file_path": "D:/models/working.mph",
+            "unsaved": False,
+        }
+    ]
     revision_state = {
         "structural": {"components": ["comp1"], "studies": ["std1"]},
         "state": {"parameters": {"gap": "10[nm]"}},
     }
-    manager, ownership, client = _manager(
-        tmp_path, models=models, revision_state=revision_state
-    )
-    lock = _attach_saved_and_lock(
-        manager, source, collaboration_mode="automation_exclusive"
-    )
+    manager, ownership, client = _manager(tmp_path, models=models, revision_state=revision_state)
+    lock = _attach_saved_and_lock(manager, source, collaboration_mode="automation_exclusive")
     if changed_part == "model":
         models[0] = {**models[0], "label": "Changed in Desktop"}
         expected = ["model_identity"]
@@ -879,19 +881,17 @@ def test_automation_handoff_preserves_model_guard_when_disconnect_fails(tmp_path
 
     source = tmp_path / "immutable-source.mph"
     source.write_bytes(b"immutable source")
-    models = [{
-        "tag": "Model_1",
-        "label": "Working",
-        "file_path": "D:/models/working.mph",
-        "unsaved": False,
-    }]
+    models = [
+        {
+            "tag": "Model_1",
+            "label": "Working",
+            "file_path": "D:/models/working.mph",
+            "unsaved": False,
+        }
+    ]
     client = FailingDisconnect()
-    manager, ownership, _client = _manager(
-        tmp_path, models=models, client=client
-    )
-    lock = _attach_saved_and_lock(
-        manager, source, collaboration_mode="automation_exclusive"
-    )
+    manager, ownership, _client = _manager(tmp_path, models=models, client=client)
+    lock = _attach_saved_and_lock(manager, source, collaboration_mode="automation_exclusive")
 
     result = manager.prepare_attached_job_handoff(
         expected_lock_sha256=lock["lock_sha256"],
@@ -912,9 +912,7 @@ def test_model_lock_verify_detects_desktop_readback_change(tmp_path):
         "structural": {"components": ["comp1"], "studies": ["std1"]},
         "state": {"parameters": {"gap": "10[nm]"}},
     }
-    manager, _ownership, _client = _manager(
-        tmp_path, revision_state=revision_state
-    )
+    manager, _ownership, _client = _manager(tmp_path, revision_state=revision_state)
     lock = _attach_and_lock(manager)
     revision_state["state"] = {"parameters": {"gap": "11[nm]"}}
 
@@ -929,9 +927,7 @@ def test_model_lock_verify_detects_desktop_readback_change(tmp_path):
 
 
 def test_model_lock_verify_detects_changed_model_identity(tmp_path):
-    models = [
-        {"tag": "Model_1", "label": "Shared", "file_path": None, "unsaved": True}
-    ]
+    models = [{"tag": "Model_1", "label": "Shared", "file_path": None, "unsaved": True}]
     manager, _ownership, _client = _manager(tmp_path, models=models)
     lock = _attach_and_lock(manager)
     models[0] = {
@@ -968,6 +964,7 @@ def test_model_lock_verify_detects_changed_server_identity(tmp_path):
 
     assert result["success"] is False
     assert result["changed_fields"] == ["attached_server"]
+    assert manager._test_snapshot_provider.calls == len(snapshots)
 
 
 def test_model_lock_verify_rejects_stale_caller_identities(tmp_path):
@@ -990,9 +987,7 @@ def test_unlock_requires_reason_and_leaves_bounded_audit(tmp_path):
     manager, _ownership, _client = _manager(tmp_path)
     lock = _attach_and_lock(manager)
 
-    missing = manager.unlock_model(
-        expected_lock_sha256=lock["lock_sha256"], reason="  "
-    )
+    missing = manager.unlock_model(expected_lock_sha256=lock["lock_sha256"], reason="  ")
     unlocked = manager.unlock_model(
         expected_lock_sha256=lock["lock_sha256"], reason="Return control to Desktop"
     )
@@ -1014,9 +1009,10 @@ def test_detach_refuses_while_model_lock_is_active(tmp_path):
     assert result["state"] == "model_lock_active"
     assert client.calls == []
     assert ownership.releases == 0
-    assert manager.unlock_model(
-        expected_lock_sha256=lock["lock_sha256"], reason="Detach"
-    )["success"] is True
+    assert (
+        manager.unlock_model(expected_lock_sha256=lock["lock_sha256"], reason="Detach")["success"]
+        is True
+    )
 
 
 def test_save_copy_snapshot_commits_manifest_after_identity_verification(tmp_path):
@@ -1067,11 +1063,14 @@ def test_native_path_only_writer_fails_before_any_snapshot_write(tmp_path):
 
 def test_snapshot_rehashes_and_preserves_declared_immutable_source(tmp_path):
     manager, _ownership, _client = _manager(tmp_path)
-    assert manager.attach(
-        _request(),
-        profile="core",
-        environ={SHARED_SERVER_FEATURE_ENV: "true"},
-    )["success"] is True
+    assert (
+        manager.attach(
+            _request(),
+            profile="core",
+            environ={SHARED_SERVER_FEATURE_ENV: "true"},
+        )["success"]
+        is True
+    )
     assert manager.adopt_model(_selector())["success"] is True
     source = tmp_path / "source.mph"
     source.write_bytes(b"immutable source bytes")
@@ -1096,9 +1095,7 @@ def test_snapshot_writer_failure_never_commits_complete_manifest(tmp_path):
         target.write_bytes(b"partial")
         raise RuntimeError("simulated Save Copy failure")
 
-    manager, _ownership, _client = _manager(
-        tmp_path, snapshot_writer=partial_failure
-    )
+    manager, _ownership, _client = _manager(tmp_path, snapshot_writer=partial_failure)
     lock = _attach_and_lock(manager)
 
     result = manager.snapshot_model(
@@ -1137,9 +1134,7 @@ def test_snapshot_manifest_failure_removes_snapshot_and_partial_manifest(tmp_pat
         path.write_text("{", encoding="utf-8")
         raise OSError("simulated manifest publication failure")
 
-    manager, _ownership, _client = _manager(
-        tmp_path, manifest_writer=partial_manifest
-    )
+    manager, _ownership, _client = _manager(tmp_path, manifest_writer=partial_manifest)
     lock = _attach_and_lock(manager)
 
     result = manager.snapshot_model(
@@ -1156,9 +1151,7 @@ def test_snapshot_manifest_failure_removes_snapshot_and_partial_manifest(tmp_pat
     assert list(tmp_path.glob("Model_1-snapshot*")) == []
 
 
-def test_snapshot_cleanup_reports_non_oserror_without_skipping_later_cleanup(
-    tmp_path, monkeypatch
-):
+def test_snapshot_cleanup_reports_non_oserror_without_skipping_later_cleanup(tmp_path, monkeypatch):
     def partial_manifest(path, _value):
         path.write_text("{", encoding="utf-8")
         raise OSError("simulated manifest publication failure")
@@ -1179,7 +1172,6 @@ def test_snapshot_cleanup_reports_non_oserror_without_skipping_later_cleanup(
         expected_revision_sha256=lock["revision"]["revision_sha256"],
         max_snapshot_bytes=1024,
     )
-
     assert result["success"] is False
     assert any("ValueError" in error for error in result["cleanup_errors"])
     assert result["partial_snapshot_exists"] is False
@@ -1209,9 +1201,7 @@ def test_snapshot_collision_never_deletes_preexisting_artifact(tmp_path, collisi
 
 
 def test_snapshot_detects_model_identity_change_during_save_copy(tmp_path):
-    models = [
-        {"tag": "Model_1", "label": "Shared", "file_path": None, "unsaved": True}
-    ]
+    models = [{"tag": "Model_1", "label": "Shared", "file_path": None, "unsaved": True}]
 
     def change_identity(_client, _tag, target):
         target.write_bytes(b"snapshot fixture")
@@ -1282,9 +1272,7 @@ def test_post_connect_accepts_final_build_difference_with_warning(tmp_path):
 
     assert result["success"] is True
     assert result["post_connect"]["clientapi_comsol_version"] == "6.4.0.310"
-    assert result["post_connect"]["warnings"] == [
-        "same_accepted_release_line_build_difference"
-    ]
+    assert result["post_connect"]["warnings"] == ["same_accepted_release_line_build_difference"]
 
 
 def test_post_connect_correlates_localized_clientapi_build_to_file_version(tmp_path):
@@ -1358,6 +1346,7 @@ def test_post_connect_rejects_changed_server_identity_before_inventory(tmp_path)
     assert "identity changed after client connection" in result["error"]
     assert client.calls == ["disconnect"]
     assert ownership.releases == 1
+    assert manager._test_snapshot_provider.calls == len(snapshots)
 
 
 def test_client_construction_failure_releases_only_mcp_lease(tmp_path):
@@ -1399,9 +1388,7 @@ def test_attach_inventory_and_disconnect_failures_retain_cleanup_handles(tmp_pat
         }
         for index in range(33)
     ]
-    manager, ownership, _client = _manager(
-        tmp_path, client=client, models=oversized_inventory
-    )
+    manager, ownership, _client = _manager(tmp_path, client=client, models=oversized_inventory)
 
     attached = manager.attach(
         _request(),
@@ -1493,11 +1480,14 @@ def test_detach_release_failure_retains_ownership_for_retry(tmp_path):
 
     ownership = ToggleRelease(tmp_path)
     manager, _ownership, client = _manager(tmp_path, ownership=ownership)
-    assert manager.attach(
-        _request(),
-        profile="core",
-        environ={SHARED_SERVER_FEATURE_ENV: "true"},
-    )["success"] is True
+    assert (
+        manager.attach(
+            _request(),
+            profile="core",
+            environ={SHARED_SERVER_FEATURE_ENV: "true"},
+        )["success"]
+        is True
+    )
 
     first = manager.detach()
 
@@ -1569,11 +1559,14 @@ def test_changed_server_identity_after_disconnect_fails_preservation(tmp_path):
         _snapshot(server_created=999.0),
     ]
     manager, ownership, client = _manager(tmp_path, snapshots=snapshots)
-    assert manager.attach(
-        _request(),
-        profile="core",
-        environ={SHARED_SERVER_FEATURE_ENV: "true"},
-    )["success"] is True
+    assert (
+        manager.attach(
+            _request(),
+            profile="core",
+            environ={SHARED_SERVER_FEATURE_ENV: "true"},
+        )["success"]
+        is True
+    )
 
     result = manager.detach()
 
@@ -1601,14 +1594,15 @@ def test_detach_independently_checks_preservation_boundaries(
     elif after_mutation == "inventory_incomplete":
         after["inventory_complete"] = False
     snapshots = [_snapshot(), _snapshot(), _snapshot(), after]
-    manager, ownership, client = _manager(
-        tmp_path, models=models, snapshots=snapshots
+    manager, ownership, client = _manager(tmp_path, models=models, snapshots=snapshots)
+    assert (
+        manager.attach(
+            _request(),
+            profile="core",
+            environ={SHARED_SERVER_FEATURE_ENV: "true"},
+        )["success"]
+        is True
     )
-    assert manager.attach(
-        _request(),
-        profile="core",
-        environ={SHARED_SERVER_FEATURE_ENV: "true"},
-    )["success"] is True
     if after_mutation == "model_inventory":
         models[0] = {**models[0], "label": "Changed in Desktop"}
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 import pytest
 from pydantic import BaseModel, TypeAdapter, ValidationError
@@ -63,7 +64,12 @@ def test_legacy_job_fields_reach_the_existing_normalizer_byte_identically(tmp_pa
     parsed = TypeAdapter(JobSubmissionSpec).validate_python(raw)
     transported = job_submission_dict(parsed)
 
-    assert transported == raw
+    def canonical(value):
+        return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode(
+            "utf-8"
+        )
+
+    assert canonical(transported) == canonical(raw)
     assert (
         validate_staged_sweep_spec(transported)["spec_fingerprint"]
         == (validate_staged_sweep_spec(raw)["spec_fingerprint"])

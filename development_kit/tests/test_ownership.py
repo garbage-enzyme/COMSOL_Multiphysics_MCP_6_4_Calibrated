@@ -11,6 +11,7 @@ import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from pathlib import Path
 
 import psutil
@@ -80,7 +81,9 @@ def test_collision_rollback_does_not_report_a_foreign_or_missing_lease_as_retain
     manager = owner(runtime_dir, 10, 100.0, ["python.exe"], [])
     monkeypatch.setattr(manager, "_create_lease", lambda _payload: {"success": True})
     monkeypatch.setattr(manager, "status", lambda **_kwargs: {"collision": True})
-    monkeypatch.setattr(ownership_module, "_unlink_retry", lambda *_args, **_kwargs: (False, reason))
+    monkeypatch.setattr(
+        ownership_module, "_unlink_retry", lambda *_args, **_kwargs: (False, reason)
+    )
 
     result = manager._create_lease_if_collision_free({"pid": 10})
 
@@ -212,6 +215,20 @@ def test_lease_mutations_hold_one_cross_process_operation_lock(runtime_dir, monk
     allow_replace = threading.Event()
     release_finished = threading.Event()
     original_replace = ownership_module._replace_retry_if_unchanged
+    original_operation_lock = ownership_module._lease_operation_lock
+    operation_attempts = 0
+    attempt_guard = threading.Lock()
+    second_operation_attempted = threading.Event()
+
+    @contextmanager
+    def tracked_operation_lock(path):
+        nonlocal operation_attempts
+        with attempt_guard:
+            operation_attempts += 1
+            if operation_attempts == 2:
+                second_operation_attempted.set()
+        with original_operation_lock(path):
+            yield
 
     def paused_replace(*args, **kwargs):
         entered_replace.set()
@@ -219,6 +236,7 @@ def test_lease_mutations_hold_one_cross_process_operation_lock(runtime_dir, monk
         return original_replace(*args, **kwargs)
 
     monkeypatch.setattr(ownership_module, "_replace_retry_if_unchanged", paused_replace)
+    monkeypatch.setattr(ownership_module, "_lease_operation_lock", tracked_operation_lock)
     heartbeat_result = []
     release_result = []
     heartbeat_thread = threading.Thread(target=lambda: heartbeat_result.append(manager.heartbeat()))
@@ -231,6 +249,7 @@ def test_lease_mutations_hold_one_cross_process_operation_lock(runtime_dir, monk
     heartbeat_thread.start()
     assert entered_replace.wait(timeout=1)
     release_thread.start()
+    assert second_operation_attempted.wait(timeout=1)
     assert not release_finished.wait(timeout=0.05)
     allow_replace.set()
     heartbeat_thread.join(timeout=2)

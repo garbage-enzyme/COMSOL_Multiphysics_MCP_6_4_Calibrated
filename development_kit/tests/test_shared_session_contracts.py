@@ -7,7 +7,6 @@ import sys
 from pathlib import Path
 
 import pytest
-
 from src.shared_session.contracts import (
     SHARED_SERVER_FEATURE_ENV,
     SharedServerEndpoint,
@@ -49,9 +48,7 @@ def test_shared_feature_is_profile_independent_and_requires_strict_true_flag():
 @pytest.mark.parametrize("value", ["1", "yes", "enabled", "", " true-ish "])
 def test_shared_feature_rejects_ambiguous_flag_values(value):
     with pytest.raises(ValueError, match="exactly true or false"):
-        normalize_shared_server_feature_gate(
-            "core", environ={SHARED_SERVER_FEATURE_ENV: value}
-        )
+        normalize_shared_server_feature_gate("core", environ={SHARED_SERVER_FEATURE_ENV: value})
 
 
 @pytest.mark.parametrize(
@@ -153,9 +150,11 @@ def test_contract_import_does_not_import_mph_or_construct_a_client():
     code = """
 import sys
 from src.shared_session.contracts import normalize_shared_server_endpoint
-assert 'mph' not in sys.modules
+if 'mph' in sys.modules:
+    raise RuntimeError('contracts imported mph')
 assert normalize_shared_server_endpoint({'host': '127.0.0.1', 'port': 2036}).port == 2036
-assert 'mph' not in sys.modules
+if 'mph' in sys.modules:
+    raise RuntimeError('normalization imported mph')
 """
     completed = subprocess.run(
         [sys.executable, "-c", code],

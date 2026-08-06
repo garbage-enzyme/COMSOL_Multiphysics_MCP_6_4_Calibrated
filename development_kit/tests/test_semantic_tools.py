@@ -8,7 +8,6 @@ import json
 import shutil
 import subprocess
 import sys
-import uuid
 from pathlib import Path
 
 import pytest
@@ -26,8 +25,8 @@ def _decode_public_tool_result(result):
 
 
 @pytest.fixture
-def lightweight_deployment():
-    root = Path("D:/comsol_semantic_profile_test") / uuid.uuid4().hex
+def lightweight_deployment(ascii_tmp_path):
+    root = ascii_tmp_path / "semantic-profile"
     index = root / "indexes" / "corpus" / "model" / "build-1"
     model = root / "models" / "model" / "r1"
     lexical = root / "lexical" / "manuals.sqlite3"
@@ -262,9 +261,7 @@ print(json.dumps({'count': len(names), 'configured': status['configured']}))
         capture_output=True,
         text=True,
         timeout=20,
-        env=isolated_semantic_environment(
-            {"COMSOL_MCP_ENABLE_SEMANTIC_DOCS": "true"}
-        ),
+        env=isolated_semantic_environment({"COMSOL_MCP_ENABLE_SEMANTIC_DOCS": "true"}),
     )
 
     assert completed.returncode == 0, completed.stderr

@@ -21,7 +21,8 @@ from src.utils.validation import strict_json_number
 
 ROOT = Path(__file__).parents[2]
 _PRIVATE_HOME_PATH = re.compile(
-    r"(?:(?<![a-z0-9_])[a-z]:)?/(?:users|documents and settings|home)/[^/\s\"']+",
+    r"(?:^|(?<![a-z0-9_]))(?:~(?:/|$)|(?:[a-z]:)?/"
+    r"(?:users|documents and settings|home)/+[^/\s\"']+|(?<![:/])//[^/\s]+/[^/\s]+)",
     re.IGNORECASE,
 )
 
@@ -254,7 +255,21 @@ def test_real_probe_sources_contain_no_private_model_defaults():
         "C:\\Documents and Settings\\Carol\\model.mph",
         "/home/dave/project/model.mph",
         "/Users/Erin/project/model.mph",
+        "\\\\laptop\\Users\\Owner\\model.mph",
+        "~/project/model.mph",
+        "/home//dave/project/model.mph",
     ],
 )
 def test_private_path_scan_normalizes_drive_case_and_separators(private_path):
     assert _contains_private_home_path(private_path)
+
+
+@pytest.mark.parametrize(
+    "public_url",
+    [
+        "https://example.com/reference/manual.pdf",
+        "http://localhost:8000/status",
+    ],
+)
+def test_private_path_scan_does_not_classify_public_urls(public_url):
+    assert not _contains_private_home_path(public_url)

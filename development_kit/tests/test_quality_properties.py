@@ -6,7 +6,6 @@ import asyncio
 import json
 import math
 import os
-import tempfile
 from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
@@ -354,14 +353,15 @@ def test_frozen_dict_rejects_in_place_union() -> None:
 
 
 @seed(20260721)
-@settings(max_examples=50, deadline=None, print_blob=True)
+@settings(
+    max_examples=50,
+    deadline=None,
+    print_blob=True,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
 @given(segment=_ASCII_SEGMENTS)
-def test_owned_paths_are_absolute_ascii_and_contained(segment: str) -> None:
-    base = (
-        Path("D:/comsol_runtime/property_paths")
-        if Path("D:/").exists()
-        else Path(tempfile.gettempdir()) / "comsol_mcp_property_paths"
-    )
+def test_owned_paths_are_absolute_ascii_and_contained(segment: str, ascii_tmp_path) -> None:
+    base = ascii_tmp_path / "property-paths"
     root = base / "owned"
     root.mkdir(parents=True, exist_ok=True)
     policy = PathPolicy((), root)

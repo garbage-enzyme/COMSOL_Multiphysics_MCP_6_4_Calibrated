@@ -1,12 +1,11 @@
-import os
 import hashlib
+import os
 import subprocess
 import sys
 import time
 
 import psutil
 import pytest
-
 import src.jobs.manager as manager_module
 import src.jobs.process_control as process_control_module
 from src.jobs.process_control import (
@@ -119,16 +118,22 @@ def test_owned_tree_capture_excludes_unrelated_sentinel():
         [sys.executable, "-c", "import time; time.sleep(30)"],
         creationflags=_HIDDEN_PROCESS_FLAGS,
     )
+    identity = process_identity(root.pid)
     descendants = []
     try:
-        identity = process_identity(root.pid)
         deadline = time.monotonic() + 5
-        captured = capture_owned_descendants(identity)
-        while len(captured["descendants"]) < 2 and time.monotonic() < deadline:
-            time.sleep(0.05)
+        while time.monotonic() < deadline:
             captured = capture_owned_descendants(identity)
-        descendants = captured["descendants"]
-        assert len(captured["descendants"]) >= 2
+            descendants = [
+                *{
+                    (item["pid"], item["process_create_time"]): item
+                    for item in [*descendants, *captured["descendants"]]
+                }.values()
+            ]
+            if len(descendants) >= 2:
+                break
+            time.sleep(0.05)
+        assert len(descendants) >= 2
 
         assert terminate_exact(identity)["acted"] is True
         for descendant in descendants:
@@ -138,6 +143,14 @@ def test_owned_tree_capture_excludes_unrelated_sentinel():
         assert _wait_absent([identity, *descendants])["absent"] is True
         assert sentinel.poll() is None
     finally:
+        if root.poll() is None:
+            latest = capture_owned_descendants(identity)
+            descendants = [
+                *{
+                    (item["pid"], item["process_create_time"]): item
+                    for item in [*descendants, *latest["descendants"]]
+                }.values()
+            ]
         for descendant in descendants:
             terminate_exact(descendant, force=True)
         if descendants:

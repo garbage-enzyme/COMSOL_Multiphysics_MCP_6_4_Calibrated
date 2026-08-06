@@ -606,6 +606,9 @@ def test_retrieval_acceptance_preserves_primary_failure_through_reset_failure(tm
 
 
 def test_retrieval_acceptance_rejects_unsuccessful_worker_reset(tmp_path):
+    expected_by_query = {item[1]: item[3] for item in retrieval_module.QUERIES}
+    assert len(expected_by_query) == len(retrieval_module.QUERIES)
+
     class Manager:
         def __init__(self):
             self.query_count = 0
@@ -616,7 +619,8 @@ def test_retrieval_acceptance_rejects_unsuccessful_worker_reset(tmp_path):
 
         def query(self, query, **_kwargs):
             self.query_count += 1
-            expected = next(item[3] for item in retrieval_module.QUERIES if item[1] == query)
+            assert query in expected_by_query, f"missing retrieval expectation for {query!r}"
+            expected = expected_by_query[query]
             return {
                 "success": True,
                 "count": 1,

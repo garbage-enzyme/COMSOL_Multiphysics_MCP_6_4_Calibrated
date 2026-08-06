@@ -81,17 +81,18 @@ def test_happy_path_reuses_one_worker_and_reset_verifies_absence():
         assert manager.status()["state"] == "stopped"
 
 
-@pytest.mark.parametrize("fault", [
-    "query_hang",
-    "invalid_json",
-    "oversized_json",
-    "wrong_request_id",
-    "crash_before_response",
-])
+@pytest.mark.parametrize(
+    "fault",
+    [
+        "query_hang",
+        "invalid_json",
+        "oversized_json",
+        "wrong_request_id",
+        "crash_before_response",
+    ],
+)
 def test_query_protocol_faults_are_contained_without_retry(fault: str):
-    with SemanticWorkerManager(
-        startup_deadline=10.0, query_deadline=0.25, fault=fault
-    ) as manager:
+    with SemanticWorkerManager(startup_deadline=10.0, query_deadline=0.25, fault=fault) as manager:
         assert manager.start()["success"] is True
         result = manager.query("bounded fault probe")
 
@@ -177,9 +178,7 @@ def test_nested_query_filters_are_rejected_before_worker_start(monkeypatch):
 
 
 @pytest.mark.parametrize("invalid_document", [[], "manifest", 1])
-def test_lightweight_identity_rejects_non_object_decoded_manifests(
-    tmp_path, invalid_document
-):
+def test_lightweight_identity_rejects_non_object_decoded_manifests(tmp_path, invalid_document):
     root = tmp_path / "deployment"
     index = root / "index"
     model = root / "model"
@@ -196,9 +195,7 @@ def test_lightweight_identity_rejects_non_object_decoded_manifests(
         ),
         encoding="utf-8",
     )
-    (index / "manifest.json").write_text(
-        json.dumps(invalid_document), encoding="utf-8"
-    )
+    (index / "manifest.json").write_text(json.dumps(invalid_document), encoding="utf-8")
     (model / "model_manifest.json").write_text(
         json.dumps({"model_sha256": "b" * 64}), encoding="utf-8"
     )
@@ -265,9 +262,8 @@ def test_lightweight_identity_rejects_non_object_model_manifest(tmp_path):
     assert result["cleanup"]["absent"] is True
 
 
-def test_lightweight_identity_hashes_loaded_manifest_and_contains_invalid_utf8(request):
-    root = Path("D:/comsol_semantic_worker_test") / uuid.uuid4().hex
-    request.addfinalizer(lambda: shutil.rmtree(root, ignore_errors=True))
+def test_lightweight_identity_hashes_loaded_manifest_and_contains_invalid_utf8(ascii_tmp_path):
+    root = ascii_tmp_path / "semantic-worker"
     index = root / "indexes" / "corpus" / "model" / "build"
     model = root / "model"
     index.mkdir(parents=True)
@@ -285,12 +281,14 @@ def test_lightweight_identity_hashes_loaded_manifest_and_contains_invalid_utf8(r
         json.dumps({"model_sha256": "b" * 64}), encoding="utf-8"
     )
     (root / "current.json").write_text(
-        json.dumps({
-            "index_path": str(index),
-            "manifest_sha256": hashlib.sha256(manifest_bytes).hexdigest(),
-            "build_id": "build",
-            "model_fingerprint": "b" * 64,
-        }),
+        json.dumps(
+            {
+                "index_path": str(index),
+                "manifest_sha256": hashlib.sha256(manifest_bytes).hexdigest(),
+                "build_id": "build",
+                "model_fingerprint": "b" * 64,
+            }
+        ),
         encoding="utf-8",
     )
     configuration = {
@@ -299,13 +297,9 @@ def test_lightweight_identity_hashes_loaded_manifest_and_contains_invalid_utf8(r
         "model_path": str(model),
     }
 
-    assert _lightweight_deployment_identity(configuration)[
-        "lightweight_identity_match"
-    ] is True
+    assert _lightweight_deployment_identity(configuration)["lightweight_identity_match"] is True
     (index / "manifest.json").write_bytes(manifest_bytes + b" ")
-    assert _lightweight_deployment_identity(configuration)[
-        "lightweight_identity_match"
-    ] is False
+    assert _lightweight_deployment_identity(configuration)["lightweight_identity_match"] is False
     (index / "manifest.json").write_bytes(b"\xff")
     assert _lightweight_deployment_identity(configuration)["readable"] is False
 
@@ -321,9 +315,7 @@ def test_lightweight_identity_hashes_loaded_manifest_and_contains_invalid_utf8(r
         ("model", "model_sha256"),
     ],
 )
-def test_lightweight_identity_rejects_missing_required_fields(
-    request, document_name, field
-):
+def test_lightweight_identity_rejects_missing_required_fields(request, document_name, field):
     root = Path("D:/mcp_tests/a65b15id") / uuid.uuid4().hex
     request.addfinalizer(lambda: shutil.rmtree(root, ignore_errors=True))
     index = root / "indexes" / "corpus" / "model" / "build"
@@ -345,15 +337,11 @@ def test_lightweight_identity_rejects_missing_required_fields(
         "model_fingerprint": "b" * 64,
     }
     documents[document_name].pop(field)
-    (index / "manifest.json").write_text(
-        json.dumps(documents["manifest"]), encoding="utf-8"
-    )
+    (index / "manifest.json").write_text(json.dumps(documents["manifest"]), encoding="utf-8")
     (model_root / "model_manifest.json").write_text(
         json.dumps(documents["model"]), encoding="utf-8"
     )
-    (root / "current.json").write_text(
-        json.dumps(documents["pointer"]), encoding="utf-8"
-    )
+    (root / "current.json").write_text(json.dumps(documents["pointer"]), encoding="utf-8")
 
     result = _lightweight_deployment_identity(
         {"configured": True, "root": str(root), "model_path": str(model_root)}
@@ -366,18 +354,24 @@ def test_authentication_schema_and_message_bounds_do_not_kill_worker():
     with SemanticWorkerManager(startup_deadline=2.0) as manager:
         assert manager.start()["success"] is True
         port = int(manager._port)
-        wrong = _raw_request(port, {
-            "schema_version": WORKER_PROTOCOL_SCHEMA_VERSION,
-            "request_id": "wrong-token",
-            "token": "0" * 64,
-            "operation": "health",
-        })
-        schema = _raw_request(port, {
-            "schema_version": "999",
-            "request_id": "wrong-schema",
-            "token": manager._token,
-            "operation": "health",
-        })
+        wrong = _raw_request(
+            port,
+            {
+                "schema_version": WORKER_PROTOCOL_SCHEMA_VERSION,
+                "request_id": "wrong-token",
+                "token": "0" * 64,
+                "operation": "health",
+            },
+        )
+        schema = _raw_request(
+            port,
+            {
+                "schema_version": "999",
+                "request_id": "wrong-schema",
+                "token": manager._token,
+                "operation": "health",
+            },
+        )
         assert wrong["error"]["code"] == "unauthorized"
         assert schema["error"]["code"] == "invalid_schema"
         assert manager.health()["success"] is True
@@ -398,17 +392,23 @@ def test_queue_overflow_is_bounded_and_worker_recovers():
 
         def call(index: int) -> dict:
             barrier.wait(timeout=10.0)
-            return _raw_request(port, _request(
-                manager,
-                f"burst-{index}",
-                operation="query",
-                query=f"query {index}",
-                limit=1,
-            ), timeout=15.0)
+            return _raw_request(
+                port,
+                _request(
+                    manager,
+                    f"burst-{index}",
+                    operation="query",
+                    query=f"query {index}",
+                    limit=1,
+                ),
+                timeout=15.0,
+            )
 
         with ThreadPoolExecutor(max_workers=participants) as pool:
             responses = list(pool.map(call, range(participants)))
-        busy = [item for item in responses if not item["success"] and item["error"]["code"] == "busy"]
+        busy = [
+            item for item in responses if not item["success"] and item["error"]["code"] == "busy"
+        ]
         assert busy
         assert manager.health()["success"] is True
 
@@ -449,9 +449,7 @@ def test_unserializable_worker_response_uses_stable_json_fallback():
     handler = object.__new__(_RequestHandler)
     handler.wfile = BytesIO()
 
-    handler._write(
-        {"request_id": "response-1", "success": True, "value": object()}
-    )
+    handler._write({"request_id": "response-1", "success": True, "value": object()})
 
     response = json.loads(handler.wfile.getvalue())
     assert response["success"] is False
@@ -638,10 +636,9 @@ def test_query_limit_applies_to_the_transmitted_trimmed_value(monkeypatch):
     monkeypatch.setattr(
         manager,
         "_request",
-        lambda operation, fields, deadline: observed.append(
-            (operation, fields, deadline)
-        )
-        or {"success": True},
+        lambda operation, fields, deadline: (
+            observed.append((operation, fields, deadline)) or {"success": True}
+        ),
     )
     query = " " + "x" * PUBLIC_LIMITS["maximum_query_characters"] + " "
 
@@ -680,9 +677,7 @@ def test_unhashable_worker_discriminators_return_structured_errors(payload, code
 
 
 def test_crash_after_response_is_observed_without_process_leak():
-    with SemanticWorkerManager(
-        startup_deadline=2.0, fault="crash_after_response"
-    ) as manager:
+    with SemanticWorkerManager(startup_deadline=2.0, fault="crash_after_response") as manager:
         response = manager.query("respond then crash")
         assert response["success"] is True
         deadline = time.monotonic() + 2.0
@@ -804,10 +799,19 @@ def test_hanging_semantic_worker_does_not_delay_control_plane_or_lexical_search(
     root = Path("D:/comsol_semantic_worker_test") / uuid.uuid4().hex
     index = root / "manuals.sqlite3"
     runtime = root / "runtime"
-    build_index_from_records([{
-        "source": "fake/manual.pdf", "module": "fake", "page": 1,
-        "heading": "CopyFace", "text": "CopyFace source destination mesh",
-    }], index, corpus_fingerprint="semantic-worker-test")
+    build_index_from_records(
+        [
+            {
+                "source": "fake/manual.pdf",
+                "module": "fake",
+                "page": 1,
+                "heading": "CopyFace",
+                "text": "CopyFace source destination mesh",
+            }
+        ],
+        index,
+        corpus_fingerprint="semantic-worker-test",
+    )
     try:
         with SemanticWorkerManager(
             startup_deadline=2.0, query_deadline=0.5, fault="query_hang"

@@ -5,7 +5,6 @@ from __future__ import annotations
 from copy import deepcopy
 
 import pytest
-
 from src.shared_session.identity import (
     normalize_attached_server_identity,
     normalize_shared_model_selector,
@@ -28,12 +27,18 @@ def test_attached_server_identity_is_exact_stable_and_non_owned():
     second = normalize_attached_server_identity(deepcopy(_server_identity()))
 
     assert first == second
+    assert (
+        first.identity_sha256 == "a5d3d8d8f84dd4473770745b25662d8ee27a6c20122c3d53874f88f939da2fd2"
+    )
     assert first.server_command_signature == "a" * 64
     assert first.ownership == "external_user_owned"
     assert first.listener_bind_scope == "loopback"
     assert len(first.identity_sha256) == 64
     assert first.to_dict()["endpoint"]["scope"] == "loopback"
     assert normalize_attached_server_identity(first.to_dict()) == first
+    lowercase = _server_identity()
+    lowercase["server_command_signature"] = "a" * 64
+    assert normalize_attached_server_identity(lowercase).identity_sha256 == first.identity_sha256
 
     tampered = first.to_dict()
     tampered["identity_sha256"] = "0" * 64

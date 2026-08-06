@@ -110,6 +110,7 @@ def test_staged_model_is_published_only_after_client_and_lease_cleanup(ascii_tmp
 
     def publish(source, destination, *, overwrite):
         assert events == ["save", "clear", "release"]
+        assert overwrite is False
         events.append("publish")
         source.replace(destination)
 
@@ -121,6 +122,28 @@ def test_staged_model_is_published_only_after_client_and_lease_cleanup(ascii_tmp
 
     assert events == ["save", "clear", "release", "publish", "receipt"]
     assert output.read_bytes() == b"model"
+
+
+def test_existing_output_is_rejected_without_overwrite(ascii_tmp_path, monkeypatch):
+    namespace = _namespace(monkeypatch)
+    output = ascii_tmp_path / "existing.mph"
+    output.write_bytes(b"owner")
+    namespace["parse_args"] = lambda: SimpleNamespace(
+        output_model=output,
+        receipt=ascii_tmp_path / "receipt.json",
+        plate_side_m=0.01,
+        plate_separation_m=0.001,
+        relative_permittivity=2.1,
+        potential_v=1.0,
+        maximum_relative_error=1e-6,
+        solve=False,
+        overwrite_output=False,
+    )
+    namespace["SolverOwnership"] = lambda **_kwargs: pytest.fail("solver must not start")
+
+    with pytest.raises(FileExistsError, match="already exists"):
+        namespace["main"]()
+    assert output.read_bytes() == b"owner"
 
 
 @pytest.mark.parametrize(

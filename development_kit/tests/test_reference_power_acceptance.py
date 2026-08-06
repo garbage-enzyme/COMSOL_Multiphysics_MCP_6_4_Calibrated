@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 import subprocess
@@ -182,9 +183,19 @@ def test_preflight_cli_validates_fixture_without_importing_mph():
     assert receipt["contract_valid"] is True
     assert receipt["spec_valid"] is None
     assert receipt["real_comsol_started"] is False
-    assert "mph" not in (
-        ROOT / "development_kit" / "scripts" / "reference_power_gate_preflight.py"
-    ).read_text(encoding="utf-8")
+    preflight = ROOT / "development_kit" / "scripts" / "reference_power_gate_preflight.py"
+    imports = [
+        node
+        for node in ast.walk(ast.parse(preflight.read_text(encoding="utf-8")))
+        if isinstance(node, (ast.Import, ast.ImportFrom))
+    ]
+    assert all(
+        not (
+            (isinstance(node, ast.Import) and any(alias.name == "mph" for alias in node.names))
+            or (isinstance(node, ast.ImportFrom) and node.module == "mph")
+        )
+        for node in imports
+    )
 
 
 def test_preflight_cli_never_truncates_an_existing_receipt(tmp_path):

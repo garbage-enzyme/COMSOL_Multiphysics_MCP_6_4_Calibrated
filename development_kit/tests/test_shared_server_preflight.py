@@ -5,7 +5,6 @@ from __future__ import annotations
 from copy import deepcopy
 
 import pytest
-
 from src.shared_session.preflight import (
     classify_shared_server_preflight,
     normalize_comsol_version_readback,
@@ -116,11 +115,13 @@ def test_opposite_family_wildcard_is_not_attributed_to_ipv4_endpoint():
 
 def test_wildcard_listener_with_foreign_owner_is_rejected():
     snapshot = _ready()
+    snapshot["processes"].append(_process(21, "comsol_server"))
     snapshot["listeners"] = [{"host": "0.0.0.0", "port": 2036, "pid": 21}]
 
     result = _classify(snapshot)
 
     assert result["state"] == "unknown_or_multiple_candidate_servers"
+    assert result["violations"] == ["unknown_or_multiple_candidate_servers"]
 
 
 def test_wildcard_listener_with_multiple_owners_is_rejected():

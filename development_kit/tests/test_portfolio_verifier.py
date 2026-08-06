@@ -185,10 +185,15 @@ def test_exact_configuration_mesh_fit_and_wavelength_claims_verify(tmp_path):
 
 def test_summary_claims_reuse_artifact_chain_snapshots(tmp_path, monkeypatch):
     request, _raw, _fit = _fixture(tmp_path)
+    original = portfolio_verifier_module._verify_artifact_chain_snapshot
+    calls = []
+
+    def tracked_snapshot(*args, **kwargs):
+        calls.append((args, kwargs))
+        return original(*args, **kwargs)
+
     monkeypatch.setattr(
-        portfolio_verifier_module,
-        "_read_cited_artifact",
-        lambda **_kwargs: pytest.fail("verified artifact must not be reopened"),
+        portfolio_verifier_module, "_verify_artifact_chain_snapshot", tracked_snapshot
     )
 
     receipt = verify_portfolio_evidence(
@@ -197,6 +202,7 @@ def test_summary_claims_reuse_artifact_chain_snapshots(tmp_path, monkeypatch):
     )
 
     assert receipt["claim_count"] == 4
+    assert len(calls) == 1
 
 
 @pytest.mark.parametrize("claim_id", ["configuration", "mesh", "fit", "wavelength"])
