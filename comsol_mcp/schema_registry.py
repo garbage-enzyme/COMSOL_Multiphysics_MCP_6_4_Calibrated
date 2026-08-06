@@ -24,8 +24,12 @@ from comsol_mcp.research import (
     OBJECTIVE_SCORE_SCHEMA_VERSION,
     OPTIMIZER_CHECKPOINT_SCHEMA_NAME,
     OPTIMIZER_CHECKPOINT_SCHEMA_VERSION,
+    OPTIMIZER_EXPLANATION_SCHEMA_NAME,
+    OPTIMIZER_EXPLANATION_SCHEMA_VERSION,
     OPTIMIZER_PROPOSAL_SCHEMA_NAME,
     OPTIMIZER_PROPOSAL_SCHEMA_VERSION,
+    OPTIMIZER_STATE_SCHEMA_NAME,
+    OPTIMIZER_STATE_SCHEMA_VERSION,
     PORTFOLIO_SCHEMA_NAME,
     PORTFOLIO_SCHEMA_VERSION,
     RESEARCH_GOAL_SCHEMA_NAME,
@@ -415,6 +419,16 @@ def _entries() -> list[dict[str, Any]]:
         _entry(
             OPTIMIZER_PROPOSAL_SCHEMA_NAME,
             OPTIMIZER_PROPOSAL_SCHEMA_VERSION,
+            "comsol_mcp.research.optimizers",
+        ),
+        _entry(
+            OPTIMIZER_STATE_SCHEMA_NAME,
+            OPTIMIZER_STATE_SCHEMA_VERSION,
+            "comsol_mcp.research.optimizers",
+        ),
+        _entry(
+            OPTIMIZER_EXPLANATION_SCHEMA_NAME,
+            OPTIMIZER_EXPLANATION_SCHEMA_VERSION,
             "comsol_mcp.research.optimizers",
         ),
         _entry(

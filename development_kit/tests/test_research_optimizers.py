@@ -12,6 +12,7 @@ from comsol_mcp.durable import domain_sha256_v2
 from comsol_mcp.research.optimizers import (
     DeterministicLatinHypercubeOptimizer,
     DeterministicRandomOptimizer,
+    ResearchOptimizerProtocol,
 )
 from development_kit.tests.test_research_contracts import _space
 
@@ -161,6 +162,70 @@ def test_lhs_rejects_random_checkpoint_and_cross_backend_proposal():
         )
     with pytest.raises(ValueError, match="fields mismatch"):
         DeterministicLatinHypercubeOptimizer.restore(_space(), random_checkpoint)
+
+
+@pytest.mark.parametrize(
+    "optimizer",
+    [
+        DeterministicRandomOptimizer(_space(), seed=1),
+        DeterministicLatinHypercubeOptimizer(_space(), seed=1, sample_count=8),
+    ],
+)
+def test_baselines_implement_runtime_optimizer_protocol(optimizer):
+    assert isinstance(optimizer, ResearchOptimizerProtocol)
+
+
+def test_state_is_fingerprinted_and_tracks_exact_observation_counts():
+    optimizer = DeterministicRandomOptimizer(_space(), seed=1)
+    initial = optimizer.state()
+    assert initial["next_proposal_index"] == 0
+    assert initial["observation_count"] == 0
+    assert initial["status_counts"] == {"completed": 0, "failed": 0, "infeasible": 0}
+    proposal = optimizer.ask()
+    optimizer.tell(
+        proposal,
+        candidate_fingerprint="a" * 64,
+        status="infeasible",
+        score_fingerprint=None,
+        losses={},
+    )
+    observed = optimizer.state()
+    assert observed["next_proposal_index"] == 1
+    assert observed["remaining_proposals"] == observed["proposal_limit"] - 1
+    assert observed["observation_count"] == 1
+    assert observed["status_counts"]["infeasible"] == 1
+    assert observed["state_fingerprint"] != initial["state_fingerprint"]
+
+
+def test_explain_is_deterministic_backend_specific_and_observation_independent():
+    first = DeterministicLatinHypercubeOptimizer(_space(), seed=7, sample_count=8)
+    second = DeterministicLatinHypercubeOptimizer(_space(), seed=7, sample_count=8)
+    first_proposal = first.ask()
+    second_proposal = second.ask()
+    explanation = first.explain(first_proposal)
+    assert explanation == second.explain(second_proposal)
+    assert explanation["uses_observations"] is False
+    assert explanation["parameters"]["sample_count"] == 8
+    assert set(explanation["parameters"]["strata"]) == {
+        "patch_length_x",
+        "patch_length_y",
+    }
+
+
+def test_explain_rejects_unasked_foreign_and_forged_proposals():
+    optimizer = DeterministicRandomOptimizer(_space(), seed=1)
+    unasked = DeterministicRandomOptimizer(_space(), seed=1).ask()
+    with pytest.raises(ValueError, match="already asked"):
+        optimizer.explain(unasked)
+    asked = optimizer.ask()
+    foreign = DeterministicRandomOptimizer(_space(), seed=2).ask()
+    with pytest.raises(ValueError, match="another backend"):
+        optimizer.explain(foreign)
+    forged = copy.deepcopy(asked)
+    forged["values"]["patch_length_x"] = 75.0
+    forged.pop("proposal_fingerprint")
+    with pytest.raises(ValueError, match="already asked"):
+        optimizer.explain(forged)
 
 
 def test_tell_is_idempotent_for_exact_result_and_rejects_conflicts():

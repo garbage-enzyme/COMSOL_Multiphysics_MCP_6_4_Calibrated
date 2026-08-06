@@ -6,7 +6,7 @@ import hashlib
 import math
 import re
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 from comsol_mcp.durable import domain_sha256_v2
 
@@ -15,6 +15,10 @@ from .state import normalize_optimizer_checkpoint
 
 OPTIMIZER_PROPOSAL_SCHEMA_NAME = "comsol_mcp.research_optimizer_proposal"
 OPTIMIZER_PROPOSAL_SCHEMA_VERSION = "1.0.0"
+OPTIMIZER_STATE_SCHEMA_NAME = "comsol_mcp.research_optimizer_state"
+OPTIMIZER_STATE_SCHEMA_VERSION = "1.0.0"
+OPTIMIZER_EXPLANATION_SCHEMA_NAME = "comsol_mcp.research_optimizer_explanation"
+OPTIMIZER_EXPLANATION_SCHEMA_VERSION = "1.0.0"
 RANDOM_BACKEND_NAME = "deterministic_random"
 RANDOM_BACKEND_VERSION = "1.0.0"
 LHS_BACKEND_NAME = "deterministic_latin_hypercube"
@@ -24,6 +28,37 @@ MAX_LHS_SAMPLES = 4096
 MAX_OBJECTIVE_LOSSES = 128
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _RESULT_STATUSES = {"completed", "failed", "infeasible"}
+
+
+@runtime_checkable
+class ResearchOptimizerProtocol(Protocol):
+    """Backend-neutral ask/tell/state/explain/checkpoint contract."""
+
+    backend_identity: str
+
+    def ask(self) -> dict[str, Any]: ...
+
+    def tell(
+        self,
+        proposal: object,
+        *,
+        candidate_fingerprint: str,
+        status: str,
+        score_fingerprint: str | None,
+        losses: object,
+    ) -> bool: ...
+
+    def state(self) -> dict[str, Any]: ...
+
+    def explain(self, proposal: object) -> dict[str, Any]: ...
+
+    def checkpoint(
+        self,
+        *,
+        campaign_fingerprint: str,
+        decision_fingerprint: str,
+        created_at: str,
+    ) -> dict[str, Any]: ...
 
 
 def _fingerprint(value: object, name: str, *, optional: bool = False) -> str | None:
@@ -180,6 +215,10 @@ def _normalize_losses(value: object, *, required: bool) -> dict[str, float]:
 class DeterministicRandomOptimizer:
     """Dependency-free ask/tell baseline with replayable counter-based streams."""
 
+    backend_name = RANDOM_BACKEND_NAME
+    backend_version = RANDOM_BACKEND_VERSION
+    strategy = "independent_sha256_counter_samples"
+
     def __init__(self, design_space: object, *, seed: int) -> None:
         self.space = normalize_design_space(design_space)
         self.seed = _seed(seed)
@@ -215,6 +254,67 @@ class DeterministicRandomOptimizer:
         proposal = self._proposal(self.next_index)
         self.next_index += 1
         return proposal
+
+    def _proposal_limit(self) -> int:
+        return MAX_PROPOSALS
+
+    def _explanation_parameters(self, index: int) -> dict[str, Any]:
+        return {"counter_index": index}
+
+    def state(self) -> dict[str, Any]:
+        status_counts = {
+            status: sum(item["status"] == status for item in self.observations.values())
+            for status in sorted(_RESULT_STATUSES)
+        }
+        body = {
+            "schema_name": OPTIMIZER_STATE_SCHEMA_NAME,
+            "schema_version": OPTIMIZER_STATE_SCHEMA_VERSION,
+            "backend": {
+                "name": self.backend_name,
+                "version": self.backend_version,
+                "identity": self.backend_identity,
+            },
+            "space_fingerprint": self.space["space_fingerprint"],
+            "next_proposal_index": self.next_index,
+            "proposal_limit": self._proposal_limit(),
+            "remaining_proposals": self._proposal_limit() - self.next_index,
+            "observation_count": len(self.observations),
+            "status_counts": status_counts,
+        }
+        return {
+            **body,
+            "state_fingerprint": domain_sha256_v2(OPTIMIZER_STATE_SCHEMA_NAME, body),
+        }
+
+    def explain(self, proposal: object) -> dict[str, Any]:
+        normalized = _normalize_proposal(proposal)
+        index = normalized["proposal_index"]
+        if (
+            normalized["backend_identity"] != self.backend_identity
+            or normalized["space_fingerprint"] != self.space["space_fingerprint"]
+        ):
+            raise ValueError("optimizer proposal belongs to another backend or space")
+        if index >= self.next_index or normalized != self._proposal(index):
+            raise ValueError("optimizer can only explain an exact proposal already asked")
+        body = {
+            "schema_name": OPTIMIZER_EXPLANATION_SCHEMA_NAME,
+            "schema_version": OPTIMIZER_EXPLANATION_SCHEMA_VERSION,
+            "backend": {
+                "name": self.backend_name,
+                "version": self.backend_version,
+                "identity": self.backend_identity,
+            },
+            "space_fingerprint": self.space["space_fingerprint"],
+            "proposal_fingerprint": normalized["proposal_fingerprint"],
+            "proposal_index": index,
+            "strategy": self.strategy,
+            "uses_observations": False,
+            "parameters": self._explanation_parameters(index),
+        }
+        return {
+            **body,
+            "explanation_fingerprint": domain_sha256_v2(OPTIMIZER_EXPLANATION_SCHEMA_NAME, body),
+        }
 
     def tell(
         self,
@@ -342,6 +442,10 @@ class DeterministicRandomOptimizer:
 class DeterministicLatinHypercubeOptimizer(DeterministicRandomOptimizer):
     """Finite deterministic Latin-hypercube baseline for mixed design spaces."""
 
+    backend_name = LHS_BACKEND_NAME
+    backend_version = LHS_BACKEND_VERSION
+    strategy = "per_variable_affine_permutation_with_stratum_jitter"
+
     def __init__(self, design_space: object, *, seed: int, sample_count: int) -> None:
         self.space = normalize_design_space(design_space)
         self.seed = _seed(seed)
@@ -379,6 +483,20 @@ class DeterministicLatinHypercubeOptimizer(DeterministicRandomOptimizer):
         proposal = self._proposal(self.next_index)
         self.next_index += 1
         return proposal
+
+    def _proposal_limit(self) -> int:
+        return self.sample_count
+
+    def _explanation_parameters(self, index: int) -> dict[str, Any]:
+        return {
+            "sample_count": self.sample_count,
+            "strata": {
+                variable["variable_id"]: _lhs_stratum(
+                    self.seed, self.sample_count, index, variable["variable_id"]
+                )
+                for variable in self.space["variables"]
+            },
+        }
 
     def checkpoint(
         self,
@@ -469,8 +587,13 @@ class DeterministicLatinHypercubeOptimizer(DeterministicRandomOptimizer):
 __all__ = [
     "LHS_BACKEND_NAME",
     "LHS_BACKEND_VERSION",
+    "OPTIMIZER_EXPLANATION_SCHEMA_NAME",
+    "OPTIMIZER_EXPLANATION_SCHEMA_VERSION",
     "OPTIMIZER_PROPOSAL_SCHEMA_NAME",
     "OPTIMIZER_PROPOSAL_SCHEMA_VERSION",
+    "OPTIMIZER_STATE_SCHEMA_NAME",
+    "OPTIMIZER_STATE_SCHEMA_VERSION",
     "DeterministicLatinHypercubeOptimizer",
     "DeterministicRandomOptimizer",
+    "ResearchOptimizerProtocol",
 ]
