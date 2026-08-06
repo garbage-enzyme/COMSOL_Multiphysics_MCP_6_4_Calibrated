@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import json
 import os
+import queue
 import subprocess
 import sys
-import queue
 import threading
 from pathlib import Path
 
