@@ -8,8 +8,8 @@ from src.tools import mim_patch as mim_patch_module
 from src.tools.mim_patch import (
     _build_periodic_mesh,
     _find_air_block_tag,
-    _identify_side_pairs,
     _identify_patch_topology,
+    _identify_side_pairs,
     _list_pair_metadata,
     _normalize_spectral_rows,
     _require_mim_selections,
@@ -215,6 +215,42 @@ def test_patch_topology_rejects_an_ambiguous_domain_identity():
 
     with pytest.raises(ValueError, match="ambiguous domain"):
         _identify_patch_topology(boundaries, [1.0, 1.0, 1.0], [0.0, 0.0, 0.0])
+
+
+def test_patch_topology_uses_bottom_top_intersection_when_face_counts_tie():
+    boundaries = [
+        {
+            "boundary_number": 1,
+            "up_domain": 3,
+            "down_domain": 7,
+            "interior": True,
+            "center": [0.5, 0.5, 0.0],
+            "normal": [0.0, 0.0, -1.0],
+        },
+        {
+            "boundary_number": 2,
+            "up_domain": 3,
+            "down_domain": 9,
+            "interior": True,
+            "center": [0.5, 0.5, 1.0],
+            "normal": [0.0, 0.0, 1.0],
+        },
+        {
+            "boundary_number": 3,
+            "up_domain": 7,
+            "down_domain": 9,
+            "interior": True,
+            "center": [0.0, 0.5, 0.5],
+            "normal": [-1.0, 0.0, 0.0],
+        },
+    ]
+
+    domain, footprint = _identify_patch_topology(
+        boundaries, [1.0, 1.0, 1.0], [0.0, 0.0, 0.0]
+    )
+
+    assert domain == 3
+    assert footprint == [1]
 
 
 class MeshSelection:

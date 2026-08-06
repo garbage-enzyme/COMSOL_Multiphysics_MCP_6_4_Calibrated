@@ -281,18 +281,35 @@ def _identify_patch_topology(
         raise ValueError("patch topology could not be bound to the requested box")
 
     counts: dict[int, int] = {}
+    bottom_domains: set[int] = set()
+    top_domains: set[int] = set()
     for boundary in patch_faces:
+        center = boundary["center"]
+        normal = boundary["normal"]
+        adjacent = set()
         for name in ("up_domain", "down_domain"):
             domain = boundary.get(name)
             if isinstance(domain, int) and not isinstance(domain, bool) and domain > 0:
                 counts[domain] = counts.get(domain, 0) + 1
+                adjacent.add(domain)
+        if abs(float(normal[2])) > 0.5:
+            if abs(float(center[2]) - low[2]) <= tolerance:
+                bottom_domains.update(adjacent)
+            if abs(float(center[2]) - high[2]) <= tolerance:
+                top_domains.update(adjacent)
     if not counts:
         raise ValueError("patch topology has no readable adjacent domains")
-    maximum = max(counts.values())
-    candidates = sorted(domain for domain, count in counts.items() if count == maximum)
-    if len(candidates) != 1:
+    spanning_domains = bottom_domains & top_domains
+    if len(spanning_domains) > 1:
         raise ValueError("patch topology has an ambiguous domain identity")
-    patch_domain = candidates[0]
+    if len(spanning_domains) == 1:
+        patch_domain = next(iter(spanning_domains))
+    else:
+        maximum = max(counts.values())
+        candidates = sorted(domain for domain, count in counts.items() if count == maximum)
+        if len(candidates) != 1:
+            raise ValueError("patch topology has an ambiguous domain identity")
+        patch_domain = candidates[0]
 
     footprint = []
     for boundary in patch_faces:
