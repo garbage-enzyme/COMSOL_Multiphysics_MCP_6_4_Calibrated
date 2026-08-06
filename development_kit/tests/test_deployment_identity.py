@@ -207,7 +207,23 @@ def test_concurrent_build_identity_requests_share_only_the_inflight_hash(tmp_pat
     original_hash = build_identity_module._hash_package_content
     calls = 0
     entered = threading.Event()
+    all_requests_registered = threading.Event()
     release = threading.Event()
+
+    class CountingLock:
+        def __init__(self):
+            self._lock = threading.Lock()
+            self._completed_entries = 0
+
+        def __enter__(self):
+            self._lock.acquire()
+            return self
+
+        def __exit__(self, _exc_type, _exc, _traceback):
+            self._completed_entries += 1
+            if self._completed_entries == 8:
+                all_requests_registered.set()
+            self._lock.release()
 
     def bounded_hash(root):
         nonlocal calls
@@ -216,10 +232,12 @@ def test_concurrent_build_identity_requests_share_only_the_inflight_hash(tmp_pat
         assert release.wait(5)
         return original_hash(root)
 
+    monkeypatch.setattr(build_identity_module, "_INFLIGHT_HASHES_LOCK", CountingLock())
     monkeypatch.setattr(build_identity_module, "_hash_package_content", bounded_hash)
     with ThreadPoolExecutor(max_workers=8) as executor:
         futures = [executor.submit(package_content_sha256, package) for _ in range(8)]
         assert entered.wait(5)
+        assert all_requests_registered.wait(5)
         release.set()
         results = [future.result(timeout=5) for future in futures]
 
