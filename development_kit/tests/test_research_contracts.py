@@ -8,7 +8,12 @@ from pathlib import Path
 
 import pytest
 
-from comsol_mcp.research import normalize_design_space, normalize_research_goal, relative_bounds
+from comsol_mcp.research import (
+    compile_campaign_manifest,
+    normalize_design_space,
+    normalize_research_goal,
+    relative_bounds,
+)
 
 
 def _goal() -> dict:
@@ -108,6 +113,15 @@ def _space() -> dict:
     }
 
 
+def _approval() -> dict:
+    return {
+        "campaign_id": "mim-campaign-001",
+        "approval_id": "approval-001",
+        "approved_by": "researcher",
+        "approved_at": "2026-08-06T01:00:00Z",
+    }
+
+
 def test_d0_bounds_and_fingerprints_are_stable():
     assert relative_bounds(100) == (75.0, 125.0)
     first = normalize_design_space(_space())
@@ -197,3 +211,46 @@ def test_research_package_has_no_solver_or_optimizer_imports():
             elif isinstance(node, ast.ImportFrom) and node.module:
                 imported_roots.add(node.module.split(".", 1)[0])
     assert imported_roots.isdisjoint({"mph", "jpype", "scipy", "sklearn", "optuna"})
+
+
+def test_campaign_compilation_binds_goal_space_and_approval():
+    manifest = compile_campaign_manifest(_goal(), _space(), _approval())
+    assert manifest["state"] == "compiled_not_started"
+    assert manifest["success_claim_allowed"] is True
+    assert manifest["missing_success_threshold_objective_ids"] == []
+    assert len(manifest["campaign_fingerprint"]) == 64
+    assert manifest == compile_campaign_manifest(_goal(), _space(), _approval())
+
+
+def test_missing_threshold_allows_ranking_but_forbids_success_claim():
+    goal = _goal()
+    goal["objectives"][0]["tolerance"] = None
+    manifest = compile_campaign_manifest(goal, _space(), _approval())
+    assert manifest["success_claim_allowed"] is False
+    assert manifest["missing_success_threshold_objective_ids"] == ["q"]
+
+
+def test_campaign_rejects_goal_constraints_outside_design_space():
+    goal = _goal()
+    goal["constraints"] = [
+        {
+            "constraint_id": "undeclared",
+            "kind": "geometry",
+            "variable_ids": ["gap"],
+            "operator": "ge",
+            "value": 10,
+        }
+    ]
+    with pytest.raises(ValueError, match="declared design-space variables"):
+        compile_campaign_manifest(goal, _space(), _approval())
+
+
+def test_campaign_rejects_adapter_mapping_drift_and_unapproved_fields():
+    space = _space()
+    space["adapter_mappings"][0]["unit"] = "um"
+    with pytest.raises(ValueError, match="adapter mappings"):
+        compile_campaign_manifest(_goal(), space, _approval())
+    approval = _approval()
+    approval["extra"] = True
+    with pytest.raises(ValueError, match="fields mismatch"):
+        compile_campaign_manifest(_goal(), _space(), approval)

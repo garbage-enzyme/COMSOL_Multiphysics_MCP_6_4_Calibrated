@@ -127,7 +127,11 @@ def _normalize_objective(value: object, index: int) -> dict[str, Any]:
         target_value: float | list[float] = target_value_list
     else:
         target_value = _finite(target, f"{name}.target")
-    tolerance = _finite(raw["tolerance"], f"{name}.tolerance", minimum=0.0)
+    tolerance = (
+        None
+        if raw["tolerance"] is None
+        else _finite(raw["tolerance"], f"{name}.tolerance", minimum=0.0)
+    )
     return {
         "objective_id": _identifier(raw["objective_id"], f"{name}.objective_id"),
         "observable": _identifier(raw["observable"], f"{name}.observable"),

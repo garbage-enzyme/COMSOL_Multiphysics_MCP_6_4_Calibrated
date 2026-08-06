@@ -328,6 +328,7 @@ models are intentionally absent.
 
 - `comsol_mcp/research/__init__.py` — This file exports solver-free bounded research contracts.
 - `comsol_mcp/research/contracts.py` — This module normalizes versioned research goals and design spaces with deterministic fingerprints.
+- `comsol_mcp/research/compiler.py` — This module compiles approved goals and design spaces into frozen campaign manifests without a solver.
 
 - `src/__init__.py` — This compatibility package aliases legacy imports to the canonical implementation modules.
 - `comsol_mcp/__init__.py` — This module defines the single authored package version.
