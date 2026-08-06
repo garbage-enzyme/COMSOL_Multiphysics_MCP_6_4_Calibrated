@@ -1,5 +1,13 @@
 """Solver-free contracts for bounded goal-directed research campaigns."""
 
+from .adapters import (
+    STRUCTURE_ADAPTER_MANIFEST_SCHEMA_NAME,
+    STRUCTURE_ADAPTER_MANIFEST_SCHEMA_VERSION,
+    STRUCTURE_TREE_AUDIT_SCHEMA_NAME,
+    STRUCTURE_TREE_AUDIT_SCHEMA_VERSION,
+    normalize_structure_adapter_manifest,
+    normalize_structure_tree_audit,
+)
 from .compiler import (
     CAMPAIGN_MANIFEST_SCHEMA_NAME,
     CAMPAIGN_MANIFEST_SCHEMA_VERSION,
@@ -72,6 +80,10 @@ from .workflow import (
 )
 
 __all__ = [
+    "STRUCTURE_ADAPTER_MANIFEST_SCHEMA_NAME",
+    "STRUCTURE_ADAPTER_MANIFEST_SCHEMA_VERSION",
+    "STRUCTURE_TREE_AUDIT_SCHEMA_NAME",
+    "STRUCTURE_TREE_AUDIT_SCHEMA_VERSION",
     "DESIGN_SPACE_SCHEMA_NAME",
     "DESIGN_SPACE_SCHEMA_VERSION",
     "EVALUATION_RECORD_SCHEMA_NAME",
@@ -107,6 +119,8 @@ __all__ = [
     "WORKFLOW_CAPSULE_SCHEMA_NAME",
     "WORKFLOW_CAPSULE_SCHEMA_VERSION",
     "normalize_design_space",
+    "normalize_structure_adapter_manifest",
+    "normalize_structure_tree_audit",
     "normalize_decision_record",
     "normalize_evaluation_record",
     "normalize_material_catalog",

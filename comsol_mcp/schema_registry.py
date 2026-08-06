@@ -36,6 +36,10 @@ from comsol_mcp.research import (
     RESEARCH_GOAL_SCHEMA_VERSION,
     RESEARCH_JOURNAL_RECORD_SCHEMA_NAME,
     RESEARCH_JOURNAL_RECORD_SCHEMA_VERSION,
+    STRUCTURE_ADAPTER_MANIFEST_SCHEMA_NAME,
+    STRUCTURE_ADAPTER_MANIFEST_SCHEMA_VERSION,
+    STRUCTURE_TREE_AUDIT_SCHEMA_NAME,
+    STRUCTURE_TREE_AUDIT_SCHEMA_VERSION,
     WORKFLOW_CAPSULE_SCHEMA_NAME,
     WORKFLOW_CAPSULE_SCHEMA_VERSION,
 )
@@ -430,6 +434,16 @@ def _entries() -> list[dict[str, Any]]:
             OPTIMIZER_EXPLANATION_SCHEMA_NAME,
             OPTIMIZER_EXPLANATION_SCHEMA_VERSION,
             "comsol_mcp.research.optimizers",
+        ),
+        _entry(
+            STRUCTURE_ADAPTER_MANIFEST_SCHEMA_NAME,
+            STRUCTURE_ADAPTER_MANIFEST_SCHEMA_VERSION,
+            "comsol_mcp.research.adapters",
+        ),
+        _entry(
+            STRUCTURE_TREE_AUDIT_SCHEMA_NAME,
+            STRUCTURE_TREE_AUDIT_SCHEMA_VERSION,
+            "comsol_mcp.research.adapters",
         ),
         _entry(
             PATH_POLICY_SCHEMA,
