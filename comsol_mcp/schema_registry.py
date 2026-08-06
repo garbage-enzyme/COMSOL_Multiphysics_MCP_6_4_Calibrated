@@ -7,6 +7,12 @@ from typing import Any
 
 from comsol_mcp import __version__
 from comsol_mcp.durable import canonical_sha256_v1
+from comsol_mcp.research import (
+    DESIGN_SPACE_SCHEMA_NAME,
+    DESIGN_SPACE_SCHEMA_VERSION,
+    RESEARCH_GOAL_SCHEMA_NAME,
+    RESEARCH_GOAL_SCHEMA_VERSION,
+)
 from comsol_mcp.settings_gui_handshake import HANDSHAKE_SCHEMA, HANDSHAKE_VERSION
 
 OPERATION_LOCK_SCHEMA, OPERATION_LOCK_VERSION = "comsol_mcp.operation_lock", "1.0.0"
@@ -262,6 +268,12 @@ def _entries() -> list[dict[str, Any]]:
             readable_versions=("1.0.0", "1.1.0", "1.2.0"),
         ),
         _entry(
+            DESIGN_SPACE_SCHEMA_NAME,
+            DESIGN_SPACE_SCHEMA_VERSION,
+            "comsol_mcp.research.contracts",
+            artifact_kind="configuration",
+        ),
+        _entry(
             "comsol_mcp.environment_identity",
             "1.0.0",
             "comsol_mcp.environment_identity",
@@ -450,6 +462,12 @@ def _entries() -> list[dict[str, Any]]:
             "comsol_mcp.resource_calibration_report",
             "1.0.0",
             "comsol_mcp.jobs.resource_admission",
+        ),
+        _entry(
+            RESEARCH_GOAL_SCHEMA_NAME,
+            RESEARCH_GOAL_SCHEMA_VERSION,
+            "comsol_mcp.research.contracts",
+            artifact_kind="configuration",
         ),
         _entry(
             "comsol_mcp.resource_journal_entry",

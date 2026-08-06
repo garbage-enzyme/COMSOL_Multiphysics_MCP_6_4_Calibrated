@@ -46,6 +46,7 @@ LINT_TARGETS = (
     "comsol_mcp/jobs/thermo_optomechanical_replay_runner.py",
     "comsol_mcp/jobs/thermo_optomechanical_replay_worker.py",
     "comsol_mcp/knowledge/lexical_build_worker.py",
+    "comsol_mcp/research",
     "comsol_mcp/standalone",
     "comsol_mcp/tools/acoustics_pde.py",
     "comsol_mcp/tools/catalog.py",
@@ -114,6 +115,7 @@ MYPY_GROUPS = (
         "comsol_mcp/knowledge/lexical_build_worker.py",
         "comsol_mcp/native_runtime.py",
         "comsol_mcp/standalone",
+        "comsol_mcp/research",
         "src/__init__.py",
     ),
 )

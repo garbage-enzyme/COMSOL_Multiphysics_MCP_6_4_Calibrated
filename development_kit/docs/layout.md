@@ -261,6 +261,7 @@ models are intentionally absent.
 - `development_kit/tests/test_release_engineering.py` — This module tests repository, dependency, fixture, archive, and release policies.
 - `development_kit/tests/test_release_facts.py` — This module tests the generated release-facts view against live implementation data.
 - `development_kit/tests/test_release_receipts.py` — This module tests deterministic SBOM and release inventory receipts.
+- `development_kit/tests/test_research_contracts.py` — This module tests closed goal and design-space normalization, identities, and the first MIM campaign bounds.
 - `development_kit/tests/test_resource_admission.py` — This module tests resource policy normalization, telemetry, and admission decisions.
 - `development_kit/tests/test_results.py` — This module tests result normalization without a COMSOL client.
 - `development_kit/tests/test_runtime_paths.py` — This module tests shared ASCII-safe runtime and lease paths.
@@ -322,6 +323,9 @@ models are intentionally absent.
 - `development_kit/tests/test_workflow.py` — This module tests durable staged workflow execution without COMSOL.
 
 ## Packaged runtime root
+
+- `comsol_mcp/research/__init__.py` — This file exports solver-free bounded research contracts.
+- `comsol_mcp/research/contracts.py` — This module normalizes versioned research goals and design spaces with deterministic fingerprints.
 
 - `src/__init__.py` — This compatibility package aliases legacy imports to the canonical implementation modules.
 - `comsol_mcp/__init__.py` — This module defines the single authored package version.
