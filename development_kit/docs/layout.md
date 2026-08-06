@@ -280,6 +280,7 @@ models are intentionally absent.
 - `development_kit/tests/test_research_coordinator.py` — This module tests solver-free budget admission, duplicate suppression, cancellation, and exact crash replay.
 - `development_kit/tests/test_research_campaign_loop.py` — This module tests optimizer-to-coordinator execution, per-point checkpoints, measured success, and honest budget exhaustion.
 - `development_kit/tests/test_research_objectives.py` — This module tests exact evidence pointers, deterministic losses, and threshold disposition separation.
+- `development_kit/tests/test_research_robustness.py` — This module tests bounded axis perturbations, exact evidence coverage, and optional robustness thresholds.
 - `development_kit/tests/test_research_adapters.py` — This module tests exact trusted-template manifests, closed x/y mutation scope, and live-tree drift rejection.
 - `development_kit/tests/test_research_adaptive_acquisition.py` — This module tests bounded deterministic GP/EI selection, invalid evidence rejection, and heavy-import isolation.
 - `development_kit/tests/test_research_optimizers.py` — This module tests deterministic ask/tell/checkpoint replay, mixed domains, and dependency isolation.
@@ -358,6 +359,7 @@ models are intentionally absent.
 - `comsol_mcp/research/coordinator.py` — This module serializes injected evaluators behind durable admission, cancellation, and replay contracts.
 - `comsol_mcp/research/campaign_loop.py` — This module connects optimizer proposals to durable evaluation, scoring, checkpoints, and honest bounded stop outcomes.
 - `comsol_mcp/research/objectives.py` — This module computes deterministic objective receipts from exact immutable evidence fields.
+- `comsol_mcp/research/robustness.py` — This module creates bounded finalist perturbation matrices and threshold-separated robustness summaries.
 - `comsol_mcp/research/adapters.py` — This module freezes trusted structure-family manifests and exact live-tree audit receipts.
 - `comsol_mcp/research/adaptive_acquisition.py` — This explicitly loaded module performs bounded Gaussian-process posterior and expected-improvement selection without affecting ordinary discovery imports.
 - `comsol_mcp/research/optimizers.py` — This module provides the backend-neutral optimizer protocol and deterministic grid, random, and Latin-hypercube baselines.
