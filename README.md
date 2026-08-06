@@ -180,6 +180,15 @@ restart after changing it.
 | `experimental` | Explicit opt-in generic creation, async, property escape hatches, and project helpers. |
 | `full` | Broad compatibility/discovery surface containing every non-feature-gated tool. |
 
+The `experimental` and `full` profiles expose two solver-free alpha7 research
+preparation tools. `research_campaign_compile` turns a complete goal, frozen
+design space, and explicit approval into a fingerprinted manifest; it never
+starts a solver. `research_robustness_plan` creates a centered one-axis-at-a-time
+perturbation matrix and rejects candidates that would require bound clipping.
+These tools prepare evidence-safe work; they do not start an autonomous
+campaign, change materials, claim success without caller tolerances, or make
+RCWA mandatory when an independent adapter is not applicable.
+
 Profiles only control the visibility of COMSOL automation/simulation tools and
 future autonomous-exploration tools. Orthogonal functionality uses independent,
 default-off Boolean feature gates that compose with every profile and with each

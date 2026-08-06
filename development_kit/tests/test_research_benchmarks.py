@@ -177,9 +177,11 @@ def test_uncertainty_backend_review_reuses_only_declared_licensed_dependencies()
         )
     )
     selected = review["selected_backend"]
-    assert selected["status"] == "selected_not_implemented"
+    assert selected["status"] == "implemented_solver_free"
     assert selected["backend_id"] == "internal_gaussian_process_expected_improvement_v1"
     assert selected["dependencies"] == ["numpy", "scipy"]
+    assert selected["implementation"]["multi_seed_success"] == "8/8"
+    assert selected["implementation"]["ordinary_discovery_imports_numpy_or_scipy"] is False
     declared = {
         item.split("<", 1)[0].split(">", 1)[0].split("=", 1)[0]
         for item in project["project"]["dependencies"]

@@ -146,6 +146,13 @@ GUI 打开期间不要同时编辑 JSON。只有用户明确要求 agent 管理�
 | `experimental` | 显式选择的通用创建、异步、属性逃生口和项目辅助工具。 |
 | `full` | 宽兼容/发现界面，包含全部非 feature-gated 工具。 |
 
+`experimental` 和 `full` profile 提供两个 solver-free 的 alpha7 research
+准备工具。`research_campaign_compile` 将完整目标、冻结设计空间和显式批准编译为带
+fingerprint 的 manifest，且不会启动求解器；`research_robustness_plan` 创建以候选点为
+中心的单轴正负扰动矩阵，并拒绝任何需要越界 clipping 的候选。它们只用于安全准备，
+不会自行启动自主 campaign、改变材料、在缺少调用方阈值时宣称成功，也不会在独立
+adapter 不适用时强制要求 RCWA。
+
 Profile 只控制 COMSOL 自动化仿真工具以及未来自主探索工具的可见性。其他正交功能使用
 独立、默认关闭的 Boolean 开关；它们可与任意 profile 组合，也可同时开启：
 
