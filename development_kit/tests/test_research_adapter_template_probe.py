@@ -25,6 +25,7 @@ def _args(root: Path, source: Path, **changes) -> argparse.Namespace:
         "source_model": source,
         "cores": 2,
         "version": "6.4",
+        "property_query": [],
         "dry_run": True,
     }
     values.update(changes)
@@ -51,6 +52,8 @@ def test_dry_run_contract_is_path_redacted_and_solver_free(tmp_path: Path):
         "shared_server_enabled": False,
         "strict_evidence_checks_requested": True,
         "settings_sha256": result["isolation"]["settings_sha256"],
+        "property_query_count": 0,
+        "property_queries_sha256": result["isolation"]["property_queries_sha256"],
         "paths_included": False,
     }
     assert not root.exists()
@@ -124,6 +127,53 @@ def test_probe_rejects_unbounded_or_uncalibrated_start_inputs(
 
     with pytest.raises(ValueError, match=message):
         probe._normalized_spec(_args(root, source, **changes))
+
+
+def test_property_queries_are_bounded_typed_unique_and_hash_bound(tmp_path: Path):
+    source = _source(tmp_path)
+    root = Path("D:/mcp_tests/a70p4") if os.name == "nt" else tmp_path / "a70p4"
+    values = [
+        "comp1|geometry_feature|geom1/b_pat|size",
+        "comp1|geometry_feature|geom1/b_pat|pos",
+    ]
+
+    spec = probe._normalized_spec(_args(root, source, property_query=values))
+    receipt = probe._dry_run_receipt(spec)
+
+    assert spec["property_queries"] == [
+        {
+            "component_name": "comp1",
+            "container": "geometry_feature",
+            "feature_tag": "geom1/b_pat",
+            "property_name": "size",
+        },
+        {
+            "component_name": "comp1",
+            "container": "geometry_feature",
+            "feature_tag": "geom1/b_pat",
+            "property_name": "pos",
+        },
+    ]
+    assert receipt["isolation"]["property_query_count"] == 2
+    assert len(receipt["isolation"]["property_queries_sha256"]) == 64
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        ["comp1|geometry_feature|geom1/b_pat"],
+        ["comp1|arbitrary|geom1/b_pat|size"],
+        ["comp1|geometry_feature|geom1/bad-tag|size"],
+        ["comp1|geometry_feature|geom1/b_pat|size"] * 2,
+        ["comp1|geometry_feature|geom1/b_pat|size"] * (probe.MAX_PROPERTY_QUERIES + 1),
+    ],
+)
+def test_property_queries_reject_malformed_duplicates_and_excess(tmp_path: Path, values: list[str]):
+    source = _source(tmp_path)
+    root = Path("D:/mcp_tests/a70p5") if os.name == "nt" else tmp_path / "a70p5"
+
+    with pytest.raises(ValueError, match="property quer"):
+        probe._normalized_spec(_args(root, source, property_query=values))
 
 
 def test_tool_payload_accepts_structured_and_text_wrappers():

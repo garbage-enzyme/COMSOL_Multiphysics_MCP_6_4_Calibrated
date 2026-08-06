@@ -11,6 +11,7 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -29,6 +30,11 @@ MAX_DIAGNOSTICS_BYTES = 8 * 1024 * 1024
 START_RESPONSE_SECONDS = 15.0
 STARTUP_SECONDS = 180.0
 CALL_SECONDS = 120.0
+MAX_PROPERTY_QUERIES = 32
+_TAG = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
+_PROPERTY_CONTAINERS = frozenset(
+    {"geometry_feature", "physics_feature", "mesh_feature", "study_step", "result_feature"}
+)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -39,6 +45,12 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--source-model", type=Path, required=True)
     parser.add_argument("--cores", type=int, required=True)
     parser.add_argument("--version", default="6.4")
+    parser.add_argument(
+        "--property-query",
+        action="append",
+        default=[],
+        metavar="COMPONENT|CONTAINER|PARENT/CHILD|PROPERTY",
+    )
     parser.add_argument("--dry-run", action="store_true")
     return parser
 
@@ -90,6 +102,7 @@ def _normalized_spec(args: argparse.Namespace) -> dict[str, Any]:
         raise ValueError("cores must be an integer from 1 through 64")
     if args.version != "6.4":
         raise ValueError("this acceptance probe is calibrated only for COMSOL 6.4")
+    property_queries = _normalize_property_queries(args.property_query)
     return {
         "test_root": root,
         "source_model": source,
@@ -97,6 +110,7 @@ def _normalized_spec(args: argparse.Namespace) -> dict[str, Any]:
         "source_size_bytes": source.stat().st_size,
         "cores": args.cores,
         "version": args.version,
+        "property_queries": property_queries,
         "runtime_root": root / "runtime",
         "artifact_root": root / "artifacts",
         "settings_path": root / "settings.json",
@@ -104,6 +118,42 @@ def _normalized_spec(args: argparse.Namespace) -> dict[str, Any]:
         "diagnostics_path": root / "private-diagnostics.json",
         "stderr_path": root / "server-stderr.log",
     }
+
+
+def _normalize_property_queries(values: list[str]) -> list[dict[str, str]]:
+    if len(values) > MAX_PROPERTY_QUERIES:
+        raise ValueError(f"at most {MAX_PROPERTY_QUERIES} property queries are allowed")
+    result = []
+    identities = set()
+    for value in values:
+        if not isinstance(value, str) or len(value) > 256:
+            raise ValueError("property query must be one bounded string")
+        parts = value.split("|")
+        if len(parts) != 4:
+            raise ValueError("property query must use COMPONENT|CONTAINER|PARENT/CHILD|PROPERTY")
+        component, container, feature_tag, property_name = parts
+        feature_parts = feature_tag.split("/")
+        if (
+            not _TAG.fullmatch(component)
+            or container not in _PROPERTY_CONTAINERS
+            or len(feature_parts) != 2
+            or not all(_TAG.fullmatch(part) for part in feature_parts)
+            or not _TAG.fullmatch(property_name)
+        ):
+            raise ValueError("property query contains an unsupported clientapi target")
+        identity = (component, container, feature_tag, property_name)
+        if identity in identities:
+            raise ValueError("property queries must not contain duplicates")
+        identities.add(identity)
+        result.append(
+            {
+                "component_name": component,
+                "container": container,
+                "feature_tag": feature_tag,
+                "property_name": property_name,
+            }
+        )
+    return result
 
 
 def _settings_document(spec: dict[str, Any]) -> dict[str, Any]:
@@ -228,6 +278,7 @@ async def _probe(spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
     if not git_identity["success"] or not git_identity["worktree_clean"]:
         raise RuntimeError("source-tree probe requires one clean Git revision")
     diagnostics: dict[str, Any] = {"calls": [], "paths": {}}
+    query_bytes = _canonical_bytes(spec["property_queries"])
     receipt: dict[str, Any] = {
         "schema_name": SCHEMA_NAME,
         "schema_version": SCHEMA_VERSION,
@@ -243,6 +294,8 @@ async def _probe(spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
             "shared_server_enabled": False,
             "strict_evidence_checks_requested": True,
             "model_read_root_count": 1,
+            "property_query_count": len(spec["property_queries"]),
+            "property_queries_sha256": hashlib.sha256(query_bytes).hexdigest(),
             "paths_included": False,
         },
         "calls": [],
@@ -350,6 +403,15 @@ async def _probe(spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
                         observed = await call(session, name, arguments, CALL_SECONDS)
                         if observed.get("success") is not True:
                             raise RuntimeError(f"read-only template inspection failed: {name}")
+                    for query in spec["property_queries"]:
+                        observed = await call(
+                            session,
+                            "clientapi_property_get",
+                            {**query, "model_name": model_name},
+                            CALL_SECONDS,
+                        )
+                        if observed.get("success") is not True:
+                            raise RuntimeError("read-only clientapi property query failed")
                     receipt["success"] = True
                 except Exception as exc:
                     receipt["error"] = {
@@ -433,6 +495,7 @@ async def _probe(spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
 
 def _dry_run_receipt(spec: dict[str, Any]) -> dict[str, Any]:
     settings = _settings_document(spec)
+    query_bytes = _canonical_bytes(spec["property_queries"])
     return {
         "schema_name": SCHEMA_NAME,
         "schema_version": SCHEMA_VERSION,
@@ -451,6 +514,8 @@ def _dry_run_receipt(spec: dict[str, Any]) -> dict[str, Any]:
             "shared_server_enabled": False,
             "strict_evidence_checks_requested": True,
             "settings_sha256": hashlib.sha256(_canonical_bytes(settings)).hexdigest(),
+            "property_query_count": len(spec["property_queries"]),
+            "property_queries_sha256": hashlib.sha256(query_bytes).hexdigest(),
             "paths_included": False,
         },
         "solver_started": False,
