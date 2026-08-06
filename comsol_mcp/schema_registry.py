@@ -12,6 +12,8 @@ from comsol_mcp.research import (
     CAMPAIGN_MANIFEST_SCHEMA_VERSION,
     CANDIDATE_RECORD_SCHEMA_NAME,
     CANDIDATE_RECORD_SCHEMA_VERSION,
+    DECISION_RECORD_SCHEMA_NAME,
+    DECISION_RECORD_SCHEMA_VERSION,
     DESIGN_SPACE_SCHEMA_NAME,
     DESIGN_SPACE_SCHEMA_VERSION,
     MATERIAL_CATALOG_SCHEMA_NAME,
@@ -286,6 +288,12 @@ def _entries() -> list[dict[str, Any]]:
             "1.2.0",
             "comsol_mcp.tools.capabilities",
             readable_versions=("1.0.0", "1.1.0", "1.2.0"),
+        ),
+        _entry(
+            DECISION_RECORD_SCHEMA_NAME,
+            DECISION_RECORD_SCHEMA_VERSION,
+            "comsol_mcp.research.decisions",
+            artifact_kind="durable_artifact",
         ),
         _entry(
             DESIGN_SPACE_SCHEMA_NAME,
