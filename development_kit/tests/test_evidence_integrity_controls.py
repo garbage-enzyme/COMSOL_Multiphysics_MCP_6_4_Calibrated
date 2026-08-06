@@ -80,9 +80,7 @@ def test_each_check_can_be_explicitly_disabled_without_changing_other_checks(
     assert status["warning_codes"] == [DISABLED_CHECK_WARNING_CODE]
     assert status["warning_messages"] == [DISABLED_CHECK_WARNING]
     assert warning_fields(status)["strictly_verified"] is False
-    assert status["settings_fingerprint_sha256"] == hashlib.sha256(
-        path.read_bytes()
-    ).hexdigest()
+    assert status["settings_fingerprint_sha256"] == hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 @pytest.mark.parametrize(
@@ -171,9 +169,31 @@ def test_capabilities_report_effective_checks_without_exposing_settings_path(tmp
     monkeypatch.setenv(EVIDENCE_SETTINGS_ENV, str(path))
 
     capability = evidence_integrity_capability()
-    root_capabilities = get_capabilities(_selection())["evidence_integrity"]
-
-    assert capability == root_capabilities
+    assert set(capability) == {
+        "success",
+        "schema_name",
+        "schema_version",
+        "configuration_state",
+        "settings_source",
+        "settings_environment_variable",
+        "settings_fingerprint_sha256",
+        "settings_path_included",
+        "default_enabled",
+        "strict_verification_active",
+        "checks",
+        "disabled_checks",
+        "warning_codes",
+        "warning_messages",
+        "solver_free",
+        "tools",
+        "formal_verification_scope",
+        "hashes_prove_physical_correctness",
+    }
+    assert capability["success"] is True
+    assert capability["configuration_state"] == "valid"
+    assert capability["settings_source"] == "explicit_settings"
+    assert capability["solver_free"] is True
+    assert capability["tools"] == ["evidence_integrity_status", "evidence_integrity_verify"]
     assert capability["strict_verification_active"] is False
     assert capability["disabled_checks"] == ["summary_claim_verification"]
     assert capability["settings_path_included"] is False

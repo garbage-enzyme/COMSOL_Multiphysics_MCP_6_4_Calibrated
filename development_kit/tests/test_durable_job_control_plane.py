@@ -43,9 +43,12 @@ def wait_for(manager: JobManager, job_id: str, statuses: set[str], timeout: floa
         if state["status"] in statuses:
             return state
         time.sleep(0.025)
-    raise AssertionError(
-        f"Job did not reach {statuses}: {manager.status(job_id)}; tail={manager.tail(job_id, 50)}"
-    )
+    final = manager.status(job_id)
+    try:
+        tail = manager.tail(job_id, 50)
+    except Exception as exc:
+        tail = {"unavailable": type(exc).__name__}
+    raise AssertionError(f"Job did not reach {statuses}: {final}; tail={tail}")
 
 
 def test_sequence_resume_reconciles_progress_from_all_durable_rows(jobs_root):
@@ -194,14 +197,20 @@ def test_cooperative_cancel_is_truthful_and_resumable(jobs_root):
     assert terminal["cancel"]["verification"]["absent"] is True
     assert terminal["cancel"]["cooperative_observation"]["target_attempt"] == 1
     timestamps = terminal["cancel"]["phase_timestamps"]
-    assert set(timestamps) >= {
+    assert set(timestamps) == {
         "requested",
         "native_grace",
         "verifying",
         "verified",
         "terminal_commit",
     }
-    assert timestamps["requested"] <= timestamps["native_grace"] <= timestamps["terminal_commit"]
+    assert (
+        timestamps["requested"]
+        <= timestamps["native_grace"]
+        <= timestamps["verifying"]
+        <= timestamps["verified"]
+        <= timestamps["terminal_commit"]
+    )
     assert terminal["cancel"]["timing_policy"] == {
         "native_grace_budget_s": 10.0,
         "terminate_budget_s": 5.0,
@@ -762,7 +771,15 @@ def test_coordinator_loss_at_each_durable_phase_reconciles_safely(
         cwd=Path(__file__).resolve().parents[2],
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
-    assert crashed.wait(timeout=5) == 91
+    crash_code = crashed.wait(timeout=5)
+    if crash_code != 91:
+        diagnostic_state = manager.store.read_state(result["job_id"])
+        diagnostic_events = manager.tail(result["job_id"], 100)["events"]
+        pytest.fail(
+            f"coordinator did not crash at {crash_phase}: code={crash_code}, "
+            f"phase={diagnostic_state.get('cancel', {}).get('phase')}, "
+            f"events={diagnostic_events[-10:]}"
+        )
     phase_state = manager.store.read_state(result["job_id"])
     assert phase_state["status"] == "cancelling"
     assert phase_state["cancel"]["phase"] == crash_phase
@@ -1110,6 +1127,7 @@ def test_job_lock_guard_prevents_replacement_during_release(jobs_root, monkeypat
     entered_unlink = Event()
     allow_unlink = Event()
     second_acquired = Event()
+    second_attempted = Event()
     release_second = Event()
     original_unlink = Path.unlink
 
@@ -1120,6 +1138,7 @@ def test_job_lock_guard_prevents_replacement_during_release(jobs_root, monkeypat
         return original_unlink(path, *args, **kwargs)
 
     def acquire_second():
+        second_attempted.set()
         second.acquire()
         second_acquired.set()
         assert release_second.wait(timeout=1)
@@ -1131,6 +1150,7 @@ def test_job_lock_guard_prevents_replacement_during_release(jobs_root, monkeypat
     first_release.start()
     assert entered_unlink.wait(timeout=1)
     second_thread.start()
+    assert second_attempted.wait(timeout=1)
     assert not second_acquired.wait(timeout=0.05)
     allow_unlink.set()
     first_release.join(timeout=2)
@@ -1939,12 +1959,24 @@ def _cleanup_fixture_processes(root: Path) -> dict[str, object]:
                 "process_create_time": state.get("worker_process_create_time"),
                 "command_signature": state.get("worker_command_signature"),
             }
-            captured = capture_owned_descendants(identity)
-            targets.extend(captured.get("descendants", []))
-            targets.append(identity)
+            if (
+                isinstance(identity["process_create_time"], (int, float))
+                and not isinstance(identity["process_create_time"], bool)
+                and isinstance(identity["command_signature"], str)
+                and len(identity["command_signature"]) == 64
+            ):
+                captured = capture_owned_descendants(identity)
+                targets.extend(captured.get("descendants", []))
+                targets.append(identity)
         cancel = state.get("cancel")
         coordinator = cancel.get("coordinator") if isinstance(cancel, dict) else None
-        if isinstance(coordinator, dict) and coordinator.get("pid") != os.getpid():
+        if (
+            isinstance(coordinator, dict)
+            and coordinator.get("pid") != os.getpid()
+            and isinstance(coordinator.get("process_create_time"), (int, float))
+            and isinstance(coordinator.get("command_signature"), str)
+            and len(coordinator["command_signature"]) == 64
+        ):
             targets.append(coordinator)
 
     unique: dict[tuple[object, object, object], dict[str, object]] = {}

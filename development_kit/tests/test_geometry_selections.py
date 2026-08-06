@@ -1,5 +1,7 @@
 """Tests for bounded named geometry selections without COMSOL."""
 
+import pytest
+
 from src.tools.geometry_selections import create_box_selection, create_side_selections
 
 
@@ -29,14 +31,17 @@ class FakeGeometryList:
 
 
 class FakeSelection:
-    def __init__(self, tag, fail_property=None):
+    def __init__(self, tag, fail_property=None, fail_geometry=False):
         self.tag = tag
         self.fail_property = fail_property
+        self.fail_geometry = fail_geometry
         self.geometry = None
         self.dimension = None
         self.properties = {}
 
     def geom(self, geometry, dimension):
+        if self.fail_geometry:
+            raise RuntimeError("injected selection geometry failure")
         self.geometry = geometry
         self.dimension = dimension
 
@@ -50,8 +55,9 @@ class FakeSelection:
 
 
 class FakeSelectionList:
-    def __init__(self, fail_tag=None, existing=()):
+    def __init__(self, fail_tag=None, existing=(), fail_step="condition"):
         self.fail_tag = fail_tag
+        self.fail_step = fail_step
         self.items = {tag: FakeSelection(tag) for tag in existing}
         self.removed = []
 
@@ -60,7 +66,13 @@ class FakeSelectionList:
 
     def create(self, tag, selection_type):
         assert selection_type == "Box"
-        selection = FakeSelection(tag, "condition" if tag == self.fail_tag else None)
+        if tag == self.fail_tag and self.fail_step == "create":
+            raise RuntimeError("injected selection creation failure")
+        selection = FakeSelection(
+            tag,
+            self.fail_step if tag == self.fail_tag and self.fail_step != "geom" else None,
+            fail_geometry=tag == self.fail_tag and self.fail_step == "geom",
+        )
         self.items[tag] = selection
         return selection
 
@@ -70,9 +82,16 @@ class FakeSelectionList:
 
 
 class FakeComponent:
-    def __init__(self, dimension=2, fail_tag=None, existing=(), fail_geometry_after=None):
+    def __init__(
+        self,
+        dimension=2,
+        fail_tag=None,
+        existing=(),
+        fail_geometry_after=None,
+        fail_step="condition",
+    ):
         self.geometries = FakeGeometryList(dimension, fail_geometry_after)
-        self.selections = FakeSelectionList(fail_tag, existing)
+        self.selections = FakeSelectionList(fail_tag, existing, fail_step)
 
     def tag(self):
         return "comp1"
@@ -175,8 +194,9 @@ def test_box_selection_rejects_invalid_inputs_before_mutation():
     assert set(component.selections.items) == {"taken"}
 
 
-def test_box_selection_rolls_back_failed_property_setup():
-    component = FakeComponent(fail_tag="bad_box")
+@pytest.mark.parametrize("fail_step", ["create", "geom", "xmin", "condition"])
+def test_box_selection_rolls_back_failed_setup_steps(fail_step):
+    component = FakeComponent(fail_tag="bad_box", fail_step=fail_step)
 
     result = create_box_selection(
         FakeModel(component),

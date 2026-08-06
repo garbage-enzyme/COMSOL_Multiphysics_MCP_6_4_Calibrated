@@ -1,6 +1,7 @@
 import json
 import re
 import subprocess
+import threading
 from pathlib import Path
 
 import pytest
@@ -329,42 +330,45 @@ def test_cancel_gate_preserves_resources_while_solve_thread_is_alive(monkeypatch
     temporary_root.mkdir()
     removed = []
 
+    solve_started = threading.Event()
+    solve_release = threading.Event()
+
+    class BlockingStudy:
+        def run(self):
+            solve_started.set()
+            assert solve_release.wait(timeout=5)
+
+    class BlockingJavaModel(_FakeJavaModel):
+        def study(self, _tag):
+            return BlockingStudy()
+
+    class BlockingModel:
+        java = BlockingJavaModel()
+
     class FakeClient:
         def load(self, _path):
-            return _FakeModel()
+            return BlockingModel()
 
         def remove(self, model):
             removed.append(model)
-
-    class FakeThread:
-        def __init__(self, **_kwargs):
-            pass
-
-        def start(self):
-            return None
-
-        def is_alive(self):
-            return True
-
-        def join(self, timeout):
-            assert timeout == 0.01
 
     class FakeContext:
         def cancel(self):
             return None
 
-    monkeypatch.setattr(acceptance_probe.threading, "Thread", FakeThread)
-    monkeypatch.setattr(acceptance_probe.time, "sleep", lambda _seconds: None)
     monkeypatch.setattr("jpype.JClass", lambda _name: FakeContext)
+    try:
+        result = acceptance_probe._progress_context_cancel_gate(
+            FakeClient(),
+            source,
+            temporary_root,
+            startup_wait_seconds=0.05,
+            join_timeout_seconds=0.01,
+        )
+    finally:
+        solve_release.set()
 
-    result = acceptance_probe._progress_context_cancel_gate(
-        FakeClient(),
-        source,
-        temporary_root,
-        startup_wait_seconds=0.0,
-        join_timeout_seconds=0.01,
-    )
-
+    assert solve_started.is_set()
     assert result["cleanup_safe"] is False
     assert result["model_remove"] == "skipped_solve_thread_active"
     assert removed == []
@@ -381,25 +385,10 @@ def test_cancel_gate_does_not_convert_base_exception_to_candidate_outcome(monkey
         def load(self, _path):
             return _FakeModel()
 
-    class FakeThread:
-        def __init__(self, target, **_kwargs):
-            self.target = target
-
-        def start(self):
-            self.target()
-
-        def is_alive(self):
-            return False
-
-        def join(self, timeout):
-            return None
-
     class FakeContext:
         def cancel(self):
             raise KeyboardInterrupt
 
-    monkeypatch.setattr(acceptance_probe.threading, "Thread", FakeThread)
-    monkeypatch.setattr(acceptance_probe.time, "sleep", lambda _seconds: None)
     monkeypatch.setattr("jpype.JClass", lambda _name: FakeContext)
 
     with pytest.raises(KeyboardInterrupt):

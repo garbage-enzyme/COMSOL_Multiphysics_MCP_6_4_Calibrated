@@ -10,9 +10,7 @@ from pathlib import Path
 import anyio
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
-from src.evidence.integrity_controls import EVIDENCE_SETTINGS_ENV
 from src.path_policy import ARTIFACT_WRITE_ROOT_ENV
-from src.settings import SETTINGS_PATH_ENV
 
 from development_kit.tests.test_portfolio_verifier import _fixture
 
@@ -41,9 +39,9 @@ def _decode(result) -> dict:
 
 
 async def _exercise(request: dict, artifact_root: Path, runtime_root: Path) -> None:
-    environment = os.environ.copy()
-    environment.pop(EVIDENCE_SETTINGS_ENV, None)
-    environment.pop(SETTINGS_PATH_ENV, None)
+    environment = {
+        key: value for key, value in os.environ.items() if not key.startswith("COMSOL_MCP_")
+    }
     environment.update(
         {
             "COMSOL_MCP_PROFILE": "core",

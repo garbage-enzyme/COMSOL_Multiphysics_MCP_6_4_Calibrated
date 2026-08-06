@@ -73,7 +73,8 @@ def test_all_default_checks_produce_one_strictly_verified_receipt(tmp_path):
     assert result["strictly_verified"] is True
     assert result["reason_code"] == "all_enabled_checks_passed"
     assert result["check_results"]["producer_driver_compatibility"]["state"] == "not_applicable"
-    assert all(result["check_results"][name]["state"] == "passed" for name in EVIDENCE_CHECKS[:-1])
+    file_checks = set(EVIDENCE_CHECKS) - {"producer_driver_compatibility"}
+    assert all(result["check_results"][name]["state"] == "passed" for name in file_checks)
     assert result["paths_included"] is False
     assert len(result["verification_sha256"]) == 64
 
@@ -121,7 +122,7 @@ def test_each_disabled_check_is_the_only_skipped_check_and_forces_unverified(
         "state": "skipped",
         "reason_code": "disabled_by_settings",
     }
-    for name in set(EVIDENCE_CHECKS[:-1]) - {disabled_check}:
+    for name in set(EVIDENCE_CHECKS) - {"producer_driver_compatibility", disabled_check}:
         assert result["check_results"][name]["state"] == "passed"
     if disabled_check != "producer_driver_compatibility":
         assert result["check_results"]["producer_driver_compatibility"]["state"] == "not_applicable"
@@ -361,9 +362,7 @@ def test_mcp_verify_tool_contains_invalid_request_when_settings_are_degraded(mon
     server = MCPServer("evidence-integrity-degraded-request-test")
     register_evidence_integrity_tools(server)
 
-    result = server._tool_manager._tools["evidence_integrity_verify"].fn(
-        [], {}, resumed="yes"
-    )
+    result = server._tool_manager._tools["evidence_integrity_verify"].fn([], {}, resumed="yes")
 
     assert result["success"] is False
     assert result["reason_code"] == "integrity_verification_rejected"

@@ -219,6 +219,8 @@ def test_adapter_rejects_dataset_not_bound_to_declared_component(tmp_path):
             view_id="on",
             artifact_root=tmp_path,
         )
+    assert len(model.calls) == 1
+    assert not list(tmp_path.rglob("*"))
 
 
 def test_adapter_allows_only_rounding_scale_coordinate_differences(tmp_path):
