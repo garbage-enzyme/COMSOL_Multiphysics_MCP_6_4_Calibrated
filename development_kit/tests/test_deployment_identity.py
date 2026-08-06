@@ -283,7 +283,7 @@ def test_build_identity_rejects_content_changed_during_read(tmp_path, monkeypatc
     def mutate_after_read(path):
         payload = original_read_bytes(path)
         if path == target:
-            path.write_text("value = 2\n", encoding="utf-8")
+            path.write_text("value = 200\n", encoding="utf-8")
         return payload
 
     monkeypatch.setattr(build_identity_module.Path, "read_bytes", mutate_after_read)

@@ -1,3 +1,4 @@
+import os
 import shutil
 import sqlite3
 import subprocess
@@ -188,7 +189,8 @@ def test_pdf_index_build_rejects_a_manual_changed_during_extraction(
     with pytest.raises(RuntimeError, match="changed during extraction"):
         manual_module.build_index_from_pdfs(pdf_root, index)
 
-    assert opened == [source]
+    assert len(opened) == 1
+    assert os.path.samefile(opened[0], source)
     assert not index.exists()
     assert not list(ascii_tmp_path.glob("manuals.sqlite3.tmp-*"))
 
