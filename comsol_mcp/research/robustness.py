@@ -125,4 +125,76 @@ def summarize_robustness(
     return {**body, "summary_fingerprint": domain_sha256_v2(body["schema_name"], body)}
 
 
-__all__ = ["axis_perturbation_matrix", "summarize_robustness"]
+def summarize_optional_fidelity_bridge(
+    *,
+    applicable: bool,
+    primary: object,
+    independent: object | None,
+    maximum_absolute_differences: object | None,
+) -> dict[str, Any]:
+    """Compare exact observables only when an independent adapter is declared applicable."""
+    if not isinstance(applicable, bool) or not isinstance(primary, Mapping):
+        raise ValueError("applicability and primary evidence are required")
+    if not applicable:
+        if independent is not None or maximum_absolute_differences is not None:
+            raise ValueError("non-applicable fidelity cannot contain comparison evidence")
+        body = {
+            "schema_name": "research.fidelity.bridge",
+            "schema_version": "1.0.0",
+            "applicability": "not_applicable",
+            "outcome": "not_applicable",
+            "differences": {},
+        }
+        return {**body, "bridge_fingerprint": domain_sha256_v2(body["schema_name"], body)}
+    if not isinstance(independent, Mapping) or set(independent) != set(primary):
+        raise ValueError("applicable fidelity requires matching observable sets")
+    differences: dict[str, float] = {}
+    for key in sorted(primary):
+        left, right = primary[key], independent[key]
+        if (
+            not isinstance(key, str)
+            or isinstance(left, bool)
+            or isinstance(right, bool)
+            or not isinstance(left, (int, float))
+            or not isinstance(right, (int, float))
+            or not math.isfinite(float(left))
+            or not math.isfinite(float(right))
+        ):
+            raise ValueError("fidelity observables must be finite numeric mappings")
+        differences[key] = abs(float(left) - float(right))
+    thresholds = None
+    outcome = "not_declared"
+    if maximum_absolute_differences is not None:
+        if not isinstance(maximum_absolute_differences, Mapping) or set(
+            maximum_absolute_differences
+        ) != set(differences):
+            raise ValueError("fidelity thresholds must exactly cover compared observables")
+        thresholds = {}
+        for key, raw in maximum_absolute_differences.items():
+            if (
+                isinstance(raw, bool)
+                or not isinstance(raw, (int, float))
+                or not math.isfinite(float(raw))
+                or float(raw) < 0.0
+            ):
+                raise ValueError("fidelity thresholds must be finite and nonnegative")
+            thresholds[key] = float(raw)
+        outcome = (
+            "pass" if all(differences[key] <= thresholds[key] for key in differences) else "fail"
+        )
+    body = {
+        "schema_name": "research.fidelity.bridge",
+        "schema_version": "1.0.0",
+        "applicability": "applicable",
+        "outcome": outcome,
+        "differences": differences,
+        "maximum_absolute_differences": thresholds,
+    }
+    return {**body, "bridge_fingerprint": domain_sha256_v2(body["schema_name"], body)}
+
+
+__all__ = [
+    "axis_perturbation_matrix",
+    "summarize_optional_fidelity_bridge",
+    "summarize_robustness",
+]
