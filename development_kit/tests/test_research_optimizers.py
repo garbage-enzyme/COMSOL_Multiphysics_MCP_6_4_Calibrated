@@ -9,7 +9,10 @@ from pathlib import Path
 import pytest
 
 from comsol_mcp.durable import domain_sha256_v2
-from comsol_mcp.research.optimizers import DeterministicRandomOptimizer
+from comsol_mcp.research.optimizers import (
+    DeterministicLatinHypercubeOptimizer,
+    DeterministicRandomOptimizer,
+)
 from development_kit.tests.test_research_contracts import _space
 
 
@@ -74,6 +77,90 @@ def test_different_seed_changes_backend_and_proposal_identity():
     second = DeterministicRandomOptimizer(_space(), seed=2)
     assert first.backend_identity != second.backend_identity
     assert first.ask()["proposal_fingerprint"] != second.ask()["proposal_fingerprint"]
+
+
+def test_lhs_replays_and_covers_each_continuous_stratum_once():
+    sample_count = 16
+    first = DeterministicLatinHypercubeOptimizer(
+        _mixed_space(), seed=17001, sample_count=sample_count
+    )
+    second = DeterministicLatinHypercubeOptimizer(
+        _mixed_space(), seed=17001, sample_count=sample_count
+    )
+    proposals = [first.ask() for _ in range(sample_count)]
+    assert proposals == [second.ask() for _ in range(sample_count)]
+    bounds = {"patch_length_x": (75.0, 125.0), "patch_length_y": (60.0, 100.0)}
+    for variable_id, (lower, upper) in bounds.items():
+        strata = {
+            min(
+                sample_count - 1,
+                int((proposal["values"][variable_id] - lower) / (upper - lower) * sample_count),
+            )
+            for proposal in proposals
+        }
+        assert strata == set(range(sample_count))
+
+
+def test_lhs_mixed_domains_are_bounded_balanced_and_finite():
+    optimizer = DeterministicLatinHypercubeOptimizer(_mixed_space(), seed=9, sample_count=16)
+    values = [optimizer.ask()["values"] for _ in range(16)]
+    assert all(type(item["mesh_level"]) is int and 1 <= item["mesh_level"] <= 4 for item in values)
+    category_counts = {
+        category: sum(item["material_state"] == category for item in values)
+        for category in {"gold", "silver"}
+    }
+    assert category_counts == {"gold": 8, "silver": 8}
+    with pytest.raises(ValueError, match="sample limit is exhausted"):
+        optimizer.ask()
+
+
+@pytest.mark.parametrize("sample_count", [False, 0, 4097])
+def test_lhs_rejects_invalid_sample_count(sample_count):
+    with pytest.raises(ValueError, match="sample_count"):
+        DeterministicLatinHypercubeOptimizer(_space(), seed=1, sample_count=sample_count)
+
+
+def test_lhs_checkpoint_restore_preserves_design_and_next_stratum():
+    optimizer = DeterministicLatinHypercubeOptimizer(_space(), seed=17001, sample_count=8)
+    first = optimizer.ask()
+    optimizer.tell(
+        first,
+        candidate_fingerprint="a" * 64,
+        status="completed",
+        score_fingerprint="b" * 64,
+        losses={"peak": 2.0, "q": 0.5},
+    )
+    checkpoint = optimizer.checkpoint(
+        campaign_fingerprint="c" * 64,
+        decision_fingerprint="d" * 64,
+        created_at="2026-08-06T00:00:00Z",
+    )
+    restored = DeterministicLatinHypercubeOptimizer.restore(_space(), checkpoint)
+    assert restored.sample_count == 8
+    assert restored.observations == optimizer.observations
+    assert restored.ask() == optimizer.ask()
+
+
+def test_lhs_rejects_random_checkpoint_and_cross_backend_proposal():
+    random_optimizer = DeterministicRandomOptimizer(_space(), seed=1)
+    random_proposal = random_optimizer.ask()
+    random_checkpoint = random_optimizer.checkpoint(
+        campaign_fingerprint="c" * 64,
+        decision_fingerprint="d" * 64,
+        created_at="2026-08-06T00:00:00Z",
+    )
+    lhs = DeterministicLatinHypercubeOptimizer(_space(), seed=1, sample_count=8)
+    lhs.ask()
+    with pytest.raises(ValueError, match="another backend"):
+        lhs.tell(
+            random_proposal,
+            candidate_fingerprint="a" * 64,
+            status="failed",
+            score_fingerprint=None,
+            losses={},
+        )
+    with pytest.raises(ValueError, match="fields mismatch"):
+        DeterministicLatinHypercubeOptimizer.restore(_space(), random_checkpoint)
 
 
 def test_tell_is_idempotent_for_exact_result_and_rejects_conflicts():

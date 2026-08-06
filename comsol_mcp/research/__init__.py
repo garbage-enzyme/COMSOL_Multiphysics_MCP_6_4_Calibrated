@@ -43,6 +43,7 @@ from .objectives import (
 from .optimizers import (
     OPTIMIZER_PROPOSAL_SCHEMA_NAME,
     OPTIMIZER_PROPOSAL_SCHEMA_VERSION,
+    DeterministicLatinHypercubeOptimizer,
     DeterministicRandomOptimizer,
 )
 from .records import (
@@ -81,6 +82,7 @@ __all__ = [
     "OBJECTIVE_SCORE_SCHEMA_VERSION",
     "PORTFOLIO_SCHEMA_NAME",
     "PORTFOLIO_SCHEMA_VERSION",
+    "DeterministicLatinHypercubeOptimizer",
     "DeterministicRandomOptimizer",
     "CAMPAIGN_MANIFEST_SCHEMA_NAME",
     "CAMPAIGN_MANIFEST_SCHEMA_VERSION",

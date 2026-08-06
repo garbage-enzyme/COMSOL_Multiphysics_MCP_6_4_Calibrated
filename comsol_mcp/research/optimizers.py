@@ -17,7 +17,10 @@ OPTIMIZER_PROPOSAL_SCHEMA_NAME = "comsol_mcp.research_optimizer_proposal"
 OPTIMIZER_PROPOSAL_SCHEMA_VERSION = "1.0.0"
 RANDOM_BACKEND_NAME = "deterministic_random"
 RANDOM_BACKEND_VERSION = "1.0.0"
+LHS_BACKEND_NAME = "deterministic_latin_hypercube"
+LHS_BACKEND_VERSION = "1.0.0"
 MAX_PROPOSALS = 1_000_000_000
+MAX_LHS_SAMPLES = 4096
 MAX_OBJECTIVE_LOSSES = 128
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _RESULT_STATUSES = {"completed", "failed", "infeasible"}
@@ -42,8 +45,25 @@ def _stream(seed: int, index: int, variable_id: str, purpose: str) -> int:
     return int.from_bytes(hashlib.sha256(payload).digest(), "big")
 
 
-def _unit_interval(seed: int, index: int, variable_id: str) -> float:
-    return (_stream(seed, index, variable_id, "unit") >> (256 - 53)) / float(1 << 53)
+def _unit_interval(seed: int, index: int, variable_id: str, purpose: str = "unit") -> float:
+    return (_stream(seed, index, variable_id, purpose) >> (256 - 53)) / float(1 << 53)
+
+
+def _sample_count(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= MAX_LHS_SAMPLES:
+        raise ValueError(f"sample_count must be an integer from 1 to {MAX_LHS_SAMPLES}")
+    return value
+
+
+def _lhs_stratum(seed: int, sample_count: int, index: int, variable_id: str) -> int:
+    if sample_count == 1:
+        return 0
+    multiplier = _stream(seed, sample_count, variable_id, "lhs_multiplier") % sample_count
+    multiplier = max(1, multiplier)
+    while math.gcd(multiplier, sample_count) != 1:
+        multiplier += 1
+    offset = _stream(seed, sample_count, variable_id, "lhs_offset") % sample_count
+    return (multiplier * index + offset) % sample_count
 
 
 def _proposal_values(space: Mapping[str, Any], seed: int, index: int) -> dict[str, Any]:
@@ -69,6 +89,35 @@ def _proposal_values(space: Mapping[str, Any], seed: int, index: int) -> dict[st
             values[variable_id] = round(
                 continuous_lower + (continuous_upper - continuous_lower) * unit, digits
             )
+    return {key: values[key] for key in sorted(values)}
+
+
+def _lhs_proposal_values(
+    space: Mapping[str, Any], seed: int, sample_count: int, index: int
+) -> dict[str, Any]:
+    digits = space["canonicalization"]["float_digits"]
+    values: dict[str, Any] = {}
+    for variable in space["variables"]:
+        variable_id = variable["variable_id"]
+        kind = variable["kind"]
+        stratum = _lhs_stratum(seed, sample_count, index, variable_id)
+        if kind in {"categorical", "ordinal"}:
+            allowed = variable["allowed_values"]
+            values[variable_id] = allowed[stratum % len(allowed)]
+            continue
+        jitter = _unit_interval(seed, index, variable_id, "lhs_jitter")
+        unit = (stratum + jitter) / sample_count
+        if kind == "integer":
+            integer_lower = int(variable["lower"])
+            integer_upper = int(variable["upper"])
+            level_count = integer_upper - integer_lower + 1
+            values[variable_id] = integer_lower + min(level_count - 1, int(unit * level_count))
+            continue
+        continuous_lower = float(variable["lower"])
+        continuous_upper = float(variable["upper"])
+        values[variable_id] = round(
+            continuous_lower + (continuous_upper - continuous_lower) * unit, digits
+        )
     return {key: values[key] for key in sorted(values)}
 
 
@@ -290,8 +339,138 @@ class DeterministicRandomOptimizer:
         return optimizer
 
 
+class DeterministicLatinHypercubeOptimizer(DeterministicRandomOptimizer):
+    """Finite deterministic Latin-hypercube baseline for mixed design spaces."""
+
+    def __init__(self, design_space: object, *, seed: int, sample_count: int) -> None:
+        self.space = normalize_design_space(design_space)
+        self.seed = _seed(seed)
+        self.sample_count = _sample_count(sample_count)
+        backend_body = {
+            "name": LHS_BACKEND_NAME,
+            "version": LHS_BACKEND_VERSION,
+            "space_fingerprint": self.space["space_fingerprint"],
+            "seed": self.seed,
+            "sample_count": self.sample_count,
+        }
+        self.backend_identity = domain_sha256_v2(
+            "comsol_mcp.research_optimizer_backend", backend_body
+        )
+        self.next_index = 0
+        self.observations: dict[str, dict[str, Any]] = {}
+
+    def _proposal(self, index: int) -> dict[str, Any]:
+        body = {
+            "schema_name": OPTIMIZER_PROPOSAL_SCHEMA_NAME,
+            "schema_version": OPTIMIZER_PROPOSAL_SCHEMA_VERSION,
+            "backend_identity": self.backend_identity,
+            "space_fingerprint": self.space["space_fingerprint"],
+            "proposal_index": index,
+            "values": _lhs_proposal_values(self.space, self.seed, self.sample_count, index),
+        }
+        return {
+            **body,
+            "proposal_fingerprint": domain_sha256_v2(OPTIMIZER_PROPOSAL_SCHEMA_NAME, body),
+        }
+
+    def ask(self) -> dict[str, Any]:
+        if self.next_index >= self.sample_count:
+            raise ValueError("Latin-hypercube sample limit is exhausted")
+        proposal = self._proposal(self.next_index)
+        self.next_index += 1
+        return proposal
+
+    def checkpoint(
+        self,
+        *,
+        campaign_fingerprint: str,
+        decision_fingerprint: str,
+        created_at: str,
+    ) -> dict[str, Any]:
+        observations = [self.observations[key] for key in sorted(self.observations)]
+        history_fingerprint = domain_sha256_v2(
+            "comsol_mcp.research_optimizer_history", observations
+        )
+        return normalize_optimizer_checkpoint(
+            {
+                "schema_name": "comsol_mcp.research_optimizer_checkpoint",
+                "schema_version": "1.0.0",
+                "campaign_fingerprint": campaign_fingerprint,
+                "sequence": self.next_index,
+                "decision_fingerprint": decision_fingerprint,
+                "backend": {
+                    "name": LHS_BACKEND_NAME,
+                    "version": LHS_BACKEND_VERSION,
+                    "identity": self.backend_identity,
+                },
+                "random_state": {
+                    "seed": self.seed,
+                    "sample_count": self.sample_count,
+                    "next_index": self.next_index,
+                },
+                "optimizer_state": {"observations": observations},
+                "history_fingerprint": history_fingerprint,
+                "candidate_fingerprints": sorted(self.observations),
+                "created_at": _timestamp(created_at, "created_at"),
+            }
+        )
+
+    @classmethod
+    def restore(
+        cls, design_space: object, checkpoint: object
+    ) -> "DeterministicLatinHypercubeOptimizer":
+        normalized = normalize_optimizer_checkpoint(checkpoint)
+        random_state = _object(
+            normalized["random_state"],
+            {"seed", "sample_count", "next_index"},
+            "checkpoint.random_state",
+        )
+        optimizer = cls(
+            design_space,
+            seed=_seed(random_state["seed"]),
+            sample_count=_sample_count(random_state["sample_count"]),
+        )
+        if (
+            normalized["backend"]["name"] != LHS_BACKEND_NAME
+            or normalized["backend"]["version"] != LHS_BACKEND_VERSION
+            or normalized["backend"]["identity"] != optimizer.backend_identity
+        ):
+            raise ValueError("optimizer checkpoint backend identity is incompatible")
+        next_index = random_state["next_index"]
+        if (
+            isinstance(next_index, bool)
+            or not isinstance(next_index, int)
+            or not 0 <= next_index <= optimizer.sample_count
+            or next_index != normalized["sequence"]
+        ):
+            raise ValueError("optimizer checkpoint proposal sequence is invalid")
+        state = _object(normalized["optimizer_state"], {"observations"}, "optimizer_state")
+        observations = state["observations"]
+        if not isinstance(observations, list):
+            raise ValueError("optimizer checkpoint observations must be a list")
+        restored: dict[str, dict[str, Any]] = {}
+        for observation in observations:
+            if not isinstance(observation, dict):
+                raise ValueError("optimizer checkpoint observations must be objects")
+            candidate = _fingerprint(
+                observation.get("candidate_fingerprint"), "candidate_fingerprint"
+            )
+            restored[str(candidate)] = dict(observation)
+        ordered = [restored[key] for key in sorted(restored)]
+        if normalized["history_fingerprint"] != domain_sha256_v2(
+            "comsol_mcp.research_optimizer_history", ordered
+        ) or normalized["candidate_fingerprints"] != sorted(restored):
+            raise ValueError("optimizer checkpoint history identity is invalid")
+        optimizer.next_index = next_index
+        optimizer.observations = restored
+        return optimizer
+
+
 __all__ = [
+    "LHS_BACKEND_NAME",
+    "LHS_BACKEND_VERSION",
     "OPTIMIZER_PROPOSAL_SCHEMA_NAME",
     "OPTIMIZER_PROPOSAL_SCHEMA_VERSION",
+    "DeterministicLatinHypercubeOptimizer",
     "DeterministicRandomOptimizer",
 ]

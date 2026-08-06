@@ -348,7 +348,7 @@ models are intentionally absent.
 - `comsol_mcp/research/evaluations.py` — This module normalizes started and terminal candidate evaluation records without interpreting results.
 - `comsol_mcp/research/coordinator.py` — This module serializes injected evaluators behind durable admission, cancellation, and replay contracts.
 - `comsol_mcp/research/objectives.py` — This module computes deterministic objective receipts from exact immutable evidence fields.
-- `comsol_mcp/research/optimizers.py` — This module provides the backend-neutral optimizer protocol and counter-based random baseline.
+- `comsol_mcp/research/optimizers.py` — This module provides the backend-neutral optimizer protocol and counter-based random and Latin-hypercube baselines.
 
 - `src/__init__.py` — This compatibility package aliases legacy imports to the canonical implementation modules.
 - `comsol_mcp/__init__.py` — This module defines the single authored package version.
