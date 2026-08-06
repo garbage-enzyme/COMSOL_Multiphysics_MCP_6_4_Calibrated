@@ -14,6 +14,7 @@ MAX_CORE_TOOL_SCHEMA_BYTES = 16 * 1024
 MAX_CAPABILITIES_RESPONSE_BYTES = 64 * 1024
 
 _CHILD_PROBE = r"""
+import asyncio
 import json
 import os
 import psutil
@@ -35,17 +36,18 @@ sys.addaudithook(record_process_launch)
 process_start_rss = process.memory_info().rss
 import_started = time.perf_counter()
 from src.server import create_server
+from development_kit.tests.mcp_test_support import decode_tool_result
 import_finished = time.perf_counter()
 import_rss = process.memory_info().rss
 create_started = time.perf_counter()
 server = create_server("cold-control-plane", profile="core")
 create_finished = time.perf_counter()
-tools = sorted(server._tool_manager._tools.values(), key=lambda item: item.name)
+tools = sorted(asyncio.run(server.list_tools()), key=lambda item: item.name)
 tool_records = [
     {
         "name": tool.name,
         "description": tool.description,
-        "inputSchema": tool.parameters,
+        "inputSchema": tool.input_schema,
     }
     for tool in tools
 ]
@@ -56,9 +58,10 @@ tool_record_bytes = [
 core_discovery_bytes = len(
     json.dumps(tool_records, sort_keys=True, separators=(",", ":")).encode("utf-8")
 )
+capabilities = decode_tool_result(asyncio.run(server.call_tool("capabilities", {})))
 capabilities_response_bytes = len(
     json.dumps(
-        server._tool_manager._tools["capabilities"].fn(),
+        capabilities,
         sort_keys=True,
         separators=(",", ":"),
     ).encode("utf-8")
@@ -77,7 +80,7 @@ print(json.dumps({
     "rss_from_server_import_mib": (process.memory_info().rss - import_rss) / 1048576,
     "heavy_modules": heavy_modules,
     "process_launch_events": process_launch_events,
-    "tool_count": len(server._tool_manager._tools),
+    "tool_count": len(tools),
     "core_discovery_bytes": core_discovery_bytes,
     "largest_tool_schema_bytes": max(tool_record_bytes, default=0),
     "capabilities_response_bytes": capabilities_response_bytes,

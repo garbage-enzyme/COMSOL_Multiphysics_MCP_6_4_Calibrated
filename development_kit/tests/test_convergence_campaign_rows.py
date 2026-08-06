@@ -124,13 +124,14 @@ def test_duplicate_append_and_out_of_order_level_directory_fail_closed(tmp_path)
     root = tmp_path / "campaign"
     journal = root / "convergence_levels.jsonl"
     first_dir = _complete_level(spec, root, 0)
-    append_convergence_campaign_level(
+    first = append_convergence_campaign_level(
         journal, spec, attempt=1, level_dir=first_dir, artifact_root=root
     )
     with pytest.raises(ValueError, match="spectral|stage|summary"):
         append_convergence_campaign_level(
             journal, spec, attempt=1, level_dir=first_dir, artifact_root=root
         )
+    assert read_convergence_campaign_levels(journal, spec, artifact_root=root) == [first]
     second_dir = _complete_level(spec, root, 1)
     second = append_convergence_campaign_level(
         journal, spec, attempt=1, level_dir=second_dir, artifact_root=root

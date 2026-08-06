@@ -90,7 +90,11 @@ def _collect_controls(runtime: Path, job_id: str) -> dict:
         raise RuntimeError("solver control probe changed or found ownership")
     if job.get("success") is not True or job.get("status") != "completed":
         raise RuntimeError("job control probe failed")
-    if lexical.get("success") is not True or not lexical.get("results"):
+    if (
+        lexical.get("success") is not True
+        or not lexical.get("results")
+        or lexical.get("count", 0) <= 0
+    ):
         raise RuntimeError("manual-search control probe failed")
     return {"timings": timings, "lexical_count": lexical["count"]}
 
@@ -115,7 +119,8 @@ def _poll_controls(runtime: Path, job_id: str) -> dict:
         creationflags=(getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0),
     )
     if completed.returncode != 0:
-        raise RuntimeError("control-plane watchdog subprocess failed")
+        diagnostic = (completed.stderr or completed.stdout or "no output")[-2000:]
+        raise RuntimeError(f"control-plane watchdog subprocess failed: {diagnostic}")
     lines = [line for line in completed.stdout.splitlines() if line.strip()]
     if len(lines) != 1:
         raise RuntimeError("control-plane watchdog returned malformed output")

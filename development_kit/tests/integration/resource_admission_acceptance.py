@@ -95,7 +95,9 @@ def _run_builder_process(command: list[str]) -> dict[str, object]:
             creationflags=creation_flags,
         )
         containment = OwnedJobObject.assign(process.pid)
-        stdout, stderr = process.communicate(timeout=120)
+        stdout, stderr = process.communicate(
+            timeout=float(_resource_policy()["wall_time_budget_seconds"]) + 60.0
+        )
     except subprocess.TimeoutExpired as exc:
         timed_out = True
         stdout = _timeout_text(exc.stdout)

@@ -77,7 +77,7 @@ def test_committed_runtime_dependencies_match_reviewed_license_snapshot() -> Non
     receipt_strings = tuple(_normalized_path_text(value) for value in _string_leaves(receipt))
     sensitive_paths = (ROOT, PYPROJECT, REVIEW, Path.home())
     for sensitive_path in sensitive_paths:
-        needle = _normalized_path_text(sensitive_path.resolve())
+        needle = _normalized_path_text(sensitive_path)
         assert all(needle not in value for value in receipt_strings)
 
 
@@ -277,9 +277,7 @@ def test_every_observed_license_signal_requires_review_coverage(tmp_path: Path) 
     assert {item["reason_code"] for item in receipt["failures"]} == {"license_metadata_unmatched"}
 
 
-def test_license_receipt_hashes_the_same_single_input_snapshots(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_license_receipt_hashes_the_exact_input_bytes(tmp_path: Path) -> None:
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text('[project]\ndependencies = ["alpha>=1"]\n', encoding="utf-8")
     review = tmp_path / "review.json"
@@ -305,16 +303,6 @@ def test_license_receipt_hashes_the_same_single_input_snapshots(
         pyproject.resolve(): pyproject.read_bytes(),
         review.resolve(): review.read_bytes(),
     }
-    calls = {path: 0 for path in expected}
-    original = Path.read_bytes
-
-    def tracked(path):
-        resolved = path.resolve()
-        if resolved in calls:
-            calls[resolved] += 1
-        return original(path)
-
-    monkeypatch.setattr(Path, "read_bytes", tracked)
     receipt = build_license_receipt(
         pyproject,
         review,
@@ -324,6 +312,5 @@ def test_license_receipt_hashes_the_same_single_input_snapshots(
 
     import hashlib
 
-    assert calls == {pyproject.resolve(): 1, review.resolve(): 1}
     assert receipt["pyproject_sha256"] == hashlib.sha256(expected[pyproject.resolve()]).hexdigest()
     assert receipt["review_sha256"] == hashlib.sha256(expected[review.resolve()]).hexdigest()

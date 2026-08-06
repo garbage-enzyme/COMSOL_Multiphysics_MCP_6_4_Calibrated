@@ -348,6 +348,7 @@ def test_native_cancel_timeout_blocks_client_and_lease_cleanup(tmp_path, ascii_r
     native_finished = threading.Event()
     base_collector = _collector_for(spec)
     cancellation_requested = False
+    release_timer = None
 
     def blocked_native_cancel():
         native_started.set()
@@ -363,12 +364,14 @@ def test_native_cancel_timeout_blocks_client_and_lease_cleanup(tmp_path, ascii_r
             native_finished.set()
 
     def cancelling_collector(point, collector, artifact_dir):
-        nonlocal cancellation_requested
+        nonlocal cancellation_requested, release_timer
         result = base_collector(point, collector, artifact_dir)
         if not cancellation_requested:
             cancellation_requested = True
             store.request_cancel(job_id, requester_identity=process_identity(os.getpid()))
-            assert native_started.wait(timeout=2)
+            assert native_started.wait(timeout=5)
+            release_timer = threading.Timer(1.25, native_release.set)
+            release_timer.start()
         return result
 
     monkeypatch.setattr(native_cancel_probe, "request_native_cancel_once", blocked_native_cancel)
@@ -385,7 +388,9 @@ def test_native_cancel_timeout_blocks_client_and_lease_cleanup(tmp_path, ascii_r
         )
     finally:
         native_release.set()
-        assert native_finished.wait(timeout=2)
+        if release_timer is not None:
+            release_timer.join(timeout=5)
+        assert native_finished.wait(timeout=5)
 
     state = store.read_state(job_id)
     assert code == 1

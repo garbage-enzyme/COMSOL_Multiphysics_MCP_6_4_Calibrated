@@ -1,5 +1,7 @@
 """Standalone clientapi study and mesh integration probe for COMSOL 6.4."""
 
+import sys
+
 import jpype
 import mph
 
@@ -32,20 +34,23 @@ def main() -> None:
         study.create("step1", "Stationary")
         print(
             "study+mesh OK:",
-            "ndom=", geom.getNDomains(),
-            "nbnd=", geom.getNBoundaries(),
-            "nelem=", mesh.getNumElem(),
+            "ndom=",
+            geom.getNDomains(),
+            "nbnd=",
+            geom.getNBoundaries(),
+            "nelem=",
+            mesh.getNumElem(),
         )
     finally:
         if client is not None:
             try:
                 client.clear()
-            except Exception:
-                pass
+            except Exception as exc:
+                print(f"study+mesh cleanup warning: clear failed: {exc}", file=sys.stderr)
             try:
                 client.disconnect()
-            except Exception:
-                pass
+            except Exception as exc:
+                print(f"study+mesh cleanup warning: disconnect failed: {exc}", file=sys.stderr)
 
 
 if __name__ == "__main__":
