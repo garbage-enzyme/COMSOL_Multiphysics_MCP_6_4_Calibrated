@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import threading
-import uuid
 from pathlib import Path
 
 import pytest
@@ -16,13 +14,8 @@ from src.jobs.validation_worker import _run
 
 
 @pytest.fixture
-def ascii_root():
-    root = Path("D:/comsol_runtime_test") / f"pytest-validation-{uuid.uuid4().hex}"
-    root.mkdir(parents=True)
-    try:
-        yield root
-    finally:
-        shutil.rmtree(root, ignore_errors=True)
+def ascii_root(ascii_tmp_path):
+    yield ascii_tmp_path
 
 
 def _raw_spec(source: Path, *, points=2):

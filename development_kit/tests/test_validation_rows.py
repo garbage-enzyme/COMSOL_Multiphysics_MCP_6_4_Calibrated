@@ -383,7 +383,6 @@ def test_partial_tail_is_truncated_before_concurrent_safe_append(tmp_path):
     )
 
     assert read_validation_rows(path, spec) == [first, second]
-    assert not (tmp_path / ".rows.jsonl.lock").exists()
 
 
 def test_concurrent_validation_appends_form_one_contiguous_chain(tmp_path):

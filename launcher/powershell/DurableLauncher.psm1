@@ -323,7 +323,11 @@ function ConvertTo-DurableBoundedText {
         [int]$MaximumLength = 240
     )
     if ($null -eq $Value) { return $null }
-    $Text = ([string]$Value) -replace '[\r\n\t]+', ' '
+    $RawText = if ($Value -is [double] -or $Value -is [single]) {
+        $Value.ToString('R', [Globalization.CultureInfo]::InvariantCulture)
+    }
+    else { [string]$Value }
+    $Text = $RawText -replace '[\r\n\t]+', ' '
     $Text = ($Text -replace '\s{2,}', ' ').Trim()
     if ([string]::IsNullOrWhiteSpace($Text)) { return $null }
     if ($Text.Length -le $MaximumLength) { return $Text }

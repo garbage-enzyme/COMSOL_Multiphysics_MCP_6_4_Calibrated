@@ -9,18 +9,10 @@ import pytest
 
 
 def _ascii_temp_candidates() -> tuple[Path, ...]:
-    candidates = []
     configured = os.environ.get("COMSOL_MCP_TEST_ASCII_ROOT")
     if configured:
-        candidates.append(Path(configured))
-    candidates.extend(
-        [
-            Path(tempfile.gettempdir()),
-            Path(os.environ.get("SystemRoot", "C:/Windows")) / "Temp",
-            Path("D:/comsol_runtime_test"),
-        ]
-    )
-    return tuple(candidates)
+        return (Path(configured),)
+    return (Path("D:/mcp_tests"),)
 
 
 def _create_ascii_temp_dir(*, candidates=None) -> Path:

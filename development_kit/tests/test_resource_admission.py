@@ -5,8 +5,6 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
-import shutil
-import uuid
 from pathlib import Path
 
 import pytest
@@ -209,13 +207,8 @@ def test_builder_assignment_failure_still_reaps_the_started_process(monkeypatch)
 
 
 @pytest.fixture
-def ascii_jobs_root():
-    root = Path("D:/comsol_runtime_test/resource_admission_journal") / uuid.uuid4().hex
-    root.mkdir(parents=True)
-    try:
-        yield root
-    finally:
-        shutil.rmtree(root, ignore_errors=True)
+def ascii_jobs_root(ascii_tmp_path):
+    yield ascii_tmp_path
 
 
 def sample(**overrides):

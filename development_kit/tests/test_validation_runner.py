@@ -245,7 +245,13 @@ def test_resource_refusal_before_point_writes_no_false_error_row(tmp_path):
 
     assert result["stop_reason"] == "before_point_checkpoint_no_start"
     assert result["processed"] == 0
+    assert result["resource_gate"] == {
+        "action": "checkpoint_no_start",
+        "start_authorized": False,
+        "point_id": spec["points"][0]["point_fingerprint"],
+    }
     assert not (directory / "matrix_rows.jsonl").exists()
+    assert read_validation_rows(directory / "matrix_rows.jsonl", spec) == []
 
 
 def test_resource_stop_after_fsync_preserves_completed_row_then_stops(tmp_path):
@@ -299,9 +305,10 @@ def test_resource_hook_identity_and_authorization_must_match(tmp_path):
 
 def test_post_solve_skip_completed_is_a_normal_durable_replay_state(tmp_path):
     spec = _spec(tmp_path)
+    directory = tmp_path / "job"
     result = run_pending_validation_points(
         spec,
-        tmp_path / "job",
+        directory,
         attempt=1,
         collector_executor=_complete_executor,
         after_durable_row_hook=lambda context: {
@@ -314,6 +321,12 @@ def test_post_solve_skip_completed_is_a_normal_durable_replay_state(tmp_path):
     assert result["success"] is True
     assert result["processed"] == 2
     assert result["remaining"] == 0
+    rows = read_validation_rows(directory / "matrix_rows.jsonl", spec)
+    assert [row["status"] for row in rows] == ["ok", "ok"]
+    assert [
+        [summary["audit_status"] for summary in row["collector_summaries"]]
+        for row in rows
+    ] == [["measurement_complete"], ["measurement_complete"]]
 
 
 def test_empty_exception_message_still_produces_a_durable_error_row(tmp_path):

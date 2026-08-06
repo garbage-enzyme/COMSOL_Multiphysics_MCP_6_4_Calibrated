@@ -464,7 +464,7 @@ def test_semantic_worker_inventory_matches_actual_module_command(monkeypatch):
 
 
 def test_semantic_acceptance_uses_isolated_runtime_and_run_lock():
-    runtime = Path("D:/comsol_runtime/semantic_feature/runs/test-run")
+    runtime = Path("D:/mcp_tests/semantic_feature/runs/test-run")
     parameters = feature_module._server("core", runtime, semantic_enabled=True)
 
     assert parameters.env["COMSOL_MCP_RUNTIME_DIR"] == str(runtime)
@@ -472,6 +472,7 @@ def test_semantic_acceptance_uses_isolated_runtime_and_run_lock():
     assert parameters.env["COMSOL_MCP_ENABLE_SEMANTIC_DOCS"] == "true"
     assert feature_module.RUN_LOCK.name == "acceptance.lock"
     assert feature_module.RUN_LOCK.is_absolute()
+    assert feature_module.OUTPUT.is_relative_to(Path("D:/mcp_tests"))
 
 
 def test_concurrent_burst_requires_success_busy_and_no_unexpected_failures():

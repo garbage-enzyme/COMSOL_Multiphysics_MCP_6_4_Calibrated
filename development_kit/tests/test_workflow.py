@@ -585,16 +585,17 @@ def test_mesh_convergence_resumes_completed_levels(tmp_path):
     csv_path = tmp_path / "mesh.csv"
     source = tmp_path / "source.mph"
     source.write_bytes(b"immutable mesh source")
-    model = FakeModel()
+    first_model = FakeModel()
     first = run_mesh_convergence(
-        model,
+        first_model,
         [{"name": "coarse", "properties": {"hmax": "0.1"}}],
         ["A"],
         csv_path=str(csv_path),
         source_model_path=str(source),
     )
+    resumed_model = FakeModel()
     resumed = run_mesh_convergence(
-        model,
+        resumed_model,
         [
             {"name": "coarse", "properties": {"hmax": "0.1"}},
             {"name": "fine", "properties": {"hmax": "0.05"}},
@@ -610,6 +611,8 @@ def test_mesh_convergence_resumes_completed_levels(tmp_path):
     assert type(first["resolved_study_tag"]) is str
     assert resumed["n_skipped"] == 1
     assert resumed["n_levels"] == 1
+    assert first_model.java.study_node.run_count == 1
+    assert resumed_model.java.study_node.run_count == 1
     assert [row["level"] for row in read_csv(csv_path)] == ["coarse", "fine"]
 
 

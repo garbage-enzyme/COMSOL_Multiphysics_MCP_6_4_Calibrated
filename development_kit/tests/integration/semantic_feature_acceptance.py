@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import shutil
@@ -18,7 +19,8 @@ from src.jobs.store import JobLock
 
 ROOT = Path(__file__).parents[3]
 PYTHON = Path(sys.executable)
-OUTPUT = Path("D:/comsol_runtime/semantic_feature/live_feature.json")
+DEFAULT_OUTPUT_ROOT = Path(os.environ.get("COMSOL_MCP_TEST_ASCII_ROOT", "D:/mcp_tests"))
+OUTPUT = DEFAULT_OUTPUT_ROOT / "semantic_feature" / "live_feature.json"
 RUN_LOCK = OUTPUT.parent / "acceptance.lock"
 MODEL = Path("D:/comsol_semantic/models/all-MiniLM-L6-v2/1110a243fdf4706b3f48f1d95db1a4f5529b4d41")
 PROFILE_COUNTS = {
@@ -58,16 +60,21 @@ def _server(
     semantic_enabled: bool = False,
 ) -> StdioServerParameters:
     environment = os.environ.copy()
-    environment.update({
-        "COMSOL_MCP_PROFILE": profile,
-        "COMSOL_MCP_RUNTIME_DIR": str(runtime_dir),
-        "COMSOL_MCP_ENABLE_SEMANTIC_DOCS": str(semantic_enabled).lower(),
-        "COMSOL_SEMANTIC_ROOT": "D:/comsol_semantic",
-        "COMSOL_SEMANTIC_LEXICAL_INDEX": "D:/comsol_docs_fts/manuals.sqlite3",
-        "COMSOL_SEMANTIC_MODEL_PATH": str(MODEL),
-    })
+    environment.update(
+        {
+            "COMSOL_MCP_PROFILE": profile,
+            "COMSOL_MCP_RUNTIME_DIR": str(runtime_dir),
+            "COMSOL_MCP_ENABLE_SEMANTIC_DOCS": str(semantic_enabled).lower(),
+            "COMSOL_SEMANTIC_ROOT": "D:/comsol_semantic",
+            "COMSOL_SEMANTIC_LEXICAL_INDEX": "D:/comsol_docs_fts/manuals.sqlite3",
+            "COMSOL_SEMANTIC_MODEL_PATH": str(MODEL),
+        }
+    )
     return StdioServerParameters(
-        command=str(PYTHON), args=["-m", "src.server"], cwd=ROOT, env=environment,
+        command=str(PYTHON),
+        args=["-m", "src.server"],
+        cwd=ROOT,
+        env=environment,
     )
 
 
@@ -78,7 +85,9 @@ async def _call(session: ClientSession, name: str, arguments: dict[str, Any]) ->
     return {
         "payload": payload,
         "elapsed_seconds": time.perf_counter() - started,
-        "response_bytes": len(json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")),
+        "response_bytes": len(
+            json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        ),
     }
 
 
@@ -103,19 +112,27 @@ async def _semantic_flow(runtime_dir: Path) -> dict[str, Any]:
                 solver_before = await _call(session, "solver_status", {})
                 cold = await _call(session, "semantic_status", {"warm": False})
                 warm = await _call(session, "semantic_status", {"warm": True})
-                search = await _call(session, "semantic_search", {
-                    "query": "How can periodic boundary faces use identical discretization?",
-                    "module": "Wave_Optics_Module",
-                    "limit": 5,
-                })
+                search = await _call(
+                    session,
+                    "semantic_search",
+                    {
+                        "query": "How can periodic boundary faces use identical discretization?",
+                        "module": "Wave_Optics_Module",
+                        "limit": 5,
+                    },
+                )
                 capabilities = await _call(session, "capabilities", {})
             finally:
                 reset = await _call(session, "semantic_worker_reset", {})
             stopped = await _call(session, "semantic_status", {"warm": False})
-            lexical = await _call(session, "manual_search", {
-                "query": "CopyFace source destination",
-                "limit": 3,
-            })
+            lexical = await _call(
+                session,
+                "manual_search",
+                {
+                    "query": "CopyFace source destination",
+                    "limit": 3,
+                },
+            )
             solver_after = await _call(session, "solver_status", {})
 
     assert cold["payload"]["configured"] is True
@@ -157,39 +174,66 @@ async def _run(runtime_dir: Path) -> dict[str, Any]:
     return {"schema_version": "1", "success": True, "discovery": discovery, "semantic": semantic}
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=OUTPUT,
+        help="Acceptance receipt path under an isolated ASCII test root.",
+    )
+    args = parser.parse_args(argv)
+    output_path = args.output.resolve()
+    run_lock = output_path.parent / "acceptance.lock"
     run_id = uuid.uuid4().hex
-    runtime_dir = OUTPUT.parent / "runs" / run_id
-    with JobLock(RUN_LOCK, timeout=5.0):
+    runtime_dir = output_path.parent / "runs" / run_id
+    with JobLock(run_lock, timeout=5.0):
         try:
             output = anyio.run(_run, runtime_dir)
-            OUTPUT.parent.mkdir(parents=True, exist_ok=True)
-            temporary = OUTPUT.with_name(f".tmp-{run_id[:8]}")
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = output_path.with_name(f".tmp-{run_id[:8]}")
             try:
                 with temporary.open("wb") as handle:
-                    handle.write(json.dumps(output, ensure_ascii=False, allow_nan=False, indent=2).encode("utf-8") + b"\n")
+                    handle.write(
+                        json.dumps(output, ensure_ascii=False, allow_nan=False, indent=2).encode(
+                            "utf-8"
+                        )
+                        + b"\n"
+                    )
                     handle.flush()
                     os.fsync(handle.fileno())
-                os.replace(temporary, OUTPUT)
+                os.replace(temporary, output_path)
             finally:
                 temporary.unlink(missing_ok=True)
         finally:
             shutil.rmtree(runtime_dir, ignore_errors=True)
-    print(json.dumps({
-        "success": True,
-        "profiles": {item["profile"]: item["tool_count"] for item in output["discovery"]},
-        "cold_status_seconds": output["semantic"]["cold_status"]["elapsed_seconds"],
-        "warm_status_seconds": output["semantic"]["warm_status"]["elapsed_seconds"],
-        "search_seconds": output["semantic"]["search"]["elapsed_seconds"],
-        "search_top": [
-            [item["source"], item["page"]]
-            for item in output["semantic"]["search"]["payload"]["results"][:3]
-        ],
-        "semantic_available_after_health": output["semantic"]["capabilities_after_health"]["payload"]["semantic_search"]["available"],
-        "worker_state_after_reset": output["semantic"]["stopped_status"]["payload"]["worker"]["state"],
-        "lexical_after_reset_count": output["semantic"]["lexical_after_reset"]["payload"]["count"],
-        "artifact": str(OUTPUT),
-    }, ensure_ascii=False, indent=2))
+    print(
+        json.dumps(
+            {
+                "success": True,
+                "profiles": {item["profile"]: item["tool_count"] for item in output["discovery"]},
+                "cold_status_seconds": output["semantic"]["cold_status"]["elapsed_seconds"],
+                "warm_status_seconds": output["semantic"]["warm_status"]["elapsed_seconds"],
+                "search_seconds": output["semantic"]["search"]["elapsed_seconds"],
+                "search_top": [
+                    [item["source"], item["page"]]
+                    for item in output["semantic"]["search"]["payload"]["results"][:3]
+                ],
+                "semantic_available_after_health": output["semantic"]["capabilities_after_health"][
+                    "payload"
+                ]["semantic_search"]["available"],
+                "worker_state_after_reset": output["semantic"]["stopped_status"]["payload"][
+                    "worker"
+                ]["state"],
+                "lexical_after_reset_count": output["semantic"]["lexical_after_reset"]["payload"][
+                    "count"
+                ],
+                "artifact": str(output_path),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
 
 
 if __name__ == "__main__":
