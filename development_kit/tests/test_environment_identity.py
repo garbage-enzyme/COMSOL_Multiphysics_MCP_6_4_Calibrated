@@ -11,6 +11,7 @@ from src.environment_identity import get_environment_identity
 from src.tools.capabilities import get_capabilities
 from src.tools.profiles import ProfileSelection
 
+import comsol_mcp.environment_identity as environment_identity_module
 from src import __version__
 
 
@@ -88,3 +89,20 @@ def test_environment_identity_separates_dependency_and_external_runtime_evidence
 def test_capabilities_embed_the_same_environment_identity():
     capabilities = get_capabilities(_selection())
     assert capabilities["environment_identity"] == get_environment_identity()
+
+
+def test_distribution_metadata_failure_is_bounded_and_path_free(monkeypatch):
+    monkeypatch.setattr(
+        environment_identity_module,
+        "version",
+        lambda _name: (_ for _ in ()).throw(ValueError("private metadata path")),
+    )
+
+    record = environment_identity_module._distribution_record("broken")
+
+    assert record == {
+        "name": "broken",
+        "availability": "metadata_error",
+        "version": None,
+        "error_type": "ValueError",
+    }

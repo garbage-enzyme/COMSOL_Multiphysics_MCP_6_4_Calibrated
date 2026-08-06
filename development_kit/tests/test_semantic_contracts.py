@@ -28,6 +28,7 @@ from src.knowledge.semantic_contracts import (
 )
 
 from development_kit.benchmarks.semantic_benchmark import (
+    _aggregate,
     _query_metrics,
     evaluate_lexical_baseline,
 )
@@ -45,6 +46,28 @@ EVALUATION_PATH = (
 SHA_A = "a" * 64
 SHA_B = "b" * 64
 SHA_C = "c" * 64
+
+
+def test_empty_semantic_benchmark_aggregate_is_serializable_and_schema_complete():
+    aggregate = _aggregate([])
+
+    assert aggregate == {
+        "query_count": 0,
+        "judged_query_count": 0,
+        "recall_at_5": 0.0,
+        "recall_at_10": 0.0,
+        "mrr_at_10": 0.0,
+        "ndcg_at_10": 0.0,
+        "zero_result_rate": 0.0,
+        "misses_at_5": 0,
+        "negative_query_count": 0,
+        "negative_abstention_rate": None,
+    }
+    assert json.loads(json.dumps(aggregate, allow_nan=False)) == aggregate
+    assert (
+        evaluate_semantic_continuation({"target_styles": aggregate})["continue_to_semantic_worker"]
+        is False
+    )
 
 
 def _absent_ownership():

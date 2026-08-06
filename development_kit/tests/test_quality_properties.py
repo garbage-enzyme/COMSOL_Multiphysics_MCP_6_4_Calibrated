@@ -1045,6 +1045,23 @@ def test_compatibility_manifest_validation_fails_closed(
         compatibility.load_runtime_compatibility()
 
 
+def test_unknown_compatibility_builds_has_an_explicit_string_contract(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    value = compatibility.load_runtime_compatibility()
+    value["unknown_compatibility"]["comsol_builds"] = []
+    path = tmp_path / "compatibility.json"
+    path.write_text(json.dumps(value), encoding="utf-8")
+    monkeypatch.setattr(compatibility, "_MANIFEST_PATH", path)
+
+    with pytest.raises(
+        ValueError,
+        match="unknown compatibility comsol_builds must be a bounded nonempty string",
+    ):
+        compatibility.load_runtime_compatibility()
+
+
 def test_compatibility_manifest_and_session_status_have_copy_semantics() -> None:
     assert compatibility.load_runtime_compatibility()["schema_version"] == "1.0.0"
     previous = get_session_status()

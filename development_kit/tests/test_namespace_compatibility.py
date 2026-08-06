@@ -194,3 +194,13 @@ def test_reloading_legacy_package_retains_one_alias_finder():
         if getattr(item, "alias_finder_identity", None) == "comsol_mcp.src_alias_finder.v1"
     ]
     assert len(finders) == 1
+
+
+def test_reloading_legacy_submodule_retains_the_canonical_object():
+    canonical = importlib.import_module("comsol_mcp.tools.session_status")
+    legacy = importlib.import_module("src.tools.session_status")
+
+    reloaded = importlib.reload(legacy)
+
+    assert reloaded is canonical
+    assert importlib.import_module("src.tools.session_status") is canonical

@@ -282,6 +282,12 @@ def test_markdown_code_preserves_boundary_backticks():
     assert resources_module._markdown_code("`value`") == "`` `value` ``"
 
 
+def test_markdown_code_escapes_backslashes_before_table_pipes():
+    import src.resources.model_resources as resources_module
+
+    assert resources_module._markdown_code(r"a\|b") == r"`a\\\|b`"
+
+
 def test_default_registration_does_not_import_semantic_stack():
     code = """
 import json
