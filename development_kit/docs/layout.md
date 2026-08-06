@@ -77,6 +77,7 @@ models are intentionally absent.
 - `development_kit/README.md` — This file is the starting guide for tests, release gates, fixtures, and handoff work.
 - `development_kit/benchmarks/__init__.py` — This file marks repository-only benchmark drivers as a Python package.
 - `development_kit/benchmarks/semantic_benchmark.py` — This script runs the frozen lexical and semantic retrieval benchmark.
+- `development_kit/benchmarks/research_campaign.py` — This module defines the frozen solver-free research-campaign benchmark suite and fake MIM evaluator.
 - `development_kit/docs/layout.md` — This file maps every tracked repository file to one concise purpose statement.
 - `development_kit/docs/legacy_phase_compatibility.md` — This file records the frozen compatibility allowlist for historical aliases.
 - `development_kit/docs/release_checklist.md` — This file gives the ordered dependency, package, licensed, install, and restart release checklist.
@@ -262,6 +263,7 @@ models are intentionally absent.
 - `development_kit/tests/test_release_facts.py` — This module tests the generated release-facts view against live implementation data.
 - `development_kit/tests/test_release_receipts.py` — This module tests deterministic SBOM and release inventory receipts.
 - `development_kit/tests/test_research_contracts.py` — This module tests closed goal and design-space normalization, identities, and the first MIM campaign bounds.
+- `development_kit/tests/test_research_benchmarks.py` — This module proves the frozen feasible, impossible, multi-objective, material, and crash-resume benchmark fixtures.
 - `development_kit/tests/test_resource_admission.py` — This module tests resource policy normalization, telemetry, and admission decisions.
 - `development_kit/tests/test_results.py` — This module tests result normalization without a COMSOL client.
 - `development_kit/tests/test_runtime_paths.py` — This module tests shared ASCII-safe runtime and lease paths.
