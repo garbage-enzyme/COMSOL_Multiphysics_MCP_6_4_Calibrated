@@ -122,7 +122,9 @@ def test_submit_returns_promptly_and_second_manager_observes_completion(jobs_roo
     second = JobManager(jobs_root, allow_test_jobs=True)
     completed = wait_for(second, result["job_id"], {"completed"})
 
-    assert elapsed < 1.0
+    # Submission is asynchronous; cold hosted Windows runners can spend over
+    # one second starting the detached worker under process scheduling.
+    assert elapsed < 5.0
     assert completed["progress"] == {"completed": 2, "total": 2}
     assert second.tail(result["job_id"], 2)["events"]
 

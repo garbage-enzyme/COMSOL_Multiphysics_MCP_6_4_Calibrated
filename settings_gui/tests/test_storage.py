@@ -130,6 +130,10 @@ def test_named_mutex_rejects_a_second_process(tmp_path):
         assert not reader.is_alive()
         output = "".join(list(lines.queue))
         errors = process.stderr.read() if process.stderr is not None else ""
+        if process.stdout is not None:
+            process.stdout.close()
+        if process.stderr is not None:
+            process.stderr.close()
         assert process.returncode == 0, output + errors
 
 

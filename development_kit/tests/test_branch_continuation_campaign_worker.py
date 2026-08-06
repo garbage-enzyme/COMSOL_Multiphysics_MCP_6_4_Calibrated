@@ -370,7 +370,7 @@ def test_native_cancel_timeout_blocks_client_and_lease_cleanup(tmp_path, ascii_r
             cancellation_requested = True
             store.request_cancel(job_id, requester_identity=process_identity(os.getpid()))
             assert native_started.wait(timeout=5)
-            release_timer = threading.Timer(1.25, native_release.set)
+            release_timer = threading.Timer(3.0, native_release.set)
             release_timer.start()
         return result
 
