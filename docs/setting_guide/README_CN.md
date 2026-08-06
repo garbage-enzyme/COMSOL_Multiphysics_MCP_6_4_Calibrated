@@ -224,7 +224,7 @@ Java 查找顺序是：COMSOL 自带且可用的 Java、`JAVA_HOME`、`JDK_HOME`
 | --- | --- | --- |
 | `manuals.root` | `null` | “生成索引”递归扫描的原始 COMSOL PDF 根目录。 |
 | `lexical_docs.enabled` | `false` | 独立控制 `manual_search` 和 `manual_read_pages`。 |
-| `lexical_docs.index_path` | `null` | SQLite FTS5/BM25 索引的仅含 ASCII 字符目标路径。 |
+| `lexical_docs.index_path` | `null` | SQLite 文件或目标文件夹的仅含 ASCII 字符路径；文件夹会解析为其中的 `lexical_manuals.sqlite3`。 |
 
 “文档”页通过隔离后台进程生成索引。进度弹窗显示当前阶段、PDF 文件、已处理
 PDF/页数和百分比。新索引通过 SQLite 完整性、元数据和行数验证后才原子替换；

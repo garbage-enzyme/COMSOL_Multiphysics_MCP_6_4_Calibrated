@@ -215,8 +215,8 @@ msgstr "启用已安装或复制到本机的 PDF 手册关键词搜索。由于�
 msgid "Folder scanned recursively when generating the manual index. Choose the folder containing the PDF manuals."
 msgstr "生成手册索引时递归扫描的文件夹。请选择包含 PDF 手册的文件夹。"
 
-msgid "SQLite FTS5/BM25 index used by manual_search. Use an ASCII-only full path. The Generate Index action creates or atomically replaces this file."
-msgstr "manual_search 使用的 SQLite FTS5/BM25 索引。请使用仅含 ASCII 字符的完整路径。“生成索引”会创建或原子替换此文件。"
+msgid "SQLite FTS5/BM25 index used by manual_search. Enter an ASCII-only SQLite file or destination folder. A folder uses lexical_manuals.sqlite3."
+msgstr "manual_search 使用的 SQLite FTS5/BM25 索引。请输入仅含 ASCII 字符的 SQLite 文件或目标文件夹；文件夹会使用 lexical_manuals.sqlite3。"
 
 msgid "Enable optional semantic manual-search tools for the selected profile. This feature requires prepared local indexes and a search model."
 msgstr "为所选 profile 启用可选的语义手册搜索工具。此功能需要预先准备本地索引和搜索模型。"

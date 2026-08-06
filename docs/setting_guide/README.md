@@ -253,7 +253,7 @@ explicitly unverified.
 | --- | --- | --- |
 | `manuals.root` | `null` | Original COMSOL manuals/PDF folder recursively scanned by **Generate Index**. |
 | `lexical_docs.enabled` | `false` | Independent gate for `manual_search` and `manual_read_pages`. |
-| `lexical_docs.index_path` | `null` | ASCII-only destination for the SQLite FTS5/BM25 index. |
+| `lexical_docs.index_path` | `null` | ASCII-only SQLite file or destination folder. A folder resolves to `lexical_manuals.sqlite3`. |
 
 The Docs tab builds the index in an isolated background process. Its progress
 dialog reports the stage, current PDF, processed PDF/page counts, and percentage.

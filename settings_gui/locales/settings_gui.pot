@@ -215,7 +215,7 @@ msgstr ""
 msgid "Folder scanned recursively when generating the manual index. Choose the folder containing the PDF manuals."
 msgstr ""
 
-msgid "SQLite FTS5/BM25 index used by manual_search. Use an ASCII-only full path. The Generate Index action creates or atomically replaces this file."
+msgid "SQLite FTS5/BM25 index used by manual_search. Enter an ASCII-only SQLite file or destination folder. A folder uses lexical_manuals.sqlite3."
 msgstr ""
 
 msgid "Enable optional semantic manual-search tools for the selected profile. This feature requires prepared local indexes and a search model."

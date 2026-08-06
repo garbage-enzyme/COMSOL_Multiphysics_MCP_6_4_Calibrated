@@ -114,8 +114,8 @@ MESSAGE_IDS = (
         "Choose the folder containing the PDF manuals."
     ),
     (
-        "SQLite FTS5/BM25 index used by manual_search. Use an ASCII-only full path. "
-        "The Generate Index action creates or atomically replaces this file."
+        "SQLite FTS5/BM25 index used by manual_search. Enter an ASCII-only SQLite "
+        "file or destination folder. A folder uses lexical_manuals.sqlite3."
     ),
     (
         "Enable optional semantic manual-search tools for the selected profile. "

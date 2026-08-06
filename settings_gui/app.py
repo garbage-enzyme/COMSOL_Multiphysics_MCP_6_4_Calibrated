@@ -376,7 +376,6 @@ class SettingsApplication:
             ).grid(row=row, column=0, sticky="w", pady=(4, 12))
             for key in keys:
                 self._add_field(docs_parent, next(field for field in FIELDS if field.key == key))
-        self._build_docs_actions(docs_parent)
         self._build_about(self.tabs["about"].content)
         try:
             self.notebook.select(min(self._selected_tab, len(TAB_IDS) - 1))
@@ -398,16 +397,6 @@ class SettingsApplication:
         self.save_button.configure(state=state)
         self.apply_button.configure(state=state)
         self._refresh_state()
-
-    def _build_docs_actions(self, parent: ttk.Frame) -> None:
-        row = parent.grid_size()[1]
-        frame = ttk.Frame(parent, padding=(0, 2, 0, 18))
-        frame.grid(row=row, column=0, sticky="ew")
-        ttk.Button(
-            frame,
-            text=self.controller.text("Generate Index"),
-            command=self._start_manual_index_build,
-        ).pack(anchor="w")
 
     def _start_manual_index_build(self) -> None:
         if self.index_dialog is not None:
@@ -530,6 +519,16 @@ class SettingsApplication:
             self.field_widgets[field.key] = control_widgets
         self.variables[field.key] = variable
         help_id = profile_help_id(value) if field.key == "profile.name" else field.help_id
+        content_row = 1
+        if field.key == "lexical_docs.index_path":
+            action = ttk.Frame(frame)
+            action.grid(row=1, column=1, columnspan=2, sticky="w", pady=(2, 0))
+            ttk.Button(
+                action,
+                text=self.controller.text("Generate Index"),
+                command=self._start_manual_index_build,
+            ).pack(anchor="w")
+            content_row = 2
         help_label = ttk.Label(
             frame,
             text=self.controller.text(help_id),
@@ -537,7 +536,7 @@ class SettingsApplication:
             wraplength=620,
             justify="left",
         )
-        help_label.grid(row=1, column=1, columnspan=2, sticky="w", pady=(4, 0))
+        help_label.grid(row=content_row, column=1, columnspan=2, sticky="w", pady=(4, 0))
         self.help_labels[field.key] = help_label
         error = self.controller.model.errors.get(field.key, "")
         error_label = ttk.Label(
@@ -547,7 +546,7 @@ class SettingsApplication:
             wraplength=620,
             justify="left",
         )
-        error_label.grid(row=2, column=1, columnspan=2, sticky="w", pady=(2, 0))
+        error_label.grid(row=content_row + 1, column=1, columnspan=2, sticky="w", pady=(2, 0))
         self.error_labels[field.key] = error_label
 
     def _add_roots(self, frame: ttk.Frame, field: FieldDescriptor, values: list[str]) -> None:

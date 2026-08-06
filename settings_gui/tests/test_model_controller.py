@@ -364,6 +364,36 @@ def test_generate_index_starts_one_background_task_from_form_paths(tmp_path: Pat
     assert calls == [{"pdf_root": str(pdf_root), "index_path": str(index)}]
 
 
+def test_generate_index_resolves_folder_to_default_sqlite_name(tmp_path: Path) -> None:
+    pdf_root = tmp_path / "pdf"
+    pdf_root.mkdir()
+    index_folder = tmp_path / "index-folder"
+    index_folder.mkdir()
+    calls = []
+
+    class FakeTask:
+        def __init__(self, **kwargs):
+            calls.append(kwargs)
+
+        def start(self):
+            return None
+
+    model = SettingsFormModel(default_settings_document())
+    model.update("manuals.root", str(pdf_root))
+    model.update("lexical_docs.index_path", str(index_folder))
+    controller = SettingsController(
+        model,
+        FakeStore(),
+        dialogs=FakeDialogs(),
+        index_task_factory=FakeTask,
+    )
+
+    assert controller.start_manual_index_build() is not None
+    target = index_folder / "lexical_manuals.sqlite3"
+    assert calls == [{"pdf_root": str(pdf_root), "index_path": str(target)}]
+    assert get_value(controller.model.document, "lexical_docs.index_path") == str(target)
+
+
 def test_auto_detect_decline_is_atomic(tmp_path: Path) -> None:
     detected_root = tmp_path / "COMSOL64" / "Multiphysics"
     detected_java = detected_root / "java" / "win64" / "jre"
@@ -413,6 +443,29 @@ def test_manual_auto_detect_keeps_the_single_dirty_notice(tmp_path: Path) -> Non
 
     assert controller.model.dirty is True
     assert len(dialogs.infos) == 1
+
+
+def test_auto_detect_fills_manuals_root_only_when_pdf_exists(tmp_path: Path) -> None:
+    detected_root = tmp_path / "COMSOL64" / "Multiphysics"
+    detected_java = detected_root / "java" / "win64" / "jre"
+    (detected_root / "doc").mkdir(parents=True)
+    (detected_root / "doc" / "manual.pdf").write_bytes(b"%PDF-test")
+    result = DiscoveryResult(detected_root, detected_java, "comsol_bundled")
+    controller, _store, dialogs = _controller(discover=lambda **_kwargs: result)
+
+    controller.auto_detect(manual=False)
+
+    assert get_value(controller.model.document, "manuals.root") == str(detected_root / "doc")
+    assert dialogs.errors == []
+
+    empty_root = tmp_path / "Empty" / "Multiphysics"
+    empty_java = empty_root / "java" / "win64" / "jre"
+    empty_root.mkdir(parents=True)
+    result = DiscoveryResult(empty_root, empty_java, "comsol_bundled")
+    controller, _store, dialogs = _controller(discover=lambda **_kwargs: result)
+    controller.auto_detect(manual=False)
+    assert get_value(controller.model.document, "manuals.root") is None
+    assert dialogs.errors == []
 
 
 def test_external_conflict_is_terminal_and_localized() -> None:

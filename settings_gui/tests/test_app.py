@@ -167,6 +167,15 @@ def _scenario_constructs_every_tab_and_field() -> None:
             "semantic_docs.root",
             "semantic_docs.model_path",
         ]
+        lexical_frame = app.help_labels["lexical_docs.index_path"].master
+        generate_button = next(
+            child
+            for container in lexical_frame.winfo_children()
+            for child in container.winfo_children()
+            if child.winfo_class() == "TButton"
+            and child.cget("text") == controller.text("Generate Index")
+        )
+        assert int(generate_button.master.grid_info()["row"]) == 1
         app.notebook.select(TAB_IDS.index("about"))
         root.geometry("960x640")
         root.attributes("-alpha", 0.0)

@@ -231,8 +231,8 @@ FIELDS = (
         "save_file",
         True,
         help_id=(
-            "SQLite FTS5/BM25 index used by manual_search. Use an ASCII-only full path. "
-            "The Generate Index action creates or atomically replaces this file."
+            "SQLite FTS5/BM25 index used by manual_search. Enter an ASCII-only SQLite "
+            "file or destination folder. A folder uses lexical_manuals.sqlite3."
         ),
     ),
     FieldDescriptor(
