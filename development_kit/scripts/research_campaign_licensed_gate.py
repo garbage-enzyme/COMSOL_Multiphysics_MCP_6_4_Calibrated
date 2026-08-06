@@ -43,7 +43,7 @@ from development_kit.scripts.research_adapter_licensed_gate import (  # noqa: E4
 SCHEMA_NAME = "comsol_mcp.research_campaign_licensed_gate"
 SCHEMA_VERSION = "1.0.0"
 SERVER = REPOSITORY_ROOT / "development_kit/scripts/research_adapter_gate_server.py"
-WAVELENGTHS_M = tuple((12 + index) * 1.0e-7 for index in range(17))
+WAVELENGTHS_M = tuple(1.5e-6 + index * 6.25e-8 for index in range(17))
 PEAK_TOLERANCE_M = 1.5e-7
 Q_TOLERANCE = 1.0
 PASSIVITY_ABS_TOLERANCE = 5.0e-2
