@@ -15,6 +15,12 @@ def _selector():
     return module.select_expected_improvement_candidate
 
 
+def _optimizer():
+    return importlib.import_module(
+        "comsol_mcp.research.adaptive_acquisition"
+    ).GaussianProcessExpectedImprovementOptimizer
+
+
 def test_explicit_gp_selector_is_deterministic_bounded_and_observation_aware():
     observations = [
         {"values": {"patch_length_x": 75.0, "patch_length_y": 60.0}, "loss": 4.0},
@@ -84,3 +90,37 @@ def test_ordinary_research_import_does_not_load_numpy_or_scipy(monkeypatch):
     importlib.import_module("comsol_mcp.research")
     loaded = set(sys.modules) - before
     assert not any(name == "numpy" or name.startswith("scipy") for name in loaded)
+
+
+def test_adaptive_optimizer_warmup_tell_checkpoint_and_exact_replay():
+    optimizer = _optimizer()(_space(), seed=17001, warmup_count=2, candidate_pool_count=8)
+    first = optimizer.ask()
+    second = optimizer.ask()
+    arguments = {
+        "candidate_fingerprint": "a" * 64,
+        "status": "completed",
+        "score_fingerprint": "b" * 64,
+        "losses": {"peak": 1.0, "q": 0.5},
+    }
+    assert optimizer.tell(first, **arguments) is True
+    assert (
+        optimizer.tell(
+            second,
+            **{
+                **arguments,
+                "candidate_fingerprint": "c" * 64,
+                "losses": {"peak": 2.0, "q": 1.0},
+            },
+        )
+        is True
+    )
+    third = optimizer.ask()
+    assert optimizer.explain(third)["uses_observations"] is True
+    checkpoint = optimizer.checkpoint(
+        campaign_fingerprint="d" * 64,
+        decision_fingerprint="e" * 64,
+        created_at="2026-08-07T00:00:00Z",
+    )
+    restored = _optimizer().restore(_space(), checkpoint)
+    assert restored.state() == optimizer.state()
+    assert restored.ask() == optimizer.ask()
