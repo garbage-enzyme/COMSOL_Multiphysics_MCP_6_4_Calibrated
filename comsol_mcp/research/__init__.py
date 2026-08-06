@@ -14,6 +14,11 @@ from .contracts import (
     normalize_research_goal,
     relative_bounds,
 )
+from .materials import (
+    MATERIAL_CATALOG_SCHEMA_NAME,
+    MATERIAL_CATALOG_SCHEMA_VERSION,
+    normalize_material_catalog,
+)
 from .workflow import (
     WORKFLOW_CAPSULE_SCHEMA_NAME,
     WORKFLOW_CAPSULE_SCHEMA_VERSION,
@@ -23,6 +28,8 @@ from .workflow import (
 __all__ = [
     "DESIGN_SPACE_SCHEMA_NAME",
     "DESIGN_SPACE_SCHEMA_VERSION",
+    "MATERIAL_CATALOG_SCHEMA_NAME",
+    "MATERIAL_CATALOG_SCHEMA_VERSION",
     "CAMPAIGN_MANIFEST_SCHEMA_NAME",
     "CAMPAIGN_MANIFEST_SCHEMA_VERSION",
     "RESEARCH_GOAL_SCHEMA_NAME",
@@ -30,6 +37,7 @@ __all__ = [
     "WORKFLOW_CAPSULE_SCHEMA_NAME",
     "WORKFLOW_CAPSULE_SCHEMA_VERSION",
     "normalize_design_space",
+    "normalize_material_catalog",
     "normalize_research_goal",
     "normalize_workflow_capsule",
     "relative_bounds",

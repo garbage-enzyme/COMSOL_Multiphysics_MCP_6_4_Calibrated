@@ -12,6 +12,8 @@ from comsol_mcp.research import (
     CAMPAIGN_MANIFEST_SCHEMA_VERSION,
     DESIGN_SPACE_SCHEMA_NAME,
     DESIGN_SPACE_SCHEMA_VERSION,
+    MATERIAL_CATALOG_SCHEMA_NAME,
+    MATERIAL_CATALOG_SCHEMA_VERSION,
     RESEARCH_GOAL_SCHEMA_NAME,
     RESEARCH_GOAL_SCHEMA_VERSION,
     WORKFLOW_CAPSULE_SCHEMA_NAME,
@@ -327,6 +329,12 @@ def _entries() -> list[dict[str, Any]]:
             "comsol_mcp.model_version_metadata",
             "1.0.0",
             "comsol_mcp.tools.model",
+        ),
+        _entry(
+            MATERIAL_CATALOG_SCHEMA_NAME,
+            MATERIAL_CATALOG_SCHEMA_VERSION,
+            "comsol_mcp.research.materials",
+            artifact_kind="configuration",
         ),
         _entry(
             _REFERENCE_POWER_DRY_RUN_SCHEMA,
