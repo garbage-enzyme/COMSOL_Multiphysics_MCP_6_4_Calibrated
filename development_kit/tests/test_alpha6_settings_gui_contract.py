@@ -18,7 +18,7 @@ RELEASED_SETTINGS_READABLE_VERSIONS = (
     "1.2.0",
     RELEASED_SETTINGS_VERSION,
 )
-RELEASED_PACKAGE_VERSION = "0.6.5"
+RELEASED_PACKAGE_VERSION = "0.7.0"
 
 
 def test_alpha6_settings_schema_and_defaults_are_current_and_backward_readable(tmp_path):
