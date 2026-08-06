@@ -459,7 +459,11 @@ async def _run(spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
                                 "mode": spec["mode"],
                                 "target_fingerprint": target_fingerprint,
                                 "completed_candidate_evaluations": index + 1,
-                                "optimizer_checkpoint": optimizer.checkpoint(),
+                                "optimizer_checkpoint": optimizer.checkpoint(
+                                    campaign_fingerprint=target_fingerprint,
+                                    decision_fingerprint=score_fingerprint,
+                                    created_at=f"2026-08-07T00:00:{index:02d}Z",
+                                ),
                                 "best": best,
                             },
                             maximum_bytes=4 * 1024 * 1024,
