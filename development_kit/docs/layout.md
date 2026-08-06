@@ -281,6 +281,7 @@ models are intentionally absent.
 - `development_kit/tests/test_research_campaign_loop.py` — This module tests optimizer-to-coordinator execution, per-point checkpoints, measured success, and honest budget exhaustion.
 - `development_kit/tests/test_research_objectives.py` — This module tests exact evidence pointers, deterministic losses, and threshold disposition separation.
 - `development_kit/tests/test_research_robustness.py` — This module tests bounded axis perturbations, exact evidence coverage, and optional robustness thresholds.
+- `development_kit/tests/test_research_tools.py` — This module tests real dispatch for experimental solver-free campaign compilation and robustness planning.
 - `development_kit/tests/test_research_adapters.py` — This module tests exact trusted-template manifests, closed x/y mutation scope, and live-tree drift rejection.
 - `development_kit/tests/test_research_adaptive_acquisition.py` — This module tests bounded deterministic GP/EI selection, invalid evidence rejection, and heavy-import isolation.
 - `development_kit/tests/test_research_optimizers.py` — This module tests deterministic ask/tell/checkpoint replay, mixed domains, and dependency isolation.
@@ -539,6 +540,7 @@ models are intentionally absent.
 - `comsol_mcp/tools/profiles.py` — This module resolves static profiles and filters tool registration.
 - `comsol_mcp/tools/session_status.py` — This module stores last-known session booleans without importing COMSOL or MPh.
 - `comsol_mcp/tools/properties.py` — This module exposes constrained clientapi property access.
+- `comsol_mcp/tools/research.py` — This module exposes experimental solver-free campaign compilation and robustness planning.
 - `comsol_mcp/tools/property_transport.py` — This module normalizes bounded property values for JSON transport.
 - `comsol_mcp/tools/results.py` — This module exposes result evaluation and export tools.
 - `comsol_mcp/tools/semantic_docs.py` — This module exposes bounded opt-in semantic documentation tools.

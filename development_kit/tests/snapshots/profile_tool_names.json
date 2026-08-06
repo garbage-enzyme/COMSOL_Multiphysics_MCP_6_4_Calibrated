@@ -424,6 +424,8 @@
     "physics_setup_flow_boundaries",
     "physics_setup_heat_boundaries",
     "physics_setup_pde_boundaries",
+    "research_campaign_compile",
+    "research_robustness_plan",
     "results_evaluate",
     "results_export_data",
     "results_export_image",

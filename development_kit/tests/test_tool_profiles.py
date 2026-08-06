@@ -141,7 +141,7 @@ def test_profile_registration_has_no_cross_server_leakage():
     experimental = create_server("isolated-experimental", profile="experimental")
 
     assert len(_tool_names(core)) == 45
-    assert len(_tool_names(full)) == 148
+    assert len(_tool_names(full)) == 150
     assert len(_tool_names(semantic)) == 48
     assert len(_tool_names(experimental)) == 95
     assert _tool_names(core) != _tool_names(experimental)
