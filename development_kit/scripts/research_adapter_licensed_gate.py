@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import hashlib
 import json
+import math
 import os
 import subprocess
 import sys
@@ -35,6 +36,30 @@ _tool_payload = _probe._tool_payload
 SCHEMA_NAME = "comsol_mcp.research_adapter_licensed_gate"
 SCHEMA_VERSION = "1.0.0"
 SERVER = REPOSITORY_ROOT / "development_kit" / "scripts" / "research_adapter_gate_server.py"
+
+
+def _wavelength_synchronized(measurement: dict[str, Any]) -> bool:
+    wavelength = measurement.get("wavelength")
+    if not isinstance(wavelength, dict) or wavelength.get("complete") is not True:
+        return False
+    values = [
+        wavelength.get("requested_m"),
+        wavelength.get("evaluated_parameter_m"),
+        wavelength.get("solved_frequency_wavelength_m"),
+    ]
+    if any(
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(float(value))
+        or float(value) <= 0.0
+        for value in values
+    ):
+        return False
+    requested = float(values[0])
+    return all(
+        math.isclose(requested, float(value), rel_tol=1.0e-12, abs_tol=1.0e-15)
+        for value in values[1:]
+    )
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -270,8 +295,8 @@ async def _run(spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
                             "wavelength_value": spec["wavelength_um"],
                             "wavelength_unit": "um",
                             "wavelength_parameter": "wl",
-                            "study_step_tag": "step1",
-                            "study_step_property": "plist",
+                            "study_step_tag": "sweep1",
+                            "study_step_property": "plistarr",
                             "expected_source_sha256": spec["source_sha256"],
                             "config_id": "alpha70-s4-one-point",
                             "artifact_dir": str(spec["artifacts"] / "point"),
@@ -287,6 +312,8 @@ async def _run(spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
                     if audit.get("success") is not True:
                         raise RuntimeError("one-point evidence collection failed")
                     measurement = audit.get("measurement", {})
+                    if not _wavelength_synchronized(measurement):
+                        raise RuntimeError("one-point wavelength synchronization failed")
                     receipt["application"] = {
                         key: applied.get(key)
                         for key in (

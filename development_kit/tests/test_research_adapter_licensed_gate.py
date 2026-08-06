@@ -98,3 +98,32 @@ def test_gate_scripts_are_directly_importable_from_repository_root():
             check=False,
         )
         assert completed.returncode == 0, completed.stderr
+
+
+@pytest.mark.parametrize(
+    ("wavelength", "expected"),
+    [
+        (
+            {
+                "complete": True,
+                "requested_m": 5.0e-6,
+                "evaluated_parameter_m": 5.0e-6,
+                "solved_frequency_wavelength_m": 5.0e-6,
+            },
+            True,
+        ),
+        (
+            {
+                "complete": True,
+                "requested_m": 5.0e-6,
+                "evaluated_parameter_m": 10.0e-6,
+                "solved_frequency_wavelength_m": 10.0e-6,
+            },
+            False,
+        ),
+    ],
+)
+def test_gate_requires_requested_evaluated_and_solved_wavelength_identity(
+    wavelength: dict, expected: bool
+):
+    assert gate._wavelength_synchronized({"wavelength": wavelength}) is expected

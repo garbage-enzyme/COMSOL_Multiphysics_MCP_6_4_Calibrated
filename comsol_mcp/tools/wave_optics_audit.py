@@ -1447,19 +1447,29 @@ def _run_wave_optics_point_audit_impl(
             solved_raw = _single_complex(controls[1], f"c_const/{physics_tag}.freq")
             evaluated_parameter = _single_real(evaluated_raw, wavelength_parameter)
             solved_frequency_wavelength = _single_real(solved_raw, f"c_const/{physics_tag}.freq")
-            difference = evaluated_parameter - solved_frequency_wavelength
+            evaluated_to_solved = evaluated_parameter - solved_frequency_wavelength
+            requested_to_evaluated = requested_m - evaluated_parameter
+            requested_to_solved = requested_m - solved_frequency_wavelength
+            absolute_difference = max(
+                abs(evaluated_to_solved),
+                abs(requested_to_evaluated),
+                abs(requested_to_solved),
+            )
             wavelength.update(
                 {
                     "complete": True,
                     "requested_m": requested_m,
                     "evaluated_parameter_m": evaluated_parameter,
                     "solved_frequency_wavelength_m": solved_frequency_wavelength,
-                    "signed_difference_m": difference,
-                    "absolute_difference_m": abs(difference),
+                    "signed_difference_m": evaluated_to_solved,
+                    "requested_to_evaluated_difference_m": requested_to_evaluated,
+                    "requested_to_solved_difference_m": requested_to_solved,
+                    "evaluated_to_solved_difference_m": evaluated_to_solved,
+                    "absolute_difference_m": absolute_difference,
                     "relative_difference": (
                         None
-                        if solved_frequency_wavelength == 0
-                        else abs(difference) / abs(solved_frequency_wavelength)
+                        if requested_m == 0
+                        else absolute_difference / abs(requested_m)
                     ),
                     "raw": {
                         "evaluated_parameter": _json_number(evaluated_raw),
