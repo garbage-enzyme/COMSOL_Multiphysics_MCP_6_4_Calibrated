@@ -266,6 +266,7 @@ models are intentionally absent.
 - `development_kit/tests/test_research_benchmarks.py` — This module proves the frozen feasible, impossible, multi-objective, material, and crash-resume benchmark fixtures.
 - `development_kit/tests/test_research_workflow.py` — This module tests passive workflow claims, ambiguity review, canonical identity, and baseline readiness.
 - `development_kit/tests/test_research_materials.py` — This module tests provenance, validity, approval, strict verification, and campaign material binding.
+- `development_kit/tests/test_research_candidates.py` — This module tests pre-side-effect candidate normalization, bounds, lifecycle, and deduplication.
 - `development_kit/tests/test_resource_admission.py` — This module tests resource policy normalization, telemetry, and admission decisions.
 - `development_kit/tests/test_results.py` — This module tests result normalization without a COMSOL client.
 - `development_kit/tests/test_runtime_paths.py` — This module tests shared ASCII-safe runtime and lease paths.
@@ -333,6 +334,7 @@ models are intentionally absent.
 - `comsol_mcp/research/compiler.py` — This module compiles approved goals and design spaces into frozen campaign manifests without a solver.
 - `comsol_mcp/research/workflow.py` — This module normalizes passive cited workflow capsules, explicit assumptions, review, and baseline readiness.
 - `comsol_mcp/research/materials.py` — This module normalizes provenance-bound material catalogs and derives approval and strict-verification sets.
+- `comsol_mcp/research/records.py` — This module normalizes canonical candidate records and point identities before side effects.
 
 - `src/__init__.py` — This compatibility package aliases legacy imports to the canonical implementation modules.
 - `comsol_mcp/__init__.py` — This module defines the single authored package version.

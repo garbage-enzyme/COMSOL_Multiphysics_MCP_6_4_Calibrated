@@ -10,6 +10,8 @@ from comsol_mcp.durable import canonical_sha256_v1
 from comsol_mcp.research import (
     CAMPAIGN_MANIFEST_SCHEMA_NAME,
     CAMPAIGN_MANIFEST_SCHEMA_VERSION,
+    CANDIDATE_RECORD_SCHEMA_NAME,
+    CANDIDATE_RECORD_SCHEMA_VERSION,
     DESIGN_SPACE_SCHEMA_NAME,
     DESIGN_SPACE_SCHEMA_VERSION,
     MATERIAL_CATALOG_SCHEMA_NAME,
@@ -205,6 +207,12 @@ def _entries() -> list[dict[str, Any]]:
             CLEANUP_OUTCOME_SCHEMA,
             CLEANUP_OUTCOME_VERSION,
             "comsol_mcp.shared_session.cleanup",
+        ),
+        _entry(
+            CANDIDATE_RECORD_SCHEMA_NAME,
+            CANDIDATE_RECORD_SCHEMA_VERSION,
+            "comsol_mcp.research.records",
+            artifact_kind="durable_artifact",
         ),
         _entry(
             CAMPAIGN_MANIFEST_SCHEMA_NAME,

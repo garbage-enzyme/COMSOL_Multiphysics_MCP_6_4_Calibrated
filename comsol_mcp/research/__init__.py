@@ -19,6 +19,11 @@ from .materials import (
     MATERIAL_CATALOG_SCHEMA_VERSION,
     normalize_material_catalog,
 )
+from .records import (
+    CANDIDATE_RECORD_SCHEMA_NAME,
+    CANDIDATE_RECORD_SCHEMA_VERSION,
+    normalize_candidate_record,
+)
 from .workflow import (
     WORKFLOW_CAPSULE_SCHEMA_NAME,
     WORKFLOW_CAPSULE_SCHEMA_VERSION,
@@ -32,12 +37,15 @@ __all__ = [
     "MATERIAL_CATALOG_SCHEMA_VERSION",
     "CAMPAIGN_MANIFEST_SCHEMA_NAME",
     "CAMPAIGN_MANIFEST_SCHEMA_VERSION",
+    "CANDIDATE_RECORD_SCHEMA_NAME",
+    "CANDIDATE_RECORD_SCHEMA_VERSION",
     "RESEARCH_GOAL_SCHEMA_NAME",
     "RESEARCH_GOAL_SCHEMA_VERSION",
     "WORKFLOW_CAPSULE_SCHEMA_NAME",
     "WORKFLOW_CAPSULE_SCHEMA_VERSION",
     "normalize_design_space",
     "normalize_material_catalog",
+    "normalize_candidate_record",
     "normalize_research_goal",
     "normalize_workflow_capsule",
     "relative_bounds",
