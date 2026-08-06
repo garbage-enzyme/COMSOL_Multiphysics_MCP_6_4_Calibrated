@@ -22,7 +22,7 @@
         "pymupdf": "1.28.0"
       }
     },
-    "test_result": "alpha6.4 solver-free implementation candidate: minimum and current-compatible lanes, 2588-test quality suite plus 3-test startup tail, package/install checks, and all six exact-SHA CI jobs passed; final locked release gate pending",
+    "test_result": "alpha6.5 solver-free implementation candidate: 2938-test quality suite plus 3-test startup tail passed locally; exact-SHA CI and final locked release gate pending",
     "licensed_result": {
       "status": "passed",
       "source_commit": "afc466f6fd12a5aba92320081588bc6f788c39c2",

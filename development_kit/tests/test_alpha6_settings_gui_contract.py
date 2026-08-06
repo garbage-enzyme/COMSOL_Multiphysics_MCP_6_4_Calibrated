@@ -13,7 +13,7 @@ from comsol_mcp.tools.catalog import PROFILE_NAMES, TOOL_SPECS
 
 RELEASED_SETTINGS_VERSION = "1.2.0"
 RELEASED_SETTINGS_READABLE_VERSIONS = ("1.0.0", "1.1.0", RELEASED_SETTINGS_VERSION)
-RELEASED_PACKAGE_VERSION = "0.6.4"
+RELEASED_PACKAGE_VERSION = "0.6.5"
 
 
 def test_alpha6_settings_schema_and_defaults_are_current_and_backward_readable(tmp_path):
