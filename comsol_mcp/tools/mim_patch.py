@@ -195,7 +195,7 @@ def _set_copy_face_selections(feature, source: Sequence[int], destination: Seque
 
 
 def _normalize_spectral_rows(results, expression_count: int) -> list[list[object]]:
-    """Convert MPh expression-major evaluation output into wavelength rows."""
+    """Convert supported MPh spectral evaluation layouts into wavelength rows."""
     import numpy as np
 
     if isinstance(expression_count, bool) or not isinstance(expression_count, int):
@@ -203,13 +203,21 @@ def _normalize_spectral_rows(results, expression_count: int) -> list[list[object
     if expression_count < 1:
         raise ValueError("expression_count must be a positive integer")
     array = np.asarray(results)
+    if array.ndim > 2:
+        array = np.squeeze(array)
     if array.ndim == 1:
+        if expression_count == 1:
+            return [[value] for value in array.tolist()]
         if array.size != expression_count:
             raise ValueError("spectral evaluation shape does not match the requested expressions")
         return [array.tolist()]
-    if array.ndim != 2 or array.shape[0] != expression_count:
-        raise ValueError("spectral evaluation must be expression-major with one row per expression")
-    return array.T.tolist()
+    if array.ndim != 2:
+        raise ValueError("spectral evaluation must be a two-dimensional numeric matrix")
+    if array.shape[0] == expression_count:
+        return array.T.tolist()
+    if array.shape[1] == expression_count:
+        return array.tolist()
+    raise ValueError("spectral evaluation matrix does not match the requested expressions")
 
 
 def _require_mim_selections(

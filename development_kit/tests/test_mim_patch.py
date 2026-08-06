@@ -336,6 +336,41 @@ def test_expression_major_spectral_values_are_transposed_to_wavelength_rows():
     ]
 
 
+def test_point_major_spectral_values_are_preserved_as_wavelength_rows():
+    rows = _normalize_spectral_rows(
+        [
+            [0.1, 0.4, 0.5, 4.0e-6],
+            [0.2, 0.5, 0.3, 4.1e-6],
+            [0.3, 0.6, 0.1, 4.2e-6],
+        ],
+        4,
+    )
+
+    assert rows == [
+        [0.1, 0.4, 0.5, 4.0e-6],
+        [0.2, 0.5, 0.3, 4.1e-6],
+        [0.3, 0.6, 0.1, 4.2e-6],
+    ]
+
+
+def test_singleton_wrapped_expression_major_values_are_normalized():
+    rows = _normalize_spectral_rows(
+        [
+            [[0.1, 0.2, 0.3]],
+            [[0.4, 0.5, 0.6]],
+            [[0.5, 0.3, 0.1]],
+            [[4.0e-6, 4.1e-6, 4.2e-6]],
+        ],
+        4,
+    )
+
+    assert rows == [
+        [0.1, 0.4, 0.5, 4.0e-6],
+        [0.2, 0.5, 0.3, 4.1e-6],
+        [0.3, 0.6, 0.1, 4.2e-6],
+    ]
+
+
 def test_spectral_emissivity_preserves_transmission_and_prefers_absorptivity(monkeypatch):
     class Model:
         def evaluate(self, expressions):
