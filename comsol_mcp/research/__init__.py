@@ -19,6 +19,11 @@ from .decisions import (
     DECISION_RECORD_SCHEMA_VERSION,
     normalize_decision_record,
 )
+from .evaluations import (
+    EVALUATION_RECORD_SCHEMA_NAME,
+    EVALUATION_RECORD_SCHEMA_VERSION,
+    normalize_evaluation_record,
+)
 from .journal import (
     RESEARCH_JOURNAL_RECORD_SCHEMA_NAME,
     RESEARCH_JOURNAL_RECORD_SCHEMA_VERSION,
@@ -52,6 +57,8 @@ from .workflow import (
 __all__ = [
     "DESIGN_SPACE_SCHEMA_NAME",
     "DESIGN_SPACE_SCHEMA_VERSION",
+    "EVALUATION_RECORD_SCHEMA_NAME",
+    "EVALUATION_RECORD_SCHEMA_VERSION",
     "DECISION_RECORD_SCHEMA_NAME",
     "DECISION_RECORD_SCHEMA_VERSION",
     "MATERIAL_CATALOG_SCHEMA_NAME",
@@ -72,6 +79,7 @@ __all__ = [
     "WORKFLOW_CAPSULE_SCHEMA_VERSION",
     "normalize_design_space",
     "normalize_decision_record",
+    "normalize_evaluation_record",
     "normalize_material_catalog",
     "normalize_optimizer_checkpoint",
     "normalize_portfolio",

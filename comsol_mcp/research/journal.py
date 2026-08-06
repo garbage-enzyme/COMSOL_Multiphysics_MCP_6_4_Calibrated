@@ -14,6 +14,7 @@ from comsol_mcp.durable import (
 )
 
 from .decisions import DECISION_RECORD_SCHEMA_NAME
+from .evaluations import EVALUATION_RECORD_SCHEMA_NAME
 from .records import CANDIDATE_RECORD_SCHEMA_NAME
 from .state import OPTIMIZER_CHECKPOINT_SCHEMA_NAME, PORTFOLIO_SCHEMA_NAME
 
@@ -23,6 +24,7 @@ MAX_JOURNAL_BYTES = 256 * 1024 * 1024
 _KINDS = {
     "candidate": (CANDIDATE_RECORD_SCHEMA_NAME, "record_fingerprint"),
     "decision": (DECISION_RECORD_SCHEMA_NAME, "decision_fingerprint"),
+    "evaluation": (EVALUATION_RECORD_SCHEMA_NAME, "evaluation_fingerprint"),
     "checkpoint": (OPTIMIZER_CHECKPOINT_SCHEMA_NAME, "checkpoint_fingerprint"),
     "portfolio": (PORTFOLIO_SCHEMA_NAME, "portfolio_fingerprint"),
 }

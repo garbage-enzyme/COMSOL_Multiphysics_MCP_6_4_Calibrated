@@ -16,6 +16,8 @@ from comsol_mcp.research import (
     DECISION_RECORD_SCHEMA_VERSION,
     DESIGN_SPACE_SCHEMA_NAME,
     DESIGN_SPACE_SCHEMA_VERSION,
+    EVALUATION_RECORD_SCHEMA_NAME,
+    EVALUATION_RECORD_SCHEMA_VERSION,
     MATERIAL_CATALOG_SCHEMA_NAME,
     MATERIAL_CATALOG_SCHEMA_VERSION,
     OPTIMIZER_CHECKPOINT_SCHEMA_NAME,
@@ -326,6 +328,12 @@ def _entries() -> list[dict[str, Any]]:
             EVIDENCE_VERIFICATION_SCHEMA,
             EVIDENCE_INTEGRITY_VERSION,
             "comsol_mcp.evidence.integrity_verifier",
+        ),
+        _entry(
+            EVALUATION_RECORD_SCHEMA_NAME,
+            EVALUATION_RECORD_SCHEMA_VERSION,
+            "comsol_mcp.research.evaluations",
+            artifact_kind="durable_artifact",
         ),
         _entry(
             "comsol_mcp.execution_evidence_outcome",
