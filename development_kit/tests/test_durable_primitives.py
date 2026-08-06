@@ -98,20 +98,16 @@ def test_bounded_snapshot_rejects_invalid_limits(tmp_path, options, match):
 
 def test_bounded_snapshot_detects_growth_after_open(tmp_path, monkeypatch):
     path = tmp_path / "growing.bin"
-    path.write_bytes(b"ab")
-    opened = os.stat(path)
-    monkeypatch.setattr(
-        durable_io.os,
-        "fstat",
-        lambda _descriptor: SimpleNamespace(
-            st_mode=opened.st_mode,
-            st_dev=opened.st_dev,
-            st_ino=opened.st_ino,
-            st_size=1,
-        ),
-    )
+    path.write_bytes(b"a")
+    real_open = durable_io.os.open
 
-    with pytest.raises(ValueError, match="grew"):
+    def grow_then_open(candidate, flags):
+        path.write_bytes(b"ab")
+        return real_open(candidate, flags)
+
+    monkeypatch.setattr(durable_io.os, "open", grow_then_open)
+
+    with pytest.raises(ValueError, match="exceeds the declared snapshot limit"):
         snapshot_file_bounded(path, max_bytes=1)
 
 

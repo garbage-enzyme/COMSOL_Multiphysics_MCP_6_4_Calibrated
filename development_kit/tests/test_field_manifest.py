@@ -63,7 +63,7 @@ def _manifest(*, missing: int = 0) -> tuple[dict, dict]:
             "z": [0.5, 0.5],
             "unit": "um",
         },
-        quantity_summaries=_summaries(missing=missing),
+        quantity_summaries=_summaries(grid_points=request["grid_point_count"], missing=missing),
         array_artifact=_artifact("field-on-npz", "on/fields.npz", "application/x-npz"),
         png_artifact=_artifact("field-on-png", "on/fields.png", "image/png"),
     )

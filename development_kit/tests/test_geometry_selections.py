@@ -283,6 +283,7 @@ def test_side_selections_roll_back_after_geometry_lookup_failure():
     assert result["failed_side"] == "right"
     assert result["rolled_back"] is True
     assert component.selections.items == {}
+    assert component.selections.removed == ["duct_left"]
 
 
 def test_side_selections_are_explicitly_two_dimensional():

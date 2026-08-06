@@ -97,6 +97,7 @@ def test_stdio_environment_preserves_launcher_environment_and_forces_probe_scope
     monkeypatch.setenv("PYTHONPATH", "untrusted-import-root")
     monkeypatch.setenv("COMSOL_MCP_PROFILE", "wave_optics")
     monkeypatch.setenv("COMSOL_MCP_RUNTIME_DIR", "stale-runtime")
+    monkeypatch.setenv("COMSOL_MCP_UNREVIEWED_OVERRIDE", "must-not-leak")
 
     environment = _stdio_environment(tmp_path)
 
@@ -104,6 +105,7 @@ def test_stdio_environment_preserves_launcher_environment_and_forces_probe_scope
     assert environment["COMSOL_MCP_PROFILE"] == "core"
     assert environment["COMSOL_MCP_RUNTIME_DIR"] == str(tmp_path / "runtime")
     assert "PYTHONPATH" not in environment
+    assert "COMSOL_MCP_UNREVIEWED_OVERRIDE" not in environment
     assert environment.get("PATH") == os.environ.get("PATH")
 
 

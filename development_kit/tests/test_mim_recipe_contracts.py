@@ -99,6 +99,14 @@ def test_ports_must_match_the_intended_exterior_domains():
             top_domains=[9],
             bottom_domains=[4],
         )
+    with pytest.raises(ValueError, match="outside the built topology"):
+        contracts.require_port_pair(
+            [3],
+            [2],
+            geometry=geometry,
+            top_domains=[9],
+            bottom_domains=[4],
+        )
 
 
 def test_ports_reject_out_of_range_boundaries_and_overlapping_domain_groups():

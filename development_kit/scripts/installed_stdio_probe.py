@@ -55,7 +55,9 @@ def _tool_payload(result: Any) -> dict[str, Any]:
 
 
 def _stdio_environment(workdir: Path) -> dict[str, str]:
-    environment = os.environ.copy()
+    environment = {
+        key: value for key, value in os.environ.items() if not key.startswith("COMSOL_MCP_")
+    }
     environment.pop("PYTHONPATH", None)
     environment.update(
         {

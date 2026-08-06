@@ -6,7 +6,6 @@ from copy import deepcopy
 from itertools import product
 
 import pytest
-
 from src.evidence.outcome_contract import (
     EVIDENCE_COMPLETENESS_STATES,
     EXECUTION_STATES,
@@ -62,23 +61,34 @@ def _payload(execution: str, evidence: str, disposition: str) -> dict:
     }
 
 
-def _compatible(execution: str, evidence: str, disposition: str) -> bool:
-    if disposition in {"accepted", "residual", "unresolved_at_declared_cap"}:
-        return execution == "completed" and evidence == "complete"
-    if disposition == "invalid_evidence":
-        return evidence != "complete"
-    if disposition == "not_evaluated":
-        return not (execution == "completed" and evidence == "complete")
-    return True
+_SCIENTIFIC_OUTCOME_EXPECTATIONS = {
+    "accepted": {("completed", "complete")},
+    "residual": {("completed", "complete")},
+    "unresolved_at_declared_cap": {("completed", "complete")},
+    "invalid_evidence": {
+        (execution, evidence)
+        for execution in EXECUTION_STATES
+        for evidence in EVIDENCE_COMPLETENESS_STATES
+        if evidence != "complete"
+    },
+    "not_evaluated": {
+        (execution, evidence)
+        for execution in EXECUTION_STATES
+        for evidence in EVIDENCE_COMPLETENESS_STATES
+        if (execution, evidence) != ("completed", "complete")
+    },
+}
 
 
 def test_cartesian_product_is_deterministically_accepted_or_rejected():
-    combinations = set(product(EXECUTION_STATES, EVIDENCE_COMPLETENESS_STATES, SCIENTIFIC_DISPOSITIONS))
+    combinations = set(
+        product(EXECUTION_STATES, EVIDENCE_COMPLETENESS_STATES, SCIENTIFIC_DISPOSITIONS)
+    )
     observed = set()
     for execution, evidence, disposition in sorted(combinations):
         observed.add((execution, evidence, disposition))
         payload = _payload(execution, evidence, disposition)
-        if _compatible(execution, evidence, disposition):
+        if (execution, evidence) in _SCIENTIFIC_OUTCOME_EXPECTATIONS[disposition]:
             contract = build_outcome_contract(payload)
             assert validate_outcome_contract(contract) == contract
         else:
@@ -149,9 +159,7 @@ def test_unknown_fields_and_hash_tampering_fail_closed():
     with pytest.raises(ValueError, match="does not match"):
         validate_outcome_contract(contract)
 
-    malformed_hash = build_outcome_contract(
-        _payload("completed", "complete", "accepted")
-    )
+    malformed_hash = build_outcome_contract(_payload("completed", "complete", "accepted"))
     malformed_hash["outcome_sha256"] = "g" * 64
     with pytest.raises(ValueError, match="lowercase SHA-256"):
         validate_outcome_contract(malformed_hash)
@@ -283,9 +291,12 @@ def test_nonterminal_or_completed_without_cleanup_proof_cannot_be_summarized():
         "lease_absent": True,
         "verified": True,
     }
-    assert execution_from_terminal_job_state(
-        {"status": "completed", "cleanup_verification": cleanup}
-    )["state"] == "completed"
+    assert (
+        execution_from_terminal_job_state({"status": "completed", "cleanup_verification": cleanup})[
+            "state"
+        ]
+        == "completed"
+    )
 
     for field in (
         "processes_absent",

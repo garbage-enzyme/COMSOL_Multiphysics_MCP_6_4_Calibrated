@@ -201,7 +201,11 @@ def test_matrix_field_template_rejects_png_and_unknown_fields_before_client(tmp_
 
 
 def _fake_field_runner(status="measurement_complete", request_mutator=None):
-    def run(*, request, artifact_root, **_kwargs):
+    observed_calls = []
+
+    def run(*, model, request, view_id, artifact_root):
+        observed_calls.append({"model": model, "view_id": view_id})
+        assert view_id == request["views"][0]["view_id"]
         manifest_request = request
         if request_mutator is not None:
             raw = {
@@ -288,6 +292,7 @@ def _fake_field_runner(status="measurement_complete", request_mutator=None):
             "manifest_artifact": descriptor(manifest, view["outputs"]["manifest_artifact_id"]),
         }
 
+    run.observed_calls = observed_calls
     return run
 
 

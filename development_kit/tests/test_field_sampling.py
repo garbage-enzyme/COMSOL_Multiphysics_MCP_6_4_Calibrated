@@ -64,13 +64,9 @@ def test_selection_includes_exact_spatial_and_slice_tolerance_boundaries():
 
     assert result["selected_point_count"] == 4
     for axis in ("x", "y", "z"):
-        np.testing.assert_array_equal(
-            result["coordinates"][axis], kwargs["coordinates"][axis]
-        )
+        np.testing.assert_array_equal(result["coordinates"][axis], kwargs["coordinates"][axis])
     for name in ("electric_norm", "magnetic_norm"):
-        np.testing.assert_array_equal(
-            result["quantities"][name], kwargs["quantities"][name]
-        )
+        np.testing.assert_array_equal(result["quantities"][name], kwargs["quantities"][name])
 
 
 def test_selection_rejects_empty_and_too_few_linear_samples():
@@ -78,7 +74,7 @@ def test_selection_rejects_empty_and_too_few_linear_samples():
     empty["coordinates"]["z"][:] = 0.8
     _, too_few = _samples()
     too_few["coordinates"]["z"][:] = 0.8
-    too_few["coordinates"]["z"][:2] = 0.5
+    too_few["coordinates"]["z"][1:3] = 0.5
 
     with pytest.raises(ValueError, match="no field samples"):
         select_field_slice_samples(**empty)

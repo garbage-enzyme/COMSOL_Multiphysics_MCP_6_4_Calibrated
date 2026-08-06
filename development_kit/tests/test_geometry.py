@@ -1,8 +1,8 @@
 """Unit tests for geometry helpers without a COMSOL client."""
 
 import pytest
-from mcp.server.mcpserver import MCPServer
 import src.tools.geometry as geometry_module
+from mcp.server.mcpserver import MCPServer
 from src.tools.geometry import (
     add_circle_feature,
     add_difference_feature,
@@ -320,9 +320,11 @@ def test_add_union_feature_sets_input_selection():
 
 
 def test_add_union_feature_requires_inputs():
-    result = add_union_feature(FakeModel(FakeGeometry()), [])
+    geometry = FakeGeometry()
+    result = add_union_feature(FakeModel(geometry), [])
 
     assert result["success"] is False
+    assert geometry.features.features == {}
 
 
 def test_union_uses_first_free_tag_and_rolls_back_selection_failure():
@@ -348,9 +350,7 @@ def test_union_uses_first_free_tag_and_rolls_back_selection_failure():
         return feature
 
     geometry.features.create = create
-    failed = add_union_feature(
-        FakeModel(geometry), ["blk1", "blk2"], feature_name="uni4"
-    )
+    failed = add_union_feature(FakeModel(geometry), ["blk1", "blk2"], feature_name="uni4")
     assert failed["success"] is False
     assert failed["rolled_back"] is True
     assert "uni4" not in geometry.features.features
@@ -377,12 +377,14 @@ def test_add_import_feature_sets_absolute_filename(tmp_path, monkeypatch):
 
 def test_add_import_feature_requires_existing_file(tmp_path, monkeypatch):
     monkeypatch.setenv("COMSOL_MCP_MODEL_READ_ROOTS", str(tmp_path))
+    geometry = FakeGeometry()
     result = add_import_feature(
-        FakeModel(FakeGeometry()),
+        FakeModel(geometry),
         str(tmp_path / "missing.step"),
     )
 
     assert result["success"] is False
+    assert geometry.features.features == {}
 
 
 def test_missing_import_is_rejected_before_model_access(tmp_path, monkeypatch):
@@ -511,9 +513,7 @@ def test_build_without_name_runs_every_geometry():
     model = FakeModel(first)
     model.java.component_node.geometries["geom2"] = second
 
-    result = build_geometry_sequences(
-        model, geometry_name=None, component_name="comp1"
-    )
+    result = build_geometry_sequences(model, geometry_name=None, component_name="comp1")
 
     assert result["success"] is True
     assert result["geometries"] == ["geom1", "geom2"]

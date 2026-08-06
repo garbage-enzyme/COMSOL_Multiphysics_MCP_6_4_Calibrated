@@ -10,7 +10,6 @@ import subprocess
 import sys
 import time
 import types
-import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -31,13 +30,10 @@ from src.jobs.store import (
 
 
 @pytest.fixture()
-def jobs_root():
-    root = Path("D:/comsol_runtime_test/jobs") / uuid.uuid4().hex
-    root.mkdir(parents=True)
-    try:
-        yield root
-    finally:
-        fixture_clean(root, ignore_errors=True)
+def jobs_root(ascii_tmp_path):
+    root = ascii_tmp_path / "jobs"
+    root.mkdir()
+    return root
 
 
 def wait_for(manager: JobManager, job_id: str, statuses: set[str], timeout: float = 5.0):
@@ -879,7 +875,7 @@ def test_thirty_cancel_status_polling_races_have_no_false_terminal_state(jobs_ro
             json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
         archive_root = Path(
-            os.environ.get(failure_root_env, "D:/comsol_runtime_test/cancellation_failures")
+            os.environ.get(failure_root_env, str(jobs_root.parent / "cancellation-failures"))
         )
         archive_root.mkdir(parents=True, exist_ok=True)
         archive = archive_root / f"{jobs_root.name}-{int(time.time())}"

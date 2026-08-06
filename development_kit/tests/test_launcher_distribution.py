@@ -177,8 +177,9 @@ def test_launcher_distribution_is_portable_and_outside_runtime_package() -> None
         errors="strict",
         check=True,
     )
-    tracked_files = set(tracked.stdout.splitlines())
+    tracked_files = {path.removeprefix("launcher/") for path in tracked.stdout.splitlines()}
     assert not any("__pycache__" in path or path.endswith(".pyc") for path in tracked_files)
+    assert tracked_files <= relative_files
     assert not (REPOSITORY / "comsol_mcp" / "launcher").exists()
 
     text = "\n".join(

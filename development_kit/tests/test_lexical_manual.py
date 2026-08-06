@@ -177,11 +177,18 @@ def test_pdf_index_build_rejects_a_manual_changed_during_extraction(
         def __iter__(self):
             return iter([Page()])
 
-    monkeypatch.setitem(sys.modules, "fitz", SimpleNamespace(open=lambda _path: Document()))
+    opened = []
+
+    def open_document(path):
+        opened.append(path)
+        return Document()
+
+    monkeypatch.setitem(sys.modules, "fitz", SimpleNamespace(open=open_document))
 
     with pytest.raises(RuntimeError, match="changed during extraction"):
         manual_module.build_index_from_pdfs(pdf_root, index)
 
+    assert opened == [source]
     assert not index.exists()
     assert not list(ascii_tmp_path.glob("manuals.sqlite3.tmp-*"))
 

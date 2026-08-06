@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import threading
+from pathlib import Path
 
 import pytest
 import src.tools.derived_geometry as derived_geometry_module
@@ -36,7 +36,9 @@ class Container:
 class Feature:
     def __init__(self, kind, props, fail=None):
         self.kind = kind
-        self.props = {key: list(value) if isinstance(value, list) else value for key, value in props.items()}
+        self.props = {
+            key: list(value) if isinstance(value, list) else value for key, value in props.items()
+        }
         self.fail = fail
 
     def getType(self):
@@ -64,7 +66,11 @@ class Feature:
     def set(self, name, value):
         if self.fail == name or self.fail == "all":
             raise RuntimeError(f"forced {name} failure")
-        if self.kind == "FormUnion" and name in {"imprint", "createpairs"} and isinstance(value, bool):
+        if (
+            self.kind == "FormUnion"
+            and name in {"imprint", "createpairs"}
+            and isinstance(value, bool)
+        ):
             value = "on" if value else "off"
         self.props[name] = list(value) if isinstance(value, list) else value
 
@@ -113,25 +119,50 @@ class Model:
 
 def fixture(fail_second=None, run_failure=False):
     fin = Feature("FormUnion", {"action": "union", "imprint": "off", "createpairs": "off"})
-    blk1 = Feature("Block", {"size": ["1[mm]", "2[mm]", "3[mm]"], "pos": ["0[mm]", "0[mm]", "0[mm]"]})
-    blk2 = Feature("Block", {"size": ["2[mm]", "2[mm]", "2[mm]"], "pos": ["1[mm]", "1[mm]", "1[mm]"]}, fail=fail_second)
+    blk1 = Feature(
+        "Block", {"size": ["1[mm]", "2[mm]", "3[mm]"], "pos": ["0[mm]", "0[mm]", "0[mm]"]}
+    )
+    blk2 = Feature(
+        "Block",
+        {"size": ["2[mm]", "2[mm]", "2[mm]"], "pos": ["1[mm]", "1[mm]", "1[mm]"]},
+        fail=fail_second,
+    )
     geom = Geometry({"blk1": blk1, "blk2": blk2, "fin": fin}, run_failure=run_failure)
     model = Model(geom)
-    record = DerivedGeometryRecord("derived-test", "clone", "source.mph", "a" * 64, "clone.mph", "b" * 64)
+    record = DerivedGeometryRecord(
+        "derived-test", "clone", "source.mph", "a" * 64, "clone.mph", "b" * 64
+    )
     state = _state_hash(record, _snapshot(model, "comp1", "geom1"))
     return model, geom, record, state
 
 
 def edits():
     return [
-        {"block_tag": "blk1", "size": ["2[mm]", "2[mm]", "3[mm]"], "pos": ["-1[mm]", "0[mm]", "0[mm]"]},
-        {"block_tag": "blk2", "size": ["3[mm]", "2[mm]", "2[mm]"], "pos": ["1[mm]", "1[mm]", "1[mm]"]},
+        {
+            "block_tag": "blk1",
+            "size": ["2[mm]", "2[mm]", "3[mm]"],
+            "pos": ["-1[mm]", "0[mm]", "0[mm]"],
+        },
+        {
+            "block_tag": "blk2",
+            "size": ["3[mm]", "2[mm]", "2[mm]"],
+            "pos": ["1[mm]", "1[mm]", "1[mm]"],
+        },
     ]
 
 
 def test_fin_preview_is_read_only_and_apply_runs_geometry():
     model, geom, record, state = fixture()
-    preview = preview_fin(model, record, expected_state_sha256=state, component_tag="comp1", geometry_tag="geom1", action="assembly", imprint=True, create_pairs=False)
+    preview = preview_fin(
+        model,
+        record,
+        expected_state_sha256=state,
+        component_tag="comp1",
+        geometry_tag="geom1",
+        action="assembly",
+        imprint=True,
+        create_pairs=False,
+    )
     assert preview["mutated"] is False
     assert geom.features.get("fin").props["action"] == "union"
 
@@ -143,7 +174,14 @@ def test_fin_preview_is_read_only_and_apply_runs_geometry():
 
 def test_block_preview_and_apply_never_run_geometry_or_mesh():
     model, geom, record, state = fixture()
-    preview = preview_blocks(model, record, expected_state_sha256=state, component_tag="comp1", geometry_tag="geom1", block_edits=edits())
+    preview = preview_blocks(
+        model,
+        record,
+        expected_state_sha256=state,
+        component_tag="comp1",
+        geometry_tag="geom1",
+        block_edits=edits(),
+    )
     result = apply_blocks(model, record, preview, "comp1", "geom1")
     assert result["success"] is True
     assert result["geometry_run"] is False and result["mesh_run"] is False
@@ -156,17 +194,36 @@ def test_stale_hash_invalid_feature_partial_vectors_and_nonpositive_size_fail():
     cases = [
         ([{"block_tag": "missing", "size": ["1[mm]"] * 3, "pos": ["0[mm]"] * 3}], "missing"),
         ([{"block_tag": "blk1", "size": ["1[mm]"] * 2, "pos": ["0[mm]"] * 3}], "complete"),
-        ([{"block_tag": "blk1", "size": ["0[mm]", "1[mm]", "1[mm]"], "pos": ["0[mm]"] * 3}], "positive"),
+        (
+            [{"block_tag": "blk1", "size": ["0[mm]", "1[mm]", "1[mm]"], "pos": ["0[mm]"] * 3}],
+            "positive",
+        ),
     ]
     for block_edits, text in cases:
         try:
-            preview_blocks(model, record, expected_state_sha256=state, component_tag="comp1", geometry_tag="geom1", block_edits=block_edits)
+            preview_blocks(
+                model,
+                record,
+                expected_state_sha256=state,
+                component_tag="comp1",
+                geometry_tag="geom1",
+                block_edits=block_edits,
+            )
         except ValueError as exc:
             assert text in str(exc)
         else:
             raise AssertionError("invalid edit accepted")
     try:
-        preview_fin(model, record, expected_state_sha256="0" * 64, component_tag="comp1", geometry_tag="geom1", action="union", imprint=False, create_pairs=False)
+        preview_fin(
+            model,
+            record,
+            expected_state_sha256="0" * 64,
+            component_tag="comp1",
+            geometry_tag="geom1",
+            action="union",
+            imprint=False,
+            create_pairs=False,
+        )
     except ValueError as exc:
         assert "stale" in str(exc)
     else:
@@ -175,7 +232,14 @@ def test_stale_hash_invalid_feature_partial_vectors_and_nonpositive_size_fail():
 
 def test_partial_block_failure_rolls_back_when_setters_remain_available():
     model, _geom, record, state = fixture(fail_second="size")
-    preview = preview_blocks(model, record, expected_state_sha256=state, component_tag="comp1", geometry_tag="geom1", block_edits=edits())
+    preview = preview_blocks(
+        model,
+        record,
+        expected_state_sha256=state,
+        component_tag="comp1",
+        geometry_tag="geom1",
+        block_edits=edits(),
+    )
     before = _snapshot(model, "comp1", "geom1")
     result = apply_blocks(model, record, preview, "comp1", "geom1")
     assert result["success"] is False
@@ -187,10 +251,23 @@ def test_partial_block_failure_rolls_back_when_setters_remain_available():
 
 def test_fin_geometry_failure_restores_properties_but_reports_unproven_build():
     model, geom, record, state = fixture(run_failure=True)
-    preview = preview_fin(model, record, expected_state_sha256=state, component_tag="comp1", geometry_tag="geom1", action="assembly", imprint=True, create_pairs=True)
+    preview = preview_fin(
+        model,
+        record,
+        expected_state_sha256=state,
+        component_tag="comp1",
+        geometry_tag="geom1",
+        action="assembly",
+        imprint=True,
+        create_pairs=True,
+    )
     result = apply_fin(model, record, preview, "comp1", "geom1")
     assert result["success"] is False
-    assert geom.features.get("fin").props == {"action": "union", "imprint": "off", "createpairs": "off"}
+    assert geom.features.get("fin").props == {
+        "action": "union",
+        "imprint": "off",
+        "createpairs": "off",
+    }
     assert result["rollback_proved"] is False
     assert record.dirty is True
 
@@ -227,7 +304,16 @@ def test_fin_rollback_fails_closed_when_entity_identity_cannot_be_proved():
 
 
 def test_dirty_derived_record_is_forbidden_from_validation():
-    record = DerivedGeometryRecord("derived-dirty", "dirty-clone", "source.mph", "a" * 64, "clone.mph", "b" * 64, dirty=True, dirty_reason="rollback unproven")
+    record = DerivedGeometryRecord(
+        "derived-dirty",
+        "dirty-clone",
+        "source.mph",
+        "a" * 64,
+        "clone.mph",
+        "b" * 64,
+        dirty=True,
+        dirty_reason="rollback unproven",
+    )
     previous = _DERIVED.get(record.derived_model_id)
     _DERIVED[record.derived_model_id] = record
     try:
@@ -262,9 +348,7 @@ def test_block_inventory_uses_exact_feature_type_not_substring_heuristics():
     geom.features.items["block_notes"] = Feature(
         "Annotation", {"size": ["1[mm]"] * 3, "pos": ["0[mm]"] * 3}
     )
-    geom.features.items["shape1"] = Feature(
-        "Block", {"size": ["1[mm]"] * 3, "pos": ["0[mm]"] * 3}
-    )
+    geom.features.items["shape1"] = Feature("Block", {"size": ["1[mm]"] * 3, "pos": ["0[mm]"] * 3})
 
     snapshot = _snapshot(model, "comp1", "geom1")
 
@@ -306,9 +390,7 @@ def test_clone_label_failure_removes_loaded_clone_and_backing_artifact(tmp_path)
 
     client = Client()
     with pytest.raises(RuntimeError, match="label failed"):
-        create_derived_geometry_clone(
-            Source(), client, new_name="derived", runtime_dir=tmp_path
-        )
+        create_derived_geometry_clone(Source(), client, new_name="derived", runtime_dir=tmp_path)
 
     assert client.removed == [client.clone]
     assert list(tmp_path.glob("comsol_mcp_clone_geometry_*")) == []
@@ -376,14 +458,24 @@ def test_session_removal_discards_derived_registry_entry(monkeypatch):
     monkeypatch.setattr(manager, "_current_model", None)
     monkeypatch.setattr(manager._ownership, "heartbeat", lambda **_kwargs: True)
     record = DerivedGeometryRecord(
-        "derived-session-id", "derived-session-model", "source.mph", "a" * 64,
-        "clone.mph", "b" * 64,
+        "derived-session-id",
+        "derived-session-model",
+        "source.mph",
+        "a" * 64,
+        "clone.mph",
+        "b" * 64,
     )
+    previous = _DERIVED.get(record.derived_model_id)
     _DERIVED[record.derived_model_id] = record
-    manager.add_model(Model())
-
-    assert manager.remove_model(record.model_name) is True
-    assert record.derived_model_id not in _DERIVED
+    try:
+        manager.add_model(Model())
+        assert manager.remove_model(record.model_name) is True
+        assert record.derived_model_id not in _DERIVED
+    finally:
+        if previous is None:
+            _DERIVED.pop(record.derived_model_id, None)
+        else:
+            _DERIVED[record.derived_model_id] = previous
 
 
 def test_rollback_requires_complete_snapshot_readback_not_only_setter_success():
@@ -404,17 +496,19 @@ def test_rollback_requires_complete_snapshot_readback_not_only_setter_success():
     blk1 = SilentCorruptFeature(
         "Block", {"size": ["1[mm]", "2[mm]", "3[mm]"], "pos": ["0[mm]"] * 3}
     )
-    blk2 = Feature(
-        "Block", {"size": ["2[mm]"] * 3, "pos": ["1[mm]"] * 3}, fail="size"
-    )
+    blk2 = Feature("Block", {"size": ["2[mm]"] * 3, "pos": ["1[mm]"] * 3}, fail="size")
     model = Model(Geometry({"blk1": blk1, "blk2": blk2, "fin": fin}))
     record = DerivedGeometryRecord(
         "derived-readback", "clone", "source.mph", "a" * 64, "clone.mph", "b" * 64
     )
     state = _state_hash(record, _snapshot(model, "comp1", "geom1"))
     preview = preview_blocks(
-        model, record, expected_state_sha256=state, component_tag="comp1",
-        geometry_tag="geom1", block_edits=edits(),
+        model,
+        record,
+        expected_state_sha256=state,
+        component_tag="comp1",
+        geometry_tag="geom1",
+        block_edits=edits(),
     )
 
     result = apply_blocks(model, record, preview, "comp1", "geom1")
@@ -428,8 +522,12 @@ def test_rollback_requires_complete_snapshot_readback_not_only_setter_success():
 def test_post_mutation_snapshot_failure_rolls_back_and_marks_state_dirty(monkeypatch):
     model, _geom, record, state = fixture()
     preview = preview_blocks(
-        model, record, expected_state_sha256=state, component_tag="comp1",
-        geometry_tag="geom1", block_edits=edits(),
+        model,
+        record,
+        expected_state_sha256=state,
+        component_tag="comp1",
+        geometry_tag="geom1",
+        block_edits=edits(),
     )
     original_snapshot = derived_geometry_module._snapshot
     calls = 0
@@ -462,8 +560,12 @@ def test_initial_snapshot_failure_rolls_back_session_registry_and_clone(monkeypa
 
     clone = Clone()
     record = DerivedGeometryRecord(
-        "derived-transaction", clone.name(), "source.mph", "a" * 64,
-        str(backing), "b" * 64,
+        "derived-transaction",
+        clone.name(),
+        "source.mph",
+        "a" * 64,
+        str(backing),
+        "b" * 64,
     )
     removed = []
     monkeypatch.setattr(
@@ -485,7 +587,8 @@ def test_initial_snapshot_failure_rolls_back_session_registry_and_clone(monkeypa
 
     monkeypatch.setattr(derived_geometry_module.session_manager, "remove_model", remove_model)
     monkeypatch.setattr(
-        derived_geometry_module, "_snapshot",
+        derived_geometry_module,
+        "_snapshot",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(ValueError("snapshot failed")),
     )
 

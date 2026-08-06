@@ -141,8 +141,12 @@ def test_same_evidence_and_policy_serialize_byte_stably_across_mapping_orders():
         tolerances={"margin": 0.0},
         assumptions={"passive": True, "power_normalized": True},
     )
-    second_evidence = _reverse_mapping_order(first_evidence)
-    second_policy = _reverse_mapping_order(first_policy)
+    evidence_payload = deepcopy(first_evidence)
+    evidence_payload.pop("contract_sha256")
+    policy_payload = deepcopy(first_policy)
+    policy_payload.pop("policy_sha256")
+    second_evidence = build_physical_evidence(_reverse_mapping_order(evidence_payload))
+    second_policy = build_validation_policy(_reverse_mapping_order(policy_payload))
 
     assert canonical_json_bytes(first_evidence) == canonical_json_bytes(second_evidence)
     assert canonical_json_bytes(first_policy) == canonical_json_bytes(second_policy)

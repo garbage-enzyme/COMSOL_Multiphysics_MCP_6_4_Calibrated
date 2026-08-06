@@ -4,6 +4,7 @@ import _winapi
 import hashlib
 import inspect
 import json
+import shutil
 from copy import deepcopy
 from pathlib import Path
 
@@ -303,7 +304,11 @@ def test_pair_assembler_rejects_junctioned_publication_parent(tmp_path):
             )
         assert list(outside.iterdir()) == []
     finally:
-        visual_root.rmdir()
+        try:
+            visual_root.rmdir()
+        except OSError:
+            pass
+        shutil.rmtree(outside, ignore_errors=True)
 
 
 def test_pair_assembler_rejects_tampered_wrapper_before_rendering(tmp_path, monkeypatch):

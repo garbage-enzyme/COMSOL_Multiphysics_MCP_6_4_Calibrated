@@ -75,7 +75,13 @@ print(json.dumps({{'same': first is second is canonical, 'before': before, 'afte
     )
 
     assert completed.returncode == 0, completed.stderr
-    result = json.loads(completed.stdout)
+    try:
+        result = json.loads(completed.stdout)
+    except json.JSONDecodeError as exc:
+        raise AssertionError(
+            "namespace child did not emit one JSON object; "
+            f"stdout={completed.stdout!r}; stderr={completed.stderr!r}"
+        ) from exc
     assert result["same"] is True
     assert result["after"] == result["before"]
     assert result["after"]["spec_name"] == "comsol_mcp.tools.session"

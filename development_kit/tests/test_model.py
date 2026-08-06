@@ -167,9 +167,7 @@ def test_clone_failures_remove_loaded_model_and_backing_artifacts(tmp_path, fail
     if failure == "load":
         client.load = lambda _path: (_ for _ in ()).throw(RuntimeError("load failure"))
     if failure == "label":
-        cloned.java.label = lambda _value: (_ for _ in ()).throw(
-            RuntimeError("label failure")
-        )
+        cloned.java.label = lambda _value: (_ for _ in ()).throw(RuntimeError("label failure"))
 
     root = tmp_path / "clones"
     with pytest.raises(RuntimeError, match=failure):
@@ -195,9 +193,7 @@ def test_clone_rejects_name_collision_before_save(tmp_path):
     assert source.java.saved == []
 
 
-def test_model_clone_cleans_unregistered_clone_after_session_rejection(
-    tmp_path, monkeypatch
-):
+def test_model_clone_cleans_unregistered_clone_after_session_rejection(tmp_path, monkeypatch):
     source = CloneModel("Source")
     cloned = CloneModel("Clone")
     client = CloneClient(cloned)
@@ -285,9 +281,7 @@ def test_version_bundle_fsyncs_every_stage_before_publication(tmp_path, monkeypa
     assert len(synced) == 4
 
 
-def test_version_bundle_failure_restores_existing_latest_and_removes_version(
-    tmp_path, monkeypatch
-):
+def test_version_bundle_failure_restores_existing_latest_and_removes_version(tmp_path, monkeypatch):
     model = FakeModel()
     model.name = lambda: "Model"
     version = tmp_path / "Model_1.mph"
@@ -298,16 +292,13 @@ def test_version_bundle_failure_restores_existing_latest_and_removes_version(
     original_publish = __import__(
         "src.tools.model", fromlist=["publish_file_exclusive"]
     ).publish_file_exclusive
-    calls = 0
 
-    def fail_third(staging, target):
-        nonlocal calls
-        calls += 1
-        if calls == 3:
+    def fail_latest(staging, target):
+        if Path(target) == latest:
             raise OSError("latest publication failure")
         return original_publish(staging, target)
 
-    monkeypatch.setattr("src.tools.model.publish_file_exclusive", fail_third)
+    monkeypatch.setattr("src.tools.model.publish_file_exclusive", fail_latest)
 
     with pytest.raises(OSError, match="latest publication failure"):
         _save_model_version_bundle(model, str(version), str(latest), description=None)
