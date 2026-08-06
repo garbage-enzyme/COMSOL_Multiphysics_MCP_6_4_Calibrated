@@ -422,11 +422,58 @@ async def _run(spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
                     for index in range(spec["budget"]):
                         proposal = optimizer.ask()
                         values = {name: float(value) for name, value in proposal["values"].items()}
-                        measurement = await evaluate(values)
-                        score = _score(measurement, target)
                         candidate_fingerprint = domain_sha256_v2(
                             "comsol_mcp.licensed_campaign_candidate", values
                         )
+                        try:
+                            measurement = await evaluate(values)
+                        except ValueError as exc:
+                            optimizer.tell(
+                                proposal,
+                                candidate_fingerprint=candidate_fingerprint,
+                                status="failed",
+                                score_fingerprint=None,
+                                losses={},
+                            )
+                            failure_fingerprint = domain_sha256_v2(
+                                "comsol_mcp.licensed_campaign_measurement_failure",
+                                {
+                                    "candidate_fingerprint": candidate_fingerprint,
+                                    "error_type": type(exc).__name__,
+                                    "error": str(exc)[:512],
+                                },
+                            )
+                            private["evaluations"].append(
+                                {
+                                    "evaluation_index": index,
+                                    "proposal": proposal,
+                                    "candidate_fingerprint": candidate_fingerprint,
+                                    "measurement": None,
+                                    "score": None,
+                                    "terminal_reason": "measurement_failed",
+                                    "error_type": type(exc).__name__,
+                                    "failure_fingerprint": failure_fingerprint,
+                                }
+                            )
+                            _atomic_write_json(
+                                spec["state"],
+                                {
+                                    "schema_name": "comsol_mcp.licensed_campaign_state",
+                                    "schema_version": "1.0.0",
+                                    "mode": spec["mode"],
+                                    "target_fingerprint": target_fingerprint,
+                                    "completed_candidate_evaluations": index + 1,
+                                    "optimizer_checkpoint": optimizer.checkpoint(
+                                        campaign_fingerprint=target_fingerprint,
+                                        decision_fingerprint=failure_fingerprint,
+                                        created_at=f"2026-08-07T00:00:{index:02d}Z",
+                                    ),
+                                    "best": best,
+                                },
+                                maximum_bytes=4 * 1024 * 1024,
+                            )
+                            continue
+                        score = _score(measurement, target)
                         score_fingerprint = domain_sha256_v2(
                             "comsol_mcp.licensed_campaign_score", score
                         )
