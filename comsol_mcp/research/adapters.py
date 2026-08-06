@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 import re
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Protocol
 
 from comsol_mcp.durable import domain_sha256_v2
 
@@ -15,6 +15,8 @@ STRUCTURE_ADAPTER_MANIFEST_SCHEMA_NAME = "comsol_mcp.research_structure_adapter_
 STRUCTURE_ADAPTER_MANIFEST_SCHEMA_VERSION = "1.0.0"
 STRUCTURE_TREE_AUDIT_SCHEMA_NAME = "comsol_mcp.research_structure_tree_audit"
 STRUCTURE_TREE_AUDIT_SCHEMA_VERSION = "1.0.0"
+STRUCTURE_ADAPTER_APPLICATION_SCHEMA_NAME = "comsol_mcp.research_structure_adapter_application"
+STRUCTURE_ADAPTER_APPLICATION_SCHEMA_VERSION = "1.0.0"
 PERIODIC_MIM_PATCH_ADAPTER_ID = "periodic_mim_patch_v1"
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _VARIABLES = ("patch_length_x", "patch_length_y")
@@ -29,6 +31,26 @@ _FIXED_KEYS = {
     "topology",
 }
 _SCOPES = {"geometry", "material", "mesh", "physics", "result", "study"}
+
+
+class PeriodicMimPatchBackend(Protocol):
+    """Minimal derived-model backend required by the trusted adapter."""
+
+    def source_sha256(self) -> str: ...
+
+    def snapshot(self) -> dict[str, Any]: ...
+
+    def apply_patch(self, size: list[float], position: list[float]) -> None: ...
+
+    def rebuild_geometry(self) -> None: ...
+
+    def reprobe_selections(self) -> dict[str, int]: ...
+
+    def rebuild_mesh(self) -> str: ...
+
+    def restore(self, snapshot: dict[str, Any]) -> None: ...
+
+    def mark_dirty(self, reason_code: str) -> None: ...
 
 
 def _sha(value: object, name: str) -> str:
@@ -308,12 +330,186 @@ def normalize_structure_tree_audit(value: object, manifest: object) -> dict[str,
     return {**body, "audit_fingerprint": fingerprint}
 
 
+def _snapshot(value: object, manifest: Mapping[str, Any]) -> dict[str, Any]:
+    raw = _object(
+        _bounded_json(value, "adapter snapshot", 256 * 1024),
+        {
+            "mesh_identity",
+            "patch_position",
+            "patch_size",
+            "selection_identity",
+            "topology",
+        },
+        "adapter snapshot",
+    )
+    size = raw["patch_size"]
+    position = raw["patch_position"]
+    if not isinstance(size, list) or len(size) != 2:
+        raise ValueError("adapter snapshot patch_size must contain x and y")
+    if not isinstance(position, list) or len(position) != 2:
+        raise ValueError("adapter snapshot patch_position must contain x and y")
+    normalized_size = [_finite(item, f"patch_size[{index}]") for index, item in enumerate(size)]
+    normalized_position = [
+        _finite(item, f"patch_position[{index}]") for index, item in enumerate(position)
+    ]
+    center = manifest["patch_center"]
+    if any(
+        not math.isclose(
+            normalized_position[index] + normalized_size[index] / 2.0,
+            center[index],
+            rel_tol=0.0,
+            abs_tol=1e-15,
+        )
+        for index in range(2)
+    ):
+        raise ValueError("adapter snapshot patch is not centered at the trusted fixed center")
+    return {
+        "patch_size": normalized_size,
+        "patch_position": normalized_position,
+        "topology": _topology(raw["topology"], "snapshot.topology"),
+        "selection_identity": _sha(raw["selection_identity"], "selection_identity"),
+        "mesh_identity": _sha(raw["mesh_identity"], "mesh_identity"),
+    }
+
+
+def adapter_state_sha256(manifest: object, snapshot: object) -> str:
+    """Hash one complete mutable/readback state under its exact manifest."""
+    normalized_manifest = normalize_structure_adapter_manifest(manifest)
+    normalized_snapshot = _snapshot(snapshot, normalized_manifest)
+    return str(
+        domain_sha256_v2(
+            "comsol_mcp.research_structure_adapter_state",
+            {
+                "manifest_fingerprint": normalized_manifest["manifest_fingerprint"],
+                "snapshot": normalized_snapshot,
+            },
+        )
+    )
+
+
+def _candidate(value: object, manifest: Mapping[str, Any]) -> dict[str, float]:
+    raw = _object(value, set(_VARIABLES), "adapter candidate")
+    by_id = {item["variable_id"]: item for item in manifest["mutable_dimensions"]}
+    result = {}
+    for variable_id in _VARIABLES:
+        number = _finite(raw[variable_id], variable_id)
+        bounds = by_id[variable_id]
+        if not bounds["lower"] <= number <= bounds["upper"]:
+            raise ValueError(f"{variable_id} is outside the trusted adapter bounds")
+        result[variable_id] = number
+    return result
+
+
+def apply_periodic_mim_patch_candidate(
+    backend: PeriodicMimPatchBackend,
+    manifest: object,
+    tree_audit: object,
+    candidate: object,
+    *,
+    expected_state_sha256: str,
+) -> dict[str, Any]:
+    """Apply one centered x/y candidate atomically to a derived model backend."""
+    normalized_manifest = normalize_structure_adapter_manifest(manifest)
+    normalized_audit = normalize_structure_tree_audit(tree_audit, normalized_manifest)
+    expected_state = _sha(expected_state_sha256, "expected_state_sha256")
+    values = _candidate(candidate, normalized_manifest)
+    source_before = _sha(backend.source_sha256(), "backend.source_sha256")
+    if source_before != normalized_manifest["source_identity"]["source_sha256"]:
+        raise ValueError("backend source identity does not match the accepted manifest")
+    before = _snapshot(backend.snapshot(), normalized_manifest)
+    pre_state = adapter_state_sha256(normalized_manifest, before)
+    if pre_state != expected_state:
+        raise ValueError("stale expected_state_sha256")
+    size = [values["patch_length_x"], values["patch_length_y"]]
+    center = normalized_manifest["patch_center"]
+    position = [center[index] - size[index] / 2.0 for index in range(2)]
+    failure_code = None
+    rollback_errors = []
+    try:
+        backend.apply_patch(size, position)
+        backend.rebuild_geometry()
+        topology = _topology(backend.reprobe_selections(), "observed topology")
+        if topology != normalized_manifest["topology_invariants"]:
+            raise ValueError("candidate changed the trusted topology invariants")
+        mesh_identity = _sha(backend.rebuild_mesh(), "rebuilt mesh identity")
+        after = _snapshot(backend.snapshot(), normalized_manifest)
+        if after["patch_size"] != size or after["patch_position"] != position:
+            raise ValueError("candidate readback does not match the requested patch geometry")
+        if after["topology"] != topology or after["mesh_identity"] != mesh_identity:
+            raise ValueError("candidate readback does not match rebuilt topology or mesh")
+        source_after = _sha(backend.source_sha256(), "backend.source_sha256")
+        if source_after != source_before:
+            raise ValueError("immutable source changed during adapter application")
+    except Exception as exc:
+        failure_code = type(exc).__name__
+        try:
+            backend.restore(before)
+            backend.rebuild_geometry()
+            backend.reprobe_selections()
+            backend.rebuild_mesh()
+            restored = _snapshot(backend.snapshot(), normalized_manifest)
+            if restored != before or backend.source_sha256() != source_before:
+                rollback_errors.append("restored_state_mismatch")
+        except Exception as rollback_exc:
+            rollback_errors.append(type(rollback_exc).__name__)
+        if rollback_errors:
+            backend.mark_dirty("adapter_rollback_unproved")
+        body = {
+            "schema_name": STRUCTURE_ADAPTER_APPLICATION_SCHEMA_NAME,
+            "schema_version": STRUCTURE_ADAPTER_APPLICATION_SCHEMA_VERSION,
+            "manifest_fingerprint": normalized_manifest["manifest_fingerprint"],
+            "audit_fingerprint": normalized_audit["audit_fingerprint"],
+            "candidate": values,
+            "pre_state_sha256": pre_state,
+            "post_state_sha256": None,
+            "source_sha256": source_before,
+            "success": False,
+            "failure_code": failure_code,
+            "rollback_proved": not rollback_errors,
+            "rollback_errors": rollback_errors,
+            "derived_model_dirty": bool(rollback_errors),
+        }
+        return {
+            **body,
+            "application_fingerprint": domain_sha256_v2(
+                STRUCTURE_ADAPTER_APPLICATION_SCHEMA_NAME, body
+            ),
+        }
+    post_state = adapter_state_sha256(normalized_manifest, after)
+    body = {
+        "schema_name": STRUCTURE_ADAPTER_APPLICATION_SCHEMA_NAME,
+        "schema_version": STRUCTURE_ADAPTER_APPLICATION_SCHEMA_VERSION,
+        "manifest_fingerprint": normalized_manifest["manifest_fingerprint"],
+        "audit_fingerprint": normalized_audit["audit_fingerprint"],
+        "candidate": values,
+        "pre_state_sha256": pre_state,
+        "post_state_sha256": post_state,
+        "source_sha256": source_before,
+        "success": True,
+        "failure_code": None,
+        "rollback_proved": None,
+        "rollback_errors": [],
+        "derived_model_dirty": False,
+    }
+    return {
+        **body,
+        "application_fingerprint": domain_sha256_v2(
+            STRUCTURE_ADAPTER_APPLICATION_SCHEMA_NAME, body
+        ),
+    }
+
+
 __all__ = [
     "PERIODIC_MIM_PATCH_ADAPTER_ID",
+    "STRUCTURE_ADAPTER_APPLICATION_SCHEMA_NAME",
+    "STRUCTURE_ADAPTER_APPLICATION_SCHEMA_VERSION",
     "STRUCTURE_ADAPTER_MANIFEST_SCHEMA_NAME",
     "STRUCTURE_ADAPTER_MANIFEST_SCHEMA_VERSION",
     "STRUCTURE_TREE_AUDIT_SCHEMA_NAME",
     "STRUCTURE_TREE_AUDIT_SCHEMA_VERSION",
+    "PeriodicMimPatchBackend",
+    "adapter_state_sha256",
+    "apply_periodic_mim_patch_candidate",
     "normalize_structure_adapter_manifest",
     "normalize_structure_tree_audit",
 ]

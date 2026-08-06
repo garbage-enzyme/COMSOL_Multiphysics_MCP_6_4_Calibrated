@@ -1,10 +1,14 @@
 """Solver-free contracts for bounded goal-directed research campaigns."""
 
 from .adapters import (
+    STRUCTURE_ADAPTER_APPLICATION_SCHEMA_NAME,
+    STRUCTURE_ADAPTER_APPLICATION_SCHEMA_VERSION,
     STRUCTURE_ADAPTER_MANIFEST_SCHEMA_NAME,
     STRUCTURE_ADAPTER_MANIFEST_SCHEMA_VERSION,
     STRUCTURE_TREE_AUDIT_SCHEMA_NAME,
     STRUCTURE_TREE_AUDIT_SCHEMA_VERSION,
+    adapter_state_sha256,
+    apply_periodic_mim_patch_candidate,
     normalize_structure_adapter_manifest,
     normalize_structure_tree_audit,
 )
@@ -80,6 +84,8 @@ from .workflow import (
 )
 
 __all__ = [
+    "STRUCTURE_ADAPTER_APPLICATION_SCHEMA_NAME",
+    "STRUCTURE_ADAPTER_APPLICATION_SCHEMA_VERSION",
     "STRUCTURE_ADAPTER_MANIFEST_SCHEMA_NAME",
     "STRUCTURE_ADAPTER_MANIFEST_SCHEMA_VERSION",
     "STRUCTURE_TREE_AUDIT_SCHEMA_NAME",
@@ -118,6 +124,8 @@ __all__ = [
     "RESEARCH_JOURNAL_RECORD_SCHEMA_VERSION",
     "WORKFLOW_CAPSULE_SCHEMA_NAME",
     "WORKFLOW_CAPSULE_SCHEMA_VERSION",
+    "adapter_state_sha256",
+    "apply_periodic_mim_patch_candidate",
     "normalize_design_space",
     "normalize_structure_adapter_manifest",
     "normalize_structure_tree_audit",
