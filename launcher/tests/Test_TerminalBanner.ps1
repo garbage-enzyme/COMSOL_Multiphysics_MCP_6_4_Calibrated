@@ -42,14 +42,23 @@ foreach ($State in @('scientific', 'failure', 'paused')) {
             ('"' + $Child + '"'), '-TestRoot', ('"' + $Root + '"'), '-State', $State
         ) -RedirectStandardOutput $Stdout -RedirectStandardError $Stderr -WindowStyle Hidden -PassThru
         $Deadline = [DateTime]::UtcNow.AddSeconds(20)
+        $Complete = $false
         while ([DateTime]::UtcNow -lt $Deadline) {
             $Process.Refresh()
             if ($Process.HasExited) { throw "$State terminal monitor exited before rendering." }
-            if ((Test-Path -LiteralPath $Stdout -PathType Leaf) -and (Get-Item -LiteralPath $Stdout).Length -gt 0) { break }
+            if (Test-Path -LiteralPath $Stdout -PathType Leaf) {
+                $Rendered = [string](Get-Content -LiteralPath $Stdout -Raw)
+                if ($null -eq $Rendered) { $Rendered = '' }
+                $Complete = $true
+                foreach ($Text in $Expected[$State]) {
+                    if ($Rendered.IndexOf($Text, [StringComparison]::OrdinalIgnoreCase) -lt 0) { $Complete = $false; break }
+                }
+                if ($Complete) { break }
+            }
             Start-Sleep -Milliseconds 250
         }
-        if (-not (Test-Path -LiteralPath $Stdout -PathType Leaf) -or (Get-Item -LiteralPath $Stdout).Length -eq 0) {
-            throw "$State terminal monitor did not render within 20 seconds."
+        if (-not $Complete) {
+            throw "$State terminal monitor did not render every expected field within 20 seconds."
         }
         $Process.Refresh()
         if ($Process.HasExited) { throw "$State terminal monitor did not remain latched." }

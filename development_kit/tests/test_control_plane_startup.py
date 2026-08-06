@@ -79,7 +79,7 @@ print(json.dumps({
     "process_launch_events": process_launch_events,
     "tool_count": len(server._tool_manager._tools),
     "core_discovery_bytes": core_discovery_bytes,
-    "largest_tool_schema_bytes": max(tool_record_bytes),
+    "largest_tool_schema_bytes": max(tool_record_bytes, default=0),
     "capabilities_response_bytes": capabilities_response_bytes,
 }))
 """

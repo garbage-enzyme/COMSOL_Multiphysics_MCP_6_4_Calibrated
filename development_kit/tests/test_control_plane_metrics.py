@@ -5,13 +5,10 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
-import shutil
 import subprocess
 import threading
 import time
-import uuid
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
 
 import pytest
 import src.knowledge.lexical_manual as lexical_module
@@ -36,13 +33,8 @@ def reset_control_metrics():
 
 
 @pytest.fixture()
-def runtime_root():
-    root = Path("D:/comsol_runtime_test/control_plane") / uuid.uuid4().hex
-    root.mkdir(parents=True)
-    try:
-        yield root
-    finally:
-        shutil.rmtree(root, ignore_errors=True)
+def runtime_root(ascii_tmp_path):
+    return ascii_tmp_path / "control-plane"
 
 
 def test_metrics_window_is_bounded_and_reports_nearest_rank_latency():

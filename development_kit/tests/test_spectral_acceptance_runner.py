@@ -68,6 +68,27 @@ def test_non_ascii_runtime_root_fails_before_worker_start(tmp_path):
         )
 
 
+def test_worker_failure_publishes_a_bounded_failure_receipt(tmp_path, ascii_root):
+    spec = spectral_job_spec(tmp_path)
+    output = tmp_path / "failure.json"
+
+    receipt = run_acceptance(
+        raw_spec=_raw_spec(spec),
+        runtime_root=ascii_root,
+        output=output,
+        worker_runner=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("injected worker failure")
+        ),
+    )
+
+    assert receipt["success"] is False
+    assert receipt["error"] == {
+        "type": "RuntimeError",
+        "message": "injected worker failure",
+    }
+    assert json.loads(output.read_text(encoding="utf-8")) == receipt
+
+
 def test_receipt_publication_uses_the_directory_durable_exclusive_primitive(tmp_path, monkeypatch):
     output = tmp_path / "receipt.json"
     calls = []

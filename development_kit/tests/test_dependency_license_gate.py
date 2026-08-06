@@ -38,16 +38,39 @@ def _normalized_path_text(value: str | Path) -> str:
     return str(value).replace("\\", "/").casefold()
 
 
+def _reviewed_metadata(entries: list[dict]) -> dict[str, SimpleNamespace]:
+    reviewed = {}
+    for entry in entries:
+        message = Message()
+        message["Name"] = entry["dependency"]
+        message["Version"] = "review-snapshot"
+        for signal in entry["accepted_signals"]:
+            kind, value = signal.split(":", 1)
+            if kind == "license":
+                message["License"] = value
+            elif kind == "license-expression":
+                message["License-Expression"] = value
+            elif kind == "classifier":
+                message["Classifier"] = value
+        reviewed[entry["dependency"]] = SimpleNamespace(metadata=message)
+    return reviewed
+
+
 def test_committed_runtime_dependencies_match_reviewed_license_snapshot() -> None:
+    review = json.loads(REVIEW.read_text(encoding="utf-8"))
+    reviewed_metadata = _reviewed_metadata(review["entries"])
+    dependencies = declared_runtime_dependencies(PYPROJECT)
+    reviewed_on = date.fromisoformat(review["reviewed_on"])
     receipt = build_license_receipt(
         PYPROJECT,
         REVIEW,
-        as_of=date(2026, 8, 4),
+        as_of=reviewed_on,
+        distribution_provider=lambda name: reviewed_metadata[name],
     )
 
     assert receipt["status"] == "passed"
-    assert receipt["as_of"] == "2026-08-04"
-    assert receipt["dependency_count"] == 7
+    assert receipt["as_of"] == review["reviewed_on"]
+    assert receipt["dependency_count"] == len(dependencies)
     assert receipt["failures"] == []
     assert len(receipt["pyproject_sha256"]) == 64
     assert len(receipt["review_sha256"]) == 64

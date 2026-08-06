@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import os
-import shutil
+import sys
 import threading
 import time
-import uuid
 from pathlib import Path
 
 import pytest
@@ -39,13 +38,19 @@ class _Client:
         self.clear_count = 0
         self.attempt_mutation = attempt_mutation
         self.mutation_blocked = 0
+        self.source_bytes_preserved = 0
 
     def load(self, path):
         if self.attempt_mutation:
+            source = Path(path)
+            before = source.read_bytes()
             try:
-                Path(path).write_bytes(b"replacement")
+                with source.open("r+b"):
+                    pass
             except PermissionError:
                 self.mutation_blocked += 1
+            finally:
+                self.source_bytes_preserved += int(source.read_bytes() == before)
         self.loaded.append(path)
         return _Model(f"model-{len(self.loaded)}")
 
@@ -84,13 +89,8 @@ def _telemetry(stage, point_id, model, directory, elapsed):
 
 
 @pytest.fixture
-def ascii_root():
-    root = Path("D:/comsol_runtime_test") / f"continuation-worker-{uuid.uuid4().hex}"
-    root.mkdir(parents=True)
-    try:
-        yield root
-    finally:
-        shutil.rmtree(root, ignore_errors=True)
+def ascii_root(ascii_tmp_path):
+    return ascii_tmp_path / "continuation-worker"
 
 
 def _created_job(tmp_path, ascii_root):
@@ -173,7 +173,9 @@ def test_worker_uses_one_owner_and_client_for_all_exact_states(tmp_path, ascii_r
     assert ownership.acquired is True and ownership.released is True
     assert factory_calls == {"ownership": 1, "client": 1}
     assert len(client.loaded) == 3
-    assert client.mutation_blocked == 3
+    assert client.source_bytes_preserved == 3
+    if sys.platform == "win32":
+        assert client.mutation_blocked == 3
     assert client.clear_count == 4
 
 

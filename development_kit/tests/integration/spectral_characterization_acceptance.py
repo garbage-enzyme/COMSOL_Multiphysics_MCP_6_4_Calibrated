@@ -184,17 +184,33 @@ def run_acceptance(
             "last_error": None,
         },
     )
-    exit_code = worker_runner(str(store.root), job_id, native_cancel_enabled=True)
     directory = store.job_dir(job_id)
-    state = store.read_state(job_id)
-    rows = read_spectral_rows(directory / "spectral_rows.jsonl", spec, artifact_root=directory)
-    stages = read_spectral_stage_plans(directory, spec)
+    state = None
+    rows = []
+    stages = []
+    exit_code = None
+    error = None
+    try:
+        exit_code = worker_runner(str(store.root), job_id, native_cancel_enabled=True)
+        state = store.read_state(job_id)
+        rows = read_spectral_rows(
+            directory / "spectral_rows.jsonl", spec, artifact_root=directory
+        )
+        stages = read_spectral_stage_plans(directory, spec)
+    except Exception as exc:
+        error = {"type": type(exc).__name__, "message": str(exc)[-1000:]}
+        try:
+            state = store.read_state(job_id)
+        except Exception:
+            state = None
     scientific_acceptance = _scientific_acceptance(rows, stages, spec)
     source_after = _sha256_file(source)
     lease_absent = not (runtime / "solver_owner.json").exists()
     receipt = {
-        "success": exit_code == 0
-        and state["status"] == "completed"
+        "success": error is None
+        and exit_code == 0
+        and isinstance(state, dict)
+        and state.get("status") == "completed"
         and source_after == source_before
         and lease_absent,
         "scientific_acceptance": scientific_acceptance,
@@ -208,6 +224,7 @@ def run_acceptance(
         "source_model_sha256_after": source_after,
         "source_unchanged": source_after == source_before,
         "state": state,
+        "error": error,
         "stage_plans": [
             {
                 "stage_index": stage["stage_index"],
@@ -221,7 +238,7 @@ def run_acceptance(
         "rows": [_row_receipt(row) for row in rows],
         "cleanup": {
             "lease_absent": lease_absent,
-            "worker_state_cleanup": state.get("cleanup"),
+            "worker_state_cleanup": state.get("cleanup") if isinstance(state, dict) else None,
             "external_process_absence": "parent_must_verify_after_runner_exit",
         },
     }

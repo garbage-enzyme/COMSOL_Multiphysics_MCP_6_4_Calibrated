@@ -332,7 +332,8 @@ def test_boundary_batch_rolls_back_every_created_feature_on_property_failure():
 
     assert result["success"] is False
     assert result["rolled_back"] is True
-    assert {"wall", "imp"}.isdisjoint(physics.features.items)
+    assert physics.features.items == {}
+    assert physics.features.removed == ["imp", "wall"]
 
 
 def test_custom_boundary_type_and_property_are_rejected_before_mutation():

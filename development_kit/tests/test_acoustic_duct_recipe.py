@@ -124,7 +124,8 @@ def test_build_failure_remains_primary_when_cleanup_also_fails(tmp_path, monkeyp
     with pytest.raises(ValueError, match="build failed") as caught:
         namespace["main"]()
 
-    assert any("cleanup was incomplete" in note for note in caught.value.__notes__)
+    assert any("client.clear" in note for note in caught.value.__notes__)
+    assert any("lease.release" in note for note in caught.value.__notes__)
 
 
 def test_publish_never_overwrites_competing_output(tmp_path, monkeypatch):

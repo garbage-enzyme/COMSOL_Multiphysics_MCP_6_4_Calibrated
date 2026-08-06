@@ -382,7 +382,7 @@ def test_native_cancel_timeout_blocks_client_and_lease_cleanup(
 
     def blocked_native_cancel():
         native_started.set()
-        native_release.wait(timeout=5)
+        native_release.wait()
         return {"attempted": True, "supported": False}
 
     real_record = production_worker._record_native_cancel
