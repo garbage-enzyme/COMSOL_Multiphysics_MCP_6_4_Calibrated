@@ -11,6 +11,7 @@ import os
 import subprocess
 import sys
 import time
+from importlib import import_module
 from pathlib import Path
 from typing import Any
 
@@ -21,24 +22,22 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
-from comsol_mcp.durable import domain_sha256_v2  # noqa: E402
-from comsol_mcp.evidence.spectral_characterization import (  # noqa: E402
-    build_spectral_analysis_decision,
-    build_spectral_characterization,
-    build_spectral_point_bundle,
-)
-from comsol_mcp.research.adaptive_acquisition import (  # noqa: E402
-    GaussianProcessExpectedImprovementOptimizer,
-)
-from development_kit.scripts.research_adapter_licensed_gate import (  # noqa: E402
-    _atomic_write_json,
-    _canonical_bytes,
-    _git_identity,
-    _settings,
-    _sha256,
-    _stdio_environment,
-    _tool_payload,
-)
+domain_sha256_v2 = import_module("comsol_mcp.durable").domain_sha256_v2
+_spectral = import_module("comsol_mcp.evidence.spectral_characterization")
+build_spectral_analysis_decision = _spectral.build_spectral_analysis_decision
+build_spectral_characterization = _spectral.build_spectral_characterization
+build_spectral_point_bundle = _spectral.build_spectral_point_bundle
+GaussianProcessExpectedImprovementOptimizer = import_module(
+    "comsol_mcp.research.adaptive_acquisition"
+).GaussianProcessExpectedImprovementOptimizer
+_adapter_gate = import_module("development_kit.scripts.research_adapter_licensed_gate")
+_atomic_write_json = _adapter_gate._atomic_write_json
+_canonical_bytes = _adapter_gate._canonical_bytes
+_git_identity = _adapter_gate._git_identity
+_settings = _adapter_gate._settings
+_sha256 = _adapter_gate._sha256
+_stdio_environment = _adapter_gate._stdio_environment
+_tool_payload = _adapter_gate._tool_payload
 
 SCHEMA_NAME = "comsol_mcp.research_campaign_licensed_gate"
 SCHEMA_VERSION = "1.0.0"
