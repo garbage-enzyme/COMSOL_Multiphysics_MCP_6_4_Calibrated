@@ -24,6 +24,8 @@ from comsol_mcp.research import (
     PORTFOLIO_SCHEMA_VERSION,
     RESEARCH_GOAL_SCHEMA_NAME,
     RESEARCH_GOAL_SCHEMA_VERSION,
+    RESEARCH_JOURNAL_RECORD_SCHEMA_NAME,
+    RESEARCH_JOURNAL_RECORD_SCHEMA_VERSION,
     WORKFLOW_CAPSULE_SCHEMA_NAME,
     WORKFLOW_CAPSULE_SCHEMA_VERSION,
 )
@@ -518,6 +520,12 @@ def _entries() -> list[dict[str, Any]]:
             RESEARCH_GOAL_SCHEMA_VERSION,
             "comsol_mcp.research.contracts",
             artifact_kind="configuration",
+        ),
+        _entry(
+            RESEARCH_JOURNAL_RECORD_SCHEMA_NAME,
+            RESEARCH_JOURNAL_RECORD_SCHEMA_VERSION,
+            "comsol_mcp.research.journal",
+            artifact_kind="durable_artifact",
         ),
         _entry(
             "comsol_mcp.resource_journal_entry",

@@ -19,6 +19,12 @@ from .decisions import (
     DECISION_RECORD_SCHEMA_VERSION,
     normalize_decision_record,
 )
+from .journal import (
+    RESEARCH_JOURNAL_RECORD_SCHEMA_NAME,
+    RESEARCH_JOURNAL_RECORD_SCHEMA_VERSION,
+    append_research_journal_record,
+    recover_research_journal,
+)
 from .materials import (
     MATERIAL_CATALOG_SCHEMA_NAME,
     MATERIAL_CATALOG_SCHEMA_VERSION,
@@ -60,6 +66,8 @@ __all__ = [
     "CANDIDATE_RECORD_SCHEMA_VERSION",
     "RESEARCH_GOAL_SCHEMA_NAME",
     "RESEARCH_GOAL_SCHEMA_VERSION",
+    "RESEARCH_JOURNAL_RECORD_SCHEMA_NAME",
+    "RESEARCH_JOURNAL_RECORD_SCHEMA_VERSION",
     "WORKFLOW_CAPSULE_SCHEMA_NAME",
     "WORKFLOW_CAPSULE_SCHEMA_VERSION",
     "normalize_design_space",
@@ -70,6 +78,8 @@ __all__ = [
     "normalize_candidate_record",
     "normalize_research_goal",
     "normalize_workflow_capsule",
+    "append_research_journal_record",
+    "recover_research_journal",
     "relative_bounds",
     "compile_campaign_manifest",
 ]
