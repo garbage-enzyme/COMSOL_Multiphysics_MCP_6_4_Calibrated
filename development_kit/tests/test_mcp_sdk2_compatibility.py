@@ -224,7 +224,7 @@ def test_sdk2_server_preserves_legacy_stdio_protocols(
     assert "resultType" not in called
     capabilities = _response_payload(called)
     assert capabilities["profile"] == "core"
-    assert capabilities["tool_count"] == 47
+    assert capabilities["tool_count"] == 45
     assert capabilities["session"] == {"connected": False, "starting": False}
 
     resources = exchange["resources"]["result"]

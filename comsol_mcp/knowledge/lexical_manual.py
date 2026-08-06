@@ -20,8 +20,9 @@ import sys
 import time
 from contextlib import closing
 from pathlib import Path
-from typing import Iterable, Mapping, Sequence
+from typing import Callable, Iterable, Mapping, Sequence
 
+from comsol_mcp.settings import LEXICAL_DOCS_INDEX_ENV
 from comsol_mcp.utils.control_plane import measured_call
 
 DEFAULT_INDEX_DIR = Path("D:/comsol_docs_fts")
@@ -63,6 +64,44 @@ QUERY_STOP_WORDS = {
     "where",
     "with",
 }
+
+ProgressCallback = Callable[[dict[str, object]], None]
+CancelCallback = Callable[[], bool]
+
+
+class IndexBuildCancelled(RuntimeError):
+    """Raised before publication when the caller cancels an index build."""
+
+
+def _check_cancelled(cancelled: CancelCallback | None) -> None:
+    if cancelled is not None and cancelled():
+        raise IndexBuildCancelled("manual index build was cancelled")
+
+
+def _emit_progress(
+    progress: ProgressCallback | None,
+    *,
+    stage: str,
+    percent: int,
+    processed_files: int,
+    total_files: int,
+    processed_pages: int,
+    total_pages: int,
+    current_source: str | None = None,
+) -> None:
+    if progress is None:
+        return
+    progress(
+        {
+            "stage": stage,
+            "percent": max(0, min(int(percent), 100)),
+            "processed_files": int(processed_files),
+            "total_files": int(total_files),
+            "processed_pages": int(processed_pages),
+            "total_pages": int(total_pages),
+            "current_source": current_source,
+        }
+    )
 
 
 def _is_ascii_path(path: Path) -> bool:
@@ -134,13 +173,28 @@ def build_index_from_records(
     index_path: str | Path,
     *,
     corpus_fingerprint: str = "test-corpus",
+    temporary_path: str | Path | None = None,
+    progress: ProgressCallback | None = None,
+    cancelled: CancelCallback | None = None,
+    total_files: int = 0,
+    total_pages: int = 0,
 ) -> dict:
     """Atomically build an FTS index from normalized page records."""
     target = Path(index_path)
     if not _is_ascii_path(target):
         raise ValueError("The lexical index path must contain ASCII characters only")
     target.parent.mkdir(parents=True, exist_ok=True)
-    temporary = target.with_suffix(target.suffix + f".tmp-{os.getpid()}")
+    temporary = (
+        Path(temporary_path)
+        if temporary_path is not None
+        else target.with_suffix(target.suffix + f".tmp-{os.getpid()}")
+    )
+    if temporary.parent.resolve() != target.parent.resolve() or not temporary.name.startswith(
+        target.name + ".tmp-"
+    ):
+        raise ValueError("temporary index must be a uniquely named sibling of the target")
+    if not _is_ascii_path(temporary):
+        raise ValueError("The temporary lexical index path must contain ASCII characters only")
     if temporary.exists():
         temporary.unlink()
 
@@ -157,6 +211,7 @@ def build_index_from_records(
             ],
         )
         for record in records:
+            _check_cancelled(cancelled)
             text = _normalize_text(str(record["text"]))
             if not text:
                 continue
@@ -186,6 +241,27 @@ def build_index_from_records(
     else:
         connection.close()
     try:
+        _check_cancelled(cancelled)
+        _emit_progress(
+            progress,
+            stage="validating",
+            percent=94,
+            processed_files=total_files,
+            total_files=total_files,
+            processed_pages=count,
+            total_pages=total_pages or count,
+        )
+        validation = validate_index_file(temporary, expected_page_count=count)
+        _check_cancelled(cancelled)
+        _emit_progress(
+            progress,
+            stage="publishing",
+            percent=99,
+            processed_files=total_files,
+            total_files=total_files,
+            processed_pages=count,
+            total_pages=total_pages or count,
+        )
         os.replace(temporary, target)
     finally:
         temporary.unlink(missing_ok=True)
@@ -195,6 +271,7 @@ def build_index_from_records(
         "page_count": count,
         "schema_version": SCHEMA_VERSION,
         "corpus_fingerprint": corpus_fingerprint,
+        "validation": validation,
     }
 
 
@@ -224,6 +301,10 @@ def _pdf_fingerprint(
 def build_index_from_pdfs(
     pdf_dir: str | Path = DEFAULT_PDF_DIR,
     index_path: str | Path = DEFAULT_INDEX_PATH,
+    *,
+    temporary_path: str | Path | None = None,
+    progress: ProgressCallback | None = None,
+    cancelled: CancelCallback | None = None,
 ) -> dict:
     """Extract all PDF pages once and atomically build the production index."""
     source_root = Path(pdf_dir).resolve()
@@ -232,11 +313,43 @@ def build_index_from_pdfs(
         raise FileNotFoundError(f"No PDF manuals found below {source_root}")
     snapshots = {path: _pdf_snapshot(path) for path in pdf_files}
     corpus_fingerprint = _pdf_fingerprint(source_root, pdf_files, snapshots)
+    _emit_progress(
+        progress,
+        stage="scanning",
+        percent=0,
+        processed_files=0,
+        total_files=len(pdf_files),
+        processed_pages=0,
+        total_pages=0,
+    )
+    import fitz
+
+    page_counts: dict[Path, int] = {}
+    total_pages = 0
+    for index, pdf_path in enumerate(pdf_files, start=1):
+        _check_cancelled(cancelled)
+        if _pdf_snapshot(pdf_path) != snapshots[pdf_path]:
+            raise RuntimeError("PDF manual changed before page counting")
+        with fitz.open(pdf_path) as document:
+            page_counts[pdf_path] = int(document.page_count)
+        total_pages += page_counts[pdf_path]
+        _emit_progress(
+            progress,
+            stage="scanning",
+            percent=max(1, round(10 * index / len(pdf_files))),
+            processed_files=index,
+            total_files=len(pdf_files),
+            processed_pages=0,
+            total_pages=total_pages,
+            current_source=pdf_path.relative_to(source_root).as_posix(),
+        )
+
+    processed_pages = 0
 
     def records():
-        import fitz
-
-        for pdf_path in pdf_files:
+        nonlocal processed_pages
+        for file_index, pdf_path in enumerate(pdf_files, start=1):
+            _check_cancelled(cancelled)
             expected_snapshot = snapshots[pdf_path]
             if _pdf_snapshot(pdf_path) != expected_snapshot:
                 raise RuntimeError(f"PDF manual changed before extraction: {pdf_path}")
@@ -244,7 +357,19 @@ def build_index_from_pdfs(
             module = source.split("/", 1)[0]
             with fitz.open(pdf_path) as document:
                 for page_number, page in enumerate(document, start=1):
+                    _check_cancelled(cancelled)
                     text = _normalize_text(page.get_text("text"))
+                    processed_pages += 1
+                    _emit_progress(
+                        progress,
+                        stage="extracting",
+                        percent=10 + round(83 * processed_pages / max(total_pages, 1)),
+                        processed_files=file_index - 1,
+                        total_files=len(pdf_files),
+                        processed_pages=processed_pages,
+                        total_pages=total_pages,
+                        current_source=source,
+                    )
                     if text:
                         yield {
                             "source": source,
@@ -260,9 +385,23 @@ def build_index_from_pdfs(
         records(),
         index_path,
         corpus_fingerprint=corpus_fingerprint,
+        temporary_path=temporary_path,
+        progress=progress,
+        cancelled=cancelled,
+        total_files=len(pdf_files),
+        total_pages=total_pages,
     )
     result["pdf_count"] = len(pdf_files)
     result["pdf_dir"] = str(source_root)
+    _emit_progress(
+        progress,
+        stage="complete",
+        percent=100,
+        processed_files=len(pdf_files),
+        total_files=len(pdf_files),
+        processed_pages=total_pages,
+        total_pages=total_pages,
+    )
     return result
 
 
@@ -313,6 +452,36 @@ def _validated_index_metadata(connection: sqlite3.Connection) -> dict[str, str]:
     if page_count < 0:
         raise ValueError("Manual index page count is invalid; rebuild the index")
     return metadata
+
+
+def validate_index_file(
+    index_path: str | Path,
+    *,
+    expected_page_count: int | None = None,
+) -> dict[str, object]:
+    """Validate a complete lexical index before it can be published or enabled."""
+    path = Path(index_path)
+    if not path.is_file():
+        raise FileNotFoundError("manual index does not exist")
+    with closing(_open_index(path, readonly=True)) as connection:
+        metadata = _validated_index_metadata(connection)
+        integrity = connection.execute("PRAGMA integrity_check").fetchone()[0]
+        if integrity != "ok":
+            raise ValueError("manual index integrity check failed")
+        pages = int(connection.execute("SELECT COUNT(*) FROM pages").fetchone()[0])
+        fts_pages = int(connection.execute("SELECT COUNT(*) FROM pages_fts").fetchone()[0])
+    declared = int(metadata["page_count"])
+    if pages != declared or fts_pages != declared:
+        raise ValueError("manual index row counts do not match its metadata")
+    if expected_page_count is not None and declared != int(expected_page_count):
+        raise ValueError("manual index page count differs from the completed build")
+    return {
+        "success": True,
+        "schema_version": metadata["schema_version"],
+        "corpus_fingerprint": metadata["corpus_fingerprint"],
+        "page_count": declared,
+        "integrity_check": "ok",
+    }
 
 
 def search_index(
@@ -490,6 +659,8 @@ def run_bounded(operation: str, arguments: dict, timeout: float) -> dict:
 def register_lexical_manual_tools(mcp) -> None:
     """Register dependency-free, bounded manual retrieval tools."""
 
+    index_path = Path(os.environ.get(LEXICAL_DOCS_INDEX_ENV, str(DEFAULT_INDEX_PATH)))
+
     @mcp.tool()
     def manual_search(
         query: str,
@@ -521,7 +692,7 @@ def register_lexical_manual_tools(mcp) -> None:
                     "page_start": page_start,
                     "page_end": page_end,
                     "mode": mode,
-                    "index_path": str(DEFAULT_INDEX_PATH),
+                    "index_path": str(index_path),
                 },
                 SEARCH_TIMEOUT_SECONDS,
             ),
@@ -541,7 +712,7 @@ def register_lexical_manual_tools(mcp) -> None:
                 {
                     "source": source,
                     "pages": pages,
-                    "index_path": str(DEFAULT_INDEX_PATH),
+                    "index_path": str(index_path),
                 },
                 READ_TIMEOUT_SECONDS,
             ),

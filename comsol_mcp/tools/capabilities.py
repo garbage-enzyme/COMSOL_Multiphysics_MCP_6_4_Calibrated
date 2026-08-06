@@ -14,7 +14,13 @@ from comsol_mcp.compatibility import load_runtime_compatibility
 from comsol_mcp.durable import canonical_sha256_v1
 from comsol_mcp.environment_identity import get_environment_identity
 from comsol_mcp.path_policy import PathPolicy
-from comsol_mcp.settings import SEMANTIC_ENABLED_ENV, SETTINGS_PATH_ENV, settings_status
+from comsol_mcp.settings import (
+    LEXICAL_DOCS_ENABLED_ENV,
+    SEMANTIC_ENABLED_ENV,
+    SETTINGS_PATH_ENV,
+    load_settings,
+    settings_status,
+)
 from comsol_mcp.shared_session.contracts import (
     SHARED_SERVER_FEATURE_ENV,
     normalize_shared_server_feature_gate,
@@ -208,6 +214,7 @@ def get_capabilities(selection: ProfileSelection | None = None) -> dict:
     started = time.perf_counter()
     active_selection = selection or resolve_profile()
     status = session_manager.get_status()
+    manuals_feature_enabled = active_selection.feature_enabled("lexical_docs")
     semantic_feature_enabled = active_selection.feature_enabled("semantic_docs")
     shared_feature_enabled = active_selection.feature_enabled("shared_server")
     standalone_profile_active = active_selection.name in {
@@ -216,6 +223,12 @@ def get_capabilities(selection: ProfileSelection | None = None) -> dict:
         "full",
     }
     semantic = semantic_capability_status(feature_enabled=semantic_feature_enabled)
+    manual_settings = load_settings()["lexical_docs"]
+    manual_index = manual_settings["index_path"]
+    manual_configured = bool(manual_index)
+    manual_available = bool(
+        manuals_feature_enabled and manual_index and Path(manual_index).is_file()
+    )
     compatibility = load_runtime_compatibility()
     shared_gate = normalize_shared_server_feature_gate(
         active_selection.name,
@@ -318,6 +331,11 @@ def get_capabilities(selection: ProfileSelection | None = None) -> dict:
         "disabled_by_default": [
             *(
                 []
+                if manuals_feature_enabled
+                else ["manual_search", "manual_read_pages"]
+            ),
+            *(
+                []
                 if semantic_feature_enabled
                 else [
                     "semantic_search",
@@ -343,6 +361,7 @@ def get_capabilities(selection: ProfileSelection | None = None) -> dict:
             "default_profile": DEFAULT_PROFILE,
             "wave_optics_recommended_profile": "wave_optics",
             "independent_feature_gates": {
+                "lexical_docs": LEXICAL_DOCS_ENABLED_ENV,
                 "semantic_docs": SEMANTIC_ENABLED_ENV,
                 "shared_server": SHARED_SERVER_FEATURE_ENV,
             },
@@ -401,6 +420,9 @@ def get_capabilities(selection: ProfileSelection | None = None) -> dict:
             "paired_png_shared_color_limits_required": True,
         },
         "manual_search": {
+            "feature_enabled": manuals_feature_enabled,
+            "configured": manual_configured,
+            "available": manual_available,
             "backend": "sqlite_fts5_bm25",
             "isolated_worker": True,
             "hard_deadline": True,
@@ -554,7 +576,9 @@ def startup_capability_summary(selection: ProfileSelection | None = None) -> str
         f"profile={capabilities['profile']}; "
         f"tools={capabilities['tool_count']}; "
         f"target=COMSOL {targets['comsol']} exact licensed / MPh {targets['mph']}; "
-        "lexical_manual=enabled; semantic_docs="
+        "lexical_manual="
+        f"{'active' if capabilities['manual_search']['feature_enabled'] else 'disabled'}; "
+        "semantic_docs="
         f"{'active' if capabilities['semantic_search']['feature_enabled'] else 'disabled'}; "
         "durable_jobs=staged_sweep,validation_matrix,spectral_characterization,"
         "convergence_campaign,branch_continuation_campaign; "

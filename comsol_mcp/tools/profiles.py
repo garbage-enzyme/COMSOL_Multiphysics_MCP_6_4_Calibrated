@@ -10,6 +10,7 @@ from typing import Any
 from comsol_mcp.contracts import bounded_public_schema, structurally_guarded
 from comsol_mcp.operation_arbiter import guard_tool_call
 from comsol_mcp.settings import (
+    LEXICAL_DOCS_ENABLED_ENV,
     PROFILE_ENV,
     SEMANTIC_ENABLED_ENV,
     SETTINGS_PATH_ENV,
@@ -25,7 +26,7 @@ _PROFILE_SELECTION_TOKEN = object()
 
 PROFILE_DESCRIPTIONS = {
     "core": (
-        "Default mature ownership, job, session, inspection, one-point solve, and manual surface."
+        "Default mature ownership, job, session, inspection, and one-point solve surface."
     ),
     "basic_fem": (
         "Core plus typed conventional FEM construction, bounded exports, and standalone execution."
@@ -115,6 +116,7 @@ def resolve_profile(
         source = f"{source}_invalid_profile_fallback"
         fallback_used = True
     feature_environment = {
+        "lexical_docs": LEXICAL_DOCS_ENABLED_ENV,
         "semantic_docs": SEMANTIC_ENABLED_ENV,
         "shared_server": SHARED_SERVER_ENV,
     }

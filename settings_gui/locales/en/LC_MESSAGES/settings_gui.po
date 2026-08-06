@@ -62,6 +62,9 @@ msgstr "Choose folder"
 msgid "Choose file"
 msgstr "Choose file"
 
+msgid "Choose index file"
+msgstr "Choose index file"
+
 msgid "GUI release"
 msgstr "GUI release"
 
@@ -200,14 +203,26 @@ msgstr "Check that summary statements match the saved result values."
 msgid "Check that a resumed job uses the same producer and driver."
 msgstr "Check that a resumed job uses the same producer and driver."
 
+msgid "Manual sources and lexical search"
+msgstr "Manual sources and lexical search"
+
+msgid "Optional semantic search"
+msgstr "Optional semantic search"
+
+msgid "Enable local keyword search for installed or copied PDF manuals. This is off by default because COMSOL manuals may not be installed."
+msgstr "Enable local keyword search for installed or copied PDF manuals. This is off by default because COMSOL manuals may not be installed."
+
+msgid "Folder scanned recursively when generating the manual index. Choose the folder containing the PDF manuals."
+msgstr "Folder scanned recursively when generating the manual index. Choose the folder containing the PDF manuals."
+
+msgid "SQLite FTS5/BM25 index used by manual_search. Use an ASCII-only full path. The Generate Index action creates or atomically replaces this file."
+msgstr "SQLite FTS5/BM25 index used by manual_search. Use an ASCII-only full path. The Generate Index action creates or atomically replaces this file."
+
 msgid "Enable optional semantic manual-search tools for the selected profile. This feature requires prepared local indexes and a search model."
 msgstr "Enable optional semantic manual-search tools for the selected profile. This feature requires prepared local indexes and a search model."
 
-msgid "Optional folder containing prepared semantic-search files. This is not COMSOL's built-in manual folder. \nExample: %LOCALAPPDATA%\\comsol_mcp\\semantic\\manuals"
-msgstr "Optional folder containing prepared semantic-search files. This is not COMSOL's built-in manual folder. \nExample: %LOCALAPPDATA%\\comsol_mcp\\semantic\\manuals"
-
-msgid "Optional SQLite file used for manual text search. \nExample: %LOCALAPPDATA%\\comsol_mcp\\semantic\\manuals.sqlite3"
-msgstr "Optional SQLite file used for manual text search. \nExample: %LOCALAPPDATA%\\comsol_mcp\\semantic\\manuals.sqlite3"
+msgid "Optional folder containing the prepared semantic vector index. It is independent from the SQLite lexical index."
+msgstr "Optional folder containing the prepared semantic vector index. It is independent from the SQLite lexical index."
 
 msgid "Optional folder containing the local semantic-search model. \nExample: %LOCALAPPDATA%\\comsol_mcp\\semantic\\models"
 msgstr "Optional folder containing the local semantic-search model. \nExample: %LOCALAPPDATA%\\comsol_mcp\\semantic\\models"
@@ -295,3 +310,60 @@ msgstr "Settings could not be prepared safely."
 
 msgid "Settings are missing or damaged. Preserve them and rebuild defaults?"
 msgstr "Settings are missing or damaged. Preserve them and rebuild defaults?"
+
+msgid "Generate Index"
+msgstr "Generate Index"
+
+msgid "Generate manual index"
+msgstr "Generate manual index"
+
+msgid "Starting index worker..."
+msgstr "Starting index worker..."
+
+msgid "Cancelling safely..."
+msgstr "Cancelling safely..."
+
+msgid "{percent}% — {files}/{total_files} PDFs, {pages}/{total_pages} pages{source}"
+msgstr "{percent}% — {files}/{total_files} PDFs, {pages}/{total_pages} pages{source}"
+
+msgid "Replace existing index?"
+msgstr "Replace existing index?"
+
+msgid "A validated new index will atomically replace the existing file. Continue?"
+msgstr "A validated new index will atomically replace the existing file. Continue?"
+
+msgid "Choose both the PDF folder and SQLite index file first."
+msgstr "Choose both the PDF folder and SQLite index file first."
+
+msgid "Index generation could not start. Check the selected paths and permissions."
+msgstr "Index generation could not start. Check the selected paths and permissions."
+
+msgid "Manual index ready"
+msgstr "Manual index ready"
+
+msgid "Indexed {pdfs} PDFs and {pages} pages. Corpus fingerprint: {fingerprint}"
+msgstr "Indexed {pdfs} PDFs and {pages} pages. Corpus fingerprint: {fingerprint}"
+
+msgid "Index generation failed"
+msgstr "Index generation failed"
+
+msgid "The index worker stopped without a completion receipt."
+msgstr "The index worker stopped without a completion receipt."
+
+msgid "Index generation cancelled"
+msgstr "Index generation cancelled"
+
+msgid "Temporary files were removed and the previous index was preserved."
+msgstr "Temporary files were removed and the previous index was preserved."
+
+msgid "Manual search is not ready"
+msgstr "Manual search is not ready"
+
+msgid "Choose or generate a valid SQLite manual index before enabling search."
+msgstr "Choose or generate a valid SQLite manual index before enabling search."
+
+msgid "Semantic search is not ready"
+msgstr "Semantic search is not ready"
+
+msgid "Enable manual search and choose valid lexical, semantic-index, and model assets first."
+msgstr "Enable manual search and choose valid lexical, semantic-index, and model assets first."

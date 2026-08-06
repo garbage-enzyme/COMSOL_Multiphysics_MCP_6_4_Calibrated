@@ -15,6 +15,13 @@ class Dialogs:
             filetypes=(("SQLite", "*.sqlite3 *.sqlite *.db"), ("All files", "*.*")),
         )
 
+    def ask_save_file(self, *, title: str) -> str:
+        return filedialog.asksaveasfilename(
+            title=title,
+            defaultextension=".sqlite3",
+            filetypes=(("SQLite", "*.sqlite3"), ("All files", "*.*")),
+        )
+
     def confirm(self, *, title: str, message: str) -> bool:
         return bool(messagebox.askyesno(title=title, message=message))
 

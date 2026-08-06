@@ -71,6 +71,9 @@ class QuietDialogs:
     def ask_file(self, *, title: str) -> str:
         return ""
 
+    def ask_save_file(self, *, title: str) -> str:
+        return ""
+
     def rebuild_or_exit(self, *, title: str, message: str) -> bool:
         return True
 
@@ -146,18 +149,22 @@ def _scenario_constructs_every_tab_and_field() -> None:
             "evidence_integrity.checks.artifact_chain_verification",
             "evidence_integrity.checks.summary_claim_verification",
             "evidence_integrity.checks.producer_driver_compatibility",
+            "manuals.root",
+            "lexical_docs.enabled",
+            "lexical_docs.index_path",
             "semantic_docs.enabled",
             "semantic_docs.root",
-            "semantic_docs.lexical_index",
             "semantic_docs.model_path",
             "ownership.owner",
         }
         assert "shared" not in TAB_IDS
         assert _field_keys(app, "profile") == ["profile.name", "shared_server.enabled"]
-        assert _field_keys(app, "semantic") == [
+        assert _field_keys(app, "docs")[:6] == [
+            "manuals.root",
+            "lexical_docs.enabled",
+            "lexical_docs.index_path",
             "semantic_docs.enabled",
             "semantic_docs.root",
-            "semantic_docs.lexical_index",
             "semantic_docs.model_path",
         ]
         app.notebook.select(TAB_IDS.index("about"))
@@ -333,15 +340,44 @@ def _scenario_feature_checkboxes_compose() -> None:
     root, app, controller, _store = _application(document)
     try:
         _boolean_widget(app, "shared_server.enabled").invoke()
-        _boolean_widget(app, "semantic_docs.enabled").invoke()
         root.update_idletasks()
 
         assert get_value(controller.model.document, "profile.name") == "core"
         assert get_value(controller.model.document, "shared_server.enabled") is True
-        assert get_value(controller.model.document, "semantic_docs.enabled") is True
+        assert get_value(controller.model.document, "lexical_docs.enabled") is False
+        assert get_value(controller.model.document, "semantic_docs.enabled") is False
         assert app.variables["shared_server.enabled"].get() is True
-        assert app.variables["semantic_docs.enabled"].get() is True
+        assert app.variables["lexical_docs.enabled"].get() is False
+        assert app.variables["semantic_docs.enabled"].get() is False
         assert app.banner is not None and app.banner.winfo_manager() == "pack"
+    finally:
+        app.close()
+
+
+def _scenario_doc_path_controls_follow_feature_gates() -> None:
+    document = default_settings_document()
+    document["gui"]["language"] = "en"
+    root, app, controller, _store = _application(document)
+    try:
+        controller.model.update("lexical_docs.index_path", "D:/docs/manuals.sqlite3")
+        controller.model.update("semantic_docs.root", "D:/docs/semantic")
+        controller.model.update("semantic_docs.model_path", "D:/docs/model")
+        root.update_idletasks()
+        assert all("disabled" in widget.state() for widget in app.field_widgets["lexical_docs.index_path"])
+        assert all("disabled" in widget.state() for key in ("semantic_docs.root", "semantic_docs.model_path") for widget in app.field_widgets[key])
+
+        _boolean_widget(app, "lexical_docs.enabled").invoke()
+        _boolean_widget(app, "semantic_docs.enabled").invoke()
+        root.update_idletasks()
+        assert all("disabled" not in widget.state() for widget in app.field_widgets["lexical_docs.index_path"])
+        assert all("disabled" not in widget.state() for key in ("semantic_docs.root", "semantic_docs.model_path") for widget in app.field_widgets[key])
+
+        _boolean_widget(app, "lexical_docs.enabled").invoke()
+        _boolean_widget(app, "semantic_docs.enabled").invoke()
+        root.update_idletasks()
+        assert get_value(controller.model.document, "lexical_docs.index_path") == "D:/docs/manuals.sqlite3"
+        assert get_value(controller.model.document, "semantic_docs.root") == "D:/docs/semantic"
+        assert all("disabled" in widget.state() for widget in app.field_widgets["lexical_docs.index_path"])
     finally:
         app.close()
 
@@ -399,6 +435,7 @@ _TK_SCENARIOS = {
     "language": _scenario_language_rebuild,
     "profile-help": _scenario_profile_help_changes,
     "feature-checkboxes": _scenario_feature_checkboxes_compose,
+    "doc-path-gates": _scenario_doc_path_controls_follow_feature_gates,
     "scale": _scenario_scale_rebuild,
 }
 
@@ -453,6 +490,10 @@ def test_profile_help_changes_with_selected_profile() -> None:
 
 def test_feature_checkboxes_are_independent_and_composable() -> None:
     _run_tk_scenario("feature-checkboxes")
+
+
+def test_document_path_controls_follow_feature_gates_and_retain_values() -> None:
+    _run_tk_scenario("doc-path-gates")
 
 
 @pytest.mark.parametrize("version", ["9.0.0", 2, None])

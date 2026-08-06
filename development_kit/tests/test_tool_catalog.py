@@ -40,6 +40,7 @@ def test_full_tool_schema_snapshot_is_stable():
     selection = resolve_profile(
         "full",
         environ={
+            "COMSOL_MCP_ENABLE_LEXICAL_DOCS": "true",
             "COMSOL_MCP_ENABLE_SEMANTIC_DOCS": "true",
             "COMSOL_MCP_ENABLE_SHARED_SERVER": "true",
         },

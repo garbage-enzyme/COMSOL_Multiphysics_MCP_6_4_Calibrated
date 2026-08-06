@@ -5,22 +5,26 @@
   "tool_count": 163,
   "profiles": {
     "core": {
-      "tool_count": 47
+      "tool_count": 45
     },
     "basic_fem": {
-      "tool_count": 109
+      "tool_count": 107
     },
     "wave_optics": {
-      "tool_count": 76
+      "tool_count": 74
     },
     "experimental": {
-      "tool_count": 97
+      "tool_count": 95
     },
     "full": {
-      "tool_count": 150
+      "tool_count": 148
     }
   },
   "features": {
+    "lexical_docs": {
+      "tool_count": 2,
+      "default_enabled": false
+    },
     "semantic_docs": {
       "tool_count": 3,
       "default_enabled": false
@@ -32,12 +36,12 @@
   },
   "schema_registry": {
     "entry_count": 83,
-    "registry_sha256": "5c892344c896583973ee3e10f0b18ba024c902485c55dbdf73750624326947ec"
+    "registry_sha256": "9cb7c297d624670ee84ec0a3036d0126ad9ff8447b568f9103746a4de9751b9c"
   },
   "identities": {
-    "catalog_sha256": "bf26d39cae68b40b9a84a8a911dec82aad3de736efa8c16a160b44ba12a5f274",
-    "profile_tools_sha256": "0a97cdbd3a4ec178a44fcd9247c658f5a02d50615ba755b6f4988d5cfb6ba810",
-    "feature_tools_sha256": "5f400de77399253ecc066ef732cb6278edf00f995b49e1a2a7bb1e0ed0c8fc51",
+    "catalog_sha256": "f336d1ce4f7cd6a8d75987376cca6e1e40135c89b85ec8d6f31c3f467e0ef4ae",
+    "profile_tools_sha256": "fa1c6756a9367d34d37848826d27c2bab6f9158a63379fcc408d56cd3811a672",
+    "feature_tools_sha256": "e37721d24bcd1ee6a949a156eaba90936bc5812b8b2f7a0f5fddc04fa928439a",
     "runtime_compatibility_sha256": "16e932bbead0e8c0f86a573b3ffba5013ebc9cecada1615d58aac6ccc492f332"
   }
 }

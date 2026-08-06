@@ -14,7 +14,7 @@ PROFILE_NAMES = (
     "experimental",
     "full",
 )
-FEATURE_NAMES = ("semantic_docs", "shared_server")
+FEATURE_NAMES = ("lexical_docs", "semantic_docs", "shared_server")
 
 
 @dataclass(frozen=True)
@@ -322,7 +322,7 @@ _GROUP_BY_REGISTRAR = {
     "register_branch_continuation_tools": "branch_continuation_evidence",
     "register_shared_session_tools": "shared_session",
     "register_knowledge_tools": "embedded_docs",
-    "register_lexical_manual_tools": "manuals",
+    "register_lexical_manual_tools": "lexical_docs",
 }
 
 _EXPERIMENTAL_TOOLS = frozenset(
@@ -714,14 +714,19 @@ _CORE_TOOLS = frozenset(
         "solutions_list",
         "datasets_list",
         "results_global_evaluate",
-        "manual_search",
-        "manual_read_pages",
         "spectral_characterize",
         "spectral_model_compare",
         "simulation_configuration_validate",
         "job_spec_preview",
         "convergence_evaluate",
         "branch_continuation_plan",
+    }
+)
+
+_MANUALS_ADDITIONS = frozenset(
+    {
+        "manual_search",
+        "manual_read_pages",
     }
 )
 
@@ -920,6 +925,7 @@ _SHARED_SERVER_ADDITIONS = _DESKTOP_SHARED_FOUNDATION - _CORE_TOOLS
 def _build_registry() -> dict[str, ToolMetadata]:
     all_names = {name for names in _TOOLS_BY_REGISTRAR.values() for name in names}
     feature_by_tool = {
+        **{name: "lexical_docs" for name in _MANUALS_ADDITIONS},
         **{name: "semantic_docs" for name in _SEMANTIC_DOCS_ADDITIONS},
         **{name: "shared_server" for name in _SHARED_SERVER_ADDITIONS},
     }

@@ -166,12 +166,12 @@ English (en)
 | `profile.name` | `"core"` | 可选 `core`、`basic_fem`、`wave_optics`、`experimental` 或 `full`；保存为小写。不支持的值会回落到 `core` 并报告来源。 |
 
 新手在重视安全、希望减少可用操作时，可以从 `core` 开始。大多数进行常规仿真的用户应
-选择 `basic_fem`。Profile 只控制 COMSOL 自动化仿真及未来自主探索工具的可见性；共享
-协作和语义检索使用独立 Boolean 开关，可用于任意 profile，也可同时启用。
+选择 `basic_fem`。Profile 只控制 COMSOL 自动化仿真及未来自主探索工具的可见性；手册
+检索、语义检索和共享协作使用独立 Boolean 开关，可用于任意 profile，也可同时启用。
 
 | Profile | 适用情况 |
 | --- | --- |
-| `core` | 面向新手的安全默认项：操作较少，可查看模型、管理任务、进行谨慎的单点检查与手册搜索。 |
+| `core` | 面向新手的安全默认项：操作较少，可查看模型、管理任务并进行谨慎的单点检查。 |
 | `basic_fem` | 推荐大多数用户选择：常规 FEM 建模、结果导出和 Windows standalone 包。 |
 | `wave_optics` | 光学与超表面、场结果查看、Wave Optics 检查、单点审计和分阶段参数流程。 |
 | `experimental` | 范围更广或尚未成熟、需要仔细检查输出的额外工具。 |
@@ -218,13 +218,25 @@ Java 查找顺序是：COMSOL 自带且可用的 Java、`JAVA_HOME`、`JDK_HOME`
 
 关闭任何一项都属于探索性跳过。受影响的正式结果会继续标记为“未完整验证”。
 
+### 手册关键词检索
+
+| 设置项 | 默认值 | 作用和可填写内容 |
+| --- | --- | --- |
+| `manuals.root` | `null` | “生成索引”递归扫描的原始 COMSOL PDF 根目录。 |
+| `lexical_docs.enabled` | `false` | 独立控制 `manual_search` 和 `manual_read_pages`。 |
+| `lexical_docs.index_path` | `null` | SQLite FTS5/BM25 索引的仅含 ASCII 字符目标路径。 |
+
+“文档”页通过隔离后台进程生成索引。进度弹窗显示当前阶段、PDF 文件、已处理
+PDF/页数和百分比。新索引通过 SQLite 完整性、元数据和行数验证后才原子替换；
+取消或失败会清理精确临时文件并保留原有有效索引。成功建库不会自动开启手册或
+语义搜索。
+
 ### 可选语义检索
 
 | 设置项 | 默认值 | 作用和可填写内容 |
 | --- | --- | --- |
 | `semantic_docs.enabled` | `false` | 独立控制隔离式语义工具；可与任意 profile 以及 `shared_server.enabled` 组合。 |
-| `semantic_docs.root` | `null` | 预处理语义检索资产的可选根目录。它不是 COMSOL 安装包自带的 manual 目录，也不会自动检测。 |
-| `semantic_docs.lexical_index` | `null` | 可选的只读 SQLite 词法索引文件。 |
+| `semantic_docs.root` | `null` | 已准备语义向量索引的可选根目录，与 SQLite 词法索引分开。 |
 | `semantic_docs.model_path` | `null` | 可选的本地语义模型版本目录。 |
 
 三项资产路径保持 `null` 是正常状态。只有事先生成并放好所需资产后，开启
@@ -260,10 +272,11 @@ Java 查找顺序是：COMSOL 自带且可用的 Java、`JAVA_HOME`、`JDK_HOME`
       "producer_driver_compatibility": true
     }
   },
+  "manuals": {"root": null},
+  "lexical_docs": {"enabled": false, "index_path": null},
   "semantic_docs": {
     "enabled": false,
     "root": null,
-    "lexical_index": null,
     "model_path": null
   },
   "ownership": {"owner": null},

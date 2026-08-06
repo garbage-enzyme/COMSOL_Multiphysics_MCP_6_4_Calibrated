@@ -5,6 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 from pathlib import Path
 
+from comsol_mcp.knowledge.lexical_manual import build_index_from_records
 from comsol_mcp.settings import GUI_LANGUAGES, default_settings_document
 from comsol_mcp.tools.catalog import PROFILE_NAMES
 from settings_gui.comsol_discovery import DiscoveryResult
@@ -63,6 +64,9 @@ class FakeDialogs:
     def ask_file(self, *, title: str) -> str:
         return self.file
 
+    def ask_save_file(self, *, title: str) -> str:
+        return self.file
+
 
 def _controller(*, dialogs: FakeDialogs | None = None, discover=None):
     model = SettingsFormModel(default_settings_document())
@@ -89,8 +93,8 @@ def test_every_settings_leaf_has_one_typed_field_binding() -> None:
     assert next(field for field in FIELDS if field.key == "gui.language").choices == GUI_LANGUAGES
     assert next(field for field in FIELDS if field.key == "profile.name").choices == PROFILE_NAMES
     assert next(field for field in FIELDS if field.key == "paths.model_read_roots").kind == "roots"
-    assert (
-        next(field for field in FIELDS if field.key == "semantic_docs.lexical_index").kind == "file"
+    assert next(field for field in FIELDS if field.key == "lexical_docs.index_path").kind == (
+        "save_file"
     )
 
 
@@ -279,9 +283,85 @@ def test_browser_cancellation_has_no_effect() -> None:
     before = deepcopy(controller.model.document)
 
     controller.browse_directory("runtime.directory")
-    controller.browse_file("semantic_docs.lexical_index")
+    controller.browse_save_file("lexical_docs.index_path")
 
     assert controller.model.document == before
+
+
+def test_manual_search_can_be_enabled_before_index_generation(tmp_path: Path) -> None:
+    controller, _store, dialogs = _controller()
+    missing = tmp_path / "missing.sqlite3"
+    controller.model.update("lexical_docs.index_path", str(missing))
+
+    assert controller.update("lexical_docs.enabled", True) is True
+    assert get_value(controller.model.document, "lexical_docs.enabled") is True
+    assert not dialogs.errors
+
+    build_index_from_records(
+        [
+            {
+                "source": "manual.pdf",
+                "module": "manual",
+                "page": 1,
+                "heading": "Heading",
+                "text": "searchable content",
+            }
+        ],
+        missing,
+    )
+
+    assert get_value(controller.model.document, "lexical_docs.enabled") is True
+
+
+def test_semantic_enable_is_editable_before_assets_are_selected(tmp_path: Path) -> None:
+    controller, _store, dialogs = _controller()
+
+    assert controller.update("semantic_docs.enabled", True) is True
+    assert not dialogs.errors
+
+    index = tmp_path / "manuals.sqlite3"
+    build_index_from_records([], index)
+    semantic_root = tmp_path / "semantic-index"
+    model_path = tmp_path / "model"
+    semantic_root.mkdir()
+    model_path.mkdir()
+    controller.model.update("lexical_docs.index_path", str(index))
+    controller.model.update("lexical_docs.enabled", True)
+    controller.model.update("semantic_docs.root", str(semantic_root))
+    controller.model.update("semantic_docs.model_path", str(model_path))
+
+    assert controller.update("semantic_docs.enabled", True) is True
+    assert get_value(controller.model.document, "semantic_docs.enabled") is True
+
+
+def test_generate_index_starts_one_background_task_from_form_paths(tmp_path: Path) -> None:
+    pdf_root = tmp_path / "pdf"
+    pdf_root.mkdir()
+    index = tmp_path / "manuals.sqlite3"
+    calls = []
+
+    class FakeTask:
+        def __init__(self, **kwargs):
+            calls.append(kwargs)
+            self.started = False
+
+        def start(self):
+            self.started = True
+
+    model = SettingsFormModel(default_settings_document())
+    model.update("manuals.root", str(pdf_root))
+    model.update("lexical_docs.index_path", str(index))
+    controller = SettingsController(
+        model,
+        FakeStore(),
+        dialogs=FakeDialogs(),
+        index_task_factory=FakeTask,
+    )
+
+    task = controller.start_manual_index_build()
+
+    assert task is not None and task.started is True
+    assert calls == [{"pdf_root": str(pdf_root), "index_path": str(index)}]
 
 
 def test_auto_detect_decline_is_atomic(tmp_path: Path) -> None:

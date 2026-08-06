@@ -86,7 +86,7 @@ server 内强制执行的 ownership 和 validation 检查提供。
   Python、Conda、MPh、JPype 或另装 Java；COMSOL 本身仍然必需，项目不会打包或替代它。
 - **共享 Desktop 协作（默认关闭）。** 独立的 `shared_server.enabled` 功能可与任意工具 profile 组合，连接用户手动启动的本地 COMSOL Server，精确采用一个 Server 模型，执行非拥有式租约和 revision lock，运行持久化 attached job，并在 detach 时保留用户的 Server、Desktop、listener 和模型。
 - **Wave Optics 验证。** 专用 profile 支持只读模型预检，以及用于周期性超表面的单波长证据审计。
-- **有界离线手册检索。** SQLite FTS5/BM25 检索和页读取不在 COMSOL 控制进程中运行，返回紧凑的来源/页码引用。
+- **有界离线手册检索（默认关闭）。** `manuals.root` 表示原始 COMSOL PDF 目录；独立的 `lexical_docs.enabled` 功能在生成本地索引后增加 SQLite FTS5/BM25 检索和页读取。
 - **如实标注的可选语义检索。** 隔离式 `semantic_docs.enabled` 功能可与任意工具 profile 组合，但基线模型未通过质量和内存的晋级门槛；推荐默认使用词法手册检索。
 
 ## 统一项目设置
@@ -140,7 +140,7 @@ GUI 打开期间不要同时编辑 JSON。只有用户明确要求 agent 管理�
 
 | Profile | 适用场景 |
 | --- | --- |
-| `core`（默认） | 紧凑且成熟的控制面：状态、所有权、会话/模型检查、单点求解/求值及词法手册检索。 |
+| `core`（默认） | 紧凑且成熟的控制面：状态、所有权、会话/模型检查及单点求解/求值。 |
 | `basic_fem` | 在 `core` 基础上增加传统 FEM 的类型化构建、命名 selection、Pressure Acoustics 与数学 PDE、派生几何编辑、有界导出，以及无需 Python 的独立启动器工具。 |
 | `wave_optics` | 超表面推荐：在 `core` 基础上增加派生几何编辑、材料预览、locale-safe 场数据发现及有界 NPZ/manifest 提取、周期网格审计/冒烟、视觉审查合同、Wave Optics 预检和单点/参考审计。持久化分段任务仍通过 `job_submit`。 |
 | `experimental` | 显式选择的通用创建、异步、属性逃生口和项目辅助工具。 |
@@ -151,6 +151,7 @@ Profile 只控制 COMSOL 自动化仿真工具以及未来自主探索工具的�
 
 | 功能（高级 JSON 设置） | 增加的工具界面 |
 | --- | --- |
+| `lexical_docs.enabled=true` | 两个隔离的 SQLite FTS5/BM25 手册检索和精确页读取工具。 |
 | `shared_server.enabled=true` | 需要显式确认及精确进程/listener/model 身份的受保护 shared Desktop/attached-Server 工作流。 |
 | `semantic_docs.enabled=true` | 三个隔离的实验性向量辅助手册检索工具。 |
 
@@ -348,7 +349,9 @@ solver_status -> wave_optics_preflight -> wave_optics_reference_audit（可选�
 
 ## 手册检索
 
-`manual_search` 和 `manual_read_pages` 是正式的文档检索路径。它们使用离线 SQLite FTS5/BM25 索引、有截止时间的 worker 进程以及紧凑的来源/页码引用；此路径不会在 MCP 控制进程中导入 Torch 或 SentenceTransformer。
+`manual_search` 和 `manual_read_pages` 是正式的文档检索路径。它们使用离线 SQLite FTS5/BM25 索引、有截止时间的 worker 进程以及紧凑的来源/页码引用；此路径不会在 MCP 控制进程中导入 Torch 或 SentenceTransformer。由于安装 COMSOL 时可能不安装本地手册，这两个工具独立且默认关闭。
+
+设置界面的“文档”页把手册关键词检索与语义检索分开。选择原始 PDF 根目录和仅含 ASCII 字符的 SQLite 目标路径后，点击“生成索引”。后台弹窗会显示阶段、当前 PDF、页数和百分比；新数据库在同目录临时文件中构建并验证，成功后才原子发布，取消或失败不会损坏原有索引。有效索引生成后再手动启用手册检索。
 
 `semantic_docs.enabled` 是可选的隔离功能，不会干扰 COMSOL 控制。隔离 worker 向量检索只是英文诊断基线，并非多语言或生产质量声明：冻结基准中它提高了精确匹配召回率，却降低了改述/多概念召回，直接中文检索无命中，负查询没有正确弃答，长时间运行时内存也显著增长。基线模型及其索引资产已移除；替换模型需通过完整基准门槛后才能重新部署。常规工作请使用词法手册检索。
 
@@ -458,9 +461,11 @@ python -m comsol_mcp.knowledge.lexical_manual build --index D:\comsol_docs_fts\m
 ```powershell
 python -m pip install ".[semantic-docs]"
 # 优先使用设置界面的“文档”页；开发者/agent 自动化可编辑 JSON：
+#   manuals.root = "D:/COMSOL64/Multiphysics/doc"
+#   lexical_docs.enabled = true
+#   lexical_docs.index_path = "D:/comsol_docs_fts/manuals.sqlite3"
 #   semantic_docs.enabled = true
 #   semantic_docs.root = "D:/comsol_semantic"
-#   semantic_docs.lexical_index = "D:/comsol_docs_fts/manuals.sqlite3"
 #   semantic_docs.model_path = "D:/comsol_semantic/models/<model>/<revision>"
 ```
 
@@ -499,7 +504,7 @@ MCP 客户端配置示例：
 | 求解器并发 | 没有同主机所有权协议。 | 通过进程感知租约、外部客户端检测、状态、预检和过期租约恢复来防止冲突；不会终止不属于本服务器的进程。 |
 | 长任务 | 以交互式/当前进程工作流为主。 | 使用独立的持久化扫描和自适应光谱任务：不可变规格、经 `fsync` 的证据行、冻结 stage、校验恢复和已验证的取消清理。 |
 | Wave Optics | 只有通用工具。 | 提供周期性超表面专用的预检和单点证据审计，原始证据与调用方 policy 分离。 |
-| 手册检索 | 无有界手册检索。 | 默认使用有界、隔离的词法手册检索；实验性语义检索被隔离且明确未晋级。旧式进程内 ChromaDB 路径已移除。 |
+| 手册检索 | 无有界手册检索。 | 提供默认关闭、可独立启用的有界词法手册检索；实验性语义检索被隔离且明确未晋级。旧式进程内 ChromaDB 路径已移除。 |
 | Windows 路径 | 不特别保证 Unicode 保存路径。 | 通过 clientapi Java 保存 Unicode `.mph`；原生/持久化 runtime 和索引使用 ASCII-only 根目录。 |
 
 若在 MPh standalone 下使用上游工具时遇到 `No matching overloads`、`Operation_cannot_be_created_in_this_context` 或 client-list 索引错误，请使用本 Fork。只有确实需要宽泛旧接口兼容时才选择 `full`。

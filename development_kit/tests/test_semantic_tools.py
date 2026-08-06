@@ -265,7 +265,7 @@ print(json.dumps({'count': len(names), 'configured': status['configured']}))
     )
 
     assert completed.returncode == 0, completed.stderr
-    assert json.loads(completed.stdout)["count"] == 50
+    assert json.loads(completed.stdout)["count"] == 48
 
 
 def test_semantic_and_other_profile_counts_match_declared_discovery(monkeypatch):
@@ -283,9 +283,9 @@ def test_semantic_and_other_profile_counts_match_declared_discovery(monkeypatch)
         counts[profile] = len(asyncio.run(server.list_tools()))
 
     assert counts == {
-        "core": 47,
-        "basic_fem": 109,
-        "wave_optics": 76,
-        "experimental": 97,
-        "full": 150,
+        "core": 45,
+        "basic_fem": 107,
+        "wave_optics": 74,
+        "experimental": 95,
+        "full": 148,
     }

@@ -443,6 +443,7 @@ models are intentionally absent.
 - `comsol_mcp/knowledge/__init__.py` — This file exports knowledge and documentation services.
 - `comsol_mcp/knowledge/embedded.py` — This module registers embedded documentation tools.
 - `comsol_mcp/knowledge/lexical_manual.py` — This module implements bounded SQLite full-text manual search.
+- `comsol_mcp/knowledge/lexical_build_worker.py` — This module builds and atomically validates bounded SQLite manual indexes in an isolated process.
 - `comsol_mcp/knowledge/lexical_worker.py` — This module isolates lexical manual operations behind JSON transport.
 - `comsol_mcp/knowledge/semantic_contracts.py` — This module defines dependency-free semantic service contracts.
 - `comsol_mcp/knowledge/semantic_index.py` — This module builds and validates immutable semantic indexes.
@@ -528,6 +529,7 @@ models are intentionally absent.
 - `settings_gui/dialogs.py` — This module adapts native file, folder, confirmation, information, and error dialogs.
 - `settings_gui/fonts.py` — This module selects deterministic Windows CJK system-font fallbacks.
 - `settings_gui/i18n.py` — This module loads complete runtime gettext catalogs and supports language switching.
+- `settings_gui/manual_index.py` — This module manages one cancellable JSON-lines manual-index worker task for the GUI.
 - `settings_gui/model.py` — This module defines every settings field binding and the validated dirty form model.
 - `settings_gui/storage.py` — This module implements strict loading, recovery copies, and exact atomic settings writes.
 - `settings_gui/windows_lock.py` — This module enforces Windows mutex, sidecar, target-handle, and file-identity ownership.
@@ -547,6 +549,7 @@ models are intentionally absent.
 - `settings_gui/tests/test_i18n.py` — This module tests gettext completeness, placeholders, and reproducible PO and MO outputs.
 - `settings_gui/tests/test_icon.py` — This module verifies the packaged ICO dimensions, encoding, transparency-capable depth, and size bound.
 - `settings_gui/tests/test_model_controller.py` — This module tests complete field bindings and controller state transitions.
+- `settings_gui/tests/test_manual_index.py` — This module tests isolated manual-index task progress, cancellation, and cleanup.
 - `settings_gui/tests/test_storage.py` — This module tests Windows mutex, sharing, conflict, recovery, and atomic-write behavior.
 
 ## Shared utilities

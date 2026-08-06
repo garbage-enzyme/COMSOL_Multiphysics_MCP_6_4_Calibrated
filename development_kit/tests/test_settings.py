@@ -92,10 +92,11 @@ def test_deleted_entries_use_safe_defaults_without_an_error(tmp_path):
     assert settings["profile"]["name"] == "core"
     assert settings["runtime"] == defaults["runtime"]
     assert settings["paths"] == defaults["paths"]
+    assert settings["manuals"] == {"root": None}
+    assert settings["lexical_docs"] == {"enabled": False, "index_path": None}
     assert settings["semantic_docs"] == {
         "enabled": False,
         "root": None,
-        "lexical_index": None,
         "model_path": None,
     }
     assert settings["shared_server"]["enabled"] is False
@@ -391,6 +392,40 @@ def test_legacy_synthetic_profiles_migrate_to_independent_feature_gates() -> Non
     assert full["settings"]["semantic_docs"]["enabled"] is True
 
 
+def test_settings_1_2_moves_lexical_index_out_of_semantic_group() -> None:
+    report = normalize_settings_document(
+        {
+            "schema_name": SETTINGS_SCHEMA,
+            "schema_version": "1.2.0",
+            "profile": {"name": "core"},
+            "manuals": {
+                "enabled": True,
+                "pdf_root": "D:/manuals",
+                "lexical_index": "D:/legacy.sqlite3",
+            },
+            "semantic_docs": {
+                "enabled": False,
+                "root": "D:/semantic",
+                "lexical_index": "D:/manuals.sqlite3",
+                "model_path": None,
+            },
+        }
+    )
+
+    assert report["errors"] == []
+    assert report["settings"]["schema_version"] == SETTINGS_VERSION
+    assert report["settings"]["manuals"] == {"root": str(Path("D:/manuals"))}
+    assert report["settings"]["lexical_docs"] == {
+        "enabled": True,
+        "index_path": str(Path("D:/manuals.sqlite3")),
+    }
+    assert report["settings"]["semantic_docs"] == {
+        "enabled": False,
+        "root": str(Path("D:/semantic")),
+        "model_path": None,
+    }
+
+
 @pytest.mark.parametrize("schema_version", [[], {}])
 def test_malformed_legacy_schema_version_falls_back_without_type_error(schema_version) -> None:
     report = normalize_settings_document(
@@ -413,10 +448,11 @@ def test_current_feature_gates_are_boolean_composable_and_environment_visible(tm
             "schema_version": SETTINGS_VERSION,
             "profile": {"name": "wave_optics"},
             "shared_server": {"enabled": True},
+            "manuals": {"root": "D:/manuals"},
+            "lexical_docs": {"enabled": True, "index_path": "D:/manuals.sqlite3"},
             "semantic_docs": {
                 "enabled": True,
                 "root": None,
-                "lexical_index": None,
                 "model_path": None,
             },
         },
@@ -427,6 +463,11 @@ def test_current_feature_gates_are_boolean_composable_and_environment_visible(tm
 
     assert loaded["profile"]["name"] == "wave_optics"
     assert loaded["shared_server"]["enabled"] is True
+    assert loaded["lexical_docs"]["enabled"] is True
     assert loaded["semantic_docs"]["enabled"] is True
     assert effective["COMSOL_MCP_ENABLE_SHARED_SERVER"] == "true"
+    assert effective["COMSOL_MCP_ENABLE_LEXICAL_DOCS"] == "true"
     assert effective["COMSOL_MCP_ENABLE_SEMANTIC_DOCS"] == "true"
+    assert effective["COMSOL_MANUALS_ROOT"] == str(Path("D:/manuals"))
+    assert effective["COMSOL_LEXICAL_DOCS_INDEX_PATH"] == str(Path("D:/manuals.sqlite3"))
+    assert effective["COMSOL_SEMANTIC_LEXICAL_INDEX"] == str(Path("D:/manuals.sqlite3"))

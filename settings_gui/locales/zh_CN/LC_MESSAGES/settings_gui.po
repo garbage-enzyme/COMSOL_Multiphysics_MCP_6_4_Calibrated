@@ -62,6 +62,9 @@ msgstr "选择文件夹"
 msgid "Choose file"
 msgstr "选择文件"
 
+msgid "Choose index file"
+msgstr "选择索引文件"
+
 msgid "GUI release"
 msgstr "GUI 发布版本"
 
@@ -200,14 +203,26 @@ msgstr "检查摘要说明是否与保存的结果数值一致。"
 msgid "Check that a resumed job uses the same producer and driver."
 msgstr "检查恢复任务是否使用相同的生成器和驱动。"
 
+msgid "Manual sources and lexical search"
+msgstr "手册来源与词法搜索"
+
+msgid "Optional semantic search"
+msgstr "可选语义搜索"
+
+msgid "Enable local keyword search for installed or copied PDF manuals. This is off by default because COMSOL manuals may not be installed."
+msgstr "启用已安装或复制到本机的 PDF 手册关键词搜索。由于安装 COMSOL 时可能未安装手册，此功能默认关闭。"
+
+msgid "Folder scanned recursively when generating the manual index. Choose the folder containing the PDF manuals."
+msgstr "生成手册索引时递归扫描的文件夹。请选择包含 PDF 手册的文件夹。"
+
+msgid "SQLite FTS5/BM25 index used by manual_search. Use an ASCII-only full path. The Generate Index action creates or atomically replaces this file."
+msgstr "manual_search 使用的 SQLite FTS5/BM25 索引。请使用仅含 ASCII 字符的完整路径。“生成索引”会创建或原子替换此文件。"
+
 msgid "Enable optional semantic manual-search tools for the selected profile. This feature requires prepared local indexes and a search model."
 msgstr "为所选 profile 启用可选的语义手册搜索工具。此功能需要预先准备本地索引和搜索模型。"
 
-msgid "Optional folder containing prepared semantic-search files. This is not COMSOL's built-in manual folder. \nExample: %LOCALAPPDATA%\\comsol_mcp\\semantic\\manuals"
-msgstr "存放已准备语义搜索文件的可选文件夹。它不是 COMSOL 自带的 manual 文件夹。\n示例：%LOCALAPPDATA%\\comsol_mcp\\semantic\\manuals"
-
-msgid "Optional SQLite file used for manual text search. \nExample: %LOCALAPPDATA%\\comsol_mcp\\semantic\\manuals.sqlite3"
-msgstr "用于手册文字搜索的可选 SQLite 文件。\n示例：%LOCALAPPDATA%\\comsol_mcp\\semantic\\manuals.sqlite3"
+msgid "Optional folder containing the prepared semantic vector index. It is independent from the SQLite lexical index."
+msgstr "存放已准备语义向量索引的可选文件夹。它与 SQLite 词法索引相互独立。"
 
 msgid "Optional folder containing the local semantic-search model. \nExample: %LOCALAPPDATA%\\comsol_mcp\\semantic\\models"
 msgstr "存放本地语义搜索模型的可选文件夹。\n示例：%LOCALAPPDATA%\\comsol_mcp\\semantic\\models"
@@ -295,3 +310,60 @@ msgstr "无法安全地准备设置文件。"
 
 msgid "Settings are missing or damaged. Preserve them and rebuild defaults?"
 msgstr "设置文件缺失或已损坏。是否保留原文件并重建默认设置？"
+
+msgid "Generate Index"
+msgstr "生成索引"
+
+msgid "Generate manual index"
+msgstr "生成手册索引"
+
+msgid "Starting index worker..."
+msgstr "正在启动索引工作进程……"
+
+msgid "Cancelling safely..."
+msgstr "正在安全取消……"
+
+msgid "{percent}% — {files}/{total_files} PDFs, {pages}/{total_pages} pages{source}"
+msgstr "{percent}% — {files}/{total_files} 个 PDF，{pages}/{total_pages} 页{source}"
+
+msgid "Replace existing index?"
+msgstr "要替换现有索引吗？"
+
+msgid "A validated new index will atomically replace the existing file. Continue?"
+msgstr "验证通过的新索引将原子替换现有文件。是否继续？"
+
+msgid "Choose both the PDF folder and SQLite index file first."
+msgstr "请先同时选择 PDF 文件夹和 SQLite 索引文件。"
+
+msgid "Index generation could not start. Check the selected paths and permissions."
+msgstr "无法启动索引生成。请检查所选路径和权限。"
+
+msgid "Manual index ready"
+msgstr "手册索引已就绪"
+
+msgid "Indexed {pdfs} PDFs and {pages} pages. Corpus fingerprint: {fingerprint}"
+msgstr "已索引 {pdfs} 个 PDF、{pages} 页。语料指纹：{fingerprint}"
+
+msgid "Index generation failed"
+msgstr "索引生成失败"
+
+msgid "The index worker stopped without a completion receipt."
+msgstr "索引工作进程已停止，但未返回完成凭据。"
+
+msgid "Index generation cancelled"
+msgstr "已取消索引生成"
+
+msgid "Temporary files were removed and the previous index was preserved."
+msgstr "临时文件已清理，原有索引保持不变。"
+
+msgid "Manual search is not ready"
+msgstr "手册搜索尚未就绪"
+
+msgid "Choose or generate a valid SQLite manual index before enabling search."
+msgstr "请先选择或生成有效的 SQLite 手册索引，再启用搜索。"
+
+msgid "Semantic search is not ready"
+msgstr "语义搜索尚未就绪"
+
+msgid "Enable manual search and choose valid lexical, semantic-index, and model assets first."
+msgstr "请先启用手册搜索，并选择有效的词法索引、语义索引和模型资源。"

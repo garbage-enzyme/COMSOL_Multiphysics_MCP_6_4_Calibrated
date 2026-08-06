@@ -39,6 +39,7 @@ MESSAGE_IDS = (
     "Remove",
     "Choose folder",
     "Choose file",
+    "Choose index file",
     "GUI release",
     "Installed package version",
     "Desktop shortcut",
@@ -102,18 +103,27 @@ MESSAGE_IDS = (
     "Check saved result files and their hashes.",
     "Check that summary statements match the saved result values.",
     "Check that a resumed job uses the same producer and driver.",
+    "Manual sources and lexical search",
+    "Optional semantic search",
+    (
+        "Enable local keyword search for installed or copied PDF manuals. "
+        "This is off by default because COMSOL manuals may not be installed."
+    ),
+    (
+        "Folder scanned recursively when generating the manual index. "
+        "Choose the folder containing the PDF manuals."
+    ),
+    (
+        "SQLite FTS5/BM25 index used by manual_search. Use an ASCII-only full path. "
+        "The Generate Index action creates or atomically replaces this file."
+    ),
     (
         "Enable optional semantic manual-search tools for the selected profile. "
         "This feature requires prepared local indexes and a search model."
     ),
     (
-        "Optional folder containing prepared semantic-search files. "
-        "This is not COMSOL's built-in manual folder. "
-        "\nExample: %LOCALAPPDATA%\\comsol_mcp\\semantic\\manuals"
-    ),
-    (
-        "Optional SQLite file used for manual text search. \nExample: "
-        "%LOCALAPPDATA%\\comsol_mcp\\semantic\\manuals.sqlite3"
+        "Optional folder containing the prepared semantic vector index. "
+        "It is independent from the SQLite lexical index."
     ),
     (
         "Optional folder containing the local semantic-search model. "
@@ -150,6 +160,25 @@ MESSAGE_IDS = (
     "Another settings editor is active. Close it and reopen settings.",
     "Settings could not be prepared safely.",
     "Settings are missing or damaged. Preserve them and rebuild defaults?",
+    "Generate Index",
+    "Generate manual index",
+    "Starting index worker...",
+    "Cancelling safely...",
+    "{percent}% — {files}/{total_files} PDFs, {pages}/{total_pages} pages{source}",
+    "Replace existing index?",
+    "A validated new index will atomically replace the existing file. Continue?",
+    "Choose both the PDF folder and SQLite index file first.",
+    "Index generation could not start. Check the selected paths and permissions.",
+    "Manual index ready",
+    "Indexed {pdfs} PDFs and {pages} pages. Corpus fingerprint: {fingerprint}",
+    "Index generation failed",
+    "The index worker stopped without a completion receipt.",
+    "Index generation cancelled",
+    "Temporary files were removed and the previous index was preserved.",
+    "Manual search is not ready",
+    "Choose or generate a valid SQLite manual index before enabling search.",
+    "Semantic search is not ready",
+    "Enable manual search and choose valid lexical, semantic-index, and model assets first.",
 )
 
 

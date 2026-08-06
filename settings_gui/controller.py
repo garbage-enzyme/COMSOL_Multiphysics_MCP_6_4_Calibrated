@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from .comsol_discovery import DiscoveryResult, discover_environment
 from .desktop_shortcut import create_desktop_shortcut, remove_desktop_shortcut
 from .dialogs import Dialogs
 from .i18n import Translator
+from .manual_index import ManualIndexBuildTask
 from .model import SettingsFormModel, get_value
 from .storage import SettingsStore
 
@@ -23,6 +25,7 @@ class SettingsController:
         discover: Callable[..., DiscoveryResult] = discover_environment,
         create_shortcut: Callable[..., dict[str, Any]] = create_desktop_shortcut,
         remove_shortcut: Callable[..., dict[str, Any]] = remove_desktop_shortcut,
+        index_task_factory: Callable[..., ManualIndexBuildTask] = ManualIndexBuildTask,
     ) -> None:
         self.model = model
         self.store = store
@@ -30,6 +33,7 @@ class SettingsController:
         self.discover = discover
         self._create_shortcut = create_shortcut
         self._remove_shortcut = remove_shortcut
+        self._index_task_factory = index_task_factory
         self.translator = Translator(model.language)
         self.restart_pending = False
         self._dirty_notice_shown = False
@@ -115,8 +119,43 @@ class SettingsController:
         if value:
             self.update(key, value)
 
+    def browse_save_file(self, key: str) -> None:
+        value = self.dialogs.ask_save_file(title=self.text("Choose index file"))
+        if value:
+            self.update(key, value)
+
     def clear(self, key: str) -> None:
         self.update(key, None)
+
+    def start_manual_index_build(self) -> ManualIndexBuildTask | None:
+        pdf_root = get_value(self.model.document, "manuals.root")
+        index_path = get_value(self.model.document, "lexical_docs.index_path")
+        if not pdf_root or not index_path:
+            self.dialogs.error(
+                title=self.text("Generate manual index"),
+                message=self.text("Choose both the PDF folder and SQLite index file first."),
+            )
+            return None
+        target = Path(index_path)
+        if target.exists() and not self.dialogs.confirm(
+            title=self.text("Replace existing index?"),
+            message=self.text(
+                "A validated new index will atomically replace the existing file. Continue?"
+            ),
+        ):
+            return None
+        try:
+            task = self._index_task_factory(pdf_root=pdf_root, index_path=index_path)
+            task.start()
+        except (OSError, RuntimeError, ValueError):
+            self.dialogs.error(
+                title=self.text("Generate manual index"),
+                message=self.text(
+                    "Index generation could not start. Check the selected paths and permissions."
+                ),
+            )
+            return None
+        return task
 
     def auto_detect(self, *, manual: bool) -> None:
         current_root = get_value(self.model.document, "comsol.installation_root")

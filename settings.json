@@ -1,6 +1,6 @@
 {
   "schema_name": "comsol_mcp.settings",
-  "schema_version": "1.2.0",
+  "schema_version": "1.3.0",
   "profile": {
     "name": "core"
   },
@@ -25,10 +25,16 @@
       "producer_driver_compatibility": true
     }
   },
+  "manuals": {
+    "root": null
+  },
+  "lexical_docs": {
+    "enabled": false,
+    "index_path": null
+  },
   "semantic_docs": {
     "enabled": false,
     "root": null,
-    "lexical_index": null,
     "model_path": null
   },
   "ownership": {

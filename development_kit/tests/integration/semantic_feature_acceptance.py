@@ -64,6 +64,7 @@ def _server(
         {
             "COMSOL_MCP_PROFILE": profile,
             "COMSOL_MCP_RUNTIME_DIR": str(runtime_dir),
+            "COMSOL_MCP_ENABLE_LEXICAL_DOCS": str(semantic_enabled).lower(),
             "COMSOL_MCP_ENABLE_SEMANTIC_DOCS": str(semantic_enabled).lower(),
             "COMSOL_SEMANTIC_ROOT": "D:/comsol_semantic",
             "COMSOL_SEMANTIC_LEXICAL_INDEX": "D:/comsol_docs_fts/manuals.sqlite3",
@@ -144,7 +145,7 @@ async def _semantic_flow(runtime_dir: Path) -> dict[str, Any]:
     assert all(item["module"] == "Wave_Optics_Module" for item in search["payload"]["results"])
     assert capabilities["payload"]["semantic_search"]["available"] is True
     assert capabilities["payload"]["profile"] == "core"
-    assert capabilities["payload"]["enabled_features"] == ["semantic_docs"]
+    assert capabilities["payload"]["enabled_features"] == ["manuals", "semantic_docs"]
     assert capabilities["payload"]["tool_count"] == 50
     assert reset["payload"]["success"] is True
     assert stopped["payload"]["worker"]["state"] == "stopped"
