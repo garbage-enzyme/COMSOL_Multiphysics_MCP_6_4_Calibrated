@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 import pytest
-from src.evidence.contracts import build_physical_evidence
+from src.evidence.contracts import build_physical_evidence, validate_physical_evidence
 from src.jobs.validation_collectors import execute_physical_audit_collector
 from src.jobs.validation_matrix import normalize_validation_matrix_spec
 
@@ -170,6 +170,12 @@ def test_point_audit_identity_fields_are_matrix_locked_and_wrapped(tmp_path):
     assert "clone_register" not in kwargs
     assert "clone_cleanup" not in kwargs
     wrapper = json.loads(Path(result["artifacts"]["manifest"]).read_text(encoding="utf-8"))
+    inner_path = tmp_path / "artifact" / wrapper["inner_manifest"]["relative_path"]
+    inner = json.loads(inner_path.read_text(encoding="utf-8"))
+    physical = validate_physical_evidence(inner["physical_evidence"], verify_hash=True)
+    assert physical["identity"]["config_id"] == point["point_fingerprint"]
+    assert physical["identity"]["source_sha256"] == spec["source_model_sha256"]
+    assert result["success"] is True
     assert wrapper["point"]["incidence"]["polarization_evidence"] == "label_only"
     assert wrapper["point"]["incidence_application"] == "not_mutated_by_collector_adapter"
     assert wrapper["inner_manifest"]["relative_path"] == "inner.json"
@@ -209,7 +215,7 @@ def test_reference_audit_uses_same_loaded_model_and_client(tmp_path):
         inputs={"component_tag": "comp1", "physics_tag": "ewfd"},
     )
     captured = {}
-    execute_physical_audit_collector(
+    result = execute_physical_audit_collector(
         point,
         collector,
         tmp_path / "reference",
@@ -223,6 +229,12 @@ def test_reference_audit_uses_same_loaded_model_and_client(tmp_path):
     )
 
     assert captured["args"] == ("MODEL", "CLIENT")
+    assert result["success"] is True
+    wrapper = json.loads(Path(result["artifacts"]["manifest"]).read_text(encoding="utf-8"))
+    assert wrapper["schema_name"] == "comsol_mcp.validation_matrix_collector"
+    assert wrapper["collector"] == "wave_optics_reference_audit"
+    assert wrapper["audit_status"] == "measurement_complete"
+    assert wrapper["inner_manifest"]["relative_path"] == "inner.json"
     assert "session_state" not in captured["kwargs"]
     assert "ownership_preflight" not in captured["kwargs"]
 

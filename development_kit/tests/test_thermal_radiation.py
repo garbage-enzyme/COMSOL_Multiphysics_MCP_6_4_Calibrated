@@ -170,8 +170,8 @@ def test_unit_emissivity_recovers_stefan_boltzmann_on_finite_domain():
 
 
 def test_lambertian_grid_recovers_pi_projected_solid_angle():
-    theta = np.linspace(0.0, math.pi / 2.0, 16)
-    phi = np.linspace(0.0, 2.0 * math.pi, 32)
+    theta = np.linspace(0.0, math.pi / 2.0, 64)
+    phi = np.linspace(0.0, 2.0 * math.pi, 16)
     angular = {
         "mode": "grid_trapezoid",
         "theta_rad": [float(item) for item in theta],

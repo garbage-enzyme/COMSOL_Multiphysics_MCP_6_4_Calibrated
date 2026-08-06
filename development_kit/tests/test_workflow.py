@@ -143,7 +143,11 @@ class FakeModel:
     def evaluate(self, expressions):
         raw = self.java.parameters.values.get("wl", "0")
         value = float(str(raw).split("[", 1)[0])
-        arrays = [np.array([value + index]) for index, _ in enumerate(expressions)]
+        values = {
+            "wl": value + 1,
+            "c_const/ewfd.freq": value + 2,
+        }
+        arrays = [np.array([values.get(expression, value)]) for expression in expressions]
         return arrays[0] if len(arrays) == 1 else arrays
 
 

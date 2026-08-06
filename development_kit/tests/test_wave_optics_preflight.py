@@ -50,12 +50,17 @@ def _hash(path):
 def test_evidence_ledger_has_stable_status_precedence():
     ledger = EvidenceLedger()
     assert ledger.inspection_status == "complete"
-    ledger.add("warning", "warning_code", "warning")
-    assert ledger.inspection_status == "complete"
-    ledger.add("unknown", "unknown_code", "unknown")
-    assert ledger.inspection_status == "partial"
-    ledger.add("integrity_error", "integrity_code", "blocked")
+    ledger.add("integrity_error", "early_integrity_code", "blocked")
     assert ledger.inspection_status == "integrity_blocked"
+    ledger.add("warning", "warning_code", "warning")
+    assert ledger.inspection_status == "integrity_blocked"
+    ledger.add("unknown", "unknown_code", "unknown")
+    assert ledger.inspection_status == "integrity_blocked"
+    lower_first = EvidenceLedger()
+    lower_first.add("unknown", "unknown_code", "unknown")
+    lower_first.add("warning", "warning_code", "warning")
+    lower_first.add("integrity_error", "integrity_code", "blocked")
+    assert lower_first.inspection_status == "integrity_blocked"
 
 
 def test_foundation_reports_evidence_only_and_preserves_source(tmp_path, monkeypatch):
@@ -95,9 +100,7 @@ def test_foundation_reports_evidence_only_and_preserves_source(tmp_path, monkeyp
     assert result["provenance"]["source_sha256"] == source_hash
     assert result["ownership"]["solve_permitted"] is True
     assert result["incidence"] == {}
-    assert "incidence_not_inspected" in {
-        item["code"] for item in result["evidence"]["unknowns"]
-    }
+    assert "incidence_not_inspected" in {item["code"] for item in result["evidence"]["unknowns"]}
     assert result["next_call"]["available"] is False
     assert result["next_call"]["missing_evidence"] == [
         "topology",
@@ -415,9 +418,7 @@ class FullFakeModel(MetadataOnlyModel):
         super().__init__(path)
         linked = fixture.pop("linked", True)
         empty_steps = fixture.pop("empty_steps", False)
-        self._java = FakeJavaModel(
-            FakeComponent(**fixture), linked=linked, empty_steps=empty_steps
-        )
+        self._java = FakeJavaModel(FakeComponent(**fixture), linked=linked, empty_steps=empty_steps)
         self._linked = linked
 
     @property
@@ -485,9 +486,7 @@ def test_empty_study_steps_are_explicit_unknown_evidence(tmp_path, monkeypatch):
     result = _full_result(tmp_path, monkeypatch, empty_steps=True)
 
     assert result["wavelength"]["structurally_linked"] is None
-    assert "study_steps_missing" in {
-        item["code"] for item in result["evidence"]["unknowns"]
-    }
+    assert "study_steps_missing" in {item["code"] for item in result["evidence"]["unknowns"]}
 
 
 def test_selected_boundary_probes_obey_global_budget(monkeypatch):
@@ -515,15 +514,11 @@ def test_selected_boundary_probes_obey_global_budget(monkeypatch):
     ledger = EvidenceLedger()
     boundary_map = {}
 
-    _extend_boundary_map(
-        LargeGeometry(), boundary_map, range(1, MAX_BOUNDARIES * 2 + 1), ledger
-    )
+    _extend_boundary_map(LargeGeometry(), boundary_map, range(1, MAX_BOUNDARIES * 2 + 1), ledger)
 
     assert len(probed) == MAX_BOUNDARIES
     assert len(boundary_map) == MAX_BOUNDARIES
-    assert "selected_boundary_probe_budget_exceeded" in {
-        item["code"] for item in ledger.unknowns
-    }
+    assert "selected_boundary_probe_budget_exceeded" in {item["code"] for item in ledger.unknowns}
 
 
 def test_selected_boundary_topology_failure_remains_partial_evidence(monkeypatch):
@@ -540,9 +535,7 @@ def test_selected_boundary_topology_failure_remains_partial_evidence(monkeypatch
 
     _extend_boundary_map(UnreadableGeometry(), {}, [1], ledger)
 
-    assert [item["code"] for item in ledger.unknowns] == [
-        "selected_boundary_topology_unreadable"
-    ]
+    assert [item["code"] for item in ledger.unknowns] == ["selected_boundary_topology_unreadable"]
 
 
 def test_complete_preflight_does_not_recommend_tool_outside_profile(tmp_path, monkeypatch):

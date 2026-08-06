@@ -40,4 +40,5 @@ $Config = @{
     MonitorIntervalSeconds = 0.2
     PointEstimateSeconds = 1
 }
-[void](Show-DurableJobMonitor -Config $Config -NoTopMost)
+$MonitorResult = Show-DurableJobMonitor -Config $Config -NoTopMost
+throw "Terminal banner monitor returned unexpectedly: $MonitorResult"

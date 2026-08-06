@@ -140,6 +140,10 @@ def main() -> None:
         block_result = apply_blocks(clone, record, block_preview, "comp1", "geom1")
         if not block_result.get("success"):
             raise AssertionError(f"block apply failed: {block_result}")
+        if fin_result.get("after") == fin_result.get("before"):
+            raise AssertionError("fin edit produced no observable state change")
+        if block_result.get("after") == block_result.get("before"):
+            raise AssertionError("block edit produced no observable state change")
         if block_result["geometry_run"] or block_result["mesh_run"]:
             raise AssertionError("block apply ran geometry or mesh implicitly")
 

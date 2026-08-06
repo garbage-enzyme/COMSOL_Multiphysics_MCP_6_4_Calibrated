@@ -237,7 +237,20 @@ def _manager(
             self.calls += 1
             return value
 
+    class RecordingReader:
+        def __init__(self, callback):
+            self.callback = callback
+            self.calls = 0
+
+        def __call__(self, *args):
+            self.calls += 1
+            return self.callback(*args)
+
     provider = ScriptedSnapshots(snapshots)
+    model_reader = RecordingReader(lambda _value: _inventory(models))
+    revision_reader = RecordingReader(
+        lambda _value, _tag: (revision_state["structural"], revision_state["state"])
+    )
     ownership = ownership or FakeOwnership(tmp_path)
     client = client or FakeClient()
     revision_state = revision_state or {
@@ -249,11 +262,8 @@ def _manager(
         ownership_factory=lambda: ownership,
         client_factory=client_factory or (lambda host, port: client),
         client_version_reader=lambda value: client_version,
-        model_inventory_reader=lambda value: _inventory(models),
-        model_revision_reader=lambda value, tag: (
-            revision_state["structural"],
-            revision_state["state"],
-        ),
+        model_inventory_reader=model_reader,
+        model_revision_reader=revision_reader,
         mcp_process_identity_provider=lambda: {
             "pid": 5000,
             "process_create_time": 900.0,
@@ -268,6 +278,8 @@ def _manager(
         clock=lambda: 1100.0,
     )
     manager._test_snapshot_provider = provider
+    manager._test_model_reader = model_reader
+    manager._test_revision_reader = revision_reader
     return (manager, ownership, client)
 
 
@@ -871,6 +883,12 @@ def test_automation_handoff_rejects_immediate_model_or_revision_change(tmp_path,
     assert manager.status()["state"] == "attached_model_locked"
     assert client.calls == []
     assert ownership.releases == 0
+    if changed_part == "model":
+        assert manager._test_model_reader.calls >= 2
+        assert manager._test_revision_reader.calls >= 1
+    else:
+        assert manager._test_model_reader.calls >= 1
+        assert manager._test_revision_reader.calls >= 2
 
 
 def test_automation_handoff_preserves_model_guard_when_disconnect_fails(tmp_path):

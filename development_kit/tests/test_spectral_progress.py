@@ -13,6 +13,7 @@ from src.jobs.spectral_progress import (
     build_spectral_progress,
 )
 from src.jobs.spectral_rows import read_spectral_rows
+from src.jobs import spectral_rows as spectral_rows_module
 from src.jobs.spectral_stages import build_initial_spectral_stage, build_spectral_stage_plan
 
 from development_kit.tests.test_spectral_rows import (
@@ -112,28 +113,52 @@ def _rows(spec, plan, values):
     for index, (point, wavelength, absorption) in enumerate(
         zip(plan["requested_points"], plan["requested_wavelengths_m"], values), 1
     ):
-        raw = {
-            "point": point["point_fingerprint"],
-            "wavelength": wavelength,
-            "absorption": absorption,
+        body = {
+            "schema_name": spectral_rows_module.SPECTRAL_ROW_SCHEMA_NAME,
+            "schema_version": spectral_rows_module.SPECTRAL_ROW_SCHEMA_VERSION,
+            "sequence": index,
+            "attempt": 1,
+            "stage_index": plan["stage_index"],
+            "stage_kind": plan["stage_kind"],
+            "created_at_epoch": float(index),
+            "spec_fingerprint": spec["spec_fingerprint"],
+            "source_model_sha256": spec["source_model_sha256"],
+            "configuration_sha256": spec["configuration_sha256"],
+            "collector_identity_sha256": spectral_rows_module.spectral_collector_identity(spec),
+            "point_id": point["point_id"],
+            "point_fingerprint": point["point_fingerprint"],
+            "requested_wavelength_m": wavelength,
+            "evaluated_wavelength_m": wavelength,
+            "frequency_wavelength_m": wavelength,
+            "R": 0.95 - absorption,
+            "T": 0.05,
+            "A": absorption,
+            "mesh_element_count": None,
+            "mesh_vertex_count": None,
+            "solve_seconds": 0.0,
+            "audit_artifact": {
+                "wrapper_relative_path": "wrapper.json",
+                "wrapper_sha256": "a" * 64,
+                "wrapper_size_bytes": 1,
+                "inner_relative_path": "inner.json",
+                "inner_sha256": "b" * 64,
+                "inner_size_bytes": 1,
+                "physical_evidence_sha256": "c" * 64,
+                "audit_status": "measurement_complete",
+            },
+            "previous_row_sha256": rows[-1]["row_sha256"] if rows else None,
         }
+        normalized = spectral_rows_module._normalize_row_body(
+            body,
+            spec=spec,
+            sequence=index,
+            previous_row_sha256=body["previous_row_sha256"],
+            artifact_root=None,
+        )
         rows.append(
             {
-                "sequence": index,
-                "stage_index": plan["stage_index"],
-                "stage_kind": plan["stage_kind"],
-                "point_id": point["point_id"],
-                "point_fingerprint": point["point_fingerprint"],
-                "row_sha256": hashlib.sha256(
-                    json.dumps(raw, sort_keys=True).encode("utf-8")
-                ).hexdigest(),
-                "configuration_sha256": spec["configuration_sha256"],
-                "requested_wavelength_m": wavelength,
-                "evaluated_wavelength_m": wavelength,
-                "frequency_wavelength_m": wavelength,
-                "R": 0.95 - absorption,
-                "T": 0.05,
-                "A": absorption,
+                **normalized,
+                "row_sha256": spectral_rows_module._fingerprint(normalized),
             }
         )
     return rows

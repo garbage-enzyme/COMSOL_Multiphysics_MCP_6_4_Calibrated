@@ -273,9 +273,7 @@ def test_create_study_validates_before_creation_and_uses_first_free_tag():
 def test_transient_study_rejects_empty_time_list_before_creation():
     studies = MutableStudyList()
 
-    result = create_study(
-        MutableStudyModel(studies), study_type="Transient", time_list=[]
-    )
+    result = create_study(MutableStudyModel(studies), study_type="Transient", time_list=[])
 
     assert result == {"success": False, "error": "time_list must not be empty"}
     assert studies.studies == {}
@@ -298,14 +296,14 @@ def test_finite_study_wait_uses_managed_solver_and_honors_deadline():
     model = make_model()
 
     class Solver:
-        is_running = False
-
         def __init__(self):
+            self.is_running = False
             self.started = []
             self.waited = []
 
         def start_solve(self, active_model, tag):
             self.started.append((active_model, tag))
+            self.is_running = True
             return True
 
         def wait(self, timeout):
@@ -329,6 +327,20 @@ def test_finite_study_wait_uses_managed_solver_and_honors_deadline():
     assert result["background_continues"] is True
     assert solver.started == [(model, "std1")]
     assert solver.waited == [0.25]
+    assert solver.is_running is True
+
+
+def test_study_wait_rejects_an_already_running_solver_before_start():
+    class Solver:
+        is_running = True
+
+        def start_solve(self, *_args):
+            raise AssertionError("a running solver must not start another solve")
+
+    result = solve_study(make_model(), "std1", timeout=1.0, solver=Solver())
+
+    assert result["success"] is False
+    assert "Another solving operation is in progress" in result["error"]
 
 
 @pytest.mark.parametrize("timeout", [True, -1, float("inf"), "1"])

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 
@@ -313,6 +314,8 @@ def test_concurrent_different_next_stages_cannot_overwrite(tmp_path, monkeypatch
         lambda *_args: {"action": "solve_current_stage"},
     )
 
+    start_gate = threading.Barrier(2)
+
     def candidate(wavelength):
         return build_spectral_stage_plan(
             spec,
@@ -327,8 +330,13 @@ def test_concurrent_different_next_stages_cannot_overwrite(tmp_path, monkeypatch
         )
 
     candidates = [candidate(4.1e-6), candidate(4.2e-6)]
+
+    def write_candidate(plan):
+        start_gate.wait(timeout=5)
+        return write_spectral_stage_plan(job, spec, plan)
+
     with ThreadPoolExecutor(max_workers=2) as pool:
-        futures = [pool.submit(write_spectral_stage_plan, job, spec, plan) for plan in candidates]
+        futures = [pool.submit(write_candidate, plan) for plan in candidates]
     outcomes = []
     for future in futures:
         try:

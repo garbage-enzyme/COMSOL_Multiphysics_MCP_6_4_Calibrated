@@ -32,4 +32,12 @@ $Config = @{
     MonitorIntervalSeconds = 0.2
     PointEstimateSeconds = 1.0
 }
+if (@(Get-DurableDriverProcesses -DriverPath $Config.Driver).Count -ne 0) {
+    throw 'Terminal monitor fixture unexpectedly found an active driver before rendering.'
+}
+foreach ($Owned in @('launcher_owner.json', 'run.lock')) {
+    if (Test-Path -LiteralPath (Join-Path $TestRoot $Owned)) {
+        throw "Terminal monitor fixture found unexpected ownership artifact: $Owned"
+    }
+}
 [void](Show-DurableJobMonitor -Config $Config -NoTopMost)

@@ -20,27 +20,38 @@ $Process = Start-Process -FilePath $PowerShellPath -ArgumentList @(
 $Deadline = [DateTime]::UtcNow.AddSeconds(15)
 $Alive = $true
 $Output = ''
+$BannerSeen = $false
 while ([DateTime]::UtcNow -lt $Deadline) {
     $Process.Refresh()
     $Alive = -not $Process.HasExited
     $Output = (Get-Content -LiteralPath $Stdout -Raw -ErrorAction SilentlyContinue) + (Get-Content -LiteralPath $Stderr -Raw -ErrorAction SilentlyContinue)
-    if (-not $Alive -or ($Output -match 'MONITOR REFRESH FAILED' -and $Output -match 'displayed progress is not current')) {
+    if (-not $Alive) {
+        break
+    }
+    if ($Output -match 'EXPECTED_REFRESH_FAILURE_TRIGGER status_json_corrupted' -and
+        $Output -match 'MONITOR REFRESH FAILED' -and
+        $Output -match 'displayed progress is not current') {
+        $BannerSeen = $true
         break
     }
     Start-Sleep -Milliseconds 100
 }
-if ($Alive -and $Output -match 'MONITOR REFRESH FAILED' -and $Output -match 'displayed progress is not current') {
-    Start-Sleep -Milliseconds 750
-    $Process.Refresh()
-    $Alive = -not $Process.HasExited
+if ($Alive -and $BannerSeen) {
+    $LatchDeadline = [DateTime]::UtcNow.AddSeconds(2)
+    while ([DateTime]::UtcNow -lt $LatchDeadline) {
+        $Process.Refresh()
+        if ($Process.HasExited) { $Alive = $false; break }
+        Start-Sleep -Milliseconds 100
+    }
 }
 if ($Alive) {
-    Stop-Process -Id $Process.Id -Force -ErrorAction SilentlyContinue
-    try { $Process.WaitForExit() }
-    catch { }
+    Stop-Process -Id $Process.Id -Force -ErrorAction Stop
+    $Process.WaitForExit()
 }
-if (-not $Alive) { throw "Refresh-failure monitor exited instead of latching: $Output" }
-if ($Output -notmatch 'MONITOR REFRESH FAILED' -or $Output -notmatch 'displayed progress is not current') {
+if (-not $BannerSeen) { throw "Refresh-failure monitor did not latch: $Output" }
+if ($Output -notmatch 'EXPECTED_REFRESH_FAILURE_TRIGGER status_json_corrupted' -or
+    $Output -notmatch 'MONITOR REFRESH FAILED' -or
+    $Output -notmatch 'displayed progress is not current') {
     throw "Refresh-failure monitor did not visibly replace stale progress: $Output"
 }
 $Receipt = [ordered]@{
@@ -48,7 +59,7 @@ $Receipt = [ordered]@{
     status = 'pass'
     powershell_path = $PowerShellPath
     powershell_version = (& $PowerShellPath -NoLogo -NoProfile -Command '$PSVersionTable.PSVersion.ToString()')
-    monitor_alive_until_failure_banner = $true
+    monitor_alive_for_latch_window = $true
     refresh_failure_banner_visible = $true
     stale_progress_explicitly_disclaimed = $true
     test_pid = $Process.Id

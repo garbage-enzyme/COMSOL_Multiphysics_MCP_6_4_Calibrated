@@ -6,6 +6,8 @@ import json
 import os
 import subprocess
 import sys
+import queue
+import threading
 from pathlib import Path
 
 import pytest
@@ -105,13 +107,29 @@ def test_named_mutex_rejects_a_second_process(tmp_path):
         text=True,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
-    try:
+    lines = queue.Queue()
+
+    def read_stdout():
         assert process.stdout is not None
-        assert process.stdout.readline().strip() == "READY"
+        for line in process.stdout:
+            lines.put(line)
+
+    reader = threading.Thread(target=read_stdout, daemon=True)
+    reader.start()
+    try:
+        assert lines.get(timeout=10).strip() == "READY"
         with pytest.raises(SettingsConflict, match="another settings editor"):
             SettingsOwnership(target).acquire()
     finally:
-        output, errors = process.communicate("done\n", timeout=10)
+        assert process.stdin is not None
+        process.stdin.write("done\n")
+        process.stdin.flush()
+        process.stdin.close()
+        process.wait(timeout=10)
+        reader.join(timeout=1)
+        assert not reader.is_alive()
+        output = "".join(list(lines.queue))
+        errors = process.stderr.read() if process.stderr is not None else ""
         assert process.returncode == 0, output + errors
 
 

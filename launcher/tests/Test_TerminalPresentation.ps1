@@ -132,9 +132,7 @@ $Receipt = [ordered]@{
     explicit_pause_disposition = 'paused'
     explicit_pause_color = 'Blue'
     explicit_pause_reason = $Paused.TerminalReason
-    bounded_nested_gate_summary = $true
     evidence_arrays_excluded = $true
-    red_and_yellow_show_status_driver_and_error_paths = $true
     module_sha256 = Get-TestSha256 -Path $Module
 }
 $ReceiptPath = Join-Path $TestRoot 'terminal_presentation_receipt.json'

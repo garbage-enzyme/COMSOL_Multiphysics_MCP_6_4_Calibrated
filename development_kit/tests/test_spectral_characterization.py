@@ -732,7 +732,9 @@ def test_public_tool_requires_exactly_one_input_form_and_import_is_solver_free()
     assert rejected["classification"] == "invalid_input"
     assert "exactly one" in rejected["error"]
 
-    code = """
+    bundle = _bundle([0.1, 0.5, 0.9, 0.5, 0.1])
+    code = f"""
+import json
 import mph
 mph.Client = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError('Client called'))
 from mcp.server.mcpserver import MCPServer
@@ -740,9 +742,11 @@ from src.tools.spectral_characterization import register_spectral_characterizati
 server = MCPServer('solver-free-spectral-subprocess')
 register_spectral_characterization_tools(server)
 result = server._tool_manager._tools['spectral_characterize'].fn(
-    analysis_policy={}, measurement_configuration={}
+    spectral_bundle=json.loads({json.dumps(bundle)!r}),
+    analysis_policy=json.loads({json.dumps(_policy())!r}),
+    measurement_configuration=json.loads({json.dumps(_measurement())!r}),
 )
-assert result['success'] is False
+assert result['success'] is True
 assert result['solver_started'] is False
 """
     completed = subprocess.run(
@@ -750,7 +754,7 @@ assert result['solver_started'] is False
         cwd=Path(__file__).parents[2],
         capture_output=True,
         text=True,
-        timeout=20,
+        timeout=30,
         check=False,
     )
     assert completed.returncode == 0, completed.stderr

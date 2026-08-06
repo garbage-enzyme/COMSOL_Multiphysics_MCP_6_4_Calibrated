@@ -341,7 +341,12 @@ def test_external_conflict_is_terminal_and_localized() -> None:
 
     assert controller.poll_conflict() is True
     assert len(dialogs.errors) == 1
-    assert "changed" not in dialogs.errors[0][1]
+    assert dialogs.errors[0] == (
+        controller.text("Settings conflict"),
+        controller.text(
+            "The settings file changed outside this editor. Close this window and reopen settings."
+        ),
+    )
 
 
 def test_create_shortcut_confirms_before_replacing_foreign_item() -> None:
