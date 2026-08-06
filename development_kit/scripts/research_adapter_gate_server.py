@@ -96,7 +96,11 @@ def register_gate_tools(server: Any) -> None:
                 "state_sha256": adapter_state_sha256(manifest, snapshot),
             }
         except Exception as exc:
-            return {"success": False, "error_type": type(exc).__name__}
+            return {
+                "success": False,
+                "error_type": type(exc).__name__,
+                "error": str(exc)[:2048],
+            }
 
     @server.tool()
     def research_adapter_gate_apply(
@@ -118,7 +122,11 @@ def register_gate_tools(server: Any) -> None:
             )
             return {**result, "snapshot": backend.snapshot() if result["success"] else None}
         except Exception as exc:
-            return {"success": False, "error_type": type(exc).__name__}
+            return {
+                "success": False,
+                "error_type": type(exc).__name__,
+                "error": str(exc)[:2048],
+            }
 
 
 def main() -> None:
