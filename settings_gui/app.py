@@ -66,6 +66,10 @@ FIXED_LINKS = (
     ),
 )
 ICON_PATH = Path(__file__).resolve().parent / "assets" / "comsol_mcp.ico"
+INDEX_DIALOG_WIDTH = 620
+INDEX_DIALOG_HEIGHT = 260
+INDEX_DIALOG_MARGIN = 48
+INDEX_DIALOG_SOURCE_CHARS = 96
 DOC_SECTIONS = (
     (
         "Manual sources and lexical search",
@@ -138,31 +142,59 @@ class ManualIndexProgressDialog:
         self.window = tk.Toplevel(parent)
         self.window.title(controller.text("Generate manual index"))
         self.window.transient(parent)
-        self.window.resizable(False, False)
+        self.window.resizable(True, False)
         self.window.protocol("WM_DELETE_WINDOW", self.cancel)
+        self.window.bind("<Escape>", lambda _event: self.cancel())
         self.window.grab_set()
-        frame = ttk.Frame(self.window, padding=(18, 16, 18, 16))
-        frame.pack(fill="both", expand=True)
+        self._size_and_position()
+        outer = ttk.Frame(self.window)
+        outer.pack(fill="both", expand=True)
+        footer = ttk.Frame(outer, padding=(18, 8, 18, 16))
+        footer.pack(side="bottom", fill="x")
+        body = ttk.Frame(outer, padding=(18, 16, 18, 6))
+        body.pack(side="top", fill="both", expand=True)
         self.stage = tk.StringVar(value=controller.text("Starting index worker..."))
         self.detail = tk.StringVar(value="0%")
         self.percent = tk.IntVar(value=0)
-        ttk.Label(frame, textvariable=self.stage, wraplength=520).pack(anchor="w")
+        ttk.Label(body, textvariable=self.stage, wraplength=540).pack(anchor="w")
         ttk.Progressbar(
-            frame,
+            body,
             maximum=100,
             variable=self.percent,
-            length=520,
             mode="determinate",
         ).pack(fill="x", pady=(12, 6))
-        ttk.Label(frame, textvariable=self.detail, wraplength=520).pack(anchor="w")
+        ttk.Label(body, textvariable=self.detail, wraplength=540).pack(anchor="w")
         self.cancel_button = ttk.Button(
-            frame,
+            footer,
             text=controller.text("Cancel"),
             command=self.cancel,
         )
-        self.cancel_button.pack(anchor="e", pady=(14, 0))
+        self.cancel_button.pack(side="right")
         self._terminal = False
         self._after_id = self.window.after(100, self.poll)
+
+    def _size_and_position(self) -> None:
+        """Keep the fixed footer reachable within the current monitor bounds."""
+        self.parent.update_idletasks()
+        screen_width = max(1, self.window.winfo_screenwidth())
+        screen_height = max(1, self.window.winfo_screenheight())
+        width = min(INDEX_DIALOG_WIDTH, max(360, screen_width - INDEX_DIALOG_MARGIN * 2))
+        height = min(INDEX_DIALOG_HEIGHT, max(180, screen_height - INDEX_DIALOG_MARGIN * 2))
+        parent_x = self.parent.winfo_rootx()
+        parent_y = self.parent.winfo_rooty()
+        parent_width = max(self.parent.winfo_width(), width)
+        parent_height = max(self.parent.winfo_height(), height)
+        x = max(0, min(parent_x + (parent_width - width) // 2, screen_width - width))
+        y = max(0, min(parent_y + (parent_height - height) // 2, screen_height - height))
+        self.window.geometry(f"{width}x{height}+{x}+{y}")
+        self.window.minsize(min(width, 420), min(height, 180))
+
+    @staticmethod
+    def _display_source(value: object) -> str:
+        source = str(value)
+        if len(source) <= INDEX_DIALOG_SOURCE_CHARS:
+            return source
+        return "..." + source[-(INDEX_DIALOG_SOURCE_CHARS - 3) :]
 
     def cancel(self) -> None:
         if self._terminal:
@@ -189,7 +221,7 @@ class ManualIndexProgressDialog:
                         pages=int(event.get("processed_pages", 0)),
                         total_pages=int(event.get("total_pages", 0)),
                         source=(
-                            " — " + str(event["current_source"])
+                            " — " + self._display_source(event["current_source"])
                             if event.get("current_source")
                             else ""
                         ),

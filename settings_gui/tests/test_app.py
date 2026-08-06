@@ -19,6 +19,7 @@ from comsol_mcp.settings import (
 )
 from settings_gui.app import (
     ICON_PATH,
+    ManualIndexProgressDialog,
     SettingsApplication,
     _initial_auto_detect,
     _load_startup_document,
@@ -361,6 +362,53 @@ def _scenario_feature_checkboxes_compose() -> None:
         assert app.banner is not None and app.banner.winfo_manager() == "pack"
     finally:
         app.close()
+
+
+def test_index_progress_cancel_footer_stays_visible_at_high_scaling() -> None:
+    class FakeTask:
+        running = True
+
+        def __init__(self) -> None:
+            self.cancelled = False
+            self._events = [
+                {
+                    "event": "progress",
+                    "percent": 50,
+                    "processed_files": 1,
+                    "total_files": 1,
+                    "processed_pages": 1,
+                    "total_pages": 1,
+                    "current_source": "deep\\" + ("long-name-" * 200) + ".pdf",
+                }
+            ]
+
+        def drain_events(self):
+            events, self._events = self._events, []
+            return events
+
+        def cancel(self) -> None:
+            self.cancelled = True
+
+    root = tk.Tk()
+    root.withdraw()
+    root.tk.call("tk", "scaling", 2.6666666667)
+    controller = SettingsController(SettingsFormModel(default_settings_document()), FakeStore(), dialogs=QuietDialogs())
+    task = FakeTask()
+    dialog = ManualIndexProgressDialog(root, controller, task, on_close=lambda: None)
+    try:
+        dialog.window.deiconify()
+        dialog.poll()
+        root.update_idletasks()
+        bottom = dialog.window.winfo_rooty() + dialog.window.winfo_height()
+        assert bottom <= dialog.window.winfo_screenheight()
+        assert dialog.cancel_button.winfo_manager() == "pack"
+        assert dialog.cancel_button.winfo_width() > 0
+        assert len(dialog.detail.get()) < 180
+        dialog.cancel()
+        assert task.cancelled is True
+    finally:
+        dialog.close()
+        root.destroy()
 
 
 def _scenario_doc_path_controls_follow_feature_gates() -> None:
