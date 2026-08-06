@@ -6,6 +6,8 @@ import argparse
 import json
 import os
 import shutil
+import subprocess
+import sys
 import uuid
 from pathlib import Path
 
@@ -77,3 +79,22 @@ def test_gate_settings_are_isolated_and_strict(tmp_path: Path):
     assert settings["shared_server"] == {"enabled": False}
     assert all(settings["evidence_integrity"]["checks"].values())
     assert settings["paths"]["model_read_roots"] == [str(source.parent.resolve())]
+
+
+def test_gate_scripts_are_directly_importable_from_repository_root():
+    for script in (gate.SERVER, Path(gate.__file__)):
+        completed = subprocess.run(
+            [sys.executable, str(script), "--help"]
+            if script == Path(gate.__file__)
+            else [
+                sys.executable,
+                "-c",
+                (f"import runpy; runpy.run_path({str(script)!r}, run_name='gate_import_probe')"),
+            ],
+            cwd=gate.REPOSITORY_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=False,
+        )
+        assert completed.returncode == 0, completed.stderr

@@ -3,16 +3,24 @@
 from __future__ import annotations
 
 import multiprocessing as mp
+import sys
+from importlib import import_module
+from pathlib import Path
 from typing import Any
 
-from comsol_mcp.research.adapters import (
-    ClientapiPeriodicMimPatchBackend,
-    adapter_state_sha256,
-    apply_periodic_mim_patch_candidate,
-)
-from comsol_mcp.server import create_server
-from comsol_mcp.tools.derived_geometry import get_derived_geometry_record
-from comsol_mcp.tools.session import session_manager
+REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+if str(REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT))
+
+_adapters = import_module("comsol_mcp.research.adapters")
+ClientapiPeriodicMimPatchBackend = _adapters.ClientapiPeriodicMimPatchBackend
+adapter_state_sha256 = _adapters.adapter_state_sha256
+apply_periodic_mim_patch_candidate = _adapters.apply_periodic_mim_patch_candidate
+create_server = import_module("comsol_mcp.server").create_server
+get_derived_geometry_record = import_module(
+    "comsol_mcp.tools.derived_geometry"
+).get_derived_geometry_record
+session_manager = import_module("comsol_mcp.tools.session").session_manager
 
 
 def _backend(model_name: str, derived_model_id: str, manifest: dict[str, Any]):

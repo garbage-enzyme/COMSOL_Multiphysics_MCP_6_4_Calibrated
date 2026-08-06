@@ -10,24 +10,27 @@ import os
 import subprocess
 import sys
 import time
+from importlib import import_module
 from pathlib import Path
 from typing import Any
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-from development_kit.scripts.research_adapter_template_probe import (
-    CALL_SECONDS,
-    REPOSITORY_ROOT,
-    START_RESPONSE_SECONDS,
-    STARTUP_SECONDS,
-    _atomic_write_json,
-    _canonical_bytes,
-    _git_identity,
-    _sha256,
-    _stdio_environment,
-    _tool_payload,
-)
+REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+if str(REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT))
+
+_probe = import_module("development_kit.scripts.research_adapter_template_probe")
+CALL_SECONDS = _probe.CALL_SECONDS
+START_RESPONSE_SECONDS = _probe.START_RESPONSE_SECONDS
+STARTUP_SECONDS = _probe.STARTUP_SECONDS
+_atomic_write_json = _probe._atomic_write_json
+_canonical_bytes = _probe._canonical_bytes
+_git_identity = _probe._git_identity
+_sha256 = _probe._sha256
+_stdio_environment = _probe._stdio_environment
+_tool_payload = _probe._tool_payload
 
 SCHEMA_NAME = "comsol_mcp.research_adapter_licensed_gate"
 SCHEMA_VERSION = "1.0.0"
