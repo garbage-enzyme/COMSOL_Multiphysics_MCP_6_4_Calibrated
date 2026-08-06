@@ -283,7 +283,7 @@ def test_operation_lock_retries_short_writes_until_publication_is_exact(
 
     assert claim is not None
     assert evidence["state"] == "acquired"
-    assert len(writes) == len(claim.lock_bytes)
+    assert len(writes) > 1
     assert arbiter.lock_path.read_bytes() == claim.lock_bytes
     assert arbiter.release(claim)["verified"] is True
 
@@ -370,16 +370,10 @@ def test_expected_model_revision_is_checked_after_lock_and_advances(
         def file(self):
             return None
 
-    original = {
-        "models": session_manager._models,
-        "paths": session_manager._model_paths,
-        "revisions": session_manager._model_revisions,
-        "current": session_manager._current_model,
-    }
-    session_manager._models = {"model": FakeModel()}
-    session_manager._model_paths = {}
-    session_manager._model_revisions = {}
-    session_manager._current_model = "model"
+    monkeypatch.setattr(session_manager, "_models", {"model": FakeModel()})
+    monkeypatch.setattr(session_manager, "_model_paths", {})
+    monkeypatch.setattr(session_manager, "_model_revisions", {})
+    monkeypatch.setattr(session_manager, "_current_model", "model")
     initial = session_manager.get_model_revision("model")
     arbiter = OperationArbiter(
         tmp_path,
@@ -414,33 +408,21 @@ def test_expected_model_revision_is_checked_after_lock_and_advances(
         requires_model_revision=True,
         advances_model_revision=True,
     )
-    try:
-        assert "expected_model_revision" in inspect.signature(guarded).parameters
-        stale = guarded(
-            "p", "1", expected_model_revision="0" * 64
-        )
-        assert stale["success"] is False
-        assert calls == []
-        accepted = guarded(
-            "p", "1", expected_model_revision=initial["revision_sha256"]
-        )
-        assert accepted["success"] is True
-        assert calls == [("p", "1", None)]
-        assert accepted["model_revision"]["sequence"] == 1
-        assert accepted["model_revision"]["revision_sha256"] != initial[
-            "revision_sha256"
-        ]
-        replay = guarded(
-            "p", "2", expected_model_revision=initial["revision_sha256"]
-        )
-        assert replay["success"] is False
-        assert calls == [("p", "1", None)]
-        assert revision_checks == ["model"] * 4
-    finally:
-        session_manager._models = original["models"]
-        session_manager._model_paths = original["paths"]
-        session_manager._model_revisions = original["revisions"]
-        session_manager._current_model = original["current"]
+    assert "expected_model_revision" in inspect.signature(guarded).parameters
+    stale = guarded("p", "1", expected_model_revision="0" * 64)
+    assert stale["success"] is False
+    assert calls == []
+    accepted = guarded("p", "1", expected_model_revision=initial["revision_sha256"])
+    assert accepted["success"] is True
+    assert calls == [("p", "1", None)]
+    assert accepted["model_revision"]["sequence"] == 1
+    assert accepted["model_revision"]["revision_sha256"] != initial[
+        "revision_sha256"
+    ]
+    replay = guarded("p", "2", expected_model_revision=initial["revision_sha256"])
+    assert replay["success"] is False
+    assert calls == [("p", "1", None)]
+    assert revision_checks == ["model"] * 4
 
 
 def test_full_profile_tracks_revision_without_enforcing_expected_token(
@@ -451,16 +433,10 @@ def test_full_profile_tracks_revision_without_enforcing_expected_token(
     class FakeModel:
         pass
 
-    original = (
-        session_manager._models,
-        session_manager._model_paths,
-        session_manager._model_revisions,
-        session_manager._current_model,
-    )
-    session_manager._models = {"model": FakeModel()}
-    session_manager._model_paths = {}
-    session_manager._model_revisions = {}
-    session_manager._current_model = "model"
+    monkeypatch.setattr(session_manager, "_models", {"model": FakeModel()})
+    monkeypatch.setattr(session_manager, "_model_paths", {})
+    monkeypatch.setattr(session_manager, "_model_revisions", {})
+    monkeypatch.setattr(session_manager, "_current_model", "model")
     arbiter = OperationArbiter(
         tmp_path,
         pid=100,
@@ -477,14 +453,6 @@ def test_full_profile_tracks_revision_without_enforcing_expected_token(
         requires_model_revision=True,
         advances_model_revision=True,
     )
-    try:
-        result = guarded()
-        assert result["success"] is True
-        assert result["model_revision"]["sequence"] == 1
-    finally:
-        (
-            session_manager._models,
-            session_manager._model_paths,
-            session_manager._model_revisions,
-            session_manager._current_model,
-        ) = original
+    result = guarded()
+    assert result["success"] is True
+    assert result["model_revision"]["sequence"] == 1

@@ -102,7 +102,7 @@ def test_result_export_preserves_a_target_created_during_staging(tmp_path):
         export_result_file(ExportModel(), "data1", str(target))
 
     assert target.read_bytes() == b"competitor"
-    assert not list(tmp_path.glob(".*.export"))
+    assert {path.name for path in tmp_path.iterdir()} == {target.name}
 
 
 @pytest.mark.parametrize("tool_name", ["results_export_data", "results_export_image"])

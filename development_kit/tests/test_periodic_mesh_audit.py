@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 from src.tools.periodic_mesh_audit import (
+    MAX_MESH_FEATURES,
     _mesh_sequence,
     _periodic_groups,
     _recipe_for_group,
@@ -203,7 +204,10 @@ def test_mesh_feature_truncation_requires_an_observed_extra_item():
     )
 
     component = FakeComponent()
-    exactly = {f"size{index}": FakeFeature(f"size{index}", "Size") for index in range(256)}
+    exactly = {
+        f"size{index}": FakeFeature(f"size{index}", "Size")
+        for index in range(MAX_MESH_FEATURES)
+    }
     component._mesh.items["mesh1"] = FakeMesh(1, exactly)
     complete, _mesh = _mesh_sequence(component, "mesh1")
     component._mesh.items["mesh1"] = FakeMesh(
@@ -214,13 +218,42 @@ def test_mesh_feature_truncation_requires_an_observed_extra_item():
 
     assert complete["feature_count_truncated"] is False
     assert truncated["feature_count_truncated"] is True
-    group = {
-        "group_id": "fpc1",
-        "source_candidate": [1],
-        "destination_candidate": [2],
-        "adjacent_domains": [1],
-        "geometry_consistent": True,
-    }
+    group = _periodic_groups(
+        {
+            "topology": {
+                "boundaries": [
+                    {
+                        "boundary": 1,
+                        "normal": [1.0, 0.0, 0.0],
+                        "center": [0.0, 0.0, 0.0],
+                        "interior": False,
+                        "up_domain": 1,
+                        "down_domain": 0,
+                    },
+                    {
+                        "boundary": 2,
+                        "normal": [-1.0, 0.0, 0.0],
+                        "center": [1.0, 0.0, 0.0],
+                        "interior": False,
+                        "up_domain": 1,
+                        "down_domain": 0,
+                    },
+                ]
+            },
+            "periodicity": {
+                "floquet_features": [
+                    {
+                        "tag": "fpc1",
+                        "type": "PeriodicCondition",
+                        "selection": [1, 2],
+                        "opposing_face_groups": {
+                            "adjacent_domain_signatures_match": True
+                        },
+                    }
+                ]
+            },
+        }
+    )[0]
     recipe = _recipe_for_group(
         group,
         truncated["features_in_execution_order"],

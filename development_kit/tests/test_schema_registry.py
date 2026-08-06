@@ -160,6 +160,8 @@ def test_registry_is_complete_sorted_and_snapshot_stable():
     assert registry["schema_name"] == "comsol_mcp.schema_registry"
     assert registry["schema_version"] == "1.0.0"
     assert registry["producer"] == {"package": "comsol-mcp", "version": __version__}
+    # These are deliberate public release snapshots. A registry change updates
+    # both literals and development_kit/release/release_facts.json together.
     assert registry["entry_count"] == len(entries) == 83
     assert names == sorted(names)
     assert len(names) == len(set(names))

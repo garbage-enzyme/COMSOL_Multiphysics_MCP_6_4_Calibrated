@@ -80,8 +80,18 @@ class FakeRunner:
     def __call__(self, command, **kwargs):
         self.commands.append(list(command))
         self.kwargs.append(kwargs)
-        if "reference_power_acceptance.py" in " ".join(command):
-            output = Path(command[command.index("--output") + 1])
+        is_reference_power = (
+            "--confirm" in command
+            and command[command.index("--confirm") + 1] == "RUN_REAL_COMSOL"
+            and any(Path(part).name == "reference_power_acceptance.py" for part in command)
+        )
+        if is_reference_power:
+            try:
+                output = Path(command[command.index("--output") + 1])
+            except (ValueError, IndexError) as exc:
+                raise AssertionError(
+                    "reference-power command must provide an --output value"
+                ) from exc
             output.write_text(
                 json.dumps(
                     {

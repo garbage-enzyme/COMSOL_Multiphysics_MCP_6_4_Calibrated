@@ -283,11 +283,15 @@ def test_lexical_baseline_computes_rank_metrics_without_semantic_dependencies():
             "queries": [
                 {
                     "id": f"q{number:02d}",
-                    "query": "CopyFace source destination",
+                    "query": (
+                        "CopyFace source destination"
+                        if number < 30
+                        else "CopyFace copies mesh between source and destination faces"
+                    ),
                     "category": "exact_clientapi",
                     "style": "exact" if number < 30 else "paraphrase",
                     "relevant": [{"source": source, "page": 10}],
-                    "judge_note": "Synthetic exact citation for rank-metric testing.",
+                    "judge_note": "Synthetic citation for rank-metric testing.",
                 }
                 for number in range(60)
             ],
@@ -297,6 +301,8 @@ def test_lexical_baseline_computes_rank_metrics_without_semantic_dependencies():
     assert result["query_count"] == 60
     assert result["summary"]["overall"]["recall_at_5"] == 1.0
     assert result["summary"]["overall"]["mrr_at_10"] == 1.0
+    assert result["summary"]["by_style"]["paraphrase"]["recall_at_5"] == 1.0
+    assert result["summary"]["by_style"]["paraphrase"]["mrr_at_10"] == 1.0
     assert result["continuation_gate"]["continue_to_semantic_worker"] is False
 
 

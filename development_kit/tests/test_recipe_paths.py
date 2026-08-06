@@ -50,10 +50,14 @@ def test_recipe_output_falls_back_when_an_automatic_root_is_not_writable(
     blocked = ascii_tmp_path / "blocked"
     fallback = ascii_tmp_path / "fallback"
     blocked_output = blocked.resolve() / "recipes"
+    fallback_output = fallback.resolve() / "recipes"
     original_mkdir = Path.mkdir
+    attempted = []
 
     def selective_mkdir(path, *args, **kwargs):
-        if path == blocked_output:
+        candidate = Path(path).resolve(strict=False)
+        attempted.append(candidate)
+        if candidate == blocked_output:
             raise PermissionError("synthetic unwritable root")
         return original_mkdir(path, *args, **kwargs)
 
@@ -63,7 +67,9 @@ def test_recipe_output_falls_back_when_an_automatic_root_is_not_writable(
 
     output = module.recipe_output_dir()
 
-    assert output == fallback.resolve() / "recipes"
+    assert attempted[0] == blocked_output
+    assert fallback_output in attempted[1:]
+    assert output == fallback_output
     assert output.is_dir()
 
 

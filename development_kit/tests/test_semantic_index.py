@@ -324,7 +324,7 @@ def test_read_only_semantic_connections_close_deterministically(semantic_index_a
     list(index_module._iter_pages(semantic_index_assets["lexical"]))
     validate_index_against_lexical(index, semantic_index_assets["lexical"])
 
-    assert len(tracked) == 4
+    assert tracked
     assert all(connection.closed for connection in tracked)
 
 

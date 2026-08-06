@@ -71,10 +71,27 @@ def _run_with_solver_observer(command):
     observer.start()
     try:
         stdout, stderr = process.communicate(timeout=30)
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as initial_timeout:
         process.kill()
-        stdout, stderr = process.communicate(timeout=10)
-        raise
+        try:
+            stdout, stderr = process.communicate(timeout=10)
+        except subprocess.TimeoutExpired as drain_timeout:
+            stdout = (
+                drain_timeout.stdout
+                if drain_timeout.stdout is not None
+                else initial_timeout.stdout
+            )
+            stderr = (
+                drain_timeout.stderr
+                if drain_timeout.stderr is not None
+                else initial_timeout.stderr
+            )
+        raise subprocess.TimeoutExpired(
+            initial_timeout.cmd,
+            initial_timeout.timeout,
+            output=stdout,
+            stderr=stderr,
+        ) from initial_timeout
     finally:
         observed.update(_solver_descendant_identities(process.pid))
         stop.set()
@@ -86,6 +103,43 @@ def _run_with_solver_observer(command):
         stderr,
     )
     return completed, observed
+
+
+def test_solver_observer_timeout_preserves_post_kill_diagnostics(monkeypatch):
+    class Process:
+        pid = 41000
+        returncode = 1
+
+        def __init__(self):
+            self.communications = 0
+            self.killed = False
+
+        def communicate(self, *, timeout):
+            self.communications += 1
+            if self.communications == 1:
+                raise subprocess.TimeoutExpired(
+                    [sys.executable, "worker.py"],
+                    timeout,
+                    output="before-kill",
+                    stderr="before-kill-error",
+                )
+            return "after-kill", "after-kill-error"
+
+        def kill(self):
+            self.killed = True
+
+    process = Process()
+    monkeypatch.setattr(subprocess, "Popen", lambda *_args, **_kwargs: process)
+    monkeypatch.setattr(
+        sys.modules[__name__], "_solver_descendant_identities", lambda _pid: set()
+    )
+
+    with pytest.raises(subprocess.TimeoutExpired) as raised:
+        _run_with_solver_observer([sys.executable, "worker.py"])
+
+    assert process.killed is True
+    assert raised.value.stdout == "after-kill"
+    assert raised.value.stderr == "after-kill-error"
 
 
 def test_stable_admission_rechecks_a_clean_process_snapshot() -> None:
@@ -413,6 +467,11 @@ def test_coordinator_refuses_collision_before_starting_worker(tmp_path, ascii_tm
             time.sleep(0.01)
         assert ready == "ready"
         assert blocker.poll() is None
+        scanner_status = runner_module._lightweight_solver_status()
+        assert any(
+            item["pid"] == blocker.pid and item["kind"] == "python-mph-client-script"
+            for item in scanner_status["external_solver_processes"]
+        )
         completed = subprocess.run(
             [
                 sys.executable,

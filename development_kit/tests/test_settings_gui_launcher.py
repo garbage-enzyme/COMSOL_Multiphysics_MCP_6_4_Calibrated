@@ -62,7 +62,7 @@ def test_detached_launch_uses_pythonw_devnull_and_ready_handshake(
     assert result == {
         "success": True,
         "state": "launched",
-        "gui_release": "alpha6.4",
+        "gui_release": launcher.GUI_RELEASE,
         "restart_required_after_change": True,
         "message_code": "settings_gui_opened",
         "contains_local_path": False,
@@ -342,7 +342,7 @@ def test_public_dispatch_has_no_arguments_and_returns_tool_result(monkeypatch) -
     expected = {
         "success": True,
         "state": "already_running",
-        "gui_release": "alpha6.4",
+        "gui_release": launcher.GUI_RELEASE,
         "restart_required_after_change": True,
         "message_code": "settings_gui_already_open",
         "contains_local_path": False,
@@ -361,11 +361,12 @@ def test_public_dispatch_has_no_arguments_and_returns_tool_result(monkeypatch) -
 
 def test_mcp_server_registration_never_imports_tkinter() -> None:
     script = (
-        "import json,sys\n"
+        "import asyncio,json,sys\n"
         "from comsol_mcp.server import create_server\n"
         "server=create_server(profile='core')\n"
+        "tools=asyncio.run(server.list_tools())\n"
         "print(json.dumps({'tkinter': 'tkinter' in sys.modules, "
-        "'tool': 'settings.start' in server._tool_manager._tools}))\n"
+        "'tool': any(tool.name == 'settings.start' for tool in tools)}))\n"
     )
     completed = subprocess.run(  # noqa: S603
         [sys.executable, "-c", script],

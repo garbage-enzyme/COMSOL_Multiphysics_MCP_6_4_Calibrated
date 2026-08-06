@@ -93,7 +93,14 @@ def test_reference_power_spec_overrides_inherited_reserved_fixture_environment(t
     )
 
     assert environment["PRESERVED"] == "yes"
-    assert all(environment[name] != inherited for name, inherited in reserved.items())
+    source = (tmp_path / "controlled.mph").resolve()
+    assert {name: environment[name] for name in reserved} == {
+        MODEL_ENV: str(source),
+        SOURCE_SHA256_ENV: hashlib.sha256(source.read_bytes()).hexdigest(),
+        WAVELENGTH_ENV: format(5.292, ".17g"),
+        DOMAINS_ENV: "[6]",
+        RANGE_ENV: '{"x":[-1e-07,3.4e-06],"y":[-1.5e-06,1.5e-06],"z":[2.25e-06,2.55e-06]}',
+    }
     assert controlled_fixture_from_environment(environment)["source"].name == "controlled.mph"
 
 
