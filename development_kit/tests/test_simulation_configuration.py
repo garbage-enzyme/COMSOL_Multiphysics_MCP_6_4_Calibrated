@@ -232,7 +232,10 @@ def test_container_level_physical_changes_are_classified(mutation):
     right = deepcopy(_configuration())
     mutation(right)
     comparison = compare_simulation_configurations(_configuration(), right)
+    assert comparison["disposition"] == "different"
     assert comparison["physical_disposition"] == "different"
+    assert comparison["changes"]
+    assert {item["classification"] for item in comparison["changes"]} == {"semantic"}
 
 
 @pytest.mark.parametrize(

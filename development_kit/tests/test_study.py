@@ -354,4 +354,4 @@ def test_study_wait_rejects_invalid_timeout_without_starting(timeout):
     result = solve_study(make_model(), "std1", timeout=timeout, solver=Solver())
 
     assert result["success"] is False
-    assert "timeout" in result["error"]
+    assert result["error"] == "timeout must be a finite non-negative number"

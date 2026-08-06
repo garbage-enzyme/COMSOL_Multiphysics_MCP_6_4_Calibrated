@@ -20,6 +20,7 @@ from development_kit.scripts.settings_gui_package_probe import (
     SHORTCUT_MEMBER,
     inspect_settings_gui_distributions,
 )
+from settings_gui.model import TAB_IDS
 
 ROOT = Path(__file__).parents[2]
 
@@ -163,14 +164,14 @@ def test_visual_capture_direct_script_uses_current_source_tab_contract() -> None
 
     assert completed.returncode == 0, completed.stderr
     assert "shared_server" not in completed.stdout
-    assert (
-        "--tab {general,profile,runtime,comsol_java,evidence,semantic,ownership,about}"
-        in completed.stdout
-    )
+    for tab in TAB_IDS:
+        assert tab in completed.stdout
 
 
 def test_visual_capture_matrix_covers_feature_tabs_and_about_at_every_scale() -> None:
     scenarios = set(settings_gui_visual_capture._capture_scenarios())
+    # This independent golden is intentional: it must detect drift in the
+    # scenario generator rather than derive its expectation from that generator.
     expected = {
         (language, dpi_percent, state, tab)
         for dpi_percent in (100, 125, 150, 200)

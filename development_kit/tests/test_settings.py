@@ -38,6 +38,9 @@ def test_project_settings_is_grouped_and_contains_no_embedded_comments():
     assert document["schema_version"] == SETTINGS_VERSION
     assert document["profile"]["name"] == "core"
     assert document["shared_server"]["enabled"] is False
+    assert (
+        document["evidence_integrity"]["checks"] == _safe_defaults()["evidence_integrity"]["checks"]
+    )
     assert all(document["evidence_integrity"]["checks"].values())
     loaded = load_settings({SETTINGS_PATH_ENV: str(path)})
     assert loaded == load_settings({})

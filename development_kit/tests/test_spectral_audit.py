@@ -346,11 +346,11 @@ def test_artifact_must_remain_inside_job_directory(tmp_path):
     outside.mkdir()
     wrapper = artifact / "matrix_collector.json"
     moved = outside / wrapper.name
-    moved.write_bytes(wrapper.read_bytes())
+    wrapper.replace(moved)
     result["artifacts"]["manifest"] = str(moved)
-    with pytest.raises(ValueError, match="assigned artifact"):
+    with pytest.raises(ValueError, match="durable job"):
         extract_spectral_audit_result(
-            job_dir=job, artifact_dir=artifact, spec=spec, point=point, result=result
+            job_dir=job, artifact_dir=outside, spec=spec, point=point, result=result
         )
 
 

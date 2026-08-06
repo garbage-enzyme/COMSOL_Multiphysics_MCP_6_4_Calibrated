@@ -39,7 +39,7 @@ from comsol_mcp.standalone.inspection import (
 def _workstation_build_available() -> bool:
     try:
         builder_module._validate_build_host(builder_module._default_csc_path())
-    except builder_module.PlatformError, FileNotFoundError:
+    except builder_module.PlatformError, OSError:
         return False
     return True
 
@@ -48,6 +48,16 @@ requires_windows_workstation_build = pytest.mark.skipif(
     not _workstation_build_available(),
     reason="requires a supported Windows 10/11 x64 workstation build host",
 )
+
+
+def test_workstation_build_probe_treats_host_path_errors_as_unavailable(monkeypatch):
+    monkeypatch.setattr(
+        builder_module,
+        "_validate_build_host",
+        lambda _path: (_ for _ in ()).throw(PermissionError("synthetic host path denial")),
+    )
+
+    assert _workstation_build_available() is False
 
 
 def _status(*, state: str = "running", completed: int = 1) -> dict[str, object]:

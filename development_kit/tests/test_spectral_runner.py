@@ -59,6 +59,7 @@ def test_runner_completes_full_bundle_one_durable_point_at_a_time(tmp_path):
     assert descriptor["size_bytes"] == len(bundle_bytes)
     assert descriptor["sha256"] == hashlib.sha256(bundle_bytes).hexdigest()
     bundle = validate_spectral_point_bundle(json.loads(bundle_bytes))
+    assert len(bundle["rows"]) == len(rows)
     assert {item["raw_row_sha256"]: item["row_id"] for item in bundle["rows"]} == {
         row["row_sha256"]: row["point_id"] for row in rows
     }

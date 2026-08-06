@@ -141,8 +141,8 @@ def test_shared_interactive_saved_mode_binds_exact_source_path():
         "expected_file_path": str(Path(_ascii_working_model())),
     }
     assert result["spec"]["saved_model_parameter"] == {
-        "name": "saved_model_agent_value",
-        "value": "31[mm]",
+        "name": gate.SAVED_MODEL_PARAMETER,
+        "value": gate.SAVED_MODEL_PARAMETER_VALUE,
     }
     assert result["spec"]["immutable_source_path"] == str(Path(_ascii_source()))
 

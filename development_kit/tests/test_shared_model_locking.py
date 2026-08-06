@@ -265,6 +265,8 @@ def test_lock_identity_normalizes_acquisition_id_case_before_derivation():
     )
 
     assert lower == upper
+    assert lower.lock_sha256 == upper.lock_sha256
+    assert lower.lock_id == upper.lock_id
 
 
 def test_lock_rejects_revision_from_a_different_model():
