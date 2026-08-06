@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from comsol_mcp.durable import domain_sha256_v2
 from comsol_mcp.research.adaptive_acquisition import GaussianProcessExpectedImprovementOptimizer
 from comsol_mcp.research.campaign_loop import BoundedResearchCampaignLoop
@@ -47,7 +49,7 @@ def _score(response):
     }
 
 
-def _loop(tmp_path, manifest, evaluator):
+def _loop(tmp_path, manifest, evaluator, optimizer=None):
     coordinator = ResearchCampaignCoordinator(
         tmp_path,
         manifest,
@@ -55,7 +57,7 @@ def _loop(tmp_path, manifest, evaluator):
         evaluator_identity="b" * 64,
         clock=lambda: 1000.0,
     )
-    optimizer = GaussianProcessExpectedImprovementOptimizer(
+    optimizer = optimizer or GaussianProcessExpectedImprovementOptimizer(
         manifest["design_space"], seed=17001, warmup_count=2, candidate_pool_count=8
     )
     return BoundedResearchCampaignLoop(coordinator, optimizer, _candidate, _score)
@@ -81,3 +83,32 @@ def test_impossible_campaign_exhausts_budget_without_manufacturing_success(ascii
     assert result["stop_reason"] == "budget_exhausted"
     assert result["step_count"] == 3
     assert loop.coordinator.status()["started_evaluations"] == 2
+
+
+def test_checkpoint_restart_replays_exact_next_adaptive_decision(ascii_tmp_path):
+    manifest = _manifest(max_evaluations=4)
+
+    def evaluator(values):
+        return {"peak_wavelength_nm": 1600.0 + values["patch_length_x"] / 100.0}
+
+    interrupted_root = ascii_tmp_path / "interrupted"
+    interrupted = _loop(interrupted_root, manifest, evaluator)
+    assert interrupted.step()["stop_reason"] == "continue"
+    checkpoint = json.loads(
+        (interrupted_root / "optimizer_checkpoint.json").read_text(encoding="utf-8")
+    )
+    restored_optimizer = GaussianProcessExpectedImprovementOptimizer.restore(
+        manifest["design_space"], checkpoint
+    )
+    resumed = _loop(interrupted_root, manifest, evaluator, restored_optimizer)
+    resumed_second = resumed.step()
+
+    uninterrupted = _loop(ascii_tmp_path / "uninterrupted", manifest, evaluator)
+    assert uninterrupted.step()["stop_reason"] == "continue"
+    uninterrupted_second = uninterrupted.step()
+
+    assert resumed_second["score"] == uninterrupted_second["score"]
+    assert (
+        resumed_second["evaluation"]["response"] == uninterrupted_second["evaluation"]["response"]
+    )
+    assert resumed.optimizer.state() == uninterrupted.optimizer.state()
