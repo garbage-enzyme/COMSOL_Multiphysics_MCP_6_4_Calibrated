@@ -47,7 +47,7 @@ def test_default_profile_is_core_after_h3_cutover(monkeypatch):
     server = create_server("default-core-profile-test")
 
     assert DEFAULT_PROFILE == "core"
-    assert len(_tool_names(server)) == 47
+    assert len(_tool_names(server)) == 45
     names = set(_tool_names(server))
     assert {"solver_status", "job_cancel", "model_load", "study_solve"} <= names
     assert "spectral_characterize" in names
@@ -73,7 +73,7 @@ def test_invalid_profile_falls_back_to_core_with_explicit_provenance():
     assert selection.fallback_used is True
     assert selection.requested_name == "not-real"
     assert selection.source == "explicit_argument_invalid_profile_fallback"
-    assert len(_tool_names(server)) == 47
+    assert len(_tool_names(server)) == 45
 
 
 def test_environment_profile_is_normalized(monkeypatch):
@@ -86,7 +86,7 @@ def test_environment_profile_is_normalized(monkeypatch):
     assert selection.environment_variable == PROFILE_ENV_VAR
 
     server = create_server("environment-wave-profile-test")
-    assert len(_tool_names(server)) == 76
+    assert len(_tool_names(server)) == 74
     assert "wave_optics_field_datasets" in _tool_names(server)
     assert "wave_optics_field_extract" in _tool_names(server)
     assert "wave_optics_material_expression_preview" in _tool_names(server)
@@ -140,10 +140,10 @@ def test_profile_registration_has_no_cross_server_leakage():
     semantic = create_server("isolated-semantic", profile=semantic_selection)
     experimental = create_server("isolated-experimental", profile="experimental")
 
-    assert len(_tool_names(core)) == 47
-    assert len(_tool_names(full)) == 150
-    assert len(_tool_names(semantic)) == 50
-    assert len(_tool_names(experimental)) == 97
+    assert len(_tool_names(core)) == 45
+    assert len(_tool_names(full)) == 151
+    assert len(_tool_names(semantic)) == 48
+    assert len(_tool_names(experimental)) == 95
     assert _tool_names(core) != _tool_names(experimental)
     assert {"semantic_search", "semantic_status", "semantic_worker_reset"} <= set(
         _tool_names(semantic)
@@ -159,6 +159,7 @@ def test_independent_feature_overlays_compose_with_any_base_profile() -> None:
     selection = resolve_profile(
         "wave_optics",
         environ={
+                "COMSOL_MCP_ENABLE_LEXICAL_DOCS": "true",
             "COMSOL_MCP_ENABLE_SEMANTIC_DOCS": "true",
             SHARED_SERVER_FEATURE_ENV: "true",
         },
@@ -166,9 +167,10 @@ def test_independent_feature_overlays_compose_with_any_base_profile() -> None:
     server = create_server("composed-feature-overlays", profile=selection)
     names = set(_tool_names(server))
 
-    assert tuple(selection.enabled_features) == ("semantic_docs", "shared_server")
+    assert tuple(selection.enabled_features) == ("lexical_docs", "semantic_docs", "shared_server")
     assert selection.name == "wave_optics"
     assert {"semantic_search", "semantic_status", "semantic_worker_reset"} <= names
+    assert {"manual_search", "manual_read_pages"} <= names
     assert {
         "shared_server_preflight",
         "shared_server_attach",
@@ -220,6 +222,19 @@ def test_shared_server_feature_is_default_off_and_adds_only_its_delta():
 
     assert shared.isdisjoint(base)
     assert names == base | shared
+
+
+def test_manual_feature_is_default_off_and_adds_only_lexical_tools():
+    base = set(_tool_names(create_server("manuals-off", profile="core")))
+    selection = resolve_profile(
+        "core",
+        environ={"COMSOL_MCP_ENABLE_LEXICAL_DOCS": "true"},
+    )
+    names = set(_tool_names(create_server("manuals-on", profile=selection)))
+
+    assert selection.enabled_features == ("lexical_docs",)
+    assert {"manual_search", "manual_read_pages"}.isdisjoint(base)
+    assert names - base == {"manual_search", "manual_read_pages"}
 
 
 def test_validated_shared_startup_selection_is_not_reresolved(monkeypatch):
@@ -334,10 +349,10 @@ def test_capabilities_are_bound_to_each_server_profile(monkeypatch):
     wave_result = _call_tool(wave, "capabilities", {})
 
     assert core_result["active_profile"] == "core"
-    assert core_result["tool_count"] == 47
+    assert core_result["tool_count"] == 45
     assert core_result["profile_source"]["source"] == "explicit_argument"
     assert wave_result["active_profile"] == "wave_optics"
-    assert wave_result["tool_count"] == 76
+    assert wave_result["tool_count"] == 74
 
 
 @pytest.mark.parametrize("profile", ["core", "basic_fem", "wave_optics"])

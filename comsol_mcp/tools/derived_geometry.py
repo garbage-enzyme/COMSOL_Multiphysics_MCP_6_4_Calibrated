@@ -65,7 +65,7 @@ def _feature_type(feature: Any) -> str:
     for getter in ("getType", "type"):
         try:
             return str(getattr(feature, getter)())
-        except Exception:
+        except Exception:  # noqa: S112 - try the next documented clientapi type getter
             continue
     try:
         return str(feature.label())
@@ -103,10 +103,11 @@ def _set_vector(feature: Any, name: str, values: list[str]) -> None:
     """Set a string vector through clientapi, with a mock-friendly fallback."""
     try:
         import jpype
+
         if not jpype.isJVMStarted():
             raise ImportError("JVM not started")
         feature.set(name, jpype.JArray(jpype.JString)(values))
-    except (ImportError, TypeError):
+    except ImportError, TypeError:
         feature.set(name, values)
 
 
@@ -125,9 +126,7 @@ def _snapshot(model: Any, component_tag: str, geometry_tag: str) -> dict[str, An
     geom = _geometry(model, component_tag, geometry_tag)
     features = geom.feature()
     tags = _tags(features)
-    feature_snapshots = {
-        tag: _feature_snapshot(_get(features, tag), tag) for tag in tags
-    }
+    feature_snapshots = {tag: _feature_snapshot(_get(features, tag), tag) for tag in tags}
     fin = None
     if "fin" in feature_snapshots:
         properties = feature_snapshots["fin"]["properties"]
@@ -188,7 +187,9 @@ def _validate_vector(values: object, *, positive: bool) -> list[str]:
             raise ValueError("geometry vector values must be strings with explicit units")
         match = _NUMBER_WITH_UNIT.fullmatch(value)
         if not match:
-            raise ValueError(f"geometry value must be a finite literal with explicit unit: {value!r}")
+            raise ValueError(
+                f"geometry value must be a finite literal with explicit unit: {value!r}"
+            )
         number = float(match.group(1))
         if not math.isfinite(number) or (positive and number <= 0):
             raise ValueError("block sizes must be finite and positive")
@@ -208,11 +209,13 @@ def _validate_edits(edits: object) -> list[dict[str, Any]]:
         if not isinstance(tag, str) or not tag or tag in seen:
             raise ValueError("block_tag must be a unique non-empty string")
         seen.add(tag)
-        normalized.append({
-            "block_tag": tag,
-            "size": _validate_vector(item["size"], positive=True),
-            "pos": _validate_vector(item["pos"], positive=False),
-        })
+        normalized.append(
+            {
+                "block_tag": tag,
+                "size": _validate_vector(item["size"], positive=True),
+                "pos": _validate_vector(item["pos"], positive=False),
+            }
+        )
     return normalized
 
 
@@ -252,9 +255,7 @@ def create_derived_geometry_clone(
         except Exception as cleanup_exc:
             cleanup_errors.append(f"backing_remove: {cleanup_exc}")
         if cleanup_errors:
-            raise RuntimeError(
-                f"{exc}; clone cleanup failed: {'; '.join(cleanup_errors)}"
-            ) from exc
+            raise RuntimeError(f"{exc}; clone cleanup failed: {'; '.join(cleanup_errors)}") from exc
         raise
     record = DerivedGeometryRecord(
         derived_model_id=f"derived-{uuid.uuid4().hex}",
@@ -289,14 +290,10 @@ def _create_registered_derived_geometry_clone(
     *,
     new_name: str,
 ) -> tuple[Any, DerivedGeometryRecord, dict[str, Any]]:
-    clone, record = create_derived_geometry_clone(
-        source_model, client, new_name=new_name
-    )
+    clone, record = create_derived_geometry_clone(source_model, client, new_name=new_name)
     registered_name = None
     try:
-        registered_name = session_manager.add_model(
-            clone, cleanup_path=record.backing_path
-        )
+        registered_name = session_manager.add_model(clone, cleanup_path=record.backing_path)
         record.model_name = registered_name
         with _DERIVED_LOCK:
             _DERIVED[record.derived_model_id] = record
@@ -353,6 +350,11 @@ def derived_model_validation_status(model_name: str) -> dict[str, Any]:
         "dirty": record.dirty,
         "dirty_reason": record.dirty_reason,
     }
+
+
+def get_derived_geometry_record(derived_model_id: str, model_name: str) -> DerivedGeometryRecord:
+    """Return one exact clean registered record for internal trusted adapters."""
+    return _record(derived_model_id, model_name)
 
 
 def preview_fin(
@@ -436,7 +438,13 @@ def _topology(geom: Any) -> dict[str, Any]:
         return {"error": str(exc)[:300]}
 
 
-def apply_fin(model: Any, record: DerivedGeometryRecord, preview: dict[str, Any], component_tag: str, geometry_tag: str) -> dict[str, Any]:
+def apply_fin(
+    model: Any,
+    record: DerivedGeometryRecord,
+    preview: dict[str, Any],
+    component_tag: str,
+    geometry_tag: str,
+) -> dict[str, Any]:
     current = _snapshot(model, component_tag, geometry_tag)
     if _state_hash(record, current) != preview["pre_state_sha256"]:
         raise ValueError("stale pre-state; preview must be regenerated")
@@ -469,9 +477,7 @@ def apply_fin(model: Any, record: DerivedGeometryRecord, preview: dict[str, Any]
             if restored_topology != before_topology:
                 rollback_errors.append("restored topology does not match the pre-state")
             elif not before_topology.get("entity_identity_verified", False):
-                rollback_errors.append(
-                    "restored entity identity cannot be independently verified"
-                )
+                rollback_errors.append("restored entity identity cannot be independently verified")
         except Exception as rollback_exc:
             rollback_errors.append(f"rollback_snapshot: {rollback_exc}")
         if rollback_errors:
@@ -500,12 +506,20 @@ def apply_fin(model: Any, record: DerivedGeometryRecord, preview: dict[str, Any]
     }
 
 
-def apply_blocks(model: Any, record: DerivedGeometryRecord, preview: dict[str, Any], component_tag: str, geometry_tag: str) -> dict[str, Any]:
+def apply_blocks(
+    model: Any,
+    record: DerivedGeometryRecord,
+    preview: dict[str, Any],
+    component_tag: str,
+    geometry_tag: str,
+) -> dict[str, Any]:
     current = _snapshot(model, component_tag, geometry_tag)
     if _state_hash(record, current) != preview["pre_state_sha256"]:
         raise ValueError("stale pre-state; preview must be regenerated")
     geom = _geometry(model, component_tag, geometry_tag)
-    captured = {tag: current["blocks"][tag] for tag in (item["block_tag"] for item in preview["planned"])}
+    captured = {
+        tag: current["blocks"][tag] for tag in (item["block_tag"] for item in preview["planned"])
+    }
     rollback_errors = []
     try:
         for edit in preview["planned"]:
@@ -578,42 +592,122 @@ def register_derived_geometry_tools(mcp: MCPServer) -> None:
             return {"success": False, "error": str(exc)}
 
     @mcp.tool()
-    def geometry_fin_preview(derived_model_id: str, model_name: str, expected_state_sha256: str, action: Literal["union", "assembly"], imprint: bool, create_pairs: bool, component_tag: str = "comp1", geometry_tag: str = "geom1") -> dict[str, Any]:
+    def geometry_fin_preview(
+        derived_model_id: str,
+        model_name: str,
+        expected_state_sha256: str,
+        action: Literal["union", "assembly"],
+        imprint: bool,
+        create_pairs: bool,
+        component_tag: str = "comp1",
+        geometry_tag: str = "geom1",
+    ) -> dict[str, Any]:
         try:
             record = _record(derived_model_id, model_name)
-            return {"success": True, **preview_fin(session_manager.get_model(model_name), record, expected_state_sha256=expected_state_sha256, component_tag=component_tag, geometry_tag=geometry_tag, action=action, imprint=imprint, create_pairs=create_pairs)}
+            return {
+                "success": True,
+                **preview_fin(
+                    session_manager.get_model(model_name),
+                    record,
+                    expected_state_sha256=expected_state_sha256,
+                    component_tag=component_tag,
+                    geometry_tag=geometry_tag,
+                    action=action,
+                    imprint=imprint,
+                    create_pairs=create_pairs,
+                ),
+            }
         except Exception as exc:
             return {"success": False, "error": str(exc)}
 
     @mcp.tool()
-    def geometry_fin_apply(derived_model_id: str, model_name: str, expected_state_sha256: str, action: Literal["union", "assembly"], imprint: bool, create_pairs: bool, component_tag: str = "comp1", geometry_tag: str = "geom1") -> dict[str, Any]:
+    def geometry_fin_apply(
+        derived_model_id: str,
+        model_name: str,
+        expected_state_sha256: str,
+        action: Literal["union", "assembly"],
+        imprint: bool,
+        create_pairs: bool,
+        component_tag: str = "comp1",
+        geometry_tag: str = "geom1",
+    ) -> dict[str, Any]:
         try:
             record = _record(derived_model_id, model_name)
-            preview = preview_fin(session_manager.get_model(model_name), record, expected_state_sha256=expected_state_sha256, component_tag=component_tag, geometry_tag=geometry_tag, action=action, imprint=imprint, create_pairs=create_pairs)
-            return apply_fin(session_manager.get_model(model_name), record, preview, component_tag, geometry_tag)
+            preview = preview_fin(
+                session_manager.get_model(model_name),
+                record,
+                expected_state_sha256=expected_state_sha256,
+                component_tag=component_tag,
+                geometry_tag=geometry_tag,
+                action=action,
+                imprint=imprint,
+                create_pairs=create_pairs,
+            )
+            return apply_fin(
+                session_manager.get_model(model_name), record, preview, component_tag, geometry_tag
+            )
         except Exception as exc:
             return {"success": False, "error": str(exc)}
 
     @mcp.tool()
-    def geometry_blocks_preview(derived_model_id: str, model_name: str, expected_state_sha256: str, block_edits: list[dict[str, Any]], component_tag: str = "comp1", geometry_tag: str = "geom1") -> dict[str, Any]:
+    def geometry_blocks_preview(
+        derived_model_id: str,
+        model_name: str,
+        expected_state_sha256: str,
+        block_edits: list[dict[str, Any]],
+        component_tag: str = "comp1",
+        geometry_tag: str = "geom1",
+    ) -> dict[str, Any]:
         try:
             record = _record(derived_model_id, model_name)
-            return {"success": True, **preview_blocks(session_manager.get_model(model_name), record, expected_state_sha256=expected_state_sha256, component_tag=component_tag, geometry_tag=geometry_tag, block_edits=block_edits)}
+            return {
+                "success": True,
+                **preview_blocks(
+                    session_manager.get_model(model_name),
+                    record,
+                    expected_state_sha256=expected_state_sha256,
+                    component_tag=component_tag,
+                    geometry_tag=geometry_tag,
+                    block_edits=block_edits,
+                ),
+            }
         except Exception as exc:
             return {"success": False, "error": str(exc)}
 
     @mcp.tool()
-    def geometry_blocks_apply(derived_model_id: str, model_name: str, expected_state_sha256: str, block_edits: list[dict[str, Any]], component_tag: str = "comp1", geometry_tag: str = "geom1") -> dict[str, Any]:
+    def geometry_blocks_apply(
+        derived_model_id: str,
+        model_name: str,
+        expected_state_sha256: str,
+        block_edits: list[dict[str, Any]],
+        component_tag: str = "comp1",
+        geometry_tag: str = "geom1",
+    ) -> dict[str, Any]:
         try:
             record = _record(derived_model_id, model_name)
-            preview = preview_blocks(session_manager.get_model(model_name), record, expected_state_sha256=expected_state_sha256, component_tag=component_tag, geometry_tag=geometry_tag, block_edits=block_edits)
-            return apply_blocks(session_manager.get_model(model_name), record, preview, component_tag, geometry_tag)
+            preview = preview_blocks(
+                session_manager.get_model(model_name),
+                record,
+                expected_state_sha256=expected_state_sha256,
+                component_tag=component_tag,
+                geometry_tag=geometry_tag,
+                block_edits=block_edits,
+            )
+            return apply_blocks(
+                session_manager.get_model(model_name), record, preview, component_tag, geometry_tag
+            )
         except Exception as exc:
             return {"success": False, "error": str(exc)}
 
 
 __all__ = [
-    "DerivedGeometryRecord", "apply_blocks", "apply_fin",
-    "create_derived_geometry_clone", "preview_blocks", "preview_fin",
-    "derived_model_validation_status", "register_derived_geometry_tools",
+    "DerivedGeometryRecord",
+    "apply_blocks",
+    "apply_fin",
+    "create_derived_geometry_clone",
+    "preview_blocks",
+    "preview_fin",
+    "derived_model_validation_status",
+    "get_derived_geometry_record",
+    "register_derived_geometry_tools",
 ]

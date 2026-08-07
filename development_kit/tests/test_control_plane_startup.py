@@ -113,7 +113,7 @@ def test_fresh_core_discovery_is_solver_free():
 
     assert sample["heavy_modules"] == []
     assert sample["process_launch_events"] == []
-    assert sample["tool_count"] == 47
+    assert sample["tool_count"] == 45
     assert sample["create_seconds"] <= 0.75
     assert sample["core_discovery_bytes"] <= MAX_CORE_DISCOVERY_BYTES
     assert sample["largest_tool_schema_bytes"] <= MAX_CORE_TOOL_SCHEMA_BYTES

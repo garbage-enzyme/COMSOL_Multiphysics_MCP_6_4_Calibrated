@@ -3,14 +3,48 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from .comsol_discovery import DiscoveryResult, discover_environment
 from .desktop_shortcut import create_desktop_shortcut, remove_desktop_shortcut
 from .dialogs import Dialogs
 from .i18n import Translator
+from .manual_index import ManualIndexBuildTask
 from .model import SettingsFormModel, get_value
 from .storage import SettingsStore
+
+DEFAULT_LEXICAL_INDEX_NAME = "lexical_manuals.sqlite3"
+
+
+def resolve_lexical_index_target(value: str | Path) -> Path:
+    """Resolve a selected SQLite file or an existing destination folder."""
+    target = Path(value)
+    if not target.is_absolute() or not str(target).isascii():
+        raise ValueError("lexical index destination must be an ASCII-only absolute path")
+    if target.exists():
+        if target.is_dir():
+            return target / DEFAULT_LEXICAL_INDEX_NAME
+        if target.is_file():
+            return target
+        raise ValueError("lexical index destination is not a regular file or folder")
+    if not target.suffix:
+        return target / DEFAULT_LEXICAL_INDEX_NAME
+    return target
+
+
+def discover_manuals_root(comsol_root: Path) -> Path | None:
+    """Return COMSOL's manuals folder only when it actually contains a PDF."""
+    candidate = comsol_root / "doc"
+    if not candidate.is_dir():
+        return None
+    try:
+        next(candidate.rglob("*.pdf"))
+    except StopIteration:
+        return None
+    except OSError:
+        return None
+    return candidate
 
 
 class SettingsController:
@@ -23,6 +57,7 @@ class SettingsController:
         discover: Callable[..., DiscoveryResult] = discover_environment,
         create_shortcut: Callable[..., dict[str, Any]] = create_desktop_shortcut,
         remove_shortcut: Callable[..., dict[str, Any]] = remove_desktop_shortcut,
+        index_task_factory: Callable[..., ManualIndexBuildTask] = ManualIndexBuildTask,
     ) -> None:
         self.model = model
         self.store = store
@@ -30,6 +65,7 @@ class SettingsController:
         self.discover = discover
         self._create_shortcut = create_shortcut
         self._remove_shortcut = remove_shortcut
+        self._index_task_factory = index_task_factory
         self.translator = Translator(model.language)
         self.restart_pending = False
         self._dirty_notice_shown = False
@@ -115,8 +151,54 @@ class SettingsController:
         if value:
             self.update(key, value)
 
+    def browse_save_file(self, key: str) -> None:
+        value = self.dialogs.ask_save_file(title=self.text("Choose index file"))
+        if value:
+            self.update(key, value)
+
     def clear(self, key: str) -> None:
         self.update(key, None)
+
+    def start_manual_index_build(self) -> ManualIndexBuildTask | None:
+        pdf_root = get_value(self.model.document, "manuals.root")
+        index_path = get_value(self.model.document, "lexical_docs.index_path")
+        if not pdf_root or not index_path:
+            self.dialogs.error(
+                title=self.text("Generate manual index"),
+                message=self.text("Choose both the PDF folder and SQLite index file first."),
+            )
+            return None
+        try:
+            target = resolve_lexical_index_target(index_path)
+        except OSError, ValueError:
+            self.dialogs.error(
+                title=self.text("Generate manual index"),
+                message=self.text(
+                    "Index generation could not start. Check the selected paths and permissions."
+                ),
+            )
+            return None
+        if target.exists() and not self.dialogs.confirm(
+            title=self.text("Replace existing index?"),
+            message=self.text(
+                "A validated new index will atomically replace the existing file. Continue?"
+            ),
+        ):
+            return None
+        try:
+            if str(target) != str(index_path):
+                self.update("lexical_docs.index_path", str(target))
+            task = self._index_task_factory(pdf_root=pdf_root, index_path=str(target))
+            task.start()
+        except OSError, RuntimeError, ValueError:
+            self.dialogs.error(
+                title=self.text("Generate manual index"),
+                message=self.text(
+                    "Index generation could not start. Check the selected paths and permissions."
+                ),
+            )
+            return None
+        return task
 
     def auto_detect(self, *, manual: bool) -> None:
         current_root = get_value(self.model.document, "comsol.installation_root")
@@ -151,6 +233,9 @@ class SettingsController:
         if result.java_home is not None:
             proposal["java.java_home"] = str(result.java_home)
             proposal["java.jdk_home"] = str(result.java_home)
+        manuals_root = discover_manuals_root(result.comsol_root)
+        if manuals_root is not None:
+            proposal["manuals.root"] = str(manuals_root)
         overwritten = [
             key
             for key, value in proposal.items()

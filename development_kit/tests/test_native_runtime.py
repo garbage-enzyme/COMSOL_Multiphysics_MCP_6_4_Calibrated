@@ -77,7 +77,7 @@ def test_native_runtime_manifest_separates_host_worker_and_offline_imports() -> 
         "torch",
     }
     assert {item.module for item in NATIVE_RUNTIME_MANIFEST if item.scope == "offline_cli"} == {
-        "fitz"
+        "pymupdf"
     }
 
 

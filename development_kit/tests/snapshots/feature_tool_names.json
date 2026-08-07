@@ -1,4 +1,8 @@
 {
+  "lexical_docs": [
+    "manual_read_pages",
+    "manual_search"
+  ],
   "semantic_docs": [
     "semantic_search",
     "semantic_status",

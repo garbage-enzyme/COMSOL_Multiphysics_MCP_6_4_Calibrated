@@ -1,6 +1,6 @@
 # Generated deterministic gettext template for COMSOL MCP Settings.
 msgid ""
-msgstr "Project-Id-Version: comsol-mcp alpha6.5\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\nLanguage: \nPlural-Forms: nplurals=2; plural=(n != 1);\n"
+msgstr "Project-Id-Version: comsol-mcp alpha7.0\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\nLanguage: \nPlural-Forms: nplurals=2; plural=(n != 1);\n"
 
 msgid "COMSOL MCP Settings"
 msgstr ""
@@ -60,6 +60,9 @@ msgid "Choose folder"
 msgstr ""
 
 msgid "Choose file"
+msgstr ""
+
+msgid "Choose index file"
 msgstr ""
 
 msgid "GUI release"
@@ -200,13 +203,25 @@ msgstr ""
 msgid "Check that a resumed job uses the same producer and driver."
 msgstr ""
 
+msgid "Manual sources and lexical search"
+msgstr ""
+
+msgid "Optional semantic search"
+msgstr ""
+
+msgid "Enable local keyword search for installed or copied PDF manuals. This is off by default because COMSOL manuals may not be installed."
+msgstr ""
+
+msgid "Folder scanned recursively when generating the manual index. Choose the folder containing the PDF manuals."
+msgstr ""
+
+msgid "SQLite FTS5/BM25 index used by manual_search. Enter an ASCII-only SQLite file or destination folder. A folder uses lexical_manuals.sqlite3."
+msgstr ""
+
 msgid "Enable optional semantic manual-search tools for the selected profile. This feature requires prepared local indexes and a search model."
 msgstr ""
 
-msgid "Optional folder containing prepared semantic-search files. This is not COMSOL's built-in manual folder. \nExample: %LOCALAPPDATA%\\comsol_mcp\\semantic\\manuals"
-msgstr ""
-
-msgid "Optional SQLite file used for manual text search. \nExample: %LOCALAPPDATA%\\comsol_mcp\\semantic\\manuals.sqlite3"
+msgid "Optional folder containing the prepared semantic vector index. It is independent from the SQLite lexical index."
 msgstr ""
 
 msgid "Optional folder containing the local semantic-search model. \nExample: %LOCALAPPDATA%\\comsol_mcp\\semantic\\models"
@@ -294,4 +309,61 @@ msgid "Settings could not be prepared safely."
 msgstr ""
 
 msgid "Settings are missing or damaged. Preserve them and rebuild defaults?"
+msgstr ""
+
+msgid "Generate Index"
+msgstr ""
+
+msgid "Generate manual index"
+msgstr ""
+
+msgid "Starting index worker..."
+msgstr ""
+
+msgid "Cancelling safely..."
+msgstr ""
+
+msgid "{percent}% — {files}/{total_files} PDFs, {pages}/{total_pages} pages{source}"
+msgstr ""
+
+msgid "Replace existing index?"
+msgstr ""
+
+msgid "A validated new index will atomically replace the existing file. Continue?"
+msgstr ""
+
+msgid "Choose both the PDF folder and SQLite index file first."
+msgstr ""
+
+msgid "Index generation could not start. Check the selected paths and permissions."
+msgstr ""
+
+msgid "Manual index ready"
+msgstr ""
+
+msgid "Indexed {pdfs} PDFs and {pages} pages. Corpus fingerprint: {fingerprint}"
+msgstr ""
+
+msgid "Index generation failed"
+msgstr ""
+
+msgid "The index worker stopped without a completion receipt."
+msgstr ""
+
+msgid "Index generation cancelled"
+msgstr ""
+
+msgid "Temporary files were removed and the previous index was preserved."
+msgstr ""
+
+msgid "Manual search is not ready"
+msgstr ""
+
+msgid "Choose or generate a valid SQLite manual index before enabling search."
+msgstr ""
+
+msgid "Semantic search is not ready"
+msgstr ""
+
+msgid "Enable manual search and choose valid lexical, semantic-index, and model assets first."
 msgstr ""

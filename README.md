@@ -5,7 +5,7 @@ English | [中文](README_CN.md)
 [![CI](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/actions/workflows/ci.yml)
 [![Python 3.14](https://img.shields.io/badge/python-3.14-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
-![Release: 0.6.5](https://img.shields.io/badge/release-0.6.5-blue)
+![Release: 0.7.0](https://img.shields.io/badge/release-0.7.0-blue)
 ![Status: alpha](https://img.shields.io/badge/status-alpha-red)
 [![GitHub stars](https://img.shields.io/github/stars/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated?style=social)](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/stargazers)
 
@@ -76,7 +76,7 @@ and `capabilities` readback without starting COMSOL, then separately label any
 licensed start/solve/cleanup coverage. Treat live discovery, not a count copied
 from documentation, as the authority for the installed tool surface.
 
-Release `0.6.5` uses the MCP Python SDK `2.0.x` runtime base conservatively.
+Release `0.7.0` uses the MCP Python SDK `2.0.x` runtime base conservatively.
 Its tools, profiles, schemas, and stdio configuration remain on the accepted
 legacy-compatible application contract; the release does not opt clients into
 MCP `2026-07-28` features such as multi-round-trip requests, cache hints,
@@ -105,7 +105,7 @@ and validation checks remain the security boundary.
   itself is still required and is never bundled or replaced.
 - **Shared Desktop collaboration (default-off).** The independent `shared_server.enabled` feature can be combined with any tool profile to attach to a manually started local COMSOL Server, adopt exactly one server-held model, enforce non-owning leases and revision locks, run durable attached jobs, and detach without shutting down the user's Server, Desktop, listener, or model.
 - **Wave Optics validation.** A focused profile provides read-only model preflight and a one-wavelength evidence audit for periodic metasurfaces.
-- **Bounded offline manuals.** SQLite FTS5/BM25 search and page retrieval run outside the COMSOL control process and return compact source/page citations.
+- **Bounded offline manuals (default-off).** `manuals.root` identifies the original COMSOL PDF tree, while the independent `lexical_docs.enabled` feature adds SQLite FTS5/BM25 search and page retrieval after the user generates a local index. It runs outside the COMSOL control process and returns compact source/page citations.
 - **Honest optional semantic retrieval.** The isolated `semantic_docs.enabled` feature is contained and composes with any tool profile, but its baseline model did not meet quality and memory promotion gates. Lexical manual search remains the recommended default.
 
 ## Shared project settings
@@ -174,11 +174,23 @@ restart after changing it.
 
 | Profile | Intended use |
 | --- | --- |
-| `core` (default) | Compact, mature control plane: status, ownership, session/model inspection, one-point solve/evaluation, and lexical manuals. |
+| `core` (default) | Compact, mature control plane: status, ownership, session/model inspection, and one-point solve/evaluation. |
 | `basic_fem` | `core` plus typed conventional FEM construction, named selections, Pressure Acoustics and mathematical PDE interfaces, derived-geometry edits, bounded exports, and the Python-free standalone launcher tools. |
 | `wave_optics` | Recommended for metasurfaces: `core` plus derived-geometry edits, material preview, locale-safe field discovery and bounded NPZ/manifest extraction, periodic-mesh audit/smoke, visual-review contracts, Wave Optics preflight, and point/reference audits. Durable staged jobs remain under `job_submit`. |
 | `experimental` | Explicit opt-in generic creation, async, property escape hatches, and project helpers. |
 | `full` | Broad compatibility/discovery surface containing every non-feature-gated tool. |
+
+The `experimental` and `full` profiles expose two solver-free alpha7 research
+preparation tools. `research_campaign_compile` turns a complete goal, frozen
+design space, and explicit approval into a fingerprinted manifest; it never
+starts a solver. `research_robustness_plan` creates a centered one-axis-at-a-time
+perturbation matrix and rejects candidates that would require bound clipping.
+`research_optimizer_advance` is a stateless checkpoint/feedback step for the
+experimental adaptive backend; clients own the returned checkpoint and can
+resume exact proposals after a restart.
+These tools prepare evidence-safe work; they do not start an autonomous
+campaign, change materials, claim success without caller tolerances, or make
+RCWA mandatory when an independent adapter is not applicable.
 
 Profiles only control the visibility of COMSOL automation/simulation tools and
 future autonomous-exploration tools. Orthogonal functionality uses independent,
@@ -187,6 +199,7 @@ other:
 
 | Feature (advanced JSON setting) | Added surface |
 | --- | --- |
+| `lexical_docs.enabled=true` | Two isolated SQLite FTS5/BM25 manual-search and exact-page tools. |
 | `shared_server.enabled=true` | Protected shared Desktop/attached-Server workflow with explicit confirmation and exact process/listener/model identity. |
 | `semantic_docs.enabled=true` | Three isolated experimental vector-assisted manual-retrieval tools. |
 
@@ -417,7 +430,9 @@ Without a caller-supplied versioned validation policy, an audit is evidence-only
 
 ## Manual retrieval
 
-`manual_search` and `manual_read_pages` are the production documentation path. They use an offline SQLite FTS5/BM25 index, bounded worker processes, and compact source/page citations. The MCP control process does not import Torch or SentenceTransformer for this path.
+`manual_search` and `manual_read_pages` are the production documentation path. They use an offline SQLite FTS5/BM25 index, bounded worker processes, and compact source/page citations. The MCP control process does not import Torch or SentenceTransformer for this path. They are independently default-off because a COMSOL installation may omit local manuals.
+
+The Settings GUI Docs tab separates manual keyword search from semantic search. Choose a raw PDF root and an ASCII-only SQLite destination, then use **Generate Index**. The background dialog reports stage, current PDF, page counts, and percentage. It builds and validates a sibling temporary database, atomically publishes only a valid result, and preserves the previous index on cancellation or failure. Enable manual search only after a valid index exists.
 
 `semantic_docs.enabled` is opt-in and isolated from COMSOL control. Its isolated-worker vector retrieval is an English diagnostic baseline, not a multilingual or production-quality claim: the frozen benchmark improved exact-match recall but regressed paraphrase/multi-concept recall, returned no direct-Chinese matches, failed negative-query abstention, and grew substantially in memory during soak testing. The baseline model and its index assets have been removed; a replacement model would require a full benchmark gate before re-deployment. Keep lexical manual search for normal work.
 
@@ -535,9 +550,11 @@ For optional isolated semantic retrieval (sentence-transformers, not ChromaDB):
 ```powershell
 python -m pip install ".[semantic-docs]"
 # Prefer the Settings GUI Docs tab. For developer/agent JSON automation:
+#   manuals.root = "D:/COMSOL64/Multiphysics/doc"
+#   lexical_docs.enabled = true
+#   lexical_docs.index_path = "D:/comsol_docs_fts/manuals.sqlite3"
 #   semantic_docs.enabled = true
 #   semantic_docs.root = "D:/comsol_semantic"
-#   semantic_docs.lexical_index = "D:/comsol_docs_fts/manuals.sqlite3"
 #   semantic_docs.model_path = "D:/comsol_semantic/models/<model>/<revision>"
 ```
 

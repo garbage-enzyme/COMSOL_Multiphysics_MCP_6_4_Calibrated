@@ -267,7 +267,7 @@ def main() -> int:
     import comsol_mcp
     import settings_gui
     from comsol_mcp.server import create_server
-    from comsol_mcp.settings import SEMANTIC_ENABLED_ENV
+    from comsol_mcp.settings import LEXICAL_DOCS_ENABLED_ENV, SEMANTIC_ENABLED_ENV
     from comsol_mcp.shared_session.contracts import SHARED_SERVER_FEATURE_ENV
     from comsol_mcp.tools.capabilities import get_capabilities
     from comsol_mcp.tools.catalog import FEATURE_NAMES, PROFILE_NAMES, snapshot_tool_schemas
@@ -307,6 +307,7 @@ def main() -> int:
         )
 
     feature_environments = {
+        "lexical_docs": LEXICAL_DOCS_ENABLED_ENV,
         "semantic_docs": SEMANTIC_ENABLED_ENV,
         "shared_server": SHARED_SERVER_FEATURE_ENV,
     }
@@ -336,6 +337,7 @@ def main() -> int:
     composed = resolve_profile(
         "full",
         environ={
+            LEXICAL_DOCS_ENABLED_ENV: "true",
             SEMANTIC_ENABLED_ENV: "true",
             SHARED_SERVER_FEATURE_ENV: "true",
         },

@@ -11,11 +11,11 @@ import numpy as np
 import pytest
 from src.evidence.contracts import example_validation_policies
 from src.tools.wave_optics_audit import (
-    _strict_positive_entity_ids,
     _load_air_reference,
     _load_policy,
     _replace_clone_materials_with_air,
     _single_real,
+    _strict_positive_entity_ids,
     evaluate_validation_policy,
     run_wave_optics_point_audit,
     run_wave_optics_reference_audit,
@@ -351,12 +351,16 @@ class AuditModel:
         absorption=1.2,
         nonfinite=False,
         drift_source=False,
+        evaluated_wavelength_m=4.37e-6,
+        solved_wavelength_m=4.37e-6,
     ):
         self.path = path
         self._name = name
         self.absorption = absorption
         self.nonfinite = nonfinite
         self.drift_source = drift_source
+        self.evaluated_wavelength_m = evaluated_wavelength_m
+        self.solved_wavelength_m = solved_wavelength_m
         self.solved = False
         self.java = JavaModel(self)
 
@@ -373,7 +377,7 @@ class AuditModel:
     def evaluate(self, expression):
         if isinstance(expression, list):
             if expression == ["wl", "c_const/ewfd.freq"]:
-                return [4.37e-6, 4.37e-6]
+                return [self.evaluated_wavelength_m, self.solved_wavelength_m]
             if expression[-1] == "dom":
                 return [
                     np.array([1 + 0j, 1 + 0j, 1 + 0j]),
@@ -488,6 +492,22 @@ def _declared_plane_flux():
             "positive_power_sign": -1,
         },
     }
+
+
+def test_point_audit_wavelength_difference_includes_requested_value(tmp_path, monkeypatch):
+    result, _source = _run(
+        tmp_path,
+        monkeypatch,
+        evaluated_wavelength_m=10.0e-6,
+        solved_wavelength_m=10.0e-6,
+    )
+
+    wavelength = result["measurement"]["wavelength"]
+    assert wavelength["evaluated_to_solved_difference_m"] == 0.0
+    assert wavelength["requested_to_evaluated_difference_m"] == pytest.approx(-5.63e-6)
+    assert wavelength["requested_to_solved_difference_m"] == pytest.approx(-5.63e-6)
+    assert wavelength["absolute_difference_m"] == pytest.approx(5.63e-6)
+    assert wavelength["relative_difference"] == pytest.approx(5.63 / 4.37)
 
 
 def _internal_absorption():

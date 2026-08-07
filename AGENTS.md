@@ -52,6 +52,9 @@ removed.
    process-only work. Licensed COMSOL checks are explicit and serial.
 8. Bound inputs, responses, retries, workers, artifact counts, and file sizes.
    Durable resume requires exact source, configuration, and driver identities.
+   For subprocess JSON-lines or similar stdout protocols, keep stdout protocol-
+   only, route diagnostics to stderr, and test optional native dependencies in
+   a fresh environment because deprecated compatibility imports may emit text.
 9. Keep evidence state separate from execution state and scientific disposition.
    A successful native call, fixed-wavelength match, or S/P label alone is not
    physical validation.

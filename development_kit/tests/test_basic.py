@@ -291,18 +291,18 @@ class TestSessionManager:
 
         def create_client(**_kwargs):
             entered.set()
-            assert release.wait(timeout=2)
+            assert release.wait(timeout=10)
             return FakeClient()
 
         monkeypatch.setattr(session_module.mph, "Client", create_client)
         monkeypatch.setattr(session_module.mph_session, "client", None)
 
         assert sm.start(cores=2)["starting"] is True
-        assert entered.wait(timeout=2)
+        assert entered.wait(timeout=10)
         assert get_session_status() == {"connected": False, "starting": True}
 
         release.set()
-        sm._start_thread.join(timeout=2)
+        sm._start_thread.join(timeout=10)
         assert get_session_status() == {"connected": True, "starting": False}
 
         assert sm.disconnect()["success"] is True

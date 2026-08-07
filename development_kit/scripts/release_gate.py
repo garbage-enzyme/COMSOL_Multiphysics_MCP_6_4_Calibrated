@@ -7,10 +7,12 @@ import hashlib
 import json
 import os
 import platform
+import shutil
 import subprocess
 import sys
 import tarfile
 import tempfile
+import uuid
 import zipfile
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
@@ -316,7 +318,12 @@ def main() -> int:
         ]
     )
     if not args.skip_tests:
-        _run([sys.executable, "-m", "pytest", "-q"])
+        pytest_root = artifact_root.parent / f"rpt{uuid.uuid4().hex[:6]}"
+        pytest_root.mkdir()
+        try:
+            _run([sys.executable, "-m", "pytest", "-q", "--basetemp", str(pytest_root)])
+        finally:
+            shutil.rmtree(pytest_root, ignore_errors=True)
     _run([sys.executable, "-m", "build", "--outdir", str(dist_dir)])
     distribution_paths = _distribution_artifacts(dist_dir)
     distributions = [_distribution_inventory(path) for path in distribution_paths]

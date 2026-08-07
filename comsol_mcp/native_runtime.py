@@ -122,7 +122,7 @@ NATIVE_RUNTIME_MANIFEST = (
         "Optional semantic model loading is contained in semantic_worker.",
     ),
     NativeRuntimeImport(
-        "fitz",
+        "pymupdf",
         "pymupdf",
         "offline_cli",
         False,

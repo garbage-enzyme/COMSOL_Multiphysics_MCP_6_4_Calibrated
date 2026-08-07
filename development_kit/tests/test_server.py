@@ -76,8 +76,8 @@ def test_server_registration_is_idempotent():
     assert {"job_submit", "job_status", "job_tail", "job_cancel", "job_resume"} <= tool_names
     assert "model_load" in tool_names
     assert "study_solve" in tool_names
-    assert "manual_search" in tool_names
-    assert "manual_read_pages" in tool_names
+    assert "manual_search" not in tool_names
+    assert "manual_read_pages" not in tool_names
     assert "model_create" not in tool_names
     assert "docs_get" not in tool_names
     assert "wave_optics_preflight" not in tool_names
@@ -335,7 +335,7 @@ def test_capabilities_report_risky_operations_without_starting_comsol(monkeypatc
 
     assert result["profile"] == "core"
     assert result["active_profile"] == "core"
-    assert result["tool_count"] == 47
+    assert result["tool_count"] == 45
     assert result["profile_source"]["default_used"] is True
     assert [item["name"] for item in result["available_profiles"]] == [
         "core",
@@ -346,6 +346,7 @@ def test_capabilities_report_risky_operations_without_starting_comsol(monkeypatc
     ]
     assert result["enabled_features"] == []
     assert [item["name"] for item in result["available_features"]] == [
+        "lexical_docs",
         "semantic_docs",
         "shared_server",
     ]
@@ -358,6 +359,7 @@ def test_capabilities_report_risky_operations_without_starting_comsol(monkeypatc
     assert result["profile_guidance"]["default_profile"] == "core"
     assert result["profile_guidance"]["wave_optics_recommended_profile"] == "wave_optics"
     assert result["profile_guidance"]["independent_feature_gates"] == {
+        "lexical_docs": "COMSOL_MCP_ENABLE_LEXICAL_DOCS",
         "semantic_docs": "COMSOL_MCP_ENABLE_SEMANTIC_DOCS",
         "shared_server": "COMSOL_MCP_ENABLE_SHARED_SERVER",
     }
@@ -416,9 +418,9 @@ def test_startup_capability_summary_is_compact_and_truthful(monkeypatch):
     summary = startup_capability_summary()
 
     assert "profile=core" in summary
-    assert "tools=47" in summary
+    assert "tools=45" in summary
+    assert "lexical_manual=disabled" in summary
     assert "semantic_docs=disabled" in summary
-    assert "lexical_manual=enabled" in summary
     assert "durable_jobs=staged_sweep" in summary
     assert "convergence_campaign" in summary
     assert "durable_job_cancellation=verified" in summary

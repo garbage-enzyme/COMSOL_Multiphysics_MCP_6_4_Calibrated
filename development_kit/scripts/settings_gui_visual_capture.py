@@ -70,6 +70,17 @@ def _document(language: str, state: str) -> dict:
         document["comsol"]["installation_root"] = f"C:/{suffix}"
         document["java"]["java_home"] = f"C:/{suffix}/java/win64/jre"
         document["java"]["jdk_home"] = f"C:/{suffix}/java/win64/jre"
+    elif state == "docs":
+        document["manuals"]["root"] = "C:/COMSOL64/Multiphysics/doc"
+        document["lexical_docs"] = {
+            "enabled": True,
+            "index_path": "D:/comsol_docs_fts/manuals.sqlite3",
+        }
+        document["semantic_docs"] = {
+            "enabled": True,
+            "root": "D:/comsol_docs_semantic",
+            "model_path": "D:/models/semantic-search",
+        }
     return document
 
 
@@ -172,7 +183,7 @@ def _capture_scenarios() -> tuple[tuple[str, int, str, str], ...]:
                 (
                     (language, dpi_percent, "valid", "general"),
                     (language, dpi_percent, "valid", "profile"),
-                    (language, dpi_percent, "valid", "semantic"),
+                    (language, dpi_percent, "docs", "docs"),
                     (language, dpi_percent, "about", "about"),
                 )
             )
@@ -246,7 +257,7 @@ def main() -> int:
     parser.add_argument("--dpi-percent", type=int, choices=(100, 125, 150, 200))
     parser.add_argument(
         "--state",
-        choices=("valid", "invalid", "long_paths", "evidence", "about"),
+        choices=("valid", "invalid", "long_paths", "evidence", "docs", "about"),
     )
     parser.add_argument("--tab", choices=TAB_IDS)
     args = parser.parse_args()

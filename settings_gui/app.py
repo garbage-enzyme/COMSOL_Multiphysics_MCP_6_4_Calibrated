@@ -28,6 +28,7 @@ from .controller import SettingsController
 from .dialogs import Dialogs
 from .fonts import apply_locale_font
 from .i18n import Translator, language_option_labels, scale_option_labels
+from .manual_index import ManualIndexBuildTask
 from .model import (
     FIELDS,
     TAB_IDS,
@@ -51,7 +52,7 @@ TAB_TITLES = {
     "runtime": "Runtime",
     "comsol_java": "COMSOL/Java",
     "evidence": "Evidence",
-    "semantic": "Docs",
+    "docs": "Docs",
     "ownership": "Owner",
     "about": "About",
 }
@@ -65,6 +66,20 @@ FIXED_LINKS = (
     ),
 )
 ICON_PATH = Path(__file__).resolve().parent / "assets" / "comsol_mcp.ico"
+INDEX_DIALOG_WIDTH = 620
+INDEX_DIALOG_HEIGHT = 260
+INDEX_DIALOG_MARGIN = 48
+INDEX_DIALOG_SOURCE_CHARS = 96
+DOC_SECTIONS = (
+    (
+        "Manual sources and lexical search",
+        ("manuals.root", "lexical_docs.enabled", "lexical_docs.index_path"),
+    ),
+    (
+        "Optional semantic search",
+        ("semantic_docs.enabled", "semantic_docs.root", "semantic_docs.model_path"),
+    ),
+)
 
 
 def _apply_window_icon(root: tk.Tk) -> bool:
@@ -109,6 +124,172 @@ class ScrollableTab(ttk.Frame):
         self.canvas.itemconfigure(self.window, width=event.width)
 
 
+class ManualIndexProgressDialog:
+    """Modal progress view backed by one isolated index-build process."""
+
+    def __init__(
+        self,
+        parent: tk.Tk,
+        controller: SettingsController,
+        task: ManualIndexBuildTask,
+        *,
+        on_close,
+    ) -> None:
+        self.parent = parent
+        self.controller = controller
+        self.task = task
+        self.on_close = on_close
+        self.window = tk.Toplevel(parent)
+        self.window.title(controller.text("Generate manual index"))
+        self.window.transient(parent)
+        self.window.resizable(True, False)
+        self.window.protocol("WM_DELETE_WINDOW", self.cancel)
+        self.window.bind("<Escape>", lambda _event: self.cancel())
+        self.window.grab_set()
+        self._size_and_position()
+        outer = ttk.Frame(self.window)
+        outer.pack(fill="both", expand=True)
+        footer = ttk.Frame(outer, padding=(18, 8, 18, 16))
+        footer.pack(side="bottom", fill="x")
+        body = ttk.Frame(outer, padding=(18, 16, 18, 6))
+        body.pack(side="top", fill="both", expand=True)
+        self.stage = tk.StringVar(value=controller.text("Starting index worker..."))
+        self.detail = tk.StringVar(value="0%")
+        self.percent = tk.IntVar(value=0)
+        ttk.Label(body, textvariable=self.stage, wraplength=540).pack(anchor="w")
+        ttk.Progressbar(
+            body,
+            maximum=100,
+            variable=self.percent,
+            mode="determinate",
+        ).pack(fill="x", pady=(12, 6))
+        ttk.Label(body, textvariable=self.detail, wraplength=540).pack(anchor="w")
+        self.cancel_button = ttk.Button(
+            footer,
+            text=controller.text("Cancel"),
+            command=self.cancel,
+        )
+        self.cancel_button.pack(side="right")
+        self._terminal = False
+        self._after_id = self.window.after(100, self.poll)
+
+    def _size_and_position(self) -> None:
+        """Keep the fixed footer reachable within the current monitor bounds."""
+        self.parent.update_idletasks()
+        screen_width = max(1, self.window.winfo_screenwidth())
+        screen_height = max(1, self.window.winfo_screenheight())
+        width = min(INDEX_DIALOG_WIDTH, max(360, screen_width - INDEX_DIALOG_MARGIN * 2))
+        height = min(INDEX_DIALOG_HEIGHT, max(180, screen_height - INDEX_DIALOG_MARGIN * 2))
+        parent_x = self.parent.winfo_rootx()
+        parent_y = self.parent.winfo_rooty()
+        parent_width = max(self.parent.winfo_width(), width)
+        parent_height = max(self.parent.winfo_height(), height)
+        x = max(0, min(parent_x + (parent_width - width) // 2, screen_width - width))
+        y = max(0, min(parent_y + (parent_height - height) // 2, screen_height - height))
+        self.window.geometry(f"{width}x{height}+{x}+{y}")
+        self.window.minsize(min(width, 420), min(height, 180))
+
+    @staticmethod
+    def _display_source(value: object) -> str:
+        source = str(value)
+        if len(source) <= INDEX_DIALOG_SOURCE_CHARS:
+            return source
+        return "..." + source[-(INDEX_DIALOG_SOURCE_CHARS - 3) :]
+
+    def cancel(self) -> None:
+        if self._terminal:
+            return
+        self.cancel_button.configure(state="disabled")
+        self.stage.set(self.controller.text("Cancelling safely..."))
+        self.task.cancel()
+
+    def poll(self) -> None:
+        for event in self.task.drain_events():
+            kind = event.get("event")
+            if kind == "progress":
+                percent = max(0, min(int(event.get("percent", 0)), 100))
+                self.percent.set(percent)
+                stage = str(event.get("stage", "working")).replace("_", " ").title()
+                self.stage.set(self.controller.text(stage))
+                self.detail.set(
+                    self.controller.text(
+                        "{percent}% — {files}/{total_files} PDFs, "
+                        "{pages}/{total_pages} pages{source}"
+                    ).format(
+                        percent=percent,
+                        files=int(event.get("processed_files", 0)),
+                        total_files=int(event.get("total_files", 0)),
+                        pages=int(event.get("processed_pages", 0)),
+                        total_pages=int(event.get("total_pages", 0)),
+                        source=(
+                            " — " + self._display_source(event["current_source"])
+                            if event.get("current_source")
+                            else ""
+                        ),
+                    )
+                )
+            elif kind == "result":
+                self._terminal = True
+                self.percent.set(100)
+                self.controller.dialogs.info(
+                    title=self.controller.text("Manual index ready"),
+                    message=self.controller.text(
+                        "Indexed {pdfs} PDFs and {pages} pages. Corpus fingerprint: {fingerprint}"
+                    ).format(
+                        pdfs=int(event.get("pdf_count", 0)),
+                        pages=int(event.get("page_count", 0)),
+                        fingerprint=str(event.get("corpus_fingerprint", "")),
+                    ),
+                )
+                self.close()
+                return
+            elif kind == "error":
+                self._terminal = True
+                self.controller.dialogs.error(
+                    title=self.controller.text("Index generation failed"),
+                    message=self.controller.text(
+                        str(event.get("message", "Index generation failed."))
+                    ),
+                )
+                self.close()
+                return
+            elif kind == "cancelled":
+                self._terminal = True
+                self.controller.dialogs.info(
+                    title=self.controller.text("Index generation cancelled"),
+                    message=self.controller.text(
+                        "Temporary files were removed and the previous index was preserved."
+                    ),
+                )
+                self.close()
+                return
+        if not self.task.running and not self._terminal:
+            self._terminal = True
+            self.controller.dialogs.error(
+                title=self.controller.text("Index generation failed"),
+                message=self.controller.text(
+                    "The index worker stopped without a completion receipt."
+                ),
+            )
+            self.close()
+            return
+        self._after_id = self.window.after(100, self.poll)
+
+    def close(self) -> None:
+        if self._after_id is not None:
+            try:
+                self.window.after_cancel(self._after_id)
+            except tk.TclError:
+                pass
+            self._after_id = None
+        try:
+            self.window.grab_release()
+        except tk.TclError:
+            pass
+        self.window.destroy()
+        self.on_close()
+
+
 class SettingsApplication:
     def __init__(
         self,
@@ -124,9 +305,11 @@ class SettingsApplication:
         self.help_labels: dict[str, ttk.Label] = {}
         self.error_labels: dict[str, ttk.Label] = {}
         self.entries: dict[str, ttk.Entry] = {}
+        self.field_widgets: dict[str, list[Any]] = {}
         self.root_lists: dict[str, tk.Listbox] = {}
         self.shortcut_buttons: dict[str, ttk.Button] = {}
         self.fixed_link_buttons: list[ttk.Button] = []
+        self.index_dialog: ManualIndexProgressDialog | None = None
         self.banner: ttk.Label | None = None
         self.save_button: ttk.Button | None = None
         self.apply_button: ttk.Button | None = None
@@ -177,6 +360,7 @@ class SettingsApplication:
             self.help_labels.clear()
             self.error_labels.clear()
             self.entries.clear()
+            self.field_widgets.clear()
             self.root_lists.clear()
             self.shortcut_buttons.clear()
             self.fixed_link_buttons.clear()
@@ -213,8 +397,20 @@ class SettingsApplication:
             tab = ScrollableTab(self.notebook)
             self.tabs[tab_id] = tab
             self.notebook.add(tab, text=_(TAB_TITLES[tab_id]))
+        docs_keys = {key for _title, keys in DOC_SECTIONS for key in keys}
         for field in FIELDS:
-            self._add_field(self.tabs[field.tab].content, field)
+            if field.key not in docs_keys:
+                self._add_field(self.tabs[field.tab].content, field)
+        docs_parent = self.tabs["docs"].content
+        for title, keys in DOC_SECTIONS:
+            row = docs_parent.grid_size()[1]
+            ttk.Label(
+                docs_parent,
+                text=_(title),
+                font="TkHeadingFont",
+            ).grid(row=row, column=0, sticky="w", pady=(4, 12))
+            for key in keys:
+                self._add_field(docs_parent, next(field for field in FIELDS if field.key == key))
         self._build_about(self.tabs["about"].content)
         try:
             self.notebook.select(min(self._selected_tab, len(TAB_IDS) - 1))
@@ -235,6 +431,20 @@ class SettingsApplication:
         state = "normal" if self.controller.model.valid else "disabled"
         self.save_button.configure(state=state)
         self.apply_button.configure(state=state)
+        self._refresh_state()
+
+    def _start_manual_index_build(self) -> None:
+        if self.index_dialog is not None:
+            return
+        task = self.controller.start_manual_index_build()
+        if task is None:
+            return
+        self.index_dialog = ManualIndexProgressDialog(
+            self.root,
+            self.controller,
+            task,
+            on_close=lambda: setattr(self, "index_dialog", None),
+        )
 
     def _add_field(self, parent: ttk.Frame, field: FieldDescriptor) -> None:
         row = parent.grid_size()[1]
@@ -295,6 +505,7 @@ class SettingsApplication:
                 command=lambda key=field.key, var=variable: self._changed(key, var.get()),
             )
             widget.grid(row=0, column=1, sticky="w")
+            self.field_widgets[field.key] = [widget]
         elif field.kind == "roots":
             variable = tk.StringVar(value="")
             self._add_roots(frame, field, list(value))
@@ -307,6 +518,7 @@ class SettingsApplication:
             )
             widget.grid(row=0, column=1, sticky="ew")
             self.entries[field.key] = widget
+            control_widgets: list[Any] = [widget]
             variable.trace_add(
                 "write",
                 lambda *_args, key=field.key, var=variable, nullable=field.nullable: self._changed(
@@ -318,25 +530,42 @@ class SettingsApplication:
             controls.grid(row=0, column=2, sticky="e", padx=(8, 0))
             if field.kind == "file":
                 command = partial(self.controller.browse_file, field.key)
+            elif field.kind == "save_file":
+                command = partial(self.controller.browse_save_file, field.key)
             else:
                 command = partial(self.controller.browse_directory, field.key)
-            ttk.Button(controls, text=self.controller.text("Browse"), command=command).pack(
-                side="left"
+            browse_button = ttk.Button(
+                controls, text=self.controller.text("Browse"), command=command
             )
+            browse_button.pack(side="left")
+            control_widgets.append(browse_button)
             if field.nullable:
-                ttk.Button(
+                clear_button = ttk.Button(
                     controls,
                     text=self.controller.text("Clear"),
                     command=lambda key=field.key: self.controller.clear(key),
-                ).pack(side="left", padx=(6, 0))
+                )
+                clear_button.pack(side="left", padx=(6, 0))
+                control_widgets.append(clear_button)
             if field.key == "comsol.installation_root":
                 ttk.Button(
                     controls,
                     text=self.controller.text("Auto-detect"),
                     command=lambda: self.controller.auto_detect(manual=True),
                 ).pack(side="left", padx=(6, 0))
+            self.field_widgets[field.key] = control_widgets
         self.variables[field.key] = variable
         help_id = profile_help_id(value) if field.key == "profile.name" else field.help_id
+        content_row = 1
+        if field.key == "lexical_docs.index_path":
+            action = ttk.Frame(frame)
+            action.grid(row=1, column=1, columnspan=2, sticky="w", pady=(2, 0))
+            ttk.Button(
+                action,
+                text=self.controller.text("Generate Index"),
+                command=self._start_manual_index_build,
+            ).pack(anchor="w")
+            content_row = 2
         help_label = ttk.Label(
             frame,
             text=self.controller.text(help_id),
@@ -344,7 +573,7 @@ class SettingsApplication:
             wraplength=620,
             justify="left",
         )
-        help_label.grid(row=1, column=1, columnspan=2, sticky="w", pady=(4, 0))
+        help_label.grid(row=content_row, column=1, columnspan=2, sticky="w", pady=(4, 0))
         self.help_labels[field.key] = help_label
         error = self.controller.model.errors.get(field.key, "")
         error_label = ttk.Label(
@@ -354,7 +583,7 @@ class SettingsApplication:
             wraplength=620,
             justify="left",
         )
-        error_label.grid(row=2, column=1, columnspan=2, sticky="w", pady=(2, 0))
+        error_label.grid(row=content_row + 1, column=1, columnspan=2, sticky="w", pady=(2, 0))
         self.error_labels[field.key] = error_label
 
     def _add_roots(self, frame: ttk.Frame, field: FieldDescriptor, values: list[str]) -> None:
@@ -515,6 +744,20 @@ class SettingsApplication:
                     )
                 if field.key in self.entries:
                     self.entries[field.key].configure(style="Invalid.TEntry" if error else "TEntry")
+                if field.key in self.field_widgets:
+                    enabled = not (
+                        field.key == "lexical_docs.index_path"
+                        and not bool(
+                            get_value(self.controller.model.document, "lexical_docs.enabled")
+                        )
+                    ) and not (
+                        field.key in {"semantic_docs.root", "semantic_docs.model_path"}
+                        and not bool(
+                            get_value(self.controller.model.document, "semantic_docs.enabled")
+                        )
+                    )
+                    for widget in self.field_widgets[field.key]:
+                        widget.configure(state="normal" if enabled else "disabled")
             state = "normal" if self.controller.model.valid else "disabled"
             if self.save_button is not None:
                 self.save_button.configure(state=state)
@@ -541,6 +784,8 @@ class SettingsApplication:
         self._conflict_after_id = self.root.after(LOCK_POLL_MS, self._poll_conflict)
 
     def close(self) -> None:
+        if self.index_dialog is not None:
+            self.index_dialog.task.cancel()
         if self._conflict_after_id is not None:
             try:
                 self.root.after_cancel(self._conflict_after_id)

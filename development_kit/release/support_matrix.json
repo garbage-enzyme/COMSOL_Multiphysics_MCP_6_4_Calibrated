@@ -10,30 +10,36 @@
     {
       "name": "core",
       "support": "verified",
-      "tool_count": 47
+      "tool_count": 45
     },
     {
       "name": "basic_fem",
       "support": "verified",
-      "tool_count": 109
+      "tool_count": 107
     },
     {
       "name": "wave_optics",
       "support": "experimental",
-      "tool_count": 76
+      "tool_count": 74
     },
     {
       "name": "experimental",
       "support": "experimental",
-      "tool_count": 97
+      "tool_count": 95
     },
     {
       "name": "full",
       "support": "compatibility_only",
-      "tool_count": 150
+      "tool_count": 151
     }
   ],
   "features": [
+    {
+      "name": "lexical_docs",
+      "support": "verified_default_off",
+      "tool_count": 2,
+      "default_enabled": false
+    },
     {
       "name": "semantic_docs",
       "support": "experimental_promotion_rejected",

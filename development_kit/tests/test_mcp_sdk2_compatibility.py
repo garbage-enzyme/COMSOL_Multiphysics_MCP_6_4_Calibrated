@@ -172,14 +172,14 @@ async def _legacy_stdio_exchange(protocol_version: str, runtime_root: Path) -> d
 
 def test_mcp_dependency_and_package_identity_are_the_conservative_2_0_lane() -> None:
     assert "mcp>=2.0.0,<2.1" in _runtime_dependencies()
-    assert __version__ == "0.6.5"
+    assert __version__ == "0.7.0"
 
 
 def test_server_uses_official_mcpserver_and_preserves_wire_schema_aliases() -> None:
     server = create_server("MCP SDK 2 compatibility", profile="core")
     assert isinstance(server, MCPServer)
     tools = asyncio.run(server.list_tools())
-    assert len(tools) == 47
+    assert len(tools) == 45
     capabilities = next(tool for tool in tools if tool.name == "capabilities")
     serialized = capabilities.model_dump(mode="json", by_alias=True, exclude_none=True)
     assert serialized["inputSchema"] == capabilities.input_schema
@@ -205,12 +205,12 @@ def test_sdk2_server_preserves_legacy_stdio_protocols(
     assert initialized["protocolVersion"] == protocol_version
     assert initialized["serverInfo"] == {
         "name": "COMSOL MCP legacy compatibility",
-        "version": "0.6.5",
+        "version": "0.7.0",
     }
     assert initialized["instructions"] == SERVER_INSTRUCTIONS
 
     listed = exchange["listed"]["result"]
-    assert len(listed["tools"]) == 47
+    assert len(listed["tools"]) == 45
     assert {tool["name"] for tool in listed["tools"]} >= {
         "capabilities",
         "solver_preflight",
@@ -224,7 +224,7 @@ def test_sdk2_server_preserves_legacy_stdio_protocols(
     assert "resultType" not in called
     capabilities = _response_payload(called)
     assert capabilities["profile"] == "core"
-    assert capabilities["tool_count"] == 47
+    assert capabilities["tool_count"] == 45
     assert capabilities["session"] == {"connected": False, "starting": False}
 
     resources = exchange["resources"]["result"]

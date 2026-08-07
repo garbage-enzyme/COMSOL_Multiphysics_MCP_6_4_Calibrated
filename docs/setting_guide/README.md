@@ -193,12 +193,12 @@ the GUI before save and by backend validation when JSON is edited directly.
 New users can begin with the smaller `core` surface when safety is the priority.
 Most users doing ordinary simulation should choose `basic_fem`. Profiles only
 control COMSOL automation/simulation and future autonomous-exploration tool
-visibility. Shared collaboration and semantic retrieval use independent Boolean
-feature gates and may be enabled together for any profile.
+visibility. Manual lookup, semantic retrieval, and shared collaboration use
+independent Boolean feature gates and may be enabled together for any profile.
 
 | Profile | Best suited to |
 | --- | --- |
-| `core` | Safety-first default for new users: fewer operations, model inspection, jobs, careful single-point checks, and manual search. |
+| `core` | Safety-first default for new users: fewer operations, model inspection, jobs, and careful single-point checks. |
 | `basic_fem` | Recommended for most users: ordinary FEM construction, result export, and Windows standalone packages. |
 | `wave_optics` | Optical and metasurface work, field review, Wave Optics checks, point audits, and staged parameters. |
 | `experimental` | Extra helpers that are broader or less mature and require careful review. |
@@ -247,13 +247,27 @@ then `PATH`. Auto-detect never replaces a non-null value without confirmation.
 Disabling any check is an exploration opt-out. Affected formal results remain
 explicitly unverified.
 
+### Manual Keyword Search
+
+| Key | Default | Meaning and accepted values |
+| --- | --- | --- |
+| `manuals.root` | `null` | Original COMSOL manuals/PDF folder recursively scanned by **Generate Index**. |
+| `lexical_docs.enabled` | `false` | Independent gate for `manual_search` and `manual_read_pages`. |
+| `lexical_docs.index_path` | `null` | ASCII-only SQLite file or destination folder. A folder resolves to `lexical_manuals.sqlite3`. |
+
+The Docs tab builds the index in an isolated background process. Its progress
+dialog reports the stage, current PDF, processed PDF/page counts, and percentage.
+The worker validates SQLite integrity, metadata, and row counts before an atomic
+replacement. Cancellation or failure removes the exact temporary file and
+preserves the previous valid index. A successful build does not silently enable
+manual or semantic search.
+
 ### Optional Semantic Retrieval
 
 | Key | Default | Meaning and accepted values |
 | --- | --- | --- |
 | `semantic_docs.enabled` | `false` | Independent Boolean gate for the isolated semantic tools. It composes with every profile and with `shared_server.enabled`. |
-| `semantic_docs.root` | `null` | Optional root for preprocessed semantic retrieval assets. This is not COMSOL's bundled manual directory and is not auto-detected. |
-| `semantic_docs.lexical_index` | `null` | Optional immutable SQLite lexical index file. |
+| `semantic_docs.root` | `null` | Optional root for the prepared semantic vector index. It is separate from the SQLite lexical index. |
 | `semantic_docs.model_path` | `null` | Optional local semantic-model revision directory. |
 
 Leaving the asset values at `null` is valid. Enabling `semantic_docs.enabled`
@@ -291,10 +305,11 @@ Canonical default template:
       "producer_driver_compatibility": true
     }
   },
+  "manuals": {"root": null},
+  "lexical_docs": {"enabled": false, "index_path": null},
   "semantic_docs": {
     "enabled": false,
     "root": null,
-    "lexical_index": null,
     "model_path": null
   },
   "ownership": {"owner": null},

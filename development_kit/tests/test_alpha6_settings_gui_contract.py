@@ -11,9 +11,14 @@ from comsol_mcp import __version__
 from comsol_mcp.server import create_server
 from comsol_mcp.tools.catalog import PROFILE_NAMES, TOOL_SPECS
 
-RELEASED_SETTINGS_VERSION = "1.2.0"
-RELEASED_SETTINGS_READABLE_VERSIONS = ("1.0.0", "1.1.0", RELEASED_SETTINGS_VERSION)
-RELEASED_PACKAGE_VERSION = "0.6.5"
+RELEASED_SETTINGS_VERSION = "1.3.0"
+RELEASED_SETTINGS_READABLE_VERSIONS = (
+    "1.0.0",
+    "1.1.0",
+    "1.2.0",
+    RELEASED_SETTINGS_VERSION,
+)
+RELEASED_PACKAGE_VERSION = "0.7.0"
 
 
 def test_alpha6_settings_schema_and_defaults_are_current_and_backward_readable(tmp_path):
@@ -37,10 +42,11 @@ def test_alpha6_settings_schema_and_defaults_are_current_and_backward_readable(t
     assert str(user_root / "models").isascii() is False
     assert str(program_root / "runtime").isascii() is True
     assert str(program_root / "artifacts").isascii() is True
+    assert user_defaults["manuals"] == {"root": None}
+    assert user_defaults["lexical_docs"] == {"enabled": False, "index_path": None}
     assert user_defaults["semantic_docs"] == {
         "enabled": False,
         "root": None,
-        "lexical_index": None,
         "model_path": None,
     }
 

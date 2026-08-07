@@ -179,7 +179,7 @@ def test_visual_capture_matrix_covers_feature_tabs_and_about_at_every_scale() ->
         for state, tab in (
             ("valid", "general"),
             ("valid", "profile"),
-            ("valid", "semantic"),
+            ("docs", "docs"),
             ("about", "about"),
         )
     }

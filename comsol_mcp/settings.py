@@ -13,8 +13,8 @@ from comsol_mcp.durable import canonical_sha256_v1, read_file_bytes_bounded
 
 SETTINGS_PATH_ENV = "COMSOL_MCP_SETTINGS_PATH"
 SETTINGS_SCHEMA = "comsol_mcp.settings"
-SETTINGS_VERSION = "1.2.0"
-SETTINGS_READABLE_VERSIONS = ("1.0.0", "1.1.0", SETTINGS_VERSION)
+SETTINGS_VERSION = "1.3.0"
+SETTINGS_READABLE_VERSIONS = ("1.0.0", "1.1.0", "1.2.0", SETTINGS_VERSION)
 MAX_SETTINGS_BYTES = 64 * 1024
 LOCALAPPDATA_ENV = "LOCALAPPDATA"
 PROGRAMDATA_ENV = "PROGRAMDATA"
@@ -25,6 +25,9 @@ JOBS_ENV = "COMSOL_MCP_JOBS_DIR"
 MODEL_READ_ROOTS_ENV = "COMSOL_MCP_MODEL_READ_ROOTS"
 ARTIFACT_WRITE_ROOT_ENV = "COMSOL_MCP_ARTIFACT_WRITE_ROOT"
 SHARED_SERVER_ENV = "COMSOL_MCP_ENABLE_SHARED_SERVER"
+LEXICAL_DOCS_ENABLED_ENV = "COMSOL_MCP_ENABLE_LEXICAL_DOCS"
+MANUALS_ROOT_ENV = "COMSOL_MANUALS_ROOT"
+LEXICAL_DOCS_INDEX_ENV = "COMSOL_LEXICAL_DOCS_INDEX_PATH"
 SEMANTIC_ENABLED_ENV = "COMSOL_MCP_ENABLE_SEMANTIC_DOCS"
 OWNER_ENV = "COMSOL_MCP_OWNER"
 SEMANTIC_ROOT_ENV = "COMSOL_SEMANTIC_ROOT"
@@ -73,10 +76,11 @@ _DEFAULT_SETTINGS = {
     "evidence_integrity": {
         "checks": {name: True for name in _EVIDENCE_CHECKS},
     },
+    "manuals": {"root": None},
+    "lexical_docs": {"enabled": False, "index_path": None},
     "semantic_docs": {
         "enabled": False,
         "root": None,
-        "lexical_index": None,
         "model_path": None,
     },
     "ownership": {"owner": None},
@@ -288,6 +292,14 @@ def _migrate_legacy_document(document: Any) -> Any:
     if not isinstance(semantic, dict):
         semantic = {}
         migrated["semantic_docs"] = semantic
+    lexical_docs = migrated.get("lexical_docs")
+    if not isinstance(lexical_docs, dict):
+        lexical_docs = {}
+        migrated["lexical_docs"] = lexical_docs
+    manuals = migrated.get("manuals")
+    if not isinstance(manuals, dict):
+        manuals = {}
+        migrated["manuals"] = manuals
     shared = migrated.get("shared_server")
     if not isinstance(shared, dict):
         shared = {}
@@ -303,6 +315,15 @@ def _migrate_legacy_document(document: Any) -> Any:
         semantic.setdefault("enabled", True)
     else:
         semantic.setdefault("enabled", False)
+    if raw_version in (None, "1.0.0", "1.1.0", "1.2.0"):
+        semantic_index = semantic.pop("lexical_index", None)
+        manual_index = manuals.pop("lexical_index", None)
+        legacy_index = semantic_index if semantic_index is not None else manual_index
+        legacy_enabled = manuals.pop("enabled", None)
+        legacy_root = manuals.pop("pdf_root", None)
+        lexical_docs.setdefault("enabled", False if legacy_enabled is None else legacy_enabled)
+        lexical_docs.setdefault("index_path", legacy_index)
+        manuals.setdefault("root", legacy_root)
     return migrated
 
 
@@ -513,6 +534,52 @@ def _normalize(
         for name in _EVIDENCE_CHECKS
     }
 
+    manuals = _object(
+        top["manuals"],
+        location="settings.manuals",
+        defaults=_DEFAULT_SETTINGS["manuals"],
+        errors=errors,
+    )
+    manuals_root = _read_value(
+        manuals["root"],
+        location="settings.manuals.root",
+        default=_DEFAULT_SETTINGS["manuals"]["root"],
+        parser=lambda value: _absolute_string(
+            value,
+            location="settings.manuals.root",
+            allow_none=True,
+            environment=environment,
+        ),
+        errors=errors,
+    )
+
+    lexical_docs = _object(
+        top["lexical_docs"],
+        location="settings.lexical_docs",
+        defaults=_DEFAULT_SETTINGS["lexical_docs"],
+        errors=errors,
+    )
+    lexical_docs_enabled = _read_value(
+        lexical_docs["enabled"],
+        location="settings.lexical_docs.enabled",
+        default=_DEFAULT_SETTINGS["lexical_docs"]["enabled"],
+        parser=lambda value: _parse_bool(value, location="settings.lexical_docs.enabled"),
+        errors=errors,
+    )
+    lexical_index = _read_value(
+        lexical_docs["index_path"],
+        location="settings.lexical_docs.index_path",
+        default=_DEFAULT_SETTINGS["lexical_docs"]["index_path"],
+        parser=lambda value: _absolute_string(
+            value,
+            location="settings.lexical_docs.index_path",
+            allow_none=True,
+            require_ascii=True,
+            environment=environment,
+        ),
+        errors=errors,
+    )
+
     semantic = _object(
         top["semantic_docs"],
         location="settings.semantic_docs",
@@ -526,18 +593,6 @@ def _normalize(
         parser=lambda value: _absolute_string(
             value,
             location="settings.semantic_docs.root",
-            allow_none=True,
-            environment=environment,
-        ),
-        errors=errors,
-    )
-    lexical_index = _read_value(
-        semantic["lexical_index"],
-        location="settings.semantic_docs.lexical_index",
-        default=_DEFAULT_SETTINGS["semantic_docs"]["lexical_index"],
-        parser=lambda value: _absolute_string(
-            value,
-            location="settings.semantic_docs.lexical_index",
             allow_none=True,
             environment=environment,
         ),
@@ -659,10 +714,14 @@ def _normalize(
         },
         "shared_server": {"enabled": shared_enabled},
         "evidence_integrity": {"checks": normalized_checks},
+        "manuals": {"root": manuals_root},
+        "lexical_docs": {
+            "enabled": lexical_docs_enabled,
+            "index_path": lexical_index,
+        },
         "semantic_docs": {
             "enabled": semantic_enabled,
             "root": semantic_root,
-            "lexical_index": lexical_index,
             "model_path": model_path,
         },
         "ownership": {"owner": owner},
@@ -970,6 +1029,10 @@ def settings_environment(environ: Mapping[str, str] | None = None) -> dict[str, 
 
     set_default(PROFILE_ENV, settings["profile"]["name"])
     set_default(SHARED_SERVER_ENV, str(settings["shared_server"]["enabled"]).lower())
+    set_default(
+        LEXICAL_DOCS_ENABLED_ENV,
+        str(settings["lexical_docs"]["enabled"]).lower(),
+    )
     set_default(SEMANTIC_ENABLED_ENV, str(settings["semantic_docs"]["enabled"]).lower())
     set_default(RUNTIME_ENV, settings["runtime"]["directory"])
     set_default(JOBS_ENV, settings["runtime"]["jobs_directory"])
@@ -977,8 +1040,10 @@ def settings_environment(environ: Mapping[str, str] | None = None) -> dict[str, 
     set_default(MODEL_READ_ROOTS_ENV, os.pathsep.join(roots) if roots else None)
     set_default(ARTIFACT_WRITE_ROOT_ENV, settings["paths"]["artifact_write_root"])
     set_default(OWNER_ENV, settings["ownership"]["owner"])
+    set_default(MANUALS_ROOT_ENV, settings["manuals"]["root"])
+    set_default(LEXICAL_DOCS_INDEX_ENV, settings["lexical_docs"]["index_path"])
     set_default(SEMANTIC_ROOT_ENV, settings["semantic_docs"]["root"])
-    set_default(SEMANTIC_LEXICAL_ENV, settings["semantic_docs"]["lexical_index"])
+    set_default(SEMANTIC_LEXICAL_ENV, settings["lexical_docs"]["index_path"])
     set_default(SEMANTIC_MODEL_ENV, settings["semantic_docs"]["model_path"])
     set_default(JAVA_HOME_ENV, settings["java"]["java_home"])
     set_default(JDK_HOME_ENV, settings["java"]["jdk_home"])
@@ -1002,6 +1067,9 @@ __all__ = [
     "JAVA_HOME_ENV",
     "JDK_HOME_ENV",
     "LOCALAPPDATA_ENV",
+    "LEXICAL_DOCS_ENABLED_ENV",
+    "LEXICAL_DOCS_INDEX_ENV",
+    "MANUALS_ROOT_ENV",
     "PROGRAMDATA_ENV",
     "MODEL_READ_ROOTS_ENV",
     "OWNER_ENV",

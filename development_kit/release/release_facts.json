@@ -1,26 +1,30 @@
 {
   "schema_name": "comsol_mcp.release_facts",
   "schema_version": "1.0.0",
-  "package_version": "0.6.5",
-  "tool_count": 163,
+  "package_version": "0.7.0",
+  "tool_count": 166,
   "profiles": {
     "core": {
-      "tool_count": 47
+      "tool_count": 45
     },
     "basic_fem": {
-      "tool_count": 109
+      "tool_count": 107
     },
     "wave_optics": {
-      "tool_count": 76
+      "tool_count": 74
     },
     "experimental": {
-      "tool_count": 97
+      "tool_count": 95
     },
     "full": {
-      "tool_count": 150
+      "tool_count": 151
     }
   },
   "features": {
+    "lexical_docs": {
+      "tool_count": 2,
+      "default_enabled": false
+    },
     "semantic_docs": {
       "tool_count": 3,
       "default_enabled": false
@@ -31,13 +35,13 @@
     }
   },
   "schema_registry": {
-    "entry_count": 83,
-    "registry_sha256": "5c892344c896583973ee3e10f0b18ba024c902485c55dbdf73750624326947ec"
+    "entry_count": 101,
+    "registry_sha256": "79338a9eca92f3960ef23f72b3bbf1629ddb534ec05734dcd07973d6e639d7ab"
   },
   "identities": {
-    "catalog_sha256": "bf26d39cae68b40b9a84a8a911dec82aad3de736efa8c16a160b44ba12a5f274",
-    "profile_tools_sha256": "0a97cdbd3a4ec178a44fcd9247c658f5a02d50615ba755b6f4988d5cfb6ba810",
-    "feature_tools_sha256": "5f400de77399253ecc066ef732cb6278edf00f995b49e1a2a7bb1e0ed0c8fc51",
+    "catalog_sha256": "8313b4a4df6491d321e2d44111ab173b0b981169db1ff59cdff4064d01421929",
+    "profile_tools_sha256": "2e0ae0c1256cf16cdd85a7b26cc6eb09d3a0c79656c34c1ab9a7c128ae60af5f",
+    "feature_tools_sha256": "e37721d24bcd1ee6a949a156eaba90936bc5812b8b2f7a0f5fddc04fa928439a",
     "runtime_compatibility_sha256": "16e932bbead0e8c0f86a573b3ffba5013ebc9cecada1615d58aac6ccc492f332"
   }
 }

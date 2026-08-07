@@ -35,7 +35,7 @@
     {
       "path": "development_kit/tests/test_schema_registry.py",
       "match_count": 1,
-      "match_sha256": "0de3f39a1fc6c9219aff12b945cb7ea9e79773ca0d8aa1c0b5e59fa9bb8c4970"
+      "match_sha256": "1b334b532e3c1c72c26c219582be2cf4c096572257528f9b8cb14c9a6cc38b09"
     },
     {
       "path": "comsol_mcp/evidence/reference_power_acceptance.py",

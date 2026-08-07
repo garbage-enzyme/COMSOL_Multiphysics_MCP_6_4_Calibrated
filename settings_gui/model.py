@@ -10,9 +10,23 @@ from typing import Any, Literal
 from comsol_mcp.settings import GUI_LANGUAGES, GUI_SCALES, normalize_settings_document
 from comsol_mcp.tools.profiles import PROFILE_NAMES
 
-FieldKind = Literal["readonly", "choice", "boolean", "directory", "file", "roots", "text"]
+FieldKind = Literal[
+    "readonly",
+    "choice",
+    "boolean",
+    "directory",
+    "file",
+    "save_file",
+    "roots",
+    "text",
+]
 ASCII_PATH_FIELDS = frozenset(
-    {"runtime.directory", "runtime.jobs_directory", "paths.artifact_write_root"}
+    {
+        "runtime.directory",
+        "runtime.jobs_directory",
+        "paths.artifact_write_root",
+        "lexical_docs.index_path",
+    }
 )
 PROFILE_HELP_IDS = {
     "core": (
@@ -193,8 +207,37 @@ FIELDS = (
         help_id="Check that a resumed job uses the same producer and driver.",
     ),
     FieldDescriptor(
+        "lexical_docs.enabled",
+        "docs",
+        "boolean",
+        help_id=(
+            "Enable local keyword search for installed or copied PDF manuals. "
+            "This is off by default because COMSOL manuals may not be installed."
+        ),
+    ),
+    FieldDescriptor(
+        "manuals.root",
+        "docs",
+        "directory",
+        True,
+        help_id=(
+            "Folder scanned recursively when generating the manual index. "
+            "Choose the folder containing the PDF manuals."
+        ),
+    ),
+    FieldDescriptor(
+        "lexical_docs.index_path",
+        "docs",
+        "save_file",
+        True,
+        help_id=(
+            "SQLite FTS5/BM25 index used by manual_search. Enter an ASCII-only SQLite "
+            "file or destination folder. A folder uses lexical_manuals.sqlite3."
+        ),
+    ),
+    FieldDescriptor(
         "semantic_docs.enabled",
-        "semantic",
+        "docs",
         "boolean",
         help_id=(
             "Enable optional semantic manual-search tools for the selected profile. "
@@ -203,28 +246,17 @@ FIELDS = (
     ),
     FieldDescriptor(
         "semantic_docs.root",
-        "semantic",
+        "docs",
         "directory",
         True,
         help_id=(
-            "Optional folder containing prepared semantic-search files. "
-            "This is not COMSOL's built-in manual folder. "
-            "\nExample: %LOCALAPPDATA%\\comsol_mcp\\semantic\\manuals"
-        ),
-    ),
-    FieldDescriptor(
-        "semantic_docs.lexical_index",
-        "semantic",
-        "file",
-        True,
-        help_id=(
-            "Optional SQLite file used for manual text search. "
-            "\nExample: %LOCALAPPDATA%\\comsol_mcp\\semantic\\manuals.sqlite3"
+            "Optional folder containing the prepared semantic vector index. "
+            "It is independent from the SQLite lexical index."
         ),
     ),
     FieldDescriptor(
         "semantic_docs.model_path",
-        "semantic",
+        "docs",
         "directory",
         True,
         help_id=(
@@ -247,7 +279,7 @@ TAB_IDS = (
     "runtime",
     "comsol_java",
     "evidence",
-    "semantic",
+    "docs",
     "ownership",
     "about",
 )

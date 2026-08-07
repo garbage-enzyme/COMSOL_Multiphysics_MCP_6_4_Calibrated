@@ -195,7 +195,7 @@ def _set_copy_face_selections(feature, source: Sequence[int], destination: Seque
 
 
 def _normalize_spectral_rows(results, expression_count: int) -> list[list[object]]:
-    """Convert MPh expression-major evaluation output into wavelength rows."""
+    """Convert supported MPh spectral evaluation layouts into wavelength rows."""
     import numpy as np
 
     if isinstance(expression_count, bool) or not isinstance(expression_count, int):
@@ -203,13 +203,21 @@ def _normalize_spectral_rows(results, expression_count: int) -> list[list[object
     if expression_count < 1:
         raise ValueError("expression_count must be a positive integer")
     array = np.asarray(results)
+    if array.ndim > 2:
+        array = np.squeeze(array)
     if array.ndim == 1:
+        if expression_count == 1:
+            return [[value] for value in array.tolist()]
         if array.size != expression_count:
             raise ValueError("spectral evaluation shape does not match the requested expressions")
         return [array.tolist()]
-    if array.ndim != 2 or array.shape[0] != expression_count:
-        raise ValueError("spectral evaluation must be expression-major with one row per expression")
-    return array.T.tolist()
+    if array.ndim != 2:
+        raise ValueError("spectral evaluation must be a two-dimensional numeric matrix")
+    if array.shape[0] == expression_count:
+        return array.T.tolist()
+    if array.shape[1] == expression_count:
+        return array.tolist()
+    raise ValueError("spectral evaluation matrix does not match the requested expressions")
 
 
 def _require_mim_selections(
@@ -237,6 +245,7 @@ def _identify_patch_topology(
     boundaries: Sequence[dict],
     patch_size: Sequence[float],
     patch_pos: Sequence[float],
+    preferred_footprint: Optional[Sequence[int]] = None,
 ) -> tuple[int, list[int]]:
     """Identify the patch domain and its footprint from box geometry and adjacency."""
     if len(patch_size) != 3 or len(patch_pos) != 3:
@@ -280,19 +289,67 @@ def _identify_patch_topology(
     if len(patch_faces) < 2:
         raise ValueError("patch topology could not be bound to the requested box")
 
+    if preferred_footprint is not None:
+        footprint = sorted({int(value) for value in preferred_footprint})
+        by_number = {int(item["boundary_number"]): item for item in boundaries}
+        if len(footprint) != 1 or any(value not in by_number for value in footprint):
+            raise ValueError("trusted patch footprint selection is missing or ambiguous")
+        footprint_face = by_number[footprint[0]]
+        if footprint_face.get("interior") is not True:
+            raise ValueError("trusted patch footprint must remain an interior boundary")
+
+        def adjacent_domains(items: Sequence[dict]) -> set[int]:
+            return {
+                int(item[name])
+                for item in items
+                for name in ("up_domain", "down_domain")
+                if isinstance(item.get(name), int)
+                and not isinstance(item.get(name), bool)
+                and int(item[name]) > 0
+            }
+
+        footprint_domains = adjacent_domains([footprint_face])
+        top_faces = [
+            item
+            for item in patch_faces
+            if abs(float(item["normal"][2])) > 0.5
+            and abs(float(item["center"][2]) - high[2]) <= tolerance
+        ]
+        candidates = footprint_domains & adjacent_domains(top_faces)
+        if len(candidates) != 1:
+            raise ValueError("trusted footprint does not identify one patch domain")
+        return next(iter(candidates)), footprint
+
     counts: dict[int, int] = {}
+    bottom_domains: set[int] = set()
+    top_domains: set[int] = set()
     for boundary in patch_faces:
+        center = boundary["center"]
+        normal = boundary["normal"]
+        adjacent = set()
         for name in ("up_domain", "down_domain"):
             domain = boundary.get(name)
             if isinstance(domain, int) and not isinstance(domain, bool) and domain > 0:
                 counts[domain] = counts.get(domain, 0) + 1
+                adjacent.add(domain)
+        if abs(float(normal[2])) > 0.5:
+            if abs(float(center[2]) - low[2]) <= tolerance:
+                bottom_domains.update(adjacent)
+            if abs(float(center[2]) - high[2]) <= tolerance:
+                top_domains.update(adjacent)
     if not counts:
         raise ValueError("patch topology has no readable adjacent domains")
-    maximum = max(counts.values())
-    candidates = sorted(domain for domain, count in counts.items() if count == maximum)
-    if len(candidates) != 1:
+    spanning_domains = bottom_domains & top_domains
+    if len(spanning_domains) > 1:
         raise ValueError("patch topology has an ambiguous domain identity")
-    patch_domain = candidates[0]
+    if len(spanning_domains) == 1:
+        patch_domain = next(iter(spanning_domains))
+    else:
+        maximum = max(counts.values())
+        candidates = sorted(domain for domain, count in counts.items() if count == maximum)
+        if len(candidates) != 1:
+            raise ValueError("patch topology has an ambiguous domain identity")
+        patch_domain = candidates[0]
 
     footprint = []
     for boundary in patch_faces:

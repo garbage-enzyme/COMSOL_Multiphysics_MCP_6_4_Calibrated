@@ -14,7 +14,7 @@ PROFILE_NAMES = (
     "experimental",
     "full",
 )
-FEATURE_NAMES = ("semantic_docs", "shared_server")
+FEATURE_NAMES = ("lexical_docs", "semantic_docs", "shared_server")
 
 
 @dataclass(frozen=True)
@@ -260,6 +260,11 @@ _TOOLS_BY_REGISTRAR = {
     "comsol_mcp.tools.branch_continuation.register_branch_continuation_tools": (
         "branch_continuation_plan",
     ),
+    "comsol_mcp.tools.research.register_research_tools": (
+        "research_campaign_compile",
+        "research_optimizer_advance",
+        "research_robustness_plan",
+    ),
     "comsol_mcp.tools.shared_session.register_shared_session_tools": (
         "shared_server_preflight",
         "shared_server_attach",
@@ -320,9 +325,10 @@ _GROUP_BY_REGISTRAR = {
     "register_thermal_material_tools": "thermal_material_evidence",
     "register_convergence_evaluation_tools": "convergence_evidence",
     "register_branch_continuation_tools": "branch_continuation_evidence",
+    "register_research_tools": "research_exploration",
     "register_shared_session_tools": "shared_session",
     "register_knowledge_tools": "embedded_docs",
-    "register_lexical_manual_tools": "manuals",
+    "register_lexical_manual_tools": "lexical_docs",
 }
 
 _EXPERIMENTAL_TOOLS = frozenset(
@@ -369,6 +375,9 @@ _EXPERIMENTAL_TOOLS = frozenset(
         "shared_model_unlock",
         "shared_model_snapshot",
         "shared_model_adopt",
+        "research_campaign_compile",
+        "research_optimizer_advance",
+        "research_robustness_plan",
     }
 )
 
@@ -543,6 +552,9 @@ _EXPLICIT_READ_ONLY_TOOLS = frozenset(
         "thermal_radiation_evaluate",
         "thermal_material_validate",
         "thermal_material_evaluate",
+        "research_campaign_compile",
+        "research_optimizer_advance",
+        "research_robustness_plan",
         "study_get_progress",
         "study_list",
         "troubleshoot",
@@ -608,6 +620,9 @@ _SOLVER_FREE_TOOLS = frozenset(
         "job_spec_preview",
         "convergence_evaluate",
         "branch_continuation_plan",
+        "research_campaign_compile",
+        "research_optimizer_advance",
+        "research_robustness_plan",
         "geometry_fin_preview",
         "geometry_blocks_preview",
         "wave_optics_incidence_preview",
@@ -619,6 +634,9 @@ _SOLVER_FREE_TOOLS = frozenset(
         "thermal_radiation_evaluate",
         "thermal_material_validate",
         "thermal_material_evaluate",
+        "research_campaign_compile",
+        "research_optimizer_advance",
+        "research_robustness_plan",
     }
 )
 
@@ -714,14 +732,19 @@ _CORE_TOOLS = frozenset(
         "solutions_list",
         "datasets_list",
         "results_global_evaluate",
-        "manual_search",
-        "manual_read_pages",
         "spectral_characterize",
         "spectral_model_compare",
         "simulation_configuration_validate",
         "job_spec_preview",
         "convergence_evaluate",
         "branch_continuation_plan",
+    }
+)
+
+_MANUALS_ADDITIONS = frozenset(
+    {
+        "manual_search",
+        "manual_read_pages",
     }
 )
 
@@ -920,6 +943,7 @@ _SHARED_SERVER_ADDITIONS = _DESKTOP_SHARED_FOUNDATION - _CORE_TOOLS
 def _build_registry() -> dict[str, ToolMetadata]:
     all_names = {name for names in _TOOLS_BY_REGISTRAR.values() for name in names}
     feature_by_tool = {
+        **{name: "lexical_docs" for name in _MANUALS_ADDITIONS},
         **{name: "semantic_docs" for name in _SEMANTIC_DOCS_ADDITIONS},
         **{name: "shared_server" for name in _SHARED_SERVER_ADDITIONS},
     }

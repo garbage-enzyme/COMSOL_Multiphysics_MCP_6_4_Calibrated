@@ -7,11 +7,49 @@ from typing import Any
 
 from comsol_mcp import __version__
 from comsol_mcp.durable import canonical_sha256_v1
+from comsol_mcp.research import (
+    CAMPAIGN_MANIFEST_SCHEMA_NAME,
+    CAMPAIGN_MANIFEST_SCHEMA_VERSION,
+    CANDIDATE_RECORD_SCHEMA_NAME,
+    CANDIDATE_RECORD_SCHEMA_VERSION,
+    DECISION_RECORD_SCHEMA_NAME,
+    DECISION_RECORD_SCHEMA_VERSION,
+    DESIGN_SPACE_SCHEMA_NAME,
+    DESIGN_SPACE_SCHEMA_VERSION,
+    EVALUATION_RECORD_SCHEMA_NAME,
+    EVALUATION_RECORD_SCHEMA_VERSION,
+    MATERIAL_CATALOG_SCHEMA_NAME,
+    MATERIAL_CATALOG_SCHEMA_VERSION,
+    OBJECTIVE_SCORE_SCHEMA_NAME,
+    OBJECTIVE_SCORE_SCHEMA_VERSION,
+    OPTIMIZER_CHECKPOINT_SCHEMA_NAME,
+    OPTIMIZER_CHECKPOINT_SCHEMA_VERSION,
+    OPTIMIZER_EXPLANATION_SCHEMA_NAME,
+    OPTIMIZER_EXPLANATION_SCHEMA_VERSION,
+    OPTIMIZER_PROPOSAL_SCHEMA_NAME,
+    OPTIMIZER_PROPOSAL_SCHEMA_VERSION,
+    OPTIMIZER_STATE_SCHEMA_NAME,
+    OPTIMIZER_STATE_SCHEMA_VERSION,
+    PORTFOLIO_SCHEMA_NAME,
+    PORTFOLIO_SCHEMA_VERSION,
+    RESEARCH_GOAL_SCHEMA_NAME,
+    RESEARCH_GOAL_SCHEMA_VERSION,
+    RESEARCH_JOURNAL_RECORD_SCHEMA_NAME,
+    RESEARCH_JOURNAL_RECORD_SCHEMA_VERSION,
+    STRUCTURE_ADAPTER_APPLICATION_SCHEMA_NAME,
+    STRUCTURE_ADAPTER_APPLICATION_SCHEMA_VERSION,
+    STRUCTURE_ADAPTER_MANIFEST_SCHEMA_NAME,
+    STRUCTURE_ADAPTER_MANIFEST_SCHEMA_VERSION,
+    STRUCTURE_TREE_AUDIT_SCHEMA_NAME,
+    STRUCTURE_TREE_AUDIT_SCHEMA_VERSION,
+    WORKFLOW_CAPSULE_SCHEMA_NAME,
+    WORKFLOW_CAPSULE_SCHEMA_VERSION,
+)
 from comsol_mcp.settings_gui_handshake import HANDSHAKE_SCHEMA, HANDSHAKE_VERSION
 
 OPERATION_LOCK_SCHEMA, OPERATION_LOCK_VERSION = "comsol_mcp.operation_lock", "1.0.0"
 PATH_POLICY_SCHEMA, PATH_POLICY_VERSION = "comsol_mcp.path_policy", "1.1.0"
-SETTINGS_SCHEMA, SETTINGS_VERSION = "comsol_mcp.settings", "1.2.0"
+SETTINGS_SCHEMA, SETTINGS_VERSION = "comsol_mcp.settings", "1.3.0"
 CLEANUP_OUTCOME_SCHEMA, CLEANUP_OUTCOME_VERSION = "comsol_mcp.cleanup_outcome", "1.0.0"
 SHARED_MODEL_LOCK_SCHEMA, SHARED_MODEL_LOCK_VERSION = (
     "comsol_mcp.shared_model_lock",
@@ -195,6 +233,18 @@ def _entries() -> list[dict[str, Any]]:
             "comsol_mcp.shared_session.cleanup",
         ),
         _entry(
+            CANDIDATE_RECORD_SCHEMA_NAME,
+            CANDIDATE_RECORD_SCHEMA_VERSION,
+            "comsol_mcp.research.records",
+            artifact_kind="durable_artifact",
+        ),
+        _entry(
+            CAMPAIGN_MANIFEST_SCHEMA_NAME,
+            CAMPAIGN_MANIFEST_SCHEMA_VERSION,
+            "comsol_mcp.research.compiler",
+            artifact_kind="configuration",
+        ),
+        _entry(
             BRANCH_CONTINUATION_PLAN_SCHEMA,
             BRANCH_CONTINUATION_SCHEMA_VERSION,
             "comsol_mcp.evidence.branch_continuation",
@@ -262,6 +312,18 @@ def _entries() -> list[dict[str, Any]]:
             readable_versions=("1.0.0", "1.1.0", "1.2.0"),
         ),
         _entry(
+            DECISION_RECORD_SCHEMA_NAME,
+            DECISION_RECORD_SCHEMA_VERSION,
+            "comsol_mcp.research.decisions",
+            artifact_kind="durable_artifact",
+        ),
+        _entry(
+            DESIGN_SPACE_SCHEMA_NAME,
+            DESIGN_SPACE_SCHEMA_VERSION,
+            "comsol_mcp.research.contracts",
+            artifact_kind="configuration",
+        ),
+        _entry(
             "comsol_mcp.environment_identity",
             "1.0.0",
             "comsol_mcp.environment_identity",
@@ -280,6 +342,12 @@ def _entries() -> list[dict[str, Any]]:
             EVIDENCE_VERIFICATION_SCHEMA,
             EVIDENCE_INTEGRITY_VERSION,
             "comsol_mcp.evidence.integrity_verifier",
+        ),
+        _entry(
+            EVALUATION_RECORD_SCHEMA_NAME,
+            EVALUATION_RECORD_SCHEMA_VERSION,
+            "comsol_mcp.research.evaluations",
+            artifact_kind="durable_artifact",
         ),
         _entry(
             "comsol_mcp.execution_evidence_outcome",
@@ -305,6 +373,12 @@ def _entries() -> list[dict[str, Any]]:
             "comsol_mcp.model_version_metadata",
             "1.0.0",
             "comsol_mcp.tools.model",
+        ),
+        _entry(
+            MATERIAL_CATALOG_SCHEMA_NAME,
+            MATERIAL_CATALOG_SCHEMA_VERSION,
+            "comsol_mcp.research.materials",
+            artifact_kind="configuration",
         ),
         _entry(
             _REFERENCE_POWER_DRY_RUN_SCHEMA,
@@ -338,6 +412,47 @@ def _entries() -> list[dict[str, Any]]:
             artifact_kind="durable_artifact",
         ),
         _entry(
+            OBJECTIVE_SCORE_SCHEMA_NAME,
+            OBJECTIVE_SCORE_SCHEMA_VERSION,
+            "comsol_mcp.research.objectives",
+        ),
+        _entry(
+            OPTIMIZER_CHECKPOINT_SCHEMA_NAME,
+            OPTIMIZER_CHECKPOINT_SCHEMA_VERSION,
+            "comsol_mcp.research.state",
+            artifact_kind="durable_artifact",
+        ),
+        _entry(
+            OPTIMIZER_PROPOSAL_SCHEMA_NAME,
+            OPTIMIZER_PROPOSAL_SCHEMA_VERSION,
+            "comsol_mcp.research.optimizers",
+        ),
+        _entry(
+            OPTIMIZER_STATE_SCHEMA_NAME,
+            OPTIMIZER_STATE_SCHEMA_VERSION,
+            "comsol_mcp.research.optimizers",
+        ),
+        _entry(
+            OPTIMIZER_EXPLANATION_SCHEMA_NAME,
+            OPTIMIZER_EXPLANATION_SCHEMA_VERSION,
+            "comsol_mcp.research.optimizers",
+        ),
+        _entry(
+            STRUCTURE_ADAPTER_MANIFEST_SCHEMA_NAME,
+            STRUCTURE_ADAPTER_MANIFEST_SCHEMA_VERSION,
+            "comsol_mcp.research.adapters",
+        ),
+        _entry(
+            STRUCTURE_ADAPTER_APPLICATION_SCHEMA_NAME,
+            STRUCTURE_ADAPTER_APPLICATION_SCHEMA_VERSION,
+            "comsol_mcp.research.adapters",
+        ),
+        _entry(
+            STRUCTURE_TREE_AUDIT_SCHEMA_NAME,
+            STRUCTURE_TREE_AUDIT_SCHEMA_VERSION,
+            "comsol_mcp.research.adapters",
+        ),
+        _entry(
             PATH_POLICY_SCHEMA,
             PATH_POLICY_VERSION,
             "comsol_mcp.path_policy",
@@ -354,6 +469,12 @@ def _entries() -> list[dict[str, Any]]:
             "comsol_mcp.portfolio_evidence_request",
             "1.0.0",
             "comsol_mcp.evidence.portfolio_verifier",
+        ),
+        _entry(
+            PORTFOLIO_SCHEMA_NAME,
+            PORTFOLIO_SCHEMA_VERSION,
+            "comsol_mcp.research.state",
+            artifact_kind="durable_artifact",
         ),
         _entry(
             "comsol_mcp.portfolio_evidence_verification",
@@ -452,6 +573,18 @@ def _entries() -> list[dict[str, Any]]:
             "comsol_mcp.jobs.resource_admission",
         ),
         _entry(
+            RESEARCH_GOAL_SCHEMA_NAME,
+            RESEARCH_GOAL_SCHEMA_VERSION,
+            "comsol_mcp.research.contracts",
+            artifact_kind="configuration",
+        ),
+        _entry(
+            RESEARCH_JOURNAL_RECORD_SCHEMA_NAME,
+            RESEARCH_JOURNAL_RECORD_SCHEMA_VERSION,
+            "comsol_mcp.research.journal",
+            artifact_kind="durable_artifact",
+        ),
+        _entry(
             "comsol_mcp.resource_journal_entry",
             "1.0.0",
             "comsol_mcp.jobs.resource_admission",
@@ -473,7 +606,7 @@ def _entries() -> list[dict[str, Any]]:
             SETTINGS_VERSION,
             "comsol_mcp.settings",
             artifact_kind="configuration",
-            readable_versions=("1.0.0", "1.1.0", SETTINGS_VERSION),
+            readable_versions=("1.0.0", "1.1.0", "1.2.0", SETTINGS_VERSION),
         ),
         _entry(
             HANDSHAKE_SCHEMA,
@@ -548,6 +681,12 @@ def _entries() -> list[dict[str, Any]]:
             "comsol_mcp.visual_reviewer_capability",
             "1.0.0",
             "comsol_mcp.evidence.visual_review",
+        ),
+        _entry(
+            WORKFLOW_CAPSULE_SCHEMA_NAME,
+            WORKFLOW_CAPSULE_SCHEMA_VERSION,
+            "comsol_mcp.research.workflow",
+            artifact_kind="configuration",
         ),
         _entry(
             legacy_point_audit,

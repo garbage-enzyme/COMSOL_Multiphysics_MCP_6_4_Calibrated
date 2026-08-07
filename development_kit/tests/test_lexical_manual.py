@@ -10,10 +10,12 @@ from types import SimpleNamespace
 import pytest
 from src.knowledge import lexical_manual as manual_module
 from src.knowledge.lexical_manual import (
+    IndexBuildCancelled,
     build_index_from_records,
     read_index_pages,
     run_bounded,
     search_index,
+    validate_index_file,
 )
 from src.tools.session import session_manager
 
@@ -169,6 +171,8 @@ def test_pdf_index_build_rejects_a_manual_changed_during_extraction(
             return "Searchable manual page"
 
     class Document:
+        page_count = 1
+
         def __enter__(self):
             return self
 
@@ -184,13 +188,13 @@ def test_pdf_index_build_rejects_a_manual_changed_during_extraction(
         opened.append(path)
         return Document()
 
-    monkeypatch.setitem(sys.modules, "fitz", SimpleNamespace(open=open_document))
+    monkeypatch.setitem(sys.modules, "pymupdf", SimpleNamespace(open=open_document))
 
     with pytest.raises(RuntimeError, match="changed during extraction"):
         manual_module.build_index_from_pdfs(pdf_root, index)
 
-    assert len(opened) == 1
-    assert os.path.samefile(opened[0], source)
+    assert len(opened) == 2
+    assert all(os.path.samefile(opened_path, source) for opened_path in opened)
     assert not index.exists()
     assert not list(ascii_tmp_path.glob("manuals.sqlite3.tmp-*"))
 
@@ -290,3 +294,89 @@ def test_index_replacement_failure_removes_completed_temporary_database(
 
     assert not target.exists()
     assert not list(ascii_tmp_path.glob("manuals.sqlite3.tmp-*"))
+
+
+def test_cancel_before_publication_preserves_previous_valid_index(ascii_tmp_path):
+    target = ascii_tmp_path / "manuals.sqlite3"
+    build_index_from_records(
+        [
+            {
+                "source": "old.pdf",
+                "module": "manual",
+                "page": 1,
+                "heading": "Old",
+                "text": "preserved old content",
+            }
+        ],
+        target,
+        corpus_fingerprint="old-corpus",
+    )
+    temporary = target.with_name(target.name + ".tmp-explicit")
+
+    with pytest.raises(IndexBuildCancelled):
+        build_index_from_records(
+            [
+                {
+                    "source": "new.pdf",
+                    "module": "manual",
+                    "page": 1,
+                    "heading": "New",
+                    "text": "replacement content",
+                }
+            ],
+            target,
+            corpus_fingerprint="new-corpus",
+            temporary_path=temporary,
+            cancelled=lambda: True,
+        )
+
+    assert search_index("preserved", index_path=target)["count"] == 1
+    assert not temporary.exists()
+
+
+def test_completed_index_is_validated_before_publication(manual_index: Path):
+    result = validate_index_file(manual_index, expected_page_count=5)
+
+    assert result == {
+        "success": True,
+        "schema_version": "1",
+        "corpus_fingerprint": "fixture-v1",
+        "page_count": 5,
+        "integrity_check": "ok",
+    }
+
+
+def test_pdf_build_emits_monotonic_stage_and_percentage_progress(ascii_tmp_path):
+    import pymupdf
+
+    pdf_root = ascii_tmp_path / "pdf-progress"
+    pdf_root.mkdir()
+    document = pymupdf.open()
+    try:
+        document.new_page().insert_text((72, 72), "searchable first page")
+        document.new_page().insert_text((72, 72), "searchable second page")
+        document.save(pdf_root / "guide.pdf")
+    finally:
+        document.close()
+    events = []
+    target = ascii_tmp_path / "progress.sqlite3"
+
+    result = manual_module.build_index_from_pdfs(
+        pdf_root,
+        target,
+        progress=events.append,
+    )
+
+    assert result["page_count"] == 2
+    assert [
+        event["stage"]
+        for event in events
+        if event["stage"] in {"validating", "publishing", "complete"}
+    ] == [
+        "validating",
+        "publishing",
+        "complete",
+    ]
+    assert [event["percent"] for event in events] == sorted(event["percent"] for event in events)
+    assert events[-1]["percent"] == 100
+    assert events[-1]["total_pages"] == 2
