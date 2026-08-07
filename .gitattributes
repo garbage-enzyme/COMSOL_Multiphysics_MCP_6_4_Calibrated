@@ -1,6 +1,9 @@
 # Auto detect text files and perform LF normalization
 * text=auto
 
+# Ruff formatting is byte-stable only when Python sources keep LF on Windows.
+*.py text eol=lf
+
 # Gettext source catalogs are byte-reproducible across Windows checkouts.
 settings_gui/locales/settings_gui.pot text eol=lf
 settings_gui/locales/**/settings_gui.po text eol=lf

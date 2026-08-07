@@ -392,7 +392,9 @@ def test_index_progress_cancel_footer_stays_visible_at_high_scaling() -> None:
     root = tk.Tk()
     root.withdraw()
     root.tk.call("tk", "scaling", 2.6666666667)
-    controller = SettingsController(SettingsFormModel(default_settings_document()), FakeStore(), dialogs=QuietDialogs())
+    controller = SettingsController(
+        SettingsFormModel(default_settings_document()), FakeStore(), dialogs=QuietDialogs()
+    )
     task = FakeTask()
     dialog = ManualIndexProgressDialog(root, controller, task, on_close=lambda: None)
     try:
@@ -420,21 +422,39 @@ def _scenario_doc_path_controls_follow_feature_gates() -> None:
         controller.model.update("semantic_docs.root", "D:/docs/semantic")
         controller.model.update("semantic_docs.model_path", "D:/docs/model")
         root.update_idletasks()
-        assert all("disabled" in widget.state() for widget in app.field_widgets["lexical_docs.index_path"])
-        assert all("disabled" in widget.state() for key in ("semantic_docs.root", "semantic_docs.model_path") for widget in app.field_widgets[key])
+        assert all(
+            "disabled" in widget.state() for widget in app.field_widgets["lexical_docs.index_path"]
+        )
+        assert all(
+            "disabled" in widget.state()
+            for key in ("semantic_docs.root", "semantic_docs.model_path")
+            for widget in app.field_widgets[key]
+        )
 
         _boolean_widget(app, "lexical_docs.enabled").invoke()
         _boolean_widget(app, "semantic_docs.enabled").invoke()
         root.update_idletasks()
-        assert all("disabled" not in widget.state() for widget in app.field_widgets["lexical_docs.index_path"])
-        assert all("disabled" not in widget.state() for key in ("semantic_docs.root", "semantic_docs.model_path") for widget in app.field_widgets[key])
+        assert all(
+            "disabled" not in widget.state()
+            for widget in app.field_widgets["lexical_docs.index_path"]
+        )
+        assert all(
+            "disabled" not in widget.state()
+            for key in ("semantic_docs.root", "semantic_docs.model_path")
+            for widget in app.field_widgets[key]
+        )
 
         _boolean_widget(app, "lexical_docs.enabled").invoke()
         _boolean_widget(app, "semantic_docs.enabled").invoke()
         root.update_idletasks()
-        assert get_value(controller.model.document, "lexical_docs.index_path") == "D:/docs/manuals.sqlite3"
+        assert (
+            get_value(controller.model.document, "lexical_docs.index_path")
+            == "D:/docs/manuals.sqlite3"
+        )
         assert get_value(controller.model.document, "semantic_docs.root") == "D:/docs/semantic"
-        assert all("disabled" in widget.state() for widget in app.field_widgets["lexical_docs.index_path"])
+        assert all(
+            "disabled" in widget.state() for widget in app.field_widgets["lexical_docs.index_path"]
+        )
     finally:
         app.close()
 

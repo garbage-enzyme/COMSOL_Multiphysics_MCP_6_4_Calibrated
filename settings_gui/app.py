@@ -213,7 +213,8 @@ class ManualIndexProgressDialog:
                 self.stage.set(self.controller.text(stage))
                 self.detail.set(
                     self.controller.text(
-                        "{percent}% — {files}/{total_files} PDFs, {pages}/{total_pages} pages{source}"
+                        "{percent}% — {files}/{total_files} PDFs, "
+                        "{pages}/{total_pages} pages{source}"
                     ).format(
                         percent=percent,
                         files=int(event.get("processed_files", 0)),
@@ -246,7 +247,9 @@ class ManualIndexProgressDialog:
                 self._terminal = True
                 self.controller.dialogs.error(
                     title=self.controller.text("Index generation failed"),
-                    message=self.controller.text(str(event.get("message", "Index generation failed."))),
+                    message=self.controller.text(
+                        str(event.get("message", "Index generation failed."))
+                    ),
                 )
                 self.close()
                 return
@@ -531,7 +534,9 @@ class SettingsApplication:
                 command = partial(self.controller.browse_save_file, field.key)
             else:
                 command = partial(self.controller.browse_directory, field.key)
-            browse_button = ttk.Button(controls, text=self.controller.text("Browse"), command=command)
+            browse_button = ttk.Button(
+                controls, text=self.controller.text("Browse"), command=command
+            )
             browse_button.pack(side="left")
             control_widgets.append(browse_button)
             if field.nullable:
@@ -742,10 +747,14 @@ class SettingsApplication:
                 if field.key in self.field_widgets:
                     enabled = not (
                         field.key == "lexical_docs.index_path"
-                        and not bool(get_value(self.controller.model.document, "lexical_docs.enabled"))
+                        and not bool(
+                            get_value(self.controller.model.document, "lexical_docs.enabled")
+                        )
                     ) and not (
                         field.key in {"semantic_docs.root", "semantic_docs.model_path"}
-                        and not bool(get_value(self.controller.model.document, "semantic_docs.enabled"))
+                        and not bool(
+                            get_value(self.controller.model.document, "semantic_docs.enabled")
+                        )
                     )
                     for widget in self.field_widgets[field.key]:
                         widget.configure(state="normal" if enabled else "disabled")

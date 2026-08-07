@@ -34,10 +34,10 @@ jobs:
             constraints/minimum_supported_py314.txt
       - name: Install minimum-supported dependency lane
         if: matrix.lane == 'minimum-supported'
-        run: python -m pip install --constraint constraints/minimum_supported_py314.txt ".[dev]"
+        run: python -m pip install --constraint constraints/minimum_supported_py314.txt ".[dev,manuals]"
       - name: Install current-compatible dependency lane
         if: matrix.lane == 'current-compatible'
-        run: python -m pip install --upgrade --upgrade-strategy eager ".[dev]"
+        run: python -m pip install --upgrade --upgrade-strategy eager ".[dev,manuals]"
       - name: Verify resolved dependencies
         run: python -m pip check
       - name: Verify reviewed runtime dependency licenses
@@ -66,7 +66,7 @@ jobs:
           python-version: "3.14"
           cache: pip
       - name: Install dependency-only test environment
-        run: python -m pip install ".[dev]"
+        run: python -m pip install ".[dev,manuals]"
       - name: Verify pip check
         run: python -m pip check
       - name: Compile Python sources

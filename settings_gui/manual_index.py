@@ -23,9 +23,7 @@ class ManualIndexBuildTask:
         self.pdf_root = Path(pdf_root)
         self.index_path = Path(index_path)
         token = uuid.uuid4().hex
-        self.temporary_path = self.index_path.with_name(
-            f"{self.index_path.name}.tmp-gui-{token}"
-        )
+        self.temporary_path = self.index_path.with_name(f"{self.index_path.name}.tmp-gui-{token}")
         self._events: deque[dict[str, Any]] = deque(maxlen=64)
         self._events_lock = threading.Lock()
         self._cancel = threading.Event()
@@ -90,6 +88,8 @@ class ManualIndexBuildTask:
         ).encode("utf-8")
         creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
         saw_error = False
+        process: subprocess.Popen[bytes] | None = None
+        stderr_thread: threading.Thread | None = None
         try:
             process = subprocess.Popen(
                 [sys.executable, "-m", "comsol_mcp.knowledge.lexical_build_worker"],
@@ -100,9 +100,8 @@ class ManualIndexBuildTask:
             )
             with self._process_lock:
                 self._process = process
-            assert process.stdin is not None
-            assert process.stdout is not None
-            assert process.stderr is not None
+            if process.stdin is None or process.stdout is None or process.stderr is None:
+                raise RuntimeError("index worker pipes were not created")
 
             def drain_stderr() -> None:
                 while True:
@@ -140,15 +139,30 @@ class ManualIndexBuildTask:
                         "message": "The index worker stopped before completing the build.",
                     }
                 )
-        except (OSError, RuntimeError, subprocess.SubprocessError):
+        except OSError, RuntimeError, subprocess.SubprocessError:
             self._publish(
                 {
                     "event": "error",
                     "reason_code": "index_worker_failed",
-                    "message": "The index worker could not complete. The previous index was preserved.",
+                    "message": (
+                        "The index worker could not complete. The previous index was preserved."
+                    ),
                 }
             )
         finally:
+            if process is not None:
+                if process.poll() is None:
+                    process.terminate()
+                    try:
+                        process.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait(timeout=2)
+                if stderr_thread is not None:
+                    stderr_thread.join(timeout=2)
+                for stream in (process.stdin, process.stdout, process.stderr):
+                    if stream is not None and not stream.closed:
+                        stream.close()
             with self._process_lock:
                 self._process = None
             try:

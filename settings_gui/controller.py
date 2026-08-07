@@ -170,7 +170,7 @@ class SettingsController:
             return None
         try:
             target = resolve_lexical_index_target(index_path)
-        except (OSError, ValueError):
+        except OSError, ValueError:
             self.dialogs.error(
                 title=self.text("Generate manual index"),
                 message=self.text(
@@ -190,7 +190,7 @@ class SettingsController:
                 self.update("lexical_docs.index_path", str(target))
             task = self._index_task_factory(pdf_root=pdf_root, index_path=str(target))
             task.start()
-        except (OSError, RuntimeError, ValueError):
+        except OSError, RuntimeError, ValueError:
             self.dialogs.error(
                 title=self.text("Generate manual index"),
                 message=self.text(
