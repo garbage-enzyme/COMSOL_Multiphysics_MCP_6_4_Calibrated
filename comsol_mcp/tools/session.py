@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import threading
 import time
 import uuid
@@ -446,6 +447,51 @@ class SessionManager:
                         "The process-global MPh client was created for a remote "
                         "topology and cannot become a local stand-alone client."
                     ),
+                }
+            if isinstance(cores, bool) or not isinstance(cores, int) or cores < 1:
+                return {
+                    "success": False,
+                    "starting": False,
+                    "error": {
+                        "code": "cores_required",
+                        "message": (
+                            "cores must be an explicit positive integer declared by the caller"
+                        ),
+                    },
+                }
+            available_cores = os.cpu_count()
+            if not isinstance(available_cores, int) or available_cores < 1:
+                return {
+                    "success": False,
+                    "starting": False,
+                    "error": {
+                        "code": "cpu_capacity_unavailable",
+                        "message": (
+                            "the host CPU capacity could not be measured; refusing solver start"
+                        ),
+                    },
+                }
+            if cores > available_cores:
+                return {
+                    "success": False,
+                    "starting": False,
+                    "error": {
+                        "code": "cores_exceed_host_capacity",
+                        "message": (
+                            "caller-declared cores exceed the currently measured host capacity"
+                        ),
+                        "requested": cores,
+                        "available": available_cores,
+                    },
+                }
+            if not isinstance(version, str) or not version.strip():
+                return {
+                    "success": False,
+                    "starting": False,
+                    "error": {
+                        "code": "version_required",
+                        "message": "version must be explicitly declared by the caller",
+                    },
                 }
             # Claim the starting flag for this call.
             self._starting = True
@@ -1311,8 +1357,9 @@ def register_session_tools(mcp: MCPServer) -> None:
         flight; the second call reports the existing attempt.
 
         Args:
-            cores: Number of processor cores to use (default: all available)
-            version: COMSOL version to use, e.g., '6.0' (default: latest installed)
+            cores: Number of processor cores to use; the caller must declare it
+                   explicitly and it is checked against live host capacity.
+            version: COMSOL version to use; the caller must declare it explicitly.
             products: Compatibility hint only. MPh 1.3.1 cannot preload a
                      product list; COMSOL checks out licensed products on demand.
 
