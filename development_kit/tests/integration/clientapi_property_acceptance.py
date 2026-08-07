@@ -16,6 +16,8 @@ ROOT = Path(__file__).parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from development_kit.tests.integration.acceptance_resources import required_acceptance_cores
+
 _properties = import_module("src.tools.properties")
 get_existing_property = _properties.get_existing_property
 set_existing_property = _properties.set_existing_property
@@ -198,7 +200,7 @@ def main() -> None:
     )
     artifact_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = artifact_dir / "property_gate_result.json"
-    client = mph.Client(cores=1)
+    client = mph.Client(cores=required_acceptance_cores(), version="6.4")
     try:
         result = _run_gate(client, artifact_dir)
     finally:

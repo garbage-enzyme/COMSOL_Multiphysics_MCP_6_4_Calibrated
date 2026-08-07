@@ -27,6 +27,7 @@ from src.jobs.native_cancel_probe import (  # noqa
     discover_environment,
     reflect_candidate_signatures,
 )
+from development_kit.tests.integration.acceptance_resources import required_acceptance_cores
 
 NATIVE_CANCEL_PROBE_MODEL_ENV = "COMSOL_MCP_NATIVE_CANCEL_PROBE_MODEL"
 
@@ -122,7 +123,7 @@ def main() -> int:
     returncode = 1
     try:
         manifest.update(discover_environment())
-        client = mph.Client(cores=1)
+        client = mph.Client(cores=required_acceptance_cores(), version="6.4")
         manifest["client"] = {
             "standalone": bool(client.standalone),
             "port": client.port,

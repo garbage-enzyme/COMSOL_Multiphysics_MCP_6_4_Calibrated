@@ -19,6 +19,7 @@ from src.tools.ownership import SolverOwnership
 from src.tools.wave_optics_preflight import collect_wave_optics_preflight
 from src.evidence.real_fixture import controlled_fixture_from_environment
 from development_kit.scripts.acceptance_cleanup import CleanupRecorder, lease_released
+from development_kit.tests.integration.acceptance_resources import required_acceptance_cores
 
 
 def _sha256(path: Path) -> str:
@@ -81,7 +82,7 @@ def main() -> None:
         claim = owner.acquire(mode="wave_optics_preflight_read_only", model_path=str(models[0]))
         if not claim.get("acquired"):
             raise RuntimeError(f"solver lease unavailable: {claim}")
-        client = mph.Client(cores=1)
+        client = mph.Client(cores=required_acceptance_cores(), version="6.4")
         for source in models:
             source_hash = _sha256(source)
             source_stat = source.stat()

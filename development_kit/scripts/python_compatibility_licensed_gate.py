@@ -619,7 +619,7 @@ def main() -> int:
     parser.add_argument("--confirm", choices=["RUN_REAL_COMSOL"])
     parser.add_argument("--output", type=Path)
     parser.add_argument("--runtime-root", type=Path, default=Path("D:/comsol_runtime"))
-    parser.add_argument("--cores", type=int, default=1)
+    parser.add_argument("--cores", type=int, required=True)
     parser.add_argument("--timeout-seconds", type=float, default=180.0)
     parser.add_argument("--minimum-free-gb", type=float, default=2.0)
     parser.add_argument("--worker", action="store_true", help=argparse.SUPPRESS)

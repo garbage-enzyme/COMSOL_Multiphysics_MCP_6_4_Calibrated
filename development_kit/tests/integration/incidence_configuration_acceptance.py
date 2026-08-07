@@ -21,6 +21,7 @@ from src.tools.incidence_config import apply_incidence, preview_incidence
 from src.tools.ownership import SolverOwnership
 
 from development_kit.scripts.acceptance_cleanup import CleanupRecorder, lease_released
+from development_kit.tests.integration.acceptance_resources import required_acceptance_cores
 
 
 def _sha256(path: Path) -> str:
@@ -67,7 +68,7 @@ def main() -> None:
             raise RuntimeError(f"solver lease unavailable: {claim}")
         import mph
 
-        client = mph.Client(cores=1, version="6.4")
+        client = mph.Client(cores=required_acceptance_cores(), version="6.4")
         source = client.load(str(source_path))
         component_tag = _first_tag(source.java.component().tags(), "comp1")
         if component_tag is None:

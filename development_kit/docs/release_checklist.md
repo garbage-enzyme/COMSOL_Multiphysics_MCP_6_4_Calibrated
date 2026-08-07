@@ -29,11 +29,17 @@ Before a release:
    from the clean candidate commit:
 
    ```powershell
+   $env:COMSOL_MCP_ACCEPTANCE_CORES='<caller-selected-positive-integer>'
    python development_kit/scripts/python_compatibility_licensed_gate.py `
      --confirm RUN_REAL_COMSOL `
+     --cores $env:COMSOL_MCP_ACCEPTANCE_CORES `
      --runtime-root D:\comsol_runtime `
      --output D:\comsol_release\python_compatibility.json
    ```
+
+   The environment value is also consumed by direct licensed integration
+   entry points. Select it for the current host and campaign; do not copy a
+   core count from another machine or release receipt.
 
 5. On a free, licensed, version-pinned host, run the serial real gate explicitly:
 

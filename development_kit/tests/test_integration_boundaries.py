@@ -121,6 +121,7 @@ def test_property_acceptance_clears_client_when_gate_fails(tmp_path, monkeypatch
             calls.append("clear")
 
     monkeypatch.setenv("COMSOL_MCP_RUNTIME_DIR", str(tmp_path))
+    monkeypatch.setenv("COMSOL_MCP_ACCEPTANCE_CORES", "1")
     monkeypatch.setattr(property_gate.mph, "Client", lambda **_kwargs: Client())
     monkeypatch.setattr(
         property_gate,

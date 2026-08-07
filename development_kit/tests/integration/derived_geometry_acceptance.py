@@ -16,6 +16,7 @@ ROOT = Path(__file__).parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from development_kit.tests.integration.acceptance_resources import required_acceptance_cores
 from src.tools.derived_geometry import (
     _snapshot,
     _state_hash,
@@ -82,7 +83,7 @@ def main() -> None:
     try:
         claim = owner.acquire(mode="derived_geometry", model_path=str(source_path))
         lease_acquired_here, lease_reused = _lease_disposition(claim)
-        client = mph.Client(cores=1)
+        client = mph.Client(cores=required_acceptance_cores(), version="6.4")
         source = client.create("DerivedGeometrySource")
         jm = source.java
         component = jm.component().create("comp1", True)

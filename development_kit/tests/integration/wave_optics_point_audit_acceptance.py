@@ -18,6 +18,7 @@ if str(ROOT) not in sys.path:
 from src.evidence.real_fixture import controlled_fixture_from_environment
 from src.tools.ownership import SolverOwnership
 from src.tools.wave_optics_audit import run_wave_optics_point_audit
+from development_kit.tests.integration.acceptance_resources import required_acceptance_cores
 
 
 def _require(condition: object, detail: object) -> None:
@@ -109,7 +110,7 @@ def main() -> None:
         )
         if not claim.get("success"):
             raise RuntimeError(f"solver lease unavailable: {claim}")
-        client = mph.Client(cores=8)
+        client = mph.Client(cores=required_acceptance_cores(), version="6.4")
         for case in active_cases:
             source = case["source"]
             source_hash = _bound_source_sha256(case)

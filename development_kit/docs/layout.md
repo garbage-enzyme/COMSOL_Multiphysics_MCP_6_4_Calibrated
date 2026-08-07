@@ -145,6 +145,7 @@ models are intentionally absent.
 ## Licensed and subprocess integration tests
 
 - `development_kit/tests/integration/__init__.py` — This file marks explicit subprocess-isolated integration tests as a Python package.
+- `development_kit/tests/integration/acceptance_resources.py` — This module requires caller-declared host resources for licensed integration entry points.
 - `development_kit/tests/integration/probes/acoustics_pde.py` — This probe validates analytical Pressure Acoustics and Poisson PDE models plus the typed interface surface.
 - `development_kit/tests/integration/clientapi_property_acceptance.py` — This gate checks constrained clientapi property round trips without solving.
 - `development_kit/tests/integration/coordinator_claim_kill.py` — This helper stops only the exact coordinator process after a durable claim.
@@ -174,6 +175,7 @@ models are intentionally absent.
 ## Dependency and process tests
 
 - `development_kit/tests/test_acceptance_cleanup.py` — This module tests licensed-gate cleanup accounting without starting COMSOL.
+- `development_kit/tests/test_acceptance_resources.py` — This module tests caller-declared, live-bounded licensed acceptance resources.
 - `development_kit/tests/test_acoustic_duct_recipe.py` — This module tests staging, cleanup ordering, collision refusal, and sharing retries for the acoustic recipe.
 - `development_kit/tests/test_acoustics_pde.py` — This module tests bounded Acoustics and mathematical PDE interface and boundary transactions without COMSOL.
 - `development_kit/tests/test_artifact_chain.py` — This module tests bounded solver-free artifact hash-chain verification.
