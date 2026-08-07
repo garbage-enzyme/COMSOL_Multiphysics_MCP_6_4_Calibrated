@@ -188,7 +188,7 @@ def test_pdf_index_build_rejects_a_manual_changed_during_extraction(
         opened.append(path)
         return Document()
 
-    monkeypatch.setitem(sys.modules, "fitz", SimpleNamespace(open=open_document))
+    monkeypatch.setitem(sys.modules, "pymupdf", SimpleNamespace(open=open_document))
 
     with pytest.raises(RuntimeError, match="changed during extraction"):
         manual_module.build_index_from_pdfs(pdf_root, index)
@@ -347,11 +347,11 @@ def test_completed_index_is_validated_before_publication(manual_index: Path):
 
 
 def test_pdf_build_emits_monotonic_stage_and_percentage_progress(ascii_tmp_path):
-    import fitz
+    import pymupdf
 
     pdf_root = ascii_tmp_path / "pdf-progress"
     pdf_root.mkdir()
-    document = fitz.open()
+    document = pymupdf.open()
     try:
         document.new_page().insert_text((72, 72), "searchable first page")
         document.new_page().insert_text((72, 72), "searchable second page")
@@ -368,13 +368,15 @@ def test_pdf_build_emits_monotonic_stage_and_percentage_progress(ascii_tmp_path)
     )
 
     assert result["page_count"] == 2
-    assert [event["stage"] for event in events if event["stage"] in {"validating", "publishing", "complete"}] == [
+    assert [
+        event["stage"]
+        for event in events
+        if event["stage"] in {"validating", "publishing", "complete"}
+    ] == [
         "validating",
         "publishing",
         "complete",
     ]
-    assert [event["percent"] for event in events] == sorted(
-        event["percent"] for event in events
-    )
+    assert [event["percent"] for event in events] == sorted(event["percent"] for event in events)
     assert events[-1]["percent"] == 100
     assert events[-1]["total_pages"] == 2

@@ -322,7 +322,7 @@ def build_index_from_pdfs(
         processed_pages=0,
         total_pages=0,
     )
-    import fitz
+    import pymupdf
 
     page_counts: dict[Path, int] = {}
     total_pages = 0
@@ -330,7 +330,7 @@ def build_index_from_pdfs(
         _check_cancelled(cancelled)
         if _pdf_snapshot(pdf_path) != snapshots[pdf_path]:
             raise RuntimeError("PDF manual changed before page counting")
-        with fitz.open(pdf_path) as document:
+        with pymupdf.open(pdf_path) as document:
             page_counts[pdf_path] = int(document.page_count)
         total_pages += page_counts[pdf_path]
         _emit_progress(
@@ -355,7 +355,7 @@ def build_index_from_pdfs(
                 raise RuntimeError(f"PDF manual changed before extraction: {pdf_path}")
             source = pdf_path.relative_to(source_root).as_posix()
             module = source.split("/", 1)[0]
-            with fitz.open(pdf_path) as document:
+            with pymupdf.open(pdf_path) as document:
                 for page_number, page in enumerate(document, start=1):
                     _check_cancelled(cancelled)
                     text = _normalize_text(page.get_text("text"))

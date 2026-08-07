@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import fitz
+import pymupdf
 import pytest
 
 from comsol_mcp.knowledge.lexical_manual import search_index, validate_index_file
@@ -12,7 +12,7 @@ from settings_gui.manual_index import ManualIndexBuildTask
 
 
 def _write_pdf(path: Path, text: str) -> None:
-    document = fitz.open()
+    document = pymupdf.open()
     try:
         page = document.new_page()
         page.insert_text((72, 72), text)
