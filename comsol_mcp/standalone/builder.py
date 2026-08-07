@@ -46,7 +46,10 @@ def _resource_bytes(name: str) -> bytes:
 
 def _default_csc_path(environ: dict[str, str] | None = None) -> Path:
     environment = os.environ if environ is None else environ
-    windows = Path(environment.get("WINDIR", "C:/Windows"))
+    windir = environment.get("WINDIR")
+    if not windir:
+        raise PlatformError("WINDIR is unavailable; refusing to guess the Windows installation")
+    windows = Path(windir)
     return windows / "Microsoft.NET" / "Framework64" / "v4.0.30319" / "csc.exe"
 
 

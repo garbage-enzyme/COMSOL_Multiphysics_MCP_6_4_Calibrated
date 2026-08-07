@@ -37,7 +37,7 @@ The default `core` profile supports existing-model work:
 ```text
 comsol_start(cores=caller_declared_cores, version=caller_declared_version)
 comsol_status
-model_load(file_path="D:\\models\\source.mph")
+model_load(file_path=caller_declared_source_path)
 model_inspect
 model_list_components
 physics_list
@@ -133,7 +133,7 @@ feature creation is not a solved or physically validated model.
 ```text
 study_solve(study_name="std1", wait=true)
 results_global_evaluate(expression="2*es.intWe/(1[V])^2", unit="pF")
-model_save(file_path="D:\\derived_models\\capacitor_result.mph")
+model_save(file_path=caller_declared_derived_path)
 ```
 
 For transient or multi-solution models, pass an explicit dataset and inner

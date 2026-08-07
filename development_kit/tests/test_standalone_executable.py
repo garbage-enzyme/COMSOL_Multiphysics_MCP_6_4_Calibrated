@@ -60,6 +60,11 @@ def test_workstation_build_probe_treats_host_path_errors_as_unavailable(monkeypa
     assert _workstation_build_available() is False
 
 
+def test_compiler_discovery_does_not_guess_the_windows_drive():
+    with pytest.raises(builder_module.PlatformError, match="refusing to guess"):
+        builder_module._default_csc_path({})
+
+
 def _status(*, state: str = "running", completed: int = 1) -> dict[str, object]:
     return {
         "schema_name": "comsol_mcp.standalone_status",

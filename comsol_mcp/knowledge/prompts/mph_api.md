@@ -165,7 +165,7 @@ For an absolute Unicode destination, save through the Java clientapi:
 ```python
 from pathlib import Path
 
-destination = Path(r"C:\path\to\derived_model.mph").resolve()
+destination = Path(caller_declared_derived_path).resolve()
 model.java.save(str(destination))
 ```
 
