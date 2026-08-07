@@ -59,12 +59,10 @@ def _create_recipe_output(root: str | Path) -> Path:
 
 def _automatic_output_roots(environment: dict[str, str]) -> tuple[Path, ...]:
     candidates = []
-    if os.name == "nt" and Path("D:/").exists():
-        candidates.append(Path("D:/comsol_runtime"))
     if os.name == "nt":
-        candidates.append(
-            Path(environment.get("PROGRAMDATA", "C:/ProgramData")) / "comsol_mcp_runtime"
-        )
+        program_data = environment.get("PROGRAMDATA")
+        if program_data:
+            candidates.append(Path(program_data) / "comsol_mcp_runtime")
     candidates.append(Path(tempfile.gettempdir()) / "comsol_runtime")
     return tuple(candidates)
 

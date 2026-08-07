@@ -10,17 +10,26 @@ from src.jobs.store import default_jobs_root
 from src.tools.ownership import _default_runtime_dir
 
 
-def test_windows_without_d_drive_uses_programdata_for_both_roots(monkeypatch):
+def test_windows_uses_reported_programdata_without_probing_drive_layout(monkeypatch):
     monkeypatch.setattr(
         runtime_paths,
         "settings_environment",
         lambda _environ=None: {"PROGRAMDATA": "C:/ProgramData"},
     )
     monkeypatch.setattr(runtime_paths, "_is_windows", lambda: True)
-    monkeypatch.setattr(runtime_paths, "_has_d_runtime_drive", lambda: False)
 
     assert _default_runtime_dir() == Path("C:/ProgramData/comsol_mcp_runtime")
     assert default_jobs_root() == Path("C:/ProgramData/comsol_mcp_runtime/jobs")
+
+
+def test_missing_system_root_uses_observed_ascii_temp_without_drive_assumptions(
+    monkeypatch, ascii_tmp_path
+):
+    monkeypatch.setattr(runtime_paths, "settings_environment", lambda _environ=None: {})
+    monkeypatch.setattr(runtime_paths, "_is_windows", lambda: True)
+    monkeypatch.setattr(runtime_paths.tempfile, "gettempdir", lambda: str(ascii_tmp_path))
+
+    assert runtime_paths.default_runtime_dir({}) == ascii_tmp_path / "comsol_runtime"
 
 
 def test_jobs_override_also_sets_lease_root_when_runtime_is_not_explicit(monkeypatch):
