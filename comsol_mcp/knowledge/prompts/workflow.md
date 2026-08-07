@@ -35,7 +35,7 @@ replace this lifecycle. Use the complete bilingual guides under
 The default `core` profile supports existing-model work:
 
 ```text
-comsol_start(cores=4, version="6.4")
+comsol_start(cores=caller_declared_cores, version=caller_declared_version)
 comsol_status
 model_load(file_path="D:\\models\\source.mph")
 model_inspect

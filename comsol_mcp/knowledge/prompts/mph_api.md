@@ -39,7 +39,7 @@ python -m pip install "mph>=1.3.1,<1.4"
 import mph
 
 # Standalone client. Starting COMSOL can take 30-90 seconds.
-client = mph.Client(cores=1, version="6.4")
+client = mph.Client(cores=caller_declared_cores, version=caller_declared_version)
 ```
 
 In a fresh Python process, the alternative direct Server connection is:

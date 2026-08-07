@@ -4,7 +4,7 @@ Continuous Au film (no patch) first — verify Rtotal<1 at some wavelengths.
 Then patch (spatial-varying lth) for resonance.
 """
 import mph, jpype, sys, time
-from _paths import recipe_output_dir
+from _paths import parse_recipe_cores, recipe_output_dir
 from _mim_safety import (
     bind_wavelength_step,
     require_interface_boundaries,
@@ -26,7 +26,7 @@ Px=0.6e-6; Py=0.6e-6; t_al2o3=30e-9; H_air=0.83e-6; t_au=30e-9
 # Parametric Drude using wl parameter (avoids ewfd.freq singularity in sweep)
 au_drude_param = "1-(1.37e16)^2/((2*pi*c_const/wl)*((2*pi*c_const/wl)+i*4.1e13))"
 
-client = mph.Client(cores=4, version='6.4')
+client = mph.Client(cores=parse_recipe_cores(), version='6.4')
 print('Connected', client.version, flush=True)
 m = client.create('MIM_drude'); jm = m.java
 

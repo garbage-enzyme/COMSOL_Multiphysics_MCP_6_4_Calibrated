@@ -25,6 +25,16 @@ def test_recipe_output_uses_declared_runtime_root(monkeypatch, ascii_tmp_path):
     assert output.is_dir()
 
 
+def test_recipe_cores_are_caller_declared_and_positive():
+    module = _load_recipe_paths()
+
+    assert module.parse_recipe_cores(["--cores", "3"]) == 3
+    with pytest.raises(SystemExit):
+        module.parse_recipe_cores([])
+    with pytest.raises(SystemExit):
+        module.parse_recipe_cores(["--cores", "0"])
+
+
 @pytest.mark.parametrize("configured", ["", "relative", "D:/non-ascii-路径"])
 def test_recipe_output_rejects_nonportable_runtime_root(monkeypatch, configured):
     module = _load_recipe_paths()

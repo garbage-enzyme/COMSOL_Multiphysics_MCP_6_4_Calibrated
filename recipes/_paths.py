@@ -2,11 +2,22 @@
 
 from __future__ import annotations
 
+import argparse
 import os
 import tempfile
 from pathlib import Path
 
 from src.settings import settings_environment
+
+
+def parse_recipe_cores(argv: list[str] | None = None) -> int:
+    """Require a caller-selected positive core count for a standalone recipe."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--cores", type=int, required=True)
+    cores = parser.parse_args(argv).cores
+    if isinstance(cores, bool) or cores < 1:
+        parser.error("--cores must be a positive integer selected for this host")
+    return cores
 
 
 def _is_reparse_point(path: Path) -> bool:

@@ -11,7 +11,7 @@ Patch = 0.3x0.3µm center rectangle on the Al2O3/air interface (bnd6).
 LayeredTransition + LML only on patch boundary; rest = plain continuity.
 """
 import mph, jpype, sys, time
-from _paths import recipe_output_dir
+from _paths import parse_recipe_cores, recipe_output_dir
 from _mim_safety import (
     bind_wavelength_step,
     require_named_domains,
@@ -36,7 +36,7 @@ ax=0.3e-6; px0=(Px-ax)/2  # 0.15µm, patch lower-left corner
 # Drude Au via wl parameter (avoids ewfd.freq singularity in sweep)
 au_drude = "1-(1.37e16)^2/((2*pi*c_const/wl)*((2*pi*c_const/wl)+i*4.1e13))"
 
-client = mph.Client(cores=4, version='6.4')
+client = mph.Client(cores=parse_recipe_cores(), version='6.4')
 print('Connected', client.version, flush=True)
 m = client.create('MIM_patch'); jm = m.java
 jm.param().set('wl', '5e-6[m]')
