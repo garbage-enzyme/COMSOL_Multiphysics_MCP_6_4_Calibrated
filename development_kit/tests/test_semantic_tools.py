@@ -94,6 +94,19 @@ def test_configuration_is_ascii_static_and_missing_model_degrades(lightweight_de
         semantic_configuration({"COMSOL_SEMANTIC_ROOT": "relative/semantic"})
 
 
+def test_configuration_does_not_infer_paths_from_host_drive_layout():
+    configuration = semantic_configuration({})
+
+    assert configuration["configured"] is False
+    assert configuration["root"] is None
+    assert configuration["lexical_index"] is None
+    assert set(configuration["missing"]) == {
+        "root_configuration",
+        "lexical_index_configuration",
+        "model_path_configuration",
+    }
+
+
 def test_cold_status_is_solver_free_and_does_not_start_worker(lightweight_deployment):
     service = SemanticService(lightweight_deployment)
     status = service.status(warm=False)

@@ -13,6 +13,7 @@ from src.knowledge.lexical_manual import (
     IndexBuildCancelled,
     build_index_from_records,
     read_index_pages,
+    register_lexical_manual_tools,
     run_bounded,
     search_index,
     validate_index_file,
@@ -79,6 +80,27 @@ def test_exact_and_term_search_returns_compact_page_references(manual_index: Pat
     assert result["results"][0]["page"] == 151
     assert "[PeriodicStructure]" not in result["results"][0]["snippet"]
     assert result["index"]["corpus_fingerprint"] == "fixture-v1"
+
+
+def test_index_operations_require_caller_configured_paths():
+    with pytest.raises(ValueError, match="explicitly configured"):
+        search_index("PeriodicStructure")
+    with pytest.raises(ValueError, match="explicitly configured"):
+        read_index_pages("manual.pdf", [1])
+
+
+def test_public_tools_report_unconfigured_instead_of_guessing_host_paths(monkeypatch):
+    from mcp.server.mcpserver import MCPServer
+
+    monkeypatch.delenv("COMSOL_LEXICAL_DOCS_INDEX_PATH", raising=False)
+    server = MCPServer("lexical-unconfigured")
+    register_lexical_manual_tools(server)
+
+    search = server._tool_manager._tools["manual_search"].fn("PeriodicStructure")
+    pages = server._tool_manager._tools["manual_read_pages"].fn("manual.pdf", [1])
+
+    assert search["error_type"] == "ConfigurationError"
+    assert pages["error_type"] == "ConfigurationError"
 
 
 def test_phrase_module_and_page_filters(manual_index: Path):

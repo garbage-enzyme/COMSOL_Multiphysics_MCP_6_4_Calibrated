@@ -25,8 +25,8 @@ from typing import Callable, Iterable, Mapping, Sequence
 from comsol_mcp.settings import LEXICAL_DOCS_INDEX_ENV
 from comsol_mcp.utils.control_plane import measured_call
 
-DEFAULT_INDEX_DIR = Path("D:/comsol_docs_fts")
-DEFAULT_INDEX_PATH = DEFAULT_INDEX_DIR / "manuals.sqlite3"
+DEFAULT_INDEX_DIR: Path | None = None
+DEFAULT_INDEX_PATH: Path | None = None
 DEFAULT_PDF_DIR = Path(__file__).resolve().parents[2] / "pdf"
 SCHEMA_VERSION = "1"
 SEARCH_TIMEOUT_SECONDS = 2.0
@@ -300,13 +300,15 @@ def _pdf_fingerprint(
 
 def build_index_from_pdfs(
     pdf_dir: str | Path = DEFAULT_PDF_DIR,
-    index_path: str | Path = DEFAULT_INDEX_PATH,
+    index_path: str | Path | None = DEFAULT_INDEX_PATH,
     *,
     temporary_path: str | Path | None = None,
     progress: ProgressCallback | None = None,
     cancelled: CancelCallback | None = None,
 ) -> dict:
     """Extract all PDF pages once and atomically build the production index."""
+    if index_path is None:
+        raise ValueError("index_path must be explicitly configured")
     source_root = Path(pdf_dir).resolve()
     pdf_files = sorted(source_root.rglob("*.pdf"))
     if not pdf_files:
@@ -492,10 +494,12 @@ def search_index(
     source: str | None = None,
     page_start: int | None = None,
     page_end: int | None = None,
-    index_path: str | Path = DEFAULT_INDEX_PATH,
+    index_path: str | Path | None = DEFAULT_INDEX_PATH,
     mode: str = "auto",
 ) -> dict:
     """Search an index, relaxing long natural-language queries when necessary."""
+    if index_path is None:
+        raise ValueError("index_path must be explicitly configured")
     path = Path(index_path)
     if not path.is_file():
         raise FileNotFoundError(
@@ -588,9 +592,11 @@ def read_index_pages(
     source: str,
     pages: Sequence[int],
     *,
-    index_path: str | Path = DEFAULT_INDEX_PATH,
+    index_path: str | Path | None = DEFAULT_INDEX_PATH,
 ) -> dict:
     """Read selected pages from the immutable lexical corpus."""
+    if index_path is None:
+        raise ValueError("index_path must be explicitly configured")
     path = Path(index_path)
     if not path.is_file():
         raise FileNotFoundError(f"Manual index not found at {path}")
@@ -659,7 +665,8 @@ def run_bounded(operation: str, arguments: dict, timeout: float) -> dict:
 def register_lexical_manual_tools(mcp) -> None:
     """Register dependency-free, bounded manual retrieval tools."""
 
-    index_path = Path(os.environ.get(LEXICAL_DOCS_INDEX_ENV, str(DEFAULT_INDEX_PATH)))
+    configured_index = os.environ.get(LEXICAL_DOCS_INDEX_ENV)
+    index_path = Path(configured_index) if configured_index else None
 
     @mcp.tool()
     def manual_search(
@@ -680,6 +687,12 @@ def register_lexical_manual_tools(mcp) -> None:
         worker with a hard deadline. Optional filters select a module, source PDF,
         or inclusive page interval. Use manual_read_pages for full page text.
         """
+        if index_path is None:
+            return {
+                "success": False,
+                "error_type": "ConfigurationError",
+                "error": "manual index path is not configured",
+            }
         return measured_call(
             "manual_search",
             lambda: run_bounded(
@@ -705,6 +718,12 @@ def register_lexical_manual_tools(mcp) -> None:
         The text comes from the immutable offline corpus. This read-only call is
         isolated from the COMSOL control process and has a hard deadline.
         """
+        if index_path is None:
+            return {
+                "success": False,
+                "error_type": "ConfigurationError",
+                "error": "manual index path is not configured",
+            }
         return measured_call(
             "manual_read_pages",
             lambda: run_bounded(
@@ -724,9 +743,9 @@ def _main() -> None:
     subparsers = parser.add_subparsers(dest="command", required=True)
     build = subparsers.add_parser("build", help="build the SQLite FTS5 index")
     build.add_argument("--pdf-dir", default=str(DEFAULT_PDF_DIR))
-    build.add_argument("--index", default=str(DEFAULT_INDEX_PATH))
+    build.add_argument("--index", required=True)
     status = subparsers.add_parser("status", help="print index metadata")
-    status.add_argument("--index", default=str(DEFAULT_INDEX_PATH))
+    status.add_argument("--index", required=True)
     args = parser.parse_args()
     if args.command == "build":
         result = build_index_from_pdfs(args.pdf_dir, args.index)

@@ -16,8 +16,8 @@ from .semantic_process import SemanticWorkerManager
 SEMANTIC_ROOT_ENV = "COMSOL_SEMANTIC_ROOT"
 SEMANTIC_LEXICAL_ENV = "COMSOL_SEMANTIC_LEXICAL_INDEX"
 SEMANTIC_MODEL_ENV = "COMSOL_SEMANTIC_MODEL_PATH"
-DEFAULT_SEMANTIC_ROOT = Path("D:/comsol_semantic")
-DEFAULT_LEXICAL_INDEX = Path("D:/comsol_docs_fts/manuals.sqlite3")
+DEFAULT_SEMANTIC_ROOT: Path | None = None
+DEFAULT_LEXICAL_INDEX: Path | None = None
 
 
 def _ascii_absolute(value: str | Path, label: str) -> Path:
@@ -34,22 +34,28 @@ def _ascii_absolute(value: str | Path, label: str) -> Path:
 
 def semantic_configuration(environ: Mapping[str, str] | None = None) -> dict[str, Any]:
     environment = settings_environment(environ)
-    root = _ascii_absolute(environment.get(SEMANTIC_ROOT_ENV, str(DEFAULT_SEMANTIC_ROOT)), SEMANTIC_ROOT_ENV)
-    lexical = _ascii_absolute(environment.get(SEMANTIC_LEXICAL_ENV, str(DEFAULT_LEXICAL_INDEX)), SEMANTIC_LEXICAL_ENV)
+    raw_root = environment.get(SEMANTIC_ROOT_ENV)
+    raw_lexical = environment.get(SEMANTIC_LEXICAL_ENV)
     raw_model = environment.get(SEMANTIC_MODEL_ENV)
+    root = _ascii_absolute(raw_root, SEMANTIC_ROOT_ENV) if raw_root else None
+    lexical = _ascii_absolute(raw_lexical, SEMANTIC_LEXICAL_ENV) if raw_lexical else None
     model = _ascii_absolute(raw_model, SEMANTIC_MODEL_ENV) if raw_model else None
     missing = []
-    if not (root / "current.json").is_file():
+    if root is None:
+        missing.append("root_configuration")
+    elif not (root / "current.json").is_file():
         missing.append("current_pointer")
-    if not lexical.is_file():
+    if lexical is None:
+        missing.append("lexical_index_configuration")
+    elif not lexical.is_file():
         missing.append("lexical_index")
     if model is None:
         missing.append("model_path_configuration")
     elif not (model / "model_manifest.json").is_file():
         missing.append("model_manifest")
     return {
-        "root": str(root),
-        "lexical_index": str(lexical),
+        "root": str(root) if root is not None else None,
+        "lexical_index": str(lexical) if lexical is not None else None,
         "model_path": str(model) if model is not None else None,
         "configured": not missing,
         "missing": missing,
@@ -81,7 +87,11 @@ def _lightweight_deployment_identity(configuration: Mapping[str, Any]) -> dict[s
         manifest = json.loads(manifest_bytes.decode("utf-8"))
         if not isinstance(manifest, dict):
             raise TypeError("index manifest must be a JSON object")
-        model = json.loads((Path(str(configuration["model_path"])) / "model_manifest.json").read_text(encoding="utf-8"))
+        model = json.loads(
+            (Path(str(configuration["model_path"])) / "model_manifest.json").read_text(
+                encoding="utf-8"
+            )
+        )
         if not isinstance(model, dict):
             raise TypeError("model manifest must be a JSON object")
         required_identity = (
@@ -129,7 +139,9 @@ class SemanticService:
 
     def _get_manager(self) -> SemanticWorkerManager:
         if not self.configuration["configured"]:
-            raise RuntimeError(f"semantic retrieval is not configured: {self.configuration['missing']}")
+            raise RuntimeError(
+                f"semantic retrieval is not configured: {self.configuration['missing']}"
+            )
         if self._manager is None:
             self._manager = SemanticWorkerManager(
                 backend="hybrid",
@@ -149,7 +161,10 @@ class SemanticService:
                 try:
                     manager = self._get_manager()
                 except RuntimeError as exc:
-                    health = {"success": False, "error": {"code": "semantic_unavailable", "message": str(exc)}}
+                    health = {
+                        "success": False,
+                        "error": {"code": "semantic_unavailable", "message": str(exc)},
+                    }
                     worker = {"state": "stopped", "health": health}
                 else:
                     health = manager.health()
@@ -211,12 +226,14 @@ class SemanticService:
                     "configuration": self.configuration,
                 }
             filters = {
-                key: value for key, value in {
+                key: value
+                for key, value in {
                     "module": module,
                     "source": source,
                     "page_start": page_start,
                     "page_end": page_end,
-                }.items() if value is not None
+                }.items()
+                if value is not None
             }
             result = manager.query(query, limit=limit, filters=filters, retrieval_mode="hybrid")
             self._health_gate_passed = bool(result.get("success"))
@@ -231,7 +248,11 @@ class SemanticService:
             if self._manager is None:
                 self._health_gate_passed = False
                 self._last_error = None
-                return {"success": True, "reset": False, "message": "semantic worker is already stopped"}
+                return {
+                    "success": True,
+                    "reset": False,
+                    "message": "semantic worker is already stopped",
+                }
             result = self._manager.reset()
             self._health_gate_passed = False
             if result.get("success"):
@@ -271,7 +292,13 @@ def semantic_capability_status(*, feature_enabled: bool) -> dict[str, Any]:
 
 
 __all__ = [
-    "DEFAULT_LEXICAL_INDEX", "DEFAULT_SEMANTIC_ROOT", "SEMANTIC_LEXICAL_ENV",
-    "SEMANTIC_MODEL_ENV", "SEMANTIC_ROOT_ENV", "SemanticService",
-    "get_semantic_service", "semantic_capability_status", "semantic_configuration",
+    "DEFAULT_LEXICAL_INDEX",
+    "DEFAULT_SEMANTIC_ROOT",
+    "SEMANTIC_LEXICAL_ENV",
+    "SEMANTIC_MODEL_ENV",
+    "SEMANTIC_ROOT_ENV",
+    "SemanticService",
+    "get_semantic_service",
+    "semantic_capability_status",
+    "semantic_configuration",
 ]
