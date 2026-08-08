@@ -287,6 +287,7 @@ models are intentionally absent.
 - `development_kit/tests/test_research_robustness.py` — This module tests bounded axis perturbations, exact evidence coverage, and optional robustness thresholds.
 - `development_kit/tests/test_research_tools.py` — This module tests real dispatch for experimental solver-free campaign compilation and robustness planning.
 - `development_kit/tests/test_research_adapters.py` — This module tests exact trusted-template manifests, closed x/y mutation scope, and live-tree drift rejection.
+- `development_kit/tests/test_adjoint_adapter.py` — This module tests native adapter readback, unit canonicalization, and rollback on mutation failure.
 - `development_kit/tests/test_research_adaptive_acquisition.py` — This module tests bounded deterministic GP/EI selection, invalid evidence rejection, and heavy-import isolation.
 - `development_kit/tests/test_research_optimizers.py` — This module tests deterministic ask/tell/checkpoint replay, mixed domains, and dependency isolation.
 - `development_kit/tests/test_native_gradient_support_matrix.py` — This module validates the redacted alpha7.1 native-gradient capability matrix and receipt boundary.
@@ -372,6 +373,7 @@ models are intentionally absent.
 - `comsol_mcp/research/objectives.py` — This module computes deterministic objective receipts from exact immutable evidence fields.
 - `comsol_mcp/research/robustness.py` — This module creates bounded finalist perturbation matrices and threshold-separated robustness summaries.
 - `comsol_mcp/research/adapters.py` — This module freezes trusted structure-family manifests and exact live-tree audit receipts.
+- `comsol_mcp/research/adjoint_adapter.py` — This module configures the fixed periodic-MIM native Sensitivity/Optimization feature pair with failure-atomic rollback.
 - `comsol_mcp/research/adaptive_acquisition.py` — This explicitly loaded module performs bounded Gaussian-process posterior and expected-improvement selection without affecting ordinary discovery imports.
 - `comsol_mcp/research/optimizers.py` — This module provides the backend-neutral optimizer protocol and deterministic grid, random, and Latin-hypercube baselines.
 

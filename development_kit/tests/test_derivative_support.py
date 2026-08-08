@@ -25,6 +25,7 @@ def _variable(order: int, variable_id: str = "patch_length_x") -> dict:
             "feature_tag": "blk1",
             "feature_type": "Block",
             "property_name": "size",
+            "property_index": order,
             "readback_expression": "patch_length_x",
         },
         "dependency_class": "geometry",

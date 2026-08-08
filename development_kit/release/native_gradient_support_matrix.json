@@ -52,6 +52,27 @@
     "feature_execution": "unverified",
     "objective_control_constraint_wiring": "unverified",
     "derivative_correctness": "unverified"
+    ,"wiring_probe": {
+      "status": "licensed_structural_readback",
+      "receipt_sha256": "3daf996cbbcfebcbd6ec8e7bba97fe5b99e697d7668549e03d90563e9946f3ff",
+      "sensitivity_properties": ["gradientMethod", "pname", "punit", "initval", "scale", "optobj"],
+      "optimization_properties": ["optmethod", "pname", "punit", "initval", "scale", "lbound", "ubound", "optobj", "nsolvemax"],
+      "unit_readback": "requested_nm_canonicalized_to_m",
+      "save_reload": true,
+      "solve_executed": false
+    },
+    "trusted_adapter_probe": {
+      "status": "licensed_structural_proven",
+      "receipt_sha256": "73c0bd8b31f1164b2b05f45bfe3b98ac0c959686589b881b2ea6b8c0d82a85d6",
+      "source_sha256": "3862d52d2ebcac7c7ab9e2470d2d0e75d7bbf407d771b20c0560cee143351ac6",
+      "source_unchanged": true,
+      "parameter_binding": ["patch_length_x", "patch_length_y"],
+      "objective_expression_readback": "ewfd.Ttotal",
+      "gradient_method_readback": "adjoint",
+      "save_reload": true,
+      "cleanup_verified": true,
+      "native_solve_executed": false
+    }
   },
   "method_policy": {
     "accepted_lane": "adjoint",
@@ -67,5 +88,5 @@
     "client_clear_succeeded": true,
     "solver_residue_observed": false
   },
-  "support_state": "structurally_supported_pending_licensed_execution"
+  "support_state": "licensed_structural_proven_pending_native_derivative"
 }

@@ -24,6 +24,13 @@ def test_native_gradient_matrix_is_redacted_and_binds_the_live_probe_boundary():
     ]
     assert matrix["capability_probe"]["module_inventory_is_diagnostic_only"] is True
     assert matrix["capability_probe"]["feature_execution"] == "unverified"
+    assert matrix["capability_probe"]["wiring_probe"]["status"] == "licensed_structural_readback"
+    assert matrix["capability_probe"]["wiring_probe"]["solve_executed"] is False
+    assert matrix["capability_probe"]["trusted_adapter_probe"]["status"] == (
+        "licensed_structural_proven"
+    )
+    assert matrix["capability_probe"]["trusted_adapter_probe"]["source_unchanged"] is True
+    assert matrix["capability_probe"]["trusted_adapter_probe"]["native_solve_executed"] is False
     assert matrix["method_policy"]["accepted_lane"] == "adjoint"
     assert matrix["method_policy"]["global_optimality_claim"] is False
     assert matrix["probe_receipts"]["full_receipts_retained_locally"] is True

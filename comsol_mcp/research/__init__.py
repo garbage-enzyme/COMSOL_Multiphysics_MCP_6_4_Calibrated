@@ -13,6 +13,7 @@ from .adapters import (
     normalize_structure_adapter_manifest,
     normalize_structure_tree_audit,
 )
+from .adjoint_adapter import ADJOINT_ADAPTER_ID, ADJOINT_ADAPTER_VERSION, configure_native_adjoint
 from .compiler import (
     CAMPAIGN_MANIFEST_SCHEMA_NAME,
     CAMPAIGN_MANIFEST_SCHEMA_VERSION,
@@ -114,6 +115,8 @@ from .workflow import (
 
 __all__ = [
     "ClientapiPeriodicMimPatchBackend",
+    "ADJOINT_ADAPTER_ID",
+    "ADJOINT_ADAPTER_VERSION",
     "STRUCTURE_ADAPTER_APPLICATION_SCHEMA_NAME",
     "STRUCTURE_ADAPTER_APPLICATION_SCHEMA_VERSION",
     "STRUCTURE_ADAPTER_MANIFEST_SCHEMA_NAME",
@@ -194,4 +197,5 @@ __all__ = [
     "relative_bounds",
     "score_objectives",
     "compile_campaign_manifest",
+    "configure_native_adjoint",
 ]

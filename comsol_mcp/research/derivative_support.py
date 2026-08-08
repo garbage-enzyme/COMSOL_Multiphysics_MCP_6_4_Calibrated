@@ -117,17 +117,30 @@ def normalize_derivative_variable(value: object, *, index: int) -> dict[str, Any
     scale = _finite(raw["scale"], f"{name}.scale", positive=True)
     mapping = _object(
         raw["mapping"],
-        {"feature_tag", "feature_type", "property_name", "readback_expression"},
+        {
+            "feature_tag",
+            "feature_type",
+            "property_name",
+            "property_index",
+            "readback_expression",
+        },
         f"{name}.mapping",
     )
     normalized_mapping = {
         "feature_tag": _identifier(mapping["feature_tag"], f"{name}.mapping.feature_tag"),
         "feature_type": _identifier(mapping["feature_type"], f"{name}.mapping.feature_type"),
         "property_name": _identifier(mapping["property_name"], f"{name}.mapping.property_name"),
+        "property_index": mapping["property_index"],
         "readback_expression": _text(
             mapping["readback_expression"], f"{name}.mapping.readback_expression", maximum=256
         ),
     }
+    if (
+        isinstance(normalized_mapping["property_index"], bool)
+        or not isinstance(normalized_mapping["property_index"], int)
+        or not 0 <= normalized_mapping["property_index"] <= 1024
+    ):
+        raise ValueError(f"{name}.mapping.property_index must be a bounded nonnegative integer")
     dependency = raw["dependency_class"]
     if dependency not in _DEPENDENCIES:
         raise ValueError(f"{name}.dependency_class is unsupported")
@@ -303,6 +316,7 @@ def normalize_derivative_support(value: object) -> dict[str, Any]:
         (
             item["mapping"]["feature_tag"],
             item["mapping"]["property_name"],
+            item["mapping"]["property_index"],
             item["mapping"]["readback_expression"],
         )
         for item in normalized_variables
