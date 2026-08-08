@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from typing import Any, Protocol
 
@@ -14,6 +15,66 @@ ADJOINT_ADAPTER_ID = "periodic_mim_patch_shape_gradient_v1"
 ADJOINT_ADAPTER_VERSION = "1.0.0"
 _CANONICAL_UNITS = {"m", "s", "kg", "A", "K", "mol", "cd", "1"}
 _UNIT_SCALE = {"m": 1.0, "um": 1e-6, "nm": 1e-9}
+
+
+def _container_get(container: Any, tag: str) -> Any:
+    try:
+        return container.get(tag)
+    except Exception:
+        return container(tag)
+
+
+def _layered_transition_footprint(component: Any) -> list[int]:
+    """Read the one trusted patch footprint directly from ``ewfd/ltr1``."""
+    physics = component.physics()
+    if "ewfd" not in ClientapiAdjointStudyBackend._tags(physics):
+        raise ValueError("trusted Wave Optics interface is absent")
+    interface = _container_get(physics, "ewfd")
+    features = interface.feature()
+    if "ltr1" not in ClientapiAdjointStudyBackend._tags(features):
+        raise ValueError("trusted layered transition feature is absent")
+    feature = _container_get(features, "ltr1")
+    if str(feature.getType()) != "LayeredTransitionBoundaryCondition":
+        raise ValueError("trusted layered transition feature type changed")
+    entities = sorted(int(value) for value in list(feature.selection().entities()))
+    if len(entities) != 1:
+        raise ValueError("trusted layered transition selection must contain one footprint")
+    return entities
+
+
+def _deformation_selections(
+    boundaries: list[dict[str, Any]], patch_domain: int, domain_count: int
+) -> dict[str, list[int]]:
+    """Derive the exact trusted block interfaces and exterior cell boundary."""
+    if domain_count != 3 or patch_domain < 1 or patch_domain > domain_count:
+        raise ValueError("trusted periodic MIM domain topology changed")
+    numbers = [item.get("boundary_number") for item in boundaries]
+    if any(
+        not isinstance(value, int) or isinstance(value, bool) or value < 1 for value in numbers
+    ) or len(set(numbers)) != len(numbers):
+        raise ValueError("trusted periodic MIM boundary identities changed")
+    patch = sorted(
+        int(item["boundary_number"])
+        for item in boundaries
+        if item.get("interior") is True
+        and patch_domain in {int(item.get("up_domain", 0)), int(item.get("down_domain", 0))}
+    )
+    exterior = sorted(
+        int(item["boundary_number"]) for item in boundaries if item.get("interior") is False
+    )
+    if (
+        len(patch) != 6
+        or len(set(patch)) != 6
+        or len(exterior) != 10
+        or len(set(exterior)) != 10
+        or set(patch) & set(exterior)
+    ):
+        raise ValueError("trusted periodic MIM deformation boundary topology changed")
+    return {
+        "domains": list(range(1, domain_count + 1)),
+        "patch_boundaries": patch,
+        "fixed_outer_boundaries": exterior,
+    }
 
 
 class AdjointStudyBackend(Protocol):
@@ -61,11 +122,19 @@ class ClientapiAdjointStudyBackend:
         self.model.java.study().remove(tag)
 
     def snapshot(self) -> Mapping[str, Any]:
-        result: dict[str, Any] = {"studies": {}, "parameters": self.model.parameters()}
+        result: dict[str, Any] = {
+            "studies": {},
+            "parameters": self.model.parameters(),
+            "physics": {},
+        }
         studies = self.model.java.study()
         for tag in self._tags(studies):
             study = self.get_study(tag)
             result["studies"][tag] = {"features": self._tags(study.feature())}
+        physics = self.model.java.component("comp1").physics()
+        for tag in self._tags(physics):
+            interface = _container_get(physics, tag)
+            result["physics"][tag] = {"features": self._tags(interface.feature())}
         try:
             block = self.model.java.component("comp1").geom("geom1").feature("b_pat")
             result["patch_size"] = [str(item) for item in list(block.getStringArray("size"))]
@@ -84,6 +153,18 @@ class ClientapiAdjointStudyBackend:
             for feature_tag in self._tags(study.feature()):
                 if feature_tag not in original_features:
                     study.feature().remove(feature_tag)
+        component = self.model.java.component("comp1")
+        physics = component.physics()
+        expected_physics = snapshot.get("physics", {})
+        for tag in list(self._tags(physics)):
+            if tag not in expected_physics:
+                physics.remove(tag)
+                continue
+            interface = _container_get(physics, tag)
+            original_features = set(expected_physics[tag].get("features", []))
+            for feature_tag in self._tags(interface.feature()):
+                if feature_tag not in original_features:
+                    interface.feature().remove(feature_tag)
         current_parameters = dict(self.model.parameters())
         original_parameters = dict(snapshot.get("parameters", {}))
         parameters = self.model.java.param()
@@ -106,7 +187,8 @@ class ClientapiAdjointStudyBackend:
             "patch_length_y",
         ]:
             raise ValueError("trusted periodic MIM controls must be patch_length_x/y")
-        geometry = self.model.java.component("comp1").geom("geom1")
+        component = self.model.java.component("comp1")
+        geometry = component.geom("geom1")
         block = geometry.feature("b_pat")
         if str(block.getType()) != "Block":
             raise ValueError("trusted patch feature type changed")
@@ -127,18 +209,85 @@ class ClientapiAdjointStudyBackend:
             expression = f"{item['baseline']:.17g}[{item['unit']}]"
             parameters.set(item["variable_id"], expression)
             expressions[item["variable_id"]] = expression
-        requested_size = ["patch_length_x", "patch_length_y", before[2]]
-        from comsol_mcp.tools.derived_geometry import _set_vector
+        from comsol_mcp.research.adapters import _clientapi_vector
+        from comsol_mcp.tools.mim_patch import _identify_patch_topology, _probe_boundaries
 
-        _set_vector(block, "size", requested_size)
-        geometry.run()
+        size = _clientapi_vector(block, "size")
+        for index, variable in enumerate(variables):
+            expected = float(variable["baseline"]) * _UNIT_SCALE[variable["unit"]]
+            if not math.isclose(size[index], expected, rel_tol=1e-12, abs_tol=1e-15):
+                raise ValueError("trusted patch baseline differs from the derivative contract")
+        if any(variable_id in expression for variable_id in expressions for expression in before):
+            raise ValueError(
+                "trusted patch geometry must remain independent of sensitivity variables"
+            )
         readback = [str(item) for item in list(block.getStringArray("size"))]
-        if readback != requested_size:
-            raise ValueError("trusted patch parameter binding readback mismatch")
+        if readback != before:
+            raise ValueError("trusted patch baseline geometry changed during control preparation")
+        position = _clientapi_vector(block, "pos")
+        boundaries, domains, _boundary_count, _space_dimension = _probe_boundaries(geometry)
+        footprint = _layered_transition_footprint(component)
+        patch_domain, observed_footprint = _identify_patch_topology(
+            boundaries,
+            size,
+            position,
+            preferred_footprint=footprint,
+        )
+        selections = _deformation_selections(boundaries, patch_domain, int(domains))
+        center_x = position[0] + size[0] / 2.0
+        center_y = position[1] + size[1] / 2.0
+        displacement = [
+            f"(patch_length_x-{size[0]:.17g}[m])*(x-{center_x:.17g}[m])/{size[0]:.17g}[m]",
+            f"(patch_length_y-{size[1]:.17g}[m])*(y-{center_y:.17g}[m])/{size[1]:.17g}[m]",
+            "0",
+        ]
+        physics = component.physics()
+        if "dg_a71" in self._tags(physics):
+            raise ValueError("trusted native adjoint deformation interface already exists")
+        deformation = physics.create("dg_a71", "DeformedGeometry", "geom1")
+        feature_tags = self._tags(deformation.feature())
+        if "free" not in feature_tags or "disp1" not in feature_tags:
+            raise ValueError("Deformed Geometry defaults changed on the accepted COMSOL build")
+        features = deformation.feature()
+        free = _container_get(features, "free")
+        fixed = _container_get(features, "disp1")
+        free.selection().set(selections["domains"])
+        fixed.selection().set(selections["fixed_outer_boundaries"])
+        patch = deformation.feature().create("patch_a71", "PrescribedMeshDisplacement", 2)
+        patch.selection().set(selections["patch_boundaries"])
+        import jpype
+
+        for index in range(3):
+            fixed.setIndex("useDx", jpype.JBoolean(True), index)
+            fixed.setIndex("dx", "0", index)
+            patch.setIndex("useDx", jpype.JBoolean(True), index)
+            patch.setIndex("dx", displacement[index], index)
+        deformation_readback = {
+            "physics_tag": "dg_a71",
+            "physics_type": str(deformation.getType()),
+            "free_domains": sorted(int(item) for item in list(free.selection().entities())),
+            "fixed_outer_boundaries": [int(item) for item in sorted(fixed.selection().entities())],
+            "patch_boundaries": sorted(int(item) for item in list(patch.selection().entities())),
+            "patch_displacement": [str(item) for item in list(patch.getStringArray("dx"))],
+            "patch_domain": patch_domain,
+            "patch_footprint": observed_footprint,
+        }
+        if deformation_readback != {
+            "physics_tag": "dg_a71",
+            "physics_type": "DeformedGeometry",
+            "free_domains": selections["domains"],
+            "fixed_outer_boundaries": selections["fixed_outer_boundaries"],
+            "patch_boundaries": selections["patch_boundaries"],
+            "patch_displacement": displacement,
+            "patch_domain": patch_domain,
+            "patch_footprint": observed_footprint,
+        }:
+            raise ValueError("trusted Deformed Geometry readback differs from requested mapping")
         return {
             "parameters": expressions,
             "patch_size_before": before,
             "patch_size_readback": readback,
+            "deformed_geometry": deformation_readback,
         }
 
 
