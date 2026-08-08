@@ -97,6 +97,29 @@ def test_dry_run_binds_inputs_without_importing_mph(tmp_path, gate_root, monkeyp
     assert receipt["paths_included"] is False
 
 
+def test_support_maps_controls_to_deformed_geometry(tmp_path, gate_root, monkeypatch):
+    source, manifest, audit = _inputs(tmp_path)
+    monkeypatch.setattr(gate.os, "cpu_count", lambda: 4)
+    support = gate._support(gate._spec(_args(gate_root, source, manifest, audit)))
+
+    assert [item["mapping"] for item in support["variables"]] == [
+        {
+            "feature_tag": "patch_a71",
+            "feature_type": "PrescribedMeshDisplacement",
+            "property_name": "dx",
+            "property_index": 0,
+            "readback_expression": "patch_length_x",
+        },
+        {
+            "feature_tag": "patch_a71",
+            "feature_type": "PrescribedMeshDisplacement",
+            "property_name": "dx",
+            "property_index": 1,
+            "readback_expression": "patch_length_y",
+        },
+    ]
+
+
 def test_gate_rejects_undeclared_host_capacity(tmp_path, gate_root, monkeypatch):
     source, manifest, audit = _inputs(tmp_path)
     monkeypatch.setattr(gate.os, "cpu_count", lambda: 2)

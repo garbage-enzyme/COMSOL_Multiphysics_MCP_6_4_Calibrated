@@ -200,9 +200,9 @@ class ClientapiAdjointStudyBackend:
         for item in variables:
             mapping = item["mapping"]
             if (
-                mapping["feature_tag"] != "b_pat"
-                or mapping["feature_type"] != "Block"
-                or mapping["property_name"] != "size"
+                mapping["feature_tag"] != "patch_a71"
+                or mapping["feature_type"] != "PrescribedMeshDisplacement"
+                or mapping["property_name"] != "dx"
                 or mapping["property_index"] != item["order"]
             ):
                 raise ValueError("trusted patch control mapping changed")

@@ -170,9 +170,9 @@ def _support(spec: dict[str, Any]) -> dict[str, Any]:
                 "upper": item["upper"],
                 "scale": item["baseline"],
                 "mapping": {
-                    "feature_tag": spec["manifest"]["patch_feature"]["tag_path"][0],
-                    "feature_type": spec["manifest"]["patch_feature"]["feature_types"][0],
-                    "property_name": spec["manifest"]["patch_feature"]["size_property"],
+                    "feature_tag": "patch_a71",
+                    "feature_type": "PrescribedMeshDisplacement",
+                    "property_name": "dx",
                     "property_index": item["property_index"],
                     "readback_expression": item["variable_id"],
                 },
@@ -252,6 +252,36 @@ def _dry_run(spec: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _container_get(container: Any, tag: str) -> Any:
+    try:
+        return container.get(tag)
+    except Exception:
+        return container(tag)
+
+
+def _saved_mapping_readback(model: Any) -> dict[str, Any]:
+    component = model.java.component("comp1")
+    deformation = _container_get(component.physics(), "dg_a71")
+    features = deformation.feature()
+    free = _container_get(features, "free")
+    fixed = _container_get(features, "disp1")
+    patch = _container_get(features, "patch_a71")
+    block = component.geom("geom1").feature("b_pat")
+    parameters = dict(model.parameters())
+    return {
+        "physics_tag": "dg_a71",
+        "physics_type": str(deformation.getType()),
+        "free_domains": sorted(int(item) for item in list(free.selection().entities())),
+        "fixed_outer_boundaries": sorted(int(item) for item in list(fixed.selection().entities())),
+        "patch_boundaries": sorted(int(item) for item in list(patch.selection().entities())),
+        "patch_displacement": [str(item) for item in list(patch.getStringArray("dx"))],
+        "baseline_patch_size": [str(item) for item in list(block.getStringArray("size"))],
+        "parameter_binding": {
+            name: str(parameters[name]) for name in ("patch_length_x", "patch_length_y")
+        },
+    }
+
+
 def _run(spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
     git = _git_identity()
     if not git["clean"]:
@@ -296,6 +326,16 @@ def _run(spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
         reloaded = client.load(str(spec["configured_copy"]))
         sensitivity = reloaded.java.study("std1").feature("sens_a71")
         optimization = reloaded.java.study("std2").feature("opt_a71")
+        deformation = _saved_mapping_readback(reloaded)
+        expected_deformation = dict(adapter_receipt["controls"]["deformed_geometry"])
+        expected_deformation["baseline_patch_size"] = adapter_receipt["controls"][
+            "patch_size_before"
+        ]
+        expected_deformation["parameter_binding"] = adapter_receipt["controls"]["parameters"]
+        expected_deformation.pop("patch_domain")
+        expected_deformation.pop("patch_footprint")
+        if deformation != expected_deformation:
+            raise ValueError("saved Deformed Geometry mapping differs after reload")
         readback = {
             "sensitivity_type": str(sensitivity.getType()),
             "gradient_method": str(sensitivity.getString("gradientMethod")),
@@ -305,6 +345,7 @@ def _run(spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
             ],
             "optimization_type": str(optimization.getType()),
             "optimizer_method": str(optimization.getString("optmethod")),
+            "deformed_geometry": deformation,
         }
         receipt.update(
             {

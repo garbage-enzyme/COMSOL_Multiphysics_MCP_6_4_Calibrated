@@ -379,7 +379,14 @@ def test_clientapi_backend_restore_removes_new_physics_and_features():
 def _two_variable_support():
     support = _support()
     first = support["variables"][0]
-    first["mapping"].update({"feature_tag": "b_pat", "feature_type": "Block", "property_index": 0})
+    first["mapping"].update(
+        {
+            "feature_tag": "patch_a71",
+            "feature_type": "PrescribedMeshDisplacement",
+            "property_name": "dx",
+            "property_index": 0,
+        }
+    )
     second = copy.deepcopy(first)
     second.update({"variable_id": "patch_length_y", "order": 1})
     second["mapping"].update({"property_index": 1, "readback_expression": "patch_length_y"})
