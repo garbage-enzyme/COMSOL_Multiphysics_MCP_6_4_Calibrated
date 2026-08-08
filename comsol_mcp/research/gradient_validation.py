@@ -108,17 +108,21 @@ def compare_gradient(
                 if step["base_objective"] is None
                 else _finite(step["base_objective"], "base_objective")
             )
-            if mode == "central" and (plus_value is None or minus_value is None):
-                raise ValueError("central finite differences require both neighboring objectives")
-            if mode == "forward" and (plus_value is None or base_value is None):
-                raise ValueError("forward finite differences require plus and base objectives")
-            if mode == "backward" and (minus_value is None or base_value is None):
-                raise ValueError("backward finite differences require minus and base objectives")
             if mode == "central":
+                if plus_value is None or minus_value is None:
+                    raise ValueError(
+                        "central finite differences require both neighboring objectives"
+                    )
                 fd_value = (plus_value - minus_value) / (2.0 * relative_step)
             elif mode == "forward":
+                if plus_value is None or base_value is None:
+                    raise ValueError("forward finite differences require plus and base objectives")
                 fd_value = (plus_value - base_value) / relative_step
             else:
+                if minus_value is None or base_value is None:
+                    raise ValueError(
+                        "backward finite differences require minus and base objectives"
+                    )
                 fd_value = (base_value - minus_value) / relative_step
             step_rows.append(
                 {
