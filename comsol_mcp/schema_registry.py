@@ -214,6 +214,24 @@ def _entry(
 def _entries() -> list[dict[str, Any]]:
     legacy_point_audit = _LEGACY_POINT_AUDIT_SCHEMA
     entries = [
+        _entry(
+            "comsol_mcp.adjoint_optimization_manifest",
+            "1.0.0",
+            "comsol_mcp.jobs.adjoint_optimization",
+            artifact_kind="configuration",
+        ),
+        _entry(
+            "comsol_mcp.adjoint_optimization_row",
+            "1.0.0",
+            "comsol_mcp.jobs.adjoint_rows",
+            artifact_kind="durable_artifact",
+        ),
+        _entry(
+            "comsol_mcp.adjoint_optimization_submission",
+            "1.0.0",
+            "comsol_mcp.jobs.adjoint_optimization",
+            artifact_kind="configuration",
+        ),
         _entry("comsol_mcp.artifact_chain", "1.0.0", "comsol_mcp.artifact_chain"),
         _entry(
             "comsol_mcp.artifact_chain_verification",
@@ -324,6 +342,12 @@ def _entries() -> list[dict[str, Any]]:
             artifact_kind="configuration",
         ),
         _entry(
+            "comsol_mcp.derivative_support",
+            "1.0.0",
+            "comsol_mcp.research.derivative_support",
+            artifact_kind="configuration",
+        ),
+        _entry(
             "comsol_mcp.environment_identity",
             "1.0.0",
             "comsol_mcp.environment_identity",
@@ -370,6 +394,16 @@ def _entries() -> list[dict[str, Any]]:
             "comsol_mcp.evidence.field_bundle",
         ),
         _entry(
+            "comsol_mcp.gradient_check",
+            "1.0.0",
+            "comsol_mcp.research.gradient_validation",
+        ),
+        _entry(
+            "comsol_mcp.gradient_record",
+            "1.0.0",
+            "comsol_mcp.research.gradient_contracts",
+        ),
+        _entry(
             "comsol_mcp.model_version_metadata",
             "1.0.0",
             "comsol_mcp.tools.model",
@@ -378,6 +412,17 @@ def _entries() -> list[dict[str, Any]]:
             MATERIAL_CATALOG_SCHEMA_NAME,
             MATERIAL_CATALOG_SCHEMA_VERSION,
             "comsol_mcp.research.materials",
+            artifact_kind="configuration",
+        ),
+        _entry(
+            "comsol_mcp.native_adjoint_adapter_receipt",
+            "1.0.0",
+            "comsol_mcp.research.adjoint_adapter",
+        ),
+        _entry(
+            "comsol_mcp.native_optimizer_configuration",
+            "1.0.0",
+            "comsol_mcp.research.gradient_contracts",
             artifact_kind="configuration",
         ),
         _entry(
