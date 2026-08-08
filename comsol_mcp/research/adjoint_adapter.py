@@ -245,15 +245,12 @@ class ClientapiAdjointStudyBackend:
         if "dg_a71" in self._tags(physics):
             raise ValueError("trusted native adjoint deformation interface already exists")
         deformation = physics.create("dg_a71", "DeformedGeometry", "geom1")
-        feature_tags = self._tags(deformation.feature())
-        if "free" not in feature_tags or "disp1" not in feature_tags:
-            raise ValueError("Deformed Geometry defaults changed on the accepted COMSOL build")
         features = deformation.feature()
-        free = _container_get(features, "free")
-        fixed = _container_get(features, "disp1")
+        free = features.create("free_a71", "FreeDeformation", 3)
+        fixed = features.create("fix_a71", "PrescribedMeshDisplacement", 2)
         free.selection().set(selections["domains"])
         fixed.selection().set(selections["fixed_outer_boundaries"])
-        patch = deformation.feature().create("patch_a71", "PrescribedMeshDisplacement", 2)
+        patch = features.create("patch_a71", "PrescribedMeshDisplacement", 2)
         patch.selection().set(selections["patch_boundaries"])
         import jpype
 

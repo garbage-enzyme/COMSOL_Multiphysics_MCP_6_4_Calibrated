@@ -411,6 +411,13 @@ def test_clientapi_prepare_controls_builds_exact_deformed_geometry(monkeypatch):
 
     assert receipt["patch_size_before"] == ["856[nm]", "856[nm]", "100[nm]"]
     assert receipt["patch_size_readback"] == receipt["patch_size_before"]
+    assert model.physics.get("dg_a71").feature().tags() == [
+        "free",
+        "disp1",
+        "free_a71",
+        "fix_a71",
+        "patch_a71",
+    ]
     assert receipt["deformed_geometry"]["free_domains"] == [1, 2, 3]
     assert receipt["deformed_geometry"]["patch_boundaries"] == [10, 11, 12, 13, 14, 15]
     assert receipt["deformed_geometry"]["fixed_outer_boundaries"] == [
