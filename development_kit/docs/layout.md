@@ -354,6 +354,7 @@ models are intentionally absent.
 - `comsol_mcp/research/contracts.py` — This module normalizes versioned research goals and design spaces with deterministic fingerprints.
 - `comsol_mcp/research/compiler.py` — This module compiles approved goals and design spaces into frozen campaign manifests without a solver.
 - `comsol_mcp/research/derivative_support.py` — This module defines solver-free native-derivative support, variable, objective, and constraint identities.
+- `comsol_mcp/research/gradient_contracts.py` — This module defines immutable gradient rows and caller-budgeted native optimizer identities.
 - `comsol_mcp/research/workflow.py` — This module normalizes passive cited workflow capsules, explicit assumptions, review, and baseline readiness.
 - `comsol_mcp/research/materials.py` — This module normalizes provenance-bound material catalogs and derives approval and strict-verification sets.
 - `comsol_mcp/research/records.py` — This module normalizes canonical candidate records and point identities before side effects.

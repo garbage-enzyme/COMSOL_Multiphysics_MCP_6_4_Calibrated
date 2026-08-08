@@ -51,6 +51,14 @@ from .evaluations import (
     EVALUATION_RECORD_SCHEMA_VERSION,
     normalize_evaluation_record,
 )
+from .gradient_contracts import (
+    GRADIENT_RECORD_SCHEMA_NAME,
+    GRADIENT_RECORD_SCHEMA_VERSION,
+    NATIVE_OPTIMIZER_SCHEMA_NAME,
+    NATIVE_OPTIMIZER_SCHEMA_VERSION,
+    normalize_gradient_record,
+    normalize_native_optimizer_configuration,
+)
 from .journal import (
     RESEARCH_JOURNAL_RECORD_SCHEMA_NAME,
     RESEARCH_JOURNAL_RECORD_SCHEMA_VERSION,
@@ -122,6 +130,10 @@ __all__ = [
     "DERIVATIVE_VARIABLE_SCHEMA_VERSION",
     "MATERIAL_CATALOG_SCHEMA_NAME",
     "MATERIAL_CATALOG_SCHEMA_VERSION",
+    "GRADIENT_RECORD_SCHEMA_NAME",
+    "GRADIENT_RECORD_SCHEMA_VERSION",
+    "NATIVE_OPTIMIZER_SCHEMA_NAME",
+    "NATIVE_OPTIMIZER_SCHEMA_VERSION",
     "OPTIMIZER_CHECKPOINT_SCHEMA_NAME",
     "OPTIMIZER_CHECKPOINT_SCHEMA_VERSION",
     "OPTIMIZER_EXPLANATION_SCHEMA_NAME",
@@ -160,6 +172,8 @@ __all__ = [
     "normalize_derivative_variable",
     "normalize_evaluation_record",
     "normalize_material_catalog",
+    "normalize_gradient_record",
+    "normalize_native_optimizer_configuration",
     "normalize_optimizer_checkpoint",
     "normalize_portfolio",
     "normalize_candidate_record",
