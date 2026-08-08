@@ -27,10 +27,10 @@
         "baseline": 856.0
       }
     ],
-    "objective": {
+      "objective": {
       "kind": "fixed_scalar",
       "wavelength_um": 1.717657785,
-      "expression_readback": "pending_exact_fixture_readback"
+      "expression_readback": "ewfd.Ttotal"
     }
   },
   "capability_probe": {
@@ -72,6 +72,21 @@
       "save_reload": true,
       "cleanup_verified": true,
       "native_solve_executed": false
+    },
+    "formal_licensed_gate": {
+      "status": "licensed_structural_proven",
+      "source_revision": "cd867bcd45ef6fa391fedb6e5f52fddfe438e64c",
+      "receipt_sha256": "013e23acea334879def98cdb2443524c02433127807309c406326c0fbe088391",
+      "configured_copy_sha256": "ca1c397629f8315bcba35cb8c57b05c9d7a61976bc73e962632f22c0c6a006fb",
+      "optimizer_method_readback": "gcmma",
+      "gradient_method_readback": "adjoint",
+      "objective_expression_readback": "ewfd.Ttotal",
+      "variable_order_readback": ["patch_length_x", "patch_length_y"],
+      "save_reload": true,
+      "source_unchanged": true,
+      "native_solve_executed": false,
+      "cleanup_verified": true,
+      "public_receipt_redacted": true
     }
   },
   "method_policy": {
