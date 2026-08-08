@@ -343,6 +343,7 @@ models are intentionally absent.
 - `development_kit/tests/test_validation_collectors.py` — This module tests adapters from validation points to evidence collectors.
 - `development_kit/tests/test_validation_matrix.py` — This module tests bounded validation-matrix specification normalization.
 - `development_kit/tests/test_validation_rows.py` — This module tests append-only validation row identity and durability.
+- `development_kit/tests/test_adjoint_rows.py` — This module tests crash-tail recovery, identity binding, and hash chaining for adjoint rows.
 - `development_kit/tests/test_validation_runner.py` — This module tests the solver-independent validation point loop.
 - `development_kit/tests/test_validation_worker.py` — This module tests detached validation worker boundaries and cleanup.
 - `development_kit/tests/test_visual_review_contracts.py` — This module tests host-confirmed visual-review requests and receipts.
@@ -484,6 +485,7 @@ models are intentionally absent.
 - `comsol_mcp/jobs/validation_collectors.py` — This module adapts validation points to physical evidence collectors.
 - `comsol_mcp/jobs/validation_matrix.py` — This module normalizes bounded durable validation-matrix specifications.
 - `comsol_mcp/jobs/validation_rows.py` — This module writes and validates append-only durable validation rows.
+- `comsol_mcp/jobs/adjoint_rows.py` — This module writes and validates hash-chained iteration, gradient, and trial rows for adjoint optimization.
 - `comsol_mcp/jobs/validation_runner.py` — This module runs the solver-independent validation point loop.
 - `comsol_mcp/jobs/validation_worker.py` — This module runs one detached physical-validation matrix worker.
 - `comsol_mcp/jobs/worker.py` — This module runs one detached staged COMSOL sweep worker.
