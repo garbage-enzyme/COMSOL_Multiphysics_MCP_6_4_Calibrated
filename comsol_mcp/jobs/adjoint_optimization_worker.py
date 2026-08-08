@@ -74,6 +74,7 @@ def run(root: str, job_id: str) -> int:
                 "reason_code": "synthetic_contract_only",
             },
         )
+    store.update_state(job_id, "smoke_validated", event="adjoint_synthetic_validated")
     store.update_state(
         job_id,
         "completed",

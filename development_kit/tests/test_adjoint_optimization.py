@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import os
 
 import pytest
 
@@ -9,6 +10,9 @@ from comsol_mcp.jobs.adjoint_optimization import (
     expand_adjoint_optimization_manifest,
     normalize_adjoint_optimization_submission,
 )
+from comsol_mcp.jobs.adjoint_optimization_worker import run as run_adjoint_worker
+from comsol_mcp.jobs.manager import JobManager
+from comsol_mcp.jobs.store import process_identity
 from development_kit.tests.test_derivative_support import _support
 from development_kit.tests.test_gradient_contracts import _optimizer
 
@@ -74,3 +78,33 @@ def test_manifest_rejects_source_mutation_after_submission(tmp_path):
     source.write_bytes(b"changed")
     with pytest.raises(ValueError, match="source SHA-256"):
         expand_adjoint_optimization_manifest(envelope)
+
+
+def test_durable_manager_accepts_synthetic_adjoint_discriminator(tmp_path, monkeypatch):
+    envelope, _, _ = _write_manifest(tmp_path)
+    manager = JobManager(
+        tmp_path / "jobs",
+        preflight=lambda **_kwargs: {"success": True, "ready": True},
+    )
+    monkeypatch.setattr(
+        manager,
+        "_launch_worker",
+        lambda _job_id, module: (
+            process_identity(os.getpid())
+            if module == "comsol_mcp.jobs.adjoint_optimization_worker"
+            else (_ for _ in ()).throw(AssertionError(module))
+        ),
+    )
+    result = manager.submit(envelope)
+    spec = manager.store.read_spec(result["job_id"])
+    assert spec["job_type"] == "adjoint_optimization"
+    assert spec["synthetic_mode"] is True
+    assert spec["optimizer"]["budget"]["max_iterations"] == 10
+    assert manager.store.read_state(result["job_id"])["progress"] == {
+        "completed": 0,
+        "total": 10,
+    }
+    assert run_adjoint_worker(str(manager.store.root), result["job_id"]) == 0
+    terminal = manager.store.read_state(result["job_id"])
+    assert terminal["status"] == "completed"
+    assert terminal["solver_started"] is False

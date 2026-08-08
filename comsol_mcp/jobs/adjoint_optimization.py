@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from comsol_mcp.durable import domain_sha256_v2, validate_finite_json
+from comsol_mcp.durable import validate_finite_json
 from comsol_mcp.jobs.resource_admission import normalize_resource_policy
 from comsol_mcp.research.derivative_support import normalize_derivative_support
 from comsol_mcp.research.gradient_contracts import normalize_native_optimizer_configuration
@@ -153,7 +153,9 @@ def expand_adjoint_optimization_manifest(submission: object) -> dict[str, Any]:
         "synthetic_mode": raw["synthetic_mode"],
     }
     validate_finite_json(body)
-    body["spec_fingerprint"] = domain_sha256_v2(ADJOINT_MANIFEST_SCHEMA_NAME, body)
+    body["spec_fingerprint"] = hashlib.sha256(
+        json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
     return body
 
 
