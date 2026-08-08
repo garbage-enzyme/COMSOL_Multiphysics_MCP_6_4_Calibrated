@@ -114,6 +114,7 @@ models are intentionally absent.
 - `development_kit/scripts/generate_release_lock.py` — This script generates the complete hashed Windows Python release lock.
 - `development_kit/scripts/installed_package_probe.py` — This script verifies installed discovery, schemas, profiles, and deployment identity without COMSOL startup.
 - `development_kit/scripts/installed_stdio_probe.py` — This script verifies the installed console entry point over real MCP stdio transport.
+- `development_kit/scripts/native_adjoint_licensed_gate.py` — This repository-only alpha7.1 gate applies the trusted native adjoint structure on an immutable derived model and emits separate path-redacted and private receipts.
 - `development_kit/scripts/research_adapter_template_probe.py` — This repository-only licensed probe launches the current source tree with isolated settings, audits one immutable COMSOL template read-only over serial stdio, and emits separate path-redacted and private receipts.
 - `development_kit/scripts/research_adapter_gate_server.py` — This repository-only candidate server adds two private calls that bind the trusted periodic-MIM backend to a provenance-tracked derived model during the licensed S4 gate.
 - `development_kit/scripts/research_adapter_licensed_gate.py` — This isolated serial stdio gate applies one trusted MIM candidate to a derived copy, collects one-point Wave Optics evidence, and proves source and solver cleanup.
@@ -137,6 +138,7 @@ models are intentionally absent.
 ## Test fixtures and frozen snapshots
 
 - `development_kit/tests/__init__.py` — This file marks the dependency and process test suite as a Python package.
+- `development_kit/tests/test_native_adjoint_licensed_gate.py` — This module verifies the alpha7.1 licensed gate's solver-free preflight, caller-declared budgets, host admission, and redacted receipt boundary.
 - `development_kit/tests/fixtures/semantic_retrieval_evaluation.json` — This fixture contains the frozen judged semantic retrieval queries.
 - `development_kit/tests/snapshots/baseline_tool_schemas.json` — This snapshot freezes the baseline public tool schemas.
 - `development_kit/tests/snapshots/full_tool_schemas.json` — This snapshot freezes every registered public tool schema.
@@ -288,6 +290,9 @@ models are intentionally absent.
 - `development_kit/tests/test_research_tools.py` — This module tests real dispatch for experimental solver-free campaign compilation and robustness planning.
 - `development_kit/tests/test_research_adapters.py` — This module tests exact trusted-template manifests, closed x/y mutation scope, and live-tree drift rejection.
 - `development_kit/tests/test_adjoint_adapter.py` — This module tests native adapter readback, unit canonicalization, and rollback on mutation failure.
+- `development_kit/tests/test_derivative_support.py` — This module tests strict derivative-support identities, variable mappings, objective contracts, and immutable normalization.
+- `development_kit/tests/test_gradient_contracts.py` — This module tests caller-budgeted native optimizer and exact gradient-row contracts.
+- `development_kit/tests/test_gradient_validation.py` — This module tests independent finite-difference, sign, cosine, directional, and step-sensitivity gradient checks.
 - `development_kit/tests/test_research_adaptive_acquisition.py` — This module tests bounded deterministic GP/EI selection, invalid evidence rejection, and heavy-import isolation.
 - `development_kit/tests/test_research_optimizers.py` — This module tests deterministic ask/tell/checkpoint replay, mixed domains, and dependency isolation.
 - `development_kit/tests/test_native_gradient_support_matrix.py` — This module validates the redacted alpha7.1 native-gradient capability matrix and receipt boundary.
