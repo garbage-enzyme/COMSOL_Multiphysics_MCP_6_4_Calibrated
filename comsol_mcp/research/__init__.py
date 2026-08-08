@@ -59,6 +59,12 @@ from .gradient_contracts import (
     normalize_gradient_record,
     normalize_native_optimizer_configuration,
 )
+from .gradient_validation import (
+    GRADIENT_CHECK_SCHEMA_NAME,
+    GRADIENT_CHECK_SCHEMA_VERSION,
+    compare_directional_gradient,
+    compare_gradient,
+)
 from .journal import (
     RESEARCH_JOURNAL_RECORD_SCHEMA_NAME,
     RESEARCH_JOURNAL_RECORD_SCHEMA_VERSION,
@@ -132,6 +138,8 @@ __all__ = [
     "MATERIAL_CATALOG_SCHEMA_VERSION",
     "GRADIENT_RECORD_SCHEMA_NAME",
     "GRADIENT_RECORD_SCHEMA_VERSION",
+    "GRADIENT_CHECK_SCHEMA_NAME",
+    "GRADIENT_CHECK_SCHEMA_VERSION",
     "NATIVE_OPTIMIZER_SCHEMA_NAME",
     "NATIVE_OPTIMIZER_SCHEMA_VERSION",
     "OPTIMIZER_CHECKPOINT_SCHEMA_NAME",
@@ -174,6 +182,8 @@ __all__ = [
     "normalize_material_catalog",
     "normalize_gradient_record",
     "normalize_native_optimizer_configuration",
+    "compare_gradient",
+    "compare_directional_gradient",
     "normalize_optimizer_checkpoint",
     "normalize_portfolio",
     "normalize_candidate_record",
