@@ -36,6 +36,7 @@ def test_native_gradient_matrix_is_redacted_and_binds_the_live_probe_boundary():
     assert deformed["mapping"] == "fixed_topology_deformed_geometry"
     assert deformed["free_domains"] == [1, 2, 3]
     assert deformed["patch_boundaries"] == [10, 11, 12, 13, 14, 15]
+    assert deformed["variable_value_types"] == ["real", "real"]
     assert deformed["caller_budget"] == {"cores": 14, "max_commit_fraction": 0.75}
     assert deformed["source_unchanged"] is True
     assert deformed["native_solve_executed"] is False
