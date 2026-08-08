@@ -687,15 +687,15 @@ def register_lexical_manual_tools(mcp) -> None:
         worker with a hard deadline. Optional filters select a module, source PDF,
         or inclusive page interval. Use manual_read_pages for full page text.
         """
-        if index_path is None:
-            return {
-                "success": False,
-                "error_type": "ConfigurationError",
-                "error": "manual index path is not configured",
-            }
-        return measured_call(
-            "manual_search",
-            lambda: run_bounded(
+
+        def search() -> dict:
+            if index_path is None:
+                return {
+                    "success": False,
+                    "error_type": "ConfigurationError",
+                    "error": "manual index path is not configured",
+                }
+            return run_bounded(
                 "search",
                 {
                     "query": query,
@@ -708,8 +708,9 @@ def register_lexical_manual_tools(mcp) -> None:
                     "index_path": str(index_path),
                 },
                 SEARCH_TIMEOUT_SECONDS,
-            ),
-        )
+            )
+
+        return measured_call("manual_search", search)
 
     @mcp.tool()
     def manual_read_pages(source: str, pages: list[int]) -> dict:
@@ -718,15 +719,15 @@ def register_lexical_manual_tools(mcp) -> None:
         The text comes from the immutable offline corpus. This read-only call is
         isolated from the COMSOL control process and has a hard deadline.
         """
-        if index_path is None:
-            return {
-                "success": False,
-                "error_type": "ConfigurationError",
-                "error": "manual index path is not configured",
-            }
-        return measured_call(
-            "manual_read_pages",
-            lambda: run_bounded(
+
+        def read_pages() -> dict:
+            if index_path is None:
+                return {
+                    "success": False,
+                    "error_type": "ConfigurationError",
+                    "error": "manual index path is not configured",
+                }
+            return run_bounded(
                 "read",
                 {
                     "source": source,
@@ -734,8 +735,9 @@ def register_lexical_manual_tools(mcp) -> None:
                     "index_path": str(index_path),
                 },
                 READ_TIMEOUT_SECONDS,
-            ),
-        )
+            )
+
+        return measured_call("manual_read_pages", read_pages)
 
 
 def _main() -> None:
