@@ -1,0 +1,71 @@
+{
+  "schema_name": "comsol_mcp.native_gradient_support_matrix",
+  "schema_version": "1.0.0",
+  "release_boundary": "alpha7.1",
+  "runtime": {
+    "comsol_version": "6.4",
+    "comsol_build": "6.4.0.293",
+    "mph_version": "1.3.1",
+    "required_physics": "Wave Optics",
+    "required_entitlement": "Optimization"
+  },
+  "fixture": {
+    "adapter_id": "periodic_mim_patch_v1",
+    "variables": [
+      {
+        "variable_id": "patch_length_x",
+        "unit": "nm",
+        "lower": 642.0,
+        "upper": 1070.0,
+        "baseline": 856.0
+      },
+      {
+        "variable_id": "patch_length_y",
+        "unit": "nm",
+        "lower": 642.0,
+        "upper": 1070.0,
+        "baseline": 856.0
+      }
+    ],
+    "objective": {
+      "kind": "fixed_scalar",
+      "wavelength_um": 1.717657785,
+      "expression_readback": "pending_exact_fixture_readback"
+    }
+  },
+  "capability_probe": {
+    "sensitivity": {
+      "feature_type": "Sensitivity",
+      "gradient_method_allowed": ["adjoint", "forward"],
+      "gradient_method_readback": {"adjoint": true, "forward": true},
+      "save_reload_readback": "adjoint"
+    },
+    "optimization_features": {
+      "types_created_and_reloaded": [
+        "Optimization",
+        "ShapeOptimization",
+        "TopologyOptimization"
+      ],
+      "native_methods_readback": ["gcmma", "mma", "ipopt"]
+    },
+    "module_inventory_is_diagnostic_only": true,
+    "feature_execution": "unverified",
+    "objective_control_constraint_wiring": "unverified",
+    "derivative_correctness": "unverified"
+  },
+  "method_policy": {
+    "accepted_lane": "adjoint",
+    "forward_role": "diagnostic_cross_check_only",
+    "optimizer_choice": "pending_controlled_effect_comparison",
+    "global_optimality_claim": false
+  },
+  "probe_receipts": {
+    "sensitivity_receipt_sha256": "9d6dcfbc8e9612cd68f085186ff10744ad6508b712fb2347e1073a1ea8aa84d0",
+    "optimization_receipt_sha256": "a3d448e5c46c6d117602117c0529185739feb7c7a95705ed1352b94c6ba8dfd1",
+    "full_receipts_retained_locally": true,
+    "public_materials_redacted": true,
+    "client_clear_succeeded": true,
+    "solver_residue_observed": false
+  },
+  "support_state": "structurally_supported_pending_licensed_execution"
+}
