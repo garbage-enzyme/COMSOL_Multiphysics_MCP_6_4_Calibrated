@@ -50,7 +50,7 @@
     },
     "module_inventory_is_diagnostic_only": true,
     "feature_execution": "unverified",
-    "objective_control_constraint_wiring": "unverified",
+    "objective_control_constraint_wiring": "structurally_verified_pending_native_execution",
     "derivative_correctness": "unverified"
     ,"wiring_probe": {
       "status": "licensed_structural_readback",
@@ -62,7 +62,7 @@
       "solve_executed": false
     },
     "trusted_adapter_probe": {
-      "status": "licensed_structural_proven",
+      "status": "superseded_direct_geometry_binding",
       "receipt_sha256": "73c0bd8b31f1164b2b05f45bfe3b98ac0c959686589b881b2ea6b8c0d82a85d6",
       "source_sha256": "3862d52d2ebcac7c7ab9e2470d2d0e75d7bbf407d771b20c0560cee143351ac6",
       "source_unchanged": true,
@@ -74,7 +74,7 @@
       "native_solve_executed": false
     },
     "formal_licensed_gate": {
-      "status": "licensed_structural_proven",
+      "status": "superseded_direct_geometry_binding",
       "source_revision": "cd867bcd45ef6fa391fedb6e5f52fddfe438e64c",
       "receipt_sha256": "013e23acea334879def98cdb2443524c02433127807309c406326c0fbe088391",
       "configured_copy_sha256": "ca1c397629f8315bcba35cb8c57b05c9d7a61976bc73e962632f22c0c6a006fb",
@@ -82,6 +82,29 @@
       "gradient_method_readback": "adjoint",
       "objective_expression_readback": "ewfd.Ttotal",
       "variable_order_readback": ["patch_length_x", "patch_length_y"],
+      "save_reload": true,
+      "source_unchanged": true,
+      "native_solve_executed": false,
+      "cleanup_verified": true,
+      "public_receipt_redacted": true
+    },
+    "deformed_geometry_formal_gate": {
+      "status": "licensed_structural_proven_pending_native_derivative",
+      "source_revision": "f85a83cf91dde17a74d74351efdb447526def8cc",
+      "receipt_sha256": "28533ad5f4869f232e92722f46b63997622e5d60f4d251fa31d70b1956089d55",
+      "configured_copy_sha256": "5fd2e19ac3da67c6daf6cacbc33adb65f20178c676cb2eabae4c7fc1a025458f",
+      "failed_default_selection_receipt_sha256": "c5129459f38cf79a64fe49785aca6f96f8492a4fcb1c8e561d5702d6164559aa",
+      "failed_default_selection_disposition": "reproduced_uneditable_default_selection",
+      "mapping": "fixed_topology_deformed_geometry",
+      "physics_type": "DeformedGeometry",
+      "free_domains": [1, 2, 3],
+      "fixed_outer_boundaries": [1, 2, 3, 4, 5, 7, 8, 9, 16, 17],
+      "patch_boundaries": [10, 11, 12, 13, 14, 15],
+      "parameter_binding": ["patch_length_x", "patch_length_y"],
+      "gradient_method_readback": "adjoint",
+      "objective_expression_readback": "ewfd.Ttotal",
+      "variable_order_readback": ["patch_length_x", "patch_length_y"],
+      "caller_budget": {"cores": 14, "max_commit_fraction": 0.75},
       "save_reload": true,
       "source_unchanged": true,
       "native_solve_executed": false,

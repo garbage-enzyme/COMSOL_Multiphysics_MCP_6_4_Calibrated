@@ -27,10 +27,19 @@ def test_native_gradient_matrix_is_redacted_and_binds_the_live_probe_boundary():
     assert matrix["capability_probe"]["wiring_probe"]["status"] == "licensed_structural_readback"
     assert matrix["capability_probe"]["wiring_probe"]["solve_executed"] is False
     assert matrix["capability_probe"]["trusted_adapter_probe"]["status"] == (
-        "licensed_structural_proven"
+        "superseded_direct_geometry_binding"
     )
     assert matrix["capability_probe"]["trusted_adapter_probe"]["source_unchanged"] is True
     assert matrix["capability_probe"]["trusted_adapter_probe"]["native_solve_executed"] is False
+    deformed = matrix["capability_probe"]["deformed_geometry_formal_gate"]
+    assert deformed["status"] == "licensed_structural_proven_pending_native_derivative"
+    assert deformed["mapping"] == "fixed_topology_deformed_geometry"
+    assert deformed["free_domains"] == [1, 2, 3]
+    assert deformed["patch_boundaries"] == [10, 11, 12, 13, 14, 15]
+    assert deformed["caller_budget"] == {"cores": 14, "max_commit_fraction": 0.75}
+    assert deformed["source_unchanged"] is True
+    assert deformed["native_solve_executed"] is False
+    assert deformed["cleanup_verified"] is True
     assert matrix["method_policy"]["accepted_lane"] == "adjoint"
     assert matrix["method_policy"]["global_optimality_claim"] is False
     assert matrix["probe_receipts"]["full_receipts_retained_locally"] is True
