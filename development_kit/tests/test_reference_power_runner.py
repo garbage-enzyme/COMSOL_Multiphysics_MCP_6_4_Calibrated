@@ -178,7 +178,7 @@ def test_runner_import_and_dry_run_do_not_import_mph_or_start_comsol():
         ],
     )
     dry_run, dry_run_solver_starts = _run_with_solver_observer(
-        [sys.executable, str(RUNNER), "--dry-run"]
+        [sys.executable, str(RUNNER), "--dry-run", "--cores", "1"]
     )
 
     assert import_probe.returncode == 0, import_probe.stderr
@@ -338,7 +338,7 @@ def test_coordinator_rejects_receipt_inside_artifact_root_before_admission(tmp_p
 
 def test_real_mode_requires_explicit_authority_and_resource_limits():
     completed = subprocess.run(
-        [sys.executable, str(RUNNER)],
+        [sys.executable, str(RUNNER), "--cores", "1"],
         cwd=ROOT,
         text=True,
         capture_output=True,
