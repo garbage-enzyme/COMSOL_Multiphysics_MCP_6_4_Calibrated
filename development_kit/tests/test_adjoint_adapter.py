@@ -115,6 +115,7 @@ def test_adapter_configures_fixed_nodes_and_canonicalizes_units():
     receipt = configure_native_adjoint(backend, _support(), _optimizer())
     assert receipt["sensitivity"]["gradientMethod"] == "adjoint"
     assert receipt["sensitivity"]["punit"]["readback"] == ["m"]
+    assert receipt["sensitivity"]["valuetype"]["readback"] == ["real"]
     assert receipt["optimization"]["optmethod"]["readback"] == "gcmma"
     assert backend.study_tags() == ["std1", "std2"]
 

@@ -381,6 +381,7 @@ def configure_native_adjoint(
             "punit": _array(sensitivity, "punit", values["units"]),
             "initval": _array(sensitivity, "initval", values["values"]),
             "scale": _array(sensitivity, "scale", values["scales"]),
+            "valuetype": _array(sensitivity, "valuetype", ["real"] * len(values["names"])),
             "optobj": _array(sensitivity, "optobj", [objective_expression]),
         }
         if optimization_study_tag not in backend.study_tags():

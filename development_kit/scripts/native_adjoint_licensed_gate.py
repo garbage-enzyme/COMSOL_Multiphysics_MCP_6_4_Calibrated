@@ -340,6 +340,9 @@ def _run(spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
             "sensitivity_type": str(sensitivity.getType()),
             "gradient_method": str(sensitivity.getString("gradientMethod")),
             "variable_order": [str(item) for item in list(sensitivity.getStringArray("pname"))],
+            "variable_value_types": [
+                str(item) for item in list(sensitivity.getStringArray("valuetype"))
+            ],
             "objective_expression": [
                 str(item) for item in list(sensitivity.getStringArray("optobj"))
             ],
