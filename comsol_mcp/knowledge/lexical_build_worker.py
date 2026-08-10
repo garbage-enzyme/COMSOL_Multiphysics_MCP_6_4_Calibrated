@@ -16,9 +16,7 @@ _PROTOCOL_STREAM: TextIO = sys.stdout
 
 
 def _emit(payload: dict[str, Any]) -> None:
-    _PROTOCOL_STREAM.write(
-        json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n"
-    )
+    _PROTOCOL_STREAM.write(json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n")
     _PROTOCOL_STREAM.flush()
 
 
