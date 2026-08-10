@@ -326,6 +326,7 @@ def _run(spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
         reloaded = client.load(str(spec["configured_copy"]))
         sensitivity = reloaded.java.study("std1").feature("sens_a71")
         optimization = reloaded.java.study("std2").feature("opt_a71")
+        wavelength = reloaded.java.study("std2").feature("wavelength_a71")
         deformation = _saved_mapping_readback(reloaded)
         expected_deformation = dict(adapter_receipt["controls"]["deformed_geometry"])
         expected_deformation["baseline_patch_size"] = adapter_receipt["controls"][
@@ -348,6 +349,11 @@ def _run(spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
             ],
             "optimization_type": str(optimization.getType()),
             "optimizer_method": str(optimization.getString("optmethod")),
+            "wavelength": {
+                "type": str(wavelength.getType()),
+                "punit": str(wavelength.getString("punit")),
+                "plist": str(wavelength.getString("plist")),
+            },
             "deformed_geometry": deformation,
         }
         receipt.update(
