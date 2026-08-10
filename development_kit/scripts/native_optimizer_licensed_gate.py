@@ -72,6 +72,23 @@ def _dataset_for_solution(model, solution_tag: str):
     return matches[0]
 
 
+def _only_solution_dataset(model):
+    solution_tags = {str(item) for item in list(model.java.sol().tags())}
+    matches = []
+    for dataset in model / "datasets":
+        properties = dataset.properties()
+        linked = None
+        if "solution" in properties:
+            linked = dataset.property("solution")
+        elif "data" in properties:
+            linked = dataset.property("data")
+        if str(linked) in solution_tags:
+            matches.append(dataset)
+    if len(matches) != 1:
+        raise ValueError("direct forward dataset identity is ambiguous")
+    return matches[0]
+
+
 def _configure_solver_move_limit(
     model, study, move_limit: float, optimizer_iterations: int
 ) -> dict:
@@ -141,8 +158,9 @@ def run(args: argparse.Namespace) -> dict:
         baseline_study = baseline_model.java.study("std1")
         baseline_study.feature().remove("sens_a71")
         baseline_study.run()
+        baseline_dataset = _only_solution_dataset(baseline_model)
         baseline_values = baseline_model.evaluate(
-            receipt["objective_expression"], dataset="dset1", outer=1
+            receipt["objective_expression"], dataset=baseline_dataset, outer=1
         )
         baseline_series = _numeric_series(baseline_values)
         baseline = baseline_series[-1]
@@ -185,7 +203,7 @@ def run(args: argparse.Namespace) -> dict:
                 "success": True,
                 "baseline_objective": baseline,
                 "baseline_objective_series": baseline_series,
-                "baseline_dataset_tag": "dset1",
+                "baseline_dataset_tag": str(baseline_dataset.tag()),
                 "final_objective": final,
                 "optimizer_objective_series": optimizer_series,
                 "objective_delta": final - baseline,
