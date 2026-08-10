@@ -198,6 +198,30 @@ def run(args: argparse.Namespace) -> dict:
             name: _numeric_series(values)[-1]
             for name, values in zip(variables, evaluated[1:], strict=True)
         }
+        global_parameter_readback = {
+            name: str(model.parameters()[name]) for name in variables
+        }
+        optimizer_dataset_tag = str(optimizer_dataset.tag())
+        client.remove(model)
+        phase = "final_fresh_forward"
+        finalist = client.load(str(spec["configured_copy"]))
+        for name, value in final_variables.items():
+            finalist.java.param().set(name, f"{value:.17g}[m]")
+        finalist_study = finalist.java.study("std1")
+        finalist_study.feature().remove("sens_a71")
+        finalist_study.run()
+        finalist_dataset = _forward_sweep_dataset(finalist)
+        finalist_dataset_tag = str(finalist_dataset.tag())
+        fresh_series = _numeric_series(
+            finalist.evaluate(
+                receipt["objective_expression"], dataset=finalist_dataset, outer=1
+            )
+        )
+        fresh_final = fresh_series[-1]
+        if not math.isclose(fresh_final, final, rel_tol=1e-6, abs_tol=1e-9):
+            raise ValueError("fresh forward objective differs from native optimizer result")
+        client.remove(finalist)
+        model = None
         phase = "parameter_readback"
         receipt.update(
             {
@@ -209,10 +233,12 @@ def run(args: argparse.Namespace) -> dict:
                 "optimizer_objective_series": optimizer_series,
                 "objective_delta": final - baseline,
                 "final_variables_si": final_variables,
-                "global_parameter_readback": {
-                    name: str(model.parameters()[name]) for name in variables
-                },
-                "optimizer_dataset_tag": str(optimizer_dataset.tag()),
+                "fresh_forward_objective": fresh_final,
+                "fresh_forward_objective_series": fresh_series,
+                "fresh_forward_dataset_tag": finalist_dataset_tag,
+                "fresh_forward_delta": fresh_final - baseline,
+                "global_parameter_readback": global_parameter_readback,
+                "optimizer_dataset_tag": optimizer_dataset_tag,
                 "elapsed_seconds": time.monotonic() - started,
                 "configured_copy_sha256": structural._sha(spec["configured_copy"]),
             }
