@@ -142,7 +142,7 @@ def run(args: argparse.Namespace) -> dict:
         baseline_study.feature().remove("sens_a71")
         baseline_study.run()
         baseline_values = baseline_model.evaluate(
-            receipt["objective_expression"], dataset="dset2", outer=1
+            receipt["objective_expression"], dataset="dset1", outer=1
         )
         baseline_series = _numeric_series(baseline_values)
         baseline = baseline_series[-1]
@@ -185,6 +185,7 @@ def run(args: argparse.Namespace) -> dict:
                 "success": True,
                 "baseline_objective": baseline,
                 "baseline_objective_series": baseline_series,
+                "baseline_dataset_tag": "dset1",
                 "final_objective": final,
                 "optimizer_objective_series": optimizer_series,
                 "objective_delta": final - baseline,
