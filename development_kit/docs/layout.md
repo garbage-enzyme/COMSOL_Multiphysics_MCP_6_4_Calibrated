@@ -115,6 +115,7 @@ models are intentionally absent.
 - `development_kit/scripts/installed_package_probe.py` — This script verifies installed discovery, schemas, profiles, and deployment identity without COMSOL startup.
 - `development_kit/scripts/installed_stdio_probe.py` — This script verifies the installed console entry point over real MCP stdio transport.
 - `development_kit/scripts/native_adjoint_licensed_gate.py` — This repository-only alpha7.1 gate applies the trusted native adjoint structure on an immutable derived model and emits separate path-redacted and private receipts.
+- `development_kit/scripts/native_gradient_licensed_gate.py` — This repository-only licensed runner executes one-variable or full-vector native adjoint derivatives, freezes all wavelength controls, validates generated solution/dataset identities, and emits bounded public/private receipts.
 - `development_kit/scripts/research_adapter_template_probe.py` — This repository-only licensed probe launches the current source tree with isolated settings, audits one immutable COMSOL template read-only over serial stdio, and emits separate path-redacted and private receipts.
 - `development_kit/scripts/research_adapter_gate_server.py` — This repository-only candidate server adds two private calls that bind the trusted periodic-MIM backend to a provenance-tracked derived model during the licensed S4 gate.
 - `development_kit/scripts/research_adapter_licensed_gate.py` — This isolated serial stdio gate applies one trusted MIM candidate to a derived copy, collects one-point Wave Optics evidence, and proves source and solver cleanup.
@@ -139,6 +140,7 @@ models are intentionally absent.
 
 - `development_kit/tests/__init__.py` — This file marks the dependency and process test suite as a Python package.
 - `development_kit/tests/test_native_adjoint_licensed_gate.py` — This module verifies the alpha7.1 licensed gate's solver-free preflight, caller-declared budgets, host admission, and redacted receipt boundary.
+- `development_kit/tests/test_native_gradient_licensed_gate.py` — This module verifies the native-gradient runner's solver-free modes, caller-relative commit admission, exact derivative identity, redaction, and cleanup contracts.
 - `development_kit/tests/fixtures/semantic_retrieval_evaluation.json` — This fixture contains the frozen judged semantic retrieval queries.
 - `development_kit/tests/snapshots/baseline_tool_schemas.json` — This snapshot freezes the baseline public tool schemas.
 - `development_kit/tests/snapshots/full_tool_schemas.json` — This snapshot freezes every registered public tool schema.
