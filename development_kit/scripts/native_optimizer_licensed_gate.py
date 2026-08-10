@@ -32,8 +32,7 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _objective(model, expression: str) -> tuple[float, list[float]]:
-    value = model.evaluate(expression)
+def _numeric_series(value) -> list[float]:
     tolist = getattr(value, "tolist", None)
     if callable(tolist):
         value = tolist()
@@ -54,10 +53,28 @@ def _objective(model, expression: str) -> tuple[float, list[float]]:
     collect(value)
     if not flattened:
         raise ValueError("native objective evaluation is empty")
-    return flattened[-1], flattened
+    return flattened
 
 
-def _configure_solver_move_limit(model, study, move_limit: float) -> dict:
+def _dataset_for_solution(model, solution_tag: str):
+    matches = []
+    for dataset in model / "datasets":
+        properties = dataset.properties()
+        linked = None
+        if "solution" in properties:
+            linked = dataset.property("solution")
+        elif "data" in properties:
+            linked = dataset.property("data")
+        if str(linked) == solution_tag:
+            matches.append(dataset)
+    if len(matches) != 1:
+        raise ValueError("native optimizer dataset identity is ambiguous")
+    return matches[0]
+
+
+def _configure_solver_move_limit(
+    model, study, move_limit: float, optimizer_iterations: int
+) -> dict:
     study.createAutoSequences("sol")
     matches = []
     solutions = model.java.sol()
@@ -73,11 +90,15 @@ def _configure_solver_move_limit(model, study, move_limit: float) -> dict:
     solution_tag, feature_tag, feature = matches[0]
     feature.set("movelimitactive", "on")
     feature.set("movelimit", f"{move_limit:.17g}")
+    feature.set("mmamaxiteractive", "on")
+    feature.set("mmamaxiter", str(optimizer_iterations))
     return {
         "solution_tag": solution_tag,
         "feature_tag": feature_tag,
         "movelimitactive": str(feature.getString("movelimitactive")),
         "movelimit": str(feature.getString("movelimit")),
+        "mmamaxiteractive": str(feature.getString("mmamaxiteractive")),
+        "mmamaxiter": str(feature.getString("mmamaxiter")),
     }
 
 
@@ -120,9 +141,11 @@ def run(args: argparse.Namespace) -> dict:
         baseline_study = baseline_model.java.study("std1")
         baseline_study.feature().remove("sens_a71")
         baseline_study.run()
-        baseline, baseline_series = _objective(
-            baseline_model, receipt["objective_expression"]
+        baseline_values = baseline_model.evaluate(
+            receipt["objective_expression"], dataset="dset2", outer=1
         )
+        baseline_series = _numeric_series(baseline_values)
+        baseline = baseline_series[-1]
         phase = "optimization_solve"
         client.remove(baseline_model)
         model = client.load(str(spec["configured_copy"]))
@@ -134,13 +157,28 @@ def run(args: argparse.Namespace) -> dict:
         except Exception:
             pass
         receipt["solver_move_limit"] = _configure_solver_move_limit(
-            model, std2, spec["optimizer"]["move_limit"]
+            model,
+            std2,
+            spec["optimizer"]["move_limit"],
+            spec["optimizer"]["budget"]["max_iterations"],
         )
         if time.monotonic() - started > spec["optimizer"]["budget"]["max_wall_time_seconds"]:
             raise TimeoutError("native optimizer wall budget exhausted before optimization")
         std2.run()
         phase = "final_objective"
-        final, optimizer_series = _objective(model, receipt["objective_expression"])
+        optimizer_dataset = _dataset_for_solution(
+            model, receipt["solver_move_limit"]["solution_tag"]
+        )
+        variables = [item["variable_id"] for item in support["variables"]]
+        evaluated = model.evaluate(
+            [receipt["objective_expression"], *variables], dataset=optimizer_dataset
+        )
+        optimizer_series = _numeric_series(evaluated[0])
+        final = optimizer_series[-1]
+        final_variables = {
+            name: _numeric_series(values)[-1]
+            for name, values in zip(variables, evaluated[1:], strict=True)
+        }
         phase = "parameter_readback"
         receipt.update(
             {
@@ -150,7 +188,11 @@ def run(args: argparse.Namespace) -> dict:
                 "final_objective": final,
                 "optimizer_objective_series": optimizer_series,
                 "objective_delta": final - baseline,
-                "parameters": {name: str(model.parameters()[name]) for name in ("patch_length_x", "patch_length_y")},
+                "final_variables_si": final_variables,
+                "global_parameter_readback": {
+                    name: str(model.parameters()[name]) for name in variables
+                },
+                "optimizer_dataset_tag": str(optimizer_dataset.tag()),
                 "elapsed_seconds": time.monotonic() - started,
                 "configured_copy_sha256": structural._sha(spec["configured_copy"]),
             }
