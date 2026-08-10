@@ -252,12 +252,12 @@ class ClientapiAdjointStudyBackend:
         fixed.selection().set(selections["fixed_outer_boundaries"])
         patch = features.create("patch_a71", "PrescribedMeshDisplacement", 2)
         patch.selection().set(selections["patch_boundaries"])
-        import jpype
+        from comsol_mcp.tools.derived_geometry import _java_boolean
 
         for index in range(3):
-            fixed.setIndex("useDx", jpype.JBoolean(True), index)
+            fixed.setIndex("useDx", _java_boolean(True), index)
             fixed.setIndex("dx", "0", index)
-            patch.setIndex("useDx", jpype.JBoolean(True), index)
+            patch.setIndex("useDx", _java_boolean(True), index)
             patch.setIndex("dx", displacement[index], index)
         deformation_readback = {
             "physics_tag": "dg_a71",

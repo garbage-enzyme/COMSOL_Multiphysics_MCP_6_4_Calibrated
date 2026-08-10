@@ -111,6 +111,18 @@ def _set_vector(feature: Any, name: str, values: list[str]) -> None:
         feature.set(name, values)
 
 
+def _java_boolean(value: bool) -> Any:
+    """Convert a boolean at the ClientAPI boundary with a test-friendly fallback."""
+    try:
+        import jpype
+
+        if not jpype.isJVMStarted():
+            raise ImportError("JVM not started")
+        return jpype.JBoolean(value)
+    except ImportError, TypeError, AttributeError:
+        return value
+
+
 def _geometry(model: Any, component_tag: str, geometry_tag: str) -> Any:
     components = model.java.component()
     if component_tag not in _tags(components):
