@@ -350,6 +350,7 @@ def configure_native_adjoint(
     sensitivity_feature_tag: str = "sens_a71",
     optimization_study_tag: str = "std2",
     optimization_feature_tag: str = "opt_a71",
+    wavelength_feature_tag: str = "wavelength_a71",
 ) -> dict[str, Any]:
     """Atomically create and configure the only accepted native feature pair."""
     normalized_support = normalize_derivative_support(support)
@@ -407,6 +408,16 @@ def configure_native_adjoint(
                 str(normalized_optimizer["budget"]["max_solves"]),
             ),
         }
+        wavelength = optimization_study.feature().create(
+            wavelength_feature_tag, "Wavelength"
+        )
+        if str(wavelength.getType()) != "Wavelength":
+            raise ValueError("Wavelength study step type readback mismatch")
+        wavelength_expression = f"{normalized_support['objective']['wavelength_um']:.17g}e-6"
+        wavelength_readback = {
+            "punit": _scalar(wavelength, "punit", "m"),
+            "plist": _scalar(wavelength, "plist", wavelength_expression),
+        }
         receipt = {
             "schema_name": "comsol_mcp.native_adjoint_adapter_receipt",
             "schema_version": "1.0.0",
@@ -418,6 +429,7 @@ def configure_native_adjoint(
             "controls": control_readback,
             "sensitivity": sensitivity_readback,
             "optimization": optimization_readback,
+            "wavelength": wavelength_readback,
             "rollback": {"attempted": False, "verified": False},
         }
         receipt["receipt_fingerprint"] = domain_sha256_v2(
