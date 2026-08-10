@@ -387,6 +387,8 @@ models are intentionally absent.
 - `comsol_mcp/research/robustness.py` — This module creates bounded finalist perturbation matrices and threshold-separated robustness summaries.
 - `comsol_mcp/research/adapters.py` — This module freezes trusted structure-family manifests and exact live-tree audit receipts.
 - `comsol_mcp/research/adjoint_adapter.py` — This module configures the fixed periodic-MIM native Sensitivity/Optimization feature pair with failure-atomic rollback.
+- `comsol_mcp/jobs/native_adjoint_runtime.py` — This module executes the licensed fixed-topology GCMMA lane with caller budgets, explicit datasets, remesh, fresh-forward, and physical evidence.
+- `comsol_mcp/jobs/adjoint_optimization_worker.py` — This module dispatches synthetic lifecycle fixtures or the licensed durable native-adjoint runtime and persists validated hash-chained terminal rows.
 - `comsol_mcp/research/adaptive_acquisition.py` — This explicitly loaded module performs bounded Gaussian-process posterior and expected-improvement selection without affecting ordinary discovery imports.
 - `comsol_mcp/research/optimizers.py` — This module provides the backend-neutral optimizer protocol and deterministic grid, random, and Latin-hypercube baselines.
 
