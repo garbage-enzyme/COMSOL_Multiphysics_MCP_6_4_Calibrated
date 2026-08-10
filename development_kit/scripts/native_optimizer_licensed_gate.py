@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
-import sys
+import math
 import time
 from pathlib import Path
 
@@ -33,25 +32,29 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _objective(model, expression: str) -> float:
+def _objective(model, expression: str) -> tuple[float, list[float]]:
     value = model.evaluate(expression)
-    size = getattr(value, "size", None)
-    if size == 1:
-        try:
-            value = value.flat[0]
-        except (AttributeError, TypeError):
-            pass
-    item = getattr(value, "item", None)
-    if callable(item):
-        try:
-            value = item()
-        except ValueError:
-            pass
-    if isinstance(value, (list, tuple)):
-        if len(value) != 1:
-            raise ValueError("native objective must be scalar")
-        value = value[0]
-    return float(value)
+    tolist = getattr(value, "tolist", None)
+    if callable(tolist):
+        value = tolist()
+    flattened = []
+
+    def collect(item):
+        if isinstance(item, (list, tuple)):
+            for child in item:
+                collect(child)
+            return
+        scalar = complex(item)
+        if not math.isfinite(scalar.real) or not math.isfinite(scalar.imag):
+            raise ValueError("native objective contains a nonfinite value")
+        if abs(scalar.imag) > 1e-12 * max(1.0, abs(scalar.real)):
+            raise ValueError("native objective unexpectedly contains a complex component")
+        flattened.append(float(scalar.real))
+
+    collect(value)
+    if not flattened:
+        raise ValueError("native objective evaluation is empty")
+    return flattened[-1], flattened
 
 
 def _configure_solver_move_limit(model, study, move_limit: float) -> dict:
@@ -117,7 +120,9 @@ def run(args: argparse.Namespace) -> dict:
         baseline_study = baseline_model.java.study("std1")
         baseline_study.feature().remove("sens_a71")
         baseline_study.run()
-        baseline = _objective(baseline_model, receipt["objective_expression"])
+        baseline, baseline_series = _objective(
+            baseline_model, receipt["objective_expression"]
+        )
         phase = "optimization_solve"
         client.remove(baseline_model)
         model = client.load(str(spec["configured_copy"]))
@@ -135,13 +140,15 @@ def run(args: argparse.Namespace) -> dict:
             raise TimeoutError("native optimizer wall budget exhausted before optimization")
         std2.run()
         phase = "final_objective"
-        final = _objective(model, receipt["objective_expression"])
+        final, optimizer_series = _objective(model, receipt["objective_expression"])
         phase = "parameter_readback"
         receipt.update(
             {
                 "success": True,
                 "baseline_objective": baseline,
+                "baseline_objective_series": baseline_series,
                 "final_objective": final,
+                "optimizer_objective_series": optimizer_series,
                 "objective_delta": final - baseline,
                 "parameters": {name: str(model.parameters()[name]) for name in ("patch_length_x", "patch_length_y")},
                 "elapsed_seconds": time.monotonic() - started,
