@@ -118,6 +118,24 @@ def test_support_maps_controls_to_deformed_geometry(tmp_path, gate_root, monkeyp
             "readback_expression": "patch_length_y",
         },
     ]
+    assert support["objective"] == {
+        "objective_id": "fixed_transmission",
+        "expression": "comp1.ewfd.Torder_0_0",
+        "direction": "maximize",
+        "unit": "1",
+        "wavelength_um": 1.717657785,
+        "study_tag": "std1",
+        "solution_tag": "sol2",
+        "dataset_tag": "dset2",
+        "evidence_paths": ["forward.transmission"],
+    }
+    assert support["result_identity"] == {
+        "study_tag": "std1",
+        "solution_tag": "sol2",
+        "dataset_tag": "dset2",
+        "derivative_expression": "real(fsens(control_variable))",
+        "derivative_units": "1/m",
+    }
 
 
 def test_gate_rejects_undeclared_host_capacity(tmp_path, gate_root, monkeypatch):
