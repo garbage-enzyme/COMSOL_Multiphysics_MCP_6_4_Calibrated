@@ -35,6 +35,12 @@ def _parser() -> argparse.ArgumentParser:
 
 def _objective(model, expression: str) -> float:
     value = model.evaluate(expression)
+    size = getattr(value, "size", None)
+    if size == 1:
+        try:
+            value = value.flat[0]
+        except (AttributeError, TypeError):
+            pass
     item = getattr(value, "item", None)
     if callable(item):
         try:
@@ -91,6 +97,7 @@ def run(args: argparse.Namespace) -> dict:
     }
     client = None
     private_error = None
+    phase = "startup"
     started = time.monotonic()
     try:
         import mph
@@ -106,10 +113,12 @@ def run(args: argparse.Namespace) -> dict:
         model.java.save(str(spec["configured_copy"]), True)
         client.remove(model)
         baseline_model = client.load(str(spec["configured_copy"]))
+        phase = "baseline_solve"
         baseline_study = baseline_model.java.study("std1")
         baseline_study.feature().remove("sens_a71")
         baseline_study.run()
         baseline = _objective(baseline_model, receipt["objective_expression"])
+        phase = "optimization_solve"
         client.remove(baseline_model)
         model = client.load(str(spec["configured_copy"]))
         std2 = model.java.study("std2")
@@ -125,7 +134,9 @@ def run(args: argparse.Namespace) -> dict:
         if time.monotonic() - started > spec["optimizer"]["budget"]["max_wall_time_seconds"]:
             raise TimeoutError("native optimizer wall budget exhausted before optimization")
         std2.run()
+        phase = "final_objective"
         final = _objective(model, receipt["objective_expression"])
+        phase = "parameter_readback"
         receipt.update(
             {
                 "success": True,
@@ -139,7 +150,7 @@ def run(args: argparse.Namespace) -> dict:
         )
     except Exception as exc:
         receipt["error"] = {"code": "native_optimizer_failed", "type": type(exc).__name__}
-        private_error = f"{type(exc).__name__}: {exc}"
+        private_error = {"phase": phase, "detail": f"{type(exc).__name__}: {exc}"}
     finally:
         cleanup = {"client_clear": False, "source_unchanged": structural._sha(spec["source"]) == source_before}
         if client is not None:
