@@ -5,9 +5,9 @@ from __future__ import annotations
 import json
 import os
 import sys
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from collections.abc import Iterator
 from typing import Any, TextIO
 
 from .lexical_manual import IndexBuildCancelled, build_index_from_pdfs
