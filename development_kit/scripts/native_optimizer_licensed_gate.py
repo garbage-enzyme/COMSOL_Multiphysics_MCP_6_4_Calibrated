@@ -208,9 +208,7 @@ def run(args: argparse.Namespace) -> dict:
             name: _numeric_series(values)[-1]
             for name, values in zip(variables, evaluated[1:], strict=True)
         }
-        global_parameter_readback = {
-            name: str(model.parameters()[name]) for name in variables
-        }
+        global_parameter_readback = {name: str(model.parameters()[name]) for name in variables}
         optimizer_dataset_tag = str(optimizer_dataset.tag())
         client.remove(model)
         phase = "final_fresh_forward"
@@ -229,11 +227,31 @@ def run(args: argparse.Namespace) -> dict:
         finalist_dataset = _forward_sweep_dataset(finalist)
         finalist_dataset_tag = str(finalist_dataset.tag())
         fresh_series = _numeric_series(
-            finalist.evaluate(
-                receipt["objective_expression"], dataset=finalist_dataset, outer=1
-            )
+            finalist.evaluate(receipt["objective_expression"], dataset=finalist_dataset, outer=1)
         )
         fresh_final = fresh_series[-1]
+        physical_expressions = [
+            "ewfd.Rtotal",
+            "ewfd.Ttotal",
+            "ewfd.Atotal",
+            "wl",
+            "c_const/freq",
+        ]
+        physical_values = finalist.evaluate(physical_expressions, dataset=finalist_dataset, outer=1)
+        physical = {
+            name: _numeric_series(value)[-1]
+            for name, value in zip(physical_expressions, physical_values, strict=True)
+        }
+        closure = physical["ewfd.Rtotal"] + physical["ewfd.Ttotal"] + physical["ewfd.Atotal"]
+        if not math.isclose(closure, 1.0, rel_tol=0.0, abs_tol=1e-6):
+            raise ValueError("remeshed finalist R/T/A closure is outside tolerance")
+        requested_wavelength = support["objective"]["wavelength_um"] * 1e-6
+        if not math.isclose(physical["wl"], requested_wavelength, rel_tol=1e-12, abs_tol=1e-15):
+            raise ValueError("remeshed finalist evaluated wavelength changed")
+        if not math.isclose(
+            physical["c_const/freq"], requested_wavelength, rel_tol=1e-12, abs_tol=1e-15
+        ):
+            raise ValueError("remeshed finalist solved wavelength changed")
         receipt.update(
             {
                 "baseline_objective": baseline,
@@ -251,6 +269,17 @@ def run(args: argparse.Namespace) -> dict:
                     "explicit_rebuild": True,
                     "before": mesh_before,
                     "after": mesh_after,
+                },
+                "physical_evidence": {
+                    "reflectance": physical["ewfd.Rtotal"],
+                    "transmittance": physical["ewfd.Ttotal"],
+                    "absorption": physical["ewfd.Atotal"],
+                    "closure": closure,
+                    "requested_wavelength_m": requested_wavelength,
+                    "evaluated_wavelength_m": physical["wl"],
+                    "solved_wavelength_m": physical["c_const/freq"],
+                    "branch_disposition": "single_fixed_state_no_continuation_claim",
+                    "robustness_disposition": "multi_state_deferred_to_alpha7_2",
                 },
                 "global_parameter_readback": global_parameter_readback,
                 "optimizer_dataset_tag": optimizer_dataset_tag,
@@ -272,13 +301,16 @@ def run(args: argparse.Namespace) -> dict:
         receipt["error"] = {"code": "native_optimizer_failed", "type": type(exc).__name__}
         private_error = {"phase": phase, "detail": f"{type(exc).__name__}: {exc}"}
     finally:
-        cleanup = {"client_clear": False, "source_unchanged": structural._sha(spec["source"]) == source_before}
+        cleanup = {
+            "client_clear": False,
+            "source_unchanged": structural._sha(spec["source"]) == source_before,
+        }
         if client is not None:
             try:
                 client.clear()
                 cleanup["client_clear"] = True
-            except Exception:
-                pass
+            except Exception as exc:
+                cleanup["client_clear_error_type"] = type(exc).__name__
         receipt["cleanup"] = cleanup
         receipt["elapsed_seconds"] = time.monotonic() - started
         receipt["success"] = receipt.get("success") is True and all(cleanup.values())
