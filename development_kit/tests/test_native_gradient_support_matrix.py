@@ -55,7 +55,7 @@ def test_native_gradient_matrix_is_redacted_and_binds_the_live_probe_boundary():
     assert execution["source_unchanged"] is True
     assert execution["cleanup_verified"] is True
     formal = matrix["capability_probe"]["native_gradient_formal_gate"]
-    assert formal["status"] == "full_vector_native_and_fd_verified_pending_directional"
+    assert formal["status"] == "gradient_validated_native_fd_directional"
     assert formal["variable_order"] == ["patch_length_x", "patch_length_y"]
     assert formal["native_gradient"][0] < 0.0 < formal["native_gradient"][1]
     assert formal["generated_solutions"] == ["sol1", "sol2", "sol3"]
@@ -73,6 +73,14 @@ def test_native_gradient_matrix_is_redacted_and_binds_the_live_probe_boundary():
     assert finite_difference["source_unchanged"] is True
     assert finite_difference["cleanup_verified"] is True
     assert finite_difference["solver_residue_observed"] is False
+    directional = formal["directional"]
+    assert directional["direction_seed"] == 71004
+    assert len(directional["direction"]) == 2
+    assert directional["relative_error"] < 0.1
+    assert directional["sign_agreement"] is True
+    assert directional["source_unchanged"] is True
+    assert directional["cleanup_verified"] is True
+    assert directional["solver_residue_observed"] is False
     assert matrix["method_policy"]["accepted_lane"] == "adjoint"
     assert matrix["method_policy"]["global_optimality_claim"] is False
     assert matrix["probe_receipts"]["full_receipts_retained_locally"] is True
