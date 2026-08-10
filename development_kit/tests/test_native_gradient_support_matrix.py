@@ -88,6 +88,8 @@ def test_native_gradient_matrix_is_redacted_and_binds_the_live_probe_boundary():
     assert optimizer["fresh_forward_objective"] > optimizer["baseline_objective"]
     assert optimizer["max_iterations"] == 2
     assert optimizer["move_limit"] == 0.1
+    assert optimizer["remesh"]["explicit_rebuild"] is True
+    assert optimizer["remesh"]["minimum_quality"] > 0.1
     assert optimizer["same_budget_mma_comparison"]["status"] == (
         "rejected_fresh_forward_mismatch"
     )
