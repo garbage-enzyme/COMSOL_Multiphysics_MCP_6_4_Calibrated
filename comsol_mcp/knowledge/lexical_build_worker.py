@@ -7,6 +7,7 @@ import os
 import sys
 from contextlib import contextmanager
 from pathlib import Path
+from collections.abc import Iterator
 from typing import Any, TextIO
 
 from .lexical_manual import IndexBuildCancelled, build_index_from_pdfs
@@ -21,7 +22,7 @@ def _emit(payload: dict[str, Any]) -> None:
 
 
 @contextmanager
-def _isolate_native_stdout():
+def _isolate_native_stdout() -> Iterator[None]:
     """Reserve the original stdout pipe for JSON while native libraries use stderr."""
     global _PROTOCOL_STREAM
 
