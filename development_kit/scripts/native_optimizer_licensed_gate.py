@@ -163,6 +163,7 @@ def run(args: argparse.Namespace) -> dict:
         baseline_study.feature().remove("sens_a71")
         baseline_study.run()
         baseline_dataset = _forward_sweep_dataset(baseline_model)
+        baseline_dataset_tag = str(baseline_dataset.tag())
         baseline_values = baseline_model.evaluate(
             receipt["objective_expression"], dataset=baseline_dataset, outer=1
         )
@@ -174,10 +175,6 @@ def run(args: argparse.Namespace) -> dict:
         std2 = model.java.study("std2")
         optimization = std2.feature("opt_a71")
         optimization.set("nsolvemax", str(spec["optimizer"]["budget"]["max_solves"]))
-        try:
-            optimization.set("maxiter", str(spec["optimizer"]["budget"]["max_iterations"]))
-        except Exception:
-            pass
         receipt["solver_move_limit"] = _configure_solver_move_limit(
             model,
             std2,
@@ -207,7 +204,7 @@ def run(args: argparse.Namespace) -> dict:
                 "success": True,
                 "baseline_objective": baseline,
                 "baseline_objective_series": baseline_series,
-                "baseline_dataset_tag": str(baseline_dataset.tag()),
+                "baseline_dataset_tag": baseline_dataset_tag,
                 "final_objective": final,
                 "optimizer_objective_series": optimizer_series,
                 "objective_delta": final - baseline,
