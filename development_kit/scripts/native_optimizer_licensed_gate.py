@@ -9,6 +9,7 @@ import time
 from pathlib import Path
 
 from development_kit.scripts import native_adjoint_licensed_gate as structural
+from development_kit.scripts import native_gradient_licensed_gate as gradient
 
 REPOSITORY_ROOT = structural.REPOSITORY_ROOT
 SCHEMA_NAME = "comsol_mcp.native_optimizer_licensed_gate"
@@ -72,20 +73,18 @@ def _dataset_for_solution(model, solution_tag: str):
     return matches[0]
 
 
-def _only_solution_dataset(model):
-    solution_tags = {str(item) for item in list(model.java.sol().tags())}
+def _forward_sweep_dataset(model):
     matches = []
-    for dataset in model / "datasets":
-        properties = dataset.properties()
-        linked = None
-        if "solution" in properties:
-            linked = dataset.property("solution")
-        elif "data" in properties:
-            linked = dataset.property("data")
-        if str(linked) in solution_tags:
-            matches.append(dataset)
+    for solution_tag in [str(item) for item in list(model.java.sol().tags())]:
+        solution = model.java.sol(solution_tag)
+        feature_types = {
+            str(solution.feature(tag).getType())
+            for tag in [str(item) for item in list(solution.feature().tags())]
+        }
+        if "StoreSolution" in feature_types:
+            matches.append(_dataset_for_solution(model, solution_tag))
     if len(matches) != 1:
-        raise ValueError("direct forward dataset identity is ambiguous")
+        raise ValueError("direct forward sweep dataset identity is ambiguous")
     return matches[0]
 
 
@@ -151,6 +150,11 @@ def run(args: argparse.Namespace) -> dict:
         structural.configure_native_adjoint(
             structural.ClientapiAdjointStudyBackend(model), support, structural._optimizer(spec)
         )
+        gradient._configure_selected_sensitivity(
+            model,
+            support,
+            [item["variable_id"] for item in support["variables"]],
+        )
         model.java.save(str(spec["configured_copy"]), True)
         client.remove(model)
         baseline_model = client.load(str(spec["configured_copy"]))
@@ -158,7 +162,7 @@ def run(args: argparse.Namespace) -> dict:
         baseline_study = baseline_model.java.study("std1")
         baseline_study.feature().remove("sens_a71")
         baseline_study.run()
-        baseline_dataset = _only_solution_dataset(baseline_model)
+        baseline_dataset = _forward_sweep_dataset(baseline_model)
         baseline_values = baseline_model.evaluate(
             receipt["objective_expression"], dataset=baseline_dataset, outer=1
         )
