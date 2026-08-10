@@ -35,6 +35,12 @@ def _parser() -> argparse.ArgumentParser:
 
 def _objective(model, expression: str) -> float:
     value = model.evaluate(expression)
+    item = getattr(value, "item", None)
+    if callable(item):
+        try:
+            value = item()
+        except ValueError:
+            pass
     if isinstance(value, (list, tuple)):
         if len(value) != 1:
             raise ValueError("native objective must be scalar")
