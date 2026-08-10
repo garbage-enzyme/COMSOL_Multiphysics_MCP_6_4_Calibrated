@@ -198,16 +198,16 @@
     },
     "native_optimizer_formal_gate": {
       "status": "bounded_native_optimizer_with_fresh_forward_verified",
-      "source_revision": "424fa31c164adbb41843de6d13cc3d3edfdbdc4e",
-      "receipt_sha256": "88a0b265d61d218a89d9de6480b432fce34fed65a228d23050b153ada9095a7f",
+      "source_revision": "d0c3944e2b33a06486ea443dce05865c546a93f1",
+      "receipt_sha256": "18ae99cda8c02971c3b91d1a3050e2f9cc923e0c4b9fd05080b7343017474a37",
       "method": "gcmma",
       "objective_direction": "maximization",
       "objective_expression": "comp1.ewfd.Torder_0_0",
       "baseline_objective": 0.15976432595785578,
-      "optimizer_objective": 0.6073564279842106,
-      "fresh_forward_objective": 0.6073564279842103,
-      "fresh_forward_delta": 0.4475921020263545,
-      "final_variables_si": [7.534384077471211e-7, 9.269533016793348e-7],
+      "optimizer_objective": 0.6073564279842112,
+      "fresh_forward_objective": 0.6073564279842113,
+      "fresh_forward_delta": 0.44759210202635547,
+      "final_variables_si": [7.534384077471197e-7, 9.269533016793313e-7],
       "variable_order": ["patch_length_x", "patch_length_y"],
       "max_iterations": 2,
       "max_solves": 20,
@@ -218,6 +218,16 @@
         "minimum_quality": 0.2155,
         "mean_quality": 0.6775,
         "quality_measure": "volcircum"
+      },
+      "physical_evidence": {
+        "reflectance": 0.4062471222118139,
+        "transmittance": 0.6073564279842113,
+        "absorption": -0.013603550196023233,
+        "closure": 1.000000000000002,
+        "wavelength_m": 1.717657785e-6,
+        "branch_disposition": "single_fixed_state_no_continuation_claim",
+        "robustness_disposition": "multi_state_deferred_to_alpha7_2",
+        "negative_absorption_disposition": "raw_port_evidence_without_passivity_claim"
       },
       "source_unchanged": true,
       "cleanup_verified": true,
@@ -244,5 +254,5 @@
     "client_clear_succeeded": true,
     "solver_residue_observed": false
   },
-  "support_state": "native_optimizer_validated"
+  "support_state": "native_optimizer_finalist_validated"
 }

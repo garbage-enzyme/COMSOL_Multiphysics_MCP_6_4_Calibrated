@@ -90,6 +90,11 @@ def test_native_gradient_matrix_is_redacted_and_binds_the_live_probe_boundary():
     assert optimizer["move_limit"] == 0.1
     assert optimizer["remesh"]["explicit_rebuild"] is True
     assert optimizer["remesh"]["minimum_quality"] > 0.1
+    physical = optimizer["physical_evidence"]
+    assert abs(physical["closure"] - 1.0) < 1e-6
+    assert physical["wavelength_m"] == 1.717657785e-6
+    assert physical["branch_disposition"] == "single_fixed_state_no_continuation_claim"
+    assert physical["robustness_disposition"] == "multi_state_deferred_to_alpha7_2"
     assert optimizer["same_budget_mma_comparison"]["status"] == (
         "rejected_fresh_forward_mismatch"
     )
