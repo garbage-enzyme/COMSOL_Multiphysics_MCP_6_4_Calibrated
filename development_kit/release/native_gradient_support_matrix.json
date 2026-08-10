@@ -195,12 +195,38 @@
         "cleanup_verified": true,
         "solver_residue_observed": false
       }
+    },
+    "native_optimizer_formal_gate": {
+      "status": "bounded_native_optimizer_with_fresh_forward_verified",
+      "source_revision": "215fc6cb1d0a74466a492ed161ecae57bd3c6b87",
+      "receipt_sha256": "aa5676dadc5ccf6687303bc1d49e3838b0359f93b6f8e20db49f6d6da1ea1a36",
+      "method": "gcmma",
+      "objective_direction": "maximization",
+      "objective_expression": "comp1.ewfd.Torder_0_0",
+      "baseline_objective": 0.15976432595785578,
+      "optimizer_objective": 0.6073564279842109,
+      "fresh_forward_objective": 0.6073564279842112,
+      "fresh_forward_delta": 0.4475921020263554,
+      "final_variables_si": [7.534384077471208e-7, 9.269533016793346e-7],
+      "variable_order": ["patch_length_x", "patch_length_y"],
+      "max_iterations": 2,
+      "max_solves": 20,
+      "move_limit": 0.1,
+      "source_unchanged": true,
+      "cleanup_verified": true,
+      "same_budget_mma_comparison": {
+        "status": "rejected_fresh_forward_mismatch",
+        "receipt_sha256": "d2ccc420b71eda657719d5821a79600c2136a82133aea2248f0f3b31496efba2",
+        "optimizer_objective": 2.818323179896832e19,
+        "fresh_forward_objective": 0.006920588319683022,
+        "fresh_forward_delta": -0.15284373763817274
+      }
     }
   },
   "method_policy": {
     "accepted_lane": "adjoint",
     "forward_role": "diagnostic_cross_check_only",
-    "optimizer_choice": "pending_controlled_effect_comparison",
+    "optimizer_choice": "gcmma_after_same_budget_fresh_forward_comparison",
     "global_optimality_claim": false
   },
   "probe_receipts": {
@@ -211,5 +237,5 @@
     "client_clear_succeeded": true,
     "solver_residue_observed": false
   },
-  "support_state": "gradient_validated"
+  "support_state": "native_optimizer_validated"
 }

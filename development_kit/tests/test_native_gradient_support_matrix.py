@@ -81,7 +81,21 @@ def test_native_gradient_matrix_is_redacted_and_binds_the_live_probe_boundary():
     assert directional["source_unchanged"] is True
     assert directional["cleanup_verified"] is True
     assert directional["solver_residue_observed"] is False
+    optimizer = matrix["capability_probe"]["native_optimizer_formal_gate"]
+    assert optimizer["status"] == "bounded_native_optimizer_with_fresh_forward_verified"
+    assert optimizer["method"] == "gcmma"
+    assert optimizer["objective_direction"] == "maximization"
+    assert optimizer["fresh_forward_objective"] > optimizer["baseline_objective"]
+    assert optimizer["max_iterations"] == 2
+    assert optimizer["move_limit"] == 0.1
+    assert optimizer["same_budget_mma_comparison"]["status"] == (
+        "rejected_fresh_forward_mismatch"
+    )
+    assert optimizer["same_budget_mma_comparison"]["fresh_forward_delta"] < 0.0
     assert matrix["method_policy"]["accepted_lane"] == "adjoint"
+    assert matrix["method_policy"]["optimizer_choice"] == (
+        "gcmma_after_same_budget_fresh_forward_comparison"
+    )
     assert matrix["method_policy"]["global_optimality_claim"] is False
     assert matrix["probe_receipts"]["full_receipts_retained_locally"] is True
     assert matrix["probe_receipts"]["public_materials_redacted"] is True
