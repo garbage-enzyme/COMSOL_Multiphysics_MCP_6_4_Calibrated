@@ -3,18 +3,46 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
 from .lexical_manual import IndexBuildCancelled, build_index_from_pdfs
 
 MAX_REQUEST_BYTES = 16 * 1024
+_PROTOCOL_STREAM: TextIO = sys.stdout
 
 
 def _emit(payload: dict[str, Any]) -> None:
-    sys.stdout.write(json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n")
+    _PROTOCOL_STREAM.write(
+        json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n"
+    )
+    _PROTOCOL_STREAM.flush()
+
+
+@contextmanager
+def _isolate_native_stdout():
+    """Reserve the original stdout pipe for JSON while native libraries use stderr."""
+    global _PROTOCOL_STREAM
+
     sys.stdout.flush()
+    saved_stdout = os.dup(1)
+    protocol_stream = os.fdopen(
+        os.dup(1), mode="w", encoding="utf-8", errors="strict", newline="\n"
+    )
+    previous_stream = _PROTOCOL_STREAM
+    _PROTOCOL_STREAM = protocol_stream
+    os.dup2(2, 1)
+    try:
+        yield
+    finally:
+        sys.stdout.flush()
+        os.dup2(saved_stdout, 1)
+        os.close(saved_stdout)
+        _PROTOCOL_STREAM = previous_stream
+        protocol_stream.close()
 
 
 def _error_payload(exc: BaseException) -> dict[str, Any]:
@@ -39,7 +67,7 @@ def _error_payload(exc: BaseException) -> dict[str, Any]:
     return {"event": "error", "reason_code": code, "message": message}
 
 
-def main() -> int:
+def _run_request() -> int:
     try:
         raw = sys.stdin.buffer.read(MAX_REQUEST_BYTES + 1)
         if not raw or len(raw) > MAX_REQUEST_BYTES:
@@ -74,6 +102,11 @@ def main() -> int:
     except (OSError, RuntimeError, ValueError, ModuleNotFoundError, json.JSONDecodeError) as exc:
         _emit(_error_payload(exc))
         return 2
+
+
+def main() -> int:
+    with _isolate_native_stdout():
+        return _run_request()
 
 
 if __name__ == "__main__":

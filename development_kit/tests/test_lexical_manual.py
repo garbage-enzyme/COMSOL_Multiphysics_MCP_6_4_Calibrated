@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import sqlite3
@@ -19,6 +20,8 @@ from src.knowledge.lexical_manual import (
     validate_index_file,
 )
 from src.tools.session import session_manager
+
+from comsol_mcp.knowledge import lexical_build_worker
 
 
 @pytest.fixture()
@@ -219,6 +222,16 @@ def test_pdf_index_build_rejects_a_manual_changed_during_extraction(
     assert all(os.path.samefile(opened_path, source) for opened_path in opened)
     assert not index.exists()
     assert not list(ascii_tmp_path.glob("manuals.sqlite3.tmp-*"))
+
+
+def test_build_worker_keeps_native_stdout_out_of_json_protocol(capfd):
+    with lexical_build_worker._isolate_native_stdout():
+        os.write(1, b"MuPDF error: recoverable profile warning\n")
+        lexical_build_worker._emit({"event": "progress", "processed_pages": 1})
+
+    captured = capfd.readouterr()
+    assert json.loads(captured.out) == {"event": "progress", "processed_pages": 1}
+    assert captured.err == "MuPDF error: recoverable profile warning\n"
 
 
 def test_read_only_lexical_connections_close_deterministically(manual_index: Path, monkeypatch):
