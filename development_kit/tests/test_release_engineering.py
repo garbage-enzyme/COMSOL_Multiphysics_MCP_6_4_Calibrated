@@ -828,6 +828,13 @@ def test_hosted_ci_is_dependency_only_and_real_gate_is_explicit():
     assert "--upgrade-strategy eager" in dependency_commands
     assert security_job["name"] == "locked runtime vulnerability policy"
     assert gui_job["name"] == "Settings GUI, package, and installed entry"
+    gui_setup = next(
+        step
+        for step in gui_job["steps"]
+        if "actions/setup-python" in str(step.get("uses", ""))
+    )
+    assert gui_setup["with"]["python-version"] == "3.14.7"
+    assert "root = tk.Tk()" in gui_commands
     assert "settings_gui/tests" in gui_commands
     assert "test_settings_gui_direct_entry.py" in gui_commands
     assert "settings_gui_package_probe.py" in gui_commands

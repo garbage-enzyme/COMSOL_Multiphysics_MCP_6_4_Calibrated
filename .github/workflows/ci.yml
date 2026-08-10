@@ -128,8 +128,13 @@ jobs:
       # actions/setup-python v6.2.0
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
         with:
-          python-version: "3.14"
+          # Floating 3.14 can select a hosted toolcache with an incomplete
+          # Tcl/Tk payload. Pin a fresh official patch for the real Tk tests.
+          python-version: "3.14.7"
           cache: pip
+      - name: Require a usable Tk runtime
+        run: |
+          python -c "import tkinter as tk; root = tk.Tk(); root.withdraw(); root.update_idletasks(); root.destroy()"
       - name: Install solver-free GUI development environment
         run: python -m pip install ".[dev,manuals]"
       - name: Verify dependency state
