@@ -27,10 +27,10 @@
         "baseline": 856.0
       }
     ],
-      "objective": {
+    "objective": {
       "kind": "fixed_scalar",
       "wavelength_um": 1.717657785,
-      "expression_readback": "ewfd.Ttotal"
+      "expression_readback": "comp1.ewfd.Torder_0_0"
     }
   },
   "capability_probe": {
@@ -49,10 +49,10 @@
       "native_methods_readback": ["gcmma", "mma", "ipopt"]
     },
     "module_inventory_is_diagnostic_only": true,
-    "feature_execution": "unverified",
-    "objective_control_constraint_wiring": "structurally_verified_pending_native_execution",
-    "derivative_correctness": "unverified"
-    ,"wiring_probe": {
+    "feature_execution": "one_variable_native_adjoint_diagnostic_verified",
+    "objective_control_constraint_wiring": "native_one_variable_verified_pending_full_vector_gate",
+    "derivative_correctness": "one_variable_one_step_diagnostic_verified_pending_frozen_gate",
+    "wiring_probe": {
       "status": "licensed_structural_readback",
       "receipt_sha256": "3daf996cbbcfebcbd6ec8e7bba97fe5b99e697d7668549e03d90563e9946f3ff",
       "sensitivity_properties": ["gradientMethod", "pname", "punit", "initval", "scale", "optobj"],
@@ -89,10 +89,10 @@
       "public_receipt_redacted": true
     },
     "deformed_geometry_formal_gate": {
-      "status": "licensed_structural_proven_pending_native_derivative",
-      "source_revision": "6133a4adfe81deb409513758bd5d4fe2f3ee053d",
-      "receipt_sha256": "f976a47ef9f6bc263700cabe3a7ee0ca9705608c25d9fb0ecaad0f20f9db21ee",
-      "configured_copy_sha256": "d67dbac9219b2713436593f2053583d17d9bbabfb4a026e2b9632afde831b471",
+      "status": "licensed_structural_proven_with_differentiable_objective",
+      "source_revision": "740d9e3365486cff6fc68a8b173a3fd3c08e0142",
+      "receipt_sha256": "c3782f971cbb9f525e746de37765d31a18b983502f8a9645c2f9854f1390ff2e",
+      "configured_copy_sha256": "cd9227cbf731ae0b944375551bb67b3522d787b72a1a7d9b355134a85ba95693",
       "failed_default_selection_receipt_sha256": "c5129459f38cf79a64fe49785aca6f96f8492a4fcb1c8e561d5702d6164559aa",
       "failed_default_selection_disposition": "reproduced_uneditable_default_selection",
       "mapping": "fixed_topology_deformed_geometry",
@@ -103,14 +103,48 @@
       "parameter_binding": ["patch_length_x", "patch_length_y"],
       "variable_value_types": ["real", "real"],
       "gradient_method_readback": "adjoint",
-      "objective_expression_readback": "ewfd.Ttotal",
+      "objective_expression_readback": "comp1.ewfd.Torder_0_0",
       "variable_order_readback": ["patch_length_x", "patch_length_y"],
-      "caller_budget": {"cores": 14, "max_commit_fraction": 0.75},
       "save_reload": true,
       "source_unchanged": true,
       "native_solve_executed": false,
       "cleanup_verified": true,
       "public_receipt_redacted": true
+    },
+    "native_execution_diagnostics": {
+      "status": "one_variable_one_step_verified_pending_full_s5_gate",
+      "superseded_objective": {
+        "expression": "ewfd.Ttotal",
+        "disposition": "valid_forward_evidence_but_undefined_in_native_adjoint_objective_scope",
+        "result_sha256": "5239a3d8e70f8f0f1994545b10781aada40ee0dbb7098cee55c80ca94f0e2c0e"
+      },
+      "accepted_objective": {
+        "expression": "comp1.ewfd.Torder_0_0",
+        "forward_value": 0.1597643259578559
+      },
+      "generated_identity": {
+        "primal_solution": "sol1",
+        "sensitivity_solution": "sol2",
+        "parametric_wrapper": "sol3",
+        "derivative_dataset": "dset2",
+        "derivative_dataset_solution": "sol2"
+      },
+      "derivative": {
+        "variable": "patch_length_x",
+        "raw_expression": "fsens(patch_length_x)",
+        "accepted_expression": "real(fsens(patch_length_x))",
+        "unit": "1/m",
+        "native_real": -4088999.1648458783,
+        "native_imaginary": 2057941.545668528,
+        "central_difference_relative_step": 0.01,
+        "central_difference": -4065801.3178009675,
+        "relative_error": 0.005673233500350969
+      },
+      "native_result_sha256": "936cc804059628a65c25351f9be9d72706899ce92db3d4cc28c1262b26306f71",
+      "finite_difference_result_sha256": "ee288d5acb4acbe441c80e98dc991dc7c3032a8310c6842e4ff5e8fd99607f0a",
+      "durable_points_sha256": "e12559d6b03471197384eb2d17358072302994a5fef7ea64464c1273207f597a",
+      "source_unchanged": true,
+      "cleanup_verified": true
     }
   },
   "method_policy": {
@@ -127,5 +161,5 @@
     "client_clear_succeeded": true,
     "solver_residue_observed": false
   },
-  "support_state": "licensed_structural_proven_pending_native_derivative"
+  "support_state": "one_variable_native_diagnostic_verified_pending_full_s5_gate"
 }
