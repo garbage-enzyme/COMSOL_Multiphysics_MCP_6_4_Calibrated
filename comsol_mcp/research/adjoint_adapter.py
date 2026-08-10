@@ -395,10 +395,6 @@ def configure_native_adjoint(
             raise ValueError("Optimization feature type readback mismatch")
         optimization_readback = {
             "optmethod": _scalar(optimization, "optmethod", normalized_optimizer["method"]),
-            "movelimitactive": _scalar(optimization, "movelimitactive", "on"),
-            "movelimit": _scalar(
-                optimization, "movelimit", f"{normalized_optimizer['move_limit']:.17g}"
-            ),
             "pname": _array(optimization, "pname", values["names"]),
             "punit": _array(optimization, "punit", values["units"]),
             "initval": _array(optimization, "initval", values["values"]),

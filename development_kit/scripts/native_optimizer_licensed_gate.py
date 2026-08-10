@@ -42,6 +42,30 @@ def _objective(model, expression: str) -> float:
     return float(value)
 
 
+def _configure_solver_move_limit(model, study, move_limit: float) -> dict:
+    study.createAutoSequences("sol")
+    matches = []
+    solutions = model.java.sol()
+    for solution_tag in [str(item) for item in list(solutions.tags())]:
+        solution = model.java.sol(solution_tag)
+        features = solution.feature()
+        for feature_tag in [str(item) for item in list(features.tags())]:
+            feature = solution.feature(feature_tag)
+            if str(feature.getType()) == "Optimization":
+                matches.append((solution_tag, feature_tag, feature))
+    if len(matches) != 1:
+        raise ValueError("native optimization solver identity is ambiguous")
+    solution_tag, feature_tag, feature = matches[0]
+    feature.set("movelimitactive", "on")
+    feature.set("movelimit", f"{move_limit:.17g}")
+    return {
+        "solution_tag": solution_tag,
+        "feature_tag": feature_tag,
+        "movelimitactive": str(feature.getString("movelimitactive")),
+        "movelimit": str(feature.getString("movelimit")),
+    }
+
+
 def run(args: argparse.Namespace) -> dict:
     spec = structural._spec(args)
     source_before = structural._sha(spec["source"])
@@ -89,6 +113,9 @@ def run(args: argparse.Namespace) -> dict:
             optimization.set("maxiter", str(spec["optimizer"]["budget"]["max_iterations"]))
         except Exception:
             pass
+        receipt["solver_move_limit"] = _configure_solver_move_limit(
+            model, std2, spec["optimizer"]["move_limit"]
+        )
         if time.monotonic() - started > spec["optimizer"]["budget"]["max_wall_time_seconds"]:
             raise TimeoutError("native optimizer wall budget exhausted before optimization")
         std2.run()

@@ -117,8 +117,6 @@ def test_adapter_configures_fixed_nodes_and_canonicalizes_units():
     assert receipt["sensitivity"]["punit"]["readback"] == ["m"]
     assert receipt["sensitivity"]["valuetype"]["readback"] == ["real"]
     assert receipt["optimization"]["optmethod"]["readback"] == "gcmma"
-    assert receipt["optimization"]["movelimitactive"]["readback"] == "on"
-    assert receipt["optimization"]["movelimit"]["readback"] == "0.10000000000000001"
     assert backend.study_tags() == ["std1", "std2"]
 
 
