@@ -49,9 +49,9 @@
       "native_methods_readback": ["gcmma", "mma", "ipopt"]
     },
     "module_inventory_is_diagnostic_only": true,
-    "feature_execution": "one_variable_native_adjoint_diagnostic_verified",
-    "objective_control_constraint_wiring": "native_one_variable_verified_pending_full_vector_gate",
-    "derivative_correctness": "one_variable_one_step_diagnostic_verified_pending_frozen_gate",
+    "feature_execution": "full_vector_native_adjoint_verified",
+    "objective_control_constraint_wiring": "native_full_vector_verified",
+    "derivative_correctness": "native_full_vector_verified_pending_frozen_fd_gate",
     "wiring_probe": {
       "status": "licensed_structural_readback",
       "receipt_sha256": "3daf996cbbcfebcbd6ec8e7bba97fe5b99e697d7668549e03d90563e9946f3ff",
@@ -145,6 +145,24 @@
       "durable_points_sha256": "e12559d6b03471197384eb2d17358072302994a5fef7ea64464c1273207f597a",
       "source_unchanged": true,
       "cleanup_verified": true
+    },
+    "native_gradient_formal_gate": {
+      "status": "full_vector_native_verified_pending_finite_difference",
+      "source_revision": "b330deb6298cb036cb6668429019baf7f6af8f0f",
+      "one_variable_receipt_sha256": "877bcfc61be1fd48b7804cb94757bd404a44fad0d2df22b7c2e147cf418022c4",
+      "full_vector_receipt_sha256": "a0d8f8971b72db7c7cc1a8e48682467452c4b0a5ceaf646e5e33414c0a8923e3",
+      "objective_expression": "comp1.ewfd.Torder_0_0",
+      "objective_value": 0.15976432595785572,
+      "variable_order": ["patch_length_x", "patch_length_y"],
+      "native_gradient": [-4088999.164846509, 1400064.2164403256],
+      "native_units": ["1/m", "1/m"],
+      "raw_imaginary_components": [2057941.5456679892, -761329.5875855108],
+      "generated_solutions": ["sol1", "sol2", "sol3"],
+      "derivative_dataset": {"dataset": "dset2", "solution": "sol2"},
+      "wavelength_expression": "1.717657785e-6[m]",
+      "source_unchanged": true,
+      "cleanup_verified": true,
+      "solver_residue_observed": false
     }
   },
   "method_policy": {
@@ -161,5 +179,5 @@
     "client_clear_succeeded": true,
     "solver_residue_observed": false
   },
-  "support_state": "one_variable_native_diagnostic_verified_pending_full_s5_gate"
+  "support_state": "full_vector_native_verified_pending_finite_difference_gate"
 }

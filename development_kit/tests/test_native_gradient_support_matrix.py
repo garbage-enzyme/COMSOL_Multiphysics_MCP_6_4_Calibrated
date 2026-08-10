@@ -24,7 +24,7 @@ def test_native_gradient_matrix_is_redacted_and_binds_the_live_probe_boundary():
     ]
     assert matrix["capability_probe"]["module_inventory_is_diagnostic_only"] is True
     assert matrix["capability_probe"]["feature_execution"] == (
-        "one_variable_native_adjoint_diagnostic_verified"
+        "full_vector_native_adjoint_verified"
     )
     assert matrix["capability_probe"]["wiring_probe"]["status"] == "licensed_structural_readback"
     assert matrix["capability_probe"]["wiring_probe"]["solve_executed"] is False
@@ -54,6 +54,15 @@ def test_native_gradient_matrix_is_redacted_and_binds_the_live_probe_boundary():
     assert execution["derivative"]["relative_error"] < 0.01
     assert execution["source_unchanged"] is True
     assert execution["cleanup_verified"] is True
+    formal = matrix["capability_probe"]["native_gradient_formal_gate"]
+    assert formal["status"] == "full_vector_native_verified_pending_finite_difference"
+    assert formal["variable_order"] == ["patch_length_x", "patch_length_y"]
+    assert formal["native_gradient"][0] < 0.0 < formal["native_gradient"][1]
+    assert formal["generated_solutions"] == ["sol1", "sol2", "sol3"]
+    assert formal["derivative_dataset"] == {"dataset": "dset2", "solution": "sol2"}
+    assert formal["source_unchanged"] is True
+    assert formal["cleanup_verified"] is True
+    assert formal["solver_residue_observed"] is False
     assert matrix["method_policy"]["accepted_lane"] == "adjoint"
     assert matrix["method_policy"]["global_optimality_claim"] is False
     assert matrix["probe_receipts"]["full_receipts_retained_locally"] is True
