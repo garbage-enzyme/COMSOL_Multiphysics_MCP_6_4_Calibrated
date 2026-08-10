@@ -8,7 +8,7 @@ MIM with LayeredMaterialLink approach:
 Test with eps=2.1 first, then Drude.
 """
 import mph, jpype, sys, time
-from _paths import recipe_output_dir
+from _paths import parse_recipe_cores, recipe_output_dir
 from _mim_safety import (
     bind_wavelength_step,
     require_interface_boundaries,
@@ -29,7 +29,7 @@ def jarr(v, d=jpype.JDouble): return jpype.JArray(d)(v)
 Px=0.6e-6; Py=0.6e-6; t_al2o3=30e-9; H_air=0.83e-6; t_au=30e-9
 wl0 = 5e-6; eps_test = "2.1"  # simple dielectric first
 
-client = mph.Client(cores=4, version='6.4')
+client = mph.Client(cores=parse_recipe_cores(), version='6.4')
 print('Connected', client.version, flush=True)
 m = client.create('MIM_lml'); jm = m.java
 

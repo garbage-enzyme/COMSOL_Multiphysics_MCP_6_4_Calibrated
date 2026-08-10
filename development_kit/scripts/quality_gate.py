@@ -45,6 +45,9 @@ LINT_TARGETS = (
     "comsol_mcp/jobs/thermo_optomechanical_replay_rows.py",
     "comsol_mcp/jobs/thermo_optomechanical_replay_runner.py",
     "comsol_mcp/jobs/thermo_optomechanical_replay_worker.py",
+    "comsol_mcp/jobs/adjoint_optimization.py",
+    "comsol_mcp/jobs/adjoint_optimization_worker.py",
+    "comsol_mcp/jobs/native_adjoint_runtime.py",
     "comsol_mcp/knowledge/lexical_build_worker.py",
     "comsol_mcp/research",
     "comsol_mcp/standalone",
@@ -116,6 +119,9 @@ MYPY_GROUPS = (
         "comsol_mcp/jobs/thermo_optomechanical_replay_rows.py",
         "comsol_mcp/jobs/thermo_optomechanical_replay_runner.py",
         "comsol_mcp/jobs/thermo_optomechanical_replay_worker.py",
+        "comsol_mcp/jobs/adjoint_optimization.py",
+        "comsol_mcp/jobs/adjoint_optimization_worker.py",
+        "comsol_mcp/jobs/native_adjoint_runtime.py",
         "comsol_mcp/tools/acoustics_pde.py",
         "comsol_mcp/tools/catalog.py",
         "comsol_mcp/tools/configuration.py",
@@ -137,8 +143,8 @@ MYPY_GROUPS = (
     ),
 )
 PRODUCTION_ROOTS = ("comsol_mcp", "src")
-LINT_EXCLUSIONS_SHA256 = "c3306e6115cbe533a5317054ce1af85cab33bff2147ec1b7feff990cf4ed9fe8"
-MYPY_EXCLUSIONS_SHA256 = "8d5b4a970ff2235f0dd3ba3bafc1827d8e6b27975127bac9c221fcf07ae2f7db"
+LINT_EXCLUSIONS_SHA256 = "9c684049c1f735122b0a6218aa8dfec3a47877500288994f0a172ab4718ca4c1"
+MYPY_EXCLUSIONS_SHA256 = "3c4115179fd2052ea94b6f69a4e517e5ff4a9daea93dc06d620cb181cad4233a"
 PARALLEL_TEST_WORKERS = 4
 SERIAL_TEST_TARGETS = ("development_kit/tests/test_control_plane_startup.py",)
 WINDOWS_GATE_ROOT_MAX_CHARS = 32

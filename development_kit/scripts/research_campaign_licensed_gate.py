@@ -58,7 +58,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--tree-audit", type=Path, required=True)
     parser.add_argument("--mode", choices=("feasible", "impossible"), required=True)
     parser.add_argument("--budget", type=int, default=32)
-    parser.add_argument("--cores", type=int, default=4)
+    parser.add_argument("--cores", type=int, required=True)
     parser.add_argument("--dry-run", action="store_true")
     return parser
 

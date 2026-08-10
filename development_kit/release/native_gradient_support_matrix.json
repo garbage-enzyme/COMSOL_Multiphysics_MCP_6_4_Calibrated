@@ -1,0 +1,258 @@
+{
+  "schema_name": "comsol_mcp.native_gradient_support_matrix",
+  "schema_version": "1.0.0",
+  "release_boundary": "alpha7.1",
+  "runtime": {
+    "comsol_version": "6.4",
+    "comsol_build": "6.4.0.293",
+    "mph_version": "1.3.1",
+    "required_physics": "Wave Optics",
+    "required_entitlement": "Optimization"
+  },
+  "fixture": {
+    "adapter_id": "periodic_mim_patch_v1",
+    "variables": [
+      {
+        "variable_id": "patch_length_x",
+        "unit": "nm",
+        "lower": 642.0,
+        "upper": 1070.0,
+        "baseline": 856.0
+      },
+      {
+        "variable_id": "patch_length_y",
+        "unit": "nm",
+        "lower": 642.0,
+        "upper": 1070.0,
+        "baseline": 856.0
+      }
+    ],
+    "objective": {
+      "kind": "fixed_scalar",
+      "wavelength_um": 1.717657785,
+      "expression_readback": "comp1.ewfd.Torder_0_0"
+    }
+  },
+  "capability_probe": {
+    "sensitivity": {
+      "feature_type": "Sensitivity",
+      "gradient_method_allowed": ["adjoint", "forward"],
+      "gradient_method_readback": {"adjoint": true, "forward": true},
+      "save_reload_readback": "adjoint"
+    },
+    "optimization_features": {
+      "types_created_and_reloaded": [
+        "Optimization",
+        "ShapeOptimization",
+        "TopologyOptimization"
+      ],
+      "native_methods_readback": ["gcmma", "mma", "ipopt"]
+    },
+    "module_inventory_is_diagnostic_only": true,
+    "feature_execution": "full_vector_native_adjoint_verified",
+    "objective_control_constraint_wiring": "native_full_vector_verified",
+    "derivative_correctness": "gradient_validated",
+    "wiring_probe": {
+      "status": "licensed_structural_readback",
+      "receipt_sha256": "3daf996cbbcfebcbd6ec8e7bba97fe5b99e697d7668549e03d90563e9946f3ff",
+      "sensitivity_properties": ["gradientMethod", "pname", "punit", "initval", "scale", "optobj"],
+      "optimization_properties": ["optmethod", "pname", "punit", "initval", "scale", "lbound", "ubound", "optobj", "nsolvemax"],
+      "unit_readback": "requested_nm_canonicalized_to_m",
+      "save_reload": true,
+      "solve_executed": false
+    },
+    "trusted_adapter_probe": {
+      "status": "superseded_direct_geometry_binding",
+      "receipt_sha256": "73c0bd8b31f1164b2b05f45bfe3b98ac0c959686589b881b2ea6b8c0d82a85d6",
+      "source_sha256": "3862d52d2ebcac7c7ab9e2470d2d0e75d7bbf407d771b20c0560cee143351ac6",
+      "source_unchanged": true,
+      "parameter_binding": ["patch_length_x", "patch_length_y"],
+      "objective_expression_readback": "ewfd.Ttotal",
+      "gradient_method_readback": "adjoint",
+      "save_reload": true,
+      "cleanup_verified": true,
+      "native_solve_executed": false
+    },
+    "formal_licensed_gate": {
+      "status": "superseded_direct_geometry_binding",
+      "source_revision": "cd867bcd45ef6fa391fedb6e5f52fddfe438e64c",
+      "receipt_sha256": "013e23acea334879def98cdb2443524c02433127807309c406326c0fbe088391",
+      "configured_copy_sha256": "ca1c397629f8315bcba35cb8c57b05c9d7a61976bc73e962632f22c0c6a006fb",
+      "optimizer_method_readback": "gcmma",
+      "gradient_method_readback": "adjoint",
+      "objective_expression_readback": "ewfd.Ttotal",
+      "variable_order_readback": ["patch_length_x", "patch_length_y"],
+      "save_reload": true,
+      "source_unchanged": true,
+      "native_solve_executed": false,
+      "cleanup_verified": true,
+      "public_receipt_redacted": true
+    },
+    "deformed_geometry_formal_gate": {
+      "status": "licensed_structural_proven_with_differentiable_objective",
+      "source_revision": "740d9e3365486cff6fc68a8b173a3fd3c08e0142",
+      "receipt_sha256": "c3782f971cbb9f525e746de37765d31a18b983502f8a9645c2f9854f1390ff2e",
+      "configured_copy_sha256": "cd9227cbf731ae0b944375551bb67b3522d787b72a1a7d9b355134a85ba95693",
+      "failed_default_selection_receipt_sha256": "c5129459f38cf79a64fe49785aca6f96f8492a4fcb1c8e561d5702d6164559aa",
+      "failed_default_selection_disposition": "reproduced_uneditable_default_selection",
+      "mapping": "fixed_topology_deformed_geometry",
+      "physics_type": "DeformedGeometry",
+      "free_domains": [1, 2, 3],
+      "fixed_outer_boundaries": [1, 2, 3, 4, 5, 7, 8, 9, 16, 17],
+      "patch_boundaries": [10, 11, 12, 13, 14, 15],
+      "parameter_binding": ["patch_length_x", "patch_length_y"],
+      "variable_value_types": ["real", "real"],
+      "gradient_method_readback": "adjoint",
+      "objective_expression_readback": "comp1.ewfd.Torder_0_0",
+      "variable_order_readback": ["patch_length_x", "patch_length_y"],
+      "save_reload": true,
+      "source_unchanged": true,
+      "native_solve_executed": false,
+      "cleanup_verified": true,
+      "public_receipt_redacted": true
+    },
+    "native_execution_diagnostics": {
+      "status": "one_variable_one_step_verified_pending_full_s5_gate",
+      "superseded_objective": {
+        "expression": "ewfd.Ttotal",
+        "disposition": "valid_forward_evidence_but_undefined_in_native_adjoint_objective_scope",
+        "result_sha256": "5239a3d8e70f8f0f1994545b10781aada40ee0dbb7098cee55c80ca94f0e2c0e"
+      },
+      "accepted_objective": {
+        "expression": "comp1.ewfd.Torder_0_0",
+        "forward_value": 0.1597643259578559
+      },
+      "generated_identity": {
+        "primal_solution": "sol1",
+        "sensitivity_solution": "sol2",
+        "parametric_wrapper": "sol3",
+        "derivative_dataset": "dset2",
+        "derivative_dataset_solution": "sol2"
+      },
+      "derivative": {
+        "variable": "patch_length_x",
+        "raw_expression": "fsens(patch_length_x)",
+        "accepted_expression": "real(fsens(patch_length_x))",
+        "unit": "1/m",
+        "native_real": -4088999.1648458783,
+        "native_imaginary": 2057941.545668528,
+        "central_difference_relative_step": 0.01,
+        "central_difference": -4065801.3178009675,
+        "relative_error": 0.005673233500350969
+      },
+      "native_result_sha256": "936cc804059628a65c25351f9be9d72706899ce92db3d4cc28c1262b26306f71",
+      "finite_difference_result_sha256": "ee288d5acb4acbe441c80e98dc991dc7c3032a8310c6842e4ff5e8fd99607f0a",
+      "durable_points_sha256": "e12559d6b03471197384eb2d17358072302994a5fef7ea64464c1273207f597a",
+      "source_unchanged": true,
+      "cleanup_verified": true
+    },
+    "native_gradient_formal_gate": {
+      "status": "gradient_validated_native_fd_directional",
+      "source_revision": "b330deb6298cb036cb6668429019baf7f6af8f0f",
+      "one_variable_receipt_sha256": "877bcfc61be1fd48b7804cb94757bd404a44fad0d2df22b7c2e147cf418022c4",
+      "full_vector_receipt_sha256": "a0d8f8971b72db7c7cc1a8e48682467452c4b0a5ceaf646e5e33414c0a8923e3",
+      "objective_expression": "comp1.ewfd.Torder_0_0",
+      "objective_value": 0.15976432595785572,
+      "variable_order": ["patch_length_x", "patch_length_y"],
+      "native_gradient": [-4088999.164846509, 1400064.2164403256],
+      "native_units": ["1/m", "1/m"],
+      "raw_imaginary_components": [2057941.5456679892, -761329.5875855108],
+      "generated_solutions": ["sol1", "sol2", "sol3"],
+      "derivative_dataset": {"dataset": "dset2", "solution": "sol2"},
+      "wavelength_expression": "1.717657785e-6[m]",
+      "source_unchanged": true,
+      "cleanup_verified": true,
+      "solver_residue_observed": false,
+      "finite_difference": {
+        "source_revision": "102297813bca9a7a4ba73c08f54025252f63d0ad",
+        "receipt_sha256": "3dd0b52e96f8d2e0b6d4c3cb2ddc5647b1173090f0b61faa7a4ce99f5b77802b",
+        "durable_points_sha256": "13dd2926bad162686296116fd65042072331b68c8068e805cc88e08ebf24700e",
+        "relative_steps": [0.01, 0.003, 0.001],
+        "completed_points": 12,
+        "selected_gradient": [-4081302.230208976, 1525524.1628184253],
+        "selected_relative_errors": [0.001882351726482184, 0.08224055012430015],
+        "step_sensitivity": [0.0037908817740210793, 0.00033228976575665203],
+        "cosine_similarity": 0.9996131146201941,
+        "all_signs_agree": true,
+        "relative_error_limit": 0.1,
+        "cosine_floor": 0.9,
+        "source_unchanged": true,
+        "cleanup_verified": true,
+        "solver_residue_observed": false
+      },
+      "directional": {
+        "source_revision": "cf1ba5f1386f7d7bfefdf9bb4d0b228cb3a15ec4",
+        "receipt_sha256": "19b5a2cfa37bfe55c3a9ee39fce9a39cf464e0b15e7b8d47d56e5aebd98fd1c4",
+        "durable_points_sha256": "8328a0905a02f9c305d3e97dd603a17d8ba446f01f92271aed558569c99c248b",
+        "direction_seed": 71004,
+        "direction": [-0.7643971630704898, -0.6447456685312334],
+        "relative_step": 0.001,
+        "native_prediction_1_per_m": 2222934.0221907985,
+        "observed_1_per_m": 2135896.859008276,
+        "relative_error": 0.03915418195666631,
+        "sign_agreement": true,
+        "source_unchanged": true,
+        "cleanup_verified": true,
+        "solver_residue_observed": false
+      }
+    },
+    "native_optimizer_formal_gate": {
+      "status": "bounded_native_optimizer_with_fresh_forward_verified",
+      "source_revision": "d0c3944e2b33a06486ea443dce05865c546a93f1",
+      "receipt_sha256": "18ae99cda8c02971c3b91d1a3050e2f9cc923e0c4b9fd05080b7343017474a37",
+      "method": "gcmma",
+      "objective_direction": "maximization",
+      "objective_expression": "comp1.ewfd.Torder_0_0",
+      "baseline_objective": 0.15976432595785578,
+      "optimizer_objective": 0.6073564279842112,
+      "fresh_forward_objective": 0.6073564279842113,
+      "fresh_forward_delta": 0.44759210202635547,
+      "final_variables_si": [7.534384077471197e-7, 9.269533016793313e-7],
+      "variable_order": ["patch_length_x", "patch_length_y"],
+      "max_iterations": 2,
+      "max_solves": 20,
+      "move_limit": 0.1,
+      "remesh": {
+        "explicit_rebuild": true,
+        "element_count": 19808,
+        "minimum_quality": 0.2155,
+        "mean_quality": 0.6775,
+        "quality_measure": "volcircum"
+      },
+      "physical_evidence": {
+        "reflectance": 0.4062471222118139,
+        "transmittance": 0.6073564279842113,
+        "absorption": -0.013603550196023233,
+        "closure": 1.000000000000002,
+        "wavelength_m": 1.717657785e-6,
+        "branch_disposition": "single_fixed_state_no_continuation_claim",
+        "robustness_disposition": "multi_state_deferred_to_alpha7_2",
+        "negative_absorption_disposition": "raw_port_evidence_without_passivity_claim"
+      },
+      "source_unchanged": true,
+      "cleanup_verified": true,
+      "same_budget_mma_comparison": {
+        "status": "rejected_fresh_forward_mismatch",
+        "receipt_sha256": "d2ccc420b71eda657719d5821a79600c2136a82133aea2248f0f3b31496efba2",
+        "optimizer_objective": 2.818323179896832e19,
+        "fresh_forward_objective": 0.006920588319683022,
+        "fresh_forward_delta": -0.15284373763817274
+      }
+    }
+  },
+  "method_policy": {
+    "accepted_lane": "adjoint",
+    "forward_role": "diagnostic_cross_check_only",
+    "optimizer_choice": "gcmma_after_same_budget_fresh_forward_comparison",
+    "global_optimality_claim": false
+  },
+  "probe_receipts": {
+    "sensitivity_receipt_sha256": "9d6dcfbc8e9612cd68f085186ff10744ad6508b712fb2347e1073a1ea8aa84d0",
+    "optimization_receipt_sha256": "a3d448e5c46c6d117602117c0529185739feb7c7a95705ed1352b94c6ba8dfd1",
+    "full_receipts_retained_locally": true,
+    "public_materials_redacted": true,
+    "client_clear_succeeded": true,
+    "solver_residue_observed": false
+  },
+  "support_state": "native_optimizer_finalist_validated"
+}

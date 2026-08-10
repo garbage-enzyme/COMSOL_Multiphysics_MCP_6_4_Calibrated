@@ -22,6 +22,7 @@ from src.tools.periodic_mesh_audit import (
     collect_periodic_mesh_audit,
     run_clone_mesh_smoke,
 )
+from development_kit.tests.integration.acceptance_resources import required_acceptance_cores
 
 
 def _owned_model_path(artifact_dir: Path, *, lease_acquired: bool) -> Path:
@@ -136,7 +137,7 @@ def main() -> None:
         broken_path = _owned_model_path(artifact_dir, lease_acquired=True)
         import mph
 
-        client = mph.Client(cores=1)
+        client = mph.Client(cores=required_acceptance_cores(), version="6.4")
         source_model = client.load(str(source_path))
         component_tag = _first_tag(source_model.java.component().tags(), "comp1")
         if component_tag is None:

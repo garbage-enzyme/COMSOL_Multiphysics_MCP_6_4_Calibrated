@@ -5,7 +5,7 @@
 [![CI](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/actions/workflows/ci.yml)
 [![Python 3.14](https://img.shields.io/badge/python-3.14-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
-![Release: 0.7.0](https://img.shields.io/badge/release-0.7.0-blue)
+![Release: 0.7.1](https://img.shields.io/badge/release-0.7.1-blue)
 ![Status: alpha](https://img.shields.io/badge/status-alpha-red)
 [![GitHub stars](https://img.shields.io/github/stars/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated?style=social)](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/stargazers)
 
@@ -64,7 +64,7 @@ acceptance 报告应至少包含不启动 COMSOL 的 `initialize`、实时 `list
 `capabilities` 回读，并把 licensed start/solve/cleanup 覆盖单独标注。已安装工具界面
 以实时 discovery 为准，不以文档中复制的数量为准。
 
-`0.7.0` 继续以保守方式使用 MCP Python SDK `2.0.x` 运行基座。工具、profile、schema
+`0.7.1` 继续以保守方式使用 MCP Python SDK `2.0.x` 运行基座。工具、profile、schema
 和 stdio 配置仍保持已接受的旧协议兼容应用合同；本版本不会让 client opt in MCP
 `2026-07-28` 的 multi-round-trip request、cache hint、subscription 或 Tasks extension。
 
@@ -81,6 +81,11 @@ server 内强制执行的 ownership 和 validation 检查提供。
   精确类型和属性白名单的原子边界批量配置。
 - **安全的求解器所有权。** ASCII 路径租约、进程身份核验、外部客户端检测、状态和预检可避免意外启动并发 COMSOL 客户端。
 - **持久化后台任务。** 分段扫描和自适应光谱表征在独立 worker 中执行，具有不可变规格、原子状态、经 `fsync` 的证据行、检查点、校验后的恢复，以及已验证的同主机取消能力。可复用的[本地启动器](launcher/README_CN.md)为项目驱动提供相同的逐点运行方式。
+- **有界原生伴随优化（实验性）。** `adjoint_optimization` 持久化任务仅支持一个
+  allowlist 固定拓扑周期 MIM adapter，并使用已验证的 COMSOL 原生梯度与 GCMMA。
+  每次请求必须显式声明 cores、solve/iteration/wall/commit/disk/review budgets；
+  接受的结果会绑定 move limit、solution/dataset 身份、重建网格后的独立 forward
+  证据和不可变源模型。它不代表通用 CAD、多状态鲁棒优化、拓扑优化或全局最优声明。
 - **无需 Python 的独立执行。** 原生 Windows x64 启动器保留三层结构：本机已安装并
   授权的 COMSOL 6.4、由 COMSOL 编译的 Java 单点驱动，以及启动器 EXE。目标机不需要
   Python、Conda、MPh、JPype 或另装 Java；COMSOL 本身仍然必需，项目不会打包或替代它。

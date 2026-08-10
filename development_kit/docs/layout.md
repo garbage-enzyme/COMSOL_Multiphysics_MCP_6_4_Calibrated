@@ -90,6 +90,7 @@ models are intentionally absent.
 - `development_kit/release/vulnerability_allowlist.json` — This file records exact reviewed vulnerabilities with mandatory expiry dates.
 - `development_kit/release/dependency_license_review.json` — This file records accepted license metadata for every declared runtime dependency.
 - `development_kit/release/research_optimizer_dependency_review.json` — This file freezes the uncertainty-aware optimizer dependency decision and isolation gates.
+- `development_kit/release/native_gradient_support_matrix.json` — This redacted matrix records the alpha7.1 licensed native-gradient and bounded optimizer validation boundary.
 - `development_kit/release/coverage_policy.json` — This file records the non-decreasing global coverage floor and owned per-file safety targets.
 - `development_kit/release/planning_code_allowlist.json` — This file freezes historical planning-code matches by path, count, and hash.
 - `development_kit/release/integration_fixtures/manifest.json` — This file inventories sanitized integration contracts and their canonical hashes.
@@ -113,6 +114,11 @@ models are intentionally absent.
 - `development_kit/scripts/generate_release_lock.py` — This script generates the complete hashed Windows Python release lock.
 - `development_kit/scripts/installed_package_probe.py` — This script verifies installed discovery, schemas, profiles, and deployment identity without COMSOL startup.
 - `development_kit/scripts/installed_stdio_probe.py` — This script verifies the installed console entry point over real MCP stdio transport.
+- `development_kit/scripts/native_adjoint_licensed_gate.py` — This repository-only alpha7.1 gate applies the trusted native adjoint structure on an immutable derived model and emits separate path-redacted and private receipts.
+- `development_kit/scripts/native_gradient_licensed_gate.py` — This repository-only licensed runner executes one-variable or full-vector native adjoint derivatives, freezes all wavelength controls, validates generated solution/dataset identities, and emits bounded public/private receipts.
+- `development_kit/scripts/native_gradient_fd_licensed_gate.py` — This repository-only licensed runner performs fresh-model three-step central finite-difference validation for every native-gradient component with durable point rows and independent error checks.
+- `development_kit/scripts/native_gradient_directional_licensed_gate.py` — This repository-only licensed runner validates the full native gradient with an independently solved deterministic two-variable directional perturbation and durable point rows.
+- `development_kit/scripts/native_optimizer_licensed_gate.py` — This repository-only licensed runner enforces caller-declared native solver budgets, objective direction, move limits, explicit dataset identities, and fresh-forward finalist validation.
 - `development_kit/scripts/research_adapter_template_probe.py` — This repository-only licensed probe launches the current source tree with isolated settings, audits one immutable COMSOL template read-only over serial stdio, and emits separate path-redacted and private receipts.
 - `development_kit/scripts/research_adapter_gate_server.py` — This repository-only candidate server adds two private calls that bind the trusted periodic-MIM backend to a provenance-tracked derived model during the licensed S4 gate.
 - `development_kit/scripts/research_adapter_licensed_gate.py` — This isolated serial stdio gate applies one trusted MIM candidate to a derived copy, collects one-point Wave Optics evidence, and proves source and solver cleanup.
@@ -136,6 +142,11 @@ models are intentionally absent.
 ## Test fixtures and frozen snapshots
 
 - `development_kit/tests/__init__.py` — This file marks the dependency and process test suite as a Python package.
+- `development_kit/tests/test_native_adjoint_licensed_gate.py` — This module verifies the alpha7.1 licensed gate's solver-free preflight, caller-declared budgets, host admission, and redacted receipt boundary.
+- `development_kit/tests/test_native_gradient_licensed_gate.py` — This module verifies the native-gradient runner's solver-free modes, caller-relative commit admission, exact derivative identity, redaction, and cleanup contracts.
+- `development_kit/tests/test_native_gradient_fd_licensed_gate.py` — This module verifies the finite-difference runner's frozen step policy, exact native receipt binding, bounded point count, and solver-free behavior.
+- `development_kit/tests/test_native_gradient_directional_licensed_gate.py` — This module verifies deterministic normalized direction generation, bounded directional steps, exact native identity binding, and solver-free preview.
+- `development_kit/tests/test_native_optimizer_licensed_gate.py` — This module verifies solver-node iteration and move limits, finite objective-series normalization, and the absence of host-resource defaults.
 - `development_kit/tests/fixtures/semantic_retrieval_evaluation.json` — This fixture contains the frozen judged semantic retrieval queries.
 - `development_kit/tests/snapshots/baseline_tool_schemas.json` — This snapshot freezes the baseline public tool schemas.
 - `development_kit/tests/snapshots/full_tool_schemas.json` — This snapshot freezes every registered public tool schema.
@@ -145,6 +156,7 @@ models are intentionally absent.
 ## Licensed and subprocess integration tests
 
 - `development_kit/tests/integration/__init__.py` — This file marks explicit subprocess-isolated integration tests as a Python package.
+- `development_kit/tests/integration/acceptance_resources.py` — This module requires caller-declared host resources for licensed integration entry points.
 - `development_kit/tests/integration/probes/acoustics_pde.py` — This probe validates analytical Pressure Acoustics and Poisson PDE models plus the typed interface surface.
 - `development_kit/tests/integration/clientapi_property_acceptance.py` — This gate checks constrained clientapi property round trips without solving.
 - `development_kit/tests/integration/coordinator_claim_kill.py` — This helper stops only the exact coordinator process after a durable claim.
@@ -174,6 +186,7 @@ models are intentionally absent.
 ## Dependency and process tests
 
 - `development_kit/tests/test_acceptance_cleanup.py` — This module tests licensed-gate cleanup accounting without starting COMSOL.
+- `development_kit/tests/test_acceptance_resources.py` — This module tests caller-declared, live-bounded licensed acceptance resources.
 - `development_kit/tests/test_acoustic_duct_recipe.py` — This module tests staging, cleanup ordering, collision refusal, and sharing retries for the acoustic recipe.
 - `development_kit/tests/test_acoustics_pde.py` — This module tests bounded Acoustics and mathematical PDE interface and boundary transactions without COMSOL.
 - `development_kit/tests/test_artifact_chain.py` — This module tests bounded solver-free artifact hash-chain verification.
@@ -284,8 +297,13 @@ models are intentionally absent.
 - `development_kit/tests/test_research_robustness.py` — This module tests bounded axis perturbations, exact evidence coverage, and optional robustness thresholds.
 - `development_kit/tests/test_research_tools.py` — This module tests real dispatch for experimental solver-free campaign compilation and robustness planning.
 - `development_kit/tests/test_research_adapters.py` — This module tests exact trusted-template manifests, closed x/y mutation scope, and live-tree drift rejection.
+- `development_kit/tests/test_adjoint_adapter.py` — This module tests native adapter readback, unit canonicalization, and rollback on mutation failure.
+- `development_kit/tests/test_derivative_support.py` — This module tests strict derivative-support identities, variable mappings, objective contracts, and immutable normalization.
+- `development_kit/tests/test_gradient_contracts.py` — This module tests caller-budgeted native optimizer and exact gradient-row contracts.
+- `development_kit/tests/test_gradient_validation.py` — This module tests independent finite-difference, sign, cosine, directional, and step-sensitivity gradient checks.
 - `development_kit/tests/test_research_adaptive_acquisition.py` — This module tests bounded deterministic GP/EI selection, invalid evidence rejection, and heavy-import isolation.
 - `development_kit/tests/test_research_optimizers.py` — This module tests deterministic ask/tell/checkpoint replay, mixed domains, and dependency isolation.
+- `development_kit/tests/test_native_gradient_support_matrix.py` — This module validates the redacted alpha7.1 native-gradient capability matrix and receipt boundary.
 - `development_kit/tests/test_resource_admission.py` — This module tests resource policy normalization, telemetry, and admission decisions.
 - `development_kit/tests/test_results.py` — This module tests result normalization without a COMSOL client.
 - `development_kit/tests/test_runtime_paths.py` — This module tests shared ASCII-safe runtime and lease paths.
@@ -339,6 +357,8 @@ models are intentionally absent.
 - `development_kit/tests/test_validation_collectors.py` — This module tests adapters from validation points to evidence collectors.
 - `development_kit/tests/test_validation_matrix.py` — This module tests bounded validation-matrix specification normalization.
 - `development_kit/tests/test_validation_rows.py` — This module tests append-only validation row identity and durability.
+- `development_kit/tests/test_adjoint_rows.py` — This module tests crash-tail recovery, identity binding, and hash chaining for adjoint rows.
+- `development_kit/tests/test_adjoint_optimization.py` — This module tests bounded manifest expansion, source identity, and explicit resource submission for adjoint jobs.
 - `development_kit/tests/test_validation_runner.py` — This module tests the solver-independent validation point loop.
 - `development_kit/tests/test_validation_worker.py` — This module tests detached validation worker boundaries and cleanup.
 - `development_kit/tests/test_visual_review_contracts.py` — This module tests host-confirmed visual-review requests and receipts.
@@ -351,6 +371,9 @@ models are intentionally absent.
 - `comsol_mcp/research/__init__.py` — This file exports solver-free bounded research contracts.
 - `comsol_mcp/research/contracts.py` — This module normalizes versioned research goals and design spaces with deterministic fingerprints.
 - `comsol_mcp/research/compiler.py` — This module compiles approved goals and design spaces into frozen campaign manifests without a solver.
+- `comsol_mcp/research/derivative_support.py` — This module defines solver-free native-derivative support, variable, objective, and constraint identities.
+- `comsol_mcp/research/gradient_contracts.py` — This module defines immutable gradient rows and caller-budgeted native optimizer identities.
+- `comsol_mcp/research/gradient_validation.py` — This module compares native gradients with caller-supplied central or one-sided finite-difference evidence.
 - `comsol_mcp/research/workflow.py` — This module normalizes passive cited workflow capsules, explicit assumptions, review, and baseline readiness.
 - `comsol_mcp/research/materials.py` — This module normalizes provenance-bound material catalogs and derives approval and strict-verification sets.
 - `comsol_mcp/research/records.py` — This module normalizes canonical candidate records and point identities before side effects.
@@ -363,6 +386,9 @@ models are intentionally absent.
 - `comsol_mcp/research/objectives.py` — This module computes deterministic objective receipts from exact immutable evidence fields.
 - `comsol_mcp/research/robustness.py` — This module creates bounded finalist perturbation matrices and threshold-separated robustness summaries.
 - `comsol_mcp/research/adapters.py` — This module freezes trusted structure-family manifests and exact live-tree audit receipts.
+- `comsol_mcp/research/adjoint_adapter.py` — This module configures the fixed periodic-MIM native Sensitivity/Optimization feature pair with failure-atomic rollback.
+- `comsol_mcp/jobs/native_adjoint_runtime.py` — This module executes the licensed fixed-topology GCMMA lane with caller budgets, explicit datasets, remesh, fresh-forward, and physical evidence.
+- `comsol_mcp/jobs/adjoint_optimization_worker.py` — This module dispatches synthetic lifecycle fixtures or the licensed durable native-adjoint runtime and persists validated hash-chained terminal rows.
 - `comsol_mcp/research/adaptive_acquisition.py` — This explicitly loaded module performs bounded Gaussian-process posterior and expected-improvement selection without affecting ordinary discovery imports.
 - `comsol_mcp/research/optimizers.py` — This module provides the backend-neutral optimizer protocol and deterministic grid, random, and Latin-hypercube baselines.
 
@@ -477,6 +503,8 @@ models are intentionally absent.
 - `comsol_mcp/jobs/validation_collectors.py` — This module adapts validation points to physical evidence collectors.
 - `comsol_mcp/jobs/validation_matrix.py` — This module normalizes bounded durable validation-matrix specifications.
 - `comsol_mcp/jobs/validation_rows.py` — This module writes and validates append-only durable validation rows.
+- `comsol_mcp/jobs/adjoint_rows.py` — This module writes and validates hash-chained iteration, gradient, and trial rows for adjoint optimization.
+- `comsol_mcp/jobs/adjoint_optimization.py` — This module validates and expands hash-bound adjoint optimization submission manifests.
 - `comsol_mcp/jobs/validation_runner.py` — This module runs the solver-independent validation point loop.
 - `comsol_mcp/jobs/validation_worker.py` — This module runs one detached physical-validation matrix worker.
 - `comsol_mcp/jobs/worker.py` — This module runs one detached staged COMSOL sweep worker.

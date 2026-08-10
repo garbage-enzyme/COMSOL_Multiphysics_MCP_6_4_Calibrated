@@ -15,6 +15,7 @@ from typing import Any, Callable, Protocol
 
 import psutil
 
+from .adjoint_optimization import expand_adjoint_optimization_manifest
 from .attached_backend import normalize_attached_execution_backend
 from .branch_continuation_campaign import normalize_branch_continuation_campaign_spec
 from .convergence_campaign import normalize_convergence_campaign_spec
@@ -278,6 +279,7 @@ def _worker_module(job_type: str) -> str:
         "convergence_campaign": "comsol_mcp.jobs.convergence_campaign_worker",
         "branch_continuation_campaign": "comsol_mcp.jobs.branch_continuation_campaign_worker",
         "thermo_optomechanical_replay": "comsol_mcp.jobs.thermo_optomechanical_replay_worker",
+        "adjoint_optimization": "comsol_mcp.jobs.adjoint_optimization_worker",
     }
     try:
         return modules[job_type]
@@ -298,6 +300,8 @@ def _point_count(spec: dict[str, Any]) -> int:
         return int(spec["maximum_total_points"])
     if spec["job_type"] == "thermo_optomechanical_replay":
         return int(spec["declared_stage_count"])
+    if spec["job_type"] == "adjoint_optimization":
+        return int(spec["optimizer"]["budget"]["max_iterations"])
     return len(spec["parameter_values"])
 
 
@@ -338,6 +342,8 @@ class JobManager:
             spec = normalize_branch_continuation_campaign_spec(raw_spec)
         elif job_type == "thermo_optomechanical_replay":
             spec = normalize_thermo_optomechanical_replay_spec(raw_spec)
+        elif job_type == "adjoint_optimization":
+            spec = expand_adjoint_optimization_manifest(raw_spec)
         else:
             spec = validate_staged_sweep_spec(raw_spec)
         worker_module = _worker_module(spec["job_type"])
@@ -347,6 +353,7 @@ class JobManager:
             "convergence_campaign",
             "branch_continuation_campaign",
             "thermo_optomechanical_replay",
+            "adjoint_optimization",
         }
         if spec["job_type"] in duplicate_job_types:
             with JobLock(self.store.root / ".submit.lock"):
@@ -837,6 +844,7 @@ class JobManager:
             "convergence_campaign",
             "branch_continuation_campaign",
             "thermo_optomechanical_replay",
+            "adjoint_optimization",
         }:
             if self._preflight is None and spec.get("execution_backend") is None:
                 from comsol_mcp.tools.ownership import SolverOwnership

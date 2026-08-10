@@ -13,6 +13,7 @@ from .adapters import (
     normalize_structure_adapter_manifest,
     normalize_structure_tree_audit,
 )
+from .adjoint_adapter import ADJOINT_ADAPTER_ID, ADJOINT_ADAPTER_VERSION, configure_native_adjoint
 from .compiler import (
     CAMPAIGN_MANIFEST_SCHEMA_NAME,
     CAMPAIGN_MANIFEST_SCHEMA_VERSION,
@@ -32,10 +33,38 @@ from .decisions import (
     DECISION_RECORD_SCHEMA_VERSION,
     normalize_decision_record,
 )
+from .derivative_support import (
+    DERIVATIVE_CONSTRAINT_SCHEMA_NAME,
+    DERIVATIVE_CONSTRAINT_SCHEMA_VERSION,
+    DERIVATIVE_OBJECTIVE_SCHEMA_NAME,
+    DERIVATIVE_OBJECTIVE_SCHEMA_VERSION,
+    DERIVATIVE_SUPPORT_SCHEMA_NAME,
+    DERIVATIVE_SUPPORT_SCHEMA_VERSION,
+    DERIVATIVE_VARIABLE_SCHEMA_NAME,
+    DERIVATIVE_VARIABLE_SCHEMA_VERSION,
+    normalize_derivative_constraint,
+    normalize_derivative_objective,
+    normalize_derivative_support,
+    normalize_derivative_variable,
+)
 from .evaluations import (
     EVALUATION_RECORD_SCHEMA_NAME,
     EVALUATION_RECORD_SCHEMA_VERSION,
     normalize_evaluation_record,
+)
+from .gradient_contracts import (
+    GRADIENT_RECORD_SCHEMA_NAME,
+    GRADIENT_RECORD_SCHEMA_VERSION,
+    NATIVE_OPTIMIZER_SCHEMA_NAME,
+    NATIVE_OPTIMIZER_SCHEMA_VERSION,
+    normalize_gradient_record,
+    normalize_native_optimizer_configuration,
+)
+from .gradient_validation import (
+    GRADIENT_CHECK_SCHEMA_NAME,
+    GRADIENT_CHECK_SCHEMA_VERSION,
+    compare_directional_gradient,
+    compare_gradient,
 )
 from .journal import (
     RESEARCH_JOURNAL_RECORD_SCHEMA_NAME,
@@ -86,6 +115,8 @@ from .workflow import (
 
 __all__ = [
     "ClientapiPeriodicMimPatchBackend",
+    "ADJOINT_ADAPTER_ID",
+    "ADJOINT_ADAPTER_VERSION",
     "STRUCTURE_ADAPTER_APPLICATION_SCHEMA_NAME",
     "STRUCTURE_ADAPTER_APPLICATION_SCHEMA_VERSION",
     "STRUCTURE_ADAPTER_MANIFEST_SCHEMA_NAME",
@@ -98,8 +129,22 @@ __all__ = [
     "EVALUATION_RECORD_SCHEMA_VERSION",
     "DECISION_RECORD_SCHEMA_NAME",
     "DECISION_RECORD_SCHEMA_VERSION",
+    "DERIVATIVE_CONSTRAINT_SCHEMA_NAME",
+    "DERIVATIVE_CONSTRAINT_SCHEMA_VERSION",
+    "DERIVATIVE_OBJECTIVE_SCHEMA_NAME",
+    "DERIVATIVE_OBJECTIVE_SCHEMA_VERSION",
+    "DERIVATIVE_SUPPORT_SCHEMA_NAME",
+    "DERIVATIVE_SUPPORT_SCHEMA_VERSION",
+    "DERIVATIVE_VARIABLE_SCHEMA_NAME",
+    "DERIVATIVE_VARIABLE_SCHEMA_VERSION",
     "MATERIAL_CATALOG_SCHEMA_NAME",
     "MATERIAL_CATALOG_SCHEMA_VERSION",
+    "GRADIENT_RECORD_SCHEMA_NAME",
+    "GRADIENT_RECORD_SCHEMA_VERSION",
+    "GRADIENT_CHECK_SCHEMA_NAME",
+    "GRADIENT_CHECK_SCHEMA_VERSION",
+    "NATIVE_OPTIMIZER_SCHEMA_NAME",
+    "NATIVE_OPTIMIZER_SCHEMA_VERSION",
     "OPTIMIZER_CHECKPOINT_SCHEMA_NAME",
     "OPTIMIZER_CHECKPOINT_SCHEMA_VERSION",
     "OPTIMIZER_EXPLANATION_SCHEMA_NAME",
@@ -132,8 +177,16 @@ __all__ = [
     "normalize_structure_adapter_manifest",
     "normalize_structure_tree_audit",
     "normalize_decision_record",
+    "normalize_derivative_constraint",
+    "normalize_derivative_objective",
+    "normalize_derivative_support",
+    "normalize_derivative_variable",
     "normalize_evaluation_record",
     "normalize_material_catalog",
+    "normalize_gradient_record",
+    "normalize_native_optimizer_configuration",
+    "compare_gradient",
+    "compare_directional_gradient",
     "normalize_optimizer_checkpoint",
     "normalize_portfolio",
     "normalize_candidate_record",
@@ -144,4 +197,5 @@ __all__ = [
     "relative_bounds",
     "score_objectives",
     "compile_campaign_manifest",
+    "configure_native_adjoint",
 ]

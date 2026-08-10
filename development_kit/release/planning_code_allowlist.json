@@ -30,7 +30,7 @@
     {
       "path": "development_kit/tests/test_reference_power_runner.py",
       "match_count": 1,
-      "match_sha256": "889c3681d4dfc267c82b2063ec91ac4d7b3d4035e54ce9fc1cc9662f93c04b69"
+      "match_sha256": "c2a059a61d78c10183bf272c537b05eee94352b5da622889d7f0f52d08314bb2"
     },
     {
       "path": "development_kit/tests/test_schema_registry.py",

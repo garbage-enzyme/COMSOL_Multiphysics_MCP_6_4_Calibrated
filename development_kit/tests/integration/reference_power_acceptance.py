@@ -692,7 +692,7 @@ def main() -> int:
     parser.add_argument("--output", type=Path)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--confirm", choices=["RUN_REAL_COMSOL"])
-    parser.add_argument("--cores", type=int)
+    parser.add_argument("--cores", type=int, required=True)
     parser.add_argument("--timeout-seconds", type=float)
     parser.add_argument("--worker", action="store_true")
     parser.add_argument("--worker-result", type=Path)

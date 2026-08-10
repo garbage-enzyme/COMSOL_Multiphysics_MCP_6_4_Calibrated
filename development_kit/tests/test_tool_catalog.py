@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import subprocess
 import sys
 from copy import deepcopy
@@ -334,6 +335,14 @@ def test_embedded_knowledge_uses_one_bounded_regular_file_read(tmp_path, monkeyp
     )
 
     assert embedded_module._load_knowledge_file("mph_api") == "bounded guidance"
+
+
+def test_embedded_prompts_do_not_assume_a_windows_drive():
+    prompt_root = Path(__file__).parents[2] / "comsol_mcp" / "knowledge" / "prompts"
+
+    for prompt in prompt_root.glob("*.md"):
+        text = prompt.read_text(encoding="utf-8")
+        assert re.search(r"(?<![A-Za-z])[A-Za-z]:[\\/]", text) is None, prompt.name
 
 
 @pytest.mark.parametrize(

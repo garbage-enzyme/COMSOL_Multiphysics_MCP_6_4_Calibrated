@@ -236,6 +236,46 @@ class TestVersioning:
 class TestSessionManager:
     """Tests for session manager (without actual COMSOL)."""
 
+    def test_start_requires_caller_declared_cores_and_version(self, monkeypatch):
+        import src.tools.session as session_module
+
+        sm = session_module.SessionManager()
+        monkeypatch.setattr(session_module.os, "cpu_count", lambda: 8)
+
+        missing_cores = sm.start()
+        missing_version = sm.start(cores=2)
+
+        assert missing_cores["error"]["code"] == "cores_required"
+        assert missing_version["error"]["code"] == "version_required"
+        assert sm.get_status()["starting"] is False
+
+    def test_start_checks_declared_cores_against_live_capacity(self, monkeypatch):
+        import src.tools.session as session_module
+
+        sm = session_module.SessionManager()
+        monkeypatch.setattr(session_module.os, "cpu_count", lambda: 4)
+
+        result = sm.start(cores=5, version="6.4")
+
+        assert result["error"] == {
+            "code": "cores_exceed_host_capacity",
+            "message": "caller-declared cores exceed the currently measured host capacity",
+            "requested": 5,
+            "available": 4,
+        }
+        assert sm.get_status()["starting"] is False
+
+    def test_start_fails_closed_when_live_cpu_capacity_is_unavailable(self, monkeypatch):
+        import src.tools.session as session_module
+
+        sm = session_module.SessionManager()
+        monkeypatch.setattr(session_module.os, "cpu_count", lambda: None)
+
+        result = sm.start(cores=1, version="6.4")
+
+        assert result["error"]["code"] == "cpu_capacity_unavailable"
+        assert sm.get_status()["starting"] is False
+
     def test_session_manager_singleton(self):
         from src.tools.session import SessionManager
 
@@ -297,7 +337,7 @@ class TestSessionManager:
         monkeypatch.setattr(session_module.mph, "Client", create_client)
         monkeypatch.setattr(session_module.mph_session, "client", None)
 
-        assert sm.start(cores=2)["starting"] is True
+        assert sm.start(cores=2, version="6.4")["starting"] is True
         assert entered.wait(timeout=10)
         assert get_session_status() == {"connected": False, "starting": True}
 
@@ -617,7 +657,7 @@ class TestSessionManager:
         monkeypatch.setattr(session_module.mph, "Client", create_client)
         monkeypatch.setattr(session_module.mph_session, "client", None)
 
-        started = sm.start(cores=2)
+        started = sm.start(cores=2, version="6.4")
         assert started["starting"] is True
         assert created.wait(timeout=2)
 
@@ -662,7 +702,7 @@ class TestSessionManager:
         monkeypatch.setattr(session_module.mph_session, "client", None)
 
         with ThreadPoolExecutor(max_workers=8) as executor:
-            results = list(executor.map(lambda _: sm.start(cores=2), range(16)))
+            results = list(executor.map(lambda _: sm.start(cores=2, version="6.4"), range(16)))
 
         assert created.wait(timeout=2)
         assert all(result.get("starting") for result in results)
@@ -702,7 +742,7 @@ class TestSessionManager:
         monkeypatch.setattr(session_module.mph, "Client", create_client)
         monkeypatch.setattr(session_module.mph_session, "client", None)
 
-        assert sm.start()["starting"] is True
+        assert sm.start(cores=2, version="6.4")["starting"] is True
         assert created.wait(timeout=2)
 
         reset = sm.reset()
@@ -739,7 +779,7 @@ class TestSessionManager:
         sm._models = {"model": model}
         sm._current_model = "model"
 
-        result = sm.start(cores=8)
+        result = sm.start(cores=8, version="6.4")
 
         assert result["success"] is True
         assert result["connected"] is True
@@ -793,12 +833,12 @@ class TestSessionManager:
         monkeypatch.setattr(session_module.mph, "Client", fail_client)
         monkeypatch.setattr(session_module.mph_session, "client", None)
 
-        first = sm.start(cores=2)
+        first = sm.start(cores=2, version="6.4")
         assert first["starting"] is True
         sm._start_thread.join(timeout=2)
         assert not sm._start_thread.is_alive()
 
-        blocked = sm.start(cores=4)
+        blocked = sm.start(cores=4, version="6.4")
 
         assert blocked["success"] is False
         assert blocked["reset_required"] is True
@@ -835,7 +875,7 @@ class TestSessionManager:
         monkeypatch.setattr(session_module.mph, "Client", create_client)
         monkeypatch.setattr(session_module.mph_session, "client", None)
 
-        result = sm.start(cores=2)
+        result = sm.start(cores=2, version="6.4")
 
         assert result["starting"] is True
         assert not entered.is_set()
@@ -901,7 +941,7 @@ class TestSessionManager:
         monkeypatch.setattr(session_module.mph_session, "client", None)
 
         started_at = time.perf_counter()
-        result = sm.start(cores=2)
+        result = sm.start(cores=2, version="6.4")
         response_elapsed = time.perf_counter() - started_at
         assert result["starting"] is True
         assert response_elapsed < 0.2
@@ -942,7 +982,7 @@ class TestSessionManager:
         monkeypatch.setattr(session_module.mph, "Client", create_client)
         monkeypatch.setattr(session_module.mph_session, "client", None)
 
-        assert sm.start(cores=2)["starting"] is True
+        assert sm.start(cores=2, version="6.4")["starting"] is True
         sm._start_thread.join(timeout=1)
         first_client = sm.client
         assert first_client is clients[0]
@@ -952,7 +992,7 @@ class TestSessionManager:
         assert first_disconnect["client_reusable"] is True
         assert sm.client is None
 
-        assert sm.start(cores=2)["starting"] is True
+        assert sm.start(cores=2, version="6.4")["starting"] is True
         sm._start_thread.join(timeout=1)
         assert sm.client is first_client
         assert len(clients) == 1
@@ -973,7 +1013,7 @@ class TestSessionManager:
         monkeypatch.setattr(session_module.mph, "Client", fail_client)
         monkeypatch.setattr(session_module.mph_session, "client", None)
 
-        assert sm.start()["starting"] is True
+        assert sm.start(cores=2, version="6.4")["starting"] is True
         sm._start_thread.join(timeout=1)
 
         status = sm.get_status()
@@ -1013,7 +1053,7 @@ class TestSessionManager:
         monkeypatch.setattr(session_module.mph, "Client", create_client)
         monkeypatch.setattr(session_module.mph_session, "client", None)
 
-        assert sm.start()["starting"] is True
+        assert sm.start(cores=2, version="6.4")["starting"] is True
         assert entered.wait(timeout=3)
         sm._mark_start_timeout(sm._start_attempt_id)
 
@@ -1366,7 +1406,7 @@ class TestSessionManager:
 
         sm._ownership = RefusingOwnership()
         monkeypatch.setattr(session_module.mph, "Client", create_client)
-        result = sm.start(cores=2)
+        result = sm.start(cores=2, version="6.4")
         sm._start_thread.join(timeout=1)
 
         assert result["success"] is True
@@ -1399,7 +1439,7 @@ class TestSessionManager:
         monkeypatch.setattr(session_module.mph, "Client", create_client)
         monkeypatch.setattr(session_module.mph_session, "client", None)
 
-        assert sm.start()["starting"] is True
+        assert sm.start(cores=2, version="6.4")["starting"] is True
         sm._start_thread.join(timeout=3)
 
         status = sm.get_status()

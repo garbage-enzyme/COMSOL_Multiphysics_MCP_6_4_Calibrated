@@ -13,10 +13,6 @@ def _is_windows() -> bool:
     return os.name == "nt"
 
 
-def _has_d_runtime_drive() -> bool:
-    return _is_windows() and Path("D:/").exists()
-
-
 def default_runtime_dir(environ: dict[str, str] | None = None) -> Path:
     """Return the common root for leases and durable jobs.
 
@@ -41,12 +37,16 @@ def default_runtime_dir(environ: dict[str, str] | None = None) -> Path:
     if configured_jobs:
         return Path(configured_jobs).parent
 
-    if _has_d_runtime_drive():
-        return Path("D:/comsol_runtime")
     if _is_windows():
-        program_data = Path(environment.get("PROGRAMDATA", "C:/ProgramData"))
-        return program_data / "comsol_mcp_runtime"
-    return Path(tempfile.gettempdir()) / "comsol_runtime"
+        program_data = environment.get("PROGRAMDATA")
+        if program_data:
+            return Path(program_data) / "comsol_mcp_runtime"
+    temporary = Path(tempfile.gettempdir())
+    if not str(temporary).isascii():
+        raise RuntimeError(
+            "no configured ASCII runtime root is available; set COMSOL_MCP_RUNTIME_DIR"
+        )
+    return temporary / "comsol_runtime"
 
 
 def default_jobs_root(environ: dict[str, str] | None = None) -> Path:

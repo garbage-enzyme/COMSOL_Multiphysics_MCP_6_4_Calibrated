@@ -905,7 +905,7 @@ def run_gate(output: Path, *, cores: int) -> dict[str, Any]:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--cores", type=int, default=2)
+    parser.add_argument("--cores", type=int, required=True)
     parser.add_argument("--confirm", required=True)
     args = parser.parse_args()
     if args.confirm != "RUN_REAL_COMSOL":

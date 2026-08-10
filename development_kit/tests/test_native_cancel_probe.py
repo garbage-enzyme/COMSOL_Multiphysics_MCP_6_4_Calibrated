@@ -406,9 +406,10 @@ def test_probe_main_reports_client_cleanup_failure(monkeypatch, capsys):
             raise RuntimeError("clear failed")
 
     monkeypatch.delenv(acceptance_test.NATIVE_CANCEL_PROBE_MODEL_ENV, raising=False)
+    monkeypatch.setenv("COMSOL_MCP_ACCEPTANCE_CORES", "1")
     monkeypatch.setattr(acceptance_probe, "discover_environment", lambda: {"backend": {}})
     monkeypatch.setattr(acceptance_probe, "reflect_candidate_signatures", lambda: {})
-    monkeypatch.setattr(acceptance_probe.mph, "Client", lambda cores: FakeClient())
+    monkeypatch.setattr(acceptance_probe.mph, "Client", lambda **_kwargs: FakeClient())
 
     returncode = acceptance_probe.main()
     manifest = json.loads(capsys.readouterr().out)

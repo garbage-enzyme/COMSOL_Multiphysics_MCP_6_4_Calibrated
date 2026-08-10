@@ -24,6 +24,7 @@ from src.jobs.resource_admission import (
 )
 from src.jobs.store import TERMINAL_STATES
 from src.tools.ownership import SolverOwnership
+from development_kit.tests.integration.acceptance_resources import required_acceptance_cores
 
 
 def _timeout_text(value: str | bytes | None) -> str:
@@ -184,7 +185,7 @@ def _build_source(runtime: Path, source_path: Path, mesh_receipt: Path) -> None:
         claim = owner.acquire(mode="resource_mesh_builder", model_path=str(source_path))
         if not claim.get("acquired"):
             raise RuntimeError(f"solver lease unavailable: {claim}")
-        client = mph.Client(cores=1, version="6.4")
+        client = mph.Client(cores=required_acceptance_cores(), version="6.4")
         model = client.create("ResourceAdmissionSource")
         jm = model.java
         for name, value in (

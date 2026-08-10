@@ -153,12 +153,25 @@ def test_capability_job_and_manual_tools_attach_bounded_evidence(runtime_root, m
         ]
     )
     monkeypatch.setattr(lexical_module, "run_bounded", lambda *_args, **_kwargs: next(responses))
+    monkeypatch.setenv(lexical_module.LEXICAL_DOCS_INDEX_ENV, str(runtime_root / "manual.sqlite"))
     manual_server = MCPServer("control-plane-manuals")
     lexical_module.register_lexical_manual_tools(manual_server)
     busy = manual_server._tool_manager._tools["manual_search"].fn("query")
     timeout = manual_server._tool_manager._tools["manual_read_pages"].fn("manual.pdf", [1])
     assert busy["control_plane"]["outcome"] == "busy"
     assert timeout["control_plane"]["outcome"] == "timeout"
+
+
+def test_unconfigured_manual_tools_attach_error_evidence(monkeypatch):
+    monkeypatch.delenv(lexical_module.LEXICAL_DOCS_INDEX_ENV, raising=False)
+    manual_server = MCPServer("control-plane-unconfigured-manuals")
+    lexical_module.register_lexical_manual_tools(manual_server)
+
+    result = manual_server._tool_manager._tools["manual_search"].fn("query")
+
+    assert result["error_type"] == "ConfigurationError"
+    assert result["control_plane"]["operation"] == "manual_search"
+    assert result["control_plane"]["outcome"] == "error"
 
 
 def test_slow_inventory_does_not_starve_durable_cancel_request(runtime_root, monkeypatch):
@@ -245,6 +258,7 @@ def test_concurrent_wrappers_record_bounded_latency_and_overload_outcomes(
         return {"success": False, "error_type": "TimeoutError", "error": "deadline exceeded"}
 
     monkeypatch.setattr(lexical_module, "run_bounded", manual_response)
+    monkeypatch.setenv(lexical_module.LEXICAL_DOCS_INDEX_ENV, str(runtime_root / "manual.sqlite"))
     manual_server = MCPServer("control-plane-concurrent-manual")
     lexical_module.register_lexical_manual_tools(manual_server)
 

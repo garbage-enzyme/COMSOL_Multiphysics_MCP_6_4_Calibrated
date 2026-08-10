@@ -39,7 +39,7 @@ python -m pip install "mph>=1.3.1,<1.4"
 import mph
 
 # Standalone client. Starting COMSOL can take 30-90 seconds.
-client = mph.Client(cores=1, version="6.4")
+client = mph.Client(cores=caller_declared_cores, version=caller_declared_version)
 ```
 
 In a fresh Python process, the alternative direct Server connection is:
@@ -165,7 +165,7 @@ For an absolute Unicode destination, save through the Java clientapi:
 ```python
 from pathlib import Path
 
-destination = Path(r"C:\path\to\derived_model.mph").resolve()
+destination = Path(caller_declared_derived_path).resolve()
 model.java.save(str(destination))
 ```
 

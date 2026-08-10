@@ -2,11 +2,22 @@
 
 from __future__ import annotations
 
+import argparse
 import os
 import tempfile
 from pathlib import Path
 
 from src.settings import settings_environment
+
+
+def parse_recipe_cores(argv: list[str] | None = None) -> int:
+    """Require a caller-selected positive core count for a standalone recipe."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--cores", type=int, required=True)
+    cores = parser.parse_args(argv).cores
+    if isinstance(cores, bool) or cores < 1:
+        parser.error("--cores must be a positive integer selected for this host")
+    return cores
 
 
 def _is_reparse_point(path: Path) -> bool:
@@ -59,12 +70,10 @@ def _create_recipe_output(root: str | Path) -> Path:
 
 def _automatic_output_roots(environment: dict[str, str]) -> tuple[Path, ...]:
     candidates = []
-    if os.name == "nt" and Path("D:/").exists():
-        candidates.append(Path("D:/comsol_runtime"))
     if os.name == "nt":
-        candidates.append(
-            Path(environment.get("PROGRAMDATA", "C:/ProgramData")) / "comsol_mcp_runtime"
-        )
+        program_data = environment.get("PROGRAMDATA")
+        if program_data:
+            candidates.append(Path(program_data) / "comsol_mcp_runtime")
     candidates.append(Path(tempfile.gettempdir()) / "comsol_runtime")
     return tuple(candidates)
 

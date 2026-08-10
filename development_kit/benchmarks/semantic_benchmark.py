@@ -171,9 +171,11 @@ def _index_identity(index_path: Path) -> dict[str, Any]:
 def evaluate_lexical_baseline(
     evaluation: Mapping[str, Any],
     *,
-    index_path: str | Path = DEFAULT_INDEX_PATH,
+    index_path: str | Path | None = DEFAULT_INDEX_PATH,
 ) -> dict[str, Any]:
     """Evaluate the current deterministic BM25 implementation at ranks 5 and 10."""
+    if index_path is None:
+        raise ValueError("index_path must be explicitly configured")
     frozen = validate_evaluation_set(evaluation)
     index = _index_identity(Path(index_path))
     if frozen["corpus_fingerprint"] != index["corpus_fingerprint"]:
@@ -264,7 +266,7 @@ def _atomic_write_json(path: Path, value: Any) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--evaluation", default=str(DEFAULT_EVALUATION_PATH))
-    parser.add_argument("--index", default=str(DEFAULT_INDEX_PATH))
+    parser.add_argument("--index", required=True)
     parser.add_argument("--output")
     args = parser.parse_args()
     evaluation = json.loads(Path(args.evaluation).read_text(encoding="utf-8"))
