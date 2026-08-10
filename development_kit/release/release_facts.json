@@ -1,7 +1,7 @@
 {
   "schema_name": "comsol_mcp.release_facts",
   "schema_version": "1.0.0",
-  "package_version": "0.7.0",
+  "package_version": "0.7.1",
   "tool_count": 166,
   "profiles": {
     "core": {
@@ -35,8 +35,8 @@
     }
   },
   "schema_registry": {
-    "entry_count": 109,
-    "registry_sha256": "98990e34a9dc58eb27852a369080ad118289e1444ab91ab4a4816492f84bcb32"
+    "entry_count": 110,
+    "registry_sha256": "d98595e1f1f0eef8eece0bb57526443c2946453e356de492ef259975998be712"
   },
   "identities": {
     "catalog_sha256": "8313b4a4df6491d321e2d44111ab173b0b981169db1ff59cdff4064d01421929",

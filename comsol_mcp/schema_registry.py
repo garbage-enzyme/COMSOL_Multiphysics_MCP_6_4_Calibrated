@@ -426,6 +426,11 @@ def _entries() -> list[dict[str, Any]]:
             artifact_kind="configuration",
         ),
         _entry(
+            "comsol_mcp.native_optimizer_runtime_receipt",
+            "1.0.0",
+            "comsol_mcp.jobs.native_adjoint_runtime",
+        ),
+        _entry(
             _REFERENCE_POWER_DRY_RUN_SCHEMA,
             "1.0.0",
             "comsol_mcp.evidence.reference_power_acceptance",

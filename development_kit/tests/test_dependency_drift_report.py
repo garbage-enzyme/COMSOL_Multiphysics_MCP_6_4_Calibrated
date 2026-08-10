@@ -21,7 +21,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 LOCK_DRIFTS = {
-    "annotated-types": ("0.7.0", "0.8.0"),
+    "annotated-types": ("0.7.1", "0.8.0"),
     "certifi": ("2026.6.17", "2026.7.22"),
     "cryptography": ("49.0.0", "50.0.0"),
     "matplotlib": ("3.11.0", "3.11.1"),
