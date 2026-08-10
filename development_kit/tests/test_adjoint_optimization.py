@@ -3,14 +3,18 @@
 import hashlib
 import json
 import os
+import sys
+from types import SimpleNamespace
 
 import pytest
 
+from comsol_mcp.jobs import native_adjoint_runtime
 from comsol_mcp.jobs.adjoint_optimization import (
     expand_adjoint_optimization_manifest,
     normalize_adjoint_optimization_submission,
 )
 from comsol_mcp.jobs.adjoint_optimization_worker import run as run_adjoint_worker
+from comsol_mcp.jobs.adjoint_rows import read_adjoint_rows
 from comsol_mcp.jobs.manager import JobManager
 from comsol_mcp.jobs.store import process_identity
 from development_kit.tests.test_derivative_support import _support
@@ -50,8 +54,8 @@ def _write_manifest(tmp_path):
     return envelope, source, manifest
 
 
-def test_submission_requires_explicit_ascii_manifest_and_resources(tmp_path):
-    envelope, _, _ = _write_manifest(tmp_path)
+def test_submission_requires_explicit_ascii_manifest_and_resources(ascii_tmp_path):
+    envelope, _, _ = _write_manifest(ascii_tmp_path)
     normalized = normalize_adjoint_optimization_submission(envelope)
     assert normalized["cores"] == 3
     assert normalized["resource_policy"]["host_defaults_applied"] is False
@@ -61,8 +65,8 @@ def test_submission_requires_explicit_ascii_manifest_and_resources(tmp_path):
         normalize_adjoint_optimization_submission(missing)
 
 
-def test_manifest_expansion_hashes_source_and_support_identity(tmp_path):
-    envelope, source, _ = _write_manifest(tmp_path)
+def test_manifest_expansion_hashes_source_and_support_identity(ascii_tmp_path):
+    envelope, source, _ = _write_manifest(ascii_tmp_path)
     spec = expand_adjoint_optimization_manifest(envelope)
     assert spec["source_model_sha256"] == hashlib.sha256(source.read_bytes()).hexdigest()
     assert spec["support"]["derivative_method"] == "adjoint"
@@ -73,17 +77,36 @@ def test_manifest_expansion_hashes_source_and_support_identity(tmp_path):
         expand_adjoint_optimization_manifest(changed)
 
 
-def test_manifest_rejects_source_mutation_after_submission(tmp_path):
-    envelope, source, _ = _write_manifest(tmp_path)
+def test_manifest_rejects_source_mutation_after_submission(ascii_tmp_path):
+    envelope, source, _ = _write_manifest(ascii_tmp_path)
     source.write_bytes(b"changed")
     with pytest.raises(ValueError, match="source SHA-256"):
         expand_adjoint_optimization_manifest(envelope)
 
 
-def test_durable_manager_accepts_synthetic_adjoint_discriminator(tmp_path, monkeypatch):
-    envelope, _, _ = _write_manifest(tmp_path)
+def test_manifest_rejects_unvalidated_method_or_mismatched_core_budget(ascii_tmp_path):
+    envelope, _, manifest = _write_manifest(ascii_tmp_path)
+    raw = json.loads(manifest.read_text(encoding="utf-8"))
+    raw["optimizer"]["method"] = "mma"
+    payload = json.dumps(raw, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    manifest.write_bytes(payload)
+    envelope["submission_manifest_sha256"] = hashlib.sha256(payload).hexdigest()
+    with pytest.raises(ValueError, match="only validated gcmma"):
+        expand_adjoint_optimization_manifest(envelope)
+
+    raw["optimizer"]["method"] = "gcmma"
+    raw["optimizer"]["budget"]["cores"] = 2
+    payload = json.dumps(raw, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    manifest.write_bytes(payload)
+    envelope["submission_manifest_sha256"] = hashlib.sha256(payload).hexdigest()
+    with pytest.raises(ValueError, match="budget cores"):
+        expand_adjoint_optimization_manifest(envelope)
+
+
+def test_durable_manager_accepts_synthetic_adjoint_discriminator(ascii_tmp_path, monkeypatch):
+    envelope, _, _ = _write_manifest(ascii_tmp_path)
     manager = JobManager(
-        tmp_path / "jobs",
+        ascii_tmp_path / "jobs",
         preflight=lambda **_kwargs: {"success": True, "ready": True},
     )
     monkeypatch.setattr(
@@ -108,3 +131,62 @@ def test_durable_manager_accepts_synthetic_adjoint_discriminator(tmp_path, monke
     terminal = manager.store.read_state(result["job_id"])
     assert terminal["status"] == "completed"
     assert terminal["solver_started"] is False
+
+
+def test_real_adjoint_worker_dispatches_validated_runtime_and_persists_rows(
+    ascii_tmp_path, monkeypatch
+):
+    envelope, _, manifest = _write_manifest(ascii_tmp_path)
+    raw = json.loads(manifest.read_text(encoding="utf-8"))
+    raw["synthetic_mode"] = False
+    payload = json.dumps(raw, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    manifest.write_bytes(payload)
+    envelope["submission_manifest_sha256"] = hashlib.sha256(payload).hexdigest()
+    manager = JobManager(
+        ascii_tmp_path / "jobs",
+        preflight=lambda **_kwargs: {"success": True, "ready": True},
+    )
+    monkeypatch.setattr(
+        manager, "_launch_worker", lambda _job_id, _module: process_identity(os.getpid())
+    )
+    result = manager.submit(envelope)
+
+    class Ownership:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def preflight(self, **_kwargs):
+            return {"ready": True}
+
+        def acquire(self, **_kwargs):
+            return {"success": True}
+
+        def release(self):
+            return {"success": True}
+
+    monkeypatch.setitem(
+        sys.modules,
+        "comsol_mcp.tools.ownership",
+        SimpleNamespace(SolverOwnership=Ownership),
+    )
+    monkeypatch.setattr(
+        native_adjoint_runtime,
+        "execute_native_adjoint_optimization",
+        lambda _spec, _directory: {
+            "success": True,
+            "final_variables_si": {"patch_length_x": 8.0e-7},
+            "fresh_forward_objective": 0.6,
+            "cleanup": {"source_unchanged": True, "client_clear": True},
+        },
+    )
+
+    assert run_adjoint_worker(str(manager.store.root), result["job_id"]) == 0
+    terminal = manager.store.read_state(result["job_id"])
+    rows = manager.store.job_dir(result["job_id"]) / "optimization_rows.jsonl"
+    persisted = read_adjoint_rows(
+        rows,
+        job_fingerprint=manager.store.read_spec(result["job_id"])["spec_fingerprint"],
+    )
+    assert terminal["status"] == "completed"
+    assert terminal["solver_started"] is True
+    assert [row["kind"] for row in persisted] == ["gradient", "iteration"]

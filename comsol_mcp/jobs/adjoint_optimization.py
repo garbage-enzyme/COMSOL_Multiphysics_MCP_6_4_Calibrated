@@ -132,6 +132,12 @@ def expand_adjoint_optimization_manifest(submission: object) -> dict[str, Any]:
     if support["source_identity"] != source_hash:
         raise ValueError("adjoint support source identity differs from manifest source")
     optimizer = normalize_native_optimizer_configuration(raw["optimizer"])
+    if optimizer["method"] != "gcmma":
+        raise ValueError("alpha7.1 durable native optimizer accepts only validated gcmma")
+    if optimizer["budget"]["cores"] != envelope["cores"]:
+        raise ValueError("adjoint optimizer budget cores differ from submission cores")
+    if support["comsol_version"] != envelope["version"]:
+        raise ValueError("adjoint support COMSOL version differs from submission version")
     values = raw["initial_values"]
     if not isinstance(values, list) or len(values) != len(support["variables"]):
         raise ValueError("initial_values must match the support variable count")
