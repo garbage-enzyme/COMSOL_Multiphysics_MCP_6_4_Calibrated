@@ -91,3 +91,15 @@ def test_fd_rejects_native_receipt_source_mismatch(tmp_path, gate_root):
     native.write_text(json.dumps(_native_receipt("a" * 64)), encoding="utf-8")
     with pytest.raises(ValueError, match="exact successful full-vector source"):
         gate._spec(_args(gate_root, source, manifest, audit, native))
+
+
+def test_fd_baselines_are_taken_from_si_support_values():
+    support = {
+        "variables": [
+            {"variable_id": "patch_length_x", "baseline": 8.56e-7},
+            {"variable_id": "patch_length_y", "baseline": 8.56e-7},
+        ]
+    }
+    assert gate._baseline_values(
+        support, ["patch_length_x", "patch_length_y"]
+    ) == {"patch_length_x": 8.56e-7, "patch_length_y": 8.56e-7}

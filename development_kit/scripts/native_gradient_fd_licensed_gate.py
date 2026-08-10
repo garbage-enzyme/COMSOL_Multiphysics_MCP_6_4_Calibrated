@@ -117,18 +117,21 @@ def _append(path: Path, row: dict[str, Any]) -> None:
 def _set_forward_state(model: Any, values: dict[str, float]) -> None:
     java = model.java
     study = java.study("std1")
-    sensitivity = study.feature().get("sens_a71")
-    if sensitivity is not None:
-        study.feature().remove("sens_a71")
+    study.feature().remove("sens_a71")
     sweep = study.feature("sweep1")
     wavelength = study.feature("step1")
+    for variable, value in values.items():
+        java.param().set(variable, f"{value:.17g}[m]")
     java.param().set("wl", WAVELENGTH_EXPRESSION)
     _set_vector(sweep, "pname", ["wl"])
     _set_vector(sweep, "plistarr", [WAVELENGTH_EXPRESSION])
     _set_vector(sweep, "punit", ["m"])
     wavelength.set("plist", WAVELENGTH_EXPRESSION)
-    for variable, value in values.items():
-        java.param().set(variable, f"{value:.17g}[m]")
+
+
+def _baseline_values(support: dict[str, Any], variables: list[str]) -> dict[str, float]:
+    by_id = {item["variable_id"]: item for item in support["variables"]}
+    return {variable: float(by_id[variable]["baseline"]) for variable in variables}
 
 
 def _dataset_by_tag(model: Any, tag: str) -> Any:
@@ -168,9 +171,13 @@ def _run(spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
     git = _native._git_identity()
     if not git["clean"]:
         raise RuntimeError("finite-difference gate requires a clean source tree")
-    import mph
-
     source_before = _sha(spec["source"])
+    resource_preflight = _native._resource_preflight(
+        spec["optimizer"]["budget"]["max_commit_fraction"]
+    )
+    if resource_preflight["admitted"] is not True:
+        raise RuntimeError("caller-declared commit ceiling does not admit this run")
+    import mph
     for path in (spec["base_copy"], spec["configured_copy"], spec["points"], spec["receipt"]):
         path.unlink(missing_ok=True)
     receipt: dict[str, Any] = {
@@ -185,6 +192,7 @@ def _run(spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
         "variables": spec["selected_variables"],
         "wavelength_expression": WAVELENGTH_EXPRESSION,
         "points_fsync": True,
+        "resource_preflight": resource_preflight,
         "points": [],
     }
     private = {
@@ -206,21 +214,21 @@ def _run(spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
         )
         model.java.save(str(spec["configured_copy"]), True)
         client.remove(model)
+        baseline_values = _baseline_values(support, spec["selected_variables"])
+        run_started = time.monotonic()
         for variable in spec["selected_variables"]:
-            baseline = (
-                next(
-                    item["baseline"]
-                    for item in support["variables"]
-                    if item["variable_id"] == variable
-                )
-                * 1e-9
-            )
+            baseline = baseline_values[variable]
             for relative_step in spec["steps"]:
                 delta = baseline * relative_step
                 for direction, sign in (("plus", 1.0), ("minus", -1.0)):
-                    values = {
-                        item: 856.0e-9 for item in spec["selected_variables"]
-                    }
+                    if len(receipt["points"]) >= spec["optimizer"]["budget"]["max_solves"]:
+                        raise RuntimeError("finite-difference solve budget was exhausted")
+                    if (
+                        time.monotonic() - run_started
+                        > spec["optimizer"]["budget"]["max_wall_time_seconds"]
+                    ):
+                        raise TimeoutError("finite-difference gate exceeded its wall-time budget")
+                    values = dict(baseline_values)
                     values[variable] = baseline + sign * delta
                     row = _forward_point(client, spec, values)
                     row.update(
@@ -238,7 +246,6 @@ def _run(spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
         }
         derivatives = []
         for variable in spec["selected_variables"]:
-            baseline = 856.0e-9
             native = spec["native_gradients"][variable]
             step_rows = []
             for relative_step in spec["steps"]:
