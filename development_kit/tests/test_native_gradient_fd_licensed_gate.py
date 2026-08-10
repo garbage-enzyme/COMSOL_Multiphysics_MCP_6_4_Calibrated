@@ -103,3 +103,15 @@ def test_fd_baselines_are_taken_from_si_support_values():
     assert gate._baseline_values(
         support, ["patch_length_x", "patch_length_y"]
     ) == {"patch_length_x": 8.56e-7, "patch_length_y": 8.56e-7}
+
+
+def test_forward_objective_accepts_mph_zero_dimensional_scalar(monkeypatch):
+    class Model:
+        def evaluate(self, expression, *, dataset, outer):
+            assert expression == "comp1.ewfd.Torder_0_0"
+            assert dataset == "dset1-wrapper"
+            assert outer == 1
+            return __import__("numpy").asarray(0.25)
+
+    monkeypatch.setattr(gate, "_dataset_by_tag", lambda _model, _tag: "dset1-wrapper")
+    assert gate._forward_objective(Model()) == 0.25

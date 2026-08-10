@@ -138,6 +138,18 @@ def _dataset_by_tag(model: Any, tag: str) -> Any:
     return _native._dataset_by_tag(model, tag)
 
 
+def _forward_objective(model: Any) -> float:
+    evaluated = model.evaluate(
+        "comp1.ewfd.Torder_0_0",
+        dataset=_dataset_by_tag(model, "dset1"),
+        outer=1,
+    )
+    objective = _native._complex_scalar(evaluated)
+    if abs(objective.imag) > 1e-12:
+        raise ValueError("forward objective is not real-valued")
+    return objective.real
+
+
 def _forward_point(client: Any, spec: dict[str, Any], values: dict[str, float]) -> dict[str, Any]:
     model = client.load(str(spec["configured_copy"]))
     try:
@@ -148,17 +160,9 @@ def _forward_point(client: Any, spec: dict[str, Any], values: dict[str, float]) 
         datasets = [str(item) for item in list(model.java.result().dataset().tags())]
         if "dset1" not in datasets:
             raise ValueError("forward point did not generate dset1")
-        evaluated = model.evaluate(
-            ["comp1.ewfd.Torder_0_0"],
-            dataset=_dataset_by_tag(model, "dset1"),
-            outer=1,
-        )
-        objective = _native._complex_scalar(evaluated[0])
-        if abs(objective.imag) > 1e-12:
-            raise ValueError("forward objective is not real-valued")
         return {
             "values_m": values,
-            "objective": objective.real,
+            "objective": _forward_objective(model),
             "dataset": "dset1",
             "dataset_solution": "sol1",
             "solve_elapsed_seconds": elapsed,
