@@ -218,14 +218,8 @@ def run(args: argparse.Namespace) -> dict:
             )
         )
         fresh_final = fresh_series[-1]
-        if not math.isclose(fresh_final, final, rel_tol=1e-6, abs_tol=1e-9):
-            raise ValueError("fresh forward objective differs from native optimizer result")
-        client.remove(finalist)
-        model = None
-        phase = "parameter_readback"
         receipt.update(
             {
-                "success": True,
                 "baseline_objective": baseline,
                 "baseline_objective_series": baseline_series,
                 "baseline_dataset_tag": baseline_dataset_tag,
@@ -239,6 +233,16 @@ def run(args: argparse.Namespace) -> dict:
                 "fresh_forward_delta": fresh_final - baseline,
                 "global_parameter_readback": global_parameter_readback,
                 "optimizer_dataset_tag": optimizer_dataset_tag,
+            }
+        )
+        if not math.isclose(fresh_final, final, rel_tol=1e-6, abs_tol=1e-9):
+            raise ValueError("fresh forward objective differs from native optimizer result")
+        client.remove(finalist)
+        model = None
+        phase = "parameter_readback"
+        receipt.update(
+            {
+                "success": True,
                 "elapsed_seconds": time.monotonic() - started,
                 "configured_copy_sha256": structural._sha(spec["configured_copy"]),
             }
