@@ -90,7 +90,7 @@ models are intentionally absent.
 - `development_kit/release/vulnerability_allowlist.json` — This file records exact reviewed vulnerabilities with mandatory expiry dates.
 - `development_kit/release/dependency_license_review.json` — This file records accepted license metadata for every declared runtime dependency.
 - `development_kit/release/research_optimizer_dependency_review.json` — This file freezes the uncertainty-aware optimizer dependency decision and isolation gates.
-- `development_kit/release/native_gradient_support_matrix.json` — This redacted matrix records the alpha7.1 licensed capability-probe boundary and unverified execution states.
+- `development_kit/release/native_gradient_support_matrix.json` — This redacted matrix records the alpha7.1 licensed native-gradient and bounded optimizer validation boundary.
 - `development_kit/release/coverage_policy.json` — This file records the non-decreasing global coverage floor and owned per-file safety targets.
 - `development_kit/release/planning_code_allowlist.json` — This file freezes historical planning-code matches by path, count, and hash.
 - `development_kit/release/integration_fixtures/manifest.json` — This file inventories sanitized integration contracts and their canonical hashes.
@@ -118,6 +118,7 @@ models are intentionally absent.
 - `development_kit/scripts/native_gradient_licensed_gate.py` — This repository-only licensed runner executes one-variable or full-vector native adjoint derivatives, freezes all wavelength controls, validates generated solution/dataset identities, and emits bounded public/private receipts.
 - `development_kit/scripts/native_gradient_fd_licensed_gate.py` — This repository-only licensed runner performs fresh-model three-step central finite-difference validation for every native-gradient component with durable point rows and independent error checks.
 - `development_kit/scripts/native_gradient_directional_licensed_gate.py` — This repository-only licensed runner validates the full native gradient with an independently solved deterministic two-variable directional perturbation and durable point rows.
+- `development_kit/scripts/native_optimizer_licensed_gate.py` — This repository-only licensed runner enforces caller-declared native solver budgets, objective direction, move limits, explicit dataset identities, and fresh-forward finalist validation.
 - `development_kit/scripts/research_adapter_template_probe.py` — This repository-only licensed probe launches the current source tree with isolated settings, audits one immutable COMSOL template read-only over serial stdio, and emits separate path-redacted and private receipts.
 - `development_kit/scripts/research_adapter_gate_server.py` — This repository-only candidate server adds two private calls that bind the trusted periodic-MIM backend to a provenance-tracked derived model during the licensed S4 gate.
 - `development_kit/scripts/research_adapter_licensed_gate.py` — This isolated serial stdio gate applies one trusted MIM candidate to a derived copy, collects one-point Wave Optics evidence, and proves source and solver cleanup.
@@ -145,6 +146,7 @@ models are intentionally absent.
 - `development_kit/tests/test_native_gradient_licensed_gate.py` — This module verifies the native-gradient runner's solver-free modes, caller-relative commit admission, exact derivative identity, redaction, and cleanup contracts.
 - `development_kit/tests/test_native_gradient_fd_licensed_gate.py` — This module verifies the finite-difference runner's frozen step policy, exact native receipt binding, bounded point count, and solver-free behavior.
 - `development_kit/tests/test_native_gradient_directional_licensed_gate.py` — This module verifies deterministic normalized direction generation, bounded directional steps, exact native identity binding, and solver-free preview.
+- `development_kit/tests/test_native_optimizer_licensed_gate.py` — This module verifies solver-node iteration and move limits, finite objective-series normalization, and the absence of host-resource defaults.
 - `development_kit/tests/fixtures/semantic_retrieval_evaluation.json` — This fixture contains the frozen judged semantic retrieval queries.
 - `development_kit/tests/snapshots/baseline_tool_schemas.json` — This snapshot freezes the baseline public tool schemas.
 - `development_kit/tests/snapshots/full_tool_schemas.json` — This snapshot freezes every registered public tool schema.
