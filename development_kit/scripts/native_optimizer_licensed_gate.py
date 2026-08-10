@@ -88,6 +88,16 @@ def _forward_sweep_dataset(model):
     return matches[0]
 
 
+def _mesh_statistics(model) -> dict:
+    statistics = model.java.component("comp1").mesh("mesh1").stat()
+    return {
+        "element_count": int(statistics.getNumElem()),
+        "minimum_quality": float(statistics.getMinQuality()),
+        "mean_quality": float(statistics.getMeanQuality()),
+        "quality_measure": str(statistics.getQualityMeasure()),
+    }
+
+
 def _configure_solver_move_limit(
     model, study, move_limit: float, optimizer_iterations: int
 ) -> dict:
@@ -209,6 +219,12 @@ def run(args: argparse.Namespace) -> dict:
             finalist.java.param().set(name, f"{value:.17g}[m]")
         finalist_study = finalist.java.study("std1")
         finalist_study.feature().remove("sens_a71")
+        mesh = finalist.java.component("comp1").mesh("mesh1")
+        mesh_before = _mesh_statistics(finalist)
+        mesh.run()
+        mesh_after = _mesh_statistics(finalist)
+        if mesh_after["minimum_quality"] <= 0.1:
+            raise ValueError("remeshed finalist minimum quality is not acceptable")
         finalist_study.run()
         finalist_dataset = _forward_sweep_dataset(finalist)
         finalist_dataset_tag = str(finalist_dataset.tag())
@@ -231,6 +247,11 @@ def run(args: argparse.Namespace) -> dict:
                 "fresh_forward_objective_series": fresh_series,
                 "fresh_forward_dataset_tag": finalist_dataset_tag,
                 "fresh_forward_delta": fresh_final - baseline,
+                "remesh": {
+                    "explicit_rebuild": True,
+                    "before": mesh_before,
+                    "after": mesh_after,
+                },
                 "global_parameter_readback": global_parameter_readback,
                 "optimizer_dataset_tag": optimizer_dataset_tag,
             }
