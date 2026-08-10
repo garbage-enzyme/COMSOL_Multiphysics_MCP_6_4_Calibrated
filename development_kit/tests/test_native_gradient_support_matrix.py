@@ -55,7 +55,7 @@ def test_native_gradient_matrix_is_redacted_and_binds_the_live_probe_boundary():
     assert execution["source_unchanged"] is True
     assert execution["cleanup_verified"] is True
     formal = matrix["capability_probe"]["native_gradient_formal_gate"]
-    assert formal["status"] == "full_vector_native_verified_pending_finite_difference"
+    assert formal["status"] == "full_vector_native_and_fd_verified_pending_directional"
     assert formal["variable_order"] == ["patch_length_x", "patch_length_y"]
     assert formal["native_gradient"][0] < 0.0 < formal["native_gradient"][1]
     assert formal["generated_solutions"] == ["sol1", "sol2", "sol3"]
@@ -63,6 +63,16 @@ def test_native_gradient_matrix_is_redacted_and_binds_the_live_probe_boundary():
     assert formal["source_unchanged"] is True
     assert formal["cleanup_verified"] is True
     assert formal["solver_residue_observed"] is False
+    finite_difference = formal["finite_difference"]
+    assert finite_difference["relative_steps"] == [0.01, 0.003, 0.001]
+    assert finite_difference["completed_points"] == 12
+    assert finite_difference["selected_relative_errors"][0] < 0.002
+    assert 0.08 < finite_difference["selected_relative_errors"][1] < 0.1
+    assert finite_difference["cosine_similarity"] > 0.999
+    assert finite_difference["all_signs_agree"] is True
+    assert finite_difference["source_unchanged"] is True
+    assert finite_difference["cleanup_verified"] is True
+    assert finite_difference["solver_residue_observed"] is False
     assert matrix["method_policy"]["accepted_lane"] == "adjoint"
     assert matrix["method_policy"]["global_optimality_claim"] is False
     assert matrix["probe_receipts"]["full_receipts_retained_locally"] is True
