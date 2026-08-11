@@ -122,6 +122,7 @@ models are intentionally absent.
 - `development_kit/scripts/robust_shape_adapter_licensed_gate.py` — This repository-only alpha7.2 gate creates, reloads, and failure-rolls-back trusted Deformed Geometry controls on an immutable derived periodic-MIM model without solving.
 - `development_kit/scripts/robust_gradient_ladder_licensed_gate.py` — This repository-only alpha7.2 S4 gate owns one shared lease while serial fresh processes run native, finite-difference, directional, GCMMA, and optionally explicit MMA validation with caller-only budgets.
 - `development_kit/scripts/robust_pedot_fixture.py` — This repository-only compiler audits private OX/MR CSV tensor conventions and emits a path-redacted hash-bound 24-condition acceptance manifest.
+- `development_kit/scripts/pedot_material_ownership_probe.py` — This repository-only licensed probe reads material tags, domain selections, and bounded property identities without solving or mutating the source model.
 - `development_kit/scripts/verify_robust_gradient_ladder_receipt.py` — This repository-only alpha7.2 S4 verifier independently reopens every licensed ladder receipt and log, recomputes canonical gradient and optimizer evidence, and rejects identity, ordering, budget, cleanup, fallback, or artifact drift.
 - `development_kit/scripts/research_adapter_template_probe.py` — This repository-only licensed probe launches the current source tree with isolated settings, audits one immutable COMSOL template read-only over serial stdio, and emits separate path-redacted and private receipts.
 - `development_kit/scripts/research_adapter_gate_server.py` — This repository-only candidate server adds two private calls that bind the trusted periodic-MIM backend to a provenance-tracked derived model during the licensed S4 gate.
@@ -310,6 +311,7 @@ models are intentionally absent.
 - `development_kit/tests/test_robust_gradient_acceptance.py` — This module tests joint component, cosine, sign, three-step, and directional gradient acceptance.
 - `development_kit/tests/test_robust_material_mapping.py` — This module tests diagonal optical tensor axes, source columns, time convention, and no-extrapolation identity.
 - `development_kit/tests/test_robust_pedot_fixture.py` — This module tests private-data-redacted OX/MR CSV auditing and complete 24-condition fixture compilation.
+- `development_kit/tests/test_pedot_material_ownership_probe.py` — This module tests source-bound dry run, bounded material selection/property inspection, redaction, and cleanup for the read-only licensed probe.
 - `development_kit/tests/test_robust_finalist_validation.py` — This module tests caller-owned finalist validation policy and no-fallback/no-host-default boundaries.
 - `development_kit/tests/test_robust_finalist_evidence.py` — This module tests independent finalist manufacturability, remesh, convergence, branch, off-design, and external-fidelity promotion evidence.
 - `development_kit/tests/test_robust_gradient_ladder_licensed_gate.py` — This module tests required caller budgets, startup-only admission, shared-lease sequencing, exact gradient thresholds, and explicit non-fallback MMA disposition.
