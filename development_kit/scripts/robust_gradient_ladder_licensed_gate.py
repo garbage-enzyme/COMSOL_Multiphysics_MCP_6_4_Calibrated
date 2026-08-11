@@ -8,6 +8,7 @@ import json
 import math
 import os
 import shutil
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -49,6 +50,8 @@ _GRADIENT_POLICY = {
     "require_sign": True,
     "required_relative_steps": [0.01, 0.003, 0.001],
 }
+_MAX_STAGE_RECEIPT_BYTES = 16 * 1024 * 1024
+_MAX_STAGE_FILES = 100_000
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -300,6 +303,34 @@ def _startup_admission(spec: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _bounded_tree_bytes(root: Path) -> int:
+    total = 0
+    files = 0
+    for path in root.rglob("*"):
+        information = path.lstat()
+        attributes = int(getattr(information, "st_file_attributes", 0))
+        if path.is_symlink() or attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT:
+            raise RuntimeError("licensed stage artifacts contain a reparse point")
+        if not path.is_file():
+            continue
+        files += 1
+        if files > _MAX_STAGE_FILES:
+            raise RuntimeError("licensed stage artifact count exceeds the bounded maximum")
+        total += information.st_size
+    return total
+
+
+def _stage_review_items(stage: str, receipt: dict[str, Any]) -> int:
+    if stage in {"native", "finite_difference"}:
+        rows = receipt.get("derivatives")
+        return len(rows) if isinstance(rows, list) else 0
+    if stage == "directional":
+        return 1 if "relative_error" in receipt else 0
+    if stage in {"gcmma", "mma"}:
+        return 1 if receipt.get("optimizer_method") == stage else 0
+    raise ValueError("unknown licensed ladder stage")
+
+
 def _run_child(spec: dict[str, Any], stage: str) -> dict[str, Any]:
     root = spec["child_roots"][stage]
     root.mkdir(parents=False, exist_ok=False)
@@ -323,13 +354,20 @@ def _run_child(spec: dict[str, Any], stage: str) -> dict[str, Any]:
     receipt_path = root / _RECEIPT_NAMES[stage]
     if not receipt_path.is_file():
         raise RuntimeError(f"{stage} did not publish its required receipt")
+    if receipt_path.stat().st_size > _MAX_STAGE_RECEIPT_BYTES:
+        raise RuntimeError(f"{stage} receipt exceeds the bounded byte limit")
     receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    artifact_bytes = (
+        _bounded_tree_bytes(root) + stdout_path.stat().st_size + stderr_path.stat().st_size
+    )
     return {
         "returncode": completed.returncode,
         "receipt": receipt,
         "receipt_sha256": _sha(receipt_path),
         "stdout_sha256": _sha(stdout_path),
         "stderr_sha256": _sha(stderr_path),
+        "artifact_bytes": artifact_bytes,
+        "review_items": _stage_review_items(stage, receipt),
     }
 
 
@@ -456,6 +494,11 @@ def _dry_run(spec: dict[str, Any]) -> dict[str, Any]:
                 else None
             ),
         },
+        "budget_semantics": {
+            "max_disk_bytes": "cumulative_stage_roots_and_logs_checked_after_each_stage",
+            "max_review_items": "cumulative_derivative_and_method_summary_items",
+            "stage_receipt_max_bytes": _MAX_STAGE_RECEIPT_BYTES,
+        },
         "solver_started": False,
         "filesystem_modified": False,
         "paths_included": False,
@@ -526,6 +569,8 @@ def _run(
     ownership = ownership_factory()
     lease_acquired = False
     results: dict[str, dict[str, Any]] = {}
+    artifact_bytes = 0
+    review_items = 0
     try:
         _verify_startup_ownership(ownership)
         lease = ownership.acquire(
@@ -550,13 +595,27 @@ def _run(
                 source_sha256=spec["source_sha256"],
             )
             results[stage] = result
+            artifact_bytes += result["artifact_bytes"]
+            review_items += result["review_items"]
             receipt["stage_receipts"][stage] = {
                 "receipt_sha256": result["receipt_sha256"],
                 "returncode": result["returncode"],
                 "success": result["receipt"].get("success") is True,
                 "stdout_sha256": result["stdout_sha256"],
                 "stderr_sha256": result["stderr_sha256"],
+                "artifact_bytes": result["artifact_bytes"],
+                "review_items": result["review_items"],
             }
+            receipt["budget_usage"] = {
+                "artifact_bytes": artifact_bytes,
+                "max_disk_bytes": spec["max_disk_bytes"],
+                "review_items": review_items,
+                "max_review_items": spec["max_review_items"],
+            }
+            if artifact_bytes > spec["max_disk_bytes"]:
+                raise RuntimeError("licensed ladder exceeded the caller disk budget")
+            if review_items > spec["max_review_items"]:
+                raise RuntimeError("licensed ladder exceeded the caller review-item budget")
         gradient = _gradient_checks(results)
         receipt["gradient_acceptance"] = gradient
         if not gradient["passed"]:
@@ -578,13 +637,27 @@ def _run(
                 source_sha256=spec["source_sha256"],
             )
             results[stage] = result
+            artifact_bytes += result["artifact_bytes"]
+            review_items += result["review_items"]
             receipt["stage_receipts"][stage] = {
                 "receipt_sha256": result["receipt_sha256"],
                 "returncode": result["returncode"],
                 "success": result["receipt"].get("success") is True,
                 "stdout_sha256": result["stdout_sha256"],
                 "stderr_sha256": result["stderr_sha256"],
+                "artifact_bytes": result["artifact_bytes"],
+                "review_items": result["review_items"],
             }
+            receipt["budget_usage"] = {
+                "artifact_bytes": artifact_bytes,
+                "max_disk_bytes": spec["max_disk_bytes"],
+                "review_items": review_items,
+                "max_review_items": spec["max_review_items"],
+            }
+            if artifact_bytes > spec["max_disk_bytes"]:
+                raise RuntimeError("licensed ladder exceeded the caller disk budget")
+            if review_items > spec["max_review_items"]:
+                raise RuntimeError("licensed ladder exceeded the caller review-item budget")
         gcmma = _optimizer_disposition(spec, "gcmma", results["gcmma"])
         mma = _optimizer_disposition(spec, "mma", results["mma"]) if "mma" in results else None
         receipt.update(

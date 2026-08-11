@@ -243,6 +243,8 @@ def _result(stage: str, revision: str, source_sha256: str, spec: dict | None = N
         * 64,
         "stdout_sha256": "a" * 64,
         "stderr_sha256": "b" * 64,
+        "artifact_bytes": 1024,
+        "review_items": gate._stage_review_items(stage, receipt),
     }
 
 
@@ -304,6 +306,12 @@ def test_ladder_accepts_gcmma_and_records_failed_mma_without_fallback(
     )
     assert len(receipt["gradient_acceptance"]["receipt_fingerprint"]) == 64
     assert receipt["gcmma"]["disposition"] == "accepted"
+    assert receipt["budget_usage"] == {
+        "artifact_bytes": 5 * 1024,
+        "max_disk_bytes": 2 * 1024**3,
+        "review_items": 7,
+        "max_review_items": 20,
+    }
     assert receipt["mma"]["method"] == "mma"
     assert receipt["mma"]["execution_success"] is False
     assert receipt["mma"]["disposition"] == "rejected"
@@ -386,6 +394,73 @@ def test_gradient_checks_reject_consistent_but_wrong_fixture_variable_order():
     results["directional"]["receipt"]["variables"] = replacements
     with pytest.raises(ValueError, match="frozen fixture"):
         gate._gradient_checks(results)
+
+
+@pytest.mark.parametrize(
+    ("budget_field", "budget_value", "message", "expected_stages"),
+    [
+        ("max_disk_bytes", 1024, "disk budget", ["native", "finite_difference"]),
+        ("max_review_items", 3, "review-item budget", ["native", "finite_difference"]),
+    ],
+)
+def test_ladder_stops_before_next_stage_when_cumulative_budget_is_exceeded(
+    tmp_path,
+    gate_root,
+    monkeypatch,
+    budget_field,
+    budget_value,
+    message,
+    expected_stages,
+):
+    monkeypatch.setattr(gate.os, "cpu_count", lambda: 4)
+    monkeypatch.setattr(
+        gate.psutil, "virtual_memory", lambda: type("M", (), {"available": 2**40})()
+    )
+    monkeypatch.setattr(gate.shutil, "disk_usage", lambda _path: type("D", (), {"free": 2**40})())
+    arguments = _args(gate_root, tmp_path)
+    setattr(arguments, budget_field, budget_value)
+    spec = gate._spec(arguments)
+    revision = "a" * 40
+    stages = []
+
+    class Ownership:
+        acquired = False
+
+        def status(self, **_kwargs):
+            return {
+                "process_inventory": {"complete": True},
+                "lease": (
+                    {
+                        "state": "active",
+                        "owned_by_current_process": True,
+                        "lease": {"comsol_server_processes": []},
+                    }
+                    if self.acquired
+                    else {"state": "absent"}
+                ),
+                "external_solver_processes": [],
+                "durable_jobs": {"available": True, "active_count": 0},
+            }
+
+        def acquire(self, **_kwargs):
+            self.acquired = True
+            return {"success": True, "acquired": True}
+
+        def heartbeat(self, **_kwargs):
+            return True
+
+        def release(self):
+            return {"success": True, "released": True}
+
+    def runner(current, stage):
+        stages.append(stage)
+        return _result(stage, revision, current["source_sha256"], current)
+
+    monkeypatch.setattr(gate, "_git_identity", lambda: {"revision": revision, "clean": True})
+    receipt, private = gate._run(spec, child_runner=runner, ownership_factory=Ownership)
+    assert receipt["success"] is False
+    assert message in private["error"]
+    assert stages == expected_stages
 
 
 def test_ladder_rejects_stage_process_residue(tmp_path, gate_root, monkeypatch):
