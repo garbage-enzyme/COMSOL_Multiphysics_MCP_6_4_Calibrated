@@ -11,6 +11,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any, Callable
 
@@ -63,8 +64,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--cores", type=int, required=True)
     parser.add_argument("--validation-max-solves", type=int, required=True)
     parser.add_argument("--optimizer-max-solves", type=int, required=True)
+    parser.add_argument("--total-max-solves", type=int, required=True)
     parser.add_argument("--max-iterations", type=int, required=True)
-    parser.add_argument("--max-wall-time-seconds", type=int, required=True)
+    parser.add_argument("--validation-max-wall-time-seconds", type=int, required=True)
+    parser.add_argument("--optimizer-max-wall-time-seconds", type=int, required=True)
+    parser.add_argument("--total-max-wall-time-seconds", type=int, required=True)
     parser.add_argument("--max-commit-fraction", type=float, required=True)
     parser.add_argument("--max-disk-bytes", type=int, required=True)
     parser.add_argument("--max-review-items", type=int, required=True)
@@ -139,8 +143,17 @@ def _spec(args: argparse.Namespace) -> dict[str, Any]:
     integer_fields = {
         "validation_max_solves": (args.validation_max_solves, 100_000),
         "optimizer_max_solves": (args.optimizer_max_solves, 100_000),
+        "total_max_solves": (args.total_max_solves, 500_000),
         "max_iterations": (args.max_iterations, 10_000),
-        "max_wall_time_seconds": (args.max_wall_time_seconds, 31_536_000),
+        "validation_max_wall_time_seconds": (
+            args.validation_max_wall_time_seconds,
+            31_536_000,
+        ),
+        "optimizer_max_wall_time_seconds": (
+            args.optimizer_max_wall_time_seconds,
+            31_536_000,
+        ),
+        "total_max_wall_time_seconds": (args.total_max_wall_time_seconds, 63_072_000),
         "max_disk_bytes": (args.max_disk_bytes, 1 << 50),
         "max_review_items": (args.max_review_items, 100_000),
         "max_elements_per_model": (args.max_elements_per_model, 1_000_000_000),
@@ -165,6 +178,20 @@ def _spec(args: argparse.Namespace) -> dict[str, Any]:
         )
     elif any(value is not None for value, _maximum in mma_budget_values.values()):
         raise ValueError("MMA budgets require explicit --run-mma")
+    declared_base_solves = (
+        len(_GRADIENT_STAGES) * normalized["validation_max_solves"]
+        + normalized["optimizer_max_solves"]
+    )
+    if declared_base_solves > normalized["total_max_solves"]:
+        raise ValueError("declared validation and GCMMA solve caps exceed total_max_solves")
+    declared_base_wall_time = (
+        len(_GRADIENT_STAGES) * normalized["validation_max_wall_time_seconds"]
+        + normalized["optimizer_max_wall_time_seconds"]
+    )
+    if declared_base_wall_time > normalized["total_max_wall_time_seconds"]:
+        raise ValueError(
+            "declared validation and GCMMA wall caps exceed total_max_wall_time_seconds"
+        )
     commit_fraction = float(args.max_commit_fraction)
     minimum_quality = float(args.minimum_element_quality)
     if not math.isfinite(commit_fraction) or not 0.0 < commit_fraction <= 1.0:
@@ -218,7 +245,7 @@ def _common_args(
         str(spec["max_iterations"] if max_iterations is None else max_iterations),
         "--max-wall-time-seconds",
         str(
-            spec["max_wall_time_seconds"]
+            spec["validation_max_wall_time_seconds"]
             if max_wall_time_seconds is None
             else max_wall_time_seconds
         ),
@@ -262,7 +289,9 @@ def _stage_command(spec: dict[str, Any], stage: str) -> list[str]:
         max_solves = spec["optimizer_max_solves"] if stage == "gcmma" else spec["mma_max_solves"]
         max_iterations = spec["max_iterations"] if stage == "gcmma" else spec["mma_max_iterations"]
         max_wall_time_seconds = (
-            spec["max_wall_time_seconds"] if stage == "gcmma" else spec["mma_max_wall_time_seconds"]
+            spec["optimizer_max_wall_time_seconds"]
+            if stage == "gcmma"
+            else spec["mma_max_wall_time_seconds"]
         )
         command = [
             sys.executable,
@@ -337,9 +366,13 @@ def _run_child(spec: dict[str, Any], stage: str) -> dict[str, Any]:
     stdout_path = spec["root"] / f"{stage}.stdout.log"
     stderr_path = spec["root"] / f"{stage}.stderr.log"
     command = _stage_command(spec, stage)
-    stage_wall_time = (
-        spec["mma_max_wall_time_seconds"] if stage == "mma" else spec["max_wall_time_seconds"]
-    )
+    stage_wall_time = {
+        "native": spec["validation_max_wall_time_seconds"],
+        "finite_difference": spec["validation_max_wall_time_seconds"],
+        "directional": spec["validation_max_wall_time_seconds"],
+        "gcmma": spec["optimizer_max_wall_time_seconds"],
+        "mma": spec["mma_max_wall_time_seconds"],
+    }[stage]
     creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
     with stdout_path.open("wb") as stdout, stderr_path.open("wb") as stderr:
         completed = subprocess.run(  # noqa: S603
@@ -406,7 +439,9 @@ def _optimizer_configuration(spec: dict[str, Any], stage: str) -> dict[str, Any]
     max_solves = spec["optimizer_max_solves"] if stage == "gcmma" else spec["mma_max_solves"]
     max_iterations = spec["max_iterations"] if stage == "gcmma" else spec["mma_max_iterations"]
     max_wall_time = (
-        spec["max_wall_time_seconds"] if stage == "gcmma" else spec["mma_max_wall_time_seconds"]
+        spec["optimizer_max_wall_time_seconds"]
+        if stage == "gcmma"
+        else spec["mma_max_wall_time_seconds"]
     )
     return normalize_native_optimizer_configuration(
         {
@@ -466,8 +501,11 @@ def _dry_run(spec: dict[str, Any]) -> dict[str, Any]:
                 "cores",
                 "validation_max_solves",
                 "optimizer_max_solves",
+                "total_max_solves",
                 "max_iterations",
-                "max_wall_time_seconds",
+                "validation_max_wall_time_seconds",
+                "optimizer_max_wall_time_seconds",
+                "total_max_wall_time_seconds",
                 "max_commit_fraction",
                 "max_disk_bytes",
                 "max_review_items",
@@ -498,6 +536,9 @@ def _dry_run(spec: dict[str, Any]) -> dict[str, Any]:
             "max_disk_bytes": "cumulative_stage_roots_and_logs_checked_after_each_stage",
             "max_review_items": "cumulative_derivative_and_method_summary_items",
             "stage_receipt_max_bytes": _MAX_STAGE_RECEIPT_BYTES,
+            "base_solve_cap": "three_validation_stage_caps_plus_gcmma_cap_within_total",
+            "base_wall_cap": "three_validation_stage_caps_plus_gcmma_cap_within_total",
+            "mma_scope": "separate_explicit_attempt_with_separate_budget",
         },
         "solver_started": False,
         "filesystem_modified": False,
@@ -571,6 +612,7 @@ def _run(
     results: dict[str, dict[str, Any]] = {}
     artifact_bytes = 0
     review_items = 0
+    base_started = 0.0
     try:
         _verify_startup_ownership(ownership)
         lease = ownership.acquire(
@@ -579,6 +621,7 @@ def _run(
         if not lease.get("success") or not lease.get("acquired"):
             raise RuntimeError("exclusive solver ownership could not be acquired")
         lease_acquired = True
+        base_started = time.monotonic()
         for stage in _GRADIENT_STAGES:
             if not ownership.heartbeat(
                 model_path=str(spec["source"]), refresh_server_processes=True
@@ -611,11 +654,18 @@ def _run(
                 "max_disk_bytes": spec["max_disk_bytes"],
                 "review_items": review_items,
                 "max_review_items": spec["max_review_items"],
+                "base_wall_elapsed_seconds": time.monotonic() - base_started,
+                "total_max_wall_time_seconds": spec["total_max_wall_time_seconds"],
             }
             if artifact_bytes > spec["max_disk_bytes"]:
                 raise RuntimeError("licensed ladder exceeded the caller disk budget")
             if review_items > spec["max_review_items"]:
                 raise RuntimeError("licensed ladder exceeded the caller review-item budget")
+            if (
+                receipt["budget_usage"]["base_wall_elapsed_seconds"]
+                > spec["total_max_wall_time_seconds"]
+            ):
+                raise TimeoutError("licensed ladder exceeded the caller total wall budget")
         gradient = _gradient_checks(results)
         receipt["gradient_acceptance"] = gradient
         if not gradient["passed"]:
@@ -653,11 +703,23 @@ def _run(
                 "max_disk_bytes": spec["max_disk_bytes"],
                 "review_items": review_items,
                 "max_review_items": spec["max_review_items"],
+                "base_wall_elapsed_seconds": (
+                    time.monotonic() - base_started
+                    if stage == "gcmma"
+                    else receipt["budget_usage"]["base_wall_elapsed_seconds"]
+                ),
+                "total_max_wall_time_seconds": spec["total_max_wall_time_seconds"],
             }
             if artifact_bytes > spec["max_disk_bytes"]:
                 raise RuntimeError("licensed ladder exceeded the caller disk budget")
             if review_items > spec["max_review_items"]:
                 raise RuntimeError("licensed ladder exceeded the caller review-item budget")
+            if (
+                stage == "gcmma"
+                and receipt["budget_usage"]["base_wall_elapsed_seconds"]
+                > spec["total_max_wall_time_seconds"]
+            ):
+                raise TimeoutError("licensed ladder exceeded the caller total wall budget")
         gcmma = _optimizer_disposition(spec, "gcmma", results["gcmma"])
         mma = _optimizer_disposition(spec, "mma", results["mma"]) if "mma" in results else None
         receipt.update(

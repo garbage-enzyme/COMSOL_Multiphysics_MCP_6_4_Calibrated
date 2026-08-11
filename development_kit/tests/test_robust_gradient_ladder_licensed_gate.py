@@ -51,12 +51,18 @@ def _args(
         "--cores",
         "3",
         "--validation-max-solves",
-        "20",
+        "15",
         "--optimizer-max-solves",
+        "105",
+        "--total-max-solves",
         "150",
         "--max-iterations",
         "3",
-        "--max-wall-time-seconds",
+        "--validation-max-wall-time-seconds",
+        "1800",
+        "--optimizer-max-wall-time-seconds",
+        "9000",
+        "--total-max-wall-time-seconds",
         "14400",
         "--max-commit-fraction",
         "0.9",
@@ -95,8 +101,11 @@ def test_parser_has_no_caller_budget_or_resource_defaults():
         "cores",
         "validation_max_solves",
         "optimizer_max_solves",
+        "total_max_solves",
         "max_iterations",
-        "max_wall_time_seconds",
+        "validation_max_wall_time_seconds",
+        "optimizer_max_wall_time_seconds",
+        "total_max_wall_time_seconds",
         "max_commit_fraction",
         "max_disk_bytes",
         "max_review_items",
@@ -117,6 +126,23 @@ def test_mma_requires_its_own_explicit_budget(tmp_path, gate_root, monkeypatch):
         gate._spec(_args(gate_root, tmp_path, run_mma=True, include_mma_budgets=False))
 
 
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("total_max_solves", 149, "solve caps exceed"),
+        ("total_max_wall_time_seconds", 14_399, "wall caps exceed"),
+    ],
+)
+def test_base_stage_allocations_must_fit_caller_total_budget(
+    tmp_path, gate_root, monkeypatch, field, value, message
+):
+    monkeypatch.setattr(gate.os, "cpu_count", lambda: 4)
+    arguments = _args(gate_root, tmp_path)
+    setattr(arguments, field, value)
+    with pytest.raises(ValueError, match=message):
+        gate._spec(arguments)
+
+
 def test_dry_run_freezes_serial_fresh_process_plan_without_starting_solver(
     tmp_path, gate_root, monkeypatch
 ):
@@ -125,6 +151,8 @@ def test_dry_run_freezes_serial_fresh_process_plan_without_starting_solver(
     receipt = gate._dry_run(spec)
     assert receipt["stages"] == ["native", "finite_difference", "directional", "gcmma", "mma"]
     assert receipt["budgets"]["max_commit_fraction"] == 0.9
+    assert receipt["budgets"]["total_max_solves"] == 150
+    assert receipt["budgets"]["total_max_wall_time_seconds"] == 14_400
     assert receipt["budgets"]["minimum_runtime_free_bytes"] == 100 * 1024**3
     assert receipt["mma_budget"] == {
         "max_solves": 150,
@@ -306,12 +334,12 @@ def test_ladder_accepts_gcmma_and_records_failed_mma_without_fallback(
     )
     assert len(receipt["gradient_acceptance"]["receipt_fingerprint"]) == 64
     assert receipt["gcmma"]["disposition"] == "accepted"
-    assert receipt["budget_usage"] == {
-        "artifact_bytes": 5 * 1024,
-        "max_disk_bytes": 2 * 1024**3,
-        "review_items": 7,
-        "max_review_items": 20,
-    }
+    assert receipt["budget_usage"]["artifact_bytes"] == 5 * 1024
+    assert receipt["budget_usage"]["max_disk_bytes"] == 2 * 1024**3
+    assert receipt["budget_usage"]["review_items"] == 7
+    assert receipt["budget_usage"]["max_review_items"] == 20
+    assert receipt["budget_usage"]["total_max_wall_time_seconds"] == 14_400
+    assert 0.0 <= receipt["budget_usage"]["base_wall_elapsed_seconds"] < 14_400
     assert receipt["mma"]["method"] == "mma"
     assert receipt["mma"]["execution_success"] is False
     assert receipt["mma"]["disposition"] == "rejected"
@@ -461,6 +489,60 @@ def test_ladder_stops_before_next_stage_when_cumulative_budget_is_exceeded(
     assert receipt["success"] is False
     assert message in private["error"]
     assert stages == expected_stages
+
+
+def test_ladder_stops_before_optimizer_when_total_wall_budget_is_exceeded(
+    tmp_path, gate_root, monkeypatch
+):
+    monkeypatch.setattr(gate.os, "cpu_count", lambda: 4)
+    monkeypatch.setattr(
+        gate.psutil, "virtual_memory", lambda: type("M", (), {"available": 2**40})()
+    )
+    monkeypatch.setattr(gate.shutil, "disk_usage", lambda _path: type("D", (), {"free": 2**40})())
+    times = iter((0.0, 5_000.0, 10_000.0, 15_000.0))
+    monkeypatch.setattr(gate.time, "monotonic", lambda: next(times))
+    spec = gate._spec(_args(gate_root, tmp_path))
+    revision = "a" * 40
+    stages = []
+
+    class Ownership:
+        acquired = False
+
+        def status(self, **_kwargs):
+            return {
+                "process_inventory": {"complete": True},
+                "lease": (
+                    {
+                        "state": "active",
+                        "owned_by_current_process": True,
+                        "lease": {"comsol_server_processes": []},
+                    }
+                    if self.acquired
+                    else {"state": "absent"}
+                ),
+                "external_solver_processes": [],
+                "durable_jobs": {"available": True, "active_count": 0},
+            }
+
+        def acquire(self, **_kwargs):
+            self.acquired = True
+            return {"success": True, "acquired": True}
+
+        def heartbeat(self, **_kwargs):
+            return True
+
+        def release(self):
+            return {"success": True, "released": True}
+
+    def runner(current, stage):
+        stages.append(stage)
+        return _result(stage, revision, current["source_sha256"], current)
+
+    monkeypatch.setattr(gate, "_git_identity", lambda: {"revision": revision, "clean": True})
+    receipt, private = gate._run(spec, child_runner=runner, ownership_factory=Ownership)
+    assert receipt["success"] is False
+    assert "total wall budget" in private["error"]
+    assert stages == ["native", "finite_difference", "directional"]
 
 
 def test_ladder_rejects_stage_process_residue(tmp_path, gate_root, monkeypatch):
