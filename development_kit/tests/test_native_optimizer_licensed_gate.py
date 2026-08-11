@@ -88,6 +88,14 @@ def test_generated_solver_receives_caller_iteration_and_move_limits():
     }
 
 
+def test_requested_solver_iterations_are_separate_from_budget_cap():
+    args = type("Args", (), {"optimizer_iterations": 2})()
+    assert gate._requested_optimizer_iterations(args, {"max_iterations": 3}) == 2
+    args.optimizer_iterations = 4
+    with pytest.raises(ValueError, match="exceeds"):
+        gate._requested_optimizer_iterations(args, {"max_iterations": 3})
+
+
 def test_gate_parser_has_no_host_resource_defaults():
     parser = gate._parser()
     actions = {action.dest: action.default for action in parser._actions}
@@ -95,6 +103,7 @@ def test_gate_parser_has_no_host_resource_defaults():
         "cores",
         "max_solves",
         "max_iterations",
+        "optimizer_iterations",
         "max_wall_time_seconds",
         "max_commit_fraction",
         "max_disk_bytes",

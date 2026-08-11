@@ -57,6 +57,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--optimizer-max-solves", type=int, required=True)
     parser.add_argument("--total-max-solves", type=int, required=True)
     parser.add_argument("--max-iterations", type=int, required=True)
+    parser.add_argument("--gcmma-optimizer-iterations", type=int, required=True)
     parser.add_argument("--validation-max-wall-time-seconds", type=int, required=True)
     parser.add_argument("--optimizer-max-wall-time-seconds", type=int, required=True)
     parser.add_argument("--total-max-wall-time-seconds", type=int, required=True)
@@ -70,6 +71,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--run-mma", action="store_true")
     parser.add_argument("--mma-max-solves", type=int)
     parser.add_argument("--mma-max-iterations", type=int)
+    parser.add_argument("--mma-optimizer-iterations", type=int)
     parser.add_argument("--mma-max-wall-time-seconds", type=int)
     return parser
 
@@ -134,6 +136,11 @@ def _expected(args: argparse.Namespace) -> dict[str, Any]:
         raise ValueError("minimum_element_quality must be within (0, 1]")
     budgets["max_commit_fraction"] = commit_fraction
     budgets["minimum_element_quality"] = minimum_quality
+    gcmma_optimizer_iterations = _positive_int(
+        args.gcmma_optimizer_iterations, "gcmma_optimizer_iterations"
+    )
+    if gcmma_optimizer_iterations > budgets["max_iterations"]:
+        raise ValueError("gcmma_optimizer_iterations exceeds max_iterations")
     declared_solves = 3 * budgets["validation_max_solves"] + budgets["optimizer_max_solves"]
     declared_wall = (
         3 * budgets["validation_max_wall_time_seconds"] + budgets["optimizer_max_wall_time_seconds"]
@@ -142,17 +149,26 @@ def _expected(args: argparse.Namespace) -> dict[str, Any]:
         raise ValueError("declared stage solve caps exceed the total")
     if declared_wall > budgets["total_max_wall_time_seconds"]:
         raise ValueError("declared stage wall caps exceed the total")
-    mma_values = (args.mma_max_solves, args.mma_max_iterations, args.mma_max_wall_time_seconds)
+    mma_values = (
+        args.mma_max_solves,
+        args.mma_max_iterations,
+        args.mma_max_wall_time_seconds,
+        args.mma_optimizer_iterations,
+    )
     if args.run_mma:
         mma_budget = {
             "max_solves": _positive_int(mma_values[0], "mma_max_solves"),
             "max_iterations": _positive_int(mma_values[1], "mma_max_iterations"),
             "max_wall_time_seconds": _positive_int(mma_values[2], "mma_max_wall_time_seconds"),
         }
+        mma_optimizer_iterations = _positive_int(mma_values[3], "mma_optimizer_iterations")
+        if mma_optimizer_iterations > mma_budget["max_iterations"]:
+            raise ValueError("mma_optimizer_iterations exceeds mma_max_iterations")
     else:
         if any(value is not None for value in mma_values):
             raise ValueError("MMA budgets require --run-mma")
         mma_budget = None
+        mma_optimizer_iterations = None
     stages = [*_BASE_STAGES, *(["mma"] if args.run_mma else [])]
     roots = {stage: root.with_name(root.name + _SUFFIXES[stage]) for stage in stages}
     return {
@@ -162,6 +178,14 @@ def _expected(args: argparse.Namespace) -> dict[str, Any]:
         "revision": revision,
         "budgets": budgets,
         "mma_budget": mma_budget,
+        "optimizer_execution": {
+            "gcmma": {"optimizer_iterations": gcmma_optimizer_iterations},
+            "mma": (
+                {"optimizer_iterations": mma_optimizer_iterations}
+                if mma_budget is not None
+                else None
+            ),
+        },
         "stages": stages,
         "roots": roots,
     }
@@ -252,6 +276,8 @@ def verify(expected: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("ladder caller budgets drifted")
     if ladder.get("declared_mma_budget") != expected["mma_budget"]:
         raise ValueError("ladder MMA budget drifted")
+    if ladder.get("declared_optimizer_execution") != expected["optimizer_execution"]:
+        raise ValueError("ladder optimizer execution request drifted")
     if ladder.get("automatic_fallback_allowed") is not False:
         raise ValueError("ladder automatic-fallback policy is invalid")
     admission = ladder.get("startup_admission")
@@ -326,6 +352,16 @@ def verify(expected: dict[str, Any]) -> dict[str, Any]:
             raise ValueError("MMA return code is outside the accepted explicit-attempt boundary")
         if stage in {"gcmma", "mma"} and receipt.get("optimizer_method") != stage:
             raise ValueError(f"{stage} optimizer method drifted")
+        if stage in {"gcmma", "mma"}:
+            requested = expected["optimizer_execution"][stage]["optimizer_iterations"]
+            solver = receipt.get("solver_move_limit")
+            if (
+                receipt.get("requested_optimizer_iterations") != requested
+                or (solver is not None and not isinstance(solver, dict))
+                or (isinstance(solver, dict) and solver.get("mmamaxiter") != str(requested))
+                or (receipt.get("success") is True and not isinstance(solver, dict))
+            ):
+                raise ValueError(f"{stage} requested optimizer iterations drifted")
         receipts[stage] = receipt
         hashes[stage] = receipt_hash
         artifact_bytes += stage_bytes

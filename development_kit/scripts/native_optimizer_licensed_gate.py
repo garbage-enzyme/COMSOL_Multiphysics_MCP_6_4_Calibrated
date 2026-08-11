@@ -26,6 +26,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--optimizer-method", choices=("gcmma", "mma", "ipopt"), required=True)
     parser.add_argument("--max-solves", type=int, required=True)
     parser.add_argument("--max-iterations", type=int, required=True)
+    parser.add_argument("--optimizer-iterations", type=int, required=True)
     parser.add_argument("--max-wall-time-seconds", type=int, required=True)
     parser.add_argument("--max-commit-fraction", type=float, required=True)
     parser.add_argument("--max-disk-bytes", type=int, required=True)
@@ -111,6 +112,15 @@ def _admit_mesh(statistics: dict, *, max_elements: int, minimum_quality: float) 
         raise ValueError("mesh minimum quality is below the caller-supplied threshold")
 
 
+def _requested_optimizer_iterations(args: argparse.Namespace, budget: dict) -> int:
+    requested = args.optimizer_iterations
+    if isinstance(requested, bool) or not isinstance(requested, int) or requested < 1:
+        raise ValueError("optimizer_iterations must be a caller-supplied positive integer")
+    if requested > budget["max_iterations"]:
+        raise ValueError("optimizer_iterations exceeds the caller iteration budget")
+    return requested
+
+
 def _configure_solver_move_limit(
     model, study, move_limit: float, optimizer_iterations: int
 ) -> dict:
@@ -143,6 +153,7 @@ def _configure_solver_move_limit(
 
 def run(args: argparse.Namespace) -> dict:
     spec = structural._spec(args)
+    requested_iterations = _requested_optimizer_iterations(args, spec["optimizer"]["budget"])
     source_before = structural._sha(spec["source"])
     for path in (spec["base_copy"], spec["configured_copy"]):
         path.unlink(missing_ok=True)
@@ -155,6 +166,7 @@ def run(args: argparse.Namespace) -> dict:
         "source_sha256": source_before,
         "optimizer_method": spec["optimizer"]["method"],
         "budget": spec["optimizer"]["budget"],
+        "requested_optimizer_iterations": requested_iterations,
         "objective_expression": support["objective"]["expression"],
         "points": [],
         "mesh_admission_policy": {
@@ -215,7 +227,7 @@ def run(args: argparse.Namespace) -> dict:
             model,
             std2,
             spec["optimizer"]["move_limit"],
-            spec["optimizer"]["budget"]["max_iterations"],
+            requested_iterations,
         )
         if time.monotonic() - started > spec["optimizer"]["budget"]["max_wall_time_seconds"]:
             raise TimeoutError("native optimizer wall budget exhausted before optimization")

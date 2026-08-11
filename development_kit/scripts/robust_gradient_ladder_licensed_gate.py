@@ -66,6 +66,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--optimizer-max-solves", type=int, required=True)
     parser.add_argument("--total-max-solves", type=int, required=True)
     parser.add_argument("--max-iterations", type=int, required=True)
+    parser.add_argument("--gcmma-optimizer-iterations", type=int, required=True)
     parser.add_argument("--validation-max-wall-time-seconds", type=int, required=True)
     parser.add_argument("--optimizer-max-wall-time-seconds", type=int, required=True)
     parser.add_argument("--total-max-wall-time-seconds", type=int, required=True)
@@ -79,6 +80,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--run-mma", action="store_true")
     parser.add_argument("--mma-max-solves", type=int)
     parser.add_argument("--mma-max-iterations", type=int)
+    parser.add_argument("--mma-optimizer-iterations", type=int)
     parser.add_argument("--mma-max-wall-time-seconds", type=int)
     parser.add_argument("--dry-run", action="store_true")
     return parser
@@ -164,6 +166,13 @@ def _spec(args: argparse.Namespace) -> dict[str, Any]:
         name: _positive_integer(value, name, maximum=maximum)
         for name, (value, maximum) in integer_fields.items()
     }
+    gcmma_optimizer_iterations = _positive_integer(
+        args.gcmma_optimizer_iterations,
+        "gcmma_optimizer_iterations",
+        maximum=10_000,
+    )
+    if gcmma_optimizer_iterations > normalized["max_iterations"]:
+        raise ValueError("gcmma_optimizer_iterations exceeds max_iterations")
     mma_budget_values = {
         "mma_max_solves": (args.mma_max_solves, 100_000),
         "mma_max_iterations": (args.mma_max_iterations, 10_000),
@@ -176,8 +185,19 @@ def _spec(args: argparse.Namespace) -> dict[str, Any]:
                 for name, (value, maximum) in mma_budget_values.items()
             }
         )
-    elif any(value is not None for value, _maximum in mma_budget_values.values()):
+        mma_optimizer_iterations = _positive_integer(
+            args.mma_optimizer_iterations,
+            "mma_optimizer_iterations",
+            maximum=10_000,
+        )
+        if mma_optimizer_iterations > normalized["mma_max_iterations"]:
+            raise ValueError("mma_optimizer_iterations exceeds mma_max_iterations")
+    elif any(value is not None for value, _maximum in mma_budget_values.values()) or (
+        args.mma_optimizer_iterations is not None
+    ):
         raise ValueError("MMA budgets require explicit --run-mma")
+    else:
+        mma_optimizer_iterations = None
     declared_base_solves = (
         len(_GRADIENT_STAGES) * normalized["validation_max_solves"]
         + normalized["optimizer_max_solves"]
@@ -211,6 +231,8 @@ def _spec(args: argparse.Namespace) -> dict[str, Any]:
         **normalized,
         "max_commit_fraction": commit_fraction,
         "minimum_element_quality": minimum_quality,
+        "gcmma_optimizer_iterations": gcmma_optimizer_iterations,
+        "mma_optimizer_iterations": mma_optimizer_iterations,
         "run_mma": bool(args.run_mma),
         "child_roots": child_roots,
         "receipt": root / "ladder-receipt.json",
@@ -293,6 +315,11 @@ def _stage_command(spec: dict[str, Any], stage: str) -> list[str]:
             if stage == "gcmma"
             else spec["mma_max_wall_time_seconds"]
         )
+        optimizer_iterations = (
+            spec["gcmma_optimizer_iterations"]
+            if stage == "gcmma"
+            else spec["mma_optimizer_iterations"]
+        )
         command = [
             sys.executable,
             "-m",
@@ -304,6 +331,8 @@ def _stage_command(spec: dict[str, Any], stage: str) -> list[str]:
                 max_iterations=max_iterations,
                 max_wall_time_seconds=max_wall_time_seconds,
             ),
+            "--optimizer-iterations",
+            str(optimizer_iterations),
             "--max-elements-per-model",
             str(spec["max_elements_per_model"]),
             "--minimum-element-quality",
@@ -404,12 +433,29 @@ def _run_child(spec: dict[str, Any], stage: str) -> dict[str, Any]:
     }
 
 
-def _verify_stage(stage: str, result: dict[str, Any], *, revision: str, source_sha256: str) -> None:
+def _verify_stage(
+    stage: str,
+    result: dict[str, Any],
+    *,
+    revision: str,
+    source_sha256: str,
+    optimizer_iterations: int | None = None,
+) -> None:
     receipt = result["receipt"]
     if receipt.get("source_revision") != revision or receipt.get("source_sha256") != source_sha256:
         raise ValueError(f"{stage} receipt identity differs from the ladder source")
     if stage in {"gcmma", "mma"} and receipt.get("optimizer_method") != stage:
         raise ValueError(f"{stage} receipt reports a different optimizer method")
+    if stage in {"gcmma", "mma"}:
+        solver = receipt.get("solver_move_limit")
+        if (
+            optimizer_iterations is None
+            or receipt.get("requested_optimizer_iterations") != optimizer_iterations
+            or (solver is not None and not isinstance(solver, dict))
+            or (isinstance(solver, dict) and solver.get("mmamaxiter") != str(optimizer_iterations))
+            or (receipt.get("success") is True and not isinstance(solver, dict))
+        ):
+            raise ValueError(f"{stage} receipt reports different requested iterations")
     if stage != "mma" and (result["returncode"] != 0 or receipt.get("success") is not True):
         raise ValueError(f"{stage} licensed stage failed")
 
@@ -517,6 +563,15 @@ def _declared_mma_budget(spec: dict[str, Any]) -> dict[str, int] | None:
     }
 
 
+def _declared_optimizer_execution(spec: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "gcmma": {"optimizer_iterations": spec["gcmma_optimizer_iterations"]},
+        "mma": (
+            {"optimizer_iterations": spec["mma_optimizer_iterations"]} if spec["run_mma"] else None
+        ),
+    }
+
+
 def _dry_run(spec: dict[str, Any]) -> dict[str, Any]:
     stages = [*_STAGES, *(["mma"] if spec["run_mma"] else [])]
     return {
@@ -530,6 +585,7 @@ def _dry_run(spec: dict[str, Any]) -> dict[str, Any]:
         "commands": {stage: _stage_command(spec, stage)[2] for stage in stages},
         "budgets": _declared_budgets(spec),
         "mma_budget": _declared_mma_budget(spec),
+        "optimizer_execution": _declared_optimizer_execution(spec),
         "optimizer_configuration_fingerprints": {
             "gcmma": _optimizer_configuration(spec, "gcmma")["optimizer_fingerprint"],
             "mma": (
@@ -609,6 +665,7 @@ def _run(
         "stages": [*_STAGES, *(["mma"] if spec["run_mma"] else [])],
         "declared_budgets": _declared_budgets(spec),
         "declared_mma_budget": _declared_mma_budget(spec),
+        "declared_optimizer_execution": _declared_optimizer_execution(spec),
         "automatic_fallback_allowed": False,
         "startup_admission": admission,
         "stage_receipts": {},
@@ -695,6 +752,11 @@ def _run(
                 result,
                 revision=git["revision"],
                 source_sha256=spec["source_sha256"],
+                optimizer_iterations=(
+                    spec["gcmma_optimizer_iterations"]
+                    if stage == "gcmma"
+                    else spec["mma_optimizer_iterations"]
+                ),
             )
             results[stage] = result
             artifact_bytes += result["artifact_bytes"]
