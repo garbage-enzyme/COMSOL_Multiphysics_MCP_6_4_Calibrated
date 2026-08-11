@@ -44,6 +44,8 @@ from comsol_mcp.research import (
     ROBUST_OBJECTIVE_CONFIGURATION_SCHEMA_VERSION,
     ROBUST_OBJECTIVE_RECEIPT_SCHEMA_NAME,
     ROBUST_OBJECTIVE_RECEIPT_SCHEMA_VERSION,
+    SHAPE_SUPPORT_POLICY_SCHEMA_NAME,
+    SHAPE_SUPPORT_POLICY_SCHEMA_VERSION,
     STRUCTURE_ADAPTER_APPLICATION_SCHEMA_NAME,
     STRUCTURE_ADAPTER_APPLICATION_SCHEMA_VERSION,
     STRUCTURE_ADAPTER_MANIFEST_SCHEMA_NAME,
@@ -477,6 +479,12 @@ def _entries() -> list[dict[str, Any]]:
             "comsol_mcp.research.robust_objectives",
         ),
         _entry(
+            SHAPE_SUPPORT_POLICY_SCHEMA_NAME,
+            SHAPE_SUPPORT_POLICY_SCHEMA_VERSION,
+            "comsol_mcp.research.shape_support",
+            artifact_kind="configuration",
+        ),
+        _entry(
             "comsol_mcp.periodic_mesh_audit",
             "1.0.0",
             "comsol_mcp.tools.periodic_mesh_audit",
@@ -717,7 +725,7 @@ def _entries() -> list[dict[str, Any]]:
             artifact_kind="durable_artifact",
         ),
         _entry(
-            SHARED_MODEL_SNAPSHOT_SCHEMA,
+    SHARED_MODEL_SNAPSHOT_SCHEMA,
             SHARED_MODEL_SNAPSHOT_VERSION,
             "comsol_mcp.shared_session.lifecycle",
             artifact_kind="durable_artifact",

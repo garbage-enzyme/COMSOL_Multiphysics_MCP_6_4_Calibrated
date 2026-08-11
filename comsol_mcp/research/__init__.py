@@ -115,6 +115,11 @@ from .robust_objectives import (
     evaluate_robust_absolute_contrast,
     normalize_robust_objective_configuration,
 )
+from .shape_support import (
+    SHAPE_SUPPORT_POLICY_SCHEMA_NAME,
+    SHAPE_SUPPORT_POLICY_SCHEMA_VERSION,
+    normalize_shape_support_policy,
+)
 from .state import (
     OPTIMIZER_CHECKPOINT_SCHEMA_NAME,
     OPTIMIZER_CHECKPOINT_SCHEMA_VERSION,
@@ -179,6 +184,8 @@ __all__ = [
     "ROBUST_OBJECTIVE_CONFIGURATION_SCHEMA_VERSION",
     "ROBUST_OBJECTIVE_RECEIPT_SCHEMA_NAME",
     "ROBUST_OBJECTIVE_RECEIPT_SCHEMA_VERSION",
+    "SHAPE_SUPPORT_POLICY_SCHEMA_NAME",
+    "SHAPE_SUPPORT_POLICY_SCHEMA_VERSION",
     "PORTFOLIO_SCHEMA_NAME",
     "PORTFOLIO_SCHEMA_VERSION",
     "DeterministicGridOptimizer",
@@ -210,6 +217,7 @@ __all__ = [
     "normalize_optimization_condition_table",
     "normalize_optimization_material_state",
     "normalize_robust_objective_configuration",
+    "normalize_shape_support_policy",
     "normalize_gradient_record",
     "normalize_native_optimizer_configuration",
     "compare_gradient",
