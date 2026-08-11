@@ -30,6 +30,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-commit-fraction", type=float, required=True)
     parser.add_argument("--max-disk-bytes", type=int, required=True)
     parser.add_argument("--max-review-items", type=int, required=True)
+    parser.add_argument("--max-elements-per-model", type=int, required=True)
+    parser.add_argument("--minimum-element-quality", type=float, required=True)
     return parser
 
 
@@ -98,6 +100,17 @@ def _mesh_statistics(model) -> dict:
     }
 
 
+def _admit_mesh(statistics: dict, *, max_elements: int, minimum_quality: float) -> None:
+    if isinstance(max_elements, bool) or not isinstance(max_elements, int) or max_elements < 1:
+        raise ValueError("max_elements_per_model must be a caller-supplied positive integer")
+    if not math.isfinite(minimum_quality) or not 0.0 < minimum_quality <= 1.0:
+        raise ValueError("minimum_element_quality must be caller supplied in (0, 1]")
+    if statistics["element_count"] > max_elements:
+        raise ValueError("mesh element count exceeds the caller-supplied per-model ceiling")
+    if statistics["minimum_quality"] < minimum_quality:
+        raise ValueError("mesh minimum quality is below the caller-supplied threshold")
+
+
 def _configure_solver_move_limit(
     model, study, move_limit: float, optimizer_iterations: int
 ) -> dict:
@@ -144,6 +157,12 @@ def run(args: argparse.Namespace) -> dict:
         "budget": spec["optimizer"]["budget"],
         "objective_expression": support["objective"]["expression"],
         "points": [],
+        "mesh_admission_policy": {
+            "max_elements_per_model": args.max_elements_per_model,
+            "minimum_element_quality": args.minimum_element_quality,
+            "scope": "baseline_and_explicit_finalist_remesh",
+            "internal_optimizer_remesh_callback": False,
+        },
     }
     client = None
     private_error = None
@@ -171,6 +190,13 @@ def run(args: argparse.Namespace) -> dict:
         phase = "baseline_solve"
         baseline_study = baseline_model.java.study("std1")
         baseline_study.feature().remove("sens_a71")
+        baseline_mesh = _mesh_statistics(baseline_model)
+        _admit_mesh(
+            baseline_mesh,
+            max_elements=args.max_elements_per_model,
+            minimum_quality=args.minimum_element_quality,
+        )
+        receipt["baseline_mesh"] = baseline_mesh
         baseline_study.run()
         baseline_dataset = _forward_sweep_dataset(baseline_model)
         baseline_dataset_tag = str(baseline_dataset.tag())
@@ -221,8 +247,11 @@ def run(args: argparse.Namespace) -> dict:
         mesh_before = _mesh_statistics(finalist)
         mesh.run()
         mesh_after = _mesh_statistics(finalist)
-        if mesh_after["minimum_quality"] <= 0.1:
-            raise ValueError("remeshed finalist minimum quality is not acceptable")
+        _admit_mesh(
+            mesh_after,
+            max_elements=args.max_elements_per_model,
+            minimum_quality=args.minimum_element_quality,
+        )
         finalist_study.run()
         finalist_dataset = _forward_sweep_dataset(finalist)
         finalist_dataset_tag = str(finalist_dataset.tag())

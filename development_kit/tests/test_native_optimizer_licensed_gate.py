@@ -99,5 +99,23 @@ def test_gate_parser_has_no_host_resource_defaults():
         "max_commit_fraction",
         "max_disk_bytes",
         "max_review_items",
+        "max_elements_per_model",
+        "minimum_element_quality",
     ):
         assert actions[name] is None
+
+
+def test_mesh_admission_uses_caller_element_and_quality_thresholds():
+    accepted = {
+        "element_count": 300_000,
+        "minimum_quality": 0.1,
+        "mean_quality": 0.5,
+        "quality_measure": "volcircum",
+    }
+    gate._admit_mesh(accepted, max_elements=300_000, minimum_quality=0.1)
+    too_large = {**accepted, "element_count": 300_001}
+    with pytest.raises(ValueError, match="element count"):
+        gate._admit_mesh(too_large, max_elements=300_000, minimum_quality=0.1)
+    too_low = {**accepted, "minimum_quality": 0.099}
+    with pytest.raises(ValueError, match="minimum quality"):
+        gate._admit_mesh(too_low, max_elements=300_000, minimum_quality=0.1)
