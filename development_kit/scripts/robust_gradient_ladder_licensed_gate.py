@@ -484,6 +484,39 @@ def _optimizer_disposition(
     )
 
 
+def _declared_budgets(spec: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: spec[key]
+        for key in (
+            "cores",
+            "validation_max_solves",
+            "optimizer_max_solves",
+            "total_max_solves",
+            "max_iterations",
+            "validation_max_wall_time_seconds",
+            "optimizer_max_wall_time_seconds",
+            "total_max_wall_time_seconds",
+            "max_commit_fraction",
+            "max_disk_bytes",
+            "max_review_items",
+            "max_elements_per_model",
+            "minimum_element_quality",
+            "minimum_available_memory_bytes",
+            "minimum_runtime_free_bytes",
+        )
+    }
+
+
+def _declared_mma_budget(spec: dict[str, Any]) -> dict[str, int] | None:
+    if not spec["run_mma"]:
+        return None
+    return {
+        "max_solves": spec["mma_max_solves"],
+        "max_iterations": spec["mma_max_iterations"],
+        "max_wall_time_seconds": spec["mma_max_wall_time_seconds"],
+    }
+
+
 def _dry_run(spec: dict[str, Any]) -> dict[str, Any]:
     stages = [*_STAGES, *(["mma"] if spec["run_mma"] else [])]
     return {
@@ -495,35 +528,8 @@ def _dry_run(spec: dict[str, Any]) -> dict[str, Any]:
         "stages": stages,
         "gradient_policy": _GRADIENT_POLICY,
         "commands": {stage: _stage_command(spec, stage)[2] for stage in stages},
-        "budgets": {
-            key: spec[key]
-            for key in (
-                "cores",
-                "validation_max_solves",
-                "optimizer_max_solves",
-                "total_max_solves",
-                "max_iterations",
-                "validation_max_wall_time_seconds",
-                "optimizer_max_wall_time_seconds",
-                "total_max_wall_time_seconds",
-                "max_commit_fraction",
-                "max_disk_bytes",
-                "max_review_items",
-                "max_elements_per_model",
-                "minimum_element_quality",
-                "minimum_available_memory_bytes",
-                "minimum_runtime_free_bytes",
-            )
-        },
-        "mma_budget": (
-            {
-                "max_solves": spec["mma_max_solves"],
-                "max_iterations": spec["mma_max_iterations"],
-                "max_wall_time_seconds": spec["mma_max_wall_time_seconds"],
-            }
-            if spec["run_mma"]
-            else None
-        ),
+        "budgets": _declared_budgets(spec),
+        "mma_budget": _declared_mma_budget(spec),
         "optimizer_configuration_fingerprints": {
             "gcmma": _optimizer_configuration(spec, "gcmma")["optimizer_fingerprint"],
             "mma": (
@@ -600,6 +606,10 @@ def _run(
         "dry_run": False,
         "source_revision": git["revision"],
         "source_sha256": spec["source_sha256"],
+        "stages": [*_STAGES, *(["mma"] if spec["run_mma"] else [])],
+        "declared_budgets": _declared_budgets(spec),
+        "declared_mma_budget": _declared_mma_budget(spec),
+        "automatic_fallback_allowed": False,
         "startup_admission": admission,
         "stage_receipts": {},
         "paths_included": False,

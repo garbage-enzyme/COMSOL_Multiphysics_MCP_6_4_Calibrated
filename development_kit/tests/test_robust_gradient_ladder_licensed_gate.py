@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from development_kit.scripts import robust_gradient_ladder_licensed_gate as gate
+from development_kit.scripts import verify_robust_gradient_ladder_receipt as verifier
 
 
 @pytest.fixture
@@ -597,3 +598,170 @@ def test_ladder_rejects_stage_process_residue(tmp_path, gate_root, monkeypatch):
     assert receipt["success"] is False
     assert receipt["error"]["type"] == "RuntimeError"
     assert "residue remains after native" in private["error"]
+
+
+def _verifier_args(root: Path, tmp_path: Path, revision: str, *, run_mma: bool = True):
+    values = [
+        "--test-root",
+        str(root),
+        "--source-model",
+        str(tmp_path / "source.mph"),
+        "--expected-revision",
+        revision,
+        "--cores",
+        "3",
+        "--validation-max-solves",
+        "15",
+        "--optimizer-max-solves",
+        "105",
+        "--total-max-solves",
+        "150",
+        "--max-iterations",
+        "3",
+        "--validation-max-wall-time-seconds",
+        "1800",
+        "--optimizer-max-wall-time-seconds",
+        "9000",
+        "--total-max-wall-time-seconds",
+        "14400",
+        "--max-commit-fraction",
+        "0.9",
+        "--max-disk-bytes",
+        "2147483648",
+        "--max-review-items",
+        "20",
+        "--max-elements-per-model",
+        "300000",
+        "--minimum-element-quality",
+        "0.1",
+        "--minimum-available-memory-bytes",
+        "1073741824",
+        "--minimum-runtime-free-bytes",
+        "107374182400",
+    ]
+    if run_mma:
+        values.extend(
+            [
+                "--run-mma",
+                "--mma-max-solves",
+                "150",
+                "--mma-max-iterations",
+                "3",
+                "--mma-max-wall-time-seconds",
+                "14400",
+            ]
+        )
+    return verifier._parser().parse_args(values)
+
+
+def _write_verifiable_ladder(tmp_path, gate_root, monkeypatch):
+    monkeypatch.setattr(gate.os, "cpu_count", lambda: 4)
+    monkeypatch.setattr(
+        gate.psutil, "virtual_memory", lambda: type("M", (), {"available": 2**40})()
+    )
+    monkeypatch.setattr(gate.shutil, "disk_usage", lambda _path: type("D", (), {"free": 2**40})())
+    spec = gate._spec(_args(gate_root, tmp_path, run_mma=True))
+    revision = "f" * 40
+
+    class Ownership:
+        acquired = False
+
+        def status(self, **_kwargs):
+            return {
+                "process_inventory": {"complete": True},
+                "lease": (
+                    {
+                        "state": "active",
+                        "owned_by_current_process": True,
+                        "lease": {"comsol_server_processes": []},
+                    }
+                    if self.acquired
+                    else {"state": "absent"}
+                ),
+                "external_solver_processes": [],
+                "durable_jobs": {"available": True, "active_count": 0},
+            }
+
+        def acquire(self, **_kwargs):
+            self.acquired = True
+            return {"success": True, "acquired": True}
+
+        def heartbeat(self, **_kwargs):
+            return True
+
+        def release(self):
+            return {"success": True, "released": True}
+
+    def runner(current, stage):
+        result = _result(stage, revision, current["source_sha256"], current)
+        stage_root = current["child_roots"][stage]
+        stage_root.mkdir(parents=False, exist_ok=False)
+        receipt_path = stage_root / gate._RECEIPT_NAMES[stage]
+        gate.atomic_write_json(receipt_path, result["receipt"])
+        stdout_path = current["root"] / f"{stage}.stdout.log"
+        stderr_path = current["root"] / f"{stage}.stderr.log"
+        stdout_path.write_bytes(f"{stage} stdout\n".encode())
+        stderr_path.write_bytes(f"{stage} stderr\n".encode())
+        result.update(
+            {
+                "receipt_sha256": gate._sha(receipt_path),
+                "stdout_sha256": gate._sha(stdout_path),
+                "stderr_sha256": gate._sha(stderr_path),
+                "artifact_bytes": (
+                    gate._bounded_tree_bytes(stage_root)
+                    + stdout_path.stat().st_size
+                    + stderr_path.stat().st_size
+                ),
+            }
+        )
+        return result
+
+    monkeypatch.setattr(gate, "_git_identity", lambda: {"revision": revision, "clean": True})
+    receipt, _private = gate._run(
+        spec,
+        child_runner=runner,
+        ownership_factory=Ownership,
+    )
+    gate.atomic_write_json(gate_root / "ladder-receipt.json", receipt)
+    return verifier._expected(_verifier_args(gate_root, tmp_path, revision)), receipt
+
+
+def test_independent_ladder_verifier_reopens_all_receipts_and_logs(
+    tmp_path, gate_root, monkeypatch
+):
+    expected, _receipt = _write_verifiable_ladder(tmp_path, gate_root, monkeypatch)
+    verification = verifier.verify(expected)
+    assert verification["passed"] is True
+    assert verification["stages"] == [
+        "native",
+        "finite_difference",
+        "directional",
+        "gcmma",
+        "mma",
+    ]
+    assert verification["automatic_fallback_used"] is False
+    assert verification["budget_usage"]["review_items"] == 7
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["stage_order", "budget", "cleanup", "gradient", "stdout"],
+)
+def test_independent_ladder_verifier_rejects_tampering_and_false_success(
+    tmp_path, gate_root, monkeypatch, mutation
+):
+    expected, receipt = _write_verifiable_ladder(tmp_path, gate_root, monkeypatch)
+    if mutation == "stage_order":
+        receipt["stages"] = list(reversed(receipt["stages"]))
+    elif mutation == "budget":
+        receipt["declared_budgets"]["max_review_items"] = 19
+    elif mutation == "cleanup":
+        receipt["cleanup"]["source_unchanged"] = False
+    elif mutation == "gradient":
+        receipt["gradient_acceptance"]["passed"] = False
+    else:
+        (gate_root / "native.stdout.log").write_bytes(b"tampered\n")
+    if mutation != "stdout":
+        gate.atomic_write_json(gate_root / "ladder-receipt.json", receipt)
+    with pytest.raises(ValueError):
+        verifier.verify(expected)

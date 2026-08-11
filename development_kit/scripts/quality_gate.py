@@ -68,6 +68,7 @@ LINT_TARGETS = (
     "development_kit/scripts/dependency_license_gate.py",
     "development_kit/scripts/quality_gate.py",
     "development_kit/scripts/robust_gradient_ladder_licensed_gate.py",
+    "development_kit/scripts/verify_robust_gradient_ladder_receipt.py",
     "development_kit/scripts/standalone_licensed_gate.py",
     "development_kit/benchmarks/research_campaign.py",
     "development_kit/tests/conftest.py",
