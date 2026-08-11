@@ -35,8 +35,8 @@
     }
   },
   "schema_registry": {
-    "entry_count": 112,
-    "registry_sha256": "02b37be3a2492f73eba1475c8cae9d6045cb6ea83961a28de053c9c6ce993691"
+    "entry_count": 114,
+    "registry_sha256": "400ae57ee084703d016ecb3a8a3e8d649b2d041a2a1695361dee353b76a5dfd2"
   },
   "identities": {
     "catalog_sha256": "8313b4a4df6491d321e2d44111ab173b0b981169db1ff59cdff4064d01421929",

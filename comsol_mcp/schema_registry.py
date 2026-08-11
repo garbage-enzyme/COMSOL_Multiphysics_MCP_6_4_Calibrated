@@ -40,6 +40,10 @@ from comsol_mcp.research import (
     RESEARCH_GOAL_SCHEMA_VERSION,
     RESEARCH_JOURNAL_RECORD_SCHEMA_NAME,
     RESEARCH_JOURNAL_RECORD_SCHEMA_VERSION,
+    ROBUST_OBJECTIVE_CONFIGURATION_SCHEMA_NAME,
+    ROBUST_OBJECTIVE_CONFIGURATION_SCHEMA_VERSION,
+    ROBUST_OBJECTIVE_RECEIPT_SCHEMA_NAME,
+    ROBUST_OBJECTIVE_RECEIPT_SCHEMA_VERSION,
     STRUCTURE_ADAPTER_APPLICATION_SCHEMA_NAME,
     STRUCTURE_ADAPTER_APPLICATION_SCHEMA_VERSION,
     STRUCTURE_ADAPTER_MANIFEST_SCHEMA_NAME,
@@ -460,6 +464,17 @@ def _entries() -> list[dict[str, Any]]:
             REFERENCE_POWER_CONTRACT_SCHEMA,
             "1.0.0",
             "comsol_mcp.evidence.reference_power_acceptance",
+        ),
+        _entry(
+            ROBUST_OBJECTIVE_CONFIGURATION_SCHEMA_NAME,
+            ROBUST_OBJECTIVE_CONFIGURATION_SCHEMA_VERSION,
+            "comsol_mcp.research.robust_objectives",
+            artifact_kind="configuration",
+        ),
+        _entry(
+            ROBUST_OBJECTIVE_RECEIPT_SCHEMA_NAME,
+            ROBUST_OBJECTIVE_RECEIPT_SCHEMA_VERSION,
+            "comsol_mcp.research.robust_objectives",
         ),
         _entry(
             "comsol_mcp.periodic_mesh_audit",

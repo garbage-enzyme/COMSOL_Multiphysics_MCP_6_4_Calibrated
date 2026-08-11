@@ -107,6 +107,14 @@ from .robust_conditions import (
     normalize_optimization_condition_table,
     normalize_optimization_material_state,
 )
+from .robust_objectives import (
+    ROBUST_OBJECTIVE_CONFIGURATION_SCHEMA_NAME,
+    ROBUST_OBJECTIVE_CONFIGURATION_SCHEMA_VERSION,
+    ROBUST_OBJECTIVE_RECEIPT_SCHEMA_NAME,
+    ROBUST_OBJECTIVE_RECEIPT_SCHEMA_VERSION,
+    evaluate_robust_absolute_contrast,
+    normalize_robust_objective_configuration,
+)
 from .state import (
     OPTIMIZER_CHECKPOINT_SCHEMA_NAME,
     OPTIMIZER_CHECKPOINT_SCHEMA_VERSION,
@@ -167,6 +175,10 @@ __all__ = [
     "OBJECTIVE_SCORE_SCHEMA_VERSION",
     "OPTIMIZATION_CONDITION_TABLE_SCHEMA_NAME",
     "OPTIMIZATION_CONDITION_TABLE_SCHEMA_VERSION",
+    "ROBUST_OBJECTIVE_CONFIGURATION_SCHEMA_NAME",
+    "ROBUST_OBJECTIVE_CONFIGURATION_SCHEMA_VERSION",
+    "ROBUST_OBJECTIVE_RECEIPT_SCHEMA_NAME",
+    "ROBUST_OBJECTIVE_RECEIPT_SCHEMA_VERSION",
     "PORTFOLIO_SCHEMA_NAME",
     "PORTFOLIO_SCHEMA_VERSION",
     "DeterministicGridOptimizer",
@@ -197,6 +209,7 @@ __all__ = [
     "normalize_material_catalog",
     "normalize_optimization_condition_table",
     "normalize_optimization_material_state",
+    "normalize_robust_objective_configuration",
     "normalize_gradient_record",
     "normalize_native_optimizer_configuration",
     "compare_gradient",
@@ -210,6 +223,7 @@ __all__ = [
     "recover_research_journal",
     "relative_bounds",
     "score_objectives",
+    "evaluate_robust_absolute_contrast",
     "compile_campaign_manifest",
     "configure_native_adjoint",
 ]
