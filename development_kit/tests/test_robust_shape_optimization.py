@@ -14,6 +14,7 @@ from development_kit.tests.test_robust_conditions import _table
 from development_kit.tests.test_robust_gradient_acceptance import _policy as _gradient_policy
 from development_kit.tests.test_robust_objectives import _configuration
 from development_kit.tests.test_robust_optimizer_policy import _policy as _optimizer_policy
+from development_kit.tests.test_robust_startup_admission import _policy as _startup_policy
 from development_kit.tests.test_shape_support import _policy as _shape_policy
 
 
@@ -45,6 +46,7 @@ def _write_manifest(tmp_path, *, selected: str = "gcmma", synthetic: bool = True
         "gradient_policy": _gradient_policy(),
         "optimizer_policy": optimizer_policy,
         "native_optimizer": optimizer,
+        "startup_admission": _startup_policy(),
         "initial_values": [856.0],
         "synthetic_mode": synthetic,
     }
@@ -76,6 +78,7 @@ def test_manifest_binds_every_robust_contract_and_uses_no_host_defaults(ascii_tm
     assert spec["resource_policy"]["host_defaults_applied"] is False
     assert spec["shape_policy"]["mesh_admission"]["max_elements_per_model"] == 300_000
     assert spec["optimizer_policy"]["selected_method"] == "gcmma"
+    assert spec["startup_admission"]["check_frequency"] == "startup_only"
 
 
 def test_manifest_rejects_source_or_manifest_mutation(ascii_tmp_path):

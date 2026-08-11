@@ -8,10 +8,12 @@ from pathlib import Path
 
 from comsol_mcp.durable import domain_sha256_v2
 from comsol_mcp.research.robust_objectives import evaluate_robust_absolute_contrast
+from comsol_mcp.research.robust_startup_admission import evaluate_robust_startup_admission
 
 from .process_control import contain_current_process_tree
+from .resource_admission import collect_resource_telemetry
 from .robust_shape_rows import append_robust_shape_row, read_robust_shape_rows
-from .store import JobStore, cancel_request_targets_attempt, process_identity
+from .store import JobStore, atomic_write_json, cancel_request_targets_attempt, process_identity
 
 
 def _synthetic_observations(spec: dict) -> list[dict]:
@@ -98,6 +100,29 @@ def _run_synthetic(root: str, job_id: str) -> int:
         store.update_state(job_id, "starting", event="worker_started")
     elif state["status"] != "starting":
         raise ValueError(f"robust shape worker cannot start from {state['status']}")
+    telemetry = collect_resource_telemetry(stage="pre_mesh", runtime_path=directory)
+    startup_admission = evaluate_robust_startup_admission(spec["startup_admission"], telemetry)
+    atomic_write_json(directory / "startup-admission.json", startup_admission)
+    if not startup_admission["ready"]:
+        store.update_state(
+            job_id,
+            "failed",
+            patch={
+                "solver_started": False,
+                "startup_admission_fingerprint": startup_admission["receipt_fingerprint"],
+                "last_error": {
+                    "type": "StartupResourceRefused",
+                    "message": "Caller-declared startup RAM/disk admission refused the job",
+                },
+            },
+            event="robust_startup_resource_refused",
+        )
+        return 1
+    store.update_state(
+        job_id,
+        patch={"startup_admission_fingerprint": startup_admission["receipt_fingerprint"]},
+        event="robust_startup_resource_admitted",
+    )
     store.update_state(job_id, "smoke_running", event="robust_shape_synthetic_started")
     rows_path = directory / "robust_shape_rows.jsonl"
     existing = read_robust_shape_rows(rows_path, job_fingerprint=spec["spec_fingerprint"])

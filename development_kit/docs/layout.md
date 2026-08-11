@@ -368,6 +368,7 @@ models are intentionally absent.
 - `development_kit/tests/test_robust_shape_optimization.py` — This module tests hash-pinned robust shape manifests, cross-contract identities, and caller-owned admission limits.
 - `development_kit/tests/test_robust_shape_rows.py` — This module tests robust condition, gradient, iteration, trial, checkpoint, and cleanup row chaining and crash-tail recovery.
 - `development_kit/tests/test_robust_shape_worker.py` — This module tests JobManager dispatch, synthetic 24-condition completion, exact replay, status summaries, and duplicate suppression.
+- `development_kit/tests/test_robust_startup_admission.py` — This module tests caller-owned absolute RAM/disk thresholds with startup-only evaluation semantics.
 - `development_kit/tests/test_validation_runner.py` — This module tests the solver-independent validation point loop.
 - `development_kit/tests/test_validation_worker.py` — This module tests detached validation worker boundaries and cleanup.
 - `development_kit/tests/test_visual_review_contracts.py` — This module tests host-confirmed visual-review requests and receipts.
@@ -389,6 +390,7 @@ models are intentionally absent.
 - `comsol_mcp/research/robust_objectives.py` — This module evaluates differentiable absolute state contrast and caller-configurable smooth worst-case aggregation.
 - `comsol_mcp/research/robust_optimizer_policy.py` — This module binds manual GCMMA/MMA selection to method-specific execution evidence without automatic fallback.
 - `comsol_mcp/research/shape_support.py` — This module normalizes geometry-scale minimum-gap, mesh admission, invariant geometry, and retention policy.
+- `comsol_mcp/research/robust_startup_admission.py` — This module evaluates caller-owned absolute RAM/disk thresholds exactly once before robust work starts.
 - `comsol_mcp/research/workflow.py` — This module normalizes passive cited workflow capsules, explicit assumptions, review, and baseline readiness.
 - `comsol_mcp/research/materials.py` — This module normalizes provenance-bound material catalogs and derives approval and strict-verification sets.
 - `comsol_mcp/research/records.py` — This module normalizes canonical candidate records and point identities before side effects.

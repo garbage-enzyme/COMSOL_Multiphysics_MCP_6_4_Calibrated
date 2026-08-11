@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import os
 
+from comsol_mcp.jobs import robust_shape_worker
 from comsol_mcp.jobs.manager import JobManager
 from comsol_mcp.jobs.robust_shape_rows import append_robust_shape_row, read_robust_shape_rows
 from comsol_mcp.jobs.robust_shape_worker import run as run_robust_worker
-from comsol_mcp.jobs.store import process_identity
+from comsol_mcp.jobs.store import process_identity, read_json
 from development_kit.tests.test_robust_shape_optimization import _write_manifest
 
 
@@ -21,6 +22,16 @@ def _manager(root, monkeypatch):
             if module == "comsol_mcp.jobs.robust_shape_worker"
             else (_ for _ in ()).throw(AssertionError(module))
         ),
+    )
+    monkeypatch.setattr(
+        robust_shape_worker,
+        "collect_resource_telemetry",
+        lambda **_kwargs: {
+            "stage": "pre_mesh",
+            "available_memory_bytes": 2 * 1024**3,
+            "total_memory_bytes": 16 * 1024**3,
+            "runtime_free_bytes": 200 * 1024**3,
+        },
     )
     return manager
 
@@ -120,3 +131,27 @@ def test_attempt_bound_cancel_records_cleanup_before_cooperative_observation(
     assert all(rows[0]["payload"].values())
     state = manager.store.read_state(job_id)
     assert state["cancel"]["cooperative_observation"]["target_attempt"] == 1
+
+
+def test_startup_resource_refusal_is_durable_and_solver_free(ascii_tmp_path, monkeypatch):
+    envelope, _, _ = _write_manifest(ascii_tmp_path)
+    manager = _manager(ascii_tmp_path / "jobs", monkeypatch)
+    monkeypatch.setattr(
+        robust_shape_worker,
+        "collect_resource_telemetry",
+        lambda **_kwargs: {
+            "stage": "pre_mesh",
+            "available_memory_bytes": 1024**3 - 1,
+            "total_memory_bytes": 16 * 1024**3,
+            "runtime_free_bytes": 200 * 1024**3,
+        },
+    )
+    submitted = manager.submit(envelope)
+    job_id = submitted["job_id"]
+    assert run_robust_worker(str(manager.store.root), job_id) == 1
+    state = manager.store.read_state(job_id)
+    receipt = read_json(manager.store.job_dir(job_id) / "startup-admission.json")
+    assert state["status"] == "failed"
+    assert state["solver_started"] is False
+    assert receipt["decision"] == "refuse"
+    assert receipt["checks"]["available_memory_meets_minimum"] is False

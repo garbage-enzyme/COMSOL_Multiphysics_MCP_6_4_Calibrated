@@ -16,6 +16,7 @@ from comsol_mcp.research.robust_conditions import normalize_optimization_conditi
 from comsol_mcp.research.robust_gradient_acceptance import normalize_robust_gradient_policy
 from comsol_mcp.research.robust_objectives import normalize_robust_objective_configuration
 from comsol_mcp.research.robust_optimizer_policy import normalize_robust_optimizer_policy
+from comsol_mcp.research.robust_startup_admission import normalize_robust_startup_policy
 from comsol_mcp.research.shape_support import normalize_shape_support_policy
 
 ROBUST_SHAPE_MANIFEST_SCHEMA_NAME = "comsol_mcp.robust_shape_optimization_manifest"
@@ -89,6 +90,7 @@ def expand_robust_shape_manifest(submission: object) -> dict[str, Any]:
         "gradient_policy",
         "optimizer_policy",
         "native_optimizer",
+        "startup_admission",
         "initial_values",
         "synthetic_mode",
     }
@@ -122,6 +124,7 @@ def expand_robust_shape_manifest(submission: object) -> dict[str, Any]:
     gradient_policy = normalize_robust_gradient_policy(raw["gradient_policy"])
     optimizer_policy = normalize_robust_optimizer_policy(raw["optimizer_policy"])
     native_optimizer = normalize_native_optimizer_configuration(raw["native_optimizer"])
+    startup_admission = normalize_robust_startup_policy(raw["startup_admission"])
     if support["source_identity"] != source_hash:
         raise ValueError("robust shape support source identity differs from manifest source")
     if support["adapter_id"] != shape_policy["adapter_id"]:
@@ -164,6 +167,7 @@ def expand_robust_shape_manifest(submission: object) -> dict[str, Any]:
         "gradient_policy": gradient_policy,
         "optimizer_policy": optimizer_policy,
         "native_optimizer": native_optimizer,
+        "startup_admission": startup_admission,
         "initial_values": normalized_values,
         "synthetic_mode": raw["synthetic_mode"],
     }

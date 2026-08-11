@@ -263,6 +263,17 @@ def _entries() -> list[dict[str, Any]]:
             artifact_kind="configuration",
         ),
         _entry(
+            "comsol_mcp.robust_startup_admission_policy",
+            "1.0.0",
+            "comsol_mcp.research.robust_startup_admission",
+            artifact_kind="configuration",
+        ),
+        _entry(
+            "comsol_mcp.robust_startup_admission_receipt",
+            "1.0.0",
+            "comsol_mcp.research.robust_startup_admission",
+        ),
+        _entry(
             "comsol_mcp.robust_shape_optimization_row",
             "1.0.0",
             "comsol_mcp.jobs.robust_shape_rows",
