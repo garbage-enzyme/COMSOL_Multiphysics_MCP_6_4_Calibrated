@@ -48,6 +48,31 @@ def _cancel_requested(store: JobStore, job_id: str, attempt: int) -> bool:
     )
 
 
+def _record_synthetic_cancel(
+    store: JobStore, job_id: str, spec: dict, attempt: int, message: str
+) -> None:
+    rows_path = store.job_dir(job_id) / "robust_shape_rows.jsonl"
+    rows = read_robust_shape_rows(rows_path, job_fingerprint=spec["spec_fingerprint"])
+    if not any(row["kind"] == "cleanup" for row in rows):
+        append_robust_shape_row(
+            rows_path,
+            job_fingerprint=spec["spec_fingerprint"],
+            attempt=attempt,
+            kind="cleanup",
+            payload={
+                "source_unchanged": True,
+                "client_clear": True,
+                "owned_processes_absent": True,
+                "lease_released": True,
+                "cleanup_fingerprint": domain_sha256_v2(
+                    "comsol_mcp.synthetic_robust_cancel_cleanup",
+                    {"attempt": attempt, "message": message},
+                ),
+            },
+        )
+    store.record_cooperative_cancel_observed(job_id, attempt=attempt, message=message)
+
+
 def _run_synthetic(root: str, job_id: str) -> int:
     store = JobStore(Path(root))
     directory = store.job_dir(job_id)
@@ -60,8 +85,12 @@ def _run_synthetic(root: str, job_id: str) -> int:
         event="worker_containment_recorded",
     )
     if _cancel_requested(store, job_id, attempt):
-        store.record_cooperative_cancel_observed(
-            job_id, attempt=attempt, message="Stopped before robust synthetic startup"
+        _record_synthetic_cancel(
+            store,
+            job_id,
+            spec,
+            attempt,
+            "Stopped before robust synthetic startup",
         )
         return 0
     state = store.read_state(job_id)
@@ -86,8 +115,12 @@ def _run_synthetic(root: str, job_id: str) -> int:
     ]
     for row in active_rows:
         if _cancel_requested(store, job_id, attempt):
-            store.record_cooperative_cancel_observed(
-                job_id, attempt=attempt, message="Stopped between robust conditions"
+            _record_synthetic_cancel(
+                store,
+                job_id,
+                spec,
+                attempt,
+                "Stopped between robust conditions",
             )
             return 0
         if row["condition_id"] in completed:

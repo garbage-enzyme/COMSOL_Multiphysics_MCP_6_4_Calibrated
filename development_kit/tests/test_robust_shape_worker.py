@@ -100,3 +100,23 @@ def test_exact_duplicate_submission_reuses_existing_job(ascii_tmp_path, monkeypa
     second = manager.submit(envelope)
     assert second["duplicate"] is True
     assert second["job_id"] == first["job_id"]
+
+
+def test_attempt_bound_cancel_records_cleanup_before_cooperative_observation(
+    ascii_tmp_path, monkeypatch
+):
+    envelope, _, _ = _write_manifest(ascii_tmp_path)
+    manager = _manager(ascii_tmp_path / "jobs", monkeypatch)
+    submitted = manager.submit(envelope)
+    job_id = submitted["job_id"]
+    manager.store.request_cancel(job_id, requester_identity=process_identity(os.getpid()))
+    assert run_robust_worker(str(manager.store.root), job_id) == 0
+    spec = manager.store.read_spec(job_id)
+    rows = read_robust_shape_rows(
+        manager.store.job_dir(job_id) / "robust_shape_rows.jsonl",
+        job_fingerprint=spec["spec_fingerprint"],
+    )
+    assert [row["kind"] for row in rows] == ["cleanup"]
+    assert all(rows[0]["payload"].values())
+    state = manager.store.read_state(job_id)
+    assert state["cancel"]["cooperative_observation"]["target_attempt"] == 1
