@@ -101,6 +101,7 @@ LINT_TARGETS = (
     "development_kit/tests/test_robust_startup_admission.py",
     "development_kit/tests/test_robust_shape_optimization.py",
     "development_kit/tests/test_robust_shape_adapter.py",
+    "development_kit/tests/test_robust_shape_adapter_licensed_gate.py",
     "development_kit/tests/test_robust_shape_rows.py",
     "development_kit/tests/test_robust_shape_worker.py",
     "development_kit/tests/test_schema_registry.py",

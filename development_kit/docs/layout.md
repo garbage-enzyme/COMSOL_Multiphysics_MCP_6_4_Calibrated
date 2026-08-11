@@ -119,6 +119,7 @@ models are intentionally absent.
 - `development_kit/scripts/native_gradient_fd_licensed_gate.py` — This repository-only licensed runner performs fresh-model three-step central finite-difference validation for every native-gradient component with durable point rows and independent error checks.
 - `development_kit/scripts/native_gradient_directional_licensed_gate.py` — This repository-only licensed runner validates the full native gradient with an independently solved deterministic two-variable directional perturbation and durable point rows.
 - `development_kit/scripts/native_optimizer_licensed_gate.py` — This repository-only licensed runner enforces caller-declared native solver budgets, objective direction, move limits, explicit dataset identities, and fresh-forward finalist validation.
+- `development_kit/scripts/robust_shape_adapter_licensed_gate.py` — This repository-only alpha7.2 gate creates, reloads, and failure-rolls-back trusted Deformed Geometry controls on an immutable derived periodic-MIM model without solving.
 - `development_kit/scripts/research_adapter_template_probe.py` — This repository-only licensed probe launches the current source tree with isolated settings, audits one immutable COMSOL template read-only over serial stdio, and emits separate path-redacted and private receipts.
 - `development_kit/scripts/research_adapter_gate_server.py` — This repository-only candidate server adds two private calls that bind the trusted periodic-MIM backend to a provenance-tracked derived model during the licensed S4 gate.
 - `development_kit/scripts/research_adapter_licensed_gate.py` — This isolated serial stdio gate applies one trusted MIM candidate to a derived copy, collects one-point Wave Optics evidence, and proves source and solver cleanup.
@@ -367,6 +368,7 @@ models are intentionally absent.
 - `development_kit/tests/test_adjoint_optimization.py` — This module tests bounded manifest expansion, source identity, and explicit resource submission for adjoint jobs.
 - `development_kit/tests/test_robust_shape_optimization.py` — This module tests hash-pinned robust shape manifests, cross-contract identities, and caller-owned admission limits.
 - `development_kit/tests/test_robust_shape_adapter.py` — This module tests exact source, tree, topology, policy, and x/y variable binding before robust ClientAPI work.
+- `development_kit/tests/test_robust_shape_adapter_licensed_gate.py` — This module tests the S3 licensed gate's caller-owned limits, solver-free dry run, redaction, and cleanup boundaries.
 - `development_kit/tests/test_robust_shape_rows.py` — This module tests robust condition, gradient, iteration, trial, checkpoint, and cleanup row chaining and crash-tail recovery.
 - `development_kit/tests/test_robust_shape_worker.py` — This module tests JobManager dispatch, synthetic 24-condition completion, exact replay, status summaries, and duplicate suppression.
 - `development_kit/tests/test_robust_startup_admission.py` — This module tests caller-owned absolute RAM/disk thresholds with startup-only evaluation semantics.
