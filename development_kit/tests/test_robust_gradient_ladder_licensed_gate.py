@@ -60,7 +60,9 @@ def _args(
         "--max-iterations",
         "3",
         "--gcmma-optimizer-iterations",
-        "2",
+        "3",
+        "--gcmma-move-limit",
+        "0.05",
         "--validation-max-wall-time-seconds",
         "1800",
         "--optimizer-max-wall-time-seconds",
@@ -92,7 +94,9 @@ def _args(
                     "--mma-max-iterations",
                     "3",
                     "--mma-optimizer-iterations",
-                    "2",
+                    "3",
+                    "--mma-move-limit",
+                    "0.05",
                     "--mma-max-wall-time-seconds",
                     "14400",
                 ]
@@ -109,6 +113,7 @@ def test_parser_has_no_caller_budget_or_resource_defaults():
         "total_max_solves",
         "max_iterations",
         "gcmma_optimizer_iterations",
+        "gcmma_move_limit",
         "validation_max_wall_time_seconds",
         "optimizer_max_wall_time_seconds",
         "total_max_wall_time_seconds",
@@ -122,6 +127,7 @@ def test_parser_has_no_caller_budget_or_resource_defaults():
         "mma_max_solves",
         "mma_max_iterations",
         "mma_optimizer_iterations",
+        "mma_move_limit",
         "mma_max_wall_time_seconds",
     ):
         assert actions[name] is None
@@ -131,6 +137,14 @@ def test_mma_requires_its_own_explicit_budget(tmp_path, gate_root, monkeypatch):
     monkeypatch.setattr(gate.os, "cpu_count", lambda: 4)
     with pytest.raises(ValueError, match="mma_max_solves"):
         gate._spec(_args(gate_root, tmp_path, run_mma=True, include_mma_budgets=False))
+
+
+def test_mma_requires_its_own_explicit_move_limit(tmp_path, gate_root, monkeypatch):
+    monkeypatch.setattr(gate.os, "cpu_count", lambda: 4)
+    arguments = _args(gate_root, tmp_path, run_mma=True)
+    arguments.mma_move_limit = None
+    with pytest.raises(ValueError, match="mma_move_limit"):
+        gate._spec(arguments)
 
 
 @pytest.mark.parametrize(
@@ -184,8 +198,8 @@ def test_dry_run_freezes_serial_fresh_process_plan_without_starting_solver(
         "max_wall_time_seconds": 14400,
     }
     assert receipt["optimizer_execution"] == {
-        "gcmma": {"optimizer_iterations": 2},
-        "mma": {"optimizer_iterations": 2},
+        "gcmma": {"optimizer_iterations": 3, "move_limit": 0.05},
+        "mma": {"optimizer_iterations": 3, "move_limit": 0.05},
     }
     assert receipt["solver_started"] is False
     assert receipt["filesystem_modified"] is False
@@ -202,6 +216,7 @@ def test_mma_command_uses_its_separate_budget(tmp_path, gate_root, monkeypatch):
     assert command[command.index("--max-solves") + 1] == "17"
     assert command[command.index("--max-iterations") + 1] == "2"
     assert command[command.index("--optimizer-iterations") + 1] == "1"
+    assert float(command[command.index("--move-limit") + 1]) == 0.05
     assert command[command.index("--max-wall-time-seconds") + 1] == "900"
 
 
@@ -244,7 +259,11 @@ def _result(stage: str, revision: str, source_sha256: str, spec: dict | None = N
             {
                 "optimizer_method": "gcmma",
                 "requested_optimizer_iterations": spec["gcmma_optimizer_iterations"],
-                "solver_move_limit": {"mmamaxiter": str(spec["gcmma_optimizer_iterations"])},
+                "requested_move_limit": spec["gcmma_move_limit"],
+                "solver_move_limit": {
+                    "mmamaxiter": str(spec["gcmma_optimizer_iterations"]),
+                    "movelimit": str(spec["gcmma_move_limit"]),
+                },
                 "budget": gate._optimizer_configuration(spec, "gcmma")["budget"],
                 "baseline_objective": 0.2,
                 "final_objective": 0.64,
@@ -287,7 +306,11 @@ def _result(stage: str, revision: str, source_sha256: str, spec: dict | None = N
                 "success": False,
                 "optimizer_method": "mma",
                 "requested_optimizer_iterations": spec["mma_optimizer_iterations"],
-                "solver_move_limit": {"mmamaxiter": str(spec["mma_optimizer_iterations"])},
+                "requested_move_limit": spec["mma_move_limit"],
+                "solver_move_limit": {
+                    "mmamaxiter": str(spec["mma_optimizer_iterations"]),
+                    "movelimit": str(spec["mma_move_limit"]),
+                },
                 "budget": gate._optimizer_configuration(spec, "mma")["budget"],
                 "cleanup": {"client_clear": True, "source_unchanged": True},
             }
@@ -652,7 +675,9 @@ def _verifier_args(root: Path, tmp_path: Path, revision: str, *, run_mma: bool =
         "--max-iterations",
         "3",
         "--gcmma-optimizer-iterations",
-        "2",
+        "3",
+        "--gcmma-move-limit",
+        "0.05",
         "--validation-max-wall-time-seconds",
         "1800",
         "--optimizer-max-wall-time-seconds",
@@ -683,7 +708,9 @@ def _verifier_args(root: Path, tmp_path: Path, revision: str, *, run_mma: bool =
                 "--mma-max-iterations",
                 "3",
                 "--mma-optimizer-iterations",
-                "2",
+                "3",
+                "--mma-move-limit",
+                "0.05",
                 "--mma-max-wall-time-seconds",
                 "14400",
             ]
@@ -793,7 +820,7 @@ def test_independent_ladder_verifier_rejects_tampering_and_false_success(
     elif mutation == "budget":
         receipt["declared_budgets"]["max_review_items"] = 19
     elif mutation == "execution":
-        receipt["declared_optimizer_execution"]["gcmma"]["optimizer_iterations"] = 3
+        receipt["declared_optimizer_execution"]["gcmma"]["optimizer_iterations"] = 2
     elif mutation == "cleanup":
         receipt["cleanup"]["source_unchanged"] = False
     elif mutation == "gradient":

@@ -96,6 +96,15 @@ def test_requested_solver_iterations_are_separate_from_budget_cap():
         gate._requested_optimizer_iterations(args, {"max_iterations": 3})
 
 
+def test_move_limit_is_a_required_positive_caller_input():
+    args = type("Args", (), {"move_limit": 0.05})()
+    assert gate._requested_move_limit(args) == 0.05
+    for value in (None, False, 0.0, -0.1, float("nan"), float("inf")):
+        args.move_limit = value
+        with pytest.raises(ValueError, match="move_limit"):
+            gate._requested_move_limit(args)
+
+
 def test_gate_parser_has_no_host_resource_defaults():
     parser = gate._parser()
     actions = {action.dest: action.default for action in parser._actions}
@@ -104,6 +113,7 @@ def test_gate_parser_has_no_host_resource_defaults():
         "max_solves",
         "max_iterations",
         "optimizer_iterations",
+        "move_limit",
         "max_wall_time_seconds",
         "max_commit_fraction",
         "max_disk_bytes",

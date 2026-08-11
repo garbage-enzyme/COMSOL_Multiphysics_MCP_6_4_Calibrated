@@ -27,6 +27,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-solves", type=int, required=True)
     parser.add_argument("--max-iterations", type=int, required=True)
     parser.add_argument("--optimizer-iterations", type=int, required=True)
+    parser.add_argument("--move-limit", type=float, required=True)
     parser.add_argument("--max-wall-time-seconds", type=int, required=True)
     parser.add_argument("--max-commit-fraction", type=float, required=True)
     parser.add_argument("--max-disk-bytes", type=int, required=True)
@@ -121,6 +122,20 @@ def _requested_optimizer_iterations(args: argparse.Namespace, budget: dict) -> i
     return requested
 
 
+def _requested_move_limit(args: argparse.Namespace) -> float:
+    if isinstance(args.move_limit, bool):
+        raise ValueError("move_limit must be a caller-supplied positive finite number")
+    try:
+        requested = float(args.move_limit)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "move_limit must be a caller-supplied positive finite number"
+        ) from exc
+    if not math.isfinite(requested) or requested <= 0.0:
+        raise ValueError("move_limit must be a caller-supplied positive finite number")
+    return requested
+
+
 def _configure_solver_move_limit(
     model, study, move_limit: float, optimizer_iterations: int
 ) -> dict:
@@ -154,6 +169,11 @@ def _configure_solver_move_limit(
 def run(args: argparse.Namespace) -> dict:
     spec = structural._spec(args)
     requested_iterations = _requested_optimizer_iterations(args, spec["optimizer"]["budget"])
+    requested_move_limit = _requested_move_limit(args)
+    optimizer = dict(spec["optimizer"])
+    optimizer.pop("optimizer_fingerprint", None)
+    optimizer["move_limit"] = requested_move_limit
+    spec["optimizer"] = structural.normalize_native_optimizer_configuration(optimizer)
     source_before = structural._sha(spec["source"])
     for path in (spec["base_copy"], spec["configured_copy"]):
         path.unlink(missing_ok=True)
@@ -167,6 +187,7 @@ def run(args: argparse.Namespace) -> dict:
         "optimizer_method": spec["optimizer"]["method"],
         "budget": spec["optimizer"]["budget"],
         "requested_optimizer_iterations": requested_iterations,
+        "requested_move_limit": requested_move_limit,
         "objective_expression": support["objective"]["expression"],
         "points": [],
         "mesh_admission_policy": {
@@ -229,6 +250,13 @@ def run(args: argparse.Namespace) -> dict:
             spec["optimizer"]["move_limit"],
             requested_iterations,
         )
+        if not math.isclose(
+            float(receipt["solver_move_limit"]["movelimit"]),
+            requested_move_limit,
+            rel_tol=1e-12,
+            abs_tol=0.0,
+        ):
+            raise ValueError("native optimizer solver move-limit readback drifted")
         if time.monotonic() - started > spec["optimizer"]["budget"]["max_wall_time_seconds"]:
             raise TimeoutError("native optimizer wall budget exhausted before optimization")
         std2.run()

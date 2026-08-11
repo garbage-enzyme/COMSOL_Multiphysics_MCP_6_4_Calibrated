@@ -58,6 +58,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--total-max-solves", type=int, required=True)
     parser.add_argument("--max-iterations", type=int, required=True)
     parser.add_argument("--gcmma-optimizer-iterations", type=int, required=True)
+    parser.add_argument("--gcmma-move-limit", type=float, required=True)
     parser.add_argument("--validation-max-wall-time-seconds", type=int, required=True)
     parser.add_argument("--optimizer-max-wall-time-seconds", type=int, required=True)
     parser.add_argument("--total-max-wall-time-seconds", type=int, required=True)
@@ -72,6 +73,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--mma-max-solves", type=int)
     parser.add_argument("--mma-max-iterations", type=int)
     parser.add_argument("--mma-optimizer-iterations", type=int)
+    parser.add_argument("--mma-move-limit", type=float)
     parser.add_argument("--mma-max-wall-time-seconds", type=int)
     return parser
 
@@ -97,6 +99,18 @@ def _positive_int(value: object, name: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 1:
         raise ValueError(f"{name} must be a positive integer")
     return value
+
+
+def _positive_finite(value: object, name: str) -> float:
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be a positive finite number")
+    try:
+        normalized = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a positive finite number") from exc
+    if not math.isfinite(normalized) or normalized <= 0.0:
+        raise ValueError(f"{name} must be a positive finite number")
+    return normalized
 
 
 def _expected(args: argparse.Namespace) -> dict[str, Any]:
@@ -141,6 +155,7 @@ def _expected(args: argparse.Namespace) -> dict[str, Any]:
     )
     if gcmma_optimizer_iterations > budgets["max_iterations"]:
         raise ValueError("gcmma_optimizer_iterations exceeds max_iterations")
+    gcmma_move_limit = _positive_finite(args.gcmma_move_limit, "gcmma_move_limit")
     declared_solves = 3 * budgets["validation_max_solves"] + budgets["optimizer_max_solves"]
     declared_wall = (
         3 * budgets["validation_max_wall_time_seconds"] + budgets["optimizer_max_wall_time_seconds"]
@@ -154,6 +169,7 @@ def _expected(args: argparse.Namespace) -> dict[str, Any]:
         args.mma_max_iterations,
         args.mma_max_wall_time_seconds,
         args.mma_optimizer_iterations,
+        args.mma_move_limit,
     )
     if args.run_mma:
         mma_budget = {
@@ -162,6 +178,7 @@ def _expected(args: argparse.Namespace) -> dict[str, Any]:
             "max_wall_time_seconds": _positive_int(mma_values[2], "mma_max_wall_time_seconds"),
         }
         mma_optimizer_iterations = _positive_int(mma_values[3], "mma_optimizer_iterations")
+        mma_move_limit = _positive_finite(mma_values[4], "mma_move_limit")
         if mma_optimizer_iterations > mma_budget["max_iterations"]:
             raise ValueError("mma_optimizer_iterations exceeds mma_max_iterations")
     else:
@@ -169,6 +186,7 @@ def _expected(args: argparse.Namespace) -> dict[str, Any]:
             raise ValueError("MMA budgets require --run-mma")
         mma_budget = None
         mma_optimizer_iterations = None
+        mma_move_limit = None
     stages = [*_BASE_STAGES, *(["mma"] if args.run_mma else [])]
     roots = {stage: root.with_name(root.name + _SUFFIXES[stage]) for stage in stages}
     return {
@@ -179,9 +197,15 @@ def _expected(args: argparse.Namespace) -> dict[str, Any]:
         "budgets": budgets,
         "mma_budget": mma_budget,
         "optimizer_execution": {
-            "gcmma": {"optimizer_iterations": gcmma_optimizer_iterations},
+            "gcmma": {
+                "optimizer_iterations": gcmma_optimizer_iterations,
+                "move_limit": gcmma_move_limit,
+            },
             "mma": (
-                {"optimizer_iterations": mma_optimizer_iterations}
+                {
+                    "optimizer_iterations": mma_optimizer_iterations,
+                    "move_limit": mma_move_limit,
+                }
                 if mma_budget is not None
                 else None
             ),
@@ -238,7 +262,7 @@ def _optimizer_configuration(expected: dict[str, Any], stage: str) -> dict[str, 
             "optimizer_id": f"alpha72-{stage}-licensed-ladder",
             "backend": "comsol_native",
             "method": stage,
-            "move_limit": 0.1,
+            "move_limit": expected["optimizer_execution"][stage]["move_limit"],
             "optimality_tolerance": 1e-3,
             "constraint_tolerance": 1e-3,
             "budget": {
@@ -354,14 +378,25 @@ def verify(expected: dict[str, Any]) -> dict[str, Any]:
             raise ValueError(f"{stage} optimizer method drifted")
         if stage in {"gcmma", "mma"}:
             requested = expected["optimizer_execution"][stage]["optimizer_iterations"]
+            move_limit = expected["optimizer_execution"][stage]["move_limit"]
             solver = receipt.get("solver_move_limit")
             if (
                 receipt.get("requested_optimizer_iterations") != requested
+                or receipt.get("requested_move_limit") != move_limit
                 or (solver is not None and not isinstance(solver, dict))
                 or (isinstance(solver, dict) and solver.get("mmamaxiter") != str(requested))
+                or (
+                    isinstance(solver, dict)
+                    and not math.isclose(
+                        float(solver.get("movelimit", "nan")),
+                        move_limit,
+                        rel_tol=1e-12,
+                        abs_tol=0.0,
+                    )
+                )
                 or (receipt.get("success") is True and not isinstance(solver, dict))
             ):
-                raise ValueError(f"{stage} requested optimizer iterations drifted")
+                raise ValueError(f"{stage} optimizer execution settings drifted")
         receipts[stage] = receipt
         hashes[stage] = receipt_hash
         artifact_bytes += stage_bytes

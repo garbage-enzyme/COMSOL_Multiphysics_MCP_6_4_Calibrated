@@ -67,6 +67,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--total-max-solves", type=int, required=True)
     parser.add_argument("--max-iterations", type=int, required=True)
     parser.add_argument("--gcmma-optimizer-iterations", type=int, required=True)
+    parser.add_argument("--gcmma-move-limit", type=float, required=True)
     parser.add_argument("--validation-max-wall-time-seconds", type=int, required=True)
     parser.add_argument("--optimizer-max-wall-time-seconds", type=int, required=True)
     parser.add_argument("--total-max-wall-time-seconds", type=int, required=True)
@@ -81,6 +82,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--mma-max-solves", type=int)
     parser.add_argument("--mma-max-iterations", type=int)
     parser.add_argument("--mma-optimizer-iterations", type=int)
+    parser.add_argument("--mma-move-limit", type=float)
     parser.add_argument("--mma-max-wall-time-seconds", type=int)
     parser.add_argument("--dry-run", action="store_true")
     return parser
@@ -98,6 +100,18 @@ def _positive_integer(value: object, name: str, *, maximum: int = 1 << 50) -> in
     if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= maximum:
         raise ValueError(f"{name} must be a caller-supplied positive integer")
     return value
+
+
+def _positive_finite(value: object, name: str) -> float:
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be a caller-supplied positive finite number")
+    try:
+        normalized = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a caller-supplied positive finite number") from exc
+    if not math.isfinite(normalized) or normalized <= 0.0:
+        raise ValueError(f"{name} must be a caller-supplied positive finite number")
+    return normalized
 
 
 def _git_identity() -> dict[str, Any]:
@@ -173,6 +187,7 @@ def _spec(args: argparse.Namespace) -> dict[str, Any]:
     )
     if gcmma_optimizer_iterations > normalized["max_iterations"]:
         raise ValueError("gcmma_optimizer_iterations exceeds max_iterations")
+    gcmma_move_limit = _positive_finite(args.gcmma_move_limit, "gcmma_move_limit")
     mma_budget_values = {
         "mma_max_solves": (args.mma_max_solves, 100_000),
         "mma_max_iterations": (args.mma_max_iterations, 10_000),
@@ -192,12 +207,14 @@ def _spec(args: argparse.Namespace) -> dict[str, Any]:
         )
         if mma_optimizer_iterations > normalized["mma_max_iterations"]:
             raise ValueError("mma_optimizer_iterations exceeds mma_max_iterations")
+        mma_move_limit = _positive_finite(args.mma_move_limit, "mma_move_limit")
     elif any(value is not None for value, _maximum in mma_budget_values.values()) or (
-        args.mma_optimizer_iterations is not None
+        args.mma_optimizer_iterations is not None or args.mma_move_limit is not None
     ):
         raise ValueError("MMA budgets require explicit --run-mma")
     else:
         mma_optimizer_iterations = None
+        mma_move_limit = None
     declared_base_solves = (
         len(_GRADIENT_STAGES) * normalized["validation_max_solves"]
         + normalized["optimizer_max_solves"]
@@ -232,7 +249,9 @@ def _spec(args: argparse.Namespace) -> dict[str, Any]:
         "max_commit_fraction": commit_fraction,
         "minimum_element_quality": minimum_quality,
         "gcmma_optimizer_iterations": gcmma_optimizer_iterations,
+        "gcmma_move_limit": gcmma_move_limit,
         "mma_optimizer_iterations": mma_optimizer_iterations,
+        "mma_move_limit": mma_move_limit,
         "run_mma": bool(args.run_mma),
         "child_roots": child_roots,
         "receipt": root / "ladder-receipt.json",
@@ -333,6 +352,11 @@ def _stage_command(spec: dict[str, Any], stage: str) -> list[str]:
             ),
             "--optimizer-iterations",
             str(optimizer_iterations),
+            "--move-limit",
+            format(
+                spec["gcmma_move_limit"] if stage == "gcmma" else spec["mma_move_limit"],
+                ".17g",
+            ),
             "--max-elements-per-model",
             str(spec["max_elements_per_model"]),
             "--minimum-element-quality",
@@ -440,6 +464,7 @@ def _verify_stage(
     revision: str,
     source_sha256: str,
     optimizer_iterations: int | None = None,
+    move_limit: float | None = None,
 ) -> None:
     receipt = result["receipt"]
     if receipt.get("source_revision") != revision or receipt.get("source_sha256") != source_sha256:
@@ -450,12 +475,20 @@ def _verify_stage(
         solver = receipt.get("solver_move_limit")
         if (
             optimizer_iterations is None
+            or move_limit is None
             or receipt.get("requested_optimizer_iterations") != optimizer_iterations
+            or receipt.get("requested_move_limit") != move_limit
             or (solver is not None and not isinstance(solver, dict))
             or (isinstance(solver, dict) and solver.get("mmamaxiter") != str(optimizer_iterations))
+            or (
+                isinstance(solver, dict)
+                and not math.isclose(
+                    float(solver.get("movelimit", "nan")), move_limit, rel_tol=1e-12, abs_tol=0.0
+                )
+            )
             or (receipt.get("success") is True and not isinstance(solver, dict))
         ):
-            raise ValueError(f"{stage} receipt reports different requested iterations")
+            raise ValueError(f"{stage} receipt reports different optimizer execution settings")
     if stage != "mma" and (result["returncode"] != 0 or receipt.get("success") is not True):
         raise ValueError(f"{stage} licensed stage failed")
 
@@ -496,7 +529,7 @@ def _optimizer_configuration(spec: dict[str, Any], stage: str) -> dict[str, Any]
             "optimizer_id": f"alpha72-{stage}-licensed-ladder",
             "backend": "comsol_native",
             "method": stage,
-            "move_limit": 0.1,
+            "move_limit": spec[f"{stage}_move_limit"],
             "optimality_tolerance": 1e-3,
             "constraint_tolerance": 1e-3,
             "budget": {
@@ -565,9 +598,17 @@ def _declared_mma_budget(spec: dict[str, Any]) -> dict[str, int] | None:
 
 def _declared_optimizer_execution(spec: dict[str, Any]) -> dict[str, Any]:
     return {
-        "gcmma": {"optimizer_iterations": spec["gcmma_optimizer_iterations"]},
+        "gcmma": {
+            "optimizer_iterations": spec["gcmma_optimizer_iterations"],
+            "move_limit": spec["gcmma_move_limit"],
+        },
         "mma": (
-            {"optimizer_iterations": spec["mma_optimizer_iterations"]} if spec["run_mma"] else None
+            {
+                "optimizer_iterations": spec["mma_optimizer_iterations"],
+                "move_limit": spec["mma_move_limit"],
+            }
+            if spec["run_mma"]
+            else None
         ),
     }
 
@@ -756,6 +797,9 @@ def _run(
                     spec["gcmma_optimizer_iterations"]
                     if stage == "gcmma"
                     else spec["mma_optimizer_iterations"]
+                ),
+                move_limit=(
+                    spec["gcmma_move_limit"] if stage == "gcmma" else spec["mma_move_limit"]
                 ),
             )
             results[stage] = result
