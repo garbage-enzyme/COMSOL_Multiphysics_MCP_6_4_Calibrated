@@ -7,7 +7,10 @@ import copy
 import pytest
 
 from comsol_mcp.research.robust_conditions import normalize_optimization_condition_table
-from comsol_mcp.research.robust_objectives import evaluate_robust_absolute_contrast
+from comsol_mcp.research.robust_objectives import (
+    aggregate_robust_absolute_contrast_gradient,
+    evaluate_robust_absolute_contrast,
+)
 from development_kit.tests.test_robust_conditions import _table
 
 
@@ -41,6 +44,23 @@ def _observations() -> list[dict]:
             }
         )
     return values
+
+
+def _gradients() -> list[dict]:
+    table = normalize_optimization_condition_table(_table())
+    return [
+        {
+            "condition_id": row["condition_id"],
+            "variable_ids": ["patch_length_x", "patch_length_y"],
+            "values": [
+                0.5 + row["order"] * 0.01,
+                -0.2 + row["order"] * 0.005,
+            ],
+            "evidence_sha256": f"{(row['order'] + 3) % 10}" * 64,
+            "disposition": "measured",
+        }
+        for row in table["conditions"]
+    ]
 
 
 def test_24_conditions_form_12_complete_symmetric_contrast_pairs():
@@ -99,3 +119,58 @@ def test_pair_weights_must_match_and_configuration_fingerprint_is_immutable():
     with pytest.raises(ValueError, match="fingerprint"):
         normalize_robust_objective_configuration(tampered)
     assert len(receipt["receipt_fingerprint"]) == 64
+
+
+def test_aggregate_gradient_matches_independent_objective_finite_difference():
+    observations = _observations()
+    gradients = _gradients()
+    receipt = aggregate_robust_absolute_contrast_gradient(
+        _configuration(), _table(), observations, gradients
+    )
+    step = 1e-7
+    for variable_index, expected in enumerate(receipt["aggregate_gradient"]):
+        plus = copy.deepcopy(observations)
+        minus = copy.deepcopy(observations)
+        by_condition = {item["condition_id"]: item for item in gradients}
+        for target in plus:
+            target["value"] += step * by_condition[target["condition_id"]]["values"][variable_index]
+        for target in minus:
+            target["value"] -= step * by_condition[target["condition_id"]]["values"][variable_index]
+        plus_value = evaluate_robust_absolute_contrast(_configuration(), _table(), plus)[
+            "smooth_worst_case_absolute_contrast"
+        ]
+        minus_value = evaluate_robust_absolute_contrast(_configuration(), _table(), minus)[
+            "smooth_worst_case_absolute_contrast"
+        ]
+        finite_difference = (plus_value - minus_value) / (2.0 * step)
+        assert expected == pytest.approx(finite_difference, rel=1e-7, abs=1e-9)
+
+
+def test_state_order_does_not_change_the_physical_aggregate_gradient():
+    forward = aggregate_robust_absolute_contrast_gradient(
+        _configuration(), _table(), _observations(), _gradients()
+    )
+    reversed_states = aggregate_robust_absolute_contrast_gradient(
+        _configuration(["MR", "OX"]), _table(), _observations(), _gradients()
+    )
+    assert reversed_states["aggregate_gradient"] == pytest.approx(forward["aggregate_gradient"])
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        (lambda rows: rows.pop(), "exactly cover"),
+        (lambda rows: rows[0].update(disposition="failed"), "unmeasured"),
+        (lambda rows: rows[1]["variable_ids"].reverse(), "variable order"),
+        (lambda rows: rows[0]["values"].pop(), "match variable_ids"),
+    ],
+)
+def test_aggregate_gradient_rejects_incomplete_or_inconsistent_condition_evidence(
+    mutation, message
+):
+    gradients = _gradients()
+    mutation(gradients)
+    with pytest.raises(ValueError, match=message):
+        aggregate_robust_absolute_contrast_gradient(
+            _configuration(), _table(), _observations(), gradients
+        )

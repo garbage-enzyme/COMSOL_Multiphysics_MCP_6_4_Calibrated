@@ -15,6 +15,8 @@ ROBUST_OBJECTIVE_CONFIGURATION_SCHEMA_NAME = "comsol_mcp.robust_objective_config
 ROBUST_OBJECTIVE_CONFIGURATION_SCHEMA_VERSION = "1.0.0"
 ROBUST_OBJECTIVE_RECEIPT_SCHEMA_NAME = "comsol_mcp.robust_objective_receipt"
 ROBUST_OBJECTIVE_RECEIPT_SCHEMA_VERSION = "1.0.0"
+ROBUST_OBJECTIVE_GRADIENT_RECEIPT_SCHEMA_NAME = "comsol_mcp.robust_objective_gradient_receipt"
+ROBUST_OBJECTIVE_GRADIENT_RECEIPT_SCHEMA_VERSION = "1.0.0"
 
 _OBJECTIVE_KIND = "smooth_worst_case_absolute_contrast"
 _MEASURED_DISPOSITION = "measured"
@@ -222,11 +224,134 @@ def evaluate_robust_absolute_contrast(
     }
 
 
+def _normalize_condition_gradients(
+    value: object, expected_ids: set[str]
+) -> tuple[list[str], dict[str, dict[str, Any]]]:
+    bounded = _bounded_json(value, "robust condition gradients", 2 * 1024 * 1024)
+    if not isinstance(bounded, list) or not bounded:
+        raise ValueError("robust condition gradients must be a bounded nonempty list")
+    variable_ids: list[str] | None = None
+    by_condition: dict[str, dict[str, Any]] = {}
+    for index, item in enumerate(bounded):
+        name = f"condition_gradients[{index}]"
+        raw = _object(
+            item,
+            {"condition_id", "variable_ids", "values", "evidence_sha256", "disposition"},
+            name,
+        )
+        condition_id = _identifier(raw["condition_id"], f"{name}.condition_id")
+        if condition_id in by_condition:
+            raise ValueError("robust condition gradient IDs must be unique")
+        variables = raw["variable_ids"]
+        values = raw["values"]
+        if not isinstance(variables, list) or not variables:
+            raise ValueError("robust condition gradient variable_ids must be nonempty")
+        normalized_variables = [
+            _identifier(item, f"{name}.variable_ids[{position}]")
+            for position, item in enumerate(variables)
+        ]
+        if len(normalized_variables) != len(set(normalized_variables)):
+            raise ValueError("robust condition gradient variable_ids must be unique")
+        if variable_ids is None:
+            variable_ids = normalized_variables
+        elif normalized_variables != variable_ids:
+            raise ValueError("robust condition gradient variable order changed")
+        if not isinstance(values, list) or len(values) != len(normalized_variables):
+            raise ValueError("robust condition gradient values must match variable_ids")
+        if raw["disposition"] != _MEASURED_DISPOSITION:
+            raise ValueError("robust objective cannot aggregate an unmeasured condition gradient")
+        by_condition[condition_id] = {
+            "condition_id": condition_id,
+            "values": [
+                _finite(item, f"{name}.values[{position}]") for position, item in enumerate(values)
+            ],
+            "evidence_sha256": _sha256(raw["evidence_sha256"], f"{name}.evidence_sha256"),
+        }
+    if set(by_condition) != expected_ids:
+        raise ValueError("condition gradients must exactly cover objective observations")
+    if variable_ids is None:
+        raise ValueError("robust condition gradients did not establish variable order")
+    return variable_ids, by_condition
+
+
+def aggregate_robust_absolute_contrast_gradient(
+    configuration: object,
+    condition_table: object,
+    observations: object,
+    condition_gradients: object,
+) -> dict[str, Any]:
+    """Apply the exact smooth-absolute and smooth-worst-case gradient chain rule."""
+    objective_receipt = evaluate_robust_absolute_contrast(
+        configuration, condition_table, observations
+    )
+    expected_ids = {
+        condition_id
+        for pair in objective_receipt["pairs"]
+        for condition_id in pair["state_condition_ids"].values()
+    }
+    variable_ids, gradients = _normalize_condition_gradients(condition_gradients, expected_ids)
+    objective = normalize_robust_objective_configuration(configuration)
+    state_a, state_b = objective["state_ids"]
+    pairs = []
+    aggregate = [0.0] * len(variable_ids)
+    for pair in objective_receipt["pairs"]:
+        condition_a = pair["state_condition_ids"][state_a]
+        condition_b = pair["state_condition_ids"][state_b]
+        difference = [
+            left - right
+            for left, right in zip(
+                gradients[condition_a]["values"],
+                gradients[condition_b]["values"],
+                strict=True,
+            )
+        ]
+        smooth = [pair["smooth_absolute_derivative"] * item for item in difference]
+        weight = pair["smooth_worst_case_weight"]
+        aggregate = [
+            current + weight * contribution
+            for current, contribution in zip(aggregate, smooth, strict=True)
+        ]
+        pairs.append(
+            {
+                "pair_id": pair["pair_id"],
+                "state_condition_ids": pair["state_condition_ids"],
+                "state_gradient_evidence_sha256": {
+                    state_a: gradients[condition_a]["evidence_sha256"],
+                    state_b: gradients[condition_b]["evidence_sha256"],
+                },
+                "signed_difference_gradient": difference,
+                "smooth_absolute_gradient": smooth,
+                "smooth_worst_case_weight": weight,
+                "weighted_gradient_contribution": [weight * item for item in smooth],
+            }
+        )
+    body = {
+        "schema_name": ROBUST_OBJECTIVE_GRADIENT_RECEIPT_SCHEMA_NAME,
+        "schema_version": ROBUST_OBJECTIVE_GRADIENT_RECEIPT_SCHEMA_VERSION,
+        "objective_receipt_fingerprint": objective_receipt["receipt_fingerprint"],
+        "objective_fingerprint": objective_receipt["objective_fingerprint"],
+        "condition_table_fingerprint": objective_receipt["condition_table_fingerprint"],
+        "variable_ids": variable_ids,
+        "pairs": pairs,
+        "aggregate_gradient": aggregate,
+        "complete": True,
+    }
+    return {
+        **body,
+        "receipt_fingerprint": domain_sha256_v2(
+            ROBUST_OBJECTIVE_GRADIENT_RECEIPT_SCHEMA_NAME, body
+        ),
+    }
+
+
 __all__ = [
     "ROBUST_OBJECTIVE_CONFIGURATION_SCHEMA_NAME",
     "ROBUST_OBJECTIVE_CONFIGURATION_SCHEMA_VERSION",
     "ROBUST_OBJECTIVE_RECEIPT_SCHEMA_NAME",
     "ROBUST_OBJECTIVE_RECEIPT_SCHEMA_VERSION",
+    "ROBUST_OBJECTIVE_GRADIENT_RECEIPT_SCHEMA_NAME",
+    "ROBUST_OBJECTIVE_GRADIENT_RECEIPT_SCHEMA_VERSION",
+    "aggregate_robust_absolute_contrast_gradient",
     "evaluate_robust_absolute_contrast",
     "normalize_robust_objective_configuration",
 ]

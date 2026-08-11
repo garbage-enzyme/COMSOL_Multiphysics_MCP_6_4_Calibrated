@@ -123,8 +123,11 @@ from .robust_gradient_acceptance import (
 from .robust_objectives import (
     ROBUST_OBJECTIVE_CONFIGURATION_SCHEMA_NAME,
     ROBUST_OBJECTIVE_CONFIGURATION_SCHEMA_VERSION,
+    ROBUST_OBJECTIVE_GRADIENT_RECEIPT_SCHEMA_NAME,
+    ROBUST_OBJECTIVE_GRADIENT_RECEIPT_SCHEMA_VERSION,
     ROBUST_OBJECTIVE_RECEIPT_SCHEMA_NAME,
     ROBUST_OBJECTIVE_RECEIPT_SCHEMA_VERSION,
+    aggregate_robust_absolute_contrast_gradient,
     evaluate_robust_absolute_contrast,
     normalize_robust_objective_configuration,
 )
@@ -212,6 +215,8 @@ __all__ = [
     "ROBUST_OBJECTIVE_CONFIGURATION_SCHEMA_VERSION",
     "ROBUST_OBJECTIVE_RECEIPT_SCHEMA_NAME",
     "ROBUST_OBJECTIVE_RECEIPT_SCHEMA_VERSION",
+    "ROBUST_OBJECTIVE_GRADIENT_RECEIPT_SCHEMA_NAME",
+    "ROBUST_OBJECTIVE_GRADIENT_RECEIPT_SCHEMA_VERSION",
     "ROBUST_OPTIMIZER_POLICY_SCHEMA_NAME",
     "ROBUST_OPTIMIZER_POLICY_SCHEMA_VERSION",
     "ROBUST_GRADIENT_POLICY_SCHEMA_NAME",
@@ -273,6 +278,7 @@ __all__ = [
     "relative_bounds",
     "score_objectives",
     "evaluate_robust_absolute_contrast",
+    "aggregate_robust_absolute_contrast_gradient",
     "assess_robust_gradient_acceptance",
     "compile_campaign_manifest",
     "compile_robust_shape_adapter_binding",

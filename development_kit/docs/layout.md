@@ -390,7 +390,7 @@ models are intentionally absent.
 - `comsol_mcp/research/external_validation.py` — This module normalizes backend-neutral independent validation receipts and forbids silent RCWA fallback.
 - `comsol_mcp/research/robust_conditions.py` — This module normalizes immutable configurable optimization condition tables and provenance-bound material states.
 - `comsol_mcp/research/robust_gradient_acceptance.py` — This module combines independent component and directional gradient receipts under caller-frozen thresholds.
-- `comsol_mcp/research/robust_objectives.py` — This module evaluates differentiable absolute state contrast and caller-configurable smooth worst-case aggregation.
+- `comsol_mcp/research/robust_objectives.py` — This module evaluates differentiable absolute state contrast, caller-configurable smooth worst-case aggregation, and the exact condition-to-aggregate gradient chain rule.
 - `comsol_mcp/research/robust_optimizer_policy.py` — This module binds manual GCMMA/MMA selection to method-specific execution evidence without automatic fallback.
 - `comsol_mcp/research/robust_shape_adapter.py` — This module binds the trusted periodic-MIM structure, tree audit, derivative support, shape policy, and x/y variables, then verifies failure-atomic Deformed Geometry control preparation.
 - `comsol_mcp/research/shape_support.py` — This module normalizes geometry-scale minimum-gap, mesh admission, invariant geometry, and retention policy.
