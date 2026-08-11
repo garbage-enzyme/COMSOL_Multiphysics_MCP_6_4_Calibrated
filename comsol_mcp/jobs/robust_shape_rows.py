@@ -15,7 +15,15 @@ ROBUST_SHAPE_ROW_SCHEMA_NAME = "comsol_mcp.robust_shape_optimization_row"
 ROBUST_SHAPE_ROW_SCHEMA_VERSION = "1.0.0"
 MAX_ROWS = 100_000
 MAX_ROW_BYTES = 256 * 1024
-_KINDS = {"condition", "gradient", "iteration", "trial", "checkpoint", "cleanup"}
+_KINDS = {
+    "condition",
+    "gradient",
+    "iteration",
+    "trial",
+    "finalist_validation",
+    "checkpoint",
+    "cleanup",
+}
 _STATUSES = {"accepted", "rejected", "completed", "failed", "skipped", "cancelled"}
 
 
@@ -171,6 +179,38 @@ def _payload(value: object, kind: str) -> dict[str, Any]:
             "aggregate_objective": _finite(raw["aggregate_objective"], "aggregate_objective"),
             "status": _status(raw["status"], "trial status"),
             "reason_code": _identifier(raw["reason_code"], "reason_code"),
+        }
+    if kind == "finalist_validation":
+        fields = {
+            "iteration_id",
+            "candidate_fingerprint",
+            "policy_fingerprint",
+            "receipt_fingerprint",
+            "status",
+            "reason_codes",
+        }
+        if set(raw) != fields:
+            raise ValueError("finalist validation payload fields are invalid")
+        status = raw["status"]
+        if status not in {"validated", "rejected"}:
+            raise ValueError("finalist validation status is unsupported")
+        reasons = raw["reason_codes"]
+        if not isinstance(reasons, list) or len(reasons) > 6:
+            raise ValueError("finalist validation reason_codes must be a bounded list")
+        normalized_reasons = [
+            _identifier(item, "finalist validation reason_code") for item in reasons
+        ]
+        if len(normalized_reasons) != len(set(normalized_reasons)):
+            raise ValueError("finalist validation reason_codes must be unique")
+        if (status == "validated") != (not normalized_reasons):
+            raise ValueError("finalist validation status differs from reason_codes")
+        return {
+            "iteration_id": _identifier(raw["iteration_id"], "iteration_id"),
+            "candidate_fingerprint": _digest(raw["candidate_fingerprint"], "candidate_fingerprint"),
+            "policy_fingerprint": _digest(raw["policy_fingerprint"], "policy_fingerprint"),
+            "receipt_fingerprint": _digest(raw["receipt_fingerprint"], "receipt_fingerprint"),
+            "status": status,
+            "reason_codes": normalized_reasons,
         }
     if kind == "checkpoint":
         fields = {

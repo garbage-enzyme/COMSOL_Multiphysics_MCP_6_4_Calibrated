@@ -63,6 +63,17 @@ def test_all_row_kinds_share_one_contiguous_hash_chain(ascii_tmp_path):
             },
         ),
         (
+            "finalist_validation",
+            {
+                "iteration_id": "it-0",
+                "candidate_fingerprint": "c" * 64,
+                "policy_fingerprint": "5" * 64,
+                "receipt_fingerprint": "6" * 64,
+                "status": "validated",
+                "reason_codes": [],
+            },
+        ),
+        (
             "checkpoint",
             {
                 "iteration_id": "it-0",
@@ -147,3 +158,32 @@ def test_failed_condition_cannot_claim_observation_or_objective_contribution(asc
             kind="condition",
             payload=payload,
         )
+
+
+def test_rejected_finalist_row_requires_bounded_unique_reasons(ascii_tmp_path):
+    payload = {
+        "iteration_id": "it-3",
+        "candidate_fingerprint": "a" * 64,
+        "policy_fingerprint": "b" * 64,
+        "receipt_fingerprint": "c" * 64,
+        "status": "rejected",
+        "reason_codes": ["mesh_convergence_failed", "branch_guard_failed"],
+    }
+    row = append_robust_shape_row(
+        ascii_tmp_path / "rejected-finalist.jsonl",
+        job_fingerprint=JOB,
+        attempt=1,
+        kind="finalist_validation",
+        payload=payload,
+    )
+    assert row["payload"]["reason_codes"] == payload["reason_codes"]
+    for reasons in ([], ["same", "same"], [f"reason-{index}" for index in range(7)]):
+        payload["reason_codes"] = reasons
+        with pytest.raises(ValueError, match="reason_codes"):
+            append_robust_shape_row(
+                ascii_tmp_path / f"invalid-finalist-{len(reasons)}.jsonl",
+                job_fingerprint=JOB,
+                attempt=1,
+                kind="finalist_validation",
+                payload=payload,
+            )
