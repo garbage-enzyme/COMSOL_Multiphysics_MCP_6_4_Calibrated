@@ -21,6 +21,7 @@ from .branch_continuation_campaign import normalize_branch_continuation_campaign
 from .convergence_campaign import normalize_convergence_campaign_spec
 from .process_control import inspect_identity
 from .resource_admission import normalize_resource_policy
+from .robust_shape_optimization import expand_robust_shape_manifest
 from .spectral_characterization import normalize_spectral_characterization_job_spec
 from .store import (
     ACTIVE_STATES,
@@ -280,6 +281,7 @@ def _worker_module(job_type: str) -> str:
         "branch_continuation_campaign": "comsol_mcp.jobs.branch_continuation_campaign_worker",
         "thermo_optomechanical_replay": "comsol_mcp.jobs.thermo_optomechanical_replay_worker",
         "adjoint_optimization": "comsol_mcp.jobs.adjoint_optimization_worker",
+        "robust_shape_optimization": "comsol_mcp.jobs.robust_shape_worker",
     }
     try:
         return modules[job_type]
@@ -302,6 +304,14 @@ def _point_count(spec: dict[str, Any]) -> int:
         return int(spec["declared_stage_count"])
     if spec["job_type"] == "adjoint_optimization":
         return int(spec["optimizer"]["budget"]["max_iterations"])
+    if spec["job_type"] == "robust_shape_optimization":
+        return len(
+            [
+                row
+                for row in spec["condition_table"]["conditions"]
+                if row["active"] and row["objective_role"] == "objective"
+            ]
+        )
     return len(spec["parameter_values"])
 
 
@@ -344,6 +354,8 @@ class JobManager:
             spec = normalize_thermo_optomechanical_replay_spec(raw_spec)
         elif job_type == "adjoint_optimization":
             spec = expand_adjoint_optimization_manifest(raw_spec)
+        elif job_type == "robust_shape_optimization":
+            spec = expand_robust_shape_manifest(raw_spec)
         else:
             spec = validate_staged_sweep_spec(raw_spec)
         worker_module = _worker_module(spec["job_type"])
@@ -354,6 +366,7 @@ class JobManager:
             "branch_continuation_campaign",
             "thermo_optomechanical_replay",
             "adjoint_optimization",
+            "robust_shape_optimization",
         }
         if spec["job_type"] in duplicate_job_types:
             with JobLock(self.store.root / ".submit.lock"):
@@ -845,6 +858,7 @@ class JobManager:
             "branch_continuation_campaign",
             "thermo_optomechanical_replay",
             "adjoint_optimization",
+            "robust_shape_optimization",
         }:
             if self._preflight is None and spec.get("execution_backend") is None:
                 from comsol_mcp.tools.ownership import SolverOwnership
@@ -1053,6 +1067,29 @@ class JobManager:
                     "completed_stage_ids": [row["stage_id"] for row in rows],
                     "last_stage_row_sha256": rows[-1]["row_sha256"] if rows else None,
                     "declared_optical_points": spec["declared_optical_point_count"],
+                }
+            elif spec.get("job_type") == "robust_shape_optimization":
+                from .robust_shape_rows import read_robust_shape_rows
+
+                directory = self.store.job_dir(job_id)
+                rows = read_robust_shape_rows(
+                    directory / "robust_shape_rows.jsonl",
+                    job_fingerprint=spec["spec_fingerprint"],
+                )
+                condition_rows = [row for row in rows if row["kind"] == "condition"]
+                completed = {
+                    row["payload"]["condition_id"]
+                    for row in condition_rows
+                    if row["payload"]["status"] in {"completed", "skipped"}
+                }
+                declared = _point_count(spec)
+                state["robust_shape_progress"] = {
+                    "declared_conditions": declared,
+                    "completed_conditions": len(completed),
+                    "pending_conditions": declared - len(completed),
+                    "row_count": len(rows),
+                    "last_row_sha256": rows[-1]["row_sha256"] if rows else None,
+                    "cleanup_recorded": any(row["kind"] == "cleanup" for row in rows),
                 }
             return {"success": True, "job_id": job_id, **state}
 
