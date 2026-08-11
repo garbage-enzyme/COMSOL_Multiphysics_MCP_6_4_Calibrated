@@ -18,6 +18,8 @@ from comsol_mcp.research import (
     DESIGN_SPACE_SCHEMA_VERSION,
     EVALUATION_RECORD_SCHEMA_NAME,
     EVALUATION_RECORD_SCHEMA_VERSION,
+    EXTERNAL_VALIDATION_RECEIPT_SCHEMA_NAME,
+    EXTERNAL_VALIDATION_RECEIPT_SCHEMA_VERSION,
     MATERIAL_CATALOG_SCHEMA_NAME,
     MATERIAL_CATALOG_SCHEMA_VERSION,
     MATERIAL_STATE_CONFIGURATION_SCHEMA_NAME,
@@ -388,6 +390,11 @@ def _entries() -> list[dict[str, Any]]:
             EVALUATION_RECORD_SCHEMA_VERSION,
             "comsol_mcp.research.evaluations",
             artifact_kind="durable_artifact",
+        ),
+        _entry(
+            EXTERNAL_VALIDATION_RECEIPT_SCHEMA_NAME,
+            EXTERNAL_VALIDATION_RECEIPT_SCHEMA_VERSION,
+            "comsol_mcp.research.external_validation",
         ),
         _entry(
             "comsol_mcp.execution_evidence_outcome",

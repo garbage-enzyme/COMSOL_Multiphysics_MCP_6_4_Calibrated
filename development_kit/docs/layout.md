@@ -301,6 +301,7 @@ models are intentionally absent.
 - `development_kit/tests/test_derivative_support.py` — This module tests strict derivative-support identities, variable mappings, objective contracts, and immutable normalization.
 - `development_kit/tests/test_gradient_contracts.py` — This module tests caller-budgeted native optimizer and exact gradient-row contracts.
 - `development_kit/tests/test_gradient_validation.py` — This module tests independent finite-difference, sign, cosine, directional, and step-sensitivity gradient checks.
+- `development_kit/tests/test_external_validation.py` — This module tests independent COMSOL-first validation and explicitly authorized RCWA fallback receipts.
 - `development_kit/tests/test_robust_conditions.py` — This module tests complete or explicitly sparse configurable multi-condition and material-state tables.
 - `development_kit/tests/test_robust_gradient_acceptance.py` — This module tests joint component, cosine, sign, three-step, and directional gradient acceptance.
 - `development_kit/tests/test_robust_objectives.py` — This module tests smooth absolute two-state contrast and weighted smooth worst-case scalarization.
@@ -379,6 +380,7 @@ models are intentionally absent.
 - `comsol_mcp/research/derivative_support.py` — This module defines solver-free native-derivative support, variable, objective, and constraint identities.
 - `comsol_mcp/research/gradient_contracts.py` — This module defines immutable gradient rows and caller-budgeted native optimizer identities.
 - `comsol_mcp/research/gradient_validation.py` — This module compares native gradients with caller-supplied central or one-sided finite-difference evidence.
+- `comsol_mcp/research/external_validation.py` — This module normalizes backend-neutral independent validation receipts and forbids silent RCWA fallback.
 - `comsol_mcp/research/robust_conditions.py` — This module normalizes immutable configurable optimization condition tables and provenance-bound material states.
 - `comsol_mcp/research/robust_gradient_acceptance.py` — This module combines independent component and directional gradient receipts under caller-frozen thresholds.
 - `comsol_mcp/research/robust_objectives.py` — This module evaluates differentiable absolute state contrast and caller-configurable smooth worst-case aggregation.

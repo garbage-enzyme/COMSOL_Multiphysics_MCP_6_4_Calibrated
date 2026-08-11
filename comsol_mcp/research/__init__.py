@@ -52,6 +52,11 @@ from .evaluations import (
     EVALUATION_RECORD_SCHEMA_VERSION,
     normalize_evaluation_record,
 )
+from .external_validation import (
+    EXTERNAL_VALIDATION_RECEIPT_SCHEMA_NAME,
+    EXTERNAL_VALIDATION_RECEIPT_SCHEMA_VERSION,
+    normalize_external_validation_receipt,
+)
 from .gradient_contracts import (
     GRADIENT_RECORD_SCHEMA_NAME,
     GRADIENT_RECORD_SCHEMA_VERSION,
@@ -161,6 +166,8 @@ __all__ = [
     "DESIGN_SPACE_SCHEMA_VERSION",
     "EVALUATION_RECORD_SCHEMA_NAME",
     "EVALUATION_RECORD_SCHEMA_VERSION",
+    "EXTERNAL_VALIDATION_RECEIPT_SCHEMA_NAME",
+    "EXTERNAL_VALIDATION_RECEIPT_SCHEMA_VERSION",
     "DECISION_RECORD_SCHEMA_NAME",
     "DECISION_RECORD_SCHEMA_VERSION",
     "DERIVATIVE_CONSTRAINT_SCHEMA_NAME",
@@ -232,6 +239,7 @@ __all__ = [
     "normalize_derivative_support",
     "normalize_derivative_variable",
     "normalize_evaluation_record",
+    "normalize_external_validation_receipt",
     "normalize_material_catalog",
     "normalize_optimization_condition_table",
     "normalize_optimization_material_state",
