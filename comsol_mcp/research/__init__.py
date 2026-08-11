@@ -133,8 +133,11 @@ from .robust_objectives import (
     normalize_robust_objective_configuration,
 )
 from .robust_optimizer_policy import (
+    ROBUST_OPTIMIZER_EXECUTION_RECEIPT_SCHEMA_NAME,
+    ROBUST_OPTIMIZER_EXECUTION_RECEIPT_SCHEMA_VERSION,
     ROBUST_OPTIMIZER_POLICY_SCHEMA_NAME,
     ROBUST_OPTIMIZER_POLICY_SCHEMA_VERSION,
+    assess_robust_optimizer_execution,
     normalize_robust_optimizer_policy,
 )
 from .robust_shape_adapter import (
@@ -220,6 +223,8 @@ __all__ = [
     "ROBUST_OBJECTIVE_GRADIENT_RECEIPT_SCHEMA_VERSION",
     "ROBUST_OPTIMIZER_POLICY_SCHEMA_NAME",
     "ROBUST_OPTIMIZER_POLICY_SCHEMA_VERSION",
+    "ROBUST_OPTIMIZER_EXECUTION_RECEIPT_SCHEMA_NAME",
+    "ROBUST_OPTIMIZER_EXECUTION_RECEIPT_SCHEMA_VERSION",
     "ROBUST_GRADIENT_POLICY_SCHEMA_NAME",
     "ROBUST_GRADIENT_POLICY_SCHEMA_VERSION",
     "ROBUST_GRADIENT_RECEIPT_SCHEMA_NAME",
@@ -263,6 +268,7 @@ __all__ = [
     "normalize_optimization_material_state",
     "normalize_robust_objective_configuration",
     "normalize_robust_optimizer_policy",
+    "assess_robust_optimizer_execution",
     "normalize_robust_gradient_policy",
     "normalize_shape_support_policy",
     "normalize_gradient_record",

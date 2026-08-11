@@ -16,7 +16,9 @@ from typing import Any, Callable
 import psutil
 
 from comsol_mcp.durable import atomic_write_json
+from comsol_mcp.research.gradient_contracts import normalize_native_optimizer_configuration
 from comsol_mcp.research.robust_gradient_acceptance import assess_licensed_gradient_ladder
+from comsol_mcp.research.robust_optimizer_policy import assess_robust_optimizer_execution
 from comsol_mcp.tools.ownership import SolverOwnership
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -360,24 +362,53 @@ def _gradient_checks(results: dict[str, dict[str, Any]]) -> dict[str, Any]:
     )
 
 
-def _optimizer_disposition(result: dict[str, Any]) -> dict[str, Any]:
-    receipt = result["receipt"]
-    success = result["returncode"] == 0 and receipt.get("success") is True
-    fresh_delta = receipt.get("fresh_forward_delta")
-    accepted = (
-        success
-        and not isinstance(fresh_delta, bool)
-        and isinstance(fresh_delta, (int, float))
-        and math.isfinite(float(fresh_delta))
-        and float(fresh_delta) > 0.0
+def _optimizer_configuration(spec: dict[str, Any], stage: str) -> dict[str, Any]:
+    if stage not in {"gcmma", "mma"}:
+        raise ValueError("optimizer configuration requires GCMMA or MMA")
+    max_solves = spec["optimizer_max_solves"] if stage == "gcmma" else spec["mma_max_solves"]
+    max_iterations = spec["max_iterations"] if stage == "gcmma" else spec["mma_max_iterations"]
+    max_wall_time = (
+        spec["max_wall_time_seconds"] if stage == "gcmma" else spec["mma_max_wall_time_seconds"]
     )
-    return {
-        "method": receipt.get("optimizer_method"),
-        "execution_success": success,
-        "fresh_forward_delta": fresh_delta,
-        "disposition": "accepted" if accepted else "rejected",
-        "automatic_fallback_used": False,
-    }
+    return normalize_native_optimizer_configuration(
+        {
+            "schema_name": "comsol_mcp.native_optimizer_configuration",
+            "schema_version": "1.0.0",
+            "optimizer_id": f"alpha72-{stage}-licensed-ladder",
+            "backend": "comsol_native",
+            "method": stage,
+            "move_limit": 0.1,
+            "optimality_tolerance": 1e-3,
+            "constraint_tolerance": 1e-3,
+            "budget": {
+                "cores": spec["cores"],
+                "max_solves": max_solves,
+                "max_iterations": max_iterations,
+                "max_wall_time_seconds": max_wall_time,
+                "max_commit_fraction": spec["max_commit_fraction"],
+                "max_disk_bytes": spec["max_disk_bytes"],
+                "max_review_items": spec["max_review_items"],
+            },
+            "checkpoint_policy": {
+                "every_accepted_iteration": True,
+                "save_copy": True,
+                "exact_native_resume_required": False,
+            },
+            "deterministic_seed": 71004,
+        }
+    )
+
+
+def _optimizer_disposition(
+    spec: dict[str, Any], stage: str, result: dict[str, Any]
+) -> dict[str, Any]:
+    return assess_robust_optimizer_execution(
+        _optimizer_configuration(spec, stage),
+        result["receipt"],
+        native_receipt_sha256=result["receipt_sha256"],
+        max_elements_per_model=spec["max_elements_per_model"],
+        minimum_element_quality=spec["minimum_element_quality"],
+    )
 
 
 def _dry_run(spec: dict[str, Any]) -> dict[str, Any]:
@@ -417,6 +448,14 @@ def _dry_run(spec: dict[str, Any]) -> dict[str, Any]:
             if spec["run_mma"]
             else None
         ),
+        "optimizer_configuration_fingerprints": {
+            "gcmma": _optimizer_configuration(spec, "gcmma")["optimizer_fingerprint"],
+            "mma": (
+                _optimizer_configuration(spec, "mma")["optimizer_fingerprint"]
+                if spec["run_mma"]
+                else None
+            ),
+        },
         "solver_started": False,
         "filesystem_modified": False,
         "paths_included": False,
@@ -546,8 +585,8 @@ def _run(
                 "stdout_sha256": result["stdout_sha256"],
                 "stderr_sha256": result["stderr_sha256"],
             }
-        gcmma = _optimizer_disposition(results["gcmma"])
-        mma = _optimizer_disposition(results["mma"]) if "mma" in results else None
+        gcmma = _optimizer_disposition(spec, "gcmma", results["gcmma"])
+        mma = _optimizer_disposition(spec, "mma", results["mma"]) if "mma" in results else None
         receipt.update(
             {
                 "gcmma": gcmma,

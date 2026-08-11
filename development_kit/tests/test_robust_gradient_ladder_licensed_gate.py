@@ -147,7 +147,7 @@ def test_mma_command_uses_its_separate_budget(tmp_path, gate_root, monkeypatch):
     assert command[command.index("--max-wall-time-seconds") + 1] == "900"
 
 
-def _result(stage: str, revision: str, source_sha256: str):
+def _result(stage: str, revision: str, source_sha256: str, spec: dict | None = None):
     receipt = {"source_revision": revision, "source_sha256": source_sha256, "success": True}
     if stage == "native":
         receipt["derivatives"] = [
@@ -181,13 +181,53 @@ def _result(stage: str, revision: str, source_sha256: str):
             }
         )
     elif stage == "gcmma":
-        receipt.update({"optimizer_method": "gcmma", "fresh_forward_delta": 0.44})
+        assert spec is not None
+        receipt.update(
+            {
+                "optimizer_method": "gcmma",
+                "budget": gate._optimizer_configuration(spec, "gcmma")["budget"],
+                "baseline_objective": 0.2,
+                "final_objective": 0.64,
+                "fresh_forward_objective": 0.64,
+                "fresh_forward_delta": 0.44,
+                "mesh_admission_policy": {
+                    "max_elements_per_model": spec["max_elements_per_model"],
+                    "minimum_element_quality": spec["minimum_element_quality"],
+                    "scope": "baseline_and_explicit_finalist_remesh",
+                    "internal_optimizer_remesh_callback": False,
+                },
+                "baseline_mesh": {
+                    "element_count": 20_000,
+                    "minimum_quality": 0.2,
+                    "mean_quality": 0.7,
+                    "quality_measure": "volcircum",
+                },
+                "remesh": {
+                    "explicit_rebuild": True,
+                    "before": {
+                        "element_count": 20_000,
+                        "minimum_quality": 0.2,
+                        "mean_quality": 0.7,
+                        "quality_measure": "volcircum",
+                    },
+                    "after": {
+                        "element_count": 21_000,
+                        "minimum_quality": 0.21,
+                        "mean_quality": 0.69,
+                        "quality_measure": "volcircum",
+                    },
+                },
+                "cleanup": {"client_clear": True, "source_unchanged": True},
+            }
+        )
     else:
+        assert spec is not None
         receipt.update(
             {
                 "success": False,
                 "optimizer_method": "mma",
-                "fresh_forward_delta": -0.15,
+                "budget": gate._optimizer_configuration(spec, "mma")["budget"],
+                "cleanup": {"client_clear": True, "source_unchanged": True},
             }
         )
     return {
@@ -252,7 +292,9 @@ def test_ladder_accepts_gcmma_and_records_failed_mma_without_fallback(
     monkeypatch.setattr(gate, "_git_identity", lambda: {"revision": revision, "clean": True})
     receipt, _private = gate._run(
         spec,
-        child_runner=lambda current, stage: _result(stage, revision, current["source_sha256"]),
+        child_runner=lambda current, stage: _result(
+            stage, revision, current["source_sha256"], current
+        ),
         ownership_factory=Ownership,
     )
     assert receipt["success"] is True
@@ -262,13 +304,11 @@ def test_ladder_accepts_gcmma_and_records_failed_mma_without_fallback(
     )
     assert len(receipt["gradient_acceptance"]["receipt_fingerprint"]) == 64
     assert receipt["gcmma"]["disposition"] == "accepted"
-    assert receipt["mma"] == {
-        "method": "mma",
-        "execution_success": False,
-        "fresh_forward_delta": -0.15,
-        "disposition": "rejected",
-        "automatic_fallback_used": False,
-    }
+    assert receipt["mma"]["method"] == "mma"
+    assert receipt["mma"]["execution_success"] is False
+    assert receipt["mma"]["disposition"] == "rejected"
+    assert receipt["mma"]["automatic_fallback_used"] is False
+    assert len(receipt["mma"]["receipt_fingerprint"]) == 64
     assert events[0][0] == "status"
     assert events[-1][0] == "release"
 
@@ -315,7 +355,7 @@ def test_gradient_threshold_failure_prevents_ladder_success(tmp_path, gate_root,
 
     def runner(current, stage):
         stages.append(stage)
-        result = _result(stage, revision, current["source_sha256"])
+        result = _result(stage, revision, current["source_sha256"], current)
         if stage == "directional":
             result["receipt"]["relative_error"] = 0.051
         return result
@@ -392,7 +432,9 @@ def test_ladder_rejects_stage_process_residue(tmp_path, gate_root, monkeypatch):
     monkeypatch.setattr(gate, "_git_identity", lambda: {"revision": revision, "clean": True})
     receipt, private = gate._run(
         spec,
-        child_runner=lambda current, stage: _result(stage, revision, current["source_sha256"]),
+        child_runner=lambda current, stage: _result(
+            stage, revision, current["source_sha256"], current
+        ),
         ownership_factory=Ownership,
     )
     assert receipt["success"] is False

@@ -6,7 +6,11 @@ import copy
 
 import pytest
 
-from comsol_mcp.research.robust_optimizer_policy import normalize_robust_optimizer_policy
+from comsol_mcp.research.robust_optimizer_policy import (
+    assess_robust_optimizer_execution,
+    normalize_robust_optimizer_policy,
+)
+from development_kit.tests.test_gradient_contracts import _optimizer
 
 
 def _policy(selected: str = "gcmma") -> dict:
@@ -63,3 +67,136 @@ def test_policy_fingerprint_rejects_method_or_evidence_tampering():
     tampered["selected_method"] = "mma"
     with pytest.raises(ValueError, match="derived selection|fingerprint"):
         normalize_robust_optimizer_policy(tampered)
+
+
+def _execution_receipt(*, delta: float = 0.4) -> dict:
+    optimizer = _optimizer()
+    baseline = 0.2
+    fresh = baseline + delta
+    return {
+        "schema_name": "comsol_mcp.native_optimizer_licensed_gate",
+        "schema_version": "1.0.0",
+        "success": True,
+        "source_revision": "a" * 40,
+        "source_sha256": "b" * 64,
+        "optimizer_method": "gcmma",
+        "budget": optimizer["budget"],
+        "baseline_objective": baseline,
+        "final_objective": fresh,
+        "fresh_forward_objective": fresh,
+        "fresh_forward_delta": delta,
+        "mesh_admission_policy": {
+            "max_elements_per_model": 300_000,
+            "minimum_element_quality": 0.1,
+            "scope": "baseline_and_explicit_finalist_remesh",
+            "internal_optimizer_remesh_callback": False,
+        },
+        "baseline_mesh": {
+            "element_count": 20_000,
+            "minimum_quality": 0.2,
+            "mean_quality": 0.7,
+            "quality_measure": "volcircum",
+        },
+        "remesh": {
+            "explicit_rebuild": True,
+            "before": {
+                "element_count": 20_000,
+                "minimum_quality": 0.2,
+                "mean_quality": 0.7,
+                "quality_measure": "volcircum",
+            },
+            "after": {
+                "element_count": 21_000,
+                "minimum_quality": 0.21,
+                "mean_quality": 0.69,
+                "quality_measure": "volcircum",
+            },
+        },
+        "cleanup": {"client_clear": True, "source_unchanged": True},
+    }
+
+
+def test_optimizer_execution_accepts_only_positive_fresh_forward_mesh_admitted_result():
+    receipt = assess_robust_optimizer_execution(
+        _optimizer(),
+        _execution_receipt(),
+        native_receipt_sha256="c" * 64,
+        max_elements_per_model=300_000,
+        minimum_element_quality=0.1,
+    )
+    assert receipt["schema_name"] == "comsol_mcp.robust_optimizer_execution_receipt"
+    assert receipt["disposition"] == "accepted"
+    assert receipt["fresh_forward_improvement"] is True
+    assert all(receipt["mesh_checks"].values())
+    assert receipt["automatic_fallback_used"] is False
+
+
+def test_optimizer_execution_records_nonimproving_or_failed_method_as_rejected():
+    nonimproving = assess_robust_optimizer_execution(
+        _optimizer(),
+        _execution_receipt(delta=-0.1),
+        native_receipt_sha256="c" * 64,
+        max_elements_per_model=300_000,
+        minimum_element_quality=0.1,
+    )
+    assert nonimproving["disposition"] == "rejected"
+    failed = _execution_receipt()
+    failed["success"] = False
+    for field in (
+        "baseline_objective",
+        "final_objective",
+        "fresh_forward_objective",
+        "fresh_forward_delta",
+        "mesh_admission_policy",
+        "baseline_mesh",
+        "remesh",
+    ):
+        failed.pop(field)
+    rejected = assess_robust_optimizer_execution(
+        _optimizer(),
+        failed,
+        native_receipt_sha256="d" * 64,
+        max_elements_per_model=300_000,
+        minimum_element_quality=0.1,
+    )
+    assert rejected["execution_success"] is False
+    assert rejected["disposition"] == "rejected"
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        (lambda receipt: receipt.update(optimizer_method="mma"), "method differs"),
+        (lambda receipt: receipt["budget"].update(max_solves=21), "budget differs"),
+        (
+            lambda receipt: receipt.update(fresh_forward_delta=0.3),
+            "delta differs",
+        ),
+        (
+            lambda receipt: receipt["remesh"]["after"].update(element_count=300_001),
+            "",
+        ),
+    ],
+)
+def test_optimizer_execution_rejects_identity_evidence_or_mesh_drift(mutation, message):
+    native = _execution_receipt()
+    mutation(native)
+    if message:
+        with pytest.raises(ValueError, match=message):
+            assess_robust_optimizer_execution(
+                _optimizer(),
+                native,
+                native_receipt_sha256="c" * 64,
+                max_elements_per_model=300_000,
+                minimum_element_quality=0.1,
+            )
+    else:
+        receipt = assess_robust_optimizer_execution(
+            _optimizer(),
+            native,
+            native_receipt_sha256="c" * 64,
+            max_elements_per_model=300_000,
+            minimum_element_quality=0.1,
+        )
+        assert receipt["mesh_checks"]["finalist_remesh_admitted"] is False
+        assert receipt["disposition"] == "rejected"

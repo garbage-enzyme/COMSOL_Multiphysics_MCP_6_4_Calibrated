@@ -52,6 +52,8 @@ from comsol_mcp.research import (
     ROBUST_OBJECTIVE_GRADIENT_RECEIPT_SCHEMA_VERSION,
     ROBUST_OBJECTIVE_RECEIPT_SCHEMA_NAME,
     ROBUST_OBJECTIVE_RECEIPT_SCHEMA_VERSION,
+    ROBUST_OPTIMIZER_EXECUTION_RECEIPT_SCHEMA_NAME,
+    ROBUST_OPTIMIZER_EXECUTION_RECEIPT_SCHEMA_VERSION,
     ROBUST_OPTIMIZER_POLICY_SCHEMA_NAME,
     ROBUST_OPTIMIZER_POLICY_SCHEMA_VERSION,
     ROBUST_SHAPE_ADAPTER_BINDING_SCHEMA_NAME,
@@ -547,6 +549,11 @@ def _entries() -> list[dict[str, Any]]:
             ROBUST_OPTIMIZER_POLICY_SCHEMA_VERSION,
             "comsol_mcp.research.robust_optimizer_policy",
             artifact_kind="configuration",
+        ),
+        _entry(
+            ROBUST_OPTIMIZER_EXECUTION_RECEIPT_SCHEMA_NAME,
+            ROBUST_OPTIMIZER_EXECUTION_RECEIPT_SCHEMA_VERSION,
+            "comsol_mcp.research.robust_optimizer_policy",
         ),
         _entry(
             ROBUST_SHAPE_ADAPTER_BINDING_SCHEMA_NAME,
