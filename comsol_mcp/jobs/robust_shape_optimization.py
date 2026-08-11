@@ -1,0 +1,184 @@
+"""Bounded manifest submission and expansion for robust shape jobs."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from pathlib import Path
+from typing import Any
+
+from comsol_mcp.durable import validate_finite_json
+from comsol_mcp.jobs.adjoint_optimization import _digest, _manifest_path
+from comsol_mcp.jobs.resource_admission import normalize_resource_policy
+from comsol_mcp.research.derivative_support import normalize_derivative_support
+from comsol_mcp.research.gradient_contracts import normalize_native_optimizer_configuration
+from comsol_mcp.research.robust_conditions import normalize_optimization_condition_table
+from comsol_mcp.research.robust_gradient_acceptance import normalize_robust_gradient_policy
+from comsol_mcp.research.robust_objectives import normalize_robust_objective_configuration
+from comsol_mcp.research.robust_optimizer_policy import normalize_robust_optimizer_policy
+from comsol_mcp.research.shape_support import normalize_shape_support_policy
+
+ROBUST_SHAPE_MANIFEST_SCHEMA_NAME = "comsol_mcp.robust_shape_optimization_manifest"
+ROBUST_SHAPE_MANIFEST_SCHEMA_VERSION = "1.0.0"
+ROBUST_SHAPE_SUBMISSION_SCHEMA_NAME = "comsol_mcp.robust_shape_optimization_submission"
+ROBUST_SHAPE_SUBMISSION_SCHEMA_VERSION = "1.0.0"
+MAX_MANIFEST_BYTES = 2 * 1024 * 1024
+
+
+def normalize_robust_shape_submission(value: object) -> dict[str, Any]:
+    """Normalize the compact public envelope without reading the manifest."""
+    if not isinstance(value, dict):
+        raise ValueError("robust shape submission must be an object")
+    fields = {
+        "job_type",
+        "submission_manifest_path",
+        "submission_manifest_sha256",
+        "cores",
+        "version",
+        "resource_policy",
+    }
+    if set(value) != fields:
+        raise ValueError("robust shape submission fields are invalid")
+    if value["job_type"] != "robust_shape_optimization":
+        raise ValueError("robust shape submission discriminator is invalid")
+    cores = value["cores"]
+    if isinstance(cores, bool) or not isinstance(cores, int) or not 1 <= cores <= 1024:
+        raise ValueError("robust shape cores must be explicitly bounded")
+    version = value["version"]
+    if not isinstance(version, str) or not version.strip() or len(version) > 32:
+        raise ValueError("robust shape version must be bounded")
+    resource_policy = normalize_resource_policy(value["resource_policy"])
+    if resource_policy is None:
+        raise ValueError("robust shape resource_policy is required")
+    return {
+        "job_type": "robust_shape_optimization",
+        "submission_manifest_path": str(_manifest_path(value["submission_manifest_path"])),
+        "submission_manifest_sha256": _digest(
+            value["submission_manifest_sha256"], "submission_manifest_sha256"
+        ),
+        "cores": cores,
+        "version": version.strip(),
+        "resource_policy": resource_policy,
+        "schema_name": ROBUST_SHAPE_SUBMISSION_SCHEMA_NAME,
+        "schema_version": ROBUST_SHAPE_SUBMISSION_SCHEMA_VERSION,
+    }
+
+
+def expand_robust_shape_manifest(submission: object) -> dict[str, Any]:
+    """Hash-pin and normalize a complete robust shape manifest before startup."""
+    envelope = normalize_robust_shape_submission(submission)
+    path = Path(envelope["submission_manifest_path"])
+    payload = path.read_bytes()
+    if len(payload) > MAX_MANIFEST_BYTES:
+        raise ValueError("robust shape manifest exceeds its byte limit")
+    if hashlib.sha256(payload).hexdigest() != envelope["submission_manifest_sha256"]:
+        raise ValueError("robust shape manifest SHA-256 changed")
+    try:
+        raw = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("robust shape manifest is not strict UTF-8 JSON") from exc
+    fields = {
+        "schema_name",
+        "schema_version",
+        "source_model_path",
+        "source_model_sha256",
+        "support",
+        "condition_table",
+        "objective",
+        "shape_policy",
+        "gradient_policy",
+        "optimizer_policy",
+        "native_optimizer",
+        "initial_values",
+        "synthetic_mode",
+    }
+    if not isinstance(raw, dict) or set(raw) != fields:
+        raise ValueError("robust shape manifest fields are invalid")
+    if (
+        raw["schema_name"] != ROBUST_SHAPE_MANIFEST_SCHEMA_NAME
+        or raw["schema_version"] != ROBUST_SHAPE_MANIFEST_SCHEMA_VERSION
+    ):
+        raise ValueError("robust shape manifest schema is unsupported")
+    source_text = raw["source_model_path"]
+    if not isinstance(source_text, str) or not source_text.isascii():
+        raise ValueError("robust shape source path must be ASCII")
+    source = Path(source_text).expanduser()
+    if (
+        not source.is_absolute()
+        or source.suffix.casefold() != ".mph"
+        or source.is_symlink()
+        or not source.is_file()
+    ):
+        raise ValueError("robust shape source must be a regular absolute MPH file")
+    source = source.resolve()
+    source_hash = _digest(raw["source_model_sha256"], "source_model_sha256")
+    if hashlib.sha256(source.read_bytes()).hexdigest() != source_hash:
+        raise ValueError("robust shape source SHA-256 changed")
+
+    support = normalize_derivative_support(raw["support"])
+    conditions = normalize_optimization_condition_table(raw["condition_table"])
+    objective = normalize_robust_objective_configuration(raw["objective"])
+    shape_policy = normalize_shape_support_policy(raw["shape_policy"])
+    gradient_policy = normalize_robust_gradient_policy(raw["gradient_policy"])
+    optimizer_policy = normalize_robust_optimizer_policy(raw["optimizer_policy"])
+    native_optimizer = normalize_native_optimizer_configuration(raw["native_optimizer"])
+    if support["source_identity"] != source_hash:
+        raise ValueError("robust shape support source identity differs from manifest source")
+    if support["adapter_id"] != shape_policy["adapter_id"]:
+        raise ValueError("robust shape adapter identity differs across support policies")
+    table_states = {item["state_id"] for item in conditions["material_states"]}
+    if not set(objective["state_ids"]).issubset(table_states):
+        raise ValueError("robust objective states are not declared by the condition table")
+    if native_optimizer["method"] != optimizer_policy["selected_method"]:
+        raise ValueError("native optimizer method differs from manual robust selection")
+    if native_optimizer["method"] not in {"gcmma", "mma"}:
+        raise ValueError("robust shape native optimizer must be GCMMA or MMA")
+    if native_optimizer["budget"]["cores"] != envelope["cores"]:
+        raise ValueError("robust shape optimizer budget cores differ from submission cores")
+    if support["comsol_version"] != envelope["version"]:
+        raise ValueError("robust shape COMSOL version differs from submission version")
+    mesh_cap = envelope["resource_policy"]["rules"].get("max_mesh_elements")
+    if mesh_cap != shape_policy["mesh_admission"]["max_elements_per_model"]:
+        raise ValueError("robust shape mesh cap differs from resource admission policy")
+    values = raw["initial_values"]
+    if not isinstance(values, list) or len(values) != len(support["variables"]):
+        raise ValueError("initial_values must match the robust support variable count")
+    normalized_values = [float(item) for item in values]
+    for item, variable in zip(normalized_values, support["variables"], strict=True):
+        if not variable["lower"] <= item <= variable["upper"]:
+            raise ValueError("initial_values must remain within robust support bounds")
+    if not isinstance(raw["synthetic_mode"], bool):
+        raise ValueError("synthetic_mode must be boolean")
+    if not raw["synthetic_mode"] and not optimizer_policy["execution_allowed"]:
+        raise ValueError("selected robust optimizer lacks accepted execution evidence")
+    body = {
+        **envelope,
+        "schema_name": ROBUST_SHAPE_MANIFEST_SCHEMA_NAME,
+        "schema_version": ROBUST_SHAPE_MANIFEST_SCHEMA_VERSION,
+        "source_model_path": str(source),
+        "source_model_sha256": source_hash,
+        "support": support,
+        "condition_table": conditions,
+        "objective": objective,
+        "shape_policy": shape_policy,
+        "gradient_policy": gradient_policy,
+        "optimizer_policy": optimizer_policy,
+        "native_optimizer": native_optimizer,
+        "initial_values": normalized_values,
+        "synthetic_mode": raw["synthetic_mode"],
+    }
+    validate_finite_json(body)
+    body["spec_fingerprint"] = hashlib.sha256(
+        json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    return body
+
+
+__all__ = [
+    "ROBUST_SHAPE_MANIFEST_SCHEMA_NAME",
+    "ROBUST_SHAPE_MANIFEST_SCHEMA_VERSION",
+    "ROBUST_SHAPE_SUBMISSION_SCHEMA_NAME",
+    "ROBUST_SHAPE_SUBMISSION_SCHEMA_VERSION",
+    "expand_robust_shape_manifest",
+    "normalize_robust_shape_submission",
+]

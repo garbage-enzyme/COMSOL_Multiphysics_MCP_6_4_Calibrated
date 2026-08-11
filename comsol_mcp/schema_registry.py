@@ -250,6 +250,18 @@ def _entries() -> list[dict[str, Any]]:
             "comsol_mcp.jobs.adjoint_optimization",
             artifact_kind="configuration",
         ),
+        _entry(
+            "comsol_mcp.robust_shape_optimization_manifest",
+            "1.0.0",
+            "comsol_mcp.jobs.robust_shape_optimization",
+            artifact_kind="configuration",
+        ),
+        _entry(
+            "comsol_mcp.robust_shape_optimization_submission",
+            "1.0.0",
+            "comsol_mcp.jobs.robust_shape_optimization",
+            artifact_kind="configuration",
+        ),
         _entry("comsol_mcp.artifact_chain", "1.0.0", "comsol_mcp.artifact_chain"),
         _entry(
             "comsol_mcp.artifact_chain_verification",
