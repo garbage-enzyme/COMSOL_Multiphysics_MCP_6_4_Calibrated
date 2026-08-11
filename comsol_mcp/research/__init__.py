@@ -107,6 +107,14 @@ from .robust_conditions import (
     normalize_optimization_condition_table,
     normalize_optimization_material_state,
 )
+from .robust_gradient_acceptance import (
+    ROBUST_GRADIENT_POLICY_SCHEMA_NAME,
+    ROBUST_GRADIENT_POLICY_SCHEMA_VERSION,
+    ROBUST_GRADIENT_RECEIPT_SCHEMA_NAME,
+    ROBUST_GRADIENT_RECEIPT_SCHEMA_VERSION,
+    assess_robust_gradient_acceptance,
+    normalize_robust_gradient_policy,
+)
 from .robust_objectives import (
     ROBUST_OBJECTIVE_CONFIGURATION_SCHEMA_NAME,
     ROBUST_OBJECTIVE_CONFIGURATION_SCHEMA_VERSION,
@@ -184,6 +192,10 @@ __all__ = [
     "ROBUST_OBJECTIVE_CONFIGURATION_SCHEMA_VERSION",
     "ROBUST_OBJECTIVE_RECEIPT_SCHEMA_NAME",
     "ROBUST_OBJECTIVE_RECEIPT_SCHEMA_VERSION",
+    "ROBUST_GRADIENT_POLICY_SCHEMA_NAME",
+    "ROBUST_GRADIENT_POLICY_SCHEMA_VERSION",
+    "ROBUST_GRADIENT_RECEIPT_SCHEMA_NAME",
+    "ROBUST_GRADIENT_RECEIPT_SCHEMA_VERSION",
     "SHAPE_SUPPORT_POLICY_SCHEMA_NAME",
     "SHAPE_SUPPORT_POLICY_SCHEMA_VERSION",
     "PORTFOLIO_SCHEMA_NAME",
@@ -217,6 +229,7 @@ __all__ = [
     "normalize_optimization_condition_table",
     "normalize_optimization_material_state",
     "normalize_robust_objective_configuration",
+    "normalize_robust_gradient_policy",
     "normalize_shape_support_policy",
     "normalize_gradient_record",
     "normalize_native_optimizer_configuration",
@@ -232,6 +245,7 @@ __all__ = [
     "relative_bounds",
     "score_objectives",
     "evaluate_robust_absolute_contrast",
+    "assess_robust_gradient_acceptance",
     "compile_campaign_manifest",
     "configure_native_adjoint",
 ]
