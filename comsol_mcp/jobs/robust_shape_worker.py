@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from comsol_mcp.durable import domain_sha256_v2
+from comsol_mcp.research.robust_finalist_evidence import assess_robust_finalist_validation
 from comsol_mcp.research.robust_objectives import evaluate_robust_absolute_contrast
 from comsol_mcp.research.robust_startup_admission import evaluate_robust_startup_admission
 
@@ -42,6 +43,153 @@ def _synthetic_observations(spec: dict[str, Any]) -> list[dict[str, Any]]:
             }
         )
     return observations
+
+
+def _synthetic_finalist_evidence(
+    spec: dict[str, Any], candidate: str, objective_value: float
+) -> dict[str, Any]:
+    """Build clearly synthetic evidence for the solver-free durable contract path."""
+    shape = spec["shape_policy"]
+    finalist = spec["finalist_validation_policy"]
+    mesh = finalist["mesh_convergence"]
+    baseline_count = max(1, mesh["max_elements_per_model"] // 2)
+    finer_count = mesh["max_elements_per_model"]
+    quality = mesh["minimum_element_quality"]
+    objective_configuration = domain_sha256_v2(
+        "comsol_mcp.synthetic_robust_objective_configuration", spec["objective"]
+    )
+    off_design_rows = []
+    for condition in spec["condition_table"]["conditions"]:
+        if not condition["active"] or condition["objective_role"] != "objective":
+            continue
+        for axis, offsets in (
+            ("wavelength_relative", finalist["off_design"]["wavelength_relative_offsets"]),
+            ("angle_deg", finalist["off_design"]["angle_offsets_deg"]),
+        ):
+            for offset in offsets:
+                body = {
+                    "base_condition_id": condition["condition_id"],
+                    "axis": axis,
+                    "offset": offset,
+                    "status": "measured",
+                    "objective_value": objective_value,
+                }
+                off_design_rows.append(
+                    {
+                        **body,
+                        "evidence_sha256": domain_sha256_v2(
+                            "comsol_mcp.synthetic_robust_off_design", body
+                        ),
+                    }
+                )
+    branch_policy = finalist["branch_guard"]
+    branch_required = branch_policy["mode"] == "required"
+    branch_id = "synthetic-branch" if branch_required else None
+    branch_order = 0 if branch_required else None
+    branch_body = {
+        "mode": branch_policy["mode"],
+        "observable_id": branch_policy["observable_id"],
+        "baseline_branch_id": branch_id,
+        "finer_branch_id": branch_id,
+        "baseline_mode_order": branch_order,
+        "finer_mode_order": branch_order,
+        "ambiguous": False,
+        "disappeared": False,
+    }
+    return {
+        "candidate_fingerprint": candidate,
+        "optimizer_execution_fingerprint": domain_sha256_v2(
+            "comsol_mcp.synthetic_robust_optimizer_execution", {"candidate": candidate}
+        ),
+        "manufacturability": {
+            "shape_policy_fingerprint": shape["policy_fingerprint"],
+            "minimum_gap_m": shape["minimum_gap"]["effective_value_m"],
+            "minimum_thickness_m": shape["geometry_guards"]["minimum_thickness_m"],
+            "minimum_radius_m": shape["geometry_guards"]["minimum_radius_m"],
+            "topology_preserved": True,
+            "selections_preserved": True,
+            "positive_dimensions": True,
+            "self_intersection_absent": True,
+            "evidence_sha256": domain_sha256_v2(
+                "comsol_mcp.synthetic_robust_manufacturability", {"candidate": candidate}
+            ),
+        },
+        "fresh_remesh": {
+            "candidate_fingerprint": candidate,
+            "explicit_rebuild": True,
+            "optimizer_state_reused": False,
+            "model_sha256": domain_sha256_v2(
+                "comsol_mcp.synthetic_robust_fresh_model", {"candidate": candidate}
+            ),
+            "mesh_sha256": domain_sha256_v2(
+                "comsol_mcp.synthetic_robust_fresh_mesh", {"candidate": candidate}
+            ),
+            "element_count": baseline_count,
+            "minimum_element_quality": quality,
+            "quality_measure": mesh["quality_measure"],
+            "objective_evidence_sha256": domain_sha256_v2(
+                "comsol_mcp.synthetic_robust_fresh_objective", {"value": objective_value}
+            ),
+            "evidence_sha256": domain_sha256_v2(
+                "comsol_mcp.synthetic_robust_fresh_remesh", {"candidate": candidate}
+            ),
+        },
+        "mesh_convergence": {
+            "levels": [
+                {
+                    "level_id": mesh["baseline_level_id"],
+                    "candidate_fingerprint": candidate,
+                    "model_sha256": domain_sha256_v2(
+                        "comsol_mcp.synthetic_robust_baseline_model", {"candidate": candidate}
+                    ),
+                    "mesh_sha256": domain_sha256_v2(
+                        "comsol_mcp.synthetic_robust_baseline_mesh", {"candidate": candidate}
+                    ),
+                    "element_count": baseline_count,
+                    "minimum_element_quality": quality,
+                    "quality_measure": mesh["quality_measure"],
+                    "objective_configuration_fingerprint": objective_configuration,
+                    "objective_value": objective_value,
+                    "objective_evidence_sha256": domain_sha256_v2(
+                        "comsol_mcp.synthetic_robust_baseline_objective",
+                        {"value": objective_value},
+                    ),
+                },
+                {
+                    "level_id": mesh["finer_level_id"],
+                    "candidate_fingerprint": candidate,
+                    "model_sha256": domain_sha256_v2(
+                        "comsol_mcp.synthetic_robust_finer_model", {"candidate": candidate}
+                    ),
+                    "mesh_sha256": domain_sha256_v2(
+                        "comsol_mcp.synthetic_robust_finer_mesh", {"candidate": candidate}
+                    ),
+                    "element_count": finer_count,
+                    "minimum_element_quality": quality,
+                    "quality_measure": mesh["quality_measure"],
+                    "objective_configuration_fingerprint": objective_configuration,
+                    "objective_value": objective_value,
+                    "objective_evidence_sha256": domain_sha256_v2(
+                        "comsol_mcp.synthetic_robust_finer_objective",
+                        {"value": objective_value},
+                    ),
+                },
+            ],
+            "evidence_sha256": domain_sha256_v2(
+                "comsol_mcp.synthetic_robust_mesh_convergence", {"candidate": candidate}
+            ),
+        },
+        "branch_guard": {
+            **branch_body,
+            "evidence_sha256": (
+                domain_sha256_v2("comsol_mcp.synthetic_robust_branch", branch_body)
+                if branch_required
+                else None
+            ),
+        },
+        "off_design_rows": off_design_rows,
+        "external_validation_receipt": None,
+    }
 
 
 def _cancel_requested(store: JobStore, job_id: str, attempt: int) -> bool:
@@ -219,6 +367,63 @@ def _run_synthetic(root: str, job_id: str) -> int:
                 "reason_code": "synthetic_contract_only",
             },
         )
+    finalist_receipt = assess_robust_finalist_validation(
+        spec["finalist_validation_policy"],
+        spec["condition_table"],
+        spec["shape_policy"],
+        _synthetic_finalist_evidence(
+            spec,
+            candidate_fp,
+            objective["smooth_worst_case_absolute_contrast"],
+        ),
+    )
+    atomic_write_json(directory / "finalist-validation.json", finalist_receipt)
+    if "finalist_validation" not in kinds:
+        append_robust_shape_row(
+            rows_path,
+            job_fingerprint=spec["spec_fingerprint"],
+            attempt=attempt,
+            kind="finalist_validation",
+            payload={
+                "iteration_id": "it-0",
+                "candidate_fingerprint": candidate_fp,
+                "policy_fingerprint": finalist_receipt["policy_fingerprint"],
+                "receipt_fingerprint": finalist_receipt["receipt_fingerprint"],
+                "status": finalist_receipt["disposition"],
+                "reason_codes": finalist_receipt["reason_codes"],
+            },
+        )
+    if not finalist_receipt["accepted"]:
+        append_robust_shape_row(
+            rows_path,
+            job_fingerprint=spec["spec_fingerprint"],
+            attempt=attempt,
+            kind="cleanup",
+            payload={
+                "source_unchanged": True,
+                "client_clear": True,
+                "owned_processes_absent": True,
+                "lease_released": True,
+                "cleanup_fingerprint": domain_sha256_v2(
+                    "comsol_mcp.synthetic_robust_rejected_cleanup",
+                    {"finalist": finalist_receipt["receipt_fingerprint"]},
+                ),
+            },
+        )
+        store.update_state(
+            job_id,
+            "failed",
+            patch={
+                "solver_started": False,
+                "finalist_validation_fingerprint": finalist_receipt["receipt_fingerprint"],
+                "last_error": {
+                    "type": "FinalistValidationRejected",
+                    "message": "Synthetic finalist evidence did not satisfy caller policy",
+                },
+            },
+            event="robust_finalist_validation_rejected",
+        )
+        return 1
     if "checkpoint" not in kinds:
         append_robust_shape_row(
             rows_path,
@@ -260,6 +465,7 @@ def _run_synthetic(root: str, job_id: str) -> int:
             "solver_started": False,
             "last_robust_shape_row_sha256": final_rows[-1]["row_sha256"],
             "robust_objective_fingerprint": objective["receipt_fingerprint"],
+            "finalist_validation_fingerprint": finalist_receipt["receipt_fingerprint"],
         },
         event="completed",
     )

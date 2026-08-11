@@ -55,16 +55,20 @@ def test_manager_dispatches_synthetic_24_condition_job_without_solver(ascii_tmp_
         "declared_conditions": 24,
         "completed_conditions": 24,
         "pending_conditions": 0,
-        "row_count": 28,
+        "row_count": 29,
         "last_row_sha256": rows[-1]["row_sha256"],
         "cleanup_recorded": True,
     }
-    assert [row["kind"] for row in rows[-4:]] == [
+    assert [row["kind"] for row in rows[-5:]] == [
         "gradient",
         "iteration",
+        "finalist_validation",
         "checkpoint",
         "cleanup",
     ]
+    finalist = read_json(manager.store.job_dir(submitted["job_id"]) / "finalist-validation.json")
+    assert finalist["accepted"] is True
+    assert terminal["finalist_validation_fingerprint"] == finalist["receipt_fingerprint"]
 
 
 def test_worker_replays_complete_condition_without_duplicate_row(ascii_tmp_path, monkeypatch):
@@ -155,3 +159,33 @@ def test_startup_resource_refusal_is_durable_and_solver_free(ascii_tmp_path, mon
     assert state["solver_started"] is False
     assert receipt["decision"] == "refuse"
     assert receipt["checks"]["available_memory_meets_minimum"] is False
+
+
+def test_rejected_finalist_is_durable_and_cleans_before_terminal_failure(
+    ascii_tmp_path, monkeypatch
+):
+    envelope, _, _ = _write_manifest(ascii_tmp_path)
+    manager = _manager(ascii_tmp_path / "jobs", monkeypatch)
+    original = robust_shape_worker._synthetic_finalist_evidence
+
+    def rejected_evidence(spec, candidate, objective_value):
+        evidence = original(spec, candidate, objective_value)
+        evidence["manufacturability"]["minimum_gap_m"] = 0.0
+        return evidence
+
+    monkeypatch.setattr(robust_shape_worker, "_synthetic_finalist_evidence", rejected_evidence)
+    submitted = manager.submit(envelope)
+    job_id = submitted["job_id"]
+    assert run_robust_worker(str(manager.store.root), job_id) == 1
+    spec = manager.store.read_spec(job_id)
+    rows = read_robust_shape_rows(
+        manager.store.job_dir(job_id) / "robust_shape_rows.jsonl",
+        job_fingerprint=spec["spec_fingerprint"],
+    )
+    assert [row["kind"] for row in rows[-2:]] == ["finalist_validation", "cleanup"]
+    assert not any(row["kind"] == "checkpoint" for row in rows)
+    assert rows[-2]["payload"]["status"] == "rejected"
+    assert rows[-2]["payload"]["reason_codes"] == ["manufacturability_failed"]
+    state = manager.store.read_state(job_id)
+    assert state["status"] == "failed"
+    assert state["solver_started"] is False

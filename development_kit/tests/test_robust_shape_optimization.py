@@ -80,6 +80,13 @@ def _write_manifest(tmp_path, *, selected: str = "gcmma", synthetic: bool = True
         ],
         shape_policy_fingerprint=normalize_shape_support_policy(shape_policy)["policy_fingerprint"],
     )
+    if synthetic:
+        finalist_policy["external_fidelity"] = {
+            "mode": "not_requested",
+            "primary_backend": None,
+            "fallback_mode": "not_requested",
+            "automatic_fallback": False,
+        }
     manifest_body = {
         "schema_name": "comsol_mcp.robust_shape_optimization_manifest",
         "schema_version": "1.0.0",
