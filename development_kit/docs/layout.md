@@ -120,6 +120,7 @@ models are intentionally absent.
 - `development_kit/scripts/native_gradient_directional_licensed_gate.py` — This repository-only licensed runner validates the full native gradient with an independently solved deterministic two-variable directional perturbation and durable point rows.
 - `development_kit/scripts/native_optimizer_licensed_gate.py` — This repository-only licensed runner enforces caller-owned solver, iteration, move, per-model element, baseline/finalist mesh-quality, wall, and artifact budgets with fresh-forward finalist validation.
 - `development_kit/scripts/robust_shape_adapter_licensed_gate.py` — This repository-only alpha7.2 gate creates, reloads, and failure-rolls-back trusted Deformed Geometry controls on an immutable derived periodic-MIM model without solving.
+- `development_kit/scripts/robust_gradient_ladder_licensed_gate.py` — This repository-only alpha7.2 S4 gate owns one shared lease while serial fresh processes run native, finite-difference, directional, GCMMA, and optionally explicit MMA validation with caller-only budgets.
 - `development_kit/scripts/research_adapter_template_probe.py` — This repository-only licensed probe launches the current source tree with isolated settings, audits one immutable COMSOL template read-only over serial stdio, and emits separate path-redacted and private receipts.
 - `development_kit/scripts/research_adapter_gate_server.py` — This repository-only candidate server adds two private calls that bind the trusted periodic-MIM backend to a provenance-tracked derived model during the licensed S4 gate.
 - `development_kit/scripts/research_adapter_licensed_gate.py` — This isolated serial stdio gate applies one trusted MIM candidate to a derived copy, collects one-point Wave Optics evidence, and proves source and solver cleanup.
@@ -305,6 +306,7 @@ models are intentionally absent.
 - `development_kit/tests/test_external_validation.py` — This module tests independent COMSOL-first validation and explicitly authorized RCWA fallback receipts.
 - `development_kit/tests/test_robust_conditions.py` — This module tests complete or explicitly sparse configurable multi-condition and material-state tables.
 - `development_kit/tests/test_robust_gradient_acceptance.py` — This module tests joint component, cosine, sign, three-step, and directional gradient acceptance.
+- `development_kit/tests/test_robust_gradient_ladder_licensed_gate.py` — This module tests required caller budgets, startup-only admission, shared-lease sequencing, exact gradient thresholds, and explicit non-fallback MMA disposition.
 - `development_kit/tests/test_robust_objectives.py` — This module tests smooth absolute two-state contrast and weighted smooth worst-case scalarization.
 - `development_kit/tests/test_robust_optimizer_policy.py` — This module tests method-bound manual GCMMA/MMA selection and rejects automatic fallback.
 - `development_kit/tests/test_shape_support.py` — This module tests geometry-derived minimum gap, per-model mesh admission, invariant guards, and model retention.
