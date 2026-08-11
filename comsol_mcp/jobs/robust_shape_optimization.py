@@ -10,12 +10,17 @@ from typing import Any
 from comsol_mcp.durable import validate_finite_json
 from comsol_mcp.jobs.adjoint_optimization import _digest, _manifest_path
 from comsol_mcp.jobs.resource_admission import normalize_resource_policy
+from comsol_mcp.research.adapters import (
+    normalize_structure_adapter_manifest,
+    normalize_structure_tree_audit,
+)
 from comsol_mcp.research.derivative_support import normalize_derivative_support
 from comsol_mcp.research.gradient_contracts import normalize_native_optimizer_configuration
 from comsol_mcp.research.robust_conditions import normalize_optimization_condition_table
 from comsol_mcp.research.robust_gradient_acceptance import normalize_robust_gradient_policy
 from comsol_mcp.research.robust_objectives import normalize_robust_objective_configuration
 from comsol_mcp.research.robust_optimizer_policy import normalize_robust_optimizer_policy
+from comsol_mcp.research.robust_shape_adapter import compile_robust_shape_adapter_binding
 from comsol_mcp.research.robust_startup_admission import normalize_robust_startup_policy
 from comsol_mcp.research.shape_support import normalize_shape_support_policy
 
@@ -83,6 +88,8 @@ def expand_robust_shape_manifest(submission: object) -> dict[str, Any]:
         "schema_version",
         "source_model_path",
         "source_model_sha256",
+        "structure_adapter_manifest",
+        "structure_tree_audit",
         "support",
         "condition_table",
         "objective",
@@ -125,6 +132,16 @@ def expand_robust_shape_manifest(submission: object) -> dict[str, Any]:
     optimizer_policy = normalize_robust_optimizer_policy(raw["optimizer_policy"])
     native_optimizer = normalize_native_optimizer_configuration(raw["native_optimizer"])
     startup_admission = normalize_robust_startup_policy(raw["startup_admission"])
+    structure_manifest = normalize_structure_adapter_manifest(raw["structure_adapter_manifest"])
+    structure_tree_audit = normalize_structure_tree_audit(
+        raw["structure_tree_audit"], structure_manifest
+    )
+    adapter_binding = compile_robust_shape_adapter_binding(
+        structure_manifest,
+        structure_tree_audit,
+        support,
+        shape_policy,
+    )
     if support["source_identity"] != source_hash:
         raise ValueError("robust shape support source identity differs from manifest source")
     if support["adapter_id"] != shape_policy["adapter_id"]:
@@ -160,6 +177,9 @@ def expand_robust_shape_manifest(submission: object) -> dict[str, Any]:
         "schema_version": ROBUST_SHAPE_MANIFEST_SCHEMA_VERSION,
         "source_model_path": str(source),
         "source_model_sha256": source_hash,
+        "structure_adapter_manifest": structure_manifest,
+        "structure_tree_audit": structure_tree_audit,
+        "adapter_binding": adapter_binding,
         "support": support,
         "condition_table": conditions,
         "objective": objective,
