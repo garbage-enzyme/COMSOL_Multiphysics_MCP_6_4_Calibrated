@@ -20,8 +20,12 @@ from comsol_mcp.research import (
     EVALUATION_RECORD_SCHEMA_VERSION,
     MATERIAL_CATALOG_SCHEMA_NAME,
     MATERIAL_CATALOG_SCHEMA_VERSION,
+    MATERIAL_STATE_CONFIGURATION_SCHEMA_NAME,
+    MATERIAL_STATE_CONFIGURATION_SCHEMA_VERSION,
     OBJECTIVE_SCORE_SCHEMA_NAME,
     OBJECTIVE_SCORE_SCHEMA_VERSION,
+    OPTIMIZATION_CONDITION_TABLE_SCHEMA_NAME,
+    OPTIMIZATION_CONDITION_TABLE_SCHEMA_VERSION,
     OPTIMIZER_CHECKPOINT_SCHEMA_NAME,
     OPTIMIZER_CHECKPOINT_SCHEMA_VERSION,
     OPTIMIZER_EXPLANATION_SCHEMA_NAME,
@@ -415,6 +419,12 @@ def _entries() -> list[dict[str, Any]]:
             artifact_kind="configuration",
         ),
         _entry(
+            MATERIAL_STATE_CONFIGURATION_SCHEMA_NAME,
+            MATERIAL_STATE_CONFIGURATION_SCHEMA_VERSION,
+            "comsol_mcp.research.robust_conditions",
+            artifact_kind="configuration",
+        ),
+        _entry(
             "comsol_mcp.native_adjoint_adapter_receipt",
             "1.0.0",
             "comsol_mcp.research.adjoint_adapter",
@@ -429,6 +439,12 @@ def _entries() -> list[dict[str, Any]]:
             "comsol_mcp.native_optimizer_runtime_receipt",
             "1.0.0",
             "comsol_mcp.jobs.native_adjoint_runtime",
+        ),
+        _entry(
+            OPTIMIZATION_CONDITION_TABLE_SCHEMA_NAME,
+            OPTIMIZATION_CONDITION_TABLE_SCHEMA_VERSION,
+            "comsol_mcp.research.robust_conditions",
+            artifact_kind="configuration",
         ),
         _entry(
             _REFERENCE_POWER_DRY_RUN_SCHEMA,

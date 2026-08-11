@@ -301,6 +301,7 @@ models are intentionally absent.
 - `development_kit/tests/test_derivative_support.py` — This module tests strict derivative-support identities, variable mappings, objective contracts, and immutable normalization.
 - `development_kit/tests/test_gradient_contracts.py` — This module tests caller-budgeted native optimizer and exact gradient-row contracts.
 - `development_kit/tests/test_gradient_validation.py` — This module tests independent finite-difference, sign, cosine, directional, and step-sensitivity gradient checks.
+- `development_kit/tests/test_robust_conditions.py` — This module tests complete or explicitly sparse configurable multi-condition and material-state tables.
 - `development_kit/tests/test_research_adaptive_acquisition.py` — This module tests bounded deterministic GP/EI selection, invalid evidence rejection, and heavy-import isolation.
 - `development_kit/tests/test_research_optimizers.py` — This module tests deterministic ask/tell/checkpoint replay, mixed domains, and dependency isolation.
 - `development_kit/tests/test_native_gradient_support_matrix.py` — This module validates the redacted alpha7.1 native-gradient capability matrix and receipt boundary.
@@ -374,6 +375,7 @@ models are intentionally absent.
 - `comsol_mcp/research/derivative_support.py` — This module defines solver-free native-derivative support, variable, objective, and constraint identities.
 - `comsol_mcp/research/gradient_contracts.py` — This module defines immutable gradient rows and caller-budgeted native optimizer identities.
 - `comsol_mcp/research/gradient_validation.py` — This module compares native gradients with caller-supplied central or one-sided finite-difference evidence.
+- `comsol_mcp/research/robust_conditions.py` — This module normalizes immutable configurable optimization condition tables and provenance-bound material states.
 - `comsol_mcp/research/workflow.py` — This module normalizes passive cited workflow capsules, explicit assumptions, review, and baseline readiness.
 - `comsol_mcp/research/materials.py` — This module normalizes provenance-bound material catalogs and derives approval and strict-verification sets.
 - `comsol_mcp/research/records.py` — This module normalizes canonical candidate records and point identities before side effects.

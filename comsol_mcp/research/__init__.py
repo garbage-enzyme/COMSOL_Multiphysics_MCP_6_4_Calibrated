@@ -99,6 +99,14 @@ from .records import (
     CANDIDATE_RECORD_SCHEMA_VERSION,
     normalize_candidate_record,
 )
+from .robust_conditions import (
+    MATERIAL_STATE_CONFIGURATION_SCHEMA_NAME,
+    MATERIAL_STATE_CONFIGURATION_SCHEMA_VERSION,
+    OPTIMIZATION_CONDITION_TABLE_SCHEMA_NAME,
+    OPTIMIZATION_CONDITION_TABLE_SCHEMA_VERSION,
+    normalize_optimization_condition_table,
+    normalize_optimization_material_state,
+)
 from .state import (
     OPTIMIZER_CHECKPOINT_SCHEMA_NAME,
     OPTIMIZER_CHECKPOINT_SCHEMA_VERSION,
@@ -139,6 +147,8 @@ __all__ = [
     "DERIVATIVE_VARIABLE_SCHEMA_VERSION",
     "MATERIAL_CATALOG_SCHEMA_NAME",
     "MATERIAL_CATALOG_SCHEMA_VERSION",
+    "MATERIAL_STATE_CONFIGURATION_SCHEMA_NAME",
+    "MATERIAL_STATE_CONFIGURATION_SCHEMA_VERSION",
     "GRADIENT_RECORD_SCHEMA_NAME",
     "GRADIENT_RECORD_SCHEMA_VERSION",
     "GRADIENT_CHECK_SCHEMA_NAME",
@@ -155,6 +165,8 @@ __all__ = [
     "OPTIMIZER_STATE_SCHEMA_VERSION",
     "OBJECTIVE_SCORE_SCHEMA_NAME",
     "OBJECTIVE_SCORE_SCHEMA_VERSION",
+    "OPTIMIZATION_CONDITION_TABLE_SCHEMA_NAME",
+    "OPTIMIZATION_CONDITION_TABLE_SCHEMA_VERSION",
     "PORTFOLIO_SCHEMA_NAME",
     "PORTFOLIO_SCHEMA_VERSION",
     "DeterministicGridOptimizer",
@@ -183,6 +195,8 @@ __all__ = [
     "normalize_derivative_variable",
     "normalize_evaluation_record",
     "normalize_material_catalog",
+    "normalize_optimization_condition_table",
+    "normalize_optimization_material_state",
     "normalize_gradient_record",
     "normalize_native_optimizer_configuration",
     "compare_gradient",
