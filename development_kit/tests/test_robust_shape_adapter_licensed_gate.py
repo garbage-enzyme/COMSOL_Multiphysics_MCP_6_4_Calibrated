@@ -90,6 +90,20 @@ def test_runtime_failure_redacts_paths_and_still_clears_client(tmp_path, gate_ro
     monkeypatch.setattr(gate.os, "cpu_count", lambda: 4)
     spec = gate._spec(_args(gate_root, source, manifest, audit))
     cleared = []
+    ownership_events = []
+
+    class FakeOwnership:
+        def acquire(self, **kwargs):
+            ownership_events.append(("acquire", kwargs))
+            return {"success": True, "acquired": True}
+
+        def heartbeat(self, **kwargs):
+            ownership_events.append(("heartbeat", kwargs))
+            return True
+
+        def release(self):
+            ownership_events.append(("release", {}))
+            return {"success": True, "released": True}
 
     class FakeClient:
         def __init__(self, *, cores, version):
@@ -102,10 +116,49 @@ def test_runtime_failure_redacts_paths_and_still_clears_client(tmp_path, gate_ro
             cleared.append(True)
 
     monkeypatch.setattr(gate, "_git_identity", lambda: {"revision": "a" * 40, "clean": True})
+    monkeypatch.setattr(gate, "SolverOwnership", FakeOwnership)
     monkeypatch.setitem(sys.modules, "mph", SimpleNamespace(Client=FakeClient))
     receipt, private = gate._run(spec)
     assert receipt["error"] == {"code": "robust_shape_adapter_failed", "type": "RuntimeError"}
-    assert receipt["cleanup"] == {"client_clear": True, "source_unchanged": True}
+    assert receipt["cleanup"] == {
+        "client_clear": True,
+        "lease_released": True,
+        "source_unchanged": True,
+    }
     assert "D:/fixture/source.mph" not in json.dumps(receipt)
     assert "D:/fixture/source.mph" in private["error"]
     assert cleared == [True]
+    assert ownership_events == [
+        ("acquire", {"mode": "alpha7.2_s3_licensed_gate", "model_path": str(source)}),
+        (
+            "heartbeat",
+            {"model_path": str(source), "refresh_server_processes": True},
+        ),
+        ("release", {}),
+    ]
+
+
+def test_runtime_refuses_client_start_when_solver_lease_is_unavailable(
+    tmp_path, gate_root, monkeypatch
+):
+    source, manifest, audit = _inputs(tmp_path)
+    monkeypatch.setattr(gate.os, "cpu_count", lambda: 4)
+    spec = gate._spec(_args(gate_root, source, manifest, audit))
+
+    class RefusingOwnership:
+        def acquire(self, **_kwargs):
+            return {"success": False, "acquired": False}
+
+        def release(self):
+            raise AssertionError("foreign lease must not be released")
+
+    class ForbiddenClient:
+        def __init__(self, **_kwargs):
+            raise AssertionError("COMSOL client must not start without ownership")
+
+    monkeypatch.setattr(gate, "_git_identity", lambda: {"revision": "a" * 40, "clean": True})
+    monkeypatch.setattr(gate, "SolverOwnership", RefusingOwnership)
+    monkeypatch.setitem(sys.modules, "mph", SimpleNamespace(Client=ForbiddenClient))
+    receipt, _private = gate._run(spec)
+    assert receipt["error"] == {"code": "robust_shape_adapter_failed", "type": "RuntimeError"}
+    assert receipt["cleanup"]["lease_released"] is True

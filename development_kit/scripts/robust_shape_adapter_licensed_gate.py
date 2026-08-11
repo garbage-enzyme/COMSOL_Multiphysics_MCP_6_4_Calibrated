@@ -21,11 +21,13 @@ _durable = import_module("comsol_mcp.durable")
 _adapters = import_module("comsol_mcp.research.adapters")
 _adjoint = import_module("comsol_mcp.research.adjoint_adapter")
 _robust = import_module("comsol_mcp.research.robust_shape_adapter")
+_ownership = import_module("comsol_mcp.tools.ownership")
 atomic_write_json = _durable.atomic_write_json
 normalize_structure_adapter_manifest = _adapters.normalize_structure_adapter_manifest
 normalize_structure_tree_audit = _adapters.normalize_structure_tree_audit
 ClientapiAdjointStudyBackend = _adjoint.ClientapiAdjointStudyBackend
 prepare_robust_shape_controls = _robust.prepare_robust_shape_controls
+SolverOwnership = _ownership.SolverOwnership
 
 SCHEMA_NAME = "comsol_mcp.robust_shape_adapter_licensed_gate"
 SCHEMA_VERSION = "1.0.0"
@@ -280,6 +282,8 @@ def _run(spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
     support = _support(spec)
     policy = _shape_policy(spec)
     client = None
+    ownership = SolverOwnership()
+    lease_acquired = False
     receipt: dict[str, Any] = {
         "schema_name": SCHEMA_NAME,
         "schema_version": SCHEMA_VERSION,
@@ -298,9 +302,15 @@ def _run(spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
         key: str(spec[key]) for key in ("source", "base_copy", "configured_copy", "rollback_copy")
     }
     try:
+        lease = ownership.acquire(mode="alpha7.2_s3_licensed_gate", model_path=str(spec["source"]))
+        if not lease.get("success") or not lease.get("acquired"):
+            raise RuntimeError("exclusive solver ownership could not be acquired")
+        lease_acquired = True
         for path in (spec["base_copy"], spec["configured_copy"], spec["rollback_copy"]):
             path.unlink(missing_ok=True)
         client = mph.Client(cores=spec["cores"], version="6.4")
+        if not ownership.heartbeat(model_path=str(spec["source"]), refresh_server_processes=True):
+            raise RuntimeError("solver ownership heartbeat failed after client startup")
         source_model = client.load(str(spec["source"]))
         source_model.java.save(str(spec["base_copy"]), True)
         client.remove(source_model)
@@ -362,13 +372,22 @@ def _run(spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
         receipt["error"] = {"code": "robust_shape_adapter_failed", "type": type(exc).__name__}
         private["error"] = f"{type(exc).__name__}: {exc}"
     finally:
-        cleanup = {"client_clear": False, "source_unchanged": _sha(spec["source"]) == source_before}
+        cleanup = {
+            "client_clear": False,
+            "lease_released": not lease_acquired,
+            "source_unchanged": _sha(spec["source"]) == source_before,
+        }
         if client is not None:
             try:
                 client.clear()
                 cleanup["client_clear"] = True
             except Exception as exc:
                 private["cleanup_error"] = f"{type(exc).__name__}: {exc}"
+        if lease_acquired:
+            released = ownership.release()
+            cleanup["lease_released"] = bool(released.get("success") and released.get("released"))
+            if not cleanup["lease_released"]:
+                private["lease_cleanup_error"] = released
         receipt["cleanup"] = cleanup
         receipt["success"] = receipt.get("success") is True and all(cleanup.values())
     return receipt, private
