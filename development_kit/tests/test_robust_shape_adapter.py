@@ -6,7 +6,10 @@ import copy
 
 import pytest
 
-from comsol_mcp.research.robust_shape_adapter import compile_robust_shape_adapter_binding
+from comsol_mcp.research.robust_shape_adapter import (
+    compile_robust_shape_adapter_binding,
+    prepare_robust_shape_controls,
+)
 from development_kit.tests.test_derivative_support import _support, _variable
 from development_kit.tests.test_research_adapters import _audit, _manifest
 from development_kit.tests.test_shape_support import _policy
@@ -85,3 +88,66 @@ def test_binding_rejects_cross_contract_drift_before_clientapi(field, message):
         audit["topology"]["boundary_count"] += 1
     with pytest.raises(ValueError, match=message):
         compile_robust_shape_adapter_binding(manifest, audit, support, policy)
+
+
+class _Backend:
+    def __init__(self, *, failure: str | None = None):
+        self.state = {"nodes": []}
+        self.failure = failure
+
+    def snapshot(self):
+        return copy.deepcopy(self.state)
+
+    def restore(self, snapshot):
+        self.state = copy.deepcopy(snapshot)
+        if self.failure == "restore":
+            self.state["nodes"] = ["residue"]
+
+    def prepare_controls(self, _support):
+        self.state["nodes"] = ["dg_a71", "free_a71", "fix_a71", "patch_a71"]
+        if self.failure in {"prepare", "restore"}:
+            raise ValueError("injected control failure")
+        return {
+            "parameters": {
+                "patch_length_x": "856[nm]",
+                "patch_length_y": "800[nm]",
+            },
+            "patch_size_before": ["856e-9", "800e-9", "100e-9"],
+            "patch_size_readback": ["856e-9", "800e-9", "100e-9"],
+            "deformed_geometry": {
+                "physics_tag": "dg_a71",
+                "physics_type": "DeformedGeometry",
+                "free_domains": [1, 2],
+                "fixed_outer_boundaries": [1, 2, 3, 4],
+                "patch_boundaries": [5, 6],
+                "patch_displacement": ["dx", "dy", "0"],
+                "patch_domain": 1,
+                "patch_footprint": [7],
+            },
+        }
+
+
+def test_control_preparation_binds_exact_readback_and_changes_only_derived_state():
+    manifest, audit, support, policy = _contracts()
+    backend = _Backend()
+    receipt = prepare_robust_shape_controls(backend, manifest, audit, support, policy)
+    assert receipt["controls"]["deformed_geometry"]["free_domains"] == [1, 2]
+    assert receipt["rollback"] == {"attempted": False, "verified": False}
+    assert backend.state["nodes"][-1] == "patch_a71"
+    assert len(receipt["receipt_fingerprint"]) == 64
+
+
+def test_control_preparation_restores_complete_snapshot_after_failure():
+    manifest, audit, support, policy = _contracts()
+    backend = _Backend(failure="prepare")
+    before = backend.snapshot()
+    with pytest.raises(ValueError, match="injected control failure"):
+        prepare_robust_shape_controls(backend, manifest, audit, support, policy)
+    assert backend.snapshot() == before
+
+
+def test_control_preparation_fails_closed_when_rollback_readback_differs():
+    manifest, audit, support, policy = _contracts()
+    backend = _Backend(failure="restore")
+    with pytest.raises(RuntimeError, match="rollback was uncertain"):
+        prepare_robust_shape_controls(backend, manifest, audit, support, policy)

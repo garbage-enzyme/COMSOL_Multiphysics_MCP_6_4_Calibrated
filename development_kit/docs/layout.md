@@ -390,7 +390,7 @@ models are intentionally absent.
 - `comsol_mcp/research/robust_gradient_acceptance.py` — This module combines independent component and directional gradient receipts under caller-frozen thresholds.
 - `comsol_mcp/research/robust_objectives.py` — This module evaluates differentiable absolute state contrast and caller-configurable smooth worst-case aggregation.
 - `comsol_mcp/research/robust_optimizer_policy.py` — This module binds manual GCMMA/MMA selection to method-specific execution evidence without automatic fallback.
-- `comsol_mcp/research/robust_shape_adapter.py` — This module binds the trusted periodic-MIM structure, tree audit, derivative support, shape policy, and x/y variables before ClientAPI work.
+- `comsol_mcp/research/robust_shape_adapter.py` — This module binds the trusted periodic-MIM structure, tree audit, derivative support, shape policy, and x/y variables, then verifies failure-atomic Deformed Geometry control preparation.
 - `comsol_mcp/research/shape_support.py` — This module normalizes geometry-scale minimum-gap, mesh admission, invariant geometry, and retention policy.
 - `comsol_mcp/research/robust_startup_admission.py` — This module evaluates caller-owned absolute RAM/disk thresholds exactly once before robust work starts.
 - `comsol_mcp/research/workflow.py` — This module normalizes passive cited workflow capsules, explicit assumptions, review, and baseline readiness.
