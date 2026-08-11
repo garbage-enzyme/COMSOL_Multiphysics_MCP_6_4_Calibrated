@@ -308,6 +308,7 @@ models are intentionally absent.
 - `development_kit/tests/test_robust_conditions.py` — This module tests complete or explicitly sparse configurable multi-condition and material-state tables.
 - `development_kit/tests/test_robust_gradient_acceptance.py` — This module tests joint component, cosine, sign, three-step, and directional gradient acceptance.
 - `development_kit/tests/test_robust_finalist_validation.py` — This module tests caller-owned finalist validation policy and no-fallback/no-host-default boundaries.
+- `development_kit/tests/test_robust_finalist_evidence.py` — This module tests independent finalist manufacturability, remesh, convergence, branch, off-design, and external-fidelity promotion evidence.
 - `development_kit/tests/test_robust_gradient_ladder_licensed_gate.py` — This module tests required caller budgets, startup-only admission, shared-lease sequencing, exact gradient thresholds, and explicit non-fallback MMA disposition.
 - `development_kit/tests/test_robust_objectives.py` — This module tests smooth absolute two-state contrast and weighted smooth worst-case scalarization.
 - `development_kit/tests/test_robust_optimizer_policy.py` — This module tests method-bound manual GCMMA/MMA selection and rejects automatic fallback.
@@ -395,6 +396,7 @@ models are intentionally absent.
 - `comsol_mcp/research/robust_conditions.py` — This module normalizes immutable configurable optimization condition tables and provenance-bound material states.
 - `comsol_mcp/research/robust_gradient_acceptance.py` — This module combines independent component and directional gradient receipts under caller-frozen thresholds.
 - `comsol_mcp/research/robust_finalist_validation.py` — This module freezes caller-owned fresh-remesh, convergence, branch, off-design, and external-fidelity finalist validation policy.
+- `comsol_mcp/research/robust_finalist_evidence.py` — This module independently assesses complete finalist promotion evidence and emits a tamper-evident receipt.
 - `comsol_mcp/research/robust_objectives.py` — This module evaluates differentiable absolute state contrast, caller-configurable smooth worst-case aggregation, and the exact condition-to-aggregate gradient chain rule.
 - `comsol_mcp/research/robust_optimizer_policy.py` — This module binds manual GCMMA/MMA selection to method-specific execution evidence without automatic fallback.
 - `comsol_mcp/research/robust_shape_adapter.py` — This module binds the trusted periodic-MIM structure, tree audit, derivative support, shape policy, and x/y variables, then verifies failure-atomic Deformed Geometry control preparation.

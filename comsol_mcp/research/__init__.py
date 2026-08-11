@@ -112,6 +112,12 @@ from .robust_conditions import (
     normalize_optimization_condition_table,
     normalize_optimization_material_state,
 )
+from .robust_finalist_evidence import (
+    ROBUST_FINALIST_VALIDATION_RECEIPT_SCHEMA_NAME,
+    ROBUST_FINALIST_VALIDATION_RECEIPT_SCHEMA_VERSION,
+    assess_robust_finalist_validation,
+    normalize_robust_finalist_validation_receipt,
+)
 from .robust_finalist_validation import (
     ROBUST_FINALIST_VALIDATION_POLICY_SCHEMA_NAME,
     ROBUST_FINALIST_VALIDATION_POLICY_SCHEMA_VERSION,
@@ -236,6 +242,8 @@ __all__ = [
     "ROBUST_GRADIENT_RECEIPT_SCHEMA_VERSION",
     "ROBUST_FINALIST_VALIDATION_POLICY_SCHEMA_NAME",
     "ROBUST_FINALIST_VALIDATION_POLICY_SCHEMA_VERSION",
+    "ROBUST_FINALIST_VALIDATION_RECEIPT_SCHEMA_NAME",
+    "ROBUST_FINALIST_VALIDATION_RECEIPT_SCHEMA_VERSION",
     "ROBUST_SHAPE_ADAPTER_BINDING_SCHEMA_NAME",
     "ROBUST_SHAPE_ADAPTER_BINDING_SCHEMA_VERSION",
     "ROBUST_SHAPE_CONTROL_RECEIPT_SCHEMA_NAME",
@@ -278,6 +286,8 @@ __all__ = [
     "assess_robust_optimizer_execution",
     "normalize_robust_gradient_policy",
     "normalize_robust_finalist_validation_policy",
+    "normalize_robust_finalist_validation_receipt",
+    "assess_robust_finalist_validation",
     "normalize_shape_support_policy",
     "normalize_gradient_record",
     "normalize_native_optimizer_configuration",
