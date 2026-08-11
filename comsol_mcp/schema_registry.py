@@ -42,6 +42,8 @@ from comsol_mcp.research import (
     RESEARCH_GOAL_SCHEMA_VERSION,
     RESEARCH_JOURNAL_RECORD_SCHEMA_NAME,
     RESEARCH_JOURNAL_RECORD_SCHEMA_VERSION,
+    ROBUST_FINALIST_VALIDATION_POLICY_SCHEMA_NAME,
+    ROBUST_FINALIST_VALIDATION_POLICY_SCHEMA_VERSION,
     ROBUST_GRADIENT_POLICY_SCHEMA_NAME,
     ROBUST_GRADIENT_POLICY_SCHEMA_VERSION,
     ROBUST_GRADIENT_RECEIPT_SCHEMA_NAME,
@@ -521,6 +523,12 @@ def _entries() -> list[dict[str, Any]]:
             ROBUST_OBJECTIVE_CONFIGURATION_SCHEMA_NAME,
             ROBUST_OBJECTIVE_CONFIGURATION_SCHEMA_VERSION,
             "comsol_mcp.research.robust_objectives",
+            artifact_kind="configuration",
+        ),
+        _entry(
+            ROBUST_FINALIST_VALIDATION_POLICY_SCHEMA_NAME,
+            ROBUST_FINALIST_VALIDATION_POLICY_SCHEMA_VERSION,
+            "comsol_mcp.research.robust_finalist_validation",
             artifact_kind="configuration",
         ),
         _entry(
