@@ -925,9 +925,7 @@ def test_independent_ladder_verifier_rejects_tampering_and_false_success(
     elif mutation == "execution":
         receipt["declared_optimizer_execution"]["gcmma"]["optimizer_iterations"] = 2
     elif mutation == "deformation_policy":
-        receipt["declared_deformation_feasibility_policy"][
-            "minimum_relative_jacobian"
-        ] = 0.01
+        receipt["declared_deformation_feasibility_policy"]["minimum_relative_jacobian"] = 0.01
     elif mutation == "cleanup":
         receipt["cleanup"]["source_unchanged"] = False
     elif mutation == "gradient":
