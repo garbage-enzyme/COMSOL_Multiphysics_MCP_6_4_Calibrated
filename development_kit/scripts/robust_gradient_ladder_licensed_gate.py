@@ -16,6 +16,7 @@ from typing import Any, Callable
 import psutil
 
 from comsol_mcp.durable import atomic_write_json
+from comsol_mcp.research.robust_gradient_acceptance import assess_licensed_gradient_ladder
 from comsol_mcp.tools.ownership import SolverOwnership
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -36,6 +37,15 @@ _RECEIPT_NAMES = {
     "directional": "directional-receipt.json",
     "gcmma": "native-optimizer-receipt.json",
     "mma": "native-optimizer-receipt.json",
+}
+_GRADIENT_POLICY = {
+    "schema_name": "comsol_mcp.robust_gradient_acceptance_policy",
+    "schema_version": "1.0.0",
+    "component_relative_error_limit": 0.10,
+    "directional_relative_error_limit": 0.05,
+    "cosine_floor": 0.995,
+    "require_sign": True,
+    "required_relative_steps": [0.01, 0.003, 0.001],
 }
 
 
@@ -332,35 +342,22 @@ def _verify_stage(stage: str, result: dict[str, Any], *, revision: str, source_s
 
 
 def _gradient_checks(results: dict[str, dict[str, Any]]) -> dict[str, Any]:
-    native = results["native"]["receipt"]
-    finite_difference = results["finite_difference"]["receipt"]
-    directional = results["directional"]["receipt"]
-    variables = [item["variable_id"] for item in native.get("derivatives", [])]
-    fd_variables = [item["variable_id"] for item in finite_difference.get("derivatives", [])]
-    selected_errors = [
-        float(item["selected"]["relative_error"])
-        for item in finite_difference.get("derivatives", [])
+    variable_order = [
+        item.get("variable_id")
+        for item in results["native"]["receipt"].get("derivatives", [])
+        if isinstance(item, dict)
     ]
-    selected_signs = [
-        item["selected"].get("sign_agreement") is True
-        for item in finite_difference.get("derivatives", [])
-    ]
-    steps_match = all(
-        [float(step["relative_step"]) for step in item.get("steps", [])] == [0.01, 0.003, 0.001]
-        for item in finite_difference.get("derivatives", [])
+    if variable_order != ["patch_length_x", "patch_length_y"]:
+        raise ValueError("licensed ladder native variable order differs from the frozen fixture")
+    return assess_licensed_gradient_ladder(
+        _GRADIENT_POLICY,
+        results["native"]["receipt"],
+        results["finite_difference"]["receipt"],
+        results["directional"]["receipt"],
+        native_receipt_sha256=results["native"]["receipt_sha256"],
+        finite_difference_receipt_sha256=results["finite_difference"]["receipt_sha256"],
+        directional_receipt_sha256=results["directional"]["receipt_sha256"],
     )
-    checks = {
-        "variable_order_matches": variables == ["patch_length_x", "patch_length_y"] == fd_variables,
-        "three_step_policy_matches": steps_match,
-        "component_relative_errors_within_10_percent": bool(selected_errors)
-        and all(item <= 0.10 for item in selected_errors),
-        "component_signs_agree": bool(selected_signs) and all(selected_signs),
-        "cosine_at_least_0_995": float(finite_difference.get("cosine_similarity", -2.0)) >= 0.995,
-        "directional_relative_error_within_5_percent": float(directional.get("relative_error", 2.0))
-        <= 0.05,
-        "directional_sign_agrees": directional.get("sign_agreement") is True,
-    }
-    return {"checks": checks, "passed": all(checks.values())}
 
 
 def _optimizer_disposition(result: dict[str, Any]) -> dict[str, Any]:
@@ -392,6 +389,7 @@ def _dry_run(spec: dict[str, Any]) -> dict[str, Any]:
         "dry_run": True,
         "source_sha256": spec["source_sha256"],
         "stages": stages,
+        "gradient_policy": _GRADIENT_POLICY,
         "commands": {stage: _stage_command(spec, stage)[2] for stage in stages},
         "budgets": {
             key: spec[key]

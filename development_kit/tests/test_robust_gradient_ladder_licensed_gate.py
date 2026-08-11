@@ -151,25 +151,35 @@ def _result(stage: str, revision: str, source_sha256: str):
     receipt = {"source_revision": revision, "source_sha256": source_sha256, "success": True}
     if stage == "native":
         receipt["derivatives"] = [
-            {"variable_id": "patch_length_x"},
-            {"variable_id": "patch_length_y"},
+            {"variable_id": "patch_length_x", "accepted_real": 2.0},
+            {"variable_id": "patch_length_y", "accepted_real": -1.0},
         ]
     elif stage == "finite_difference":
+        derivatives = []
+        for name, error in (("patch_length_x", 0.002), ("patch_length_y", 0.082)):
+            steps = [
+                {
+                    "relative_step": step,
+                    "relative_error": error + index * 0.001,
+                    "sign_agreement": True,
+                }
+                for index, step in enumerate((0.01, 0.003, 0.001))
+            ]
+            derivatives.append({"variable_id": name, "selected": steps[0], "steps": steps})
         receipt.update(
             {
                 "cosine_similarity": 0.9996,
-                "derivatives": [
-                    {
-                        "variable_id": name,
-                        "selected": {"relative_error": error, "sign_agreement": True},
-                        "steps": [{"relative_step": step} for step in (0.01, 0.003, 0.001)],
-                    }
-                    for name, error in (("patch_length_x", 0.002), ("patch_length_y", 0.082))
-                ],
+                "derivatives": derivatives,
             }
         )
     elif stage == "directional":
-        receipt.update({"relative_error": 0.039, "sign_agreement": True})
+        receipt.update(
+            {
+                "variables": ["patch_length_x", "patch_length_y"],
+                "relative_error": 0.039,
+                "sign_agreement": True,
+            }
+        )
     elif stage == "gcmma":
         receipt.update({"optimizer_method": "gcmma", "fresh_forward_delta": 0.44})
     else:
@@ -183,7 +193,14 @@ def _result(stage: str, revision: str, source_sha256: str):
     return {
         "returncode": 0 if receipt["success"] else 1,
         "receipt": receipt,
-        "receipt_sha256": stage[0] * 64,
+        "receipt_sha256": {
+            "native": "a",
+            "finite_difference": "b",
+            "directional": "c",
+            "gcmma": "d",
+            "mma": "e",
+        }[stage]
+        * 64,
         "stdout_sha256": "a" * 64,
         "stderr_sha256": "b" * 64,
     }
@@ -240,6 +257,10 @@ def test_ladder_accepts_gcmma_and_records_failed_mma_without_fallback(
     )
     assert receipt["success"] is True
     assert receipt["gradient_acceptance"]["passed"] is True
+    assert receipt["gradient_acceptance"]["schema_name"] == (
+        "comsol_mcp.robust_gradient_acceptance_receipt"
+    )
+    assert len(receipt["gradient_acceptance"]["receipt_fingerprint"]) == 64
     assert receipt["gcmma"]["disposition"] == "accepted"
     assert receipt["mma"] == {
         "method": "mma",
@@ -304,6 +325,27 @@ def test_gradient_threshold_failure_prevents_ladder_success(tmp_path, gate_root,
     assert receipt["gradient_acceptance"]["passed"] is False
     assert receipt["success"] is False
     assert stages == ["native", "finite_difference", "directional"]
+
+
+def test_gradient_checks_reject_consistent_but_wrong_fixture_variable_order():
+    results = {
+        stage: _result(stage, "a" * 40, "b" * 64)
+        for stage in ("native", "finite_difference", "directional")
+    }
+    replacements = ["width", "height"]
+    for row, replacement in zip(
+        results["native"]["receipt"]["derivatives"], replacements, strict=True
+    ):
+        row["variable_id"] = replacement
+    for row, replacement in zip(
+        results["finite_difference"]["receipt"]["derivatives"],
+        replacements,
+        strict=True,
+    ):
+        row["variable_id"] = replacement
+    results["directional"]["receipt"]["variables"] = replacements
+    with pytest.raises(ValueError, match="frozen fixture"):
+        gate._gradient_checks(results)
 
 
 def test_ladder_rejects_stage_process_residue(tmp_path, gate_root, monkeypatch):

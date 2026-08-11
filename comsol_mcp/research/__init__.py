@@ -117,6 +117,7 @@ from .robust_gradient_acceptance import (
     ROBUST_GRADIENT_POLICY_SCHEMA_VERSION,
     ROBUST_GRADIENT_RECEIPT_SCHEMA_NAME,
     ROBUST_GRADIENT_RECEIPT_SCHEMA_VERSION,
+    assess_licensed_gradient_ladder,
     assess_robust_gradient_acceptance,
     normalize_robust_gradient_policy,
 )
@@ -279,6 +280,7 @@ __all__ = [
     "score_objectives",
     "evaluate_robust_absolute_contrast",
     "aggregate_robust_absolute_contrast_gradient",
+    "assess_licensed_gradient_ladder",
     "assess_robust_gradient_acceptance",
     "compile_campaign_manifest",
     "compile_robust_shape_adapter_binding",
