@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 from comsol_mcp.durable import domain_sha256_v2
 from comsol_mcp.research.robust_objectives import evaluate_robust_absolute_contrast
@@ -16,7 +17,7 @@ from .robust_shape_rows import append_robust_shape_row, read_robust_shape_rows
 from .store import JobStore, atomic_write_json, cancel_request_targets_attempt, process_identity
 
 
-def _synthetic_observations(spec: dict) -> list[dict]:
+def _synthetic_observations(spec: dict[str, Any]) -> list[dict[str, Any]]:
     states = spec["objective"]["state_ids"]
     observations = []
     for row in spec["condition_table"]["conditions"]:
@@ -45,13 +46,14 @@ def _synthetic_observations(spec: dict) -> list[dict]:
 
 def _cancel_requested(store: JobStore, job_id: str, attempt: int) -> bool:
     state = store.read_state(job_id)
-    return state["status"] == "cancel_requested" or cancel_request_targets_attempt(
-        store.read_control(job_id), attempt
+    return bool(
+        state["status"] == "cancel_requested"
+        or cancel_request_targets_attempt(store.read_control(job_id), attempt)
     )
 
 
 def _record_synthetic_cancel(
-    store: JobStore, job_id: str, spec: dict, attempt: int, message: str
+    store: JobStore, job_id: str, spec: dict[str, Any], attempt: int, message: str
 ) -> None:
     rows_path = store.job_dir(job_id) / "robust_shape_rows.jsonl"
     rows = read_robust_shape_rows(rows_path, job_fingerprint=spec["spec_fingerprint"])

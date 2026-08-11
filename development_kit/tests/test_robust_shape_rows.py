@@ -101,9 +101,9 @@ def test_partial_tail_is_truncated_before_next_hash_chained_append(ascii_tmp_pat
     )
     with path.open("ab") as handle:
         handle.write(b'{"partial":')
-    assert read_robust_shape_rows(path, job_fingerprint=JOB)[-1]["row_sha256"] == first[
-        "row_sha256"
-    ]
+    assert (
+        read_robust_shape_rows(path, job_fingerprint=JOB)[-1]["row_sha256"] == first["row_sha256"]
+    )
     second = append_robust_shape_row(
         path, job_fingerprint=JOB, attempt=2, kind="iteration", payload=_iteration()
     )

@@ -784,7 +784,7 @@ def _entries() -> list[dict[str, Any]]:
             artifact_kind="durable_artifact",
         ),
         _entry(
-    SHARED_MODEL_SNAPSHOT_SCHEMA,
+            SHARED_MODEL_SNAPSHOT_SCHEMA,
             SHARED_MODEL_SNAPSHOT_VERSION,
             "comsol_mcp.shared_session.lifecycle",
             artifact_kind="durable_artifact",

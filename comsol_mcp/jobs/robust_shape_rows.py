@@ -86,12 +86,8 @@ def _payload(value: object, kind: str) -> dict[str, Any]:
         status = _status(raw["status"], "condition status")
         if status not in {"completed", "failed", "skipped", "cancelled"}:
             raise ValueError("condition status is unsupported")
-        observation = _optional_digest(
-            raw["observation_fingerprint"], "observation_fingerprint"
-        )
-        contribution = _optional_finite(
-            raw["objective_contribution"], "objective_contribution"
-        )
+        observation = _optional_digest(raw["observation_fingerprint"], "observation_fingerprint")
+        contribution = _optional_finite(raw["objective_contribution"], "objective_contribution")
         if status in {"completed", "skipped"} and (observation is None or contribution is None):
             raise ValueError("completed condition rows require durable observation evidence")
         if status in {"failed", "cancelled"} and (
@@ -311,7 +307,7 @@ def append_robust_shape_row(
         rows = _read_rows_unlocked(journal, job)
         if len(rows) >= MAX_ROWS:
             raise ValueError("robust shape journal exceeds its entry limit")
-        body = {
+        body: dict[str, Any] = {
             "schema_name": ROBUST_SHAPE_ROW_SCHEMA_NAME,
             "schema_version": ROBUST_SHAPE_ROW_SCHEMA_VERSION,
             "sequence": len(rows),

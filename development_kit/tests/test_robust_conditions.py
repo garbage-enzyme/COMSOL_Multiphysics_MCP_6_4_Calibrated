@@ -114,9 +114,7 @@ def test_condition_table_rejects_missing_cartesian_row_unless_sparse_is_explicit
         ),
     ],
 )
-def test_condition_table_rejects_order_state_weight_boolean_or_coordinate_drift(
-    mutation, message
-):
+def test_condition_table_rejects_order_state_weight_boolean_or_coordinate_drift(mutation, message):
     value = _table()
     mutation(value)
     with pytest.raises(ValueError, match=message):

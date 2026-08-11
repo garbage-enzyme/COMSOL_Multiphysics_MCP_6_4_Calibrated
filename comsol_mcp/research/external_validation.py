@@ -150,9 +150,7 @@ def normalize_external_validation_receipt(value: object) -> dict[str, Any]:
         ),
         "known_non_equivalences": normalized_non_equivalences,
         "sampling_sha256": _sha256(raw["sampling_sha256"], "sampling_sha256"),
-        "discretization_sha256": _sha256(
-            raw["discretization_sha256"], "discretization_sha256"
-        ),
+        "discretization_sha256": _sha256(raw["discretization_sha256"], "discretization_sha256"),
         "convergence_sha256": _sha256(raw["convergence_sha256"], "convergence_sha256"),
         "raw_artifact_sha256": normalized_artifacts,
         "comparison_metrics": _finite_mapping(raw["comparison_metrics"], "comparison_metrics"),
@@ -160,13 +158,9 @@ def normalize_external_validation_receipt(value: object) -> dict[str, Any]:
             raw["comparison_tolerances"], "comparison_tolerances"
         ),
         "disposition": disposition,
-        "retention_disposition": _identifier(
-            raw["retention_disposition"], "retention_disposition"
-        ),
+        "retention_disposition": _identifier(raw["retention_disposition"], "retention_disposition"),
     }
-    body["receipt_fingerprint"] = domain_sha256_v2(
-        EXTERNAL_VALIDATION_RECEIPT_SCHEMA_NAME, body
-    )
+    body["receipt_fingerprint"] = domain_sha256_v2(EXTERNAL_VALIDATION_RECEIPT_SCHEMA_NAME, body)
     if supplied is not None and supplied != body["receipt_fingerprint"]:
         raise ValueError("external validation receipt fingerprint is invalid")
     return body

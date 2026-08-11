@@ -60,9 +60,7 @@ def normalize_optimization_material_state(value: object) -> dict[str, Any]:
         "schema_name": MATERIAL_STATE_CONFIGURATION_SCHEMA_NAME,
         "schema_version": MATERIAL_STATE_CONFIGURATION_SCHEMA_VERSION,
         "state_id": _identifier(raw["state_id"], "state_id"),
-        "material_ledger_sha256": _sha256(
-            raw["material_ledger_sha256"], "material_ledger_sha256"
-        ),
+        "material_ledger_sha256": _sha256(raw["material_ledger_sha256"], "material_ledger_sha256"),
         "optical_property_source_sha256": _sha256(
             raw["optical_property_source_sha256"], "optical_property_source_sha256"
         ),
@@ -71,9 +69,7 @@ def normalize_optimization_material_state(value: object) -> dict[str, Any]:
             raw["provenance_disposition"], "provenance_disposition"
         ),
     }
-    body["state_fingerprint"] = domain_sha256_v2(
-        MATERIAL_STATE_CONFIGURATION_SCHEMA_NAME, body
-    )
+    body["state_fingerprint"] = domain_sha256_v2(MATERIAL_STATE_CONFIGURATION_SCHEMA_NAME, body)
     if supplied is not None and supplied != body["state_fingerprint"]:
         raise ValueError("optimization material state fingerprint is invalid")
     return body
@@ -101,11 +97,7 @@ def _condition_row(value: object, *, index: int, state_ids: set[str]) -> dict[st
         },
         name,
     )
-    if (
-        isinstance(raw["order"], bool)
-        or not isinstance(raw["order"], int)
-        or raw["order"] != index
-    ):
+    if isinstance(raw["order"], bool) or not isinstance(raw["order"], int) or raw["order"] != index:
         raise ValueError(f"{name}.order must be the canonical zero-based condition order")
     state_id = _identifier(raw["material_state_id"], f"{name}.material_state_id")
     if state_id not in state_ids:

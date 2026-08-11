@@ -126,9 +126,7 @@ def evaluate_robust_absolute_contrast(
     if not set(objective["state_ids"]).issubset(table_states):
         raise ValueError("robust objective states are not declared by the condition table")
     active = [
-        row
-        for row in table["conditions"]
-        if row["active"] and row["objective_role"] == "objective"
+        row for row in table["conditions"] if row["active"] and row["objective_role"] == "objective"
     ]
     expected_ids = {row["condition_id"] for row in active}
     if set(observed) != expected_ids:
@@ -196,8 +194,7 @@ def evaluate_robust_absolute_contrast(
     temperature = objective["worst_case_temperature"]
     minimum = min(pair["smooth_absolute_contrast"] for pair in pairs)
     weighted_terms = [
-        pair["weight"]
-        * math.exp(-(pair["smooth_absolute_contrast"] - minimum) / temperature)
+        pair["weight"] * math.exp(-(pair["smooth_absolute_contrast"] - minimum) / temperature)
         for pair in pairs
     ]
     total_weight = sum(pair["weight"] for pair in pairs)

@@ -128,8 +128,7 @@ def assess_robust_gradient_acceptance(
     checks = {
         "three_step_policy_matches": step_match,
         "component_relative_errors_within_limit": all(
-            item <= normalized_policy["component_relative_error_limit"]
-            for item in component_errors
+            item <= normalized_policy["component_relative_error_limit"] for item in component_errors
         ),
         "cosine_above_floor": cosine >= normalized_policy["cosine_floor"],
         "component_signs_agree": all(component_signs),

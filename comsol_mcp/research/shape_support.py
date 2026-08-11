@@ -81,12 +81,8 @@ def normalize_shape_support_policy(value: object) -> dict[str, Any]:
     geometry_length = _optional_positive(
         gap["geometry_reference_length_m"], "minimum_gap.geometry_reference_length_m"
     )
-    mesh_resolution = _optional_positive(
-        gap["mesh_resolution_m"], "minimum_gap.mesh_resolution_m"
-    )
-    mesh_multiplier = _optional_positive(
-        gap["mesh_multiplier"], "minimum_gap.mesh_multiplier"
-    )
+    mesh_resolution = _optional_positive(gap["mesh_resolution_m"], "minimum_gap.mesh_resolution_m")
+    mesh_multiplier = _optional_positive(gap["mesh_multiplier"], "minimum_gap.mesh_multiplier")
     geometry_floor = _optional_positive(
         gap["geometry_relative_floor"], "minimum_gap.geometry_relative_floor"
     )
@@ -99,9 +95,12 @@ def normalize_shape_support_policy(value: object) -> dict[str, Any]:
         effective_gap = explicit
         claim = "caller_explicit"
     elif mode == "recommended":
-        if explicit is not None or any(
-            item is None
-            for item in (geometry_length, mesh_resolution, mesh_multiplier, geometry_floor)
+        if (
+            explicit is not None
+            or geometry_length is None
+            or mesh_resolution is None
+            or mesh_multiplier is None
+            or geometry_floor is None
         ):
             raise ValueError("recommended minimum gap requires geometry and mesh inputs")
         geometry_length_value = float(geometry_length)
@@ -188,9 +187,7 @@ def normalize_shape_support_policy(value: object) -> dict[str, Any]:
     if supplied_mesh_scope is not None and supplied_mesh_scope != "per_model_not_cumulative":
         raise ValueError("mesh admission scope is invalid")
 
-    retention = _object(
-        raw["model_retention"], {"mode", "max_retained_models"}, "model_retention"
-    )
+    retention = _object(raw["model_retention"], {"mode", "max_retained_models"}, "model_retention")
     retention_mode = retention["mode"]
     if retention_mode not in _RETENTION_MODES:
         raise ValueError("model_retention.mode is unsupported")
