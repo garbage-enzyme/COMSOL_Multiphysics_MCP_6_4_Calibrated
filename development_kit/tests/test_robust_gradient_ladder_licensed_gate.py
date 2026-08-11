@@ -79,6 +79,10 @@ def _args(
         "300000",
         "--minimum-element-quality",
         "0.1",
+        "--deformation-jacobian-expression",
+        "reldetjac",
+        "--minimum-relative-jacobian",
+        "0",
         "--minimum-available-memory-bytes",
         "1073741824",
         "--minimum-runtime-free-bytes",
@@ -122,6 +126,8 @@ def test_parser_has_no_caller_budget_or_resource_defaults():
         "max_review_items",
         "max_elements_per_model",
         "minimum_element_quality",
+        "deformation_jacobian_expression",
+        "minimum_relative_jacobian",
         "minimum_available_memory_bytes",
         "minimum_runtime_free_bytes",
         "mma_max_solves",
@@ -200,6 +206,12 @@ def test_dry_run_freezes_serial_fresh_process_plan_without_starting_solver(
     assert receipt["optimizer_execution"] == {
         "gcmma": {"optimizer_iterations": 3, "move_limit": 0.05},
         "mma": {"optimizer_iterations": 3, "move_limit": 0.05},
+    }
+    assert receipt["deformation_feasibility_policy"] == {
+        "jacobian_expression": "reldetjac",
+        "minimum_relative_jacobian": 0.0,
+        "comparison": "strictly_greater_than",
+        "scope": "fresh_forward_finalist_deformed_geometry",
     }
     assert receipt["solver_started"] is False
     assert receipt["filesystem_modified"] is False
@@ -296,6 +308,19 @@ def _result(stage: str, revision: str, source_sha256: str, spec: dict | None = N
                         "quality_measure": "volcircum",
                     },
                 },
+                "deformation_feasibility_policy": {
+                    "jacobian_expression": spec["deformation_jacobian_expression"],
+                    "minimum_relative_jacobian": spec["minimum_relative_jacobian"],
+                    "comparison": "strictly_greater_than",
+                    "scope": "fresh_forward_finalist_deformed_geometry",
+                },
+                "deformation_feasibility": {
+                    "sample_count": 100,
+                    "minimum_relative_jacobian": 0.02,
+                    "maximum_relative_jacobian": 1.0,
+                    "threshold": spec["minimum_relative_jacobian"],
+                    "passed": True,
+                },
                 "cleanup": {"client_clear": True, "source_unchanged": True},
             }
         )
@@ -312,6 +337,12 @@ def _result(stage: str, revision: str, source_sha256: str, spec: dict | None = N
                     "movelimit": str(spec["mma_move_limit"]),
                 },
                 "budget": gate._optimizer_configuration(spec, "mma")["budget"],
+                "deformation_feasibility_policy": {
+                    "jacobian_expression": spec["deformation_jacobian_expression"],
+                    "minimum_relative_jacobian": spec["minimum_relative_jacobian"],
+                    "comparison": "strictly_greater_than",
+                    "scope": "fresh_forward_finalist_deformed_geometry",
+                },
                 "cleanup": {"client_clear": True, "source_unchanged": True},
             }
         )
@@ -694,6 +725,10 @@ def _verifier_args(root: Path, tmp_path: Path, revision: str, *, run_mma: bool =
         "300000",
         "--minimum-element-quality",
         "0.1",
+        "--deformation-jacobian-expression",
+        "reldetjac",
+        "--minimum-relative-jacobian",
+        "0",
         "--minimum-available-memory-bytes",
         "1073741824",
         "--minimum-runtime-free-bytes",
@@ -809,7 +844,15 @@ def test_independent_ladder_verifier_reopens_all_receipts_and_logs(
 
 @pytest.mark.parametrize(
     "mutation",
-    ["stage_order", "budget", "execution", "cleanup", "gradient", "stdout"],
+    [
+        "stage_order",
+        "budget",
+        "execution",
+        "deformation_policy",
+        "cleanup",
+        "gradient",
+        "stdout",
+    ],
 )
 def test_independent_ladder_verifier_rejects_tampering_and_false_success(
     tmp_path, gate_root, monkeypatch, mutation
@@ -821,6 +864,10 @@ def test_independent_ladder_verifier_rejects_tampering_and_false_success(
         receipt["declared_budgets"]["max_review_items"] = 19
     elif mutation == "execution":
         receipt["declared_optimizer_execution"]["gcmma"]["optimizer_iterations"] = 2
+    elif mutation == "deformation_policy":
+        receipt["declared_deformation_feasibility_policy"][
+            "minimum_relative_jacobian"
+        ] = 0.01
     elif mutation == "cleanup":
         receipt["cleanup"]["source_unchanged"] = False
     elif mutation == "gradient":

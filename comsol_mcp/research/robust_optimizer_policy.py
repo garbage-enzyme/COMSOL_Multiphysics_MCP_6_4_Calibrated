@@ -143,6 +143,8 @@ def assess_robust_optimizer_execution(
     native_receipt_sha256: object,
     max_elements_per_model: object,
     minimum_element_quality: object,
+    deformation_jacobian_expression: object,
+    minimum_relative_jacobian: object,
 ) -> dict[str, Any]:
     """Bind one native method attempt to caller budgets and fresh-forward evidence."""
     optimizer = normalize_native_optimizer_configuration(configuration)
@@ -168,6 +170,17 @@ def assess_robust_optimizer_execution(
     minimum_quality = _finite(minimum_element_quality, "minimum_element_quality", positive=True)
     if minimum_quality > 1.0:
         raise ValueError("minimum_element_quality must not exceed one")
+    if (
+        not isinstance(deformation_jacobian_expression, str)
+        or not deformation_jacobian_expression.strip()
+        or len(deformation_jacobian_expression) > 256
+        or any(ord(character) < 32 for character in deformation_jacobian_expression)
+    ):
+        raise ValueError("deformation_jacobian_expression must be bounded printable text")
+    jacobian_expression = deformation_jacobian_expression.strip()
+    jacobian_threshold = _finite(minimum_relative_jacobian, "minimum_relative_jacobian")
+    if jacobian_threshold < 0.0:
+        raise ValueError("minimum_relative_jacobian must be nonnegative")
     cleanup = receipt.get("cleanup")
     cleanup_complete = bool(
         isinstance(cleanup, dict)
@@ -186,6 +199,11 @@ def assess_robust_optimizer_execution(
         "quality_measure_matches": False,
     }
     fresh_forward_improvement = False
+    deformation_checks = {
+        "policy_matches": False,
+        "finite_evidence": False,
+        "above_caller_threshold": False,
+    }
     if execution_success:
         baseline = _finite(receipt.get("baseline_objective"), "baseline_objective")
         final = _finite(receipt.get("final_objective"), "final_objective")
@@ -229,7 +247,43 @@ def assess_robust_optimizer_execution(
             == 1
         )
         fresh_forward_improvement = delta > 0.0
-    accepted = execution_success and fresh_forward_improvement and all(mesh_checks.values())
+        expected_deformation_policy = {
+            "jacobian_expression": jacobian_expression,
+            "minimum_relative_jacobian": jacobian_threshold,
+            "comparison": "strictly_greater_than",
+            "scope": "fresh_forward_finalist_deformed_geometry",
+        }
+        deformation_checks["policy_matches"] = (
+            receipt.get("deformation_feasibility_policy") == expected_deformation_policy
+        )
+        evidence = receipt.get("deformation_feasibility")
+        if not isinstance(evidence, dict):
+            raise ValueError("native optimizer deformation feasibility evidence is missing")
+        sample_count = evidence.get("sample_count")
+        minimum_jacobian = _finite(
+            evidence.get("minimum_relative_jacobian"),
+            "deformation_feasibility.minimum_relative_jacobian",
+        )
+        maximum_jacobian = _finite(
+            evidence.get("maximum_relative_jacobian"),
+            "deformation_feasibility.maximum_relative_jacobian",
+        )
+        deformation_checks["finite_evidence"] = (
+            isinstance(sample_count, int)
+            and not isinstance(sample_count, bool)
+            and sample_count >= 1
+            and minimum_jacobian <= maximum_jacobian
+            and evidence.get("threshold") == jacobian_threshold
+        )
+        deformation_checks["above_caller_threshold"] = (
+            minimum_jacobian > jacobian_threshold and evidence.get("passed") is True
+        )
+    accepted = (
+        execution_success
+        and fresh_forward_improvement
+        and all(mesh_checks.values())
+        and all(deformation_checks.values())
+    )
     body = {
         "schema_name": ROBUST_OPTIMIZER_EXECUTION_RECEIPT_SCHEMA_NAME,
         "schema_version": ROBUST_OPTIMIZER_EXECUTION_RECEIPT_SCHEMA_VERSION,
@@ -246,6 +300,7 @@ def assess_robust_optimizer_execution(
         "fresh_forward_delta": delta,
         "fresh_forward_improvement": fresh_forward_improvement,
         "mesh_checks": mesh_checks,
+        "deformation_checks": deformation_checks,
         "disposition": "accepted" if accepted else "rejected",
         "automatic_fallback_used": False,
     }

@@ -76,6 +76,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-review-items", type=int, required=True)
     parser.add_argument("--max-elements-per-model", type=int, required=True)
     parser.add_argument("--minimum-element-quality", type=float, required=True)
+    parser.add_argument("--deformation-jacobian-expression", required=True)
+    parser.add_argument("--minimum-relative-jacobian", type=float, required=True)
     parser.add_argument("--minimum-available-memory-bytes", type=int, required=True)
     parser.add_argument("--minimum-runtime-free-bytes", type=int, required=True)
     parser.add_argument("--run-mma", action="store_true")
@@ -103,7 +105,7 @@ def _positive_integer(value: object, name: str, *, maximum: int = 1 << 50) -> in
 
 
 def _positive_finite(value: object, name: str) -> float:
-    if isinstance(value, bool):
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
         raise ValueError(f"{name} must be a caller-supplied positive finite number")
     try:
         normalized = float(value)
@@ -231,10 +233,21 @@ def _spec(args: argparse.Namespace) -> dict[str, Any]:
         )
     commit_fraction = float(args.max_commit_fraction)
     minimum_quality = float(args.minimum_element_quality)
+    minimum_relative_jacobian = float(args.minimum_relative_jacobian)
     if not math.isfinite(commit_fraction) or not 0.0 < commit_fraction <= 1.0:
         raise ValueError("max_commit_fraction must be caller supplied in (0, 1]")
     if not math.isfinite(minimum_quality) or not 0.0 < minimum_quality <= 1.0:
         raise ValueError("minimum_element_quality must be caller supplied in (0, 1]")
+    jacobian_expression = args.deformation_jacobian_expression
+    if (
+        not isinstance(jacobian_expression, str)
+        or not jacobian_expression.strip()
+        or len(jacobian_expression) > 256
+        or any(ord(character) < 32 for character in jacobian_expression)
+    ):
+        raise ValueError("deformation_jacobian_expression must be bounded printable text")
+    if not math.isfinite(minimum_relative_jacobian) or minimum_relative_jacobian < 0.0:
+        raise ValueError("minimum_relative_jacobian must be caller supplied and nonnegative")
     child_roots = {stage: root.with_name(root.name + suffix) for stage, suffix in _SUFFIXES.items()}
     if any(len(path.name) > 12 or path.parent != approved for path in child_roots.values()):
         raise ValueError("derived stage roots exceed the Windows path budget")
@@ -248,6 +261,8 @@ def _spec(args: argparse.Namespace) -> dict[str, Any]:
         **normalized,
         "max_commit_fraction": commit_fraction,
         "minimum_element_quality": minimum_quality,
+        "deformation_jacobian_expression": jacobian_expression.strip(),
+        "minimum_relative_jacobian": minimum_relative_jacobian,
         "gcmma_optimizer_iterations": gcmma_optimizer_iterations,
         "gcmma_move_limit": gcmma_move_limit,
         "mma_optimizer_iterations": mma_optimizer_iterations,
@@ -361,6 +376,10 @@ def _stage_command(spec: dict[str, Any], stage: str) -> list[str]:
             str(spec["max_elements_per_model"]),
             "--minimum-element-quality",
             format(spec["minimum_element_quality"], ".17g"),
+            "--deformation-jacobian-expression",
+            spec["deformation_jacobian_expression"],
+            "--minimum-relative-jacobian",
+            format(spec["minimum_relative_jacobian"], ".17g"),
         ]
         method_index = command.index("--optimizer-method") + 1
         command[method_index] = stage
@@ -465,6 +484,7 @@ def _verify_stage(
     source_sha256: str,
     optimizer_iterations: int | None = None,
     move_limit: float | None = None,
+    deformation_policy: dict[str, Any] | None = None,
 ) -> None:
     receipt = result["receipt"]
     if receipt.get("source_revision") != revision or receipt.get("source_sha256") != source_sha256:
@@ -476,8 +496,10 @@ def _verify_stage(
         if (
             optimizer_iterations is None
             or move_limit is None
+            or deformation_policy is None
             or receipt.get("requested_optimizer_iterations") != optimizer_iterations
             or receipt.get("requested_move_limit") != move_limit
+            or receipt.get("deformation_feasibility_policy") != deformation_policy
             or (solver is not None and not isinstance(solver, dict))
             or (isinstance(solver, dict) and solver.get("mmamaxiter") != str(optimizer_iterations))
             or (
@@ -560,6 +582,8 @@ def _optimizer_disposition(
         native_receipt_sha256=result["receipt_sha256"],
         max_elements_per_model=spec["max_elements_per_model"],
         minimum_element_quality=spec["minimum_element_quality"],
+        deformation_jacobian_expression=spec["deformation_jacobian_expression"],
+        minimum_relative_jacobian=spec["minimum_relative_jacobian"],
     )
 
 
@@ -583,6 +607,15 @@ def _declared_budgets(spec: dict[str, Any]) -> dict[str, Any]:
             "minimum_available_memory_bytes",
             "minimum_runtime_free_bytes",
         )
+    }
+
+
+def _declared_deformation_feasibility_policy(spec: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "jacobian_expression": spec["deformation_jacobian_expression"],
+        "minimum_relative_jacobian": spec["minimum_relative_jacobian"],
+        "comparison": "strictly_greater_than",
+        "scope": "fresh_forward_finalist_deformed_geometry",
     }
 
 
@@ -627,6 +660,7 @@ def _dry_run(spec: dict[str, Any]) -> dict[str, Any]:
         "budgets": _declared_budgets(spec),
         "mma_budget": _declared_mma_budget(spec),
         "optimizer_execution": _declared_optimizer_execution(spec),
+        "deformation_feasibility_policy": _declared_deformation_feasibility_policy(spec),
         "optimizer_configuration_fingerprints": {
             "gcmma": _optimizer_configuration(spec, "gcmma")["optimizer_fingerprint"],
             "mma": (
@@ -707,6 +741,7 @@ def _run(
         "declared_budgets": _declared_budgets(spec),
         "declared_mma_budget": _declared_mma_budget(spec),
         "declared_optimizer_execution": _declared_optimizer_execution(spec),
+        "declared_deformation_feasibility_policy": _declared_deformation_feasibility_policy(spec),
         "automatic_fallback_allowed": False,
         "startup_admission": admission,
         "stage_receipts": {},
@@ -801,6 +836,7 @@ def _run(
                 move_limit=(
                     spec["gcmma_move_limit"] if stage == "gcmma" else spec["mma_move_limit"]
                 ),
+                deformation_policy=_declared_deformation_feasibility_policy(spec),
             )
             results[stage] = result
             artifact_bytes += result["artifact_bytes"]

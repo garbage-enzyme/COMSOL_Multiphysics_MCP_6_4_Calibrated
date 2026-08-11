@@ -34,6 +34,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-review-items", type=int, required=True)
     parser.add_argument("--max-elements-per-model", type=int, required=True)
     parser.add_argument("--minimum-element-quality", type=float, required=True)
+    parser.add_argument("--deformation-jacobian-expression", required=True)
+    parser.add_argument("--minimum-relative-jacobian", type=float, required=True)
     return parser
 
 
@@ -136,6 +138,42 @@ def _requested_move_limit(args: argparse.Namespace) -> float:
     return requested
 
 
+def _deformation_feasibility_policy(args: argparse.Namespace) -> dict:
+    expression = args.deformation_jacobian_expression
+    if (
+        not isinstance(expression, str)
+        or not expression.strip()
+        or len(expression) > 256
+        or any(ord(character) < 32 for character in expression)
+    ):
+        raise ValueError("deformation_jacobian_expression must be bounded printable text")
+    threshold = float(args.minimum_relative_jacobian)
+    if not math.isfinite(threshold) or threshold < 0.0:
+        raise ValueError(
+            "minimum_relative_jacobian must be a caller-supplied finite nonnegative number"
+        )
+    return {
+        "jacobian_expression": expression.strip(),
+        "minimum_relative_jacobian": threshold,
+        "comparison": "strictly_greater_than",
+        "scope": "fresh_forward_finalist_deformed_geometry",
+    }
+
+
+def _deformation_feasibility_evidence(values, policy: dict) -> dict:
+    series = _numeric_series(values)
+    minimum = min(series)
+    maximum = max(series)
+    threshold = policy["minimum_relative_jacobian"]
+    return {
+        "sample_count": len(series),
+        "minimum_relative_jacobian": minimum,
+        "maximum_relative_jacobian": maximum,
+        "threshold": threshold,
+        "passed": minimum > threshold,
+    }
+
+
 def _configure_solver_move_limit(
     model, study, move_limit: float, optimizer_iterations: int
 ) -> dict:
@@ -170,6 +208,7 @@ def run(args: argparse.Namespace) -> dict:
     spec = structural._spec(args)
     requested_iterations = _requested_optimizer_iterations(args, spec["optimizer"]["budget"])
     requested_move_limit = _requested_move_limit(args)
+    deformation_policy = _deformation_feasibility_policy(args)
     optimizer = dict(spec["optimizer"])
     optimizer.pop("optimizer_fingerprint", None)
     optimizer["move_limit"] = requested_move_limit
@@ -196,6 +235,7 @@ def run(args: argparse.Namespace) -> dict:
             "scope": "baseline_and_explicit_finalist_remesh",
             "internal_optimizer_remesh_callback": False,
         },
+        "deformation_feasibility_policy": deformation_policy,
     }
     client = None
     private_error = None
@@ -299,6 +339,17 @@ def run(args: argparse.Namespace) -> dict:
             finalist.evaluate(receipt["objective_expression"], dataset=finalist_dataset, outer=1)
         )
         fresh_final = fresh_series[-1]
+        deformation_evidence = _deformation_feasibility_evidence(
+            finalist.evaluate(
+                deformation_policy["jacobian_expression"],
+                dataset=finalist_dataset,
+                outer=1,
+            ),
+            deformation_policy,
+        )
+        receipt["deformation_feasibility"] = deformation_evidence
+        if deformation_evidence["passed"] is not True:
+            raise ValueError("fresh-forward deformation feasibility is below the caller threshold")
         physical_expressions = [
             "ewfd.Rtotal",
             "ewfd.Ttotal",

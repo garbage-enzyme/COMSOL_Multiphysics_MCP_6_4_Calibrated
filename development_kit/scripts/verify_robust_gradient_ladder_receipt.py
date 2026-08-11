@@ -67,6 +67,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-review-items", type=int, required=True)
     parser.add_argument("--max-elements-per-model", type=int, required=True)
     parser.add_argument("--minimum-element-quality", type=float, required=True)
+    parser.add_argument("--deformation-jacobian-expression", required=True)
+    parser.add_argument("--minimum-relative-jacobian", type=float, required=True)
     parser.add_argument("--minimum-available-memory-bytes", type=int, required=True)
     parser.add_argument("--minimum-runtime-free-bytes", type=int, required=True)
     parser.add_argument("--run-mma", action="store_true")
@@ -102,7 +104,7 @@ def _positive_int(value: object, name: str) -> int:
 
 
 def _positive_finite(value: object, name: str) -> float:
-    if isinstance(value, bool):
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
         raise ValueError(f"{name} must be a positive finite number")
     try:
         normalized = float(value)
@@ -141,13 +143,26 @@ def _expected(args: argparse.Namespace) -> dict[str, Any]:
         "minimum_available_memory_bytes",
         "minimum_runtime_free_bytes",
     )
-    budgets = {name: _positive_int(getattr(args, name), name) for name in integer_names}
+    budgets: dict[str, Any] = {
+        name: _positive_int(getattr(args, name), name) for name in integer_names
+    }
     commit_fraction = float(args.max_commit_fraction)
     minimum_quality = float(args.minimum_element_quality)
+    minimum_relative_jacobian = float(args.minimum_relative_jacobian)
     if not math.isfinite(commit_fraction) or not 0.0 < commit_fraction <= 1.0:
         raise ValueError("max_commit_fraction must be within (0, 1]")
     if not math.isfinite(minimum_quality) or not 0.0 < minimum_quality <= 1.0:
         raise ValueError("minimum_element_quality must be within (0, 1]")
+    jacobian_expression = args.deformation_jacobian_expression
+    if (
+        not isinstance(jacobian_expression, str)
+        or not jacobian_expression.strip()
+        or len(jacobian_expression) > 256
+        or any(ord(character) < 32 for character in jacobian_expression)
+    ):
+        raise ValueError("deformation_jacobian_expression must be bounded printable text")
+    if not math.isfinite(minimum_relative_jacobian) or minimum_relative_jacobian < 0.0:
+        raise ValueError("minimum_relative_jacobian must be finite and nonnegative")
     budgets["max_commit_fraction"] = commit_fraction
     budgets["minimum_element_quality"] = minimum_quality
     gcmma_optimizer_iterations = _positive_int(
@@ -196,6 +211,12 @@ def _expected(args: argparse.Namespace) -> dict[str, Any]:
         "revision": revision,
         "budgets": budgets,
         "mma_budget": mma_budget,
+        "deformation_feasibility_policy": {
+            "jacobian_expression": jacobian_expression.strip(),
+            "minimum_relative_jacobian": minimum_relative_jacobian,
+            "comparison": "strictly_greater_than",
+            "scope": "fresh_forward_finalist_deformed_geometry",
+        },
         "optimizer_execution": {
             "gcmma": {
                 "optimizer_iterations": gcmma_optimizer_iterations,
@@ -302,6 +323,11 @@ def verify(expected: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("ladder MMA budget drifted")
     if ladder.get("declared_optimizer_execution") != expected["optimizer_execution"]:
         raise ValueError("ladder optimizer execution request drifted")
+    if (
+        ladder.get("declared_deformation_feasibility_policy")
+        != expected["deformation_feasibility_policy"]
+    ):
+        raise ValueError("ladder deformation feasibility policy drifted")
     if ladder.get("automatic_fallback_allowed") is not False:
         raise ValueError("ladder automatic-fallback policy is invalid")
     admission = ladder.get("startup_admission")
@@ -383,6 +409,8 @@ def verify(expected: dict[str, Any]) -> dict[str, Any]:
             if (
                 receipt.get("requested_optimizer_iterations") != requested
                 or receipt.get("requested_move_limit") != move_limit
+                or receipt.get("deformation_feasibility_policy")
+                != expected["deformation_feasibility_policy"]
                 or (solver is not None and not isinstance(solver, dict))
                 or (isinstance(solver, dict) and solver.get("mmamaxiter") != str(requested))
                 or (
@@ -446,6 +474,12 @@ def verify(expected: dict[str, Any]) -> dict[str, Any]:
             native_receipt_sha256=hashes[stage],
             max_elements_per_model=expected["budgets"]["max_elements_per_model"],
             minimum_element_quality=expected["budgets"]["minimum_element_quality"],
+            deformation_jacobian_expression=expected["deformation_feasibility_policy"][
+                "jacobian_expression"
+            ],
+            minimum_relative_jacobian=expected["deformation_feasibility_policy"][
+                "minimum_relative_jacobian"
+            ],
         )
         if result != ladder.get(stage) or result.get("automatic_fallback_used") is not False:
             raise ValueError(f"{stage} optimizer disposition is noncanonical")

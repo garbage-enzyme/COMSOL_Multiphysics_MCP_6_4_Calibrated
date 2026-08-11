@@ -112,6 +112,19 @@ def _execution_receipt(*, delta: float = 0.4) -> dict:
                 "quality_measure": "volcircum",
             },
         },
+        "deformation_feasibility_policy": {
+            "jacobian_expression": "reldetjac",
+            "minimum_relative_jacobian": 0.0,
+            "comparison": "strictly_greater_than",
+            "scope": "fresh_forward_finalist_deformed_geometry",
+        },
+        "deformation_feasibility": {
+            "sample_count": 100,
+            "minimum_relative_jacobian": 0.02,
+            "maximum_relative_jacobian": 1.0,
+            "threshold": 0.0,
+            "passed": True,
+        },
         "cleanup": {"client_clear": True, "source_unchanged": True},
     }
 
@@ -123,11 +136,14 @@ def test_optimizer_execution_accepts_only_positive_fresh_forward_mesh_admitted_r
         native_receipt_sha256="c" * 64,
         max_elements_per_model=300_000,
         minimum_element_quality=0.1,
+        deformation_jacobian_expression="reldetjac",
+        minimum_relative_jacobian=0.0,
     )
     assert receipt["schema_name"] == "comsol_mcp.robust_optimizer_execution_receipt"
     assert receipt["disposition"] == "accepted"
     assert receipt["fresh_forward_improvement"] is True
     assert all(receipt["mesh_checks"].values())
+    assert all(receipt["deformation_checks"].values())
     assert receipt["automatic_fallback_used"] is False
 
 
@@ -138,6 +154,8 @@ def test_optimizer_execution_records_nonimproving_or_failed_method_as_rejected()
         native_receipt_sha256="c" * 64,
         max_elements_per_model=300_000,
         minimum_element_quality=0.1,
+        deformation_jacobian_expression="reldetjac",
+        minimum_relative_jacobian=0.0,
     )
     assert nonimproving["disposition"] == "rejected"
     failed = _execution_receipt()
@@ -150,6 +168,8 @@ def test_optimizer_execution_records_nonimproving_or_failed_method_as_rejected()
         "mesh_admission_policy",
         "baseline_mesh",
         "remesh",
+        "deformation_feasibility_policy",
+        "deformation_feasibility",
     ):
         failed.pop(field)
     rejected = assess_robust_optimizer_execution(
@@ -158,6 +178,8 @@ def test_optimizer_execution_records_nonimproving_or_failed_method_as_rejected()
         native_receipt_sha256="d" * 64,
         max_elements_per_model=300_000,
         minimum_element_quality=0.1,
+        deformation_jacobian_expression="reldetjac",
+        minimum_relative_jacobian=0.0,
     )
     assert rejected["execution_success"] is False
     assert rejected["disposition"] == "rejected"
@@ -189,6 +211,8 @@ def test_optimizer_execution_rejects_identity_evidence_or_mesh_drift(mutation, m
                 native_receipt_sha256="c" * 64,
                 max_elements_per_model=300_000,
                 minimum_element_quality=0.1,
+                deformation_jacobian_expression="reldetjac",
+                minimum_relative_jacobian=0.0,
             )
     else:
         receipt = assess_robust_optimizer_execution(
@@ -197,6 +221,8 @@ def test_optimizer_execution_rejects_identity_evidence_or_mesh_drift(mutation, m
             native_receipt_sha256="c" * 64,
             max_elements_per_model=300_000,
             minimum_element_quality=0.1,
+            deformation_jacobian_expression="reldetjac",
+            minimum_relative_jacobian=0.0,
         )
         assert receipt["mesh_checks"]["finalist_remesh_admitted"] is False
         assert receipt["disposition"] == "rejected"

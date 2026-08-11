@@ -105,6 +105,21 @@ def test_move_limit_is_a_required_positive_caller_input():
             gate._requested_move_limit(args)
 
 
+def test_deformation_feasibility_uses_caller_expression_and_absolute_threshold():
+    args = type(
+        "Args",
+        (),
+        {"deformation_jacobian_expression": "reldetjac", "minimum_relative_jacobian": 0.0},
+    )()
+    policy = gate._deformation_feasibility_policy(args)
+    assert policy["jacobian_expression"] == "reldetjac"
+    accepted = gate._deformation_feasibility_evidence(np.array([0.02, 0.3]), policy)
+    assert accepted["minimum_relative_jacobian"] == 0.02
+    assert accepted["passed"] is True
+    rejected = gate._deformation_feasibility_evidence(np.array([0.0, 0.3]), policy)
+    assert rejected["passed"] is False
+
+
 def test_gate_parser_has_no_host_resource_defaults():
     parser = gate._parser()
     actions = {action.dest: action.default for action in parser._actions}
@@ -120,6 +135,8 @@ def test_gate_parser_has_no_host_resource_defaults():
         "max_review_items",
         "max_elements_per_model",
         "minimum_element_quality",
+        "deformation_jacobian_expression",
+        "minimum_relative_jacobian",
     ):
         assert actions[name] is None
 
