@@ -55,6 +55,10 @@ _MAX_STAGE_RECEIPT_BYTES = 16 * 1024 * 1024
 _MAX_STAGE_FILES = 100_000
 
 
+class DeformationFeasibilityStageError(RuntimeError):
+    """A licensed optimizer stage reported a deformation feasibility failure."""
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument("--test-root", type=Path, required=True)
@@ -512,6 +516,14 @@ def _verify_stage(
         ):
             raise ValueError(f"{stage} receipt reports different optimizer execution settings")
     if stage != "mma" and (result["returncode"] != 0 or receipt.get("success") is not True):
+        if (
+            stage == "gcmma"
+            and isinstance(receipt.get("error"), dict)
+            and receipt["error"].get("code") == "deformation_feasibility_failed"
+        ):
+            raise DeformationFeasibilityStageError(
+                "GCMMA crossed the caller-declared deformation feasibility boundary"
+            )
         raise ValueError(f"{stage} licensed stage failed")
 
 
@@ -882,7 +894,15 @@ def _run(
             }
         )
     except Exception as exc:
-        receipt["error"] = {"code": "robust_gradient_ladder_failed", "type": type(exc).__name__}
+        code = (
+            "deformation_feasibility_failed"
+            if isinstance(exc, DeformationFeasibilityStageError)
+            else "robust_gradient_ladder_failed"
+        )
+        receipt["error"] = {"code": code, "type": type(exc).__name__}
+        if code == "deformation_feasibility_failed":
+            receipt["automatic_move_reduction_used"] = False
+            receipt["automatic_method_fallback_used"] = False
         private["error"] = f"{type(exc).__name__}: {exc}"
     finally:
         cleanup = {

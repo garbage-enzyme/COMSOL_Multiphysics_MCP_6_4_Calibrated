@@ -188,6 +188,13 @@ def assess_robust_optimizer_execution(
         and cleanup.get("source_unchanged") is True
     )
     execution_success = receipt.get("success") is True and cleanup_complete
+    failure_code = None
+    if not execution_success:
+        error = receipt.get("error")
+        if isinstance(error, dict):
+            candidate = error.get("code")
+            if isinstance(candidate, str) and 0 < len(candidate) <= 128:
+                failure_code = candidate
     baseline = None
     final = None
     fresh = None
@@ -293,6 +300,7 @@ def assess_robust_optimizer_execution(
         "method": optimizer["method"],
         "native_receipt_sha256": receipt_sha256,
         "execution_success": execution_success,
+        "failure_code": failure_code,
         "cleanup_complete": cleanup_complete,
         "baseline_objective": baseline,
         "native_final_objective": final,

@@ -16,6 +16,21 @@ SCHEMA_NAME = "comsol_mcp.native_optimizer_licensed_gate"
 SCHEMA_VERSION = "1.0.0"
 
 
+class DeformationFeasibilityError(RuntimeError):
+    """A caller-declared deformation feasibility boundary was not satisfied."""
+
+
+def _optimizer_error_code(exc: Exception, phase: str) -> tuple[str, str | None]:
+    if isinstance(exc, DeformationFeasibilityError) or phase == "deformation_feasibility":
+        return "deformation_feasibility_failed", "fresh_forward_jacobian_guard"
+    signature = f"{type(exc).__module__}.{type(exc).__name__}: {exc}".casefold()
+    nonfinite = any(token in signature for token in ("nan", "infinite", "infinity"))
+    material_coordinates = "material.u" in signature or "material coordinate" in signature
+    if phase == "optimization_solve" and nonfinite and material_coordinates:
+        return "deformation_feasibility_failed", "comsol_nonfinite_material_coordinates"
+    return "native_optimizer_failed", None
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument("--test-root", type=Path, required=True)
@@ -339,6 +354,7 @@ def run(args: argparse.Namespace) -> dict:
             finalist.evaluate(receipt["objective_expression"], dataset=finalist_dataset, outer=1)
         )
         fresh_final = fresh_series[-1]
+        phase = "deformation_feasibility"
         deformation_evidence = _deformation_feasibility_evidence(
             finalist.evaluate(
                 deformation_policy["jacobian_expression"],
@@ -349,7 +365,10 @@ def run(args: argparse.Namespace) -> dict:
         )
         receipt["deformation_feasibility"] = deformation_evidence
         if deformation_evidence["passed"] is not True:
-            raise ValueError("fresh-forward deformation feasibility is below the caller threshold")
+            raise DeformationFeasibilityError(
+                "fresh-forward deformation feasibility is below the caller threshold"
+            )
+        phase = "physical_evidence"
         physical_expressions = [
             "ewfd.Rtotal",
             "ewfd.Ttotal",
@@ -418,7 +437,18 @@ def run(args: argparse.Namespace) -> dict:
             }
         )
     except Exception as exc:
-        receipt["error"] = {"code": "native_optimizer_failed", "type": type(exc).__name__}
+        error_code, classification_basis = _optimizer_error_code(exc, phase)
+        receipt["error"] = {"code": error_code, "type": type(exc).__name__}
+        if classification_basis is not None:
+            receipt["deformation_failure"] = {
+                "classification_basis": classification_basis,
+                "phase": phase,
+                "automatic_move_reduction_used": False,
+                "automatic_method_fallback_used": False,
+                "fresh_forward_guard_completed": isinstance(
+                    receipt.get("deformation_feasibility"), dict
+                ),
+            }
         private_error = {"phase": phase, "detail": f"{type(exc).__name__}: {exc}"}
     finally:
         cleanup = {

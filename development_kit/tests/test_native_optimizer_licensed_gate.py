@@ -120,6 +120,28 @@ def test_deformation_feasibility_uses_caller_expression_and_absolute_threshold()
     assert rejected["passed"] is False
 
 
+def test_optimizer_error_classifies_only_proven_deformation_signatures():
+    guarded = gate._optimizer_error_code(
+        gate.DeformationFeasibilityError("below threshold"), "deformation_feasibility"
+    )
+    assert guarded == ("deformation_feasibility_failed", "fresh_forward_jacobian_guard")
+
+    class FlException(RuntimeError):
+        pass
+
+    nonfinite = gate._optimizer_error_code(
+        FlException("NaN degrees of freedom in comp1.material.u"), "optimization_solve"
+    )
+    assert nonfinite == (
+        "deformation_feasibility_failed",
+        "comsol_nonfinite_material_coordinates",
+    )
+    unrelated = gate._optimizer_error_code(
+        FlException("linear solver failed"), "optimization_solve"
+    )
+    assert unrelated == ("native_optimizer_failed", None)
+
+
 def test_gate_parser_has_no_host_resource_defaults():
     parser = gate._parser()
     actions = {action.dest: action.default for action in parser._actions}

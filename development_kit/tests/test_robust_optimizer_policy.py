@@ -160,6 +160,7 @@ def test_optimizer_execution_records_nonimproving_or_failed_method_as_rejected()
     assert nonimproving["disposition"] == "rejected"
     failed = _execution_receipt()
     failed["success"] = False
+    failed["error"] = {"code": "deformation_feasibility_failed", "type": "FlException"}
     for field in (
         "baseline_objective",
         "final_objective",
@@ -182,6 +183,7 @@ def test_optimizer_execution_records_nonimproving_or_failed_method_as_rejected()
         minimum_relative_jacobian=0.0,
     )
     assert rejected["execution_success"] is False
+    assert rejected["failure_code"] == "deformation_feasibility_failed"
     assert rejected["disposition"] == "rejected"
 
 

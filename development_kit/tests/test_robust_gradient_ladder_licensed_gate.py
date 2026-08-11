@@ -491,6 +491,66 @@ def test_gradient_threshold_failure_prevents_ladder_success(tmp_path, gate_root,
     assert stages == ["native", "finite_difference", "directional"]
 
 
+def test_gcmma_deformation_failure_is_structured_without_automatic_recovery(
+    tmp_path, gate_root, monkeypatch
+):
+    monkeypatch.setattr(gate.os, "cpu_count", lambda: 4)
+    monkeypatch.setattr(
+        gate.psutil, "virtual_memory", lambda: type("M", (), {"available": 2**40})()
+    )
+    monkeypatch.setattr(gate.shutil, "disk_usage", lambda _path: type("D", (), {"free": 2**40})())
+    spec = gate._spec(_args(gate_root, tmp_path))
+    revision = "9" * 40
+
+    class Ownership:
+        acquired = False
+
+        def status(self, **_kwargs):
+            return {
+                "process_inventory": {"complete": True},
+                "lease": (
+                    {
+                        "state": "active",
+                        "owned_by_current_process": True,
+                        "lease": {"comsol_server_processes": []},
+                    }
+                    if self.acquired
+                    else {"state": "absent"}
+                ),
+                "external_solver_processes": [],
+                "durable_jobs": {"available": True, "active_count": 0},
+            }
+
+        def acquire(self, **_kwargs):
+            self.acquired = True
+            return {"success": True, "acquired": True}
+
+        def heartbeat(self, **_kwargs):
+            return True
+
+        def release(self):
+            return {"success": True, "released": True}
+
+    def runner(current, stage):
+        result = _result(stage, revision, current["source_sha256"], current)
+        if stage == "gcmma":
+            result["returncode"] = 1
+            result["receipt"]["success"] = False
+            result["receipt"]["error"] = {
+                "code": "deformation_feasibility_failed",
+                "type": "FlException",
+            }
+        return result
+
+    monkeypatch.setattr(gate, "_git_identity", lambda: {"revision": revision, "clean": True})
+    receipt, _private = gate._run(spec, child_runner=runner, ownership_factory=Ownership)
+    assert receipt["success"] is False
+    assert receipt["error"]["code"] == "deformation_feasibility_failed"
+    assert receipt["automatic_move_reduction_used"] is False
+    assert receipt["automatic_method_fallback_used"] is False
+    assert "mma" not in receipt["stage_receipts"]
+
+
 def test_gradient_checks_reject_consistent_but_wrong_fixture_variable_order():
     results = {
         stage: _result(stage, "a" * 40, "b" * 64)
