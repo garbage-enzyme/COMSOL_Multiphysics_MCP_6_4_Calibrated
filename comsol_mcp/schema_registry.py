@@ -52,6 +52,8 @@ from comsol_mcp.research import (
     ROBUST_OBJECTIVE_RECEIPT_SCHEMA_VERSION,
     ROBUST_OPTIMIZER_POLICY_SCHEMA_NAME,
     ROBUST_OPTIMIZER_POLICY_SCHEMA_VERSION,
+    ROBUST_SHAPE_ADAPTER_BINDING_SCHEMA_NAME,
+    ROBUST_SHAPE_ADAPTER_BINDING_SCHEMA_VERSION,
     SHAPE_SUPPORT_POLICY_SCHEMA_NAME,
     SHAPE_SUPPORT_POLICY_SCHEMA_VERSION,
     STRUCTURE_ADAPTER_APPLICATION_SCHEMA_NAME,
@@ -535,6 +537,12 @@ def _entries() -> list[dict[str, Any]]:
             ROBUST_OPTIMIZER_POLICY_SCHEMA_NAME,
             ROBUST_OPTIMIZER_POLICY_SCHEMA_VERSION,
             "comsol_mcp.research.robust_optimizer_policy",
+            artifact_kind="configuration",
+        ),
+        _entry(
+            ROBUST_SHAPE_ADAPTER_BINDING_SCHEMA_NAME,
+            ROBUST_SHAPE_ADAPTER_BINDING_SCHEMA_VERSION,
+            "comsol_mcp.research.robust_shape_adapter",
             artifact_kind="configuration",
         ),
         _entry(

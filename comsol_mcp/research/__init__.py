@@ -133,6 +133,11 @@ from .robust_optimizer_policy import (
     ROBUST_OPTIMIZER_POLICY_SCHEMA_VERSION,
     normalize_robust_optimizer_policy,
 )
+from .robust_shape_adapter import (
+    ROBUST_SHAPE_ADAPTER_BINDING_SCHEMA_NAME,
+    ROBUST_SHAPE_ADAPTER_BINDING_SCHEMA_VERSION,
+    compile_robust_shape_adapter_binding,
+)
 from .shape_support import (
     SHAPE_SUPPORT_POLICY_SCHEMA_NAME,
     SHAPE_SUPPORT_POLICY_SCHEMA_VERSION,
@@ -210,6 +215,8 @@ __all__ = [
     "ROBUST_GRADIENT_POLICY_SCHEMA_VERSION",
     "ROBUST_GRADIENT_RECEIPT_SCHEMA_NAME",
     "ROBUST_GRADIENT_RECEIPT_SCHEMA_VERSION",
+    "ROBUST_SHAPE_ADAPTER_BINDING_SCHEMA_NAME",
+    "ROBUST_SHAPE_ADAPTER_BINDING_SCHEMA_VERSION",
     "SHAPE_SUPPORT_POLICY_SCHEMA_NAME",
     "SHAPE_SUPPORT_POLICY_SCHEMA_VERSION",
     "PORTFOLIO_SCHEMA_NAME",
@@ -263,5 +270,6 @@ __all__ = [
     "evaluate_robust_absolute_contrast",
     "assess_robust_gradient_acceptance",
     "compile_campaign_manifest",
+    "compile_robust_shape_adapter_binding",
     "configure_native_adjoint",
 ]
