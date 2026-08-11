@@ -8,6 +8,7 @@ import itertools
 import pytest
 
 from comsol_mcp.research.robust_conditions import normalize_optimization_condition_table
+from development_kit.tests.test_robust_material_mapping import _mapping
 
 
 def _state(state_id: str, marker: str) -> dict:
@@ -17,6 +18,7 @@ def _state(state_id: str, marker: str) -> dict:
         "state_id": state_id,
         "material_ledger_sha256": marker * 64,
         "optical_property_source_sha256": marker.upper() * 64,
+        "optical_property_mapping": _mapping(marker.upper(), state_id),
         "temperature_k": 300.0,
         "provenance_disposition": "private_input_hash_bound",
     }

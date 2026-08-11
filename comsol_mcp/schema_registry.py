@@ -26,6 +26,8 @@ from comsol_mcp.research import (
     MATERIAL_STATE_CONFIGURATION_SCHEMA_VERSION,
     OBJECTIVE_SCORE_SCHEMA_NAME,
     OBJECTIVE_SCORE_SCHEMA_VERSION,
+    OPTICAL_PROPERTY_MAPPING_SCHEMA_NAME,
+    OPTICAL_PROPERTY_MAPPING_SCHEMA_VERSION,
     OPTIMIZATION_CONDITION_TABLE_SCHEMA_NAME,
     OPTIMIZATION_CONDITION_TABLE_SCHEMA_VERSION,
     OPTIMIZER_CHECKPOINT_SCHEMA_NAME,
@@ -520,6 +522,12 @@ def _entries() -> list[dict[str, Any]]:
             REFERENCE_POWER_CONTRACT_SCHEMA,
             "1.0.0",
             "comsol_mcp.evidence.reference_power_acceptance",
+        ),
+        _entry(
+            OPTICAL_PROPERTY_MAPPING_SCHEMA_NAME,
+            OPTICAL_PROPERTY_MAPPING_SCHEMA_VERSION,
+            "comsol_mcp.research.robust_material_mapping",
+            artifact_kind="configuration",
         ),
         _entry(
             ROBUST_OBJECTIVE_CONFIGURATION_SCHEMA_NAME,

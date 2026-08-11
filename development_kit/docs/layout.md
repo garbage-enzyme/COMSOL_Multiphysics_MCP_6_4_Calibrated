@@ -307,6 +307,7 @@ models are intentionally absent.
 - `development_kit/tests/test_external_validation.py` — This module tests independent COMSOL-first validation and explicitly authorized RCWA fallback receipts.
 - `development_kit/tests/test_robust_conditions.py` — This module tests complete or explicitly sparse configurable multi-condition and material-state tables.
 - `development_kit/tests/test_robust_gradient_acceptance.py` — This module tests joint component, cosine, sign, three-step, and directional gradient acceptance.
+- `development_kit/tests/test_robust_material_mapping.py` — This module tests diagonal optical tensor axes, source columns, time convention, and no-extrapolation identity.
 - `development_kit/tests/test_robust_finalist_validation.py` — This module tests caller-owned finalist validation policy and no-fallback/no-host-default boundaries.
 - `development_kit/tests/test_robust_finalist_evidence.py` — This module tests independent finalist manufacturability, remesh, convergence, branch, off-design, and external-fidelity promotion evidence.
 - `development_kit/tests/test_robust_gradient_ladder_licensed_gate.py` — This module tests required caller budgets, startup-only admission, shared-lease sequencing, exact gradient thresholds, and explicit non-fallback MMA disposition.
@@ -395,6 +396,7 @@ models are intentionally absent.
 - `comsol_mcp/research/external_validation.py` — This module normalizes backend-neutral independent validation receipts and forbids silent RCWA fallback.
 - `comsol_mcp/research/robust_conditions.py` — This module normalizes immutable configurable optimization condition tables and provenance-bound material states.
 - `comsol_mcp/research/robust_gradient_acceptance.py` — This module combines independent component and directional gradient receipts under caller-frozen thresholds.
+- `comsol_mcp/research/robust_material_mapping.py` — This module freezes source columns, diagonal tensor axes, time-harmonic convention, interpolation, and no-extrapolation policy for immutable material states.
 - `comsol_mcp/research/robust_finalist_validation.py` — This module freezes caller-owned fresh-remesh, convergence, branch, off-design, and external-fidelity finalist validation policy.
 - `comsol_mcp/research/robust_finalist_evidence.py` — This module independently assesses complete finalist promotion evidence and emits a tamper-evident receipt.
 - `comsol_mcp/research/robust_objectives.py` — This module evaluates differentiable absolute state contrast, caller-configurable smooth worst-case aggregation, and the exact condition-to-aggregate gradient chain rule.

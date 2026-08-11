@@ -132,6 +132,11 @@ from .robust_gradient_acceptance import (
     assess_robust_gradient_acceptance,
     normalize_robust_gradient_policy,
 )
+from .robust_material_mapping import (
+    OPTICAL_PROPERTY_MAPPING_SCHEMA_NAME,
+    OPTICAL_PROPERTY_MAPPING_SCHEMA_VERSION,
+    normalize_optical_property_mapping,
+)
 from .robust_objectives import (
     ROBUST_OBJECTIVE_CONFIGURATION_SCHEMA_NAME,
     ROBUST_OBJECTIVE_CONFIGURATION_SCHEMA_VERSION,
@@ -226,6 +231,8 @@ __all__ = [
     "OBJECTIVE_SCORE_SCHEMA_VERSION",
     "OPTIMIZATION_CONDITION_TABLE_SCHEMA_NAME",
     "OPTIMIZATION_CONDITION_TABLE_SCHEMA_VERSION",
+    "OPTICAL_PROPERTY_MAPPING_SCHEMA_NAME",
+    "OPTICAL_PROPERTY_MAPPING_SCHEMA_VERSION",
     "ROBUST_OBJECTIVE_CONFIGURATION_SCHEMA_NAME",
     "ROBUST_OBJECTIVE_CONFIGURATION_SCHEMA_VERSION",
     "ROBUST_OBJECTIVE_RECEIPT_SCHEMA_NAME",
@@ -281,6 +288,7 @@ __all__ = [
     "normalize_material_catalog",
     "normalize_optimization_condition_table",
     "normalize_optimization_material_state",
+    "normalize_optical_property_mapping",
     "normalize_robust_objective_configuration",
     "normalize_robust_optimizer_policy",
     "assess_robust_optimizer_execution",

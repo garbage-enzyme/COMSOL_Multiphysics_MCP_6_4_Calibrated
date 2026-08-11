@@ -16,6 +16,7 @@ from .derivative_support import (
     _sha256,
     _text,
 )
+from .robust_material_mapping import normalize_optical_property_mapping
 
 MATERIAL_STATE_CONFIGURATION_SCHEMA_NAME = "comsol_mcp.optimization_material_state"
 MATERIAL_STATE_CONFIGURATION_SCHEMA_VERSION = "1.0.0"
@@ -46,6 +47,7 @@ def normalize_optimization_material_state(value: object) -> dict[str, Any]:
             "state_id",
             "material_ledger_sha256",
             "optical_property_source_sha256",
+            "optical_property_mapping",
             "temperature_k",
             "provenance_disposition",
         },
@@ -56,14 +58,17 @@ def normalize_optimization_material_state(value: object) -> dict[str, Any]:
         or raw["schema_version"] != MATERIAL_STATE_CONFIGURATION_SCHEMA_VERSION
     ):
         raise ValueError("optimization material state schema identity is unsupported")
+    source_hash = _sha256(raw["optical_property_source_sha256"], "optical_property_source_sha256")
+    mapping = normalize_optical_property_mapping(raw["optical_property_mapping"])
+    if mapping["source_sha256"] != source_hash:
+        raise ValueError("material-state optical mapping source identity changed")
     body = {
         "schema_name": MATERIAL_STATE_CONFIGURATION_SCHEMA_NAME,
         "schema_version": MATERIAL_STATE_CONFIGURATION_SCHEMA_VERSION,
         "state_id": _identifier(raw["state_id"], "state_id"),
         "material_ledger_sha256": _sha256(raw["material_ledger_sha256"], "material_ledger_sha256"),
-        "optical_property_source_sha256": _sha256(
-            raw["optical_property_source_sha256"], "optical_property_source_sha256"
-        ),
+        "optical_property_source_sha256": source_hash,
+        "optical_property_mapping": mapping,
         "temperature_k": _finite(raw["temperature_k"], "temperature_k", positive=True),
         "provenance_disposition": _identifier(
             raw["provenance_disposition"], "provenance_disposition"
