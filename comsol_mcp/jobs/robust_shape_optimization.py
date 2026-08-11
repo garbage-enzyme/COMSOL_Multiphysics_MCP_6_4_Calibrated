@@ -17,6 +17,9 @@ from comsol_mcp.research.adapters import (
 from comsol_mcp.research.derivative_support import normalize_derivative_support
 from comsol_mcp.research.gradient_contracts import normalize_native_optimizer_configuration
 from comsol_mcp.research.robust_conditions import normalize_optimization_condition_table
+from comsol_mcp.research.robust_finalist_validation import (
+    normalize_robust_finalist_validation_policy,
+)
 from comsol_mcp.research.robust_gradient_acceptance import normalize_robust_gradient_policy
 from comsol_mcp.research.robust_objectives import normalize_robust_objective_configuration
 from comsol_mcp.research.robust_optimizer_policy import normalize_robust_optimizer_policy
@@ -94,6 +97,7 @@ def expand_robust_shape_manifest(submission: object) -> dict[str, Any]:
         "condition_table",
         "objective",
         "shape_policy",
+        "finalist_validation_policy",
         "gradient_policy",
         "optimizer_policy",
         "native_optimizer",
@@ -128,6 +132,9 @@ def expand_robust_shape_manifest(submission: object) -> dict[str, Any]:
     conditions = normalize_optimization_condition_table(raw["condition_table"])
     objective = normalize_robust_objective_configuration(raw["objective"])
     shape_policy = normalize_shape_support_policy(raw["shape_policy"])
+    finalist_validation_policy = normalize_robust_finalist_validation_policy(
+        raw["finalist_validation_policy"]
+    )
     gradient_policy = normalize_robust_gradient_policy(raw["gradient_policy"])
     optimizer_policy = normalize_robust_optimizer_policy(raw["optimizer_policy"])
     native_optimizer = normalize_native_optimizer_configuration(raw["native_optimizer"])
@@ -146,6 +153,13 @@ def expand_robust_shape_manifest(submission: object) -> dict[str, Any]:
         raise ValueError("robust shape support source identity differs from manifest source")
     if support["adapter_id"] != shape_policy["adapter_id"]:
         raise ValueError("robust shape adapter identity differs across support policies")
+    if (
+        finalist_validation_policy["condition_table_fingerprint"]
+        != conditions["condition_table_fingerprint"]
+    ):
+        raise ValueError("finalist validation condition table identity differs from manifest")
+    if finalist_validation_policy["shape_policy_fingerprint"] != shape_policy["policy_fingerprint"]:
+        raise ValueError("finalist validation shape policy identity differs from manifest")
     table_states = {item["state_id"] for item in conditions["material_states"]}
     if not set(objective["state_ids"]).issubset(table_states):
         raise ValueError("robust objective states are not declared by the condition table")
@@ -160,6 +174,15 @@ def expand_robust_shape_manifest(submission: object) -> dict[str, Any]:
     mesh_cap = envelope["resource_policy"]["rules"].get("max_mesh_elements")
     if mesh_cap != shape_policy["mesh_admission"]["max_elements_per_model"]:
         raise ValueError("robust shape mesh cap differs from resource admission policy")
+    finalist_mesh = finalist_validation_policy["mesh_convergence"]
+    shape_mesh = shape_policy["mesh_admission"]
+    if finalist_mesh["max_elements_per_model"] != shape_mesh["max_elements_per_model"]:
+        raise ValueError("finalist validation mesh cap differs from shape policy")
+    if (
+        finalist_mesh["minimum_element_quality"] != shape_mesh["minimum_element_quality"]
+        or finalist_mesh["quality_measure"] != shape_mesh["quality_measure"]
+    ):
+        raise ValueError("finalist validation mesh quality identity differs from shape policy")
     values = raw["initial_values"]
     if not isinstance(values, list) or len(values) != len(support["variables"]):
         raise ValueError("initial_values must match the robust support variable count")
@@ -184,6 +207,7 @@ def expand_robust_shape_manifest(submission: object) -> dict[str, Any]:
         "condition_table": conditions,
         "objective": objective,
         "shape_policy": shape_policy,
+        "finalist_validation_policy": finalist_validation_policy,
         "gradient_policy": gradient_policy,
         "optimizer_policy": optimizer_policy,
         "native_optimizer": native_optimizer,

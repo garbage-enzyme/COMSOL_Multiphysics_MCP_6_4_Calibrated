@@ -11,13 +11,17 @@ from comsol_mcp.research.robust_finalist_validation import (
 )
 
 
-def _policy() -> dict:
+def _policy(
+    *,
+    condition_table_fingerprint: str = "1" * 64,
+    shape_policy_fingerprint: str = "2" * 64,
+) -> dict:
     return {
         "schema_name": "comsol_mcp.robust_finalist_validation_policy",
         "schema_version": "1.0.0",
         "policy_id": "pedot-finalist-v1",
-        "condition_table_fingerprint": "1" * 64,
-        "shape_policy_fingerprint": "2" * 64,
+        "condition_table_fingerprint": condition_table_fingerprint,
+        "shape_policy_fingerprint": shape_policy_fingerprint,
         "fresh_remesh": {
             "required": True,
             "explicit_rebuild": True,

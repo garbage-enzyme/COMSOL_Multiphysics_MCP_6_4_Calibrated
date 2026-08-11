@@ -8,6 +8,8 @@ import json
 import pytest
 
 from comsol_mcp.jobs.robust_shape_optimization import expand_robust_shape_manifest
+from comsol_mcp.research.robust_conditions import normalize_optimization_condition_table
+from comsol_mcp.research.shape_support import normalize_shape_support_policy
 from development_kit.tests.test_derivative_support import _support, _variable
 from development_kit.tests.test_gradient_contracts import _optimizer
 from development_kit.tests.test_research_adapters import (
@@ -17,6 +19,7 @@ from development_kit.tests.test_research_adapters import (
     _manifest as _structure_manifest,
 )
 from development_kit.tests.test_robust_conditions import _table
+from development_kit.tests.test_robust_finalist_validation import _policy as _finalist_policy
 from development_kit.tests.test_robust_gradient_acceptance import _policy as _gradient_policy
 from development_kit.tests.test_robust_objectives import _configuration
 from development_kit.tests.test_robust_optimizer_policy import _policy as _optimizer_policy
@@ -69,6 +72,14 @@ def _write_manifest(tmp_path, *, selected: str = "gcmma", synthetic: bool = True
             "support_state": "validated" if not synthetic else "structural_only",
             "evidence_sha256": "b" * 64,
         }
+    condition_table = _table()
+    shape_policy = _shape_policy()
+    finalist_policy = _finalist_policy(
+        condition_table_fingerprint=normalize_optimization_condition_table(condition_table)[
+            "condition_table_fingerprint"
+        ],
+        shape_policy_fingerprint=normalize_shape_support_policy(shape_policy)["policy_fingerprint"],
+    )
     manifest_body = {
         "schema_name": "comsol_mcp.robust_shape_optimization_manifest",
         "schema_version": "1.0.0",
@@ -77,9 +88,10 @@ def _write_manifest(tmp_path, *, selected: str = "gcmma", synthetic: bool = True
         "structure_adapter_manifest": structure_manifest,
         "structure_tree_audit": _structure_audit(structure_manifest),
         "support": support,
-        "condition_table": _table(),
+        "condition_table": condition_table,
         "objective": _configuration(),
-        "shape_policy": _shape_policy(),
+        "shape_policy": shape_policy,
+        "finalist_validation_policy": finalist_policy,
         "gradient_policy": _gradient_policy(),
         "optimizer_policy": optimizer_policy,
         "native_optimizer": optimizer,
@@ -114,6 +126,13 @@ def test_manifest_binds_every_robust_contract_and_uses_no_host_defaults(ascii_tm
     }
     assert spec["resource_policy"]["host_defaults_applied"] is False
     assert spec["shape_policy"]["mesh_admission"]["max_elements_per_model"] == 300_000
+    assert spec["finalist_validation_policy"]["off_design"] == {
+        "mode": "required",
+        "validation_only": True,
+        "include_in_optimizer": False,
+        "wavelength_relative_offsets": [-0.01, 0.01],
+        "angle_offsets_deg": [-2.0, 2.0],
+    }
     assert spec["optimizer_policy"]["selected_method"] == "gcmma"
     assert spec["startup_admission"]["check_frequency"] == "startup_only"
     assert spec["adapter_binding"]["source_sha256"] == spec["source_model_sha256"]
@@ -150,6 +169,34 @@ def test_manifest_rejects_mesh_core_or_method_identity_drift(ascii_tmp_path):
     manifest.write_bytes(payload)
     envelope["submission_manifest_sha256"] = hashlib.sha256(payload).hexdigest()
     with pytest.raises(ValueError, match="method differs"):
+        expand_robust_shape_manifest(envelope)
+
+
+@pytest.mark.parametrize(
+    ("field", "message"),
+    [
+        ("condition", "condition table identity"),
+        ("shape", "shape policy identity"),
+        ("cap", "mesh cap differs"),
+        ("quality", "mesh quality identity"),
+    ],
+)
+def test_manifest_rejects_finalist_policy_identity_drift(ascii_tmp_path, field, message):
+    envelope, _, manifest = _write_manifest(ascii_tmp_path)
+    raw = json.loads(manifest.read_text())
+    policy = raw["finalist_validation_policy"]
+    if field == "condition":
+        policy["condition_table_fingerprint"] = "0" * 64
+    elif field == "shape":
+        policy["shape_policy_fingerprint"] = "0" * 64
+    elif field == "cap":
+        policy["mesh_convergence"]["max_elements_per_model"] = 299_999
+    else:
+        policy["mesh_convergence"]["minimum_element_quality"] = 0.2
+    payload = json.dumps(raw, sort_keys=True, separators=(",", ":")).encode()
+    manifest.write_bytes(payload)
+    envelope["submission_manifest_sha256"] = hashlib.sha256(payload).hexdigest()
+    with pytest.raises(ValueError, match=message):
         expand_robust_shape_manifest(envelope)
 
 
