@@ -113,9 +113,43 @@ def normalize_lin2025_pedot_cylinder_fixture(value: object) -> dict[str, Any]:
     return normalized
 
 
+def compile_lin2025_pedot_cylinder_binding(
+    fixture: object,
+    derivative_support: Mapping[str, Any],
+    shape_policy: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Bind the Lin2025 fixture to caller-owned derivative and shape contracts."""
+    normalized = normalize_lin2025_pedot_cylinder_fixture(fixture)
+    if derivative_support.get("adapter_id") != ADAPTER_ID:
+        raise ValueError("Lin2025 derivative adapter identity differs from fixture")
+    if shape_policy.get("adapter_id") != ADAPTER_ID:
+        raise ValueError("Lin2025 shape-policy adapter identity differs from fixture")
+    if derivative_support.get("source_identity") != normalized["source_identity"]["source_sha256"]:
+        raise ValueError("Lin2025 derivative source identity differs from fixture")
+    variables = derivative_support.get("variables")
+    if not isinstance(variables, list) or [item.get("variable_id") for item in variables] != list(_VARIABLES):
+        raise ValueError("Lin2025 derivative variables must be ordered cylinder x/y radii")
+    body = {
+        "schema_name": f"{SCHEMA_NAME}.binding",
+        "schema_version": SCHEMA_VERSION,
+        "adapter_id": ADAPTER_ID,
+        "fixture_fingerprint": normalized["fixture_fingerprint"],
+        "source_sha256": normalized["source_identity"]["source_sha256"],
+        "derivative_support_fingerprint": derivative_support.get("support_fingerprint"),
+        "shape_policy_fingerprint": shape_policy.get("policy_fingerprint"),
+        "variable_ids": list(_VARIABLES),
+        "pedot_domain": normalized["domains"]["pedot_cylinder"],
+        "material_state_ids": list(_STATES),
+        "temperature_k": normalized["temperature_k"],
+    }
+    body["binding_fingerprint"] = domain_sha256_v2(body["schema_name"], body)
+    return body
+
+
 __all__ = [
     "ADAPTER_ID",
     "SCHEMA_NAME",
     "SCHEMA_VERSION",
     "normalize_lin2025_pedot_cylinder_fixture",
+    "compile_lin2025_pedot_cylinder_binding",
 ]

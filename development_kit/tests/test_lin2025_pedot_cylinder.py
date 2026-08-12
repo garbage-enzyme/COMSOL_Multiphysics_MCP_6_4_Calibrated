@@ -4,6 +4,7 @@ import pytest
 
 from comsol_mcp.research.lin2025_pedot_cylinder import (
     SCHEMA_NAME,
+    compile_lin2025_pedot_cylinder_binding,
     normalize_lin2025_pedot_cylinder_fixture,
 )
 
@@ -71,3 +72,33 @@ def test_fixture_normalization_is_defensive():
     result = normalize_lin2025_pedot_cylinder_fixture(value)
     result["domains"]["air"] = 99
     assert normalize_lin2025_pedot_cylinder_fixture(value)["domains"]["air"] == 4
+
+
+def test_binding_freezes_source_domain_states_and_variables():
+    fixture = normalize_lin2025_pedot_cylinder_fixture(_fixture())
+    support = {
+        "adapter_id": "lin2025_pedot_cylinder_v1",
+        "source_identity": fixture["source_identity"]["source_sha256"],
+        "support_fingerprint": "c" * 64,
+        "variables": [
+            {"variable_id": "pedot_cylinder_radius_x"},
+            {"variable_id": "pedot_cylinder_radius_y"},
+        ],
+    }
+    policy = {"adapter_id": "lin2025_pedot_cylinder_v1", "policy_fingerprint": "d" * 64}
+    binding = compile_lin2025_pedot_cylinder_binding(fixture, support, policy)
+    assert binding["pedot_domain"] == 5
+    assert binding["material_state_ids"] == ["OX", "MR"]
+    assert len(binding["binding_fingerprint"]) == 64
+
+
+def test_binding_rejects_wrong_adapter_or_variable_order():
+    fixture = _fixture()
+    support = {
+        "adapter_id": "wrong",
+        "source_identity": "a" * 64,
+        "support_fingerprint": "c" * 64,
+        "variables": [],
+    }
+    with pytest.raises(ValueError, match="adapter identity"):
+        compile_lin2025_pedot_cylinder_binding(fixture, support, {"adapter_id": "wrong"})
