@@ -77,6 +77,18 @@ from .journal import (
     append_research_journal_record,
     recover_research_journal,
 )
+from .lin2025_pedot_cylinder import (
+    ADAPTER_ID as LIN2025_PEDOT_CYLINDER_ADAPTER_ID,
+)
+from .lin2025_pedot_cylinder import (
+    SCHEMA_NAME as LIN2025_PEDOT_CYLINDER_SCHEMA_NAME,
+)
+from .lin2025_pedot_cylinder import (
+    SCHEMA_VERSION as LIN2025_PEDOT_CYLINDER_SCHEMA_VERSION,
+)
+from .lin2025_pedot_cylinder import (
+    normalize_lin2025_pedot_cylinder_fixture,
+)
 from .materials import (
     MATERIAL_CATALOG_SCHEMA_NAME,
     MATERIAL_CATALOG_SCHEMA_VERSION,
@@ -155,12 +167,6 @@ from .robust_optimizer_policy import (
     ROBUST_OPTIMIZER_POLICY_SCHEMA_VERSION,
     assess_robust_optimizer_execution,
     normalize_robust_optimizer_policy,
-)
-from .lin2025_pedot_cylinder import (
-    ADAPTER_ID as LIN2025_PEDOT_CYLINDER_ADAPTER_ID,
-    SCHEMA_NAME as LIN2025_PEDOT_CYLINDER_SCHEMA_NAME,
-    SCHEMA_VERSION as LIN2025_PEDOT_CYLINDER_SCHEMA_VERSION,
-    normalize_lin2025_pedot_cylinder_fixture,
 )
 from .robust_shape_adapter import (
     ROBUST_SHAPE_ADAPTER_BINDING_SCHEMA_NAME,
