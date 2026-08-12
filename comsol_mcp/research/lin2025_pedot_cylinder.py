@@ -113,7 +113,10 @@ def normalize_lin2025_pedot_cylinder_fixture(value: object) -> dict[str, Any]:
         "temperature_k": _finite(raw["temperature_k"], "temperature_k"),
     }
     normalized["fixture_fingerprint"] = domain_sha256_v2(SCHEMA_NAME, normalized)
-    if supplied_fingerprint is not None and supplied_fingerprint != normalized["fixture_fingerprint"]:
+    if (
+        supplied_fingerprint is not None
+        and supplied_fingerprint != normalized["fixture_fingerprint"]
+    ):
         raise ValueError("PEDOT-cylinder fixture fingerprint is invalid")
     return normalized
 
