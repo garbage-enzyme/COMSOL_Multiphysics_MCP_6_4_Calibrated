@@ -6,6 +6,7 @@ from comsol_mcp.research.lin2025_pedot_cylinder import (
     SCHEMA_NAME,
     compile_lin2025_pedot_cylinder_binding,
     normalize_lin2025_pedot_cylinder_fixture,
+    validate_lin2025_pedot_cylinder_tree,
 )
 
 
@@ -102,3 +103,37 @@ def test_binding_rejects_wrong_adapter_or_variable_order():
     }
     with pytest.raises(ValueError, match="adapter identity"):
         compile_lin2025_pedot_cylinder_binding(fixture, support, {"adapter_id": "wrong"})
+
+
+def test_tree_readback_freezes_domains_z_bounds_state_and_no_gold():
+    fixture = _fixture()
+    readback = {
+        "source_sha256": "a" * 64,
+        "domain_map": {"substrate": 1, "pedot_cylinder": 5, "air": 4},
+        "domain_z_bounds_um": {"5": [0.0, 0.2]},
+        "material_tags": {"pedot_cylinder": "OX"},
+        "feature_tags": ["ewfd", "mesh1"],
+    }
+    result = validate_lin2025_pedot_cylinder_tree(fixture, readback)
+    assert result["pedot_state"] == "OX"
+    assert "au" not in " ".join(result["feature_tags"]).casefold()
+
+
+@pytest.mark.parametrize("mutate", [
+    lambda value: value["domain_map"].update(pedot_cylinder=3),
+    lambda value: value["domain_z_bounds_um"].update({"5": [0.1, 0.2]}),
+    lambda value: value["material_tags"].update(pedot_cylinder="air"),
+    lambda value: value["feature_tags"].append("mat_au"),
+])
+def test_tree_readback_rejects_physical_identity_drift(mutate):
+    fixture = _fixture()
+    value = {
+        "source_sha256": "a" * 64,
+        "domain_map": {"substrate": 1, "pedot_cylinder": 5, "air": 4},
+        "domain_z_bounds_um": {"5": [0.0, 0.2]},
+        "material_tags": {"pedot_cylinder": "OX"},
+        "feature_tags": ["ewfd", "mesh1"],
+    }
+    mutate(value)
+    with pytest.raises(ValueError):
+        validate_lin2025_pedot_cylinder_tree(fixture, value)

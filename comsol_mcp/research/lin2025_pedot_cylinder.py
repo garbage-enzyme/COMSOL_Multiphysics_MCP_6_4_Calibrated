@@ -156,10 +156,50 @@ def compile_lin2025_pedot_cylinder_binding(
     return body
 
 
+def validate_lin2025_pedot_cylinder_tree(
+    fixture: object, tree_readback: object
+) -> dict[str, Any]:
+    """Validate a live/read-only derived tree against the selected fixture."""
+    normalized = normalize_lin2025_pedot_cylinder_fixture(fixture)
+    raw = _object(
+        tree_readback,
+        {"source_sha256", "domain_map", "domain_z_bounds_um", "material_tags", "feature_tags"},
+        "Lin2025 tree readback",
+    )
+    if raw["source_sha256"] != normalized["source_identity"]["source_sha256"]:
+        raise ValueError("Lin2025 tree source identity differs from fixture")
+    domain_map = _object(raw["domain_map"], {"substrate", "pedot_cylinder", "air"}, "domain_map")
+    for name, expected in normalized["domains"].items():
+        if domain_map[name] != expected:
+            raise ValueError(f"Lin2025 {name} domain mapping changed")
+    bounds = raw["domain_z_bounds_um"]
+    if not isinstance(bounds, Mapping) or str(domain_map["pedot_cylinder"]) not in bounds:
+        raise ValueError("Lin2025 PEDOT domain z bounds are missing")
+    pedot_bounds = bounds[str(domain_map["pedot_cylinder"])]
+    if not isinstance(pedot_bounds, list) or len(pedot_bounds) != 2 or pedot_bounds != [0.0, normalized["geometry"]["pedot_height_um"]]:
+        raise ValueError("Lin2025 PEDOT cylinder z bounds changed")
+    materials = raw["material_tags"]
+    if not isinstance(materials, Mapping) or materials.get("pedot_cylinder") not in {"OX", "MR"}:
+        raise ValueError("Lin2025 PEDOT material state readback is invalid")
+    if any("au" in str(tag).casefold() or "gold" in str(tag).casefold() for tag in raw["feature_tags"]):
+        raise ValueError("Lin2025 cylinder fixture unexpectedly contains Au")
+    return {
+        "schema_name": f"{SCHEMA_NAME}.tree_readback",
+        "schema_version": SCHEMA_VERSION,
+        "fixture_fingerprint": normalized["fixture_fingerprint"],
+        "source_sha256": raw["source_sha256"],
+        "domain_map": dict(domain_map),
+        "pedot_state": materials["pedot_cylinder"],
+        "feature_tags": list(raw["feature_tags"]),
+        "tree_fingerprint": domain_sha256_v2(f"{SCHEMA_NAME}.tree_readback", raw),
+    }
+
+
 __all__ = [
     "ADAPTER_ID",
     "SCHEMA_NAME",
     "SCHEMA_VERSION",
     "normalize_lin2025_pedot_cylinder_fixture",
     "compile_lin2025_pedot_cylinder_binding",
+    "validate_lin2025_pedot_cylinder_tree",
 ]
