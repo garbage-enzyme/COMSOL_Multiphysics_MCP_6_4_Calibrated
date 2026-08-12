@@ -88,6 +88,7 @@ from .lin2025_pedot_cylinder import (
 )
 from .lin2025_pedot_cylinder import (
     normalize_lin2025_pedot_cylinder_fixture,
+    compile_lin2025_pedot_cylinder_binding,
 )
 from .materials import (
     MATERIAL_CATALOG_SCHEMA_NAME,
@@ -341,6 +342,7 @@ __all__ = [
     "LIN2025_PEDOT_CYLINDER_SCHEMA_NAME",
     "LIN2025_PEDOT_CYLINDER_SCHEMA_VERSION",
     "normalize_lin2025_pedot_cylinder_fixture",
+    "compile_lin2025_pedot_cylinder_binding",
     "compare_robust_smoothing_candidates",
     "normalize_robust_smoothing_comparison_receipt",
     "configure_native_adjoint",
