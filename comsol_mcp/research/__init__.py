@@ -87,8 +87,8 @@ from .lin2025_pedot_cylinder import (
     SCHEMA_VERSION as LIN2025_PEDOT_CYLINDER_SCHEMA_VERSION,
 )
 from .lin2025_pedot_cylinder import (
-    normalize_lin2025_pedot_cylinder_fixture,
     compile_lin2025_pedot_cylinder_binding,
+    normalize_lin2025_pedot_cylinder_fixture,
 )
 from .materials import (
     MATERIAL_CATALOG_SCHEMA_NAME,
