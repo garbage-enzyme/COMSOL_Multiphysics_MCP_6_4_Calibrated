@@ -40,6 +40,9 @@ def _object(value: object, keys: set[str], name: str) -> dict[str, Any]:
 
 def normalize_lin2025_pedot_cylinder_fixture(value: object) -> dict[str, Any]:
     """Normalize an exact source/topology/material contract before ClientAPI work."""
+    supplied_fingerprint = value.get("fixture_fingerprint") if isinstance(value, Mapping) else None
+    if isinstance(value, Mapping) and "fixture_fingerprint" in value:
+        value = {key: item for key, item in value.items() if key != "fixture_fingerprint"}
     raw = _object(
         value,
         {
@@ -110,6 +113,8 @@ def normalize_lin2025_pedot_cylinder_fixture(value: object) -> dict[str, Any]:
         "temperature_k": _finite(raw["temperature_k"], "temperature_k"),
     }
     normalized["fixture_fingerprint"] = domain_sha256_v2(SCHEMA_NAME, normalized)
+    if supplied_fingerprint is not None and supplied_fingerprint != normalized["fixture_fingerprint"]:
+        raise ValueError("PEDOT-cylinder fixture fingerprint is invalid")
     return normalized
 
 
@@ -127,7 +132,9 @@ def compile_lin2025_pedot_cylinder_binding(
     if derivative_support.get("source_identity") != normalized["source_identity"]["source_sha256"]:
         raise ValueError("Lin2025 derivative source identity differs from fixture")
     variables = derivative_support.get("variables")
-    if not isinstance(variables, list) or [item.get("variable_id") for item in variables] != list(_VARIABLES):
+    if not isinstance(variables, list) or [
+        item.get("variable_id") for item in variables
+    ] != list(_VARIABLES):
         raise ValueError("Lin2025 derivative variables must be ordered cylinder x/y radii")
     body = {
         "schema_name": f"{SCHEMA_NAME}.binding",
