@@ -285,6 +285,12 @@ def _entries() -> list[dict[str, Any]]:
             artifact_kind="configuration",
         ),
         _entry(
+            "comsol_mcp.lin2025_pedot_cylinder_fixture",
+            "1.0.0",
+            "comsol_mcp.research.lin2025_pedot_cylinder",
+            artifact_kind="configuration",
+        ),
+        _entry(
             "comsol_mcp.robust_startup_admission_policy",
             "1.0.0",
             "comsol_mcp.research.robust_startup_admission",

@@ -164,6 +164,12 @@ from .robust_shape_adapter import (
     compile_robust_shape_adapter_binding,
     prepare_robust_shape_controls,
 )
+from .lin2025_pedot_cylinder import (
+    ADAPTER_ID as LIN2025_PEDOT_CYLINDER_ADAPTER_ID,
+    SCHEMA_NAME as LIN2025_PEDOT_CYLINDER_SCHEMA_NAME,
+    SCHEMA_VERSION as LIN2025_PEDOT_CYLINDER_SCHEMA_VERSION,
+    normalize_lin2025_pedot_cylinder_fixture,
+)
 from .robust_smoothing_selection import (
     ROBUST_SMOOTHING_COMPARISON_SCHEMA_NAME,
     ROBUST_SMOOTHING_COMPARISON_SCHEMA_VERSION,
@@ -325,6 +331,10 @@ __all__ = [
     "compile_campaign_manifest",
     "compile_robust_shape_adapter_binding",
     "prepare_robust_shape_controls",
+    "LIN2025_PEDOT_CYLINDER_ADAPTER_ID",
+    "LIN2025_PEDOT_CYLINDER_SCHEMA_NAME",
+    "LIN2025_PEDOT_CYLINDER_SCHEMA_VERSION",
+    "normalize_lin2025_pedot_cylinder_fixture",
     "compare_robust_smoothing_candidates",
     "normalize_robust_smoothing_comparison_receipt",
     "configure_native_adjoint",
