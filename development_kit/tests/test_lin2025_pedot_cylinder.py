@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import copy
-
 import pytest
 
 from comsol_mcp.research.lin2025_pedot_cylinder import (
@@ -15,11 +13,27 @@ def _fixture() -> dict:
         "schema_name": SCHEMA_NAME,
         "schema_version": "1.0.0",
         "adapter_id": "lin2025_pedot_cylinder_v1",
-        "source_identity": {"source_sha256": "a" * 64, "tree_sha256": "b" * 64, "comsol_build": "6.4.0.293"},
-        "geometry": {"lattice": "hexagonal_primitive", "period_um": 1.7, "pedot_height_um": 0.2, "air_above": True, "substrate_n": 1.5},
+        "source_identity": {
+            "source_sha256": "a" * 64,
+            "tree_sha256": "b" * 64,
+            "comsol_build": "6.4.0.293",
+        },
+        "geometry": {
+            "lattice": "hexagonal_primitive",
+            "period_um": 1.7,
+            "pedot_height_um": 0.2,
+            "air_above": True,
+            "substrate_n": 1.5,
+        },
         "domains": {"substrate": 1, "pedot_cylinder": 5, "air": 4},
-        "material_states": [{"state_id": "OX", "mapping_id": "ox"}, {"state_id": "MR", "mapping_id": "mr"}],
-        "mutable_variables": [{"variable_id": "pedot_cylinder_radius_x"}, {"variable_id": "pedot_cylinder_radius_y"}],
+        "material_states": [
+            {"state_id": "OX", "mapping_id": "ox"},
+            {"state_id": "MR", "mapping_id": "mr"},
+        ],
+        "mutable_variables": [
+            {"variable_id": "pedot_cylinder_radius_x"},
+            {"variable_id": "pedot_cylinder_radius_y"},
+        ],
         "temperature_k": 300.0,
     }
 
@@ -32,7 +46,10 @@ def test_fixture_freezes_topology_states_and_caller_temperature():
     assert len(result["fixture_fingerprint"]) == 64
 
 
-@pytest.mark.parametrize("field", ["source_identity", "geometry", "domains", "material_states", "mutable_variables"])
+@pytest.mark.parametrize(
+    "field",
+    ["source_identity", "geometry", "domains", "material_states", "mutable_variables"],
+)
 def test_fixture_rejects_contract_drift(field):
     value = _fixture()
     if field == "source_identity":
@@ -54,4 +71,3 @@ def test_fixture_normalization_is_defensive():
     result = normalize_lin2025_pedot_cylinder_fixture(value)
     result["domains"]["air"] = 99
     assert normalize_lin2025_pedot_cylinder_fixture(value)["domains"]["air"] == 4
-

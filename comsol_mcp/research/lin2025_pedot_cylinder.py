@@ -59,24 +59,63 @@ def normalize_lin2025_pedot_cylinder_fixture(value: object) -> dict[str, Any]:
         raise ValueError("PEDOT-cylinder fixture schema identity is unsupported")
     if raw["adapter_id"] != ADAPTER_ID:
         raise ValueError("PEDOT-cylinder fixture adapter identity is unsupported")
-    source = _object(raw["source_identity"], {"source_sha256", "tree_sha256", "comsol_build"}, "source_identity")
-    source = {**source, "source_sha256": _sha(source["source_sha256"], "source_sha256"), "tree_sha256": _sha(source["tree_sha256"], "tree_sha256")}
-    geometry = _object(raw["geometry"], {"lattice", "period_um", "pedot_height_um", "air_above", "substrate_n"}, "geometry")
+    source = _object(
+        raw["source_identity"],
+        {"source_sha256", "tree_sha256", "comsol_build"},
+        "source_identity",
+    )
+    source = {
+        **source,
+        "source_sha256": _sha(source["source_sha256"], "source_sha256"),
+        "tree_sha256": _sha(source["tree_sha256"], "tree_sha256"),
+    }
+    geometry = _object(
+        raw["geometry"],
+        {"lattice", "period_um", "pedot_height_um", "air_above", "substrate_n"},
+        "geometry",
+    )
     if geometry["lattice"] != "hexagonal_primitive" or geometry["air_above"] is not True:
         raise ValueError("fixture must preserve the verified hexagonal PEDOT-cylinder topology")
-    geometry = {**geometry, "period_um": _finite(geometry["period_um"], "period_um"), "pedot_height_um": _finite(geometry["pedot_height_um"], "pedot_height_um"), "substrate_n": _finite(geometry["substrate_n"], "substrate_n")}
+    geometry = {
+        **geometry,
+        "period_um": _finite(geometry["period_um"], "period_um"),
+        "pedot_height_um": _finite(geometry["pedot_height_um"], "pedot_height_um"),
+        "substrate_n": _finite(geometry["substrate_n"], "substrate_n"),
+    }
     domains = _object(raw["domains"], {"substrate", "pedot_cylinder", "air"}, "domains")
-    if any(isinstance(domains[key], bool) or not isinstance(domains[key], int) or domains[key] < 1 for key in domains):
+    if any(
+        isinstance(domains[key], bool)
+        or not isinstance(domains[key], int)
+        or domains[key] < 1
+        for key in domains
+    ):
         raise ValueError("domain IDs must be positive integers")
     states = raw["material_states"]
-    if not isinstance(states, list) or tuple(item.get("state_id") for item in states if isinstance(item, Mapping)) != _STATES:
+    if not isinstance(states, list) or tuple(
+        item.get("state_id") for item in states if isinstance(item, Mapping)
+    ) != _STATES:
         raise ValueError("material states must be ordered OX/MR")
     variables = raw["mutable_variables"]
-    if not isinstance(variables, list) or tuple(item.get("variable_id") for item in variables if isinstance(item, Mapping)) != _VARIABLES:
+    if not isinstance(variables, list) or tuple(
+        item.get("variable_id") for item in variables if isinstance(item, Mapping)
+    ) != _VARIABLES:
         raise ValueError("mutable variables must be ordered cylinder x/y radii")
-    normalized = {**raw, "source_identity": source, "geometry": geometry, "domains": domains, "material_states": [dict(item) for item in states], "mutable_variables": [dict(item) for item in variables], "temperature_k": _finite(raw["temperature_k"], "temperature_k")}
+    normalized = {
+        **raw,
+        "source_identity": source,
+        "geometry": geometry,
+        "domains": domains,
+        "material_states": [dict(item) for item in states],
+        "mutable_variables": [dict(item) for item in variables],
+        "temperature_k": _finite(raw["temperature_k"], "temperature_k"),
+    }
     normalized["fixture_fingerprint"] = domain_sha256_v2(SCHEMA_NAME, normalized)
     return normalized
 
 
-__all__ = ["ADAPTER_ID", "SCHEMA_NAME", "SCHEMA_VERSION", "normalize_lin2025_pedot_cylinder_fixture"]
+__all__ = [
+    "ADAPTER_ID",
+    "SCHEMA_NAME",
+    "SCHEMA_VERSION",
+    "normalize_lin2025_pedot_cylinder_fixture",
+]
