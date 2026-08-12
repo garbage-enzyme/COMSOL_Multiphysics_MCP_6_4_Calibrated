@@ -379,6 +379,7 @@ models are intentionally absent.
 - `development_kit/tests/test_robust_shape_optimization.py` — This module tests hash-pinned robust shape manifests, cross-contract identities, and caller-owned admission limits.
 - `development_kit/tests/test_robust_shape_adapter.py` — This module tests exact source, tree, topology, policy, and x/y variable binding before robust ClientAPI work.
 - `development_kit/tests/test_robust_shape_adapter_licensed_gate.py` — This module tests the S3 licensed gate's caller-owned limits, solver-free dry run, redaction, and cleanup boundaries.
+- `development_kit/tests/test_robust_smoothing_selection.py` — This module tests evidence-only soft-min objective/weight/gradient comparison and forbids automatic winner selection.
 - `development_kit/tests/test_robust_shape_rows.py` — This module tests robust condition, gradient, iteration, trial, checkpoint, and cleanup row chaining and crash-tail recovery.
 - `development_kit/tests/test_robust_shape_worker.py` — This module tests JobManager dispatch, synthetic 24-condition completion, exact replay, status summaries, and duplicate suppression.
 - `development_kit/tests/test_robust_startup_admission.py` — This module tests caller-owned absolute RAM/disk thresholds with startup-only evaluation semantics.
@@ -406,6 +407,7 @@ models are intentionally absent.
 - `comsol_mcp/research/robust_objectives.py` — This module evaluates differentiable absolute state contrast, caller-configurable smooth worst-case aggregation, and the exact condition-to-aggregate gradient chain rule.
 - `comsol_mcp/research/robust_optimizer_policy.py` — This module binds manual GCMMA/MMA selection to method-specific execution evidence without automatic fallback.
 - `comsol_mcp/research/robust_shape_adapter.py` — This module binds the trusted periodic-MIM structure, tree audit, derivative support, shape policy, and x/y variables, then verifies failure-atomic Deformed Geometry control preparation.
+- `comsol_mcp/research/robust_smoothing_selection.py` — This module compares caller-supplied smooth-worst-case temperatures while preserving objective, weight, and gradient effects for manual review.
 - `comsol_mcp/research/shape_support.py` — This module normalizes geometry-scale minimum-gap, mesh admission, invariant geometry, and retention policy.
 - `comsol_mcp/research/robust_startup_admission.py` — This module evaluates caller-owned absolute RAM/disk thresholds exactly once before robust work starts.
 - `comsol_mcp/research/workflow.py` — This module normalizes passive cited workflow capsules, explicit assumptions, review, and baseline readiness.
