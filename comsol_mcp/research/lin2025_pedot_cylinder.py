@@ -176,12 +176,16 @@ def validate_lin2025_pedot_cylinder_tree(
     if not isinstance(bounds, Mapping) or str(domain_map["pedot_cylinder"]) not in bounds:
         raise ValueError("Lin2025 PEDOT domain z bounds are missing")
     pedot_bounds = bounds[str(domain_map["pedot_cylinder"])]
-    if not isinstance(pedot_bounds, list) or len(pedot_bounds) != 2 or pedot_bounds != [0.0, normalized["geometry"]["pedot_height_um"]]:
+    expected_bounds = [0.0, normalized["geometry"]["pedot_height_um"]]
+    if not isinstance(pedot_bounds, list) or len(pedot_bounds) != 2 or pedot_bounds != expected_bounds:
         raise ValueError("Lin2025 PEDOT cylinder z bounds changed")
     materials = raw["material_tags"]
     if not isinstance(materials, Mapping) or materials.get("pedot_cylinder") not in {"OX", "MR"}:
         raise ValueError("Lin2025 PEDOT material state readback is invalid")
-    if any("au" in str(tag).casefold() or "gold" in str(tag).casefold() for tag in raw["feature_tags"]):
+    if any(
+        "au" in str(tag).casefold() or "gold" in str(tag).casefold()
+        for tag in raw["feature_tags"]
+    ):
         raise ValueError("Lin2025 cylinder fixture unexpectedly contains Au")
     return {
         "schema_name": f"{SCHEMA_NAME}.tree_readback",
