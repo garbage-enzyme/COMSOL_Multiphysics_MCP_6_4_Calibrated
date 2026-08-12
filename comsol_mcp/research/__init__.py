@@ -156,6 +156,12 @@ from .robust_optimizer_policy import (
     assess_robust_optimizer_execution,
     normalize_robust_optimizer_policy,
 )
+from .lin2025_pedot_cylinder import (
+    ADAPTER_ID as LIN2025_PEDOT_CYLINDER_ADAPTER_ID,
+    SCHEMA_NAME as LIN2025_PEDOT_CYLINDER_SCHEMA_NAME,
+    SCHEMA_VERSION as LIN2025_PEDOT_CYLINDER_SCHEMA_VERSION,
+    normalize_lin2025_pedot_cylinder_fixture,
+)
 from .robust_shape_adapter import (
     ROBUST_SHAPE_ADAPTER_BINDING_SCHEMA_NAME,
     ROBUST_SHAPE_ADAPTER_BINDING_SCHEMA_VERSION,
@@ -163,12 +169,6 @@ from .robust_shape_adapter import (
     ROBUST_SHAPE_CONTROL_RECEIPT_SCHEMA_VERSION,
     compile_robust_shape_adapter_binding,
     prepare_robust_shape_controls,
-)
-from .lin2025_pedot_cylinder import (
-    ADAPTER_ID as LIN2025_PEDOT_CYLINDER_ADAPTER_ID,
-    SCHEMA_NAME as LIN2025_PEDOT_CYLINDER_SCHEMA_NAME,
-    SCHEMA_VERSION as LIN2025_PEDOT_CYLINDER_SCHEMA_VERSION,
-    normalize_lin2025_pedot_cylinder_fixture,
 )
 from .robust_smoothing_selection import (
     ROBUST_SMOOTHING_COMPARISON_SCHEMA_NAME,
