@@ -177,7 +177,11 @@ def validate_lin2025_pedot_cylinder_tree(
         raise ValueError("Lin2025 PEDOT domain z bounds are missing")
     pedot_bounds = bounds[str(domain_map["pedot_cylinder"])]
     expected_bounds = [0.0, normalized["geometry"]["pedot_height_um"]]
-    if not isinstance(pedot_bounds, list) or len(pedot_bounds) != 2 or pedot_bounds != expected_bounds:
+    if (
+        not isinstance(pedot_bounds, list)
+        or len(pedot_bounds) != 2
+        or pedot_bounds != expected_bounds
+    ):
         raise ValueError("Lin2025 PEDOT cylinder z bounds changed")
     materials = raw["material_tags"]
     if not isinstance(materials, Mapping) or materials.get("pedot_cylinder") not in {"OX", "MR"}:
