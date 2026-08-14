@@ -17,6 +17,7 @@ from .lin2025_pedot_cylinder import (
 CONTROL_RECEIPT_SCHEMA_NAME = "comsol_mcp.lin2025_pedot_cylinder_control_receipt"
 CONTROL_RECEIPT_SCHEMA_VERSION = "1.0.0"
 _VARIABLES = ("pedot_cylinder_radius_x", "pedot_cylinder_radius_y")
+_STATES = ("OX", "MR")
 _UNIT_TO_METRE = {"m": 1.0, "um": 1e-6, "nm": 1e-9}
 
 
@@ -68,6 +69,27 @@ def _circle_readback(model: Any) -> dict[str, Any]:
     return {"radius_m": radius, "center_m": position}
 
 
+def _material_readback(model: Any) -> dict[str, Any]:
+    component = _get(model.java.component(), "comp1")
+    materials = component.material()
+    if "mat_pedot" not in _tags(materials):
+        raise ValueError("Lin2025 PEDOT material tag is absent")
+    material = _get(materials, "mat_pedot")
+    if str(material.getType()) != "Common":
+        raise ValueError("Lin2025 PEDOT material type changed")
+    try:
+        selection = sorted(int(value) for value in list(material.selection().entities()))
+        tensor = [
+            str(value)
+            for value in list(material.propertyGroup("def").getStringArray("relpermittivity"))
+        ]
+    except Exception as exc:
+        raise ValueError("Lin2025 PEDOT material properties are unreadable") from exc
+    if selection != [5] or len(tensor) not in {3, 9}:
+        raise ValueError("Lin2025 PEDOT material domain or tensor shape changed")
+    return {"material_tag": "mat_pedot", "domains": selection, "relpermittivity": tensor}
+
+
 class Lin2025PedotControlBackend(Protocol):
     """Minimal atomic surface used by the solver-free control compiler."""
 
@@ -96,6 +118,7 @@ class ClientapiLin2025PedotControlBackend:
             "parameters": dict(self.model.parameters()),
             "physics": physics_state,
             "circle": _circle_readback(self.model),
+            "material": _material_readback(self.model),
         }
 
     def restore(self, snapshot: Mapping[str, Any]) -> None:
@@ -120,6 +143,36 @@ class ClientapiLin2025PedotControlBackend:
             parameters.set(name, expression)
         if _circle_readback(self.model) != snapshot.get("circle"):
             raise RuntimeError("Lin2025 source geometry changed during rollback")
+        if _material_readback(self.model) != snapshot.get("material"):
+            raise RuntimeError("Lin2025 source material changed during rollback")
+
+    def apply_material_state(self, state_id: str, tensor: list[str]) -> dict[str, Any]:
+        if state_id not in _STATES:
+            raise ValueError("Lin2025 material state must be OX or MR")
+        if not isinstance(tensor, list) or len(tensor) != 9 or any(
+            not isinstance(value, str) or not value.strip() for value in tensor
+        ):
+            raise ValueError("Lin2025 material tensor must contain nine expressions")
+        component = _get(self.model.java.component(), "comp1")
+        materials = component.material()
+        if "mat_pedot" not in _tags(materials):
+            raise ValueError("Lin2025 PEDOT material tag is absent")
+        material = _get(materials, "mat_pedot")
+        if sorted(int(value) for value in list(material.selection().entities())) != [5]:
+            raise ValueError("Lin2025 PEDOT material must select domain 5")
+        from jpype import JArray, JString
+
+        group = material.propertyGroup("def")
+        group.set("relpermittivity", JArray(JString)(tensor))
+        readback = _material_readback(self.model)
+        if readback["relpermittivity"] not in (tensor, [tensor[0], tensor[4], tensor[8]]):
+            raise ValueError("Lin2025 material tensor readback differs from requested state")
+        return {
+            "state_id": state_id,
+            "material_tag": readback["material_tag"],
+            "domains": readback["domains"],
+            "relpermittivity": readback["relpermittivity"],
+        }
 
     def prepare_controls(
         self, derivative_support: Mapping[str, Any], shape_support: Mapping[str, Any]
