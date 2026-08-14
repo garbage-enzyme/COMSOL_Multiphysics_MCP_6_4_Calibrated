@@ -64,6 +64,8 @@ from comsol_mcp.research import (
     ROBUST_OPTIMIZER_POLICY_SCHEMA_VERSION,
     ROBUST_SHAPE_ADAPTER_BINDING_SCHEMA_NAME,
     ROBUST_SHAPE_ADAPTER_BINDING_SCHEMA_VERSION,
+    ROBUST_SHAPE_ADAPTER_CONFIGURATION_SCHEMA_NAME,
+    ROBUST_SHAPE_ADAPTER_CONFIGURATION_SCHEMA_VERSION,
     ROBUST_SHAPE_CONTROL_RECEIPT_SCHEMA_NAME,
     ROBUST_SHAPE_CONTROL_RECEIPT_SCHEMA_VERSION,
     ROBUST_SMOOTHING_COMPARISON_SCHEMA_NAME,
@@ -295,6 +297,11 @@ def _entries() -> list[dict[str, Any]]:
             "1.0.0",
             "comsol_mcp.research.lin2025_pedot_cylinder",
             artifact_kind="configuration",
+        ),
+        _entry(
+            "comsol_mcp.lin2025_pedot_cylinder_control_receipt",
+            "1.0.0",
+            "comsol_mcp.research.lin2025_pedot_backend",
         ),
         _entry(
             "comsol_mcp.robust_startup_admission_policy",
@@ -602,6 +609,12 @@ def _entries() -> list[dict[str, Any]]:
             ROBUST_SHAPE_ADAPTER_BINDING_SCHEMA_NAME,
             ROBUST_SHAPE_ADAPTER_BINDING_SCHEMA_VERSION,
             "comsol_mcp.research.robust_shape_adapter",
+            artifact_kind="configuration",
+        ),
+        _entry(
+            ROBUST_SHAPE_ADAPTER_CONFIGURATION_SCHEMA_NAME,
+            ROBUST_SHAPE_ADAPTER_CONFIGURATION_SCHEMA_VERSION,
+            "comsol_mcp.research.robust_adapter_configuration",
             artifact_kind="configuration",
         ),
         _entry(

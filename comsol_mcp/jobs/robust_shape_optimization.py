@@ -16,6 +16,12 @@ from comsol_mcp.research.adapters import (
 )
 from comsol_mcp.research.derivative_support import normalize_derivative_support
 from comsol_mcp.research.gradient_contracts import normalize_native_optimizer_configuration
+from comsol_mcp.research.robust_adapter_configuration import (
+    SCHEMA_NAME as ROBUST_ADAPTER_CONFIGURATION_SCHEMA_NAME,
+)
+from comsol_mcp.research.robust_adapter_configuration import (
+    normalize_robust_shape_adapter_configuration,
+)
 from comsol_mcp.research.robust_conditions import normalize_optimization_condition_table
 from comsol_mcp.research.robust_finalist_validation import (
     normalize_robust_finalist_validation_policy,
@@ -23,12 +29,12 @@ from comsol_mcp.research.robust_finalist_validation import (
 from comsol_mcp.research.robust_gradient_acceptance import normalize_robust_gradient_policy
 from comsol_mcp.research.robust_objectives import normalize_robust_objective_configuration
 from comsol_mcp.research.robust_optimizer_policy import normalize_robust_optimizer_policy
-from comsol_mcp.research.robust_shape_adapter import compile_robust_shape_adapter_binding
 from comsol_mcp.research.robust_startup_admission import normalize_robust_startup_policy
 from comsol_mcp.research.shape_support import normalize_shape_support_policy
 
 ROBUST_SHAPE_MANIFEST_SCHEMA_NAME = "comsol_mcp.robust_shape_optimization_manifest"
-ROBUST_SHAPE_MANIFEST_SCHEMA_VERSION = "1.0.0"
+ROBUST_SHAPE_MANIFEST_SCHEMA_VERSION = "1.1.0"
+ROBUST_SHAPE_MANIFEST_LEGACY_SCHEMA_VERSION = "1.0.0"
 ROBUST_SHAPE_SUBMISSION_SCHEMA_NAME = "comsol_mcp.robust_shape_optimization_submission"
 ROBUST_SHAPE_SUBMISSION_SCHEMA_VERSION = "1.0.0"
 MAX_MANIFEST_BYTES = 2 * 1024 * 1024
@@ -86,13 +92,11 @@ def expand_robust_shape_manifest(submission: object) -> dict[str, Any]:
         raw = json.loads(payload.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValueError("robust shape manifest is not strict UTF-8 JSON") from exc
-    fields = {
+    common_fields = {
         "schema_name",
         "schema_version",
         "source_model_path",
         "source_model_sha256",
-        "structure_adapter_manifest",
-        "structure_tree_audit",
         "support",
         "condition_table",
         "objective",
@@ -105,13 +109,17 @@ def expand_robust_shape_manifest(submission: object) -> dict[str, Any]:
         "initial_values",
         "synthetic_mode",
     }
-    if not isinstance(raw, dict) or set(raw) != fields:
+    if not isinstance(raw, dict):
         raise ValueError("robust shape manifest fields are invalid")
-    if (
-        raw["schema_name"] != ROBUST_SHAPE_MANIFEST_SCHEMA_NAME
-        or raw["schema_version"] != ROBUST_SHAPE_MANIFEST_SCHEMA_VERSION
-    ):
+    schema_version = raw.get("schema_version")
+    if schema_version == ROBUST_SHAPE_MANIFEST_LEGACY_SCHEMA_VERSION:
+        fields = common_fields | {"structure_adapter_manifest", "structure_tree_audit"}
+    elif schema_version == ROBUST_SHAPE_MANIFEST_SCHEMA_VERSION:
+        fields = common_fields | {"adapter_configuration"}
+    else:
         raise ValueError("robust shape manifest schema is unsupported")
+    if set(raw) != fields or raw["schema_name"] != ROBUST_SHAPE_MANIFEST_SCHEMA_NAME:
+        raise ValueError("robust shape manifest fields are invalid")
     source_text = raw["source_model_path"]
     if not isinstance(source_text, str) or not source_text.isascii():
         raise ValueError("robust shape source path must be ASCII")
@@ -139,16 +147,30 @@ def expand_robust_shape_manifest(submission: object) -> dict[str, Any]:
     optimizer_policy = normalize_robust_optimizer_policy(raw["optimizer_policy"])
     native_optimizer = normalize_native_optimizer_configuration(raw["native_optimizer"])
     startup_admission = normalize_robust_startup_policy(raw["startup_admission"])
-    structure_manifest = normalize_structure_adapter_manifest(raw["structure_adapter_manifest"])
-    structure_tree_audit = normalize_structure_tree_audit(
-        raw["structure_tree_audit"], structure_manifest
+    if schema_version == ROBUST_SHAPE_MANIFEST_LEGACY_SCHEMA_VERSION:
+        structure_manifest = normalize_structure_adapter_manifest(
+            raw["structure_adapter_manifest"]
+        )
+        structure_tree_audit = normalize_structure_tree_audit(
+            raw["structure_tree_audit"], structure_manifest
+        )
+        adapter_input = {
+            "schema_name": ROBUST_ADAPTER_CONFIGURATION_SCHEMA_NAME,
+            "schema_version": "1.0.0",
+            "adapter_id": support["adapter_id"],
+            "configuration": {
+                "structure_adapter_manifest": structure_manifest,
+                "structure_tree_audit": structure_tree_audit,
+            },
+        }
+    else:
+        adapter_input = raw["adapter_configuration"]
+        structure_manifest = None
+        structure_tree_audit = None
+    adapter_configuration = normalize_robust_shape_adapter_configuration(
+        adapter_input, support, shape_policy
     )
-    adapter_binding = compile_robust_shape_adapter_binding(
-        structure_manifest,
-        structure_tree_audit,
-        support,
-        shape_policy,
-    )
+    adapter_binding = adapter_configuration["binding"]
     if support["source_identity"] != source_hash:
         raise ValueError("robust shape support source identity differs from manifest source")
     if support["adapter_id"] != shape_policy["adapter_id"]:
@@ -197,11 +219,10 @@ def expand_robust_shape_manifest(submission: object) -> dict[str, Any]:
     body = {
         **envelope,
         "schema_name": ROBUST_SHAPE_MANIFEST_SCHEMA_NAME,
-        "schema_version": ROBUST_SHAPE_MANIFEST_SCHEMA_VERSION,
+        "schema_version": schema_version,
         "source_model_path": str(source),
         "source_model_sha256": source_hash,
-        "structure_adapter_manifest": structure_manifest,
-        "structure_tree_audit": structure_tree_audit,
+        "adapter_configuration": adapter_configuration,
         "adapter_binding": adapter_binding,
         "support": support,
         "condition_table": conditions,
@@ -215,6 +236,9 @@ def expand_robust_shape_manifest(submission: object) -> dict[str, Any]:
         "initial_values": normalized_values,
         "synthetic_mode": raw["synthetic_mode"],
     }
+    if schema_version == ROBUST_SHAPE_MANIFEST_LEGACY_SCHEMA_VERSION:
+        body["structure_adapter_manifest"] = structure_manifest
+        body["structure_tree_audit"] = structure_tree_audit
     validate_finite_json(body)
     body["spec_fingerprint"] = hashlib.sha256(
         json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()

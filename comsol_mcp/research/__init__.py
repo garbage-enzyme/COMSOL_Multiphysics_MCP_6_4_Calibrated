@@ -117,6 +117,15 @@ from .records import (
     CANDIDATE_RECORD_SCHEMA_VERSION,
     normalize_candidate_record,
 )
+from .robust_adapter_configuration import (
+    SCHEMA_NAME as ROBUST_SHAPE_ADAPTER_CONFIGURATION_SCHEMA_NAME,
+)
+from .robust_adapter_configuration import (
+    SCHEMA_VERSION as ROBUST_SHAPE_ADAPTER_CONFIGURATION_SCHEMA_VERSION,
+)
+from .robust_adapter_configuration import (
+    normalize_robust_shape_adapter_configuration,
+)
 from .robust_conditions import (
     MATERIAL_STATE_CONFIGURATION_SCHEMA_NAME,
     MATERIAL_STATE_CONFIGURATION_SCHEMA_VERSION,
@@ -272,6 +281,8 @@ __all__ = [
     "ROBUST_FINALIST_VALIDATION_RECEIPT_SCHEMA_VERSION",
     "ROBUST_SHAPE_ADAPTER_BINDING_SCHEMA_NAME",
     "ROBUST_SHAPE_ADAPTER_BINDING_SCHEMA_VERSION",
+    "ROBUST_SHAPE_ADAPTER_CONFIGURATION_SCHEMA_NAME",
+    "ROBUST_SHAPE_ADAPTER_CONFIGURATION_SCHEMA_VERSION",
     "ROBUST_SHAPE_CONTROL_RECEIPT_SCHEMA_NAME",
     "ROBUST_SHAPE_CONTROL_RECEIPT_SCHEMA_VERSION",
     "ROBUST_SMOOTHING_COMPARISON_SCHEMA_NAME",
@@ -337,6 +348,7 @@ __all__ = [
     "assess_robust_gradient_acceptance",
     "compile_campaign_manifest",
     "compile_robust_shape_adapter_binding",
+    "normalize_robust_shape_adapter_configuration",
     "prepare_robust_shape_controls",
     "LIN2025_PEDOT_CYLINDER_ADAPTER_ID",
     "LIN2025_PEDOT_CYLINDER_SCHEMA_NAME",

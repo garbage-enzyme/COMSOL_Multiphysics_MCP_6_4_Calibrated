@@ -12,6 +12,15 @@ from comsol_mcp.research.robust_conditions import normalize_optimization_conditi
 from comsol_mcp.research.shape_support import normalize_shape_support_policy
 from development_kit.tests.test_derivative_support import _support, _variable
 from development_kit.tests.test_gradient_contracts import _optimizer
+from development_kit.tests.test_lin2025_pedot_backend import (
+    _derivative_support as _lin_support,
+)
+from development_kit.tests.test_lin2025_pedot_backend import (
+    _fixture as _lin_fixture,
+)
+from development_kit.tests.test_lin2025_pedot_backend import (
+    _tree as _lin_tree,
+)
 from development_kit.tests.test_research_adapters import (
     _audit as _structure_audit,
 )
@@ -147,6 +156,39 @@ def test_manifest_binds_every_robust_contract_and_uses_no_host_defaults(ascii_tm
         "patch_length_x",
         "patch_length_y",
     ]
+
+
+def test_manifest_v11_accepts_tagged_lin2025_adapter(ascii_tmp_path):
+    envelope, source, manifest = _write_manifest(ascii_tmp_path)
+    source_hash = hashlib.sha256(source.read_bytes()).hexdigest()
+    raw = json.loads(manifest.read_text())
+    support = _lin_support()
+    support["source_identity"] = source_hash
+    fixture = _lin_fixture()
+    fixture["source_identity"]["source_sha256"] = source_hash
+    tree = _lin_tree()
+    tree["source_sha256"] = source_hash
+    raw["schema_version"] = "1.1.0"
+    raw.pop("structure_adapter_manifest")
+    raw.pop("structure_tree_audit")
+    raw["support"] = support
+    raw["shape_policy"]["adapter_id"] = "lin2025_pedot_cylinder_v1"
+    raw["finalist_validation_policy"]["shape_policy_fingerprint"] = (
+        normalize_shape_support_policy(raw["shape_policy"])["policy_fingerprint"]
+    )
+    raw["adapter_configuration"] = {
+        "schema_name": "comsol_mcp.robust_shape_adapter_configuration",
+        "schema_version": "1.0.0",
+        "adapter_id": "lin2025_pedot_cylinder_v1",
+        "configuration": {"fixture": fixture, "tree_readback": tree},
+    }
+    raw["initial_values"] = [260.0, 260.0]
+    payload = json.dumps(raw, sort_keys=True, separators=(",", ":")).encode()
+    manifest.write_bytes(payload)
+    envelope["submission_manifest_sha256"] = hashlib.sha256(payload).hexdigest()
+    spec = expand_robust_shape_manifest(envelope)
+    assert spec["schema_version"] == "1.1.0"
+    assert spec["adapter_binding"]["pedot_domain"] == 5
 
 
 def test_manifest_rejects_source_or_manifest_mutation(ascii_tmp_path):
