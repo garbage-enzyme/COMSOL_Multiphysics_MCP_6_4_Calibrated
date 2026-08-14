@@ -15,7 +15,7 @@ from comsol_mcp.jobs.manager import JobManager
 from comsol_mcp.jobs.robust_condition_runtime import execute_robust_conditions
 from comsol_mcp.jobs.robust_shape_rows import append_robust_shape_row, read_robust_shape_rows
 from comsol_mcp.jobs.robust_shape_worker import run as run_robust_worker
-from comsol_mcp.jobs.store import process_identity, read_json
+from comsol_mcp.jobs.store import atomic_write_json, process_identity, read_json
 from development_kit.tests.test_robust_shape_optimization import _write_manifest
 
 
@@ -187,6 +187,75 @@ def test_native_runtime_records_observed_client_cleanup_on_startup_failure(
     assert cleanup["working_model_removed"] is False
     assert cleanup["client_disconnect"] == "not_applicable"
     assert cleanup["errors"] == ([] if not clear_fails else ["client_clear:RuntimeError"])
+
+
+class _CleanupOwnership:
+    def __init__(self, *, inventory_complete=True, external=None, release=True):
+        self.inventory_complete = inventory_complete
+        self.external = external or []
+        self.release_result = release
+        self.status_calls = []
+
+    def release(self):
+        return {"success": self.release_result, "released": self.release_result}
+
+    def status(self, *, require_fresh_inventory=False):
+        self.status_calls.append(require_fresh_inventory)
+        return {
+            "process_inventory": {"complete": self.inventory_complete},
+            "lease": {"state": "absent" if self.release_result else "active"},
+            "external_solver_processes": self.external,
+        }
+
+
+def test_licensed_cleanup_uses_native_receipt_and_fresh_ownership_status(ascii_tmp_path):
+    atomic_write_json(
+        ascii_tmp_path / "native-cleanup.json",
+        {
+            "source_model_removed": True,
+            "working_model_removed": True,
+            "client_clear": True,
+            "client_disconnect": "not_applicable",
+            "errors": [],
+        },
+    )
+    ownership = _CleanupOwnership()
+    payload = robust_shape_worker._finalize_licensed_cleanup(
+        ascii_tmp_path,
+        ownership=ownership,
+        lease_acquired=True,
+        native_runtime_entered=True,
+        source_unchanged=True,
+    )
+    assert ownership.status_calls == [True]
+    assert all(payload.values())
+    receipt = read_json(ascii_tmp_path / "licensed-cleanup.json")
+    assert receipt["errors"] == []
+    assert receipt["inventory_fingerprint"]
+    assert receipt["native_cleanup_fingerprint"]
+
+
+def test_licensed_cleanup_fails_closed_on_false_clear_or_incomplete_inventory(
+    ascii_tmp_path,
+):
+    atomic_write_json(
+        ascii_tmp_path / "native-cleanup.json",
+        {"client_clear": False, "errors": ["client_clear:RuntimeError"]},
+    )
+    payload = robust_shape_worker._finalize_licensed_cleanup(
+        ascii_tmp_path,
+        ownership=_CleanupOwnership(inventory_complete=False),
+        lease_acquired=True,
+        native_runtime_entered=True,
+        source_unchanged=True,
+    )
+    assert payload["client_clear"] is False
+    assert payload["owned_processes_absent"] is False
+    assert payload["lease_released"] is True
+    assert read_json(ascii_tmp_path / "licensed-cleanup.json")["errors"] == [
+        "native_cleanup:reported_errors",
+        "owned_processes_absent:unproved"
+    ]
 
 
 def _manager(root, monkeypatch):

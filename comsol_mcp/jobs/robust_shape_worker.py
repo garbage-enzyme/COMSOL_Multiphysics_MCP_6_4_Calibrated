@@ -15,7 +15,13 @@ from comsol_mcp.research.robust_startup_admission import evaluate_robust_startup
 from .process_control import contain_current_process_tree
 from .resource_admission import collect_resource_telemetry
 from .robust_shape_rows import append_robust_shape_row, read_robust_shape_rows
-from .store import JobStore, atomic_write_json, cancel_request_targets_attempt, process_identity
+from .store import (
+    JobStore,
+    atomic_write_json,
+    cancel_request_targets_attempt,
+    process_identity,
+    read_json,
+)
 
 
 def _synthetic_observations(spec: dict[str, Any]) -> list[dict[str, Any]]:
@@ -198,6 +204,105 @@ def _cancel_requested(store: JobStore, job_id: str, attempt: int) -> bool:
         state["status"] == "cancel_requested"
         or cancel_request_targets_attempt(store.read_control(job_id), attempt)
     )
+
+
+def _finalize_licensed_cleanup(
+    directory: Path,
+    *,
+    ownership: Any,
+    lease_acquired: bool,
+    native_runtime_entered: bool,
+    source_unchanged: bool,
+) -> dict[str, Any]:
+    """Collect observed native, lease, and process cleanup without asserting success."""
+    errors: list[str] = []
+    client_clear = not native_runtime_entered
+    native_path = directory / "native-cleanup.json"
+    native_fingerprint = None
+    if native_runtime_entered:
+        try:
+            native = read_json(native_path)
+            client_clear = bool(
+                native.get("client_clear") is True
+                and native.get("source_model_removed") is True
+                and native.get("working_model_removed") is True
+                and native.get("client_disconnect") in {True, "not_applicable"}
+                and not native.get("errors")
+            )
+            if native.get("errors"):
+                errors.append("native_cleanup:reported_errors")
+            native_fingerprint = domain_sha256_v2(
+                "comsol_mcp.robust_native_cleanup_receipt", native
+            )
+        except Exception as exc:
+            errors.append(f"native_cleanup_receipt:{type(exc).__name__}")
+
+    release_succeeded = not lease_acquired
+    if lease_acquired and ownership is not None:
+        try:
+            released = ownership.release()
+            release_succeeded = bool(
+                released.get("success") is True and released.get("released") is True
+            )
+            if not release_succeeded:
+                errors.append("lease_release:unproved")
+        except Exception as exc:
+            errors.append(f"lease_release:{type(exc).__name__}")
+
+    lease_absent = not lease_acquired and ownership is None
+    owned_processes_absent = not native_runtime_entered and ownership is None
+    inventory_fingerprint = None
+    if ownership is not None:
+        try:
+            status = ownership.status(require_fresh_inventory=True)
+            inventory = status.get("process_inventory", {})
+            lease_absent = status.get("lease", {}).get("state") == "absent"
+            owned_processes_absent = bool(
+                inventory.get("complete") is True
+                and not status.get("external_solver_processes")
+            )
+            inventory_fingerprint = domain_sha256_v2(
+                "comsol_mcp.robust_cleanup_ownership_status",
+                {
+                    "inventory": inventory,
+                    "lease": status.get("lease"),
+                    "external_solver_processes": status.get("external_solver_processes"),
+                },
+            )
+            if not owned_processes_absent:
+                errors.append("owned_processes_absent:unproved")
+            if not lease_absent:
+                errors.append("lease_absent:unproved")
+        except Exception as exc:
+            errors.append(f"cleanup_inventory:{type(exc).__name__}")
+
+    payload = {
+        "source_unchanged": source_unchanged,
+        "client_clear": client_clear,
+        "owned_processes_absent": owned_processes_absent,
+        "lease_released": bool(release_succeeded and lease_absent),
+        "native_cleanup_fingerprint": native_fingerprint,
+        "inventory_fingerprint": inventory_fingerprint,
+        "errors": errors,
+    }
+    receipt = {
+        "schema_name": "comsol_mcp.robust_licensed_cleanup_receipt",
+        "schema_version": "1.0.0",
+        **payload,
+    }
+    receipt["receipt_fingerprint"] = domain_sha256_v2(
+        "comsol_mcp.robust_licensed_cleanup_receipt", receipt
+    )
+    atomic_write_json(directory / "licensed-cleanup.json", receipt)
+    return {
+        key: payload[key]
+        for key in (
+            "source_unchanged",
+            "client_clear",
+            "owned_processes_absent",
+            "lease_released",
+        )
+    } | {"cleanup_fingerprint": receipt["receipt_fingerprint"]}
 
 
 def _record_synthetic_cancel(
@@ -490,6 +595,7 @@ def _run_licensed(root: str, job_id: str) -> int:
     attempt = int(store.read_state(job_id).get("attempt", 1))
     ownership = None
     lease_acquired = False
+    native_runtime_entered = False
     source = Path(spec["source_model_path"])
     source_before = source.read_bytes()
     try:
@@ -540,6 +646,7 @@ def _run_licensed(root: str, job_id: str) -> int:
             raise RuntimeError(f"licensed robust adapter dispatch is unsupported: {adapter_id}")
         from .robust_shape_native_runtime import execute_lin2025_conditions
 
+        native_runtime_entered = True
         result = execute_lin2025_conditions(
             spec,
             directory,
@@ -604,17 +711,13 @@ def _run_licensed(root: str, job_id: str) -> int:
         return 1
     finally:
         source_unchanged = source.exists() and source.read_bytes() == source_before
-        lease_released = not lease_acquired
-        if lease_acquired and ownership is not None:
-            try:
-                released = ownership.release()
-                lease_released = bool(released.get("success") and released.get("released"))
-            except Exception as exc:
-                print(
-                    f"robust lease release failed: {type(exc).__name__}",
-                    file=sys.stderr,
-                    flush=True,
-                )
+        cleanup_payload = _finalize_licensed_cleanup(
+            directory,
+            ownership=ownership,
+            lease_acquired=lease_acquired,
+            native_runtime_entered=native_runtime_entered,
+            source_unchanged=source_unchanged,
+        )
         rows_path = directory / "robust_shape_rows.jsonl"
         try:
             rows = read_robust_shape_rows(
@@ -626,16 +729,7 @@ def _run_licensed(root: str, job_id: str) -> int:
                     job_fingerprint=spec["spec_fingerprint"],
                     attempt=attempt,
                     kind="cleanup",
-                    payload={
-                        "source_unchanged": source_unchanged,
-                        "client_clear": True,
-                        "owned_processes_absent": True,
-                        "lease_released": lease_released,
-                        "cleanup_fingerprint": domain_sha256_v2(
-                            "comsol_mcp.robust_licensed_cleanup",
-                            {"source_unchanged": source_unchanged},
-                        ),
-                    },
+                    payload=cleanup_payload,
                 )
         except Exception as cleanup_exc:
             print(
