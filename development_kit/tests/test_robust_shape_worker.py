@@ -6,7 +6,11 @@ import os
 
 import pytest
 
-from comsol_mcp.jobs import robust_condition_runtime, robust_shape_worker
+from comsol_mcp.jobs import (
+    robust_condition_runtime,
+    robust_shape_native_runtime,
+    robust_shape_worker,
+)
 from comsol_mcp.jobs.manager import JobManager
 from comsol_mcp.jobs.robust_condition_runtime import execute_robust_conditions
 from comsol_mcp.jobs.robust_shape_rows import append_robust_shape_row, read_robust_shape_rows
@@ -139,6 +143,50 @@ def test_condition_runtime_recovers_receipt_written_before_row(
         cancel_requested=lambda: False,
     )
     assert recovery_backend.calls == []
+
+
+class _LoadFailureClient:
+    port = None
+
+    def __init__(self, *, clear_fails=False):
+        self.clear_fails = clear_fails
+        self.clear_calls = 0
+
+    def load(self, _path):
+        raise RuntimeError("injected load failure")
+
+    def clear(self):
+        self.clear_calls += 1
+        if self.clear_fails:
+            raise RuntimeError("injected clear failure")
+
+
+@pytest.mark.parametrize("clear_fails", [False, True])
+def test_native_runtime_records_observed_client_cleanup_on_startup_failure(
+    ascii_tmp_path, clear_fails
+):
+    source = ascii_tmp_path / "source.mph"
+    source.write_bytes(b"fixture")
+    client = _LoadFailureClient(clear_fails=clear_fails)
+    with pytest.raises(RuntimeError, match="injected load failure"):
+        robust_shape_native_runtime.execute_lin2025_conditions(
+            {
+                "source_model_path": str(source),
+                "cores": 2,
+                "version": "6.4",
+            },
+            ascii_tmp_path,
+            attempt=1,
+            client_factory=lambda **_kwargs: client,
+            cancel_requested=lambda: False,
+        )
+    cleanup = read_json(ascii_tmp_path / "native-cleanup.json")
+    assert client.clear_calls == 1
+    assert cleanup["client_clear"] is (not clear_fails)
+    assert cleanup["source_model_removed"] is False
+    assert cleanup["working_model_removed"] is False
+    assert cleanup["client_disconnect"] == "not_applicable"
+    assert cleanup["errors"] == ([] if not clear_fails else ["client_clear:RuntimeError"])
 
 
 def _manager(root, monkeypatch):

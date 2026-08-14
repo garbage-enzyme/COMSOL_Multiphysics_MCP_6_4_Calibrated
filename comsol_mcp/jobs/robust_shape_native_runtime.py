@@ -181,8 +181,17 @@ def execute_lin2025_conditions(
     """Load one derived copy, configure controls, and execute durable conditions."""
     source = Path(spec["source_model_path"])
     configured = directory / "robust-working.mph"
+    cleanup_path = directory / "native-cleanup.json"
     client = None
     model = None
+    source_model = None
+    cleanup: dict[str, Any] = {
+        "source_model_removed": False,
+        "working_model_removed": False,
+        "client_clear": False,
+        "client_disconnect": "not_applicable",
+        "errors": [],
+    }
     try:
         if client_factory is None:
             import mph
@@ -192,6 +201,8 @@ def execute_lin2025_conditions(
         source_model = client.load(str(source))
         source_model.java.save(str(configured), True)
         client.remove(source_model)
+        source_model = None
+        cleanup["source_model_removed"] = True
         model = client.load(str(configured))
         backend = ClientapiLin2025ConditionBackend(model, spec)
         controls = backend.prepare(spec["initial_values"])
@@ -208,12 +219,35 @@ def execute_lin2025_conditions(
             "controls_fingerprint": controls.get("receipt_fingerprint"),
             "solver_started": True,
             "configured_model": str(configured),
+            "cleanup": cleanup,
         }
     finally:
-        if model is not None:
-            client.remove(model)
+        if source_model is not None and client is not None:
+            try:
+                client.remove(source_model)
+                cleanup["source_model_removed"] = True
+            except Exception as exc:
+                cleanup["errors"].append(f"source_model_remove:{type(exc).__name__}")
+        if model is not None and client is not None:
+            try:
+                client.remove(model)
+                cleanup["working_model_removed"] = True
+            except Exception as exc:
+                cleanup["errors"].append(f"working_model_remove:{type(exc).__name__}")
         if client is not None:
-            client.clear()
+            try:
+                client.clear()
+                cleanup["client_clear"] = True
+            except Exception as exc:
+                cleanup["errors"].append(f"client_clear:{type(exc).__name__}")
+            if getattr(client, "port", None):
+                try:
+                    client.disconnect()
+                    cleanup["client_disconnect"] = True
+                except Exception as exc:
+                    cleanup["client_disconnect"] = False
+                    cleanup["errors"].append(f"client_disconnect:{type(exc).__name__}")
+        atomic_write_json(cleanup_path, cleanup)
 
 
 __all__ = ["ClientapiLin2025ConditionBackend", "execute_lin2025_conditions"]
