@@ -15,7 +15,8 @@ ADAPTER_ID = "lin2025_pedot_cylinder_v1"
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _VARIABLES = ("pedot_cylinder_radius_x", "pedot_cylinder_radius_y")
 _STATES = ("OX", "MR")
-_VARIABLES = ("pedot_cylinder_radius_x", "pedot_cylinder_radius_y")
+_DOMAIN_COUNT = 6
+_BOUNDARY_COUNT = 32
 
 
 def _sha(value: object, name: str) -> str:
@@ -214,9 +215,19 @@ def compile_lin2025_pedot_shape_support(fixture: object, tree_readback: object) 
     if not isinstance(tree_readback, Mapping):
         raise ValueError("Lin2025 shape tree readback must be an object")
     required = {
-        "source_sha256", "domain_map", "domain_z_bounds_um", "material_tags",
-        "feature_tags", "free_domains", "fixed_boundaries", "lateral_boundaries",
-        "baseline_radius_um", "center_um",
+        "source_sha256",
+        "domain_map",
+        "domain_z_bounds_um",
+        "material_tags",
+        "feature_tags",
+        "domain_count",
+        "boundary_count",
+        "exterior_boundaries",
+        "pedot_boundaries",
+        "pedot_lateral_boundaries",
+        "pedot_cap_boundaries",
+        "baseline_radius_um",
+        "center_um",
     }
     if set(tree_readback) != required:
         raise ValueError("Lin2025 shape tree readback fields are incomplete")
@@ -243,13 +254,22 @@ def compile_lin2025_pedot_shape_support(fixture: object, tree_readback: object) 
         if result != value:
             raise ValueError(f"Lin2025 {name} must be sorted and unique")
         return result
-    free_domains = _ids(tree_readback["free_domains"], "free_domains")
-    if free_domains != list(range(1, 7)):
-        raise ValueError("Lin2025 free domain selection changed")
-    fixed = _ids(tree_readback["fixed_boundaries"], "fixed_boundaries")
-    lateral = _ids(tree_readback["lateral_boundaries"], "lateral_boundaries")
-    if set(fixed) & set(lateral):
-        raise ValueError("Lin2025 fixed and lateral selections overlap")
+    domain_count = tree_readback["domain_count"]
+    boundary_count = tree_readback["boundary_count"]
+    if domain_count != _DOMAIN_COUNT or boundary_count != _BOUNDARY_COUNT:
+        raise ValueError("Lin2025 topology counts changed")
+    exterior = _ids(tree_readback["exterior_boundaries"], "exterior_boundaries")
+    pedot = _ids(tree_readback["pedot_boundaries"], "pedot_boundaries")
+    lateral = _ids(
+        tree_readback["pedot_lateral_boundaries"], "pedot_lateral_boundaries"
+    )
+    caps = _ids(tree_readback["pedot_cap_boundaries"], "pedot_cap_boundaries")
+    if len(exterior) != 18 or len(pedot) != 6 or len(lateral) != 4 or len(caps) != 2:
+        raise ValueError("Lin2025 deformation selection cardinality changed")
+    if sorted(lateral + caps) != pedot or set(exterior) & set(pedot):
+        raise ValueError("Lin2025 deformation selections overlap or are incomplete")
+    if any(item > boundary_count for item in exterior + pedot):
+        raise ValueError("Lin2025 deformation selection exceeds the boundary count")
     radius = tree_readback["baseline_radius_um"]
     center = tree_readback["center_um"]
     if not isinstance(radius, (int, float)) or isinstance(radius, bool) or radius <= 0:
@@ -265,9 +285,13 @@ def compile_lin2025_pedot_shape_support(fixture: object, tree_readback: object) 
         "fixture_fingerprint": normalized["fixture_fingerprint"],
         "source_sha256": normalized["source_identity"]["source_sha256"],
         "pedot_domain": normalized["domains"]["pedot_cylinder"],
-        "free_domains": free_domains,
-        "fixed_boundaries": fixed,
-        "lateral_boundaries": lateral,
+        "domain_count": domain_count,
+        "boundary_count": boundary_count,
+        "free_domains": list(range(1, domain_count + 1)),
+        "fixed_boundaries": exterior,
+        "pedot_boundaries": pedot,
+        "pedot_lateral_boundaries": lateral,
+        "pedot_cap_boundaries": caps,
         "baseline_radius_um": float(radius),
         "center_um": [float(item) for item in center],
         "variable_ids": list(_VARIABLES),

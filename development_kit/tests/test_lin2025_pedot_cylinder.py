@@ -128,11 +128,16 @@ def test_shape_support_requires_explicit_live_selections():
         "domain_z_bounds_um": {"5": [0.0, 0.2]},
         "material_tags": {"pedot_cylinder": "OX"},
         "feature_tags": ["ewfd", "mesh1"],
-        "free_domains": [1, 2, 3, 4, 5, 6],
-        "fixed_boundaries": [1, 2, 3, 4],
-        "lateral_boundaries": [5, 6],
-        "baseline_radius_um": 0.28,
-        "center_um": [0.85, 0.85],
+        "domain_count": 6,
+        "boundary_count": 32,
+        "exterior_boundaries": [
+            1, 2, 3, 4, 5, 7, 8, 10, 11, 13, 14, 15, 16, 17, 29, 30, 31, 32,
+        ],
+        "pedot_boundaries": [18, 19, 20, 23, 25, 27],
+        "pedot_lateral_boundaries": [18, 19, 25, 27],
+        "pedot_cap_boundaries": [20, 23],
+        "baseline_radius_um": 0.26,
+        "center_um": [0.85, 0.0],
     }
     support = compile_lin2025_pedot_shape_support(fixture, tree)
     assert support["variable_ids"] == ["pedot_cylinder_radius_x", "pedot_cylinder_radius_y"]
@@ -148,11 +153,16 @@ def test_shape_support_rejects_implicit_or_overlapping_selections():
         "domain_z_bounds_um": {"5": [0.0, 0.2]},
         "material_tags": {"pedot_cylinder": "OX"},
         "feature_tags": ["ewfd", "mesh1"],
-        "free_domains": [1, 2, 3, 4, 5, 6],
-        "fixed_boundaries": [1, 5],
-        "lateral_boundaries": [5, 6],
-        "baseline_radius_um": 0.28,
-        "center_um": [0.85, 0.85],
+        "domain_count": 6,
+        "boundary_count": 32,
+        "exterior_boundaries": [
+            1, 2, 3, 4, 5, 7, 8, 10, 11, 13, 14, 15, 16, 17, 18, 29, 30, 31,
+        ],
+        "pedot_boundaries": [18, 19, 20, 23, 25, 27],
+        "pedot_lateral_boundaries": [18, 19, 25, 27],
+        "pedot_cap_boundaries": [20, 23],
+        "baseline_radius_um": 0.26,
+        "center_um": [0.85, 0.0],
     }
     with pytest.raises(ValueError, match="overlap"):
         compile_lin2025_pedot_shape_support(fixture, tree)
