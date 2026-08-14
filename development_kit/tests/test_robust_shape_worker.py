@@ -420,6 +420,14 @@ def test_native_tag_resolution_supports_physics_feature_collections():
     assert robust_shape_native_runtime._get(FeatureCollection(), "ps1") is feature
 
 
+def test_native_result_flatten_accepts_array_like_iterables():
+    class ArrayLike:
+        def __iter__(self):
+            return iter((1.0, (2.0, 3.0)))
+
+    assert robust_shape_native_runtime._flatten_real(ArrayLike()) == [1.0, 2.0, 3.0]
+
+
 @pytest.mark.parametrize(
     ("periodic_drift", "port_drift", "message"),
     [

@@ -46,6 +46,15 @@ def _flatten_real(value: Any) -> list[float]:
             for child in item:
                 visit(child)
             return
+        if not isinstance(item, (str, bytes)):
+            try:
+                iterator = iter(item)
+            except TypeError:
+                iterator = None
+            if iterator is not None:
+                for child in iterator:
+                    visit(child)
+                return
         scalar = complex(item)
         if not math.isfinite(scalar.real) or not math.isfinite(scalar.imag):
             raise ValueError("COMSOL result contains a nonfinite value")
