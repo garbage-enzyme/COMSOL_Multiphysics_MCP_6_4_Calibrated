@@ -72,8 +72,9 @@ def _flatten_real(value: Any) -> list[float]:
 class ClientapiLin2025ConditionBackend(RobustConditionBackend):
     """Apply all caller-declared condition controls to one derived model."""
 
-    def __init__(self, model: Any, spec: Mapping[str, Any]):
+    def __init__(self, model: Any, spec: Mapping[str, Any], *, working_model_path: Path):
         self.model = model
+        self.working_model_path = working_model_path.resolve()
         configuration = spec["adapter_configuration"]["configuration"]
         self.controls = configuration["condition_controls"]
         self.fixture = configuration["fixture"]
@@ -198,6 +199,7 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
             wavelength_expression
         ):
             raise ValueError("study wavelength property readback differs")
+        self.model.java.save(str(self.working_model_path))
         self.study.run()
         tag = f"robust_eval_{self._counter:04d}"
         evaluator = self.numerical.create(tag, "EvalGlobal")
@@ -304,8 +306,10 @@ def execute_lin2025_conditions(
         source_model = None
         cleanup["source_model_removed"] = True
         model = client.load(str(configured))
-        backend = ClientapiLin2025ConditionBackend(model, spec)
+        backend = ClientapiLin2025ConditionBackend(model, spec, working_model_path=configured)
         controls = backend.prepare(spec["initial_values"])
+        atomic_write_json(directory / "robust-controls.json", controls)
+        model.java.save(str(configured))
         observations = execute_robust_conditions(
             spec,
             directory,
@@ -313,7 +317,6 @@ def execute_lin2025_conditions(
             backend=backend,
             cancel_requested=cancel_requested,
         )
-        atomic_write_json(directory / "robust-controls.json", controls)
         return {
             "observations": observations,
             "controls_fingerprint": controls.get("receipt_fingerprint"),

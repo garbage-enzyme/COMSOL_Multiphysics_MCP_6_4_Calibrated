@@ -386,6 +386,20 @@ class _ModelWithParameters:
         self.java = _JavaWithParameters()
 
 
+class _JavaWithSave(_JavaWithParameters):
+    def __init__(self):
+        super().__init__()
+        self.saved = []
+
+    def save(self, path, *args):
+        self.saved.append((path, args, dict(self.parameters.values)))
+
+
+class _ModelWithSave:
+    def __init__(self):
+        self.java = _JavaWithSave()
+
+
 def _incidence_backend(*, periodic_drift=None, port_drift=None):
     backend = object.__new__(robust_shape_native_runtime.ClientapiLin2025ConditionBackend)
     backend.model = _ModelWithParameters()
@@ -457,6 +471,124 @@ def test_native_solver_memory_policy_rejects_readback_drift():
     backend.linear_solver = _Feature(drift={"ooc": "auto"})
     with pytest.raises(ValueError, match="out-of-core policy readback"):
         backend._set_solver_memory_policy()
+
+
+def test_native_condition_saves_exact_configured_model_before_solve(ascii_tmp_path):
+    backend = object.__new__(robust_shape_native_runtime.ClientapiLin2025ConditionBackend)
+    backend.model = _ModelWithSave()
+    backend.working_model_path = (ascii_tmp_path / "robust-working.mph").resolve()
+    backend._counter = 0
+    backend.controls = {
+        "wavelength_parameter": "wl",
+        "study_step_property": "plist",
+        "study_step_array_property": None,
+    }
+    backend.material = type(
+        "Material",
+        (),
+        {"apply_material_state": lambda _self, _state, _tensor: None},
+    )()
+    backend._set_incidence = lambda _condition: None
+    backend._set_solver_memory_policy = lambda: {
+        "property": "ooc",
+        "requested": "on",
+        "observed": "on",
+    }
+    backend.study_step = _Feature()
+
+    class Study:
+        def run(self):
+            assert backend.model.java.saved
+            raise RuntimeError("injected solve failure")
+
+    backend.study = Study()
+    with pytest.raises(RuntimeError, match="injected solve failure"):
+        backend.evaluate_condition(
+            {
+                "condition_id": "condition-0",
+                "material_state_id": "OX",
+                "wavelength_m": 8e-7,
+            },
+            ["1"] * 9,
+        )
+    assert backend.model.java.saved == [
+        (
+            str(backend.working_model_path),
+            (),
+            {"wl": "7.9999999999999996e-07[m]"},
+        )
+    ]
+
+
+def test_native_runtime_persists_controls_before_condition_failure(ascii_tmp_path, monkeypatch):
+    source = ascii_tmp_path / "source.mph"
+    source.write_bytes(b"fixture")
+    saved = []
+
+    class Java:
+        def __init__(self, label):
+            self.label = label
+
+        def save(self, path, *args):
+            saved.append((self.label, path, args))
+
+    class Model:
+        def __init__(self, label):
+            self.java = Java(label)
+
+    class Client:
+        port = None
+
+        def __init__(self):
+            self.models = [Model("source"), Model("working")]
+
+        def load(self, _path):
+            return self.models.pop(0)
+
+        def remove(self, _model):
+            return None
+
+        def clear(self):
+            return None
+
+    class Backend:
+        def __init__(self, model, _spec, *, working_model_path):
+            self.model = model
+            self.working_model_path = working_model_path
+
+        def prepare(self, _initial_values):
+            return {"receipt_fingerprint": "a" * 64, "configured": True}
+
+    monkeypatch.setattr(robust_shape_native_runtime, "ClientapiLin2025ConditionBackend", Backend)
+    monkeypatch.setattr(
+        robust_shape_native_runtime,
+        "execute_robust_conditions",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("injected condition failure")),
+    )
+    with pytest.raises(RuntimeError, match="injected condition failure"):
+        robust_shape_native_runtime.execute_lin2025_conditions(
+            {
+                "source_model_path": str(source),
+                "cores": 2,
+                "version": "6.4",
+                "comsol_temporary_directory": str(ascii_tmp_path),
+                "initial_values": [260.0, 260.0],
+            },
+            ascii_tmp_path,
+            attempt=1,
+            client_factory=lambda **_kwargs: Client(),
+            java_environment_reader=os.environ.get,
+            cancel_requested=lambda: False,
+        )
+    assert read_json(ascii_tmp_path / "robust-controls.json") == {
+        "configured": True,
+        "receipt_fingerprint": "a" * 64,
+    }
+    assert saved[-1] == (
+        "working",
+        str((ascii_tmp_path / "robust-working.mph").resolve()),
+        (),
+    )
 
 
 @pytest.mark.parametrize(
