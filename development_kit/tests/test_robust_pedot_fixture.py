@@ -76,6 +76,11 @@ def test_compiler_builds_path_redacted_ox_mr_tensor_and_24_condition_fixture(asc
     serialized = str(receipt)
     assert str(delivery) not in serialized
     assert receipt["private_paths_redacted"] is True
+    tensor_rows = receipt["material_tensor_rows"]
+    assert [item["state_id"] for item in tensor_rows["states"]] == ["OX", "MR"]
+    assert [row["wavelength_m"] for row in tensor_rows["states"][0]["rows"]] == pytest.approx(
+        [8e-7, 1e-6, 1.2e-6]
+    )
 
 
 def test_compiler_rejects_wrong_comsol_sign_missing_range_or_implicit_inputs(ascii_tmp_path):
