@@ -435,6 +435,7 @@ models are intentionally absent.
 - `comsol_mcp/research/lin2025_pedot_backend.py` — This module prepares failure-atomic ClientAPI Deformed Geometry controls for the derived Lin2025 PEDOT cylinder.
 - `comsol_mcp/jobs/native_adjoint_runtime.py` — This module executes the licensed fixed-topology GCMMA lane with caller budgets, explicit datasets, remesh, fresh-forward, and physical evidence.
 - `comsol_mcp/jobs/robust_condition_runtime.py` — This module persists and exactly replays full per-condition licensed receipts before hash-chained robust rows.
+- `comsol_mcp/jobs/robust_shape_native_runtime.py` — This module applies explicit Lin2025 ClientAPI condition controls on a derived model and delegates durable rows.
 - `comsol_mcp/jobs/robust_shape_optimization.py` — This module expands a bounded external robust-shape manifest and validates every contract before worker startup.
 - `comsol_mcp/jobs/robust_shape_rows.py` — This module persists hash-chained fsync'd robust condition, gradient, iteration, trial, checkpoint, and cleanup rows.
 - `comsol_mcp/jobs/robust_shape_worker.py` — This module runs solver-free robust lifecycle fixtures and dispatches future licensed robust shape execution.

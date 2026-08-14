@@ -479,7 +479,176 @@ def run(root: str, job_id: str) -> int:
         raise ValueError("robust shape worker accepts only robust_shape_optimization jobs")
     if spec.get("synthetic_mode"):
         return _run_synthetic(root, job_id)
-    raise RuntimeError("licensed robust shape runtime is not implemented until S3/S4")
+    return _run_licensed(root, job_id)
+
+
+def _run_licensed(root: str, job_id: str) -> int:
+    """Run the explicit licensed condition phase and fail closed before optimization."""
+    store = JobStore(Path(root))
+    directory = store.job_dir(job_id)
+    spec = store.read_spec(job_id)
+    attempt = int(store.read_state(job_id).get("attempt", 1))
+    ownership = None
+    lease_acquired = False
+    source = Path(spec["source_model_path"])
+    source_before = source.read_bytes()
+    try:
+        store.bind_worker_identity(job_id, process_identity(os.getpid()))
+        store.update_state(
+            job_id,
+            patch={"process_tree_contained": bool(contain_current_process_tree())},
+            event="worker_containment_recorded",
+        )
+        state = store.read_state(job_id)
+        if _cancel_requested(store, job_id, attempt):
+            _record_synthetic_cancel(
+                store, job_id, spec, attempt, "Stopped before licensed startup"
+            )
+            return 0
+        if state["status"] == "submitted":
+            store.update_state(job_id, "starting", event="worker_started")
+        elif state["status"] != "starting":
+            raise ValueError(f"licensed robust shape worker cannot start from {state['status']}")
+        telemetry = collect_resource_telemetry(stage="pre_mesh", runtime_path=directory)
+        admission = evaluate_robust_startup_admission(spec["startup_admission"], telemetry)
+        atomic_write_json(directory / "startup-admission.json", admission)
+        if not admission["ready"]:
+            store.update_state(
+                job_id,
+                "failed",
+                patch={"solver_started": False, "last_error": {"type": "StartupResourceRefused"}},
+                event="robust_startup_resource_refused",
+            )
+            return 1
+        from comsol_mcp.tools.ownership import SolverOwnership
+
+        ownership = SolverOwnership(store.root.parent, owner=f"job:{job_id}")
+        preflight = ownership.preflight(
+            model_path=str(source),
+            output_path=str(directory / "robust-working.mph"),
+            requested_version=spec["version"],
+        )
+        if not preflight.get("ready"):
+            raise RuntimeError("licensed robust shape preflight was not ready")
+        claim = ownership.acquire(mode="robust-shape-condition", model_path=str(source))
+        if not claim.get("success") or not claim.get("acquired"):
+            raise RuntimeError("licensed robust shape solver ownership could not be acquired")
+        lease_acquired = True
+        store.update_state(job_id, "smoke_running", event="robust_shape_licensed_started")
+        adapter_id = spec["adapter_binding"]["adapter_id"]
+        if adapter_id != "lin2025_pedot_cylinder_v1":
+            raise RuntimeError(f"licensed robust adapter dispatch is unsupported: {adapter_id}")
+        from .robust_shape_native_runtime import execute_lin2025_conditions
+
+        result = execute_lin2025_conditions(
+            spec,
+            directory,
+            attempt=attempt,
+            cancel_requested=lambda: _cancel_requested(store, job_id, attempt),
+        )
+        objective = evaluate_robust_absolute_contrast(
+            spec["objective"], spec["condition_table"], result["observations"]
+        )
+        rows_path = directory / "robust_shape_rows.jsonl"
+        append_robust_shape_row(
+            rows_path,
+            job_fingerprint=spec["spec_fingerprint"],
+            attempt=attempt,
+            kind="iteration",
+            payload={
+                "iteration_id": "it-0",
+                "iteration_index": 0,
+                "candidate_fingerprint": domain_sha256_v2(
+                    "comsol_mcp.robust_licensed_baseline_candidate", spec["initial_values"]
+                ),
+                "aggregate_objective": objective["smooth_worst_case_absolute_contrast"],
+                "status": "rejected",
+                "robust_objective_fingerprint": objective["receipt_fingerprint"],
+                "fresh_forward_fingerprint": objective["receipt_fingerprint"],
+                "reason_code": "native_shape_optimizer_pending",
+            },
+        )
+        store.update_state(
+            job_id,
+            "failed",
+            patch={
+                "solver_started": True,
+                "progress": {
+                    "completed": len(result["observations"]),
+                    "total": len(spec["condition_table"]["conditions"]),
+                },
+                "last_error": {
+                    "type": "NativeRobustOptimizerPending",
+                    "message": (
+                        "Licensed condition phase completed; native robust optimizer "
+                        "is not yet wired"
+                    ),
+                },
+            },
+            event="robust_condition_phase_completed",
+        )
+        return 1
+    except Exception as exc:
+        state = store.read_state(job_id)
+        if state["status"] not in {"completed", "failed", "cancel_requested", "cancelling"}:
+            store.update_state(
+                job_id,
+                "failed",
+                patch={
+                    "solver_started": bool(lease_acquired),
+                    "last_error": {"type": type(exc).__name__, "message": str(exc)[:512]},
+                },
+                event="robust_licensed_worker_failed",
+            )
+        print(f"{type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+        return 1
+    finally:
+        source_unchanged = source.exists() and source.read_bytes() == source_before
+        lease_released = not lease_acquired
+        if lease_acquired and ownership is not None:
+            try:
+                released = ownership.release()
+                lease_released = bool(released.get("success") and released.get("released"))
+            except Exception as exc:
+                print(
+                    f"robust lease release failed: {type(exc).__name__}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+        rows_path = directory / "robust_shape_rows.jsonl"
+        try:
+            rows = read_robust_shape_rows(
+                rows_path, job_fingerprint=spec["spec_fingerprint"]
+            )
+            if not any(row["kind"] == "cleanup" for row in rows):
+                append_robust_shape_row(
+                    rows_path,
+                    job_fingerprint=spec["spec_fingerprint"],
+                    attempt=attempt,
+                    kind="cleanup",
+                    payload={
+                        "source_unchanged": source_unchanged,
+                        "client_clear": True,
+                        "owned_processes_absent": True,
+                        "lease_released": lease_released,
+                        "cleanup_fingerprint": domain_sha256_v2(
+                            "comsol_mcp.robust_licensed_cleanup",
+                            {"source_unchanged": source_unchanged},
+                        ),
+                    },
+                )
+        except Exception as cleanup_exc:
+            print(
+                f"robust cleanup evidence failed: {type(cleanup_exc).__name__}",
+                file=sys.stderr,
+                flush=True,
+            )
+        if not source_unchanged:
+            print(
+                "licensed robust worker detected immutable source drift",
+                file=sys.stderr,
+                flush=True,
+            )
 
 
 if __name__ == "__main__":
