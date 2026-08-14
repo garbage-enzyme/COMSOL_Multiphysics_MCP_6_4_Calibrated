@@ -78,7 +78,9 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
         component = _get(model.java.component(), self.controls["component_tag"])
         physics = _get(component.physics(), self.controls["physics_tag"])
         self.periodic = _get(physics, self.controls["periodic_structure_tag"])
-        self.ports = [_get(physics, tag) for tag in self.controls["periodic_port_tags"]]
+        self.ports = [
+            _get(self.periodic, tag) for tag in self.controls["periodic_port_tags"]
+        ]
         self.study = _get(model.java.study(), self.controls["study_tag"])
         self.study_step = self.study.feature(self.controls["study_step_tag"])
         numerical = model.java.result().numerical()
