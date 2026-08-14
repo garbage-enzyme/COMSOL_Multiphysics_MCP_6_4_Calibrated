@@ -172,6 +172,20 @@ def test_manifest_v11_accepts_tagged_lin2025_adapter(ascii_tmp_path):
     raw.pop("structure_adapter_manifest")
     raw.pop("structure_tree_audit")
     raw["support"] = support
+    wavelength_map = dict(
+        zip(
+            sorted({row["wavelength_m"] for row in raw["condition_table"]["conditions"]}),
+            (8e-7, 1e-6, 1.2e-6),
+            strict=True,
+        )
+    )
+    for row in raw["condition_table"]["conditions"]:
+        row["wavelength_m"] = wavelength_map[row["wavelength_m"]]
+    raw["finalist_validation_policy"]["condition_table_fingerprint"] = (
+        normalize_optimization_condition_table(raw["condition_table"])[
+            "condition_table_fingerprint"
+        ]
+    )
     raw["shape_policy"]["adapter_id"] = "lin2025_pedot_cylinder_v1"
     raw["finalist_validation_policy"]["shape_policy_fingerprint"] = (
         normalize_shape_support_policy(raw["shape_policy"])["policy_fingerprint"]
@@ -190,7 +204,9 @@ def test_manifest_v11_accepts_tagged_lin2025_adapter(ascii_tmp_path):
                 "states": [
                     {
                         "state_id": state,
-                        "source_sha256": "d" * 64,
+                        "source_sha256": raw["condition_table"]["material_states"][index][
+                            "optical_property_source_sha256"
+                        ],
                         "rows": [
                             {
                                 "wavelength_m": 8e-7,
@@ -210,9 +226,18 @@ def test_manifest_v11_accepts_tagged_lin2025_adapter(ascii_tmp_path):
                                 "zz_real": 3.1,
                                 "zz_imag": -0.2,
                             },
+                            {
+                                "wavelength_m": 1.2e-6,
+                                "xx_real": 2.2,
+                                "xx_imag": -0.1,
+                                "yy_real": 2.2,
+                                "yy_imag": -0.1,
+                                "zz_real": 3.2,
+                                "zz_imag": -0.2,
+                            },
                         ],
                     }
-                    for state in ("OX", "MR")
+                    for index, state in enumerate(("OX", "MR"))
                 ],
             },
         },
@@ -224,6 +249,12 @@ def test_manifest_v11_accepts_tagged_lin2025_adapter(ascii_tmp_path):
     spec = expand_robust_shape_manifest(envelope)
     assert spec["schema_version"] == "1.1.0"
     assert spec["adapter_binding"]["pedot_domain"] == 5
+    assert spec["material_tensor_binding"]["active_wavelengths_m"]["OX"] == pytest.approx(
+        [8e-7, 1e-6, 1.2e-6]
+    )
+    assert spec["material_tensor_binding"]["active_wavelengths_m"]["MR"] == pytest.approx(
+        [8e-7, 1e-6, 1.2e-6]
+    )
 
 
 def test_manifest_rejects_source_or_manifest_mutation(ascii_tmp_path):

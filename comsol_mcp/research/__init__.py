@@ -166,6 +166,7 @@ from .robust_material_tensor_rows import (
     SCHEMA_VERSION as ROBUST_MATERIAL_TENSOR_ROWS_SCHEMA_VERSION,
 )
 from .robust_material_tensor_rows import (
+    bind_robust_material_tensor_rows,
     normalize_robust_material_tensor_rows,
 )
 from .robust_objectives import (
@@ -294,6 +295,7 @@ __all__ = [
     "ROBUST_SHAPE_ADAPTER_CONFIGURATION_SCHEMA_VERSION",
     "ROBUST_MATERIAL_TENSOR_ROWS_SCHEMA_NAME",
     "ROBUST_MATERIAL_TENSOR_ROWS_SCHEMA_VERSION",
+    "bind_robust_material_tensor_rows",
     "ROBUST_SHAPE_CONTROL_RECEIPT_SCHEMA_NAME",
     "ROBUST_SHAPE_CONTROL_RECEIPT_SCHEMA_VERSION",
     "ROBUST_SMOOTHING_COMPARISON_SCHEMA_NAME",

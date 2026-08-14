@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import copy
+import itertools
 
 import pytest
 
+from comsol_mcp.research.robust_conditions import normalize_optimization_condition_table
 from comsol_mcp.research.robust_material_mapping import normalize_optical_property_mapping
+from comsol_mcp.research.robust_material_tensor_rows import bind_robust_material_tensor_rows
 
 
 def _mapping(marker: str = "a", state: str = "OX") -> dict:
@@ -104,3 +107,101 @@ def test_mapping_fingerprint_rejects_column_or_range_tampering():
     tampered["tensor"]["components"][2]["real_column"] = "epsilon1_real"
     with pytest.raises(ValueError, match="fingerprint"):
         normalize_optical_property_mapping(tampered)
+
+
+def _tensor_rows() -> dict:
+    return {
+        "schema_name": "comsol_mcp.robust_material_tensor_rows",
+        "schema_version": "1.0.0",
+        "source_sha256": "c" * 64,
+        "states": [
+            {
+                "state_id": state_id,
+                "source_sha256": marker.upper() * 64,
+                "rows": [
+                    {
+                        "wavelength_m": wavelength,
+                        "xx_real": 2.0,
+                        "xx_imag": -0.1,
+                        "yy_real": 2.0,
+                        "yy_imag": -0.1,
+                        "zz_real": 3.0,
+                        "zz_imag": -0.2,
+                    }
+                    for wavelength in (8e-6, 9e-6, 10e-6)
+                ],
+            }
+            for state_id, marker in (("OX", "a"), ("MR", "b"))
+        ],
+    }
+
+
+def _condition_table() -> dict:
+    states = []
+    for state_id, marker in (("OX", "a"), ("MR", "b")):
+        states.append(
+            {
+                "schema_name": "comsol_mcp.optimization_material_state",
+                "schema_version": "1.0.0",
+                "state_id": state_id,
+                "material_ledger_sha256": marker * 64,
+                "optical_property_source_sha256": marker.upper() * 64,
+                "optical_property_mapping": _mapping(marker.upper(), state_id),
+                "temperature_k": 300.0,
+                "provenance_disposition": "private_input_hash_bound",
+            }
+        )
+    rows = []
+    for index, (wavelength, state_id) in enumerate(
+        itertools.product((8e-6, 9e-6, 10e-6), ("OX", "MR"))
+    ):
+        rows.append(
+            {
+                "condition_id": f"condition-{index}",
+                "order": index,
+                "wavelength_m": wavelength,
+                "incidence_elevation_deg": 0.0,
+                "incidence_azimuth_deg": 0.0,
+                "polarization_basis_id": "x_linear",
+                "excitation_sha256": "e" * 64,
+                "material_state_id": state_id,
+                "objective_role": "objective",
+                "observable_id": "transmission_order_0_0",
+                "weight": 1.0,
+                "target": None,
+                "scale": 1.0,
+                "active": True,
+            }
+        )
+    return {
+        "schema_name": "comsol_mcp.optimization_condition_table",
+        "schema_version": "1.0.0",
+        "table_id": "tensor-binding",
+        "material_states": states,
+        "conditions": rows,
+        "completeness": {"mode": "cartesian_complete", "sparse_justification": None},
+    }
+
+
+def test_tensor_rows_bind_state_sources_temperature_and_active_wavelengths():
+    table = normalize_optimization_condition_table(_condition_table())
+    binding = bind_robust_material_tensor_rows(
+        _tensor_rows(), table, expected_temperature_k=300.0
+    )
+    assert binding["state_ids"] == ["OX", "MR"]
+    assert len(binding["binding_fingerprint"]) == 64
+
+
+def test_tensor_rows_reject_source_temperature_or_wavelength_drift():
+    table = normalize_optimization_condition_table(_condition_table())
+    value = _tensor_rows()
+    value["states"][0]["source_sha256"] = "f" * 64
+    with pytest.raises(ValueError, match="source identity"):
+        bind_robust_material_tensor_rows(value, table, expected_temperature_k=300.0)
+    value = _tensor_rows()
+    with pytest.raises(ValueError, match="temperature"):
+        bind_robust_material_tensor_rows(value, table, expected_temperature_k=301.0)
+    value = _tensor_rows()
+    value["states"][1]["rows"].pop()
+    with pytest.raises(ValueError, match="active wavelengths"):
+        bind_robust_material_tensor_rows(value, table, expected_temperature_k=300.0)

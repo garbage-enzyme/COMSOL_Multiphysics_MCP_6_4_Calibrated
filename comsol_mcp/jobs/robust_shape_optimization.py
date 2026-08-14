@@ -27,6 +27,7 @@ from comsol_mcp.research.robust_finalist_validation import (
     normalize_robust_finalist_validation_policy,
 )
 from comsol_mcp.research.robust_gradient_acceptance import normalize_robust_gradient_policy
+from comsol_mcp.research.robust_material_tensor_rows import bind_robust_material_tensor_rows
 from comsol_mcp.research.robust_objectives import normalize_robust_objective_configuration
 from comsol_mcp.research.robust_optimizer_policy import normalize_robust_optimizer_policy
 from comsol_mcp.research.robust_startup_admission import normalize_robust_startup_policy
@@ -171,6 +172,13 @@ def expand_robust_shape_manifest(submission: object) -> dict[str, Any]:
         adapter_input, support, shape_policy
     )
     adapter_binding = adapter_configuration["binding"]
+    material_tensor_binding = None
+    if adapter_binding["adapter_id"] == "lin2025_pedot_cylinder_v1":
+        material_tensor_binding = bind_robust_material_tensor_rows(
+            adapter_configuration["configuration"]["material_tensor_rows"],
+            conditions,
+            expected_temperature_k=adapter_binding["temperature_k"],
+        )
     if support["source_identity"] != source_hash:
         raise ValueError("robust shape support source identity differs from manifest source")
     if support["adapter_id"] != shape_policy["adapter_id"]:
@@ -224,6 +232,7 @@ def expand_robust_shape_manifest(submission: object) -> dict[str, Any]:
         "source_model_sha256": source_hash,
         "adapter_configuration": adapter_configuration,
         "adapter_binding": adapter_binding,
+        "material_tensor_binding": material_tensor_binding,
         "support": support,
         "condition_table": conditions,
         "objective": objective,

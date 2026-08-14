@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from comsol_mcp.durable import domain_sha256_v2
@@ -80,4 +81,65 @@ def normalize_robust_material_tensor_rows(value: object) -> dict[str, Any]:
     return body
 
 
-__all__ = ["SCHEMA_NAME", "SCHEMA_VERSION", "normalize_robust_material_tensor_rows"]
+def bind_robust_material_tensor_rows(
+    value: object, condition_table: object, *, expected_temperature_k: object
+) -> dict[str, Any]:
+    """Bind exact tensor samples to all active condition wavelengths and state sources."""
+    rows = normalize_robust_material_tensor_rows(value)
+    if not isinstance(condition_table, dict):
+        raise ValueError("condition table must be normalized before tensor-row binding")
+    temperature = _finite(expected_temperature_k, "expected_temperature_k", positive=True)
+    material_states = condition_table.get("material_states")
+    conditions = condition_table.get("conditions")
+    if not isinstance(material_states, list) or not isinstance(conditions, list):
+        raise ValueError("condition table is incomplete for tensor-row binding")
+    states_by_id = {
+        item.get("state_id"): item for item in material_states if isinstance(item, dict)
+    }
+    tensor_by_id = {item["state_id"]: item for item in rows["states"]}
+    if set(states_by_id) != set(tensor_by_id):
+        raise ValueError("material tensor state IDs differ from the condition table")
+    required_wavelengths: dict[str, set[float]] = {state_id: set() for state_id in tensor_by_id}
+    for condition in conditions:
+        if not isinstance(condition, dict):
+            raise ValueError("condition table row is invalid for tensor-row binding")
+        if condition.get("active"):
+            required_wavelengths[condition["material_state_id"]].add(condition["wavelength_m"])
+    for state_id, state in states_by_id.items():
+        tensor_state = tensor_by_id[state_id]
+        if tensor_state["source_sha256"] != state.get("optical_property_source_sha256"):
+            raise ValueError("material tensor source identity differs from the condition table")
+        if state.get("temperature_k") != temperature:
+            raise ValueError("material-state temperature differs from the adapter fixture")
+        available = [item["wavelength_m"] for item in tensor_state["rows"]]
+        if any(
+            not any(
+                math.isclose(required, sample, rel_tol=1e-12, abs_tol=1e-18)
+                for sample in available
+            )
+            for required in required_wavelengths[state_id]
+        ):
+            raise ValueError("material tensor rows do not exactly cover active wavelengths")
+    body = {
+        "rows_fingerprint": rows["rows_fingerprint"],
+        "condition_table_fingerprint": condition_table.get("condition_table_fingerprint"),
+        "temperature_k": temperature,
+        "state_ids": list(tensor_by_id),
+        "active_wavelengths_m": {
+            state_id: sorted(required_wavelengths[state_id]) for state_id in tensor_by_id
+        },
+    }
+    return {
+        **body,
+        "binding_fingerprint": domain_sha256_v2(
+            "comsol_mcp.robust_material_tensor_rows_binding", body
+        ),
+    }
+
+
+__all__ = [
+    "SCHEMA_NAME",
+    "SCHEMA_VERSION",
+    "bind_robust_material_tensor_rows",
+    "normalize_robust_material_tensor_rows",
+]
