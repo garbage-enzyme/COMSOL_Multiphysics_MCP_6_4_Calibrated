@@ -6,6 +6,9 @@ from comsol_mcp.research.robust_adapter_configuration import (
     SCHEMA_NAME,
     normalize_robust_shape_adapter_configuration,
 )
+from comsol_mcp.research.robust_condition_controls import (
+    normalize_robust_condition_controls,
+)
 from development_kit.tests.test_lin2025_pedot_backend import (
     _derivative_support,
     _fixture,
@@ -131,3 +134,22 @@ def test_tagged_configuration_rejects_cross_contract_adapter_drift():
             _derivative_support(),
             policy,
         )
+
+
+def test_condition_controls_support_explicit_iterative_selection_and_legacy():
+    legacy = normalize_robust_condition_controls(_condition_controls())
+    assert legacy["schema_version"] == "1.0.0"
+    assert "selected_linear_solver_tag" not in legacy
+    value = _condition_controls()
+    value.update(
+        schema_version="1.1.0",
+        selected_linear_solver_tag="i1",
+        inactive_linear_solver_tags=["d1"],
+    )
+    selected = normalize_robust_condition_controls(value)
+    assert selected["selected_linear_solver_tag"] == "i1"
+    assert selected["inactive_linear_solver_tags"] == ["d1"]
+    selected.pop("controls_fingerprint")
+    selected["inactive_linear_solver_tags"] = ["i1"]
+    with pytest.raises(ValueError, match="cannot also be inactive"):
+        normalize_robust_condition_controls(selected)

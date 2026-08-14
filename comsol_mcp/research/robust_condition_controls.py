@@ -9,52 +9,66 @@ from comsol_mcp.durable import domain_sha256_v2
 from .derivative_support import _bounded_json, _identifier, _object, _text
 
 SCHEMA_NAME = "comsol_mcp.robust_condition_controls"
-SCHEMA_VERSION = "1.0.0"
+SCHEMA_VERSION = "1.1.0"
+LEGACY_SCHEMA_VERSION = "1.0.0"
+
+_BASE_FIELDS = {
+    "schema_name",
+    "schema_version",
+    "component_tag",
+    "geometry_tag",
+    "physics_tag",
+    "periodic_structure_tag",
+    "periodic_port_tags",
+    "reference_direction_tag",
+    "wavelength_parameter",
+    "elevation_parameter",
+    "azimuth_parameter",
+    "study_tag",
+    "study_step_tag",
+    "study_step_property",
+    "study_step_array_property",
+    "solution_tag",
+    "stationary_solver_tag",
+    "linear_solver_tag",
+    "out_of_core_property",
+    "out_of_core_value",
+    "dataset_tag",
+    "angle_property",
+    "azimuth_property",
+    "polarization_property",
+    "linear_polarization_property",
+    "polarization_values",
+    "observable_expression",
+    "reflectance_expression",
+    "transmittance_expression",
+    "absorption_expression",
+    "evaluated_wavelength_expression",
+    "solved_wavelength_expression",
+    "mesh_tag",
+}
+_SOLVER_SELECTION_FIELDS = {
+    "selected_linear_solver_tag",
+    "inactive_linear_solver_tags",
+}
 
 
 def normalize_robust_condition_controls(value: object) -> dict[str, Any]:
     bounded = _bounded_json(value, "robust condition controls", 64 * 1024)
     supplied = bounded.pop("controls_fingerprint", None) if isinstance(bounded, dict) else None
+    version = bounded.get("schema_version") if isinstance(bounded, dict) else None
+    if version == LEGACY_SCHEMA_VERSION:
+        fields = _BASE_FIELDS
+    elif version == SCHEMA_VERSION:
+        fields = _BASE_FIELDS | _SOLVER_SELECTION_FIELDS
+    else:
+        raise ValueError("robust condition controls schema is unsupported")
     raw = _object(
         bounded,
-        {
-            "schema_name",
-            "schema_version",
-            "component_tag",
-            "geometry_tag",
-            "physics_tag",
-            "periodic_structure_tag",
-            "periodic_port_tags",
-            "reference_direction_tag",
-            "wavelength_parameter",
-            "elevation_parameter",
-            "azimuth_parameter",
-            "study_tag",
-            "study_step_tag",
-            "study_step_property",
-            "study_step_array_property",
-            "solution_tag",
-            "stationary_solver_tag",
-            "linear_solver_tag",
-            "out_of_core_property",
-            "out_of_core_value",
-            "dataset_tag",
-            "angle_property",
-            "azimuth_property",
-            "polarization_property",
-            "linear_polarization_property",
-            "polarization_values",
-            "observable_expression",
-            "reflectance_expression",
-            "transmittance_expression",
-            "absorption_expression",
-            "evaluated_wavelength_expression",
-            "solved_wavelength_expression",
-            "mesh_tag",
-        },
+        fields,
         "robust condition controls",
     )
-    if raw["schema_name"] != SCHEMA_NAME or raw["schema_version"] != SCHEMA_VERSION:
+    if raw["schema_name"] != SCHEMA_NAME:
         raise ValueError("robust condition controls schema is unsupported")
     ports = raw["periodic_port_tags"]
     if not isinstance(ports, list) or len(ports) != 2 or any(
@@ -73,9 +87,33 @@ def normalize_robust_condition_controls(value: object) -> dict[str, Any]:
         )
         for key, item in polarization_values.items()
     }
+    selection: dict[str, Any] = {}
+    if version == SCHEMA_VERSION:
+        selected = _identifier(
+            raw["selected_linear_solver_tag"], "selected_linear_solver_tag"
+        )
+        inactive = raw["inactive_linear_solver_tags"]
+        if (
+            not isinstance(inactive, list)
+            or not 1 <= len(inactive) <= 8
+            or any(not isinstance(item, str) for item in inactive)
+        ):
+            raise ValueError("inactive_linear_solver_tags must be a bounded nonempty list")
+        normalized_inactive = [
+            _identifier(item, f"inactive_linear_solver_tags[{index}]")
+            for index, item in enumerate(inactive)
+        ]
+        if len(set(normalized_inactive)) != len(normalized_inactive):
+            raise ValueError("inactive_linear_solver_tags must be unique")
+        if selected in normalized_inactive:
+            raise ValueError("selected linear solver cannot also be inactive")
+        selection = {
+            "selected_linear_solver_tag": selected,
+            "inactive_linear_solver_tags": normalized_inactive,
+        }
     body = {
         "schema_name": SCHEMA_NAME,
-        "schema_version": SCHEMA_VERSION,
+        "schema_version": version,
         "component_tag": _identifier(raw["component_tag"], "component_tag"),
         "geometry_tag": _identifier(raw["geometry_tag"], "geometry_tag"),
         "physics_tag": _identifier(raw["physics_tag"], "physics_tag"),
@@ -143,6 +181,7 @@ def normalize_robust_condition_controls(value: object) -> dict[str, Any]:
             raw["solved_wavelength_expression"], "solved_wavelength_expression", maximum=256
         ),
         "mesh_tag": _identifier(raw["mesh_tag"], "mesh_tag"),
+        **selection,
     }
     body["controls_fingerprint"] = domain_sha256_v2(SCHEMA_NAME, body)
     if supplied is not None and supplied != body["controls_fingerprint"]:
@@ -150,4 +189,9 @@ def normalize_robust_condition_controls(value: object) -> dict[str, Any]:
     return body
 
 
-__all__ = ["SCHEMA_NAME", "SCHEMA_VERSION", "normalize_robust_condition_controls"]
+__all__ = [
+    "LEGACY_SCHEMA_VERSION",
+    "SCHEMA_NAME",
+    "SCHEMA_VERSION",
+    "normalize_robust_condition_controls",
+]

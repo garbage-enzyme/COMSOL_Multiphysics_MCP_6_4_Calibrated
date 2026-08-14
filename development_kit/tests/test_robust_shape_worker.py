@@ -354,15 +354,26 @@ def test_licensed_cleanup_fails_closed_on_false_clear_or_incomplete_inventory(
 
 
 class _Feature:
-    def __init__(self, *, drift=None):
+    def __init__(self, *, drift=None, active=None, active_events=None, tag=None):
         self.values = {}
         self.drift = drift or {}
+        self.active_state = active
+        self.active_events = active_events
+        self.tag = tag
 
     def set(self, name, value):
         self.values[name] = value
 
     def getString(self, name):
         return self.drift.get(name, self.values[name])
+
+    def active(self, value):
+        if self.active_events is not None:
+            self.active_events.append((self.tag, bool(value)))
+        self.active_state = bool(value)
+
+    def isActive(self):
+        return self.active_state
 
 
 class _Parameters:
@@ -471,6 +482,62 @@ def test_native_solver_memory_policy_rejects_readback_drift():
     backend.linear_solver = _Feature(drift={"ooc": "auto"})
     with pytest.raises(ValueError, match="out-of-core policy readback"):
         backend._set_solver_memory_policy()
+
+
+def test_native_solver_selection_is_explicit_ordered_and_read_back():
+    events = []
+    features = {
+        "d1": _Feature(active=True, active_events=events, tag="d1"),
+        "i1": _Feature(active=False, active_events=events, tag="i1"),
+    }
+
+    class Stationary:
+        def feature(self, tag):
+            return features[tag]
+
+    backend = object.__new__(robust_shape_native_runtime.ClientapiLin2025ConditionBackend)
+    backend.controls = {
+        "selected_linear_solver_tag": "i1",
+        "inactive_linear_solver_tags": ["d1"],
+    }
+    backend.stationary_solver = Stationary()
+    assert backend._set_solver_selection() == {
+        "mode": "explicit",
+        "selected_linear_solver_tag": "i1",
+        "inactive_linear_solver_tags": ["d1"],
+        "observed_active": {"i1": True, "d1": False},
+    }
+    assert events == [("i1", True), ("d1", False)]
+
+
+def test_native_solver_selection_preserves_legacy_model_state():
+    backend = object.__new__(robust_shape_native_runtime.ClientapiLin2025ConditionBackend)
+    backend.controls = {}
+    assert backend._set_solver_selection() == {"mode": "model_existing"}
+
+
+def test_native_solver_selection_rejects_active_readback_drift():
+    class InactiveFeature(_Feature):
+        def active(self, value):
+            pass
+
+    features = {
+        "d1": _Feature(active=True),
+        "i1": InactiveFeature(active=False),
+    }
+
+    class Stationary:
+        def feature(self, tag):
+            return features[tag]
+
+    backend = object.__new__(robust_shape_native_runtime.ClientapiLin2025ConditionBackend)
+    backend.controls = {
+        "selected_linear_solver_tag": "i1",
+        "inactive_linear_solver_tags": ["d1"],
+    }
+    backend.stationary_solver = Stationary()
+    with pytest.raises(ValueError, match="selection readback differs"):
+        backend._set_solver_selection()
 
 
 def test_native_condition_saves_exact_configured_model_before_solve(ascii_tmp_path):

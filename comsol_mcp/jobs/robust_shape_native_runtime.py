@@ -95,8 +95,8 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
         self.study = _get(model.java.study(), self.controls["study_tag"])
         self.study_step = self.study.feature(self.controls["study_step_tag"])
         solution = model.java.sol(self.controls["solution_tag"])
-        stationary = solution.feature(self.controls["stationary_solver_tag"])
-        self.linear_solver = stationary.feature(self.controls["linear_solver_tag"])
+        self.stationary_solver = solution.feature(self.controls["stationary_solver_tag"])
+        self.linear_solver = self.stationary_solver.feature(self.controls["linear_solver_tag"])
         numerical = model.java.result().numerical()
         self.numerical = numerical
         self._counter = 0
@@ -123,6 +123,7 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
         body = {
             "shape_controls": controls,
             "solver_memory": self._set_solver_memory_policy(),
+            "solver_selection": self._set_solver_selection(),
         }
         body["receipt_fingerprint"] = domain_sha256_v2(
             "comsol_mcp.robust_native_controls", body
@@ -176,6 +177,34 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
             raise ValueError("linear solver out-of-core policy readback differs")
         return {"property": property_name, "requested": requested, "observed": observed}
 
+    def _set_solver_selection(self) -> dict[str, Any]:
+        selected_tag = self.controls.get("selected_linear_solver_tag")
+        inactive_tags = self.controls.get("inactive_linear_solver_tags")
+        if selected_tag is None and inactive_tags is None:
+            return {"mode": "model_existing"}
+        if not isinstance(selected_tag, str) or not isinstance(inactive_tags, list):
+            raise ValueError("linear solver selection contract is incomplete")
+        selected = self.stationary_solver.feature(selected_tag)
+        inactive = [self.stationary_solver.feature(tag) for tag in inactive_tags]
+        selected.active(True)
+        for feature in inactive:
+            feature.active(False)
+        observed = {
+            selected_tag: bool(selected.isActive()),
+            **{
+                tag: bool(feature.isActive())
+                for tag, feature in zip(inactive_tags, inactive, strict=True)
+            },
+        }
+        if observed[selected_tag] is not True or any(observed[tag] for tag in inactive_tags):
+            raise ValueError("linear solver selection readback differs")
+        return {
+            "mode": "explicit",
+            "selected_linear_solver_tag": selected_tag,
+            "inactive_linear_solver_tags": list(inactive_tags),
+            "observed_active": observed,
+        }
+
     def evaluate_condition(
         self, condition: Mapping[str, Any], tensor_expressions: list[str]
     ) -> Mapping[str, Any]:
@@ -188,6 +217,7 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
         )
         self._set_incidence(condition)
         self._set_solver_memory_policy()
+        self._set_solver_selection()
         wavelength_expression = self.controls["wavelength_parameter"]
         self.study_step.set(self.controls["study_step_property"], wavelength_expression)
         from jpype import JArray, JString
