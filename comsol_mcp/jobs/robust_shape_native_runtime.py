@@ -65,6 +65,7 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
         self.periodic = _get(physics, self.controls["periodic_structure_tag"])
         self.ports = [_get(physics, tag) for tag in self.controls["periodic_port_tags"]]
         self.study = _get(model.java.study(), self.controls["study_tag"])
+        self.study_step = self.study.feature(self.controls["study_step_tag"])
         numerical = model.java.result().numerical()
         self.numerical = numerical
         self._counter = 0
@@ -139,6 +140,18 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
             f"{float(condition['wavelength_m']):.17g}[m]",
         )
         self._set_incidence(condition)
+        wavelength_expression = self.controls["wavelength_parameter"]
+        self.study_step.set(self.controls["study_step_property"], wavelength_expression)
+        from jpype import JArray, JString
+
+        self.study_step.set(
+            self.controls["study_step_array_property"],
+            JArray(JString)([wavelength_expression]),
+        )
+        if str(self.study_step.getString(self.controls["study_step_property"])) != (
+            wavelength_expression
+        ):
+            raise ValueError("study wavelength property readback differs")
         self.study.run()
         tag = f"robust_eval_{self._counter:04d}"
         evaluator = self.numerical.create(tag, "EvalGlobal")
@@ -151,8 +164,6 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
             self.controls["evaluated_wavelength_expression"],
             self.controls["solved_wavelength_expression"],
         ]
-        from jpype import JArray, JString
-
         evaluator.set("expr", JArray(JString)(expressions))
         values = _flatten_real(evaluator.computeResult())
         if len(values) < len(expressions):

@@ -31,6 +31,8 @@ def normalize_robust_condition_controls(value: object) -> dict[str, Any]:
             "azimuth_parameter",
             "study_tag",
             "study_step_tag",
+            "study_step_property",
+            "study_step_array_property",
             "solution_tag",
             "dataset_tag",
             "angle_property",
@@ -89,6 +91,12 @@ def normalize_robust_condition_controls(value: object) -> dict[str, Any]:
         "azimuth_parameter": _identifier(raw["azimuth_parameter"], "azimuth_parameter"),
         "study_tag": _identifier(raw["study_tag"], "study_tag"),
         "study_step_tag": _identifier(raw["study_step_tag"], "study_step_tag"),
+        "study_step_property": _identifier(
+            raw["study_step_property"], "study_step_property"
+        ),
+        "study_step_array_property": _identifier(
+            raw["study_step_array_property"], "study_step_array_property"
+        ),
         "solution_tag": _identifier(raw["solution_tag"], "solution_tag"),
         "dataset_tag": _identifier(raw["dataset_tag"], "dataset_tag"),
         "angle_property": _identifier(raw["angle_property"], "angle_property"),

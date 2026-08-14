@@ -90,6 +90,8 @@ def _write_inputs(root):
         "azimuth_parameter": "phi",
         "study_tag": "std1",
         "study_step_tag": "wl_step",
+        "study_step_property": "plist",
+        "study_step_array_property": "plistarr",
         "solution_tag": "sol1",
         "dataset_tag": "dset1",
         "angle_property": "alpha1_inc",
