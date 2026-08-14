@@ -318,6 +318,12 @@ def _entries() -> list[dict[str, Any]]:
             "comsol_mcp.research.lin2025_pedot_backend",
         ),
         _entry(
+            "comsol_mcp.lin2025_robust_campaign_inputs",
+            "1.0.0",
+            "development_kit.scripts.lin2025_robust_manifest",
+            artifact_kind="configuration",
+        ),
+        _entry(
             "comsol_mcp.robust_startup_admission_policy",
             "1.0.0",
             "comsol_mcp.research.robust_startup_admission",
