@@ -256,6 +256,7 @@ def test_manifest_v11_accepts_tagged_lin2025_adapter(ascii_tmp_path):
                 "solution_tag": "sol1",
                 "dataset_tag": "dset1",
                 "angle_property": "alpha1_inc",
+                "azimuth_property": "alpha2_inc",
                 "polarization_property": "Polarization",
                 "linear_polarization_property": "LinearPol",
                 "polarization_values": {"x_linear": "S", "y_linear": "P"},

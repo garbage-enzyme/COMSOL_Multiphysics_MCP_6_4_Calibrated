@@ -100,7 +100,7 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
         )
         for node in [self.periodic, *self.ports]:
             node.set(self.controls["angle_property"], self.controls["elevation_parameter"])
-            node.set("alpha2_inc", self.controls["azimuth_parameter"])
+            node.set(self.controls["azimuth_property"], self.controls["azimuth_parameter"])
         self.periodic.set(self.controls["polarization_property"], "LinearPol")
         basis = condition["polarization_basis_id"]
         try:
@@ -112,7 +112,9 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
             "elevation_parameter"
         ]:
             raise ValueError("periodic parent elevation readback differs")
-        if str(self.periodic.getString("alpha2_inc")) != self.controls["azimuth_parameter"]:
+        if str(self.periodic.getString(self.controls["azimuth_property"])) != self.controls[
+            "azimuth_parameter"
+        ]:
             raise ValueError("periodic parent azimuth readback differs")
         if str(self.periodic.getString(self.controls["linear_polarization_property"])) != str(
             polarization

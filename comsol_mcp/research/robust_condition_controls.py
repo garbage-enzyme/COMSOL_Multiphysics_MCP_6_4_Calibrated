@@ -33,6 +33,7 @@ def normalize_robust_condition_controls(value: object) -> dict[str, Any]:
             "solution_tag",
             "dataset_tag",
             "angle_property",
+            "azimuth_property",
             "polarization_property",
             "linear_polarization_property",
             "polarization_values",
@@ -89,6 +90,7 @@ def normalize_robust_condition_controls(value: object) -> dict[str, Any]:
         "solution_tag": _identifier(raw["solution_tag"], "solution_tag"),
         "dataset_tag": _identifier(raw["dataset_tag"], "dataset_tag"),
         "angle_property": _identifier(raw["angle_property"], "angle_property"),
+        "azimuth_property": _identifier(raw["azimuth_property"], "azimuth_property"),
         "polarization_property": _identifier(
             raw["polarization_property"], "polarization_property"
         ),
