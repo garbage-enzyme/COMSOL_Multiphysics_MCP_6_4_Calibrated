@@ -14,6 +14,7 @@ from comsol_mcp.durable import domain_sha256_v2
 from comsol_mcp.jobs.store import atomic_write_json
 from comsol_mcp.research.robust_conditions import normalize_optimization_condition_table
 from comsol_mcp.research.robust_material_mapping import normalize_optical_property_mapping
+from comsol_mcp.research.robust_material_tensor_rows import normalize_robust_material_tensor_rows
 
 PEDOT_FIXTURE_SCHEMA_NAME = "comsol_mcp.robust_pedot_fixture_manifest"
 PEDOT_FIXTURE_SCHEMA_VERSION = "1.0.0"
@@ -77,6 +78,7 @@ def _audit_csv(path: Path, state: str) -> dict[str, Any]:
         raise ValueError(f"PEDOT {state} CSV row count is outside the allowed range")
     wavelengths: list[float] = []
     common_rows = 0
+    samples: list[dict[str, float]] = []
     for index, row in enumerate(rows, start=2):
         wavelength = _number(row.get("wavelength_nm"), f"{state} row {index} wavelength")
         if wavelengths and wavelength <= wavelengths[-1]:
@@ -98,6 +100,22 @@ def _audit_csv(path: Path, state: str) -> dict[str, Any]:
             raise ValueError(f"PEDOT {state} COMSOL imaginary columns have the wrong sign")
         if _COMMON_MIN_NM <= wavelength <= _COMMON_MAX_NM:
             common_rows += 1
+        if wavelength in _WAVELENGTHS_NM:
+            samples.append(
+                {
+                    "wavelength_m": wavelength * 1e-9,
+                    "xx_real": _number(
+                        row.get("epsilon1_real"), f"{state} row {index} epsilon1_real"
+                    ),
+                    "xx_imag": comsol1,
+                    "yy_real": _number(
+                        row.get("epsilon1_real"), f"{state} row {index} epsilon1_real"
+                    ),
+                    "yy_imag": comsol1,
+                    "zz_real": _number(row.get(real2), f"{state} row {index} {real2}"),
+                    "zz_imag": comsol2,
+                }
+            )
     if wavelengths[0] > _COMMON_MIN_NM or wavelengths[-1] < _COMMON_MAX_NM:
         raise ValueError(f"PEDOT {state} CSV does not cover the common no-extrapolation range")
     if _COMMON_MIN_NM not in wavelengths or _COMMON_MAX_NM not in wavelengths:
@@ -115,6 +133,7 @@ def _audit_csv(path: Path, state: str) -> dict[str, Any]:
         "epsilon2_real_column": real2,
         "epsilon2_imaginary_column": imag2,
         "imaginary_sign_verified": True,
+        "sample_rows": samples,
     }
 
 
@@ -265,6 +284,23 @@ def compile_pedot_fixture(
             "completeness": {"mode": "cartesian_complete", "sparse_justification": None},
         }
     )
+    material_tensor_rows = normalize_robust_material_tensor_rows(
+        {
+            "schema_name": "comsol_mcp.robust_material_tensor_rows",
+            "schema_version": "1.0.0",
+            "source_sha256": hashlib.sha256(
+                (audits["OX"]["source_sha256"] + audits["MR"]["source_sha256"]).encode()
+            ).hexdigest(),
+            "states": [
+                {
+                    "state_id": state,
+                    "source_sha256": audits[state]["source_sha256"],
+                    "rows": audits[state]["sample_rows"],
+                }
+                for state in _STATES
+            ],
+        }
+    )
     body = {
         "schema_name": PEDOT_FIXTURE_SCHEMA_NAME,
         "schema_version": PEDOT_FIXTURE_SCHEMA_VERSION,
@@ -280,6 +316,7 @@ def compile_pedot_fixture(
         },
         "source_audits": audits,
         "condition_table": condition_table,
+        "material_tensor_rows": material_tensor_rows,
         "fixture_policy": {
             "geometry_adapter_id": "periodic_mim_patch_v1",
             "active_domain_id": active_domain_id,
