@@ -159,6 +159,15 @@ from .robust_material_mapping import (
     OPTICAL_PROPERTY_MAPPING_SCHEMA_VERSION,
     normalize_optical_property_mapping,
 )
+from .robust_material_tensor_rows import (
+    SCHEMA_NAME as ROBUST_MATERIAL_TENSOR_ROWS_SCHEMA_NAME,
+)
+from .robust_material_tensor_rows import (
+    SCHEMA_VERSION as ROBUST_MATERIAL_TENSOR_ROWS_SCHEMA_VERSION,
+)
+from .robust_material_tensor_rows import (
+    normalize_robust_material_tensor_rows,
+)
 from .robust_objectives import (
     ROBUST_OBJECTIVE_CONFIGURATION_SCHEMA_NAME,
     ROBUST_OBJECTIVE_CONFIGURATION_SCHEMA_VERSION,
@@ -283,6 +292,8 @@ __all__ = [
     "ROBUST_SHAPE_ADAPTER_BINDING_SCHEMA_VERSION",
     "ROBUST_SHAPE_ADAPTER_CONFIGURATION_SCHEMA_NAME",
     "ROBUST_SHAPE_ADAPTER_CONFIGURATION_SCHEMA_VERSION",
+    "ROBUST_MATERIAL_TENSOR_ROWS_SCHEMA_NAME",
+    "ROBUST_MATERIAL_TENSOR_ROWS_SCHEMA_VERSION",
     "ROBUST_SHAPE_CONTROL_RECEIPT_SCHEMA_NAME",
     "ROBUST_SHAPE_CONTROL_RECEIPT_SCHEMA_VERSION",
     "ROBUST_SMOOTHING_COMPARISON_SCHEMA_NAME",
@@ -349,6 +360,7 @@ __all__ = [
     "compile_campaign_manifest",
     "compile_robust_shape_adapter_binding",
     "normalize_robust_shape_adapter_configuration",
+    "normalize_robust_material_tensor_rows",
     "prepare_robust_shape_controls",
     "LIN2025_PEDOT_CYLINDER_ADAPTER_ID",
     "LIN2025_PEDOT_CYLINDER_SCHEMA_NAME",

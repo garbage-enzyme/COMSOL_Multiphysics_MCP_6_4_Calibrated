@@ -52,6 +52,8 @@ from comsol_mcp.research import (
     ROBUST_GRADIENT_POLICY_SCHEMA_VERSION,
     ROBUST_GRADIENT_RECEIPT_SCHEMA_NAME,
     ROBUST_GRADIENT_RECEIPT_SCHEMA_VERSION,
+    ROBUST_MATERIAL_TENSOR_ROWS_SCHEMA_NAME,
+    ROBUST_MATERIAL_TENSOR_ROWS_SCHEMA_VERSION,
     ROBUST_OBJECTIVE_CONFIGURATION_SCHEMA_NAME,
     ROBUST_OBJECTIVE_CONFIGURATION_SCHEMA_VERSION,
     ROBUST_OBJECTIVE_GRADIENT_RECEIPT_SCHEMA_NAME,
@@ -615,6 +617,12 @@ def _entries() -> list[dict[str, Any]]:
             ROBUST_SHAPE_ADAPTER_CONFIGURATION_SCHEMA_NAME,
             ROBUST_SHAPE_ADAPTER_CONFIGURATION_SCHEMA_VERSION,
             "comsol_mcp.research.robust_adapter_configuration",
+            artifact_kind="configuration",
+        ),
+        _entry(
+            ROBUST_MATERIAL_TENSOR_ROWS_SCHEMA_NAME,
+            ROBUST_MATERIAL_TENSOR_ROWS_SCHEMA_VERSION,
+            "comsol_mcp.research.robust_material_tensor_rows",
             artifact_kind="configuration",
         ),
         _entry(

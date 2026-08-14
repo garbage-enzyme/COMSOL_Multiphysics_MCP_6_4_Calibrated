@@ -180,7 +180,42 @@ def test_manifest_v11_accepts_tagged_lin2025_adapter(ascii_tmp_path):
         "schema_name": "comsol_mcp.robust_shape_adapter_configuration",
         "schema_version": "1.0.0",
         "adapter_id": "lin2025_pedot_cylinder_v1",
-        "configuration": {"fixture": fixture, "tree_readback": tree},
+        "configuration": {
+            "fixture": fixture,
+            "tree_readback": tree,
+            "material_tensor_rows": {
+                "schema_name": "comsol_mcp.robust_material_tensor_rows",
+                "schema_version": "1.0.0",
+                "source_sha256": "c" * 64,
+                "states": [
+                    {
+                        "state_id": state,
+                        "source_sha256": "d" * 64,
+                        "rows": [
+                            {
+                                "wavelength_m": 8e-7,
+                                "xx_real": 2.0,
+                                "xx_imag": -0.1,
+                                "yy_real": 2.0,
+                                "yy_imag": -0.1,
+                                "zz_real": 3.0,
+                                "zz_imag": -0.2,
+                            },
+                            {
+                                "wavelength_m": 1.0e-6,
+                                "xx_real": 2.1,
+                                "xx_imag": -0.1,
+                                "yy_real": 2.1,
+                                "yy_imag": -0.1,
+                                "zz_real": 3.1,
+                                "zz_imag": -0.2,
+                            },
+                        ],
+                    }
+                    for state in ("OX", "MR")
+                ],
+            },
+        },
     }
     raw["initial_values"] = [260.0, 260.0]
     payload = json.dumps(raw, sort_keys=True, separators=(",", ":")).encode()

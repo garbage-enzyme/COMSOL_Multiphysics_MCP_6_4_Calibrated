@@ -20,6 +20,7 @@ from .lin2025_pedot_cylinder import (
     compile_lin2025_pedot_shape_support,
     normalize_lin2025_pedot_cylinder_fixture,
 )
+from .robust_material_tensor_rows import normalize_robust_material_tensor_rows
 from .robust_shape_adapter import compile_robust_shape_adapter_binding
 from .shape_support import normalize_shape_support_policy
 
@@ -66,7 +67,7 @@ def normalize_robust_shape_adapter_configuration(
     elif adapter_id == LIN2025_ADAPTER_ID:
         config = _object(
             configuration,
-            {"fixture", "tree_readback"},
+            {"fixture", "tree_readback", "material_tensor_rows"},
             "Lin2025 adapter configuration",
         )
         fixture = normalize_lin2025_pedot_cylinder_fixture(config["fixture"])
@@ -74,10 +75,12 @@ def normalize_robust_shape_adapter_configuration(
         binding = compile_lin2025_pedot_cylinder_binding(fixture, support, policy)
         if binding["source_sha256"] != shape["source_sha256"]:
             raise ValueError("Lin2025 binding and shape source identities differ")
+        tensor_rows = normalize_robust_material_tensor_rows(config["material_tensor_rows"])
         normalized_configuration = {
             "fixture": fixture,
             "tree_readback": dict(config["tree_readback"]),
             "shape_support": shape,
+            "material_tensor_rows": tensor_rows,
         }
     else:
         raise ValueError("robust shape adapter family is unsupported")
