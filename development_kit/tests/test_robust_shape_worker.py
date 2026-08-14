@@ -66,14 +66,29 @@ def _condition_runtime_spec() -> dict:
                 }
             }
         },
+        "finalist_validation_policy": {
+            "mesh_convergence": {
+                "max_elements_per_model": 1000,
+                "minimum_element_quality": 0.2,
+            }
+        },
     }
 
 
 class _ConditionBackend:
-    def __init__(self, *, dataset_id="dset1", solution_id="sol1"):
+    def __init__(
+        self,
+        *,
+        dataset_id="dset1",
+        solution_id="sol1",
+        mesh_elements=1000,
+        minimum_mesh_quality=0.2,
+    ):
         self.calls = []
         self.dataset_id = dataset_id
         self.solution_id = solution_id
+        self.mesh_elements = mesh_elements
+        self.minimum_mesh_quality = minimum_mesh_quality
 
     def evaluate_condition(self, condition, tensor_expressions):
         self.calls.append((condition["condition_id"], tensor_expressions))
@@ -87,8 +102,8 @@ class _ConditionBackend:
             "reflectance": 0.2,
             "transmittance": 0.6,
             "absorption": 0.2,
-            "mesh_elements": 1000,
-            "minimum_mesh_quality": 0.2,
+            "mesh_elements": self.mesh_elements,
+            "minimum_mesh_quality": self.minimum_mesh_quality,
             "dataset_id": self.dataset_id,
             "solution_id": self.solution_id,
         }
@@ -159,6 +174,29 @@ def test_condition_runtime_recovers_receipt_written_before_row(
     ],
 )
 def test_condition_runtime_rejects_dataset_or_solution_drift(
+    ascii_tmp_path, backend, message
+):
+    spec = _condition_runtime_spec()
+    spec["condition_table"]["conditions"] = spec["condition_table"]["conditions"][:1]
+    with pytest.raises(ValueError, match=message):
+        execute_robust_conditions(
+            spec,
+            ascii_tmp_path,
+            attempt=1,
+            backend=backend,
+            cancel_requested=lambda: False,
+        )
+    assert not (ascii_tmp_path / "condition-0000.json").exists()
+
+
+@pytest.mark.parametrize(
+    ("backend", "message"),
+    [
+        (_ConditionBackend(mesh_elements=1001), "element cap"),
+        (_ConditionBackend(minimum_mesh_quality=0.199), "quality"),
+    ],
+)
+def test_condition_runtime_enforces_caller_mesh_admission(
     ascii_tmp_path, backend, message
 ):
     spec = _condition_runtime_spec()

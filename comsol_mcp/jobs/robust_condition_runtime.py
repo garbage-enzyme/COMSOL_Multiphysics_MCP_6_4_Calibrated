@@ -76,6 +76,7 @@ def _normalize_receipt(
     condition: Mapping[str, Any],
     result: Mapping[str, Any],
     controls: Mapping[str, Any],
+    mesh_policy: Mapping[str, Any],
 ) -> dict[str, Any]:
     required = {
         "condition_id",
@@ -119,6 +120,11 @@ def _normalize_receipt(
     elements = result["mesh_elements"]
     if isinstance(elements, bool) or not isinstance(elements, int) or elements < 1:
         raise ValueError("robust condition mesh element count is invalid")
+    if elements > mesh_policy["max_elements_per_model"]:
+        raise ValueError("robust condition mesh element cap was exceeded")
+    minimum_quality = _finite(result["minimum_mesh_quality"], "minimum_mesh_quality")
+    if minimum_quality < mesh_policy["minimum_element_quality"]:
+        raise ValueError("robust condition mesh quality is below the caller threshold")
     body = {
         "schema_name": CONDITION_RECEIPT_SCHEMA_NAME,
         "schema_version": CONDITION_RECEIPT_SCHEMA_VERSION,
@@ -138,9 +144,7 @@ def _normalize_receipt(
         "absorption": absorption,
         "closure": reflectance + transmittance + absorption,
         "mesh_elements": elements,
-        "minimum_mesh_quality": _finite(
-            result["minimum_mesh_quality"], "minimum_mesh_quality"
-        ),
+        "minimum_mesh_quality": minimum_quality,
         "dataset_id": str(result["dataset_id"]),
         "solution_id": str(result["solution_id"]),
         "disposition": "measured",
@@ -172,6 +176,7 @@ def execute_robust_conditions(
         if item["active"] and item["objective_role"] == "objective"
     ]
     controls = spec["adapter_configuration"]["configuration"]["condition_controls"]
+    mesh_policy = spec["finalist_validation_policy"]["mesh_convergence"]
     for condition in active:
         if cancel_requested():
             raise InterruptedError("robust condition execution was cancelled")
@@ -193,7 +198,7 @@ def execute_robust_conditions(
             raise ValueError("completed robust condition row lacks its full receipt")
         else:
             result = backend.evaluate_condition(condition, _tensor_expressions(spec, condition))
-            receipt = _normalize_receipt(condition, result, controls)
+            receipt = _normalize_receipt(condition, result, controls, mesh_policy)
             atomic_write_json(receipt_path, receipt)
         if row is None:
             row = append_robust_shape_row(
