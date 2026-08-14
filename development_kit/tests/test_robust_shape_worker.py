@@ -41,6 +41,10 @@ def _condition_runtime_spec() -> dict:
         "condition_table": {"conditions": conditions},
         "adapter_configuration": {
             "configuration": {
+                "condition_controls": {
+                    "dataset_tag": "dset1",
+                    "solution_tag": "sol1",
+                },
                 "material_tensor_rows": {
                     "states": [
                         {
@@ -66,8 +70,10 @@ def _condition_runtime_spec() -> dict:
 
 
 class _ConditionBackend:
-    def __init__(self):
+    def __init__(self, *, dataset_id="dset1", solution_id="sol1"):
         self.calls = []
+        self.dataset_id = dataset_id
+        self.solution_id = solution_id
 
     def evaluate_condition(self, condition, tensor_expressions):
         self.calls.append((condition["condition_id"], tensor_expressions))
@@ -83,8 +89,8 @@ class _ConditionBackend:
             "absorption": 0.2,
             "mesh_elements": 1000,
             "minimum_mesh_quality": 0.2,
-            "dataset_id": "dset1",
-            "solution_id": "sol1",
+            "dataset_id": self.dataset_id,
+            "solution_id": self.solution_id,
         }
 
 
@@ -143,6 +149,29 @@ def test_condition_runtime_recovers_receipt_written_before_row(
         cancel_requested=lambda: False,
     )
     assert recovery_backend.calls == []
+
+
+@pytest.mark.parametrize(
+    ("backend", "message"),
+    [
+        (_ConditionBackend(dataset_id="dset-other"), "dataset identity"),
+        (_ConditionBackend(solution_id="sol-other"), "solution identity"),
+    ],
+)
+def test_condition_runtime_rejects_dataset_or_solution_drift(
+    ascii_tmp_path, backend, message
+):
+    spec = _condition_runtime_spec()
+    spec["condition_table"]["conditions"] = spec["condition_table"]["conditions"][:1]
+    with pytest.raises(ValueError, match=message):
+        execute_robust_conditions(
+            spec,
+            ascii_tmp_path,
+            attempt=1,
+            backend=backend,
+            cancel_requested=lambda: False,
+        )
+    assert not (ascii_tmp_path / "condition-0000.json").exists()
 
 
 class _LoadFailureClient:

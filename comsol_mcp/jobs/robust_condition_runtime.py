@@ -73,7 +73,9 @@ def _tensor_expressions(spec: Mapping[str, Any], condition: Mapping[str, Any]) -
 
 
 def _normalize_receipt(
-    condition: Mapping[str, Any], result: Mapping[str, Any]
+    condition: Mapping[str, Any],
+    result: Mapping[str, Any],
+    controls: Mapping[str, Any],
 ) -> dict[str, Any]:
     required = {
         "condition_id",
@@ -96,6 +98,10 @@ def _normalize_receipt(
         raise ValueError("robust condition backend changed the condition identity")
     if result["observable_id"] != condition["observable_id"]:
         raise ValueError("robust condition backend changed the observable identity")
+    if result["dataset_id"] != controls["dataset_tag"]:
+        raise ValueError("robust condition backend changed the dataset identity")
+    if result["solution_id"] != controls["solution_tag"]:
+        raise ValueError("robust condition backend changed the solution identity")
     requested = _finite(result["requested_wavelength_m"], "requested_wavelength_m")
     evaluated = _finite(result["evaluated_wavelength_m"], "evaluated_wavelength_m")
     solved = _finite(result["solved_wavelength_m"], "solved_wavelength_m")
@@ -165,6 +171,7 @@ def execute_robust_conditions(
         for item in spec["condition_table"]["conditions"]
         if item["active"] and item["objective_role"] == "objective"
     ]
+    controls = spec["adapter_configuration"]["configuration"]["condition_controls"]
     for condition in active:
         if cancel_requested():
             raise InterruptedError("robust condition execution was cancelled")
@@ -186,7 +193,7 @@ def execute_robust_conditions(
             raise ValueError("completed robust condition row lacks its full receipt")
         else:
             result = backend.evaluate_condition(condition, _tensor_expressions(spec, condition))
-            receipt = _normalize_receipt(condition, result)
+            receipt = _normalize_receipt(condition, result, controls)
             atomic_write_json(receipt_path, receipt)
         if row is None:
             row = append_robust_shape_row(
