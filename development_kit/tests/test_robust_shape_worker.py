@@ -4,12 +4,141 @@ from __future__ import annotations
 
 import os
 
-from comsol_mcp.jobs import robust_shape_worker
+import pytest
+
+from comsol_mcp.jobs import robust_condition_runtime, robust_shape_worker
 from comsol_mcp.jobs.manager import JobManager
+from comsol_mcp.jobs.robust_condition_runtime import execute_robust_conditions
 from comsol_mcp.jobs.robust_shape_rows import append_robust_shape_row, read_robust_shape_rows
 from comsol_mcp.jobs.robust_shape_worker import run as run_robust_worker
 from comsol_mcp.jobs.store import process_identity, read_json
 from development_kit.tests.test_robust_shape_optimization import _write_manifest
+
+
+def _condition_runtime_spec() -> dict:
+    conditions = []
+    for index, state_id in enumerate(("OX", "MR")):
+        conditions.append(
+            {
+                "condition_id": f"condition-{index}",
+                "order": index,
+                "wavelength_m": 8e-7,
+                "incidence_elevation_deg": 0.0,
+                "incidence_azimuth_deg": 0.0,
+                "polarization_basis_id": "x_linear",
+                "material_state_id": state_id,
+                "objective_role": "objective",
+                "observable_id": "transmission_order_0_0",
+                "active": True,
+            }
+        )
+    return {
+        "spec_fingerprint": "f" * 64,
+        "condition_table": {"conditions": conditions},
+        "adapter_configuration": {
+            "configuration": {
+                "material_tensor_rows": {
+                    "states": [
+                        {
+                            "state_id": state_id,
+                            "rows": [
+                                {
+                                    "wavelength_m": 8e-7,
+                                    "xx_real": 2.0,
+                                    "xx_imag": -0.1,
+                                    "yy_real": 2.0,
+                                    "yy_imag": -0.1,
+                                    "zz_real": 3.0,
+                                    "zz_imag": -0.2,
+                                }
+                            ],
+                        }
+                        for state_id in ("OX", "MR")
+                    ]
+                }
+            }
+        },
+    }
+
+
+class _ConditionBackend:
+    def __init__(self):
+        self.calls = []
+
+    def evaluate_condition(self, condition, tensor_expressions):
+        self.calls.append((condition["condition_id"], tensor_expressions))
+        return {
+            "condition_id": condition["condition_id"],
+            "observable_id": condition["observable_id"],
+            "observable_value": 0.6 + condition["order"] * 0.1,
+            "requested_wavelength_m": condition["wavelength_m"],
+            "evaluated_wavelength_m": condition["wavelength_m"],
+            "solved_wavelength_m": condition["wavelength_m"],
+            "reflectance": 0.2,
+            "transmittance": 0.6,
+            "absorption": 0.2,
+            "mesh_elements": 1000,
+            "minimum_mesh_quality": 0.2,
+            "dataset_id": "dset1",
+            "solution_id": "sol1",
+        }
+
+
+def test_condition_runtime_persists_receipts_rows_and_exact_replay(ascii_tmp_path):
+    spec = _condition_runtime_spec()
+    backend = _ConditionBackend()
+    observations = execute_robust_conditions(
+        spec,
+        ascii_tmp_path,
+        attempt=1,
+        backend=backend,
+        cancel_requested=lambda: False,
+    )
+    assert [item["value"] for item in observations] == [0.6, 0.7]
+    assert len(backend.calls) == 2
+    replay_backend = _ConditionBackend()
+    replay = execute_robust_conditions(
+        spec,
+        ascii_tmp_path,
+        attempt=1,
+        backend=replay_backend,
+        cancel_requested=lambda: False,
+    )
+    assert replay == observations
+    assert replay_backend.calls == []
+
+
+def test_condition_runtime_recovers_receipt_written_before_row(
+    ascii_tmp_path, monkeypatch
+):
+    spec = _condition_runtime_spec()
+    spec["condition_table"]["conditions"] = spec["condition_table"]["conditions"][:1]
+    backend = _ConditionBackend()
+    original = robust_condition_runtime.append_robust_shape_row
+    monkeypatch.setattr(
+        robust_condition_runtime,
+        "append_robust_shape_row",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("injected row failure")),
+    )
+    with pytest.raises(OSError, match="injected row failure"):
+        execute_robust_conditions(
+            spec,
+            ascii_tmp_path,
+            attempt=1,
+            backend=backend,
+            cancel_requested=lambda: False,
+        )
+    assert len(backend.calls) == 1
+    monkeypatch.setattr(robust_condition_runtime, "append_robust_shape_row", original)
+    recovery_backend = _ConditionBackend()
+    execute_robust_conditions(
+        spec,
+        ascii_tmp_path,
+        attempt=1,
+        backend=recovery_backend,
+        cancel_requested=lambda: False,
+    )
+    assert recovery_backend.calls == []
 
 
 def _manager(root, monkeypatch):
