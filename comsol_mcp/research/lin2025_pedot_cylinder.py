@@ -15,6 +15,7 @@ ADAPTER_ID = "lin2025_pedot_cylinder_v1"
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _VARIABLES = ("pedot_cylinder_radius_x", "pedot_cylinder_radius_y")
 _STATES = ("OX", "MR")
+_VARIABLES = ("pedot_cylinder_radius_x", "pedot_cylinder_radius_y")
 
 
 def _sha(value: object, name: str) -> str:
@@ -203,6 +204,79 @@ def validate_lin2025_pedot_cylinder_tree(
     }
 
 
+def compile_lin2025_pedot_shape_support(fixture: object, tree_readback: object) -> dict[str, Any]:
+    """Compile explicit, read-back geometry selections for native shape controls.
+
+    Boundary/domain IDs are accepted only from a live tree receipt; no local
+    or host-derived topology defaults are permitted.
+    """
+    normalized = normalize_lin2025_pedot_cylinder_fixture(fixture)
+    if not isinstance(tree_readback, Mapping):
+        raise ValueError("Lin2025 shape tree readback must be an object")
+    required = {
+        "source_sha256", "domain_map", "domain_z_bounds_um", "material_tags",
+        "feature_tags", "free_domains", "fixed_boundaries", "lateral_boundaries",
+        "baseline_radius_um", "center_um",
+    }
+    if set(tree_readback) != required:
+        raise ValueError("Lin2025 shape tree readback fields are incomplete")
+    validate_lin2025_pedot_cylinder_tree(
+        fixture,
+        {
+            key: tree_readback[key]
+            for key in (
+                "source_sha256",
+                "domain_map",
+                "domain_z_bounds_um",
+                "material_tags",
+                "feature_tags",
+            )
+        },
+    )
+    def _ids(value: object, name: str) -> list[int]:
+        if not isinstance(value, list) or not value or any(
+            isinstance(item, bool) or not isinstance(item, int) or item < 1
+            for item in value
+        ):
+            raise ValueError(f"Lin2025 {name} must be a non-empty positive integer list")
+        result = sorted(set(value))
+        if result != value:
+            raise ValueError(f"Lin2025 {name} must be sorted and unique")
+        return result
+    free_domains = _ids(tree_readback["free_domains"], "free_domains")
+    if free_domains != list(range(1, 7)):
+        raise ValueError("Lin2025 free domain selection changed")
+    fixed = _ids(tree_readback["fixed_boundaries"], "fixed_boundaries")
+    lateral = _ids(tree_readback["lateral_boundaries"], "lateral_boundaries")
+    if set(fixed) & set(lateral):
+        raise ValueError("Lin2025 fixed and lateral selections overlap")
+    radius = tree_readback["baseline_radius_um"]
+    center = tree_readback["center_um"]
+    if not isinstance(radius, (int, float)) or isinstance(radius, bool) or radius <= 0:
+        raise ValueError("Lin2025 baseline radius must be positive")
+    if not isinstance(center, list) or len(center) != 2 or any(
+        not isinstance(item, (int, float)) or isinstance(item, bool) for item in center
+    ):
+        raise ValueError("Lin2025 cylinder center must contain two numbers")
+    body = {
+        "schema_name": f"{SCHEMA_NAME}.shape_support",
+        "schema_version": SCHEMA_VERSION,
+        "adapter_id": ADAPTER_ID,
+        "fixture_fingerprint": normalized["fixture_fingerprint"],
+        "source_sha256": normalized["source_identity"]["source_sha256"],
+        "pedot_domain": normalized["domains"]["pedot_cylinder"],
+        "free_domains": free_domains,
+        "fixed_boundaries": fixed,
+        "lateral_boundaries": lateral,
+        "baseline_radius_um": float(radius),
+        "center_um": [float(item) for item in center],
+        "variable_ids": list(_VARIABLES),
+        "height_preserved": True,
+    }
+    body["support_fingerprint"] = domain_sha256_v2(body["schema_name"], body)
+    return body
+
+
 __all__ = [
     "ADAPTER_ID",
     "SCHEMA_NAME",
@@ -210,4 +284,5 @@ __all__ = [
     "normalize_lin2025_pedot_cylinder_fixture",
     "compile_lin2025_pedot_cylinder_binding",
     "validate_lin2025_pedot_cylinder_tree",
+    "compile_lin2025_pedot_shape_support",
 ]

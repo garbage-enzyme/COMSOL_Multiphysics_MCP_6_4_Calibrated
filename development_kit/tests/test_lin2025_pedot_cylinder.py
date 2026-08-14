@@ -5,6 +5,7 @@ import pytest
 from comsol_mcp.research.lin2025_pedot_cylinder import (
     SCHEMA_NAME,
     compile_lin2025_pedot_cylinder_binding,
+    compile_lin2025_pedot_shape_support,
     normalize_lin2025_pedot_cylinder_fixture,
     validate_lin2025_pedot_cylinder_tree,
 )
@@ -117,6 +118,44 @@ def test_tree_readback_freezes_domains_z_bounds_state_and_no_gold():
     result = validate_lin2025_pedot_cylinder_tree(fixture, readback)
     assert result["pedot_state"] == "OX"
     assert "au" not in " ".join(result["feature_tags"]).casefold()
+
+
+def test_shape_support_requires_explicit_live_selections():
+    fixture = _fixture()
+    tree = {
+        "source_sha256": "a" * 64,
+        "domain_map": {"substrate": 1, "pedot_cylinder": 5, "air": 4},
+        "domain_z_bounds_um": {"5": [0.0, 0.2]},
+        "material_tags": {"pedot_cylinder": "OX"},
+        "feature_tags": ["ewfd", "mesh1"],
+        "free_domains": [1, 2, 3, 4, 5, 6],
+        "fixed_boundaries": [1, 2, 3, 4],
+        "lateral_boundaries": [5, 6],
+        "baseline_radius_um": 0.28,
+        "center_um": [0.85, 0.85],
+    }
+    support = compile_lin2025_pedot_shape_support(fixture, tree)
+    assert support["variable_ids"] == ["pedot_cylinder_radius_x", "pedot_cylinder_radius_y"]
+    assert support["height_preserved"] is True
+    assert len(support["support_fingerprint"]) == 64
+
+
+def test_shape_support_rejects_implicit_or_overlapping_selections():
+    fixture = _fixture()
+    tree = {
+        "source_sha256": "a" * 64,
+        "domain_map": {"substrate": 1, "pedot_cylinder": 5, "air": 4},
+        "domain_z_bounds_um": {"5": [0.0, 0.2]},
+        "material_tags": {"pedot_cylinder": "OX"},
+        "feature_tags": ["ewfd", "mesh1"],
+        "free_domains": [1, 2, 3, 4, 5, 6],
+        "fixed_boundaries": [1, 5],
+        "lateral_boundaries": [5, 6],
+        "baseline_radius_um": 0.28,
+        "center_um": [0.85, 0.85],
+    }
+    with pytest.raises(ValueError, match="overlap"):
+        compile_lin2025_pedot_shape_support(fixture, tree)
 
 
 @pytest.mark.parametrize("mutate", [
