@@ -26,8 +26,12 @@ def normalize_robust_condition_controls(value: object) -> dict[str, Any]:
             "periodic_port_tags",
             "reference_direction_tag",
             "wavelength_parameter",
+            "elevation_parameter",
+            "azimuth_parameter",
             "study_tag",
             "study_step_tag",
+            "solution_tag",
+            "dataset_tag",
             "angle_property",
             "polarization_property",
             "linear_polarization_property",
@@ -76,8 +80,14 @@ def normalize_robust_condition_controls(value: object) -> dict[str, Any]:
             raw["reference_direction_tag"], "reference_direction_tag"
         ),
         "wavelength_parameter": _identifier(raw["wavelength_parameter"], "wavelength_parameter"),
+        "elevation_parameter": _identifier(
+            raw["elevation_parameter"], "elevation_parameter"
+        ),
+        "azimuth_parameter": _identifier(raw["azimuth_parameter"], "azimuth_parameter"),
         "study_tag": _identifier(raw["study_tag"], "study_tag"),
         "study_step_tag": _identifier(raw["study_step_tag"], "study_step_tag"),
+        "solution_tag": _identifier(raw["solution_tag"], "solution_tag"),
+        "dataset_tag": _identifier(raw["dataset_tag"], "dataset_tag"),
         "angle_property": _identifier(raw["angle_property"], "angle_property"),
         "polarization_property": _identifier(
             raw["polarization_property"], "polarization_property"
