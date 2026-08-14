@@ -648,7 +648,11 @@ def _entries() -> list[dict[str, Any]]:
             ROBUST_CONDITION_CONTROLS_SCHEMA_VERSION,
             "comsol_mcp.research.robust_condition_controls",
             artifact_kind="configuration",
-            readable_versions=("1.0.0", ROBUST_CONDITION_CONTROLS_SCHEMA_VERSION),
+            readable_versions=(
+                "1.0.0",
+                "1.1.0",
+                ROBUST_CONDITION_CONTROLS_SCHEMA_VERSION,
+            ),
         ),
         _entry(
             ROBUST_SHAPE_CONTROL_RECEIPT_SCHEMA_NAME,

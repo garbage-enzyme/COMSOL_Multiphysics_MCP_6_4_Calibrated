@@ -153,3 +153,21 @@ def test_condition_controls_support_explicit_iterative_selection_and_legacy():
     selected["inactive_linear_solver_tags"] = ["i1"]
     with pytest.raises(ValueError, match="cannot also be inactive"):
         normalize_robust_condition_controls(selected)
+
+
+def test_condition_controls_bind_selected_coarse_solver_out_of_core_path():
+    value = _condition_controls()
+    value.update(
+        schema_version="1.2.0",
+        selected_linear_solver_tag="i1",
+        inactive_linear_solver_tags=["d1"],
+        coarse_solver_feature_path=["i1", "mg1", "cs", "dDef"],
+        coarse_solver_out_of_core_property="ooc",
+        coarse_solver_out_of_core_value="on",
+    )
+    result = normalize_robust_condition_controls(value)
+    assert result["coarse_solver_feature_path"] == ["i1", "mg1", "cs", "dDef"]
+    assert result["coarse_solver_out_of_core_value"] == "on"
+    value["coarse_solver_feature_path"][0] = "d1"
+    with pytest.raises(ValueError, match="must begin at the selected"):
+        normalize_robust_condition_controls(value)

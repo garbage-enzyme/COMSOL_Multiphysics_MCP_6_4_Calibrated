@@ -9,7 +9,8 @@ from comsol_mcp.durable import domain_sha256_v2
 from .derivative_support import _bounded_json, _identifier, _object, _text
 
 SCHEMA_NAME = "comsol_mcp.robust_condition_controls"
-SCHEMA_VERSION = "1.1.0"
+SCHEMA_VERSION = "1.2.0"
+SOLVER_SELECTION_SCHEMA_VERSION = "1.1.0"
 LEGACY_SCHEMA_VERSION = "1.0.0"
 
 _BASE_FIELDS = {
@@ -51,6 +52,11 @@ _SOLVER_SELECTION_FIELDS = {
     "selected_linear_solver_tag",
     "inactive_linear_solver_tags",
 }
+_COARSE_SOLVER_MEMORY_FIELDS = {
+    "coarse_solver_feature_path",
+    "coarse_solver_out_of_core_property",
+    "coarse_solver_out_of_core_value",
+}
 
 
 def normalize_robust_condition_controls(value: object) -> dict[str, Any]:
@@ -59,8 +65,10 @@ def normalize_robust_condition_controls(value: object) -> dict[str, Any]:
     version = bounded.get("schema_version") if isinstance(bounded, dict) else None
     if version == LEGACY_SCHEMA_VERSION:
         fields = _BASE_FIELDS
-    elif version == SCHEMA_VERSION:
+    elif version == SOLVER_SELECTION_SCHEMA_VERSION:
         fields = _BASE_FIELDS | _SOLVER_SELECTION_FIELDS
+    elif version == SCHEMA_VERSION:
+        fields = _BASE_FIELDS | _SOLVER_SELECTION_FIELDS | _COARSE_SOLVER_MEMORY_FIELDS
     else:
         raise ValueError("robust condition controls schema is unsupported")
     raw = _object(
@@ -88,7 +96,7 @@ def normalize_robust_condition_controls(value: object) -> dict[str, Any]:
         for key, item in polarization_values.items()
     }
     selection: dict[str, Any] = {}
-    if version == SCHEMA_VERSION:
+    if version in {SOLVER_SELECTION_SCHEMA_VERSION, SCHEMA_VERSION}:
         selected = _identifier(
             raw["selected_linear_solver_tag"], "selected_linear_solver_tag"
         )
@@ -110,6 +118,36 @@ def normalize_robust_condition_controls(value: object) -> dict[str, Any]:
         selection = {
             "selected_linear_solver_tag": selected,
             "inactive_linear_solver_tags": normalized_inactive,
+        }
+    coarse_solver_memory: dict[str, Any] = {}
+    if version == SCHEMA_VERSION:
+        feature_path = raw["coarse_solver_feature_path"]
+        if (
+            not isinstance(feature_path, list)
+            or not 2 <= len(feature_path) <= 8
+            or any(not isinstance(item, str) for item in feature_path)
+        ):
+            raise ValueError("coarse_solver_feature_path must be a bounded feature path")
+        normalized_path = [
+            _identifier(item, f"coarse_solver_feature_path[{index}]")
+            for index, item in enumerate(feature_path)
+        ]
+        if normalized_path[0] != selection["selected_linear_solver_tag"]:
+            raise ValueError("coarse solver path must begin at the selected linear solver")
+        coarse_value = _text(
+            raw["coarse_solver_out_of_core_value"],
+            "coarse_solver_out_of_core_value",
+            maximum=16,
+        )
+        if coarse_value not in {"auto", "off", "on"}:
+            raise ValueError("coarse solver out-of-core value is unsupported")
+        coarse_solver_memory = {
+            "coarse_solver_feature_path": normalized_path,
+            "coarse_solver_out_of_core_property": _identifier(
+                raw["coarse_solver_out_of_core_property"],
+                "coarse_solver_out_of_core_property",
+            ),
+            "coarse_solver_out_of_core_value": coarse_value,
         }
     body = {
         "schema_name": SCHEMA_NAME,
@@ -182,6 +220,7 @@ def normalize_robust_condition_controls(value: object) -> dict[str, Any]:
         ),
         "mesh_tag": _identifier(raw["mesh_tag"], "mesh_tag"),
         **selection,
+        **coarse_solver_memory,
     }
     body["controls_fingerprint"] = domain_sha256_v2(SCHEMA_NAME, body)
     if supplied is not None and supplied != body["controls_fingerprint"]:
@@ -193,5 +232,6 @@ __all__ = [
     "LEGACY_SCHEMA_VERSION",
     "SCHEMA_NAME",
     "SCHEMA_VERSION",
+    "SOLVER_SELECTION_SCHEMA_VERSION",
     "normalize_robust_condition_controls",
 ]

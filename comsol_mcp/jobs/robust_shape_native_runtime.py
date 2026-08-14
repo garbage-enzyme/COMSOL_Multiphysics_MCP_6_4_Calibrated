@@ -168,14 +168,39 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
         ):
             raise ValueError("periodic polarization readback differs")
 
-    def _set_solver_memory_policy(self) -> dict[str, str]:
+    def _set_solver_memory_policy(self) -> dict[str, Any]:
         property_name = self.controls["out_of_core_property"]
         requested = self.controls["out_of_core_value"]
         self.linear_solver.set(property_name, requested)
         observed = str(self.linear_solver.getString(property_name))
         if observed != requested:
             raise ValueError("linear solver out-of-core policy readback differs")
-        return {"property": property_name, "requested": requested, "observed": observed}
+        body: dict[str, Any] = {
+            "property": property_name,
+            "requested": requested,
+            "observed": observed,
+        }
+        feature_path = self.controls.get("coarse_solver_feature_path")
+        if feature_path is None:
+            return body
+        if not isinstance(feature_path, list):
+            raise ValueError("coarse solver feature path is invalid")
+        coarse_solver = self.stationary_solver
+        for tag in feature_path:
+            coarse_solver = coarse_solver.feature(tag)
+        coarse_property = self.controls["coarse_solver_out_of_core_property"]
+        coarse_requested = self.controls["coarse_solver_out_of_core_value"]
+        coarse_solver.set(coarse_property, coarse_requested)
+        coarse_observed = str(coarse_solver.getString(coarse_property))
+        if coarse_observed != coarse_requested:
+            raise ValueError("coarse solver out-of-core policy readback differs")
+        body["coarse_solver"] = {
+            "feature_path": list(feature_path),
+            "property": coarse_property,
+            "requested": coarse_requested,
+            "observed": coarse_observed,
+        }
+        return body
 
     def _set_solver_selection(self) -> dict[str, Any]:
         selected_tag = self.controls.get("selected_linear_solver_tag")

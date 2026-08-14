@@ -354,12 +354,15 @@ def test_licensed_cleanup_fails_closed_on_false_clear_or_incomplete_inventory(
 
 
 class _Feature:
-    def __init__(self, *, drift=None, active=None, active_events=None, tag=None):
+    def __init__(
+        self, *, drift=None, active=None, active_events=None, tag=None, children=None
+    ):
         self.values = {}
         self.drift = drift or {}
         self.active_state = active
         self.active_events = active_events
         self.tag = tag
+        self.children = children or {}
 
     def set(self, name, value):
         self.values[name] = value
@@ -374,6 +377,9 @@ class _Feature:
 
     def isActive(self):
         return self.active_state
+
+    def feature(self, tag):
+        return self.children[tag]
 
 
 class _Parameters:
@@ -481,6 +487,59 @@ def test_native_solver_memory_policy_rejects_readback_drift():
     backend.controls = {"out_of_core_property": "ooc", "out_of_core_value": "on"}
     backend.linear_solver = _Feature(drift={"ooc": "auto"})
     with pytest.raises(ValueError, match="out-of-core policy readback"):
+        backend._set_solver_memory_policy()
+
+
+def test_native_solver_memory_policy_applies_active_coarse_solver_path():
+    coarse = _Feature()
+    backend = object.__new__(robust_shape_native_runtime.ClientapiLin2025ConditionBackend)
+    backend.controls = {
+        "out_of_core_property": "ooc",
+        "out_of_core_value": "on",
+        "coarse_solver_feature_path": ["i1", "mg1", "cs", "dDef"],
+        "coarse_solver_out_of_core_property": "ooc",
+        "coarse_solver_out_of_core_value": "on",
+    }
+    backend.linear_solver = _Feature()
+    backend.stationary_solver = _Feature(
+        children={
+            "i1": _Feature(
+                children={
+                    "mg1": _Feature(
+                        children={"cs": _Feature(children={"dDef": coarse})}
+                    )
+                }
+            )
+        }
+    )
+    assert backend._set_solver_memory_policy() == {
+        "property": "ooc",
+        "requested": "on",
+        "observed": "on",
+        "coarse_solver": {
+            "feature_path": ["i1", "mg1", "cs", "dDef"],
+            "property": "ooc",
+            "requested": "on",
+            "observed": "on",
+        },
+    }
+
+
+def test_native_solver_memory_policy_rejects_coarse_readback_drift():
+    coarse = _Feature(drift={"ooc": "auto"})
+    backend = object.__new__(robust_shape_native_runtime.ClientapiLin2025ConditionBackend)
+    backend.controls = {
+        "out_of_core_property": "ooc",
+        "out_of_core_value": "on",
+        "coarse_solver_feature_path": ["i1", "dDef"],
+        "coarse_solver_out_of_core_property": "ooc",
+        "coarse_solver_out_of_core_value": "on",
+    }
+    backend.linear_solver = _Feature()
+    backend.stationary_solver = _Feature(
+        children={"i1": _Feature(children={"dDef": coarse})}
+    )
+    with pytest.raises(ValueError, match="coarse solver out-of-core"):
         backend._set_solver_memory_policy()
 
 
