@@ -277,6 +277,11 @@ def _entries() -> list[dict[str, Any]]:
             artifact_kind="configuration",
         ),
         _entry(
+            "comsol_mcp.robust_condition_receipt",
+            "1.0.0",
+            "comsol_mcp.jobs.robust_condition_runtime",
+        ),
+        _entry(
             "comsol_mcp.robust_shape_optimization_submission",
             "1.0.0",
             "comsol_mcp.jobs.robust_shape_optimization",
