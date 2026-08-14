@@ -21,10 +21,21 @@ def _tags(container: Any) -> list[str]:
 
 
 def _get(container: Any, tag: str) -> Any:
-    try:
-        return container.get(tag)
-    except Exception:
-        return container(tag)
+    errors: list[Exception] = []
+    for method_name in ("get", "feature"):
+        method = getattr(container, method_name, None)
+        if callable(method):
+            try:
+                return method(tag)
+            except Exception as exc:
+                errors.append(exc)
+    if callable(container):
+        try:
+            return container(tag)
+        except Exception as exc:
+            errors.append(exc)
+    detail = type(errors[-1]).__name__ if errors else type(container).__name__
+    raise TypeError(f"cannot resolve COMSOL tag {tag!r} from {type(container).__name__}: {detail}")
 
 
 def _flatten_real(value: Any) -> list[float]:

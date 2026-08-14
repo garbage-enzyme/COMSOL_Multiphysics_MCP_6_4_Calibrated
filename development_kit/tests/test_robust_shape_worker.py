@@ -409,6 +409,17 @@ def test_native_incidence_reads_back_parent_ports_and_polarization():
     assert backend.periodic.values["LinearPol"] == "P"
 
 
+def test_native_tag_resolution_supports_physics_feature_collections():
+    feature = object()
+
+    class FeatureCollection:
+        def feature(self, tag):
+            assert tag == "ps1"
+            return feature
+
+    assert robust_shape_native_runtime._get(FeatureCollection(), "ps1") is feature
+
+
 @pytest.mark.parametrize(
     ("periodic_drift", "port_drift", "message"),
     [
