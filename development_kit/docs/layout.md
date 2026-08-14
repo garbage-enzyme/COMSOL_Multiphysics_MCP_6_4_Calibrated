@@ -383,7 +383,7 @@ models are intentionally absent.
 - `development_kit/tests/test_robust_shape_adapter_licensed_gate.py` — This module tests the S3 licensed gate's caller-owned limits, solver-free dry run, redaction, and cleanup boundaries.
 - `development_kit/tests/test_robust_smoothing_selection.py` — This module tests evidence-only soft-min objective/weight/gradient comparison and forbids automatic winner selection.
 - `development_kit/tests/test_robust_shape_rows.py` — This module tests robust condition, gradient, iteration, trial, checkpoint, and cleanup row chaining and crash-tail recovery.
-- `development_kit/tests/test_robust_shape_worker.py` — This module tests JobManager dispatch, synthetic 24-condition completion, exact replay, status summaries, and duplicate suppression.
+- `development_kit/tests/test_robust_shape_worker.py` — This module tests JobManager dispatch, synthetic 24-condition completion, exact replay, status summaries, duplicate suppression, and durable licensed-condition receipt recovery.
 - `development_kit/tests/test_lin2025_pedot_cylinder.py` — This module tests the Lin2025 PEDOT-cylinder fixture, topology, state, and explicit deformation-selection contracts.
 - `development_kit/tests/test_lin2025_pedot_backend.py` — This module tests failure-atomic Lin2025 ClientAPI control preparation and source-identity rejection.
 - `development_kit/tests/test_lin2025_pedot_shape_licensed_gate.py` — This module tests the Lin2025 licensed gate's hash-bound solver-free dry-run boundary.
@@ -405,8 +405,10 @@ models are intentionally absent.
 - `comsol_mcp/research/gradient_validation.py` — This module compares native gradients with caller-supplied central or one-sided finite-difference evidence.
 - `comsol_mcp/research/external_validation.py` — This module normalizes backend-neutral independent validation receipts and forbids silent RCWA fallback.
 - `comsol_mcp/research/robust_conditions.py` — This module normalizes immutable configurable optimization condition tables and provenance-bound material states.
+- `comsol_mcp/research/robust_condition_controls.py` — This module normalizes explicit COMSOL tags, expressions, angle, and polarization mappings for robust condition execution.
 - `comsol_mcp/research/robust_gradient_acceptance.py` — This module combines independent component and directional gradient receipts under caller-frozen thresholds.
 - `comsol_mcp/research/robust_material_mapping.py` — This module freezes source columns, diagonal tensor axes, time-harmonic convention, interpolation, and no-extrapolation policy for immutable material states.
+- `comsol_mcp/research/robust_material_tensor_rows.py` — This module validates caller-supplied OX/MR tensor samples and cross-binds them to condition wavelengths and source identities.
 - `comsol_mcp/research/robust_finalist_validation.py` — This module freezes caller-owned fresh-remesh, convergence, branch, off-design, and external-fidelity finalist validation policy.
 - `comsol_mcp/research/robust_finalist_evidence.py` — This module independently assesses complete finalist promotion evidence and emits a tamper-evident receipt.
 - `comsol_mcp/research/robust_objectives.py` — This module evaluates differentiable absolute state contrast, caller-configurable smooth worst-case aggregation, and the exact condition-to-aggregate gradient chain rule.

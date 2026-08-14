@@ -126,6 +126,15 @@ from .robust_adapter_configuration import (
 from .robust_adapter_configuration import (
     normalize_robust_shape_adapter_configuration,
 )
+from .robust_condition_controls import (
+    SCHEMA_NAME as ROBUST_CONDITION_CONTROLS_SCHEMA_NAME,
+)
+from .robust_condition_controls import (
+    SCHEMA_VERSION as ROBUST_CONDITION_CONTROLS_SCHEMA_VERSION,
+)
+from .robust_condition_controls import (
+    normalize_robust_condition_controls,
+)
 from .robust_conditions import (
     MATERIAL_STATE_CONFIGURATION_SCHEMA_NAME,
     MATERIAL_STATE_CONFIGURATION_SCHEMA_VERSION,
@@ -295,7 +304,10 @@ __all__ = [
     "ROBUST_SHAPE_ADAPTER_CONFIGURATION_SCHEMA_VERSION",
     "ROBUST_MATERIAL_TENSOR_ROWS_SCHEMA_NAME",
     "ROBUST_MATERIAL_TENSOR_ROWS_SCHEMA_VERSION",
+    "ROBUST_CONDITION_CONTROLS_SCHEMA_NAME",
+    "ROBUST_CONDITION_CONTROLS_SCHEMA_VERSION",
     "bind_robust_material_tensor_rows",
+    "normalize_robust_condition_controls",
     "ROBUST_SHAPE_CONTROL_RECEIPT_SCHEMA_NAME",
     "ROBUST_SHAPE_CONTROL_RECEIPT_SCHEMA_VERSION",
     "ROBUST_SMOOTHING_COMPARISON_SCHEMA_NAME",

@@ -44,6 +44,8 @@ from comsol_mcp.research import (
     RESEARCH_GOAL_SCHEMA_VERSION,
     RESEARCH_JOURNAL_RECORD_SCHEMA_NAME,
     RESEARCH_JOURNAL_RECORD_SCHEMA_VERSION,
+    ROBUST_CONDITION_CONTROLS_SCHEMA_NAME,
+    ROBUST_CONDITION_CONTROLS_SCHEMA_VERSION,
     ROBUST_FINALIST_VALIDATION_POLICY_SCHEMA_NAME,
     ROBUST_FINALIST_VALIDATION_POLICY_SCHEMA_VERSION,
     ROBUST_FINALIST_VALIDATION_RECEIPT_SCHEMA_NAME,
@@ -628,6 +630,12 @@ def _entries() -> list[dict[str, Any]]:
             ROBUST_MATERIAL_TENSOR_ROWS_SCHEMA_NAME,
             ROBUST_MATERIAL_TENSOR_ROWS_SCHEMA_VERSION,
             "comsol_mcp.research.robust_material_tensor_rows",
+            artifact_kind="configuration",
+        ),
+        _entry(
+            ROBUST_CONDITION_CONTROLS_SCHEMA_NAME,
+            ROBUST_CONDITION_CONTROLS_SCHEMA_VERSION,
+            "comsol_mcp.research.robust_condition_controls",
             artifact_kind="configuration",
         ),
         _entry(
