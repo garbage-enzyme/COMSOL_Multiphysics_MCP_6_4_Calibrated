@@ -161,10 +161,9 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
         self.study_step.set(self.controls["study_step_property"], wavelength_expression)
         from jpype import JArray, JString
 
-        self.study_step.set(
-            self.controls["study_step_array_property"],
-            JArray(JString)([wavelength_expression]),
-        )
+        array_property = self.controls["study_step_array_property"]
+        if array_property is not None:
+            self.study_step.set(array_property, JArray(JString)([wavelength_expression]))
         if str(self.study_step.getString(self.controls["study_step_property"])) != (
             wavelength_expression
         ):
