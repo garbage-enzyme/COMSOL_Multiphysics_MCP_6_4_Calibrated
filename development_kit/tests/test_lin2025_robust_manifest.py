@@ -7,6 +7,7 @@ import json
 
 import pytest
 
+from comsol_mcp.jobs.robust_shape_optimization import expand_robust_shape_manifest
 from comsol_mcp.jobs.store import read_json
 from comsol_mcp.research.robust_conditions import normalize_optimization_condition_table
 from comsol_mcp.research.shape_support import normalize_shape_support_policy
@@ -127,6 +128,7 @@ def _write_inputs(root):
         "version": envelope["version"],
         "resource_policy": envelope["resource_policy"],
         "condition_execution_limit": 24,
+        "comsol_temporary_directory": str(root),
     }
     values = {
         "fixture.json": fixture,
@@ -163,6 +165,45 @@ def test_compiler_emits_self_validated_24_condition_submission(ascii_tmp_path):
     assert receipt["manifest_sha256"] == hashlib.sha256(manifest.read_bytes()).hexdigest()
     assert read_json(envelope)["submission_manifest_sha256"] == receipt["manifest_sha256"]
     assert read_json(manifest)["synthetic_mode"] is False
+
+
+def test_compiler_requires_caller_directory_for_explicit_out_of_core(ascii_tmp_path):
+    source = _write_inputs(ascii_tmp_path)
+    campaign_path = ascii_tmp_path / "campaign.json"
+    campaign = read_json(campaign_path)
+    campaign.pop("comsol_temporary_directory")
+    campaign_path.write_text(json.dumps(campaign), encoding="utf-8")
+    with pytest.raises(ValueError, match="campaign input fields"):
+        compile_lin2025_robust_submission(
+            source_model=source,
+            fixture_path=ascii_tmp_path / "fixture.json",
+            tree_path=ascii_tmp_path / "tree.json",
+            support_path=ascii_tmp_path / "support.json",
+            pedot_fixture_path=ascii_tmp_path / "pedot.json",
+            campaign_path=campaign_path,
+            manifest_path=ascii_tmp_path / "licensed-manifest.json",
+            envelope_path=ascii_tmp_path / "licensed-envelope.json",
+        )
+
+
+def test_expansion_rejects_omitted_directory_for_explicit_out_of_core(ascii_tmp_path):
+    source = _write_inputs(ascii_tmp_path)
+    manifest = ascii_tmp_path / "licensed-manifest.json"
+    envelope_path = ascii_tmp_path / "licensed-envelope.json"
+    compile_lin2025_robust_submission(
+        source_model=source,
+        fixture_path=ascii_tmp_path / "fixture.json",
+        tree_path=ascii_tmp_path / "tree.json",
+        support_path=ascii_tmp_path / "support.json",
+        pedot_fixture_path=ascii_tmp_path / "pedot.json",
+        campaign_path=ascii_tmp_path / "campaign.json",
+        manifest_path=manifest,
+        envelope_path=envelope_path,
+    )
+    envelope = read_json(envelope_path)
+    envelope.pop("comsol_temporary_directory")
+    with pytest.raises(ValueError, match="explicit out-of-core solve"):
+        expand_robust_shape_manifest(envelope)
 
 
 def test_compiler_removes_outputs_when_cross_binding_fails(ascii_tmp_path):

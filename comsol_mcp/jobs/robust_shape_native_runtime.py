@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import os
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Callable
@@ -241,6 +242,7 @@ def execute_lin2025_conditions(
     *,
     attempt: int,
     client_factory: Callable[..., Any] | None = None,
+    java_environment_reader: Callable[[str], str | None] | None = None,
     cancel_requested: Callable[[], bool],
 ) -> dict[str, Any]:
     """Load one derived copy, configure controls, and execute durable conditions."""
@@ -257,12 +259,45 @@ def execute_lin2025_conditions(
         "client_disconnect": "not_applicable",
         "errors": [],
     }
+    temporary_directory = spec["comsol_temporary_directory"]
+    previous_temporary_directory = os.environ.get("COMSOL_TMPDIR")
+    environment_path = directory / "comsol-temporary-directory.json"
+    os.environ["COMSOL_TMPDIR"] = temporary_directory
+    atomic_write_json(
+        environment_path,
+        {
+            "control": "COMSOL_TMPDIR",
+            "requested_path": temporary_directory,
+            "process_environment_path": os.environ.get("COMSOL_TMPDIR"),
+            "java_environment_path": None,
+            "matches": False,
+        },
+    )
     try:
         if client_factory is None:
+            import jpype
             import mph
 
             client_factory = mph.Client
+
+            def read_java_environment(name: str) -> str:
+                return str(jpype.JClass("java.lang.System").getenv(name))
+
+            java_environment_reader = read_java_environment
         client = client_factory(cores=spec["cores"], version=spec["version"])
+        if java_environment_reader is None:
+            java_environment_reader = os.environ.get
+        java_temporary_directory = java_environment_reader("COMSOL_TMPDIR")
+        environment_receipt = {
+            "control": "COMSOL_TMPDIR",
+            "requested_path": temporary_directory,
+            "process_environment_path": os.environ.get("COMSOL_TMPDIR"),
+            "java_environment_path": java_temporary_directory,
+            "matches": java_temporary_directory == temporary_directory,
+        }
+        atomic_write_json(environment_path, environment_receipt)
+        if not environment_receipt["matches"]:
+            raise RuntimeError("COMSOL temporary directory readback mismatch")
         source_model = client.load(str(source))
         source_model.java.save(str(configured), True)
         client.remove(source_model)
@@ -312,6 +347,10 @@ def execute_lin2025_conditions(
                 except Exception as exc:
                     cleanup["client_disconnect"] = False
                     cleanup["errors"].append(f"client_disconnect:{type(exc).__name__}")
+        if previous_temporary_directory is None:
+            os.environ.pop("COMSOL_TMPDIR", None)
+        else:
+            os.environ["COMSOL_TMPDIR"] = previous_temporary_directory
         atomic_write_json(cleanup_path, cleanup)
 
 

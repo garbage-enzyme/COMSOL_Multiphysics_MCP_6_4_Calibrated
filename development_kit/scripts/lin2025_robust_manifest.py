@@ -30,6 +30,7 @@ _CAMPAIGN_FIELDS = {
     "version",
     "resource_policy",
     "condition_execution_limit",
+    "comsol_temporary_directory",
 }
 
 
@@ -128,6 +129,7 @@ def compile_lin2025_robust_submission(
         "version": campaign["version"],
         "resource_policy": campaign["resource_policy"],
         "condition_execution_limit": campaign["condition_execution_limit"],
+        "comsol_temporary_directory": campaign["comsol_temporary_directory"],
     }
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     envelope_path.parent.mkdir(parents=True, exist_ok=True)

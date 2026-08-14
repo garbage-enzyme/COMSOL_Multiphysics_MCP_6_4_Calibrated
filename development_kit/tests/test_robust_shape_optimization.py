@@ -125,6 +125,7 @@ def _write_manifest(tmp_path, *, selected: str = "gcmma", synthetic: bool = True
         "cores": 14,
         "version": "6.4",
         "resource_policy": {"max_mesh_elements": 300_000},
+        "comsol_temporary_directory": str(tmp_path),
     }
     return envelope, source, manifest
 

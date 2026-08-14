@@ -55,6 +55,8 @@ def normalize_robust_shape_submission(value: object) -> dict[str, Any]:
     }
     if isinstance(value, dict) and "condition_execution_limit" in value:
         fields.add("condition_execution_limit")
+    if isinstance(value, dict) and "comsol_temporary_directory" in value:
+        fields.add("comsol_temporary_directory")
     if set(value) != fields:
         raise ValueError("robust shape submission fields are invalid")
     if value["job_type"] != "robust_shape_optimization":
@@ -85,6 +87,22 @@ def normalize_robust_shape_submission(value: object) -> dict[str, Any]:
         if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 4096:
             raise ValueError("condition_execution_limit must be a bounded positive integer")
         body["condition_execution_limit"] = limit
+    if "comsol_temporary_directory" in value:
+        temporary_text = value["comsol_temporary_directory"]
+        if (
+            not isinstance(temporary_text, str)
+            or not temporary_text.isascii()
+            or any(character.isspace() for character in temporary_text)
+        ):
+            raise ValueError("COMSOL temporary directory must be an ASCII path without whitespace")
+        temporary_directory = Path(temporary_text).expanduser()
+        if (
+            not temporary_directory.is_absolute()
+            or temporary_directory.is_symlink()
+            or not temporary_directory.is_dir()
+        ):
+            raise ValueError("COMSOL temporary directory must be an existing absolute directory")
+        body["comsol_temporary_directory"] = str(temporary_directory.resolve())
     return body
 
 
@@ -187,6 +205,12 @@ def expand_robust_shape_manifest(submission: object) -> dict[str, Any]:
             conditions,
             expected_temperature_k=adapter_binding["temperature_k"],
         )
+        condition_controls = adapter_configuration["configuration"]["condition_controls"]
+        if (
+            condition_controls["out_of_core_value"].casefold() == "on"
+            and "comsol_temporary_directory" not in envelope
+        ):
+            raise ValueError("explicit out-of-core solve requires a COMSOL temporary directory")
     if support["source_identity"] != source_hash:
         raise ValueError("robust shape support source identity differs from manifest source")
     if support["adapter_id"] != shape_policy["adapter_id"]:
