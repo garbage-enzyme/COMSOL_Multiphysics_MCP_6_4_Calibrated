@@ -55,17 +55,22 @@ def test_dry_run_is_solver_free_and_hash_bound(tmp_path: Path):
         fixture_path = root / "fixture.json"
         tree_path = root / "tree.json"
         support_path = root / "support.json"
+        state_tensors_path = root / "state-tensors.json"
         fixture_path.write_text(
             json.dumps(_fixture(hashlib.sha256(b"source").hexdigest())), encoding="utf-8"
         )
         tree_path.write_text("{}", encoding="utf-8")
         support_path.write_text("{}", encoding="utf-8")
+        state_tensors_path.write_text(
+            json.dumps({"OX": ["0"] * 9, "MR": ["0"] * 9}), encoding="utf-8"
+        )
         args = argparse.Namespace(
             test_root=root,
             source_model=source,
             fixture=fixture_path,
             tree_readback=tree_path,
             support=support_path,
+            state_tensors=state_tensors_path,
             cores=1,
             dry_run=True,
         )

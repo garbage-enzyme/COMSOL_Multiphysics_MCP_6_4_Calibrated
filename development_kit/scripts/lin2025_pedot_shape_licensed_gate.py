@@ -46,6 +46,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--fixture", type=Path, required=True)
     parser.add_argument("--tree-readback", type=Path, required=True)
     parser.add_argument("--support", type=Path, required=True)
+    parser.add_argument("--state-tensors", type=Path, required=True)
     parser.add_argument("--cores", type=int, required=True)
     parser.add_argument("--dry-run", action="store_true")
     return parser
@@ -94,6 +95,18 @@ def _spec(args: argparse.Namespace) -> dict[str, Any]:
     )
     tree = json.loads(args.tree_readback.resolve(strict=True).read_text(encoding="utf-8"))
     support = json.loads(args.support.resolve(strict=True).read_text(encoding="utf-8"))
+    state_tensors = json.loads(args.state_tensors.resolve(strict=True).read_text(encoding="utf-8"))
+    if (
+        not isinstance(state_tensors, dict)
+        or set(state_tensors) != {"OX", "MR"}
+        or any(
+            not isinstance(values, list)
+            or len(values) != 9
+            or any(not isinstance(value, str) or not value.strip() for value in values)
+            for values in state_tensors.values()
+        )
+    ):
+        raise ValueError("state tensors must provide nine expressions for OX and MR")
     source_hash = _sha(source)
     if source_hash != fixture["source_identity"]["source_sha256"]:
         raise ValueError("source model differs from the trusted PEDOT fixture")
@@ -104,9 +117,11 @@ def _spec(args: argparse.Namespace) -> dict[str, Any]:
         "fixture": fixture,
         "tree": tree,
         "support": support,
+        "state_tensors": state_tensors,
         "fixture_sha256": hashlib.sha256(args.fixture.read_bytes()).hexdigest(),
         "tree_sha256": hashlib.sha256(args.tree_readback.read_bytes()).hexdigest(),
         "support_sha256": hashlib.sha256(args.support.read_bytes()).hexdigest(),
+        "state_tensors_sha256": hashlib.sha256(args.state_tensors.read_bytes()).hexdigest(),
         "cores": args.cores,
         "base_copy": root / "base.mph",
         "configured_copy": root / "configured.mph",
@@ -125,6 +140,7 @@ def _dry_run(spec: dict[str, Any]) -> dict[str, Any]:
         "fixture_sha256": spec["fixture_sha256"],
         "tree_sha256": spec["tree_sha256"],
         "support_sha256": spec["support_sha256"],
+        "state_tensors_sha256": spec["state_tensors_sha256"],
         "requested_cores": spec["cores"],
         "solver_started": False,
         "filesystem_modified": False,
@@ -152,6 +168,7 @@ def _run(spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
         "fixture_sha256": spec["fixture_sha256"],
         "tree_sha256": spec["tree_sha256"],
         "support_sha256": spec["support_sha256"],
+        "state_tensors_sha256": spec["state_tensors_sha256"],
         "requested_cores": spec["cores"],
         "solver_started": False,
         "paths_included": False,
@@ -183,15 +200,22 @@ def _run(spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
             spec["tree"],
             spec["support"],
         )
+        backend = ClientapiLin2025PedotControlBackend(model)
+        state_receipts = [
+            backend.apply_material_state(state, spec["state_tensors"][state])
+            for state in ("OX", "MR")
+        ]
         model.java.save(str(spec["configured_copy"]), True)
         client.remove(model)
         reloaded = client.load(str(spec["configured_copy"]))
-        backend = ClientapiLin2025PedotControlBackend(reloaded)
-        snapshot = backend.snapshot()
+        reloaded_backend = ClientapiLin2025PedotControlBackend(reloaded)
+        snapshot = reloaded_backend.snapshot()
         if "dg_pedot72" not in snapshot["physics"]:
             raise ValueError("saved PEDOT deformation interface is absent after reload")
         if snapshot["circle"] != control_receipt["controls"]["circle"]:
             raise ValueError("saved PEDOT circle identity changed after reload")
+        if snapshot["material"]["relpermittivity"] != state_receipts[-1]["relpermittivity"]:
+            raise ValueError("saved MR material tensor changed after reload")
         client.remove(reloaded)
         receipt.update(
             {
@@ -200,11 +224,19 @@ def _run(spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
                 "base_copy_sha256": _sha(spec["base_copy"]),
                 "configured_copy_sha256": _sha(spec["configured_copy"]),
                 "control_receipt_fingerprint": control_receipt["receipt_fingerprint"],
+                "material_state_ids": [item["state_id"] for item in state_receipts],
+                "material_state_receipt_fingerprints": [
+                    hashlib.sha256(
+                        json.dumps(item, sort_keys=True, separators=(",", ":")).encode()
+                    ).hexdigest()
+                    for item in state_receipts
+                ],
                 "save_reload_verified": True,
                 "native_solve_executed": False,
             }
         )
         private["control_receipt"] = control_receipt
+        private["material_state_receipts"] = state_receipts
     except Exception as exc:
         receipt["error"] = {"code": "lin2025_pedot_shape_failed", "type": type(exc).__name__}
         private["error"] = f"{type(exc).__name__}: {exc}"
