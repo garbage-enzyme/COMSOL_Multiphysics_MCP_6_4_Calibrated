@@ -119,6 +119,7 @@ def _write_inputs(root):
         "cores": envelope["cores"],
         "version": envelope["version"],
         "resource_policy": envelope["resource_policy"],
+        "condition_execution_limit": 24,
     }
     values = {
         "fixture.json": fixture,

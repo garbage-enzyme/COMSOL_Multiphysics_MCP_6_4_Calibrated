@@ -653,6 +653,56 @@ def _run_licensed(root: str, job_id: str) -> int:
             attempt=attempt,
             cancel_requested=lambda: _cancel_requested(store, job_id, attempt),
         )
+        execution_limit = spec.get("condition_execution_limit")
+        declared_conditions = len(
+            [
+                row
+                for row in spec["condition_table"]["conditions"]
+                if row["active"] and row["objective_role"] == "objective"
+            ]
+        )
+        if execution_limit is not None and execution_limit < declared_conditions:
+            rows_path = directory / "robust_shape_rows.jsonl"
+            smoke_fingerprint = domain_sha256_v2(
+                "comsol_mcp.robust_condition_smoke", result["observations"]
+            )
+            append_robust_shape_row(
+                rows_path,
+                job_fingerprint=spec["spec_fingerprint"],
+                attempt=attempt,
+                kind="iteration",
+                payload={
+                    "iteration_id": "smoke-0",
+                    "iteration_index": 0,
+                    "candidate_fingerprint": domain_sha256_v2(
+                        "comsol_mcp.robust_condition_smoke_candidate", spec["initial_values"]
+                    ),
+                    "aggregate_objective": 0.0,
+                    "status": "rejected",
+                    "robust_objective_fingerprint": smoke_fingerprint,
+                    "fresh_forward_fingerprint": None,
+                    "reason_code": "licensed_condition_smoke_only",
+                },
+            )
+            store.update_state(
+                job_id,
+                "failed",
+                patch={
+                    "solver_started": True,
+                    "progress": {
+                        "completed": len(result["observations"]),
+                        "total": execution_limit,
+                    },
+                    "last_error": {
+                        "type": "NativeConditionSmokeComplete",
+                        "message": (
+                            "Licensed condition smoke completed; full robust run not requested"
+                        ),
+                    },
+                },
+                event="robust_condition_smoke_completed",
+            )
+            return 1
         objective = evaluate_robust_absolute_contrast(
             spec["objective"], spec["condition_table"], result["observations"]
         )

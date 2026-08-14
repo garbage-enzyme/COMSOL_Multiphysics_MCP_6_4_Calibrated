@@ -53,6 +53,8 @@ def normalize_robust_shape_submission(value: object) -> dict[str, Any]:
         "version",
         "resource_policy",
     }
+    if isinstance(value, dict) and "condition_execution_limit" in value:
+        fields.add("condition_execution_limit")
     if set(value) != fields:
         raise ValueError("robust shape submission fields are invalid")
     if value["job_type"] != "robust_shape_optimization":
@@ -66,7 +68,7 @@ def normalize_robust_shape_submission(value: object) -> dict[str, Any]:
     resource_policy = normalize_resource_policy(value["resource_policy"])
     if resource_policy is None:
         raise ValueError("robust shape resource_policy is required")
-    return {
+    body = {
         "job_type": "robust_shape_optimization",
         "submission_manifest_path": str(_manifest_path(value["submission_manifest_path"])),
         "submission_manifest_sha256": _digest(
@@ -78,6 +80,12 @@ def normalize_robust_shape_submission(value: object) -> dict[str, Any]:
         "schema_name": ROBUST_SHAPE_SUBMISSION_SCHEMA_NAME,
         "schema_version": ROBUST_SHAPE_SUBMISSION_SCHEMA_VERSION,
     }
+    if "condition_execution_limit" in value:
+        limit = value["condition_execution_limit"]
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 4096:
+            raise ValueError("condition_execution_limit must be a bounded positive integer")
+        body["condition_execution_limit"] = limit
+    return body
 
 
 def expand_robust_shape_manifest(submission: object) -> dict[str, Any]:

@@ -133,6 +133,21 @@ def test_condition_runtime_persists_receipts_rows_and_exact_replay(ascii_tmp_pat
     assert replay_backend.calls == []
 
 
+def test_condition_runtime_honors_explicit_execution_limit(ascii_tmp_path):
+    spec = _condition_runtime_spec()
+    spec["condition_execution_limit"] = 1
+    backend = _ConditionBackend()
+    observations = execute_robust_conditions(
+        spec,
+        ascii_tmp_path,
+        attempt=1,
+        backend=backend,
+        cancel_requested=lambda: False,
+    )
+    assert len(observations) == 1
+    assert [call[0] for call in backend.calls] == ["condition-0"]
+
+
 def test_condition_runtime_recovers_receipt_written_before_row(
     ascii_tmp_path, monkeypatch
 ):

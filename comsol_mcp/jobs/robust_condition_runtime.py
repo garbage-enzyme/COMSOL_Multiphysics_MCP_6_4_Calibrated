@@ -175,6 +175,9 @@ def execute_robust_conditions(
         for item in spec["condition_table"]["conditions"]
         if item["active"] and item["objective_role"] == "objective"
     ]
+    execution_limit = spec.get("condition_execution_limit")
+    if execution_limit is not None:
+        active = active[:execution_limit]
     controls = spec["adapter_configuration"]["configuration"]["condition_controls"]
     mesh_policy = spec["finalist_validation_policy"]["mesh_convergence"]
     for condition in active:
