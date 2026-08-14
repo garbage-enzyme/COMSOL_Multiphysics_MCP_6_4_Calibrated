@@ -428,6 +428,25 @@ def test_native_result_flatten_accepts_array_like_iterables():
     assert robust_shape_native_runtime._flatten_real(ArrayLike()) == [1.0, 2.0, 3.0]
 
 
+def test_native_solver_memory_policy_is_explicit_and_read_back():
+    backend = object.__new__(robust_shape_native_runtime.ClientapiLin2025ConditionBackend)
+    backend.controls = {"out_of_core_property": "ooc", "out_of_core_value": "on"}
+    backend.linear_solver = _Feature()
+    assert backend._set_solver_memory_policy() == {
+        "property": "ooc",
+        "requested": "on",
+        "observed": "on",
+    }
+
+
+def test_native_solver_memory_policy_rejects_readback_drift():
+    backend = object.__new__(robust_shape_native_runtime.ClientapiLin2025ConditionBackend)
+    backend.controls = {"out_of_core_property": "ooc", "out_of_core_value": "on"}
+    backend.linear_solver = _Feature(drift={"ooc": "auto"})
+    with pytest.raises(ValueError, match="out-of-core policy readback"):
+        backend._set_solver_memory_policy()
+
+
 @pytest.mark.parametrize(
     ("periodic_drift", "port_drift", "message"),
     [

@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Callable
 
-from comsol_mcp.durable import atomic_write_json
+from comsol_mcp.durable import atomic_write_json, domain_sha256_v2
 from comsol_mcp.research.lin2025_pedot_backend import (
     ClientapiLin2025PedotControlBackend,
     prepare_lin2025_pedot_shape_controls,
@@ -92,6 +92,9 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
         ]
         self.study = _get(model.java.study(), self.controls["study_tag"])
         self.study_step = self.study.feature(self.controls["study_step_tag"])
+        solution = model.java.sol(self.controls["solution_tag"])
+        stationary = solution.feature(self.controls["stationary_solver_tag"])
+        self.linear_solver = stationary.feature(self.controls["linear_solver_tag"])
         numerical = model.java.result().numerical()
         self.numerical = numerical
         self._counter = 0
@@ -115,7 +118,14 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
             self.controls["mesh_tag"]
         )
         mesh.run()
-        return controls
+        body = {
+            "shape_controls": controls,
+            "solver_memory": self._set_solver_memory_policy(),
+        }
+        body["receipt_fingerprint"] = domain_sha256_v2(
+            "comsol_mcp.robust_native_controls", body
+        )
+        return body
 
     def _set_incidence(self, condition: Mapping[str, Any]) -> None:
         params = self.model.java.param()
@@ -155,6 +165,15 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
         ):
             raise ValueError("periodic polarization readback differs")
 
+    def _set_solver_memory_policy(self) -> dict[str, str]:
+        property_name = self.controls["out_of_core_property"]
+        requested = self.controls["out_of_core_value"]
+        self.linear_solver.set(property_name, requested)
+        observed = str(self.linear_solver.getString(property_name))
+        if observed != requested:
+            raise ValueError("linear solver out-of-core policy readback differs")
+        return {"property": property_name, "requested": requested, "observed": observed}
+
     def evaluate_condition(
         self, condition: Mapping[str, Any], tensor_expressions: list[str]
     ) -> Mapping[str, Any]:
@@ -166,6 +185,7 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
             f"{float(condition['wavelength_m']):.17g}[m]",
         )
         self._set_incidence(condition)
+        self._set_solver_memory_policy()
         wavelength_expression = self.controls["wavelength_parameter"]
         self.study_step.set(self.controls["study_step_property"], wavelength_expression)
         from jpype import JArray, JString
