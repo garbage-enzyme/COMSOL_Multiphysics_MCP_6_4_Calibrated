@@ -80,7 +80,9 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
             self.model.java.param().set(
                 variable["variable_id"], f"{float(value):.17g}[{variable['unit']}]"
             )
-        geometry = _get(self.model.java.component(), self.controls["component_tag"]).geom("geom1")
+        geometry = _get(self.model.java.component(), self.controls["component_tag"]).geom(
+            self.controls["geometry_tag"]
+        )
         geometry.run()
         mesh = _get(self.model.java.component(), self.controls["component_tag"]).mesh(
             self.controls["mesh_tag"]

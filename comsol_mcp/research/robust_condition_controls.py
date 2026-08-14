@@ -21,6 +21,7 @@ def normalize_robust_condition_controls(value: object) -> dict[str, Any]:
             "schema_name",
             "schema_version",
             "component_tag",
+            "geometry_tag",
             "physics_tag",
             "periodic_structure_tag",
             "periodic_port_tags",
@@ -70,6 +71,7 @@ def normalize_robust_condition_controls(value: object) -> dict[str, Any]:
         "schema_name": SCHEMA_NAME,
         "schema_version": SCHEMA_VERSION,
         "component_tag": _identifier(raw["component_tag"], "component_tag"),
+        "geometry_tag": _identifier(raw["geometry_tag"], "geometry_tag"),
         "physics_tag": _identifier(raw["physics_tag"], "physics_tag"),
         "periodic_structure_tag": _identifier(
             raw["periodic_structure_tag"], "periodic_structure_tag"

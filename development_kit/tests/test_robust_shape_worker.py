@@ -41,8 +41,9 @@ def _condition_runtime_spec() -> dict:
         "condition_table": {"conditions": conditions},
         "adapter_configuration": {
             "configuration": {
-                "condition_controls": {
-                    "dataset_tag": "dset1",
+                    "condition_controls": {
+                        "geometry_tag": "geom1",
+                        "dataset_tag": "dset1",
                     "solution_tag": "sol1",
                 },
                 "material_tensor_rows": {
@@ -379,6 +380,7 @@ def _incidence_backend(*, periodic_drift=None, port_drift=None):
     backend.controls = {
         "elevation_parameter": "theta",
         "azimuth_parameter": "phi",
+        "geometry_tag": "geom1",
         "angle_property": "alpha1_inc",
         "azimuth_property": "alpha2_inc",
         "polarization_property": "Polarization",

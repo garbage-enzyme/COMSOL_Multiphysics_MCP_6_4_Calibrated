@@ -80,6 +80,7 @@ def _write_inputs(root):
         "schema_name": "comsol_mcp.robust_condition_controls",
         "schema_version": "1.0.0",
         "component_tag": "comp1",
+        "geometry_tag": "geom1",
         "physics_tag": "ewfd",
         "periodic_structure_tag": "ps1",
         "periodic_port_tags": ["pport1", "pport2"],
