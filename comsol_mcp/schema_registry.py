@@ -284,6 +284,11 @@ def _entries() -> list[dict[str, Any]]:
             "comsol_mcp.jobs.robust_condition_runtime",
         ),
         _entry(
+            "comsol_mcp.robust_licensed_cleanup_receipt",
+            "1.0.0",
+            "comsol_mcp.jobs.robust_shape_worker",
+        ),
+        _entry(
             "comsol_mcp.robust_shape_optimization_submission",
             "1.0.0",
             "comsol_mcp.jobs.robust_shape_optimization",
