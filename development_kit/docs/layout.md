@@ -122,6 +122,7 @@ models are intentionally absent.
 - `development_kit/scripts/robust_shape_adapter_licensed_gate.py` — This repository-only alpha7.2 gate creates, reloads, and failure-rolls-back trusted Deformed Geometry controls on an immutable derived periodic-MIM model without solving.
 - `development_kit/scripts/robust_gradient_ladder_licensed_gate.py` — This repository-only alpha7.2 S4 gate owns one shared lease while serial fresh processes run native, finite-difference, directional, GCMMA, and optionally explicit MMA validation with caller-only budgets.
 - `development_kit/scripts/robust_pedot_fixture.py` — This repository-only compiler audits private OX/MR CSV tensor conventions and emits a path-redacted hash-bound 24-condition acceptance manifest.
+- `development_kit/scripts/lin2025_pedot_shape_licensed_gate.py` — This repository-only licensed gate saves, reloads, and audits derived Lin2025 PEDOT-cylinder shape controls without solving.
 - `development_kit/scripts/pedot_material_ownership_probe.py` — This repository-only licensed probe reads material tags, domain selections, and bounded property identities without solving or mutating the source model.
 - `development_kit/scripts/verify_robust_gradient_ladder_receipt.py` — This repository-only alpha7.2 S4 verifier independently reopens every licensed ladder receipt and log, recomputes canonical gradient and optimizer evidence, and rejects identity, ordering, budget, cleanup, fallback, or artifact drift.
 - `development_kit/scripts/research_adapter_template_probe.py` — This repository-only licensed probe launches the current source tree with isolated settings, audits one immutable COMSOL template read-only over serial stdio, and emits separate path-redacted and private receipts.
@@ -384,6 +385,7 @@ models are intentionally absent.
 - `development_kit/tests/test_robust_shape_worker.py` — This module tests JobManager dispatch, synthetic 24-condition completion, exact replay, status summaries, and duplicate suppression.
 - `development_kit/tests/test_lin2025_pedot_cylinder.py` — This module tests the Lin2025 PEDOT-cylinder fixture, topology, state, and explicit deformation-selection contracts.
 - `development_kit/tests/test_lin2025_pedot_backend.py` — This module tests failure-atomic Lin2025 ClientAPI control preparation and source-identity rejection.
+- `development_kit/tests/test_lin2025_pedot_shape_licensed_gate.py` — This module tests the Lin2025 licensed gate's hash-bound solver-free dry-run boundary.
 - `development_kit/tests/test_robust_startup_admission.py` — This module tests caller-owned absolute RAM/disk thresholds with startup-only evaluation semantics.
 - `development_kit/tests/test_validation_runner.py` — This module tests the solver-independent validation point loop.
 - `development_kit/tests/test_validation_worker.py` — This module tests detached validation worker boundaries and cleanup.
