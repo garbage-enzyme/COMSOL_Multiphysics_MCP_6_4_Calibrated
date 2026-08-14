@@ -325,6 +325,95 @@ def test_licensed_cleanup_fails_closed_on_false_clear_or_incomplete_inventory(
     ]
 
 
+class _Feature:
+    def __init__(self, *, drift=None):
+        self.values = {}
+        self.drift = drift or {}
+
+    def set(self, name, value):
+        self.values[name] = value
+
+    def getString(self, name):
+        return self.drift.get(name, self.values[name])
+
+
+class _Parameters:
+    def __init__(self):
+        self.values = {}
+
+    def set(self, name, value):
+        self.values[name] = value
+
+
+class _JavaWithParameters:
+    def __init__(self):
+        self.parameters = _Parameters()
+
+    def param(self):
+        return self.parameters
+
+
+class _ModelWithParameters:
+    def __init__(self):
+        self.java = _JavaWithParameters()
+
+
+def _incidence_backend(*, periodic_drift=None, port_drift=None):
+    backend = object.__new__(robust_shape_native_runtime.ClientapiLin2025ConditionBackend)
+    backend.model = _ModelWithParameters()
+    backend.controls = {
+        "elevation_parameter": "theta",
+        "azimuth_parameter": "phi",
+        "angle_property": "alpha1_inc",
+        "azimuth_property": "alpha2_inc",
+        "polarization_property": "Polarization",
+        "linear_polarization_property": "LinearPol",
+        "polarization_values": {"x_linear": "S", "y_linear": "P"},
+    }
+    backend.periodic = _Feature(drift=periodic_drift)
+    backend.ports = [_Feature(drift=port_drift), _Feature()]
+    return backend
+
+
+def test_native_incidence_reads_back_parent_ports_and_polarization():
+    backend = _incidence_backend()
+    backend._set_incidence(
+        {
+            "incidence_elevation_deg": 30.0,
+            "incidence_azimuth_deg": 0.0,
+            "polarization_basis_id": "y_linear",
+        }
+    )
+    assert backend.model.java.parameters.values == {
+        "theta": "30[deg]",
+        "phi": "0[deg]",
+    }
+    assert backend.periodic.values["Polarization"] == "LinearPol"
+    assert backend.periodic.values["LinearPol"] == "P"
+
+
+@pytest.mark.parametrize(
+    ("periodic_drift", "port_drift", "message"),
+    [
+        ({"Polarization": "UserDefined"}, None, "polarization mode"),
+        (None, {"alpha1_inc": "wrong_theta"}, "periodic port 1 elevation"),
+        (None, {"alpha2_inc": "wrong_phi"}, "periodic port 1 azimuth"),
+    ],
+)
+def test_native_incidence_rejects_parent_or_port_readback_drift(
+    periodic_drift, port_drift, message
+):
+    backend = _incidence_backend(periodic_drift=periodic_drift, port_drift=port_drift)
+    with pytest.raises(ValueError, match=message):
+        backend._set_incidence(
+            {
+                "incidence_elevation_deg": 30.0,
+                "incidence_azimuth_deg": 0.0,
+                "polarization_basis_id": "x_linear",
+            }
+        )
+
+
 def _manager(root, monkeypatch):
     manager = JobManager(root, preflight=lambda **_kwargs: {"success": True, "ready": True})
     monkeypatch.setattr(

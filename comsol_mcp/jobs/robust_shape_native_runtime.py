@@ -108,14 +108,19 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
         except KeyError as exc:
             raise ValueError(f"no polarization mapping for {basis}") from exc
         self.periodic.set(self.controls["linear_polarization_property"], polarization)
-        if str(self.periodic.getString(self.controls["angle_property"])) != self.controls[
-            "elevation_parameter"
-        ]:
-            raise ValueError("periodic parent elevation readback differs")
-        if str(self.periodic.getString(self.controls["azimuth_property"])) != self.controls[
-            "azimuth_parameter"
-        ]:
-            raise ValueError("periodic parent azimuth readback differs")
+        for label, node in [("periodic parent", self.periodic), *[
+            (f"periodic port {index}", port) for index, port in enumerate(self.ports, start=1)
+        ]]:
+            if str(node.getString(self.controls["angle_property"])) != self.controls[
+                "elevation_parameter"
+            ]:
+                raise ValueError(f"{label} elevation readback differs")
+            if str(node.getString(self.controls["azimuth_property"])) != self.controls[
+                "azimuth_parameter"
+            ]:
+                raise ValueError(f"{label} azimuth readback differs")
+        if str(self.periodic.getString(self.controls["polarization_property"])) != "LinearPol":
+            raise ValueError("periodic polarization mode readback differs")
         if str(self.periodic.getString(self.controls["linear_polarization_property"])) != str(
             polarization
         ):
