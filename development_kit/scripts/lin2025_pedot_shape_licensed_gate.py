@@ -195,12 +195,14 @@ def _run(spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
         client.remove(source_model)
         model = client.load(str(spec["base_copy"]))
         control_receipt = prepare_lin2025_pedot_shape_controls(
-            ClientapiLin2025PedotControlBackend(model),
+            ClientapiLin2025PedotControlBackend(model, component_tag="comp1", geometry_tag="geom1"),
             spec["fixture"],
             spec["tree"],
             spec["support"],
         )
-        backend = ClientapiLin2025PedotControlBackend(model)
+        backend = ClientapiLin2025PedotControlBackend(
+            model, component_tag="comp1", geometry_tag="geom1"
+        )
         state_receipts = [
             backend.apply_material_state(state, spec["state_tensors"][state])
             for state in ("OX", "MR")
@@ -208,7 +210,9 @@ def _run(spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
         model.java.save(str(spec["configured_copy"]), True)
         client.remove(model)
         reloaded = client.load(str(spec["configured_copy"]))
-        reloaded_backend = ClientapiLin2025PedotControlBackend(reloaded)
+        reloaded_backend = ClientapiLin2025PedotControlBackend(
+            reloaded, component_tag="comp1", geometry_tag="geom1"
+        )
         snapshot = reloaded_backend.snapshot()
         if "dg_pedot72" not in snapshot["physics"]:
             raise ValueError("saved PEDOT deformation interface is absent after reload")

@@ -42,9 +42,9 @@ def _metres(value: float, unit: str, name: str) -> float:
     return result
 
 
-def _circle_readback(model: Any) -> dict[str, Any]:
-    component = _get(model.java.component(), "comp1")
-    geometry = _get(component.geom(), "geom1")
+def _circle_readback(model: Any, component_tag: str, geometry_tag: str) -> dict[str, Any]:
+    component = _get(model.java.component(), component_tag)
+    geometry = _get(component.geom(), geometry_tag)
     features = geometry.feature()
     if "wp_pedot_cyl" not in _tags(features):
         raise ValueError("Lin2025 PEDOT work plane is absent")
@@ -69,8 +69,8 @@ def _circle_readback(model: Any) -> dict[str, Any]:
     return {"radius_m": radius, "center_m": position}
 
 
-def _material_readback(model: Any) -> dict[str, Any]:
-    component = _get(model.java.component(), "comp1")
+def _material_readback(model: Any, component_tag: str) -> dict[str, Any]:
+    component = _get(model.java.component(), component_tag)
     materials = component.material()
     if "mat_pedot" not in _tags(materials):
         raise ValueError("Lin2025 PEDOT material tag is absent")
@@ -105,11 +105,13 @@ class Lin2025PedotControlBackend(Protocol):
 class ClientapiLin2025PedotControlBackend:
     """Configure explicit fixed/free/PEDOT selections on one derived model."""
 
-    def __init__(self, model: Any) -> None:
+    def __init__(self, model: Any, *, component_tag: str, geometry_tag: str) -> None:
         self.model = model
+        self.component_tag = component_tag
+        self.geometry_tag = geometry_tag
 
     def snapshot(self) -> dict[str, Any]:
-        component = _get(self.model.java.component(), "comp1")
+        component = _get(self.model.java.component(), self.component_tag)
         physics = component.physics()
         physics_state = {}
         for tag in _tags(physics):
@@ -117,12 +119,12 @@ class ClientapiLin2025PedotControlBackend:
         return {
             "parameters": dict(self.model.parameters()),
             "physics": physics_state,
-            "circle": _circle_readback(self.model),
-            "material": _material_readback(self.model),
+            "circle": _circle_readback(self.model, self.component_tag, self.geometry_tag),
+            "material": _material_readback(self.model, self.component_tag),
         }
 
     def restore(self, snapshot: Mapping[str, Any]) -> None:
-        component = _get(self.model.java.component(), "comp1")
+        component = _get(self.model.java.component(), self.component_tag)
         physics = component.physics()
         expected_physics = snapshot.get("physics", {})
         for tag in list(_tags(physics)):
@@ -141,9 +143,11 @@ class ClientapiLin2025PedotControlBackend:
             parameters.remove(name)
         for name, expression in original_parameters.items():
             parameters.set(name, expression)
-        if _circle_readback(self.model) != snapshot.get("circle"):
+        if _circle_readback(self.model, self.component_tag, self.geometry_tag) != snapshot.get(
+            "circle"
+        ):
             raise RuntimeError("Lin2025 source geometry changed during rollback")
-        if _material_readback(self.model) != snapshot.get("material"):
+        if _material_readback(self.model, self.component_tag) != snapshot.get("material"):
             raise RuntimeError("Lin2025 source material changed during rollback")
 
     def apply_material_state(self, state_id: str, tensor: list[str]) -> dict[str, Any]:
@@ -153,7 +157,7 @@ class ClientapiLin2025PedotControlBackend:
             not isinstance(value, str) or not value.strip() for value in tensor
         ):
             raise ValueError("Lin2025 material tensor must contain nine expressions")
-        component = _get(self.model.java.component(), "comp1")
+        component = _get(self.model.java.component(), self.component_tag)
         materials = component.material()
         if "mat_pedot" not in _tags(materials):
             raise ValueError("Lin2025 PEDOT material tag is absent")
@@ -164,7 +168,7 @@ class ClientapiLin2025PedotControlBackend:
 
         group = material.propertyGroup("def")
         group.set("relpermittivity", JArray(JString)(tensor))
-        readback = _material_readback(self.model)
+        readback = _material_readback(self.model, self.component_tag)
         if readback["relpermittivity"] not in (tensor, [tensor[0], tensor[4], tensor[8]]):
             raise ValueError("Lin2025 material tensor readback differs from requested state")
         return {
@@ -182,7 +186,7 @@ class ClientapiLin2025PedotControlBackend:
             raise ValueError("Lin2025 controls must be ordered cylinder x/y radii")
         if derivative_support["adapter_id"] != ADAPTER_ID:
             raise ValueError("Lin2025 control adapter identity changed")
-        circle = _circle_readback(self.model)
+        circle = _circle_readback(self.model, self.component_tag, self.geometry_tag)
         baseline_radius_m = float(shape_support["baseline_radius_um"]) * 1e-6
         center_m = [float(value) * 1e-6 for value in shape_support["center_um"]]
         if not math.isclose(
@@ -203,11 +207,11 @@ class ClientapiLin2025PedotControlBackend:
             expression = f"{item['baseline']:.17g}[{item['unit']}]"
             parameters.set(item["variable_id"], expression)
             expressions[item["variable_id"]] = expression
-        component = _get(self.model.java.component(), "comp1")
+        component = _get(self.model.java.component(), self.component_tag)
         physics = component.physics()
         if "dg_pedot72" in _tags(physics):
             raise ValueError("Lin2025 PEDOT deformation interface already exists")
-        deformation = physics.create("dg_pedot72", "DeformedGeometry", "geom1")
+        deformation = physics.create("dg_pedot72", "DeformedGeometry", self.geometry_tag)
         features = deformation.feature()
         free = features.create("free_pedot72", "FreeDeformation", 3)
         fixed = features.create("fix_pedot72", "PrescribedMeshDisplacement", 2)
@@ -257,7 +261,9 @@ class ClientapiLin2025PedotControlBackend:
             "height_preserved": True,
             "center_preserved": True,
         }
-        if readback != expected or _circle_readback(self.model) != circle:
+        if readback != expected or _circle_readback(
+            self.model, self.component_tag, self.geometry_tag
+        ) != circle:
             raise ValueError("Lin2025 PEDOT control readback differs from the request")
         return {"parameters": expressions, "circle": circle, "deformed_geometry": readback}
 

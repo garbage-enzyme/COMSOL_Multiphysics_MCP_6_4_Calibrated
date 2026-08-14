@@ -70,7 +70,11 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
         self.tree = configuration["tree_readback"]
         self.support = spec["support"]
         self.shape_support = configuration["shape_support"]
-        self.material = ClientapiLin2025PedotControlBackend(model)
+        self.material = ClientapiLin2025PedotControlBackend(
+            model,
+            component_tag=self.controls["component_tag"],
+            geometry_tag=self.controls["geometry_tag"],
+        )
         component = _get(model.java.component(), self.controls["component_tag"])
         physics = _get(component.physics(), self.controls["physics_tag"])
         self.periodic = _get(physics, self.controls["periodic_structure_tag"])
