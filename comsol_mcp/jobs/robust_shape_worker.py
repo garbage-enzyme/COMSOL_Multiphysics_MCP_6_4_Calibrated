@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import os
 import sys
 import time
@@ -11,6 +12,11 @@ from typing import Any
 from comsol_mcp.durable import domain_sha256_v2
 from comsol_mcp.research.robust_finalist_evidence import assess_robust_finalist_validation
 from comsol_mcp.research.robust_objectives import evaluate_robust_absolute_contrast
+from comsol_mcp.research.robust_outer_gcmma import (
+    accept_gcmma_candidate,
+    create_gcmma_state,
+    propose_gcmma_candidate,
+)
 from comsol_mcp.research.robust_startup_admission import evaluate_robust_startup_admission
 
 from .process_control import contain_current_process_tree
@@ -251,6 +257,66 @@ def _cancel_requested(store: JobStore, job_id: str, attempt: int) -> bool:
         state["status"] == "cancel_requested"
         or cancel_request_targets_attempt(store.read_control(job_id), attempt)
     )
+
+
+def _sync_latest_native_cleanup(source_directory: Path, job_directory: Path) -> None:
+    """Expose the most recent client cleanup to the job-level cleanup verifier."""
+    source = source_directory / "native-cleanup.json"
+    if source.is_file():
+        atomic_write_json(job_directory / "native-cleanup.json", read_json(source))
+
+
+def _optimizer_state_from_spec(spec: dict[str, Any]) -> dict[str, Any]:
+    optimizer = spec["native_optimizer"]
+    backend = optimizer.get("backend_configuration")
+    if optimizer["backend"] != "mmapy_outer_comsol_conditions" or not isinstance(backend, dict):
+        raise ValueError("licensed robust optimizer requires the explicit mmapy outer backend")
+    variables = spec["support"]["variables"]
+    return create_gcmma_state(
+        variable_ids=[item["variable_id"] for item in variables],
+        lower_bounds=[item["lower"] for item in variables],
+        upper_bounds=[item["upper"] for item in variables],
+        initial_values=spec["initial_values"],
+        move_limit=optimizer["move_limit"],
+        max_iterations=optimizer["budget"]["max_iterations"],
+        max_inner_iterations=backend["max_inner_iterations"],
+        max_condition_solves=optimizer["budget"]["max_solves"],
+        backend_identity={
+            key: backend[key]
+            for key in (
+                "package_name",
+                "package_version",
+                "distribution_license",
+                "distribution_sha256",
+                "distribution_path",
+            )
+        },
+    )
+
+
+def _gradient_in_declared_units(spec: dict[str, Any], values: list[float]) -> list[float]:
+    scales = {"m": 1.0, "mm": 1e-3, "um": 1e-6, "nm": 1e-9}
+    variables = spec["support"]["variables"]
+    if len(values) != len(variables):
+        raise ValueError("aggregate gradient count differs from optimizer variables")
+    converted = []
+    for value, variable in zip(values, variables, strict=True):
+        try:
+            scale = scales[variable["unit"]]
+        except KeyError as exc:
+            raise ValueError("optimizer variable unit has no explicit SI conversion") from exc
+        converted.append(float(value) * scale)
+    return converted
+
+
+def _candidate_spec(spec: dict[str, Any], values: list[float]) -> dict[str, Any]:
+    candidate = copy.deepcopy(spec)
+    candidate["initial_values"] = list(values)
+    candidate["spec_fingerprint"] = domain_sha256_v2(
+        "comsol_mcp.robust_optimizer_candidate_spec",
+        {"base_spec_fingerprint": spec["spec_fingerprint"], "initial_values": values},
+    )
+    return candidate
 
 
 def _finalize_licensed_cleanup(
@@ -757,12 +823,13 @@ def _run_licensed(root: str, job_id: str) -> int:
             result.get("aggregate_gradient")
             and result["aggregate_gradient"].get("complete") is True
         )
-        pending_reason = (
-            "native_gradient_validation_pending"
-            if native_gradient_complete
-            else "native_shape_optimizer_pending"
-        )
+        if not native_gradient_complete:
+            raise RuntimeError("licensed robust optimizer requires the complete native gradient")
         rows_path = directory / "robust_shape_rows.jsonl"
+        baseline_value = objective["smooth_worst_case_absolute_contrast"]
+        baseline_gradient = _gradient_in_declared_units(
+            spec, result["aggregate_gradient"]["aggregate_gradient"]
+        )
         append_robust_shape_row(
             rows_path,
             job_fingerprint=spec["spec_fingerprint"],
@@ -774,38 +841,132 @@ def _run_licensed(root: str, job_id: str) -> int:
                 "candidate_fingerprint": domain_sha256_v2(
                     "comsol_mcp.robust_licensed_baseline_candidate", spec["initial_values"]
                 ),
-                "aggregate_objective": objective["smooth_worst_case_absolute_contrast"],
-                "status": "rejected",
+                "aggregate_objective": baseline_value,
+                "status": "accepted",
                 "robust_objective_fingerprint": objective["receipt_fingerprint"],
                 "fresh_forward_fingerprint": objective["receipt_fingerprint"],
-                "reason_code": pending_reason,
+                "reason_code": "licensed_baseline_gradient_accepted",
             },
         )
+        optimizer_state = _optimizer_state_from_spec(spec)
+        optimizer_state = propose_gcmma_candidate(
+            optimizer_state,
+            objective=baseline_value,
+            gradient=baseline_gradient,
+            condition_solves=len(result["observations"]) * 2,
+        )
+        atomic_write_json(directory / "robust-optimizer-state.json", optimizer_state)
+        accepted_steps = 0
+        while optimizer_state["status"] == "proposal_pending":
+            if _cancel_requested(store, job_id, attempt):
+                raise InterruptedError("licensed robust optimizer was cancelled")
+            proposal = optimizer_state["pending_proposal"]
+            candidate_directory = directory / (
+                f"opt-{proposal['outer_iteration']:02d}-{proposal['inner_iteration']:02d}"
+            )
+            candidate_directory.mkdir(parents=True, exist_ok=True)
+            candidate_spec = _candidate_spec(spec, proposal["physical_values"])
+            atomic_write_json(candidate_directory / "candidate-spec.json", candidate_spec)
+            try:
+                candidate_result = execute_lin2025_conditions(
+                    candidate_spec,
+                    candidate_directory,
+                    attempt=attempt,
+                    cancel_requested=lambda: _cancel_requested(store, job_id, attempt),
+                    include_gradients=False,
+                )
+            finally:
+                _sync_latest_native_cleanup(candidate_directory, directory)
+            candidate_objective = evaluate_robust_absolute_contrast(
+                candidate_spec["objective"],
+                candidate_spec["condition_table"],
+                candidate_result["observations"],
+            )
+            candidate_value = candidate_objective["smooth_worst_case_absolute_contrast"]
+            prior_outer = optimizer_state["outer_iteration"]
+            optimizer_state = accept_gcmma_candidate(
+                optimizer_state,
+                candidate_objective=candidate_value,
+                condition_solves=len(candidate_result["observations"]),
+            )
+            accepted = optimizer_state["outer_iteration"] > prior_outer
+            append_robust_shape_row(
+                rows_path,
+                job_fingerprint=spec["spec_fingerprint"],
+                attempt=attempt,
+                kind="iteration",
+                payload={
+                    "iteration_id": (
+                        f"it-{proposal['outer_iteration']}-{proposal['inner_iteration']}"
+                    ),
+                    "iteration_index": proposal["outer_iteration"],
+                    "candidate_fingerprint": proposal["proposal_fingerprint"],
+                    "aggregate_objective": candidate_value,
+                    "status": "accepted" if accepted else "rejected",
+                    "robust_objective_fingerprint": candidate_objective["receipt_fingerprint"],
+                    "fresh_forward_fingerprint": candidate_objective["receipt_fingerprint"],
+                    "reason_code": (
+                        "gcmma_conservative_fresh_forward_accepted"
+                        if accepted
+                        else "gcmma_nonconservative_fresh_forward_rejected"
+                    ),
+                },
+            )
+            atomic_write_json(directory / "robust-optimizer-state.json", optimizer_state)
+            if not accepted:
+                continue
+            accepted_steps += 1
+            if optimizer_state["status"] == "complete":
+                break
+            remaining = (
+                optimizer_state["max_condition_solves"] - optimizer_state["condition_solves_used"]
+            )
+            required_next = len(candidate_result["observations"]) * 2
+            if remaining < required_next:
+                optimizer_state = {**optimizer_state, "status": "budget_exhausted"}
+                optimizer_state.pop("state_fingerprint")
+                optimizer_state["state_fingerprint"] = domain_sha256_v2(
+                    "comsol_mcp.robust_outer_gcmma_state", optimizer_state
+                )
+                atomic_write_json(directory / "robust-optimizer-state.json", optimizer_state)
+                break
+            try:
+                gradient_result = execute_lin2025_conditions(
+                    candidate_spec,
+                    candidate_directory,
+                    attempt=attempt,
+                    cancel_requested=lambda: _cancel_requested(store, job_id, attempt),
+                    include_gradients=True,
+                )
+            finally:
+                _sync_latest_native_cleanup(candidate_directory, directory)
+            gradient = gradient_result.get("aggregate_gradient")
+            if not isinstance(gradient, dict) or gradient.get("complete") is not True:
+                raise RuntimeError("accepted optimizer candidate lacks a complete native gradient")
+            optimizer_state = propose_gcmma_candidate(
+                optimizer_state,
+                objective=candidate_value,
+                gradient=_gradient_in_declared_units(spec, gradient["aggregate_gradient"]),
+                condition_solves=len(gradient_result["observations"]),
+            )
+            atomic_write_json(directory / "robust-optimizer-state.json", optimizer_state)
         store.update_state(
             job_id,
             "failed",
             patch={
                 "solver_started": True,
                 "progress": {
-                    "completed": len(result["observations"]),
-                    "total": len(spec["condition_table"]["conditions"]),
+                    "completed": optimizer_state["condition_solves_used"],
+                    "total": optimizer_state["max_condition_solves"],
                 },
                 "last_error": {
-                    "type": "NativeRobustOptimizerPending",
-                    "message": (
-                        "Licensed native condition gradients completed; independent gradient "
-                        "validation and the native robust optimizer are not yet wired"
-                        if native_gradient_complete
-                        else "Licensed condition phase completed; native robust optimizer "
-                        "is not yet wired"
-                    ),
+                    "type": "RobustFinalistValidationPending",
+                    "message": "Bounded robust GCMMA completed; finalist validation is pending",
                 },
+                "robust_optimizer_state_fingerprint": optimizer_state["state_fingerprint"],
+                "robust_optimizer_accepted_steps": accepted_steps,
             },
-            event=(
-                "robust_native_gradient_phase_completed"
-                if native_gradient_complete
-                else "robust_condition_phase_completed"
-            ),
+            event="robust_gcmma_phase_completed",
         )
         return 1
     except Exception as exc:

@@ -200,6 +200,13 @@ manifest；`robust_shape_job_submit` 只通过 durable job authority 提交；
 gradient、optimizer 的 fresh-forward 证据、finalist、checkpoint 与 cleanup。它们不提供
 通用 Java 属性修改，并且不会出现在 `core`、`basic_fem` 或 `wave_optics` 中。
 
+执行 licensed 鲁棒任务时，optimizer configuration schema `1.1.0` 仍由 COMSOL
+完成每个 condition 的 forward/adjoint，并用显式外循环 GCMMA 状态驱动聚合目标。
+调用方提供单独取得的纯 Python `mmapy 0.3.1` wheel 的 ASCII 绝对路径和精确 SHA-256；
+系统仅在该实验执行路径中核验并加载它，不安装、不打包、不在普通 discovery 时导入，
+也不会静默改用 MMA/CCSAQ。每个 proposal、非保守 inner revision、fresh-forward 接受结果、
+move limit 与真实 condition-solve 预算均持久化并绑定指纹。
+
 鲁棒 condition-controls schema `1.4.0` 保持对 `1.3.0` mesh-reference 控制的可读
 兼容，并进一步绑定原生 Sensitivity study feature、重新生成的 solver topology、direct
 solver 的 out-of-core 策略、derivative solution/dataset、adjoint method 与 stationary
@@ -577,4 +584,7 @@ MCP 客户端配置示例：
 ## 许可证
 
 本仓库采用 [MIT License](LICENSE)。COMSOL、授权手册、第三方模型、论文和数据集
-不因本仓库许可证而被重新授权。
+不因本仓库许可证而被重新授权。外部可选的 `mmapy` GCMMA/MMA wheel 仍采用
+GPL-3.0-or-later，本包不复制或分发它。感谢 Krister Svanberg 提出 MMA/GCMMA，
+并感谢 Arjen Deetman 提供本项目核验的 Python 实现；使用该执行路径时应保留其许可证
+与引用声明。

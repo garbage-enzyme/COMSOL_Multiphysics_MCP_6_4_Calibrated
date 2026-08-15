@@ -11,7 +11,7 @@ from comsol_mcp.jobs.robust_shape_optimization import expand_robust_shape_manife
 from comsol_mcp.research.robust_conditions import normalize_optimization_condition_table
 from comsol_mcp.research.shape_support import normalize_shape_support_policy
 from development_kit.tests.test_derivative_support import _support, _variable
-from development_kit.tests.test_gradient_contracts import _optimizer
+from development_kit.tests.test_gradient_contracts import _optimizer, _outer_optimizer
 from development_kit.tests.test_lin2025_pedot_backend import (
     _derivative_support as _lin_support,
 )
@@ -159,6 +159,23 @@ def test_manifest_binds_every_robust_contract_and_uses_no_host_defaults(ascii_tm
     ]
 
 
+def test_manifest_accepts_explicit_outer_gcmma_with_native_condition_solver(ascii_tmp_path):
+    envelope, _, manifest = _write_manifest(ascii_tmp_path)
+    raw = json.loads(manifest.read_text())
+    optimizer = _outer_optimizer()
+    optimizer["budget"]["cores"] = 14
+    raw["native_optimizer"] = optimizer
+    payload = json.dumps(raw, sort_keys=True, separators=(",", ":")).encode()
+    manifest.write_bytes(payload)
+    envelope["submission_manifest_sha256"] = hashlib.sha256(payload).hexdigest()
+    spec = expand_robust_shape_manifest(envelope)
+    assert spec["native_optimizer"]["backend"] == "mmapy_outer_comsol_conditions"
+    assert (
+        spec["native_optimizer"]["backend_configuration"]["condition_solver_backend"]
+        == "comsol_native"
+    )
+
+
 def test_manifest_v11_accepts_tagged_lin2025_adapter(ascii_tmp_path):
     envelope, source, manifest = _write_manifest(ascii_tmp_path)
     source_hash = hashlib.sha256(source.read_bytes()).hexdigest()
@@ -291,9 +308,9 @@ def test_manifest_v11_accepts_tagged_lin2025_adapter(ascii_tmp_path):
     assert spec["material_tensor_binding"]["active_wavelengths_m"]["MR"] == pytest.approx(
         [8e-7, 1e-6, 1.2e-6]
     )
-    raw["adapter_configuration"]["configuration"]["condition_controls"][
-        "observable_expression"
-    ] = "ewfd.Ttotal"
+    raw["adapter_configuration"]["configuration"]["condition_controls"]["observable_expression"] = (
+        "ewfd.Ttotal"
+    )
     payload = json.dumps(raw, sort_keys=True, separators=(",", ":")).encode()
     manifest.write_bytes(payload)
     envelope["submission_manifest_sha256"] = hashlib.sha256(payload).hexdigest()

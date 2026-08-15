@@ -245,6 +245,15 @@ fresh-forward optimizer evidence, finalist validation, checkpoints, and
 cleanup. They expose no generic Java property mutation and remain absent from
 `core`, `basic_fem`, and `wave_optics`.
 
+For a licensed robust run, optimizer configuration schema `1.1.0` keeps every
+condition solve and adjoint in COMSOL while driving the aggregate objective with
+an explicit outer-loop GCMMA state. The caller supplies an ASCII path and exact
+SHA-256 for the separately obtained pure-Python `mmapy 0.3.1` wheel. The wheel
+is hash-checked and loaded only on this experimental execution path; it is not
+installed, bundled, imported by discovery, or silently replaced by MMA/CCSAQ.
+Every proposal, nonconservative inner revision, accepted fresh-forward result,
+move limit, and true condition-solve budget is durable and fingerprinted.
+
 Robust condition-controls schema `1.4.0` retains readable `1.3.0` mesh-reference
 controls and additionally binds the native Sensitivity study features, regenerated
 solver topology, direct-solver out-of-core policy, derivative solution/dataset,
@@ -669,4 +678,8 @@ Use this fork when the upstream server fails under MPh standalone with errors su
 
 This repository is distributed under the [MIT License](LICENSE). COMSOL,
 licensed manuals, third-party models, papers, and datasets are not relicensed by
-this repository.
+this repository. The optional external `mmapy` GCMMA/MMA wheel remains under
+GPL-3.0-or-later and is neither copied into nor distributed with this package.
+We thank Krister Svanberg for MMA/GCMMA and Arjen Deetman for the reviewed Python
+implementation; users of that execution path should retain their license and
+citation notices.

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 from comsol_mcp.durable import domain_sha256_v2
@@ -20,7 +21,8 @@ from .derivative_support import (
 GRADIENT_RECORD_SCHEMA_NAME = "comsol_mcp.gradient_record"
 GRADIENT_RECORD_SCHEMA_VERSION = "1.0.0"
 NATIVE_OPTIMIZER_SCHEMA_NAME = "comsol_mcp.native_optimizer_configuration"
-NATIVE_OPTIMIZER_SCHEMA_VERSION = "1.0.0"
+NATIVE_OPTIMIZER_SCHEMA_VERSION = "1.1.0"
+NATIVE_OPTIMIZER_LEGACY_SCHEMA_VERSION = "1.0.0"
 _OPTIMIZER_METHODS = {"gcmma", "mma", "ipopt"}
 _EVIDENCE_STATES = {"native_unchecked", "gradient_validated", "restricted", "rejected"}
 
@@ -169,35 +171,91 @@ def normalize_gradient_record(value: object, support: object) -> dict[str, Any]:
 
 
 def normalize_native_optimizer_configuration(value: object) -> dict[str, Any]:
-    """Normalize a caller-budgeted COMSOL-native optimizer configuration."""
+    """Normalize a caller-budgeted condition solver and optimizer configuration."""
     bounded = _bounded_json(value, "native optimizer configuration", 128 * 1024)
     supplied = None
     if isinstance(bounded, dict) and "optimizer_fingerprint" in bounded:
         supplied = bounded.pop("optimizer_fingerprint")
+    if not isinstance(bounded, dict):
+        raise ValueError("native optimizer configuration must be an object")
+    schema_version = bounded.get("schema_version")
+    fields = {
+        "schema_name",
+        "schema_version",
+        "optimizer_id",
+        "backend",
+        "method",
+        "move_limit",
+        "optimality_tolerance",
+        "constraint_tolerance",
+        "budget",
+        "checkpoint_policy",
+        "deterministic_seed",
+    }
+    if schema_version == NATIVE_OPTIMIZER_SCHEMA_VERSION:
+        fields.add("backend_configuration")
     raw = _object(
         bounded,
-        {
-            "schema_name",
-            "schema_version",
-            "optimizer_id",
-            "backend",
-            "method",
-            "move_limit",
-            "optimality_tolerance",
-            "constraint_tolerance",
-            "budget",
-            "checkpoint_policy",
-            "deterministic_seed",
-        },
+        fields,
         "native optimizer configuration",
     )
-    if (
-        raw["schema_name"] != NATIVE_OPTIMIZER_SCHEMA_NAME
-        or raw["schema_version"] != NATIVE_OPTIMIZER_SCHEMA_VERSION
-    ):
+    if raw["schema_name"] != NATIVE_OPTIMIZER_SCHEMA_NAME or raw["schema_version"] not in {
+        NATIVE_OPTIMIZER_LEGACY_SCHEMA_VERSION,
+        NATIVE_OPTIMIZER_SCHEMA_VERSION,
+    }:
         raise ValueError("native optimizer schema identity is unsupported")
-    if raw["backend"] != "comsol_native":
-        raise ValueError("alpha7.1 native optimizer backend must be comsol_native")
+    if schema_version == NATIVE_OPTIMIZER_LEGACY_SCHEMA_VERSION:
+        if raw["backend"] != "comsol_native":
+            raise ValueError("legacy native optimizer backend must be comsol_native")
+        backend_configuration = None
+    else:
+        if raw["backend"] != "mmapy_outer_comsol_conditions":
+            raise ValueError("robust optimizer backend must be mmapy_outer_comsol_conditions")
+        backend_raw = _object(
+            raw["backend_configuration"],
+            {
+                "condition_solver_backend",
+                "package_name",
+                "package_version",
+                "distribution_license",
+                "distribution_sha256",
+                "distribution_path",
+                "objective_direction",
+                "max_inner_iterations",
+            },
+            "backend_configuration",
+        )
+        if backend_raw["condition_solver_backend"] != "comsol_native":
+            raise ValueError("robust condition solver backend must be comsol_native")
+        if backend_raw["package_name"] != "mmapy" or backend_raw["package_version"] != "0.3.1":
+            raise ValueError("robust optimizer requires the reviewed mmapy 0.3.1 backend")
+        if backend_raw["distribution_license"] != "GPL-3.0-or-later":
+            raise ValueError("robust optimizer mmapy license identity differs")
+        if backend_raw["objective_direction"] != "maximize":
+            raise ValueError("robust optimizer objective direction must be maximize")
+        inner = backend_raw["max_inner_iterations"]
+        if isinstance(inner, bool) or not isinstance(inner, int) or not 1 <= inner <= 100:
+            raise ValueError("backend max_inner_iterations must be in [1, 100]")
+        distribution_path = backend_raw["distribution_path"]
+        if (
+            not isinstance(distribution_path, str)
+            or not distribution_path.isascii()
+            or not Path(distribution_path).is_absolute()
+            or Path(distribution_path).suffix.casefold() != ".whl"
+        ):
+            raise ValueError("backend distribution_path must be an absolute ASCII wheel path")
+        backend_configuration = {
+            "condition_solver_backend": "comsol_native",
+            "package_name": "mmapy",
+            "package_version": "0.3.1",
+            "distribution_license": "GPL-3.0-or-later",
+            "distribution_sha256": _sha256(
+                backend_raw["distribution_sha256"], "backend_configuration.distribution_sha256"
+            ),
+            "distribution_path": str(Path(distribution_path)),
+            "objective_direction": "maximize",
+            "max_inner_iterations": inner,
+        }
     if raw["method"] not in _OPTIMIZER_METHODS:
         raise ValueError("native optimizer method is unsupported")
     budget = _object(
@@ -245,9 +303,9 @@ def normalize_native_optimizer_configuration(value: object) -> dict[str, Any]:
         raise ValueError("deterministic_seed must be a bounded nonnegative integer")
     body = {
         "schema_name": NATIVE_OPTIMIZER_SCHEMA_NAME,
-        "schema_version": NATIVE_OPTIMIZER_SCHEMA_VERSION,
+        "schema_version": schema_version,
         "optimizer_id": _identifier(raw["optimizer_id"], "optimizer_id"),
-        "backend": "comsol_native",
+        "backend": raw["backend"],
         "method": raw["method"],
         "move_limit": _finite(raw["move_limit"], "move_limit", positive=True),
         "optimality_tolerance": _finite(
@@ -260,6 +318,8 @@ def normalize_native_optimizer_configuration(value: object) -> dict[str, Any]:
         "checkpoint_policy": checkpoint,
         "deterministic_seed": seed,
     }
+    if backend_configuration is not None:
+        body["backend_configuration"] = backend_configuration
     body["optimizer_fingerprint"] = domain_sha256_v2(NATIVE_OPTIMIZER_SCHEMA_NAME, body)
     if supplied is not None and supplied != body["optimizer_fingerprint"]:
         raise ValueError("native optimizer fingerprint is invalid")
@@ -271,6 +331,7 @@ __all__ = [
     "GRADIENT_RECORD_SCHEMA_VERSION",
     "NATIVE_OPTIMIZER_SCHEMA_NAME",
     "NATIVE_OPTIMIZER_SCHEMA_VERSION",
+    "NATIVE_OPTIMIZER_LEGACY_SCHEMA_VERSION",
     "normalize_gradient_record",
     "normalize_native_optimizer_configuration",
 ]

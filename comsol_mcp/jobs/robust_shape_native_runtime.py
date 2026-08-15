@@ -727,6 +727,7 @@ def execute_lin2025_conditions(
     client_factory: Callable[..., Any] | None = None,
     java_environment_reader: Callable[[str], str | None] | None = None,
     cancel_requested: Callable[[], bool],
+    include_gradients: bool = True,
 ) -> dict[str, Any]:
     """Load one derived copy, configure controls, and execute durable conditions."""
     source = Path(spec["source_model_path"])
@@ -800,7 +801,7 @@ def execute_lin2025_conditions(
         )
         aggregate_gradient = None
         sensitivity_controls = None
-        if backend.controls.get("schema_version") == "1.4.0":
+        if include_gradients and backend.controls.get("schema_version") == "1.4.0":
             from .robust_gradient_runtime import execute_native_condition_gradients
 
             aggregate_gradient = execute_native_condition_gradients(

@@ -571,7 +571,7 @@ def _entries() -> list[dict[str, Any]]:
         ),
         _entry(
             "comsol_mcp.native_optimizer_configuration",
-            "1.0.0",
+            "1.1.0",
             "comsol_mcp.research.gradient_contracts",
             artifact_kind="configuration",
         ),
@@ -655,6 +655,16 @@ def _entries() -> list[dict[str, Any]]:
             ROBUST_OPTIMIZER_EXECUTION_RECEIPT_SCHEMA_NAME,
             ROBUST_OPTIMIZER_EXECUTION_RECEIPT_SCHEMA_VERSION,
             "comsol_mcp.research.robust_optimizer_policy",
+        ),
+        _entry(
+            "comsol_mcp.robust_outer_gcmma_proposal",
+            "1.0.0",
+            "comsol_mcp.research.robust_outer_gcmma",
+        ),
+        _entry(
+            "comsol_mcp.robust_outer_gcmma_state",
+            "1.0.0",
+            "comsol_mcp.research.robust_outer_gcmma",
         ),
         _entry(
             ROBUST_SHAPE_ADAPTER_BINDING_SCHEMA_NAME,

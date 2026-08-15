@@ -16,6 +16,7 @@ from comsol_mcp.jobs.robust_condition_runtime import execute_robust_conditions
 from comsol_mcp.jobs.robust_shape_rows import append_robust_shape_row, read_robust_shape_rows
 from comsol_mcp.jobs.robust_shape_worker import run as run_robust_worker
 from comsol_mcp.jobs.store import atomic_write_json, process_identity, read_json
+from development_kit.tests.test_gradient_contracts import _outer_optimizer
 from development_kit.tests.test_robust_shape_optimization import _write_manifest
 
 
@@ -108,6 +109,30 @@ class _ConditionBackend:
             "dataset_id": self.dataset_id,
             "solution_id": self.solution_id,
         }
+
+
+def test_outer_optimizer_worker_state_binds_units_budget_and_candidate_identity():
+    optimizer = _outer_optimizer()
+    optimizer["budget"]["max_solves"] = 105
+    spec = {
+        "spec_fingerprint": "a" * 64,
+        "native_optimizer": optimizer,
+        "initial_values": [260.0, 260.0],
+        "support": {
+            "variables": [
+                {"variable_id": "radius_x", "lower": 200.0, "upper": 320.0, "unit": "nm"},
+                {"variable_id": "radius_y", "lower": 200.0, "upper": 320.0, "unit": "nm"},
+            ]
+        },
+    }
+    state = robust_shape_worker._optimizer_state_from_spec(spec)
+    assert state["max_condition_solves"] == 105
+    assert robust_shape_worker._gradient_in_declared_units(spec, [2e5, 3e5]) == pytest.approx(
+        [2e-4, 3e-4]
+    )
+    candidate = robust_shape_worker._candidate_spec(spec, [270.0, 250.0])
+    assert candidate["initial_values"] == [270.0, 250.0]
+    assert candidate["spec_fingerprint"] != spec["spec_fingerprint"]
 
 
 def test_condition_runtime_persists_receipts_rows_and_exact_replay(ascii_tmp_path):

@@ -197,6 +197,17 @@ from .robust_optimizer_policy import (
     assess_robust_optimizer_execution,
     normalize_robust_optimizer_policy,
 )
+from .robust_outer_gcmma import (
+    GCMMA_PROPOSAL_SCHEMA_NAME,
+    GCMMA_PROPOSAL_SCHEMA_VERSION,
+    GCMMA_STATE_SCHEMA_NAME,
+    GCMMA_STATE_SCHEMA_VERSION,
+    accept_gcmma_candidate,
+    create_gcmma_state,
+    normalize_gcmma_state,
+    propose_gcmma_candidate,
+    verify_mmapy_backend,
+)
 from .robust_shape_adapter import (
     ROBUST_SHAPE_ADAPTER_BINDING_SCHEMA_NAME,
     ROBUST_SHAPE_ADAPTER_BINDING_SCHEMA_VERSION,
@@ -349,6 +360,15 @@ __all__ = [
     "normalize_robust_objective_configuration",
     "normalize_robust_optimizer_policy",
     "assess_robust_optimizer_execution",
+    "GCMMA_PROPOSAL_SCHEMA_NAME",
+    "GCMMA_PROPOSAL_SCHEMA_VERSION",
+    "GCMMA_STATE_SCHEMA_NAME",
+    "GCMMA_STATE_SCHEMA_VERSION",
+    "accept_gcmma_candidate",
+    "create_gcmma_state",
+    "normalize_gcmma_state",
+    "propose_gcmma_candidate",
+    "verify_mmapy_backend",
     "normalize_robust_gradient_policy",
     "normalize_robust_finalist_validation_policy",
     "normalize_robust_finalist_validation_receipt",

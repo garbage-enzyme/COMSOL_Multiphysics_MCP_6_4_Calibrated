@@ -77,6 +77,27 @@ def _optimizer() -> dict:
     }
 
 
+def _outer_optimizer() -> dict:
+    value = _optimizer()
+    value.update(
+        {
+            "schema_version": "1.1.0",
+            "backend": "mmapy_outer_comsol_conditions",
+            "backend_configuration": {
+                "condition_solver_backend": "comsol_native",
+                "package_name": "mmapy",
+                "package_version": "0.3.1",
+                "distribution_license": "GPL-3.0-or-later",
+                "distribution_sha256": "4" * 64,
+                "distribution_path": "D:\\mcp_tests\\mmapy.whl",
+                "objective_direction": "maximize",
+                "max_inner_iterations": 15,
+            },
+        }
+    )
+    return value
+
+
 def test_gradient_row_binds_order_sign_scale_and_all_native_identities():
     support = normalize_gradient_support()
     first = normalize_gradient_record(_gradient(), support)
@@ -123,3 +144,14 @@ def test_optimizer_rejects_unreviewed_backend_or_unbounded_commit_fraction():
     value["budget"]["max_commit_fraction"] = 1.01
     with pytest.raises(ValueError, match="must not exceed one"):
         normalize_native_optimizer_configuration(value)
+
+
+def test_outer_gcmma_binds_reviewed_dependency_and_native_condition_solver():
+    first = normalize_native_optimizer_configuration(_outer_optimizer())
+    assert first["backend"] == "mmapy_outer_comsol_conditions"
+    assert first["backend_configuration"]["condition_solver_backend"] == "comsol_native"
+    assert normalize_native_optimizer_configuration(first) == first
+    changed = _outer_optimizer()
+    changed["backend_configuration"]["package_version"] = "0.3.0"
+    with pytest.raises(ValueError, match="mmapy 0.3.1"):
+        normalize_native_optimizer_configuration(changed)

@@ -320,6 +320,7 @@ models are intentionally absent.
 - `development_kit/tests/test_robust_gradient_ladder_licensed_gate.py` — This module tests required caller budgets, startup-only admission, shared-lease sequencing, exact gradient thresholds, and explicit non-fallback MMA disposition.
 - `development_kit/tests/test_robust_objectives.py` — This module tests smooth absolute two-state contrast and weighted smooth worst-case scalarization.
 - `development_kit/tests/test_robust_optimizer_policy.py` — This module tests method-bound manual GCMMA/MMA selection and rejects automatic fallback.
+- `development_kit/tests/test_robust_outer_gcmma.py` — This module tests the fingerprinted external GCMMA state, normalized move limits, true condition-solve budgets, conservative acceptance, and visible inner revisions without importing the optional backend.
 - `development_kit/tests/test_shape_support.py` — This module tests geometry-derived minimum gap, per-model mesh admission, invariant guards, and model retention.
 - `development_kit/tests/test_research_adaptive_acquisition.py` — This module tests bounded deterministic GP/EI selection, invalid evidence rejection, and heavy-import isolation.
 - `development_kit/tests/test_research_optimizers.py` — This module tests deterministic ask/tell/checkpoint replay, mixed domains, and dependency isolation.
@@ -419,6 +420,7 @@ models are intentionally absent.
 - `comsol_mcp/research/robust_finalist_evidence.py` — This module independently assesses complete finalist promotion evidence and emits a tamper-evident receipt.
 - `comsol_mcp/research/robust_objectives.py` — This module evaluates differentiable absolute state contrast, caller-configurable smooth worst-case aggregation, and the exact condition-to-aggregate gradient chain rule.
 - `comsol_mcp/research/robust_optimizer_policy.py` — This module binds manual GCMMA/MMA selection to method-specific execution evidence without automatic fallback.
+- `comsol_mcp/research/robust_outer_gcmma.py` — This module persists the bounded outer-loop GCMMA state and lazily hash-verifies a caller-supplied `mmapy` wheel while COMSOL remains the native condition/adjoint solver.
 - `comsol_mcp/research/robust_shape_adapter.py` — This module binds the trusted periodic-MIM structure, tree audit, derivative support, shape policy, and x/y variables, then verifies failure-atomic Deformed Geometry control preparation.
 - `comsol_mcp/research/robust_adapter_configuration.py` — This module normalizes the tagged periodic-MIM or Lin2025 adapter configuration and binds it to derivative and shape policies.
 - `comsol_mcp/research/robust_smoothing_selection.py` — This module compares caller-supplied smooth-worst-case temperatures while preserving objective, weight, and gradient effects for manual review.
@@ -445,7 +447,7 @@ models are intentionally absent.
 - `comsol_mcp/jobs/robust_shape_optimization.py` — This module expands a bounded external robust-shape manifest and validates every contract before worker startup.
 - `comsol_mcp/jobs/robust_gradient_runtime.py` — This module persists exact native condition-gradient receipts and compiles their complete ordered robust aggregate.
 - `comsol_mcp/jobs/robust_shape_rows.py` — This module persists hash-chained fsync'd robust condition, gradient, iteration, trial, checkpoint, and cleanup rows.
-- `comsol_mcp/jobs/robust_shape_worker.py` — This module runs solver-free robust lifecycle fixtures and dispatches future licensed robust shape execution.
+- `comsol_mcp/jobs/robust_shape_worker.py` — This module runs solver-free robust lifecycle fixtures and the licensed durable COMSOL-condition plus explicit outer-GCMMA candidate loop.
 - `comsol_mcp/jobs/robust_wall_watchdog.py` — This detached process enforces the caller-owned licensed robust wall budget through exact-attempt durable cancellation without calling COMSOL.
 - `comsol_mcp/jobs/adjoint_optimization_worker.py` — This module dispatches synthetic lifecycle fixtures or the licensed durable native-adjoint runtime and persists validated hash-chained terminal rows.
 - `comsol_mcp/research/adaptive_acquisition.py` — This explicitly loaded module performs bounded Gaussian-process posterior and expected-improvement selection without affecting ordinary discovery imports.
