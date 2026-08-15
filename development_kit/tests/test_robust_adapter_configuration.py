@@ -191,3 +191,22 @@ def test_condition_controls_bind_explicit_mesh_reference_parameter():
     value.pop("mesh_reference_value")
     with pytest.raises(ValueError, match="fields mismatch"):
         normalize_robust_condition_controls(value)
+
+
+def test_mesh_reference_supports_direct_solver_without_coarse_path():
+    value = _condition_controls()
+    value.update(
+        schema_version="1.3.0",
+        selected_linear_solver_tag="d1",
+        inactive_linear_solver_tags=["i1"],
+        mesh_reference_parameter="mesh_ref_wl",
+        mesh_reference_value="1600[nm]",
+    )
+
+    result = normalize_robust_condition_controls(value)
+
+    assert result["selected_linear_solver_tag"] == "d1"
+    assert "coarse_solver_feature_path" not in result
+    value["coarse_solver_out_of_core_property"] = "ooc"
+    with pytest.raises(ValueError, match="must be supplied together"):
+        normalize_robust_condition_controls(value)

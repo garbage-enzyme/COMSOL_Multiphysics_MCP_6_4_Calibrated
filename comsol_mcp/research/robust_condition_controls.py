@@ -75,12 +75,11 @@ def normalize_robust_condition_controls(value: object) -> dict[str, Any]:
     elif version == COARSE_SOLVER_MEMORY_SCHEMA_VERSION:
         fields = _BASE_FIELDS | _SOLVER_SELECTION_FIELDS | _COARSE_SOLVER_MEMORY_FIELDS
     elif version == SCHEMA_VERSION:
-        fields = (
-            _BASE_FIELDS
-            | _SOLVER_SELECTION_FIELDS
-            | _COARSE_SOLVER_MEMORY_FIELDS
-            | _MESH_REFERENCE_FIELDS
-        )
+        base_fields = _BASE_FIELDS | _SOLVER_SELECTION_FIELDS | _MESH_REFERENCE_FIELDS
+        present_coarse = _COARSE_SOLVER_MEMORY_FIELDS & set(bounded)
+        if present_coarse and present_coarse != _COARSE_SOLVER_MEMORY_FIELDS:
+            raise ValueError("coarse solver memory controls must be supplied together")
+        fields = base_fields | present_coarse
     else:
         raise ValueError("robust condition controls schema is unsupported")
     raw = _object(
@@ -136,7 +135,9 @@ def normalize_robust_condition_controls(value: object) -> dict[str, Any]:
             "inactive_linear_solver_tags": normalized_inactive,
         }
     coarse_solver_memory: dict[str, Any] = {}
-    if version in {COARSE_SOLVER_MEMORY_SCHEMA_VERSION, SCHEMA_VERSION}:
+    if version == COARSE_SOLVER_MEMORY_SCHEMA_VERSION or (
+        version == SCHEMA_VERSION and _COARSE_SOLVER_MEMORY_FIELDS <= set(raw)
+    ):
         feature_path = raw["coarse_solver_feature_path"]
         if (
             not isinstance(feature_path, list)
