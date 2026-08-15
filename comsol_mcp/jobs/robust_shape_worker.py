@@ -753,6 +753,15 @@ def _run_licensed(root: str, job_id: str) -> int:
         objective = evaluate_robust_absolute_contrast(
             spec["objective"], spec["condition_table"], result["observations"]
         )
+        native_gradient_complete = bool(
+            result.get("aggregate_gradient")
+            and result["aggregate_gradient"].get("complete") is True
+        )
+        pending_reason = (
+            "native_gradient_validation_pending"
+            if native_gradient_complete
+            else "native_shape_optimizer_pending"
+        )
         rows_path = directory / "robust_shape_rows.jsonl"
         append_robust_shape_row(
             rows_path,
@@ -769,7 +778,7 @@ def _run_licensed(root: str, job_id: str) -> int:
                 "status": "rejected",
                 "robust_objective_fingerprint": objective["receipt_fingerprint"],
                 "fresh_forward_fingerprint": objective["receipt_fingerprint"],
-                "reason_code": "native_shape_optimizer_pending",
+                "reason_code": pending_reason,
             },
         )
         store.update_state(
@@ -784,12 +793,19 @@ def _run_licensed(root: str, job_id: str) -> int:
                 "last_error": {
                     "type": "NativeRobustOptimizerPending",
                     "message": (
-                        "Licensed condition phase completed; native robust optimizer "
+                        "Licensed native condition gradients completed; independent gradient "
+                        "validation and the native robust optimizer are not yet wired"
+                        if native_gradient_complete
+                        else "Licensed condition phase completed; native robust optimizer "
                         "is not yet wired"
                     ),
                 },
             },
-            event="robust_condition_phase_completed",
+            event=(
+                "robust_native_gradient_phase_completed"
+                if native_gradient_complete
+                else "robust_condition_phase_completed"
+            ),
         )
         return 1
     except Exception as exc:

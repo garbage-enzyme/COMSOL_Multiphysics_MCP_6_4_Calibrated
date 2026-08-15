@@ -245,11 +245,16 @@ fresh-forward optimizer evidence, finalist validation, checkpoints, and
 cleanup. They expose no generic Java property mutation and remain absent from
 `core`, `basic_fem`, and `wave_optics`.
 
-Robust condition-controls schema `1.3.0` can bind an explicit caller-owned mesh
-reference parameter and value. The licensed runtime writes and reads back that
-exact value before building the mesh; it is validation-fixture evidence, never
-an automatic coarsening rule or a substitute for independent finer-mesh
-finalist convergence.
+Robust condition-controls schema `1.4.0` retains readable `1.3.0` mesh-reference
+controls and additionally binds the native Sensitivity study features, regenerated
+solver topology, direct-solver out-of-core policy, derivative solution/dataset,
+adjoint method, and stationary nonlinearity. The licensed runtime replaces the
+incompatible pre-existing solver sequence, verifies the generated identities,
+and persists both raw complex `fsens` values and the accepted real components.
+The caller-owned mesh reference remains validation-fixture evidence, never an
+automatic coarsening rule or a substitute for independent finer-mesh finalist
+convergence; accepted gradients still require independent finite-difference and
+directional reconciliation.
 
 Profiles only control the visibility of COMSOL automation/simulation tools and
 future autonomous-exploration tools. Orthogonal functionality uses independent,

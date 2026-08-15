@@ -13,6 +13,7 @@ from comsol_mcp.research.lin2025_pedot_backend import (
     ClientapiLin2025PedotControlBackend,
     prepare_lin2025_pedot_shape_controls,
 )
+from comsol_mcp.tools.derived_geometry import _set_vector
 
 from .robust_condition_runtime import RobustConditionBackend, execute_robust_conditions
 
@@ -69,6 +70,78 @@ def _flatten_real(value: Any) -> list[float]:
     return values
 
 
+def _complex_scalar(value: Any) -> complex:
+    values: list[complex] = []
+
+    def visit(item: Any) -> None:
+        if isinstance(item, (list, tuple)):
+            for child in item:
+                visit(child)
+            return
+        if not isinstance(item, (str, bytes)):
+            try:
+                iterator = iter(item)
+            except TypeError:
+                iterator = None
+            if iterator is not None:
+                for child in iterator:
+                    visit(child)
+                return
+        scalar = complex(item)
+        if not math.isfinite(scalar.real) or not math.isfinite(scalar.imag):
+            raise ValueError("COMSOL sensitivity result is nonfinite")
+        values.append(scalar)
+
+    visit(value)
+    if len(values) != 1:
+        raise ValueError("COMSOL sensitivity result is not scalar")
+    return values[0]
+
+
+def _dataset_by_tag(model: Any, tag: str) -> Any:
+    matches = [dataset for dataset in model / "datasets" if str(dataset.tag()) == tag]
+    if len(matches) != 1:
+        raise ValueError(f"COMSOL sensitivity dataset identity is ambiguous: {tag}")
+    return matches[0]
+
+
+def _generated_sensitivity_identity(model: Any) -> dict[str, Any]:
+    solutions = []
+    for solution_tag in _tags(model.java.sol()):
+        solution = model.java.sol(solution_tag)
+        solutions.append(
+            {
+                "tag": solution_tag,
+                "study": str(solution.study()),
+                "empty": bool(solution.isEmpty()),
+                "features": [
+                    {
+                        "tag": feature_tag,
+                        "type": str(solution.feature(feature_tag).getType()),
+                        "active": bool(solution.feature(feature_tag).isActive()),
+                    }
+                    for feature_tag in _tags(solution.feature())
+                ],
+            }
+        )
+    datasets = []
+    for dataset_tag in _tags(model.java.result().dataset()):
+        dataset = model.java.result().dataset(dataset_tag)
+        linked_solution = ""
+        try:
+            linked_solution = str(dataset.getString("solution"))
+        except Exception:
+            linked_solution = ""
+        datasets.append(
+            {
+                "tag": dataset_tag,
+                "type": str(dataset.getType()),
+                "solution": linked_solution,
+            }
+        )
+    return {"solutions": solutions, "datasets": datasets}
+
+
 class ClientapiLin2025ConditionBackend(RobustConditionBackend):
     """Apply all caller-declared condition controls to one derived model."""
 
@@ -98,6 +171,9 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
         numerical = model.java.result().numerical()
         self.numerical = numerical
         self._counter = 0
+        self._native_sensitivity_prepared = False
+        self._sensitivity_sweep = None
+        self._sensitivity_readback: dict[str, Any] | None = None
 
     def set_shape_deformation_active(self, requested: bool) -> dict[str, Any]:
         """Set and read back the derived shape deformation phase explicitly.
@@ -139,7 +215,7 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
         )
         mesh_reference = self._set_mesh_reference_policy()
         mesh.run()
-        body = {
+        body: dict[str, Any] = {
             "shape_controls": controls,
             "forward_shape_deformation": self.set_shape_deformation_active(False),
             "mesh_reference": mesh_reference,
@@ -332,6 +408,246 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
             "solution_id": self.controls["solution_tag"],
         }
 
+    def _prepare_native_sensitivity(self, variable_ids: list[str]) -> dict[str, Any]:
+        controls = self.controls
+        required = {
+            "sensitivity_parametric_sweep_tag",
+            "sensitivity_feature_tag",
+            "sensitivity_solver_tag",
+            "sensitivity_segregated_solver_tag",
+            "sensitivity_direct_solver_tags",
+            "sensitivity_solution_tags",
+            "sensitivity_dataset_tags",
+            "derivative_solution_tag",
+            "derivative_dataset_tag",
+            "sensitivity_gradient_method",
+            "sensitivity_solver_regeneration",
+            "sensitivity_stationary_nonlinearity",
+        }
+        if not required <= set(controls):
+            raise ValueError("native sensitivity controls are incomplete")
+        if variable_ids != [item["variable_id"] for item in self.support["variables"]]:
+            raise ValueError("native sensitivity variable order differs from support")
+        features = self.study.feature()
+        sweep_tag = controls["sensitivity_parametric_sweep_tag"]
+        sensitivity_tag = controls["sensitivity_feature_tag"]
+        if sweep_tag in _tags(features) or sensitivity_tag in _tags(features):
+            raise ValueError("native sensitivity study features already exist before preparation")
+        sensitivity = features.create(sensitivity_tag, "Sensitivity")
+        sensitivity.active(True)
+        sensitivity.set("gradientMethod", controls["sensitivity_gradient_method"])
+        unit_scale = {"m": 1.0, "um": 1e-6, "nm": 1e-9}
+        try:
+            baselines_m = [
+                float(item["baseline"]) * unit_scale[item["unit"]]
+                for item in self.support["variables"]
+            ]
+            scales_m = [
+                float(item["scale"]) * unit_scale[item["unit"]]
+                for item in self.support["variables"]
+            ]
+        except KeyError as exc:
+            raise ValueError("native sensitivity variable unit is unsupported") from exc
+        _set_vector(sensitivity, "pname", variable_ids)
+        _set_vector(sensitivity, "punit", ["m"] * len(variable_ids))
+        _set_vector(sensitivity, "initval", [f"{item:.17g}[m]" for item in baselines_m])
+        _set_vector(sensitivity, "scale", [f"{item:.17g}[m]" for item in scales_m])
+        _set_vector(sensitivity, "valuetype", ["real"] * len(variable_ids))
+        _set_vector(sensitivity, "optobj", [controls["observable_expression"]])
+        sweep = features.create(sweep_tag, "Parametric")
+        _set_vector(sweep, "pname", [controls["wavelength_parameter"]])
+        _set_vector(sweep, "plistarr", [controls["wavelength_parameter"]])
+        _set_vector(sweep, "punit", ["m"])
+        if controls["sensitivity_solver_regeneration"] != "replace_existing_auto_sequence":
+            raise ValueError("native sensitivity solver regeneration policy changed")
+        self.model.java.sol().remove(controls["solution_tag"])
+        self.study.createAutoSequences("all")
+        observed_solutions = _tags(self.model.java.sol())
+        if observed_solutions != controls["sensitivity_solution_tags"][:1]:
+            raise ValueError("pre-solve native sensitivity solution identity changed")
+        solution = self.model.java.sol(controls["solution_tag"])
+        stationary = solution.feature(controls["stationary_solver_tag"])
+        children = {
+            tag: str(stationary.feature(tag).getType()) for tag in _tags(stationary.feature())
+        }
+        if children.get(controls["sensitivity_solver_tag"]) != "Sensitivity":
+            raise ValueError("native sensitivity solver feature identity changed")
+        if children.get(controls["sensitivity_segregated_solver_tag"]) != "Segregated":
+            raise ValueError("native sensitivity segregated solver identity changed")
+        if str(stationary.getString("nonlin")) != controls["sensitivity_stationary_nonlinearity"]:
+            raise ValueError("native sensitivity stationary nonlinearity changed")
+        direct_ooc = {}
+        for tag in controls["sensitivity_direct_solver_tags"]:
+            if children.get(tag) != "Direct":
+                raise ValueError("native sensitivity direct solver identity changed")
+            direct = stationary.feature(tag)
+            direct.set(controls["out_of_core_property"], controls["out_of_core_value"])
+            direct_ooc[tag] = str(direct.getString(controls["out_of_core_property"]))
+        if any(value != controls["out_of_core_value"] for value in direct_ooc.values()):
+            raise ValueError("native sensitivity direct solver OOC readback differs")
+        self.stationary_solver = stationary
+        self.linear_solver = stationary.feature(controls["linear_solver_tag"])
+        readback = {
+            "study_feature_order": _tags(features),
+            "gradient_method": str(sensitivity.getString("gradientMethod")),
+            "variable_ids": [str(item) for item in list(sensitivity.getStringArray("pname"))],
+            "variable_units": [str(item) for item in list(sensitivity.getStringArray("punit"))],
+            "objective": [str(item) for item in list(sensitivity.getStringArray("optobj"))],
+            "solver_children": children,
+            "direct_ooc": direct_ooc,
+            "stationary_nonlinearity": str(stationary.getString("nonlin")),
+        }
+        expected_order = [sweep_tag, sensitivity_tag, controls["study_step_tag"]]
+        if (
+            readback["study_feature_order"] != expected_order
+            or readback["gradient_method"] != "adjoint"
+            or readback["variable_ids"] != variable_ids
+            or readback["variable_units"] != ["m"] * len(variable_ids)
+            or readback["objective"] != [controls["observable_expression"]]
+        ):
+            raise ValueError("native sensitivity study readback differs")
+        readback["receipt_fingerprint"] = domain_sha256_v2(
+            "comsol_mcp.robust_native_sensitivity_controls", readback
+        )
+        self._sensitivity_sweep = sweep
+        self._sensitivity_readback = readback
+        self._native_sensitivity_prepared = True
+        return readback
+
+    def evaluate_condition_gradient(
+        self,
+        condition: Mapping[str, Any],
+        tensor_expressions: list[str],
+        variable_ids: list[str],
+    ) -> Mapping[str, Any]:
+        if not self._native_sensitivity_prepared:
+            self._prepare_native_sensitivity(variable_ids)
+        if self._sensitivity_sweep is None or self._sensitivity_readback is None:
+            raise RuntimeError("native sensitivity preparation state is incomplete")
+        controls = self.controls
+        self.material.apply_material_state(condition["material_state_id"], tensor_expressions)
+        wavelength = f"{float(condition['wavelength_m']):.17g}[m]"
+        self.model.java.param().set(controls["wavelength_parameter"], wavelength)
+        self._set_incidence(condition)
+        self.study_step.set(controls["study_step_property"], controls["wavelength_parameter"])
+        _set_vector(self._sensitivity_sweep, "plistarr", [wavelength])
+        self.set_shape_deformation_active(True)
+        for tag in controls["sensitivity_direct_solver_tags"]:
+            direct = self.stationary_solver.feature(tag)
+            direct.set(controls["out_of_core_property"], controls["out_of_core_value"])
+            if (
+                str(direct.getString(controls["out_of_core_property"]))
+                != controls["out_of_core_value"]
+            ):
+                raise ValueError("native sensitivity direct solver OOC readback differs")
+        if (
+            str(self.stationary_solver.getString("nonlin"))
+            != controls["sensitivity_stationary_nonlinearity"]
+        ):
+            raise ValueError("native sensitivity stationary nonlinearity changed")
+        self.model.java.save(str(self.working_model_path))
+        self.study.run()
+        identity = _generated_sensitivity_identity(self.model)
+        if [item["tag"] for item in identity["solutions"]] != controls["sensitivity_solution_tags"]:
+            raise ValueError("native sensitivity generated solution identity changed")
+        if [item["tag"] for item in identity["datasets"]] != controls["sensitivity_dataset_tags"]:
+            raise ValueError("native sensitivity generated dataset identity changed")
+        derivative_dataset_id = controls["derivative_dataset_tag"]
+        derivative_solution_id = controls["derivative_solution_tag"]
+        derivative_dataset = next(
+            item for item in identity["datasets"] if item["tag"] == derivative_dataset_id
+        )
+        if derivative_dataset["solution"] != derivative_solution_id:
+            raise ValueError("native sensitivity derivative dataset binding changed")
+        expressions = [controls["observable_expression"]]
+        for variable_id in variable_ids:
+            expressions.extend(
+                [
+                    f"fsens({variable_id})",
+                    f"real(fsens({variable_id}))",
+                    f"imag(fsens({variable_id}))",
+                ]
+            )
+        expressions.extend(
+            [
+                controls["reflectance_expression"],
+                controls["transmittance_expression"],
+                controls["absorption_expression"],
+                controls["evaluated_wavelength_expression"],
+                controls["solved_wavelength_expression"],
+            ]
+        )
+        values = self.model.evaluate(
+            expressions,
+            dataset=_dataset_by_tag(self.model, derivative_dataset_id),
+            outer=1,
+        )
+        scalars = {
+            expression: _complex_scalar(value)
+            for expression, value in zip(expressions, values, strict=True)
+        }
+        objective = scalars[controls["observable_expression"]]
+        if abs(objective.imag) > 1e-12:
+            raise ValueError("native sensitivity objective unexpectedly contains an imaginary part")
+        raw_gradients = []
+        accepted_gradients = []
+        for variable_id in variable_ids:
+            raw = scalars[f"fsens({variable_id})"]
+            accepted = scalars[f"real(fsens({variable_id}))"]
+            imaginary = scalars[f"imag(fsens({variable_id}))"]
+            if accepted.imag != 0.0 or accepted.real != raw.real or imaginary.real != raw.imag:
+                raise ValueError("native sensitivity raw and accepted gradients differ")
+            raw_gradients.append({"real": raw.real, "imaginary": raw.imag})
+            accepted_gradients.append(accepted.real)
+        physical_expressions = expressions[-5:]
+        physical = [scalars[item] for item in physical_expressions]
+        if any(abs(item.imag) > 1e-10 for item in physical):
+            raise ValueError("native sensitivity physical evidence is unexpectedly complex")
+        mesh = _get(self.model.java.component(), controls["component_tag"]).mesh(
+            controls["mesh_tag"]
+        )
+        statistics = mesh.stat()
+        identities = {
+            "primal": domain_sha256_v2(
+                "comsol_mcp.native_primal_identity", identity["solutions"][0]
+            ),
+            "adjoint": domain_sha256_v2(
+                "comsol_mcp.native_adjoint_identity",
+                next(
+                    item for item in identity["solutions"] if item["tag"] == derivative_solution_id
+                ),
+            ),
+            "study": domain_sha256_v2(
+                "comsol_mcp.native_study_identity", self._sensitivity_readback
+            ),
+            "solution": domain_sha256_v2(
+                "comsol_mcp.native_solution_identity", identity["solutions"]
+            ),
+            "dataset": domain_sha256_v2("comsol_mcp.native_dataset_identity", identity["datasets"]),
+        }
+        return {
+            "condition_id": condition["condition_id"],
+            "observable_id": condition["observable_id"],
+            "observable_value": objective.real,
+            "requested_wavelength_m": condition["wavelength_m"],
+            "evaluated_wavelength_m": physical[3].real,
+            "solved_wavelength_m": physical[4].real,
+            "reflectance": physical[0].real,
+            "transmittance": physical[1].real,
+            "absorption": physical[2].real,
+            "mesh_elements": int(statistics.getNumElem()),
+            "minimum_mesh_quality": float(statistics.getMinQuality()),
+            "dataset_id": controls["dataset_tag"],
+            "solution_id": controls["solution_tag"],
+            "derivative_dataset_id": derivative_dataset_id,
+            "derivative_solution_id": derivative_solution_id,
+            "variable_ids": list(variable_ids),
+            "raw_gradients": raw_gradients,
+            "accepted_real_gradients": accepted_gradients,
+            "gradient_unit": self.support["result_identity"]["derivative_units"],
+            "identity_fingerprints": identities,
+        }
+
 
 def execute_lin2025_conditions(
     spec: Mapping[str, Any],
@@ -412,8 +728,23 @@ def execute_lin2025_conditions(
             backend=backend,
             cancel_requested=cancel_requested,
         )
+        aggregate_gradient = None
+        sensitivity_controls = None
+        if backend.controls.get("schema_version") == "1.4.0":
+            from .robust_gradient_runtime import execute_native_condition_gradients
+
+            aggregate_gradient = execute_native_condition_gradients(
+                spec,
+                directory,
+                backend=backend,
+                observations=observations,
+                cancel_requested=cancel_requested,
+            )
+            sensitivity_controls = backend._sensitivity_readback
         return {
             "observations": observations,
+            "aggregate_gradient": aggregate_gradient,
+            "sensitivity_controls": sensitivity_controls,
             "controls_fingerprint": controls.get("receipt_fingerprint"),
             "solver_started": True,
             "configured_model": str(configured),

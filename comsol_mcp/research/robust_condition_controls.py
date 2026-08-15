@@ -9,7 +9,8 @@ from comsol_mcp.durable import domain_sha256_v2
 from .derivative_support import _bounded_json, _identifier, _object, _text
 
 SCHEMA_NAME = "comsol_mcp.robust_condition_controls"
-SCHEMA_VERSION = "1.3.0"
+SCHEMA_VERSION = "1.4.0"
+MESH_REFERENCE_SCHEMA_VERSION = "1.3.0"
 COARSE_SOLVER_MEMORY_SCHEMA_VERSION = "1.2.0"
 SOLVER_SELECTION_SCHEMA_VERSION = "1.1.0"
 LEGACY_SCHEMA_VERSION = "1.0.0"
@@ -62,6 +63,20 @@ _MESH_REFERENCE_FIELDS = {
     "mesh_reference_parameter",
     "mesh_reference_value",
 }
+_NATIVE_SENSITIVITY_FIELDS = {
+    "sensitivity_parametric_sweep_tag",
+    "sensitivity_feature_tag",
+    "sensitivity_solver_tag",
+    "sensitivity_segregated_solver_tag",
+    "sensitivity_direct_solver_tags",
+    "sensitivity_solution_tags",
+    "sensitivity_dataset_tags",
+    "derivative_solution_tag",
+    "derivative_dataset_tag",
+    "sensitivity_gradient_method",
+    "sensitivity_solver_regeneration",
+    "sensitivity_stationary_nonlinearity",
+}
 
 
 def normalize_robust_condition_controls(value: object) -> dict[str, Any]:
@@ -74,8 +89,19 @@ def normalize_robust_condition_controls(value: object) -> dict[str, Any]:
         fields = _BASE_FIELDS | _SOLVER_SELECTION_FIELDS
     elif version == COARSE_SOLVER_MEMORY_SCHEMA_VERSION:
         fields = _BASE_FIELDS | _SOLVER_SELECTION_FIELDS | _COARSE_SOLVER_MEMORY_FIELDS
-    elif version == SCHEMA_VERSION:
+    elif version == MESH_REFERENCE_SCHEMA_VERSION:
         base_fields = _BASE_FIELDS | _SOLVER_SELECTION_FIELDS | _MESH_REFERENCE_FIELDS
+        present_coarse = _COARSE_SOLVER_MEMORY_FIELDS & set(bounded)
+        if present_coarse and present_coarse != _COARSE_SOLVER_MEMORY_FIELDS:
+            raise ValueError("coarse solver memory controls must be supplied together")
+        fields = base_fields | present_coarse
+    elif version == SCHEMA_VERSION:
+        base_fields = (
+            _BASE_FIELDS
+            | _SOLVER_SELECTION_FIELDS
+            | _MESH_REFERENCE_FIELDS
+            | _NATIVE_SENSITIVITY_FIELDS
+        )
         present_coarse = _COARSE_SOLVER_MEMORY_FIELDS & set(bounded)
         if present_coarse and present_coarse != _COARSE_SOLVER_MEMORY_FIELDS:
             raise ValueError("coarse solver memory controls must be supplied together")
@@ -112,6 +138,7 @@ def normalize_robust_condition_controls(value: object) -> dict[str, Any]:
     if version in {
         SOLVER_SELECTION_SCHEMA_VERSION,
         COARSE_SOLVER_MEMORY_SCHEMA_VERSION,
+        MESH_REFERENCE_SCHEMA_VERSION,
         SCHEMA_VERSION,
     }:
         selected = _identifier(raw["selected_linear_solver_tag"], "selected_linear_solver_tag")
@@ -136,7 +163,8 @@ def normalize_robust_condition_controls(value: object) -> dict[str, Any]:
         }
     coarse_solver_memory: dict[str, Any] = {}
     if version == COARSE_SOLVER_MEMORY_SCHEMA_VERSION or (
-        version == SCHEMA_VERSION and _COARSE_SOLVER_MEMORY_FIELDS <= set(raw)
+        version in {MESH_REFERENCE_SCHEMA_VERSION, SCHEMA_VERSION}
+        and _COARSE_SOLVER_MEMORY_FIELDS <= set(raw)
     ):
         feature_path = raw["coarse_solver_feature_path"]
         if (
@@ -167,7 +195,7 @@ def normalize_robust_condition_controls(value: object) -> dict[str, Any]:
             "coarse_solver_out_of_core_value": coarse_value,
         }
     mesh_reference: dict[str, Any] = {}
-    if version == SCHEMA_VERSION:
+    if version in {MESH_REFERENCE_SCHEMA_VERSION, SCHEMA_VERSION}:
         mesh_reference = {
             "mesh_reference_parameter": _identifier(
                 raw["mesh_reference_parameter"], "mesh_reference_parameter"
@@ -175,6 +203,91 @@ def normalize_robust_condition_controls(value: object) -> dict[str, Any]:
             "mesh_reference_value": _text(
                 raw["mesh_reference_value"], "mesh_reference_value", maximum=64
             ),
+        }
+    native_sensitivity: dict[str, Any] = {}
+    if version == SCHEMA_VERSION:
+        direct_tags = raw["sensitivity_direct_solver_tags"]
+        solution_tags = raw["sensitivity_solution_tags"]
+        dataset_tags = raw["sensitivity_dataset_tags"]
+        for name, values, expected_length in (
+            ("sensitivity_direct_solver_tags", direct_tags, 2),
+            ("sensitivity_solution_tags", solution_tags, 3),
+            ("sensitivity_dataset_tags", dataset_tags, 2),
+        ):
+            if (
+                not isinstance(values, list)
+                or len(values) != expected_length
+                or any(not isinstance(item, str) for item in values)
+            ):
+                raise ValueError(f"{name} must contain exactly {expected_length} tags")
+        normalized_direct = [
+            _identifier(item, f"sensitivity_direct_solver_tags[{index}]")
+            for index, item in enumerate(direct_tags)
+        ]
+        normalized_solutions = [
+            _identifier(item, f"sensitivity_solution_tags[{index}]")
+            for index, item in enumerate(solution_tags)
+        ]
+        normalized_datasets = [
+            _identifier(item, f"sensitivity_dataset_tags[{index}]")
+            for index, item in enumerate(dataset_tags)
+        ]
+        if (
+            len(set(normalized_direct)) != len(normalized_direct)
+            or len(set(normalized_solutions)) != len(normalized_solutions)
+            or len(set(normalized_datasets)) != len(normalized_datasets)
+        ):
+            raise ValueError("native sensitivity tags must be unique within each tag class")
+        derivative_solution = _identifier(raw["derivative_solution_tag"], "derivative_solution_tag")
+        derivative_dataset = _identifier(raw["derivative_dataset_tag"], "derivative_dataset_tag")
+        if (
+            normalized_solutions[0] != raw["solution_tag"]
+            or normalized_datasets[0] != raw["dataset_tag"]
+            or derivative_solution != normalized_solutions[1]
+            or derivative_dataset != normalized_datasets[1]
+        ):
+            raise ValueError("native sensitivity derivative identities are inconsistent")
+        gradient_method = _text(
+            raw["sensitivity_gradient_method"], "sensitivity_gradient_method", maximum=16
+        )
+        regeneration = _text(
+            raw["sensitivity_solver_regeneration"],
+            "sensitivity_solver_regeneration",
+            maximum=32,
+        )
+        nonlinearity = _text(
+            raw["sensitivity_stationary_nonlinearity"],
+            "sensitivity_stationary_nonlinearity",
+            maximum=16,
+        )
+        if gradient_method != "adjoint":
+            raise ValueError("native sensitivity gradient method must be adjoint")
+        if regeneration != "replace_existing_auto_sequence":
+            raise ValueError("native sensitivity solver regeneration policy is unsupported")
+        if nonlinearity != "auto":
+            raise ValueError("native sensitivity stationary nonlinearity must be auto")
+        native_sensitivity = {
+            "sensitivity_parametric_sweep_tag": _identifier(
+                raw["sensitivity_parametric_sweep_tag"], "sensitivity_parametric_sweep_tag"
+            ),
+            "sensitivity_feature_tag": _identifier(
+                raw["sensitivity_feature_tag"], "sensitivity_feature_tag"
+            ),
+            "sensitivity_solver_tag": _identifier(
+                raw["sensitivity_solver_tag"], "sensitivity_solver_tag"
+            ),
+            "sensitivity_segregated_solver_tag": _identifier(
+                raw["sensitivity_segregated_solver_tag"],
+                "sensitivity_segregated_solver_tag",
+            ),
+            "sensitivity_direct_solver_tags": normalized_direct,
+            "sensitivity_solution_tags": normalized_solutions,
+            "sensitivity_dataset_tags": normalized_datasets,
+            "derivative_solution_tag": derivative_solution,
+            "derivative_dataset_tag": derivative_dataset,
+            "sensitivity_gradient_method": gradient_method,
+            "sensitivity_solver_regeneration": regeneration,
+            "sensitivity_stationary_nonlinearity": nonlinearity,
         }
     body = {
         "schema_name": SCHEMA_NAME,
@@ -239,6 +352,7 @@ def normalize_robust_condition_controls(value: object) -> dict[str, Any]:
         **selection,
         **coarse_solver_memory,
         **mesh_reference,
+        **native_sensitivity,
     }
     body["controls_fingerprint"] = domain_sha256_v2(SCHEMA_NAME, body)
     if supplied is not None and supplied != body["controls_fingerprint"]:
@@ -249,6 +363,7 @@ def normalize_robust_condition_controls(value: object) -> dict[str, Any]:
 __all__ = [
     "COARSE_SOLVER_MEMORY_SCHEMA_VERSION",
     "LEGACY_SCHEMA_VERSION",
+    "MESH_REFERENCE_SCHEMA_VERSION",
     "SCHEMA_NAME",
     "SCHEMA_VERSION",
     "SOLVER_SELECTION_SCHEMA_VERSION",

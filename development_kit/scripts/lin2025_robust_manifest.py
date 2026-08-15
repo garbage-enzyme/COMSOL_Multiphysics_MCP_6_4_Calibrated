@@ -128,9 +128,10 @@ def compile_lin2025_robust_submission(
         "cores": campaign["cores"],
         "version": campaign["version"],
         "resource_policy": campaign["resource_policy"],
-        "condition_execution_limit": campaign["condition_execution_limit"],
         "comsol_temporary_directory": campaign["comsol_temporary_directory"],
     }
+    if campaign["condition_execution_limit"] is not None:
+        envelope["condition_execution_limit"] = campaign["condition_execution_limit"]
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     envelope_path.parent.mkdir(parents=True, exist_ok=True)
     atomic_write_json(manifest_path, body)

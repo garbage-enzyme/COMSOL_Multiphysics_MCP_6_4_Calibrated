@@ -210,3 +210,37 @@ def test_mesh_reference_supports_direct_solver_without_coarse_path():
     value["coarse_solver_out_of_core_property"] = "ooc"
     with pytest.raises(ValueError, match="must be supplied together"):
         normalize_robust_condition_controls(value)
+
+
+def test_condition_controls_bind_native_sensitivity_solver_identities():
+    value = _condition_controls()
+    value.update(
+        schema_version="1.4.0",
+        selected_linear_solver_tag="d1",
+        inactive_linear_solver_tags=["i1"],
+        mesh_reference_parameter="mesh_ref_wl",
+        mesh_reference_value="1600[nm]",
+        sensitivity_parametric_sweep_tag="sweep_pedot72",
+        sensitivity_feature_tag="sens_pedot72",
+        sensitivity_solver_tag="sn1",
+        sensitivity_segregated_solver_tag="se1",
+        sensitivity_direct_solver_tags=["dDef", "d1"],
+        sensitivity_solution_tags=["sol1", "sol2", "sol3"],
+        sensitivity_dataset_tags=["dset1", "dset2"],
+        derivative_solution_tag="sol2",
+        derivative_dataset_tag="dset2",
+        sensitivity_gradient_method="adjoint",
+        sensitivity_solver_regeneration="replace_existing_auto_sequence",
+        sensitivity_stationary_nonlinearity="auto",
+    )
+
+    result = normalize_robust_condition_controls(value)
+
+    assert result["sensitivity_solver_tag"] == "sn1"
+    assert result["sensitivity_segregated_solver_tag"] == "se1"
+    assert result["sensitivity_direct_solver_tags"] == ["dDef", "d1"]
+    assert result["derivative_solution_tag"] == "sol2"
+    assert result["derivative_dataset_tag"] == "dset2"
+    value["sensitivity_stationary_nonlinearity"] = "off"
+    with pytest.raises(ValueError, match="must be auto"):
+        normalize_robust_condition_controls(value)

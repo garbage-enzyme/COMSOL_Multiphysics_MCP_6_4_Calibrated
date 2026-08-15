@@ -48,9 +48,9 @@ def _write_inputs(root):
     raw["finalist_validation_policy"]["condition_table_fingerprint"] = condition_table[
         "condition_table_fingerprint"
     ]
-    raw["finalist_validation_policy"]["shape_policy_fingerprint"] = (
-        normalize_shape_support_policy(raw["shape_policy"])["policy_fingerprint"]
-    )
+    raw["finalist_validation_policy"]["shape_policy_fingerprint"] = normalize_shape_support_policy(
+        raw["shape_policy"]
+    )["policy_fingerprint"]
     material_rows = {
         "schema_name": "comsol_mcp.robust_material_tensor_rows",
         "schema_version": "1.0.0",
@@ -165,6 +165,31 @@ def test_compiler_emits_self_validated_24_condition_submission(ascii_tmp_path):
     assert receipt["manifest_sha256"] == hashlib.sha256(manifest.read_bytes()).hexdigest()
     assert read_json(envelope)["submission_manifest_sha256"] == receipt["manifest_sha256"]
     assert read_json(manifest)["synthetic_mode"] is False
+
+
+def test_compiler_omits_null_condition_limit_for_full_run(ascii_tmp_path):
+    source = _write_inputs(ascii_tmp_path)
+    campaign_path = ascii_tmp_path / "campaign.json"
+    campaign = read_json(campaign_path)
+    campaign["condition_execution_limit"] = None
+    campaign_path.write_text(json.dumps(campaign), encoding="utf-8")
+    envelope_path = ascii_tmp_path / "licensed-envelope.json"
+
+    receipt = compile_lin2025_robust_submission(
+        source_model=source,
+        fixture_path=ascii_tmp_path / "fixture.json",
+        tree_path=ascii_tmp_path / "tree.json",
+        support_path=ascii_tmp_path / "support.json",
+        pedot_fixture_path=ascii_tmp_path / "pedot.json",
+        campaign_path=campaign_path,
+        manifest_path=ascii_tmp_path / "licensed-manifest.json",
+        envelope_path=envelope_path,
+    )
+
+    envelope = read_json(envelope_path)
+    assert receipt["condition_count"] == 24
+    assert "condition_execution_limit" not in envelope
+    assert len(expand_robust_shape_manifest(envelope)["condition_table"]["conditions"]) == 24
 
 
 def test_compiler_requires_caller_directory_for_explicit_out_of_core(ascii_tmp_path):
