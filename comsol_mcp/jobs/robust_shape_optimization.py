@@ -175,9 +175,7 @@ def expand_robust_shape_manifest(submission: object) -> dict[str, Any]:
     native_optimizer = normalize_native_optimizer_configuration(raw["native_optimizer"])
     startup_admission = normalize_robust_startup_policy(raw["startup_admission"])
     if schema_version == ROBUST_SHAPE_MANIFEST_LEGACY_SCHEMA_VERSION:
-        structure_manifest = normalize_structure_adapter_manifest(
-            raw["structure_adapter_manifest"]
-        )
+        structure_manifest = normalize_structure_adapter_manifest(raw["structure_adapter_manifest"])
         structure_tree_audit = normalize_structure_tree_audit(
             raw["structure_tree_audit"], structure_manifest
         )
