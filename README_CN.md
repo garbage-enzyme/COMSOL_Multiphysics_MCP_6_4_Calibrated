@@ -204,7 +204,10 @@ gradient、optimizer 的 fresh-forward 证据、finalist、checkpoint 与 cleanu
 兼容，并进一步绑定原生 Sensitivity study feature、重新生成的 solver topology、direct
 solver 的 out-of-core 策略、derivative solution/dataset、adjoint method 与 stationary
 nonlinearity。licensed runtime 会替换不兼容的旧 solver sequence、核验生成身份，并分别
-持久化原始 complex `fsens` 与采用的 real component。caller-owned mesh reference 仍只
+持久化原始 complex `fsens` 与采用的 real component。
+该 contract 还会在斜入射导致 Wave Optics 与 material-coordinate constraints 跨组时，
+显式合并 COMSOL 生成的两个 segregated steps，并回读单一 merged step 及 caller-selected
+direct solver。caller-owned mesh reference 仍只
 属于验证 fixture 证据，不是自动粗化规则，也不能替代 finalist 的独立 finer-mesh
 convergence；gradient 仍须通过独立 finite-difference 与 directional reconciliation。
 

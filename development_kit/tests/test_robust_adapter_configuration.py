@@ -232,6 +232,11 @@ def test_condition_controls_bind_native_sensitivity_solver_identities():
         sensitivity_gradient_method="adjoint",
         sensitivity_solver_regeneration="replace_existing_auto_sequence",
         sensitivity_stationary_nonlinearity="auto",
+        sensitivity_segregated_step_tags=["ss1", "ss2"],
+        sensitivity_merged_step_tag="ss1",
+        sensitivity_removed_step_tag="ss2",
+        sensitivity_merged_linear_solver_tag="d1",
+        sensitivity_constraint_group_policy="merge_material_coordinates_into_wave_optics",
     )
 
     result = normalize_robust_condition_controls(value)
@@ -242,6 +247,10 @@ def test_condition_controls_bind_native_sensitivity_solver_identities():
     assert result["polarization_values"] == {"x_linear": "S", "y_linear": "P"}
     assert result["derivative_solution_tag"] == "sol2"
     assert result["derivative_dataset_tag"] == "dset2"
+    assert result["sensitivity_segregated_step_tags"] == ["ss1", "ss2"]
+    assert result["sensitivity_constraint_group_policy"] == (
+        "merge_material_coordinates_into_wave_optics"
+    )
     value["sensitivity_stationary_nonlinearity"] = "off"
     with pytest.raises(ValueError, match="must be auto"):
         normalize_robust_condition_controls(value)

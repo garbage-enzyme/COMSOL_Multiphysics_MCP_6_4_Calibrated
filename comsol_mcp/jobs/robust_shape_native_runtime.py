@@ -22,6 +22,10 @@ def _tags(container: Any) -> list[str]:
     return [str(value) for value in list(container.tags())]
 
 
+def _ordered_unique(values: list[str]) -> list[str]:
+    return list(dict.fromkeys(values))
+
+
 def _get(container: Any, tag: str) -> Any:
     errors: list[Exception] = []
     for method_name in ("get", "feature"):
@@ -425,6 +429,11 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
             "sensitivity_gradient_method",
             "sensitivity_solver_regeneration",
             "sensitivity_stationary_nonlinearity",
+            "sensitivity_segregated_step_tags",
+            "sensitivity_merged_step_tag",
+            "sensitivity_removed_step_tag",
+            "sensitivity_merged_linear_solver_tag",
+            "sensitivity_constraint_group_policy",
         }
         if not required <= set(controls):
             raise ValueError("native sensitivity controls are incomplete")
@@ -487,6 +496,7 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
             direct_ooc[tag] = str(direct.getString(controls["out_of_core_property"]))
         if any(value != controls["out_of_core_value"] for value in direct_ooc.values()):
             raise ValueError("native sensitivity direct solver OOC readback differs")
+        segregated_groups = self._merge_sensitivity_constraint_groups(stationary)
         self.stationary_solver = stationary
         self.linear_solver = stationary.feature(controls["linear_solver_tag"])
         readback = {
@@ -497,6 +507,7 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
             "objective": [str(item) for item in list(sensitivity.getStringArray("optobj"))],
             "solver_children": children,
             "direct_ooc": direct_ooc,
+            "segregated_groups": segregated_groups,
             "stationary_nonlinearity": str(stationary.getString("nonlin")),
         }
         expected_order = [sweep_tag, sensitivity_tag, controls["study_step_tag"]]
@@ -515,6 +526,58 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
         self._sensitivity_readback = readback
         self._native_sensitivity_prepared = True
         return readback
+
+    def _merge_sensitivity_constraint_groups(self, stationary: Any) -> dict[str, Any]:
+        controls = self.controls
+        if (
+            controls["sensitivity_constraint_group_policy"]
+            != "merge_material_coordinates_into_wave_optics"
+        ):
+            raise ValueError("native sensitivity constraint group policy changed")
+        segregated = stationary.feature(controls["sensitivity_segregated_solver_tag"])
+        step_tags = controls["sensitivity_segregated_step_tags"]
+        observed_types = {
+            tag: str(segregated.feature(tag).getType()) for tag in _tags(segregated.feature())
+        }
+        if observed_types != {tag: "SegregatedStep" for tag in step_tags}:
+            raise ValueError("native sensitivity segregated step identity changed")
+        merged_tag = controls["sensitivity_merged_step_tag"]
+        removed_tag = controls["sensitivity_removed_step_tag"]
+        merged = segregated.feature(merged_tag)
+        removed = segregated.feature(removed_tag)
+        merged_variables = _ordered_unique(
+            [str(item) for item in list(merged.getStringArray("segvar"))]
+            + [str(item) for item in list(removed.getStringArray("segvar"))]
+        )
+        merged_components = _ordered_unique(
+            [str(item) for item in list(merged.getStringArray("segcomp"))]
+            + [str(item) for item in list(removed.getStringArray("segcomp"))]
+        )
+        _set_vector(merged, "segvar", merged_variables)
+        _set_vector(merged, "segcomp", merged_components)
+        segregated.feature().remove(removed_tag)
+        merged.set("linsolver", controls["sensitivity_merged_linear_solver_tag"])
+        observed_steps = _tags(segregated.feature())
+        observed_variables = [str(item) for item in list(merged.getStringArray("segvar"))]
+        observed_components = [str(item) for item in list(merged.getStringArray("segcomp"))]
+        observed_solver = str(merged.getString("linsolver"))
+        if (
+            observed_steps != [merged_tag]
+            or observed_variables != merged_variables
+            or observed_components != merged_components
+            or observed_solver != controls["sensitivity_merged_linear_solver_tag"]
+        ):
+            raise ValueError("native sensitivity merged constraint group readback differs")
+        return {
+            "policy": controls["sensitivity_constraint_group_policy"],
+            "source_step_tags": list(step_tags),
+            "observed_step_tags": observed_steps,
+            "merged_step_tag": merged_tag,
+            "removed_step_tag": removed_tag,
+            "linear_solver_tag": observed_solver,
+            "variable_ids": observed_variables,
+            "component_ids": observed_components,
+        }
 
     def evaluate_condition_gradient(
         self,

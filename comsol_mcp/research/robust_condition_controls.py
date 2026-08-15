@@ -76,6 +76,11 @@ _NATIVE_SENSITIVITY_FIELDS = {
     "sensitivity_gradient_method",
     "sensitivity_solver_regeneration",
     "sensitivity_stationary_nonlinearity",
+    "sensitivity_segregated_step_tags",
+    "sensitivity_merged_step_tag",
+    "sensitivity_removed_step_tag",
+    "sensitivity_merged_linear_solver_tag",
+    "sensitivity_constraint_group_policy",
 }
 
 
@@ -289,6 +294,49 @@ def normalize_robust_condition_controls(value: object) -> dict[str, Any]:
             "sensitivity_solver_regeneration": regeneration,
             "sensitivity_stationary_nonlinearity": nonlinearity,
         }
+        step_tags = raw["sensitivity_segregated_step_tags"]
+        if (
+            not isinstance(step_tags, list)
+            or len(step_tags) != 2
+            or any(not isinstance(item, str) for item in step_tags)
+        ):
+            raise ValueError("sensitivity_segregated_step_tags must contain exactly two tags")
+        normalized_steps = [
+            _identifier(item, f"sensitivity_segregated_step_tags[{index}]")
+            for index, item in enumerate(step_tags)
+        ]
+        if len(set(normalized_steps)) != 2:
+            raise ValueError("native sensitivity segregated step tags must be unique")
+        merged_step = _identifier(raw["sensitivity_merged_step_tag"], "sensitivity_merged_step_tag")
+        removed_step = _identifier(
+            raw["sensitivity_removed_step_tag"], "sensitivity_removed_step_tag"
+        )
+        merged_solver = _identifier(
+            raw["sensitivity_merged_linear_solver_tag"],
+            "sensitivity_merged_linear_solver_tag",
+        )
+        group_policy = _text(
+            raw["sensitivity_constraint_group_policy"],
+            "sensitivity_constraint_group_policy",
+            maximum=64,
+        )
+        if [merged_step, removed_step] != normalized_steps:
+            raise ValueError(
+                "native sensitivity merged and removed step identities are inconsistent"
+            )
+        if merged_solver != raw["linear_solver_tag"]:
+            raise ValueError("native sensitivity merged group must use the selected direct solver")
+        if group_policy != "merge_material_coordinates_into_wave_optics":
+            raise ValueError("native sensitivity constraint group policy is unsupported")
+        native_sensitivity.update(
+            {
+                "sensitivity_segregated_step_tags": normalized_steps,
+                "sensitivity_merged_step_tag": merged_step,
+                "sensitivity_removed_step_tag": removed_step,
+                "sensitivity_merged_linear_solver_tag": merged_solver,
+                "sensitivity_constraint_group_policy": group_policy,
+            }
+        )
     body = {
         "schema_name": SCHEMA_NAME,
         "schema_version": version,

@@ -251,6 +251,9 @@ solver topology, direct-solver out-of-core policy, derivative solution/dataset,
 adjoint method, and stationary nonlinearity. The licensed runtime replaces the
 incompatible pre-existing solver sequence, verifies the generated identities,
 and persists both raw complex `fsens` values and the accepted real components.
+The same contract explicitly merges the generated Wave Optics and material-
+coordinate segregated steps when their constraints cross at oblique incidence,
+then reads back the single merged step and its caller-selected direct solver.
 The caller-owned mesh reference remains validation-fixture evidence, never an
 automatic coarsening rule or a substitute for independent finer-mesh finalist
 convergence; accepted gradients still require independent finite-difference and

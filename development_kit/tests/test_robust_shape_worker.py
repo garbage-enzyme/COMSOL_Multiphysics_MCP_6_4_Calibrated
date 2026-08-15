@@ -785,6 +785,69 @@ def test_native_sensitivity_preparation_follows_exact_condition_staging():
     ]
 
 
+def test_native_sensitivity_constraint_groups_are_merged_and_read_back():
+    class Step:
+        def __init__(self, variables, components, solver):
+            self.values = {"segvar": variables, "segcomp": components, "linsolver": solver}
+
+        def getType(self):
+            return "SegregatedStep"
+
+        def getStringArray(self, name):
+            return self.values[name]
+
+        def getString(self, name):
+            return self.values[name]
+
+        def set(self, name, value):
+            self.values[name] = value
+
+    class Steps:
+        def __init__(self):
+            self.items = {
+                "ss1": Step(["ewfd", "conpar1"], ["Ex", "rx"], "d1"),
+                "ss2": Step(["material", "conpar1"], ["u", "rx"], "dDef"),
+            }
+
+        def tags(self):
+            return list(self.items)
+
+        def remove(self, tag):
+            del self.items[tag]
+
+    class Segregated:
+        def __init__(self):
+            self.steps = Steps()
+
+        def feature(self, tag=None):
+            return self.steps if tag is None else self.steps.items[tag]
+
+    class Stationary:
+        def __init__(self):
+            self.segregated = Segregated()
+
+        def feature(self, tag):
+            assert tag == "se1"
+            return self.segregated
+
+    backend = object.__new__(robust_shape_native_runtime.ClientapiLin2025ConditionBackend)
+    backend.controls = {
+        "sensitivity_constraint_group_policy": "merge_material_coordinates_into_wave_optics",
+        "sensitivity_segregated_solver_tag": "se1",
+        "sensitivity_segregated_step_tags": ["ss1", "ss2"],
+        "sensitivity_merged_step_tag": "ss1",
+        "sensitivity_removed_step_tag": "ss2",
+        "sensitivity_merged_linear_solver_tag": "d1",
+    }
+
+    receipt = backend._merge_sensitivity_constraint_groups(Stationary())
+
+    assert receipt["observed_step_tags"] == ["ss1"]
+    assert receipt["variable_ids"] == ["ewfd", "conpar1", "material"]
+    assert receipt["component_ids"] == ["Ex", "rx", "u"]
+    assert receipt["linear_solver_tag"] == "d1"
+
+
 def test_native_runtime_persists_controls_before_condition_failure(ascii_tmp_path, monkeypatch):
     source = ascii_tmp_path / "source.mph"
     source.write_bytes(b"fixture")
