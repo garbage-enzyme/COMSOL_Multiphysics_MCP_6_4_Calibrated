@@ -204,6 +204,10 @@ def expand_robust_shape_manifest(submission: object) -> dict[str, Any]:
             expected_temperature_k=adapter_binding["temperature_k"],
         )
         condition_controls = adapter_configuration["configuration"]["condition_controls"]
+        if condition_controls["observable_expression"] != support["objective"]["expression"]:
+            raise ValueError(
+                "Lin2025 condition observable expression differs from the native objective"
+            )
         if (
             condition_controls["out_of_core_value"].casefold() == "on"
             and "comsol_temporary_directory" not in envelope

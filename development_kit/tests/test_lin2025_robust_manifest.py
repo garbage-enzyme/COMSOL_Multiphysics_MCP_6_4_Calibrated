@@ -104,7 +104,7 @@ def _write_inputs(root):
         "polarization_property": "Polarization",
         "linear_polarization_property": "LinearPol",
         "polarization_values": {"x_linear": "S", "y_linear": "P"},
-        "observable_expression": "ewfd.Ttotal",
+        "observable_expression": support["objective"]["expression"],
         "reflectance_expression": "ewfd.Rtotal",
         "transmittance_expression": "ewfd.Ttotal",
         "absorption_expression": "ewfd.Atotal",

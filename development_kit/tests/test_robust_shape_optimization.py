@@ -268,7 +268,7 @@ def test_manifest_v11_accepts_tagged_lin2025_adapter(ascii_tmp_path):
                 "polarization_property": "Polarization",
                 "linear_polarization_property": "LinearPol",
                 "polarization_values": {"x_linear": "S", "y_linear": "P"},
-                "observable_expression": "ewfd.Ttotal",
+                "observable_expression": support["objective"]["expression"],
                 "reflectance_expression": "ewfd.Rtotal",
                 "transmittance_expression": "ewfd.Ttotal",
                 "absorption_expression": "ewfd.Atotal",
@@ -291,6 +291,14 @@ def test_manifest_v11_accepts_tagged_lin2025_adapter(ascii_tmp_path):
     assert spec["material_tensor_binding"]["active_wavelengths_m"]["MR"] == pytest.approx(
         [8e-7, 1e-6, 1.2e-6]
     )
+    raw["adapter_configuration"]["configuration"]["condition_controls"][
+        "observable_expression"
+    ] = "ewfd.Ttotal"
+    payload = json.dumps(raw, sort_keys=True, separators=(",", ":")).encode()
+    manifest.write_bytes(payload)
+    envelope["submission_manifest_sha256"] = hashlib.sha256(payload).hexdigest()
+    with pytest.raises(ValueError, match="observable expression differs"):
+        expand_robust_shape_manifest(envelope)
 
 
 def test_manifest_rejects_source_or_manifest_mutation(ascii_tmp_path):
