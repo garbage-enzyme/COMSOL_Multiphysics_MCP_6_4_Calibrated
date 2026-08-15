@@ -452,6 +452,22 @@ class JobManager:
                 exc,
                 state_record_error=state_record_error,
             ) from exc
+        try:
+            self._arm_robust_wall_watchdog_if_required(
+                job_id,
+                spec,
+                attempt=1,
+                worker_identity=identity,
+            )
+        except Exception as exc:
+            cancellation = self.cancel(job_id, expected_attempt=1)
+            raise JobLaunchError(
+                job_id,
+                RuntimeError(
+                    "Licensed robust wall watchdog could not be armed; "
+                    f"exact-attempt cancellation result: {cancellation}"
+                ),
+            ) from exc
         return {"success": True, "job_id": job_id, "status": "submitted"}
 
     def _find_validation_duplicate(self, spec_fingerprint: str) -> str | None:
@@ -576,7 +592,7 @@ class JobManager:
                 | getattr(subprocess, "DETACHED_PROCESS", 0)
             )
         with (directory / "worker.log").open("ab", buffering=0) as log:
-            process = subprocess.Popen(
+            process = subprocess.Popen(  # noqa: S603 - fixed interpreter/module argv
                 command,
                 stdin=subprocess.DEVNULL,
                 stdout=log,
@@ -597,10 +613,103 @@ class JobManager:
                     )
                 time.sleep(0.01)
 
-    def cancel(self, job_id: str) -> dict[str, Any]:
+    def _arm_robust_wall_watchdog_if_required(
+        self,
+        job_id: str,
+        spec: dict[str, Any],
+        *,
+        attempt: int,
+        worker_identity: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        if spec.get("job_type") != "robust_shape_optimization" or spec.get(
+            "synthetic_mode"
+        ) is not False:
+            return None
+        budget_seconds = int(spec["native_optimizer"]["budget"]["max_wall_time_seconds"])
+        started_at = float(worker_identity["process_create_time"])
+        deadline = started_at + budget_seconds
+        directory = self.store.job_dir(job_id)
+        artifact = directory / "wall-watchdog.json"
+        launching = {
+            "schema_name": "comsol_mcp.robust_wall_watchdog",
+            "schema_version": "1.0.0",
+            "job_id": job_id,
+            "attempt": int(attempt),
+            "budget_source": "native_optimizer.budget.max_wall_time_seconds",
+            "budget_seconds": budget_seconds,
+            "worker_started_at_epoch": started_at,
+            "deadline_epoch": deadline,
+            "target_worker": worker_identity,
+            "status": "launching",
+            "updated_at_epoch": time.time(),
+        }
+        atomic_write_json(artifact, launching)
+        command = [
+            sys.executable,
+            "-m",
+            "comsol_mcp.jobs.robust_wall_watchdog",
+            str(self.store.root),
+            job_id,
+            str(attempt),
+            repr(deadline),
+        ]
+        flags = 0
+        if os.name == "nt":
+            flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(
+                subprocess, "DETACHED_PROCESS", 0
+            )
+        try:
+            with (directory / "worker.log").open("ab", buffering=0) as log:
+                process = subprocess.Popen(  # noqa: S603 - fixed interpreter/module argv
+                    command,
+                    stdin=subprocess.DEVNULL,
+                    stdout=log,
+                    stderr=log,
+                    close_fds=True,
+                    creationflags=flags,
+                    start_new_session=(os.name != "nt"),
+                )
+            _track_detached_process(process)
+            watchdog_identity = process_identity(process.pid)
+        except Exception as exc:
+            atomic_write_json(
+                artifact,
+                {
+                    **launching,
+                    "status": "launch_failed",
+                    "launch_error": {
+                        "type": type(exc).__name__,
+                        "message": str(exc)[:500],
+                    },
+                    "updated_at_epoch": time.time(),
+                },
+            )
+            raise
+        armed = {
+            **launching,
+            "status": "armed",
+            "watchdog_identity": watchdog_identity,
+            "armed_at_epoch": time.time(),
+            "updated_at_epoch": time.time(),
+        }
+        atomic_write_json(artifact, armed)
+        self.store.append_event(
+            job_id,
+            "robust_wall_watchdog_armed",
+            {
+                "attempt": int(attempt),
+                "budget_seconds": budget_seconds,
+                "deadline_epoch": deadline,
+                "watchdog_pid": watchdog_identity["pid"],
+            },
+        )
+        return armed
+
+    def cancel(self, job_id: str, *, expected_attempt: int | None = None) -> dict[str, Any]:
         request = self.store.request_cancel(
             job_id,
             requester_identity=process_identity(os.getpid()),
+            expected_attempt=expected_attempt,
         )
         state = request["state"]
         control = request["control"]
@@ -609,6 +718,8 @@ class JobManager:
                 error = "Job was terminal before the cancellation request acquired the job lock"
             elif request["reason"] == "stale_control_attempt":
                 error = "Existing cancellation request belongs to a different attempt"
+            elif request["reason"] == "attempt_mismatch":
+                error = "Job attempt changed before the cancellation request acquired the lock"
             else:
                 error = f"Cancellation request refused: {request['reason']}"
             return {
@@ -682,7 +793,7 @@ class JobManager:
                 subprocess, "DETACHED_PROCESS", 0
             )
         with (directory / "worker.log").open("ab", buffering=0) as log:
-            process = subprocess.Popen(
+            process = subprocess.Popen(  # noqa: S603 - fixed interpreter/module argv
                 command,
                 stdin=subprocess.DEVNULL,
                 stdout=log,
@@ -924,6 +1035,22 @@ class JobManager:
                 event="resume_launch_failed",
             )
             raise
+        try:
+            self._arm_robust_wall_watchdog_if_required(
+                job_id,
+                current_spec,
+                attempt=int(state["attempt"]),
+                worker_identity=identity,
+            )
+        except Exception as exc:
+            cancellation = self.cancel(job_id, expected_attempt=int(state["attempt"]))
+            raise JobLaunchError(
+                job_id,
+                RuntimeError(
+                    "Licensed robust wall watchdog could not be armed on resume; "
+                    f"exact-attempt cancellation result: {cancellation}"
+                ),
+            ) from exc
         return {
             "success": True,
             "job_id": job_id,

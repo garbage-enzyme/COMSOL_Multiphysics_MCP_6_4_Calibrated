@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import math
 from collections.abc import Mapping
 from typing import Any, Protocol
@@ -153,8 +154,10 @@ class ClientapiLin2025PedotControlBackend:
     def apply_material_state(self, state_id: str, tensor: list[str]) -> dict[str, Any]:
         if state_id not in _STATES:
             raise ValueError("Lin2025 material state must be OX or MR")
-        if not isinstance(tensor, list) or len(tensor) != 9 or any(
-            not isinstance(value, str) or not value.strip() for value in tensor
+        if (
+            not isinstance(tensor, list)
+            or len(tensor) != 9
+            or any(not isinstance(value, str) or not value.strip() for value in tensor)
         ):
             raise ValueError("Lin2025 material tensor must contain nine expressions")
         component = _get(self.model.java.component(), self.component_tag)
@@ -164,10 +167,9 @@ class ClientapiLin2025PedotControlBackend:
         material = _get(materials, "mat_pedot")
         if sorted(int(value) for value in list(material.selection().entities())) != [5]:
             raise ValueError("Lin2025 PEDOT material must select domain 5")
-        from jpype import JArray, JString
-
+        jpype = importlib.import_module("jpype")
         group = material.propertyGroup("def")
-        group.set("relpermittivity", JArray(JString)(tensor))
+        group.set("relpermittivity", jpype.JArray(jpype.JString)(tensor))
         readback = _material_readback(self.model, self.component_tag)
         if readback["relpermittivity"] not in (tensor, [tensor[0], tensor[4], tensor[8]]):
             raise ValueError("Lin2025 material tensor readback differs from requested state")
@@ -200,9 +202,7 @@ class ClientapiLin2025PedotControlBackend:
         parameters = self.model.java.param()
         for item in variables:
             baseline_m = _metres(item["baseline"], item["unit"], item["variable_id"])
-            if not math.isclose(
-                baseline_m, baseline_radius_m, rel_tol=1e-12, abs_tol=1e-15
-            ):
+            if not math.isclose(baseline_m, baseline_radius_m, rel_tol=1e-12, abs_tol=1e-15):
                 raise ValueError("Lin2025 derivative baseline differs from live radius")
             expression = f"{item['baseline']:.17g}[{item['unit']}]"
             parameters.set(item["variable_id"], expression)
@@ -241,12 +241,8 @@ class ClientapiLin2025PedotControlBackend:
             "physics_tag": "dg_pedot72",
             "physics_type": str(deformation.getType()),
             "free_domains": sorted(int(value) for value in list(free.selection().entities())),
-            "fixed_boundaries": sorted(
-                int(value) for value in list(fixed.selection().entities())
-            ),
-            "pedot_boundaries": sorted(
-                int(value) for value in list(pedot.selection().entities())
-            ),
+            "fixed_boundaries": sorted(int(value) for value in list(fixed.selection().entities())),
+            "pedot_boundaries": sorted(int(value) for value in list(pedot.selection().entities())),
             "displacement": [str(value) for value in list(pedot.getStringArray("dx"))],
             "height_preserved": displacement[2] == "0",
             "center_preserved": True,
@@ -261,9 +257,10 @@ class ClientapiLin2025PedotControlBackend:
             "height_preserved": True,
             "center_preserved": True,
         }
-        if readback != expected or _circle_readback(
-            self.model, self.component_tag, self.geometry_tag
-        ) != circle:
+        if (
+            readback != expected
+            or _circle_readback(self.model, self.component_tag, self.geometry_tag) != circle
+        ):
             raise ValueError("Lin2025 PEDOT control readback differs from the request")
         return {"parameters": expressions, "circle": circle, "deformed_geometry": readback}
 

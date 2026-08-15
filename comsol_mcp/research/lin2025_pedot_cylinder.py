@@ -89,21 +89,22 @@ def normalize_lin2025_pedot_cylinder_fixture(value: object) -> dict[str, Any]:
     }
     domains = _object(raw["domains"], {"substrate", "pedot_cylinder", "air"}, "domains")
     if any(
-        isinstance(domains[key], bool)
-        or not isinstance(domains[key], int)
-        or domains[key] < 1
+        isinstance(domains[key], bool) or not isinstance(domains[key], int) or domains[key] < 1
         for key in domains
     ):
         raise ValueError("domain IDs must be positive integers")
     states = raw["material_states"]
-    if not isinstance(states, list) or tuple(
-        item.get("state_id") for item in states if isinstance(item, Mapping)
-    ) != _STATES:
+    if (
+        not isinstance(states, list)
+        or tuple(item.get("state_id") for item in states if isinstance(item, Mapping)) != _STATES
+    ):
         raise ValueError("material states must be ordered OX/MR")
     variables = raw["mutable_variables"]
-    if not isinstance(variables, list) or tuple(
-        item.get("variable_id") for item in variables if isinstance(item, Mapping)
-    ) != _VARIABLES:
+    if (
+        not isinstance(variables, list)
+        or tuple(item.get("variable_id") for item in variables if isinstance(item, Mapping))
+        != _VARIABLES
+    ):
         raise ValueError("mutable variables must be ordered cylinder x/y radii")
     normalized = {
         **raw,
@@ -137,9 +138,9 @@ def compile_lin2025_pedot_cylinder_binding(
     if derivative_support.get("source_identity") != normalized["source_identity"]["source_sha256"]:
         raise ValueError("Lin2025 derivative source identity differs from fixture")
     variables = derivative_support.get("variables")
-    if not isinstance(variables, list) or [
-        item.get("variable_id") for item in variables
-    ] != list(_VARIABLES):
+    if not isinstance(variables, list) or [item.get("variable_id") for item in variables] != list(
+        _VARIABLES
+    ):
         raise ValueError("Lin2025 derivative variables must be ordered cylinder x/y radii")
     body = {
         "schema_name": f"{SCHEMA_NAME}.binding",
@@ -158,9 +159,7 @@ def compile_lin2025_pedot_cylinder_binding(
     return body
 
 
-def validate_lin2025_pedot_cylinder_tree(
-    fixture: object, tree_readback: object
-) -> dict[str, Any]:
+def validate_lin2025_pedot_cylinder_tree(fixture: object, tree_readback: object) -> dict[str, Any]:
     """Validate a live/read-only derived tree against the selected fixture."""
     normalized = normalize_lin2025_pedot_cylinder_fixture(fixture)
     raw = _object(
@@ -189,8 +188,7 @@ def validate_lin2025_pedot_cylinder_tree(
     if not isinstance(materials, Mapping) or materials.get("pedot_cylinder") not in {"OX", "MR"}:
         raise ValueError("Lin2025 PEDOT material state readback is invalid")
     if any(
-        "au" in str(tag).casefold() or "gold" in str(tag).casefold()
-        for tag in raw["feature_tags"]
+        "au" in str(tag).casefold() or "gold" in str(tag).casefold() for tag in raw["feature_tags"]
     ):
         raise ValueError("Lin2025 cylinder fixture unexpectedly contains Au")
     return {
@@ -244,25 +242,28 @@ def compile_lin2025_pedot_shape_support(fixture: object, tree_readback: object) 
             )
         },
     )
+
     def _ids(value: object, name: str) -> list[int]:
-        if not isinstance(value, list) or not value or any(
-            isinstance(item, bool) or not isinstance(item, int) or item < 1
-            for item in value
+        if (
+            not isinstance(value, list)
+            or not value
+            or any(
+                isinstance(item, bool) or not isinstance(item, int) or item < 1 for item in value
+            )
         ):
             raise ValueError(f"Lin2025 {name} must be a non-empty positive integer list")
         result = sorted(set(value))
         if result != value:
             raise ValueError(f"Lin2025 {name} must be sorted and unique")
         return result
+
     domain_count = tree_readback["domain_count"]
     boundary_count = tree_readback["boundary_count"]
     if domain_count != _DOMAIN_COUNT or boundary_count != _BOUNDARY_COUNT:
         raise ValueError("Lin2025 topology counts changed")
     exterior = _ids(tree_readback["exterior_boundaries"], "exterior_boundaries")
     pedot = _ids(tree_readback["pedot_boundaries"], "pedot_boundaries")
-    lateral = _ids(
-        tree_readback["pedot_lateral_boundaries"], "pedot_lateral_boundaries"
-    )
+    lateral = _ids(tree_readback["pedot_lateral_boundaries"], "pedot_lateral_boundaries")
     caps = _ids(tree_readback["pedot_cap_boundaries"], "pedot_cap_boundaries")
     if len(exterior) != 18 or len(pedot) != 6 or len(lateral) != 4 or len(caps) != 2:
         raise ValueError("Lin2025 deformation selection cardinality changed")
@@ -274,8 +275,10 @@ def compile_lin2025_pedot_shape_support(fixture: object, tree_readback: object) 
     center = tree_readback["center_um"]
     if not isinstance(radius, (int, float)) or isinstance(radius, bool) or radius <= 0:
         raise ValueError("Lin2025 baseline radius must be positive")
-    if not isinstance(center, list) or len(center) != 2 or any(
-        not isinstance(item, (int, float)) or isinstance(item, bool) for item in center
+    if (
+        not isinstance(center, list)
+        or len(center) != 2
+        or any(not isinstance(item, (int, float)) or isinstance(item, bool) for item in center)
     ):
         raise ValueError("Lin2025 cylinder center must contain two numbers")
     body = {

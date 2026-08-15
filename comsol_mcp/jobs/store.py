@@ -421,7 +421,13 @@ class JobStore:
         atomic_write_json(self.job_dir(job_id) / "control.json", control)
         return control
 
-    def request_cancel(self, job_id: str, *, requester_identity: dict[str, Any]) -> dict[str, Any]:
+    def request_cancel(
+        self,
+        job_id: str,
+        *,
+        requester_identity: dict[str, Any],
+        expected_attempt: int | None = None,
+    ) -> dict[str, Any]:
         """Durably linearize one attempt-bound cancellation request.
 
         The control artifact is the durable authorization and is written before
@@ -432,6 +438,14 @@ class JobStore:
             state = self.read_state(job_id)
             status = str(state.get("status"))
             control = self.read_control(job_id)
+            attempt = int(state.get("attempt", 1))
+            if expected_attempt is not None and attempt != int(expected_attempt):
+                return {
+                    "accepted": False,
+                    "reason": "attempt_mismatch",
+                    "state": state,
+                    "control": control,
+                }
             if status in TERMINAL_STATES:
                 return {
                     "accepted": False,
@@ -439,7 +453,6 @@ class JobStore:
                     "state": state,
                     "control": control,
                 }
-            attempt = int(state.get("attempt", 1))
             existing_request = control.get("request")
             if existing_request == "cancel_requested":
                 existing_attempt = control.get("target_attempt")

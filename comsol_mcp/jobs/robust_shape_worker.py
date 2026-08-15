@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,52 @@ from .store import (
     process_identity,
     read_json,
 )
+
+
+def _await_licensed_wall_watchdog(
+    store: JobStore,
+    job_id: str,
+    spec: dict[str, Any],
+    attempt: int,
+    *,
+    timeout_seconds: float = 2.0,
+    monotonic: Any = time.monotonic,
+    sleep: Any = time.sleep,
+    wall_clock: Any = time.time,
+) -> dict[str, Any]:
+    """Fail closed before licensed startup unless this exact attempt is guarded."""
+    path = store.job_dir(job_id) / "wall-watchdog.json"
+    deadline = monotonic() + timeout_seconds
+    while True:
+        try:
+            record = read_json(path)
+        except FileNotFoundError, RuntimeError:
+            record = None
+        if isinstance(record, dict) and record.get("status") == "armed":
+            state = store.read_state(job_id)
+            target_worker = {
+                "pid": state.get("worker_pid"),
+                "process_create_time": state.get("worker_process_create_time"),
+                "command_signature": state.get("worker_command_signature"),
+            }
+            budget = int(spec["native_optimizer"]["budget"]["max_wall_time_seconds"])
+            if int(record.get("attempt", -1)) != int(attempt):
+                raise RuntimeError("licensed robust wall watchdog attempt is not bound")
+            if record.get("target_worker") != target_worker:
+                raise RuntimeError("licensed robust wall watchdog worker identity is not bound")
+            if int(record.get("budget_seconds", -1)) != budget:
+                raise RuntimeError("licensed robust wall watchdog budget is not bound")
+            expected_deadline = float(target_worker["process_create_time"]) + budget
+            if float(record.get("deadline_epoch", 0.0)) != expected_deadline:
+                raise RuntimeError("licensed robust wall watchdog deadline is not bound")
+            if wall_clock() >= expected_deadline:
+                raise RuntimeError("licensed robust wall watchdog deadline already expired")
+            return record
+        if isinstance(record, dict) and record.get("status") == "launch_failed":
+            raise RuntimeError("licensed robust wall watchdog launch failed")
+        if monotonic() >= deadline:
+            raise RuntimeError("licensed robust wall watchdog was not armed before startup")
+        sleep(min(0.02, max(0.0, deadline - monotonic())))
 
 
 def _synthetic_observations(spec: dict[str, Any]) -> list[dict[str, Any]]:
@@ -258,8 +305,7 @@ def _finalize_licensed_cleanup(
             inventory = status.get("process_inventory", {})
             lease_absent = status.get("lease", {}).get("state") == "absent"
             owned_processes_absent = bool(
-                inventory.get("complete") is True
-                and not status.get("external_solver_processes")
+                inventory.get("complete") is True and not status.get("external_solver_processes")
             )
             inventory_fingerprint = domain_sha256_v2(
                 "comsol_mcp.robust_cleanup_ownership_status",
@@ -615,6 +661,7 @@ def _run_licensed(root: str, job_id: str) -> int:
             store.update_state(job_id, "starting", event="worker_started")
         elif state["status"] != "starting":
             raise ValueError(f"licensed robust shape worker cannot start from {state['status']}")
+        _await_licensed_wall_watchdog(store, job_id, spec, attempt)
         telemetry = collect_resource_telemetry(stage="pre_mesh", runtime_path=directory)
         admission = evaluate_robust_startup_admission(spec["startup_admission"], telemetry)
         atomic_write_json(directory / "startup-admission.json", admission)
@@ -770,9 +817,7 @@ def _run_licensed(root: str, job_id: str) -> int:
         )
         rows_path = directory / "robust_shape_rows.jsonl"
         try:
-            rows = read_robust_shape_rows(
-                rows_path, job_fingerprint=spec["spec_fingerprint"]
-            )
+            rows = read_robust_shape_rows(rows_path, job_fingerprint=spec["spec_fingerprint"])
             if not any(row["kind"] == "cleanup" for row in rows):
                 append_robust_shape_row(
                     rows_path,

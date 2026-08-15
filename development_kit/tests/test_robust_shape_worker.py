@@ -41,9 +41,9 @@ def _condition_runtime_spec() -> dict:
         "condition_table": {"conditions": conditions},
         "adapter_configuration": {
             "configuration": {
-                    "condition_controls": {
-                        "geometry_tag": "geom1",
-                        "dataset_tag": "dset1",
+                "condition_controls": {
+                    "geometry_tag": "geom1",
+                    "dataset_tag": "dset1",
                     "solution_tag": "sol1",
                 },
                 "material_tensor_rows": {
@@ -64,7 +64,7 @@ def _condition_runtime_spec() -> dict:
                         }
                         for state_id in ("OX", "MR")
                     ]
-                }
+                },
             }
         },
         "finalist_validation_policy": {
@@ -149,9 +149,7 @@ def test_condition_runtime_honors_explicit_execution_limit(ascii_tmp_path):
     assert [call[0] for call in backend.calls] == ["condition-0"]
 
 
-def test_condition_runtime_recovers_receipt_written_before_row(
-    ascii_tmp_path, monkeypatch
-):
+def test_condition_runtime_recovers_receipt_written_before_row(ascii_tmp_path, monkeypatch):
     spec = _condition_runtime_spec()
     spec["condition_table"]["conditions"] = spec["condition_table"]["conditions"][:1]
     backend = _ConditionBackend()
@@ -189,9 +187,7 @@ def test_condition_runtime_recovers_receipt_written_before_row(
         (_ConditionBackend(solution_id="sol-other"), "solution identity"),
     ],
 )
-def test_condition_runtime_rejects_dataset_or_solution_drift(
-    ascii_tmp_path, backend, message
-):
+def test_condition_runtime_rejects_dataset_or_solution_drift(ascii_tmp_path, backend, message):
     spec = _condition_runtime_spec()
     spec["condition_table"]["conditions"] = spec["condition_table"]["conditions"][:1]
     with pytest.raises(ValueError, match=message):
@@ -212,9 +208,7 @@ def test_condition_runtime_rejects_dataset_or_solution_drift(
         (_ConditionBackend(minimum_mesh_quality=0.199), "quality"),
     ],
 )
-def test_condition_runtime_enforces_caller_mesh_admission(
-    ascii_tmp_path, backend, message
-):
+def test_condition_runtime_enforces_caller_mesh_admission(ascii_tmp_path, backend, message):
     spec = _condition_runtime_spec()
     spec["condition_table"]["conditions"] = spec["condition_table"]["conditions"][:1]
     with pytest.raises(ValueError, match=message):
@@ -349,14 +343,12 @@ def test_licensed_cleanup_fails_closed_on_false_clear_or_incomplete_inventory(
     assert payload["lease_released"] is True
     assert read_json(ascii_tmp_path / "licensed-cleanup.json")["errors"] == [
         "native_cleanup:reported_errors",
-        "owned_processes_absent:unproved"
+        "owned_processes_absent:unproved",
     ]
 
 
 class _Feature:
-    def __init__(
-        self, *, drift=None, active=None, active_events=None, tag=None, children=None
-    ):
+    def __init__(self, *, drift=None, active=None, active_events=None, tag=None, children=None):
         self.values = {}
         self.drift = drift or {}
         self.active_state = active
@@ -504,11 +496,7 @@ def test_native_solver_memory_policy_applies_active_coarse_solver_path():
     backend.stationary_solver = _Feature(
         children={
             "i1": _Feature(
-                children={
-                    "mg1": _Feature(
-                        children={"cs": _Feature(children={"dDef": coarse})}
-                    )
-                }
+                children={"mg1": _Feature(children={"cs": _Feature(children={"dDef": coarse})})}
             )
         }
     )
@@ -536,9 +524,7 @@ def test_native_solver_memory_policy_rejects_coarse_readback_drift():
         "coarse_solver_out_of_core_value": "on",
     }
     backend.linear_solver = _Feature()
-    backend.stationary_solver = _Feature(
-        children={"i1": _Feature(children={"dDef": coarse})}
-    )
+    backend.stationary_solver = _Feature(children={"i1": _Feature(children={"dDef": coarse})})
     with pytest.raises(ValueError, match="coarse solver out-of-core"):
         backend._set_solver_memory_policy()
 

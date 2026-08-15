@@ -289,6 +289,12 @@ def _entries() -> list[dict[str, Any]]:
             "comsol_mcp.jobs.robust_shape_worker",
         ),
         _entry(
+            "comsol_mcp.robust_wall_watchdog",
+            "1.0.0",
+            "comsol_mcp.jobs.robust_wall_watchdog",
+            artifact_kind="durable_artifact",
+        ),
+        _entry(
             "comsol_mcp.robust_shape_optimization_submission",
             "1.0.0",
             "comsol_mcp.jobs.robust_shape_optimization",

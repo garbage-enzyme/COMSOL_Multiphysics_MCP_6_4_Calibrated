@@ -60,9 +60,7 @@ def normalize_robust_material_tensor_rows(value: object) -> dict[str, Any]:
             previous = wavelength
             normalized_rows.append(
                 {
-                    key: _finite(
-                        item_row[key], f"states[{index}].rows[{row_index}].{key}"
-                    )
+                    key: _finite(item_row[key], f"states[{index}].rows[{row_index}].{key}")
                     for key in _ROW_FIELDS
                 }
             )
@@ -93,9 +91,11 @@ def bind_robust_material_tensor_rows(
     conditions = condition_table.get("conditions")
     if not isinstance(material_states, list) or not isinstance(conditions, list):
         raise ValueError("condition table is incomplete for tensor-row binding")
-    states_by_id = {
-        item.get("state_id"): item for item in material_states if isinstance(item, dict)
-    }
+    states_by_id: dict[str, dict[str, Any]] = {}
+    for item in material_states:
+        if not isinstance(item, dict) or not isinstance(item.get("state_id"), str):
+            raise ValueError("condition table material state identity is invalid")
+        states_by_id[item["state_id"]] = item
     tensor_by_id = {item["state_id"]: item for item in rows["states"]}
     if set(states_by_id) != set(tensor_by_id):
         raise ValueError("material tensor state IDs differ from the condition table")
@@ -114,8 +114,7 @@ def bind_robust_material_tensor_rows(
         available = [item["wavelength_m"] for item in tensor_state["rows"]]
         if any(
             not any(
-                math.isclose(required, sample, rel_tol=1e-12, abs_tol=1e-18)
-                for sample in available
+                math.isclose(required, sample, rel_tol=1e-12, abs_tol=1e-18) for sample in available
             )
             for required in required_wavelengths[state_id]
         ):

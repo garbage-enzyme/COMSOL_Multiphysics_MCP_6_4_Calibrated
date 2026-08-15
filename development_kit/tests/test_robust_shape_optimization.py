@@ -188,9 +188,9 @@ def test_manifest_v11_accepts_tagged_lin2025_adapter(ascii_tmp_path):
         ]
     )
     raw["shape_policy"]["adapter_id"] = "lin2025_pedot_cylinder_v1"
-    raw["finalist_validation_policy"]["shape_policy_fingerprint"] = (
-        normalize_shape_support_policy(raw["shape_policy"])["policy_fingerprint"]
-    )
+    raw["finalist_validation_policy"]["shape_policy_fingerprint"] = normalize_shape_support_policy(
+        raw["shape_policy"]
+    )["policy_fingerprint"]
     raw["adapter_configuration"] = {
         "schema_name": "comsol_mcp.robust_shape_adapter_configuration",
         "schema_version": "1.0.0",

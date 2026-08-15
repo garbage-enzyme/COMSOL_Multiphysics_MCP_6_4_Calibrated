@@ -183,9 +183,7 @@ def normalize_robust_smoothing_comparison_receipt(value: object) -> dict[str, An
         ]
         delta = row["gradient_delta_norm_from_previous_candidate"]
         normalized_delta = (
-            None
-            if delta is None
-            else _finite(delta, f"rows[{index}].gradient_delta_norm")
+            None if delta is None else _finite(delta, f"rows[{index}].gradient_delta_norm")
         )
         if normalized_delta is not None and normalized_delta < 0.0:
             raise ValueError("robust smoothing comparison gradient delta must be nonnegative")

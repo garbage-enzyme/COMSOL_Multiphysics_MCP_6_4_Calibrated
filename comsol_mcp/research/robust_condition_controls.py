@@ -79,8 +79,10 @@ def normalize_robust_condition_controls(value: object) -> dict[str, Any]:
     if raw["schema_name"] != SCHEMA_NAME:
         raise ValueError("robust condition controls schema is unsupported")
     ports = raw["periodic_port_tags"]
-    if not isinstance(ports, list) or len(ports) != 2 or any(
-        not isinstance(item, str) for item in ports
+    if (
+        not isinstance(ports, list)
+        or len(ports) != 2
+        or any(not isinstance(item, str) for item in ports)
     ):
         raise ValueError("robust condition controls require exactly two periodic ports")
     polarization_values = raw["polarization_values"]
@@ -97,9 +99,7 @@ def normalize_robust_condition_controls(value: object) -> dict[str, Any]:
     }
     selection: dict[str, Any] = {}
     if version in {SOLVER_SELECTION_SCHEMA_VERSION, SCHEMA_VERSION}:
-        selected = _identifier(
-            raw["selected_linear_solver_tag"], "selected_linear_solver_tag"
-        )
+        selected = _identifier(raw["selected_linear_solver_tag"], "selected_linear_solver_tag")
         inactive = raw["inactive_linear_solver_tags"]
         if (
             not isinstance(inactive, list)
@@ -165,35 +165,25 @@ def normalize_robust_condition_controls(value: object) -> dict[str, Any]:
             raw["reference_direction_tag"], "reference_direction_tag"
         ),
         "wavelength_parameter": _identifier(raw["wavelength_parameter"], "wavelength_parameter"),
-        "elevation_parameter": _identifier(
-            raw["elevation_parameter"], "elevation_parameter"
-        ),
+        "elevation_parameter": _identifier(raw["elevation_parameter"], "elevation_parameter"),
         "azimuth_parameter": _identifier(raw["azimuth_parameter"], "azimuth_parameter"),
         "study_tag": _identifier(raw["study_tag"], "study_tag"),
         "study_step_tag": _identifier(raw["study_step_tag"], "study_step_tag"),
-        "study_step_property": _identifier(
-            raw["study_step_property"], "study_step_property"
-        ),
+        "study_step_property": _identifier(raw["study_step_property"], "study_step_property"),
         "study_step_array_property": (
             None
             if raw["study_step_array_property"] is None
             else _identifier(raw["study_step_array_property"], "study_step_array_property")
         ),
         "solution_tag": _identifier(raw["solution_tag"], "solution_tag"),
-        "stationary_solver_tag": _identifier(
-            raw["stationary_solver_tag"], "stationary_solver_tag"
-        ),
+        "stationary_solver_tag": _identifier(raw["stationary_solver_tag"], "stationary_solver_tag"),
         "linear_solver_tag": _identifier(raw["linear_solver_tag"], "linear_solver_tag"),
-        "out_of_core_property": _identifier(
-            raw["out_of_core_property"], "out_of_core_property"
-        ),
+        "out_of_core_property": _identifier(raw["out_of_core_property"], "out_of_core_property"),
         "out_of_core_value": _text(raw["out_of_core_value"], "out_of_core_value", maximum=16),
         "dataset_tag": _identifier(raw["dataset_tag"], "dataset_tag"),
         "angle_property": _identifier(raw["angle_property"], "angle_property"),
         "azimuth_property": _identifier(raw["azimuth_property"], "azimuth_property"),
-        "polarization_property": _identifier(
-            raw["polarization_property"], "polarization_property"
-        ),
+        "polarization_property": _identifier(raw["polarization_property"], "polarization_property"),
         "linear_polarization_property": _identifier(
             raw["linear_polarization_property"], "linear_polarization_property"
         ),

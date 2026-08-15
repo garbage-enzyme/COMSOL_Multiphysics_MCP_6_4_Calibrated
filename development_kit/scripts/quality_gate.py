@@ -51,6 +51,7 @@ LINT_TARGETS = (
     "comsol_mcp/jobs/robust_shape_optimization.py",
     "comsol_mcp/jobs/robust_shape_rows.py",
     "comsol_mcp/jobs/robust_shape_worker.py",
+    "comsol_mcp/jobs/robust_wall_watchdog.py",
     "comsol_mcp/knowledge/lexical_build_worker.py",
     "comsol_mcp/research",
     "comsol_mcp/standalone",
@@ -107,6 +108,7 @@ LINT_TARGETS = (
     "development_kit/tests/test_robust_shape_adapter_licensed_gate.py",
     "development_kit/tests/test_robust_shape_rows.py",
     "development_kit/tests/test_robust_shape_worker.py",
+    "development_kit/tests/test_robust_wall_watchdog.py",
     "development_kit/tests/test_schema_registry.py",
     "development_kit/tests/test_standalone_acceptance_runner.py",
     "development_kit/tests/test_standalone_executable.py",
@@ -143,6 +145,7 @@ MYPY_GROUPS = (
         "comsol_mcp/jobs/robust_shape_optimization.py",
         "comsol_mcp/jobs/robust_shape_rows.py",
         "comsol_mcp/jobs/robust_shape_worker.py",
+        "comsol_mcp/jobs/robust_wall_watchdog.py",
         "comsol_mcp/tools/acoustics_pde.py",
         "comsol_mcp/tools/catalog.py",
         "comsol_mcp/tools/configuration.py",
@@ -164,8 +167,8 @@ MYPY_GROUPS = (
     ),
 )
 PRODUCTION_ROOTS = ("comsol_mcp", "src")
-LINT_EXCLUSIONS_SHA256 = "9c684049c1f735122b0a6218aa8dfec3a47877500288994f0a172ab4718ca4c1"
-MYPY_EXCLUSIONS_SHA256 = "3c4115179fd2052ea94b6f69a4e517e5ff4a9daea93dc06d620cb181cad4233a"
+LINT_EXCLUSIONS_SHA256 = "8befcb97a04013eef06db5f6d337dd0addca20ac626261ec4eefa2b9700c62c8"
+MYPY_EXCLUSIONS_SHA256 = "0ee71edbf253ed405fd397ce377ae5b2202e4913d6e8c5863ee01485ae64a402"
 PARALLEL_TEST_WORKERS = 4
 SERIAL_TEST_TARGETS = ("development_kit/tests/test_control_plane_startup.py",)
 WINDOWS_GATE_ROOT_MAX_CHARS = 32

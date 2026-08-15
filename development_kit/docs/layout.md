@@ -385,6 +385,7 @@ models are intentionally absent.
 - `development_kit/tests/test_robust_smoothing_selection.py` — This module tests evidence-only soft-min objective/weight/gradient comparison and forbids automatic winner selection.
 - `development_kit/tests/test_robust_shape_rows.py` — This module tests robust condition, gradient, iteration, trial, checkpoint, and cleanup row chaining and crash-tail recovery.
 - `development_kit/tests/test_robust_shape_worker.py` — This module tests JobManager dispatch, synthetic 24-condition completion, exact replay, status summaries, duplicate suppression, and durable licensed-condition receipt recovery.
+- `development_kit/tests/test_robust_wall_watchdog.py` — This module deterministically verifies deadline cancellation, exact-attempt refusal, terminal exit, launch-failure evidence, and synthetic-job exclusion.
 - `development_kit/tests/test_lin2025_pedot_cylinder.py` — This module tests the Lin2025 PEDOT-cylinder fixture, topology, state, and explicit deformation-selection contracts.
 - `development_kit/tests/test_lin2025_pedot_backend.py` — This module tests failure-atomic Lin2025 ClientAPI control preparation and source-identity rejection.
 - `development_kit/tests/test_lin2025_pedot_shape_licensed_gate.py` — This module tests the Lin2025 licensed gate's hash-bound solver-free dry-run boundary.
@@ -441,6 +442,7 @@ models are intentionally absent.
 - `comsol_mcp/jobs/robust_shape_optimization.py` — This module expands a bounded external robust-shape manifest and validates every contract before worker startup.
 - `comsol_mcp/jobs/robust_shape_rows.py` — This module persists hash-chained fsync'd robust condition, gradient, iteration, trial, checkpoint, and cleanup rows.
 - `comsol_mcp/jobs/robust_shape_worker.py` — This module runs solver-free robust lifecycle fixtures and dispatches future licensed robust shape execution.
+- `comsol_mcp/jobs/robust_wall_watchdog.py` — This detached process enforces the caller-owned licensed robust wall budget through exact-attempt durable cancellation without calling COMSOL.
 - `comsol_mcp/jobs/adjoint_optimization_worker.py` — This module dispatches synthetic lifecycle fixtures or the licensed durable native-adjoint runtime and persists validated hash-chained terminal rows.
 - `comsol_mcp/research/adaptive_acquisition.py` — This explicitly loaded module performs bounded Gaussian-process posterior and expected-improvement selection without affecting ordinary discovery imports.
 - `comsol_mcp/research/optimizers.py` — This module provides the backend-neutral optimizer protocol and deterministic grid, random, and Latin-hypercube baselines.
