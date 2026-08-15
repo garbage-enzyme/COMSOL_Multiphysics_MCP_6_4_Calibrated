@@ -274,14 +274,21 @@ def _entries() -> list[dict[str, Any]]:
         ),
         _entry(
             "comsol_mcp.robust_shape_optimization_manifest",
-            "1.0.0",
+            "1.1.0",
             "comsol_mcp.jobs.robust_shape_optimization",
             artifact_kind="configuration",
+            readable_versions=("1.0.0", "1.1.0"),
         ),
         _entry(
             "comsol_mcp.robust_condition_receipt",
             "1.0.0",
             "comsol_mcp.jobs.robust_condition_runtime",
+        ),
+        _entry(
+            "comsol_mcp.robust_condition_gradient_receipt",
+            "1.0.0",
+            "comsol_mcp.jobs.robust_gradient_runtime",
+            artifact_kind="durable_artifact",
         ),
         _entry(
             "comsol_mcp.robust_licensed_cleanup_receipt",

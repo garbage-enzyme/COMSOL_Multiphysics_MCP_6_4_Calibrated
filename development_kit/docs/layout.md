@@ -384,6 +384,7 @@ models are intentionally absent.
 - `development_kit/tests/test_robust_adapter_configuration.py` — This module tests tagged MIM/Lin2025 robust adapter binding and cross-contract drift rejection.
 - `development_kit/tests/test_robust_shape_adapter_licensed_gate.py` — This module tests the S3 licensed gate's caller-owned limits, solver-free dry run, redaction, and cleanup boundaries.
 - `development_kit/tests/test_robust_smoothing_selection.py` — This module tests evidence-only soft-min objective/weight/gradient comparison and forbids automatic winner selection.
+- `development_kit/tests/test_robust_gradient_runtime.py` — This module tests durable ordered native condition-gradient receipts, exact replay, tamper rejection, and robust aggregation without COMSOL.
 - `development_kit/tests/test_robust_shape_rows.py` — This module tests robust condition, gradient, iteration, trial, checkpoint, and cleanup row chaining and crash-tail recovery.
 - `development_kit/tests/test_robust_shape_worker.py` — This module tests JobManager dispatch, synthetic 24-condition completion, exact replay, status summaries, duplicate suppression, and durable licensed-condition receipt recovery.
 - `development_kit/tests/test_robust_shape_tools.py` — This module verifies experimental-only robust preview, durable submission routing, bounded evidence inspection, verification, redaction, and public dispatch.
@@ -442,6 +443,7 @@ models are intentionally absent.
 - `comsol_mcp/jobs/robust_condition_runtime.py` — This module persists and exactly replays full per-condition licensed receipts before hash-chained robust rows.
 - `comsol_mcp/jobs/robust_shape_native_runtime.py` — This module applies explicit Lin2025 ClientAPI condition controls on a derived model and delegates durable rows.
 - `comsol_mcp/jobs/robust_shape_optimization.py` — This module expands a bounded external robust-shape manifest and validates every contract before worker startup.
+- `comsol_mcp/jobs/robust_gradient_runtime.py` — This module persists exact native condition-gradient receipts and compiles their complete ordered robust aggregate.
 - `comsol_mcp/jobs/robust_shape_rows.py` — This module persists hash-chained fsync'd robust condition, gradient, iteration, trial, checkpoint, and cleanup rows.
 - `comsol_mcp/jobs/robust_shape_worker.py` — This module runs solver-free robust lifecycle fixtures and dispatches future licensed robust shape execution.
 - `comsol_mcp/jobs/robust_wall_watchdog.py` — This detached process enforces the caller-owned licensed robust wall budget through exact-attempt durable cancellation without calling COMSOL.

@@ -33,7 +33,9 @@ def _finite(value: object, name: str) -> float:
     return number
 
 
-def _tensor_expressions(spec: Mapping[str, Any], condition: Mapping[str, Any]) -> list[str]:
+def condition_tensor_expressions(
+    spec: Mapping[str, Any], condition: Mapping[str, Any]
+) -> list[str]:
     configuration = spec["adapter_configuration"]["configuration"]
     states = configuration["material_tensor_rows"]["states"]
     state = next(
@@ -200,7 +202,9 @@ def execute_robust_conditions(
         elif row is not None:
             raise ValueError("completed robust condition row lacks its full receipt")
         else:
-            result = backend.evaluate_condition(condition, _tensor_expressions(spec, condition))
+            result = backend.evaluate_condition(
+                condition, condition_tensor_expressions(spec, condition)
+            )
             receipt = _normalize_receipt(condition, result, controls, mesh_policy)
             atomic_write_json(receipt_path, receipt)
         if row is None:
@@ -237,5 +241,6 @@ __all__ = [
     "CONDITION_RECEIPT_SCHEMA_NAME",
     "CONDITION_RECEIPT_SCHEMA_VERSION",
     "RobustConditionBackend",
+    "condition_tensor_expressions",
     "execute_robust_conditions",
 ]
