@@ -99,6 +99,26 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
         self.numerical = numerical
         self._counter = 0
 
+    def set_shape_deformation_active(self, requested: bool) -> dict[str, Any]:
+        """Set and read back the derived shape deformation phase explicitly.
+
+        The forward baseline must not solve the mesh-deformation physics: even
+        at zero displacement it turns the otherwise linear Wave Optics solve
+        into a stationary Newton system. Native gradient/shape phases enable it
+        explicitly after the forward baseline has been durably recorded.
+        """
+        component = _get(self.model.java.component(), self.controls["component_tag"])
+        deformation = _get(component.physics(), "dg_pedot72")
+        deformation.active(bool(requested))
+        observed = bool(deformation.isActive())
+        if observed is not bool(requested):
+            raise ValueError("Lin2025 shape deformation active-state readback differs")
+        return {
+            "physics_tag": "dg_pedot72",
+            "requested_active": bool(requested),
+            "observed_active": observed,
+        }
+
     def prepare(self, initial_values: list[float]) -> dict[str, Any]:
         if len(initial_values) != 2:
             raise ValueError("Lin2025 native runtime requires two initial radius values")
@@ -121,6 +141,7 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
         mesh.run()
         body = {
             "shape_controls": controls,
+            "forward_shape_deformation": self.set_shape_deformation_active(False),
             "mesh_reference": mesh_reference,
             "solver_memory": self._set_solver_memory_policy(),
             "solver_selection": self._set_solver_selection(),

@@ -630,6 +630,53 @@ def test_native_solver_selection_rejects_active_readback_drift():
         backend._set_solver_selection()
 
 
+def _deformation_backend(feature):
+    class Physics:
+        def get(self, tag):
+            assert tag == "dg_pedot72"
+            return feature
+
+    class Component:
+        def physics(self):
+            return Physics()
+
+    class Components:
+        def get(self, tag):
+            assert tag == "comp1"
+            return Component()
+
+    class Java:
+        def component(self):
+            return Components()
+
+    class Model:
+        java = Java()
+
+    backend = object.__new__(robust_shape_native_runtime.ClientapiLin2025ConditionBackend)
+    backend.model = Model()
+    backend.controls = {"component_tag": "comp1"}
+    return backend
+
+
+def test_forward_phase_explicitly_deactivates_shape_deformation():
+    feature = _Feature(active=True)
+    receipt = _deformation_backend(feature).set_shape_deformation_active(False)
+    assert receipt == {
+        "physics_tag": "dg_pedot72",
+        "requested_active": False,
+        "observed_active": False,
+    }
+
+
+def test_shape_deformation_active_readback_drift_fails_closed():
+    class Drift(_Feature):
+        def active(self, value):
+            pass
+
+    with pytest.raises(ValueError, match="active-state readback differs"):
+        _deformation_backend(Drift(active=True)).set_shape_deformation_active(False)
+
+
 def test_native_condition_saves_exact_configured_model_before_solve(ascii_tmp_path):
     backend = object.__new__(robust_shape_native_runtime.ClientapiLin2025ConditionBackend)
     backend.model = _ModelWithSave()
