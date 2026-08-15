@@ -408,7 +408,9 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
             "solution_id": self.controls["solution_tag"],
         }
 
-    def _prepare_native_sensitivity(self, variable_ids: list[str]) -> dict[str, Any]:
+    def _prepare_native_sensitivity(
+        self, variable_ids: list[str], *, wavelength_m: float
+    ) -> dict[str, Any]:
         controls = self.controls
         required = {
             "sensitivity_parametric_sweep_tag",
@@ -433,6 +435,7 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
         sensitivity_tag = controls["sensitivity_feature_tag"]
         if sweep_tag in _tags(features) or sensitivity_tag in _tags(features):
             raise ValueError("native sensitivity study features already exist before preparation")
+        sweep = features.create(sweep_tag, "Parametric")
         sensitivity = features.create(sensitivity_tag, "Sensitivity")
         sensitivity.active(True)
         sensitivity.set("gradientMethod", controls["sensitivity_gradient_method"])
@@ -454,9 +457,8 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
         _set_vector(sensitivity, "scale", [f"{item:.17g}[m]" for item in scales_m])
         _set_vector(sensitivity, "valuetype", ["real"] * len(variable_ids))
         _set_vector(sensitivity, "optobj", [controls["observable_expression"]])
-        sweep = features.create(sweep_tag, "Parametric")
         _set_vector(sweep, "pname", [controls["wavelength_parameter"]])
-        _set_vector(sweep, "plistarr", [controls["wavelength_parameter"]])
+        _set_vector(sweep, "plistarr", [f"{float(wavelength_m):.17g}[m]"])
         _set_vector(sweep, "punit", ["m"])
         if controls["sensitivity_solver_regeneration"] != "replace_existing_auto_sequence":
             raise ValueError("native sensitivity solver regeneration policy changed")
@@ -520,16 +522,21 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
         tensor_expressions: list[str],
         variable_ids: list[str],
     ) -> Mapping[str, Any]:
-        if not self._native_sensitivity_prepared:
-            self._prepare_native_sensitivity(variable_ids)
-        if self._sensitivity_sweep is None or self._sensitivity_readback is None:
-            raise RuntimeError("native sensitivity preparation state is incomplete")
         controls = self.controls
         self.material.apply_material_state(condition["material_state_id"], tensor_expressions)
         wavelength = f"{float(condition['wavelength_m']):.17g}[m]"
         self.model.java.param().set(controls["wavelength_parameter"], wavelength)
         self._set_incidence(condition)
         self.study_step.set(controls["study_step_property"], controls["wavelength_parameter"])
+        self._set_solver_memory_policy()
+        self._set_solver_selection()
+        if not self._native_sensitivity_prepared:
+            self.set_shape_deformation_active(True)
+            self._prepare_native_sensitivity(
+                variable_ids, wavelength_m=float(condition["wavelength_m"])
+            )
+        if self._sensitivity_sweep is None or self._sensitivity_readback is None:
+            raise RuntimeError("native sensitivity preparation state is incomplete")
         _set_vector(self._sensitivity_sweep, "plistarr", [wavelength])
         self.set_shape_deformation_active(True)
         for tag in controls["sensitivity_direct_solver_tags"]:

@@ -724,6 +724,67 @@ def test_native_condition_saves_exact_configured_model_before_solve(ascii_tmp_pa
     ]
 
 
+def test_native_sensitivity_preparation_follows_exact_condition_staging():
+    events = []
+    backend = object.__new__(robust_shape_native_runtime.ClientapiLin2025ConditionBackend)
+    backend._native_sensitivity_prepared = False
+    backend.controls = {
+        "wavelength_parameter": "wl",
+        "study_step_property": "plist",
+    }
+
+    class Material:
+        def apply_material_state(self, state, tensor):
+            events.append(("material", state, tensor))
+
+    class Parameters:
+        def set(self, name, value):
+            events.append(("parameter", name, value))
+
+    class Java:
+        def param(self):
+            return Parameters()
+
+    class Model:
+        java = Java()
+
+    class StudyStep:
+        def set(self, name, value):
+            events.append(("study_step", name, value))
+
+    backend.material = Material()
+    backend.model = Model()
+    backend.study_step = StudyStep()
+    backend._set_incidence = lambda _condition: events.append(("incidence",))
+    backend._set_solver_memory_policy = lambda: events.append(("solver_memory",))
+    backend._set_solver_selection = lambda: events.append(("solver_selection",))
+    backend.set_shape_deformation_active = lambda active: events.append(("deformation", active))
+
+    def prepare(variable_ids, *, wavelength_m):
+        events.append(("sensitivity_prepare", variable_ids, wavelength_m))
+        raise RuntimeError("stop after ordered staging")
+
+    backend._prepare_native_sensitivity = prepare
+    condition = {
+        "material_state_id": "OX",
+        "wavelength_m": 8e-7,
+    }
+
+    with pytest.raises(RuntimeError, match="ordered staging"):
+        backend.evaluate_condition_gradient(condition, ["1"] * 9, ["rx", "ry"])
+
+    assert events == [
+        ("material", "OX", ["1"] * 9),
+        ("parameter", "wl", "7.9999999999999996e-07[m]"),
+        ("incidence",),
+        ("study_step", "plist", "wl"),
+        ("solver_memory",),
+        ("solver_selection",),
+        ("deformation", True),
+        ("sensitivity_prepare", ["rx", "ry"], 8e-7),
+    ]
+
+
 def test_native_runtime_persists_controls_before_condition_failure(ascii_tmp_path, monkeypatch):
     source = ascii_tmp_path / "source.mph"
     source.write_bytes(b"fixture")
