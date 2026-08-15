@@ -132,7 +132,7 @@ comsol-mcp-settings --settings-path "D:\settings\settings.json" --remove-desktop
 | `core` | 紧凑默认控制面和词法手册检索。 |
 | `basic_fem` | 常规 FEM 构建、有界导出，以及无需 Python 的独立启动器工具。 |
 | `wave_optics` | 周期光学、超表面、有界场数据发现/提取、预检和证据审计。 |
-| `experimental` | 显式选择的通用和 escape-hatch 工具。 |
+| `experimental` | 显式选择的通用工具，以及有界的鲁棒形状预览、durable 提交和证据检查/验证工具。 |
 | `full` | 宽泛的非 feature 兼容界面；默认不推荐。 |
 
 普通用户在设置界面选择 profile。开发者和 agent 可以在 JSON 的 `profile.name` 中设置
@@ -144,6 +144,12 @@ Profile 只控制 COMSOL 自动化仿真及未来自主探索工具的可见性�
 的 `shared_server.enabled=true`，以及用于隔离语义检索的
 `semantic_docs.enabled=true`；两个开关默认均为 false。旧 `comsol_connect` 仍是
 experimental 兼容工具，不能替代该生命周期。
+
+alpha7.2 鲁棒形状工具只在 `experimental` 和 `full` 中提供。
+`robust_shape_plan_preview` 不启动求解器；`robust_shape_job_submit` 通过 durable job
+authority 提交，并可能启动 licensed solver；证据检查/验证工具有界、隐藏路径且只读。
+这些工具不会出现在 `core`、`basic_fem` 或 `wave_optics` 中，也不提供通用 Java/属性
+修改 escape hatch。
 
 `basic_fem` 中的独立启动器工具仍运行在普通 Python MCP host 中；它们负责构建和控制另一个原生
 EXE。目标机只需 Windows 10/11 x64 与已安装并授权的 COMSOL 6.4。EXE 不打包 COMSOL，

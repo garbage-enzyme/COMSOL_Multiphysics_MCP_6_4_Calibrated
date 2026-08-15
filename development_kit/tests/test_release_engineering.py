@@ -469,6 +469,7 @@ def test_repository_root_is_release_focused_and_free_of_generated_artifacts():
         ".gitignore",
         "AGENTS.md",
         "CLAUDE.md",
+        "CITATION.cff",
         "DEPLOYMENT.md",
         "DEPLOYMENT_CN.md",
         "LICENSE",

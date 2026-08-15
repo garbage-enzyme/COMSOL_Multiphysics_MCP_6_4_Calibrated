@@ -299,6 +299,6 @@ def test_semantic_and_other_profile_counts_match_declared_discovery(monkeypatch)
         "core": 45,
         "basic_fem": 107,
         "wave_optics": 74,
-        "experimental": 95,
-        "full": 151,
+        "experimental": 99,
+        "full": 155,
     }

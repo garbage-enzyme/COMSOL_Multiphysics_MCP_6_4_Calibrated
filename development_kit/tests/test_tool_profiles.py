@@ -141,9 +141,9 @@ def test_profile_registration_has_no_cross_server_leakage():
     experimental = create_server("isolated-experimental", profile="experimental")
 
     assert len(_tool_names(core)) == 45
-    assert len(_tool_names(full)) == 151
+    assert len(_tool_names(full)) == 155
     assert len(_tool_names(semantic)) == 48
-    assert len(_tool_names(experimental)) == 95
+    assert len(_tool_names(experimental)) == 99
     assert _tool_names(core) != _tool_names(experimental)
     assert {"semantic_search", "semantic_status", "semantic_worker_reset"} <= set(
         _tool_names(semantic)

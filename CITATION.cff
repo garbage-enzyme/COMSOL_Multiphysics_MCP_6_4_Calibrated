@@ -1,0 +1,36 @@
+cff-version: 1.2.0
+message: >-
+  If you use COMSOL-MCP in research, please cite the associated paper and the
+  exact software release or commit used, including the repository URL and
+  access date.
+title: COMSOL Multiphysics MCP 6.4 Calibrated
+type: software
+version: 0.7.2
+authors:
+  - family-names: Zhang
+    given-names: Naiyin
+    orcid: https://orcid.org/0000-0002-4005-1852
+  - family-names: Wang
+    given-names: Junchao
+    orcid: https://orcid.org/0000-0002-6749-1858
+repository-code: https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated
+url: https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated
+license: MIT
+preferred-citation:
+  type: article
+  authors:
+    - family-names: Zhang
+      given-names: Naiyin
+      orcid: https://orcid.org/0000-0002-4005-1852
+    - family-names: Wang
+      given-names: Junchao
+      orcid: https://orcid.org/0000-0002-6749-1858
+  title: >-
+    COMSOL-MCP: An open-source model context protocol interface for AI-assisted
+    multiphysics simulation
+  journal: Neurocomputing
+  volume: 703
+  start: 134481
+  year: 2026
+  doi: 10.1016/j.neucom.2026.134481
+  url: https://doi.org/10.1016/j.neucom.2026.134481

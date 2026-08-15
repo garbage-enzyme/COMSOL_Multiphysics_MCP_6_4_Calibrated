@@ -10,6 +10,7 @@ models are intentionally absent.
 - `.gitignore` — This file excludes generated, local, and sensitive artifacts from Git.
 - `AGENTS.md` — This file provides repository development, testing, and safety guidance for coding agents.
 - `CLAUDE.md` — This file provides repository development, testing, and safety guidance for Claude Code.
+- `CITATION.cff` — This file provides machine-readable software and preferred-paper citation metadata.
 - `.github/workflows/ci.yml` — This unified workflow runs the blocking backend, dependency, security, package, and independent Windows Settings GUI jobs under one solver-free run.
 - `.github/workflows/dependency_report.yml` — This workflow produces the scheduled information-only dependency report.
 - `LICENSE` — This file contains the repository MIT license.
@@ -385,6 +386,7 @@ models are intentionally absent.
 - `development_kit/tests/test_robust_smoothing_selection.py` — This module tests evidence-only soft-min objective/weight/gradient comparison and forbids automatic winner selection.
 - `development_kit/tests/test_robust_shape_rows.py` — This module tests robust condition, gradient, iteration, trial, checkpoint, and cleanup row chaining and crash-tail recovery.
 - `development_kit/tests/test_robust_shape_worker.py` — This module tests JobManager dispatch, synthetic 24-condition completion, exact replay, status summaries, duplicate suppression, and durable licensed-condition receipt recovery.
+- `development_kit/tests/test_robust_shape_tools.py` — This module verifies experimental-only robust preview, durable submission routing, bounded evidence inspection, verification, redaction, and public dispatch.
 - `development_kit/tests/test_robust_wall_watchdog.py` — This module deterministically verifies deadline cancellation, exact-attempt refusal, terminal exit, launch-failure evidence, and synthetic-job exclusion.
 - `development_kit/tests/test_lin2025_pedot_cylinder.py` — This module tests the Lin2025 PEDOT-cylinder fixture, topology, state, and explicit deformation-selection contracts.
 - `development_kit/tests/test_lin2025_pedot_backend.py` — This module tests failure-atomic Lin2025 ClientAPI control preparation and source-identity rejection.
@@ -625,6 +627,7 @@ models are intentionally absent.
 - `comsol_mcp/tools/session_status.py` — This module stores last-known session booleans without importing COMSOL or MPh.
 - `comsol_mcp/tools/properties.py` — This module exposes constrained clientapi property access.
 - `comsol_mcp/tools/research.py` — This module exposes experimental solver-free campaign compilation and robustness planning.
+- `comsol_mcp/tools/robust_shape.py` — This module exposes the experimental bounded robust-shape preview, durable submission, evidence inspection, and verification surface.
 - `comsol_mcp/tools/property_transport.py` — This module normalizes bounded property values for JSON transport.
 - `comsol_mcp/tools/results.py` — This module exposes result evaluation and export tools.
 - `comsol_mcp/tools/semantic_docs.py` — This module exposes bounded opt-in semantic documentation tools.

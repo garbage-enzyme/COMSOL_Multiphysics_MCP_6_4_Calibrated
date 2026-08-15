@@ -5,11 +5,43 @@
 [![CI](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/actions/workflows/ci.yml)
 [![Python 3.14](https://img.shields.io/badge/python-3.14-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
-![Release: 0.7.1](https://img.shields.io/badge/release-0.7.1-blue)
+![Release: 0.7.2](https://img.shields.io/badge/release-0.7.2-blue)
 ![Status: alpha](https://img.shields.io/badge/status-alpha-red)
 [![GitHub stars](https://img.shields.io/github/stars/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated?style=social)](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/stargazers)
 
 > [wjc9011/COMSOL_Multiphysics_MCP](https://github.com/wjc9011/COMSOL_Multiphysics_MCP) 的维护型 Fork，已接受 **`COMSOL 6.4.0.*` release line** 和 **MPh 1.3.1 standalone/clientapi**。licensed reference 证据使用 **COMSOL 6.4.0.293**；第三位数字变化视为新的 release family，需要重新验收。
+
+## 相关论文与引用
+
+介绍 COMSOL-MCP 的论文为：
+
+> Naiyin Zhang and Junchao Wang, “COMSOL-MCP: An open-source model context
+> protocol interface for AI-assisted multiphysics simulation,” *Neurocomputing*,
+> vol. 703, article 134481, 2026.
+
+出版商页面：[ScienceDirect](https://linkinghub.elsevier.com/retrieve/pii/S0925231226018795)
+
+```bibtex
+@article{Zhang2026COMSOLMCP,
+  title   = {COMSOL-MCP: An Open-Source Model Context Protocol Interface for AI-Assisted Multiphysics Simulation},
+  author  = {Zhang, Naiyin and Wang, Junchao},
+  journal = {Neurocomputing},
+  volume  = {703},
+  pages   = {134481},
+  year    = {2026},
+  doi     = {10.1016/j.neucom.2026.134481},
+  url     = {https://doi.org/10.1016/j.neucom.2026.134481}
+}
+```
+
+介绍 COMSOL-MCP 的方法、架构、功能或评估结果时，请引用上述论文。使用或修改软件时，
+请同时引用论文和代码仓库；GitHub 的 **Cite this repository** 菜单使用
+[`CITATION.cff`](CITATION.cff) 中的元数据。为保证可复现性，请在数据/代码可用性声明中
+注明所用的精确 release 或 commit、仓库链接和访问日期。
+
+感谢 Naiyin Zhang 与 Junchao Wang 创建 COMSOL-MCP、发表相关论文，并在 upstream
+[commit `99172f8`](https://github.com/wjc9011/COMSOL_Multiphysics_MCP/commit/99172f8f43c6753c2442c406cd5c6055ea8c5bef)
+中贡献引用指引；本维护型 fork 已根据自身仓库与 release evidence 边界进行了适配。
 
 该服务器为 AI agent 提供更安全、更紧凑的 COMSOL 接口，用于模型检查、受控单点验证、可恢复的分段扫描与离线手册检索。它适配 `mph.Client()` 返回的 `model.java` clientapi 对象；该对象与上游面向的直接 `com.comsol.model.Model` API 有实质差异。
 
@@ -64,7 +96,7 @@ acceptance 报告应至少包含不启动 COMSOL 的 `initialize`、实时 `list
 `capabilities` 回读，并把 licensed start/solve/cleanup 覆盖单独标注。已安装工具界面
 以实时 discovery 为准，不以文档中复制的数量为准。
 
-`0.7.1` 继续以保守方式使用 MCP Python SDK `2.0.x` 运行基座。工具、profile、schema
+`0.7.2` 继续以保守方式使用 MCP Python SDK `2.0.x` 运行基座。工具、profile、schema
 和 stdio 配置仍保持已接受的旧协议兼容应用合同；本版本不会让 client opt in MCP
 `2026-07-28` 的 multi-round-trip request、cache hint、subscription 或 Tasks extension。
 
@@ -151,7 +183,7 @@ GUI 打开期间不要同时编辑 JSON。只有用户明确要求 agent 管理�
 | `experimental` | 显式选择的通用创建、异步、属性逃生口和项目辅助工具。 |
 | `full` | 宽兼容/发现界面，包含全部非 feature-gated 工具。 |
 
-`experimental` 和 `full` profile 提供两个 solver-free 的 alpha7 research
+`experimental` 和 `full` profile 提供三个 solver-free 的 alpha7 research
 准备工具。`research_campaign_compile` 将完整目标、冻结设计空间和显式批准编译为带
 fingerprint 的 manifest，且不会启动求解器；`research_robustness_plan` 创建以候选点为
 中心的单轴正负扰动矩阵，并拒绝任何需要越界 clipping 的候选。它们只用于安全准备，
@@ -159,6 +191,14 @@ fingerprint 的 manifest，且不会启动求解器；`research_robustness_plan`
 adapter 不适用时强制要求 RCWA。`research_optimizer_advance` 是无状态的
 checkpoint/feedback 步骤；客户端负责保存返回的 checkpoint，因此重启后仍可恢复
 完全一致的 proposal。
+
+这两个 profile 还通过四个有界实验工具提供 alpha7.2 鲁棒形状工作流：
+`robust_shape_plan_preview` 在不 admission、不启动求解器的情况下验证并摘要 hash-pinned
+manifest；`robust_shape_job_submit` 只通过 durable job authority 提交；
+`robust_shape_evidence_inspect` 返回隐藏路径的有界 journal 摘要；
+`robust_shape_evidence_verify` 核验不可变规格、hash-chain 顺序、condition 完整性、已验证
+gradient、optimizer 的 fresh-forward 证据、finalist、checkpoint 与 cleanup。它们不提供
+通用 Java 属性修改，并且不会出现在 `core`、`basic_fem` 或 `wave_optics` 中。
 
 Profile 只控制 COMSOL 自动化仿真工具以及未来自主探索工具的可见性。其他正交功能使用
 独立、默认关闭的 Boolean 开关；它们可与任意 profile 组合，也可同时开启：

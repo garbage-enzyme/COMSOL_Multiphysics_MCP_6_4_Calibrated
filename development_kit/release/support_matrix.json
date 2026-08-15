@@ -25,12 +25,12 @@
     {
       "name": "experimental",
       "support": "experimental",
-      "tool_count": 95
+      "tool_count": 99
     },
     {
       "name": "full",
       "support": "compatibility_only",
-      "tool_count": 151
+      "tool_count": 155
     }
   ],
   "features": [

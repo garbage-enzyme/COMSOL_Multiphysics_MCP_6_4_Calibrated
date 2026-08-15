@@ -328,6 +328,23 @@ def read_robust_shape_rows(path: str | Path, *, job_fingerprint: str) -> list[di
         return _read_rows_unlocked(journal, job)
 
 
+def read_robust_shape_rows_readonly(
+    path: str | Path, *, job_fingerprint: str
+) -> list[dict[str, Any]]:
+    """Validate only complete durable rows without locks, repair, or filesystem writes."""
+    job = _digest(job_fingerprint, "job_fingerprint")
+    outcome = read_complete_jsonl(Path(path), max_bytes=MAX_ROWS * MAX_ROW_BYTES)
+    if outcome["state"] != "current_valid":
+        raise ValueError(f"robust shape journal is {outcome['state']}")
+    rows = []
+    previous = None
+    for sequence, value in enumerate(outcome["records"]):
+        row = _normalize_row(value, sequence=sequence, job_fingerprint=job, previous=previous)
+        rows.append(row)
+        previous = row["row_sha256"]
+    return rows
+
+
 def append_robust_shape_row(
     path: str | Path,
     *,
@@ -376,4 +393,5 @@ __all__ = [
     "ROBUST_SHAPE_ROW_SCHEMA_VERSION",
     "append_robust_shape_row",
     "read_robust_shape_rows",
+    "read_robust_shape_rows_readonly",
 ]

@@ -150,7 +150,7 @@ build/modules, license, scheduler, storage, and output requirements first.
 | `core` | Compact default control plane and lexical manuals. |
 | `basic_fem` | Conventional FEM construction, bounded exports, and the Python-free standalone launcher tools. |
 | `wave_optics` | Periodic optics, metasurfaces, bounded field discovery/extraction, preflight, and evidence audits. |
-| `experimental` | Explicit opt-in generic and escape-hatch tools. |
+| `experimental` | Explicit opt-in generic tools plus bounded robust-shape preview, durable submission, and evidence inspection/verification. |
 | `full` | Broad non-feature compatibility surface; not recommended by default. |
 
 Select the profile in the Settings GUI. Developers and agents may set the
@@ -166,6 +166,13 @@ profile and with one another. Their advanced JSON equivalents are
 `semantic_docs.enabled=true` for isolated semantic retrieval; both remain
 default-off. The legacy `comsol_connect` compatibility tool remains experimental
 and is not a substitute for this lifecycle.
+
+The alpha7.2 robust-shape tools are available only in `experimental` and
+`full`. `robust_shape_plan_preview` is solver-free; `robust_shape_job_submit`
+uses the durable job authority and can start licensed solver work; the evidence
+inspect/verify tools are bounded, path-redacted, and read-only. These tools are
+absent from `core`, `basic_fem`, and `wave_optics`, and they do not expose a
+generic Java/property mutation escape hatch.
 
 The standalone tools in `basic_fem` still run inside the normal Python MCP host. They build
 and control a separate native EXE whose target runtime needs only Windows

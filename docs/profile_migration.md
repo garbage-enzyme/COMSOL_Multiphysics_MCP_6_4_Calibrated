@@ -11,6 +11,7 @@ independent, default-off Boolean feature gates.
 | Typed conventional FEM construction, bounded exports, and Python-free launcher control | `basic_fem` profile | Verified |
 | Periodic Wave Optics preflight, evidence audit, visual-review contracts | `wave_optics` profile | Experimental; licensed acceptance is version/model-specific |
 | Generic or risky legacy helpers | `experimental` profile | Experimental |
+| Robust shape preview, durable submit, and evidence inspection/verification | `experimental` profile | Experimental and default-off |
 | Maximum legacy discovery compatibility | `full` profile | Compatibility only |
 | Isolated SQLite lexical manuals | `lexical_docs.enabled=true` | Verified; default-off |
 | Isolated vector-assisted manuals | `semantic_docs.enabled=true` | Experimental; promotion rejected |
