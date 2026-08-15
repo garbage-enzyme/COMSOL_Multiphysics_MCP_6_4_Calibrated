@@ -239,6 +239,7 @@ def test_condition_controls_bind_native_sensitivity_solver_identities():
     assert result["sensitivity_solver_tag"] == "sn1"
     assert result["sensitivity_segregated_solver_tag"] == "se1"
     assert result["sensitivity_direct_solver_tags"] == ["dDef", "d1"]
+    assert result["polarization_values"] == {"x_linear": "S", "y_linear": "P"}
     assert result["derivative_solution_tag"] == "sol2"
     assert result["derivative_dataset_tag"] == "dset2"
     value["sensitivity_stationary_nonlinearity"] = "off"

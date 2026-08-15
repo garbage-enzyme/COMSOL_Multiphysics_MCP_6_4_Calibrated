@@ -128,7 +128,7 @@ def normalize_robust_condition_controls(value: object) -> dict[str, Any]:
         "y_linear",
     }:
         raise ValueError("robust condition controls require x_linear and y_linear mappings")
-    values = {
+    normalized_polarization_values = {
         _identifier(key, "polarization_values key"): _text(
             item, f"polarization_values.{key}", maximum=32
         )
@@ -209,15 +209,15 @@ def normalize_robust_condition_controls(value: object) -> dict[str, Any]:
         direct_tags = raw["sensitivity_direct_solver_tags"]
         solution_tags = raw["sensitivity_solution_tags"]
         dataset_tags = raw["sensitivity_dataset_tags"]
-        for name, values, expected_length in (
+        for name, candidate_tags, expected_length in (
             ("sensitivity_direct_solver_tags", direct_tags, 2),
             ("sensitivity_solution_tags", solution_tags, 3),
             ("sensitivity_dataset_tags", dataset_tags, 2),
         ):
             if (
-                not isinstance(values, list)
-                or len(values) != expected_length
-                or any(not isinstance(item, str) for item in values)
+                not isinstance(candidate_tags, list)
+                or len(candidate_tags) != expected_length
+                or any(not isinstance(item, str) for item in candidate_tags)
             ):
                 raise ValueError(f"{name} must contain exactly {expected_length} tags")
         normalized_direct = [
@@ -327,7 +327,7 @@ def normalize_robust_condition_controls(value: object) -> dict[str, Any]:
         "linear_polarization_property": _identifier(
             raw["linear_polarization_property"], "linear_polarization_property"
         ),
-        "polarization_values": values,
+        "polarization_values": normalized_polarization_values,
         "observable_expression": _text(
             raw["observable_expression"], "observable_expression", maximum=256
         ),
