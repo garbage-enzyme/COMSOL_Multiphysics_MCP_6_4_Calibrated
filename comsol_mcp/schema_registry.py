@@ -675,6 +675,7 @@ def _entries() -> list[dict[str, Any]]:
             readable_versions=(
                 "1.0.0",
                 "1.1.0",
+                "1.2.0",
                 ROBUST_CONDITION_CONTROLS_SCHEMA_VERSION,
             ),
         ),

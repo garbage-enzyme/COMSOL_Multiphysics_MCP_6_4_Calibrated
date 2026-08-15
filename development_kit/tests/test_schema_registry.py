@@ -193,7 +193,7 @@ def test_registry_is_complete_sorted_and_snapshot_stable():
     assert set(names) == emitted | registry_only
     assert re.fullmatch(r"[0-9a-f]{64}", registry["registry_sha256"])
     assert registry["registry_sha256"] == (
-        "8e4a6e48ef482160baf8d75de32c86d76098aa3d82572541016246ce9a5cd0f7"
+        "436c7d85f17e6386992c7c4349b6eb004ac4205938bf65722697db3dc89a7fb3"
     )
     assert registry["registry_sha256"] == get_schema_registry()["registry_sha256"]
     assert check_schema_support("comsol_mcp.session_startup_state", "1.0.0")["supported"] is True
@@ -222,8 +222,8 @@ def test_every_entry_declares_read_write_and_non_mutating_migration_policy():
         for item in get_schema_registry()["entries"]
         if item["schema_name"] == "comsol_mcp.robust_condition_controls"
     )
-    assert robust_controls["readable_versions"] == ["1.0.0", "1.1.0", "1.2.0"]
-    assert robust_controls["writable_version"] == "1.2.0"
+    assert robust_controls["readable_versions"] == ["1.0.0", "1.1.0", "1.2.0", "1.3.0"]
+    assert robust_controls["writable_version"] == "1.3.0"
     deployment = next(
         item
         for item in get_schema_registry()["entries"]

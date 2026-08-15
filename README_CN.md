@@ -200,6 +200,10 @@ manifest；`robust_shape_job_submit` 只通过 durable job authority 提交；
 gradient、optimizer 的 fresh-forward 证据、finalist、checkpoint 与 cleanup。它们不提供
 通用 Java 属性修改，并且不会出现在 `core`、`basic_fem` 或 `wave_optics` 中。
 
+鲁棒 condition-controls schema `1.3.0` 可绑定由 caller 明确提供的 mesh reference
+参数和值。licensed runtime 在构建网格前写入并精确回读该值；它只属于验证 fixture
+证据，不是自动粗化规则，也不能替代 finalist 的独立 finer-mesh convergence。
+
 Profile 只控制 COMSOL 自动化仿真工具以及未来自主探索工具的可见性。其他正交功能使用
 独立、默认关闭的 Boolean 开关；它们可与任意 profile 组合，也可同时开启：
 

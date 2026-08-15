@@ -245,6 +245,12 @@ fresh-forward optimizer evidence, finalist validation, checkpoints, and
 cleanup. They expose no generic Java property mutation and remain absent from
 `core`, `basic_fem`, and `wave_optics`.
 
+Robust condition-controls schema `1.3.0` can bind an explicit caller-owned mesh
+reference parameter and value. The licensed runtime writes and reads back that
+exact value before building the mesh; it is validation-fixture evidence, never
+an automatic coarsening rule or a substitute for independent finer-mesh
+finalist convergence.
+
 Profiles only control the visibility of COMSOL automation/simulation tools and
 future autonomous-exploration tools. Orthogonal functionality uses independent,
 default-off Boolean feature gates that compose with every profile and with each

@@ -89,9 +89,7 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
         component = _get(model.java.component(), self.controls["component_tag"])
         physics = _get(component.physics(), self.controls["physics_tag"])
         self.periodic = _get(physics, self.controls["periodic_structure_tag"])
-        self.ports = [
-            _get(self.periodic, tag) for tag in self.controls["periodic_port_tags"]
-        ]
+        self.ports = [_get(self.periodic, tag) for tag in self.controls["periodic_port_tags"]]
         self.study = _get(model.java.study(), self.controls["study_tag"])
         self.study_step = self.study.feature(self.controls["study_step_tag"])
         solution = model.java.sol(self.controls["solution_tag"])
@@ -119,16 +117,34 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
         mesh = _get(self.model.java.component(), self.controls["component_tag"]).mesh(
             self.controls["mesh_tag"]
         )
+        mesh_reference = self._set_mesh_reference_policy()
         mesh.run()
         body = {
             "shape_controls": controls,
+            "mesh_reference": mesh_reference,
             "solver_memory": self._set_solver_memory_policy(),
             "solver_selection": self._set_solver_selection(),
         }
-        body["receipt_fingerprint"] = domain_sha256_v2(
-            "comsol_mcp.robust_native_controls", body
-        )
+        body["receipt_fingerprint"] = domain_sha256_v2("comsol_mcp.robust_native_controls", body)
         return body
+
+    def _set_mesh_reference_policy(self) -> dict[str, Any]:
+        parameter = self.controls.get("mesh_reference_parameter")
+        requested = self.controls.get("mesh_reference_value")
+        if parameter is None and requested is None:
+            return {"mode": "model_existing"}
+        if not isinstance(parameter, str) or not isinstance(requested, str):
+            raise ValueError("mesh reference control is incomplete")
+        self.model.parameter(parameter, requested)
+        observed = str(self.model.parameter(parameter, evaluate=False))
+        if observed != requested:
+            raise ValueError("mesh reference parameter readback differs")
+        return {
+            "mode": "explicit",
+            "parameter": parameter,
+            "requested": requested,
+            "observed": observed,
+        }
 
     def _set_incidence(self, condition: Mapping[str, Any]) -> None:
         params = self.model.java.param()
@@ -150,16 +166,19 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
         except KeyError as exc:
             raise ValueError(f"no polarization mapping for {basis}") from exc
         self.periodic.set(self.controls["linear_polarization_property"], polarization)
-        for label, node in [("periodic parent", self.periodic), *[
-            (f"periodic port {index}", port) for index, port in enumerate(self.ports, start=1)
-        ]]:
-            if str(node.getString(self.controls["angle_property"])) != self.controls[
-                "elevation_parameter"
-            ]:
+        for label, node in [
+            ("periodic parent", self.periodic),
+            *[(f"periodic port {index}", port) for index, port in enumerate(self.ports, start=1)],
+        ]:
+            if (
+                str(node.getString(self.controls["angle_property"]))
+                != self.controls["elevation_parameter"]
+            ):
                 raise ValueError(f"{label} elevation readback differs")
-            if str(node.getString(self.controls["azimuth_property"])) != self.controls[
-                "azimuth_parameter"
-            ]:
+            if (
+                str(node.getString(self.controls["azimuth_property"]))
+                != self.controls["azimuth_parameter"]
+            ):
                 raise ValueError(f"{label} azimuth readback differs")
         if str(self.periodic.getString(self.controls["polarization_property"])) != "LinearPol":
             raise ValueError("periodic polarization mode readback differs")

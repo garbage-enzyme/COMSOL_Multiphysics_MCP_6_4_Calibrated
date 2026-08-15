@@ -115,9 +115,7 @@ def test_tagged_configuration_binds_lin2025_fixture_tree_and_shape_support():
         policy,
     )
     assert result["binding"]["pedot_domain"] == 5
-    assert result["configuration"]["shape_support"]["pedot_boundaries"] == [
-        18, 19, 20, 23, 25, 27
-    ]
+    assert result["configuration"]["shape_support"]["pedot_boundaries"] == [18, 19, 20, 23, 25, 27]
 
 
 def test_tagged_configuration_rejects_cross_contract_adapter_drift():
@@ -170,4 +168,26 @@ def test_condition_controls_bind_selected_coarse_solver_out_of_core_path():
     assert result["coarse_solver_out_of_core_value"] == "on"
     value["coarse_solver_feature_path"][0] = "d1"
     with pytest.raises(ValueError, match="must begin at the selected"):
+        normalize_robust_condition_controls(value)
+
+
+def test_condition_controls_bind_explicit_mesh_reference_parameter():
+    value = _condition_controls()
+    value.update(
+        schema_version="1.3.0",
+        selected_linear_solver_tag="i1",
+        inactive_linear_solver_tags=["d1"],
+        coarse_solver_feature_path=["i1", "mg1", "cs", "dDef"],
+        coarse_solver_out_of_core_property="ooc",
+        coarse_solver_out_of_core_value="on",
+        mesh_reference_parameter="mesh_ref_wl",
+        mesh_reference_value="1600[nm]",
+    )
+
+    result = normalize_robust_condition_controls(value)
+
+    assert result["mesh_reference_parameter"] == "mesh_ref_wl"
+    assert result["mesh_reference_value"] == "1600[nm]"
+    value.pop("mesh_reference_value")
+    with pytest.raises(ValueError, match="fields mismatch"):
         normalize_robust_condition_controls(value)

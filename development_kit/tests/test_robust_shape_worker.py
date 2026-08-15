@@ -394,6 +394,11 @@ class _ModelWithParameters:
     def __init__(self):
         self.java = _JavaWithParameters()
 
+    def parameter(self, name, value=None, *, evaluate=False):
+        if value is not None:
+            self.java.parameters.set(name, value)
+        return self.java.parameters.values[name]
+
 
 class _JavaWithSave(_JavaWithParameters):
     def __init__(self):
@@ -472,6 +477,46 @@ def test_native_solver_memory_policy_is_explicit_and_read_back():
         "requested": "on",
         "observed": "on",
     }
+
+
+def test_native_mesh_reference_policy_is_explicit_and_read_back():
+    backend = object.__new__(robust_shape_native_runtime.ClientapiLin2025ConditionBackend)
+    backend.model = _ModelWithParameters()
+    backend.controls = {
+        "mesh_reference_parameter": "mesh_ref_wl",
+        "mesh_reference_value": "1600[nm]",
+    }
+
+    assert backend._set_mesh_reference_policy() == {
+        "mode": "explicit",
+        "parameter": "mesh_ref_wl",
+        "requested": "1600[nm]",
+        "observed": "1600[nm]",
+    }
+    assert backend.model.java.parameters.values == {"mesh_ref_wl": "1600[nm]"}
+
+
+def test_native_mesh_reference_policy_preserves_legacy_model_state():
+    backend = object.__new__(robust_shape_native_runtime.ClientapiLin2025ConditionBackend)
+    backend.controls = {}
+    assert backend._set_mesh_reference_policy() == {"mode": "model_existing"}
+
+
+def test_native_mesh_reference_policy_rejects_readback_drift():
+    class DriftModel(_ModelWithParameters):
+        def parameter(self, name, value=None, *, evaluate=False):
+            if value is not None:
+                self.java.parameters.set(name, value)
+            return "820[nm]"
+
+    backend = object.__new__(robust_shape_native_runtime.ClientapiLin2025ConditionBackend)
+    backend.model = DriftModel()
+    backend.controls = {
+        "mesh_reference_parameter": "mesh_ref_wl",
+        "mesh_reference_value": "1600[nm]",
+    }
+    with pytest.raises(ValueError, match="mesh reference parameter readback"):
+        backend._set_mesh_reference_policy()
 
 
 def test_native_solver_memory_policy_rejects_readback_drift():
