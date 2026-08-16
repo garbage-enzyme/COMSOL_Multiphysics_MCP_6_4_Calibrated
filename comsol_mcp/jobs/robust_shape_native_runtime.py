@@ -737,9 +737,12 @@ def execute_lin2025_conditions(
     model = None
     source_model = None
     cleanup: dict[str, Any] = {
+        "client_acquired": False,
+        "source_model_loaded": False,
+        "working_model_loaded": False,
         "source_model_removed": False,
         "working_model_removed": False,
-        "client_clear": False,
+        "client_clear": True,
         "client_disconnect": "not_applicable",
         "errors": [],
     }
@@ -769,6 +772,8 @@ def execute_lin2025_conditions(
 
             java_environment_reader = read_java_environment
         client = client_factory(cores=spec["cores"], version=spec["version"])
+        cleanup["client_acquired"] = True
+        cleanup["client_clear"] = False
         if java_environment_reader is None:
             java_environment_reader = os.environ.get
         java_temporary_directory = java_environment_reader("COMSOL_TMPDIR")
@@ -783,11 +788,15 @@ def execute_lin2025_conditions(
         if not environment_receipt["matches"]:
             raise RuntimeError("COMSOL temporary directory readback mismatch")
         source_model = client.load(str(source))
+        cleanup["source_model_loaded"] = True
+        cleanup["source_model_removed"] = False
         source_model.java.save(str(configured), True)
         client.remove(source_model)
         source_model = None
         cleanup["source_model_removed"] = True
         model = client.load(str(configured))
+        cleanup["working_model_loaded"] = True
+        cleanup["working_model_removed"] = False
         backend = ClientapiLin2025ConditionBackend(model, spec, working_model_path=configured)
         controls = backend.prepare(spec["initial_values"])
         atomic_write_json(directory / "robust-controls.json", controls)

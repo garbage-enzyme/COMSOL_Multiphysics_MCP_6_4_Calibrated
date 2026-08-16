@@ -231,6 +231,7 @@ def verify_robust_shape_evidence(
     finalists = [row for row in rows if row["kind"] == "finalist_validation"]
     checkpoints = [row for row in rows if row["kind"] == "checkpoint"]
     cleanup = [row for row in rows if row["kind"] == "cleanup"]
+    terminal_cleanup = cleanup[-1:]
     checks = {
         "spec_fingerprint_valid": _spec_fingerprint_valid(spec),
         "row_chain_valid": True,
@@ -248,7 +249,7 @@ def verify_robust_shape_evidence(
         ),
         "checkpoint_present": bool(checkpoints),
         "cleanup_present": bool(cleanup),
-        "cleanup_all_true": bool(cleanup)
+        "cleanup_all_true": bool(terminal_cleanup)
         and all(
             all(
                 row["payload"][key]
@@ -259,7 +260,7 @@ def verify_robust_shape_evidence(
                     "lease_released",
                 )
             )
-            for row in cleanup
+            for row in terminal_cleanup
         ),
     }
     complete = all(checks.values())

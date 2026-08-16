@@ -337,8 +337,14 @@ def _finalize_licensed_cleanup(
             native = read_json(native_path)
             client_clear = bool(
                 native.get("client_clear") is True
-                and native.get("source_model_removed") is True
-                and native.get("working_model_removed") is True
+                and (
+                    native.get("source_model_loaded") is not True
+                    or native.get("source_model_removed") is True
+                )
+                and (
+                    native.get("working_model_loaded") is not True
+                    or native.get("working_model_removed") is True
+                )
                 and native.get("client_disconnect") in {True, "not_applicable"}
                 and not native.get("errors")
             )
@@ -708,6 +714,8 @@ def _run_licensed(root: str, job_id: str) -> int:
     ownership = None
     lease_acquired = False
     native_runtime_entered = False
+    shared_client = None
+    previous_temporary_directory = os.environ.get("COMSOL_TMPDIR")
     source = Path(spec["source_model_path"])
     source_before = source.read_bytes()
     try:
@@ -759,11 +767,25 @@ def _run_licensed(root: str, job_id: str) -> int:
             raise RuntimeError(f"licensed robust adapter dispatch is unsupported: {adapter_id}")
         from .robust_shape_native_runtime import execute_lin2025_conditions
 
+        os.environ["COMSOL_TMPDIR"] = spec["comsol_temporary_directory"]
+        import jpype
+        import mph
+
+        shared_client = mph.Client(cores=spec["cores"], version=spec["version"])
+
+        def shared_client_factory(**_kwargs: Any) -> Any:
+            return shared_client
+
+        def java_environment_reader(name: str) -> str:
+            return str(jpype.JClass("java.lang.System").getenv(name))
+
         native_runtime_entered = True
         result = execute_lin2025_conditions(
             spec,
             directory,
             attempt=attempt,
+            client_factory=shared_client_factory,
+            java_environment_reader=java_environment_reader,
             cancel_requested=lambda: _cancel_requested(store, job_id, attempt),
         )
         execution_limit = spec.get("condition_execution_limit")
@@ -872,6 +894,8 @@ def _run_licensed(root: str, job_id: str) -> int:
                     candidate_spec,
                     candidate_directory,
                     attempt=attempt,
+                    client_factory=shared_client_factory,
+                    java_environment_reader=java_environment_reader,
                     cancel_requested=lambda: _cancel_requested(store, job_id, attempt),
                     include_gradients=False,
                 )
@@ -935,6 +959,8 @@ def _run_licensed(root: str, job_id: str) -> int:
                     candidate_spec,
                     candidate_directory,
                     attempt=attempt,
+                    client_factory=shared_client_factory,
+                    java_environment_reader=java_environment_reader,
                     cancel_requested=lambda: _cancel_requested(store, job_id, attempt),
                     include_gradients=True,
                 )
@@ -984,6 +1010,15 @@ def _run_licensed(root: str, job_id: str) -> int:
         print(f"{type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
         return 1
     finally:
+        if shared_client is not None:
+            try:
+                shared_client.clear()
+            except Exception as exc:
+                print(f"shared_client_cleanup:{type(exc).__name__}", file=sys.stderr, flush=True)
+        if previous_temporary_directory is None:
+            os.environ.pop("COMSOL_TMPDIR", None)
+        else:
+            os.environ["COMSOL_TMPDIR"] = previous_temporary_directory
         source_unchanged = source.exists() and source.read_bytes() == source_before
         cleanup_payload = _finalize_licensed_cleanup(
             directory,
