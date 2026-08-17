@@ -356,9 +356,10 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
         Runs the regenerated two-step study once: the deformation step solves
         the derived shape physics (linear), then the wave-optics step solves
         the forward physics on the deformed configuration (still linear).  The
-        solved-shape readback samples the solved mesh-displacement magnitude at
-        each variable's axis quadrant vertex of the PEDOT boundary and compares
-        it with the requested radius change; a mismatch fails closed instead of
+        solved-shape readback evaluates each variable's declared displacement
+        component over the mesh vertices and measures the deformed radius as
+        the axis coordinate of the maximum-component vertex minus the shape
+        center; a mismatch against the requested radius fails closed instead of
         silently solving the baseline shape.
         """
         forward = self._forward_shape_controls()
@@ -414,28 +415,36 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
                 raise ValueError("forward shape variable axis mapping is invalid") from exc
             if axis not in {0, 1}:
                 raise ValueError("forward shape variable axis is unsupported")
-            point = [
-                center_m[0] + (baseline_m if axis == 0 else 0.0),
-                center_m[1] + (baseline_m if axis == 1 else 0.0),
-            ]
-            nearest = min(
-                range(len(xs)),
-                key=lambda item: (xs[item] - point[0]) ** 2 + (ys[item] - point[1]) ** 2,
-            )
-            if abs(xs[nearest] - point[0]) > 1e-8 or abs(ys[nearest] - point[1]) > 1e-8:
-                raise ValueError("forward solved-shape readback vertex is not on the axis point")
-            observed_m = float(readback_values[2 + index][nearest])
-            if not math.isfinite(observed_m):
-                raise ValueError("forward solved-shape readback is nonfinite")
+            component_values = _flatten_real(readback_values[2 + index])
+            if len(component_values) != len(xs):
+                raise ValueError("forward solved-shape readback component count is invalid")
             requested_m = float(self._initial_values[index]) * scale
             baseline_value_m = float(variable["baseline"]) * scale
-            expected_m = abs(requested_m - baseline_value_m)
-            matches = math.isclose(
-                observed_m,
-                expected_m,
-                rel_tol=forward["tolerance"],
-                abs_tol=max(1e-12, expected_m * forward["tolerance"]),
+            expected_movement_m = abs(requested_m - baseline_value_m)
+            vertex = max(
+                range(len(component_values)),
+                key=lambda item: abs(component_values[item]),
             )
+            max_component_m = float(component_values[vertex])
+            if not math.isfinite(max_component_m):
+                raise ValueError("forward solved-shape readback is nonfinite")
+            observed_radius_m = (
+                float(xs[vertex]) - center_m[0] if axis == 0 else float(ys[vertex]) - center_m[1]
+            )
+            if expected_movement_m == 0.0:
+                # No shape change requested: the solved displacement field
+                # must stay at zero so the solved shape cannot drift.  The
+                # max-component vertex is arbitrary for a null field, so the
+                # radius is recorded as the requested one.
+                matches = abs(max_component_m) <= max(requested_m * forward["tolerance"], 1e-12)
+                observed_radius_m = requested_m
+            else:
+                matches = math.isclose(
+                    observed_radius_m,
+                    requested_m,
+                    rel_tol=forward["tolerance"],
+                    abs_tol=max(1e-9, requested_m * forward["tolerance"]),
+                )
             readbacks.append(
                 {
                     "variable_id": variable["variable_id"],
@@ -443,10 +452,11 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
                     "requested_value": float(self._initial_values[index]),
                     "unit": variable["unit"],
                     "baseline_value": float(variable["baseline"]),
-                    "axis_point_m": point,
-                    "readback_vertex_index": nearest,
-                    "expected_displacement_m": expected_m,
-                    "observed_displacement_m": observed_m,
+                    "axis": axis,
+                    "readback_vertex_index": vertex,
+                    "expected_displacement_m": expected_movement_m,
+                    "max_component_m": max_component_m,
+                    "observed_radius_m": observed_radius_m,
                     "matches": matches,
                 }
             )

@@ -222,9 +222,9 @@ convergence；gradient 仍须通过独立 finite-difference 与 directional reco
 块，使每个 licensed candidate 都在按候选形状真实变形的网格上求值：一个只解
 derived shape physics 的线性 `Stationary` 变形阶段被置于 Wave Optics 步骤之前，
 重新生成的 sequence 按步骤限定求解范围，并在信任任何 condition solve 之前按变量
-在轴顶点回读已求解形状、与请求的半径变化比较（相对容差由调用方声明）。gradient
-路径会移除该阶段并重新生成耦合 sequence，因此原生 adjoint receipts 不变；
-`1.4.0` contract 仍然可读。
+回读已求解形状：在网格顶点上求值声明的位移分量，由最大分量顶点测得变形后半径，
+并与请求半径比较（相对容差由调用方声明）。gradient 路径会移除该阶段并重新生成
+耦合 sequence，因此原生 adjoint receipts 不变；`1.4.0` contract 仍然可读。
 
 Profile 只控制 COMSOL 自动化仿真工具以及未来自主探索工具的可见性。其他正交功能使用
 独立、默认关闭的 Boolean 开关；它们可与任意 profile 组合，也可同时开启：

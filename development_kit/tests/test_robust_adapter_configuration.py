@@ -334,7 +334,7 @@ def test_condition_controls_1_5_0_reject_invalid_solved_shape_policy():
     with pytest.raises(ValueError, match="bounded nonempty list"):
         normalize_robust_condition_controls(value)
     value = _forward_shape_controls()
-    value["forward_solved_shape_relative_tolerance"] = 0.01
+    value["forward_solved_shape_relative_tolerance"] = 0.02
     with pytest.raises(ValueError, match="too large"):
         normalize_robust_condition_controls(value)
 

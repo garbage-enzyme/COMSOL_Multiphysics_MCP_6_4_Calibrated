@@ -832,8 +832,8 @@ def _forward_stage_controls():
         "forward_deformation_step_tag": "dg_step",
         "forward_deformation_step_type": "Stationary",
         "forward_deformation_physics_tag": "dg_pedot72",
-        "forward_solved_shape_expressions": ["comp1.material.disp", "comp1.material.disp"],
-        "forward_solved_shape_relative_tolerance": 1e-6,
+        "forward_solved_shape_expressions": ["comp1.material.u", "comp1.material.v"],
+        "forward_solved_shape_relative_tolerance": 5e-3,
     }
 
 
@@ -1195,8 +1195,13 @@ def test_forward_shape_controls_require_1_5_0_and_deformation_stage():
         backend._forward_shape_controls()
 
 
-def _application_model(events, *, displacement=(12.0e-9, 12.0e-9)):
-    """Fake model for run_shape_application with vertex-aligned evaluations."""
+def _application_model(events, *, moved=(12.0e-9, 12.0e-9), baseline=(260.0e-9, 260.0e-9)):
+    """Fake model for run_shape_application with radius-extent evaluations.
+
+    Vertex 0 sits at the deformed x-extreme (x = center_x + baseline_x +
+    moved_x), vertex 1 at the deformed y-extreme. The declared component
+    expressions evaluate to the moved components at those vertices.
+    """
 
     class MeshStats:
         def getNumElem(self):
@@ -1287,13 +1292,18 @@ def _application_model(events, *, displacement=(12.0e-9, 12.0e-9)):
         def evaluate(self, expressions, dataset=None, outer=1):
             assert dataset is not None and outer == 1
             events.append(("evaluate", list(expressions)))
-            xs = [1.11e-6, 0.85e-6]
-            ys = [0.0, 2.6e-7]
+            xs = [0.85e-6 + baseline[0] + moved[0], 0.85e-6]
+            ys = [0.0, baseline[1] + moved[1]]
             results = [xs, ys]
             for expression in expressions[2:]:
-                results.append(
-                    [displacement[0], displacement[1]] if "disp" in expression else [0.0, 0.0]
-                )
+                if "material.u" in expression:
+                    results.append([moved[0], 0.0])
+                elif "material.v" in expression:
+                    results.append([0.0, moved[1]])
+                elif "disp" in expression:
+                    results.append([moved[0], moved[1]])
+                else:
+                    results.append([0.0, 0.0])
             return results
 
     return Model()
@@ -1323,7 +1333,10 @@ def test_shape_application_solves_stage_and_reads_back_solved_shape():
         "pedot_cylinder_radius_x",
         "pedot_cylinder_radius_y",
     ]
-    assert all(item["observed_displacement_m"] == pytest.approx(12.0e-9) for item in solved)
+    assert [item["axis"] for item in solved] == [0, 1]
+    assert all(item["expected_displacement_m"] == pytest.approx(12.0e-9) for item in solved)
+    assert all(item["max_component_m"] == pytest.approx(12.0e-9) for item in solved)
+    assert all(item["observed_radius_m"] == pytest.approx(272.0e-9) for item in solved)
     assert all(item["matches"] for item in solved)
     assert receipt["receipt_fingerprint"]
     assert receipt["stage_fingerprint"] == backend._forward_stage_readback["receipt_fingerprint"]
@@ -1333,7 +1346,7 @@ def test_shape_application_readback_mismatch_fails_closed():
     events = []
     backend = _stage_backend(events)
     backend._prepare_forward_shape_stage()
-    backend.model = _application_model(events, displacement=(1.0e-9, 1.0e-9))
+    backend.model = _application_model(events, moved=(1.0e-9, 1.0e-9))
 
     class Study:
         def run(self):
@@ -1342,6 +1355,27 @@ def test_shape_application_readback_mismatch_fails_closed():
     backend.study = Study()
     with pytest.raises(ValueError, match="solved-shape readback differs"):
         backend.run_shape_application()
+
+
+def test_shape_application_zero_movement_readback_accepts_null_field():
+    events = []
+    backend = _stage_backend(events)
+    backend._prepare_forward_shape_stage()
+    backend.model = _application_model(events, moved=(0.0, 0.0))
+    backend._initial_values = [260.0, 260.0]
+
+    class Study:
+        def run(self):
+            events.append(("study_run",))
+
+    backend.study = Study()
+    receipt = backend.run_shape_application()
+
+    assert all(item["matches"] for item in receipt["solved_shape"])
+    assert all(item["max_component_m"] == 0.0 for item in receipt["solved_shape"])
+    assert all(
+        item["observed_radius_m"] == pytest.approx(260.0e-9) for item in receipt["solved_shape"]
+    )
 
 
 def test_shape_application_requires_prepared_initial_values():

@@ -387,7 +387,10 @@ def normalize_robust_condition_controls(value: object) -> dict[str, Any]:
             "forward_solved_shape_relative_tolerance",
             positive=True,
         )
-        if tolerance > 1e-3:
+        # The readback compares the measured deformed radius against the
+        # requested radius; mesh discretization and evaluation-frame effects
+        # are on the order of 1e-3 relative, so the bound allows 1e-2.
+        if tolerance > 1e-2:
             raise ValueError("forward solved-shape relative tolerance is too large")
         forward_shape = {
             "forward_shape_application_mode": mode,
