@@ -883,6 +883,23 @@ def _run_licensed(root: str, job_id: str) -> int:
             if _cancel_requested(store, job_id, attempt):
                 raise InterruptedError("licensed robust optimizer was cancelled")
             proposal = optimizer_state["pending_proposal"]
+            # A rejected inner proposal still consumes a complete fresh-forward
+            # condition batch.  Refuse before starting COMSOL when the caller
+            # budget cannot cover that batch; otherwise the optimizer backend
+            # raises after the expensive solve and obscures the durable stop.
+            required_forward_solves = len(spec["condition_table"]["conditions"])
+            remaining = (
+                optimizer_state["max_condition_solves"]
+                - optimizer_state["condition_solves_used"]
+            )
+            if remaining < required_forward_solves:
+                optimizer_state = {**optimizer_state, "status": "budget_exhausted"}
+                optimizer_state.pop("state_fingerprint")
+                optimizer_state["state_fingerprint"] = domain_sha256_v2(
+                    "comsol_mcp.robust_outer_gcmma_state", optimizer_state
+                )
+                atomic_write_json(directory / "robust-optimizer-state.json", optimizer_state)
+                break
             candidate_directory = directory / (
                 f"opt-{proposal['outer_iteration']:02d}-{proposal['inner_iteration']:02d}"
             )
