@@ -811,6 +811,330 @@ def test_native_sensitivity_preparation_follows_exact_condition_staging():
     ]
 
 
+def _sensitivity_controls():
+    return {
+        "schema_version": "1.5.0",
+        "component_tag": "comp1",
+        "geometry_tag": "geom1",
+        "physics_tag": "ewfd",
+        "study_tag": "std1",
+        "study_step_tag": "wl_step",
+        "solution_tag": "sol1",
+        "stationary_solver_tag": "s1",
+        "linear_solver_tag": "d1",
+        "selected_linear_solver_tag": "d1",
+        "inactive_linear_solver_tags": ["i1"],
+        "out_of_core_property": "ooc",
+        "out_of_core_value": "on",
+        "dataset_tag": "dset1",
+        "mesh_tag": "mesh1",
+        "observable_expression": "comp1.ewfd.Torder_0_0",
+        "wavelength_parameter": "wl",
+        "forward_shape_application_mode": "deformation_stage",
+        "forward_deformation_step_tag": "dg_step",
+        "forward_deformation_step_type": "Stationary",
+        "forward_deformation_physics_tag": "dg_pedot72",
+        "forward_solved_shape_expressions": ["comp1.material.u", "comp1.material.v"],
+        "forward_solved_shape_relative_tolerance": 5e-3,
+        "sensitivity_parametric_sweep_tag": "sweep_pedot72",
+        "sensitivity_feature_tag": "sens_pedot72",
+        "sensitivity_solver_tag": "sn1",
+        "sensitivity_segregated_solver_tag": "se1",
+        "sensitivity_direct_solver_tags": ["dDef", "d1"],
+        "sensitivity_solution_tags": ["sol1", "sol2", "sol3"],
+        "sensitivity_dataset_tags": ["dset1", "dset2"],
+        "derivative_solution_tag": "sol2",
+        "derivative_dataset_tag": "dset2",
+        "sensitivity_gradient_method": "adjoint",
+        "sensitivity_solver_regeneration": "replace_existing_auto_sequence",
+        "sensitivity_stationary_nonlinearity": "auto",
+        "sensitivity_segregated_step_tags": ["ss1", "ss2"],
+        "sensitivity_merged_step_tag": "ss1",
+        "sensitivity_removed_step_tag": "ss2",
+        "sensitivity_merged_linear_solver_tag": "d1",
+        "sensitivity_constraint_group_policy": "merge_material_coordinates_into_wave_optics",
+    }
+
+
+def _sensitivity_support():
+    return {
+        "variables": [
+            {
+                "variable_id": "pedot_cylinder_radius_x",
+                "unit": "nm",
+                "baseline": 260.0,
+                "scale": 1.0,
+                "mapping": {"property_index": 0},
+            },
+            {
+                "variable_id": "pedot_cylinder_radius_y",
+                "unit": "nm",
+                "baseline": 260.0,
+                "scale": 1.0,
+                "mapping": {"property_index": 1},
+            },
+        ]
+    }
+
+
+def test_native_sensitivity_initval_uses_prepared_initial_values():
+    """Regression: the gradient is evaluated at the candidate point.
+
+    The Sensitivity study solves and differentiates at its initval, so the
+    initval must be the prepared initial values (the candidate point), not
+    the declared baseline; otherwise the accepted-point gradient is silently
+    computed at the baseline shape and the fail-closed observation
+    comparison trips.
+    """
+    events: list[tuple] = []
+    controls = _sensitivity_controls()
+
+    class SensitivityNode:
+        def __init__(self, tag):
+            self.tag = tag
+            self.values = {}
+            self.active_state = True
+
+        def active(self, value):
+            self.active_state = bool(value)
+
+        def isActive(self):
+            return self.active_state
+
+        def set(self, name, value):
+            self.values[name] = list(value) if isinstance(value, list) else str(value)
+
+        def getString(self, name):
+            if name == "gradientMethod":
+                return "adjoint"
+            raise KeyError(name)
+
+        def getType(self):
+            return "Sensitivity"
+
+        def getStringArray(self, name):
+            return self.values[name]
+
+    sensitivity = SensitivityNode("sens_pedot72")
+
+    class SegregatedStep:
+        def __init__(self, variables, components, solver):
+            self.values = {"segvar": variables, "segcomp": components, "linsolver": solver}
+
+        def getType(self):
+            return "SegregatedStep"
+
+        def getStringArray(self, name):
+            return self.values[name]
+
+        def getString(self, name):
+            return self.values[name]
+
+        def set(self, name, value):
+            self.values[name] = list(value) if isinstance(value, list) else str(value)
+
+    class SegregatedSteps:
+        def __init__(self):
+            self.items = {
+                "ss1": SegregatedStep(["ewfd", "conpar1"], ["Ex", "rx"], "d1"),
+                "ss2": SegregatedStep(["material", "conpar1"], ["u", "rx"], "dDef"),
+            }
+
+        def tags(self):
+            return list(self.items)
+
+        def remove(self, tag):
+            del self.items[tag]
+
+        def feature(self, tag=None):
+            return self if tag is None else self.items[tag]
+
+    class Segregated:
+        def __init__(self):
+            self.tag = "se1"
+            self.steps = SegregatedSteps()
+
+        def getType(self):
+            return "Segregated"
+
+        def feature(self, tag=None):
+            return self.steps if tag is None else self.steps.items[tag]
+
+    class DirectNode:
+        def __init__(self, tag):
+            self.tag = tag
+            self.properties = {"ooc": "auto"}
+
+        def getType(self):
+            return "Direct"
+
+        def set(self, name, value):
+            self.properties[name] = str(value)
+
+        def getString(self, name):
+            return self.properties[name]
+
+    class Stationary:
+        def __init__(self):
+            self.items = {
+                "sn1": SensitivityNode("sn1"),
+                "se1": Segregated(),
+                "dDef": DirectNode("dDef"),
+                "d1": DirectNode("d1"),
+            }
+            self.nonlin = "auto"
+
+        def feature(self, tag=None):
+            if tag is None:
+                return _FakeSolverFeatures(list(self.items.values()))
+            return self.items[tag]
+
+        def getString(self, name):
+            if name == "nonlin":
+                return self.nonlin
+            raise KeyError(name)
+
+    stationary = Stationary()
+
+    class Solution:
+        def feature(self, tag=None):
+            if tag is None:
+                return _FakeSolverFeatures([_FakeSolverFeature("st1", "StudyStep"), stationary])
+            if tag == "s1":
+                return stationary
+            raise KeyError(tag)
+
+    class Solutions:
+        def __init__(self):
+            self.items = ["sol1"]
+
+        def remove(self, tag):
+            events.append(("sol_remove", tag))
+            self.items.remove(tag)
+
+        def tags(self):
+            return list(self.items)
+
+        def sol(self, tag):
+            assert tag == "sol1"
+            return Solution()
+
+    solutions = Solutions()
+
+    class StudyStep:
+        def setSolveFor(self, path, value):
+            events.append(("step_solvefor", path, bool(value)))
+
+    class Study:
+        def __init__(self):
+            self.items = {"dg_step": _StageStep("dg_step"), "wl_step": _StageStep("wl_step")}
+            self.order = ["dg_step", "wl_step"]
+
+        def feature(self):
+            return self
+
+        def tags(self):
+            return list(self.order)
+
+        def create(self, tag, feature_type):
+            events.append(("create", tag, feature_type))
+            # New study features land before the wave-optics study step, so
+            # the regenerated order is [sweep, sensitivity, wl_step].
+            self.order.insert(max(0, len(self.order) - 1), tag)
+            if tag == sweep_tag:
+                return SensitivityNode(tag)
+            if tag == sens_tag:
+                return sensitivity
+            raise KeyError(tag)
+
+        def remove(self, tag):
+            events.append(("remove", tag))
+            self.order.remove(tag)
+            del self.items[tag]
+
+        def createAutoSequences(self, scope):
+            events.append(("auto_sequences", scope))
+            solutions.items = ["sol1"]
+
+    sweep_tag = controls["sensitivity_parametric_sweep_tag"]
+    sens_tag = controls["sensitivity_feature_tag"]
+    study = Study()
+
+    class PhysicsPath:
+        def resolveModelPath(self):
+            return "/physics/dg_pedot72"
+
+    class PhysicsCollection:
+        def get(self, tag):
+            assert tag == "dg_pedot72"
+            return PhysicsPath()
+
+        def __call__(self, tag):
+            return self.get(tag)
+
+    class Component:
+        def physics(self, _tag=None):
+            return PhysicsCollection()
+
+    class Components:
+        def get(self, _tag):
+            return Component()
+
+        def __call__(self, tag):
+            return self.get(tag)
+
+    class Java:
+        def study(self, _tag):
+            return study
+
+        def component(self, _tag=None):
+            return Components() if _tag is None else Component()
+
+        def sol(self, *args):
+            if args:
+                return solutions.sol(args[0])
+            return solutions
+
+    class Model:
+        java = Java()
+
+    backend = object.__new__(robust_shape_native_runtime.ClientapiLin2025ConditionBackend)
+    backend.controls = controls
+    backend.model = Model()
+    backend.study = study
+    backend.study_step = StudyStep()
+    backend.support = _sensitivity_support()
+    backend._initial_values = [271.998421905626, 271.997609904722]
+    backend._forward_stage_readback = {"receipt_fingerprint": "x" * 64}
+
+    readback = backend._prepare_native_sensitivity(
+        ["pedot_cylinder_radius_x", "pedot_cylinder_radius_y"],
+        wavelength_m=8e-7,
+    )
+
+    initval = [str(item) for item in sensitivity.getStringArray("initval")]
+    assert initval == [
+        "2.7199842190562602e-07[m]",
+        "2.7199760990472204e-07[m]",
+    ]
+    assert readback["initial_values_m"] == pytest.approx([271.998421905626e-9, 271.997609904722e-9])
+    assert readback["receipt_fingerprint"]
+    assert sensitivity.values["pname"] == ["pedot_cylinder_radius_x", "pedot_cylinder_radius_y"]
+    assert ("remove", "dg_step") in events
+    assert ("auto_sequences", "all") in events
+
+
+def test_native_sensitivity_requires_prepared_initial_values():
+    backend = object.__new__(robust_shape_native_runtime.ClientapiLin2025ConditionBackend)
+    backend.controls = _sensitivity_controls()
+    backend.support = _sensitivity_support()
+    with pytest.raises(RuntimeError, match="requires prepared initial values"):
+        backend._prepare_native_sensitivity(
+            ["pedot_cylinder_radius_x", "pedot_cylinder_radius_y"],
+            wavelength_m=8e-7,
+        )
+
+
 def _forward_stage_controls():
     return {
         "schema_version": "1.5.0",

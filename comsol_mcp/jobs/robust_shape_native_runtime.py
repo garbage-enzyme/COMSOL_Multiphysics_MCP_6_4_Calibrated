@@ -741,6 +741,10 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
             raise ValueError("native sensitivity controls are incomplete")
         if variable_ids != [item["variable_id"] for item in self.support["variables"]]:
             raise ValueError("native sensitivity variable order differs from support")
+        if not getattr(self, "_initial_values", None) or len(self._initial_values) != len(
+            self.support["variables"]
+        ):
+            raise RuntimeError("native sensitivity preparation requires prepared initial values")
         features = self.study.feature()
         # The native gradient solves the deformation coupled with the wave
         # optics in the regenerated sequence, exactly as before the forward
@@ -767,19 +771,22 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
         sensitivity.set("gradientMethod", controls["sensitivity_gradient_method"])
         unit_scale = {"m": 1.0, "um": 1e-6, "nm": 1e-9}
         try:
-            baselines_m = [
-                float(item["baseline"]) * unit_scale[item["unit"]]
-                for item in self.support["variables"]
-            ]
             scales_m = [
                 float(item["scale"]) * unit_scale[item["unit"]]
                 for item in self.support["variables"]
             ]
         except KeyError as exc:
             raise ValueError("native sensitivity variable unit is unsupported") from exc
+        # The Sensitivity study solves and differentiates at its initval
+        # point, so the gradient must be evaluated at the current candidate
+        # point (the prepared initial values), not at the declared baseline.
+        current_m = [
+            float(value) * unit_scale[variable["unit"]]
+            for value, variable in zip(self._initial_values, self.support["variables"], strict=True)
+        ]
         _set_vector(sensitivity, "pname", variable_ids)
         _set_vector(sensitivity, "punit", ["m"] * len(variable_ids))
-        _set_vector(sensitivity, "initval", [f"{item:.17g}[m]" for item in baselines_m])
+        _set_vector(sensitivity, "initval", [f"{item:.17g}[m]" for item in current_m])
         _set_vector(sensitivity, "scale", [f"{item:.17g}[m]" for item in scales_m])
         _set_vector(sensitivity, "valuetype", ["real"] * len(variable_ids))
         _set_vector(sensitivity, "optobj", [controls["observable_expression"]])
@@ -821,6 +828,7 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
             "gradient_method": str(sensitivity.getString("gradientMethod")),
             "variable_ids": [str(item) for item in list(sensitivity.getStringArray("pname"))],
             "variable_units": [str(item) for item in list(sensitivity.getStringArray("punit"))],
+            "initial_values_m": [float(item) for item in current_m],
             "objective": [str(item) for item in list(sensitivity.getStringArray("optobj"))],
             "solver_children": children,
             "direct_ooc": direct_ooc,
