@@ -162,7 +162,7 @@ def test_registry_is_complete_sorted_and_snapshot_stable():
     assert registry["producer"] == {"package": "comsol-mcp", "version": __version__}
     # These are deliberate public release snapshots. A registry change updates
     # both literals and development_kit/release/release_facts.json together.
-    assert registry["entry_count"] == len(entries) == 149
+    assert registry["entry_count"] == len(entries) == 151
     assert names == sorted(names)
     assert len(names) == len(set(names))
     emitted = _emitted_schemas_in_source()
@@ -174,6 +174,7 @@ def test_registry_is_complete_sorted_and_snapshot_stable():
         "comsol_mcp.portfolio_evidence_request",
         "comsol_mcp.runtime_compatibility",
         "comsol_mcp.robust_pedot_fixture_manifest",
+        "comsol_mcp.robust_forward_shape_stage",
         "comsol_mcp.lin2025_pedot_cylinder_fixture",
         "comsol_mcp.lin2025_pedot_cylinder_fixture.binding",
         "comsol_mcp.lin2025_robust_campaign_inputs",
@@ -193,7 +194,7 @@ def test_registry_is_complete_sorted_and_snapshot_stable():
     assert set(names) == emitted | registry_only
     assert re.fullmatch(r"[0-9a-f]{64}", registry["registry_sha256"])
     assert registry["registry_sha256"] == (
-        "d0c2c365a33f167ddc86c32c5f5f0424c857d5d1fc12fc7d7616b6732bf7588c"
+        "02d607a779dddb2673ed7835a7d8ceaafd9e657eea3b3dcdea21b6834a04c1f5"
     )
     assert registry["registry_sha256"] == get_schema_registry()["registry_sha256"]
     assert check_schema_support("comsol_mcp.session_startup_state", "1.0.0")["supported"] is True
@@ -235,8 +236,9 @@ def test_every_entry_declares_read_write_and_non_mutating_migration_policy():
         "1.2.0",
         "1.3.0",
         "1.4.0",
+        "1.5.0",
     ]
-    assert robust_controls["writable_version"] == "1.4.0"
+    assert robust_controls["writable_version"] == "1.5.0"
     deployment = next(
         item
         for item in get_schema_registry()["entries"]

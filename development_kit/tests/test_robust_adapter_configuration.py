@@ -254,3 +254,118 @@ def test_condition_controls_bind_native_sensitivity_solver_identities():
     value["sensitivity_stationary_nonlinearity"] = "off"
     with pytest.raises(ValueError, match="must be auto"):
         normalize_robust_condition_controls(value)
+
+
+def _forward_shape_controls():
+    value = _condition_controls()
+    value.update(
+        schema_version="1.5.0",
+        selected_linear_solver_tag="d1",
+        inactive_linear_solver_tags=["i1"],
+        mesh_reference_parameter="mesh_ref_wl",
+        mesh_reference_value="1600[nm]",
+        sensitivity_parametric_sweep_tag="sweep_pedot72",
+        sensitivity_feature_tag="sens_pedot72",
+        sensitivity_solver_tag="sn1",
+        sensitivity_segregated_solver_tag="se1",
+        sensitivity_direct_solver_tags=["dDef", "d1"],
+        sensitivity_solution_tags=["sol1", "sol2", "sol3"],
+        sensitivity_dataset_tags=["dset1", "dset2"],
+        derivative_solution_tag="sol2",
+        derivative_dataset_tag="dset2",
+        sensitivity_gradient_method="adjoint",
+        sensitivity_solver_regeneration="replace_existing_auto_sequence",
+        sensitivity_stationary_nonlinearity="auto",
+        sensitivity_segregated_step_tags=["ss1", "ss2"],
+        sensitivity_merged_step_tag="ss1",
+        sensitivity_removed_step_tag="ss2",
+        sensitivity_merged_linear_solver_tag="d1",
+        sensitivity_constraint_group_policy="merge_material_coordinates_into_wave_optics",
+        forward_shape_application_mode="deformation_stage",
+        forward_deformation_step_tag="dg_step",
+        forward_deformation_step_type="Stationary",
+        forward_deformation_physics_tag="dg_pedot72",
+        forward_solved_shape_expressions=["comp1.material.disp", "comp1.material.disp"],
+        forward_solved_shape_relative_tolerance=1e-6,
+    )
+    return value
+
+
+def test_condition_controls_1_5_0_bind_forward_shape_application():
+    result = normalize_robust_condition_controls(_forward_shape_controls())
+
+    assert result["schema_version"] == "1.5.0"
+    assert result["forward_shape_application_mode"] == "deformation_stage"
+    assert result["forward_deformation_step_tag"] == "dg_step"
+    assert result["forward_deformation_step_type"] == "Stationary"
+    assert result["forward_deformation_physics_tag"] == "dg_pedot72"
+    assert result["forward_solved_shape_expressions"] == [
+        "comp1.material.disp",
+        "comp1.material.disp",
+    ]
+    assert result["forward_solved_shape_relative_tolerance"] == 1e-6
+    assert result["sensitivity_solver_tag"] == "sn1"
+    assert "forward_shape_application_mode" not in normalize_robust_condition_controls(
+        _condition_controls()
+    )
+
+
+def test_condition_controls_1_5_0_reject_unsupported_forward_shape_mode():
+    value = _forward_shape_controls()
+    value["forward_shape_application_mode"] = "remesh"
+    with pytest.raises(ValueError, match="forward shape application mode is unsupported"):
+        normalize_robust_condition_controls(value)
+
+
+def test_condition_controls_1_5_0_reject_unsupported_step_type_or_missing_fields():
+    value = _forward_shape_controls()
+    value["forward_deformation_step_type"] = "TimeDependent"
+    with pytest.raises(ValueError, match="forward deformation step type"):
+        normalize_robust_condition_controls(value)
+    value = _forward_shape_controls()
+    value.pop("forward_deformation_step_tag")
+    with pytest.raises(ValueError, match="fields mismatch"):
+        normalize_robust_condition_controls(value)
+
+
+def test_condition_controls_1_5_0_reject_invalid_solved_shape_policy():
+    value = _forward_shape_controls()
+    value["forward_solved_shape_expressions"] = []
+    with pytest.raises(ValueError, match="bounded nonempty list"):
+        normalize_robust_condition_controls(value)
+    value = _forward_shape_controls()
+    value["forward_solved_shape_relative_tolerance"] = 0.01
+    with pytest.raises(ValueError, match="too large"):
+        normalize_robust_condition_controls(value)
+
+
+def test_condition_controls_1_4_0_remain_supported_without_forward_shape():
+    value = _condition_controls()
+    value.update(
+        schema_version="1.4.0",
+        selected_linear_solver_tag="d1",
+        inactive_linear_solver_tags=["i1"],
+        mesh_reference_parameter="mesh_ref_wl",
+        mesh_reference_value="1600[nm]",
+        sensitivity_parametric_sweep_tag="sweep_pedot72",
+        sensitivity_feature_tag="sens_pedot72",
+        sensitivity_solver_tag="sn1",
+        sensitivity_segregated_solver_tag="se1",
+        sensitivity_direct_solver_tags=["dDef", "d1"],
+        sensitivity_solution_tags=["sol1", "sol2", "sol3"],
+        sensitivity_dataset_tags=["dset1", "dset2"],
+        derivative_solution_tag="sol2",
+        derivative_dataset_tag="dset2",
+        sensitivity_gradient_method="adjoint",
+        sensitivity_solver_regeneration="replace_existing_auto_sequence",
+        sensitivity_stationary_nonlinearity="auto",
+        sensitivity_segregated_step_tags=["ss1", "ss2"],
+        sensitivity_merged_step_tag="ss1",
+        sensitivity_removed_step_tag="ss2",
+        sensitivity_merged_linear_solver_tag="d1",
+        sensitivity_constraint_group_policy="merge_material_coordinates_into_wave_optics",
+    )
+    result = normalize_robust_condition_controls(value)
+    assert result["schema_version"] == "1.4.0"
+    assert "forward_shape_application_mode" not in result
+    assert result["sensitivity_solver_tag"] == "sn1"

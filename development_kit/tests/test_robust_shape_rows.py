@@ -33,6 +33,7 @@ def _iteration() -> dict:
         "status": "accepted",
         "robust_objective_fingerprint": "d" * 64,
         "fresh_forward_fingerprint": "e" * 64,
+        "shape_application_fingerprint": "a" * 64,
         "reason_code": "fresh_forward_accepted",
     }
 

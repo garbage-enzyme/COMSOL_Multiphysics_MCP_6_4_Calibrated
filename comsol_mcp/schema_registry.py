@@ -694,6 +694,7 @@ def _entries() -> list[dict[str, Any]]:
                 "1.1.0",
                 "1.2.0",
                 "1.3.0",
+                "1.4.0",
                 ROBUST_CONDITION_CONTROLS_SCHEMA_VERSION,
             ),
         ),
@@ -701,6 +702,16 @@ def _entries() -> list[dict[str, Any]]:
             ROBUST_SHAPE_CONTROL_RECEIPT_SCHEMA_NAME,
             ROBUST_SHAPE_CONTROL_RECEIPT_SCHEMA_VERSION,
             "comsol_mcp.research.robust_shape_adapter",
+        ),
+        _entry(
+            "comsol_mcp.robust_forward_shape_stage",
+            "1.0.0",
+            "comsol_mcp.jobs.robust_shape_native_runtime",
+        ),
+        _entry(
+            "comsol_mcp.robust_shape_application",
+            "1.0.0",
+            "comsol_mcp.jobs.robust_shape_native_runtime",
         ),
         _entry(
             ROBUST_SMOOTHING_COMPARISON_SCHEMA_NAME,

@@ -9,6 +9,7 @@ import pytest
 
 from comsol_mcp.jobs.robust_shape_optimization import expand_robust_shape_manifest
 from comsol_mcp.jobs.store import read_json
+from comsol_mcp.research.robust_condition_controls import normalize_robust_condition_controls
 from comsol_mcp.research.robust_conditions import normalize_optimization_condition_table
 from comsol_mcp.research.shape_support import normalize_shape_support_policy
 from development_kit.scripts.lin2025_robust_manifest import (
@@ -165,6 +166,70 @@ def test_compiler_emits_self_validated_24_condition_submission(ascii_tmp_path):
     assert receipt["manifest_sha256"] == hashlib.sha256(manifest.read_bytes()).hexdigest()
     assert read_json(envelope)["submission_manifest_sha256"] == receipt["manifest_sha256"]
     assert read_json(manifest)["synthetic_mode"] is False
+
+
+def test_compiler_passes_through_1_5_0_forward_shape_controls(ascii_tmp_path):
+    source = _write_inputs(ascii_tmp_path)
+    campaign_path = ascii_tmp_path / "campaign.json"
+    campaign = read_json(campaign_path)
+    campaign["condition_controls"].update(
+        schema_version="1.5.0",
+        selected_linear_solver_tag="d1",
+        inactive_linear_solver_tags=["i1"],
+        mesh_reference_parameter="mesh_ref_wl",
+        mesh_reference_value="1600[nm]",
+        sensitivity_parametric_sweep_tag="sweep_pedot72",
+        sensitivity_feature_tag="sens_pedot72",
+        sensitivity_solver_tag="sn1",
+        sensitivity_segregated_solver_tag="se1",
+        sensitivity_direct_solver_tags=["dDef", "d1"],
+        sensitivity_solution_tags=["sol1", "sol2", "sol3"],
+        sensitivity_dataset_tags=["dset1", "dset2"],
+        derivative_solution_tag="sol2",
+        derivative_dataset_tag="dset2",
+        sensitivity_gradient_method="adjoint",
+        sensitivity_solver_regeneration="replace_existing_auto_sequence",
+        sensitivity_stationary_nonlinearity="auto",
+        sensitivity_segregated_step_tags=["ss1", "ss2"],
+        sensitivity_merged_step_tag="ss1",
+        sensitivity_removed_step_tag="ss2",
+        sensitivity_merged_linear_solver_tag="d1",
+        sensitivity_constraint_group_policy="merge_material_coordinates_into_wave_optics",
+        forward_shape_application_mode="deformation_stage",
+        forward_deformation_step_tag="dg_step",
+        forward_deformation_step_type="Stationary",
+        forward_deformation_physics_tag="dg_pedot72",
+        forward_solved_shape_expressions=["comp1.material.disp", "comp1.material.disp"],
+        forward_solved_shape_relative_tolerance=1e-6,
+    )
+    campaign_path.write_text(json.dumps(campaign), encoding="utf-8")
+
+    receipt = compile_lin2025_robust_submission(
+        source_model=source,
+        fixture_path=ascii_tmp_path / "fixture.json",
+        tree_path=ascii_tmp_path / "tree.json",
+        support_path=ascii_tmp_path / "support.json",
+        pedot_fixture_path=ascii_tmp_path / "pedot.json",
+        campaign_path=campaign_path,
+        manifest_path=ascii_tmp_path / "licensed-manifest.json",
+        envelope_path=ascii_tmp_path / "licensed-envelope.json",
+    )
+
+    manifest = read_json(ascii_tmp_path / "licensed-manifest.json")
+    controls = manifest["adapter_configuration"]["configuration"]["condition_controls"]
+    assert receipt["condition_count"] == 24
+    assert controls["schema_version"] == "1.5.0"
+    assert controls["forward_shape_application_mode"] == "deformation_stage"
+    assert controls["forward_deformation_step_tag"] == "dg_step"
+    assert controls["forward_solved_shape_relative_tolerance"] == 1e-6
+    normalized = normalize_robust_condition_controls(controls)
+    assert normalized["forward_shape_application_mode"] == "deformation_stage"
+    assert normalized["forward_deformation_physics_tag"] == "dg_pedot72"
+    assert len(
+        expand_robust_shape_manifest(read_json(ascii_tmp_path / "licensed-envelope.json"))[
+            "condition_table"
+        ]["conditions"]
+    ) == 24
 
 
 def test_compiler_omits_null_condition_limit_for_full_run(ascii_tmp_path):

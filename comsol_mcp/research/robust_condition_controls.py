@@ -6,10 +6,12 @@ from typing import Any
 
 from comsol_mcp.durable import domain_sha256_v2
 
-from .derivative_support import _bounded_json, _identifier, _object, _text
+from .derivative_support import _bounded_json, _finite, _identifier, _object, _text
 
 SCHEMA_NAME = "comsol_mcp.robust_condition_controls"
-SCHEMA_VERSION = "1.4.0"
+SCHEMA_VERSION = "1.5.0"
+FORWARD_SHAPE_SCHEMA_VERSION = "1.5.0"
+NATIVE_SENSITIVITY_SCHEMA_VERSION = "1.4.0"
 MESH_REFERENCE_SCHEMA_VERSION = "1.3.0"
 COARSE_SOLVER_MEMORY_SCHEMA_VERSION = "1.2.0"
 SOLVER_SELECTION_SCHEMA_VERSION = "1.1.0"
@@ -82,6 +84,14 @@ _NATIVE_SENSITIVITY_FIELDS = {
     "sensitivity_merged_linear_solver_tag",
     "sensitivity_constraint_group_policy",
 }
+_FORWARD_SHAPE_FIELDS = {
+    "forward_shape_application_mode",
+    "forward_deformation_step_tag",
+    "forward_deformation_step_type",
+    "forward_deformation_physics_tag",
+    "forward_solved_shape_expressions",
+    "forward_solved_shape_relative_tolerance",
+}
 
 
 def normalize_robust_condition_controls(value: object) -> dict[str, Any]:
@@ -100,12 +110,24 @@ def normalize_robust_condition_controls(value: object) -> dict[str, Any]:
         if present_coarse and present_coarse != _COARSE_SOLVER_MEMORY_FIELDS:
             raise ValueError("coarse solver memory controls must be supplied together")
         fields = base_fields | present_coarse
+    elif version == NATIVE_SENSITIVITY_SCHEMA_VERSION:
+        base_fields = (
+            _BASE_FIELDS
+            | _SOLVER_SELECTION_FIELDS
+            | _MESH_REFERENCE_FIELDS
+            | _NATIVE_SENSITIVITY_FIELDS
+        )
+        present_coarse = _COARSE_SOLVER_MEMORY_FIELDS & set(bounded)
+        if present_coarse and present_coarse != _COARSE_SOLVER_MEMORY_FIELDS:
+            raise ValueError("coarse solver memory controls must be supplied together")
+        fields = base_fields | present_coarse
     elif version == SCHEMA_VERSION:
         base_fields = (
             _BASE_FIELDS
             | _SOLVER_SELECTION_FIELDS
             | _MESH_REFERENCE_FIELDS
             | _NATIVE_SENSITIVITY_FIELDS
+            | _FORWARD_SHAPE_FIELDS
         )
         present_coarse = _COARSE_SOLVER_MEMORY_FIELDS & set(bounded)
         if present_coarse and present_coarse != _COARSE_SOLVER_MEMORY_FIELDS:
@@ -210,7 +232,7 @@ def normalize_robust_condition_controls(value: object) -> dict[str, Any]:
             ),
         }
     native_sensitivity: dict[str, Any] = {}
-    if version == SCHEMA_VERSION:
+    if version in {NATIVE_SENSITIVITY_SCHEMA_VERSION, SCHEMA_VERSION}:
         direct_tags = raw["sensitivity_direct_solver_tags"]
         solution_tags = raw["sensitivity_solution_tags"]
         dataset_tags = raw["sensitivity_dataset_tags"]
@@ -337,6 +359,56 @@ def normalize_robust_condition_controls(value: object) -> dict[str, Any]:
                 "sensitivity_constraint_group_policy": group_policy,
             }
         )
+    forward_shape: dict[str, Any] = {}
+    if version == SCHEMA_VERSION:
+        mode = _text(
+            raw["forward_shape_application_mode"],
+            "forward_shape_application_mode",
+            maximum=32,
+        )
+        if mode != "deformation_stage":
+            raise ValueError("forward shape application mode is unsupported")
+        step_type = _text(
+            raw["forward_deformation_step_type"],
+            "forward_deformation_step_type",
+            maximum=32,
+        )
+        if step_type != "Stationary":
+            raise ValueError("forward deformation step type is unsupported")
+        expressions = raw["forward_solved_shape_expressions"]
+        if (
+            not isinstance(expressions, list)
+            or not 1 <= len(expressions) <= 4
+            or any(not isinstance(item, str) or not item.strip() for item in expressions)
+        ):
+            raise ValueError("forward solved-shape expressions must be a bounded nonempty list")
+        tolerance = _finite(
+            raw["forward_solved_shape_relative_tolerance"],
+            "forward_solved_shape_relative_tolerance",
+            positive=True,
+        )
+        if tolerance > 1e-3:
+            raise ValueError("forward solved-shape relative tolerance is too large")
+        forward_shape = {
+            "forward_shape_application_mode": mode,
+            "forward_deformation_step_tag": _identifier(
+                raw["forward_deformation_step_tag"], "forward_deformation_step_tag"
+            ),
+            "forward_deformation_step_type": step_type,
+            "forward_deformation_physics_tag": _identifier(
+                raw["forward_deformation_physics_tag"],
+                "forward_deformation_physics_tag",
+            ),
+            "forward_solved_shape_expressions": [
+                _text(
+                    item,
+                    f"forward_solved_shape_expressions[{index}]",
+                    maximum=256,
+                )
+                for index, item in enumerate(expressions)
+            ],
+            "forward_solved_shape_relative_tolerance": tolerance,
+        }
     body = {
         "schema_name": SCHEMA_NAME,
         "schema_version": version,
@@ -401,6 +473,7 @@ def normalize_robust_condition_controls(value: object) -> dict[str, Any]:
         **coarse_solver_memory,
         **mesh_reference,
         **native_sensitivity,
+        **forward_shape,
     }
     body["controls_fingerprint"] = domain_sha256_v2(SCHEMA_NAME, body)
     if supplied is not None and supplied != body["controls_fingerprint"]:
@@ -410,8 +483,10 @@ def normalize_robust_condition_controls(value: object) -> dict[str, Any]:
 
 __all__ = [
     "COARSE_SOLVER_MEMORY_SCHEMA_VERSION",
+    "FORWARD_SHAPE_SCHEMA_VERSION",
     "LEGACY_SCHEMA_VERSION",
     "MESH_REFERENCE_SCHEMA_VERSION",
+    "NATIVE_SENSITIVITY_SCHEMA_VERSION",
     "SCHEMA_NAME",
     "SCHEMA_VERSION",
     "SOLVER_SELECTION_SCHEMA_VERSION",

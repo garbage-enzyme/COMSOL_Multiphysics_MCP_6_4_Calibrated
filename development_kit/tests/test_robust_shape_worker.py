@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import pytest
 
@@ -810,6 +811,562 @@ def test_native_sensitivity_preparation_follows_exact_condition_staging():
     ]
 
 
+def _forward_stage_controls():
+    return {
+        "schema_version": "1.5.0",
+        "component_tag": "comp1",
+        "geometry_tag": "geom1",
+        "physics_tag": "ewfd",
+        "study_tag": "std1",
+        "study_step_tag": "wl_step",
+        "solution_tag": "sol1",
+        "stationary_solver_tag": "s1",
+        "linear_solver_tag": "d1",
+        "selected_linear_solver_tag": "d1",
+        "inactive_linear_solver_tags": ["i1"],
+        "out_of_core_property": "ooc",
+        "out_of_core_value": "on",
+        "dataset_tag": "dset1",
+        "mesh_tag": "mesh1",
+        "forward_shape_application_mode": "deformation_stage",
+        "forward_deformation_step_tag": "dg_step",
+        "forward_deformation_step_type": "Stationary",
+        "forward_deformation_physics_tag": "dg_pedot72",
+        "forward_solved_shape_expressions": ["comp1.material.disp", "comp1.material.disp"],
+        "forward_solved_shape_relative_tolerance": 1e-6,
+    }
+
+
+class _PhysicsPath:
+    def __init__(self, path):
+        self.path = path
+
+    def resolveModelPath(self):
+        return self.path
+
+
+class _StageStep:
+    def __init__(self, tag, feature_type="Stationary", solve_for_drift=None):
+        self.tag = tag
+        self.feature_type = feature_type
+        self.solve_for = {}
+        self.solve_for_drift = solve_for_drift or {}
+        self.created = False
+
+    def setSolveFor(self, path, requested):
+        self.solve_for[path] = bool(requested)
+
+    def solveFor(self, path):
+        return self.solve_for_drift.get(path, self.solve_for.get(path, None))
+
+    def getType(self):
+        return self.feature_type
+
+
+class _StageFeatures:
+    def __init__(self, items, events):
+        self.items = dict(items)
+        self.order = list(items)
+        self.events = events
+
+    def tags(self):
+        return list(self.order)
+
+    def create(self, tag, feature_type):
+        self.events.append(("create", tag, feature_type))
+        step = _StageStep(tag, feature_type)
+        step.created = True
+        self.items[tag] = step
+        self.order.append(tag)
+        return step
+
+    def move(self, tag, index):
+        self.events.append(("move", tag, index))
+        self.order.remove(tag)
+        self.order.insert(index, tag)
+
+    def remove(self, tag):
+        self.events.append(("remove", tag))
+        self.order.remove(tag)
+        self.items.pop(tag)
+
+    def get(self, tag):
+        return self.items[tag]
+
+
+class _FakeSolverFeature:
+    def __init__(self, tag, feature_type, children=None, properties=None):
+        self.tag = tag
+        self.feature_type = feature_type
+        self.children = list(children or [])
+        self.properties = dict(properties or {})
+        self.active_state = True
+
+    def getType(self):
+        return self.feature_type
+
+    def getString(self, name):
+        if name not in self.properties:
+            raise ValueError(f"unknown property {name}")
+        return self.properties[name]
+
+    def set(self, name, value):
+        self.properties[name] = str(value)
+
+    def active(self, value):
+        self.active_state = bool(value)
+
+    def isActive(self):
+        return self.active_state
+
+    def feature(self, tag=None):
+        if tag is None:
+            return _FakeSolverFeatures(self.children)
+        for child in self.children:
+            if child.tag == tag:
+                return child
+        raise KeyError(tag)
+
+
+class _FakeSolverFeatures:
+    def __init__(self, items):
+        self.items = list(items)
+
+    def tags(self):
+        return [item.tag for item in self.items]
+
+    def feature(self, tag=None):
+        if tag is None:
+            return self
+        for item in self.items:
+            if item.tag == tag:
+                return item
+        raise KeyError(tag)
+
+
+def _regenerated_solver_features(study_order):
+    """Regenerated sol1 tree: per study step a StudyStep plus a Stationary.
+
+    The wave-optics stationary solver owns the declared Direct solver tag and
+    the inactive iterative tag; the deformation solver only owns dDef, so the
+    re-resolution must pick the wave-optics solver structurally.
+    """
+    nodes = []
+    for index, step in enumerate(study_order, start=1):
+        nodes.append(_FakeSolverFeature(f"st{index}", "StudyStep", properties={"studystep": step}))
+        if step == "wl_step":
+            children = [
+                _FakeSolverFeature("dDef", "Direct", properties={"ooc": "auto"}),
+                _FakeSolverFeature("aDef", "Advanced"),
+                _FakeSolverFeature("p1", "Parametric"),
+                _FakeSolverFeature("fc1", "FullyCoupled"),
+                _FakeSolverFeature("d1", "Direct", properties={"ooc": "auto"}),
+                _FakeSolverFeature("i1", "Iterative"),
+            ]
+        else:
+            children = [
+                _FakeSolverFeature("dDef", "Direct"),
+                _FakeSolverFeature("fc1", "FullyCoupled"),
+            ]
+        nodes.append(_FakeSolverFeature(f"s{index}", "Stationary", children=children))
+    return nodes
+
+
+class _FakeSolution:
+    def __init__(self, tag, features):
+        self.tag = tag
+        self._features = _FakeSolverFeatures(features)
+
+    def feature(self, tag=None):
+        if tag is None:
+            return self._features
+        return self._features.feature(tag)
+
+
+def _stage_backend(events, *, with_shape_support=True, solve_for_drift=None):
+    backend = object.__new__(robust_shape_native_runtime.ClientapiLin2025ConditionBackend)
+    features = _StageFeatures(
+        {"wl_step": _StageStep("wl_step", solve_for_drift=solve_for_drift)},
+        events,
+    )
+    dg = _PhysicsPath("/physics/dg_pedot72")
+    ewfd = _PhysicsPath("/physics/ewfd")
+
+    class Physics:
+        def __init__(self, node):
+            self.node = node
+
+        def resolveModelPath(self):
+            return self.node.path
+
+    class PhysicsCollection:
+        def __init__(self):
+            self.nodes = {"dg_pedot72": Physics(dg), "ewfd": Physics(ewfd)}
+
+        def get(self, tag):
+            events.append(("physics", tag))
+            return self.nodes[tag]
+
+        def __call__(self, tag):
+            return self.get(tag)
+
+    class Component:
+        def physics(self, _tag=None):
+            return PhysicsCollection()
+
+    class Components:
+        def get(self, tag):
+            events.append(("component", tag))
+            return Component()
+
+        def __call__(self, tag):
+            return self.get(tag)
+
+    class Solutions:
+        def __init__(self):
+            self.tree = {
+                "sol1": _FakeSolution("sol1", _regenerated_solver_features(["wl_step"])),
+            }
+            self.items = ["sol1"]
+
+        def remove(self, tag):
+            events.append(("sol_remove", tag))
+            self.items.remove(tag)
+            self.tree.pop(tag, None)
+
+        def tags(self):
+            return list(self.items)
+
+        def sol(self, tag):
+            return self.tree[tag]
+
+    solutions = Solutions()
+
+    class Study:
+        def feature(self):
+            return features
+
+        def createAutoSequences(self, scope):
+            events.append(("auto_sequences", scope))
+            features.events.append(("auto_sequences", scope))
+            study_order = list(features.order)
+            solutions.tree["sol1"] = _FakeSolution(
+                "sol1", _regenerated_solver_features(study_order)
+            )
+            solutions.items = ["sol1", "sol2"] if len(study_order) > 1 else ["sol1"]
+            solutions.tree.setdefault("sol2", _FakeSolution("sol2", []))
+
+    class Java:
+        def study(self, _tag):
+            return Study()
+
+        def component(self, _tag=None):
+            return Components() if _tag is None else Component()
+
+        def sol(self, *args):
+            if args:
+                return solutions.sol(args[0])
+            return solutions
+
+    class Model:
+        java = Java()
+
+    backend.model = Model()
+    backend.controls = _forward_stage_controls()
+    backend.study_step = features.items["wl_step"]
+    backend.study = Study()
+    backend.shape_support = (
+        {
+            "center_um": [0.85, 0.0],
+            "baseline_radius_um": 0.26,
+        }
+        if with_shape_support
+        else {}
+    )
+    backend.support = {
+        "variables": [
+            {
+                "variable_id": "pedot_cylinder_radius_x",
+                "unit": "nm",
+                "baseline": 260.0,
+                "mapping": {
+                    "feature_tag": "pedot_pedot72",
+                    "feature_type": "PrescribedMeshDisplacement",
+                    "property_index": 0,
+                    "property_name": "dx",
+                },
+            },
+            {
+                "variable_id": "pedot_cylinder_radius_y",
+                "unit": "nm",
+                "baseline": 260.0,
+                "mapping": {
+                    "feature_tag": "pedot_pedot72",
+                    "feature_type": "PrescribedMeshDisplacement",
+                    "property_index": 1,
+                    "property_name": "dx",
+                },
+            },
+        ]
+    }
+    backend._initial_values = [272.0, 272.0]
+    backend.working_model_path = Path("C:/mcp_tests/robust-working.mph")
+    return backend
+
+
+def test_forward_shape_stage_creates_ordered_scoped_step_and_regenerates():
+    events = []
+    backend = _stage_backend(events)
+    receipt = backend._prepare_forward_shape_stage()
+
+    assert receipt["mode"] == "deformation_stage"
+    assert receipt["study_step_order"] == ["dg_step", "wl_step"]
+    assert receipt["solve_for"] == {
+        "deformation_step_forward": False,
+        "deformation_step_deformation": True,
+        "forward_step_deformation": False,
+        "forward_step_forward": True,
+    }
+    assert receipt["solution_tags"] == ["sol1", "sol2"]
+    assert receipt["forward_solver"] == {
+        "stationary_solver_tag": "s2",
+        "linear_solver_tag": "d1",
+        "observed_solution_tags": ["sol1", "sol2"],
+    }
+    assert backend.stationary_solver.tag == "s2"
+    assert backend.linear_solver.tag == "d1"
+    assert ("create", "dg_step", "Stationary") in events
+    assert ("move", "dg_step", 0) in events
+    assert ("sol_remove", "sol1") in events
+    assert ("auto_sequences", "all") in events
+    assert receipt["receipt_fingerprint"]
+    assert receipt["receipt_fingerprint"] == backend._forward_stage_readback["receipt_fingerprint"]
+
+
+def test_forward_shape_stage_re_resolves_solver_for_memory_and_selection_policy():
+    """Regression: regenerating the sequence invalidates cached solver nodes.
+
+    The declared stationary tag now belongs to the deformation solver; the
+    memory and selection policies must act on the re-resolved wave-optics
+    solver (s2/d1), not on a dangling or wrong-solver node.
+    """
+    events = []
+    backend = _stage_backend(events)
+    backend._prepare_forward_shape_stage()
+
+    memory = backend._set_solver_memory_policy()
+    assert memory["requested"] == "on"
+    assert memory["observed"] == "on"
+    assert backend.linear_solver.properties["ooc"] == "on"
+    assert backend.stationary_solver.tag == "s2"
+
+    selection = backend._set_solver_selection()
+    assert selection["observed_active"] == {"d1": True, "i1": False}
+    d1 = backend.stationary_solver.feature("d1")
+    i1 = backend.stationary_solver.feature("i1")
+    assert d1.isActive() is True
+    assert i1.isActive() is False
+
+
+def test_forward_shape_stage_rejects_existing_step_or_drift():
+    events = []
+    backend = _stage_backend(events)
+    backend.controls = dict(backend.controls)
+    backend.controls["forward_deformation_step_tag"] = "wl_step"
+    with pytest.raises(ValueError, match="already exists"):
+        backend._prepare_forward_shape_stage()
+
+    events = []
+    backend = _stage_backend(
+        events,
+        solve_for_drift={"/physics/dg_pedot72": True},
+    )
+    with pytest.raises(ValueError, match="solve-for readback differs"):
+        backend._prepare_forward_shape_stage()
+
+
+def test_forward_shape_controls_require_1_5_0_and_deformation_stage():
+    backend = object.__new__(robust_shape_native_runtime.ClientapiLin2025ConditionBackend)
+    backend.controls = {"schema_version": "1.4.0"}
+    with pytest.raises(ValueError, match="1.5.0"):
+        backend._forward_shape_controls()
+    backend.controls = {"schema_version": "1.5.0", "forward_shape_application_mode": "remesh"}
+    with pytest.raises(ValueError, match="mode is unsupported"):
+        backend._forward_shape_controls()
+
+
+def _application_model(events, *, displacement=(12.0e-9, 12.0e-9)):
+    """Fake model for run_shape_application with vertex-aligned evaluations."""
+
+    class MeshStats:
+        def getNumElem(self):
+            return 18985
+
+        def getMinQuality(self):
+            return 0.2314
+
+    class Mesh:
+        def stat(self):
+            return MeshStats()
+
+    class PhysicsPath:
+        def __init__(self):
+            self.active_state = True
+
+        def active(self, value):
+            self.active_state = bool(value)
+
+        def isActive(self):
+            return self.active_state
+
+        def resolveModelPath(self):
+            return "/physics/dg_pedot72"
+
+    class Physics:
+        def __init__(self):
+            self.active_state = True
+
+        def active(self, value):
+            self.active_state = bool(value)
+
+        def isActive(self):
+            return self.active_state
+
+        def resolveModelPath(self):
+            return "/physics/ewfd"
+
+    class PhysicsCollection:
+        def __init__(self):
+            self.dg = PhysicsPath()
+
+        def get(self, tag):
+            return self.dg if tag == "dg_pedot72" else Physics()
+
+        def __call__(self, tag):
+            return self.get(tag)
+
+    class Component:
+        def physics(self, _tag=None):
+            return PhysicsCollection()
+
+        def mesh(self, _tag):
+            return Mesh()
+
+    class Components:
+        def get(self, tag):
+            return Component()
+
+        def __call__(self, tag):
+            return self.get(tag)
+
+    class MeshNode:
+        def __init__(self, tag):
+            self.name = tag
+
+        def tag(self):
+            return self.name
+
+    class DatasetCollection:
+        def __iter__(self):
+            return iter([MeshNode("dset1")])
+
+    class Java:
+        def component(self, _tag=None):
+            return Components() if _tag is None else Component()
+
+        def save(self, _path):
+            events.append(("save",))
+
+    class Model:
+        java = Java()
+
+        def __truediv__(self, group):
+            assert group == "datasets"
+            return DatasetCollection()
+
+        def evaluate(self, expressions, dataset=None, outer=1):
+            assert dataset is not None and outer == 1
+            events.append(("evaluate", list(expressions)))
+            xs = [1.11e-6, 0.85e-6]
+            ys = [0.0, 2.6e-7]
+            results = [xs, ys]
+            for expression in expressions[2:]:
+                results.append(
+                    [displacement[0], displacement[1]] if "disp" in expression else [0.0, 0.0]
+                )
+            return results
+
+    return Model()
+
+
+def test_shape_application_solves_stage_and_reads_back_solved_shape():
+    events = []
+    backend = _stage_backend(events)
+    backend._prepare_forward_shape_stage()
+    backend.model = _application_model(events)
+
+    class Study:
+        def run(self):
+            events.append(("study_run",))
+
+    backend.study = Study()
+    receipt = backend.run_shape_application()
+
+    assert ("study_run",) in events
+    assert ("save",) in events
+    assert receipt["mode"] == "deformation_stage"
+    assert receipt["initial_values"] == [272.0, 272.0]
+    assert receipt["mesh_elements"] == 18985
+    assert receipt["minimum_mesh_quality"] == 0.2314
+    solved = receipt["solved_shape"]
+    assert [item["variable_id"] for item in solved] == [
+        "pedot_cylinder_radius_x",
+        "pedot_cylinder_radius_y",
+    ]
+    assert all(item["observed_displacement_m"] == pytest.approx(12.0e-9) for item in solved)
+    assert all(item["matches"] for item in solved)
+    assert receipt["receipt_fingerprint"]
+    assert receipt["stage_fingerprint"] == backend._forward_stage_readback["receipt_fingerprint"]
+
+
+def test_shape_application_readback_mismatch_fails_closed():
+    events = []
+    backend = _stage_backend(events)
+    backend._prepare_forward_shape_stage()
+    backend.model = _application_model(events, displacement=(1.0e-9, 1.0e-9))
+
+    class Study:
+        def run(self):
+            events.append(("study_run",))
+
+    backend.study = Study()
+    with pytest.raises(ValueError, match="solved-shape readback differs"):
+        backend.run_shape_application()
+
+
+def test_shape_application_requires_prepared_initial_values():
+    events = []
+    backend = _stage_backend(events)
+    del backend._initial_values
+    with pytest.raises(RuntimeError, match="requires prepared initial values"):
+        backend.run_shape_application()
+
+
+def test_worker_shape_application_fingerprint_helper():
+    assert robust_shape_worker._shape_application_fingerprint({}) is None
+    assert (
+        robust_shape_worker._shape_application_fingerprint(
+            {"shape_application": {"receipt_fingerprint": "a" * 64}}
+        )
+        == "a" * 64
+    )
+    assert robust_shape_worker._shape_application_fingerprint({"shape_application": None}) is None
+    with pytest.raises(ValueError, match="fingerprint is invalid"):
+        robust_shape_worker._shape_application_fingerprint(
+            {"shape_application": {"receipt_fingerprint": "short"}}
+        )
+
+
 def test_native_sensitivity_constraint_groups_are_merged_and_read_back():
     class Step:
         def __init__(self, variables, components, solver):
@@ -908,6 +1465,7 @@ def test_native_runtime_persists_controls_before_condition_failure(ascii_tmp_pat
         def __init__(self, model, _spec, *, working_model_path):
             self.model = model
             self.working_model_path = working_model_path
+            self.controls = {}
 
         def prepare(self, _initial_values):
             return {"receipt_fingerprint": "a" * 64, "configured": True}

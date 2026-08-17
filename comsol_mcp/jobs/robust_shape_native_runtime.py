@@ -26,6 +26,13 @@ def _ordered_unique(values: list[str]) -> list[str]:
     return list(dict.fromkeys(values))
 
 
+FORWARD_SHAPE_STAGE_SCHEMA_NAME = "comsol_mcp.robust_forward_shape_stage"
+FORWARD_SHAPE_STAGE_SCHEMA_VERSION = "1.0.0"
+FORWARD_SHAPE_APPLICATION_SCHEMA_NAME = "comsol_mcp.robust_shape_application"
+FORWARD_SHAPE_APPLICATION_SCHEMA_VERSION = "1.0.0"
+FORWARD_SHAPE_CONTROLS_VERSION = "1.5.0"
+
+
 def _get(container: Any, tag: str) -> Any:
     errors: list[Exception] = []
     for method_name in ("get", "feature"):
@@ -199,9 +206,272 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
             "observed_active": observed,
         }
 
+    def _forward_shape_controls(self) -> dict[str, Any]:
+        """Return the explicit forward shape application block with readback."""
+        if self.controls.get("schema_version") != FORWARD_SHAPE_CONTROLS_VERSION:
+            raise ValueError("forward shape application requires robust condition controls 1.5.0")
+        mode = self.controls.get("forward_shape_application_mode")
+        if mode != "deformation_stage":
+            raise ValueError("forward shape application mode is unsupported")
+        step_tag = self.controls.get("forward_deformation_step_tag")
+        step_type = self.controls.get("forward_deformation_step_type")
+        physics_tag = self.controls.get("forward_deformation_physics_tag")
+        expressions = self.controls.get("forward_solved_shape_expressions")
+        tolerance = self.controls.get("forward_solved_shape_relative_tolerance")
+        if (
+            not isinstance(step_tag, str)
+            or not step_tag
+            or step_type != "Stationary"
+            or not isinstance(physics_tag, str)
+            or not physics_tag
+            or not isinstance(expressions, list)
+            or not expressions
+            or isinstance(tolerance, bool)
+            or not isinstance(tolerance, (int, float))
+            or not math.isfinite(float(tolerance))
+            or float(tolerance) <= 0.0
+        ):
+            raise ValueError("forward shape application controls are invalid")
+        return {
+            "mode": mode,
+            "step_tag": step_tag,
+            "step_type": step_type,
+            "physics_tag": physics_tag,
+            "expressions": [str(item) for item in expressions],
+            "tolerance": float(tolerance),
+        }
+
+    def _prepare_forward_shape_stage(self) -> dict[str, Any]:
+        """Create the deformation-only study step and regenerate the sequence.
+
+        The study gains one stationary step before the wave-optics step. The
+        deformation step solves only the derived shape physics; the wave-optics
+        step solves only the forward physics on the deformed configuration, so
+        the forward solve stays linear while remaining physically identical to
+        the native gradient variable definition.
+        """
+        forward = self._forward_shape_controls()
+        controls = self.controls
+        study = self.model.java.study(controls["study_tag"])
+        features = study.feature()
+        step_tag = forward["step_tag"]
+        if step_tag in _tags(features):
+            raise ValueError("forward deformation study step already exists before preparation")
+        step = features.create(step_tag, forward["step_type"])
+        features.move(step_tag, 0)
+        component = self.model.java.component(controls["component_tag"])
+        deformation = _get(component.physics(), forward["physics_tag"])
+        forward_physics = _get(component.physics(), controls["physics_tag"])
+        deformation_path = str(deformation.resolveModelPath())
+        forward_path = str(forward_physics.resolveModelPath())
+        step.setSolveFor(forward_path, False)
+        step.setSolveFor(deformation_path, True)
+        self.study_step.setSolveFor(deformation_path, False)
+        self.study_step.setSolveFor(forward_path, True)
+        expected_solve_for = {
+            "deformation_step_forward": False,
+            "deformation_step_deformation": True,
+            "forward_step_deformation": False,
+            "forward_step_forward": True,
+        }
+        observed_solve_for = {
+            "deformation_step_forward": bool(step.solveFor(forward_path)),
+            "deformation_step_deformation": bool(step.solveFor(deformation_path)),
+            "forward_step_deformation": bool(self.study_step.solveFor(deformation_path)),
+            "forward_step_forward": bool(self.study_step.solveFor(forward_path)),
+        }
+        if observed_solve_for != expected_solve_for:
+            raise ValueError("forward shape stage solve-for readback differs")
+        self.model.java.sol().remove(controls["solution_tag"])
+        self.study.createAutoSequences("all")
+        observed_solutions = _tags(self.model.java.sol())
+        if controls["solution_tag"] not in observed_solutions:
+            raise ValueError("forward shape stage solution identity changed")
+        observed_order = _tags(features)
+        if observed_order[:1] != [step_tag] or controls["study_step_tag"] not in observed_order[1:]:
+            raise ValueError("forward shape stage study step order changed")
+        # Regenerating the sequence destroys every previously resolved solver
+        # node and re-tags the stationary solvers (the wave-optics step no
+        # longer owns the declared stationary tag).  Re-resolve the forward
+        # solver structurally: the Stationary feature that follows the
+        # wave-optics StudyStep and owns the declared linear solver tag.
+        solution = self.model.java.sol(controls["solution_tag"])
+        forward_solver_tag = None
+        after_forward_step = False
+        for feature_tag in _tags(solution.feature()):
+            feature = solution.feature(feature_tag)
+            feature_type = str(feature.getType())
+            if feature_type == "StudyStep":
+                try:
+                    step_tag_name = str(feature.getString("studystep"))
+                except Exception:
+                    step_tag_name = ""
+                after_forward_step = step_tag_name == controls["study_step_tag"]
+                continue
+            if feature_type != "Stationary" or not after_forward_step:
+                continue
+            try:
+                children = {
+                    child_tag: str(feature.feature(child_tag).getType())
+                    for child_tag in _tags(feature.feature())
+                }
+            except Exception:
+                children = {}
+            if children.get(controls["linear_solver_tag"]) == "Direct":
+                forward_solver_tag = feature_tag
+                break
+        if forward_solver_tag is None:
+            raise ValueError("forward shape stage forward solver identity changed")
+        self.stationary_solver = solution.feature(forward_solver_tag)
+        self.linear_solver = self.stationary_solver.feature(controls["linear_solver_tag"])
+        forward_solver_readback = {
+            "stationary_solver_tag": forward_solver_tag,
+            "linear_solver_tag": controls["linear_solver_tag"],
+            "observed_solution_tags": observed_solutions,
+        }
+        readback = {
+            "mode": forward["mode"],
+            "step_tag": step_tag,
+            "step_type": str(step.getType()),
+            "deformation_physics_tag": forward["physics_tag"],
+            "deformation_physics_path": deformation_path,
+            "forward_physics_tag": controls["physics_tag"],
+            "forward_physics_path": forward_path,
+            "solve_for": observed_solve_for,
+            "study_step_order": observed_order,
+            "solution_tags": observed_solutions,
+            "solution_tag": controls["solution_tag"],
+            "forward_solver": forward_solver_readback,
+        }
+        readback["receipt_fingerprint"] = domain_sha256_v2(
+            FORWARD_SHAPE_STAGE_SCHEMA_NAME, readback
+        )
+        self._forward_stage_readback = readback
+        self._forward_stage_prepared = True
+        return readback
+
+    def run_shape_application(self) -> dict[str, Any]:
+        """Solve the deformation-only stage and prove the solved shape.
+
+        Runs the regenerated two-step study once: the deformation step solves
+        the derived shape physics (linear), then the wave-optics step solves
+        the forward physics on the deformed configuration (still linear).  The
+        solved-shape readback samples the solved mesh-displacement magnitude at
+        each variable's axis quadrant vertex of the PEDOT boundary and compares
+        it with the requested radius change; a mismatch fails closed instead of
+        silently solving the baseline shape.
+        """
+        forward = self._forward_shape_controls()
+        controls = self.controls
+        if not getattr(self, "_initial_values", None):
+            raise RuntimeError("forward shape application requires prepared initial values")
+        self.set_shape_deformation_active(True)
+        self.model.java.save(str(self.working_model_path))
+        self.study.run()
+        dataset_tag = controls["dataset_tag"]
+        dataset = _dataset_by_tag(self.model, dataset_tag)
+        mesh = _get(self.model.java.component(), controls["component_tag"]).mesh(
+            controls["mesh_tag"]
+        )
+        statistics = mesh.stat()
+        unit_scale = {"m": 1.0, "um": 1e-6, "nm": 1e-9}
+        variables = self.support["variables"]
+        if len(forward["expressions"]) != len(variables):
+            raise ValueError("forward solved-shape expression count differs from variables")
+        support = self.shape_support
+        try:
+            center_m = [float(item) * 1e-6 for item in support["center_um"]]
+            baseline_m = float(support["baseline_radius_um"]) * 1e-6
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("forward shape support center/baseline is invalid") from exc
+        if len(center_m) < 2 or not all(math.isfinite(item) for item in center_m):
+            raise ValueError("forward shape support center is invalid")
+        if not math.isfinite(baseline_m) or baseline_m <= 0.0:
+            raise ValueError("forward shape support baseline radius is invalid")
+        readback_values = self.model.evaluate(
+            ["x", "y", *forward["expressions"]],
+            dataset=dataset,
+            outer=1,
+        )
+        if len(readback_values) != 2 + len(forward["expressions"]):
+            raise ValueError("forward solved-shape readback count is invalid")
+        xs = _flatten_real(readback_values[0])
+        ys = _flatten_real(readback_values[1])
+        if len(xs) != len(ys) or not xs:
+            raise ValueError("forward solved-shape readback mesh coordinates are invalid")
+        readbacks: list[dict[str, Any]] = []
+        for index, (expression, variable) in enumerate(
+            zip(forward["expressions"], variables, strict=True)
+        ):
+            try:
+                scale = unit_scale[variable["unit"]]
+            except KeyError as exc:
+                raise ValueError("forward shape variable unit is unsupported") from exc
+            mapping = variable["mapping"]
+            try:
+                axis = int(mapping["property_index"])
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ValueError("forward shape variable axis mapping is invalid") from exc
+            if axis not in {0, 1}:
+                raise ValueError("forward shape variable axis is unsupported")
+            point = [
+                center_m[0] + (baseline_m if axis == 0 else 0.0),
+                center_m[1] + (baseline_m if axis == 1 else 0.0),
+            ]
+            nearest = min(
+                range(len(xs)),
+                key=lambda item: (xs[item] - point[0]) ** 2 + (ys[item] - point[1]) ** 2,
+            )
+            if abs(xs[nearest] - point[0]) > 1e-8 or abs(ys[nearest] - point[1]) > 1e-8:
+                raise ValueError("forward solved-shape readback vertex is not on the axis point")
+            observed_m = float(readback_values[2 + index][nearest])
+            if not math.isfinite(observed_m):
+                raise ValueError("forward solved-shape readback is nonfinite")
+            requested_m = float(self._initial_values[index]) * scale
+            baseline_value_m = float(variable["baseline"]) * scale
+            expected_m = abs(requested_m - baseline_value_m)
+            matches = math.isclose(
+                observed_m,
+                expected_m,
+                rel_tol=forward["tolerance"],
+                abs_tol=max(1e-12, expected_m * forward["tolerance"]),
+            )
+            readbacks.append(
+                {
+                    "variable_id": variable["variable_id"],
+                    "expression": expression,
+                    "requested_value": float(self._initial_values[index]),
+                    "unit": variable["unit"],
+                    "baseline_value": float(variable["baseline"]),
+                    "axis_point_m": point,
+                    "readback_vertex_index": nearest,
+                    "expected_displacement_m": expected_m,
+                    "observed_displacement_m": observed_m,
+                    "matches": matches,
+                }
+            )
+        if not all(item["matches"] for item in readbacks):
+            raise ValueError("forward solved-shape readback differs from the requested shape")
+        body: dict[str, Any] = {
+            "schema_name": FORWARD_SHAPE_APPLICATION_SCHEMA_NAME,
+            "schema_version": FORWARD_SHAPE_APPLICATION_SCHEMA_VERSION,
+            "mode": forward["mode"],
+            "initial_values": [float(value) for value in self._initial_values],
+            "stage_fingerprint": self._forward_stage_readback["receipt_fingerprint"],
+            "dataset_tag": dataset_tag,
+            "solution_tag": controls["solution_tag"],
+            "solved_shape": readbacks,
+            "mesh_elements": int(statistics.getNumElem()),
+            "minimum_mesh_quality": float(statistics.getMinQuality()),
+            "solver_started": True,
+        }
+        body["receipt_fingerprint"] = domain_sha256_v2(FORWARD_SHAPE_APPLICATION_SCHEMA_NAME, body)
+        return body
+
     def prepare(self, initial_values: list[float]) -> dict[str, Any]:
         if len(initial_values) != 2:
             raise ValueError("Lin2025 native runtime requires two initial radius values")
+        self._initial_values = [float(value) for value in initial_values]
         controls = prepare_lin2025_pedot_shape_controls(
             self.material, self.fixture, self.tree, self.support
         )
@@ -219,13 +489,20 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
         )
         mesh_reference = self._set_mesh_reference_policy()
         mesh.run()
+        forward_shape = None
+        if self.controls.get("schema_version") == FORWARD_SHAPE_CONTROLS_VERSION:
+            forward_shape = self._prepare_forward_shape_stage()
         body: dict[str, Any] = {
             "shape_controls": controls,
-            "forward_shape_deformation": self.set_shape_deformation_active(False),
+            "forward_shape_deformation": self.set_shape_deformation_active(
+                forward_shape is not None
+            ),
             "mesh_reference": mesh_reference,
             "solver_memory": self._set_solver_memory_policy(),
             "solver_selection": self._set_solver_selection(),
         }
+        if forward_shape is not None:
+            body["forward_shape_stage"] = forward_shape
         body["receipt_fingerprint"] = domain_sha256_v2("comsol_mcp.robust_native_controls", body)
         return body
 
@@ -440,6 +717,21 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
         if variable_ids != [item["variable_id"] for item in self.support["variables"]]:
             raise ValueError("native sensitivity variable order differs from support")
         features = self.study.feature()
+        # The native gradient solves the deformation coupled with the wave
+        # optics in the regenerated sequence, exactly as before the forward
+        # shape stage existed.  Remove the staged deformation step and restore
+        # the wave-optics step's solve-for scope before regenerating.
+        if controls.get("schema_version") == FORWARD_SHAPE_CONTROLS_VERSION:
+            step_tag = controls["forward_deformation_step_tag"]
+            if step_tag not in _tags(features):
+                raise ValueError("forward deformation study step is absent before sensitivity")
+            forward = self._forward_shape_controls()
+            component = self.model.java.component(controls["component_tag"])
+            deformation_path = str(
+                _get(component.physics(), forward["physics_tag"]).resolveModelPath()
+            )
+            self.study_step.setSolveFor(deformation_path, True)
+            features.remove(step_tag)
         sweep_tag = controls["sensitivity_parametric_sweep_tag"]
         sensitivity_tag = controls["sensitivity_feature_tag"]
         if sweep_tag in _tags(features) or sensitivity_tag in _tags(features):
@@ -801,6 +1093,10 @@ def execute_lin2025_conditions(
         controls = backend.prepare(spec["initial_values"])
         atomic_write_json(directory / "robust-controls.json", controls)
         model.java.save(str(configured))
+        shape_application = None
+        if backend.controls.get("schema_version") == FORWARD_SHAPE_CONTROLS_VERSION:
+            shape_application = backend.run_shape_application()
+            atomic_write_json(directory / "shape-application.json", shape_application)
         observations = execute_robust_conditions(
             spec,
             directory,
@@ -810,7 +1106,10 @@ def execute_lin2025_conditions(
         )
         aggregate_gradient = None
         sensitivity_controls = None
-        if include_gradients and backend.controls.get("schema_version") == "1.4.0":
+        if include_gradients and backend.controls.get("schema_version") in {
+            "1.4.0",
+            FORWARD_SHAPE_CONTROLS_VERSION,
+        }:
             from .robust_gradient_runtime import execute_native_condition_gradients
 
             aggregate_gradient = execute_native_condition_gradients(
@@ -825,6 +1124,7 @@ def execute_lin2025_conditions(
             "observations": observations,
             "aggregate_gradient": aggregate_gradient,
             "sensitivity_controls": sensitivity_controls,
+            "shape_application": shape_application,
             "controls_fingerprint": controls.get("receipt_fingerprint"),
             "solver_started": True,
             "configured_model": str(configured),

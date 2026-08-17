@@ -319,6 +319,17 @@ def _candidate_spec(spec: dict[str, Any], values: list[float]) -> dict[str, Any]
     return candidate
 
 
+def _shape_application_fingerprint(result: dict[str, Any]) -> str | None:
+    """Return the durable shape-application receipt fingerprint when present."""
+    application = result.get("shape_application")
+    if not isinstance(application, dict):
+        return None
+    fingerprint = application.get("receipt_fingerprint")
+    if not isinstance(fingerprint, str) or len(fingerprint) != 64:
+        raise ValueError("licensed shape application receipt fingerprint is invalid")
+    return fingerprint.casefold()
+
+
 def _licensed_optimizer_terminal(
     optimizer_state: dict[str, Any], accepted_steps: int
 ) -> tuple[dict[str, str], str]:
@@ -610,6 +621,7 @@ def _run_synthetic(root: str, job_id: str) -> int:
                 "status": "accepted",
                 "robust_objective_fingerprint": objective["receipt_fingerprint"],
                 "fresh_forward_fingerprint": objective["receipt_fingerprint"],
+                "shape_application_fingerprint": None,
                 "reason_code": "synthetic_contract_only",
             },
         )
@@ -839,6 +851,7 @@ def _run_licensed(root: str, job_id: str) -> int:
                     "status": "rejected",
                     "robust_objective_fingerprint": smoke_fingerprint,
                     "fresh_forward_fingerprint": None,
+                    "shape_application_fingerprint": None,
                     "reason_code": "licensed_condition_smoke_only",
                 },
             )
@@ -890,6 +903,7 @@ def _run_licensed(root: str, job_id: str) -> int:
                 "status": "accepted",
                 "robust_objective_fingerprint": objective["receipt_fingerprint"],
                 "fresh_forward_fingerprint": objective["receipt_fingerprint"],
+                "shape_application_fingerprint": _shape_application_fingerprint(result),
                 "reason_code": "licensed_baseline_gradient_accepted",
             },
         )
@@ -912,8 +926,7 @@ def _run_licensed(root: str, job_id: str) -> int:
             # raises after the expensive solve and obscures the durable stop.
             required_forward_solves = len(spec["condition_table"]["conditions"])
             remaining = (
-                optimizer_state["max_condition_solves"]
-                - optimizer_state["condition_solves_used"]
+                optimizer_state["max_condition_solves"] - optimizer_state["condition_solves_used"]
             )
             if remaining < required_forward_solves:
                 optimizer_state = {**optimizer_state, "status": "budget_exhausted"}
@@ -969,6 +982,9 @@ def _run_licensed(root: str, job_id: str) -> int:
                     "status": "accepted" if accepted else "rejected",
                     "robust_objective_fingerprint": candidate_objective["receipt_fingerprint"],
                     "fresh_forward_fingerprint": candidate_objective["receipt_fingerprint"],
+                    "shape_application_fingerprint": _shape_application_fingerprint(
+                        candidate_result
+                    ),
                     "reason_code": (
                         "gcmma_conservative_fresh_forward_accepted"
                         if accepted

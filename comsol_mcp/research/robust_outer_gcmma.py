@@ -76,7 +76,7 @@ def verify_mmapy_backend(expected: Mapping[str, Any]) -> dict[str, Any]:
         sys.path.insert(0, wheel_text)
     try:
         version = importlib.metadata.version("mmapy")
-        from mmapy import asymp, concheck, gcmmasub, raaupdate  # type: ignore[import-not-found]
+        from mmapy import asymp, concheck, gcmmasub, raaupdate
     except (ImportError, importlib.metadata.PackageNotFoundError) as exc:
         raise RuntimeError(
             "mmapy 0.3.1 is required only for the explicit robust GCMMA execution path"
@@ -315,8 +315,8 @@ def propose_gcmma_candidate(
     )
     m = 0
     n = len(current["variable_ids"])
-    empty_vector = np.empty((m, 1), dtype=float)
-    empty_matrix = np.empty((m, n), dtype=float)
+    empty_vector: np.ndarray = np.empty((m, 1), dtype=float)
+    empty_matrix: np.ndarray = np.empty((m, n), dtype=float)
     outer = current["outer_iteration"] + 1
     low, upp, raa0, raa = runtime["asymp"](
         outer,
@@ -457,8 +457,8 @@ def accept_gcmma_candidate(
             xmax = np.minimum(np.ones_like(xval), xval + current["move_limit"])
             low = _column(np, current["lower_asymptotes"])
             upp = _column(np, current["upper_asymptotes"])
-            empty_vector = np.empty((0, 1), dtype=float)
-            empty_matrix = np.empty((0, len(current["variable_ids"])), dtype=float)
+            empty_vector: np.ndarray = np.empty((0, 1), dtype=float)
+            empty_matrix: np.ndarray = np.empty((0, len(current["variable_ids"])), dtype=float)
             ranges = [
                 hi - lo
                 for lo, hi in zip(current["lower_bounds"], current["upper_bounds"], strict=True)

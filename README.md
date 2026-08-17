@@ -268,6 +268,17 @@ automatic coarsening rule or a substitute for independent finer-mesh finalist
 convergence; accepted gradients still require independent finite-difference and
 directional reconciliation.
 
+Robust condition-controls schema `1.5.0` adds the mandatory
+`forward_shape_application` block so every licensed candidate is evaluated on a
+mesh actually deformed by the candidate shape. A dedicated linear `Stationary`
+deformation stage solving only the derived shape physics is placed before the
+Wave Optics step, the regenerated sequence is scoped per step, and the solved
+shape is read back per variable at the axis vertices and compared with the
+requested radius change (relative tolerance declared by the caller) before any
+condition solve is trusted. The gradient path removes the staged step and
+regenerates the coupled sequence, so native adjoint receipts are unchanged; the
+`1.4.0` contract remains readable.
+
 Profiles only control the visibility of COMSOL automation/simulation tools and
 future autonomous-exploration tools. Orthogonal functionality uses independent,
 default-off Boolean feature gates that compose with every profile and with each

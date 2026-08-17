@@ -12,7 +12,7 @@ from comsol_mcp.durable import append_jsonl_record, domain_sha256_v2, read_compl
 from .journal import locked_journal, recover_jsonl_tail
 
 ROBUST_SHAPE_ROW_SCHEMA_NAME = "comsol_mcp.robust_shape_optimization_row"
-ROBUST_SHAPE_ROW_SCHEMA_VERSION = "1.0.0"
+ROBUST_SHAPE_ROW_SCHEMA_VERSION = "1.1.0"
 MAX_ROWS = 100_000
 MAX_ROW_BYTES = 256 * 1024
 _KINDS = {
@@ -140,6 +140,7 @@ def _payload(value: object, kind: str) -> dict[str, Any]:
             "status",
             "robust_objective_fingerprint",
             "fresh_forward_fingerprint",
+            "shape_application_fingerprint",
             "reason_code",
         }
         if set(raw) != fields:
@@ -158,6 +159,9 @@ def _payload(value: object, kind: str) -> dict[str, Any]:
             ),
             "fresh_forward_fingerprint": _optional_digest(
                 raw["fresh_forward_fingerprint"], "fresh_forward_fingerprint"
+            ),
+            "shape_application_fingerprint": _optional_digest(
+                raw["shape_application_fingerprint"], "shape_application_fingerprint"
             ),
             "reason_code": _identifier(raw["reason_code"], "reason_code"),
         }
