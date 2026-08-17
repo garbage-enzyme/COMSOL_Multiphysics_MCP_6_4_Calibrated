@@ -421,24 +421,39 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
             requested_m = float(self._initial_values[index]) * scale
             baseline_value_m = float(variable["baseline"]) * scale
             expected_movement_m = abs(requested_m - baseline_value_m)
-            vertex = max(
-                range(len(component_values)),
-                key=lambda item: abs(component_values[item]),
-            )
-            max_component_m = float(component_values[vertex])
-            if not math.isfinite(max_component_m):
-                raise ValueError("forward solved-shape readback is nonfinite")
-            observed_radius_m = (
-                float(xs[vertex]) - center_m[0] if axis == 0 else float(ys[vertex]) - center_m[1]
-            )
             if expected_movement_m == 0.0:
                 # No shape change requested: the solved displacement field
                 # must stay at zero so the solved shape cannot drift.  The
                 # max-component vertex is arbitrary for a null field, so the
                 # radius is recorded as the requested one.
+                vertex = max(
+                    range(len(component_values)),
+                    key=lambda item: abs(component_values[item]),
+                )
+                max_component_m = float(component_values[vertex])
+                if not math.isfinite(max_component_m):
+                    raise ValueError("forward solved-shape readback is nonfinite")
                 matches = abs(max_component_m) <= max(requested_m * forward["tolerance"], 1e-12)
                 observed_radius_m = requested_m
             else:
+                # Select the extreme on the movement side of the axis: the
+                # maximum signed component (expansion) or the minimum signed
+                # component (shrink).  The opposite extreme carries the same
+                # magnitude but the wrong sign; the radius magnitude is the
+                # same on both sides.
+                sign = 1.0 if requested_m > baseline_value_m else -1.0
+                vertex = max(
+                    range(len(component_values)),
+                    key=lambda item: sign * component_values[item],
+                )
+                max_component_m = float(component_values[vertex])
+                if not math.isfinite(max_component_m):
+                    raise ValueError("forward solved-shape readback is nonfinite")
+                observed_radius_m = abs(
+                    float(xs[vertex]) - center_m[0]
+                    if axis == 0
+                    else float(ys[vertex]) - center_m[1]
+                )
                 matches = math.isclose(
                     observed_radius_m,
                     requested_m,
