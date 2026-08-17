@@ -319,6 +319,29 @@ def _candidate_spec(spec: dict[str, Any], values: list[float]) -> dict[str, Any]
     return candidate
 
 
+def _licensed_optimizer_terminal(
+    optimizer_state: dict[str, Any], accepted_steps: int
+) -> tuple[dict[str, str], str]:
+    if optimizer_state["status"] == "budget_exhausted" and accepted_steps == 0:
+        return (
+            {
+                "type": "RobustOptimizerBudgetExhausted",
+                "message": (
+                    "Bounded robust GCMMA exhausted its condition-solve budget "
+                    "before an accepted optimizer step"
+                ),
+            },
+            "robust_gcmma_budget_exhausted",
+        )
+    return (
+        {
+            "type": "RobustFinalistValidationPending",
+            "message": "Bounded robust GCMMA completed; finalist validation is pending",
+        },
+        "robust_gcmma_phase_completed",
+    )
+
+
 def _finalize_licensed_cleanup(
     directory: Path,
     *,
@@ -993,6 +1016,9 @@ def _run_licensed(root: str, job_id: str) -> int:
                 condition_solves=len(gradient_result["observations"]),
             )
             atomic_write_json(directory / "robust-optimizer-state.json", optimizer_state)
+        terminal_error, terminal_event = _licensed_optimizer_terminal(
+            optimizer_state, accepted_steps
+        )
         store.update_state(
             job_id,
             "failed",
@@ -1002,14 +1028,11 @@ def _run_licensed(root: str, job_id: str) -> int:
                     "completed": optimizer_state["condition_solves_used"],
                     "total": optimizer_state["max_condition_solves"],
                 },
-                "last_error": {
-                    "type": "RobustFinalistValidationPending",
-                    "message": "Bounded robust GCMMA completed; finalist validation is pending",
-                },
+                "last_error": terminal_error,
                 "robust_optimizer_state_fingerprint": optimizer_state["state_fingerprint"],
                 "robust_optimizer_accepted_steps": accepted_steps,
             },
-            event="robust_gcmma_phase_completed",
+            event=terminal_event,
         )
         return 1
     except Exception as exc:

@@ -990,6 +990,30 @@ def _manager(root, monkeypatch):
     return manager
 
 
+def test_licensed_optimizer_budget_exhaustion_is_not_reported_as_finalist_pending():
+    error, event = robust_shape_worker._licensed_optimizer_terminal(
+        {"status": "budget_exhausted"}, 0
+    )
+
+    assert error == {
+        "type": "RobustOptimizerBudgetExhausted",
+        "message": (
+            "Bounded robust GCMMA exhausted its condition-solve budget "
+            "before an accepted optimizer step"
+        ),
+    }
+    assert event == "robust_gcmma_budget_exhausted"
+
+
+def test_licensed_optimizer_accepted_step_advances_to_finalist_boundary():
+    error, event = robust_shape_worker._licensed_optimizer_terminal(
+        {"status": "budget_exhausted"}, 1
+    )
+
+    assert error["type"] == "RobustFinalistValidationPending"
+    assert event == "robust_gcmma_phase_completed"
+
+
 def test_manager_dispatches_synthetic_24_condition_job_without_solver(ascii_tmp_path, monkeypatch):
     envelope, _, _ = _write_manifest(ascii_tmp_path)
     manager = _manager(ascii_tmp_path / "jobs", monkeypatch)
