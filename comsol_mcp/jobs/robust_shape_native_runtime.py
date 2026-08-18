@@ -458,7 +458,7 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
                     observed_radius_m,
                     requested_m,
                     rel_tol=forward["tolerance"],
-                    abs_tol=max(1e-9, requested_m * forward["tolerance"]),
+                    abs_tol=max(1e-15, requested_m * forward["tolerance"]),
                 )
             readbacks.append(
                 {

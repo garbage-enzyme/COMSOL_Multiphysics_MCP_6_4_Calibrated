@@ -13,6 +13,7 @@ from .journal import locked_journal, recover_jsonl_tail
 
 ROBUST_SHAPE_ROW_SCHEMA_NAME = "comsol_mcp.robust_shape_optimization_row"
 ROBUST_SHAPE_ROW_SCHEMA_VERSION = "1.1.0"
+_READABLE_ROW_SCHEMA_VERSIONS = {"1.0.0", ROBUST_SHAPE_ROW_SCHEMA_VERSION}
 MAX_ROWS = 100_000
 MAX_ROW_BYTES = 256 * 1024
 _KINDS = {
@@ -277,9 +278,10 @@ def _normalize_row(
     }
     if set(raw) != fields:
         raise ValueError("robust shape row fields are invalid")
+    schema_version = raw["schema_version"]
     if (
         raw["schema_name"] != ROBUST_SHAPE_ROW_SCHEMA_NAME
-        or raw["schema_version"] != ROBUST_SHAPE_ROW_SCHEMA_VERSION
+        or schema_version not in _READABLE_ROW_SCHEMA_VERSIONS
     ):
         raise ValueError("robust shape row schema is unsupported")
     if isinstance(raw["sequence"], bool) or raw["sequence"] != sequence:
@@ -303,10 +305,13 @@ def _normalize_row(
     )
     if raw["row_sha256"] != expected:
         raise ValueError("robust shape row hash is invalid")
+    payload = raw["payload"]
+    if schema_version == "1.0.0" and raw["kind"] == "iteration":
+        payload = {**_mapping(payload, "iteration payload"), "shape_application_fingerprint": None}
     return {
         **raw,
         "created_at_epoch": _finite(raw["created_at_epoch"], "created_at_epoch"),
-        "payload": _payload(raw["payload"], kind),
+        "payload": _payload(payload, kind),
         "row_sha256": raw["row_sha256"].lower(),
     }
 

@@ -330,6 +330,36 @@ def _shape_application_fingerprint(result: dict[str, Any]) -> str | None:
     return fingerprint.casefold()
 
 
+def _append_native_gradient_row(
+    rows_path: Path,
+    *,
+    spec: dict[str, Any],
+    attempt: int,
+    iteration_id: str,
+    result: dict[str, Any],
+) -> None:
+    aggregate = result.get("aggregate_gradient")
+    if not isinstance(aggregate, dict) or aggregate.get("complete") is not True:
+        raise ValueError("licensed native gradient is incomplete")
+    gradient_fingerprint = aggregate.get("receipt_fingerprint")
+    policy = spec.get("gradient_policy")
+    acceptance_fingerprint = policy.get("policy_fingerprint") if isinstance(policy, dict) else None
+    if not isinstance(gradient_fingerprint, str) or not isinstance(acceptance_fingerprint, str):
+        raise ValueError("licensed native gradient evidence fingerprints are incomplete")
+    append_robust_shape_row(
+        rows_path,
+        job_fingerprint=spec["spec_fingerprint"],
+        attempt=attempt,
+        kind="gradient",
+        payload={
+            "iteration_id": iteration_id,
+            "gradient_fingerprint": gradient_fingerprint,
+            "acceptance_fingerprint": acceptance_fingerprint,
+            "evidence_state": "gradient_validated",
+        },
+    )
+
+
 def _licensed_optimizer_terminal(
     optimizer_state: dict[str, Any], accepted_steps: int
 ) -> tuple[dict[str, str], str]:
@@ -888,6 +918,13 @@ def _run_licensed(root: str, job_id: str) -> int:
         baseline_gradient = _gradient_in_declared_units(
             spec, result["aggregate_gradient"]["aggregate_gradient"]
         )
+        _append_native_gradient_row(
+            rows_path,
+            spec=spec,
+            attempt=attempt,
+            iteration_id="it-0",
+            result=result,
+        )
         append_robust_shape_row(
             rows_path,
             job_fingerprint=spec["spec_fingerprint"],
@@ -1025,6 +1062,15 @@ def _run_licensed(root: str, job_id: str) -> int:
             gradient = gradient_result.get("aggregate_gradient")
             if not isinstance(gradient, dict) or gradient.get("complete") is not True:
                 raise RuntimeError("accepted optimizer candidate lacks a complete native gradient")
+            _append_native_gradient_row(
+                rows_path,
+                spec=spec,
+                attempt=attempt,
+                iteration_id=(
+                    f"it-{proposal['outer_iteration']}-{proposal['inner_iteration']}"
+                ),
+                result=gradient_result,
+            )
             optimizer_state = propose_gcmma_candidate(
                 optimizer_state,
                 objective=candidate_value,

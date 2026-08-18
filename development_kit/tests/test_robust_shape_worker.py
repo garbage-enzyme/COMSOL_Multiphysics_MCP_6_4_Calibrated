@@ -1704,6 +1704,22 @@ def test_shape_application_readback_mismatch_fails_closed():
         backend.run_shape_application()
 
 
+def test_shape_application_does_not_widen_strict_relative_tolerance_to_one_nanometre():
+    events = []
+    backend = _stage_backend(events)
+    backend.controls["forward_solved_shape_relative_tolerance"] = 1e-6
+    backend._prepare_forward_shape_stage()
+    backend.model = _application_model(events, moved=(12.58e-9, 12.58e-9))
+
+    class Study:
+        def run(self):
+            events.append(("study_run",))
+
+    backend.study = Study()
+    with pytest.raises(ValueError, match="solved-shape readback differs"):
+        backend.run_shape_application()
+
+
 def test_shape_application_zero_movement_readback_accepts_null_field():
     events = []
     backend = _stage_backend(events)
@@ -1772,6 +1788,28 @@ def test_worker_shape_application_fingerprint_helper():
         robust_shape_worker._shape_application_fingerprint(
             {"shape_application": {"receipt_fingerprint": "short"}}
         )
+
+
+def test_worker_projects_complete_native_gradient_to_public_row(ascii_tmp_path):
+    path = ascii_tmp_path / "rows.jsonl"
+    spec = {
+        "spec_fingerprint": "a" * 64,
+        "gradient_policy": {"policy_fingerprint": "b" * 64},
+    }
+    result = {"aggregate_gradient": {"complete": True, "receipt_fingerprint": "c" * 64}}
+
+    robust_shape_worker._append_native_gradient_row(
+        path,
+        spec=spec,
+        attempt=1,
+        iteration_id="it-0",
+        result=result,
+    )
+
+    rows = read_robust_shape_rows(path, job_fingerprint="a" * 64)
+    assert rows[0]["kind"] == "gradient"
+    assert rows[0]["payload"]["evidence_state"] == "gradient_validated"
+    assert rows[0]["payload"]["gradient_fingerprint"] == "c" * 64
 
 
 def test_native_sensitivity_constraint_groups_are_merged_and_read_back():

@@ -7,6 +7,7 @@ import json
 
 import pytest
 
+from comsol_mcp.durable import domain_sha256_v2
 from comsol_mcp.jobs.robust_shape_rows import append_robust_shape_row, read_robust_shape_rows
 
 JOB = "a" * 64
@@ -135,6 +136,26 @@ def test_changed_job_payload_or_chain_is_rejected(ascii_tmp_path):
     path.write_text(json.dumps(row) + "\n", encoding="utf-8")
     with pytest.raises(ValueError, match="hash"):
         read_robust_shape_rows(path, job_fingerprint=JOB)
+
+
+def test_legacy_1_0_iteration_row_remains_readable(ascii_tmp_path):
+    path = ascii_tmp_path / "legacy.jsonl"
+    row = append_robust_shape_row(
+        path, job_fingerprint=JOB, attempt=1, kind="iteration", payload=_iteration()
+    )
+    legacy = copy.deepcopy(row)
+    legacy["schema_version"] = "1.0.0"
+    legacy["payload"].pop("shape_application_fingerprint")
+    legacy["row_sha256"] = domain_sha256_v2(
+        legacy["schema_name"],
+        {key: value for key, value in legacy.items() if key != "row_sha256"},
+    )
+    path.write_text(json.dumps(legacy) + "\n", encoding="utf-8")
+
+    restored = read_robust_shape_rows(path, job_fingerprint=JOB)
+
+    assert restored[0]["schema_version"] == "1.0.0"
+    assert restored[0]["payload"]["shape_application_fingerprint"] is None
 
 
 def test_failed_condition_cannot_claim_observation_or_objective_contribution(ascii_tmp_path):
