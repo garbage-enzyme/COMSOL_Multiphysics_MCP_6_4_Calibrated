@@ -105,6 +105,30 @@ initialize 响应也会通过旧 MCP initialize schema 携带一段简短安全�
 证据完整性和科学验证分开报告。client 可以采用或忽略这段提示；真正的安全边界仍由
 server 内强制执行的 ownership 和 validation 检查提供。
 
+### 可选的 DeepSeek Harness bridge
+
+仓库还包含 [`dsh_bridge/`](dsh_bridge/)，这是供 DeepSeek Harness 使用的可选、仅仓库
+内 Node.js 插件。它通过 MCP stdio 连接已安装的 `comsol-mcp`，以干净名称注册实时发现
+的工具，并把持久化的 `job_submit` 镜像到 `ctx.jobs`，提供完成通知、进度输出、取消和
+重新挂接。它不是第二个 COMSOL server，不修改 Python 包、公共 schema、求解器所有权或
+生产设置。
+
+bridge 不进入 Python wheel 或 sdist，需要 Node.js 20+，且没有 npm 依赖。验证和安装：
+
+```powershell
+npm test --prefix dsh_bridge
+npm run smoke --prefix dsh_bridge
+.\dsh_bridge\install.ps1
+```
+
+然后按 [`dsh_bridge/README.md`](dsh_bridge/README.md) 把 `comsol-bridge` 条目加入 DSH
+web profile，使用绝对路径的已安装 `comsol-mcp.exe`、runtime 工作目录和共享 settings
+路径。bridge 自己的 `config.enabled` Boolean 控制客户端插件是否启用；它有意不是
+COMSOL Settings GUI 的 server Boolean。相同 DSH 会话中不要再配置第二个
+`dsh-mcp-client` COMSOL 条目，因为 bridge 必须独占并串行化这一条 stdio 连接。
+fake-server 测试只证明 bridge 行为，真实 DSH discovery、cleanup 和 licensed solve 必须
+单独记录。
+
 ## 主要能力
 
 - **ClientAPI 适配。** 几何、物理场、材料、网格、研究、结果、模型克隆和 Unicode 安全的 `.mph` 保存已在 COMSOL 6.4.0.293 上通过 licensed acceptance；6.4.0.* 内只改变最后 build 数字时继承 release-line 结论，其他 release family 在独立验收前均为 unknown。

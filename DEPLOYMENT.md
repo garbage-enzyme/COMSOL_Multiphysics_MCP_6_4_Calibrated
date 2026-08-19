@@ -35,6 +35,31 @@ The wheel exposes the canonical `comsol_mcp` runtime and the solver-free
 is not installed. Configure the absolute installed server console entry point
 for a portable deployment.
 
+### Optional DeepSeek Harness bridge
+
+For DeepSeek Harness only, this repository contains the repo-only Node.js
+bridge at [`dsh_bridge/`](dsh_bridge/). It is excluded from the Python wheel
+and sdist, does not change the standard MCP server, and does not replace COMSOL
+ownership or durable job state. Node.js 20+ is required and the bridge has no
+npm dependencies.
+
+Run its solver-free checks and install the junction into the DSH web profile:
+
+```powershell
+npm test --prefix dsh_bridge
+npm run smoke --prefix dsh_bridge
+.\dsh_bridge\install.ps1
+```
+
+Then add the `comsol-bridge` Cordis entry documented in
+[`dsh_bridge/README.md`](dsh_bridge/README.md), using the absolute installed
+`comsol-mcp.exe`, runtime working directory, and shared settings path. The
+bridge's own `config.enabled` Boolean controls whether the client plugin is
+active; it is intentionally not a Settings GUI/server feature. Do not configure
+a second `dsh-mcp-client` COMSOL entry in the same DSH session: the bridge owns
+the single serialized stdio connection. Fake-server tests prove bridge behavior
+only; report real DSH discovery, cleanup, and licensed solves separately.
+
 ## 2. Configure with the Settings GUI (recommended)
 
 The Settings GUI is the normal configuration path for users. Open the installed

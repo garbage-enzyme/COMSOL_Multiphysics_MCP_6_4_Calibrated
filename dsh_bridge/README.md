@@ -118,10 +118,16 @@ dsh-comsol-bridge/
 └── .github/workflows/ci.yml  # 云端 CI
 ```
 
-## 未来
+## 当前状态与边界
 
-- 主仓库集成：按计划以 `dsh_bridge/`（repo-only，development_kit 同级）进入仓库，
-  同步更新 `development_kit/docs/layout.md` 清单；CI 可并入主仓库。
-- 若上游 `dsh-mcp-client` 增加 post-call 扩展点（工具返回后自动建镜像），本兼容层可退役。
-- 与真实服务器联调（首轮验收）：契约 pin 用 `capabilities` 的 catalog/schema hash；
-  `job_list` 工具若已由 codex 加入，可替代 stateFile 做 rehydrate 枚举。
+本目录已作为主仓库中的 **repo-only 可选组件** 集成，并由自身的 Node CI
+执行 solver-free 回归；它不进入 Python wheel/sdist，也不改变标准
+`comsol-mcp` server、工具 schema、生产设置或 COMSOL ownership 逻辑。
+启用它必须由用户显式安装 junction 并在 DSH web profile 中加入插件条目。
+
+真实生产服务器联调已覆盖 `capabilities`、工具发现、job mirror、进度流和
+完成通知；仍未宣称 DSH 的取消路径和 settings-change 后重启路径已完成验收。
+这些路径应单独测试，不能把 fake-server 37/37 结果当作 COMSOL solve 验收。
+
+如果未来上游 `dsh-mcp-client` 提供等价的 post-call 扩展点，本兼容层可以退役；
+在此之前应保持它作为独立、默认关闭、单连接的桥接组件。

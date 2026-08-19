@@ -124,6 +124,32 @@ read-only, and separate execution success from evidence integrity and scientific
 validation. Clients may use or ignore this hint; the server's enforced ownership
 and validation checks remain the security boundary.
 
+### Optional DeepSeek Harness bridge
+
+This repository also contains [`dsh_bridge/`](dsh_bridge/), an optional
+repo-only Node.js plugin for DeepSeek Harness. It connects DSH to the standard
+installed `comsol-mcp` executable over MCP stdio, registers discovered tools
+with clean names, and mirrors durable `job_submit` work into `ctx.jobs` for
+completion notices, progress output, cancellation, and rehydration. It does
+not alter the Python package, public schemas, solver ownership, or production
+settings.
+
+The bridge is excluded from the Python wheel and sdist. Node.js 20+ is required
+and there are no npm dependencies. Validate it with
+`npm test --prefix dsh_bridge` and `npm run smoke --prefix dsh_bridge`, then
+install it only when DSH is the intended client:
+
+```powershell
+.\dsh_bridge\install.ps1
+```
+
+Add the `comsol-bridge` entry shown in [`dsh_bridge/README.md`](dsh_bridge/README.md)
+to the DSH web profile, using the absolute installed `comsol-mcp.exe` and the
+runtime settings path. Do not configure a second `dsh-mcp-client` COMSOL entry
+in the same DSH session: the bridge owns the single serialized MCP connection.
+Fake-server tests are solver-free; real DSH acceptance and licensed solves must
+be reported separately.
+
 ## Highlights
 
 - **ClientAPI compatibility.** Geometry, physics, materials, meshes, studies, results, model cloning, and Unicode-safe `.mph` saving have licensed acceptance on COMSOL 6.4.0.293; final build changes within 6.4.0.* inherit the release-line conclusion, while other release families remain unknown.
