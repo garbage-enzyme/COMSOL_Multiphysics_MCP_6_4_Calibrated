@@ -130,6 +130,22 @@ def test_complete_native_condition_gradients_are_durable_and_aggregate(ascii_tmp
     assert replay.calls == []
 
 
+def test_native_condition_gradient_rejects_limited_condition_tables(ascii_tmp_path):
+    spec = _spec(ascii_tmp_path)
+    spec["condition_execution_limit"] = 2
+    observations = _observations(spec)
+    with pytest.raises(ValueError, match="complete condition table"):
+        execute_native_condition_gradients(
+            spec,
+            ascii_tmp_path,
+            backend=object(),
+            observations=observations,
+            cancel_requested=lambda: False,
+        )
+    assert not (ascii_tmp_path / "native-aggregate-gradient.json").exists()
+    assert list(ascii_tmp_path.glob("condition-gradient-*.json")) == []
+
+
 def test_native_condition_gradient_rejects_tampered_replay(ascii_tmp_path):
     spec = _spec(ascii_tmp_path)
     observations = _observations(spec)

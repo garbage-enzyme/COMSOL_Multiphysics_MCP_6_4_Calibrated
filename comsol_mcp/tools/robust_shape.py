@@ -228,8 +228,8 @@ def verify_robust_shape_evidence(
     accepted_iterations = [
         row for row in rows if row["kind"] == "iteration" and row["payload"]["status"] == "accepted"
     ]
-    controls = spec.get("adapter_configuration", {}).get("configuration", {}).get(
-        "condition_controls", {}
+    controls = (
+        spec.get("adapter_configuration", {}).get("configuration", {}).get("condition_controls", {})
     )
     shape_application_required = controls.get("schema_version") == "1.5.0"
     finalists = [row for row in rows if row["kind"] == "finalist_validation"]
@@ -253,8 +253,7 @@ def verify_robust_shape_evidence(
             or (
                 bool(accepted_iterations)
                 and all(
-                    row["payload"]["shape_application_fingerprint"]
-                    for row in accepted_iterations
+                    row["payload"]["shape_application_fingerprint"] for row in accepted_iterations
                 )
             )
         ),

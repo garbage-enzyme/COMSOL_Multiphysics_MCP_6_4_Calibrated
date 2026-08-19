@@ -1403,6 +1403,12 @@ def _stage_backend(events, *, with_shape_support=True, solve_for_drift=None):
         {
             "center_um": [0.85, 0.0],
             "baseline_radius_um": 0.26,
+            "domain_count": 6,
+            "boundary_count": 32,
+            "free_domains": [1, 2, 3, 4, 5, 6],
+            "fixed_boundaries": [1, 2],
+            "pedot_boundaries": [18, 19, 20, 23, 25, 27],
+            "support_fingerprint": "a" * 64,
         }
         if with_shape_support
         else {}
@@ -1434,6 +1440,18 @@ def _stage_backend(events, *, with_shape_support=True, solve_for_drift=None):
         ]
     }
     backend._initial_values = [272.0, 272.0]
+    backend._shape_controls_receipt = {
+        "shape_support_fingerprint": "a" * 64,
+        "controls": {
+            "deformed_geometry": {
+                "free_domains": [1, 2, 3, 4, 5, 6],
+                "fixed_boundaries": [1, 2],
+                "pedot_boundaries": [18, 19, 20, 23, 25, 27],
+                "height_preserved": True,
+                "center_preserved": True,
+            }
+        },
+    }
     backend.working_model_path = Path("C:/mcp_tests/robust-working.mph")
     return backend
 
@@ -1788,6 +1806,19 @@ def test_worker_shape_application_fingerprint_helper():
         robust_shape_worker._shape_application_fingerprint(
             {"shape_application": {"receipt_fingerprint": "short"}}
         )
+
+
+def test_cleanup_row_is_bound_to_latest_current_attempt():
+    rows = [
+        {"kind": "cleanup", "attempt": 1, "payload": {"marker": "old"}},
+        {"kind": "iteration", "attempt": 2, "payload": {}},
+        {"kind": "cleanup", "attempt": 2, "payload": {"marker": "current-first"}},
+        {"kind": "cleanup", "attempt": 2, "payload": {"marker": "current-last"}},
+    ]
+    assert robust_shape_worker._cleanup_row_for_attempt(rows, 3) is None
+    current = robust_shape_worker._cleanup_row_for_attempt(rows, 2)
+    assert current is not None
+    assert current["payload"]["marker"] == "current-last"
 
 
 def test_worker_projects_complete_native_gradient_to_public_row(ascii_tmp_path):

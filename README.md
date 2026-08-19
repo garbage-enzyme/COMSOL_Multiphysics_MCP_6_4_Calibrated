@@ -245,6 +245,14 @@ fresh-forward optimizer evidence, finalist validation, checkpoints, and
 cleanup. They expose no generic Java property mutation and remain absent from
 `core`, `basic_fem`, and `wave_optics`.
 
+Finalist validation policy schema `1.1.0` keeps legacy `1.0.0` readable and
+adds caller-owned baseline/finer mesh references plus an explicit maximum
+independent-COMSOL condition delta. A licensed finalist uses fresh derived
+models for 24 baseline conditions, 24 finer-mesh conditions, and 96 declared
+off-design conditions. It persists the external-fidelity receipt separately,
+binds it into the tamper-evident finalist receipt, and cannot reach completed
+state until finalist, checkpoint, and current-attempt cleanup evidence agree.
+
 For a licensed robust run, optimizer configuration schema `1.1.0` keeps every
 condition solve and adjoint in COMSOL while driving the aggregate objective with
 an explicit outer-loop GCMMA state. The caller supplies an ASCII path and exact

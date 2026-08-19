@@ -46,6 +46,7 @@ from comsol_mcp.research import (
     RESEARCH_JOURNAL_RECORD_SCHEMA_VERSION,
     ROBUST_CONDITION_CONTROLS_SCHEMA_NAME,
     ROBUST_CONDITION_CONTROLS_SCHEMA_VERSION,
+    ROBUST_FINALIST_VALIDATION_POLICY_READABLE_VERSIONS,
     ROBUST_FINALIST_VALIDATION_POLICY_SCHEMA_NAME,
     ROBUST_FINALIST_VALIDATION_POLICY_SCHEMA_VERSION,
     ROBUST_FINALIST_VALIDATION_RECEIPT_SCHEMA_NAME,
@@ -618,6 +619,7 @@ def _entries() -> list[dict[str, Any]]:
             ROBUST_FINALIST_VALIDATION_POLICY_SCHEMA_VERSION,
             "comsol_mcp.research.robust_finalist_validation",
             artifact_kind="configuration",
+            readable_versions=ROBUST_FINALIST_VALIDATION_POLICY_READABLE_VERSIONS,
         ),
         _entry(
             ROBUST_FINALIST_VALIDATION_RECEIPT_SCHEMA_NAME,
@@ -710,8 +712,9 @@ def _entries() -> list[dict[str, Any]]:
         ),
         _entry(
             "comsol_mcp.robust_shape_application",
-            "1.0.0",
+            "1.1.0",
             "comsol_mcp.jobs.robust_shape_native_runtime",
+            readable_versions=("1.0.0", "1.1.0"),
         ),
         _entry(
             ROBUST_SMOOTHING_COMPARISON_SCHEMA_NAME,

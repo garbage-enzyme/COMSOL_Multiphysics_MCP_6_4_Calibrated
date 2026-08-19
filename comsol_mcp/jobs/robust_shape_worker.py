@@ -21,6 +21,7 @@ from comsol_mcp.research.robust_startup_admission import evaluate_robust_startup
 
 from .process_control import contain_current_process_tree
 from .resource_admission import collect_resource_telemetry
+from .robust_finalist_runtime import run_licensed_finalist
 from .robust_shape_rows import append_robust_shape_row, read_robust_shape_rows
 from .store import (
     JobStore,
@@ -328,6 +329,12 @@ def _shape_application_fingerprint(result: dict[str, Any]) -> str | None:
     if not isinstance(fingerprint, str) or len(fingerprint) != 64:
         raise ValueError("licensed shape application receipt fingerprint is invalid")
     return fingerprint.casefold()
+
+
+def _cleanup_row_for_attempt(rows: list[dict[str, Any]], attempt: int) -> dict[str, Any] | None:
+    """Return only the latest cleanup row bound to the current attempt."""
+    matches = [row for row in rows if row["kind"] == "cleanup" and row["attempt"] == attempt]
+    return matches[-1] if matches else None
 
 
 def _append_native_gradient_row(
@@ -779,6 +786,11 @@ def _run_licensed(root: str, job_id: str) -> int:
     ownership = None
     lease_acquired = False
     native_runtime_entered = False
+    terminal_success = False
+    accepted_candidate_values: list[float] | None = None
+    accepted_candidate_fingerprint: str | None = None
+    accepted_observations: list[dict[str, Any]] | None = None
+    accepted_objective_value: float | None = None
     shared_client = None
     previous_temporary_directory = os.environ.get("COMSOL_TMPDIR")
     source = Path(spec["source_model_path"])
@@ -845,6 +857,7 @@ def _run_licensed(root: str, job_id: str) -> int:
             return str(jpype.JClass("java.lang.System").getenv(name))
 
         native_runtime_entered = True
+        execution_limit = spec.get("condition_execution_limit")
         result = execute_lin2025_conditions(
             spec,
             directory,
@@ -852,8 +865,8 @@ def _run_licensed(root: str, job_id: str) -> int:
             client_factory=shared_client_factory,
             java_environment_reader=java_environment_reader,
             cancel_requested=lambda: _cancel_requested(store, job_id, attempt),
+            include_gradients=execution_limit is None,
         )
-        execution_limit = spec.get("condition_execution_limit")
         declared_conditions = len(
             [
                 row
@@ -1033,6 +1046,10 @@ def _run_licensed(root: str, job_id: str) -> int:
             if not accepted:
                 continue
             accepted_steps += 1
+            accepted_candidate_values = list(proposal["physical_values"])
+            accepted_candidate_fingerprint = proposal["proposal_fingerprint"]
+            accepted_observations = list(candidate_result["observations"])
+            accepted_objective_value = candidate_value
             if optimizer_state["status"] == "complete":
                 break
             remaining = (
@@ -1066,9 +1083,7 @@ def _run_licensed(root: str, job_id: str) -> int:
                 rows_path,
                 spec=spec,
                 attempt=attempt,
-                iteration_id=(
-                    f"it-{proposal['outer_iteration']}-{proposal['inner_iteration']}"
-                ),
+                iteration_id=(f"it-{proposal['outer_iteration']}-{proposal['inner_iteration']}"),
                 result=gradient_result,
             )
             optimizer_state = propose_gcmma_candidate(
@@ -1078,25 +1093,103 @@ def _run_licensed(root: str, job_id: str) -> int:
                 condition_solves=len(gradient_result["observations"]),
             )
             atomic_write_json(directory / "robust-optimizer-state.json", optimizer_state)
-        terminal_error, terminal_event = _licensed_optimizer_terminal(
-            optimizer_state, accepted_steps
-        )
-        store.update_state(
-            job_id,
-            "failed",
-            patch={
-                "solver_started": True,
-                "progress": {
-                    "completed": optimizer_state["condition_solves_used"],
-                    "total": optimizer_state["max_condition_solves"],
+        if accepted_steps == 0:
+            terminal_error, terminal_event = _licensed_optimizer_terminal(
+                optimizer_state, accepted_steps
+            )
+            store.update_state(
+                job_id,
+                "failed",
+                patch={
+                    "solver_started": True,
+                    "progress": {
+                        "completed": optimizer_state["condition_solves_used"],
+                        "total": optimizer_state["max_condition_solves"],
+                    },
+                    "last_error": terminal_error,
+                    "robust_optimizer_state_fingerprint": optimizer_state["state_fingerprint"],
+                    "robust_optimizer_accepted_steps": accepted_steps,
                 },
-                "last_error": terminal_error,
-                "robust_optimizer_state_fingerprint": optimizer_state["state_fingerprint"],
-                "robust_optimizer_accepted_steps": accepted_steps,
-            },
-            event=terminal_event,
+                event=terminal_event,
+            )
+            return 1
+        if (
+            accepted_candidate_values is None
+            or accepted_candidate_fingerprint is None
+            or accepted_observations is None
+            or accepted_objective_value is None
+        ):
+            raise RuntimeError("accepted optimizer step lacks finalist inputs")
+        finalist_directory = directory / "finalist"
+        finalist_receipt = run_licensed_finalist(
+            spec,
+            finalist_directory,
+            attempt=attempt,
+            candidate_values=accepted_candidate_values,
+            candidate_fingerprint=accepted_candidate_fingerprint,
+            accepted_observations=accepted_observations,
+            accepted_objective_value=accepted_objective_value,
+            optimizer_execution_fingerprint=optimizer_state["state_fingerprint"],
+            client_factory=shared_client_factory,
+            java_environment_reader=java_environment_reader,
+            cancel_requested=lambda: _cancel_requested(store, job_id, attempt),
         )
-        return 1
+        atomic_write_json(directory / "finalist-validation.json", finalist_receipt)
+        append_robust_shape_row(
+            directory / "robust_shape_rows.jsonl",
+            job_fingerprint=spec["spec_fingerprint"],
+            attempt=attempt,
+            kind="finalist_validation",
+            payload={
+                "iteration_id": "finalist-0",
+                "candidate_fingerprint": accepted_candidate_fingerprint,
+                "policy_fingerprint": finalist_receipt["policy_fingerprint"],
+                "receipt_fingerprint": finalist_receipt["receipt_fingerprint"],
+                "status": finalist_receipt["disposition"],
+                "reason_codes": finalist_receipt["reason_codes"],
+            },
+        )
+        if not finalist_receipt["accepted"]:
+            store.update_state(
+                job_id,
+                "failed",
+                patch={
+                    "solver_started": True,
+                    "robust_optimizer_state_fingerprint": optimizer_state["state_fingerprint"],
+                    "robust_optimizer_accepted_steps": accepted_steps,
+                    "finalist_validation_fingerprint": finalist_receipt["receipt_fingerprint"],
+                    "last_error": {
+                        "type": "FinalistValidationRejected",
+                        "message": "Licensed finalist evidence did not satisfy caller policy",
+                    },
+                },
+                event="robust_finalist_validation_rejected",
+            )
+            return 1
+        append_robust_shape_row(
+            directory / "robust_shape_rows.jsonl",
+            job_fingerprint=spec["spec_fingerprint"],
+            attempt=attempt,
+            kind="checkpoint",
+            payload={
+                "iteration_id": "finalist-0",
+                "checkpoint_fingerprint": domain_sha256_v2(
+                    "comsol_mcp.robust_finalist_checkpoint",
+                    {
+                        "candidate": accepted_candidate_fingerprint,
+                        "finalist": finalist_receipt["receipt_fingerprint"],
+                    },
+                ),
+                "completed_condition_count": sum(
+                    1
+                    for condition in spec["condition_table"]["conditions"]
+                    if condition["active"] and condition["objective_role"] == "objective"
+                ),
+                "retained_model_disposition": spec["shape_policy"]["model_retention"]["mode"],
+            },
+        )
+        terminal_success = True
+        return 0
     except Exception as exc:
         state = store.read_state(job_id)
         if state["status"] not in {"completed", "failed", "cancel_requested", "cancelling"}:
@@ -1132,7 +1225,7 @@ def _run_licensed(root: str, job_id: str) -> int:
         rows_path = directory / "robust_shape_rows.jsonl"
         try:
             rows = read_robust_shape_rows(rows_path, job_fingerprint=spec["spec_fingerprint"])
-            if not any(row["kind"] == "cleanup" for row in rows):
+            if _cleanup_row_for_attempt(rows, attempt) is None:
                 append_robust_shape_row(
                     rows_path,
                     job_fingerprint=spec["spec_fingerprint"],
@@ -1146,6 +1239,60 @@ def _run_licensed(root: str, job_id: str) -> int:
                 file=sys.stderr,
                 flush=True,
             )
+        if terminal_success:
+            try:
+                rows = read_robust_shape_rows(rows_path, job_fingerprint=spec["spec_fingerprint"])
+                cleanup_row = _cleanup_row_for_attempt(rows, attempt)
+                if cleanup_row is None:
+                    raise RuntimeError("finalist completion cleanup row is missing")
+                cleanup = cleanup_row["payload"]
+                if not all(
+                    cleanup.get(field) is True
+                    for field in (
+                        "source_unchanged",
+                        "client_clear",
+                        "owned_processes_absent",
+                        "lease_released",
+                    )
+                ):
+                    raise RuntimeError("finalist completion cleanup evidence is incomplete")
+                store.update_state(
+                    job_id,
+                    "smoke_validated",
+                    patch={
+                        "finalist_validation_fingerprint": finalist_receipt["receipt_fingerprint"]
+                    },
+                    event="robust_finalist_validated",
+                )
+                store.update_state(
+                    job_id,
+                    "completed",
+                    patch={
+                        "solver_started": True,
+                        "progress": {
+                            "completed": optimizer_state["condition_solves_used"],
+                            "total": optimizer_state["max_condition_solves"],
+                        },
+                        "robust_optimizer_state_fingerprint": optimizer_state["state_fingerprint"],
+                        "robust_optimizer_accepted_steps": accepted_steps,
+                        "finalist_validation_fingerprint": finalist_receipt["receipt_fingerprint"],
+                        "last_robust_shape_row_sha256": rows[-1]["row_sha256"],
+                    },
+                    event="completed",
+                )
+            except Exception as completion_exc:
+                store.update_state(
+                    job_id,
+                    "failed",
+                    patch={
+                        "solver_started": True,
+                        "last_error": {
+                            "type": type(completion_exc).__name__,
+                            "message": str(completion_exc)[:512],
+                        },
+                    },
+                    event="robust_finalist_completion_rejected",
+                )
         if not source_unchanged:
             print(
                 "licensed robust worker detected immutable source drift",

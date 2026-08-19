@@ -200,6 +200,13 @@ manifest；`robust_shape_job_submit` 只通过 durable job authority 提交；
 gradient、optimizer 的 fresh-forward 证据、finalist、checkpoint 与 cleanup。它们不提供
 通用 Java 属性修改，并且不会出现在 `core`、`basic_fem` 或 `wave_optics` 中。
 
+finalist validation policy schema `1.1.0` 保持 `1.0.0` 可读，并新增由调用方声明的
+baseline/finer mesh reference 与 independent-COMSOL 最大 condition delta。licensed
+finalist 会用全新的 derived model 分别执行 24 个 baseline、24 个 finer-mesh 和 96 个
+明确声明的 off-design conditions；external-fidelity receipt 会单独持久化并绑定到防篡改
+finalist receipt。只有 finalist、checkpoint 与当前 attempt 的 cleanup 证据一致时，任务
+才能进入 completed 状态。
+
 执行 licensed 鲁棒任务时，optimizer configuration schema `1.1.0` 仍由 COMSOL
 完成每个 condition 的 forward/adjoint，并用显式外循环 GCMMA 状态驱动聚合目标。
 调用方提供单独取得的纯 Python `mmapy 0.3.1` wheel 的 ASCII 绝对路径和精确 SHA-256；

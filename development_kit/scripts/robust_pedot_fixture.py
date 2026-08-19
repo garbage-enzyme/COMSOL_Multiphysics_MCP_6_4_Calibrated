@@ -64,7 +64,7 @@ def _number(value: str | None, label: str) -> float:
     return number
 
 
-def _audit_csv(path: Path, state: str) -> dict[str, Any]:
+def _audit_csv(path: Path, state: str, sample_wavelengths: tuple[float, ...]) -> dict[str, Any]:
     real2 = _STATE_REAL_COLUMNS[state]
     imag2 = _STATE_IMAG_COLUMNS[state]
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
@@ -78,7 +78,7 @@ def _audit_csv(path: Path, state: str) -> dict[str, Any]:
         raise ValueError(f"PEDOT {state} CSV row count is outside the allowed range")
     wavelengths: list[float] = []
     common_rows = 0
-    samples: list[dict[str, float]] = []
+    tensor_rows: list[dict[str, float]] = []
     for index, row in enumerate(rows, start=2):
         wavelength = _number(row.get("wavelength_nm"), f"{state} row {index} wavelength")
         if wavelengths and wavelength <= wavelengths[-1]:
@@ -100,28 +100,61 @@ def _audit_csv(path: Path, state: str) -> dict[str, Any]:
             raise ValueError(f"PEDOT {state} COMSOL imaginary columns have the wrong sign")
         if _COMMON_MIN_NM <= wavelength <= _COMMON_MAX_NM:
             common_rows += 1
-        if wavelength in _WAVELENGTHS_NM:
-            samples.append(
-                {
-                    "wavelength_m": wavelength * 1e-9,
-                    "xx_real": _number(
-                        row.get("epsilon1_real"), f"{state} row {index} epsilon1_real"
-                    ),
-                    "xx_imag": comsol1,
-                    "yy_real": _number(
-                        row.get("epsilon1_real"), f"{state} row {index} epsilon1_real"
-                    ),
-                    "yy_imag": comsol1,
-                    "zz_real": _number(row.get(real2), f"{state} row {index} {real2}"),
-                    "zz_imag": comsol2,
-                }
-            )
+        tensor_rows.append(
+            {
+                "wavelength_nm": wavelength,
+                "xx_real": _number(
+                    row.get("epsilon1_real"), f"{state} row {index} epsilon1_real"
+                ),
+                "xx_imag": comsol1,
+                "yy_real": _number(
+                    row.get("epsilon1_real"), f"{state} row {index} epsilon1_real"
+                ),
+                "yy_imag": comsol1,
+                "zz_real": _number(row.get(real2), f"{state} row {index} {real2}"),
+                "zz_imag": comsol2,
+            }
+        )
     if wavelengths[0] > _COMMON_MIN_NM or wavelengths[-1] < _COMMON_MAX_NM:
         raise ValueError(f"PEDOT {state} CSV does not cover the common no-extrapolation range")
     if _COMMON_MIN_NM not in wavelengths or _COMMON_MAX_NM not in wavelengths:
         raise ValueError(f"PEDOT {state} CSV lacks exact common-range boundary rows")
     if any(wavelength not in wavelengths for wavelength in _WAVELENGTHS_NM):
         raise ValueError(f"PEDOT {state} CSV lacks an exact fixture wavelength row")
+    samples: list[dict[str, float]] = []
+    for target in sample_wavelengths:
+        if target < wavelengths[0] or target > wavelengths[-1]:
+            raise ValueError(f"PEDOT {state} sample wavelength requires forbidden extrapolation")
+        exact = next((item for item in tensor_rows if item["wavelength_nm"] == target), None)
+        if exact is None:
+            upper_index = next(
+                index for index, item in enumerate(tensor_rows) if item["wavelength_nm"] > target
+            )
+            lower = tensor_rows[upper_index - 1]
+            upper = tensor_rows[upper_index]
+            fraction = (target - lower["wavelength_nm"]) / (
+                upper["wavelength_nm"] - lower["wavelength_nm"]
+            )
+            exact = {
+                key: lower[key] + fraction * (upper[key] - lower[key])
+                for key in ("xx_real", "xx_imag", "yy_real", "yy_imag", "zz_real", "zz_imag")
+            }
+        samples.append(
+            {
+                "wavelength_m": target * 1e-9,
+                **{
+                    key: exact[key]
+                    for key in (
+                        "xx_real",
+                        "xx_imag",
+                        "yy_real",
+                        "yy_imag",
+                        "zz_real",
+                        "zz_imag",
+                    )
+                },
+            }
+        )
     return {
         "source_sha256": _sha256(path),
         "row_count": len(rows),
@@ -198,6 +231,7 @@ def compile_pedot_fixture(
     active_domain_id: str,
     temperature_k: float,
     interpolation_method: str,
+    validation_wavelength_relative_offsets: list[float] | tuple[float, ...] = (),
 ) -> dict[str, Any]:
     """Compile a path-redacted, hash-bound OX/MR 24-condition fixture."""
     root = Path(delivery_root).expanduser().resolve()
@@ -207,12 +241,21 @@ def compile_pedot_fixture(
         raise ValueError("PEDOT fixture temperature must be finite and positive")
     pdf = _source_file(root, "PEDOT-Tos_Lin2025_数据说明.pdf")
     pdf_sha256 = _sha256(pdf)
+    offsets = sorted({float(item) for item in validation_wavelength_relative_offsets})
+    if any(not math.isfinite(item) or item == 0.0 or abs(item) > 0.5 for item in offsets):
+        raise ValueError("validation wavelength offsets are outside the allowed range")
+    sample_wavelengths = tuple(
+        sorted(
+            set(_WAVELENGTHS_NM)
+            | {base * (1.0 + offset) for base in _WAVELENGTHS_NM for offset in offsets}
+        )
+    )
     audits = {}
     states = []
     for state in _STATES:
         relative = f"csv/{_STATE_FILES[state]}"
         source = _source_file(root, relative)
-        audit = _audit_csv(source, state)
+        audit = _audit_csv(source, state, sample_wavelengths)
         mapping = _mapping(
             state=state,
             source_sha256=audit["source_sha256"],
@@ -322,6 +365,8 @@ def compile_pedot_fixture(
             "active_domain_id": active_domain_id,
             "temperature_k": float(temperature_k),
             "wavelengths_nm": list(_WAVELENGTHS_NM),
+            "validation_wavelength_relative_offsets": offsets,
+            "validation_sample_wavelengths_nm": list(sample_wavelengths),
             "incidence_elevation_deg": list(_ANGLES_DEG),
             "incidence_azimuth_deg": 0.0,
             "incidence_plane": "x_z",
@@ -345,6 +390,12 @@ def main() -> int:
     parser.add_argument(
         "--interpolation-method", required=True, choices=("linear", "piecewise_cubic")
     )
+    parser.add_argument(
+        "--validation-wavelength-relative-offset",
+        action="append",
+        type=float,
+        default=[],
+    )
     args = parser.parse_args()
     output = Path(args.output).expanduser()
     if not output.is_absolute() or not str(output).isascii() or output.suffix.lower() != ".json":
@@ -354,6 +405,7 @@ def main() -> int:
         active_domain_id=args.active_domain_id,
         temperature_k=args.temperature_k,
         interpolation_method=args.interpolation_method,
+        validation_wavelength_relative_offsets=args.validation_wavelength_relative_offset,
     )
     atomic_write_json(output, receipt)
     print(json.dumps(receipt, ensure_ascii=True, sort_keys=True, separators=(",", ":")))

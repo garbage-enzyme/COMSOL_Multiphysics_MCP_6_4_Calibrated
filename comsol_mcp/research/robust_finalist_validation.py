@@ -9,7 +9,8 @@ from comsol_mcp.durable import domain_sha256_v2
 from .derivative_support import _bounded_json, _finite, _identifier, _object, _sha256
 
 ROBUST_FINALIST_VALIDATION_POLICY_SCHEMA_NAME = "comsol_mcp.robust_finalist_validation_policy"
-ROBUST_FINALIST_VALIDATION_POLICY_SCHEMA_VERSION = "1.0.0"
+ROBUST_FINALIST_VALIDATION_POLICY_SCHEMA_VERSION = "1.1.0"
+ROBUST_FINALIST_VALIDATION_POLICY_READABLE_VERSIONS = ("1.0.0", "1.1.0")
 
 _BRANCH_MODES = {"required", "not_applicable"}
 _OFF_DESIGN_MODES = {"required", "not_requested"}
@@ -18,6 +19,15 @@ _EXTERNAL_MODES = {"required", "not_requested"}
 
 def _optional_identifier(value: object, name: str) -> str | None:
     return None if value is None else _identifier(value, name)
+
+
+def _bounded_text(value: object, name: str, *, maximum: int = 64) -> str:
+    if not isinstance(value, str) or not value.strip() or len(value) > maximum:
+        raise ValueError(f"{name} must be bounded nonempty text")
+    text = value.strip()
+    if any(character in text for character in ("\r", "\n", "\x00")):
+        raise ValueError(f"{name} contains a forbidden character")
+    return text
 
 
 def _bounded_integer(value: object, name: str, *, minimum: int, maximum: int) -> int:
@@ -65,9 +75,10 @@ def normalize_robust_finalist_validation_policy(value: object) -> dict[str, Any]
         },
         "robust finalist validation policy",
     )
+    schema_version = raw["schema_version"]
     if (
         raw["schema_name"] != ROBUST_FINALIST_VALIDATION_POLICY_SCHEMA_NAME
-        or raw["schema_version"] != ROBUST_FINALIST_VALIDATION_POLICY_SCHEMA_VERSION
+        or schema_version not in ROBUST_FINALIST_VALIDATION_POLICY_READABLE_VERSIONS
     ):
         raise ValueError("robust finalist validation policy schema identity is unsupported")
 
@@ -79,22 +90,38 @@ def normalize_robust_finalist_validation_policy(value: object) -> dict[str, Any]
     if any(remesh[field] is not True for field in remesh):
         raise ValueError("finalist validation requires an independent explicit fresh remesh")
 
+    mesh_fields = {
+        "baseline_level_id",
+        "finer_level_id",
+        "max_relative_objective_change",
+        "max_elements_per_model",
+        "minimum_element_quality",
+        "quality_measure",
+    }
+    if schema_version == "1.1.0":
+        mesh_fields |= {"baseline_mesh_reference_value", "finer_mesh_reference_value"}
     mesh = _object(
         raw["mesh_convergence"],
-        {
-            "baseline_level_id",
-            "finer_level_id",
-            "max_relative_objective_change",
-            "max_elements_per_model",
-            "minimum_element_quality",
-            "quality_measure",
-        },
+        mesh_fields,
         "mesh_convergence",
     )
     baseline_level = _identifier(mesh["baseline_level_id"], "baseline_level_id")
     finer_level = _identifier(mesh["finer_level_id"], "finer_level_id")
     if baseline_level == finer_level:
         raise ValueError("mesh convergence levels must be distinct")
+    baseline_mesh_reference = None
+    finer_mesh_reference = None
+    if schema_version == "1.1.0":
+        baseline_mesh_reference = _bounded_text(
+            mesh["baseline_mesh_reference_value"],
+            "mesh_convergence.baseline_mesh_reference_value",
+        )
+        finer_mesh_reference = _bounded_text(
+            mesh["finer_mesh_reference_value"],
+            "mesh_convergence.finer_mesh_reference_value",
+        )
+        if baseline_mesh_reference == finer_mesh_reference:
+            raise ValueError("baseline and finer mesh reference values must be distinct")
     maximum_change = _finite(
         mesh["max_relative_objective_change"],
         "mesh_convergence.max_relative_objective_change",
@@ -186,9 +213,12 @@ def normalize_robust_finalist_validation_policy(value: object) -> dict[str, Any]
     ):
         raise ValueError("not-requested off-design validation must not declare sampling")
 
+    external_fields = {"mode", "primary_backend", "fallback_mode", "automatic_fallback"}
+    if schema_version == "1.1.0":
+        external_fields.add("maximum_absolute_condition_delta")
     external = _object(
         raw["external_fidelity"],
-        {"mode", "primary_backend", "fallback_mode", "automatic_fallback"},
+        external_fields,
         "external_fidelity",
     )
     external_mode = external["mode"]
@@ -198,6 +228,13 @@ def normalize_robust_finalist_validation_policy(value: object) -> dict[str, Any]
     fallback_mode = external["fallback_mode"]
     if external["automatic_fallback"] is not False:
         raise ValueError("external fidelity validation forbids automatic fallback")
+    maximum_external_delta = None
+    if schema_version == "1.1.0":
+        maximum_external_delta = _finite(
+            external["maximum_absolute_condition_delta"],
+            "external_fidelity.maximum_absolute_condition_delta",
+            positive=True,
+        )
     if external_mode == "required":
         if primary_backend != "independent_comsol" or fallback_mode != "explicit_manual_rcwa":
             raise ValueError("required external fidelity must use COMSOL first and manual RCWA")
@@ -206,7 +243,7 @@ def normalize_robust_finalist_validation_policy(value: object) -> dict[str, Any]
 
     body = {
         "schema_name": ROBUST_FINALIST_VALIDATION_POLICY_SCHEMA_NAME,
-        "schema_version": ROBUST_FINALIST_VALIDATION_POLICY_SCHEMA_VERSION,
+        "schema_version": schema_version,
         "policy_id": _identifier(raw["policy_id"], "policy_id"),
         "condition_table_fingerprint": _sha256(
             raw["condition_table_fingerprint"], "condition_table_fingerprint"
@@ -254,6 +291,14 @@ def normalize_robust_finalist_validation_policy(value: object) -> dict[str, Any]
             "automatic_fallback": False,
         },
     }
+    if schema_version == "1.1.0":
+        body["mesh_convergence"].update(
+            {
+                "baseline_mesh_reference_value": baseline_mesh_reference,
+                "finer_mesh_reference_value": finer_mesh_reference,
+            }
+        )
+        body["external_fidelity"]["maximum_absolute_condition_delta"] = maximum_external_delta
     body["policy_fingerprint"] = domain_sha256_v2(
         ROBUST_FINALIST_VALIDATION_POLICY_SCHEMA_NAME, body
     )
@@ -264,6 +309,7 @@ def normalize_robust_finalist_validation_policy(value: object) -> dict[str, Any]
 
 __all__ = [
     "ROBUST_FINALIST_VALIDATION_POLICY_SCHEMA_NAME",
+    "ROBUST_FINALIST_VALIDATION_POLICY_READABLE_VERSIONS",
     "ROBUST_FINALIST_VALIDATION_POLICY_SCHEMA_VERSION",
     "normalize_robust_finalist_validation_policy",
 ]

@@ -388,6 +388,7 @@ models are intentionally absent.
 - `development_kit/tests/test_robust_gradient_runtime.py` — This module tests durable ordered native condition-gradient receipts, exact replay, tamper rejection, and robust aggregation without COMSOL.
 - `development_kit/tests/test_robust_shape_rows.py` — This module tests robust condition, gradient, iteration, trial, checkpoint, and cleanup row chaining and crash-tail recovery.
 - `development_kit/tests/test_robust_shape_worker.py` — This module tests JobManager dispatch, synthetic 24-condition completion, exact replay, status summaries, duplicate suppression, and durable licensed-condition receipt recovery.
+- `development_kit/tests/test_robust_finalist_runtime.py` — This module tests solver-free finalist remesh, convergence, off-design, external-fidelity persistence, and observation-order failure boundaries.
 - `development_kit/tests/test_robust_shape_tools.py` — This module verifies experimental-only robust preview, durable submission routing, bounded evidence inspection, verification, redaction, and public dispatch.
 - `development_kit/tests/test_robust_wall_watchdog.py` — This module deterministically verifies deadline cancellation, exact-attempt refusal, terminal exit, launch-failure evidence, and synthetic-job exclusion.
 - `development_kit/tests/test_lin2025_pedot_cylinder.py` — This module tests the Lin2025 PEDOT-cylinder fixture, topology, state, and explicit deformation-selection contracts.
@@ -448,6 +449,7 @@ models are intentionally absent.
 - `comsol_mcp/jobs/robust_gradient_runtime.py` — This module persists exact native condition-gradient receipts and compiles their complete ordered robust aggregate.
 - `comsol_mcp/jobs/robust_shape_rows.py` — This module persists hash-chained fsync'd robust condition, gradient, iteration, trial, checkpoint, and cleanup rows.
 - `comsol_mcp/jobs/robust_shape_worker.py` — This module runs solver-free robust lifecycle fixtures and the licensed durable COMSOL-condition plus explicit outer-GCMMA candidate loop.
+- `comsol_mcp/jobs/robust_finalist_runtime.py` — This module runs fresh licensed finalist baseline/finer meshes, validation-only off-design conditions, and durable independent-fidelity assessment.
 - `comsol_mcp/jobs/robust_wall_watchdog.py` — This detached process enforces the caller-owned licensed robust wall budget through exact-attempt durable cancellation without calling COMSOL.
 - `comsol_mcp/jobs/adjoint_optimization_worker.py` — This module dispatches synthetic lifecycle fixtures or the licensed durable native-adjoint runtime and persists validated hash-chained terminal rows.
 - `comsol_mcp/research/adaptive_acquisition.py` — This explicitly loaded module performs bounded Gaussian-process posterior and expected-improvement selection without affecting ordinary discovery imports.

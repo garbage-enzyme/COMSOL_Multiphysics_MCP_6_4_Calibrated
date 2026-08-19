@@ -95,6 +95,7 @@ def _write_manifest(tmp_path, *, selected: str = "gcmma", synthetic: bool = True
             "primary_backend": None,
             "fallback_mode": "not_requested",
             "automatic_fallback": False,
+            "maximum_absolute_condition_delta": 1e-6,
         }
     manifest_body = {
         "schema_name": "comsol_mcp.robust_shape_optimization_manifest",

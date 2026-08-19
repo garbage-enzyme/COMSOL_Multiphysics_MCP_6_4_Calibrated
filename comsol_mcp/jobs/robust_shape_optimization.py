@@ -224,6 +224,8 @@ def expand_robust_shape_manifest(submission: object) -> dict[str, Any]:
         raise ValueError("finalist validation condition table identity differs from manifest")
     if finalist_validation_policy["shape_policy_fingerprint"] != shape_policy["policy_fingerprint"]:
         raise ValueError("finalist validation shape policy identity differs from manifest")
+    if not raw["synthetic_mode"] and finalist_validation_policy["schema_version"] != "1.1.0":
+        raise ValueError("licensed robust jobs require finalist validation policy 1.1.0")
     table_states = {item["state_id"] for item in conditions["material_states"]}
     if not set(objective["state_ids"]).issubset(table_states):
         raise ValueError("robust objective states are not declared by the condition table")
@@ -240,6 +242,17 @@ def expand_robust_shape_manifest(submission: object) -> dict[str, Any]:
         raise ValueError("robust shape mesh cap differs from resource admission policy")
     finalist_mesh = finalist_validation_policy["mesh_convergence"]
     shape_mesh = shape_policy["mesh_admission"]
+    active_count = sum(
+        1
+        for condition in conditions["conditions"]
+        if condition["active"] and condition["objective_role"] == "objective"
+    )
+    off_design = finalist_validation_policy["off_design"]
+    expected_validation_solves = active_count * (
+        2 + len(off_design["wavelength_relative_offsets"]) + len(off_design["angle_offsets_deg"])
+    )
+    if expected_validation_solves > 4096:
+        raise ValueError("finalist validation solve count exceeds its bound")
     if finalist_mesh["max_elements_per_model"] != shape_mesh["max_elements_per_model"]:
         raise ValueError("finalist validation mesh cap differs from shape policy")
     if (
@@ -247,6 +260,14 @@ def expand_robust_shape_manifest(submission: object) -> dict[str, Any]:
         or finalist_mesh["quality_measure"] != shape_mesh["quality_measure"]
     ):
         raise ValueError("finalist validation mesh quality identity differs from shape policy")
+    if not raw["synthetic_mode"] and adapter_binding["adapter_id"] == "lin2025_pedot_cylinder_v1":
+        controls = adapter_configuration["configuration"].get("condition_controls")
+        if not isinstance(controls, dict):
+            raise ValueError("licensed Lin2025 finalist validation requires condition controls")
+        if finalist_mesh["baseline_mesh_reference_value"] != controls.get("mesh_reference_value"):
+            raise ValueError("finalist baseline mesh reference differs from condition controls")
+        if finalist_mesh["finer_mesh_reference_value"] == controls.get("mesh_reference_value"):
+            raise ValueError("finalist finer mesh reference must differ from baseline")
     values = raw["initial_values"]
     if not isinstance(values, list) or len(values) != len(support["variables"]):
         raise ValueError("initial_values must match the robust support variable count")
@@ -272,6 +293,7 @@ def expand_robust_shape_manifest(submission: object) -> dict[str, Any]:
         "objective": objective,
         "shape_policy": shape_policy,
         "finalist_validation_policy": finalist_validation_policy,
+        "finalist_validation_solve_count": expected_validation_solves,
         "gradient_policy": gradient_policy,
         "optimizer_policy": optimizer_policy,
         "native_optimizer": native_optimizer,

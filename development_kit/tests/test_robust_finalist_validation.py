@@ -18,7 +18,7 @@ def _policy(
 ) -> dict:
     return {
         "schema_name": "comsol_mcp.robust_finalist_validation_policy",
-        "schema_version": "1.0.0",
+        "schema_version": "1.1.0",
         "policy_id": "pedot-finalist-v1",
         "condition_table_fingerprint": condition_table_fingerprint,
         "shape_policy_fingerprint": shape_policy_fingerprint,
@@ -30,6 +30,8 @@ def _policy(
         "mesh_convergence": {
             "baseline_level_id": "baseline",
             "finer_level_id": "finer",
+            "baseline_mesh_reference_value": "1600[nm]",
+            "finer_mesh_reference_value": "1200[nm]",
             "max_relative_objective_change": 0.05,
             "max_elements_per_model": 300_000,
             "minimum_element_quality": 0.1,
@@ -55,6 +57,7 @@ def _policy(
             "primary_backend": "independent_comsol",
             "fallback_mode": "explicit_manual_rcwa",
             "automatic_fallback": False,
+            "maximum_absolute_condition_delta": 1e-6,
         },
     }
 
@@ -65,6 +68,8 @@ def test_fixture_policy_is_canonical_idempotent_and_caller_owned():
     assert normalized["off_design"]["angle_offsets_deg"] == [-2.0, 2.0]
     assert normalized["mesh_convergence"]["max_relative_objective_change"] == 0.05
     assert normalized["external_fidelity"]["automatic_fallback"] is False
+    assert normalized["mesh_convergence"]["finer_mesh_reference_value"] == "1200[nm]"
+    assert normalized["external_fidelity"]["maximum_absolute_condition_delta"] == 1e-6
     assert normalize_robust_finalist_validation_policy(normalized) == normalized
 
 
@@ -120,6 +125,7 @@ def test_optional_modes_preserve_explicit_no_claim_dispositions():
         "primary_backend": None,
         "fallback_mode": "not_requested",
         "automatic_fallback": False,
+        "maximum_absolute_condition_delta": 1e-6,
     }
     normalized = normalize_robust_finalist_validation_policy(value)
     assert normalized["branch_guard"]["mode"] == "not_applicable"
@@ -138,3 +144,33 @@ def test_policy_rejects_duplicate_zero_or_out_of_range_offsets_and_tampering():
     tampered["mesh_convergence"]["max_relative_objective_change"] = 0.1
     with pytest.raises(ValueError, match="fingerprint"):
         normalize_robust_finalist_validation_policy(tampered)
+
+
+def test_legacy_policy_remains_readable_without_inventing_execution_controls():
+    value = _policy()
+    value["schema_version"] = "1.0.0"
+    value["mesh_convergence"].pop("baseline_mesh_reference_value")
+    value["mesh_convergence"].pop("finer_mesh_reference_value")
+    value["external_fidelity"].pop("maximum_absolute_condition_delta")
+    normalized = normalize_robust_finalist_validation_policy(value)
+    assert normalized["schema_version"] == "1.0.0"
+    assert "finer_mesh_reference_value" not in normalized["mesh_convergence"]
+    assert "maximum_absolute_condition_delta" not in normalized["external_fidelity"]
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda value: value["mesh_convergence"].update(
+            finer_mesh_reference_value="1600[nm]"
+        ),
+        lambda value: value["external_fidelity"].update(
+            maximum_absolute_condition_delta=0.0
+        ),
+    ],
+)
+def test_current_policy_requires_distinct_meshes_and_positive_fidelity_tolerance(mutation):
+    value = _policy()
+    mutation(value)
+    with pytest.raises(ValueError):
+        normalize_robust_finalist_validation_policy(value)

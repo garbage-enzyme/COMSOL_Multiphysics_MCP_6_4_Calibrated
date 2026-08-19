@@ -29,7 +29,7 @@ def _ordered_unique(values: list[str]) -> list[str]:
 FORWARD_SHAPE_STAGE_SCHEMA_NAME = "comsol_mcp.robust_forward_shape_stage"
 FORWARD_SHAPE_STAGE_SCHEMA_VERSION = "1.0.0"
 FORWARD_SHAPE_APPLICATION_SCHEMA_NAME = "comsol_mcp.robust_shape_application"
-FORWARD_SHAPE_APPLICATION_SCHEMA_VERSION = "1.0.0"
+FORWARD_SHAPE_APPLICATION_SCHEMA_VERSION = "1.1.0"
 FORWARD_SHAPE_CONTROLS_VERSION = "1.5.0"
 
 
@@ -185,6 +185,7 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
         self._native_sensitivity_prepared = False
         self._sensitivity_sweep = None
         self._sensitivity_readback: dict[str, Any] | None = None
+        self._shape_controls_receipt: dict[str, Any] | None = None
 
     def set_shape_deformation_active(self, requested: bool) -> dict[str, Any]:
         """Set and read back the derived shape deformation phase explicitly.
@@ -488,8 +489,11 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
             "solved_shape": readbacks,
             "mesh_elements": int(statistics.getNumElem()),
             "minimum_mesh_quality": float(statistics.getMinQuality()),
+            "shape_controls": self._shape_controls_receipt,
             "solver_started": True,
         }
+        if not isinstance(self._shape_controls_receipt, dict):
+            raise RuntimeError("forward shape application lacks prepared shape controls")
         body["receipt_fingerprint"] = domain_sha256_v2(FORWARD_SHAPE_APPLICATION_SCHEMA_NAME, body)
         return body
 
@@ -500,6 +504,7 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
         controls = prepare_lin2025_pedot_shape_controls(
             self.material, self.fixture, self.tree, self.support
         )
+        self._shape_controls_receipt = controls
         variables = self.support["variables"]
         for variable, value in zip(variables, initial_values, strict=True):
             self.model.java.param().set(

@@ -127,3 +127,19 @@ def test_compiler_accepts_utf8_bom_on_delivery_csv_headers(ascii_tmp_path):
         interpolation_method="linear",
     )
     assert receipt["source_audits"]["OX"]["imaginary_sign_verified"] is True
+
+
+def test_compiler_emits_exact_off_design_tensor_samples_without_extrapolation(ascii_tmp_path):
+    delivery = _delivery(ascii_tmp_path / "off-design")
+    receipt = compile_pedot_fixture(
+        delivery,
+        active_domain_id="active_material_domain",
+        temperature_k=300.0,
+        interpolation_method="linear",
+        validation_wavelength_relative_offsets=[-0.01, 0.01],
+    )
+    expected_nm = [792.0, 800.0, 808.0, 990.0, 1000.0, 1010.0, 1188.0, 1200.0, 1212.0]
+    assert receipt["fixture_policy"]["validation_sample_wavelengths_nm"] == expected_nm
+    assert [
+        row["wavelength_m"] for row in receipt["material_tensor_rows"]["states"][0]["rows"]
+    ] == pytest.approx([value * 1e-9 for value in expected_nm])

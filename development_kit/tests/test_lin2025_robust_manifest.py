@@ -22,6 +22,7 @@ from development_kit.tests.test_lin2025_pedot_backend import (
 )
 from development_kit.tests.test_lin2025_pedot_backend import _fixture as _lin_fixture
 from development_kit.tests.test_lin2025_pedot_backend import _tree as _lin_tree
+from development_kit.tests.test_robust_adapter_configuration import _forward_shape_controls
 from development_kit.tests.test_robust_shape_optimization import _write_manifest
 
 
@@ -78,41 +79,12 @@ def _write_inputs(root):
             for index, state in enumerate(("OX", "MR"))
         ],
     }
-    controls = {
-        "schema_name": "comsol_mcp.robust_condition_controls",
-        "schema_version": "1.0.0",
-        "component_tag": "comp1",
-        "geometry_tag": "geom1",
-        "physics_tag": "ewfd",
-        "periodic_structure_tag": "ps1",
-        "periodic_port_tags": ["pport1", "pport2"],
-        "reference_direction_tag": "rdir1",
-        "wavelength_parameter": "wl",
-        "elevation_parameter": "theta",
-        "azimuth_parameter": "phi",
-        "study_tag": "std1",
-        "study_step_tag": "wl_step",
-        "study_step_property": "plist",
-        "study_step_array_property": "plistarr",
-        "solution_tag": "sol1",
-        "stationary_solver_tag": "s1",
-        "linear_solver_tag": "d1",
-        "out_of_core_property": "ooc",
-        "out_of_core_value": "on",
-        "dataset_tag": "dset1",
-        "angle_property": "alpha1_inc",
-        "azimuth_property": "alpha2_inc",
-        "polarization_property": "Polarization",
-        "linear_polarization_property": "LinearPol",
-        "polarization_values": {"x_linear": "S", "y_linear": "P"},
-        "observable_expression": support["objective"]["expression"],
-        "reflectance_expression": "ewfd.Rtotal",
-        "transmittance_expression": "ewfd.Ttotal",
-        "absorption_expression": "ewfd.Atotal",
-        "evaluated_wavelength_expression": "wl",
-        "solved_wavelength_expression": "c_const/ewfd.freq",
-        "mesh_tag": "mesh1",
-    }
+    controls = _forward_shape_controls()
+    controls["observable_expression"] = support["objective"]["expression"]
+    controls["forward_solved_shape_expressions"] = [
+        "comp1.material.u",
+        "comp1.material.v",
+    ]
     campaign = {
         "schema_name": CAMPAIGN_SCHEMA_NAME,
         "schema_version": CAMPAIGN_SCHEMA_VERSION,
