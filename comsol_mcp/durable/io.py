@@ -65,8 +65,23 @@ def read_file_bytes_bounded(path: str | Path, *, max_bytes: int) -> bytes:
     try:
         if opened.st_size > max_bytes:
             raise _FileSizeLimitError("file exceeds the declared reading limit")
+        # Do not pass the caller's logical limit as the allocation size.  Some
+        # journals derive a very large limit from row-count policy even when
+        # the actual file is tiny; ``read(max_bytes + 1)`` can therefore ask
+        # Windows/Python to reserve tens of gigabytes unnecessarily.  Read in
+        # bounded chunks while retaining the same growth/limit semantics.
+        chunks: list[bytes] = []
+        observed = 0
         with os.fdopen(descriptor, "rb", closefd=False) as handle:
-            data = handle.read(max_bytes + 1)
+            while observed <= max_bytes:
+                chunk = handle.read(min(1024 * 1024, max_bytes - observed + 1))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                observed += len(chunk)
+                if observed > max_bytes:
+                    break
+        data = b"".join(chunks)
         if len(data) > max_bytes:
             raise _FileSizeLimitError("file grew beyond the declared reading limit")
         return data
