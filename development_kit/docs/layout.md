@@ -72,6 +72,24 @@ models are intentionally absent.
 - `recipes/mim_patch_partition.py` — This script demonstrates partitioned patch-metasurface construction.
 - `recipes/parallel_plate_capacitor.py` — This script builds and optionally validates an analytical three-dimensional parallel-plate capacitor.
 
+## DSH native bridge (repo-only)
+
+- `dsh_bridge/.gitignore` — This file excludes local node_modules, temp, job-state, and desktop shortcut artifacts from Git.
+- `dsh_bridge/README.md` — This file explains the optional DeepSeek Harness native compat layer, why it bypasses dsh-mcp-client, and the production wiring contract.
+- `dsh_bridge/package.json` — This file declares the zero-dependency `@local/dsh-comsol-bridge` package metadata and engines.
+- `dsh_bridge/install.ps1` — This script links the bridge package root into a DSH profile node_modules as a junction.
+- `dsh_bridge/.github/workflows/ci.yml` — This workflow runs the bridge regression tests on Windows and Ubuntu.
+- `dsh_bridge/fixtures/fake-comsol-server.mjs` — This fixture provides the solver-free fake comsol-mcp server with ten failure modes.
+- `dsh_bridge/lib/index.js` — This module is the cordis plugin entry that registers native tool names and wires the job mirror.
+- `dsh_bridge/lib/mcp-client-core.mjs` — This module implements the ctx-independent MCP stdio client with single-flight serialization and reconnect.
+- `dsh_bridge/lib/job-mirror.mjs` — This module mirrors comsol durable jobs into ctx.jobs with a persistent state store.
+- `dsh_bridge/scripts/smoke.mjs` — This script runs the end-to-end bridge smoke demonstration against the fake server.
+- `dsh_bridge/tests/core.test.mjs` — This module tests connection, discovery, serialization, abort, timeout, reconnect, and paging.
+- `dsh_bridge/tests/failures.test.mjs` — This module tests missing servers, crashes, garbage frames, unsupported versions, and cancel ambiguity.
+- `dsh_bridge/tests/helpers.mjs` — This module supplies shared harness helpers for bridge regression tests.
+- `dsh_bridge/tests/mirror.test.mjs` — This module tests terminal detection, completion, cancellation, loss of contact, and progress streams.
+- `dsh_bridge/tests/plugin.test.mjs` — This module tests tool-name normalization, config merging, and textual projection.
+
 ## Development kit entry points
 
 - `development_kit/__init__.py` — This file marks the repository-only development assets as a Python package.

@@ -62,7 +62,7 @@ exclude = [
 "settings.json" = "comsol_mcp/settings.json"
 
 [tool.hatch.build.targets.sdist]
-exclude = ["/development_kit", "/.claude"]
+exclude = ["/development_kit", "/.claude", "/dsh_bridge"]
 
 [tool.pytest.ini_options]
 testpaths = ["development_kit/tests"]

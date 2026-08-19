@@ -1,0 +1,4 @@
+node_modules/
+*.tmp
+.dsh-comsol-bridge-jobs.json
+.DS_Store

@@ -443,6 +443,7 @@ def test_support_matrix_matches_frozen_profile_counts_and_declared_dependencies(
     assert pyproject["tool"]["hatch"]["build"]["targets"]["sdist"]["exclude"] == [
         "/development_kit",
         "/.claude",
+        "/dsh_bridge",
     ]
 
 
