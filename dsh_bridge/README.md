@@ -1,5 +1,8 @@
 # dsh-comsol-bridge
 
+当前版本化兼容边界见
+[`DEEPSEEK_COMPATIBILITY.md`](DEEPSEEK_COMPATIBILITY.md)。
+
 可选的 DeepSeek Harness 兼容层：让 DSH 以**原生插件**方式驱动标准的 comsol-mcp 服务器，
 同时**服务器本身零改动**，codex / Claude / opencode 等其他 agent 照常直接使用它。
 
@@ -126,8 +129,8 @@ dsh-comsol-bridge/
 启用它必须由用户显式安装 junction 并在 DSH web profile 中加入插件条目。
 
 真实生产服务器联调已覆盖 `capabilities`、工具发现、job mirror、进度流和
-完成通知；仍未宣称 DSH 的取消路径和 settings-change 后重启路径已完成验收。
-这些路径应单独测试，不能把 fake-server 37/37 结果当作 COMSOL solve 验收。
+完成通知；settings-change 后重启路径已由用户独立验收。仍不能把 fake-server
+37/37 或设置变更验收当作 COMSOL solve 或生产取消路径验收。
 
 如果未来上游 `dsh-mcp-client` 提供等价的 post-call 扩展点，本兼容层可以退役；
 在此之前应保持它作为独立、默认关闭、单连接的桥接组件。

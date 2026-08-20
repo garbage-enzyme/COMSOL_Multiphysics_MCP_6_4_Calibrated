@@ -57,7 +57,9 @@ Then add the `comsol-bridge` Cordis entry documented in
 bridge's own `config.enabled` Boolean controls whether the client plugin is
 active; it is intentionally not a Settings GUI/server feature. Do not configure
 a second `dsh-mcp-client` COMSOL entry in the same DSH session: the bridge owns
-the single serialized stdio connection. Fake-server tests prove bridge behavior
+the single serialized stdio connection. Follow the versioned
+[`DeepSeek compatibility contract`](dsh_bridge/DEEPSEEK_COMPATIBILITY.md) for
+settings-change, verification, and recovery boundaries. Fake-server tests prove bridge behavior
 only; report real DSH discovery, cleanup, and licensed solves separately.
 
 ## 2. Configure with the Settings GUI (recommended)

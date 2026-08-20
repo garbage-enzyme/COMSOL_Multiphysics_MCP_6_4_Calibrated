@@ -126,6 +126,8 @@ web profile，使用绝对路径的已安装 `comsol-mcp.exe`、runtime 工作�
 路径。bridge 自己的 `config.enabled` Boolean 控制客户端插件是否启用；它有意不是
 COMSOL Settings GUI 的 server Boolean。相同 DSH 会话中不要再配置第二个
 `dsh-mcp-client` COMSOL 条目，因为 bridge 必须独占并串行化这一条 stdio 连接。
+安装、设置变更、验证与恢复边界见版本化的
+[`DeepSeek 兼容性契约`](dsh_bridge/DEEPSEEK_COMPATIBILITY.md)。
 fake-server 测试只证明 bridge 行为，真实 DSH discovery、cleanup 和 licensed solve 必须
 单独记录。
 

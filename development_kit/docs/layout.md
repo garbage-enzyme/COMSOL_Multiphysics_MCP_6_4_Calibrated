@@ -76,6 +76,7 @@ models are intentionally absent.
 
 - `dsh_bridge/.gitignore` — This file excludes local node_modules, temp, job-state, and desktop shortcut artifacts from Git.
 - `dsh_bridge/README.md` — This file explains the optional DeepSeek Harness native compat layer, why it bypasses dsh-mcp-client, and the production wiring contract.
+- `dsh_bridge/DEEPSEEK_COMPATIBILITY.md` — This file records the alpha7.2/0.7.2 DSH compatibility contract, version boundary, installation, verification, recovery, and evidence limits.
 - `dsh_bridge/package.json` — This file declares the zero-dependency `@local/dsh-comsol-bridge` package metadata and engines.
 - `dsh_bridge/install.ps1` — This script links the bridge package root into a DSH profile node_modules as a junction.
 - `dsh_bridge/.github/workflows/ci.yml` — This workflow runs the bridge regression tests on Windows and Ubuntu.

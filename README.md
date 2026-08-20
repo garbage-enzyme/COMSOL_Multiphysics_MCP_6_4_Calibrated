@@ -147,6 +147,9 @@ Add the `comsol-bridge` entry shown in [`dsh_bridge/README.md`](dsh_bridge/READM
 to the DSH web profile, using the absolute installed `comsol-mcp.exe` and the
 runtime settings path. Do not configure a second `dsh-mcp-client` COMSOL entry
 in the same DSH session: the bridge owns the single serialized MCP connection.
+See the versioned
+[`DeepSeek compatibility contract`](dsh_bridge/DEEPSEEK_COMPATIBILITY.md) for
+installation, settings-change, verification, and recovery boundaries.
 Fake-server tests are solver-free; real DSH acceptance and licensed solves must
 be reported separately.
 
