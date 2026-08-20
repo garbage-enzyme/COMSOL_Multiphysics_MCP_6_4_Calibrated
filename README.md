@@ -5,11 +5,46 @@ English | [中文](README_CN.md)
 [![CI](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/actions/workflows/ci.yml)
 [![Python 3.14](https://img.shields.io/badge/python-3.14-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
-![Release: 0.7.1](https://img.shields.io/badge/release-0.7.1-blue)
+![Release: 0.7.2](https://img.shields.io/badge/release-0.7.2-blue)
 ![Status: alpha](https://img.shields.io/badge/status-alpha-red)
 [![GitHub stars](https://img.shields.io/github/stars/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated?style=social)](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/stargazers)
 
 > A maintained fork of [wjc9011/COMSOL_Multiphysics_MCP](https://github.com/wjc9011/COMSOL_Multiphysics_MCP), accepted for the **`COMSOL 6.4.0.*` release line** and **MPh 1.3.1 standalone/clientapi**. Licensed reference evidence uses COMSOL **6.4.0.293**; a third numeric component change is a separate release family and requires new acceptance.
+
+## Publication and citation
+
+The paper describing COMSOL-MCP is:
+
+> Naiyin Zhang and Junchao Wang, “COMSOL-MCP: An open-source model context
+> protocol interface for AI-assisted multiphysics simulation,” *Neurocomputing*,
+> vol. 703, article 134481, 2026.
+
+Publisher record: [ScienceDirect](https://linkinghub.elsevier.com/retrieve/pii/S0925231226018795)
+
+```bibtex
+@article{Zhang2026COMSOLMCP,
+  title   = {COMSOL-MCP: An Open-Source Model Context Protocol Interface for AI-Assisted Multiphysics Simulation},
+  author  = {Zhang, Naiyin and Wang, Junchao},
+  journal = {Neurocomputing},
+  volume  = {703},
+  pages   = {134481},
+  year    = {2026},
+  doi     = {10.1016/j.neucom.2026.134481},
+  url     = {https://doi.org/10.1016/j.neucom.2026.134481}
+}
+```
+
+When discussing the COMSOL-MCP method, architecture, capabilities, or
+evaluation, cite the paper. When using or modifying the software, cite both the
+paper and repository through GitHub's **Cite this repository** metadata in
+[`CITATION.cff`](CITATION.cff). For reproducibility, identify the exact release
+or commit, repository URL, and access date in the data/code availability
+statement.
+
+We thank Naiyin Zhang and Junchao Wang for originating COMSOL-MCP, publishing
+the associated paper, and contributing the upstream citation guidance added in
+[commit `99172f8`](https://github.com/wjc9011/COMSOL_Multiphysics_MCP/commit/99172f8f43c6753c2442c406cd5c6055ea8c5bef), which this maintained fork has
+adapted to its own repository and release-evidence boundary.
 
 This server gives AI agents a safer, smaller interface for COMSOL inspection, controlled one-point validation, durable staged sweeps, and offline manual lookup. It is designed for the `model.java` clientapi object returned by `mph.Client()`, whose API differs materially from the direct `com.comsol.model.Model` API targeted by the upstream project.
 
@@ -76,7 +111,7 @@ and `capabilities` readback without starting COMSOL, then separately label any
 licensed start/solve/cleanup coverage. Treat live discovery, not a count copied
 from documentation, as the authority for the installed tool surface.
 
-Release `0.7.1` uses the MCP Python SDK `2.0.x` runtime base conservatively.
+Release `0.7.2` uses the MCP Python SDK `2.0.x` runtime base conservatively.
 Its tools, profiles, schemas, and stdio configuration remain on the accepted
 legacy-compatible application contract; the release does not opt clients into
 MCP `2026-07-28` features such as multi-round-trip requests, cache hints,
@@ -88,6 +123,35 @@ an explicit user request before start/solve/mutation, keep source models
 read-only, and separate execution success from evidence integrity and scientific
 validation. Clients may use or ignore this hint; the server's enforced ownership
 and validation checks remain the security boundary.
+
+### Optional DeepSeek Harness bridge
+
+This repository also contains [`dsh_bridge/`](dsh_bridge/), an optional
+repo-only Node.js plugin for DeepSeek Harness. It connects DSH to the standard
+installed `comsol-mcp` executable over MCP stdio, registers discovered tools
+with clean names, and mirrors durable `job_submit` work into `ctx.jobs` for
+completion notices, progress output, cancellation, and rehydration. It does
+not alter the Python package, public schemas, solver ownership, or production
+settings.
+
+The bridge is excluded from the Python wheel and sdist. Node.js 20+ is required
+and there are no npm dependencies. Validate it with
+`npm test --prefix dsh_bridge` and `npm run smoke --prefix dsh_bridge`, then
+install it only when DSH is the intended client:
+
+```powershell
+.\dsh_bridge\install.ps1
+```
+
+Add the `comsol-bridge` entry shown in [`dsh_bridge/README.md`](dsh_bridge/README.md)
+to the DSH web profile, using the absolute installed `comsol-mcp.exe` and the
+runtime settings path. Do not configure a second `dsh-mcp-client` COMSOL entry
+in the same DSH session: the bridge owns the single serialized MCP connection.
+See the versioned
+[`DeepSeek compatibility contract`](dsh_bridge/DEEPSEEK_COMPATIBILITY.md) for
+installation, settings-change, verification, and recovery boundaries.
+Fake-server tests are solver-free; real DSH acceptance and licensed solves must
+be reported separately.
 
 ## Highlights
 
@@ -187,7 +251,7 @@ restart after changing it.
 | `experimental` | Explicit opt-in generic creation, async, property escape hatches, and project helpers. |
 | `full` | Broad compatibility/discovery surface containing every non-feature-gated tool. |
 
-The `experimental` and `full` profiles expose two solver-free alpha7 research
+The `experimental` and `full` profiles expose three solver-free alpha7 research
 preparation tools. `research_campaign_compile` turns a complete goal, frozen
 design space, and explicit approval into a fingerprinted manifest; it never
 starts a solver. `research_robustness_plan` creates a centered one-axis-at-a-time
@@ -198,6 +262,61 @@ resume exact proposals after a restart.
 These tools prepare evidence-safe work; they do not start an autonomous
 campaign, change materials, claim success without caller tolerances, or make
 RCWA mandatory when an independent adapter is not applicable.
+
+The same two profiles expose the alpha7.2 robust-shape workflow through four
+bounded experimental tools. `robust_shape_plan_preview` validates and
+summarizes a hash-pinned manifest without admission or solver startup;
+`robust_shape_job_submit` routes only through the durable job authority;
+`robust_shape_evidence_inspect` returns a path-redacted bounded journal
+summary; and `robust_shape_evidence_verify` checks immutable specification
+identity, hash-chain ordering, condition completeness, validated gradients,
+fresh-forward optimizer evidence, finalist validation, checkpoints, and
+cleanup. They expose no generic Java property mutation and remain absent from
+`core`, `basic_fem`, and `wave_optics`.
+
+Finalist validation policy schema `1.1.0` keeps legacy `1.0.0` readable and
+adds caller-owned baseline/finer mesh references plus an explicit maximum
+independent-COMSOL condition delta. A licensed finalist uses fresh derived
+models for 24 baseline conditions, 24 finer-mesh conditions, and 96 declared
+off-design conditions. It persists the external-fidelity receipt separately,
+binds it into the tamper-evident finalist receipt, and cannot reach completed
+state until finalist, checkpoint, and current-attempt cleanup evidence agree.
+
+For a licensed robust run, optimizer configuration schema `1.1.0` keeps every
+condition solve and adjoint in COMSOL while driving the aggregate objective with
+an explicit outer-loop GCMMA state. The caller supplies an ASCII path and exact
+SHA-256 for the separately obtained pure-Python `mmapy 0.3.1` wheel. The wheel
+is hash-checked and loaded only on this experimental execution path; it is not
+installed, bundled, imported by discovery, or silently replaced by MMA/CCSAQ.
+Every proposal, nonconservative inner revision, accepted fresh-forward result,
+move limit, and true condition-solve budget is durable and fingerprinted.
+
+Robust condition-controls schema `1.4.0` retains readable `1.3.0` mesh-reference
+controls and additionally binds the native Sensitivity study features, regenerated
+solver topology, direct-solver out-of-core policy, derivative solution/dataset,
+adjoint method, and stationary nonlinearity. The licensed runtime replaces the
+incompatible pre-existing solver sequence, verifies the generated identities,
+and persists both raw complex `fsens` values and the accepted real components.
+The same contract explicitly merges the generated Wave Optics and material-
+coordinate segregated steps when their constraints cross at oblique incidence,
+then reads back the single merged step and its caller-selected direct solver.
+The caller-owned mesh reference remains validation-fixture evidence, never an
+automatic coarsening rule or a substitute for independent finer-mesh finalist
+convergence; accepted gradients still require independent finite-difference and
+directional reconciliation.
+
+Robust condition-controls schema `1.5.0` adds the mandatory
+`forward_shape_application` block so every licensed candidate is evaluated on a
+mesh actually deformed by the candidate shape. A dedicated linear `Stationary`
+deformation stage solving only the derived shape physics is placed before the
+Wave Optics step, the regenerated sequence is scoped per step, and the solved
+shape is read back per variable: the declared displacement component is
+evaluated over the mesh vertices, the deformed radius is measured from the
+maximum-component vertex, and it is compared with the requested radius
+(relative tolerance declared by the caller) before any condition solve is
+trusted. The gradient path removes the staged step and regenerates the coupled
+sequence, so native adjoint receipts are unchanged; the `1.4.0` contract
+remains readable.
 
 Profiles only control the visibility of COMSOL automation/simulation tools and
 future autonomous-exploration tools. Orthogonal functionality uses independent,
@@ -609,4 +728,8 @@ Use this fork when the upstream server fails under MPh standalone with errors su
 
 This repository is distributed under the [MIT License](LICENSE). COMSOL,
 licensed manuals, third-party models, papers, and datasets are not relicensed by
-this repository.
+this repository. The optional external `mmapy` GCMMA/MMA wheel remains under
+GPL-3.0-or-later and is neither copied into nor distributed with this package.
+We thank Krister Svanberg for MMA/GCMMA and Arjen Deetman for the reviewed Python
+implementation; users of that execution path should retain their license and
+citation notices.

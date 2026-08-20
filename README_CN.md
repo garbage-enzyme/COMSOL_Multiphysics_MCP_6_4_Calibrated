@@ -5,11 +5,43 @@
 [![CI](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/actions/workflows/ci.yml)
 [![Python 3.14](https://img.shields.io/badge/python-3.14-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
-![Release: 0.7.1](https://img.shields.io/badge/release-0.7.1-blue)
+![Release: 0.7.2](https://img.shields.io/badge/release-0.7.2-blue)
 ![Status: alpha](https://img.shields.io/badge/status-alpha-red)
 [![GitHub stars](https://img.shields.io/github/stars/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated?style=social)](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/stargazers)
 
 > [wjc9011/COMSOL_Multiphysics_MCP](https://github.com/wjc9011/COMSOL_Multiphysics_MCP) 的维护型 Fork，已接受 **`COMSOL 6.4.0.*` release line** 和 **MPh 1.3.1 standalone/clientapi**。licensed reference 证据使用 **COMSOL 6.4.0.293**；第三位数字变化视为新的 release family，需要重新验收。
+
+## 相关论文与引用
+
+介绍 COMSOL-MCP 的论文为：
+
+> Naiyin Zhang and Junchao Wang, “COMSOL-MCP: An open-source model context
+> protocol interface for AI-assisted multiphysics simulation,” *Neurocomputing*,
+> vol. 703, article 134481, 2026.
+
+出版商页面：[ScienceDirect](https://linkinghub.elsevier.com/retrieve/pii/S0925231226018795)
+
+```bibtex
+@article{Zhang2026COMSOLMCP,
+  title   = {COMSOL-MCP: An Open-Source Model Context Protocol Interface for AI-Assisted Multiphysics Simulation},
+  author  = {Zhang, Naiyin and Wang, Junchao},
+  journal = {Neurocomputing},
+  volume  = {703},
+  pages   = {134481},
+  year    = {2026},
+  doi     = {10.1016/j.neucom.2026.134481},
+  url     = {https://doi.org/10.1016/j.neucom.2026.134481}
+}
+```
+
+介绍 COMSOL-MCP 的方法、架构、功能或评估结果时，请引用上述论文。使用或修改软件时，
+请同时引用论文和代码仓库；GitHub 的 **Cite this repository** 菜单使用
+[`CITATION.cff`](CITATION.cff) 中的元数据。为保证可复现性，请在数据/代码可用性声明中
+注明所用的精确 release 或 commit、仓库链接和访问日期。
+
+感谢 Naiyin Zhang 与 Junchao Wang 创建 COMSOL-MCP、发表相关论文，并在 upstream
+[commit `99172f8`](https://github.com/wjc9011/COMSOL_Multiphysics_MCP/commit/99172f8f43c6753c2442c406cd5c6055ea8c5bef)
+中贡献引用指引；本维护型 fork 已根据自身仓库与 release evidence 边界进行了适配。
 
 该服务器为 AI agent 提供更安全、更紧凑的 COMSOL 接口，用于模型检查、受控单点验证、可恢复的分段扫描与离线手册检索。它适配 `mph.Client()` 返回的 `model.java` clientapi 对象；该对象与上游面向的直接 `com.comsol.model.Model` API 有实质差异。
 
@@ -64,7 +96,7 @@ acceptance 报告应至少包含不启动 COMSOL 的 `initialize`、实时 `list
 `capabilities` 回读，并把 licensed start/solve/cleanup 覆盖单独标注。已安装工具界面
 以实时 discovery 为准，不以文档中复制的数量为准。
 
-`0.7.1` 继续以保守方式使用 MCP Python SDK `2.0.x` 运行基座。工具、profile、schema
+`0.7.2` 继续以保守方式使用 MCP Python SDK `2.0.x` 运行基座。工具、profile、schema
 和 stdio 配置仍保持已接受的旧协议兼容应用合同；本版本不会让 client opt in MCP
 `2026-07-28` 的 multi-round-trip request、cache hint、subscription 或 Tasks extension。
 
@@ -72,6 +104,32 @@ initialize 响应也会通过旧 MCP initialize schema 携带一段简短安全�
 和 preflight；只有用户明确要求时才 start、solve 或 mutate；源模型保持只读；执行成功、
 证据完整性和科学验证分开报告。client 可以采用或忽略这段提示；真正的安全边界仍由
 server 内强制执行的 ownership 和 validation 检查提供。
+
+### 可选的 DeepSeek Harness bridge
+
+仓库还包含 [`dsh_bridge/`](dsh_bridge/)，这是供 DeepSeek Harness 使用的可选、仅仓库
+内 Node.js 插件。它通过 MCP stdio 连接已安装的 `comsol-mcp`，以干净名称注册实时发现
+的工具，并把持久化的 `job_submit` 镜像到 `ctx.jobs`，提供完成通知、进度输出、取消和
+重新挂接。它不是第二个 COMSOL server，不修改 Python 包、公共 schema、求解器所有权或
+生产设置。
+
+bridge 不进入 Python wheel 或 sdist，需要 Node.js 20+，且没有 npm 依赖。验证和安装：
+
+```powershell
+npm test --prefix dsh_bridge
+npm run smoke --prefix dsh_bridge
+.\dsh_bridge\install.ps1
+```
+
+然后按 [`dsh_bridge/README.md`](dsh_bridge/README.md) 把 `comsol-bridge` 条目加入 DSH
+web profile，使用绝对路径的已安装 `comsol-mcp.exe`、runtime 工作目录和共享 settings
+路径。bridge 自己的 `config.enabled` Boolean 控制客户端插件是否启用；它有意不是
+COMSOL Settings GUI 的 server Boolean。相同 DSH 会话中不要再配置第二个
+`dsh-mcp-client` COMSOL 条目，因为 bridge 必须独占并串行化这一条 stdio 连接。
+安装、设置变更、验证与恢复边界见版本化的
+[`DeepSeek 兼容性契约`](dsh_bridge/DEEPSEEK_COMPATIBILITY.md)。
+fake-server 测试只证明 bridge 行为，真实 DSH discovery、cleanup 和 licensed solve 必须
+单独记录。
 
 ## 主要能力
 
@@ -151,7 +209,7 @@ GUI 打开期间不要同时编辑 JSON。只有用户明确要求 agent 管理�
 | `experimental` | 显式选择的通用创建、异步、属性逃生口和项目辅助工具。 |
 | `full` | 宽兼容/发现界面，包含全部非 feature-gated 工具。 |
 
-`experimental` 和 `full` profile 提供两个 solver-free 的 alpha7 research
+`experimental` 和 `full` profile 提供三个 solver-free 的 alpha7 research
 准备工具。`research_campaign_compile` 将完整目标、冻结设计空间和显式批准编译为带
 fingerprint 的 manifest，且不会启动求解器；`research_robustness_plan` 创建以候选点为
 中心的单轴正负扰动矩阵，并拒绝任何需要越界 clipping 的候选。它们只用于安全准备，
@@ -159,6 +217,47 @@ fingerprint 的 manifest，且不会启动求解器；`research_robustness_plan`
 adapter 不适用时强制要求 RCWA。`research_optimizer_advance` 是无状态的
 checkpoint/feedback 步骤；客户端负责保存返回的 checkpoint，因此重启后仍可恢复
 完全一致的 proposal。
+
+这两个 profile 还通过四个有界实验工具提供 alpha7.2 鲁棒形状工作流：
+`robust_shape_plan_preview` 在不 admission、不启动求解器的情况下验证并摘要 hash-pinned
+manifest；`robust_shape_job_submit` 只通过 durable job authority 提交；
+`robust_shape_evidence_inspect` 返回隐藏路径的有界 journal 摘要；
+`robust_shape_evidence_verify` 核验不可变规格、hash-chain 顺序、condition 完整性、已验证
+gradient、optimizer 的 fresh-forward 证据、finalist、checkpoint 与 cleanup。它们不提供
+通用 Java 属性修改，并且不会出现在 `core`、`basic_fem` 或 `wave_optics` 中。
+
+finalist validation policy schema `1.1.0` 保持 `1.0.0` 可读，并新增由调用方声明的
+baseline/finer mesh reference 与 independent-COMSOL 最大 condition delta。licensed
+finalist 会用全新的 derived model 分别执行 24 个 baseline、24 个 finer-mesh 和 96 个
+明确声明的 off-design conditions；external-fidelity receipt 会单独持久化并绑定到防篡改
+finalist receipt。只有 finalist、checkpoint 与当前 attempt 的 cleanup 证据一致时，任务
+才能进入 completed 状态。
+
+执行 licensed 鲁棒任务时，optimizer configuration schema `1.1.0` 仍由 COMSOL
+完成每个 condition 的 forward/adjoint，并用显式外循环 GCMMA 状态驱动聚合目标。
+调用方提供单独取得的纯 Python `mmapy 0.3.1` wheel 的 ASCII 绝对路径和精确 SHA-256；
+系统仅在该实验执行路径中核验并加载它，不安装、不打包、不在普通 discovery 时导入，
+也不会静默改用 MMA/CCSAQ。每个 proposal、非保守 inner revision、fresh-forward 接受结果、
+move limit 与真实 condition-solve 预算均持久化并绑定指纹。
+
+鲁棒 condition-controls schema `1.4.0` 保持对 `1.3.0` mesh-reference 控制的可读
+兼容，并进一步绑定原生 Sensitivity study feature、重新生成的 solver topology、direct
+solver 的 out-of-core 策略、derivative solution/dataset、adjoint method 与 stationary
+nonlinearity。licensed runtime 会替换不兼容的旧 solver sequence、核验生成身份，并分别
+持久化原始 complex `fsens` 与采用的 real component。
+该 contract 还会在斜入射导致 Wave Optics 与 material-coordinate constraints 跨组时，
+显式合并 COMSOL 生成的两个 segregated steps，并回读单一 merged step 及 caller-selected
+direct solver。caller-owned mesh reference 仍只
+属于验证 fixture 证据，不是自动粗化规则，也不能替代 finalist 的独立 finer-mesh
+convergence；gradient 仍须通过独立 finite-difference 与 directional reconciliation。
+
+鲁棒 condition-controls schema `1.5.0` 增加强制的 `forward_shape_application`
+块，使每个 licensed candidate 都在按候选形状真实变形的网格上求值：一个只解
+derived shape physics 的线性 `Stationary` 变形阶段被置于 Wave Optics 步骤之前，
+重新生成的 sequence 按步骤限定求解范围，并在信任任何 condition solve 之前按变量
+回读已求解形状：在网格顶点上求值声明的位移分量，由最大分量顶点测得变形后半径，
+并与请求半径比较（相对容差由调用方声明）。gradient 路径会移除该阶段并重新生成
+耦合 sequence，因此原生 adjoint receipts 不变；`1.4.0` contract 仍然可读。
 
 Profile 只控制 COMSOL 自动化仿真工具以及未来自主探索工具的可见性。其他正交功能使用
 独立、默认关闭的 Boolean 开关；它们可与任意 profile 组合，也可同时开启：
@@ -526,4 +625,7 @@ MCP 客户端配置示例：
 ## 许可证
 
 本仓库采用 [MIT License](LICENSE)。COMSOL、授权手册、第三方模型、论文和数据集
-不因本仓库许可证而被重新授权。
+不因本仓库许可证而被重新授权。外部可选的 `mmapy` GCMMA/MMA wheel 仍采用
+GPL-3.0-or-later，本包不复制或分发它。感谢 Krister Svanberg 提出 MMA/GCMMA，
+并感谢 Arjen Deetman 提供本项目核验的 Python 实现；使用该执行路径时应保留其许可证
+与引用声明。

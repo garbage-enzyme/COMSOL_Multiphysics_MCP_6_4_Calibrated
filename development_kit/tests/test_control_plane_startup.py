@@ -11,7 +11,12 @@ from pathlib import Path
 
 MAX_CORE_DISCOVERY_BYTES = 64 * 1024
 MAX_CORE_TOOL_SCHEMA_BYTES = 16 * 1024
-MAX_CAPABILITIES_RESPONSE_BYTES = 64 * 1024
+# The capabilities result embeds the complete schema registry. The registry
+# legitimately grows with each public schema (151 entries measured at 66,692 B
+# on 2026-08-18, alpha7.2 with robust forward-shape schemas), so the bound is
+# 80 KiB to keep headroom for documented registry growth while still bounding
+# the response.
+MAX_CAPABILITIES_RESPONSE_BYTES = 80 * 1024
 
 _CHILD_PROBE = r"""
 import asyncio

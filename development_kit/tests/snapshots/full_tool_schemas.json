@@ -7813,6 +7813,169 @@
     "title": "results_plots_listArguments",
     "type": "object"
   },
+  "robust_shape_evidence_inspect": {
+    "properties": {
+      "job_id": {
+        "title": "Job Id",
+        "type": "string",
+        "maxLength": 16384
+      },
+      "limit": {
+        "default": 50,
+        "title": "Limit",
+        "type": "integer",
+        "minimum": -1e+308,
+        "maximum": 1e+308
+      }
+    },
+    "required": [
+      "job_id"
+    ],
+    "title": "robust_shape_evidence_inspectArguments",
+    "type": "object",
+    "maxProperties": 256,
+    "additionalProperties": false
+  },
+  "robust_shape_evidence_verify": {
+    "properties": {
+      "job_id": {
+        "title": "Job Id",
+        "type": "string",
+        "maxLength": 16384
+      }
+    },
+    "required": [
+      "job_id"
+    ],
+    "title": "robust_shape_evidence_verifyArguments",
+    "type": "object",
+    "maxProperties": 256,
+    "additionalProperties": false
+  },
+  "robust_shape_job_submit": {
+    "properties": {
+      "submission_manifest_path": {
+        "title": "Submission Manifest Path",
+        "type": "string",
+        "maxLength": 16384
+      },
+      "submission_manifest_sha256": {
+        "title": "Submission Manifest Sha256",
+        "type": "string",
+        "maxLength": 16384
+      },
+      "cores": {
+        "title": "Cores",
+        "type": "integer",
+        "minimum": -1e+308,
+        "maximum": 1e+308
+      },
+      "version": {
+        "title": "Version",
+        "type": "string",
+        "maxLength": 16384
+      },
+      "max_mesh_elements": {
+        "title": "Max Mesh Elements",
+        "type": "integer",
+        "minimum": -1e+308,
+        "maximum": 1e+308
+      },
+      "comsol_temporary_directory": {
+        "title": "Comsol Temporary Directory",
+        "type": "string",
+        "maxLength": 16384
+      },
+      "condition_execution_limit": {
+        "anyOf": [
+          {
+            "type": "integer",
+            "minimum": -1e+308,
+            "maximum": 1e+308
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Condition Execution Limit"
+      }
+    },
+    "required": [
+      "submission_manifest_path",
+      "submission_manifest_sha256",
+      "cores",
+      "version",
+      "max_mesh_elements",
+      "comsol_temporary_directory"
+    ],
+    "title": "robust_shape_job_submitArguments",
+    "type": "object",
+    "maxProperties": 256,
+    "additionalProperties": false
+  },
+  "robust_shape_plan_preview": {
+    "properties": {
+      "submission_manifest_path": {
+        "title": "Submission Manifest Path",
+        "type": "string",
+        "maxLength": 16384
+      },
+      "submission_manifest_sha256": {
+        "title": "Submission Manifest Sha256",
+        "type": "string",
+        "maxLength": 16384
+      },
+      "cores": {
+        "title": "Cores",
+        "type": "integer",
+        "minimum": -1e+308,
+        "maximum": 1e+308
+      },
+      "version": {
+        "title": "Version",
+        "type": "string",
+        "maxLength": 16384
+      },
+      "max_mesh_elements": {
+        "title": "Max Mesh Elements",
+        "type": "integer",
+        "minimum": -1e+308,
+        "maximum": 1e+308
+      },
+      "comsol_temporary_directory": {
+        "title": "Comsol Temporary Directory",
+        "type": "string",
+        "maxLength": 16384
+      },
+      "condition_execution_limit": {
+        "anyOf": [
+          {
+            "type": "integer",
+            "minimum": -1e+308,
+            "maximum": 1e+308
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Condition Execution Limit"
+      }
+    },
+    "required": [
+      "submission_manifest_path",
+      "submission_manifest_sha256",
+      "cores",
+      "version",
+      "max_mesh_elements",
+      "comsol_temporary_directory"
+    ],
+    "title": "robust_shape_plan_previewArguments",
+    "type": "object",
+    "maxProperties": 256,
+    "additionalProperties": false
+  },
   "semantic_search": {
     "additionalProperties": false,
     "maxProperties": 256,

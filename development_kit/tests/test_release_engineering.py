@@ -443,6 +443,7 @@ def test_support_matrix_matches_frozen_profile_counts_and_declared_dependencies(
     assert pyproject["tool"]["hatch"]["build"]["targets"]["sdist"]["exclude"] == [
         "/development_kit",
         "/.claude",
+        "/dsh_bridge",
     ]
 
 
@@ -469,6 +470,7 @@ def test_repository_root_is_release_focused_and_free_of_generated_artifacts():
         ".gitignore",
         "AGENTS.md",
         "CLAUDE.md",
+        "CITATION.cff",
         "DEPLOYMENT.md",
         "DEPLOYMENT_CN.md",
         "LICENSE",

@@ -162,7 +162,7 @@ def test_registry_is_complete_sorted_and_snapshot_stable():
     assert registry["producer"] == {"package": "comsol-mcp", "version": __version__}
     # These are deliberate public release snapshots. A registry change updates
     # both literals and development_kit/release/release_facts.json together.
-    assert registry["entry_count"] == len(entries) == 110
+    assert registry["entry_count"] == len(entries) == 151
     assert names == sorted(names)
     assert len(names) == len(set(names))
     emitted = _emitted_schemas_in_source()
@@ -173,6 +173,11 @@ def test_registry_is_complete_sorted_and_snapshot_stable():
         "comsol_mcp.h1_licensed_gate",
         "comsol_mcp.portfolio_evidence_request",
         "comsol_mcp.runtime_compatibility",
+        "comsol_mcp.robust_pedot_fixture_manifest",
+        "comsol_mcp.robust_forward_shape_stage",
+        "comsol_mcp.lin2025_pedot_cylinder_fixture",
+        "comsol_mcp.lin2025_pedot_cylinder_fixture.binding",
+        "comsol_mcp.lin2025_robust_campaign_inputs",
         "comsol_mcp.simulation_configuration",
         "comsol_mcp.standalone_driver_event",
         "comsol_mcp.standalone_licensed_acceptance",
@@ -189,7 +194,7 @@ def test_registry_is_complete_sorted_and_snapshot_stable():
     assert set(names) == emitted | registry_only
     assert re.fullmatch(r"[0-9a-f]{64}", registry["registry_sha256"])
     assert registry["registry_sha256"] == (
-        "d98595e1f1f0eef8eece0bb57526443c2946453e356de492ef259975998be712"
+        "00bb02bf3e29c441503c44dbd446dfbbb8c8893cfb8f69ee5340c8e2d4cb293b"
     )
     assert registry["registry_sha256"] == get_schema_registry()["registry_sha256"]
     assert check_schema_support("comsol_mcp.session_startup_state", "1.0.0")["supported"] is True
@@ -213,6 +218,27 @@ def test_every_entry_declares_read_write_and_non_mutating_migration_policy():
     )
     assert physical["readable_versions"] == ["1.0.0", "1.1.0"]
     assert physical["writable_version"] == "1.1.0"
+    robust_manifest = next(
+        item
+        for item in get_schema_registry()["entries"]
+        if item["schema_name"] == "comsol_mcp.robust_shape_optimization_manifest"
+    )
+    assert robust_manifest["readable_versions"] == ["1.0.0", "1.1.0"]
+    assert robust_manifest["writable_version"] == "1.1.0"
+    robust_controls = next(
+        item
+        for item in get_schema_registry()["entries"]
+        if item["schema_name"] == "comsol_mcp.robust_condition_controls"
+    )
+    assert robust_controls["readable_versions"] == [
+        "1.0.0",
+        "1.1.0",
+        "1.2.0",
+        "1.3.0",
+        "1.4.0",
+        "1.5.0",
+    ]
+    assert robust_controls["writable_version"] == "1.5.0"
     deployment = next(
         item
         for item in get_schema_registry()["entries"]

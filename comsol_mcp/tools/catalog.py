@@ -265,6 +265,12 @@ _TOOLS_BY_REGISTRAR = {
         "research_optimizer_advance",
         "research_robustness_plan",
     ),
+    "comsol_mcp.tools.robust_shape.register_robust_shape_tools": (
+        "robust_shape_plan_preview",
+        "robust_shape_job_submit",
+        "robust_shape_evidence_inspect",
+        "robust_shape_evidence_verify",
+    ),
     "comsol_mcp.tools.shared_session.register_shared_session_tools": (
         "shared_server_preflight",
         "shared_server_attach",
@@ -326,6 +332,7 @@ _GROUP_BY_REGISTRAR = {
     "register_convergence_evaluation_tools": "convergence_evidence",
     "register_branch_continuation_tools": "branch_continuation_evidence",
     "register_research_tools": "research_exploration",
+    "register_robust_shape_tools": "robust_shape_optimization",
     "register_shared_session_tools": "shared_session",
     "register_knowledge_tools": "embedded_docs",
     "register_lexical_manual_tools": "lexical_docs",
@@ -378,6 +385,10 @@ _EXPERIMENTAL_TOOLS = frozenset(
         "research_campaign_compile",
         "research_optimizer_advance",
         "research_robustness_plan",
+        "robust_shape_plan_preview",
+        "robust_shape_job_submit",
+        "robust_shape_evidence_inspect",
+        "robust_shape_evidence_verify",
     }
 )
 
@@ -387,6 +398,7 @@ _SIDE_EFFECTS = {
     "job_submit": "solver_execution",
     "job_cancel": "job_control",
     "job_resume": "solver_execution",
+    "robust_shape_job_submit": "solver_execution",
     "standalone_build": "filesystem_write",
     "standalone_start": "solver_execution",
     "standalone_pause": "job_control",
@@ -482,6 +494,7 @@ _STARTS_SOLVER = frozenset(
     {
         "job_submit",
         "job_resume",
+        "robust_shape_job_submit",
         "standalone_start",
         "standalone_resume",
         "comsol_start",
@@ -555,6 +568,9 @@ _EXPLICIT_READ_ONLY_TOOLS = frozenset(
         "research_campaign_compile",
         "research_optimizer_advance",
         "research_robustness_plan",
+        "robust_shape_plan_preview",
+        "robust_shape_evidence_inspect",
+        "robust_shape_evidence_verify",
         "study_get_progress",
         "study_list",
         "troubleshoot",
@@ -623,6 +639,9 @@ _SOLVER_FREE_TOOLS = frozenset(
         "research_campaign_compile",
         "research_optimizer_advance",
         "research_robustness_plan",
+        "robust_shape_plan_preview",
+        "robust_shape_evidence_inspect",
+        "robust_shape_evidence_verify",
         "geometry_fin_preview",
         "geometry_blocks_preview",
         "wave_optics_incidence_preview",
@@ -645,6 +664,7 @@ _MODEL_REVISION_EXCLUSIONS = frozenset(
         "job_submit",
         "job_spec_preview",
         "job_resume",
+        "robust_shape_job_submit",
         "comsol_start",
         "comsol_connect",
         "comsol_disconnect",
@@ -901,6 +921,10 @@ _EXPERIMENTAL_ADDITIONS = frozenset(
         "thermal_radiation_evaluate",
         "thermal_material_validate",
         "thermal_material_evaluate",
+        "robust_shape_plan_preview",
+        "robust_shape_job_submit",
+        "robust_shape_evidence_inspect",
+        "robust_shape_evidence_verify",
     }
 )
 

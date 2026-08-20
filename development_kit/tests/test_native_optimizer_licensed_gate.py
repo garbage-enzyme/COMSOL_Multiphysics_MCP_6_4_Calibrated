@@ -88,6 +88,60 @@ def test_generated_solver_receives_caller_iteration_and_move_limits():
     }
 
 
+def test_requested_solver_iterations_are_separate_from_budget_cap():
+    args = type("Args", (), {"optimizer_iterations": 2})()
+    assert gate._requested_optimizer_iterations(args, {"max_iterations": 3}) == 2
+    args.optimizer_iterations = 4
+    with pytest.raises(ValueError, match="exceeds"):
+        gate._requested_optimizer_iterations(args, {"max_iterations": 3})
+
+
+def test_move_limit_is_a_required_positive_caller_input():
+    args = type("Args", (), {"move_limit": 0.05})()
+    assert gate._requested_move_limit(args) == 0.05
+    for value in (None, False, 0.0, -0.1, float("nan"), float("inf")):
+        args.move_limit = value
+        with pytest.raises(ValueError, match="move_limit"):
+            gate._requested_move_limit(args)
+
+
+def test_deformation_feasibility_uses_caller_expression_and_absolute_threshold():
+    args = type(
+        "Args",
+        (),
+        {"deformation_jacobian_expression": "reldetjac", "minimum_relative_jacobian": 0.0},
+    )()
+    policy = gate._deformation_feasibility_policy(args)
+    assert policy["jacobian_expression"] == "reldetjac"
+    accepted = gate._deformation_feasibility_evidence(np.array([0.02, 0.3]), policy)
+    assert accepted["minimum_relative_jacobian"] == 0.02
+    assert accepted["passed"] is True
+    rejected = gate._deformation_feasibility_evidence(np.array([0.0, 0.3]), policy)
+    assert rejected["passed"] is False
+
+
+def test_optimizer_error_classifies_only_proven_deformation_signatures():
+    guarded = gate._optimizer_error_code(
+        gate.DeformationFeasibilityError("below threshold"), "deformation_feasibility"
+    )
+    assert guarded == ("deformation_feasibility_failed", "fresh_forward_jacobian_guard")
+
+    class FlException(RuntimeError):
+        pass
+
+    nonfinite = gate._optimizer_error_code(
+        FlException("NaN degrees of freedom in comp1.material.u"), "optimization_solve"
+    )
+    assert nonfinite == (
+        "deformation_feasibility_failed",
+        "comsol_nonfinite_material_coordinates",
+    )
+    unrelated = gate._optimizer_error_code(
+        FlException("linear solver failed"), "optimization_solve"
+    )
+    assert unrelated == ("native_optimizer_failed", None)
+
+
 def test_gate_parser_has_no_host_resource_defaults():
     parser = gate._parser()
     actions = {action.dest: action.default for action in parser._actions}
@@ -95,9 +149,31 @@ def test_gate_parser_has_no_host_resource_defaults():
         "cores",
         "max_solves",
         "max_iterations",
+        "optimizer_iterations",
+        "move_limit",
         "max_wall_time_seconds",
         "max_commit_fraction",
         "max_disk_bytes",
         "max_review_items",
+        "max_elements_per_model",
+        "minimum_element_quality",
+        "deformation_jacobian_expression",
+        "minimum_relative_jacobian",
     ):
         assert actions[name] is None
+
+
+def test_mesh_admission_uses_caller_element_and_quality_thresholds():
+    accepted = {
+        "element_count": 300_000,
+        "minimum_quality": 0.1,
+        "mean_quality": 0.5,
+        "quality_measure": "volcircum",
+    }
+    gate._admit_mesh(accepted, max_elements=300_000, minimum_quality=0.1)
+    too_large = {**accepted, "element_count": 300_001}
+    with pytest.raises(ValueError, match="element count"):
+        gate._admit_mesh(too_large, max_elements=300_000, minimum_quality=0.1)
+    too_low = {**accepted, "minimum_quality": 0.099}
+    with pytest.raises(ValueError, match="minimum quality"):
+        gate._admit_mesh(too_low, max_elements=300_000, minimum_quality=0.1)

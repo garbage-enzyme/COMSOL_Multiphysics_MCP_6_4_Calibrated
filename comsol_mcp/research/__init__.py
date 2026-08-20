@@ -52,6 +52,11 @@ from .evaluations import (
     EVALUATION_RECORD_SCHEMA_VERSION,
     normalize_evaluation_record,
 )
+from .external_validation import (
+    EXTERNAL_VALIDATION_RECEIPT_SCHEMA_NAME,
+    EXTERNAL_VALIDATION_RECEIPT_SCHEMA_VERSION,
+    normalize_external_validation_receipt,
+)
 from .gradient_contracts import (
     GRADIENT_RECORD_SCHEMA_NAME,
     GRADIENT_RECORD_SCHEMA_VERSION,
@@ -71,6 +76,19 @@ from .journal import (
     RESEARCH_JOURNAL_RECORD_SCHEMA_VERSION,
     append_research_journal_record,
     recover_research_journal,
+)
+from .lin2025_pedot_cylinder import (
+    ADAPTER_ID as LIN2025_PEDOT_CYLINDER_ADAPTER_ID,
+)
+from .lin2025_pedot_cylinder import (
+    SCHEMA_NAME as LIN2025_PEDOT_CYLINDER_SCHEMA_NAME,
+)
+from .lin2025_pedot_cylinder import (
+    SCHEMA_VERSION as LIN2025_PEDOT_CYLINDER_SCHEMA_VERSION,
+)
+from .lin2025_pedot_cylinder import (
+    compile_lin2025_pedot_cylinder_binding,
+    normalize_lin2025_pedot_cylinder_fixture,
 )
 from .materials import (
     MATERIAL_CATALOG_SCHEMA_NAME,
@@ -98,6 +116,117 @@ from .records import (
     CANDIDATE_RECORD_SCHEMA_NAME,
     CANDIDATE_RECORD_SCHEMA_VERSION,
     normalize_candidate_record,
+)
+from .robust_adapter_configuration import (
+    SCHEMA_NAME as ROBUST_SHAPE_ADAPTER_CONFIGURATION_SCHEMA_NAME,
+)
+from .robust_adapter_configuration import (
+    SCHEMA_VERSION as ROBUST_SHAPE_ADAPTER_CONFIGURATION_SCHEMA_VERSION,
+)
+from .robust_adapter_configuration import (
+    normalize_robust_shape_adapter_configuration,
+)
+from .robust_condition_controls import (
+    SCHEMA_NAME as ROBUST_CONDITION_CONTROLS_SCHEMA_NAME,
+)
+from .robust_condition_controls import (
+    SCHEMA_VERSION as ROBUST_CONDITION_CONTROLS_SCHEMA_VERSION,
+)
+from .robust_condition_controls import (
+    normalize_robust_condition_controls,
+)
+from .robust_conditions import (
+    MATERIAL_STATE_CONFIGURATION_SCHEMA_NAME,
+    MATERIAL_STATE_CONFIGURATION_SCHEMA_VERSION,
+    OPTIMIZATION_CONDITION_TABLE_SCHEMA_NAME,
+    OPTIMIZATION_CONDITION_TABLE_SCHEMA_VERSION,
+    normalize_optimization_condition_table,
+    normalize_optimization_material_state,
+)
+from .robust_finalist_evidence import (
+    ROBUST_FINALIST_VALIDATION_RECEIPT_SCHEMA_NAME,
+    ROBUST_FINALIST_VALIDATION_RECEIPT_SCHEMA_VERSION,
+    assess_robust_finalist_validation,
+    normalize_robust_finalist_validation_receipt,
+)
+from .robust_finalist_validation import (
+    ROBUST_FINALIST_VALIDATION_POLICY_READABLE_VERSIONS,
+    ROBUST_FINALIST_VALIDATION_POLICY_SCHEMA_NAME,
+    ROBUST_FINALIST_VALIDATION_POLICY_SCHEMA_VERSION,
+    normalize_robust_finalist_validation_policy,
+)
+from .robust_gradient_acceptance import (
+    ROBUST_GRADIENT_POLICY_SCHEMA_NAME,
+    ROBUST_GRADIENT_POLICY_SCHEMA_VERSION,
+    ROBUST_GRADIENT_RECEIPT_SCHEMA_NAME,
+    ROBUST_GRADIENT_RECEIPT_SCHEMA_VERSION,
+    assess_licensed_gradient_ladder,
+    assess_robust_gradient_acceptance,
+    normalize_robust_gradient_policy,
+)
+from .robust_material_mapping import (
+    OPTICAL_PROPERTY_MAPPING_SCHEMA_NAME,
+    OPTICAL_PROPERTY_MAPPING_SCHEMA_VERSION,
+    normalize_optical_property_mapping,
+)
+from .robust_material_tensor_rows import (
+    SCHEMA_NAME as ROBUST_MATERIAL_TENSOR_ROWS_SCHEMA_NAME,
+)
+from .robust_material_tensor_rows import (
+    SCHEMA_VERSION as ROBUST_MATERIAL_TENSOR_ROWS_SCHEMA_VERSION,
+)
+from .robust_material_tensor_rows import (
+    bind_robust_material_tensor_rows,
+    normalize_robust_material_tensor_rows,
+)
+from .robust_objectives import (
+    ROBUST_OBJECTIVE_CONFIGURATION_SCHEMA_NAME,
+    ROBUST_OBJECTIVE_CONFIGURATION_SCHEMA_VERSION,
+    ROBUST_OBJECTIVE_GRADIENT_RECEIPT_SCHEMA_NAME,
+    ROBUST_OBJECTIVE_GRADIENT_RECEIPT_SCHEMA_VERSION,
+    ROBUST_OBJECTIVE_RECEIPT_SCHEMA_NAME,
+    ROBUST_OBJECTIVE_RECEIPT_SCHEMA_VERSION,
+    aggregate_robust_absolute_contrast_gradient,
+    evaluate_robust_absolute_contrast,
+    normalize_robust_objective_configuration,
+)
+from .robust_optimizer_policy import (
+    ROBUST_OPTIMIZER_EXECUTION_RECEIPT_SCHEMA_NAME,
+    ROBUST_OPTIMIZER_EXECUTION_RECEIPT_SCHEMA_VERSION,
+    ROBUST_OPTIMIZER_POLICY_SCHEMA_NAME,
+    ROBUST_OPTIMIZER_POLICY_SCHEMA_VERSION,
+    assess_robust_optimizer_execution,
+    normalize_robust_optimizer_policy,
+)
+from .robust_outer_gcmma import (
+    GCMMA_PROPOSAL_SCHEMA_NAME,
+    GCMMA_PROPOSAL_SCHEMA_VERSION,
+    GCMMA_STATE_SCHEMA_NAME,
+    GCMMA_STATE_SCHEMA_VERSION,
+    accept_gcmma_candidate,
+    create_gcmma_state,
+    normalize_gcmma_state,
+    propose_gcmma_candidate,
+    verify_mmapy_backend,
+)
+from .robust_shape_adapter import (
+    ROBUST_SHAPE_ADAPTER_BINDING_SCHEMA_NAME,
+    ROBUST_SHAPE_ADAPTER_BINDING_SCHEMA_VERSION,
+    ROBUST_SHAPE_CONTROL_RECEIPT_SCHEMA_NAME,
+    ROBUST_SHAPE_CONTROL_RECEIPT_SCHEMA_VERSION,
+    compile_robust_shape_adapter_binding,
+    prepare_robust_shape_controls,
+)
+from .robust_smoothing_selection import (
+    ROBUST_SMOOTHING_COMPARISON_SCHEMA_NAME,
+    ROBUST_SMOOTHING_COMPARISON_SCHEMA_VERSION,
+    compare_robust_smoothing_candidates,
+    normalize_robust_smoothing_comparison_receipt,
+)
+from .shape_support import (
+    SHAPE_SUPPORT_POLICY_SCHEMA_NAME,
+    SHAPE_SUPPORT_POLICY_SCHEMA_VERSION,
+    normalize_shape_support_policy,
 )
 from .state import (
     OPTIMIZER_CHECKPOINT_SCHEMA_NAME,
@@ -127,6 +256,8 @@ __all__ = [
     "DESIGN_SPACE_SCHEMA_VERSION",
     "EVALUATION_RECORD_SCHEMA_NAME",
     "EVALUATION_RECORD_SCHEMA_VERSION",
+    "EXTERNAL_VALIDATION_RECEIPT_SCHEMA_NAME",
+    "EXTERNAL_VALIDATION_RECEIPT_SCHEMA_VERSION",
     "DECISION_RECORD_SCHEMA_NAME",
     "DECISION_RECORD_SCHEMA_VERSION",
     "DERIVATIVE_CONSTRAINT_SCHEMA_NAME",
@@ -139,6 +270,8 @@ __all__ = [
     "DERIVATIVE_VARIABLE_SCHEMA_VERSION",
     "MATERIAL_CATALOG_SCHEMA_NAME",
     "MATERIAL_CATALOG_SCHEMA_VERSION",
+    "MATERIAL_STATE_CONFIGURATION_SCHEMA_NAME",
+    "MATERIAL_STATE_CONFIGURATION_SCHEMA_VERSION",
     "GRADIENT_RECORD_SCHEMA_NAME",
     "GRADIENT_RECORD_SCHEMA_VERSION",
     "GRADIENT_CHECK_SCHEMA_NAME",
@@ -155,6 +288,45 @@ __all__ = [
     "OPTIMIZER_STATE_SCHEMA_VERSION",
     "OBJECTIVE_SCORE_SCHEMA_NAME",
     "OBJECTIVE_SCORE_SCHEMA_VERSION",
+    "OPTIMIZATION_CONDITION_TABLE_SCHEMA_NAME",
+    "OPTIMIZATION_CONDITION_TABLE_SCHEMA_VERSION",
+    "OPTICAL_PROPERTY_MAPPING_SCHEMA_NAME",
+    "OPTICAL_PROPERTY_MAPPING_SCHEMA_VERSION",
+    "ROBUST_OBJECTIVE_CONFIGURATION_SCHEMA_NAME",
+    "ROBUST_OBJECTIVE_CONFIGURATION_SCHEMA_VERSION",
+    "ROBUST_OBJECTIVE_RECEIPT_SCHEMA_NAME",
+    "ROBUST_OBJECTIVE_RECEIPT_SCHEMA_VERSION",
+    "ROBUST_OBJECTIVE_GRADIENT_RECEIPT_SCHEMA_NAME",
+    "ROBUST_OBJECTIVE_GRADIENT_RECEIPT_SCHEMA_VERSION",
+    "ROBUST_OPTIMIZER_POLICY_SCHEMA_NAME",
+    "ROBUST_OPTIMIZER_POLICY_SCHEMA_VERSION",
+    "ROBUST_OPTIMIZER_EXECUTION_RECEIPT_SCHEMA_NAME",
+    "ROBUST_OPTIMIZER_EXECUTION_RECEIPT_SCHEMA_VERSION",
+    "ROBUST_GRADIENT_POLICY_SCHEMA_NAME",
+    "ROBUST_GRADIENT_POLICY_SCHEMA_VERSION",
+    "ROBUST_GRADIENT_RECEIPT_SCHEMA_NAME",
+    "ROBUST_GRADIENT_RECEIPT_SCHEMA_VERSION",
+    "ROBUST_FINALIST_VALIDATION_POLICY_SCHEMA_NAME",
+    "ROBUST_FINALIST_VALIDATION_POLICY_READABLE_VERSIONS",
+    "ROBUST_FINALIST_VALIDATION_POLICY_SCHEMA_VERSION",
+    "ROBUST_FINALIST_VALIDATION_RECEIPT_SCHEMA_NAME",
+    "ROBUST_FINALIST_VALIDATION_RECEIPT_SCHEMA_VERSION",
+    "ROBUST_SHAPE_ADAPTER_BINDING_SCHEMA_NAME",
+    "ROBUST_SHAPE_ADAPTER_BINDING_SCHEMA_VERSION",
+    "ROBUST_SHAPE_ADAPTER_CONFIGURATION_SCHEMA_NAME",
+    "ROBUST_SHAPE_ADAPTER_CONFIGURATION_SCHEMA_VERSION",
+    "ROBUST_MATERIAL_TENSOR_ROWS_SCHEMA_NAME",
+    "ROBUST_MATERIAL_TENSOR_ROWS_SCHEMA_VERSION",
+    "ROBUST_CONDITION_CONTROLS_SCHEMA_NAME",
+    "ROBUST_CONDITION_CONTROLS_SCHEMA_VERSION",
+    "bind_robust_material_tensor_rows",
+    "normalize_robust_condition_controls",
+    "ROBUST_SHAPE_CONTROL_RECEIPT_SCHEMA_NAME",
+    "ROBUST_SHAPE_CONTROL_RECEIPT_SCHEMA_VERSION",
+    "ROBUST_SMOOTHING_COMPARISON_SCHEMA_NAME",
+    "ROBUST_SMOOTHING_COMPARISON_SCHEMA_VERSION",
+    "SHAPE_SUPPORT_POLICY_SCHEMA_NAME",
+    "SHAPE_SUPPORT_POLICY_SCHEMA_VERSION",
     "PORTFOLIO_SCHEMA_NAME",
     "PORTFOLIO_SCHEMA_VERSION",
     "DeterministicGridOptimizer",
@@ -182,7 +354,28 @@ __all__ = [
     "normalize_derivative_support",
     "normalize_derivative_variable",
     "normalize_evaluation_record",
+    "normalize_external_validation_receipt",
     "normalize_material_catalog",
+    "normalize_optimization_condition_table",
+    "normalize_optimization_material_state",
+    "normalize_optical_property_mapping",
+    "normalize_robust_objective_configuration",
+    "normalize_robust_optimizer_policy",
+    "assess_robust_optimizer_execution",
+    "GCMMA_PROPOSAL_SCHEMA_NAME",
+    "GCMMA_PROPOSAL_SCHEMA_VERSION",
+    "GCMMA_STATE_SCHEMA_NAME",
+    "GCMMA_STATE_SCHEMA_VERSION",
+    "accept_gcmma_candidate",
+    "create_gcmma_state",
+    "normalize_gcmma_state",
+    "propose_gcmma_candidate",
+    "verify_mmapy_backend",
+    "normalize_robust_gradient_policy",
+    "normalize_robust_finalist_validation_policy",
+    "normalize_robust_finalist_validation_receipt",
+    "assess_robust_finalist_validation",
+    "normalize_shape_support_policy",
     "normalize_gradient_record",
     "normalize_native_optimizer_configuration",
     "compare_gradient",
@@ -196,6 +389,21 @@ __all__ = [
     "recover_research_journal",
     "relative_bounds",
     "score_objectives",
+    "evaluate_robust_absolute_contrast",
+    "aggregate_robust_absolute_contrast_gradient",
+    "assess_licensed_gradient_ladder",
+    "assess_robust_gradient_acceptance",
     "compile_campaign_manifest",
+    "compile_robust_shape_adapter_binding",
+    "normalize_robust_shape_adapter_configuration",
+    "normalize_robust_material_tensor_rows",
+    "prepare_robust_shape_controls",
+    "LIN2025_PEDOT_CYLINDER_ADAPTER_ID",
+    "LIN2025_PEDOT_CYLINDER_SCHEMA_NAME",
+    "LIN2025_PEDOT_CYLINDER_SCHEMA_VERSION",
+    "normalize_lin2025_pedot_cylinder_fixture",
+    "compile_lin2025_pedot_cylinder_binding",
+    "compare_robust_smoothing_candidates",
+    "normalize_robust_smoothing_comparison_receipt",
     "configure_native_adjoint",
 ]

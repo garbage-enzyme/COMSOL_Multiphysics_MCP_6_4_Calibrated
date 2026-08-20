@@ -1,0 +1,20 @@
+{
+  "name": "@local/dsh-comsol-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Optional DSH compat layer for the standard comsol-mcp server: native tool registration + ctx.jobs supervision (completion notices, progress stream, kill/wait). Zero dependencies.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "test": "node --test --test-reporter=spec",
+    "smoke": "node scripts/smoke.mjs"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  }
+}

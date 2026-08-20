@@ -16,6 +16,21 @@ SCHEMA_NAME = "comsol_mcp.native_optimizer_licensed_gate"
 SCHEMA_VERSION = "1.0.0"
 
 
+class DeformationFeasibilityError(RuntimeError):
+    """A caller-declared deformation feasibility boundary was not satisfied."""
+
+
+def _optimizer_error_code(exc: Exception, phase: str) -> tuple[str, str | None]:
+    if isinstance(exc, DeformationFeasibilityError) or phase == "deformation_feasibility":
+        return "deformation_feasibility_failed", "fresh_forward_jacobian_guard"
+    signature = f"{type(exc).__module__}.{type(exc).__name__}: {exc}".casefold()
+    nonfinite = any(token in signature for token in ("nan", "infinite", "infinity"))
+    material_coordinates = "material.u" in signature or "material coordinate" in signature
+    if phase == "optimization_solve" and nonfinite and material_coordinates:
+        return "deformation_feasibility_failed", "comsol_nonfinite_material_coordinates"
+    return "native_optimizer_failed", None
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument("--test-root", type=Path, required=True)
@@ -26,10 +41,16 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--optimizer-method", choices=("gcmma", "mma", "ipopt"), required=True)
     parser.add_argument("--max-solves", type=int, required=True)
     parser.add_argument("--max-iterations", type=int, required=True)
+    parser.add_argument("--optimizer-iterations", type=int, required=True)
+    parser.add_argument("--move-limit", type=float, required=True)
     parser.add_argument("--max-wall-time-seconds", type=int, required=True)
     parser.add_argument("--max-commit-fraction", type=float, required=True)
     parser.add_argument("--max-disk-bytes", type=int, required=True)
     parser.add_argument("--max-review-items", type=int, required=True)
+    parser.add_argument("--max-elements-per-model", type=int, required=True)
+    parser.add_argument("--minimum-element-quality", type=float, required=True)
+    parser.add_argument("--deformation-jacobian-expression", required=True)
+    parser.add_argument("--minimum-relative-jacobian", type=float, required=True)
     return parser
 
 
@@ -98,6 +119,76 @@ def _mesh_statistics(model) -> dict:
     }
 
 
+def _admit_mesh(statistics: dict, *, max_elements: int, minimum_quality: float) -> None:
+    if isinstance(max_elements, bool) or not isinstance(max_elements, int) or max_elements < 1:
+        raise ValueError("max_elements_per_model must be a caller-supplied positive integer")
+    if not math.isfinite(minimum_quality) or not 0.0 < minimum_quality <= 1.0:
+        raise ValueError("minimum_element_quality must be caller supplied in (0, 1]")
+    if statistics["element_count"] > max_elements:
+        raise ValueError("mesh element count exceeds the caller-supplied per-model ceiling")
+    if statistics["minimum_quality"] < minimum_quality:
+        raise ValueError("mesh minimum quality is below the caller-supplied threshold")
+
+
+def _requested_optimizer_iterations(args: argparse.Namespace, budget: dict) -> int:
+    requested = args.optimizer_iterations
+    if isinstance(requested, bool) or not isinstance(requested, int) or requested < 1:
+        raise ValueError("optimizer_iterations must be a caller-supplied positive integer")
+    if requested > budget["max_iterations"]:
+        raise ValueError("optimizer_iterations exceeds the caller iteration budget")
+    return requested
+
+
+def _requested_move_limit(args: argparse.Namespace) -> float:
+    if isinstance(args.move_limit, bool):
+        raise ValueError("move_limit must be a caller-supplied positive finite number")
+    try:
+        requested = float(args.move_limit)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "move_limit must be a caller-supplied positive finite number"
+        ) from exc
+    if not math.isfinite(requested) or requested <= 0.0:
+        raise ValueError("move_limit must be a caller-supplied positive finite number")
+    return requested
+
+
+def _deformation_feasibility_policy(args: argparse.Namespace) -> dict:
+    expression = args.deformation_jacobian_expression
+    if (
+        not isinstance(expression, str)
+        or not expression.strip()
+        or len(expression) > 256
+        or any(ord(character) < 32 for character in expression)
+    ):
+        raise ValueError("deformation_jacobian_expression must be bounded printable text")
+    threshold = float(args.minimum_relative_jacobian)
+    if not math.isfinite(threshold) or threshold < 0.0:
+        raise ValueError(
+            "minimum_relative_jacobian must be a caller-supplied finite nonnegative number"
+        )
+    return {
+        "jacobian_expression": expression.strip(),
+        "minimum_relative_jacobian": threshold,
+        "comparison": "strictly_greater_than",
+        "scope": "fresh_forward_finalist_deformed_geometry",
+    }
+
+
+def _deformation_feasibility_evidence(values, policy: dict) -> dict:
+    series = _numeric_series(values)
+    minimum = min(series)
+    maximum = max(series)
+    threshold = policy["minimum_relative_jacobian"]
+    return {
+        "sample_count": len(series),
+        "minimum_relative_jacobian": minimum,
+        "maximum_relative_jacobian": maximum,
+        "threshold": threshold,
+        "passed": minimum > threshold,
+    }
+
+
 def _configure_solver_move_limit(
     model, study, move_limit: float, optimizer_iterations: int
 ) -> dict:
@@ -130,6 +221,13 @@ def _configure_solver_move_limit(
 
 def run(args: argparse.Namespace) -> dict:
     spec = structural._spec(args)
+    requested_iterations = _requested_optimizer_iterations(args, spec["optimizer"]["budget"])
+    requested_move_limit = _requested_move_limit(args)
+    deformation_policy = _deformation_feasibility_policy(args)
+    optimizer = dict(spec["optimizer"])
+    optimizer.pop("optimizer_fingerprint", None)
+    optimizer["move_limit"] = requested_move_limit
+    spec["optimizer"] = structural.normalize_native_optimizer_configuration(optimizer)
     source_before = structural._sha(spec["source"])
     for path in (spec["base_copy"], spec["configured_copy"]):
         path.unlink(missing_ok=True)
@@ -142,8 +240,17 @@ def run(args: argparse.Namespace) -> dict:
         "source_sha256": source_before,
         "optimizer_method": spec["optimizer"]["method"],
         "budget": spec["optimizer"]["budget"],
+        "requested_optimizer_iterations": requested_iterations,
+        "requested_move_limit": requested_move_limit,
         "objective_expression": support["objective"]["expression"],
         "points": [],
+        "mesh_admission_policy": {
+            "max_elements_per_model": args.max_elements_per_model,
+            "minimum_element_quality": args.minimum_element_quality,
+            "scope": "baseline_and_explicit_finalist_remesh",
+            "internal_optimizer_remesh_callback": False,
+        },
+        "deformation_feasibility_policy": deformation_policy,
     }
     client = None
     private_error = None
@@ -171,6 +278,13 @@ def run(args: argparse.Namespace) -> dict:
         phase = "baseline_solve"
         baseline_study = baseline_model.java.study("std1")
         baseline_study.feature().remove("sens_a71")
+        baseline_mesh = _mesh_statistics(baseline_model)
+        _admit_mesh(
+            baseline_mesh,
+            max_elements=args.max_elements_per_model,
+            minimum_quality=args.minimum_element_quality,
+        )
+        receipt["baseline_mesh"] = baseline_mesh
         baseline_study.run()
         baseline_dataset = _forward_sweep_dataset(baseline_model)
         baseline_dataset_tag = str(baseline_dataset.tag())
@@ -189,8 +303,15 @@ def run(args: argparse.Namespace) -> dict:
             model,
             std2,
             spec["optimizer"]["move_limit"],
-            spec["optimizer"]["budget"]["max_iterations"],
+            requested_iterations,
         )
+        if not math.isclose(
+            float(receipt["solver_move_limit"]["movelimit"]),
+            requested_move_limit,
+            rel_tol=1e-12,
+            abs_tol=0.0,
+        ):
+            raise ValueError("native optimizer solver move-limit readback drifted")
         if time.monotonic() - started > spec["optimizer"]["budget"]["max_wall_time_seconds"]:
             raise TimeoutError("native optimizer wall budget exhausted before optimization")
         std2.run()
@@ -221,8 +342,11 @@ def run(args: argparse.Namespace) -> dict:
         mesh_before = _mesh_statistics(finalist)
         mesh.run()
         mesh_after = _mesh_statistics(finalist)
-        if mesh_after["minimum_quality"] <= 0.1:
-            raise ValueError("remeshed finalist minimum quality is not acceptable")
+        _admit_mesh(
+            mesh_after,
+            max_elements=args.max_elements_per_model,
+            minimum_quality=args.minimum_element_quality,
+        )
         finalist_study.run()
         finalist_dataset = _forward_sweep_dataset(finalist)
         finalist_dataset_tag = str(finalist_dataset.tag())
@@ -230,6 +354,21 @@ def run(args: argparse.Namespace) -> dict:
             finalist.evaluate(receipt["objective_expression"], dataset=finalist_dataset, outer=1)
         )
         fresh_final = fresh_series[-1]
+        phase = "deformation_feasibility"
+        deformation_evidence = _deformation_feasibility_evidence(
+            finalist.evaluate(
+                deformation_policy["jacobian_expression"],
+                dataset=finalist_dataset,
+                outer=1,
+            ),
+            deformation_policy,
+        )
+        receipt["deformation_feasibility"] = deformation_evidence
+        if deformation_evidence["passed"] is not True:
+            raise DeformationFeasibilityError(
+                "fresh-forward deformation feasibility is below the caller threshold"
+            )
+        phase = "physical_evidence"
         physical_expressions = [
             "ewfd.Rtotal",
             "ewfd.Ttotal",
@@ -298,7 +437,18 @@ def run(args: argparse.Namespace) -> dict:
             }
         )
     except Exception as exc:
-        receipt["error"] = {"code": "native_optimizer_failed", "type": type(exc).__name__}
+        error_code, classification_basis = _optimizer_error_code(exc, phase)
+        receipt["error"] = {"code": error_code, "type": type(exc).__name__}
+        if classification_basis is not None:
+            receipt["deformation_failure"] = {
+                "classification_basis": classification_basis,
+                "phase": phase,
+                "automatic_move_reduction_used": False,
+                "automatic_method_fallback_used": False,
+                "fresh_forward_guard_completed": isinstance(
+                    receipt.get("deformation_feasibility"), dict
+                ),
+            }
         private_error = {"phase": phase, "detail": f"{type(exc).__name__}: {exc}"}
     finally:
         cleanup = {

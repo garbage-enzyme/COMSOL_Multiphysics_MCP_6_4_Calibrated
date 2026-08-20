@@ -1,0 +1,61 @@
+name: solver-free-bridge-ci
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: regression (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    steps:
+      # actions/checkout v7.0.0 (pinned SHA, same as the comsol-mcp main repo)
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      # actions/setup-node v4 — pin to an exact SHA after the first green run
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Syntax check
+        shell: bash
+        run: |
+          for f in lib/index.js lib/mcp-client-core.mjs lib/job-mirror.mjs \
+                   fixtures/fake-comsol-server.mjs tests/helpers.mjs \
+                   tests/core.test.mjs tests/failures.test.mjs \
+                   tests/mirror.test.mjs tests/plugin.test.mjs scripts/smoke.mjs; do
+            node --check "$f" || exit 1
+          done
+      - name: Regression tests (solver-free, fake MCP server)
+        shell: bash
+        run: node --test --test-reporter=spec
+      - name: Smoke test
+        shell: bash
+        run: node scripts/smoke.mjs
+
+  install-script:
+    name: install.ps1 junction smoke
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      # actions/checkout v7.0.0 (pinned SHA, same as the comsol-mcp main repo)
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - name: install.ps1 against a temp profile target
+        shell: pwsh
+        run: |
+          $tmp = Join-Path $env:RUNNER_TEMP bridge-profile-target
+          & .\install.ps1 -Target (Join-Path $tmp @local\dsh-comsol-bridge)
+          $link = Get-Item (Join-Path $tmp @local\dsh-comsol-bridge) -Force
+          if ($link.LinkType -ne Junction) { throw "expected a junction, got $($link.LinkType)" }
+          Write-Output install-script-OK

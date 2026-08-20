@@ -21,6 +21,7 @@ from .branch_continuation_campaign import normalize_branch_continuation_campaign
 from .convergence_campaign import normalize_convergence_campaign_spec
 from .process_control import inspect_identity
 from .resource_admission import normalize_resource_policy
+from .robust_shape_optimization import expand_robust_shape_manifest
 from .spectral_characterization import normalize_spectral_characterization_job_spec
 from .store import (
     ACTIVE_STATES,
@@ -280,6 +281,7 @@ def _worker_module(job_type: str) -> str:
         "branch_continuation_campaign": "comsol_mcp.jobs.branch_continuation_campaign_worker",
         "thermo_optomechanical_replay": "comsol_mcp.jobs.thermo_optomechanical_replay_worker",
         "adjoint_optimization": "comsol_mcp.jobs.adjoint_optimization_worker",
+        "robust_shape_optimization": "comsol_mcp.jobs.robust_shape_worker",
     }
     try:
         return modules[job_type]
@@ -302,6 +304,14 @@ def _point_count(spec: dict[str, Any]) -> int:
         return int(spec["declared_stage_count"])
     if spec["job_type"] == "adjoint_optimization":
         return int(spec["optimizer"]["budget"]["max_iterations"])
+    if spec["job_type"] == "robust_shape_optimization":
+        return len(
+            [
+                row
+                for row in spec["condition_table"]["conditions"]
+                if row["active"] and row["objective_role"] == "objective"
+            ]
+        )
     return len(spec["parameter_values"])
 
 
@@ -344,6 +354,8 @@ class JobManager:
             spec = normalize_thermo_optomechanical_replay_spec(raw_spec)
         elif job_type == "adjoint_optimization":
             spec = expand_adjoint_optimization_manifest(raw_spec)
+        elif job_type == "robust_shape_optimization":
+            spec = expand_robust_shape_manifest(raw_spec)
         else:
             spec = validate_staged_sweep_spec(raw_spec)
         worker_module = _worker_module(spec["job_type"])
@@ -354,6 +366,7 @@ class JobManager:
             "branch_continuation_campaign",
             "thermo_optomechanical_replay",
             "adjoint_optimization",
+            "robust_shape_optimization",
         }
         if spec["job_type"] in duplicate_job_types:
             with JobLock(self.store.root / ".submit.lock"):
@@ -438,6 +451,22 @@ class JobManager:
                 job_id,
                 exc,
                 state_record_error=state_record_error,
+            ) from exc
+        try:
+            self._arm_robust_wall_watchdog_if_required(
+                job_id,
+                spec,
+                attempt=1,
+                worker_identity=identity,
+            )
+        except Exception as exc:
+            cancellation = self.cancel(job_id, expected_attempt=1)
+            raise JobLaunchError(
+                job_id,
+                RuntimeError(
+                    "Licensed robust wall watchdog could not be armed; "
+                    f"exact-attempt cancellation result: {cancellation}"
+                ),
             ) from exc
         return {"success": True, "job_id": job_id, "status": "submitted"}
 
@@ -563,7 +592,7 @@ class JobManager:
                 | getattr(subprocess, "DETACHED_PROCESS", 0)
             )
         with (directory / "worker.log").open("ab", buffering=0) as log:
-            process = subprocess.Popen(
+            process = subprocess.Popen(  # noqa: S603 - fixed interpreter/module argv
                 command,
                 stdin=subprocess.DEVNULL,
                 stdout=log,
@@ -584,10 +613,103 @@ class JobManager:
                     )
                 time.sleep(0.01)
 
-    def cancel(self, job_id: str) -> dict[str, Any]:
+    def _arm_robust_wall_watchdog_if_required(
+        self,
+        job_id: str,
+        spec: dict[str, Any],
+        *,
+        attempt: int,
+        worker_identity: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        if spec.get("job_type") != "robust_shape_optimization" or spec.get(
+            "synthetic_mode"
+        ) is not False:
+            return None
+        budget_seconds = int(spec["native_optimizer"]["budget"]["max_wall_time_seconds"])
+        started_at = float(worker_identity["process_create_time"])
+        deadline = started_at + budget_seconds
+        directory = self.store.job_dir(job_id)
+        artifact = directory / "wall-watchdog.json"
+        launching = {
+            "schema_name": "comsol_mcp.robust_wall_watchdog",
+            "schema_version": "1.0.0",
+            "job_id": job_id,
+            "attempt": int(attempt),
+            "budget_source": "native_optimizer.budget.max_wall_time_seconds",
+            "budget_seconds": budget_seconds,
+            "worker_started_at_epoch": started_at,
+            "deadline_epoch": deadline,
+            "target_worker": worker_identity,
+            "status": "launching",
+            "updated_at_epoch": time.time(),
+        }
+        atomic_write_json(artifact, launching)
+        command = [
+            sys.executable,
+            "-m",
+            "comsol_mcp.jobs.robust_wall_watchdog",
+            str(self.store.root),
+            job_id,
+            str(attempt),
+            repr(deadline),
+        ]
+        flags = 0
+        if os.name == "nt":
+            flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(
+                subprocess, "DETACHED_PROCESS", 0
+            )
+        try:
+            with (directory / "worker.log").open("ab", buffering=0) as log:
+                process = subprocess.Popen(  # noqa: S603 - fixed interpreter/module argv
+                    command,
+                    stdin=subprocess.DEVNULL,
+                    stdout=log,
+                    stderr=log,
+                    close_fds=True,
+                    creationflags=flags,
+                    start_new_session=(os.name != "nt"),
+                )
+            _track_detached_process(process)
+            watchdog_identity = process_identity(process.pid)
+        except Exception as exc:
+            atomic_write_json(
+                artifact,
+                {
+                    **launching,
+                    "status": "launch_failed",
+                    "launch_error": {
+                        "type": type(exc).__name__,
+                        "message": str(exc)[:500],
+                    },
+                    "updated_at_epoch": time.time(),
+                },
+            )
+            raise
+        armed = {
+            **launching,
+            "status": "armed",
+            "watchdog_identity": watchdog_identity,
+            "armed_at_epoch": time.time(),
+            "updated_at_epoch": time.time(),
+        }
+        atomic_write_json(artifact, armed)
+        self.store.append_event(
+            job_id,
+            "robust_wall_watchdog_armed",
+            {
+                "attempt": int(attempt),
+                "budget_seconds": budget_seconds,
+                "deadline_epoch": deadline,
+                "watchdog_pid": watchdog_identity["pid"],
+            },
+        )
+        return armed
+
+    def cancel(self, job_id: str, *, expected_attempt: int | None = None) -> dict[str, Any]:
         request = self.store.request_cancel(
             job_id,
             requester_identity=process_identity(os.getpid()),
+            expected_attempt=expected_attempt,
         )
         state = request["state"]
         control = request["control"]
@@ -596,6 +718,8 @@ class JobManager:
                 error = "Job was terminal before the cancellation request acquired the job lock"
             elif request["reason"] == "stale_control_attempt":
                 error = "Existing cancellation request belongs to a different attempt"
+            elif request["reason"] == "attempt_mismatch":
+                error = "Job attempt changed before the cancellation request acquired the lock"
             else:
                 error = f"Cancellation request refused: {request['reason']}"
             return {
@@ -669,7 +793,7 @@ class JobManager:
                 subprocess, "DETACHED_PROCESS", 0
             )
         with (directory / "worker.log").open("ab", buffering=0) as log:
-            process = subprocess.Popen(
+            process = subprocess.Popen(  # noqa: S603 - fixed interpreter/module argv
                 command,
                 stdin=subprocess.DEVNULL,
                 stdout=log,
@@ -845,6 +969,7 @@ class JobManager:
             "branch_continuation_campaign",
             "thermo_optomechanical_replay",
             "adjoint_optimization",
+            "robust_shape_optimization",
         }:
             if self._preflight is None and spec.get("execution_backend") is None:
                 from comsol_mcp.tools.ownership import SolverOwnership
@@ -910,6 +1035,22 @@ class JobManager:
                 event="resume_launch_failed",
             )
             raise
+        try:
+            self._arm_robust_wall_watchdog_if_required(
+                job_id,
+                current_spec,
+                attempt=int(state["attempt"]),
+                worker_identity=identity,
+            )
+        except Exception as exc:
+            cancellation = self.cancel(job_id, expected_attempt=int(state["attempt"]))
+            raise JobLaunchError(
+                job_id,
+                RuntimeError(
+                    "Licensed robust wall watchdog could not be armed on resume; "
+                    f"exact-attempt cancellation result: {cancellation}"
+                ),
+            ) from exc
         return {
             "success": True,
             "job_id": job_id,
@@ -1053,6 +1194,29 @@ class JobManager:
                     "completed_stage_ids": [row["stage_id"] for row in rows],
                     "last_stage_row_sha256": rows[-1]["row_sha256"] if rows else None,
                     "declared_optical_points": spec["declared_optical_point_count"],
+                }
+            elif spec.get("job_type") == "robust_shape_optimization":
+                from .robust_shape_rows import read_robust_shape_rows
+
+                directory = self.store.job_dir(job_id)
+                rows = read_robust_shape_rows(
+                    directory / "robust_shape_rows.jsonl",
+                    job_fingerprint=spec["spec_fingerprint"],
+                )
+                condition_rows = [row for row in rows if row["kind"] == "condition"]
+                completed = {
+                    row["payload"]["condition_id"]
+                    for row in condition_rows
+                    if row["payload"]["status"] in {"completed", "skipped"}
+                }
+                declared = _point_count(spec)
+                state["robust_shape_progress"] = {
+                    "declared_conditions": declared,
+                    "completed_conditions": len(completed),
+                    "pending_conditions": declared - len(completed),
+                    "row_count": len(rows),
+                    "last_row_sha256": rows[-1]["row_sha256"] if rows else None,
+                    "cleanup_recorded": any(row["kind"] == "cleanup" for row in rows),
                 }
             return {"success": True, "job_id": job_id, **state}
 

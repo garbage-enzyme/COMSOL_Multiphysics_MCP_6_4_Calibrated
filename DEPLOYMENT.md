@@ -35,6 +35,33 @@ The wheel exposes the canonical `comsol_mcp` runtime and the solver-free
 is not installed. Configure the absolute installed server console entry point
 for a portable deployment.
 
+### Optional DeepSeek Harness bridge
+
+For DeepSeek Harness only, this repository contains the repo-only Node.js
+bridge at [`dsh_bridge/`](dsh_bridge/). It is excluded from the Python wheel
+and sdist, does not change the standard MCP server, and does not replace COMSOL
+ownership or durable job state. Node.js 20+ is required and the bridge has no
+npm dependencies.
+
+Run its solver-free checks and install the junction into the DSH web profile:
+
+```powershell
+npm test --prefix dsh_bridge
+npm run smoke --prefix dsh_bridge
+.\dsh_bridge\install.ps1
+```
+
+Then add the `comsol-bridge` Cordis entry documented in
+[`dsh_bridge/README.md`](dsh_bridge/README.md), using the absolute installed
+`comsol-mcp.exe`, runtime working directory, and shared settings path. The
+bridge's own `config.enabled` Boolean controls whether the client plugin is
+active; it is intentionally not a Settings GUI/server feature. Do not configure
+a second `dsh-mcp-client` COMSOL entry in the same DSH session: the bridge owns
+the single serialized stdio connection. Follow the versioned
+[`DeepSeek compatibility contract`](dsh_bridge/DEEPSEEK_COMPATIBILITY.md) for
+settings-change, verification, and recovery boundaries. Fake-server tests prove bridge behavior
+only; report real DSH discovery, cleanup, and licensed solves separately.
+
 ## 2. Configure with the Settings GUI (recommended)
 
 The Settings GUI is the normal configuration path for users. Open the installed
@@ -150,7 +177,7 @@ build/modules, license, scheduler, storage, and output requirements first.
 | `core` | Compact default control plane and lexical manuals. |
 | `basic_fem` | Conventional FEM construction, bounded exports, and the Python-free standalone launcher tools. |
 | `wave_optics` | Periodic optics, metasurfaces, bounded field discovery/extraction, preflight, and evidence audits. |
-| `experimental` | Explicit opt-in generic and escape-hatch tools. |
+| `experimental` | Explicit opt-in generic tools plus bounded robust-shape preview, durable submission, and evidence inspection/verification. |
 | `full` | Broad non-feature compatibility surface; not recommended by default. |
 
 Select the profile in the Settings GUI. Developers and agents may set the
@@ -166,6 +193,13 @@ profile and with one another. Their advanced JSON equivalents are
 `semantic_docs.enabled=true` for isolated semantic retrieval; both remain
 default-off. The legacy `comsol_connect` compatibility tool remains experimental
 and is not a substitute for this lifecycle.
+
+The alpha7.2 robust-shape tools are available only in `experimental` and
+`full`. `robust_shape_plan_preview` is solver-free; `robust_shape_job_submit`
+uses the durable job authority and can start licensed solver work; the evidence
+inspect/verify tools are bounded, path-redacted, and read-only. These tools are
+absent from `core`, `basic_fem`, and `wave_optics`, and they do not expose a
+generic Java/property mutation escape hatch.
 
 The standalone tools in `basic_fem` still run inside the normal Python MCP host. They build
 and control a separate native EXE whose target runtime needs only Windows
