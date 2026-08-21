@@ -179,7 +179,10 @@ class ThermalRadiationRequest(_ClosedModel):
     angular_grid: AngularGrid
     polarization: PolarizationContract
     optical_quantity: Literal["emissivity", "absorptivity"]
-    values_flat: Annotated[list[float], Field(min_length=1, max_length=MAX_DATA_VALUES)]
+    values_flat: Annotated[
+        list[Annotated[float, Field(ge=0.0, le=1.0)]],
+        Field(min_length=1, max_length=MAX_DATA_VALUES),
+    ]
     uncertainty_flat: Annotated[
         list[Annotated[float, Field(ge=0.0)]], Field(max_length=MAX_DATA_VALUES)
     ] = Field(default_factory=list)

@@ -177,6 +177,15 @@ def test_descending_spectral_axis_remains_valid():
     assert model.axis.coordinates == [2.0e-6, 1.0e-6]
 
 
+@pytest.mark.parametrize("value", [-0.5, 1.5])
+def test_values_flat_is_physically_bounded(value):
+    request = _request([1.0e-6, 2.0e-6], [1.0, 1.0])
+    request["values_flat"][0] = value
+
+    with pytest.raises(ValidationError):
+        ThermalRadiationRequest.model_validate(request)
+
+
 def test_unit_emissivity_recovers_stefan_boltzmann_on_finite_domain():
     temperature = 500.0
     wavelengths = np.geomspace(0.1e-6, 1000.0e-6, 1800)
