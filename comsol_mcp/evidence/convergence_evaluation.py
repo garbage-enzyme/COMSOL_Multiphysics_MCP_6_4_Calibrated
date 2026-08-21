@@ -163,6 +163,8 @@ def _normalize_sensitivity(value: Any, label: str) -> dict[str, Any]:
     sensitivity_state = item["state"]
     if sensitivity_state not in {"not_requested", "measured_not_classified", "unavailable"}:
         raise ValueError(f"{label}.state is invalid")
+    if sensitivity_state in {"not_requested", "unavailable"} and measurements:
+        raise ValueError(f"{label} with state {sensitivity_state} cannot carry measurements")
     if item["policy_authority"] is not False:
         raise ValueError(f"{label}.policy_authority must be false")
     normalized_measurements = []
@@ -397,6 +399,11 @@ def _validate_level_summary(value: Any, expected_ordinal: int) -> dict[str, Any]
     sensitivity_measurements = sensitivity["measurements"]
     if not isinstance(sensitivity_measurements, list) or len(sensitivity_measurements) > 16:
         raise ValueError(f"{label}.fit_support_sensitivity.measurements is invalid")
+    if sensitivity["state"] in {"not_requested", "unavailable"} and sensitivity_measurements:
+        raise ValueError(
+            f"{label}.fit_support_sensitivity with state {sensitivity['state']}"
+            " cannot carry measurements"
+        )
     normalized_sensitivity_measurements = []
     for index, measurement in enumerate(sensitivity_measurements):
         measurement_label = f"{label}.fit_support_sensitivity.measurements[{index}]"

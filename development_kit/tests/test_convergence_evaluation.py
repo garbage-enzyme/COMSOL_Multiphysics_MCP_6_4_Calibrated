@@ -672,6 +672,28 @@ def test_self_rehashed_malformed_level_summary_still_fails_closed():
         validate_convergence_ladder(malformed)
 
 
+@pytest.mark.parametrize("state", ["not_requested", "unavailable"])
+def test_validated_ladder_rejects_sensitivity_state_with_measured_rows(state):
+    levels = [
+        _fitted_level(0, 5.0e-6, None),
+        _fitted_level(1, 5.006e-6, "fitted-mesh-0"),
+    ]
+    malformed = build_convergence_ladder(ladder_id="fit-sensitive-ladder", levels=levels)
+    sensitivity = malformed["levels"][0]["fit_support_sensitivity"]
+    assert sensitivity["measurements"]
+    sensitivity["state"] = state
+    level = malformed["levels"][0]
+    level_body = dict(level)
+    level_body.pop("level_sha256")
+    level["level_sha256"] = _canonical_hash(level_body)
+    ladder_body = dict(malformed)
+    ladder_body.pop("ladder_sha256")
+    malformed["ladder_sha256"] = _canonical_hash(ladder_body)
+
+    with pytest.raises(ValueError, match="cannot carry measurements"):
+        validate_convergence_ladder(malformed)
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [("ladder_id", "invalid ladder id"), ("level_count", 3.0)],
