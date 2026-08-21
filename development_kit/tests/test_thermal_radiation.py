@@ -159,6 +159,24 @@ def test_trapezoid_angular_coordinates_are_strictly_increasing(field, coordinate
         AngularGrid.model_validate(value)
 
 
+@pytest.mark.parametrize(
+    "coordinates",
+    [
+        [1.0e-6, 3.0e-6, 2.0e-6],
+        [1.0e-6, 1.0e-6],
+    ],
+)
+def test_spectral_coordinates_are_strictly_monotonic(coordinates):
+    with pytest.raises(ValidationError, match="strictly monotonic"):
+        ThermalRadiationRequest.model_validate(_request(coordinates, [1.0, 0.5, 0.25]))
+
+
+def test_descending_spectral_axis_remains_valid():
+    model = ThermalRadiationRequest.model_validate(_request([2.0e-6, 1.0e-6], [1.0, 1.0]))
+
+    assert model.axis.coordinates == [2.0e-6, 1.0e-6]
+
+
 def test_unit_emissivity_recovers_stefan_boltzmann_on_finite_domain():
     temperature = 500.0
     wavelengths = np.geomspace(0.1e-6, 1000.0e-6, 1800)
