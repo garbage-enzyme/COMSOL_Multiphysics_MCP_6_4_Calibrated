@@ -222,7 +222,9 @@ def _assemble_manifest(
         raise ValueError(
             "unique and collapsed duplicate point counts must equal selected_point_count"
         )
-    covered_count = _count(covered_grid_point_count, "covered_grid_point_count")
+    covered_count = _count(
+        covered_grid_point_count, "covered_grid_point_count", allow_zero=False
+    )
     missing_count = _count(missing_grid_point_count, "missing_grid_point_count")
     grid_count = request["grid_point_count"]
     if covered_count + missing_count != grid_count:

@@ -225,18 +225,16 @@ def test_summary_names_units_and_counts_must_match_expressions_and_coverage():
             build_field_evidence_manifest(**dict(kwargs, quantity_summaries=summaries))
 
 
-def test_zero_coverage_cannot_claim_invented_summary_statistics():
+def test_zero_coverage_is_rejected_up_front():
     request, _, kwargs = _kwargs()
     grid_points = request["grid_point_count"]
-    summaries = _summaries(grid_points=grid_points, missing=grid_points)
 
-    with pytest.raises(ValueError, match="finite_count.*equal to 1"):
+    with pytest.raises(ValueError, match="covered_grid_point_count.*equal to 1"):
         build_field_evidence_manifest(
             **dict(
                 kwargs,
                 covered_grid_point_count=0,
                 missing_grid_point_count=grid_points,
-                quantity_summaries=summaries,
             )
         )
 
