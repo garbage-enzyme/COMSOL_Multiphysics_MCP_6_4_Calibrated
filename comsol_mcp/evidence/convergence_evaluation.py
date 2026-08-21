@@ -120,9 +120,11 @@ def _bounded_text(value: Any, label: str, maximum: int = 128) -> str:
 
 def _relative_identity(value: Any, label: str) -> str:
     text = _bounded_text(value, label, 512).replace("\\", "/")
-    path = PurePosixPath(text)
-    if path.is_absolute() or ".." in path.parts or re.match(r"^[A-Za-z]:", text):
+    if re.match(r"^[A-Za-z]:", text):
         raise ValueError(f"{label} must be relative and traversal-free")
+    path = PurePosixPath(text)
+    if path.is_absolute() or ".." in path.parts or not path.parts or text != str(path):
+        raise ValueError(f"{label} must be a canonical traversal-free relative identity")
     return text
 
 

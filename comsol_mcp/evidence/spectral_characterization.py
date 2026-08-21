@@ -156,9 +156,16 @@ def _relative_identity(value: Any, label: str) -> str:
     if not isinstance(value, str) or not value or len(value) > 512:
         raise ValueError(f"{label} must be a bounded relative identity")
     normalized = value.replace("\\", "/")
-    path = PurePosixPath(normalized)
-    if path.is_absolute() or ".." in path.parts or re.match(r"^[A-Za-z]:", normalized):
+    if re.match(r"^[A-Za-z]:", normalized):
         raise ValueError(f"{label} must be relative and traversal-free")
+    path = PurePosixPath(normalized)
+    if (
+        path.is_absolute()
+        or ".." in path.parts
+        or not path.parts
+        or normalized != str(path)
+    ):
+        raise ValueError(f"{label} must be a canonical traversal-free relative identity")
     return normalized
 
 

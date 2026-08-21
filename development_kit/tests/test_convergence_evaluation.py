@@ -26,6 +26,9 @@ from src.evidence.spectral_characterization import (
 )
 from src.tools.convergence_evaluation import register_convergence_evaluation_tools
 
+from comsol_mcp.evidence import branch_continuation as branch_continuation_module
+from comsol_mcp.evidence import convergence_evaluation as convergence_module
+from comsol_mcp.evidence import spectral_characterization as spectral_characterization_module
 from development_kit.tests.mcp_test_support import decode_tool_result
 
 MATERIAL_SHA256 = "d" * 64
@@ -654,6 +657,29 @@ def _canonical_hash(value):
             allow_nan=False,
         ).encode("utf-8")
     ).hexdigest()
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "fixtures//model.mph",
+        "./fixtures/model.mph",
+        "fixtures/./model.mph",
+        "fixtures/model.mph/",
+        ".",
+    ],
+)
+@pytest.mark.parametrize(
+    "relative_identity",
+    [
+        convergence_module._relative_identity,
+        branch_continuation_module._relative_identity,
+        spectral_characterization_module._relative_identity,
+    ],
+)
+def test_relative_identity_rejects_noncanonical_aliases(relative_identity, text):
+    with pytest.raises(ValueError, match="canonical|traversal-free"):
+        relative_identity(text, "test.identity")
 
 
 def test_self_rehashed_malformed_level_summary_still_fails_closed():
