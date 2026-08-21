@@ -6,7 +6,7 @@ import inspect
 import math
 from copy import deepcopy
 from functools import wraps
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
 from pydantic import BaseModel
 
@@ -15,6 +15,39 @@ MAX_PUBLIC_COLLECTION_ITEMS = 2_048
 MAX_PUBLIC_OBJECT_FIELDS = 256
 MAX_PUBLIC_NESTING_DEPTH = 64
 MAX_PUBLIC_NUMBER_MAGNITUDE = 1.0e308
+
+_SCHEMA_MAP_KEYWORDS = frozenset(
+    {"$defs", "definitions", "dependentSchemas", "patternProperties", "properties"}
+)
+_SCHEMA_LIST_KEYWORDS = frozenset({"allOf", "anyOf", "oneOf", "prefixItems"})
+_SCHEMA_NODE_KEYWORDS = frozenset(
+    {
+        "additionalProperties",
+        "contains",
+        "else",
+        "if",
+        "items",
+        "not",
+        "propertyNames",
+        "then",
+        "unevaluatedItems",
+        "unevaluatedProperties",
+    }
+)
+
+
+def _schema_children(node: dict[str, Any]) -> Iterator[Any]:
+    """Yield child values located at JSON-Schema schema positions of ``node``."""
+    for key, child in node.items():
+        if key in _SCHEMA_MAP_KEYWORDS and isinstance(child, dict):
+            yield from child.values()
+        elif key in _SCHEMA_LIST_KEYWORDS and isinstance(child, list):
+            yield from child
+        elif key in _SCHEMA_NODE_KEYWORDS:
+            if isinstance(child, dict):
+                yield child
+            elif isinstance(child, list) and key == "items":
+                yield from child
 
 
 def bounded_public_schema(value: dict[str, Any]) -> dict[str, Any]:
@@ -59,10 +92,6 @@ def bounded_public_schema(value: dict[str, Any]) -> dict[str, Any]:
             node[key] = max(current, limit)
 
     def visit(node: Any) -> None:
-        if isinstance(node, list):
-            for item in node:
-                visit(item)
-            return
         if not isinstance(node, dict):
             return
         node_type = node.get("type")
@@ -80,7 +109,7 @@ def bounded_public_schema(value: dict[str, Any]) -> dict[str, Any]:
         if "integer" in node_types or "number" in node_types:
             clamp_minimum(node, "minimum", -MAX_PUBLIC_NUMBER_MAGNITUDE)
             clamp_maximum(node, "maximum", MAX_PUBLIC_NUMBER_MAGNITUDE)
-        for nested in node.values():
+        for nested in _schema_children(node):
             visit(nested)
 
     visit(schema)
