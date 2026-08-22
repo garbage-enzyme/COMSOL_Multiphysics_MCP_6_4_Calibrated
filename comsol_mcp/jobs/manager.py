@@ -621,11 +621,16 @@ class JobManager:
         attempt: int,
         worker_identity: dict[str, Any],
     ) -> dict[str, Any] | None:
-        if spec.get("job_type") != "robust_shape_optimization" or spec.get(
-            "synthetic_mode"
-        ) is not False:
+        if spec.get("synthetic_mode") is not False:
             return None
-        budget_seconds = int(spec["native_optimizer"]["budget"]["max_wall_time_seconds"])
+        if spec.get("job_type") == "robust_shape_optimization":
+            budget_seconds = int(spec["native_optimizer"]["budget"]["max_wall_time_seconds"])
+            budget_source = "native_optimizer.budget.max_wall_time_seconds"
+        elif spec.get("job_type") == "adjoint_optimization":
+            budget_seconds = int(spec["optimizer"]["budget"]["max_wall_time_seconds"])
+            budget_source = "optimizer.budget.max_wall_time_seconds"
+        else:
+            return None
         started_at = float(worker_identity["process_create_time"])
         deadline = started_at + budget_seconds
         directory = self.store.job_dir(job_id)
@@ -635,7 +640,7 @@ class JobManager:
             "schema_version": "1.0.0",
             "job_id": job_id,
             "attempt": int(attempt),
-            "budget_source": "native_optimizer.budget.max_wall_time_seconds",
+            "budget_source": budget_source,
             "budget_seconds": budget_seconds,
             "worker_started_at_epoch": started_at,
             "deadline_epoch": deadline,

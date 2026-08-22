@@ -16,7 +16,7 @@ from comsol_mcp.jobs.adjoint_optimization import (
 from comsol_mcp.jobs.adjoint_optimization_worker import run as run_adjoint_worker
 from comsol_mcp.jobs.adjoint_rows import read_adjoint_rows
 from comsol_mcp.jobs.manager import JobManager
-from comsol_mcp.jobs.store import JobStore, process_identity
+from comsol_mcp.jobs.store import JobStore, process_identity, read_json
 from development_kit.tests.test_derivative_support import _support
 from development_kit.tests.test_gradient_contracts import _optimizer
 
@@ -143,6 +143,7 @@ def test_durable_manager_accepts_synthetic_adjoint_discriminator(ascii_tmp_path,
     spec = manager.store.read_spec(result["job_id"])
     assert spec["job_type"] == "adjoint_optimization"
     assert spec["synthetic_mode"] is True
+    assert not (manager.store.job_dir(result["job_id"]) / "wall-watchdog.json").exists()
     assert spec["optimizer"]["budget"]["max_iterations"] == 10
     assert manager.store.read_state(result["job_id"])["progress"] == {
         "completed": 0,
@@ -279,3 +280,47 @@ def test_real_adjoint_worker_dispatches_validated_runtime_and_persists_rows(
     assert terminal["status"] == "completed"
     assert terminal["solver_started"] is True
     assert [row["kind"] for row in persisted] == ["gradient", "iteration"]
+
+
+def _real_adjoint_envelope(ascii_tmp_path):
+    envelope, _, manifest = _write_manifest(ascii_tmp_path)
+    raw = json.loads(manifest.read_text(encoding="utf-8"))
+    raw["synthetic_mode"] = False
+    payload = json.dumps(raw, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    manifest.write_bytes(payload)
+    envelope["submission_manifest_sha256"] = hashlib.sha256(payload).hexdigest()
+    return envelope
+
+
+def test_real_adjoint_submission_arms_the_wall_watchdog(ascii_tmp_path):
+    envelope = _real_adjoint_envelope(ascii_tmp_path)
+    manager = JobManager(
+        ascii_tmp_path / "jobs",
+        preflight=lambda **_kwargs: {"success": True, "ready": True},
+    )
+    result = manager.submit(envelope)
+
+    record = read_json(manager.store.job_dir(result["job_id"]) / "wall-watchdog.json")
+    assert record["status"] == "armed"
+    assert record["budget_source"] == "optimizer.budget.max_wall_time_seconds"
+    assert record["budget_seconds"] == 3600
+
+
+def test_native_adjoint_worker_fails_closed_without_armed_watchdog(ascii_tmp_path, monkeypatch):
+    envelope = _real_adjoint_envelope(ascii_tmp_path)
+    manager = JobManager(
+        ascii_tmp_path / "jobs",
+        preflight=lambda **_kwargs: {"success": True, "ready": True},
+    )
+    monkeypatch.setattr(
+        manager, "_launch_worker", lambda _job_id, _module: process_identity(os.getpid())
+    )
+    result = manager.submit(envelope)
+    job_id = result["job_id"]
+    (manager.store.job_dir(job_id) / "wall-watchdog.json").unlink()
+
+    assert run_adjoint_worker(str(manager.store.root), job_id) == 1
+
+    terminal = manager.store.read_state(job_id)
+    assert terminal["status"] == "failed"
+    assert "was not armed" in terminal["last_error"]["message"]

@@ -13,6 +13,53 @@ from .process_control import contain_current_process_tree
 from .store import JobStore, cancel_request_targets_attempt, process_identity
 
 
+def _await_licensed_wall_watchdog(
+    store: JobStore,
+    job_id: str,
+    spec: dict,
+    attempt: int,
+    *,
+    timeout_seconds: float = 2.0,
+) -> dict:
+    """Fail closed before licensed startup unless this exact attempt is guarded."""
+    import time
+
+    from .store import read_json
+
+    path = store.job_dir(job_id) / "wall-watchdog.json"
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        try:
+            record = read_json(path)
+        except FileNotFoundError, RuntimeError:
+            record = None
+        if isinstance(record, dict) and record.get("status") == "armed":
+            state = store.read_state(job_id)
+            target_worker = {
+                "pid": state.get("worker_pid"),
+                "process_create_time": state.get("worker_process_create_time"),
+                "command_signature": state.get("worker_command_signature"),
+            }
+            budget = int(spec["optimizer"]["budget"]["max_wall_time_seconds"])
+            if int(record.get("attempt", -1)) != int(attempt):
+                raise RuntimeError("licensed adjoint wall watchdog attempt is not bound")
+            if record.get("target_worker") != target_worker:
+                raise RuntimeError("licensed adjoint wall watchdog worker identity is not bound")
+            if int(record.get("budget_seconds", -1)) != budget:
+                raise RuntimeError("licensed adjoint wall watchdog budget is not bound")
+            expected_deadline = float(target_worker["process_create_time"]) + budget
+            if float(record.get("deadline_epoch", 0.0)) != expected_deadline:
+                raise RuntimeError("licensed adjoint wall watchdog deadline is not bound")
+            if time.time() >= expected_deadline:
+                raise RuntimeError("licensed adjoint wall watchdog deadline already expired")
+            return record
+        if isinstance(record, dict) and record.get("status") == "launch_failed":
+            raise RuntimeError("licensed adjoint wall watchdog launch failed")
+        if time.monotonic() >= deadline:
+            raise RuntimeError("licensed adjoint wall watchdog was not armed before startup")
+        time.sleep(min(0.02, max(0.0, deadline - time.monotonic())))
+
+
 def _run_native(root: str, job_id: str) -> int:
     store = JobStore(Path(root))
     directory = store.job_dir(job_id)
@@ -39,6 +86,7 @@ def _run_native(root: str, job_id: str) -> int:
             store.update_state(job_id, "starting", event="worker_started")
         elif state["status"] != "starting":
             raise ValueError(f"adjoint native worker cannot start from {state['status']}")
+        _await_licensed_wall_watchdog(store, job_id, spec, attempt)
         from comsol_mcp.tools.ownership import SolverOwnership
 
         ownership = SolverOwnership(store.root.parent, owner=f"job:{job_id}")
