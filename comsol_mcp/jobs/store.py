@@ -34,6 +34,7 @@ from comsol_mcp.utils.runtime_paths import default_jobs_root as _shared_default_
 
 JOB_SCHEMA_VERSION = "2"
 CREATE_TIME_TOLERANCE_SECONDS = 0.05
+LOCK_RECOVERY_GRACE_SECONDS = 2.0
 ACTIVE_STATES = {
     "submitted",
     "starting",
@@ -253,7 +254,25 @@ class JobLock:
                             self._unlink_with_retry(expected=observed)
                             continue
                     except OSError, UnicodeDecodeError, json.JSONDecodeError:
-                        pass
+                        # A crash between exclusive creation and the fsynced
+                        # identity write leaves an empty or partial lock that
+                        # no owner will ever release.  Once such a file is
+                        # older than the recovery grace period -- far longer
+                        # than any live creator's write window -- reclaim it
+                        # only while its bytes remain exactly the observed
+                        # unparseable snapshot.
+                        try:
+                            stat = self.path.stat()
+                            observed_again = self.path.read_bytes()
+                        except OSError:
+                            pass
+                        else:
+                            age_exceeded = (
+                                time.time() - stat.st_mtime >= LOCK_RECOVERY_GRACE_SECONDS
+                            )
+                            if age_exceeded and observed_again == observed:
+                                self._unlink_with_retry(expected=observed)
+                                continue
                     if time.monotonic() >= deadline:
                         raise TimeoutError(f"Timed out waiting for durable job lock: {self.path}")
                     time.sleep(self.poll_interval)

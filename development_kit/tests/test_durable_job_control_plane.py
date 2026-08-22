@@ -1054,6 +1054,28 @@ def test_job_lock_acquire_removes_owned_partial_publication(jobs_root, monkeypat
         assert lock_path.exists()
 
 
+def test_job_lock_reclaims_aged_unparseable_crash_artifacts(ascii_tmp_path):
+    lock_path = ascii_tmp_path / "wedged.lock"
+    lock_path.write_bytes(b'{"partial":')
+    old = time.time() - 30.0
+    os.utime(lock_path, (old, old))
+
+    with JobLock(lock_path, timeout=3.0):
+        pass
+
+    assert not lock_path.exists()
+
+
+def test_job_lock_never_steals_a_fresh_partial_write_window(ascii_tmp_path):
+    lock_path = ascii_tmp_path / "fresh.lock"
+    lock_path.write_bytes(b'{"partial":')
+
+    with pytest.raises(TimeoutError, match="durable job lock"):
+        JobLock(lock_path, timeout=0.5).acquire()
+
+    assert lock_path.read_bytes() == b'{"partial":'
+
+
 def test_cancel_launch_failure_is_reported_and_next_idempotent_call_retries(jobs_root, monkeypatch):
     manager = JobManager(jobs_root, allow_test_jobs=True, reconcile_on_start=False)
     identity = process_identity(os.getpid())
