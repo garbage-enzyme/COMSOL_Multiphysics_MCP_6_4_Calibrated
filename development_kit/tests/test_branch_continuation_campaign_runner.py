@@ -202,6 +202,61 @@ def test_complete_state_artifacts_close_executor_to_row_gap_without_reexecution(
     assert calls.count("angle-0") == 1
 
 
+def test_transient_append_failure_quarantines_and_notifies_fault_hook(
+    tmp_path, monkeypatch
+):
+    spec = _spec(tmp_path)
+    root = tmp_path / "campaign-quarantine"
+    calls = []
+    real_append = runner_module.append_branch_continuation_campaign_state
+    events = []
+
+    def execute(state, directory):
+        calls.append(state["state_id"])
+        return _executor([5.0e-6, 5.08e-6, 5.16e-6])(state, directory)
+
+    def fault(phase, payload):
+        events.append((phase, payload))
+
+    # Create an executor-to-row gap: artifacts exist for angle-0 but its
+    # durable journal row was never written because append raised.
+    def gap_append(*_args, **_kwargs):
+        raise RuntimeError("injected row gap")
+
+    monkeypatch.setattr(runner_module, "append_branch_continuation_campaign_state", gap_append)
+    with pytest.raises(RuntimeError, match="row gap"):
+        run_branch_continuation_campaign(spec, root, attempt=1, state_executor=execute)
+    assert calls == ["angle-0"]
+
+    # A transient OSError while re-appending the complete state directory must
+    # quarantine the directory, notify the fault hook, and recompute the state.
+    invocations = []
+
+    def transient_oserror(*_args, **_kwargs):
+        invocations.append(1)
+        if len(invocations) == 1:
+            raise OSError("transient windows file lock")
+        return real_append(*_args, **_kwargs)
+
+    monkeypatch.setattr(
+        runner_module, "append_branch_continuation_campaign_state", transient_oserror
+    )
+    result = run_branch_continuation_campaign(
+        spec, root, attempt=2, state_executor=execute, fault_hook=fault
+    )
+    assert result["completed"] is True
+    quarantined = [payload for phase, payload in events if phase == "state_row_quarantined"]
+    assert len(quarantined) == 1
+    assert quarantined[0]["state_id"] == "angle-0"
+    assert quarantined[0]["error"].startswith("OSError:")
+    assert calls.count("angle-0") == 2
+
+    monkeypatch.setattr(runner_module, "append_branch_continuation_campaign_state", real_append)
+    resumed = run_branch_continuation_campaign(spec, root, attempt=3, state_executor=execute)
+    assert resumed["completed"] is True
+    assert calls.count("angle-0") == 2
+
+
 def test_state_directory_stays_inside_the_windows_legacy_path_budget():
     root = Path("D:/comsol_runtime/jobs") / ("job-" + "a" * 32)
     directory = branch_continuation_state_directory(root, 7)

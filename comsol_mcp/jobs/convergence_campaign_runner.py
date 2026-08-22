@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import uuid
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
@@ -281,8 +282,21 @@ def run_convergence_campaign(
                     level_dir=level_dir,
                     artifact_root=root,
                 )
-            except OSError, ValueError:
-                pass
+            except (OSError, ValueError) as err:
+                quarantine = level_dir.with_name(
+                    f".{level_dir.name}.invalid-{uuid.uuid4().hex}"
+                )
+                level_dir.replace(quarantine)
+                if fault_hook is not None:
+                    fault_hook(
+                        "level_row_quarantined",
+                        {
+                            "level_id": level["level_id"],
+                            "ordinal": level["ordinal"],
+                            "quarantine": str(quarantine),
+                            "error": f"{type(err).__name__}: {err}",
+                        },
+                    )
             else:
                 if on_durable_level is not None:
                     on_durable_level(dict(row))

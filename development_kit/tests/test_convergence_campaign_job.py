@@ -189,6 +189,13 @@ def test_invalid_ladders_hidden_policy_and_unbounded_work_fail_closed(tmp_path, 
         normalize_convergence_campaign_spec(raw)
 
 
+def test_oversized_integer_tolerance_raises_value_error(tmp_path):
+    raw = _raw_campaign(tmp_path)
+    raw["convergence_policy"]["metrics"][0]["absolute_tolerance"] = 10**400
+    with pytest.raises(ValueError, match="nonnegative and finite"):
+        normalize_convergence_campaign_spec(raw)
+
+
 def test_duplicate_exact_model_bytes_and_configuration_identities_fail_closed(tmp_path):
     raw = _raw_campaign(tmp_path)
     first_source = Path(raw["levels"][0]["spectral_job"]["source_model_path"])

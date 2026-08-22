@@ -117,6 +117,13 @@ def _normalize_receipt(
     reflectance = _finite(result["reflectance"], "reflectance")
     transmittance = _finite(result["transmittance"], "transmittance")
     absorption = _finite(result["absorption"], "absorption")
+    for name, value in (
+        ("reflectance", reflectance),
+        ("transmittance", transmittance),
+        ("absorption", absorption),
+    ):
+        if not 0.0 <= value <= 1.0:
+            raise ValueError(f"robust condition {name} must be within [0, 1]")
     if not math.isclose(reflectance + transmittance + absorption, 1.0, abs_tol=1e-4):
         raise ValueError("robust condition power closure failed")
     elements = result["mesh_elements"]

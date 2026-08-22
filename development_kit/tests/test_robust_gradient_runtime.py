@@ -146,6 +146,31 @@ def test_native_condition_gradient_rejects_limited_condition_tables(ascii_tmp_pa
     assert list(ascii_tmp_path.glob("condition-gradient-*.json")) == []
 
 
+@pytest.mark.parametrize("field", ["reflectance", "transmittance", "absorption"])
+def test_native_condition_gradient_rejects_out_of_range_power_channels(ascii_tmp_path, field):
+    spec = _spec(ascii_tmp_path)
+    observations = _observations(spec)
+    backend = _Backend(observations)
+    original_evaluate = backend.evaluate_condition_gradient
+
+    def evaluate_with_bad_channel(condition, tensor_expressions, variable_ids):
+        result = original_evaluate(condition, tensor_expressions, variable_ids)
+        result[field] = 1.5
+        return result
+
+    backend.evaluate_condition_gradient = evaluate_with_bad_channel
+    target = ascii_tmp_path / f"overshoot-{field}"
+    target.mkdir()
+    with pytest.raises(ValueError, match=f"{field} must be within"):
+        execute_native_condition_gradients(
+            spec,
+            target,
+            backend=backend,
+            observations=observations,
+            cancel_requested=lambda: False,
+        )
+
+
 def test_native_condition_gradient_rejects_tampered_replay(ascii_tmp_path):
     spec = _spec(ascii_tmp_path)
     observations = _observations(spec)

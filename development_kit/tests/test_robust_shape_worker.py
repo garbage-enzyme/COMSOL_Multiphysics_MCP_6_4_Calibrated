@@ -175,6 +175,28 @@ def test_condition_runtime_honors_explicit_execution_limit(ascii_tmp_path):
     assert [call[0] for call in backend.calls] == ["condition-0"]
 
 
+@pytest.mark.parametrize("field", ["reflectance", "transmittance", "absorption"])
+def test_condition_runtime_rejects_out_of_range_power_channels(ascii_tmp_path, field):
+    spec = _condition_runtime_spec()
+    target = ascii_tmp_path / f"negative-{field}"
+    target.mkdir()
+
+    class _NegativeBackend(_ConditionBackend):
+        def evaluate_condition(self, condition, tensor_expressions):
+            result = super().evaluate_condition(condition, tensor_expressions)
+            result[field] = -0.1
+            return result
+
+    with pytest.raises(ValueError, match=f"{field} must be within"):
+        execute_robust_conditions(
+            spec,
+            target,
+            attempt=1,
+            backend=_NegativeBackend(),
+            cancel_requested=lambda: False,
+        )
+
+
 def test_condition_runtime_recovers_receipt_written_before_row(ascii_tmp_path, monkeypatch):
     spec = _condition_runtime_spec()
     spec["condition_table"]["conditions"] = spec["condition_table"]["conditions"][:1]

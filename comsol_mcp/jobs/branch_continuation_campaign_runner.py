@@ -350,9 +350,19 @@ def run_branch_continuation_campaign(
                     state_dir=state_dir,
                     artifact_root=root,
                 )
-            except OSError, ValueError:
+            except (OSError, ValueError) as err:
                 quarantine = state_dir.with_name(f".{state_dir.name}.invalid-{uuid.uuid4().hex}")
                 os.replace(state_dir, quarantine)
+                if fault_hook is not None:
+                    fault_hook(
+                        "state_row_quarantined",
+                        {
+                            "state_id": state["state_id"],
+                            "ordinal": state["ordinal"],
+                            "quarantine": str(quarantine),
+                            "error": f"{type(err).__name__}: {err}",
+                        },
+                    )
             else:
                 if on_durable_state is not None:
                     on_durable_state(dict(row))

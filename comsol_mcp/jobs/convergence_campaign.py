@@ -77,7 +77,10 @@ def _nonnegative_optional(value: object, name: str) -> float | None:
         return None
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{name} must be nonnegative and finite when provided")
-    number = float(value)
+    try:
+        number = float(value)
+    except OverflowError as exc:
+        raise ValueError(f"{name} must be nonnegative and finite when provided") from exc
     if not math.isfinite(number) or number < 0.0:
         raise ValueError(f"{name} must be nonnegative and finite when provided")
     return number

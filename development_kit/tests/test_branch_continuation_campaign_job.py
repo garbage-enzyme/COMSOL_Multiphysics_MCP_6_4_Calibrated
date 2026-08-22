@@ -168,6 +168,13 @@ def test_exact_model_sequence_is_canonical_bounded_and_hash_bound(tmp_path):
     assert [item["coordinate"]["value"] for item in first["states"]] == [0.0, 5.0, 10.0]
 
 
+def test_oversized_policy_bound_raises_value_error(tmp_path):
+    raw = _raw_campaign(tmp_path)
+    raw["continuation_policy"]["absolute_bounds_m"]["upper_m"] = 10**400
+    with pytest.raises(ValueError, match="must be numeric"):
+        normalize_branch_continuation_campaign_spec(raw)
+
+
 def test_coordinate_identity_rejects_a_stale_bound_configuration(tmp_path):
     raw = _raw_campaign(tmp_path)
     state = raw["states"][1]

@@ -221,3 +221,56 @@ def test_level_directory_stays_inside_the_windows_legacy_path_budget():
     )
     assert directory.name == "l99"
     assert len(str(directory / suffix)) <= 259
+
+
+def test_transient_append_failure_quarantines_level_and_notifies_fault_hook(
+    tmp_path, monkeypatch
+):
+    import src.jobs.convergence_campaign_runner as runner_module
+
+    spec = _spec(tmp_path, early=False, tolerance=20e-9)
+    root = tmp_path / "campaign-quarantine"
+    calls = []
+    real_append = runner_module.append_convergence_campaign_level
+    events = []
+
+    def execute(level, directory):
+        calls.append(level["level_id"])
+        return _executor([5.0e-6, 5.001e-6, 5.002e-6])(level, directory)
+
+    def fault(phase, payload):
+        events.append((phase, payload))
+
+    def gap_append(*_args, **_kwargs):
+        raise RuntimeError("injected row gap")
+
+    monkeypatch.setattr(runner_module, "append_convergence_campaign_level", gap_append)
+    with pytest.raises(RuntimeError, match="row gap"):
+        run_convergence_campaign(spec, root, attempt=1, level_executor=execute)
+    assert calls == ["mesh-0"]
+
+    invocations = []
+
+    def transient_oserror(*_args, **_kwargs):
+        invocations.append(1)
+        if len(invocations) == 1:
+            raise OSError("transient windows file lock")
+        return real_append(*_args, **_kwargs)
+
+    monkeypatch.setattr(
+        runner_module, "append_convergence_campaign_level", transient_oserror
+    )
+    result = run_convergence_campaign(
+        spec, root, attempt=2, level_executor=execute, fault_hook=fault
+    )
+    assert result["completed"] is True
+    quarantined = [payload for phase, payload in events if phase == "level_row_quarantined"]
+    assert len(quarantined) == 1
+    assert quarantined[0]["level_id"] == "mesh-0"
+    assert quarantined[0]["error"].startswith("OSError:")
+    assert calls.count("mesh-0") == 2
+
+    monkeypatch.setattr(runner_module, "append_convergence_campaign_level", real_append)
+    resumed = run_convergence_campaign(spec, root, attempt=3, level_executor=execute)
+    assert resumed["completed"] is True
+    assert calls.count("mesh-0") == 2

@@ -140,6 +140,13 @@ def _normalize_backend_result(
     reflectance = _finite(raw["reflectance"], "reflectance")
     transmittance = _finite(raw["transmittance"], "transmittance")
     absorption = _finite(raw["absorption"], "absorption")
+    for name, value in (
+        ("reflectance", reflectance),
+        ("transmittance", transmittance),
+        ("absorption", absorption),
+    ):
+        if not 0.0 <= value <= 1.0:
+            raise ValueError(f"native condition gradient {name} must be within [0, 1]")
     closure = reflectance + transmittance + absorption
     if not math.isclose(closure, 1.0, rel_tol=0.0, abs_tol=1e-4):
         raise ValueError("native condition gradient power closure failed")

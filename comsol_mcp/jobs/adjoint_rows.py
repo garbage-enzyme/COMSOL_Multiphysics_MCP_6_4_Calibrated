@@ -152,7 +152,11 @@ def _normalize_row(
         or raw["schema_version"] != ADJOINT_ROW_SCHEMA_VERSION
     ):
         raise ValueError("adjoint row schema is unsupported")
-    if raw["sequence"] != sequence or isinstance(raw["sequence"], bool):
+    if (
+        isinstance(raw["sequence"], bool)
+        or not isinstance(raw["sequence"], int)
+        or raw["sequence"] != sequence
+    ):
         raise ValueError("adjoint row sequence is not contiguous")
     if (
         isinstance(raw["attempt"], bool)
