@@ -59,6 +59,13 @@ def test_candidate_rejects_out_of_space_or_nonfinite_values(values):
         normalize_candidate_record(value, _space())
 
 
+def test_candidate_rejects_oversized_integer_as_value_error():
+    value = _candidate()
+    value["requested_values"] = {"patch_length_x": 10**400, "patch_length_y": 80}
+    with pytest.raises(ValueError, match="must be finite"):
+        normalize_candidate_record(value, _space())
+
+
 def test_candidate_fingerprint_changes_with_campaign_or_normalized_point():
     first = normalize_candidate_record(_candidate(), _space())
     changed_campaign = _candidate()

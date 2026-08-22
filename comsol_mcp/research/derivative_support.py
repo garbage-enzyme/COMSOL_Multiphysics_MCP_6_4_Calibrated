@@ -63,7 +63,10 @@ def _text(value: object, name: str, *, maximum: int = MAX_TEXT) -> str:
 def _finite(value: object, name: str, *, positive: bool = False) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{name} must be a finite number")
-    number = float(value)
+    try:
+        number = float(value)
+    except OverflowError as exc:
+        raise ValueError(f"{name} must be a finite number in the allowed range") from exc
     if not math.isfinite(number) or (positive and number <= 0.0):
         raise ValueError(f"{name} must be a finite number in the allowed range")
     return number

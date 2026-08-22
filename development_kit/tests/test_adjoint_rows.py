@@ -72,6 +72,26 @@ def test_partial_final_json_is_truncated_and_next_append_continues_chain(ascii_t
     assert second["previous_row_sha256"] == first["row_sha256"]
 
 
+def test_oversized_unterminated_tail_never_discards_earlier_rows(ascii_tmp_path):
+    from comsol_mcp.jobs.adjoint_rows import MAX_ADJOINT_ROW_BYTES
+    from comsol_mcp.jobs.journal import recover_jsonl_tail
+
+    path = ascii_tmp_path / "oversized_tail.jsonl"
+    first = append_adjoint_row(
+        path, job_fingerprint=JOB, attempt=1, kind="iteration", payload=_iteration()
+    )
+    complete = path.read_bytes()
+    with path.open("ab") as handle:
+        handle.write(b'{"junk":' + b"x" * (MAX_ADJOINT_ROW_BYTES + 8))
+    recover_jsonl_tail(path, max_row_bytes=MAX_ADJOINT_ROW_BYTES)
+    assert path.read_bytes() == complete
+
+    second = append_adjoint_row(
+        path, job_fingerprint=JOB, attempt=1, kind="gradient", payload=_gradient()
+    )
+    assert second["previous_row_sha256"] == first["row_sha256"]
+
+
 def test_changed_job_or_hash_payload_is_rejected(ascii_tmp_path):
     path = ascii_tmp_path / "identity_rows.jsonl"
     append_adjoint_row(path, job_fingerprint=JOB, attempt=1, kind="iteration", payload=_iteration())

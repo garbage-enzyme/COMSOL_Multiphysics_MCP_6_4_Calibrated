@@ -35,6 +35,12 @@ def _relative_error(native: float, finite_difference: float, floor: float) -> fl
     return abs(native - finite_difference) / max(abs(native), abs(finite_difference), floor)
 
 
+def _gradient_check_passed(checks: dict[str, bool], *, require_sign: bool) -> bool:
+    """Sign policy governs only ``signs_agree``; every other check binds unconditionally."""
+    unconditional = [value for key, value in checks.items() if key != "signs_agree"]
+    return all(unconditional) and (checks["signs_agree"] or not require_sign)
+
+
 def compare_gradient(
     native_record: object,
     support: object,
@@ -162,7 +168,7 @@ def compare_gradient(
             for row in rows
         ),
     }
-    passed = all(checks.values()) and (checks["signs_agree"] or not raw_policy["require_sign"])
+    passed = _gradient_check_passed(checks, require_sign=raw_policy["require_sign"])
     body = {
         "schema_name": GRADIENT_CHECK_SCHEMA_NAME,
         "schema_version": GRADIENT_CHECK_SCHEMA_VERSION,

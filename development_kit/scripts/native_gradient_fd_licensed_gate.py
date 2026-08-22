@@ -251,6 +251,7 @@ def _run(spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
         derivatives = []
         for variable in spec["selected_variables"]:
             native = spec["native_gradients"][variable]
+            baseline = baseline_values[variable]
             step_rows = []
             for relative_step in spec["steps"]:
                 plus = by_key[(variable, relative_step, "plus")]["objective"]

@@ -5,6 +5,7 @@ import copy
 import pytest
 
 from comsol_mcp.research.derivative_support import (
+    _finite,
     normalize_derivative_support,
     normalize_derivative_variable,
 )
@@ -118,6 +119,11 @@ def test_variable_rejects_nonfinite_and_invalid_mapping():
     value["mapping"]["property_name"] = ""
     with pytest.raises(ValueError):
         normalize_derivative_variable(value, index=0)
+
+
+def test_finite_rejects_oversized_integer_as_value_error():
+    with pytest.raises(ValueError, match="allowed range"):
+        _finite(2**2000, "baseline")
 
 
 def test_forward_only_constraint_cannot_claim_native_derivative():

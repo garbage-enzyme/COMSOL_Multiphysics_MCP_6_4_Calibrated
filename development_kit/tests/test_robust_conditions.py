@@ -89,6 +89,43 @@ def test_condition_table_rejects_missing_cartesian_row_unless_sparse_is_explicit
     )
 
 
+def test_condition_table_bounds_cartesian_product_before_materialization():
+    def row(wavelength: float, elevation: float, azimuth: float, index: int) -> dict:
+        return {
+            "condition_id": f"condition-{index:03d}",
+            "order": index,
+            "wavelength_m": wavelength,
+            "incidence_elevation_deg": elevation,
+            "incidence_azimuth_deg": azimuth,
+            "polarization_basis_id": "declared_s",
+            "excitation_sha256": "e" * 64,
+            "material_state_id": "OX",
+            "objective_role": "objective",
+            "observable_id": "transmission_order_0_0",
+            "weight": 1.0,
+            "target": None,
+            "scale": 1.0,
+            "active": True,
+        }
+
+    rows = []
+    index = 0
+    for i in range(20):
+        rows.append(row(8.0e-6 + i * 1.0e-7, 0.5, 0.25, index))
+        index += 1
+    for j in range(20):
+        rows.append(row(8.05e-6, j * 1.5, 0.25, index))
+        index += 1
+    for k in range(11):
+        rows.append(row(8.06e-6, 0.75, k * 1.5, index))
+        index += 1
+    value = _table()
+    value["material_states"] = [_state("OX", "a")]
+    value["conditions"] = rows
+    with pytest.raises(ValueError, match="exceeds the condition limit"):
+        normalize_optimization_condition_table(value)
+
+
 @pytest.mark.parametrize(
     ("mutation", "message"),
     [

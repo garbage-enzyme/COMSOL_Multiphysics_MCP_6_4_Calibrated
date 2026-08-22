@@ -76,6 +76,23 @@ def test_gradient_check_rejects_sign_order_or_error_failures(mutation):
     assert receipt["passed"] is False or receipt["checks"]["signs_agree"] is False
 
 
+def test_gradient_check_require_sign_false_tolerates_reported_sign_mismatch():
+    checks = {
+        "all_relative_errors_within_limit": True,
+        "cosine_above_floor": True,
+        "signs_agree": False,
+        "step_sensitivity_bounded": True,
+    }
+    from comsol_mcp.research.gradient_validation import _gradient_check_passed
+
+    assert _gradient_check_passed(checks, require_sign=False) is True
+    assert _gradient_check_passed(checks, require_sign=True) is False
+    assert (
+        _gradient_check_passed({**checks, "cosine_above_floor": False}, require_sign=False)
+        is False
+    )
+
+
 def test_gradient_check_rejects_permuted_finite_difference_rows():
     rows = copy.deepcopy(_finite_difference())
     rows[0]["variable_id"] = "patch_length_y"

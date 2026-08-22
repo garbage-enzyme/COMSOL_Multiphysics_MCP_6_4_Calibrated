@@ -70,7 +70,10 @@ def _candidate_values(value: object, space: Mapping[str, Any]) -> dict[str, Any]
             continue
         if isinstance(raw, bool) or not isinstance(raw, (int, float)):
             raise ValueError(f"candidate.{variable_id} must be numeric")
-        number = float(raw)
+        try:
+            number = float(raw)
+        except OverflowError as exc:
+            raise ValueError(f"candidate.{variable_id} must be finite") from exc
         if not math.isfinite(number):
             raise ValueError(f"candidate.{variable_id} must be finite")
         if kind == "integer":

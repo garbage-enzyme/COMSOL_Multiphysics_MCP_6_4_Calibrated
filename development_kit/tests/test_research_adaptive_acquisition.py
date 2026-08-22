@@ -124,3 +124,31 @@ def test_adaptive_optimizer_warmup_tell_checkpoint_and_exact_replay():
     restored = _optimizer().restore(_space(), checkpoint)
     assert restored.state() == optimizer.state()
     assert restored.ask() == optimizer.ask()
+
+
+def test_ask_windows_completed_observations_to_the_acquisition_limit(monkeypatch):
+    optimizer = _optimizer()(_space(), seed=17001, warmup_count=2, candidate_pool_count=320)
+    arguments = {
+        "candidate_fingerprint": "a" * 64,
+        "status": "completed",
+        "score_fingerprint": "b" * 64,
+        "losses": {"peak": 1.0, "q": 0.5},
+    }
+    for index in range(300):
+        proposal = optimizer.ask()
+        fingerprint = f"{index:064x}"[-64:]
+        assert optimizer.tell(proposal, **{**arguments, "candidate_fingerprint": fingerprint})
+
+    module = importlib.import_module("comsol_mcp.research.adaptive_acquisition")
+    captured = {}
+    real = module.select_expected_improvement_candidate
+
+    def spy(space, observations, candidates):
+        captured["count"] = len(observations)
+        return real(space, observations, candidates)
+
+    monkeypatch.setattr(module, "select_expected_improvement_candidate", spy)
+
+    followup = optimizer.ask()
+    assert followup["proposal_index"] >= 0
+    assert captured["count"] == module.MAX_GP_OBSERVATIONS

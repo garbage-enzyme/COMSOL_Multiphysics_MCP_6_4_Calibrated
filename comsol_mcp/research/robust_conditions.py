@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import itertools
+import math
 from collections.abc import Mapping
 from typing import Any
 
@@ -159,10 +160,13 @@ def _validate_completeness(rows: list[dict[str, Any]], completeness: object) -> 
     if len(coordinates) != len(set(coordinates)):
         raise ValueError("condition coordinates must be unique")
     dimensions = [sorted({coordinate[index] for coordinate in coordinates}) for index in range(5)]
-    expected = set(itertools.product(*dimensions))
+    cardinality_product = math.prod(len(dimension) for dimension in dimensions)
     if mode == "cartesian_complete":
         if raw["sparse_justification"] is not None:
             raise ValueError("cartesian_complete tables must not declare sparse justification")
+        if cardinality_product > MAX_CONDITIONS:
+            raise ValueError("cartesian_complete table exceeds the condition limit")
+        expected = set(itertools.product(*dimensions))
         if set(coordinates) != expected:
             raise ValueError("condition table is missing Cartesian combinations")
         justification = None

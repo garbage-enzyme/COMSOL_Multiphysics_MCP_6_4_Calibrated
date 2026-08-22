@@ -141,6 +141,10 @@ def test_state_is_fingerprint_bound_and_round_trips():
     tampered["move_limit"] = 0.2
     with pytest.raises(ValueError, match="fingerprint"):
         normalize_gcmma_state(tampered)
+    missing = copy.deepcopy(state)
+    missing.pop("state_fingerprint")
+    with pytest.raises(ValueError, match="required"):
+        normalize_gcmma_state(missing)
 
 
 def test_proposal_enforces_physical_move_limit_and_accepts_fresh_forward_improvement():

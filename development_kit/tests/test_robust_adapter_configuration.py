@@ -251,9 +251,22 @@ def test_condition_controls_bind_native_sensitivity_solver_identities():
     assert result["sensitivity_constraint_group_policy"] == (
         "merge_material_coordinates_into_wave_optics"
     )
+    assert result["selected_linear_solver_tag"] == "d1"
+    assert result["inactive_linear_solver_tags"] == ["i1"]
+    assert result["mesh_reference_parameter"] == "mesh_ref_wl"
     value["sensitivity_stationary_nonlinearity"] = "off"
     with pytest.raises(ValueError, match="must be auto"):
         normalize_robust_condition_controls(value)
+
+
+def test_condition_controls_polarization_mapping_requires_both_linear_bases():
+    value = _condition_controls()
+    value["polarization_values"] = {"x_linear": "S", "extra": "T"}
+    with pytest.raises(ValueError, match="require x_linear and y_linear"):
+        normalize_robust_condition_controls(value)
+    value["polarization_values"] = {"x_linear": "S", "y_linear": "P", "extra": "T"}
+    normalized = normalize_robust_condition_controls(value)
+    assert normalized["polarization_values"]["extra"] == "T"
 
 
 def _forward_shape_controls():

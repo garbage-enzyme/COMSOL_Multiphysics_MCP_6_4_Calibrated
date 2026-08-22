@@ -430,6 +430,15 @@ def test_frozen_dict_rejects_in_place_union() -> None:
     assert frozen == {"stable": True}
 
 
+def test_frozen_dict_rejects_reinitialization_after_construction() -> None:
+    frozen = deep_freeze({"stable": True})
+
+    with pytest.raises(TypeError, match="cannot be mutated"):
+        frozen.__init__({"injected": True})
+
+    assert frozen == {"stable": True}
+
+
 @seed(20260721)
 @settings(
     max_examples=50,
