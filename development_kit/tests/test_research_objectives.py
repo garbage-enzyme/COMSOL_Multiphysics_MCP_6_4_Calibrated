@@ -100,3 +100,17 @@ def test_normalized_goal_is_idempotent_but_tampered_identity_is_rejected():
     normalized["objectives"][0]["target"] = 999.0
     with pytest.raises(ValueError, match="fingerprint is invalid"):
         score_objectives(normalized, _evidence(), _pointers())
+
+
+def test_overflowing_match_loss_is_rejected_as_nonfinite():
+    goal = _goal()
+    goal["objectives"][1]["target"] = 1e308
+    goal["objectives"][1]["tolerance"] = 10.0
+    evidence = _evidence()
+    evidence["response"]["peak_wavelength"] = -1e308
+    pointers = [
+        {"objective_id": "peak", "path": ["response", "peak_wavelength"]},
+        {"objective_id": "q", "path": ["response", "q_factor"]},
+    ]
+    with pytest.raises(ValueError, match="normalized match loss must be finite"):
+        score_objectives(goal, evidence, pointers)

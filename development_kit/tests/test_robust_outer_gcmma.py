@@ -216,3 +216,34 @@ def test_condition_solve_and_iteration_budgets_fail_closed():
             condition_solves=48,
             backend=_backend(),
         )
+
+
+@pytest.mark.parametrize("terminal", ["complete", "budget_exhausted"])
+def test_terminal_state_cannot_propose_new_candidates(terminal):
+    accepted = accept_gcmma_candidate(
+        propose_gcmma_candidate(
+            _state(),
+            objective=0.2,
+            gradient=[1e-3, 2e-3],
+            condition_solves=48,
+            backend=_backend(),
+        ),
+        candidate_objective=0.21,
+        condition_solves=24,
+        backend=_backend(),
+    )
+    terminal_state = {**accepted, "status": terminal}
+    terminal_state.pop("state_fingerprint")
+    from comsol_mcp.durable import domain_sha256_v2
+
+    terminal_state["state_fingerprint"] = domain_sha256_v2(
+        "comsol_mcp.robust_outer_gcmma_state", terminal_state
+    )
+    with pytest.raises(ValueError, match="already terminal"):
+        propose_gcmma_candidate(
+            terminal_state,
+            objective=0.21,
+            gradient=[1e-3, 2e-3],
+            condition_solves=24,
+            backend=_backend(),
+        )

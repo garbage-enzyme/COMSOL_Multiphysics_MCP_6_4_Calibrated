@@ -283,6 +283,8 @@ def propose_gcmma_candidate(
     current = normalize_gcmma_state(state)
     if current["pending_proposal"] is not None:
         raise ValueError("GCMMA proposal is already pending")
+    if current["status"] in {"complete", "budget_exhausted"}:
+        raise ValueError("GCMMA state is already terminal")
     if current["outer_iteration"] >= current["max_iterations"]:
         raise ValueError("GCMMA outer iteration budget is exhausted")
     if (

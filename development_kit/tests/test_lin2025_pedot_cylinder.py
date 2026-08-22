@@ -145,6 +145,51 @@ def test_shape_support_requires_explicit_live_selections():
     assert len(support["support_fingerprint"]) == 64
 
 
+def test_shape_support_rejects_nonfinite_radius_or_center():
+    fixture = _fixture()
+    tree = {
+        "source_sha256": "a" * 64,
+        "domain_map": {"substrate": 1, "pedot_cylinder": 5, "air": 4},
+        "domain_z_bounds_um": {"5": [0.0, 0.2]},
+        "material_tags": {"pedot_cylinder": "OX"},
+        "feature_tags": ["ewfd", "mesh1"],
+        "domain_count": 6,
+        "boundary_count": 32,
+        "exterior_boundaries": [
+            1, 2, 3, 4, 5, 7, 8, 10, 11, 13, 14, 15, 16, 17, 29, 30, 31, 32,
+        ],
+        "pedot_boundaries": [18, 19, 20, 23, 25, 27],
+        "pedot_lateral_boundaries": [18, 19, 25, 27],
+        "pedot_cap_boundaries": [20, 23],
+        "baseline_radius_um": float("nan"),
+        "center_um": [0.85, 0.0],
+    }
+    with pytest.raises(ValueError, match="radius"):
+        compile_lin2025_pedot_shape_support(fixture, tree)
+    tree["baseline_radius_um"] = 0.26
+    tree["center_um"] = [float("inf"), 0.0]
+    with pytest.raises(ValueError, match="center"):
+        compile_lin2025_pedot_shape_support(fixture, tree)
+
+
+@pytest.mark.parametrize("junk", [42, "OX", None])
+def test_fixture_rejects_non_mapping_state_and_variable_rows(junk):
+    # Non-mapping rows must fail the ordered-ID contract instead of being
+    # silently filtered and later crashing normalization with TypeError.
+    value = _fixture()
+    value["material_states"] = [{"state_id": "OX"}, junk]
+    with pytest.raises(ValueError, match="ordered OX/MR"):
+        normalize_lin2025_pedot_cylinder_fixture(value)
+    value = _fixture()
+    value["material_states"] = [{"state_id": "OX"}, {"state_id": "MR"}, junk]
+    with pytest.raises(ValueError, match="ordered OX/MR"):
+        normalize_lin2025_pedot_cylinder_fixture(value)
+    value = _fixture()
+    value["mutable_variables"] = [{"variable_id": "pedot_cylinder_radius_x"}, junk]
+    with pytest.raises(ValueError, match="ordered cylinder"):
+        normalize_lin2025_pedot_cylinder_fixture(value)
+
+
 def test_shape_support_rejects_implicit_or_overlapping_selections():
     fixture = _fixture()
     tree = {

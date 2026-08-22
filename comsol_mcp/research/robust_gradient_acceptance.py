@@ -115,13 +115,20 @@ def assess_robust_gradient_acceptance(
         selected = row.get("selected")
         if not isinstance(selected, dict):
             raise ValueError("component gradient row selection is invalid")
-        component_errors.append(_finite(selected.get("relative_error"), "relative_error"))
+        component_error = _finite(selected.get("relative_error"), "relative_error")
+        if component_error < 0.0:
+            raise ValueError("component relative error must be nonnegative")
+        component_errors.append(component_error)
         sign = selected.get("sign_agreement")
         if not isinstance(sign, bool):
             raise ValueError("component gradient sign evidence is invalid")
         component_signs.append(sign)
     cosine = _finite(component.get("cosine_similarity"), "cosine_similarity")
+    if not -1.0 <= cosine <= 1.0:
+        raise ValueError("component cosine similarity is outside [-1, 1]")
     directional_error = _finite(directional.get("relative_error"), "directional.relative_error")
+    if directional_error < 0.0:
+        raise ValueError("directional relative error must be nonnegative")
     directional_sign = directional.get("sign_agreement")
     if not isinstance(directional_sign, bool):
         raise ValueError("directional gradient sign evidence is invalid")

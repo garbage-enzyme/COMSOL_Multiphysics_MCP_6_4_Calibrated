@@ -126,6 +126,8 @@ def _mesh_statistics(value: object, name: str) -> dict[str, Any]:
     mean = _finite(raw["mean_quality"], f"{name}.mean_quality")
     if not 0.0 <= minimum <= 1.0 or not 0.0 <= mean <= 1.0:
         raise ValueError(f"{name} quality values must be within [0, 1]")
+    if minimum > mean:
+        raise ValueError(f"{name}.minimum_quality must not exceed mean_quality")
     if not isinstance(raw["quality_measure"], str) or not raw["quality_measure"]:
         raise ValueError(f"{name}.quality_measure must be nonempty")
     return {

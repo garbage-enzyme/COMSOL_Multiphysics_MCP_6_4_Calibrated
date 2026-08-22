@@ -144,6 +144,10 @@ def test_policy_rejects_duplicate_zero_or_out_of_range_offsets_and_tampering():
     tampered["mesh_convergence"]["max_relative_objective_change"] = 0.1
     with pytest.raises(ValueError, match="fingerprint"):
         normalize_robust_finalist_validation_policy(tampered)
+    nulled = _policy()
+    nulled["policy_fingerprint"] = None
+    with pytest.raises(ValueError, match="fingerprint is invalid"):
+        normalize_robust_finalist_validation_policy(nulled)
 
 
 def test_legacy_policy_remains_readable_without_inventing_execution_controls():
@@ -161,12 +165,8 @@ def test_legacy_policy_remains_readable_without_inventing_execution_controls():
 @pytest.mark.parametrize(
     "mutation",
     [
-        lambda value: value["mesh_convergence"].update(
-            finer_mesh_reference_value="1600[nm]"
-        ),
-        lambda value: value["external_fidelity"].update(
-            maximum_absolute_condition_delta=0.0
-        ),
+        lambda value: value["mesh_convergence"].update(finer_mesh_reference_value="1600[nm]"),
+        lambda value: value["external_fidelity"].update(maximum_absolute_condition_delta=0.0),
     ],
 )
 def test_current_policy_requires_distinct_meshes_and_positive_fidelity_tolerance(mutation):

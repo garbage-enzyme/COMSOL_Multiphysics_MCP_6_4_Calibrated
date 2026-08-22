@@ -91,6 +91,14 @@ def _material_readback(model: Any, component_tag: str) -> dict[str, Any]:
     return {"material_tag": "mat_pedot", "domains": selection, "relpermittivity": tensor}
 
 
+def _expression_is_zero(expression: str) -> bool:
+    """Accept only numeric tensor expressions that evaluate to exactly zero."""
+    try:
+        return float(expression) == 0.0
+    except ValueError:
+        return False
+
+
 class Lin2025PedotControlBackend(Protocol):
     """Minimal atomic surface used by the solver-free control compiler."""
 
@@ -171,7 +179,13 @@ class ClientapiLin2025PedotControlBackend:
         group = material.propertyGroup("def")
         group.set("relpermittivity", jpype.JArray(jpype.JString)(tensor))
         readback = _material_readback(self.model, self.component_tag)
-        if readback["relpermittivity"] not in (tensor, [tensor[0], tensor[4], tensor[8]]):
+        observed = readback["relpermittivity"]
+        off_diagonal_zero = all(
+            index in (0, 4, 8) or _expression_is_zero(tensor[index]) for index in range(9)
+        )
+        if observed != tensor and not (
+            off_diagonal_zero and observed == [tensor[0], tensor[4], tensor[8]]
+        ):
             raise ValueError("Lin2025 material tensor readback differs from requested state")
         return {
             "state_id": state_id,

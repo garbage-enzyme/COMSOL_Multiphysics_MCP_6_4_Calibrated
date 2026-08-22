@@ -52,6 +52,8 @@ def _score(objective: Mapping[str, Any], observed: float) -> tuple[float | None,
             error /= denominator
         elif metric != "absolute_error":
             raise ValueError("match objectives require absolute_error or relative_error")
+        if not math.isfinite(error):
+            raise ValueError("normalized match loss must be finite")
         return error, None if tolerance is None else error <= float(tolerance)
     if direction == "range":
         lower, upper = (float(item) for item in target)
@@ -63,6 +65,8 @@ def _score(objective: Mapping[str, Any], observed: float) -> tuple[float | None,
             violation /= denominator
         elif metric != "absolute_error":
             raise ValueError("range objectives require absolute_error or relative_error")
+        if not math.isfinite(violation):
+            raise ValueError("normalized range violation must be finite")
         return violation, None if tolerance is None else violation <= float(tolerance)
     if direction == "minimize":
         if metric != "raw_value":

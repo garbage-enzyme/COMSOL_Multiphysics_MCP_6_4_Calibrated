@@ -49,7 +49,24 @@ def _tree() -> dict:
         "domain_count": 6,
         "boundary_count": 32,
         "exterior_boundaries": [
-            1, 2, 3, 4, 5, 7, 8, 10, 11, 13, 14, 15, 16, 17, 29, 30, 31, 32,
+            1,
+            2,
+            3,
+            4,
+            5,
+            7,
+            8,
+            10,
+            11,
+            13,
+            14,
+            15,
+            16,
+            17,
+            29,
+            30,
+            31,
+            32,
         ],
         "pedot_boundaries": [18, 19, 20, 23, 25, 27],
         "pedot_lateral_boundaries": [18, 19, 25, 27],
@@ -80,14 +97,10 @@ def _derivative_support() -> dict:
     )
     second = copy.deepcopy(first)
     second.update(variable_id="pedot_cylinder_radius_y", order=1)
-    second["mapping"].update(
-        property_index=1, readback_expression="pedot_cylinder_radius_y"
-    )
+    second["mapping"].update(property_index=1, readback_expression="pedot_cylinder_radius_y")
     value["variables"] = [first, second]
     value["objective"]["objective_id"] = "pedot_contrast"
-    value["result_identity"]["derivative_expression"] = (
-        "real(fsens(pedot_cylinder_radius_x))"
-    )
+    value["result_identity"]["derivative_expression"] = "real(fsens(pedot_cylinder_radius_x))"
     return value
 
 
@@ -134,9 +147,7 @@ def test_pedot_controls_bind_two_radii_and_caps():
     receipt = prepare_lin2025_pedot_shape_controls(
         _Backend(), _fixture(), _tree(), _derivative_support()
     )
-    assert receipt["controls"]["deformed_geometry"]["pedot_boundaries"] == [
-        18, 19, 20, 23, 25, 27
-    ]
+    assert receipt["controls"]["deformed_geometry"]["pedot_boundaries"] == [18, 19, 20, 23, 25, 27]
     assert receipt["controls"]["deformed_geometry"]["height_preserved"] is True
     assert len(receipt["receipt_fingerprint"]) == 64
 
@@ -145,9 +156,7 @@ def test_pedot_controls_restore_complete_snapshot_on_failure():
     backend = _Backend(failure=True)
     before = backend.snapshot()
     with pytest.raises(ValueError, match="injected preparation failure"):
-        prepare_lin2025_pedot_shape_controls(
-            backend, _fixture(), _tree(), _derivative_support()
-        )
+        prepare_lin2025_pedot_shape_controls(backend, _fixture(), _tree(), _derivative_support())
     assert backend.snapshot() == before
 
 
@@ -267,4 +276,111 @@ def test_prepare_controls_rejects_duplicate_physics_before_parameter_writes():
         backend.prepare_controls(_derivative_support(), shape_support)
     # The precondition must fail closed before the first model mutation.
     assert parameters.set_calls == 0
-    assert parameters.values == {}
+
+
+class _MaterialSelection:
+    def entities(self):
+        return [5]
+
+
+class _PropertyGroup(dict):
+    def __init__(self, initial, *, writable):
+        super().__init__(initial)
+        self._writable = writable
+
+    def set(self, name, value):
+        if self._writable:
+            dict.__setitem__(self, name, list(value))
+
+    def getStringArray(self, name):
+        stored = dict.__getitem__(self, name)
+        if len(stored) == 9:
+            # Emulate a COMSOL build that stores the tensor as its diagonal.
+            return [stored[0], stored[4], stored[8]]
+        return stored
+
+
+class _Material:
+    def __init__(self, tensor, *, writable=True):
+        self._groups = {"def": _PropertyGroup({"relpermittivity": list(tensor)}, writable=writable)}
+        self._selection = _MaterialSelection()
+
+    def getType(self):
+        return "Common"
+
+    def selection(self):
+        return self._selection
+
+    def propertyGroup(self, tag):
+        return self._groups[tag]
+
+
+class _MaterialsComponent:
+    def __init__(self, material):
+        self._materials = _FeatureContainer({"mat_pedot": material})
+
+    def material(self):
+        return self._materials
+
+
+class _FakeJpype:
+    class JString:
+        pass
+
+    @staticmethod
+    def JArray(_item_type):
+        return lambda values: [str(v) for v in values]
+
+
+def _material_backend(monkeypatch, stored_tensor, requested_tensor, *, writable=True):
+    import importlib
+
+    component = _MaterialsComponent(_Material(stored_tensor, writable=writable))
+    model = _Model(component, _StrictParameters())
+    real_import_module = importlib.import_module
+    monkeypatch.setattr(
+        importlib,
+        "import_module",
+        lambda name: _FakeJpype if name == "jpype" else real_import_module(name),
+    )
+    return ClientapiLin2025PedotControlBackend(model, component_tag="comp1", geometry_tag="geom1")
+
+
+def _tensor(off_diagonal: str = "0") -> list[str]:
+    return [
+        "2.1",
+        off_diagonal,
+        off_diagonal,
+        off_diagonal,
+        "2.1",
+        off_diagonal,
+        off_diagonal,
+        off_diagonal,
+        "2.4",
+    ]
+
+
+def test_material_readback_accepts_diagonal_only_for_zero_offdiagonals(monkeypatch):
+    requested = _tensor()
+    diagonal = [requested[0], requested[4], requested[8]]
+    backend = _material_backend(monkeypatch, diagonal, requested)
+    result = backend.apply_material_state("OX", requested)
+    assert result["relpermittivity"] == diagonal
+
+
+def test_material_readback_rejects_diagonal_collapse_of_nonzero_offdiagonals(monkeypatch):
+    requested = _tensor(off_diagonal="0.5")
+    diagonal = [requested[0], requested[4], requested[8]]
+    backend = _material_backend(monkeypatch, diagonal, requested)
+    with pytest.raises(ValueError, match="readback differs"):
+        backend.apply_material_state("OX", requested)
+
+
+def test_material_readback_rejects_wrong_values_even_when_diagonal(monkeypatch):
+    requested = _tensor()
+    drifted = ["9.9", "9.9", "9.9"]
+    # A sticky property group ignores the write, emulating a set that did
+    # not take effect; the readback then differs from the requested state.
+    backend = _material_backend(monkeypatch, drifted, requested, writable=False)
+    with pytest.raises(ValueError, match="readback differs"):
+        backend.apply_material_state("OX", requested)

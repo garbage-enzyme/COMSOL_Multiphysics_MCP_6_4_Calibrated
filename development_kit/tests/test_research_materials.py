@@ -167,3 +167,29 @@ def test_compiler_rejects_numeric_material_variable_without_allowed_values():
         compile_campaign_manifest(
             _goal(), space, _approval(), workflow_capsule=_capsule(), material_catalog=_catalog()
         )
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda entry: entry["optical_data"].update({"representation": ["n", "k"]}),
+        lambda entry: entry["optical_data"].update({"phasor_sign": {"sign": "+"}}),
+        lambda entry: entry["optical_data"].update({"interpolation": ["linear"]}),
+        lambda entry: entry.update({"evidence_status": ["measured"]}),
+        lambda entry: entry["uncertainty"].update({"status": ["quantified"]}),
+    ],
+)
+def test_unhashable_enum_leaves_raise_valueerror_not_typeerror(mutate):
+    value = _catalog()
+    mutate(value["entries"][0])
+    with pytest.raises(ValueError):
+        normalize_material_catalog(value)
+
+
+def test_catalog_normalization_round_trips_with_fingerprint_verification():
+    normalized = normalize_material_catalog(_catalog())
+    assert normalize_material_catalog(normalized) == normalized
+    tampered = dict(normalized)
+    tampered["catalog_fingerprint"] = "0" * 64
+    with pytest.raises(ValueError, match="fingerprint is invalid"):
+        normalize_material_catalog(tampered)

@@ -8,6 +8,7 @@ from typing import Any
 from comsol_mcp.durable import domain_sha256_v2
 
 from .contracts import _bounded_json, _finite, _identifier, _object, _text, _timestamp
+from .derivative_support import _enum
 
 MATERIAL_CATALOG_SCHEMA_NAME = "comsol_mcp.research_material_catalog"
 MATERIAL_CATALOG_SCHEMA_VERSION = "1.0.0"
@@ -98,25 +99,30 @@ def _normalize_entry(value: object, index: int) -> dict[str, Any]:
         },
         f"{name}.optical_data",
     )
-    if optical["representation"] not in _REPRESENTATIONS:
-        raise ValueError(f"{name}.optical_data.representation is unsupported")
-    if optical["phasor_sign"] not in _PHASOR_SIGNS:
-        raise ValueError(f"{name}.optical_data.phasor_sign is unsupported")
-    if optical["interpolation"] not in _INTERPOLATIONS:
-        raise ValueError(f"{name}.optical_data.interpolation is unsupported")
+    representation = _enum(
+        optical["representation"],
+        _REPRESENTATIONS,
+        f"{name}.optical_data.representation",
+    )
+    phasor_sign = _enum(optical["phasor_sign"], _PHASOR_SIGNS, f"{name}.optical_data.phasor_sign")
+    interpolation = _enum(
+        optical["interpolation"], _INTERPOLATIONS, f"{name}.optical_data.interpolation"
+    )
     if optical["extrapolation"] != "forbidden":
         raise ValueError(f"{name}.optical_data.extrapolation must be forbidden")
     if not isinstance(optical["passive_expected"], bool):
         raise ValueError(f"{name}.optical_data.passive_expected must be boolean")
-    if raw["evidence_status"] not in _EVIDENCE_STATES:
-        raise ValueError(f"{name}.evidence_status is unsupported")
+    evidence_status = _enum(raw["evidence_status"], _EVIDENCE_STATES, f"{name}.evidence_status")
     uncertainty = _object(
         raw["uncertainty"],
         {"status", "description"},
         f"{name}.uncertainty",
     )
-    if uncertainty["status"] not in {"quantified", "not_reported", "not_applicable"}:
-        raise ValueError(f"{name}.uncertainty.status is unsupported")
+    uncertainty_status = _enum(
+        uncertainty["status"],
+        {"quantified", "not_reported", "not_applicable"},
+        f"{name}.uncertainty.status",
+    )
     mapping = _object(
         raw["comsol_mapping"],
         {"property_group", "function_ids"},
@@ -126,9 +132,9 @@ def _normalize_entry(value: object, index: int) -> dict[str, Any]:
         raise ValueError(f"{name}.caller_approved must be boolean")
     strictly_verified = (
         raw["caller_approved"]
-        and raw["evidence_status"] != "assumed"
+        and evidence_status != "assumed"
         and optical["passive_expected"]
-        and uncertainty["status"] != "not_reported"
+        and uncertainty_status != "not_reported"
     )
     return {
         "material_id": _identifier(raw["material_id"], f"{name}.material_id"),
@@ -148,16 +154,16 @@ def _normalize_entry(value: object, index: int) -> dict[str, Any]:
             "temperature_k": _range(validity["temperature_k"], f"{name}.validity.temperature_k"),
         },
         "optical_data": {
-            "representation": optical["representation"],
+            "representation": representation,
             "table_sha256": _sha256(optical["table_sha256"], f"{name}.optical_data.table_sha256"),
-            "phasor_sign": optical["phasor_sign"],
-            "interpolation": optical["interpolation"],
+            "phasor_sign": phasor_sign,
+            "interpolation": interpolation,
             "extrapolation": "forbidden",
             "passive_expected": optical["passive_expected"],
         },
-        "evidence_status": raw["evidence_status"],
+        "evidence_status": evidence_status,
         "uncertainty": {
-            "status": uncertainty["status"],
+            "status": uncertainty_status,
             "description": _text(
                 uncertainty["description"], f"{name}.uncertainty.description", maximum=1024
             ),
@@ -189,8 +195,15 @@ def _normalize_entry(value: object, index: int) -> dict[str, Any]:
 
 def normalize_material_catalog(value: object) -> dict[str, Any]:
     """Normalize an approved, immutable material search catalog."""
+    bounded = _bounded_json(value, "material catalog", 1024 * 1024)
+    supplied_fingerprint = None
+    if isinstance(bounded, dict) and "catalog_fingerprint" in bounded:
+        supplied_fingerprint = bounded.pop("catalog_fingerprint")
+    for derived in ("caller_approved_material_ids", "strictly_verified_material_ids"):
+        if isinstance(bounded, dict):
+            bounded.pop(derived, None)
     raw = _object(
-        _bounded_json(value, "material catalog", 1024 * 1024),
+        bounded,
         {"schema_name", "schema_version", "catalog_id", "created_at", "entries"},
         "material catalog",
     )
@@ -202,6 +215,9 @@ def normalize_material_catalog(value: object) -> dict[str, Any]:
     entries_value = raw["entries"]
     if not isinstance(entries_value, list) or not 1 <= len(entries_value) <= MAX_MATERIALS:
         raise ValueError("entries must be a bounded nonempty list")
+    for item in entries_value:
+        if isinstance(item, dict):
+            item.pop("strictly_verified", None)
     entries = [_normalize_entry(item, index) for index, item in enumerate(entries_value)]
     material_ids = [item["material_id"] for item in entries]
     if len(material_ids) != len(set(material_ids)):
@@ -219,10 +235,16 @@ def normalize_material_catalog(value: object) -> dict[str, Any]:
             item["material_id"] for item in entries if item["strictly_verified"]
         ),
     }
-    return {
+    normalized = {
         **body,
         "catalog_fingerprint": domain_sha256_v2(MATERIAL_CATALOG_SCHEMA_NAME, body),
     }
+    if (
+        supplied_fingerprint is not None
+        and supplied_fingerprint != normalized["catalog_fingerprint"]
+    ):
+        raise ValueError("material catalog fingerprint is invalid")
+    return normalized
 
 
 __all__ = [

@@ -59,6 +59,8 @@ def normalize_robust_finalist_validation_policy(value: object) -> dict[str, Any]
     supplied = None
     if isinstance(bounded, dict) and "policy_fingerprint" in bounded:
         supplied = bounded.pop("policy_fingerprint")
+        if supplied is None:
+            raise ValueError("robust finalist validation policy fingerprint is invalid")
     raw = _object(
         bounded,
         {
