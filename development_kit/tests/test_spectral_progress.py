@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
-
 import pytest
+from src.jobs import spectral_rows as spectral_rows_module
 from src.jobs.spectral_characterization import normalize_spectral_characterization_job_spec
 from src.jobs.spectral_progress import (
     _final_candidate_disposition,
@@ -13,7 +11,6 @@ from src.jobs.spectral_progress import (
     build_spectral_progress,
 )
 from src.jobs.spectral_rows import read_spectral_rows
-from src.jobs import spectral_rows as spectral_rows_module
 from src.jobs.spectral_stages import build_initial_spectral_stage, build_spectral_stage_plan
 
 from development_kit.tests.test_spectral_rows import (
@@ -405,3 +402,33 @@ def test_rehashed_adaptive_stage_with_changed_targets_fails_replay(tmp_path):
 
     with pytest.raises(ValueError, match="deterministic evidence replay"):
         build_spectral_progress(spec, [initial, tampered], rows)
+
+
+def test_non_cap_expansion_stop_is_not_labeled_as_a_declared_cap(tmp_path):
+    """A grid that yields no new exact points is residual, not a declared cap."""
+    import src.jobs.spectral_progress as progress_module
+
+    spec = _spec(tmp_path)
+    initial = build_initial_spectral_stage(spec)
+    plans = [initial]
+    rows = _rows(spec, initial, [0.1, 0.2, 0.3, 0.5, 0.9])
+    artifacts = {
+        "decision": {"classification": "boundary_high"},
+        "characterization": {"measurement_state": "measured", "candidate": {}},
+    }
+    original = progress_module._expansion_plan
+
+    def no_new_points(spec_arg, plans_arg, rows_arg, artifacts_arg):
+        return None, "window_expansion_has_no_new_exact_points"
+
+    progress_module._expansion_plan = no_new_points
+    try:
+        result = progress_module._action_after_completed_stage(
+            spec, plans, rows, artifacts
+        )
+    finally:
+        progress_module._expansion_plan = original
+
+    assert result["action"] == "complete"
+    assert result["scientific_disposition"] == "residual"
+    assert result["declared_cap_reached"] is False

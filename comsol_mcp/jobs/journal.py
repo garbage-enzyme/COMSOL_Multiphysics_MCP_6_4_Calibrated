@@ -43,7 +43,11 @@ def recover_jsonl_tail(path: str | Path, *, max_row_bytes: int) -> None:
 
         boundary = -1
         scan_end = end - 1
-        chunk_size = max(max_row_bytes + 1, 1024 * 1024)
+        # Scan exactly one cap-sized window per step: then any tail behind a
+        # found newline is within max_row_bytes, and only the no-newline case
+        # reaches the oversize branch, where dropping the single unterminated
+        # record is the documented repair.
+        chunk_size = max_row_bytes + 1
         while scan_end > 0 and boundary < 0:
             window_start = max(0, scan_end - chunk_size)
             handle.seek(window_start)

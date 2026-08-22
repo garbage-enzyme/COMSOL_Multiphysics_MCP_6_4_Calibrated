@@ -300,10 +300,18 @@ def _inspect_open_process(
     if abs(actual_created - expected_created) > CREATE_TIME_TOLERANCE_SECONDS:
         return {"identity": identity, "state": "stale", "reason": "worker PID was reused"}
     expected_signature = identity.get("command_signature")
+    if not isinstance(expected_signature, str) or not expected_signature:
+        # The exact-identity contract includes the command signature; without
+        # it PID + create time alone can never prove an active match.
+        return {
+            "identity": identity,
+            "state": "uncertain",
+            "reason": "worker command signature is missing from the captured identity",
+        }
     actual_signature = hashlib.sha256(
         "\0".join(command).encode("utf-8", errors="replace")
     ).hexdigest()
-    if expected_signature and actual_signature != expected_signature:
+    if actual_signature != expected_signature:
         return {
             "identity": identity,
             "state": "stale",
@@ -354,7 +362,17 @@ def terminate_exact(identity: dict[str, Any], *, force: bool = False) -> dict[st
     try:
         before = _inspect_open_process(process, identity)
         if before["state"] != "active":
-            return {"acted": False, "before": before, "reason": "identity_not_active"}
+            # Preserve the distinction: "uncertain" is never proof of absence
+            # and must not be reported as a proven-inactive identity.
+            return {
+                "acted": False,
+                "before": before,
+                "reason": (
+                    "identity_uncertain"
+                    if before["state"] == "uncertain"
+                    else "identity_not_active"
+                ),
+            }
         action = "kill" if force else "terminate"
         if pinned_handle is not None and kernel32 is not None:
             if not kernel32.TerminateProcess(pinned_handle, 1):

@@ -298,6 +298,11 @@ class JobLock:
             raise
 
     def _unlink_with_retry(self, *, expected: bytes) -> bool:
+        # NOTE: the verify-then-unlink window cannot be closed atomically on
+        # this platform: Windows has no compare-and-delete primitive, and the
+        # always-open msvcrt guard handle (no FILE_SHARE_DELETE) blocks any
+        # rename-based swap while the lock is held. Byte revalidation on every
+        # retry plus exclusive-create acquisition remain the binding guards.
         deadline = time.monotonic() + 2.0
         while True:
             try:
