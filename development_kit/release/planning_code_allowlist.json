@@ -15,7 +15,7 @@
     {
       "path": "development_kit/scripts/run_real_release_gate.py",
       "match_count": 16,
-      "match_sha256": "016651d9f1fdaaa59d820f51954eb47d0c0a7b1cb0692d049de0741ce88be8a9"
+      "match_sha256": "4416d35a89496853509ed1077ed28acfc8aa1d5a0f1fb53aa72abace718318e6"
     },
     {
       "path": "development_kit/tests/test_durable_job_control_plane.py",
