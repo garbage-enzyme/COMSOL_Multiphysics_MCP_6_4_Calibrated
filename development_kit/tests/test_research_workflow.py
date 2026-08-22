@@ -141,3 +141,14 @@ def test_capsule_text_is_passive_data_not_an_executable_field():
         "exploration_ready",
         "workflow_fingerprint",
     }
+
+
+def test_capsule_rejects_unhashable_provenance_and_status_as_value_error():
+    value = _capsule()
+    value["claims"][0]["provenance"] = ["stated"]
+    with pytest.raises(ValueError, match="provenance is unsupported"):
+        normalize_workflow_capsule(value)
+    value = _capsule()
+    value["review"]["status"] = {"state": "accepted"}
+    with pytest.raises(ValueError, match="status is unsupported"):
+        normalize_workflow_capsule(value)

@@ -105,6 +105,39 @@ def test_manifest_rejects_source_mutation_after_submission(ascii_tmp_path):
         expand_adjoint_optimization_manifest(envelope)
 
 
+def test_manifest_rejects_oversized_or_non_numeric_initial_values(ascii_tmp_path):
+    envelope, _, manifest = _write_manifest(ascii_tmp_path)
+
+    def rewrite(mutate):
+        raw = json.loads(manifest.read_text(encoding="utf-8"))
+        mutate(raw)
+        payload = json.dumps(
+            raw, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode()
+        manifest.write_bytes(payload)
+        envelope["submission_manifest_sha256"] = hashlib.sha256(payload).hexdigest()
+
+    def set_values(raw, values):
+        raw["initial_values"] = values
+
+    rewrite(lambda raw: set_values(raw, [True]))
+    with pytest.raises(ValueError, match="must be a number"):
+        expand_adjoint_optimization_manifest(envelope)
+    rewrite(lambda raw: set_values(raw, ["856.0"]))
+    with pytest.raises(ValueError, match="must be a number"):
+        expand_adjoint_optimization_manifest(envelope)
+    rewrite(lambda raw: set_values(raw, [None]))
+    with pytest.raises(ValueError, match="must be a number"):
+        expand_adjoint_optimization_manifest(envelope)
+
+
+def test_manifest_rejects_oversized_submission_before_reading(ascii_tmp_path):
+    envelope, _, manifest = _write_manifest(ascii_tmp_path)
+    manifest.write_bytes(b"x" * (513 * 1024))
+    with pytest.raises(ValueError, match="byte limit"):
+        expand_adjoint_optimization_manifest(envelope)
+
+
 def test_manifest_rejects_unvalidated_method_or_mismatched_core_budget(ascii_tmp_path):
     envelope, _, manifest = _write_manifest(ascii_tmp_path)
     raw = json.loads(manifest.read_text(encoding="utf-8"))
@@ -153,6 +186,54 @@ def test_durable_manager_accepts_synthetic_adjoint_discriminator(ascii_tmp_path,
     terminal = manager.store.read_state(result["job_id"])
     assert terminal["status"] == "completed"
     assert terminal["solver_started"] is False
+
+
+def test_synthetic_worker_writes_rows_for_its_own_attempt_after_prior_attempt_rows(
+    ascii_tmp_path, monkeypatch
+):
+    envelope, _, _ = _write_manifest(ascii_tmp_path)
+    manager = JobManager(
+        ascii_tmp_path / "jobs",
+        preflight=lambda **_kwargs: {"success": True, "ready": True},
+    )
+    monkeypatch.setattr(
+        manager,
+        "_launch_worker",
+        lambda _job_id, _module: process_identity(os.getpid()),
+    )
+    result = manager.submit(envelope)
+    job_id = result["job_id"]
+    store = manager.store
+
+    def broken_identity(self, *_args, **_kwargs):
+        raise OSError("injected identity failure")
+
+    monkeypatch.setattr(JobStore, "bind_worker_identity", broken_identity)
+    assert run_adjoint_worker(str(store.root), job_id) == 1
+    store.update_state(job_id, "starting", event="retry_starting")
+    rows_path = store.job_dir(job_id) / "optimization_rows.jsonl"
+    spec_fingerprint = store.read_spec(job_id)["spec_fingerprint"]
+    from comsol_mcp.jobs.adjoint_rows import append_adjoint_row, read_adjoint_rows
+
+    foreign_attempt = 9
+    append_adjoint_row(
+        rows_path,
+        job_fingerprint=spec_fingerprint,
+        attempt=foreign_attempt,
+        kind="gradient",
+        payload={
+            "iteration_id": "it-0",
+            "gradient_fingerprint": "a" * 64,
+            "check_fingerprint": "b" * 64,
+            "evidence_state": "gradient_validated",
+        },
+    )
+    monkeypatch.setattr(JobStore, "bind_worker_identity", lambda self, *a, **k: None)
+    assert run_adjoint_worker(str(store.root), job_id) == 0
+    all_rows = read_adjoint_rows(rows_path, job_fingerprint=spec_fingerprint)
+    assert any(row["attempt"] == foreign_attempt for row in all_rows)
+    current_rows = [row for row in all_rows if row["attempt"] != foreign_attempt]
+    assert {"gradient", "iteration"} <= {row["kind"] for row in current_rows}
 
 
 def test_synthetic_worker_failure_reaches_terminal_state_instead_of_propagating(

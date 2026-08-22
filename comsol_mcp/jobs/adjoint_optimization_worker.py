@@ -233,8 +233,12 @@ def run(root: str, job_id: str) -> int:
             raise ValueError(f"adjoint fake worker cannot start from {state['status']}")
         store.update_state(job_id, "smoke_running", event="adjoint_synthetic_started")
         rows_path = directory / "optimization_rows.jsonl"
-        existing = read_adjoint_rows(rows_path, job_fingerprint=spec["spec_fingerprint"])
-        if not existing:
+        existing = [
+            row
+            for row in read_adjoint_rows(rows_path, job_fingerprint=spec["spec_fingerprint"])
+            if row.get("attempt") == attempt
+        ]
+        if {"gradient", "iteration"} - {row.get("kind") for row in existing}:
             gradient_fp = domain_sha256_v2("comsol_mcp.synthetic_gradient", {"values": [0.0]})
             check_fp = domain_sha256_v2("comsol_mcp.synthetic_gradient_check", {"passed": True})
             append_adjoint_row(

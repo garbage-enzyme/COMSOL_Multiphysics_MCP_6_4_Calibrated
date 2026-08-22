@@ -121,3 +121,20 @@ def test_portfolio_inputs_are_defensive_copies_and_finite():
     invalid["items"][0]["objective_values"]["q_error"] = float("nan")
     with pytest.raises(ValueError):
         normalize_portfolio(invalid)
+
+
+def test_portfolio_rejects_unhashable_disposition_as_value_error():
+    value = _portfolio()
+    value["items"][0]["disposition"] = ["converged"]
+    with pytest.raises(ValueError, match="disposition is unsupported"):
+        normalize_portfolio(value)
+
+
+def test_portfolio_round_trips_with_fingerprint_verification():
+    normalized = normalize_portfolio(_portfolio())
+    reread = normalize_portfolio(normalized)
+    assert reread == normalized
+    tampered = copy.deepcopy(normalized)
+    tampered["created_at"] = "2026-08-07T00:00:00Z"
+    with pytest.raises(ValueError, match="fingerprint is invalid"):
+        normalize_portfolio(tampered)

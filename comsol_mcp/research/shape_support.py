@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from comsol_mcp.durable import domain_sha256_v2
@@ -109,10 +110,11 @@ def normalize_shape_support_policy(value: object) -> dict[str, Any]:
         geometry_floor_value = float(geometry_floor)
         if geometry_floor_value > 1.0:
             raise ValueError("minimum_gap.geometry_relative_floor must not exceed one")
-        effective_gap = max(
-            mesh_resolution_value * mesh_multiplier_value,
-            geometry_length_value * geometry_floor_value,
-        )
+        mesh_product = mesh_resolution_value * mesh_multiplier_value
+        geometry_product = geometry_length_value * geometry_floor_value
+        if not math.isfinite(mesh_product) or not math.isfinite(geometry_product):
+            raise ValueError("recommended minimum gap inputs overflow finite range")
+        effective_gap = max(mesh_product, geometry_product)
         claim = "adapter_geometry_mesh_recommendation"
     else:
         if any(

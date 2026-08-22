@@ -80,3 +80,44 @@ def test_non_applicable_fidelity_rejects_hidden_comparison_evidence():
             independent={"peak_wavelength_nm": 1550.0},
             maximum_absolute_differences=None,
         )
+
+
+def test_axis_matrix_rejects_overflowing_relative_fraction_as_value_error():
+    with pytest.raises(ValueError, match="relative_fraction"):
+        axis_perturbation_matrix(
+            _space(),
+            {"patch_length_x": 100.0, "patch_length_y": 80.0},
+            relative_fraction=10**400,
+        )
+
+
+def test_summary_rejects_structurally_invalid_matrix():
+    matrix = _matrix()
+    with pytest.raises(ValueError, match="matrix structure"):
+        summarize_robustness(
+            {"schema_name": "research.robustness.matrix"}, [], maximum_total_loss=None
+        )
+    stripped = dict(matrix)
+    stripped.pop("matrix_fingerprint")
+    with pytest.raises(ValueError, match="matrix structure"):
+        summarize_robustness(stripped, [], maximum_total_loss=None)
+
+
+def test_fidelity_bridge_rejects_non_string_observables_before_sorting():
+    with pytest.raises(ValueError, match="finite numeric mappings"):
+        summarize_optional_fidelity_bridge(
+            applicable=True,
+            primary={"peak_wavelength_nm": 1550.0, 7: 1.0},
+            independent={"peak_wavelength_nm": 1552.0, 7: 1.5},
+            maximum_absolute_differences=None,
+        )
+
+
+def test_fidelity_bridge_rejects_overflowing_differences():
+    with pytest.raises(ValueError, match="differences must remain finite"):
+        summarize_optional_fidelity_bridge(
+            applicable=True,
+            primary={"peak_wavelength_nm": 1.7976931348623157e308},
+            independent={"peak_wavelength_nm": -1.7976931348623157e308},
+            maximum_absolute_differences=None,
+        )

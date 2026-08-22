@@ -108,8 +108,12 @@ def normalize_optimizer_checkpoint(value: object) -> dict[str, Any]:
 
 def normalize_portfolio(value: object) -> dict[str, Any]:
     """Normalize a bounded candidate portfolio without assigning scientific truth."""
+    bounded = _bounded_json(value, "research portfolio", 4 * 1024 * 1024)
+    supplied_fingerprint = None
+    if isinstance(bounded, dict) and "portfolio_fingerprint" in bounded:
+        supplied_fingerprint = bounded.pop("portfolio_fingerprint")
     raw = _object(
-        _bounded_json(value, "research portfolio", 4 * 1024 * 1024),
+        bounded,
         {
             "schema_name",
             "schema_version",
@@ -144,7 +148,7 @@ def normalize_portfolio(value: object) -> dict[str, Any]:
             },
             name,
         )
-        if item["disposition"] not in _DISPOSITIONS:
+        if not isinstance(item["disposition"], str) or item["disposition"] not in _DISPOSITIONS:
             raise ValueError(f"{name}.disposition is unsupported")
         if not isinstance(item["strictly_verified"], bool):
             raise ValueError(f"{name}.strictly_verified must be boolean")
@@ -200,7 +204,10 @@ def normalize_portfolio(value: object) -> dict[str, Any]:
         "selected_candidate_ids": selected,
         "created_at": _timestamp(raw["created_at"], "created_at"),
     }
-    return {**body, "portfolio_fingerprint": domain_sha256_v2(PORTFOLIO_SCHEMA_NAME, body)}
+    calculated = domain_sha256_v2(PORTFOLIO_SCHEMA_NAME, body)
+    if supplied_fingerprint is not None and supplied_fingerprint != calculated:
+        raise ValueError("research portfolio fingerprint is invalid")
+    return {**body, "portfolio_fingerprint": calculated}
 
 
 __all__ = [

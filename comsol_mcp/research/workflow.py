@@ -78,7 +78,7 @@ def normalize_workflow_capsule(value: object) -> dict[str, Any]:
             name,
         )
         provenance = claim["provenance"]
-        if provenance not in _PROVENANCE:
+        if not isinstance(provenance, str) or provenance not in _PROVENANCE:
             raise ValueError(f"{name}.provenance is unsupported")
         if provenance == "unavailable" and claim["value"] is not None:
             raise ValueError(f"{name}.value must be null when unavailable")
@@ -148,7 +148,7 @@ def normalize_workflow_capsule(value: object) -> dict[str, Any]:
         {"status", "reviewer", "reviewed_at", "accepted_ambiguity_ids"},
         "review",
     )
-    if review["status"] not in _REVIEW_STATES:
+    if not isinstance(review["status"], str) or review["status"] not in _REVIEW_STATES:
         raise ValueError("review.status is unsupported")
     accepted_ids = [
         _identifier(item, f"review.accepted_ambiguity_ids[{index}]")

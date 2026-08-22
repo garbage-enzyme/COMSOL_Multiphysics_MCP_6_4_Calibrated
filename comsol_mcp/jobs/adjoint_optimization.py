@@ -91,9 +91,9 @@ def expand_adjoint_optimization_manifest(submission: object) -> dict[str, Any]:
     """Read, hash-pin, and normalize one complete manifest before worker startup."""
     envelope = normalize_adjoint_optimization_submission(submission)
     path = Path(envelope["submission_manifest_path"])
-    payload = path.read_bytes()
-    if len(payload) > MAX_MANIFEST_BYTES:
+    if path.stat().st_size > MAX_MANIFEST_BYTES:
         raise ValueError("adjoint optimization manifest exceeds its byte limit")
+    payload = path.read_bytes()
     observed_hash = hashlib.sha256(payload).hexdigest()
     if observed_hash != envelope["submission_manifest_sha256"]:
         raise ValueError("adjoint optimization manifest SHA-256 changed")
@@ -133,7 +133,11 @@ def expand_adjoint_optimization_manifest(submission: object) -> dict[str, Any]:
         raise ValueError("adjoint optimization source must be a regular absolute MPH file")
     source = source.resolve()
     source_hash = _digest(raw["source_model_sha256"], "source_model_sha256")
-    digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    streaming_digest = hashlib.sha256()
+    with source.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            streaming_digest.update(chunk)
+    digest = streaming_digest.hexdigest()
     if digest != source_hash:
         raise ValueError("adjoint optimization source SHA-256 changed")
     support = normalize_derivative_support(raw["support"])
@@ -149,7 +153,11 @@ def expand_adjoint_optimization_manifest(submission: object) -> dict[str, Any]:
     values = raw["initial_values"]
     if not isinstance(values, list) or len(values) != len(support["variables"]):
         raise ValueError("initial_values must match the support variable count")
-    normalized_values = [float(item) for item in values]
+    normalized_values = []
+    for index, item in enumerate(values):
+        if isinstance(item, bool) or not isinstance(item, (int, float)):
+            raise ValueError(f"initial_values[{index}] must be a number")
+        normalized_values.append(float(item))
     for item, variable in zip(normalized_values, support["variables"], strict=True):
         if not variable["lower"] <= item <= variable["upper"]:
             raise ValueError("initial_values must remain within support bounds")

@@ -79,15 +79,19 @@ def evaluate_robust_startup_admission(policy: object, telemetry: object) -> dict
         raise ValueError("robust startup admission requires a pre_mesh telemetry sample")
     memory = values.get("available_memory_bytes")
     runtime_free = values.get("runtime_free_bytes")
+
+    def _valid_byte_count(value: object) -> bool:
+        return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
     checks = {
-        "available_memory_present": isinstance(memory, int),
-        "runtime_free_space_present": isinstance(runtime_free, int),
+        "available_memory_present": _valid_byte_count(memory),
+        "runtime_free_space_present": _valid_byte_count(runtime_free),
         "available_memory_meets_minimum": (
-            isinstance(memory, int)
+            _valid_byte_count(memory)
             and memory >= normalized_policy["minimum_available_memory_bytes"]
         ),
         "runtime_free_space_meets_minimum": (
-            isinstance(runtime_free, int)
+            _valid_byte_count(runtime_free)
             and runtime_free >= normalized_policy["minimum_runtime_free_bytes"]
         ),
     }
