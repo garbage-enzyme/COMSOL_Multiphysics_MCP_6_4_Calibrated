@@ -52,8 +52,16 @@ def normalize_adjoint_optimization_submission(value: object) -> dict[str, Any]:
         "version",
         "resource_policy",
     }
-    if set(value) != fields:
+    allowed = fields | {"schema_name", "schema_version"}
+    if not fields <= set(value) or not set(value) <= allowed:
         raise ValueError("adjoint optimization submission fields are invalid")
+    if value.get("schema_name", ADJOINT_SUBMISSION_SCHEMA_NAME) != ADJOINT_SUBMISSION_SCHEMA_NAME:
+        raise ValueError("adjoint optimization submission schema name is unsupported")
+    if (
+        value.get("schema_version", ADJOINT_SUBMISSION_SCHEMA_VERSION)
+        != ADJOINT_SUBMISSION_SCHEMA_VERSION
+    ):
+        raise ValueError("adjoint optimization submission schema version is unsupported")
     if value["job_type"] != "adjoint_optimization":
         raise ValueError("adjoint optimization submission discriminator is invalid")
     cores = value["cores"]

@@ -65,6 +65,27 @@ def test_submission_requires_explicit_ascii_manifest_and_resources(ascii_tmp_pat
         normalize_adjoint_optimization_submission(missing)
 
 
+def test_submission_normalization_is_idempotent_over_its_own_output(ascii_tmp_path):
+    envelope, _, _ = _write_manifest(ascii_tmp_path)
+    once = normalize_adjoint_optimization_submission(envelope)
+    twice = normalize_adjoint_optimization_submission(once)
+    assert twice == once
+
+    mismatched = dict(once)
+    mismatched["schema_version"] = "9.9.9"
+    with pytest.raises(ValueError, match="schema version is unsupported"):
+        normalize_adjoint_optimization_submission(mismatched)
+
+    foreign_name = dict(once)
+    foreign_name["schema_name"] = "other.submission"
+    with pytest.raises(ValueError, match="schema name is unsupported"):
+        normalize_adjoint_optimization_submission(foreign_name)
+
+    expanded_once = expand_adjoint_optimization_manifest(once)
+    expanded_twice = expand_adjoint_optimization_manifest(twice)
+    assert expanded_twice == expanded_once
+
+
 def test_manifest_expansion_hashes_source_and_support_identity(ascii_tmp_path):
     envelope, source, _ = _write_manifest(ascii_tmp_path)
     spec = expand_adjoint_optimization_manifest(envelope)
