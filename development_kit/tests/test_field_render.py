@@ -310,6 +310,59 @@ def test_array_cannot_change_while_render_worker_consumes_it(tmp_path, monkeypat
     assert hashlib.sha256(array.read_bytes()).hexdigest() == digest
 
 
+def test_worker_verifies_array_digest_of_exact_consumed_bytes(tmp_path, monkeypatch):
+    array = tmp_path / "swap.npz"
+    _array(array)
+    import io
+    import sys
+
+    from src.evidence import field_plot_worker as worker_module
+
+    request = {
+        "quantity_name": "abs_ex",
+        "quantity_unit": "V/m",
+        "coordinate_unit": "um",
+        "color_scale": "linear",
+        "shared_color_limits": False,
+        "views": [
+            {
+                "view_id": "target",
+                "array_path": str(array),
+                "array_sha256": "0" * 64,
+                "png_artifact_id": "target-png",
+                "png_path": str(tmp_path / "out.png"),
+            }
+        ],
+    }
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(request)))
+
+    with pytest.raises(ValueError, match="declared SHA-256"):
+        worker_module.main()
+
+    assert not (tmp_path / "out.png").exists()
+
+
+def test_render_fails_closed_when_parent_hash_check_is_fooled(tmp_path, monkeypatch):
+    array = tmp_path / "stale.npz"
+    _array(array)
+    stale = "a" * 64
+    monkeypatch.setattr(field_render_module, "_sha256_file", lambda _path: stale)
+    output = tmp_path / "output"
+
+    with pytest.raises(RuntimeError, match="worker failed"):
+        render_field_png_bundle(
+            views=[_view("target", array, stale)],
+            quantity_name="abs_ex",
+            quantity_unit="V/m",
+            coordinate_unit="um",
+            color_scale="linear",
+            shared_color_limits=False,
+            output_root=output,
+        )
+
+    assert list(output.rglob("*.png")) == []
+
+
 def test_worker_failure_removes_every_owned_partial_png(tmp_path, monkeypatch):
     array = tmp_path / "partial.npz"
     digest = _array(array)

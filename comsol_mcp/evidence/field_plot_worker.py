@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sys
 import uuid
+from io import BytesIO
 from pathlib import Path
 
 
@@ -44,7 +46,12 @@ def main() -> int:
     loaded = []
     finite_sets = []
     for view in request["views"]:
-        with np.load(view["array_path"], allow_pickle=False) as archive:
+        array_bytes = Path(view["array_path"]).read_bytes()
+        if hashlib.sha256(array_bytes).hexdigest() != view["array_sha256"]:
+            raise ValueError(
+                f"view {view['view_id']} array bytes do not match the declared SHA-256"
+            )
+        with np.load(BytesIO(array_bytes), allow_pickle=False) as archive:
             if quantity_key not in archive.files:
                 raise ValueError(f"NPZ does not contain {quantity_key}")
             coordinate_keys = sorted(key for key in archive.files if key.startswith("coordinate_"))
