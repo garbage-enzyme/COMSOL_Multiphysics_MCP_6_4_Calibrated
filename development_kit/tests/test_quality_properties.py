@@ -280,6 +280,24 @@ def test_public_schema_still_descends_into_schema_bearing_keywords() -> None:
     assert result["$defs"]["inner"]["maxProperties"] == MAX_PUBLIC_OBJECT_FIELDS
 
 
+def test_public_schema_descends_into_array_form_items_keyword() -> None:
+    result = bounded_public_schema(
+        {
+            "type": "object",
+            "properties": {
+                "tuple_field": {
+                    "type": "array",
+                    "items": [{"type": "string"}, {"type": "array", "items": {"type": "integer"}}],
+                },
+            },
+        }
+    )
+
+    tuple_items = result["properties"]["tuple_field"]["items"]
+    assert isinstance(tuple_items, list)
+    assert tuple_items[1]["maxItems"] == MAX_PUBLIC_COLLECTION_ITEMS
+
+
 @pytest.mark.parametrize(
     "schema",
     [
