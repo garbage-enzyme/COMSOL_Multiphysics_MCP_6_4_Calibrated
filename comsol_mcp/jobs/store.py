@@ -101,7 +101,7 @@ def read_json(path: Path) -> dict[str, Any]:
             if time.monotonic() >= deadline:
                 raise RuntimeError(f"Cannot read durable job artifact {path}: {exc}") from exc
             time.sleep(0.02)
-        except (OSError, json.JSONDecodeError) as exc:
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise RuntimeError(f"Cannot read durable job artifact {path}: {exc}") from exc
     if not isinstance(value, dict):
         raise RuntimeError(f"Durable job artifact must contain a JSON object: {path}")

@@ -1,5 +1,6 @@
 """Version naming utilities for model version management."""
 
+import re
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -12,6 +13,12 @@ def _model_stem(model_name: str) -> str:
     clean_name = name[:-4] if name.casefold().endswith(".mph") else name
     if clean_name in {"", ".", ".."}:
         raise ValueError("model_name must identify one safe model directory")
+    if re.search(r'[<>:"/\\|?*]', clean_name) or clean_name != clean_name.rstrip(" ."):
+        raise ValueError(
+            f"model_name contains characters invalid for a model directory: {clean_name!r}"
+        )
+    if re.fullmatch(r"(?i)(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\..*)?", clean_name):
+        raise ValueError(f"model_name uses a reserved Windows device name: {clean_name!r}")
     return clean_name
 
 
@@ -158,7 +165,10 @@ def parse_version_info(name: str) -> dict | None:
 
     import re
 
-    match = re.match(r"^(.+)_(\d{8}_\d{6})(?:_[0-9a-f]{8})?$", stem)
+    # generate_version_name always appends an 8-hex uuid marker, so require
+    # it: a bare _YYYYMMDD_HHMMSS suffix can be part of an original
+    # (non-versioned) name and must not be reported as generated.
+    match = re.match(r"^(.+)_(\d{8}_\d{6})_([0-9a-f]{8})$", stem)
     if match:
         base_name = match.group(1)
         timestamp_str = match.group(2)

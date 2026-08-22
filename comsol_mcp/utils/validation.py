@@ -20,10 +20,10 @@ def strict_json_number(
         raise ValueError(f"{label} must be numeric")
     number = value
     if isinstance(number, int):
-        try:
-            finite = math.isfinite(float(number))
-        except OverflowError:
-            finite = False
+        # Python ints are arbitrary precision and always mathematically
+        # finite; converting to float would misjudge large-but-valid values
+        # like 10**400 as infinite.
+        finite = True
     else:
         finite = math.isfinite(number)
     if positive:

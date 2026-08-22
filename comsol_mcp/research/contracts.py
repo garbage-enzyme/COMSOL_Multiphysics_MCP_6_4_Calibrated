@@ -324,7 +324,13 @@ def _normalize_variable(value: object, index: int) -> dict[str, Any]:
         ]
         if len(encoded_allowed) != len(set(encoded_allowed)):
             raise ValueError(f"{name}.allowed_values must be unique")
-        allowed = [item for _, item in sorted(zip(encoded_allowed, allowed, strict=True))]
+        if kind == "ordinal":
+            # The declared ordinal order is semantically meaningful; sorting
+            # by JSON encoding would reorder values like [2, 10] into
+            # [10, 2]. Preserve the input order for ordinals.
+            allowed = list(allowed)
+        else:
+            allowed = [item for _, item in sorted(zip(encoded_allowed, allowed, strict=True))]
     if kind in {"categorical", "ordinal"}:
         baseline_encoded = json.dumps(
             baseline, ensure_ascii=False, sort_keys=True, separators=(",", ":")
@@ -384,6 +390,9 @@ def normalize_design_space(value: object) -> dict[str, Any]:
     if not isinstance(constraints, list) or len(constraints) > MAX_CONSTRAINTS:
         raise ValueError("constraints must be a bounded list")
     normalized_constraints = [_normalize_constraint(item, i) for i, item in enumerate(constraints)]
+    constraint_ids = [item["constraint_id"] for item in normalized_constraints]
+    if len(constraint_ids) != len(set(constraint_ids)):
+        raise ValueError("constraint_id values must be unique")
     for constraint in normalized_constraints:
         missing = set(constraint["variable_ids"]) - set(variable_ids)
         if missing:
