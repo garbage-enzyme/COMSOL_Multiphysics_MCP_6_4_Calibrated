@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 from comsol_mcp.durable import domain_sha256_v2
 
@@ -16,11 +17,11 @@ from .store import JobStore, cancel_request_targets_attempt, process_identity
 def _await_licensed_wall_watchdog(
     store: JobStore,
     job_id: str,
-    spec: dict,
+    spec: dict[str, Any],
     attempt: int,
     *,
     timeout_seconds: float = 2.0,
-) -> dict:
+) -> dict[str, Any]:
     """Fail closed before licensed startup unless this exact attempt is guarded."""
     import time
 

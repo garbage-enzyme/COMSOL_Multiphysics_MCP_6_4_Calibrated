@@ -224,9 +224,7 @@ def test_condition_runtime_rejects_stale_receipt_with_drifted_condition_paramete
     drifted["condition_table"]["conditions"] = drifted["condition_table"]["conditions"][:1]
     drifted_condition = drifted["condition_table"]["conditions"][0]
     drifted_condition["material_state_id"] = (
-        "MR"
-        if drifted_condition["material_state_id"] != "MR"
-        else "OX"
+        "MR" if drifted_condition["material_state_id"] != "MR" else "OX"
     )
     with pytest.raises(ValueError, match="persisted robust condition receipt is invalid"):
         execute_robust_conditions(
