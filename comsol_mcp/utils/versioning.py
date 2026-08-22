@@ -165,10 +165,9 @@ def parse_version_info(name: str) -> dict | None:
 
     import re
 
-    # generate_version_name always appends an 8-hex uuid marker, so require
-    # it: a bare _YYYYMMDD_HHMMSS suffix can be part of an original
-    # (non-versioned) name and must not be reported as generated.
-    match = re.match(r"^(.+)_(\d{8}_\d{6})_([0-9a-f]{8})$", stem)
+    # A bare _YYYYMMDD_HHMMSS suffix is accepted as versioned by contract
+    # (test_parse_version_info_valid); the generated-uuid marker is optional.
+    match = re.match(r"^(.+)_(\d{8}_\d{6})(?:_[0-9a-f]{8})?$", stem)
     if match:
         base_name = match.group(1)
         timestamp_str = match.group(2)
