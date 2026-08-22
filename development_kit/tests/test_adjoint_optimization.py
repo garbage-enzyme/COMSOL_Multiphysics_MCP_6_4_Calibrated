@@ -16,7 +16,7 @@ from comsol_mcp.jobs.adjoint_optimization import (
 from comsol_mcp.jobs.adjoint_optimization_worker import run as run_adjoint_worker
 from comsol_mcp.jobs.adjoint_rows import read_adjoint_rows
 from comsol_mcp.jobs.manager import JobManager
-from comsol_mcp.jobs.store import process_identity
+from comsol_mcp.jobs.store import JobStore, process_identity
 from development_kit.tests.test_derivative_support import _support
 from development_kit.tests.test_gradient_contracts import _optimizer
 
@@ -152,6 +152,74 @@ def test_durable_manager_accepts_synthetic_adjoint_discriminator(ascii_tmp_path,
     terminal = manager.store.read_state(result["job_id"])
     assert terminal["status"] == "completed"
     assert terminal["solver_started"] is False
+
+
+def test_synthetic_worker_failure_reaches_terminal_state_instead_of_propagating(
+    ascii_tmp_path, monkeypatch
+):
+    envelope, _, _ = _write_manifest(ascii_tmp_path)
+    manager = JobManager(
+        ascii_tmp_path / "jobs",
+        preflight=lambda **_kwargs: {"success": True, "ready": True},
+    )
+    monkeypatch.setattr(
+        manager,
+        "_launch_worker",
+        lambda _job_id, _module: process_identity(os.getpid()),
+    )
+    result = manager.submit(envelope)
+    job_id = result["job_id"]
+    store = manager.store
+
+    def broken_identity(self, *_args, **_kwargs):
+        raise OSError("injected identity failure")
+
+    monkeypatch.setattr(JobStore, "bind_worker_identity", broken_identity)
+
+    assert run_adjoint_worker(str(store.root), job_id) == 1
+
+    terminal = store.read_state(job_id)
+    assert terminal["status"] == "failed"
+    assert terminal["last_error"]["type"] == "OSError"
+    assert "injected identity failure" in terminal["last_error"]["message"]
+
+
+def test_synthetic_worker_exception_during_cancelling_records_cooperative_cancel(
+    ascii_tmp_path, monkeypatch
+):
+    envelope, _, _ = _write_manifest(ascii_tmp_path)
+    manager = JobManager(
+        ascii_tmp_path / "jobs",
+        preflight=lambda **_kwargs: {"success": True, "ready": True},
+    )
+    monkeypatch.setattr(
+        manager,
+        "_launch_worker",
+        lambda _job_id, _module: process_identity(os.getpid()),
+    )
+    result = manager.submit(envelope)
+    job_id = result["job_id"]
+    store = manager.store
+    store.request_cancel(job_id, requester_identity=process_identity(os.getpid()))
+
+    def broken_identity(self, *_args, **_kwargs):
+        raise OSError("injected cancel-window failure")
+
+    monkeypatch.setattr(JobStore, "bind_worker_identity", broken_identity)
+
+    observed = {}
+
+    def record_observed(self, job_id_arg, *, attempt, message, worker_error):
+        observed["attempt"] = attempt
+        observed["message"] = message
+        observed["worker_error"] = worker_error
+
+    monkeypatch.setattr(JobStore, "record_cooperative_cancel_observed", record_observed)
+
+    assert run_adjoint_worker(str(store.root), job_id) == 0
+    assert observed["message"] == "Stopped during synthetic validation"
+    assert observed["worker_error"]["type"] == "OSError"
+    assert store.read_state(job_id)["status"] != "failed"
 
 
 def test_real_adjoint_worker_dispatches_validated_runtime_and_persists_rows(
