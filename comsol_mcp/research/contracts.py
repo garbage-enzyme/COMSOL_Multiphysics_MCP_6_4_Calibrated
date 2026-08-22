@@ -36,7 +36,11 @@ def relative_bounds(baseline: object, fraction: object = 0.25) -> tuple[float, f
     span = _finite(fraction, "fraction", minimum=0.0)
     if center <= 0.0 or not 0.0 < span < 1.0:
         raise ValueError("baseline must be positive and fraction must be between zero and one")
-    return (center * (1.0 - span), center * (1.0 + span))
+    lower = center * (1.0 - span)
+    upper = center * (1.0 + span)
+    if not math.isfinite(lower) or not math.isfinite(upper):
+        raise ValueError("relative bounds must stay within the finite representable range")
+    return (lower, upper)
 
 
 def _object(value: object, fields: set[str], name: str) -> dict[str, Any]:
@@ -75,6 +79,13 @@ def _finite(value: object, name: str, *, minimum: float | None = None) -> float:
     if not math.isfinite(number) or (minimum is not None and number < minimum):
         raise ValueError(f"{name} must be a finite number in the allowed range")
     return number
+
+
+def _integer_bound(value: object, name: str) -> int:
+    """Keep declared integer bounds exact; float coercion silently rounds past 2**53."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{name} must be an integer")
+    return value
 
 
 def _integer(value: object, name: str, *, minimum: int, maximum: int) -> int:
@@ -305,13 +316,17 @@ def _normalize_variable(value: object, index: int) -> dict[str, Any]:
         baseline = raw["baseline"]
     else:
         baseline = _finite(raw["baseline"], f"{name}.baseline")
-    lower = _finite(raw["lower"], f"{name}.lower") if raw["lower"] is not None else None
-    upper = _finite(raw["upper"], f"{name}.upper") if raw["upper"] is not None else None
+    lower: int | float | None
+    upper: int | float | None
+    if kind == "integer":
+        lower = _integer_bound(raw["lower"], f"{name}.lower") if raw["lower"] is not None else None
+        upper = _integer_bound(raw["upper"], f"{name}.upper") if raw["upper"] is not None else None
+    else:
+        lower = _finite(raw["lower"], f"{name}.lower") if raw["lower"] is not None else None
+        upper = _finite(raw["upper"], f"{name}.upper") if raw["upper"] is not None else None
     if kind in {"continuous", "integer", "conditional"}:
         if lower is None or upper is None or lower >= upper or not lower <= baseline <= upper:
             raise ValueError(f"{name} must declare ordered bounds containing baseline")
-        if kind == "integer" and (not lower.is_integer() or not upper.is_integer()):
-            raise ValueError(f"{name}.bounds must be integers")
     allowed = raw["allowed_values"]
     if allowed is not None:
         if not isinstance(allowed, list) or not 1 <= len(allowed) <= MAX_ALLOWED_VALUES:

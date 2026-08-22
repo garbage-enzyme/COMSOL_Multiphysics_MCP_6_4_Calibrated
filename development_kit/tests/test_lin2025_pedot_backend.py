@@ -5,6 +5,7 @@ import copy
 import pytest
 
 from comsol_mcp.research.lin2025_pedot_backend import (
+    ClientapiLin2025PedotControlBackend,
     prepare_lin2025_pedot_shape_controls,
 )
 from comsol_mcp.research.lin2025_pedot_cylinder import SCHEMA_NAME
@@ -155,3 +156,115 @@ def test_pedot_controls_reject_source_identity_drift():
     support["source_identity"] = "c" * 64
     with pytest.raises(ValueError, match="source identity"):
         prepare_lin2025_pedot_shape_controls(_Backend(), _fixture(), _tree(), support)
+
+
+class _FeatureContainer(dict):
+    def tags(self):
+        return [str(key) for key in self]
+
+    def get(self, tag):
+        return dict.__getitem__(self, tag)
+
+
+class _Circle:
+    def getType(self):
+        return "Circle"
+
+    def getDouble(self, name):
+        assert name == "r"
+        return 2.6e-7
+
+    def getDoubleArray(self, name):
+        assert name == "pos"
+        return [8.5e-7, 0.0]
+
+
+class _WorkPlane:
+    def __init__(self, circles):
+        self._circles = _FeatureContainer(circles)
+
+    def getType(self):
+        return "WorkPlane"
+
+    def geom(self):
+        return self
+
+    def feature(self):
+        return self._circles
+
+
+class _Geometry:
+    def __init__(self, features):
+        self._features = _FeatureContainer(features)
+
+    def feature(self):
+        return self._features
+
+
+class _Component:
+    def __init__(self, geometries, physics):
+        self._geometries = _FeatureContainer(geometries)
+        self._physics = _FeatureContainer(physics)
+
+    def geom(self):
+        return self._geometries
+
+    def physics(self):
+        return self._physics
+
+
+class _StrictParameters:
+    def __init__(self):
+        self.values = {}
+        self.set_calls = 0
+
+    def set(self, name, value):
+        self.set_calls += 1
+        self.values[name] = value
+
+
+class _Java:
+    def __init__(self, components, parameters):
+        self._components = components
+        self._parameters = parameters
+
+    def component(self):
+        return self._components
+
+    def param(self):
+        return self._parameters
+
+
+class _Model:
+    def __init__(self, component, parameters):
+        self.java = _Java(_FeatureContainer({"comp1": component}), parameters)
+
+    def parameters(self):
+        return {}
+
+
+def test_prepare_controls_rejects_duplicate_physics_before_parameter_writes():
+    geometry = _Geometry({"wp_pedot_cyl": _WorkPlane({"circ_pedot_cyl": _Circle()})})
+    component = _Component(
+        {"geom1": geometry},
+        {
+            "ewfd": object(),
+            "dg_pedot72": object(),
+        },
+    )
+    parameters = _StrictParameters()
+    backend = ClientapiLin2025PedotControlBackend(
+        _Model(component, parameters), component_tag="comp1", geometry_tag="geom1"
+    )
+    shape_support = {
+        "baseline_radius_um": 0.26,
+        "center_um": [0.85, 0.0],
+        "free_domains": [5],
+        "fixed_boundaries": [20, 23],
+        "pedot_boundaries": [18, 19, 25, 27],
+    }
+    with pytest.raises(ValueError, match="deformation interface already exists"):
+        backend.prepare_controls(_derivative_support(), shape_support)
+    # The precondition must fail closed before the first model mutation.
+    assert parameters.set_calls == 0
+    assert parameters.values == {}

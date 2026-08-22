@@ -123,6 +123,14 @@ def normalize_gradient_record(value: object, support: object) -> dict[str, Any]:
     )
     if not set(suspect_components).issubset(expected_order):
         raise ValueError("suspect_components must reference the canonical variable order")
+    constraint_values = _constraint_values(raw["constraint_values"])
+    allowed_constraint_ids = {item["constraint_id"] for item in normalized_support["constraints"]}
+    unknown_constraints = sorted(set(constraint_values) - allowed_constraint_ids)
+    if unknown_constraints:
+        raise ValueError(
+            "constraint_values must reference derivative-support constraint ids; "
+            f"unknown={unknown_constraints}"
+        )
     method = raw["method"]
     if method != normalized_support["derivative_method"]:
         raise ValueError("gradient method differs from derivative support")
@@ -145,7 +153,7 @@ def normalize_gradient_record(value: object, support: object) -> dict[str, Any]:
         "variable_order": variable_order,
         "physical_values": _finite_vector(raw["physical_values"], "physical_values", length=count),
         "objective_value": _finite(raw["objective_value"], "objective_value"),
-        "constraint_values": _constraint_values(raw["constraint_values"]),
+        "constraint_values": constraint_values,
         "native_gradient": _finite_vector(raw["native_gradient"], "native_gradient", length=count),
         "native_units": native_units,
         "objective_sign": objective_sign,

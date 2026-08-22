@@ -141,3 +141,38 @@ def test_forward_only_constraint_cannot_claim_native_derivative():
     ]
     with pytest.raises(ValueError, match="forward_only"):
         normalize_derivative_support(value)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda value: value["variables"][0].update({"dependency_class": ["geometry"]}),
+        lambda value: value["variables"][0]["step_policy"].update({"near_bound_mode": {"a": 1}}),
+        lambda value: value["variables"][0].update({"active_bound_semantics": []}),
+        lambda value: value["objective"].update({"direction": ["maximize"]}),
+        lambda value: value.update({"derivative_method": {"adjoint": True}}),
+        lambda value: value.update({"support_state": ["structurally_supported"]}),
+    ],
+)
+def test_untrusted_enum_leaves_reject_unhashable_values_as_value_error(mutation):
+    value = _support()
+    mutation(value)
+    with pytest.raises(ValueError):
+        normalize_derivative_support(value)
+
+
+def test_constraint_kind_rejects_unhashable_value_as_value_error():
+    value = _support()
+    value["constraints"] = [
+        {
+            "constraint_id": "power",
+            "kind": [["bound"]],
+            "expression": "R+T+A",
+            "unit": "1",
+            "lower": 0.99,
+            "upper": 1.01,
+            "derivative_supported": False,
+        }
+    ]
+    with pytest.raises(ValueError, match="constraint.kind is unsupported"):
+        normalize_derivative_support(value)

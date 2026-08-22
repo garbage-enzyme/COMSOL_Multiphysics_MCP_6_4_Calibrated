@@ -140,3 +140,30 @@ def test_compiler_rejects_unready_workflow_and_unapproved_material_search():
         compile_campaign_manifest(
             _goal(), space, _approval(), workflow_capsule=_capsule(), material_catalog=catalog
         )
+
+
+def test_compiler_rejects_numeric_material_variable_without_allowed_values():
+    # A continuous material variable with allowed_values=None used to make
+    # the approval subset check vacuous and compile without any catalog
+    # restriction; it must now fail closed.
+    space = _space()
+    space["variables"][0] = {
+        "variable_id": "material_state",
+        "kind": "continuous",
+        "unit": "1",
+        "baseline": 1.0,
+        "lower": 0.0,
+        "upper": 2.0,
+        "allowed_values": None,
+        "dependency_class": "material",
+        "adapter_path": "material.state",
+    }
+    space["adapter_mappings"][0] = {
+        "variable_id": "material_state",
+        "adapter_path": "material.state",
+        "unit": "1",
+    }
+    with pytest.raises(ValueError, match="must declare allowed_values"):
+        compile_campaign_manifest(
+            _goal(), space, _approval(), workflow_capsule=_capsule(), material_catalog=_catalog()
+        )

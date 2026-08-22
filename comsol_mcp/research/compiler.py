@@ -93,8 +93,15 @@ def compile_campaign_manifest(
         else set(normalized_materials["caller_approved_material_ids"])
     )
     for variable in material_variables:
-        allowed = set(variable["allowed_values"] or [])
-        if not allowed <= approved_materials:
+        # An empty or absent allowed_values would make the subset check
+        # vacuous, so every material variable must declare its catalog
+        # domain explicitly.
+        if not variable["allowed_values"]:
+            raise ValueError(
+                f"material variable {variable['variable_id']} must declare "
+                "allowed_values from the caller-approved catalog"
+            )
+        if not set(variable["allowed_values"]) <= approved_materials:
             raise ValueError("material variables must use caller-approved catalog entries")
     missing_thresholds = sorted(
         item["objective_id"] for item in normalized_goal["objectives"] if item["tolerance"] is None

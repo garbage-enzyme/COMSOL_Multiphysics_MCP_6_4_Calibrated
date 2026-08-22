@@ -135,3 +135,21 @@ def test_directional_gradient_check_requires_a_base_for_one_sided_evidence():
             minus_objective=None,
             policy=_policy(),
         )
+
+
+@pytest.mark.parametrize("bad_sign", [1, 0, "yes", None])
+def test_directional_gradient_check_requires_boolean_require_sign(bad_sign):
+    # compare_gradient rejects non-boolean sign policies; the directional
+    # path must enforce the identical contract instead of truthiness.
+    policy = _policy()
+    policy["require_sign"] = bad_sign
+    with pytest.raises(ValueError, match="require_sign must be boolean"):
+        compare_directional_gradient(
+            _gradient(),
+            normalize_gradient_support(),
+            [1.0],
+            step=0.01,
+            plus_objective=0.80002,
+            minus_objective=0.79998,
+            policy=policy,
+        )

@@ -107,6 +107,38 @@ def test_gradient_row_binds_order_sign_scale_and_all_native_identities():
     assert normalize_gradient_record(first, support) == first
 
 
+def test_gradient_row_constraint_values_must_reference_support_constraints():
+    from comsol_mcp.research.derivative_support import normalize_derivative_support
+
+    # The base fixture declares no constraints: any reported value is foreign.
+    row = _gradient()
+    row["constraint_values"] = {"undeclared": 1.0}
+    with pytest.raises(ValueError, match="derivative-support constraint ids"):
+        normalize_gradient_record(row, normalize_gradient_support())
+
+    support_value = _support()
+    support_value["constraints"] = [
+        {
+            "constraint_id": "power",
+            "kind": "bound",
+            "expression": "R+T+A",
+            "unit": "1",
+            "lower": 0.99,
+            "upper": 1.01,
+            "derivative_supported": False,
+        }
+    ]
+    bound_support = normalize_derivative_support(support_value)
+    accepted = _gradient()
+    accepted["support_fingerprint"] = bound_support["support_fingerprint"]
+    accepted["constraint_values"] = {"power": 1.0}
+    normalized = normalize_gradient_record(accepted, bound_support)
+    assert normalized["constraint_values"] == {"power": 1.0}
+    accepted["constraint_values"] = {"power": 1.0, "foreign": 2.0}
+    with pytest.raises(ValueError, match="derivative-support constraint ids"):
+        normalize_gradient_record(accepted, bound_support)
+
+
 @pytest.mark.parametrize(
     "field,value",
     [

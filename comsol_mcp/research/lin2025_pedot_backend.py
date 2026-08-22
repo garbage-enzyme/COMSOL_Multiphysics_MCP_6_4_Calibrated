@@ -198,6 +198,13 @@ class ClientapiLin2025PedotControlBackend:
             for observed, expected in zip(circle["center_m"], center_m, strict=True)
         ):
             raise ValueError("Lin2025 live circle differs from the shape-support baseline")
+        # Validate the no-duplicate-physics precondition before the first
+        # model mutation so a rejected request cannot leave written
+        # parameters behind.
+        component = _get(self.model.java.component(), self.component_tag)
+        physics = component.physics()
+        if "dg_pedot72" in _tags(physics):
+            raise ValueError("Lin2025 PEDOT deformation interface already exists")
         expressions: dict[str, str] = {}
         parameters = self.model.java.param()
         for item in variables:
@@ -207,10 +214,6 @@ class ClientapiLin2025PedotControlBackend:
             expression = f"{item['baseline']:.17g}[{item['unit']}]"
             parameters.set(item["variable_id"], expression)
             expressions[item["variable_id"]] = expression
-        component = _get(self.model.java.component(), self.component_tag)
-        physics = component.physics()
-        if "dg_pedot72" in _tags(physics):
-            raise ValueError("Lin2025 PEDOT deformation interface already exists")
         deformation = physics.create("dg_pedot72", "DeformedGeometry", self.geometry_tag)
         features = deformation.feature()
         free = features.create("free_pedot72", "FreeDeformation", 3)

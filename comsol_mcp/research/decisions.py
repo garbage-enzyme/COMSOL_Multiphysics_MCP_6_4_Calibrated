@@ -132,7 +132,12 @@ def normalize_decision_record(value: object) -> dict[str, Any]:
     elapsed = budget["elapsed_wall_time_seconds"]
     if isinstance(elapsed, bool) or not isinstance(elapsed, (int, float)):
         raise ValueError("budget.elapsed_wall_time_seconds must be finite and nonnegative")
-    elapsed_value = float(elapsed)
+    try:
+        elapsed_value = float(elapsed)
+    except OverflowError as exc:
+        # JSON-representable integers can still exceed the float range;
+        # callers must see the declared ValueError, not a raw OverflowError.
+        raise ValueError("budget.elapsed_wall_time_seconds must be finite and nonnegative") from exc
     if not math.isfinite(elapsed_value) or elapsed_value < 0.0:
         raise ValueError("budget.elapsed_wall_time_seconds must be finite and nonnegative")
     normalized_budget = {

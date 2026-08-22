@@ -119,6 +119,15 @@ def test_adapter_configures_fixed_nodes_and_canonicalizes_units():
     assert receipt["optimization"]["optmethod"]["readback"] == "gcmma"
     assert receipt["optimization"]["objectivetype"]["readback"] == "maximization"
     assert backend.study_tags() == ["std1", "std2"]
+    # Every created node must appear in the audit trail, including the
+    # wavelength study step.
+    assert receipt["created_nodes"] == [
+        "std1",
+        "std1/sens_a71",
+        "std2",
+        "std2/opt_a71",
+        "std2/wavelength_a71",
+    ]
 
 
 def test_adapter_rolls_back_when_a_fixed_property_fails():

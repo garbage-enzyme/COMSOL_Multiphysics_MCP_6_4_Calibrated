@@ -235,6 +235,10 @@ def compare_directional_gradient(
         {"relative_error_limit", "absolute_error_floor", "cosine_floor", "require_sign"},
         "gradient_check_policy",
     )
+    # Match compare_gradient: the sign policy must be an explicit boolean,
+    # never an implicit truthy value.
+    if not isinstance(raw_policy["require_sign"], bool):
+        raise ValueError("require_sign must be boolean")
     relative_error = abs(predicted - observed) / max(
         abs(predicted),
         abs(observed),

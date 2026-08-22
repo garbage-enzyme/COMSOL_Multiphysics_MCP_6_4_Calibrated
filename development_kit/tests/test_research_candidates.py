@@ -136,3 +136,46 @@ def test_categorical_candidate_must_use_exact_allowed_value():
     value["requested_values"]["material_state"] = "copper"
     with pytest.raises(ValueError, match="outside allowed_values"):
         normalize_candidate_record(value, space)
+
+
+def test_candidate_negative_zero_canonicalizes_to_positive_zero():
+    import math
+
+    space = _space()
+    variable = {
+        "variable_id": "signed_offset",
+        "kind": "continuous",
+        "unit": "nm",
+        "baseline": 0.0,
+        "lower": -10.0,
+        "upper": 10.0,
+        "allowed_values": None,
+        "dependency_class": "geometry",
+        "adapter_path": "geom.signed_offset",
+    }
+    space["variables"] = [variable]
+    space["adapter_mappings"] = [
+        {
+            "variable_id": variable["variable_id"],
+            "adapter_path": variable["adapter_path"],
+            "unit": variable["unit"],
+        }
+    ]
+    negative = _candidate()
+    negative["requested_values"] = {"signed_offset": -1e-15}
+    zero = _candidate()
+    zero["requested_values"] = {"signed_offset": 0.0}
+    first = normalize_candidate_record(negative, space)
+    second = normalize_candidate_record(zero, space)
+    value = first["normalized_values"]["signed_offset"]
+    assert value == 0.0
+    assert math.copysign(1.0, value) == 1.0
+    # Identical canonical values must share one candidate identity.
+    assert first["candidate_fingerprint"] == second["candidate_fingerprint"]
+
+
+def test_candidate_rejects_non_string_lifecycle_state_as_value_error():
+    value = _candidate()
+    value["lifecycle_state"] = ["proposed"]
+    with pytest.raises(ValueError):
+        normalize_candidate_record(value, _space())

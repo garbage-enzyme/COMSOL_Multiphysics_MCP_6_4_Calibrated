@@ -7,7 +7,15 @@ from typing import Any
 
 from comsol_mcp.durable import domain_sha256_v2
 
-from .derivative_support import _bounded_json, _finite, _identifier, _object, _sha256, _text
+from .derivative_support import (
+    _bounded_json,
+    _enum,
+    _finite,
+    _identifier,
+    _object,
+    _sha256,
+    _text,
+)
 
 EXTERNAL_VALIDATION_RECEIPT_SCHEMA_NAME = "comsol_mcp.external_fidelity_validation_receipt"
 EXTERNAL_VALIDATION_RECEIPT_SCHEMA_VERSION = "1.0.0"
@@ -72,9 +80,7 @@ def normalize_external_validation_receipt(value: object) -> dict[str, Any]:
         {"kind", "provider", "version", "execution_location", "license_authority"},
         "backend",
     )
-    backend_kind = backend["kind"]
-    if backend_kind not in _BACKENDS:
-        raise ValueError("external validation backend is unsupported")
+    backend_kind = _enum(backend["kind"], _BACKENDS, "external validation backend")
     normalized_backend = {
         "kind": backend_kind,
         "provider": _text(backend["provider"], "backend.provider", maximum=128),
@@ -89,9 +95,7 @@ def normalize_external_validation_receipt(value: object) -> dict[str, Any]:
         {"mode", "prior_backend", "prior_receipt_sha256", "authorization_sha256"},
         "fallback",
     )
-    mode = fallback["mode"]
-    if mode not in _FALLBACK_MODES:
-        raise ValueError("external validation fallback mode is unsupported")
+    mode = _enum(fallback["mode"], _FALLBACK_MODES, "external validation fallback mode")
     prior_backend = fallback["prior_backend"]
     prior_receipt = _optional_sha256(fallback["prior_receipt_sha256"], "prior_receipt_sha256")
     authorization = _optional_sha256(fallback["authorization_sha256"], "authorization_sha256")
@@ -122,9 +126,7 @@ def normalize_external_validation_receipt(value: object) -> dict[str, Any]:
     normalized_artifacts = [_sha256(item, "raw_artifact_sha256") for item in artifacts]
     if len(normalized_artifacts) != len(set(normalized_artifacts)):
         raise ValueError("raw artifact identities must be unique")
-    disposition = raw["disposition"]
-    if disposition not in _DISPOSITIONS:
-        raise ValueError("external validation disposition is unsupported")
+    disposition = _enum(raw["disposition"], _DISPOSITIONS, "external validation disposition")
     body = {
         "schema_name": EXTERNAL_VALIDATION_RECEIPT_SCHEMA_NAME,
         "schema_version": EXTERNAL_VALIDATION_RECEIPT_SCHEMA_VERSION,

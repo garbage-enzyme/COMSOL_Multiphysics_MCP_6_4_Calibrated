@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 
 import pytest
 
+from comsol_mcp.jobs.store import JobLock
 from comsol_mcp.research.compiler import compile_campaign_manifest
 from comsol_mcp.research.coordinator import ResearchCampaignCoordinator
 from comsol_mcp.research.journal import recover_research_journal
@@ -270,3 +272,41 @@ def test_invalid_clock_fails_before_runtime_or_evaluation_side_effect(tmp_path, 
             clock=lambda: invalid,
         )
     assert not (root / "campaign_runtime.json").exists()
+
+
+def test_identity_initialization_waits_for_exclusive_runtime_lock(tmp_path):
+    # Concurrent constructors must serialize on the campaign lock so a
+    # racing second writer can never overwrite the winner's identity files.
+    holder = JobLock(tmp_path / ".coordinator.lock")
+    holder.acquire()
+    done = []
+
+    def build():
+        ResearchCampaignCoordinator(tmp_path, _manifest(), _response, evaluator_identity="d" * 64)
+        done.append(True)
+
+    thread = threading.Thread(target=build)
+    thread.start()
+    try:
+        time.sleep(0.25)
+        assert done == []
+        assert not (tmp_path / "campaign_runtime.json").exists()
+    finally:
+        holder.release()
+    thread.join(timeout=5)
+    assert done == [True]
+    assert (
+        json.loads((tmp_path / "campaign_runtime.json").read_text(encoding="utf-8"))[
+            "started_at_epoch"
+        ]
+        > 0.0
+    )
+
+
+def test_consume_cancel_tolerates_vanished_control_file(tmp_path):
+    coordinator = ResearchCampaignCoordinator(
+        tmp_path, _manifest(), _response, evaluator_identity="d" * 64
+    )
+    # Absent control file: a silent no-op, never FileNotFoundError.
+    coordinator._consume_cancel()
+    assert not coordinator.control_path.exists()

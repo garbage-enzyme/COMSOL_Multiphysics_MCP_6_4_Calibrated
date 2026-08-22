@@ -416,6 +416,7 @@ def configure_native_adjoint(
             ),
         }
         wavelength = optimization_study.feature().create(wavelength_feature_tag, "Wavelength")
+        created.append(f"{optimization_study_tag}/{wavelength_feature_tag}")
         if str(wavelength.getType()) != "Wavelength":
             raise ValueError("Wavelength study step type readback mismatch")
         wavelength_expression = f"{normalized_support['objective']['wavelength_um']:.17g}e-6"

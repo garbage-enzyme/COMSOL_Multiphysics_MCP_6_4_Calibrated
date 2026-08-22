@@ -259,6 +259,52 @@ def test_condition_controls_bind_native_sensitivity_solver_identities():
         normalize_robust_condition_controls(value)
 
 
+def _native_sensitivity_controls() -> dict:
+    value = _condition_controls()
+    value.update(
+        schema_version="1.4.0",
+        selected_linear_solver_tag="d1",
+        inactive_linear_solver_tags=["i1"],
+        mesh_reference_parameter="mesh_ref_wl",
+        mesh_reference_value="1600[nm]",
+        sensitivity_parametric_sweep_tag="sweep_pedot72",
+        sensitivity_feature_tag="sens_pedot72",
+        sensitivity_solver_tag="sn1",
+        sensitivity_segregated_solver_tag="se1",
+        sensitivity_direct_solver_tags=["dDef", "d1"],
+        sensitivity_solution_tags=["sol1", "sol2", "sol3"],
+        sensitivity_dataset_tags=["dset1", "dset2"],
+        derivative_solution_tag="sol2",
+        derivative_dataset_tag="dset2",
+        sensitivity_gradient_method="adjoint",
+        sensitivity_solver_regeneration="replace_existing_auto_sequence",
+        sensitivity_stationary_nonlinearity="auto",
+        sensitivity_segregated_step_tags=["ss1", "ss2"],
+        sensitivity_merged_step_tag="ss1",
+        sensitivity_removed_step_tag="ss2",
+        sensitivity_merged_linear_solver_tag="d1",
+        sensitivity_constraint_group_policy="merge_material_coordinates_into_wave_optics",
+    )
+    return value
+
+
+def test_merged_sensitivity_group_binds_to_selected_not_legacy_configured_tag():
+    # A legacy configured tag may differ from the caller-selected active
+    # solver; the merged-group gate must bind to the selection.
+    value = _native_sensitivity_controls()
+    value["linear_solver_tag"] = "i1"
+    assert normalize_robust_condition_controls(value)[
+        "sensitivity_merged_linear_solver_tag"
+    ] == "d1"
+
+
+def test_merged_sensitivity_group_rejects_nonselected_direct_solver():
+    value = _native_sensitivity_controls()
+    value["sensitivity_merged_linear_solver_tag"] = "i1"
+    with pytest.raises(ValueError, match="must use the selected direct solver"):
+        normalize_robust_condition_controls(value)
+
+
 def test_condition_controls_polarization_mapping_requires_both_linear_bases():
     value = _condition_controls()
     value["polarization_values"] = {"x_linear": "S", "extra": "T"}

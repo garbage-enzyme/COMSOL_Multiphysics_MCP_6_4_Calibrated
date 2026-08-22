@@ -138,6 +138,58 @@ def test_d0_bounds_and_fingerprints_are_stable():
         normalize_design_space(tampered)
 
 
+def _integer_space(lower: object, upper: object, baseline: object = None) -> dict:
+    space = _space()
+    if baseline is None:
+        baseline = lower + (upper - lower) // 2
+    variable = {
+        "variable_id": "grid_cells",
+        "kind": "integer",
+        "unit": "1",
+        "baseline": baseline,
+        "lower": lower,
+        "upper": upper,
+        "allowed_values": None,
+        "dependency_class": "geometry",
+        "adapter_path": "geom.grid_cells",
+    }
+    space["variables"] = [variable]
+    space["adapter_mappings"] = [
+        {
+            "variable_id": variable["variable_id"],
+            "adapter_path": variable["adapter_path"],
+            "unit": variable["unit"],
+        }
+    ]
+    return space
+
+
+def test_integer_variable_bounds_remain_exact_integers():
+    # Bounds above 2**53 must not be silently rounded through float coercion.
+    big_lower = 2**53 + 1
+    big_upper = 2**53 + 1024
+    normalized = normalize_design_space(_integer_space(big_lower, big_upper))["variables"][0]
+    assert type(normalized["baseline"]) is int
+    assert type(normalized["lower"]) is int and normalized["lower"] == big_lower
+    assert type(normalized["upper"]) is int and normalized["upper"] == big_upper
+    space = _integer_space(big_lower, big_upper)
+    first = normalize_design_space(space)
+    assert normalize_design_space(first) == first
+
+
+def test_integer_variable_bounds_reject_non_integer_inputs():
+    with pytest.raises(ValueError, match="must be an integer"):
+        normalize_design_space(_integer_space(9007199254740993.0, 2**53 + 1024))
+
+
+def test_relative_bounds_reject_overflow_to_infinity():
+    # A finite positive baseline near the float maximum must not produce
+    # non-finite multiplicative bounds.
+    with pytest.raises(ValueError, match="finite representable range"):
+        relative_bounds(1.7e308)
+    assert relative_bounds(100.0) == (75.0, 125.0)
+
+
 def test_goal_fingerprint_is_domain_separated_and_order_independent():
     first = normalize_research_goal(_goal())
     reordered = copy.deepcopy(_goal())

@@ -91,3 +91,18 @@ def test_receipt_rejects_nonfinite_metrics_duplicate_artifacts_and_tampering():
     tampered["disposition"] = "disagreed"
     with pytest.raises(ValueError, match="fingerprint"):
         normalize_external_validation_receipt(tampered)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda value: value["backend"].update({"kind": ["independent_comsol"]}),
+        lambda value: value["fallback"].update({"mode": {"primary": True}}),
+        lambda value: value.update({"disposition": ["validated"]}),
+    ],
+)
+def test_untrusted_enum_leaves_reject_unhashable_values_as_value_error(mutation):
+    value = _receipt()
+    mutation(value)
+    with pytest.raises(ValueError):
+        normalize_external_validation_receipt(value)

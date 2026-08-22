@@ -352,7 +352,9 @@ def normalize_robust_condition_controls(value: object) -> dict[str, Any]:
             raise ValueError(
                 "native sensitivity merged and removed step identities are inconsistent"
             )
-        if merged_solver != raw["linear_solver_tag"]:
+        # The declared contract binds the merged group to the caller-selected
+        # direct solver, not to the legacy configured tag.
+        if merged_solver != selection["selected_linear_solver_tag"]:
             raise ValueError("native sensitivity merged group must use the selected direct solver")
         if group_policy != "merge_material_coordinates_into_wave_optics":
             raise ValueError("native sensitivity constraint group policy is unsupported")
