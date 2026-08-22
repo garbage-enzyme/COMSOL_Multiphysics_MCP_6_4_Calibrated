@@ -204,6 +204,9 @@ export function createComsolConnection(opts) {
 			alive = true;
 			c.stdout.setEncoding("utf8");
 			c.stdout.on("data", onStdoutData);
+			// An unhandled stdin 'error' (EPIPE when the server dies mid-write)
+			// would crash the whole DSH host; treat it as process loss instead.
+			c.stdin.on("error", () => { onChildLost(); });
 			c.stderr.setEncoding("utf8");
 			let stderrBuf = "";
 			c.stderr.on("data", (chunk) => {
@@ -260,9 +263,22 @@ export function createComsolConnection(opts) {
 	}
 
 	async function connectOnce() {
-		await startChild();
-		connectedAt = Date.now();
-		await syncTools();
+		try {
+			await startChild();
+			connectedAt = Date.now();
+			await syncTools();
+		} catch (e) {
+			// Startup or tool discovery failed after spawning: tear the child
+			// down and clear readiness so the connected getter stays truthful
+			// and a scheduled reconnect cannot run beside a live orphan.
+			ready = false;
+			alive = false;
+			if (child) {
+				try { child.kill(); } catch { /* already gone */ }
+				child = null;
+			}
+			throw e;
+		}
 	}
 
 	/** Attempt initial connection; failures schedule background reconnects. */

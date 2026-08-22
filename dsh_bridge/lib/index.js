@@ -127,7 +127,10 @@ export async function apply(ctx, config) {
 		return async (args, exec) => {
 			const res = await connection.callTool(rawName, args, { signal: exec.signal });
 			if (rawName === "job_submit" && cfg.jobMirrorEnabled) {
-				const parsed = parseJson(res.text);
+				// Prefer the structured result when the server provides one;
+				// parsing res.text alone no-ops when content carries no text.
+				const parsed =
+					res.structuredContent !== undefined ? res.structuredContent : parseJson(res.text);
 				const jobId = parsed?.job_id ?? parsed?.jobId;
 				if (typeof jobId === "string" && jobId && !mirrored.has(jobId)) {
 					mirrored.add(jobId);
@@ -176,7 +179,9 @@ export async function apply(ctx, config) {
 			if (mirrored.has(rec.jobId)) continue;
 			try {
 				const res = await connection.callTool("job_status", { job_id: rec.jobId }, { timeoutMs: 30000 });
-				const state = extractState(parseJson(res.text));
+				const state = extractState(
+					res.structuredContent !== undefined ? res.structuredContent : parseJson(res.text)
+				);
 				if (state === undefined) continue;
 				if (isTerminal(state, cfg.terminalStates)) { stateStore.remove(rec.jobId); continue; }
 				mirrored.add(rec.jobId);
