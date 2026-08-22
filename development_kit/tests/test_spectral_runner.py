@@ -160,3 +160,51 @@ def test_control_stop_occurs_only_at_a_safe_point_boundary(tmp_path):
     )
     assert resumed["completed"] is True
     assert max(calls.values()) == 1
+
+
+def test_pre_solve_skip_point_continues_without_solving(tmp_path):
+    """A skip_point decision advances past the point instead of stopping."""
+    spec = spectral_job_spec(tmp_path)
+    job = tmp_path / "job-skip"
+    calls = Counter()
+    state: dict[str, object] = {"fingerprint": None, "skips": 0}
+
+    def control(context):
+        if context["phase"] != "before_solve":
+            return {"action": "continue"}
+        fingerprint = context["point"]["point_fingerprint"]
+        if state["fingerprint"] is None:
+            state["fingerprint"] = fingerprint
+        if fingerprint == state["fingerprint"] and state["skips"] < 2:
+            state["skips"] += 1
+            return {"action": "skip_point", "reason": "skip_completed"}
+        return {"action": "continue"}
+
+    result = run_spectral_characterization(
+        spec,
+        job,
+        attempt=1,
+        point_executor=_executor(spec, calls),
+        control_hook=control,
+    )
+
+    assert result["completed"] is True
+    assert state["skips"] == 2
+    assert set(calls.values()) == {1}
+
+
+def test_pre_solve_skip_point_is_bounded_when_pending_never_clears(tmp_path):
+    spec = spectral_job_spec(tmp_path)
+    job = tmp_path / "job-bound"
+
+    def control(_context):
+        return {"action": "skip_point", "reason": "skip_completed"}
+
+    with pytest.raises(RuntimeError, match="did not clear"):
+        run_spectral_characterization(
+            spec,
+            job,
+            attempt=1,
+            point_executor=_executor(spec, Counter()),
+            control_hook=control,
+        )

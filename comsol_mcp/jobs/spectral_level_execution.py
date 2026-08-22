@@ -110,7 +110,14 @@ def execute_loaded_spectral_level(
             resource.evaluate(stage="pre_solve", point_id=str(point["point_id"]))
         )
         latest_resource_decision = decision
-        return {"action": "continue" if decision["action"] == "start_point" else "stop"}
+        action = decision["action"]
+        if action == "start_point":
+            return {"action": "continue"}
+        if action == "skip_completed":
+            # A concurrent writer already durably completed this point; skip
+            # it and let the runner re-read progress instead of aborting.
+            return {"action": "skip_point", "reason": "skip_completed"}
+        return {"action": "stop"}
 
     def resource_after(row: Mapping[str, Any]) -> dict[str, Any]:
         nonlocal latest_resource_decision

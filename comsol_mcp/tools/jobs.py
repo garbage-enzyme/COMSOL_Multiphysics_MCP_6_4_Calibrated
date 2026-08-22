@@ -214,6 +214,33 @@ def _submit_job(
         }
     expanded = dict(spec)
     expanded["execution_backend"] = handoff["execution_backend"]
+
+    def _handoff_recovery() -> dict[str, Any]:
+        recover = getattr(session_manager, "recover_attached_job_handoff", None)
+        if not callable(recover):
+            return {"success": False, "state": "attached_handoff_recovery_unavailable"}
+        try:
+            observed_recovery = recover(
+                handoff["execution_backend"],
+                profile=profile_name,
+                feature_enabled=shared_enabled,
+            )
+        except Exception as recovery_exc:
+            return {
+                "success": False,
+                "state": "attached_handoff_recovery_failed",
+                "error_type": type(recovery_exc).__name__,
+                "error": str(recovery_exc),
+            }
+        return (
+            dict(observed_recovery)
+            if isinstance(observed_recovery, dict)
+            else {
+                "success": False,
+                "state": "attached_handoff_recovery_returned_invalid_result",
+            }
+        )
+
     try:
         submitted = manager.submit(expanded)
     except Exception as exc:
@@ -227,34 +254,7 @@ def _submit_job(
             if exc.state_record_error is not None:
                 recovery["state_record_error"] = exc.state_record_error
         else:
-            recover = getattr(session_manager, "recover_attached_job_handoff", None)
-            if callable(recover):
-                try:
-                    observed_recovery = recover(
-                        handoff["execution_backend"],
-                        profile=profile_name,
-                        feature_enabled=shared_enabled,
-                    )
-                    recovery = (
-                        dict(observed_recovery)
-                        if isinstance(observed_recovery, dict)
-                        else {
-                            "success": False,
-                            "state": "attached_handoff_recovery_returned_invalid_result",
-                        }
-                    )
-                except Exception as recovery_exc:
-                    recovery = {
-                        "success": False,
-                        "state": "attached_handoff_recovery_failed",
-                        "error_type": type(recovery_exc).__name__,
-                        "error": str(recovery_exc),
-                    }
-            else:
-                recovery = {
-                    "success": False,
-                    "state": "attached_handoff_recovery_unavailable",
-                }
+            recovery = _handoff_recovery()
         return {
             "success": False,
             "state": "job_submit_failed_after_attached_handoff",
@@ -262,6 +262,15 @@ def _submit_job(
             "error": str(exc),
             "attached_handoff": _attached_handoff_summary(handoff),
             "handoff_recovery": recovery,
+        }
+    if isinstance(submitted, dict) and not submitted.get("success"):
+        # A structured failure must also reconcile the just-claimed attached
+        # session instead of leaving it locked without any handoff recovery.
+        return {
+            **submitted,
+            "state": "job_submit_failed_after_attached_handoff",
+            "attached_handoff": _attached_handoff_summary(handoff),
+            "handoff_recovery": _handoff_recovery(),
         }
     return {
         **submitted,

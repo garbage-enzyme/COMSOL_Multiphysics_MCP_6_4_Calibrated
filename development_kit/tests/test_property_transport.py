@@ -119,8 +119,11 @@ def test_property_scalars_are_bounded_before_aggregate_serialization():
 
 
 def test_property_integer_limit_uses_exact_decimal_size():
-    exact = 2**217705
+    # Below the interpreter int-to-str conversion limit json.dumps enforces.
+    exact = 2**14270
     assert normalize_property_value(exact) == exact
+    with pytest.raises(ValueError, match="decimal digits"):
+        normalize_property_value(10**4299)
     with pytest.raises(ValueError, match="integers may contain at most"):
         normalize_property_value(10**MAX_SCALAR_BYTES)
 

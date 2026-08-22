@@ -242,7 +242,7 @@ def verify_robust_shape_evidence(
         "condition_ids_declared": set(completed_ids) <= set(declared_ids),
         "completed_conditions_unique": len(completed_ids) == len(set(completed_ids)),
         "completed_condition_order_valid": completed_orders == sorted(completed_orders),
-        "all_conditions_complete": completed_ids == declared_ids,
+        "all_conditions_complete": set(completed_ids) == set(declared_ids),
         "validated_gradient_present": any(
             row["payload"]["evidence_state"] == "gradient_validated" for row in gradients
         ),

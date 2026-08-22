@@ -834,8 +834,6 @@ def test_native_sensitivity_preparation_follows_exact_condition_staging():
         ("parameter", "wl", "7.9999999999999996e-07[m]"),
         ("incidence",),
         ("study_step", "plist", "wl"),
-        ("solver_memory",),
-        ("solver_selection",),
         ("deformation", True),
         ("sensitivity_prepare", ["rx", "ry"], 8e-7),
     ]
@@ -1005,6 +1003,8 @@ def test_native_sensitivity_initval_uses_prepared_initial_values():
             return self.properties[name]
 
     class Stationary:
+        tag = "s1"
+
         def __init__(self):
             self.items = {
                 "sn1": SensitivityNode("sn1"),
@@ -1024,14 +1024,24 @@ def test_native_sensitivity_initval_uses_prepared_initial_values():
                 return self.nonlin
             raise KeyError(name)
 
+        def getType(self):
+            return "Stationary"
+
     stationary = Stationary()
 
     class Solution:
+        def __init__(self):
+            self.attributes = [
+                _FakeSolverFeature("st1", "StudyStep"),
+                stationary,
+            ]
+
         def feature(self, tag=None):
             if tag is None:
-                return _FakeSolverFeatures([_FakeSolverFeature("st1", "StudyStep"), stationary])
-            if tag == "s1":
-                return stationary
+                return _FakeSolverFeatures(list(self.attributes))
+            for attribute in self.attributes:
+                if attribute.tag == tag:
+                    return attribute
             raise KeyError(tag)
 
     class Solutions:

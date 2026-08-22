@@ -43,6 +43,13 @@ def _save_model_file(
     target = file_path or model.file()
     if not target:
         raise ValueError("file_path is required for a model that has not been saved.")
+    if normalized_format not in {"comsol", "mph"} and not file_path:
+        # Non-binary formats write code/text; falling back to the original
+        # .mph path would overwrite the immutable source with that content.
+        raise ValueError(
+            f"file_path is required when saving format {format!r}; "
+            "refusing to overwrite the original binary model"
+        )
     path = Path(target).expanduser().resolve()
     path.parent.mkdir(parents=True, exist_ok=True)
     overwrite = path.exists()
@@ -637,9 +644,7 @@ def register_model_tools(mcp: MCPServer) -> None:
                 if tracked and session_manager.remove_model(tracked_name):
                     cleanup_errors = []
                 else:
-                    cleanup_errors = _cleanup_unregistered_clone(
-                        client, cloned_model, cleanup_path
-                    )
+                    cleanup_errors = _cleanup_unregistered_clone(client, cloned_model, cleanup_path)
             result = {"success": False, "error": f"Failed to clone model: {str(e)}"}
             if cleanup_errors:
                 result["cleanup_errors"] = cleanup_errors
