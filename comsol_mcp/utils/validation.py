@@ -20,10 +20,14 @@ def strict_json_number(
         raise ValueError(f"{label} must be numeric")
     number = value
     if isinstance(number, int):
-        # Python ints are arbitrary precision and always mathematically
-        # finite; converting to float would misjudge large-but-valid values
-        # like 10**400 as infinite.
-        finite = True
+        # Ints are mathematically finite, but the transport contract requires
+        # float-representability: oversized integers (10**400) are rejected
+        # so downstream JSON/COMSOL consumers never receive unrepresentable
+        # magnitudes (codified by test_real_fixture_contract and others).
+        try:
+            finite = math.isfinite(float(number))
+        except OverflowError:
+            finite = False
     else:
         finite = math.isfinite(number)
     if positive:
