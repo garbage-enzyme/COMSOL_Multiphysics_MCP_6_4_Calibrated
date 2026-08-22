@@ -418,7 +418,8 @@ class ThermoOptomechanicalComsolExecutor:
         )
         self._set_moving_mesh_active(True)
         self._study("transfer_study_tag")
-        self._bind_study_dataset(self.spec["model_contract"]["thermal_structure_study_tag"])
+        # _study() already binds the transfer study's own solution dataset;
+        # measuring through that binding is what observes the Transfer output.
         displacement = abs(self._evaluate("displacement_max"))
         deformed_geometry = _fingerprint(
             {
@@ -428,7 +429,8 @@ class ThermoOptomechanicalComsolExecutor:
             }
         )
         self._save(self.derived_path)
-        self._bind_study_dataset(self.spec["model_contract"]["thermal_structure_study_tag"])
+        self._load_derived()
+        self._bind_study_dataset(self.spec["model_contract"]["transfer_study_tag"])
         displacement_readback = abs(self._evaluate("displacement_max"))
         return {
             "method": self.spec["deformation_transfer"]["method"],
@@ -469,8 +471,8 @@ class ThermoOptomechanicalComsolExecutor:
         self._set_moving_mesh_active(False)
         self._study("thermal_structure_study_tag")
         self._set_moving_mesh_active(True)
-        self._study("transfer_study_tag")
-        self._bind_study_dataset(self.spec["model_contract"]["thermal_structure_study_tag"])
+        # Measure the Transfer output through the binding _study() installed,
+        # not by rebinding the pre-transfer thermal dataset.
         return abs(self._evaluate("delta_length"))
 
     def _optical_replay(self) -> Mapping[str, Any]:
@@ -484,11 +486,10 @@ class ThermoOptomechanicalComsolExecutor:
         self.model.parameter(cte_name, "0[1/K]")
         self.model.parameter(cte_name, expected_cte)
         rollback_ok = str(self.model.parameter(cte_name, evaluate=False)) == expected_cte
-        self._set_moving_mesh_active(False)
-        self._study("thermal_structure_study_tag")
-        self._set_moving_mesh_active(True)
-        self._study("transfer_study_tag")
-        self._save(self.derived_path)
+        # derived.mph already holds the declared Transfer output; re-running
+        # the thermal/transfer studies here would deform the saved mesh twice.
+        # Each optical iteration reloads from disk, so no in-memory state from
+        # a re-run could reach the deformed solves anyway.
 
         rows = []
         for wavelength in self.spec["optical_replay"]["wavelengths_m"]:

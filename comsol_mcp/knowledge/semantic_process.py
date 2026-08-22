@@ -223,10 +223,12 @@ class SemanticWorkerManager:
                 return {"success": True, "started": False, "identity": dict(self._identity or {}), "port": self._port}
             if self._process is not None:
                 cleanup = self._terminate_owned("replace_nonactive_worker")
-                if cleanup.get("refused"):
+                if not cleanup.get("absent"):
+                    # Cleanup failed to confirm the old worker is gone; never
+                    # orphan a live process by spawning a replacement.
                     error = {
                         "code": "worker_identity_uncertain",
-                        "message": "refusing to replace a live worker whose exact identity does not match",
+                        "message": "refusing to replace a live worker that cleanup could not terminate",
                     }
                     self._last_error = error
                     return {"success": False, "error": error, "cleanup": cleanup}
@@ -374,7 +376,7 @@ class SemanticWorkerManager:
         with self._lock:
             result = self._terminate_owned("explicit_reset")
             return {
-                "success": bool(result.get("absent")) and not result.get("refused", False),
+                "success": bool(result.get("absent")),
                 "reset": result,
             }
 

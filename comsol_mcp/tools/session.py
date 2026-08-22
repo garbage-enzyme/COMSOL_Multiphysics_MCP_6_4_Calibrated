@@ -288,21 +288,24 @@ class SessionManager:
 
     def _retire_client(self, client, *, clear_models: bool = True) -> tuple[bool, list[str]]:
         """Deactivate one exact client without constructing a second JVM client."""
-        self._reusable_client = None
-        self._reusable_client_kind = None
+        with self._start_lock:
+            self._reusable_client = None
+            self._reusable_client_kind = None
         errors = self._clear_client_models(client) if clear_models else []
         reusable = bool(getattr(client, "standalone", False))
         if reusable:
-            self._reusable_client = client
-            self._reusable_client_kind = "standalone"
+            with self._start_lock:
+                self._reusable_client = client
+                self._reusable_client_kind = "standalone"
         else:
             try:
                 client.disconnect()
             except Exception as exc:
                 errors.append(f"client_disconnect:{type(exc).__name__}:{exc}")
             if not errors:
-                self._reusable_client = client
-                self._reusable_client_kind = "remote"
+                with self._start_lock:
+                    self._reusable_client = client
+                    self._reusable_client_kind = "remote"
         return reusable or not errors, errors
 
     def _rollback_remote_activation(self, client, *, error: str) -> dict:
