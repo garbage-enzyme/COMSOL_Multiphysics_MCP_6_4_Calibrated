@@ -194,6 +194,10 @@ def register_gate_tools(server: Any) -> None:
                 if len(normalized) != 1:
                     raise ValueError("one-point solve produced an ambiguous spectral result")
                 numeric = [float(value) for value in normalized[0]]
+                if not all(math.isfinite(value) for value in numeric):
+                    # NaN/Inf would make the tolerance comparisons below
+                    # silently pass; fail closed on non-finite solve output.
+                    raise ValueError("one-point solve produced a non-finite spectral result")
                 requested = numeric[3]
                 solved = numeric[4]
                 rows.append(

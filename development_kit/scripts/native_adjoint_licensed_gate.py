@@ -289,6 +289,10 @@ def _run(spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
     import mph
 
     source_before = _sha(spec["source"])
+    if source_before != spec["source_sha256"]:
+        # The trusted-source check ran earlier; re-verify immediately before
+        # any load so a file swapped in between cannot be silently accepted.
+        raise RuntimeError("trusted model source changed after spec validation")
     for path in (spec["base_copy"], spec["configured_copy"]):
         path.unlink(missing_ok=True)
     client = None

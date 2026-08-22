@@ -499,7 +499,27 @@ def _run_parent(args) -> int:
                     raise RuntimeError(f"owned listener inventory failed: {ports['error']}")
                 for listener in ports["listeners"]:
                     listeners[(listener["pid"], listener["port"])] = listener
+            while process.poll() is None:
+                if time.monotonic() >= deadline:
+                    timed_out = True
+                    _terminate_owned_tree(process)
+                    break
+                if not owner.heartbeat(refresh_server_processes=True):
+                    raise RuntimeError("solver lease heartbeat failed")
+                descendants = _descendant_identities(os.getpid())
+                for identity in descendants:
+                    child_identities[(identity["pid"], identity["process_create_time"])] = identity
+                ports = _listener_inventory({item["pid"] for item in descendants})
+                if not ports["complete"]:
+                    raise RuntimeError(f"owned listener inventory failed: {ports['error']}")
+                for listener in ports["listeners"]:
+                    listeners[(listener["pid"], listener["port"])] = listener
                 time.sleep(0.25)
+            # A worker can exit before the first poll loop iteration; observe
+            # once more so its orphaned grandchildren stay attributable to
+            # this gate's owned process tree.
+            for identity in _descendant_identities(os.getpid()):
+                child_identities[(identity["pid"], identity["process_create_time"])] = identity
             process.wait(timeout=15)
         stdout = worker_stdout.read_bytes().decode("utf-8", errors="replace")
         stderr = worker_stderr.read_bytes().decode("utf-8", errors="replace")

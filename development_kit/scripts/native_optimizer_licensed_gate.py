@@ -315,6 +315,10 @@ def run(args: argparse.Namespace) -> dict:
         if time.monotonic() - started > spec["optimizer"]["budget"]["max_wall_time_seconds"]:
             raise TimeoutError("native optimizer wall budget exhausted before optimization")
         std2.run()
+        if time.monotonic() - started > spec["optimizer"]["budget"]["max_wall_time_seconds"]:
+            # The declared bounded-run contract covers the solve itself, not
+            # only the moment before it starts.
+            raise TimeoutError("native optimizer wall budget exhausted during optimization")
         phase = "final_objective"
         optimizer_dataset = _dataset_for_solution(
             model, receipt["solver_move_limit"]["solution_tag"]

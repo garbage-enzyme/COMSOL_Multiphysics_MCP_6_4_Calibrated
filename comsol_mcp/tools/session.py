@@ -954,6 +954,7 @@ class SessionManager:
             self._current_model = None
             self._publish_control_plane_status_locked()
         release = self._release_owned_lease()
+        lease_release_success = bool(release is None or release.get("success"))
         with self._start_lock:
             if self._startup_record is not None:
                 self._record_startup_phase_locked(
@@ -962,11 +963,14 @@ class SessionManager:
                     terminal=True,
                     details={
                         "client_reusable": reusable,
-                        "lease_release_success": bool(release is None or release.get("success")),
+                        "lease_release_success": lease_release_success,
                     },
                 )
         result = {
-            "success": not cleanup_errors,
+            # A failed owned-lease release must not report a deactivated
+            # session: the solver lease is still held and would poison the
+            # next start attempt.
+            "success": not cleanup_errors and lease_release_success,
             "client_reusable": reusable,
             "message": (
                 "Session deactivated and models cleared. The process-global "
@@ -977,6 +981,8 @@ class SessionManager:
         }
         if cleanup_errors:
             result["cleanup_errors"] = cleanup_errors
+        if not lease_release_success:
+            result["lease_release_pending"] = True
         if release is not None:
             result["lease_release"] = release
         return result

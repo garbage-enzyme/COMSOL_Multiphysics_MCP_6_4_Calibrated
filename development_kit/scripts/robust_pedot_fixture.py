@@ -64,7 +64,13 @@ def _number(value: str | None, label: str) -> float:
     return number
 
 
-def _audit_csv(path: Path, state: str, sample_wavelengths: tuple[float, ...]) -> dict[str, Any]:
+def _audit_csv(
+    path: Path,
+    state: str,
+    sample_wavelengths: tuple[float, ...],
+    *,
+    interpolation_method: str = "linear",
+) -> dict[str, Any]:
     real2 = _STATE_REAL_COLUMNS[state]
     imag2 = _STATE_IMAG_COLUMNS[state]
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
@@ -123,8 +129,22 @@ def _audit_csv(path: Path, state: str, sample_wavelengths: tuple[float, ...]) ->
         raise ValueError(f"PEDOT {state} CSV lacks an exact fixture wavelength row")
     samples: list[dict[str, float]] = []
     for target in sample_wavelengths:
-        if target < wavelengths[0] or target > wavelengths[-1]:
-            raise ValueError(f"PEDOT {state} sample wavelength requires forbidden extrapolation")
+        if target < _COMMON_MIN_NM or target > _COMMON_MAX_NM:
+            # The mapping declares the common range with extrapolation
+            # forbidden, so samples must stay inside it even when the source
+            # CSV itself covers more.
+            raise ValueError(
+                f"PEDOT {state} sample wavelength {target} nm is outside the "
+                f"{_COMMON_MIN_NM}-{_COMMON_MAX_NM} nm mapping range"
+            )
+        if interpolation_method != "linear" and target not in wavelengths:
+            # The audit interpolates linearly; a non-linear declared method
+            # would disagree at any non-exact wavelength. Require exact rows
+            # so both representations agree by construction.
+            raise ValueError(
+                f"PEDOT {state} sample wavelength {target} nm must match an exact "
+                f"source row when interpolation_method={interpolation_method!r}"
+            )
         exact = next((item for item in tensor_rows if item["wavelength_nm"] == target), None)
         if exact is None:
             upper_index = next(
@@ -255,7 +275,9 @@ def compile_pedot_fixture(
     for state in _STATES:
         relative = f"csv/{_STATE_FILES[state]}"
         source = _source_file(root, relative)
-        audit = _audit_csv(source, state, sample_wavelengths)
+        audit = _audit_csv(
+            source, state, sample_wavelengths, interpolation_method=interpolation_method
+        )
         mapping = _mapping(
             state=state,
             source_sha256=audit["source_sha256"],

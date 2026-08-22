@@ -18,7 +18,7 @@ def _key_background(image: Image.Image, background: tuple[int, int, int, int]) -
     keyed = Image.new("RGBA", image.size)
     output = []
     has_source_transparency = background[3] < 255
-    for red, green, blue, alpha in image.get_flattened_data():
+    for red, green, blue, alpha in image.getdata():
         if has_source_transparency:
             output.append((0, 0, 0, 0) if alpha == 0 else (red, green, blue, alpha))
             continue

@@ -265,8 +265,16 @@ def _run(spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
                         "absolute_error_1_per_m": abs(observed - native),
                         "relative_error": error,
                         "sign_agreement": (
-                            observed == 0.0
-                            or math.copysign(1.0, observed) == math.copysign(1.0, native)
+                            # Only a genuinely zero pair agrees trivially; a
+                            # zero finite difference must not bless a nonzero
+                            # native gradient (or vice versa).
+                            (observed == 0.0 and native == 0.0)
+                            or (
+                                observed != 0.0
+                                and native != 0.0
+                                and math.copysign(1.0, observed)
+                                == math.copysign(1.0, native)
+                            )
                         ),
                     }
                 )

@@ -139,7 +139,16 @@ def run_release_gate(
     reference_power_receipt = None
     reference_power_receipt_sha256 = None
     reference_power_timed_out = False
-    reference_power_receipt_path = args.output.with_name(f"{args.output.stem}.reference_power.json")
+    reference_power_receipt_path = args.output.with_name(
+        f"{args.output.stem}.reference_power.json"
+    ).resolve()
+    # Subprocesses run with cwd=ROOT; resolve every caller-supplied relative
+    # path here so parent and child observe identical absolute locations.
+    if isinstance(reference_power_spec, str) and reference_power_spec:
+        reference_power_spec = str(Path(reference_power_spec).expanduser().resolve())
+    fixture_spec_arg = getattr(args, "fixture_spec", None)
+    if isinstance(fixture_spec_arg, str) and fixture_spec_arg:
+        fixture_spec_arg = str(Path(fixture_spec_arg).expanduser().resolve())
     reference_power_passed = not require_reference_power
     if require_reference_power:
         if (
@@ -160,7 +169,7 @@ def run_release_gate(
 
     suite_completed = None
     suite_timed_out = False
-    fixture_spec = getattr(args, "fixture_spec", None)
+    fixture_spec = fixture_spec_arg
     fixture_spec_sha256 = None
     before_status = None
     after_status = None
