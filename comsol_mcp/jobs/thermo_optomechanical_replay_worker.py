@@ -210,20 +210,9 @@ def _run(
             on_durable_stage=stage_persisted,
             fault_hook=fault_hook,
         )
-        if should_stop() or result.get("stop_reason") == "before_stage_cancel":
-            cancel_message = "Stopped between thermo-optomechanical stages"
-        elif not result.get("completed"):
-            pending_terminal = {
-                "status": "interrupted",
-                "event": "thermo_optomechanical_stage_interrupted",
-                "patch": {
-                    "last_error": {
-                        "type": "ThermoOptomechanicalStageStop",
-                        "message": str(result.get("stop_reason")),
-                    }
-                },
-            }
-        else:
+        if result.get("completed"):
+            # A cancellation landing after the final durable stage must not
+            # suppress an already-completed replay.
             summary = result["summary"]
             pending_terminal = {
                 "status": "completed",
@@ -241,6 +230,19 @@ def _run(
                         "summary_sha256": summary["summary_sha256"],
                         "summary_artifact": result["summary_artifact"],
                     },
+                },
+            }
+        elif should_stop() or result.get("stop_reason") == "before_stage_cancel":
+            cancel_message = "Stopped between thermo-optomechanical stages"
+        else:
+            pending_terminal = {
+                "status": "interrupted",
+                "event": "thermo_optomechanical_stage_interrupted",
+                "patch": {
+                    "last_error": {
+                        "type": "ThermoOptomechanicalStageStop",
+                        "message": str(result.get("stop_reason")),
+                    }
                 },
             }
     except _CooperativeCancellation as exc:
@@ -343,6 +345,20 @@ def _run(
         if current in {"cancel_requested", "cancelling"}:
             store.record_cooperative_cancel_observed(
                 job_id, attempt=attempt, message=cancel_message
+            )
+        elif current not in {"completed", "cancelled", "failed", "interrupted"}:
+            # The control file carried the stop before durable state caught
+            # up; leave a truthful terminal state instead of stranding.
+            store.update_state(
+                job_id,
+                "interrupted",
+                patch={
+                    "last_error": {
+                        "type": "CooperativeCancellation",
+                        "message": cancel_message[:2000],
+                    }
+                },
+                event="worker_cancelled_from_control_file",
             )
         return 0
     if pending_terminal is not None:
