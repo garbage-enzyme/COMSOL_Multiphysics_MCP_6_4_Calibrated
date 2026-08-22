@@ -85,6 +85,33 @@ def test_impossible_campaign_exhausts_budget_without_manufacturing_success(ascii
     assert loop.coordinator.status()["started_evaluations"] == 2
 
 
+def test_duplicate_terminal_failure_replays_through_the_failed_path(ascii_tmp_path, monkeypatch):
+    loop = _loop(ascii_tmp_path, _manifest(), lambda _values: {"peak_wavelength_nm": 1550.0})
+    evaluation = {
+        "status": "failed",
+        "response": None,
+        "candidate_fingerprint": "f" * 64,
+        "evaluation_fingerprint": "e" * 64,
+        "completed_at": "2026-08-22T00:00:00Z",
+    }
+    monkeypatch.setattr(
+        loop.coordinator,
+        "evaluate",
+        lambda _candidate, **_kwargs: {
+            "status": "duplicate_terminal",
+            "evaluation": evaluation,
+            "replayed": True,
+        },
+    )
+
+    result = loop.step()
+
+    assert result["stop_reason"] == "continue"
+    assert result["success"] is False
+    assert result["evaluation"]["status"] == "failed"
+    assert result["evaluation"]["candidate_fingerprint"] == "f" * 64
+
+
 def test_checkpoint_restart_replays_exact_next_adaptive_decision(ascii_tmp_path):
     manifest = _manifest(max_evaluations=4)
 

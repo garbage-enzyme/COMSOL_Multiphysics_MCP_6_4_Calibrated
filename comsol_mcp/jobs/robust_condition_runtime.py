@@ -189,9 +189,31 @@ def execute_robust_conditions(
         row = completed.get(condition["condition_id"])
         if receipt_path.exists():
             receipt = read_json(receipt_path)
+            expected_condition_fields = {
+                "condition_id": condition["condition_id"],
+                "condition_order": condition["order"],
+                "material_state_id": condition["material_state_id"],
+                "polarization_basis_id": condition["polarization_basis_id"],
+                "incidence_elevation_deg": condition["incidence_elevation_deg"],
+                "incidence_azimuth_deg": condition["incidence_azimuth_deg"],
+                "observable_id": condition["observable_id"],
+            }
+            receipt_wavelength = receipt.get("requested_wavelength_m")
+            wavelength_matches = isinstance(receipt_wavelength, (int, float)) and not isinstance(
+                receipt_wavelength, bool
+            ) and math.isclose(
+                float(receipt_wavelength),
+                float(condition["wavelength_m"]),
+                rel_tol=1e-12,
+                abs_tol=1e-18,
+            )
             if (
                 receipt.get("schema_name") != CONDITION_RECEIPT_SCHEMA_NAME
-                or receipt.get("condition_id") != condition["condition_id"]
+                or any(
+                    receipt.get(field) != expected
+                    for field, expected in expected_condition_fields.items()
+                )
+                or not wavelength_matches
                 or receipt.get("receipt_fingerprint")
                 != domain_sha256_v2(
                     CONDITION_RECEIPT_SCHEMA_NAME,

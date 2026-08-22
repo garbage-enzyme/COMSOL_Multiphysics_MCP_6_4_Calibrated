@@ -62,6 +62,29 @@ def _observation(condition: dict) -> dict:
     }
 
 
+def test_required_branch_evidence_detects_disappeared_baseline_winner():
+    baseline_pairs = [
+        {"pair_id": "pair-0000", "smooth_absolute_contrast": 0.1},
+        {"pair_id": "pair-0001", "smooth_absolute_contrast": 0.2},
+    ]
+    policy = {"mode": "required", "observable_id": "transmission_order_0_0"}
+
+    vanished = robust_finalist_runtime._branch_evidence(
+        {"pairs": baseline_pairs},
+        {"pairs": [dict(baseline_pairs[1])]},
+        policy,
+    )
+    assert vanished["disappeared"] is True
+    assert vanished["baseline_branch_id"] == "pair-0000"
+
+    stable = robust_finalist_runtime._branch_evidence(
+        {"pairs": baseline_pairs},
+        {"pairs": copy.deepcopy(baseline_pairs)},
+        policy,
+    )
+    assert stable["disappeared"] is False
+
+
 def test_finalist_runtime_collects_all_144_solves_and_validates_receipt(
     ascii_tmp_path, monkeypatch
 ):

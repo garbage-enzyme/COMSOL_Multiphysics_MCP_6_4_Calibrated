@@ -140,6 +140,7 @@ def _branch_evidence(
 
     baseline_winner = winner(baseline_objective)
     finer_winner = winner(finer_objective)
+    finer_pair_ids = {str(pair["pair_id"]) for pair in finer_objective["pairs"]}
     body = {
         "mode": "required",
         "observable_id": policy["observable_id"],
@@ -148,7 +149,7 @@ def _branch_evidence(
         "baseline_mode_order": int(baseline_winner["pair_id"].split("-")[-1]),
         "finer_mode_order": int(finer_winner["pair_id"].split("-")[-1]),
         "ambiguous": False,
-        "disappeared": False,
+        "disappeared": str(baseline_winner["pair_id"]) not in finer_pair_ids,
     }
     return {**body, "evidence_sha256": domain_sha256_v2("comsol_mcp.robust_finalist_branch", body)}
 

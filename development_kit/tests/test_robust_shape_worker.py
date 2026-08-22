@@ -206,6 +206,38 @@ def test_condition_runtime_recovers_receipt_written_before_row(ascii_tmp_path, m
     assert recovery_backend.calls == []
 
 
+def test_condition_runtime_rejects_stale_receipt_with_drifted_condition_parameters(
+    ascii_tmp_path,
+):
+    spec = _condition_runtime_spec()
+    spec["condition_table"]["conditions"] = spec["condition_table"]["conditions"][:1]
+    backend = _ConditionBackend()
+    execute_robust_conditions(
+        spec,
+        ascii_tmp_path,
+        attempt=1,
+        backend=backend,
+        cancel_requested=lambda: False,
+    )
+
+    drifted = _condition_runtime_spec()
+    drifted["condition_table"]["conditions"] = drifted["condition_table"]["conditions"][:1]
+    drifted_condition = drifted["condition_table"]["conditions"][0]
+    drifted_condition["material_state_id"] = (
+        "MR"
+        if drifted_condition["material_state_id"] != "MR"
+        else "OX"
+    )
+    with pytest.raises(ValueError, match="persisted robust condition receipt is invalid"):
+        execute_robust_conditions(
+            drifted,
+            ascii_tmp_path,
+            attempt=1,
+            backend=_ConditionBackend(),
+            cancel_requested=lambda: False,
+        )
+
+
 @pytest.mark.parametrize(
     ("backend", "message"),
     [
