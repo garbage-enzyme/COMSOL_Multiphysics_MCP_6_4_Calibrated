@@ -238,13 +238,17 @@ def frozen_optimizer_baseline_benchmark() -> dict[str, Any]:
     suite = frozen_benchmark_suite()
     spec = next(item for item in suite["benchmarks"] if item["kind"] == "feasible_hidden_target")
     space = optimizer_benchmark_design_space()
-    runs = []
+    runs = [
+        # The grid baseline is fully deterministic and consumes no seed, so it
+        # is evaluated exactly once; repeating it per seed would recount one
+        # identical run as eight supposedly independent seeded results.
+        _evaluate_baseline(
+            "deterministic_grid", DeterministicGridOptimizer(space, levels=5), spec, None
+        ),
+    ]
     for seed in OPTIMIZER_BENCHMARK_SEEDS:
         runs.extend(
             [
-                _evaluate_baseline(
-                    "deterministic_grid", DeterministicGridOptimizer(space, levels=5), spec, seed
-                ),
                 _evaluate_baseline(
                     "deterministic_random",
                     DeterministicRandomOptimizer(space, seed=seed),

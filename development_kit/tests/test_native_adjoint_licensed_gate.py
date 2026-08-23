@@ -189,3 +189,43 @@ def test_runtime_failure_retains_private_diagnostics_and_public_cleanup(
     assert "D:/fixture/model.mph" not in json.dumps(receipt)
     assert "D:/fixture/model.mph" in private["error"]
     assert cleared == [True]
+
+
+def test_cleanup_source_entry_survives_an_unreadable_source(tmp_path):
+    source = tmp_path / "source.mph"
+    source.write_bytes(b"fixture")
+    before = gate._sha(source)
+
+    unchanged = gate._cleanup_source_entry(source, before)
+    assert unchanged == {"source_unchanged": True}
+
+    source.unlink()
+    missing = gate._cleanup_source_entry(source, before)
+    assert missing["source_unchanged"] is False
+    assert "FileNotFoundError" in missing["source_hash_error"]
+
+
+def test_persisted_success_receipt_always_has_its_private_counterpart(tmp_path, monkeypatch):
+    receipt_path = tmp_path / "receipt.json"
+    private_path = tmp_path / "private.json"
+    receipt = {"success": True}
+    private = {"detail": "internal"}
+
+    real_write = gate.atomic_write_json
+
+    def failing_private_write(path, value):
+        if path == private_path:
+            raise OSError("controlled private write failure")
+        real_write(path, value)
+
+    # Private-first ordering: a failed private write must leave no public
+    # success receipt claiming an outcome whose counterpart never landed.
+    monkeypatch.setattr(gate, "atomic_write_json", failing_private_write)
+    with pytest.raises(OSError, match="controlled private write failure"):
+        gate._persist_receipts(receipt_path, receipt, private_path, private)
+    assert not receipt_path.exists()
+
+    monkeypatch.setattr(gate, "atomic_write_json", real_write)
+    gate._persist_receipts(receipt_path, receipt, private_path, private)
+    assert json.loads(receipt_path.read_text(encoding="utf-8")) == {"success": True}
+    assert json.loads(private_path.read_text(encoding="utf-8")) == {"detail": "internal"}

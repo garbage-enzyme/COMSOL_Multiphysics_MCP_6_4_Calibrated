@@ -67,8 +67,7 @@ def _spec(args: argparse.Namespace) -> dict[str, Any]:
     ):
         raise ValueError("native receipt does not bind the exact successful full-vector source")
     gradients = {
-        item["variable_id"]: float(item["accepted_real"])
-        for item in native["derivatives"]
+        item["variable_id"]: float(item["accepted_real"]) for item in native["derivatives"]
     }
     if set(gradients) != set(spec["selected_variables"]):
         raise ValueError("native receipt derivative variables differ from the canonical vector")
@@ -131,7 +130,27 @@ def _set_forward_state(model: Any, values: dict[str, float]) -> None:
 
 def _baseline_values(support: dict[str, Any], variables: list[str]) -> dict[str, float]:
     by_id = {item["variable_id"]: item for item in support["variables"]}
-    return {variable: float(by_id[variable]["baseline"]) for variable in variables}
+    values = {variable: float(by_id[variable]["baseline"]) for variable in variables}
+    invalid = sorted(
+        variable for variable, value in values.items() if not math.isfinite(value) or value == 0.0
+    )
+    if invalid:
+        # A zero baseline zeroes the central-difference denominator and a
+        # non-finite one poisons every downstream derivative silently.
+        raise ValueError(f"finite-difference baselines must be finite and nonzero: {invalid}")
+    return values
+
+
+def _relative_error(predicted: float, observed: float) -> float:
+    """True relative error against the larger gradient magnitude.
+
+    The gradient units are 1/m, so magnitudes far below 1 are physical; a
+    unit floor would silently degrade this into an absolute error check.
+    """
+    scale = max(abs(predicted), abs(observed))
+    if scale == 0.0:
+        return 0.0
+    return abs(predicted - observed) / scale
 
 
 def _dataset_by_tag(model: Any, tag: str) -> Any:
@@ -182,6 +201,7 @@ def _run(spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
     if resource_preflight["admitted"] is not True:
         raise RuntimeError("caller-declared commit ceiling does not admit this run")
     import mph
+
     for path in (spec["base_copy"], spec["configured_copy"], spec["points"], spec["receipt"]):
         path.unlink(missing_ok=True)
     receipt: dict[str, Any] = {
@@ -257,7 +277,7 @@ def _run(spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
                 plus = by_key[(variable, relative_step, "plus")]["objective"]
                 minus = by_key[(variable, relative_step, "minus")]["objective"]
                 observed = (plus - minus) / (2.0 * baseline * relative_step)
-                error = abs(observed - native) / max(abs(observed), abs(native), 1.0)
+                error = _relative_error(native, observed)
                 step_rows.append(
                     {
                         "relative_step": relative_step,
@@ -272,8 +292,7 @@ def _run(spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
                             or (
                                 observed != 0.0
                                 and native != 0.0
-                                and math.copysign(1.0, observed)
-                                == math.copysign(1.0, native)
+                                and math.copysign(1.0, observed) == math.copysign(1.0, native)
                             )
                         ),
                     }

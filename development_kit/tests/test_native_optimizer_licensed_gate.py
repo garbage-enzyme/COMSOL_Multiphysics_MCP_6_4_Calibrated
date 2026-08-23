@@ -75,7 +75,7 @@ def test_generated_solver_receives_caller_iteration_and_move_limits():
     model = _Model()
     study = _Study()
 
-    readback = gate._configure_solver_move_limit(model, study, 0.1, 2)
+    readback = gate._configure_solver_move_limit(model, study, 0.1, 2, method="gcmma")
 
     assert study.created == ["sol"]
     assert readback == {
@@ -86,6 +86,18 @@ def test_generated_solver_receives_caller_iteration_and_move_limits():
         "mmamaxiteractive": "on",
         "mmamaxiter": "2",
     }
+
+
+def test_ipopt_solver_receives_no_mma_specific_properties():
+    model = _Model()
+    study = _Study()
+
+    readback = gate._configure_solver_move_limit(model, study, 0.1, 2, method="ipopt")
+
+    assert study.created == ["sol"]
+    assert readback == {"solution_tag": "sol2", "feature_tag": "o1"}
+    # Nothing MMA-specific may be written to the feature on the ipopt path.
+    assert model.feature.values == {}
 
 
 def test_requested_solver_iterations_are_separate_from_budget_cap():
@@ -177,3 +189,22 @@ def test_mesh_admission_uses_caller_element_and_quality_thresholds():
     too_low = {**accepted, "minimum_quality": 0.099}
     with pytest.raises(ValueError, match="minimum quality"):
         gate._admit_mesh(too_low, max_elements=300_000, minimum_quality=0.1)
+    # A NaN measured statistic compares False against every threshold and
+    # must not admit an invalid mesh.
+    nan_quality = {**accepted, "minimum_quality": float("nan")}
+    with pytest.raises(ValueError, match="not finite"):
+        gate._admit_mesh(nan_quality, max_elements=300_000, minimum_quality=0.1)
+
+
+def test_finalist_parameter_writes_require_declared_meter_units():
+    support = {
+        "variables": [
+            {"variable_id": "patch_length_x", "unit": "m"},
+            {"variable_id": "patch_length_y", "unit": "m"},
+        ]
+    }
+    gate._assert_meter_variables(support, ["patch_length_x", "patch_length_y"])
+
+    support["variables"][1]["unit"] = "1"
+    with pytest.raises(ValueError, match="meter units.*patch_length_y"):
+        gate._assert_meter_variables(support, ["patch_length_x", "patch_length_y"])

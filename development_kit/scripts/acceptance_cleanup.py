@@ -31,8 +31,6 @@ class CleanupRecorder:
     ) -> Any:
         try:
             value = operation()
-            step_passed = bool(passed(value))
-            detail = {"passed": step_passed}
         except Exception as exc:  # cleanup must continue through independent steps
             value = {
                 "success": False,
@@ -44,6 +42,19 @@ class CleanupRecorder:
                 "error_type": type(exc).__name__,
                 "error": str(exc),
             }
+        else:
+            # A predicate bug is not an operation failure: keep the real
+            # operation result exposed while still failing the step.
+            try:
+                step_passed = bool(passed(value))
+                detail = {"passed": step_passed}
+            except Exception as exc:
+                detail = {
+                    "passed": False,
+                    "predicate_error": True,
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                }
         self.steps[name] = detail
         if expose_result:
             self.result[name] = value

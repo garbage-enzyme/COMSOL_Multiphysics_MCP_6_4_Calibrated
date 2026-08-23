@@ -69,6 +69,8 @@ export function createComsolConnection(opts) {
 	let reconnectTimer = null;
 	let budgetExhausted = false;
 	let connectedAt = 0;
+	let syncInFlight = false;
+	let resyncPending = false;
 
 	const log = (level, ...a) => {
 		try { logger?.[level]?.(...a) } catch {}
@@ -140,8 +142,7 @@ export function createComsolConnection(opts) {
 			// serialized on the queue; wrapping it would deadlock the queue.
 			void syncTools().catch(() => {});
 			return;
-		}
-		if (msg.method === "notifications/message") {
+		}		if (msg.method === "notifications/message") {
 			log("info", `server message ${msg.params?.level ?? "info"}: ${msg.params?.data ?? ""}`);
 		}
 	}
@@ -257,9 +258,25 @@ export function createComsolConnection(opts) {
 	}
 
 	async function syncTools() {
-		const tools = await listTools();
-		await onTools(tools);
-		if (Date.now() - connectedAt > reconnect.maxDelayMs) reconnectAttempts = 0;
+		// Coalesce overlapping syncs: the rpc queue serializes individual
+		// tools/list calls but cannot order two interleaved pagination runs,
+		// so a notification arriving mid-sync schedules exactly one follow-up
+		// pass after the in-flight sync completes instead of racing it.
+		if (syncInFlight) {
+			resyncPending = true;
+			return;
+		}
+		syncInFlight = true;
+		try {
+			do {
+				resyncPending = false;
+				const tools = await listTools();
+				await onTools(tools);
+				if (Date.now() - connectedAt > reconnect.maxDelayMs) reconnectAttempts = 0;
+			} while (resyncPending && !disposed);
+		} finally {
+			syncInFlight = false;
+		}
 	}
 
 	async function connectOnce() {

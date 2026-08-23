@@ -154,6 +154,34 @@ test("server tools/list_changed notification triggers a re-sync", { timeout: 100
 	} finally { await s.close(); }
 });
 
+test("tool syncs coalesce instead of overlapping mid-pagination", { timeout: 20000 }, async () => {
+	// One tool per page stretches the initial sync across the fixture's
+	// 20ms list_changed notification; a slow async onTools would let two
+	// uncoalesced syncs apply snapshots concurrently.
+	const s = spawnFakeServer({ FAKE_MODE: "notify-list-changed", FAKE_PAGE_SIZE: "1" });
+	try {
+		let active = 0;
+		let maxActive = 0;
+		const applied = [];
+		const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
+		const conn = makeConnection(s, {
+			onTools: async (tools) => {
+				active += 1;
+				if (active > maxActive) maxActive = active;
+				applied.push(tools.length);
+				await sleepMs(300);
+				active -= 1;
+			},
+		});
+		await conn.connect();
+		await sleepMs(1200); // initial sync plus the coalesced follow-up pass
+		conn.dispose();
+		assert.equal(maxActive, 1);
+		assert.ok(applied.length >= 2, `expected a coalesced re-sync, applied=${JSON.stringify(applied)}`);
+		assert.ok(applied.every((n) => n === 7), `every snapshot must be complete: ${JSON.stringify(applied)}`);
+	} finally { await s.close(); }
+});
+
 // ---- 取消不可确认（cancel never confirmed）----
 
 test("cancel without terminal confirmation settles killed at the deadline", { timeout: 10000 }, async () => {
