@@ -174,3 +174,15 @@ def test_current_policy_requires_distinct_meshes_and_positive_fidelity_tolerance
     mutation(value)
     with pytest.raises(ValueError):
         normalize_robust_finalist_validation_policy(value)
+
+
+def test_mesh_reference_bound_applies_to_the_stripped_text():
+    # Caller-added indentation must not push an otherwise valid bounded
+    # reference over the limit; the canonical stripped form is what counts.
+    value = _policy()
+    padded = " " * 40 + "1600[nm]" + " " * 40
+    assert len(padded) > 64
+    value["mesh_convergence"]["baseline_mesh_reference_value"] = padded
+    normalized = normalize_robust_finalist_validation_policy(value)
+    assert normalized["mesh_convergence"]["baseline_mesh_reference_value"] == "1600[nm]"
+    assert normalized["mesh_convergence"]["finer_mesh_reference_value"] == "1200[nm]"

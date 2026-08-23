@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import math
 
 import pytest
 
@@ -112,8 +113,8 @@ class _Backend:
                 "patch_length_x": "856[nm]",
                 "patch_length_y": "800[nm]",
             },
-            "patch_size_before": ["856e-9", "800e-9", "100e-9"],
-            "patch_size_readback": ["856e-9", "800e-9", "100e-9"],
+            "patch_size_before": [856e-9, 800e-9, 100e-9],
+            "patch_size_readback": [856e-9, 800e-9, 100e-9],
             "deformed_geometry": {
                 "physics_tag": "dg_a71",
                 "physics_type": "DeformedGeometry",
@@ -151,3 +152,53 @@ def test_control_preparation_fails_closed_when_rollback_readback_differs():
     backend = _Backend(failure="restore")
     with pytest.raises(RuntimeError, match="rollback was uncertain"):
         prepare_robust_shape_controls(backend, manifest, audit, support, policy)
+
+
+class _DriftBackend(_Backend):
+    """Backend that re-derives sizes with last-bit float noise."""
+
+    def prepare_controls(self, support):
+        result = super().prepare_controls(support)
+        before = [float(value) for value in result["patch_size_before"]]
+        readback = list(before)
+        readback[0] = math.nextafter(readback[0], math.inf)
+        result["patch_size_before"] = before
+        result["patch_size_readback"] = readback
+        return result
+
+
+class _ChangedBackend(_Backend):
+    """Backend whose readback reports a materially different patch size."""
+
+    def prepare_controls(self, support):
+        result = super().prepare_controls(support)
+        result["patch_size_readback"] = [
+            float(value) * 1.001 for value in result["patch_size_before"]
+        ]
+        return result
+
+
+class _TextualBackend(_Backend):
+    """Backend that echoes a size as a numeric string instead of a number."""
+
+    def prepare_controls(self, support):
+        result = super().prepare_controls(support)
+        result["patch_size_readback"] = ["856e-9", 800e-9, 100e-9]
+        return result
+
+
+def test_control_readback_tolerates_last_bit_geometry_drift():
+    manifest, audit, support, policy = _contracts()
+    receipt = prepare_robust_shape_controls(_DriftBackend(), manifest, audit, support, policy)
+    controls = receipt["controls"]
+    assert controls["patch_size_readback"][0] == pytest.approx(
+        controls["patch_size_before"][0], rel=1e-12
+    )
+    assert len(receipt["receipt_fingerprint"]) == 64
+
+
+@pytest.mark.parametrize("backend_type", [_ChangedBackend, _TextualBackend])
+def test_control_readback_rejects_material_drift_or_non_numeric_sizes(backend_type):
+    manifest, audit, support, policy = _contracts()
+    with pytest.raises(ValueError, match="baseline geometry changed"):
+        prepare_robust_shape_controls(backend_type(), manifest, audit, support, policy)

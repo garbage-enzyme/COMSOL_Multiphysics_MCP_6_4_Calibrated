@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+import threading
 
 import pytest
 
+from comsol_mcp.research import journal as journal_module
 from comsol_mcp.research.decisions import normalize_decision_record
 from comsol_mcp.research.journal import (
     append_research_journal_record,
@@ -146,3 +148,83 @@ def test_unknown_kind_and_payload_schema_are_rejected(tmp_path):
             _candidate_payload(),
             expected_previous_record_fingerprint=None,
         )
+
+
+@pytest.mark.parametrize("bad_kind", [["candidate"], {"kind": 1}, 42, None])
+def test_unhashable_or_non_string_kinds_raise_value_errors_not_type_errors(tmp_path, bad_kind):
+    # kind is an untrusted JSON leaf; membership testing must never leak a
+    # TypeError from unhashable values.
+    with pytest.raises(ValueError, match="kind is unsupported"):
+        append_research_journal_record(
+            tmp_path / "research.jsonl",
+            bad_kind,
+            _candidate_payload(),
+            expected_previous_record_fingerprint=None,
+        )
+
+
+def test_concurrent_appends_serialize_and_preserve_the_hash_chain(tmp_path):
+    # Recover -> stale-check -> append is one critical section: with both
+    # writers claiming the same tail exactly one commits and the loser must
+    # observe a stale predecessor instead of corrupting or forking the chain.
+    path = tmp_path / "research.jsonl"
+    first = append_research_journal_record(
+        path,
+        "candidate",
+        _candidate_payload(),
+        expected_previous_record_fingerprint=None,
+    )
+    results: list[str] = []
+    errors: list[str] = []
+
+    def worker(kind: str, payload_factory) -> None:
+        try:
+            record = append_research_journal_record(
+                path,
+                kind,
+                payload_factory(),
+                expected_previous_record_fingerprint=first["record_fingerprint"],
+            )
+            results.append(record["record_fingerprint"])
+        except ValueError as error:
+            errors.append(str(error))
+
+    threads = [
+        threading.Thread(target=worker, args=("decision", _decision_payload)),
+        threading.Thread(target=worker, args=("candidate", _candidate_payload)),
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert len(results) == 1
+    assert len(errors) == 1
+    assert "predecessor is stale" in errors[0]
+    recovered = recover_research_journal(path)
+    assert recovered["record_count"] == 2
+    assert recovered["last_record_fingerprint"] == results[0]
+
+
+def test_append_runs_recovery_inside_the_exclusive_lock(tmp_path, monkeypatch):
+    events: list[str] = []
+
+    class RecordingLock(journal_module.JobLock):
+        def __enter__(self):
+            events.append("enter")
+            return super().__enter__()
+
+        def __exit__(self, *args: object):
+            events.append("exit")
+            return super().__exit__(*args)
+
+    monkeypatch.setattr(journal_module, "JobLock", RecordingLock)
+    append_research_journal_record(
+        tmp_path / "research.jsonl",
+        "candidate",
+        _candidate_payload(),
+        expected_previous_record_fingerprint=None,
+    )
+
+    assert events[0] == "enter"
+    assert events[-1] == "exit"

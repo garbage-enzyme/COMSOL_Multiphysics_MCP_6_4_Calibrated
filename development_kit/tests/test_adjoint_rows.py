@@ -56,6 +56,36 @@ def test_float_sequence_is_rejected_as_non_contiguous(ascii_tmp_path):
         read_adjoint_rows(path, job_fingerprint=JOB)
 
 
+@pytest.mark.parametrize("bad_epoch", [True, False, "123", [1.0], {"t": 1.0}])
+def test_created_at_epoch_type_is_validated_before_float_coercion(ascii_tmp_path, bad_epoch):
+    # Bools and numeric strings silently passed float() coercion and skipped
+    # the declared float | None contract; they must fail before normalization.
+    path = ascii_tmp_path / "epoch_rows.jsonl"
+    with pytest.raises(ValueError, match="created_at_epoch must be a finite number"):
+        append_adjoint_row(
+            path,
+            job_fingerprint=JOB,
+            attempt=1,
+            kind="iteration",
+            payload=_iteration(),
+            created_at_epoch=bad_epoch,
+        )
+    assert not path.exists()
+
+
+def test_created_at_epoch_accepts_declared_numeric_contract(ascii_tmp_path):
+    path = ascii_tmp_path / "epoch_ok_rows.jsonl"
+    row = append_adjoint_row(
+        path,
+        job_fingerprint=JOB,
+        attempt=1,
+        kind="iteration",
+        payload=_iteration(),
+        created_at_epoch=123,
+    )
+    assert row["created_at_epoch"] == 123.0
+
+
 def test_partial_final_json_is_truncated_and_next_append_continues_chain(ascii_tmp_path):
     path = ascii_tmp_path / "partial_rows.jsonl"
     first = append_adjoint_row(

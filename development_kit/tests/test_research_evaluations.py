@@ -60,6 +60,16 @@ def test_started_record_rejects_terminal_fields_and_completed_requires_response(
         normalize_evaluation_record(value)
 
 
+def test_completion_cannot_precede_its_start():
+    # A terminal record whose completed_at predates started_at is corrupt
+    # evidence; the ordering contract must reject it explicitly.
+    value = _evaluation("completed")
+    value["started_at"] = "2026-08-06T00:00:01Z"
+    value["completed_at"] = "2026-08-06T00:00:00Z"
+    with pytest.raises(ValueError, match="cannot precede its start"):
+        normalize_evaluation_record(value)
+
+
 def test_attempt_and_evidence_contracts_reject_boolean_and_duplicates():
     value = _evaluation("completed")
     value["attempt"] = True

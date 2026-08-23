@@ -287,6 +287,11 @@ def normalize_convergence_campaign_spec(value: object) -> dict[str, Any]:
     if minimum_completed < policy["minimum_level_count"]:
         raise ValueError("stop policy minimum cannot precede the convergence policy minimum")
     total_points = sum(item["spectral_job"]["maximum_points"] for item in normalized_levels)
+    if total_points > MAX_CONVERGENCE_CAMPAIGN_POINTS:
+        raise ValueError(
+            "declared level point budgets sum above the campaign cap "
+            f"({total_points} > {MAX_CONVERGENCE_CAMPAIGN_POINTS})"
+        )
     maximum_total_points = _integer(
         raw["maximum_total_points"],
         "maximum_total_points",

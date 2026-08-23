@@ -145,6 +145,25 @@ def build_branch_continuation_campaign_progress(
                 "continuation_states": None,
                 "continuation_plan": None,
             }
+        if total <= 1:
+            # A one-state campaign has no declared successor to schedule; its
+            # accepted spectrum already completes the campaign truthfully.
+            return {
+                "action": "complete",
+                "scientific_disposition": last["scientific_disposition"],
+                "reason_code": "initial_state_spectrum_" + last["reason_code"],
+                "declared_cap_reached": False,
+                "completed_state_count": completed,
+                "declared_state_count": total,
+                "declared_expansion_count": spec["continuation_policy"]["max_expansions"],
+                "observed_expansion_count": observed_expansion_count,
+                "remaining_expansion_count": max(
+                    0,
+                    spec["continuation_policy"]["max_expansions"] - observed_expansion_count,
+                ),
+                "continuation_states": None,
+                "continuation_plan": None,
+            }
         return {
             "action": "schedule_next_state",
             "next_state": spec["states"][1],

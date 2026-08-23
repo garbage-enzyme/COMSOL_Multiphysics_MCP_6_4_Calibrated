@@ -12,6 +12,7 @@ from comsol_mcp.durable import (
     fsync_directory,
     read_complete_jsonl,
 )
+from comsol_mcp.jobs.store import JobLock
 
 from .decisions import DECISION_RECORD_SCHEMA_NAME
 from .evaluations import EVALUATION_RECORD_SCHEMA_NAME
@@ -31,11 +32,11 @@ _KINDS = {
 
 
 def _validate_payload(kind: object, payload: object) -> tuple[str, dict[str, Any]]:
-    if kind not in _KINDS:
+    if not isinstance(kind, str) or kind not in _KINDS:
         raise ValueError("research journal kind is unsupported")
     if not isinstance(payload, dict):
         raise ValueError("research journal payload must be an object")
-    schema_name, fingerprint_field = _KINDS[str(kind)]
+    schema_name, fingerprint_field = _KINDS[kind]
     if payload.get("schema_name") != schema_name:
         raise ValueError("research journal payload schema does not match its kind")
     fingerprint = payload.get(fingerprint_field)
@@ -129,6 +130,26 @@ def append_research_journal_record(
     expected_previous_record_fingerprint: str | None,
 ) -> dict[str, Any]:
     """Append one fsync'd record only when the caller owns the exact journal tail."""
+    candidate = Path(path)
+    # Recover -> stale-check -> append is atomic here: an exclusive journal
+    # lock closes the window between tail verification and the append, so
+    # correctness no longer depends on a caller-held external lock.
+    with JobLock(candidate.with_name(candidate.name + ".append.lock")):
+        return _append_research_journal_record_locked(
+            path,
+            kind,
+            payload,
+            expected_previous_record_fingerprint=expected_previous_record_fingerprint,
+        )
+
+
+def _append_research_journal_record_locked(
+    path: str | Path,
+    kind: str,
+    payload: object,
+    *,
+    expected_previous_record_fingerprint: str | None,
+) -> dict[str, Any]:
     recovered = recover_research_journal(path, repair_partial_tail=True)
     previous = recovered["last_record_fingerprint"]
     if expected_previous_record_fingerprint != previous:

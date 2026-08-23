@@ -47,6 +47,23 @@ def test_summary_preserves_losses_and_separates_optional_threshold():
     assert strict["maximum_total_loss"] == 0.4
 
 
+def test_mean_total_loss_overflow_is_rejected_as_a_clean_value_error():
+    # Every input loss is finite, but their mean can still overflow; the
+    # summary must fail closed instead of embedding a non-finite value in the
+    # fingerprinted body.
+    matrix = _matrix()
+    rows = [
+        {
+            "point_id": point["point_id"],
+            "total_loss": 1.0e308,
+            "evidence_fingerprint": f"{index + 1:064x}",
+        }
+        for index, point in enumerate(matrix["points"])
+    ]
+    with pytest.raises(ValueError, match="mean total loss"):
+        summarize_robustness(matrix, rows, maximum_total_loss=None)
+
+
 def test_axis_matrix_rejects_candidate_without_requested_margin():
     with pytest.raises(ValueError, match="margin"):
         axis_perturbation_matrix(

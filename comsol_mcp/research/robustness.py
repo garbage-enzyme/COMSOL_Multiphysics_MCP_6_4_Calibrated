@@ -125,13 +125,19 @@ def summarize_robustness(
             raise ValueError("maximum_total_loss must be finite and nonnegative")
         threshold = float(maximum_total_loss)
     values = [losses[point_id] for point_id in expected]
+    try:
+        mean_total_loss = fmean(values)
+    except OverflowError as error:
+        raise ValueError("robustness mean total loss overflows the finite range") from error
+    if not math.isfinite(mean_total_loss):
+        raise ValueError("robustness mean total loss must be finite")
     body = {
         "schema_name": "research.robustness.summary",
         "schema_version": "1.0.0",
         "matrix_fingerprint": matrix["matrix_fingerprint"],
         "evidence_fingerprints": dict(sorted(evidence.items())),
         "minimum_total_loss": min(values),
-        "mean_total_loss": fmean(values),
+        "mean_total_loss": mean_total_loss,
         "maximum_total_loss": max(values),
         "required_maximum_total_loss": threshold,
         "threshold_outcome": "not_declared"

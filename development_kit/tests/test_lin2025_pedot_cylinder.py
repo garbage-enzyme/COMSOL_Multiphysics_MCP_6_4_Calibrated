@@ -106,6 +106,23 @@ def test_binding_rejects_wrong_adapter_or_variable_order():
         compile_lin2025_pedot_cylinder_binding(fixture, support, {"adapter_id": "wrong"})
 
 
+@pytest.mark.parametrize("junk", [42, "pedot_cylinder_radius_x", None, ["x"]])
+def test_binding_rejects_non_mapping_derivative_variables_as_value_errors(junk):
+    # Unlike the normalize path, the binding comprehension must type-check each
+    # variable row before calling .get so untrusted JSON leaves raise the
+    # intended ValueError instead of an AttributeError.
+    fixture = normalize_lin2025_pedot_cylinder_fixture(_fixture())
+    support = {
+        "adapter_id": "lin2025_pedot_cylinder_v1",
+        "source_identity": fixture["source_identity"]["source_sha256"],
+        "support_fingerprint": "c" * 64,
+        "variables": [{"variable_id": "pedot_cylinder_radius_x"}, junk],
+    }
+    policy = {"adapter_id": "lin2025_pedot_cylinder_v1", "policy_fingerprint": "d" * 64}
+    with pytest.raises(ValueError, match="ordered cylinder"):
+        compile_lin2025_pedot_cylinder_binding(fixture, support, policy)
+
+
 def test_tree_readback_freezes_domains_z_bounds_state_and_no_gold():
     fixture = _fixture()
     readback = {
@@ -131,7 +148,24 @@ def test_shape_support_requires_explicit_live_selections():
         "domain_count": 6,
         "boundary_count": 32,
         "exterior_boundaries": [
-            1, 2, 3, 4, 5, 7, 8, 10, 11, 13, 14, 15, 16, 17, 29, 30, 31, 32,
+            1,
+            2,
+            3,
+            4,
+            5,
+            7,
+            8,
+            10,
+            11,
+            13,
+            14,
+            15,
+            16,
+            17,
+            29,
+            30,
+            31,
+            32,
         ],
         "pedot_boundaries": [18, 19, 20, 23, 25, 27],
         "pedot_lateral_boundaries": [18, 19, 25, 27],
@@ -156,7 +190,24 @@ def test_shape_support_rejects_nonfinite_radius_or_center():
         "domain_count": 6,
         "boundary_count": 32,
         "exterior_boundaries": [
-            1, 2, 3, 4, 5, 7, 8, 10, 11, 13, 14, 15, 16, 17, 29, 30, 31, 32,
+            1,
+            2,
+            3,
+            4,
+            5,
+            7,
+            8,
+            10,
+            11,
+            13,
+            14,
+            15,
+            16,
+            17,
+            29,
+            30,
+            31,
+            32,
         ],
         "pedot_boundaries": [18, 19, 20, 23, 25, 27],
         "pedot_lateral_boundaries": [18, 19, 25, 27],
@@ -201,7 +252,24 @@ def test_shape_support_rejects_implicit_or_overlapping_selections():
         "domain_count": 6,
         "boundary_count": 32,
         "exterior_boundaries": [
-            1, 2, 3, 4, 5, 7, 8, 10, 11, 13, 14, 15, 16, 17, 18, 29, 30, 31,
+            1,
+            2,
+            3,
+            4,
+            5,
+            7,
+            8,
+            10,
+            11,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            29,
+            30,
+            31,
         ],
         "pedot_boundaries": [18, 19, 20, 23, 25, 27],
         "pedot_lateral_boundaries": [18, 19, 25, 27],
@@ -213,12 +281,15 @@ def test_shape_support_rejects_implicit_or_overlapping_selections():
         compile_lin2025_pedot_shape_support(fixture, tree)
 
 
-@pytest.mark.parametrize("mutate", [
-    lambda value: value["domain_map"].update(pedot_cylinder=3),
-    lambda value: value["domain_z_bounds_um"].update({"5": [0.1, 0.2]}),
-    lambda value: value["material_tags"].update(pedot_cylinder="air"),
-    lambda value: value["feature_tags"].append("mat_au"),
-])
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda value: value["domain_map"].update(pedot_cylinder=3),
+        lambda value: value["domain_z_bounds_um"].update({"5": [0.1, 0.2]}),
+        lambda value: value["material_tags"].update(pedot_cylinder="air"),
+        lambda value: value["feature_tags"].append("mat_au"),
+    ],
+)
 def test_tree_readback_rejects_physical_identity_drift(mutate):
     fixture = _fixture()
     value = {

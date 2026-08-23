@@ -150,7 +150,29 @@ def _control_readback(value: object, binding: Mapping[str, Any]) -> dict[str, An
         raise ValueError("trusted robust shape control parameters changed")
     before = raw["patch_size_before"]
     readback = raw["patch_size_readback"]
-    if not isinstance(before, list) or len(before) != 3 or readback != before:
+
+    def _geometry_vector(value: object) -> list[float] | None:
+        if not isinstance(value, list) or len(value) != 3:
+            return None
+        if any(
+            isinstance(item, bool)
+            or not isinstance(item, (int, float))
+            or not math.isfinite(float(item))
+            for item in value
+        ):
+            return None
+        return [float(item) for item in value]
+
+    before_sizes = _geometry_vector(before)
+    readback_sizes = _geometry_vector(readback)
+    if (
+        before_sizes is None
+        or readback_sizes is None
+        or any(
+            not math.isclose(observed, expected, rel_tol=1e-12, abs_tol=1e-15)
+            for observed, expected in zip(readback_sizes, before_sizes, strict=True)
+        )
+    ):
         raise ValueError(
             "trusted robust shape baseline geometry changed during control preparation"
         )

@@ -141,8 +141,10 @@ def compile_lin2025_pedot_cylinder_binding(
     if derivative_support.get("source_identity") != normalized["source_identity"]["source_sha256"]:
         raise ValueError("Lin2025 derivative source identity differs from fixture")
     variables = derivative_support.get("variables")
-    if not isinstance(variables, list) or [item.get("variable_id") for item in variables] != list(
-        _VARIABLES
+    if (
+        not isinstance(variables, list)
+        or any(not isinstance(item, Mapping) for item in variables)
+        or [item.get("variable_id") for item in variables] != list(_VARIABLES)
     ):
         raise ValueError("Lin2025 derivative variables must be ordered cylinder x/y radii")
     body = {

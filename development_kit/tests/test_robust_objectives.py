@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import math
 
 import pytest
 
@@ -119,6 +120,39 @@ def test_pair_weights_must_match_and_configuration_fingerprint_is_immutable():
     with pytest.raises(ValueError, match="fingerprint"):
         normalize_robust_objective_configuration(tampered)
     assert len(receipt["receipt_fingerprint"]) == 64
+
+
+def test_numerically_equal_paired_weights_with_different_float_forms_are_accepted():
+    # 0.1 + 0.2 and 0.3 differ only by float representation noise; paired
+    # conditions using them must not be spuriously rejected.
+    table = _table()
+    table["conditions"][0]["weight"] = 0.1 + 0.2
+    table["conditions"][1]["weight"] = 0.3
+    receipt = evaluate_robust_absolute_contrast(_configuration(), table, _observations())
+    assert receipt["pair_count"] == 12
+
+
+def test_large_but_finite_pair_values_do_not_overflow_the_smooth_contrast():
+    # delta * delta overflows to infinity at |delta| ~ 1e200 even though both
+    # observations are finite; math.hypot keeps the contrast finite instead.
+    observations = _observations()
+    observations[0]["value"] = 5.0e199
+    observations[1]["value"] = 0.0
+    receipt = evaluate_robust_absolute_contrast(_configuration(), _table(), observations)
+    pair = max(receipt["pairs"], key=lambda item: item["smooth_absolute_contrast"])
+    assert math.isfinite(pair["smooth_absolute_contrast"])
+    assert pair["smooth_absolute_contrast"] == pytest.approx(5.0e199, rel=1e-12)
+    assert pair["smooth_absolute_derivative"] == pytest.approx(1.0, abs=1e-12)
+    assert math.isfinite(receipt["minimum_smooth_absolute_contrast"])
+    assert math.isfinite(receipt["smooth_worst_case_absolute_contrast"])
+
+
+def test_pair_difference_overflow_is_rejected_instead_of_embedded_as_infinity():
+    observations = _observations()
+    observations[0]["value"] = 1.0e308
+    observations[1]["value"] = -1.0e308
+    with pytest.raises(ValueError, match="must stay finite"):
+        evaluate_robust_absolute_contrast(_configuration(), _table(), observations)
 
 
 def test_aggregate_gradient_matches_independent_objective_finite_difference():

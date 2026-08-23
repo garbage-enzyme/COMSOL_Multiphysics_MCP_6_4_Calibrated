@@ -70,6 +70,13 @@ def test_condition_table_rejects_unhashable_objective_role_as_a_value_error():
         normalize_optimization_condition_table(value)
 
 
+def test_condition_table_rejects_unhashable_completeness_mode_as_a_value_error():
+    value = _table()
+    value["completeness"]["mode"] = ["cartesian_complete"]
+    with pytest.raises(ValueError, match="completeness.mode is unsupported"):
+        normalize_optimization_condition_table(value)
+
+
 def test_configurable_24_condition_ox_mr_table_is_canonical_and_immutable():
     first = normalize_optimization_condition_table(_table())
     assert len(first["conditions"]) == 24

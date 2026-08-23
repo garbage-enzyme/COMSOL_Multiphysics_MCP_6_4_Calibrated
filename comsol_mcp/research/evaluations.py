@@ -57,9 +57,12 @@ def normalize_evaluation_record(value: object) -> dict[str, Any]:
     status = raw["status"]
     if status not in _STATUSES:
         raise ValueError("evaluation status is unsupported")
+    started_at = _timestamp(raw["started_at"], "started_at")
     completed_at = (
         None if raw["completed_at"] is None else _timestamp(raw["completed_at"], "completed_at")
     )
+    if completed_at is not None and completed_at < started_at:
+        raise ValueError("evaluation completion cannot precede its start")
     failure_reason = _optional_text(raw["failure_reason"], "failure_reason", maximum=2048)
     response = _bounded_json(raw["response"], "response", 1024 * 1024)
     if status == "started" and (
@@ -95,7 +98,7 @@ def normalize_evaluation_record(value: object) -> dict[str, Any]:
         "status": status,
         "fidelity": _identifier(raw["fidelity"], "fidelity"),
         "evaluator_identity": _fingerprint(raw["evaluator_identity"], "evaluator_identity"),
-        "started_at": _timestamp(raw["started_at"], "started_at"),
+        "started_at": started_at,
         "completed_at": completed_at,
         "response": response,
         "evidence_fingerprints": sorted(normalized_evidence),

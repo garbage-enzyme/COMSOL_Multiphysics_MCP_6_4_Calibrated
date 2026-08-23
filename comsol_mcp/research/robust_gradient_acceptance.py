@@ -110,7 +110,11 @@ def assess_robust_gradient_acceptance(
     for row in rows:
         if not isinstance(row, dict) or not isinstance(row.get("steps"), list):
             raise ValueError("component gradient row structure is invalid")
-        row_steps = [item.get("relative_step") for item in row["steps"]]
+        row_steps = []
+        for step in row["steps"]:
+            if not isinstance(step, dict):
+                raise ValueError("component gradient step structure is invalid")
+            row_steps.append(_finite(step.get("relative_step"), "relative_step", positive=True))
         step_match = step_match and row_steps == required_steps
         selected = row.get("selected")
         if not isinstance(selected, dict):

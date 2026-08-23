@@ -15,11 +15,13 @@ _COMPONENTS = ("xx", "yy", "zz")
 _TIME_CONVENTIONS = {"exp_positive_i_omega_t", "exp_negative_i_omega_t"}
 _INTERPOLATION_METHODS = {"linear", "piecewise_cubic"}
 
+_MISSING = object()
+
 
 def normalize_optical_property_mapping(value: object) -> dict[str, Any]:
     """Normalize a diagonal tensor mapping without reading private source bytes."""
     bounded = _bounded_json(value, "optical property mapping", 128 * 1024)
-    supplied = None
+    supplied: Any = _MISSING
     if isinstance(bounded, dict) and "mapping_fingerprint" in bounded:
         supplied = bounded.pop("mapping_fingerprint")
     raw = _object(
@@ -61,7 +63,7 @@ def normalize_optical_property_mapping(value: object) -> dict[str, Any]:
     if maximum <= minimum:
         raise ValueError("optical property wavelength range must be increasing")
     interpolation = independent["interpolation_method"]
-    if interpolation not in _INTERPOLATION_METHODS:
+    if not isinstance(interpolation, str) or interpolation not in _INTERPOLATION_METHODS:
         raise ValueError("optical property interpolation method is unsupported")
     if independent["extrapolation"] != "forbidden":
         raise ValueError("optical property extrapolation must be forbidden")
@@ -105,7 +107,7 @@ def normalize_optical_property_mapping(value: object) -> dict[str, Any]:
             }
         )
     time_convention = raw["time_harmonic_convention"]
-    if time_convention not in _TIME_CONVENTIONS:
+    if not isinstance(time_convention, str) or time_convention not in _TIME_CONVENTIONS:
         raise ValueError("optical property time-harmonic convention is unsupported")
     body = {
         "schema_name": OPTICAL_PROPERTY_MAPPING_SCHEMA_NAME,
@@ -135,8 +137,10 @@ def normalize_optical_property_mapping(value: object) -> dict[str, Any]:
         "time_harmonic_convention": time_convention,
     }
     body["mapping_fingerprint"] = domain_sha256_v2(OPTICAL_PROPERTY_MAPPING_SCHEMA_NAME, body)
-    if supplied is not None and supplied != body["mapping_fingerprint"]:
-        raise ValueError("optical property mapping fingerprint is invalid")
+    if supplied is not _MISSING:
+        verified = _sha256(supplied, "mapping_fingerprint")
+        if verified != body["mapping_fingerprint"]:
+            raise ValueError("optical property mapping fingerprint is invalid")
     return body
 
 

@@ -109,6 +109,38 @@ def test_mapping_fingerprint_rejects_column_or_range_tampering():
         normalize_optical_property_mapping(tampered)
 
 
+def test_mapping_rejects_explicit_null_or_malformed_fingerprint():
+    # An explicit JSON null must not masquerade as an absent field and skip
+    # fingerprint verification.
+    value = _mapping()
+    value["mapping_fingerprint"] = None
+    with pytest.raises(ValueError, match="SHA-256 hex digest"):
+        normalize_optical_property_mapping(value)
+    value = _mapping()
+    value["mapping_fingerprint"] = "not-a-fingerprint"
+    with pytest.raises(ValueError, match="SHA-256 hex digest"):
+        normalize_optical_property_mapping(value)
+    value = _mapping()
+    value["mapping_fingerprint"] = "b" * 64
+    with pytest.raises(ValueError, match="fingerprint is invalid"):
+        normalize_optical_property_mapping(value)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda value: value["independent_variable"].update(interpolation_method={"a": 1}),
+        lambda value: value["independent_variable"].update(interpolation_method=["linear"]),
+        lambda value: value.update(time_harmonic_convention=["exp_positive_i_omega_t"]),
+    ],
+)
+def test_mapping_membership_leaves_raise_value_errors_not_type_errors(mutation):
+    value = _mapping()
+    mutation(value)
+    with pytest.raises(ValueError):
+        normalize_optical_property_mapping(value)
+
+
 def _tensor_rows() -> dict:
     return {
         "schema_name": "comsol_mcp.robust_material_tensor_rows",
@@ -185,9 +217,7 @@ def _condition_table() -> dict:
 
 def test_tensor_rows_bind_state_sources_temperature_and_active_wavelengths():
     table = normalize_optimization_condition_table(_condition_table())
-    binding = bind_robust_material_tensor_rows(
-        _tensor_rows(), table, expected_temperature_k=300.0
-    )
+    binding = bind_robust_material_tensor_rows(_tensor_rows(), table, expected_temperature_k=300.0)
     assert binding["state_ids"] == ["OX", "MR"]
     assert len(binding["binding_fingerprint"]) == 64
 

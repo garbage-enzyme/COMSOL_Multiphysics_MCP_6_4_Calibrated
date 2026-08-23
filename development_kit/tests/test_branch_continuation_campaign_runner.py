@@ -202,9 +202,7 @@ def test_complete_state_artifacts_close_executor_to_row_gap_without_reexecution(
     assert calls.count("angle-0") == 1
 
 
-def test_transient_append_failure_quarantines_and_notifies_fault_hook(
-    tmp_path, monkeypatch
-):
+def test_transient_append_failure_quarantines_and_notifies_fault_hook(tmp_path, monkeypatch):
     spec = _spec(tmp_path)
     root = tmp_path / "campaign-quarantine"
     calls = []
@@ -307,3 +305,53 @@ def test_invalid_evidence_does_not_claim_the_declared_cap(tmp_path):
     )
 
     assert progress["declared_cap_reached"] is False
+
+
+def _single_state_progress_spec() -> dict:
+    # Minimal spec shape as consumed directly by the progress recomputation;
+    # the exported function must stay total over its documented inputs even
+    # though the product normalizer currently declares at least two states.
+    return {
+        "campaign_id": "single-angle-campaign",
+        "spec_fingerprint": "e" * 64,
+        "states": [{"state_id": "angle-0", "ordinal": 0}],
+        "continuation_policy": {"max_expansions": 3},
+    }
+
+
+def test_single_state_accepted_campaign_completes_without_index_error():
+    progress = build_branch_continuation_campaign_progress(
+        _single_state_progress_spec(),
+        [
+            {
+                "scientific_disposition": "accepted",
+                "reason_code": "spectrum_verified",
+                "expansion_count": 0,
+            }
+        ],
+        artifact_root=Path("unused"),
+    )
+
+    assert progress["action"] == "complete"
+    assert progress["scientific_disposition"] == "accepted"
+    assert progress["reason_code"] == "initial_state_spectrum_spectrum_verified"
+    assert progress["completed_state_count"] == 1
+    assert progress["declared_state_count"] == 1
+    assert progress["declared_cap_reached"] is False
+
+
+def test_single_state_unresolved_campaign_still_reports_declared_cap():
+    progress = build_branch_continuation_campaign_progress(
+        _single_state_progress_spec(),
+        [
+            {
+                "scientific_disposition": "unresolved_at_declared_cap",
+                "reason_code": "window_expansion_count_cap_reached",
+                "expansion_count": 1,
+            }
+        ],
+        artifact_root=Path("unused"),
+    )
+
+    assert progress["action"] == "complete"
+    assert progress["declared_cap_reached"] is True

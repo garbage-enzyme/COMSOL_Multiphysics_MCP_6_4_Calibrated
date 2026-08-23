@@ -154,7 +154,7 @@ def _validate_completeness(rows: list[dict[str, Any]], completeness: object) -> 
         supplied_cardinalities = completeness.pop("dimension_cardinalities")
     raw = _object(completeness, {"mode", "sparse_justification"}, "completeness")
     mode = raw["mode"]
-    if mode not in _COMPLETENESS_MODES:
+    if not isinstance(mode, str) or mode not in _COMPLETENESS_MODES:
         raise ValueError("completeness.mode is unsupported")
     coordinates = [_coordinate(row) for row in rows]
     if len(coordinates) != len(set(coordinates)):

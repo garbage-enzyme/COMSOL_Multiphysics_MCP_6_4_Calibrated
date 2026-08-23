@@ -264,3 +264,26 @@ def test_robust_path_rejects_negative_directional_relative_error():
     )
     with pytest.raises(ValueError, match="must be nonnegative"):
         assess_robust_gradient_acceptance(_policy(), _component(), directional)
+
+
+@pytest.mark.parametrize("junk", [42, "0.01", None, [0.01]])
+def test_robust_path_rejects_non_mapping_step_entries_as_value_errors(junk):
+    # A fingerprint-valid receipt can still carry structurally malformed step
+    # rows; they must raise the controlled ValueError, never AttributeError.
+    component = _component()
+    component["rows"][0]["steps"] = [component["rows"][0]["steps"][0], junk]
+    component = _resigned(component, "check_fingerprint", _component_domain())
+    with pytest.raises(ValueError, match="step structure"):
+        assess_robust_gradient_acceptance(_policy(), component, _directional())
+
+
+@pytest.mark.parametrize("step_value", [None, "0.01", True, 0.0, -0.01])
+def test_robust_path_rejects_malformed_relative_steps_as_value_errors(step_value):
+    component = _component()
+    component["rows"][0]["steps"] = [
+        component["rows"][0]["steps"][0],
+        {"relative_step": step_value},
+    ]
+    component = _resigned(component, "check_fingerprint", _component_domain())
+    with pytest.raises(ValueError, match="relative_step"):
+        assess_robust_gradient_acceptance(_policy(), component, _directional())
