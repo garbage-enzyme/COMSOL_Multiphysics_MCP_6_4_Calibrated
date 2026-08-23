@@ -13,6 +13,7 @@ from src.settings import (
     SETTINGS_VERSION,
     default_settings_document,
     load_settings,
+    load_settings_report,
     normalize_settings_document,
     settings_environment,
     settings_status,
@@ -151,6 +152,22 @@ def test_malformed_json_falls_back_to_the_complete_safe_defaults(tmp_path):
     assert status["configuration_state"] == "degraded"
     assert status["reason_code"] == "settings_json_invalid"
     assert status["settings_errors"][0]["path"] == "settings"
+
+
+def test_broken_default_environment_reports_errors_instead_of_raising(tmp_path):
+    missing = tmp_path / "missing-settings.json"
+    environment = {
+        SETTINGS_PATH_ENV: str(missing),
+        "LOCALAPPDATA": "relative",
+        "PROGRAMDATA": "C:/ProgramData",
+    }
+
+    report = load_settings_report(environment)
+
+    assert report["settings"]["runtime"]["directory"] == "%PROGRAMDATA%/comsol_mcp/runtime"
+    assert report["settings"]["paths"]["model_read_roots"] == ["%LOCALAPPDATA%/comsol_mcp/models"]
+    messages = [error["message"] for error in report["errors"]]
+    assert any("LOCALAPPDATA" in message and "absolute path" in message for message in messages)
 
 
 def test_deeply_nested_json_falls_back_without_recursion_escape(tmp_path):

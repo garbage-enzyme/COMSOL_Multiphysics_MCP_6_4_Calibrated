@@ -456,6 +456,85 @@ def test_unserializable_worker_response_uses_stable_json_fallback():
     assert response["error"]["code"] == "invalid_response"
 
 
+def test_response_envelope_keys_cannot_be_overridden_by_payload_fields():
+    from src.knowledge.semantic_worker import _response
+
+    payload = {"schema_version": "999", "status": {"backend": "test"}}
+    response = _response("request-1", success=True, **payload)
+
+    assert response["schema_version"] == WORKER_PROTOCOL_SCHEMA_VERSION
+    assert response["request_id"] == "request-1"
+    assert response["success"] is True
+    assert response["status"] == {"backend": "test"}
+
+
+def test_query_payload_reserved_keys_are_stripped_before_envelope_build():
+    class Backend:
+        def query(self, *_args, **_kwargs):
+            return {
+                "results": [],
+                "count": 1,
+                "success": False,
+                "status": {"stale": True},
+                "schema_version": "999",
+                "request_id": "evil",
+            }
+
+        def status(self):
+            return {"backend": "test"}
+
+    state = _WorkerState("0" * 64, None, 0.0, backend=Backend())
+    handler = object.__new__(_RequestHandler)
+    handler.server = SimpleNamespace(state=state)
+    handler.wfile = BytesIO()
+
+    handler._dispatch(
+        "envelope-safe",
+        {
+            "operation": "query",
+            "query": "bounded query",
+            "limit": 1,
+            "filters": None,
+            "retrieval_mode": "hybrid",
+        },
+    )
+
+    response = json.loads(handler.wfile.getvalue())
+    assert response["success"] is True
+    assert response["request_id"] == "envelope-safe"
+    assert response["schema_version"] == WORKER_PROTOCOL_SCHEMA_VERSION
+    assert response["status"]["backend"] == "test"
+    assert response["count"] == 1
+    serialized = json.dumps(response)
+    assert "stale" not in serialized
+    assert '"evil"' not in serialized
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows job objects only")
+def test_kill_on_close_job_error_path_closes_handle_without_truncation(monkeypatch):
+    import src.knowledge.semantic_process as process_module
+
+    class FakeKernel32:
+        def __init__(self):
+            self.closed = []
+            self.CreateJobObjectW = lambda *_args, **_kwargs: 2**40  # above c_int range
+            self.SetInformationJobObject = lambda *_args, **_kwargs: False
+            self.AssignProcessToJobObject = lambda *_args, **_kwargs: False
+
+        def CloseHandle(self, handle):
+            self.closed.append(handle)
+            return True
+
+    fake = FakeKernel32()
+    monkeypatch.setattr(process_module.ctypes, "WinDLL", lambda *_args, **_kwargs: fake)
+
+    result = process_module._KillOnCloseJob.assign(1234)
+
+    assert result is None
+    assert len(fake.closed) == 1
+    assert fake.closed[0].value == 2**40
+
+
 def test_backend_exception_returns_structured_failure_without_killing_handler():
     class Backend:
         def query(self, *_args, **_kwargs):

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 import subprocess
 import sys
@@ -372,6 +373,24 @@ def test_embedded_knowledge_contains_invalid_utf8(monkeypatch):
     )
 
     assert embedded_module.get_docs("mph_api")["success"] is False
+
+
+def test_embedded_knowledge_load_failures_are_logged_for_diagnosis(caplog, monkeypatch):
+    monkeypatch.setattr(
+        embedded_module,
+        "read_file_bytes_bounded",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(PermissionError("unreadable")),
+    )
+
+    with caplog.at_level(logging.ERROR, logger="src.knowledge.embedded"):
+        result = embedded_module.get_docs("mph_api")
+
+    assert result == {
+        "success": False,
+        "error": "Could not load documentation for: mph_api",
+    }
+    assert any("failed to load" in record.getMessage() for record in caplog.records)
+    assert any(record.exc_info is not None for record in caplog.records)
 
 
 def test_embedded_knowledge_responses_do_not_expose_module_state():

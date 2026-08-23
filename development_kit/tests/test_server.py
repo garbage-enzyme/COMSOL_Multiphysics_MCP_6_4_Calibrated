@@ -194,6 +194,32 @@ def test_partial_resource_registration_rolls_back_and_can_be_retried(monkeypatch
     assert _public_resource_uris(server) == original | {"fixture://complete"}
 
 
+def test_resource_registration_rollback_failure_is_noted_on_original_error(monkeypatch):
+    import src.resources.model_resources as resources_module
+
+    server = MCPServer("restore-failure-resource-registration")
+
+    class RestoreFailureDict(dict):
+        def clear(self):
+            raise OSError("injected restore failure")
+
+    server._resource_manager._resources = RestoreFailureDict(server._resource_manager._resources)
+
+    def fail_registration(target):
+        @target.resource("fixture://doomed")
+        def doomed_resource() -> str:
+            return "doomed"
+
+        raise RuntimeError("primary resource registration failure")
+
+    monkeypatch.setattr(resources_module, "register_model_resources", fail_registration)
+
+    with pytest.raises(RuntimeError, match="primary resource registration failure") as caught:
+        register_all_resources(server)
+
+    assert any("rollback failed: OSError" in note for note in caught.value.__notes__)
+
+
 def test_model_resources_escape_untrusted_markdown(monkeypatch):
     import src.resources.model_resources as resources_module
 

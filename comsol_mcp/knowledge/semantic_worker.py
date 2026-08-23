@@ -20,10 +20,10 @@ TOKEN_ENVIRONMENT_VARIABLE = "COMSOL_SEMANTIC_SESSION_TOKEN"
 
 def _response(request_id: str | None, *, success: bool, **fields: Any) -> dict[str, Any]:
     return {
+        **fields,
         "schema_version": WORKER_PROTOCOL_SCHEMA_VERSION,
         "request_id": request_id,
         "success": success,
-        **fields,
     }
 
 
@@ -149,7 +149,17 @@ class _RequestHandler(socketserver.StreamRequestHandler):
                         payload = self.server.state.query(
                             query.strip(), limit, filters=filters, retrieval_mode=retrieval_mode
                         )
-                    response = _response(request_id, success=True, **payload, status=self.server.state.status())
+                    reserved = {"schema_version", "request_id", "success", "status"}
+                    response = _response(
+                        request_id,
+                        success=True,
+                        status=self.server.state.status(),
+                        **{
+                            key: value
+                            for key, value in payload.items()
+                            if key not in reserved
+                        },
+                    )
                 except ValueError as exc:
                     response = _response(request_id, success=False, error={"code": "invalid_arguments", "message": str(exc)})
                 except Exception as exc:

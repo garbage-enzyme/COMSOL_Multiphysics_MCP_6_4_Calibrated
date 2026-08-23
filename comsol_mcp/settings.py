@@ -881,6 +881,13 @@ def _report_error(error: Exception, *, location: str = "settings") -> dict[str, 
 def load_settings_report(environ: Mapping[str, str] | None = None) -> dict[str, Any]:
     """Load settings and return safe defaults plus bounded validation errors."""
     environment = os.environ if environ is None else environ
+
+    def defaults_with_errors() -> tuple[dict[str, Any], list[dict[str, str]]]:
+        try:
+            return default_settings_document(environ=environment), []
+        except (OSError, RuntimeError, SettingsError) as exc:
+            return deepcopy(_DEFAULT_SETTINGS), [_report_error(exc)]
+
     try:
         path = default_settings_path(environ)
         raw = read_file_bytes_bounded(path, max_bytes=MAX_SETTINGS_BYTES)
@@ -890,27 +897,31 @@ def load_settings_report(environ: Mapping[str, str] | None = None) -> dict[str, 
                 f"settings.json must contain 1..{MAX_SETTINGS_BYTES} bytes",
                 reason_code="settings_size_invalid",
             )
+            defaults, default_errors = defaults_with_errors()
             return {
-                "settings": default_settings_document(environ=environment),
-                "errors": [_report_error(error)],
+                "settings": defaults,
+                "errors": [_report_error(error), *default_errors],
             }
+        defaults, default_errors = defaults_with_errors()
         return {
-            "settings": default_settings_document(environ=environment),
-            "errors": [_report_error(exc)],
+            "settings": defaults,
+            "errors": [_report_error(exc), *default_errors],
         }
     except (OSError, RuntimeError, SettingsError) as exc:
+        defaults, default_errors = defaults_with_errors()
         return {
-            "settings": default_settings_document(environ=environment),
-            "errors": [_report_error(exc)],
+            "settings": defaults,
+            "errors": [_report_error(exc), *default_errors],
         }
     if not raw:
         error = SettingsError(
             f"settings.json must contain 1..{MAX_SETTINGS_BYTES} bytes",
             reason_code="settings_size_invalid",
         )
+        defaults, default_errors = defaults_with_errors()
         return {
-            "settings": default_settings_document(environ=environment),
-            "errors": [_report_error(error)],
+            "settings": defaults,
+            "errors": [_report_error(error), *default_errors],
         }
     try:
         document = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_object)
@@ -918,30 +929,34 @@ def load_settings_report(environ: Mapping[str, str] | None = None) -> dict[str, 
         error = SettingsError(
             "settings.json must be UTF-8", reason_code="settings_encoding_invalid"
         )
+        defaults, default_errors = defaults_with_errors()
         return {
-            "settings": default_settings_document(environ=environment),
-            "errors": [_report_error(error)],
+            "settings": defaults,
+            "errors": [_report_error(error), *default_errors],
         }
     except json.JSONDecodeError, _DuplicateJsonKey:
         error = SettingsError(
             "settings.json contains invalid or duplicate JSON",
             reason_code="settings_json_invalid",
         )
+        defaults, default_errors = defaults_with_errors()
         return {
-            "settings": default_settings_document(environ=environment),
-            "errors": [_report_error(error)],
+            "settings": defaults,
+            "errors": [_report_error(error), *default_errors],
         }
     except RecursionError as exc:
+        defaults, default_errors = defaults_with_errors()
         return {
-            "settings": default_settings_document(environ=environment),
-            "errors": [_report_error(exc)],
+            "settings": defaults,
+            "errors": [_report_error(exc), *default_errors],
         }
     try:
         return normalize_settings_document(document, environ=environment)
     except RecursionError as exc:
+        defaults, default_errors = defaults_with_errors()
         return {
-            "settings": default_settings_document(environ=environment),
-            "errors": [_report_error(exc)],
+            "settings": defaults,
+            "errors": [_report_error(exc), *default_errors],
         }
 
 

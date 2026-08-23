@@ -74,7 +74,7 @@ class _KillOnCloseJob:
         limits = Extended()
         limits.BasicLimitInformation.LimitFlags = 0x00002000
         if not kernel32.SetInformationJobObject(handle, 9, ctypes.byref(limits), ctypes.sizeof(limits)) or not kernel32.AssignProcessToJobObject(handle, wintypes.HANDLE(process_handle)):
-            kernel32.CloseHandle(handle)
+            kernel32.CloseHandle(wintypes.HANDLE(handle))
             return None
         return cls(int(handle))
 

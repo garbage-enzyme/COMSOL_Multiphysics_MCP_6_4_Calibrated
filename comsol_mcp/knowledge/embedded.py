@@ -1,5 +1,6 @@
 """Knowledge base tools for COMSOL MCP Server."""
 
+import logging
 from copy import deepcopy
 from pathlib import Path
 from typing import Optional
@@ -7,6 +8,8 @@ from typing import Optional
 from mcp.server.mcpserver import MCPServer
 
 from comsol_mcp.durable import read_file_bytes_bounded
+
+logger = logging.getLogger(__name__)
 
 KNOWLEDGE_DIR = Path(__file__).parent / "prompts"
 MAX_EMBEDDED_KNOWLEDGE_BYTES = 1024 * 1024
@@ -284,7 +287,8 @@ def _load_knowledge_file(name: str) -> str:
             max_bytes=MAX_EMBEDDED_KNOWLEDGE_BYTES,
         )
         return payload.decode("utf-8")
-    except (OSError, ValueError, UnicodeError):
+    except (OSError, ValueError, UnicodeError) as exc:
+        logger.exception("embedded knowledge file %s failed to load", file_path, exc_info=exc)
         return ""
 
 

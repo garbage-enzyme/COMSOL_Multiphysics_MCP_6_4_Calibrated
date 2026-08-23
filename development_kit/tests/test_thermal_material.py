@@ -457,3 +457,63 @@ def test_internal_material_failures_are_not_misclassified_as_input_rejections(
 
     with pytest.raises(error_type, match="internal failure"):
         tool(typed)
+
+
+def _narrow_table(policy: dict | None = None) -> dict:
+    model = {
+        "model_kind": "nk_table",
+        "wavelengths_m": [1.5e-6, 2.5e-6],
+        "temperatures_K": [300.0, 600.0],
+        "n_flat": [1.5, 1.6, 1.7, 1.8],
+        "k_flat": [0.1, 0.2, 0.3, 0.4],
+        "interpolation": {
+            "wavelength_method": "linear",
+            "temperature_method": "linear",
+            "wavelength_discontinuities_m": [],
+            "temperature_discontinuities_K": [],
+        },
+        "table_sha256": "8" * 64,
+    }
+    if policy is not None:
+        model["interpolation"]["extrapolation"] = policy
+    return model
+
+
+def test_table_grid_gap_is_gated_by_the_extrapolation_policy():
+    ledger = _ledger([_state(model=_narrow_table())])
+
+    unavailable = evaluate_thermal_material(_request(ledger, wavelength=3.0e-6, temperature=400.0))
+
+    assert unavailable["available"] is False
+    assert unavailable["reason_code"] == "outside_declared_validity_domain"
+    assert unavailable["extrapolated"] is False
+
+    backed = _ledger(
+        [
+            _state(
+                model=_narrow_table(
+                    {
+                        "mode": "source_backed_linear",
+                        "policy_source_sha256": "9" * 64,
+                        "maximum_fraction_outside_domain": 0.5,
+                        "uncertainty_growth_per_fraction": 0.0,
+                    }
+                )
+            )
+        ]
+    )
+    extrapolated = evaluate_thermal_material(_request(backed, wavelength=3.0e-6, temperature=400.0))
+
+    assert extrapolated["available"] is True
+    assert extrapolated["extrapolated"] is True
+    assert extrapolated["extrapolation_fraction"] == pytest.approx(0.5)
+
+
+def test_table_query_inside_both_validity_and_grid_remains_normal():
+    ledger = _ledger([_state(model=_narrow_table())])
+
+    result = evaluate_thermal_material(_request(ledger, wavelength=2.0e-6, temperature=400.0))
+
+    assert result["available"] is True
+    assert result["extrapolated"] is False
+    assert result["model_kind"] == "nk_table"

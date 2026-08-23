@@ -368,6 +368,8 @@ def evaluate_thermal_radiation(
             "propagation_direction": polarization.propagation_direction,
             "handedness": polarization.source_handedness,
             "basis_rotation_rad": polarization.basis_rotation_rad,
+            "stokes_invariant_count": len(stokes_invariants),
+            "stokes_invariants_truncated": len(stokes_invariants) > 64,
             "stokes_invariants": stokes_invariants[:64],
         },
         "detector_path": {

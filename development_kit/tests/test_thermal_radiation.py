@@ -272,6 +272,33 @@ def test_stokes_rotation_preserves_invariants_and_handedness_mismatch_fails():
         evaluate_thermal_radiation(_request([2.0e-6, 3.0e-6], values, polarization=mismatch))
 
 
+def test_stokes_invariant_truncation_is_surfaced_in_evidence():
+    polarization = {
+        "mode": "stokes_mueller",
+        "channels": ["I", "Q", "U", "V"],
+        "weights": [],
+        "propagation_direction": "negative_z",
+        "source_handedness": "explicit_stokes",
+        "analyzer_handedness": "explicit_stokes",
+        "analyzer_stokes": [1.0, 0.0, 0.0, 0.0],
+        "basis_rotation_rad": 0.0,
+    }
+    coordinates = [2.0e-6 + index * 1.0e-8 for index in range(100)]
+    values = [0.8, 0.3, 0.4, 0.1] * 100
+    evidence = evaluate_thermal_radiation(_request(coordinates, values, polarization=polarization))
+
+    assert evidence["polarization"]["stokes_invariant_count"] == 100
+    assert evidence["polarization"]["stokes_invariants_truncated"] is True
+    assert len(evidence["polarization"]["stokes_invariants"]) == 64
+
+    small = evaluate_thermal_radiation(
+        _request([2.0e-6, 3.0e-6], [0.8, 0.3, 0.4, 0.1] * 2, polarization=polarization)
+    )
+    assert small["polarization"]["stokes_invariant_count"] == 2
+    assert small["polarization"]["stokes_invariants_truncated"] is False
+    assert len(small["polarization"]["stokes_invariants"]) == 2
+
+
 def test_detector_gas_and_boxcar_kernels_are_bounded_and_monotonic():
     coordinates = [1.0, 2.0, 3.0, 4.0]
     zero = evaluate_thermal_radiation(

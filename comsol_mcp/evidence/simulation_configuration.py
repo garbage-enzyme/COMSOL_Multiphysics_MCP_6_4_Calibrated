@@ -121,14 +121,12 @@ def _canonical_body(value: SimulationConfigurationInput | dict[str, Any]) -> dic
     body["layers"] = sorted(body["layers"], key=lambda item: item["order"])
     body["mesh"]["dependency_keys"] = sorted(set(body["mesh"]["dependency_keys"]))
     body["mesh"]["characteristic_lengths"] = sorted(
-        body["mesh"]["characteristic_lengths"], key=lambda item: item["dimension_id"]
+        body["mesh"]["characteristic_lengths"], key=canonical_json_v1
     )
     for key in ("physics", "studies", "solvers", "datasets", "selections"):
         body["model_tree"][key] = sorted(set(body["model_tree"][key]))
-    body["unit_contracts"] = sorted(body["unit_contracts"], key=lambda item: item["quantity"])
-    body["artifact_chains"] = sorted(
-        body["artifact_chains"], key=lambda item: (item["role"], item["chain_sha256"])
-    )
+    body["unit_contracts"] = sorted(body["unit_contracts"], key=canonical_json_v1)
+    body["artifact_chains"] = sorted(body["artifact_chains"], key=canonical_json_v1)
     canonical_json_v1(body)
     calculated = domain_sha256_v2("simulation_configuration/1.0.0", body)
     if supplied_hash is not None and supplied_hash != calculated:
