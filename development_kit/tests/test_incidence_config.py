@@ -10,6 +10,8 @@ from src.tools import incidence_config
 from src.tools.derived_geometry import _DERIVED, DerivedGeometryRecord
 from src.tools.incidence_config import (
     _incidence_snapshot,
+    _rollback_plan,
+    _validate_preview,
     apply_incidence,
     preview_incidence,
     register_incidence_config_tools,
@@ -557,3 +559,77 @@ def test_concurrent_applies_serialize_and_one_fails_stale_without_mixed_state():
     final = _incidence_snapshot(model, "comp1", "ewfd")
     winner = next(result for result in results if result["success"] is True)
     assert final == winner["after"]
+
+
+def test_rollback_plan_captures_every_captured_setting_name_not_only_planned():
+    before = {
+        "component_tag": "comp1",
+        "physics_tag": "ewfd",
+        "periodic_structure": {
+            "tag": "ps1",
+            "settings": {
+                "Polarization": "LinearPol",
+                "LinearPol": "S",
+                "CircularPol": "off",
+                "alpha1_inc": "0[deg]",
+                "alpha2_inc": "0[deg]",
+            },
+        },
+        "periodic_ports": [
+            {
+                "tag": "pp1",
+                "settings": {
+                    "Polarization": "LinearPol",
+                    "LinearPol": "S",
+                    "CircularPol": "off",
+                    "alpha1_inc": "0[deg]",
+                    "alpha2_inc": "0[deg]",
+                },
+            }
+        ],
+    }
+    planned = {
+        "periodic_structure": {
+            "tag": "ps1",
+            "settings": {"Polarization": "CircularPol", "CircularPol": "lhcp"},
+        },
+        "periodic_ports": [
+            {"tag": "pp1", "settings": {"alpha1_inc": "10[deg]", "alpha2_inc": "20[deg]"}}
+        ],
+    }
+
+    rollback = _rollback_plan(before, planned)
+
+    assert set(rollback["periodic_structure"]["settings"]) == set(
+        before["periodic_structure"]["settings"]
+    )
+    assert set(rollback["periodic_ports"][0]["settings"]) == set(
+        before["periodic_ports"][0]["settings"]
+    )
+    assert rollback["periodic_structure"]["settings"]["CircularPol"] == "off"
+
+
+def test_preview_validation_requires_the_declared_structure_after_the_hash():
+    from src.tools.incidence_config import _preview_hash
+
+    malformed = {
+        "operation": "periodic_structure_incidence",
+        "derived_model_id": "derived-1",
+        "pre_state_sha256": "a" * 64,
+        "request": {},
+    }
+    malformed["preview_sha256"] = _preview_hash(malformed)
+
+    with pytest.raises(ValueError, match="missing required fields"):
+        _validate_preview(malformed)
+
+    bad_shape = {
+        "operation": "periodic_structure_incidence",
+        "derived_model_id": "derived-1",
+        "pre_state_sha256": "a" * 64,
+        "before": [],
+        "planned": [],
+    }
+    bad_shape["preview_sha256"] = _preview_hash(bad_shape)
+    with pytest.raises(ValueError, match="structure is invalid"):
+        _validate_preview(bad_shape)

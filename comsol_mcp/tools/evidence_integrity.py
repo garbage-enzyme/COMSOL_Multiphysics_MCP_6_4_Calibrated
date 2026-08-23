@@ -40,13 +40,20 @@ def register_evidence_integrity_tools(mcp: MCPServer) -> None:
         status = load_evidence_integrity_status()
         if status.get("configuration_state") != "valid":
             try:
-                return verify_evidence_integrity(
+                result = verify_evidence_integrity(
                     portfolio_request=portfolio_request,
                     artifact_roots={},
                     resumed=resumed,
                     producer_compatibility=producer_compatibility,
                     settings_status=status,
                 )
+                result["artifact_root_validation"] = {
+                    "enforced": False,
+                    "accepted": False,
+                    "paths_included": False,
+                    "discarded_root_count": len(artifact_roots),
+                }
+                return result
             except (TypeError, ValueError):
                 logger.exception("Evidence integrity request was rejected")
                 result = {
@@ -81,28 +88,39 @@ def register_evidence_integrity_tools(mcp: MCPServer) -> None:
                 }
                 result.update(warning_fields(status))
                 return result
+        filesystem_checks_enabled = any(
+            status["checks"][name]["enabled"]
+            for name in (
+                "artifact_chain_verification",
+                "summary_claim_verification",
+            )
+        )
+        if not filesystem_checks_enabled and artifact_roots:
+            result = {
+                **public_error(
+                    "artifact_roots_forbidden",
+                    "artifact_roots must be empty when filesystem checks are disabled.",
+                ),
+                "verification_state": "blocked",
+                "strictly_verified": False,
+                "artifact_root_validation": {
+                    "enforced": False,
+                    "accepted": False,
+                    "paths_included": False,
+                },
+            }
+            result.update(warning_fields(status))
+            return result
         try:
             policy = PathPolicy.from_environment()
-            filesystem_checks_enabled = any(
-                status["checks"][name]["enabled"]
-                for name in (
-                    "artifact_chain_verification",
-                    "summary_claim_verification",
-                )
-            )
             normalized_roots: dict[str, str] = {}
             root_ids: set[str] = set()
-            if filesystem_checks_enabled:
-                for case_id, value in artifact_roots.items():
-                    if not isinstance(case_id, str) or not case_id or len(case_id) > 192:
-                        raise ValueError("artifact_roots keys must be bounded case IDs")
-                    decision = policy.validate_artifact_read_root(value)
-                    normalized_roots[case_id] = str(decision.normalized_path)
-                    root_ids.add(decision.root_id)
-            elif artifact_roots:
-                raise ValueError(
-                    "artifact_roots must be empty when filesystem checks are disabled"
-                )
+            for case_id, value in artifact_roots.items():
+                if not isinstance(case_id, str) or not case_id or len(case_id) > 192:
+                    raise ValueError("artifact_roots keys must be bounded case IDs")
+                decision = policy.validate_artifact_read_root(value)
+                normalized_roots[case_id] = str(decision.normalized_path)
+                root_ids.add(decision.root_id)
         except (OSError, RuntimeError, TypeError, ValueError):
             logger.exception("Evidence artifact-root validation failed")
             result = {

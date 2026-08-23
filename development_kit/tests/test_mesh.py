@@ -152,6 +152,20 @@ def test_get_mesh_info_resolves_label():
     assert result["mesh"]["name"] == "mesh1"
 
 
+def test_get_mesh_info_label_lookup_skips_tags_with_unreadable_labels():
+    class BrokenLabelMesh(FakeMesh):
+        def label(self):
+            raise RuntimeError("stale proxy")
+
+    result = get_mesh_info(
+        FakeModel({"mesh1": BrokenLabelMesh(), "mesh2": FakeMesh()}),
+        mesh_name="Physics-controlled mesh",
+    )
+
+    assert result["success"] is True
+    assert result["mesh"]["name"] == "mesh2"
+
+
 def test_get_mesh_info_reports_available_tags():
     result = get_mesh_info(FakeModel({"mesh1": FakeMesh()}), mesh_name="missing")
 

@@ -2029,3 +2029,34 @@ def fixture_clean(root: Path, *, ignore_errors: bool) -> None:
 
 
 monoclock = time.monotonic
+
+
+def test_standalone_submit_surfaces_durable_job_launch_error():
+    from src.jobs.manager import JobLaunchError
+    from src.tools.jobs import _submit_job
+
+    class RaisingManager:
+        def submit(self, spec):
+            raise JobLaunchError(
+                "job-launch-failure",
+                RuntimeError("worker spawn failed"),
+                state_record_error=ValueError("stale state"),
+            )
+
+    result = _submit_job(
+        {
+            "job_type": "staged_sweep",
+            "source_model_path": "C:/fixtures/sweep.mph",
+            "parameter_name": "wl",
+            "parameter_values": [1.0],
+            "expressions": ["ewfd.Rtotal"],
+        },
+        profile_name="core",
+        shared_enabled=False,
+        manager=RaisingManager(),
+    )
+
+    assert result["success"] is False
+    assert result["state"] == "durable_job_requires_reconciliation"
+    assert result["job_id"] == "job-launch-failure"
+    assert result["action"] == "inspect_job_status_before_retrying"

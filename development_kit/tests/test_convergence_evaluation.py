@@ -541,6 +541,29 @@ def test_public_tool_returns_separate_ladder_and_policy_artifacts():
     assert result["filesystem_modified"] is False
 
 
+def test_public_tool_keeps_structured_errors_for_unexpected_backend_failures(monkeypatch):
+    import src.evidence.convergence_evaluation as evidence_module
+
+    monkeypatch.setattr(
+        evidence_module,
+        "evaluate_convergence",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(KeyError("missing policy key")),
+    )
+    server = MCPServer("convergence-internal-error-test")
+    register_convergence_evaluation_tools(server)
+
+    result = server._tool_manager._tools["convergence_evaluate"].fn(
+        ladder_spec={"ladder_id": "three-mesh-ladder", "levels": _levels()},
+        convergence_policy=_policy(),
+    )
+
+    assert result["success"] is False
+    assert result["scientific_disposition"] == "internal_error"
+    assert result["reason_code"] == "convergence_evaluation_failed"
+    assert "missing policy key" not in json.dumps(result)
+    assert result["solver_started"] is False
+
+
 def test_public_tool_accepts_canonical_ladder_and_rejects_ambiguous_input():
     ladder = build_convergence_ladder(ladder_id="three-mesh-ladder", levels=_levels())
     server = MCPServer("convergence-input-test")

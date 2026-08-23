@@ -94,6 +94,7 @@ def get_mesh_info(
         return {"success": False, "error": "No meshes defined in model."}
 
     target_tag = None
+    label_failure = None
     if mesh_name is None:
         target_tag = tags[0]
     elif mesh_name in tags:
@@ -105,13 +106,17 @@ def get_mesh_info(
                     target_tag = tag
                     break
             except Exception as exc:
-                return {
-                    "success": False,
-                    "error": "Mesh label lookup failed.",
-                    "mesh_tag": tag,
-                    "error_type": type(exc).__name__,
-                }
+                if label_failure is None:
+                    label_failure = (tag, type(exc).__name__)
+                continue
     if target_tag is None:
+        if label_failure is not None:
+            return {
+                "success": False,
+                "error": "Mesh label lookup failed.",
+                "mesh_tag": label_failure[0],
+                "error_type": label_failure[1],
+            }
         return {
             "success": False,
             "error": f"Mesh not found: {mesh_name}. Available tags: {tags}",

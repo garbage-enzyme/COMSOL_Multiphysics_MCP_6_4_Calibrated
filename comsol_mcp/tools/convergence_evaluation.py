@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Optional
 
 from mcp.server.mcpserver import MCPServer
+
+from comsol_mcp.utils.public_errors import public_error
+
+logger = logging.getLogger(__name__)
+
 
 def register_convergence_evaluation_tools(mcp: MCPServer) -> None:
     """Register one read-only convergence evaluation tool."""
@@ -53,6 +59,18 @@ def register_convergence_evaluation_tools(mcp: MCPServer) -> None:
                 "scientific_disposition": "invalid_evidence",
                 "reason_code": "convergence_input_rejected",
                 "error": str(exc)[:2048],
+                "undeclared_configuration_started": False,
+                "solver_started": False,
+                "filesystem_modified": False,
+            }
+        except Exception:
+            logger.exception("Convergence evaluation failed")
+            return {
+                **public_error(
+                    "convergence_evaluation_failed",
+                    "Convergence evaluation failed safely.",
+                ),
+                "scientific_disposition": "internal_error",
                 "undeclared_configuration_started": False,
                 "solver_started": False,
                 "filesystem_modified": False,

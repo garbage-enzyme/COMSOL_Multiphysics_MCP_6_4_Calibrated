@@ -93,6 +93,19 @@ def test_nonobject_deployment_manifest_fails_closed(tmp_path, monkeypatch):
     assert identity["available"] is False
     assert identity["source_classification"] == "unknown"
     assert "deployment manifest unavailable" in identity["error"]
+    assert identity["schema_version"] == capabilities_module.DEPLOYMENT_IDENTITY_SCHEMA_VERSION
+    assert identity["schema_version"] == "1.2.0"
+
+
+def test_deployment_identity_error_branches_share_the_current_schema_version(tmp_path, monkeypatch):
+    missing = tmp_path / "missing-manifest.json"
+    monkeypatch.setattr(capabilities_module, "_DEPLOYMENT_MANIFEST", missing)
+
+    identity = get_capabilities(_selection("core"))["deployment_identity"]
+
+    assert identity["available"] is False
+    assert identity["schema_version"] == capabilities_module.DEPLOYMENT_IDENTITY_SCHEMA_VERSION
+    assert identity["schema_version"] == "1.2.0"
 
 
 def test_deployment_identity_does_not_mask_manifest_path_classification(tmp_path, monkeypatch):

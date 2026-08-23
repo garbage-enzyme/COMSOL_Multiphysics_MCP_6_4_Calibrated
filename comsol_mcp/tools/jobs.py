@@ -186,13 +186,26 @@ def _submit_job(
     session_manager: Any = None,
 ) -> dict[str, Any]:
     spec = validate_job_submission(spec)
+    from comsol_mcp.jobs.manager import JobLaunchError
+
     execution_request = spec.get("execution_backend")
     if execution_request is None:
-        return manager.submit(spec)
+        try:
+            return manager.submit(spec)
+        except JobLaunchError as exc:
+            recovery = {
+                "success": False,
+                "state": "durable_job_requires_reconciliation",
+                "job_id": exc.job_id,
+                "action": "inspect_job_status_before_retrying",
+            }
+            if exc.state_record_error is not None:
+                recovery["state_record_error"] = exc.state_record_error
+            return recovery
     if spec.get("job_type") != "staged_sweep":
         raise ValueError("attached execution is currently supported only for staged_sweep jobs")
     from comsol_mcp.jobs.attached_backend import normalize_attached_execution_request
-    from comsol_mcp.jobs.manager import JobLaunchError, validate_staged_sweep_spec
+    from comsol_mcp.jobs.manager import validate_staged_sweep_spec
     from comsol_mcp.tools.shared_session import shared_session_manager
 
     request = normalize_attached_execution_request(execution_request)

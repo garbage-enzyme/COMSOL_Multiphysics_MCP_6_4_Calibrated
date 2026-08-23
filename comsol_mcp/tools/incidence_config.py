@@ -201,6 +201,12 @@ def _validate_preview(preview: object) -> dict[str, Any]:
         raise ValueError(f"incidence preview is not canonical JSON: {exc}") from exc
     if rebuilt_hash != supplied_hash:
         raise ValueError("incidence preview identity mismatch")
+    required = {"before", "planned", "derived_model_id", "operation", "pre_state_sha256"}
+    missing = sorted(required - set(body))
+    if missing:
+        raise ValueError("incidence preview is missing required fields: " + ", ".join(missing))
+    if not isinstance(body["before"], dict) or not isinstance(body["planned"], dict):
+        raise ValueError("incidence preview structure is invalid")
     return body
 
 
@@ -367,13 +373,7 @@ def _planned_readback_mismatches(
 
 def _rollback_plan(before: dict[str, Any], planned: dict[str, Any]) -> dict[str, Any]:
     parent_before = before["periodic_structure"]
-    parent_names = planned["periodic_structure"]["settings"]
-    missing = [name for name in parent_names if name not in parent_before["settings"]]
-    if missing:
-        raise ValueError(
-            "PeriodicStructure settings required for rollback are unreadable: "
-            + ", ".join(missing)
-        )
+    parent_names = list(parent_before["settings"])
     before_ports = {item["tag"]: item for item in before["periodic_ports"]}
     port_plans = []
     for planned_port in planned["periodic_ports"]:
@@ -381,28 +381,16 @@ def _rollback_plan(before: dict[str, Any], planned: dict[str, Any]) -> dict[str,
         captured = before_ports.get(tag)
         if captured is None:
             raise ValueError(f"PeriodicPort required for rollback is missing: {tag}")
-        missing = [name for name in planned_port["settings"] if name not in captured["settings"]]
-        if missing:
-            raise ValueError(
-                f"PeriodicPort settings required for rollback are unreadable for {tag}: "
-                + ", ".join(missing)
-            )
         port_plans.append(
             {
                 "tag": tag,
-                "settings": {
-                    name: captured["settings"][name]
-                    for name in planned_port["settings"]
-                },
+                "settings": dict(captured["settings"]),
             }
         )
     return {
         "periodic_structure": {
             "tag": parent_before["tag"],
-            "settings": {
-                name: parent_before["settings"][name]
-                for name in parent_names
-            },
+            "settings": {name: parent_before["settings"][name] for name in parent_names},
         },
         "periodic_ports": port_plans,
     }

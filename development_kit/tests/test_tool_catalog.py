@@ -172,6 +172,14 @@ def test_new_tool_without_explicit_side_effect_class_fails_closed(monkeypatch):
         catalog._build_registry()
 
 
+def test_model_mutating_mim_patch_build_requires_a_model_revision():
+    metadata = TOOL_METADATA["mim_patch_build"]
+
+    assert metadata.side_effect_class == "model_mutation"
+    assert metadata.requires_model_revision is True
+    assert metadata.advances_model_revision is True
+
+
 def test_profile_registrar_selection_is_derived_from_tool_specs():
     core = registrars_for_profile("core")
     full = registrars_for_profile("full")

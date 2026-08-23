@@ -111,6 +111,8 @@ def _identify_side_pairs(boundaries, P_val=None, bbox=None, tol=1e-12):
     for b in boundaries:
         if "normal" not in b or "center" not in b:
             continue
+        if b.get("interior"):
+            continue
         nx, ny, nz = b["normal"]
         cx, cy, cz = b["center"]
         if nz < -0.5 and _on_edge(cz, zmin, tol):  # bottom face (normal -z, z=zmin)
@@ -213,6 +215,11 @@ def _normalize_spectral_rows(results, expression_count: int) -> list[list[object
         return [array.tolist()]
     if array.ndim != 2:
         raise ValueError("spectral evaluation must be a two-dimensional numeric matrix")
+    if array.shape[0] == expression_count and array.shape[1] == expression_count:
+        raise ValueError(
+            "spectral evaluation matrix is square and its layout is ambiguous; "
+            "the layout must be declared explicitly"
+        )
     if array.shape[0] == expression_count:
         return array.T.tolist()
     if array.shape[1] == expression_count:

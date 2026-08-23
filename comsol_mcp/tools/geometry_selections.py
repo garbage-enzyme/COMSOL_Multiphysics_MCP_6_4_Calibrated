@@ -272,7 +272,10 @@ def create_side_selections(
                 "rolled_back": prior_rolled_back and failed_side_rolled_back,
             }
         created.append(tag)
-        outcomes[side] = result["selection"]
+        entry = dict(result["selection"])
+        if result.get("warning"):
+            entry["warning"] = result["warning"]
+        outcomes[side] = entry
     return {
         "success": True,
         "selections": outcomes,

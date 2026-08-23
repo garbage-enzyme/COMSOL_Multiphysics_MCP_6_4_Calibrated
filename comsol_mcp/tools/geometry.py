@@ -99,7 +99,8 @@ def add_geometry_feature(
     properties: Optional[dict] = None,
 ) -> dict:
     """Create a generic geometry feature through the 6.4 clientapi."""
-    if not feature_type.strip():
+    feature_type = str(feature_type).strip() if isinstance(feature_type, str) else feature_type
+    if not feature_type:
         return {"success": False, "error": "feature_type must not be empty."}
 
     try:

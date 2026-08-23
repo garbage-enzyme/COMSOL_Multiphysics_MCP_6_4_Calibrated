@@ -129,6 +129,32 @@ def test_side_pair_classification_requires_cell_coordinates():
         )
 
 
+def test_side_pair_classification_requires_exterior_boundaries():
+    bbox = (0.0, 1.0, 0.0, 1.0, 0.0, 1.0)
+    interior_edge_face = {
+        "boundary_number": 41,
+        "normal": [0.0, 0.0, -1.0],
+        "center": [0.5, 0.5, 0.0],
+        "interior": True,
+    }
+    exterior_bottom = {
+        "boundary_number": 42,
+        "normal": [0.0, 0.0, -1.0],
+        "center": [0.5, 0.5, 0.0],
+    }
+
+    result = _identify_side_pairs([interior_edge_face, exterior_bottom], bbox=bbox)
+
+    assert result["bottom"] == [42]
+    assert result["top"] == []
+    assert result["x_src"] == result["x_dst"] == result["y_src"] == result["y_dst"] == []
+
+
+def test_square_spectral_matrix_layout_is_rejected_as_ambiguous():
+    with pytest.raises(ValueError, match="square and its layout is ambiguous"):
+        _normalize_spectral_rows([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]], 3)
+
+
 def _side_pairs():
     return {"x_src": [1], "x_dst": [2], "y_src": [3], "y_dst": [4]}
 

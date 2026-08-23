@@ -156,6 +156,18 @@ def register_field_evidence_tools(mcp: MCPServer) -> None:
             relative_root = Path("field_evidence") / normalized["request_fingerprint"]
             artifact_root = ownership_manager.runtime_dir / relative_root
             artifact_root.parent.mkdir(parents=True, exist_ok=True)
+            if artifact_root.exists():
+                return {
+                    "success": True,
+                    "model_name": model_name,
+                    "artifact_root_id": relative_root.as_posix(),
+                    "source_model_sha256": source_before,
+                    "source_unchanged": True,
+                    "already_present": True,
+                    "ownership_checked": True,
+                    "solver_started_by_tool": False,
+                    "evaluation_skipped": True,
+                }
             staging_root = Path(
                 tempfile.mkdtemp(
                     prefix=f".{artifact_root.name}.stage-",

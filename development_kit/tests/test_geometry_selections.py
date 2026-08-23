@@ -1,7 +1,6 @@
 """Tests for bounded named geometry selections without COMSOL."""
 
 import pytest
-
 from src.tools.geometry_selections import create_box_selection, create_side_selections
 
 
@@ -285,6 +284,33 @@ def test_side_selections_include_the_failed_side_rollback_result(monkeypatch):
     assert result["success"] is False
     assert result["error"] == "inner rollback failed"
     assert result["rolled_back"] is False
+
+
+def test_side_selections_propagate_per_side_entity_warnings(monkeypatch):
+    component = FakeComponent()
+    warning = "Selection exists, but entities are unavailable before geometry build."
+
+    def with_warning(*_args, **_kwargs):
+        return {
+            "success": True,
+            "selection": {
+                "tag": _kwargs["selection_name"],
+                "entities": [],
+                "entities_evaluated": False,
+            },
+            "warning": warning,
+        }
+
+    monkeypatch.setattr("src.tools.geometry_selections.create_box_selection", with_warning)
+    result = create_side_selections(
+        FakeModel(component), x_min="0", x_max="1", y_min="0", y_max="1"
+    )
+
+    assert result["success"] is True
+    assert result["count"] == 4
+    for side in ("left", "right", "bottom", "top"):
+        assert result["selections"][side]["warning"] == warning
+        assert result["selections"][side]["entities_evaluated"] is False
 
 
 def test_side_selections_roll_back_after_geometry_lookup_failure():

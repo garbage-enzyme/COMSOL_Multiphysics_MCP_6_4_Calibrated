@@ -219,6 +219,15 @@ def test_add_geometry_feature_validates_type():
     assert result == {"success": False, "error": "feature_type must not be empty."}
 
 
+def test_add_geometry_feature_normalizes_feature_type_whitespace():
+    geometry = FakeGeometry()
+    result = add_geometry_feature(FakeModel(geometry), " Sphere ", component_name="comp1")
+
+    assert result["success"] is True
+    feature_type, _feature = geometry.features.features["feat1"]
+    assert feature_type == "Sphere"
+
+
 def test_add_geometry_feature_rejects_invalid_properties_before_clientapi():
     class UntouchableModel:
         @property

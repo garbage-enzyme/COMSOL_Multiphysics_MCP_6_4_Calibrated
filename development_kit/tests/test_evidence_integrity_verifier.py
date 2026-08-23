@@ -370,6 +370,50 @@ def test_mcp_verify_tool_contains_invalid_request_when_settings_are_degraded(mon
     assert result["artifact_root_validation"]["accepted"] is False
 
 
+def test_degraded_settings_with_supplied_roots_reports_they_were_discarded(monkeypatch):
+    degraded = load_evidence_integrity_status({})
+    degraded["configuration_state"] = "degraded"
+    monkeypatch.setattr(
+        integrity_controls_module,
+        "load_evidence_integrity_status",
+        lambda: degraded,
+    )
+    server = MCPServer("evidence-integrity-degraded-roots-test")
+    register_evidence_integrity_tools(server)
+
+    result = server._tool_manager._tools["evidence_integrity_verify"].fn(
+        {}, {"case-one": "C:/artifacts"}, resumed=False
+    )
+
+    assert result["success"] is False
+    assert result["verification_state"] == "blocked"
+    assert result["artifact_root_validation"]["enforced"] is False
+    assert result["artifact_root_validation"]["accepted"] is False
+    assert result["artifact_root_validation"]["discarded_root_count"] == 1
+
+
+def test_forbidden_roots_with_disabled_checks_are_reported_without_enforcement(monkeypatch):
+    disabled = load_evidence_integrity_status({})
+    for name in ("artifact_chain_verification", "summary_claim_verification"):
+        disabled["checks"][name]["enabled"] = False
+    monkeypatch.setattr(
+        integrity_controls_module,
+        "load_evidence_integrity_status",
+        lambda: disabled,
+    )
+    server = MCPServer("evidence-integrity-forbidden-roots-test")
+    register_evidence_integrity_tools(server)
+
+    result = server._tool_manager._tools["evidence_integrity_verify"].fn(
+        {}, {"case-one": "C:/artifacts"}, resumed=False
+    )
+
+    assert result["success"] is False
+    assert result["reason_code"] == "artifact_roots_forbidden"
+    assert result["artifact_root_validation"]["enforced"] is False
+    assert result["artifact_root_validation"]["accepted"] is False
+
+
 def test_mcp_verify_tool_rejects_external_and_junction_artifact_roots(
     ascii_artifact_root, tmp_path, monkeypatch
 ):
