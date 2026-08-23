@@ -366,3 +366,29 @@ def test_parameter_rollback_preserves_unset_clientapi_description():
     assert result["rolled_back"] is True
     assert model.values["wl"] == "1[m]"
     assert model.descriptions["wl"] is None
+
+
+def test_rollback_of_never_created_parameter_does_not_report_a_false_failure():
+    class RejectingJava(FakeParameterJava):
+        def remove(self, name):
+            raise RuntimeError(f"clientapi refuses to remove missing {name}")
+
+    class RejectingModel(FakeParameterModel):
+        def __init__(self):
+            super().__init__()
+            self.java = RejectingJava(self)
+
+        def parameter(self, name, value=None, evaluate=False):
+            if value is not None:
+                raise ValueError("invalid parameter expression")
+            assert evaluate is False
+            return self.values[name]
+
+    model = RejectingModel()
+
+    result = parameters.set_parameter(model, "theta", "10[deg]", description="angle")
+
+    assert result["success"] is False
+    assert result["rolled_back"] is True
+    assert result["rollback_errors"] == []
+    assert "theta" not in model.values

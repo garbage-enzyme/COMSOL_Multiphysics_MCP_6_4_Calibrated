@@ -229,6 +229,7 @@ def test_property_set_exception_restores_and_verifies_old_value():
     assert result == {
         "success": False,
         "error": "clientapi property set failed",
+        "old_value": "old",
         "rolled_back": True,
     }
     assert target.values["label"] == "old"
@@ -356,3 +357,91 @@ def test_property_set_independently_rejects_file_and_callable_names(feature):
         )
         assert result["success"] is False
         assert not feature.set_calls
+
+
+class NumericMatrixFeature:
+    def __init__(self):
+        self.values = {"kernel": [[1.0, 2.0], [3.0, 4.0]]}
+        self.set_calls = []
+
+    def properties(self):
+        return list(self.values)
+
+    def getValueType(self, name):
+        return {"kernel": "DoubleMatrix"}[name]
+
+    def getDoubleMatrix(self, name):
+        return [list(row) for row in self.values[name]]
+
+    def set(self, name, value):
+        self.set_calls.append((name, value))
+        self.values[name] = value
+
+
+def test_double_matrix_properties_read_as_numbers_and_round_trip():
+    feature = NumericMatrixFeature()
+
+    read = get_existing_property(
+        FakeModel(feature), "comp1", "geometry_feature", "parent1/child1", "kernel"
+    )
+
+    assert read["success"] is True
+    assert read["value_type"] == "DoubleMatrix"
+    assert read["value"] == [[1.0, 2.0], [3.0, 4.0]]
+
+    result = set_existing_property(
+        FakeModel(feature),
+        "comp1",
+        "geometry_feature",
+        "parent1/child1",
+        "kernel",
+        [[1, 2], [3, 4]],
+    )
+
+    assert result["success"] is True
+    assert result["new_value"] == [[1.0, 2.0], [3.0, 4.0]]
+
+
+def test_set_failure_payload_includes_old_value_and_restore_detail():
+    class LockedFeature(FakeFeature):
+        def set(self, name, value):
+            if name == "locked" and value != self.values.get("locked"):
+                raise RuntimeError("backend rejects the assignment")
+            super().set(name, value)
+
+    feature = LockedFeature({"locked": "safe"}, {"locked": "String"})
+    result = set_existing_property(
+        FakeModel(feature),
+        "comp1",
+        "geometry_feature",
+        "parent1/child1",
+        "locked",
+        "unsafe",
+    )
+
+    assert result["success"] is False
+    assert result["error"] == "clientapi property set failed"
+    assert result["old_value"] == "safe"
+    assert result["rolled_back"] is True
+    assert "rollback_error" not in result
+
+    class UnrestorableFeature(LockedFeature):
+        def set(self, name, _value):
+            if name == "locked":
+                raise RuntimeError("backend rejects every assignment")
+            super().set(name, _value)
+
+    stuck = UnrestorableFeature({"locked": "safe"}, {"locked": "String"})
+    failed = set_existing_property(
+        FakeModel(stuck),
+        "comp1",
+        "geometry_feature",
+        "parent1/child1",
+        "locked",
+        "unsafe",
+    )
+
+    assert failed["success"] is False
+    assert failed["old_value"] == "safe"
+    assert failed["rolled_back"] is False
+    assert failed["rollback_error"].startswith("RuntimeError:")

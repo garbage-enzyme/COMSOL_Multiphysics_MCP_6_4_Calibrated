@@ -180,6 +180,35 @@ def _find_air_block_tag(geom) -> Optional[str]:
     return candidates[0][1]
 
 
+def _require_air_block_contains_patch(
+    geom,
+    air_block_tag: str,
+    patch_pos: Sequence[float],
+    patch_size: Sequence[float],
+) -> None:
+    """Fail loudly when the chosen air block cannot contain the patch footprint."""
+    feature = geom.feature().get(air_block_tag)
+    try:
+        block_pos = [float(v) for v in str(feature.getString("pos")).replace(",", " ").split()]
+        block_size = [float(v) for v in str(feature.getString("size")).replace(",", " ").split()]
+    except Exception as exc:
+        raise ValueError(f"air block {air_block_tag!r} position/size is unreadable") from exc
+    if len(block_pos) != 3 or len(block_size) != 3:
+        raise ValueError(f"air block {air_block_tag!r} is not a three-dimensional block")
+    tolerance = 1e-9
+    for axis in range(3):
+        low = float(patch_pos[axis])
+        high = low + float(patch_size[axis])
+        if (
+            low < block_pos[axis] - tolerance
+            or high > block_pos[axis] + block_size[axis] + tolerance
+        ):
+            raise ValueError(
+                f"auto-detected air block {air_block_tag!r} does not contain the patch "
+                "footprint; specify air_block_tag explicitly"
+            )
+
+
 def _set_copy_face_selections(feature, source: Sequence[int], destination: Sequence[int]) -> None:
     """Set an explicit directed CopyFace pair or fail before mesh execution."""
     failures = []
@@ -557,6 +586,8 @@ def register_mim_patch_tools(mcp: MCPServer) -> None:
                 "error": f"Model not found: {model_name or 'no current model'}",
             }
 
+        geom = None
+        created_features: list[str] = []
         try:
             jm = model.java
             comp = jm.component(component_name)
@@ -570,17 +601,21 @@ def register_mim_patch_tools(mcp: MCPServer) -> None:
             report = {"success": True, "steps": []}
 
             # ---- Step 1: identify air block (auto-detect if not given) ----
-            if not air_block_tag:
+            auto_detected_air = not air_block_tag
+            if auto_detected_air:
                 air_block_tag = _find_air_block_tag(geom)
             if not air_block_tag:
                 return {
                     "success": False,
                     "error": "Could not auto-detect air block tag. Please specify air_block_tag.",
                 }
+            if auto_detected_air:
+                _require_air_block_contains_patch(geom, air_block_tag, patch_pos, patch_size)
             report["air_block_tag"] = air_block_tag
 
             # ---- Step 2: add patch block ----
             b_pat = geom.feature().create(patch_tag, "Block")
+            created_features.append(str(patch_tag))
             b_pat.set("size", [str(s) for s in patch_size])
             b_pat.set("pos", [str(p) for p in patch_pos])
             report["steps"].append(
@@ -589,6 +624,7 @@ def register_mim_patch_tools(mcp: MCPServer) -> None:
 
             # ---- Step 3: add Difference (keepsubtract=True) ----
             dif = geom.feature().create(diff_tag, "Difference")
+            created_features.append(str(diff_tag))
             dif.selection("input").set([air_block_tag])
             dif.selection("input2").set([patch_tag])
             try:
@@ -710,7 +746,23 @@ def register_mim_patch_tools(mcp: MCPServer) -> None:
             return report
 
         except Exception as e:
-            return {"success": False, "error": f"mim_patch_build failed: {e}"}
+            rollback_errors = []
+            for tag in reversed(created_features):
+                try:
+                    geom.feature().remove(tag)
+                except Exception as rollback_exc:
+                    rollback_errors.append(f"{tag}: {type(rollback_exc).__name__}")
+            if created_features and geom is not None and not rollback_errors:
+                try:
+                    geom.run()
+                except Exception:
+                    rollback_errors.append("geometry rerun after feature removal failed")
+            result = {"success": False, "error": f"mim_patch_build failed: {e}"}
+            if created_features:
+                result["rolled_back"] = not rollback_errors
+                if rollback_errors:
+                    result["rollback_errors"] = rollback_errors[:8]
+            return result
 
     @mcp.tool()
     def mim_evaluate_spectral(

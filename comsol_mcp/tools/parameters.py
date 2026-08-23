@@ -100,7 +100,8 @@ def set_parameter(
                 ):
                     raise ValueError("restored parameter readback mismatch")
             else:
-                model.java.param().remove(name)
+                if name in {str(key) for key in model.parameters(evaluate=False)}:
+                    model.java.param().remove(name)
                 if name in {str(key) for key in model.parameters(evaluate=False)}:
                     raise ValueError("new parameter survived rollback")
         except Exception as rollback_exc:

@@ -211,17 +211,27 @@ def _save_model_version_bundle(
             ) from exc
         raise
     finally:
-        for stage in stages.values():
-            stage.unlink(missing_ok=True)
+        cleanup_errors = []
+        try:
+            for stage in stages.values():
+                stage.unlink(missing_ok=True)
+        except OSError as exc:
+            cleanup_errors.append(f"remove staging cleanup: {exc}")
         if committed:
             for backup in backups.values():
-                backup.unlink(missing_ok=True)
-    return {
+                try:
+                    backup.unlink(missing_ok=True)
+                except OSError as exc:
+                    cleanup_errors.append(f"remove {backup.name}: {exc}")
+    result = {
         "version_path": str(version),
         "latest_path": str(latest),
         "version_metadata_path": str(version_metadata),
         "latest_metadata_path": str(latest_metadata),
     }
+    if cleanup_errors:
+        result["cleanup_errors"] = cleanup_errors
+    return result
 
 
 def _list_model_components(model) -> list[dict[str, str]]:

@@ -121,3 +121,31 @@ def test_public_export_requires_a_caller_visible_destination(monkeypatch, tool_n
         "success": False,
         "error": "file_path is required so the exported artifact is caller-visible",
     }
+
+
+def test_export_requires_an_explicit_node_name(tmp_path):
+    class ExportTrap:
+        def export(self, *_args):
+            raise AssertionError("export must not run without a node name")
+
+    with pytest.raises(ValueError, match="explicit export node_name"):
+        export_result_file(ExportTrap(), None, str(tmp_path / "out.png"))
+
+
+def test_staging_preserves_the_destination_suffix(tmp_path):
+    seen = {}
+
+    class ExportModel:
+        def export(self, _node_name, staging):
+            if not staging.endswith(".png"):
+                raise RuntimeError(f"exporter cannot format {staging}")
+            seen["staging"] = staging
+            Path(staging).write_bytes(b"png")
+
+    destination = tmp_path / "field.png"
+
+    assert export_result_file(ExportModel(), "img1", str(destination)) == str(destination)
+
+    assert seen["staging"].endswith(".png")
+    assert destination.read_bytes() == b"png"
+    assert not list(tmp_path.glob(".*"))
