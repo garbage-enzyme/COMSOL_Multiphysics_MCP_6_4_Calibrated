@@ -34,6 +34,9 @@ class FrozenDict(dict):
     def __deepcopy__(self, _memo: dict[int, Any]) -> "FrozenDict":
         return self
 
+    def __hash__(self) -> int:
+        return hash(frozenset(self.items()))
+
 
 def deep_freeze(value: Any) -> Any:
     """Copy JSON-like containers into recursively immutable equivalents."""

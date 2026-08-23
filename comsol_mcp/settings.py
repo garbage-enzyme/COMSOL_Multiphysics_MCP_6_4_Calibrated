@@ -195,7 +195,11 @@ def _read_value(
         return parser(value)
     except (SettingsError, TypeError, ValueError, RuntimeError) as exc:
         _record_error(errors, location, exc)
-        return parser(deepcopy(default))
+        try:
+            return parser(deepcopy(default))
+        except (SettingsError, TypeError, ValueError, RuntimeError) as default_exc:
+            _record_error(errors, location, default_exc)
+            return deepcopy(default)
 
 
 def _absolute_string(

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
 import math
 import ntpath
 import re
+from dataclasses import asdict, dataclass
 from typing import Any, Mapping
 
 from comsol_mcp.durable import canonical_sha256_v1
@@ -16,7 +16,6 @@ from .contracts import (
     SharedServerEndpoint,
     normalize_shared_server_endpoint,
 )
-
 
 MAX_MODEL_LABEL_CHARACTERS = 512
 MAX_MODEL_PATH_CHARACTERS = 4096
@@ -59,6 +58,8 @@ def _positive_integer(value: Any, label: str) -> int:
 def _positive_finite(value: Any, label: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{label} must be positive and finite")
+    if isinstance(value, int) and abs(value) > 2**53:
+        raise ValueError(f"{label} integer must be exactly representable as float64")
     try:
         normalized = float(value)
     except OverflowError as exc:
@@ -155,7 +156,7 @@ def normalize_attached_server_identity(value: Any) -> AttachedServerIdentity:
     )
     if "ownership" in raw and raw["ownership"] != normalized.ownership:
         raise ValueError("attached server identity ownership is invalid")
-    if "identity_sha256" in raw and raw["identity_sha256"] != normalized.identity_sha256:
+    if "identity_sha256" in raw and raw["identity_sha256"].casefold() != normalized.identity_sha256:
         raise ValueError("attached server identity SHA-256 does not match its canonical content")
     return normalized
 

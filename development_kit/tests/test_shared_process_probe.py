@@ -585,3 +585,27 @@ def test_windows_file_version_validates_pointer_length_signature_and_api_types(
         ctypes.POINTER(ctypes.c_void_p),
         ctypes.POINTER(wintypes.UINT),
     ]
+
+
+def test_mph_client_classification_requires_a_real_mph_module_token():
+    unrelated = _record(30, 0, "python.exe", ["python.exe", "-m", "mphclient"])
+    snapshot = collect_shared_preflight_snapshot(
+        process_provider=lambda: [unrelated],
+        listener_provider=list,
+        window_provider=dict,
+        version_provider=lambda path: None,
+        clock=lambda: 1000.0,
+    )
+
+    assert snapshot["processes"] == []
+
+    real_mph = _record(30, 0, "python.exe", ["python.exe", "-c", "import mph; mph.Client()"])
+    snapshot = collect_shared_preflight_snapshot(
+        process_provider=lambda: [real_mph],
+        listener_provider=list,
+        window_provider=dict,
+        version_provider=lambda path: None,
+        clock=lambda: 1000.0,
+    )
+
+    assert [item["kind"] for item in snapshot["processes"]] == ["mph_client"]

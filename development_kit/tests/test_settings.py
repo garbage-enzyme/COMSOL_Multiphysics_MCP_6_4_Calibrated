@@ -170,6 +170,25 @@ def test_broken_default_environment_reports_errors_instead_of_raising(tmp_path):
     assert any("LOCALAPPDATA" in message and "absolute path" in message for message in messages)
 
 
+def test_invalid_value_with_broken_default_reparse_is_reported_not_raised(tmp_path):
+    path = _settings_path(tmp_path, {"runtime": {"directory": "relative"}})
+    environment = {
+        SETTINGS_PATH_ENV: str(path),
+        "PROGRAMDATA": "C:/非ascii",
+        "LOCALAPPDATA": "C:/AppData",
+    }
+
+    report = load_settings_report(environment)
+
+    assert report["settings"]["runtime"]["directory"] == "%PROGRAMDATA%/comsol_mcp/runtime"
+    runtime_errors = [
+        error for error in report["errors"] if error["path"] == "settings.runtime.directory"
+    ]
+    assert len(runtime_errors) == 2
+    assert any("absolute path" in error["message"] for error in runtime_errors)
+    assert any("ASCII" in error["message"] for error in runtime_errors)
+
+
 def test_deeply_nested_json_falls_back_without_recursion_escape(tmp_path):
     path = tmp_path / "deeply-nested.json"
     path.write_text(

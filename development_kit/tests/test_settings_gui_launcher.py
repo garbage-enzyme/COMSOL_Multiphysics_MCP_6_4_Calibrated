@@ -228,6 +228,15 @@ def test_handshake_rejects_unhashable_state(ascii_tmp_path: Path) -> None:
     assert read_handshake(path) is None
 
 
+def test_handshake_parent_name_comparison_is_case_insensitive(ascii_tmp_path: Path) -> None:
+    root = ascii_tmp_path / "Settings_GUI"
+    root.mkdir()
+    path = root / ".settings-gui-0123456789abcdef0123456789abcdef.json"
+    path.write_bytes(handshake_module.handshake_bytes("pending"))
+
+    assert validate_handshake_path(path) == root.resolve() / path.name
+
+
 def test_publish_handshake_rechecks_pending_state_before_replace(
     ascii_tmp_path: Path, monkeypatch
 ) -> None:

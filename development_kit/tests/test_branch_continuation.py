@@ -1222,6 +1222,19 @@ def test_public_tool_does_not_misclassify_internal_type_error_as_caller_rejectio
     assert "programming defect" not in json.dumps(result)
 
 
+def test_public_tool_import_failure_returns_a_structured_error(monkeypatch):
+    monkeypatch.setitem(sys.modules, "comsol_mcp.evidence.branch_continuation", None)
+    server = MCPServer("branch-continuation-import-failure-test")
+    register_branch_continuation_tools(server)
+
+    result = _call_public_tool(server, {"continuation_policy": {}, "states_spec": {}})
+
+    assert result["success"] is False
+    assert result["reason_code"] == "continuation_planning_failed"
+    assert result["scientific_disposition"] == "internal_error"
+    assert result["solver_started"] is False
+
+
 def test_public_tool_distinguishes_policy_rejection_from_invalid_evidence():
     server = MCPServer("branch-continuation-policy-error-test")
     register_branch_continuation_tools(server)

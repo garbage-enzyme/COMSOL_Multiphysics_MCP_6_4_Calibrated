@@ -267,11 +267,12 @@ def _kind(record: dict[str, Any], window_count: int) -> str | None:
     command_basenames = {Path(part).name.casefold() for part in command_parts}
     explicit_server_command = bool(command_basenames & _SERVER_EXECUTABLES)
     if process_names & _SERVER_EXECUTABLES or (
-        process_names & {"java", "java.exe", "javaw", "javaw.exe"}
-        and explicit_server_command
+        process_names & {"java", "java.exe", "javaw", "javaw.exe"} and explicit_server_command
     ):
         return "comsol_server"
-    if any(pattern in command for pattern in ("mph.client", "import mph", "from mph", "-m mph")):
+    if "mph.client" in command or (
+        "mph" in command_parts and {"-m", "import", "from"} & set(command_parts)
+    ):
         return "mph_client"
     if window_count > 0 and process_names & _DESKTOP_EXECUTABLES:
         return "comsol_desktop"

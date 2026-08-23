@@ -97,6 +97,26 @@ def test_attached_server_identity_rejects_missing_and_unknown_fields():
         normalize_attached_server_identity(unknown)
 
 
+def test_attached_server_identity_accepts_uppercase_hex_digest():
+    identity = _server_identity()
+    identity["identity_sha256"] = "A5D3D8D8F84DD4473770745B25662D8EE27A6C20122C3D53874F88F939DA2FD2"
+
+    normalized = normalize_attached_server_identity(identity)
+
+    assert normalized.identity_sha256 == (
+        "a5d3d8d8f84dd4473770745b25662d8ee27a6c20122c3d53874f88f939da2fd2"
+    )
+
+
+@pytest.mark.parametrize("field", ["server_process_create_time", "listener_observed_at_epoch"])
+def test_attached_server_identity_rejects_integers_beyond_exact_float_range(field):
+    raw = _server_identity()
+    raw[field] = 2**53 + 1
+
+    with pytest.raises(ValueError, match="exactly representable as float64"):
+        normalize_attached_server_identity(raw)
+
+
 def test_model_selector_normalizes_unicode_saved_path():
     selector = normalize_shared_model_selector(
         {

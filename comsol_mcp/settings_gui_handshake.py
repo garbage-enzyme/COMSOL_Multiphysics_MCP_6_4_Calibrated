@@ -47,7 +47,7 @@ def validate_handshake_path(value: str | Path) -> Path:
         not path.is_absolute()
         or not str(path).isascii()
         or not _HANDSHAKE_NAME.fullmatch(path.name)
-        or parent.name != "settings_gui"
+        or parent.name.casefold() != "settings_gui"
         or path.is_symlink()
         or getattr(path, "is_junction", lambda: False)()
         or parent.is_symlink()
