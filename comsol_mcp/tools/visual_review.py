@@ -47,6 +47,8 @@ def register_visual_review_tools(mcp: MCPServer) -> None:
                     max_total_bytes=max_total_bytes,
                     original_resolution_support=original_resolution_support,
                 )
+            if adapter != "opencode":
+                raise ValueError(f"unsupported adapter: {adapter}")
             if provider is None or model is None or provider_metadata is None:
                 raise ValueError("opencode adapter requires provider, model, and provider_metadata")
             return normalize_opencode_capability(

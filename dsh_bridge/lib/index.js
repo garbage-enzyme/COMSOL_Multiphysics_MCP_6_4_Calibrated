@@ -133,10 +133,16 @@ export async function apply(ctx, config) {
 					res.structuredContent !== undefined ? res.structuredContent : parseJson(res.text);
 				const jobId = parsed?.job_id ?? parsed?.jobId;
 				if (typeof jobId === "string" && jobId && !mirrored.has(jobId)) {
-					mirrored.add(jobId);
 					const jobType = parsed?.job_type ?? parsed?.jobType;
+					// Mark as mirrored only after the mirror actually started;
+					// a failed start must stay retryable instead of being
+					// pinned in the mirrored set with no onTerminal cleanup.
 					stateStore.add(jobId, jobType);
-					startMirror(jobId, jobType, exec.agent);
+					if (startMirror(jobId, jobType, exec.agent)) {
+						mirrored.add(jobId);
+					} else {
+						stateStore.remove(jobId);
+					}
 				}
 			}
 			return { content: res.content, ...(res.structuredContent !== undefined ? { structuredContent: res.structuredContent } : {}) };
@@ -147,7 +153,7 @@ export async function apply(ctx, config) {
 		const jobs = ctx.get("jobs");
 		if (!jobs) {
 			logger.warn?.(`comsol-bridge: ctx.jobs unavailable; mirror skipped for ${jobId} (load dsh-jobs-local + dsh-tool-jobs)`);
-			return;
+			return false;
 		}
 		try {
 			createJobMirror({
@@ -169,7 +175,9 @@ export async function apply(ctx, config) {
 			});
 		} catch (e) {
 			logger.warn?.(`comsol-bridge: mirror start failed for ${jobId}: ${e.message}`);
+			return false;
 		}
+		return true;
 	}
 
 	async function rehydrate() {
@@ -184,8 +192,11 @@ export async function apply(ctx, config) {
 				);
 				if (state === undefined) continue;
 				if (isTerminal(state, cfg.terminalStates)) { stateStore.remove(rec.jobId); continue; }
-				mirrored.add(rec.jobId);
-				startMirror(rec.jobId, rec.jobType, undefined);
+				// Only pin the record as mirrored once the mirror started;
+				// a failed start leaves it retryable on the next boot.
+				if (startMirror(rec.jobId, rec.jobType, undefined)) {
+					mirrored.add(rec.jobId);
+				}
 			} catch {
 				/* server busy or unreachable; leave the record for a later boot */
 			}

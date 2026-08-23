@@ -83,6 +83,8 @@ def register_spectral_characterization_tools(mcp: MCPServer) -> None:
             if (bundle_spec is None) == (spectral_bundle is None):
                 raise ValueError("provide exactly one of bundle_spec or spectral_bundle")
             if bundle_spec is not None:
+                if not isinstance(bundle_spec, dict):
+                    raise ValueError("bundle_spec must be a JSON object")
                 nonfinite = _nonfinite_row_summary(bundle_spec)
                 if nonfinite is not None:
                     return nonfinite
@@ -138,6 +140,8 @@ def register_spectral_characterization_tools(mcp: MCPServer) -> None:
             if (bundle_spec is None) == (spectral_bundle is None):
                 raise ValueError("provide exactly one of bundle_spec or spectral_bundle")
             if bundle_spec is not None:
+                if not isinstance(bundle_spec, dict):
+                    raise ValueError("bundle_spec must be a JSON object")
                 nonfinite = _nonfinite_row_summary(bundle_spec, artifact_key="model_comparison")
                 if nonfinite is not None:
                     return nonfinite

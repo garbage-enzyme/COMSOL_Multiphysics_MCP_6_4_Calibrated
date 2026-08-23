@@ -677,7 +677,8 @@ class SessionManager:
                     self._reusable_client = None
                     self._reusable_client_kind = None
                     self._start_message = "Client ready."
-                    self._ownership.heartbeat(refresh_server_processes=True)
+                    if self._ownership.heartbeat(refresh_server_processes=True) is not True:
+                        raise RuntimeError("solver ownership heartbeat could not be verified")
                     self._starting = False
                     self._record_startup_phase_locked(
                         "connected",
@@ -697,15 +698,27 @@ class SessionManager:
                 except Exception:
                     jvm_started_without_client = True
             with self._start_lock:
-                self._client = None
-                self._client_status = None
-                self._client_status_client = None
+                if cleanup_errors:
+                    # Retirement failed, so the client may still be alive;
+                    # surface the uncertainty instead of claiming a clean state.
+                    self._client = client
+                    self._client_status = (
+                        self._client_status_snapshot(client) if client is not None else None
+                    )
+                    self._client_status_client = client
+                    self._start_cleanup_pending = True
+                else:
+                    self._client = None
+                    self._client_status = None
+                    self._client_status_client = None
+                    self._start_cleanup_pending = False
                 self._host_restart_required = jvm_started_without_client
                 self._start_error = str(e)
                 self._start_message = f"Start failed: {e}"
-                self._start_cleanup_pending = False
+                if not cleanup_errors:
+                    self._start_cleanup_pending = False
                 self._starting = False
-                if mph_session_module is not None:
+                if mph_session_module is not None and not cleanup_errors:
                     try:
                         if mph_session_module.client is client:
                             mph_session_module.client = None
@@ -714,7 +727,8 @@ class SessionManager:
                             f"{self._start_message}; singleton cleanup warning: "
                             f"{type(singleton_exc).__name__}"
                         )
-                release_result = self._release_owned_lease()
+                if not cleanup_errors:
+                    release_result = self._release_owned_lease()
                 self._record_startup_phase_locked(
                     "start_failed",
                     state="failed",
@@ -1071,7 +1085,10 @@ class SessionManager:
         result = {
             "connected": True,
             "starting": False,
-            "cleanup_pending": False,
+            # A failed start retirement can retain a live client; surface the
+            # pending cleanup instead of claiming an unconditionally clean
+            # connected state.
+            "cleanup_pending": cleanup_pending,
             "owns_solver_lease": owns_solver_lease,
             "host_restart_required": host_restart_required,
             **client_status,

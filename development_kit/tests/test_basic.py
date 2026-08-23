@@ -1,5 +1,6 @@
 """Basic tests for COMSOL MCP Server."""
 
+import json
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -1452,3 +1453,72 @@ class TestSessionManager:
             phase["phase"] not in {"mph_loaded", "client_initialization_started"}
             for phase in status["startup"]["phases"]
         )
+
+    def test_local_start_fails_when_ownership_heartbeat_is_not_verified(
+        self, monkeypatch, permissive_session_ownership
+    ):
+        import src.tools.session as session_module
+
+        sm = session_module.SessionManager()
+
+        class FakeClient:
+            version = "6.4"
+            cores = 2
+            standalone = True
+
+            def clear(self):
+                return None
+
+        monkeypatch.setattr(session_module.mph, "Client", lambda **_k: FakeClient())
+        monkeypatch.setattr(session_module.mph_session, "client", None)
+        monkeypatch.setattr(sm._ownership, "heartbeat", lambda **_k: False)
+
+        result = sm.start(cores=2, version="6.4")
+
+        assert result["starting"] is True
+        sm._start_thread.join(timeout=3)
+
+        status = sm.get_status()
+        assert status["connected"] is False
+        assert status["cleanup_pending"] is False
+        receipt = json.loads(sm._startup_path().read_text(encoding="utf-8"))
+        failed = [p for p in receipt["phases"] if p["phase"] == "start_failed"]
+        assert failed
+        assert "heartbeat could not be verified" in failed[-1]["details"]["error"]
+
+    def test_start_failure_with_failed_retirement_surfaces_cleanup_pending(
+        self, monkeypatch, permissive_session_ownership
+    ):
+        import src.tools.session as session_module
+
+        sm = session_module.SessionManager()
+
+        class StuckClient:
+            version = "6.4"
+            cores = 2
+            standalone = False
+
+            def clear(self):
+                raise RuntimeError("clear refused")
+
+            def disconnect(self):
+                raise RuntimeError("disconnect refused")
+
+        monkeypatch.setattr(session_module.mph, "Client", lambda **_k: StuckClient())
+        monkeypatch.setattr(session_module.mph_session, "client", None)
+        monkeypatch.setattr(sm._ownership, "heartbeat", lambda **_k: False)
+
+        result = sm.start(cores=2, version="6.4")
+
+        assert result["starting"] is True
+        sm._start_thread.join(timeout=3)
+
+        record = json.loads(sm._startup_path().read_text(encoding="utf-8"))
+        assert record["connected"] is True  # retirement failed; client may be alive
+        assert record["cleanup_pending"] is True
+        failed = [p for p in record["phases"] if p["phase"] == "start_failed"]
+        assert failed
+        details = failed[-1]["details"]
+        assert len(details["cleanup_errors"]) == 2
+        status = sm.get_status()
+        assert status["cleanup_pending"] is True

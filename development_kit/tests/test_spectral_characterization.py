@@ -779,3 +779,24 @@ assert result['solver_started'] is False
         check=False,
     )
     assert completed.returncode == 0, completed.stderr
+
+
+def test_non_dict_bundle_spec_is_structurally_rejected_for_both_tools():
+    server = MCPServer("spectral-bundle-type-test")
+    register_spectral_characterization_tools(server)
+
+    for name, policy_arg in (
+        ("spectral_characterize", "measurement_configuration"),
+        ("spectral_model_compare", "comparison_configuration"),
+    ):
+        # Direct call bypasses the schema-level dict_type validation on
+        # purpose: the tool body must still fail closed structurally.
+        result = server._tool_manager._tools[name].fn(
+            analysis_policy={},
+            **{policy_arg: {}},
+            bundle_spec=["not", "a", "dict"],
+        )
+
+        assert result["success"] is False, name
+        assert result["classification"] == "invalid_input", name
+        assert "bundle_spec must be a JSON object" in result["error"], name

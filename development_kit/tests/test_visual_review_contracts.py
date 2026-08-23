@@ -732,3 +732,32 @@ def test_public_visual_review_tools_fail_closed_without_starting_comsol():
     assert capability["capability_state"] == "unavailable"
     assert invalid_request["success"] is False
     assert "1..16" in invalid_request["error"]
+
+
+def test_capability_normalize_rejects_unsupported_adapters_explicitly():
+    server = MCPServer("visual-review-adapter-test")
+    register_visual_review_tools(server)
+
+    # Direct call bypasses the schema-level Literal enum on purpose: the tool
+    # body must still fail closed for an out-of-contract adapter value.
+    unknown_adapter = server._tool_manager._tools["visual_review_capability_normalize"].fn(
+        adapter="foo", provider="p", model="m", provider_metadata={}
+    )
+    missing_opencode_args = decode_tool_result(
+        asyncio.run(
+            server.call_tool(
+                "visual_review_capability_normalize",
+                {"adapter": "opencode"},
+            )
+        )
+    )
+
+    assert unknown_adapter == {
+        "success": False,
+        "error": "unsupported adapter: foo",
+    }
+    assert missing_opencode_args["success"] is False
+    assert (
+        "opencode adapter requires provider, model, and provider_metadata"
+        in missing_opencode_args["error"]
+    )
