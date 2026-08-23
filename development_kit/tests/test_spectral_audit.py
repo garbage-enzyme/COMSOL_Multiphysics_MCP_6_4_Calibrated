@@ -300,6 +300,36 @@ def test_point_builder_rejects_a_non_object_parameter_state(tmp_path):
         build_spectral_audit_point(spec, 5e-6)
 
 
+def test_audit_projection_rejects_oversized_integers_as_value_errors(tmp_path):
+    spec = _spec(tmp_path)
+    job = tmp_path / "job"
+    point = build_spectral_audit_point(spec, 5e-6)
+    artifact, result = _result(job, spec, point)
+    _rewrite_inner(
+        artifact,
+        lambda doc: doc["measurement"]["wavelength"].__setitem__("requested_m", 10**400),
+    )
+    with pytest.raises(ValueError, match="must be numeric"):
+        extract_spectral_audit_result(
+            job_dir=job, artifact_dir=artifact, spec=spec, point=point, result=result
+        )
+
+
+def test_wrapper_descriptor_rejects_boolean_or_float_size_bytes(tmp_path):
+    spec = _spec(tmp_path)
+    job = tmp_path / "job"
+    point = build_spectral_audit_point(spec, 5e-6)
+    artifact, result = _result(job, spec, point)
+    wrapper_path = artifact / "matrix_collector.json"
+    wrapper = json.loads(wrapper_path.read_text(encoding="utf-8"))
+    wrapper["inner_manifest"]["size_bytes"] = float(wrapper["inner_manifest"]["size_bytes"])
+    wrapper_path.write_text(json.dumps(wrapper), encoding="utf-8")
+    with pytest.raises(ValueError, match="size_bytes must be an integer"):
+        extract_spectral_audit_result(
+            job_dir=job, artifact_dir=artifact, spec=spec, point=point, result=result
+        )
+
+
 def test_incomplete_audit_is_not_projected(tmp_path):
     spec = _spec(tmp_path)
     job = tmp_path / "job"

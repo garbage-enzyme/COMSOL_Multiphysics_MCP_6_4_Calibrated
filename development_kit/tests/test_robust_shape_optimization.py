@@ -319,6 +319,22 @@ def test_manifest_v11_accepts_tagged_lin2025_adapter(ascii_tmp_path):
         expand_robust_shape_manifest(envelope)
 
 
+@pytest.mark.parametrize(
+    "bad",
+    [None, True, [260.0], {"nan": 1}],
+    ids=["null", "boolean", "nested-list", "object"],
+)
+def test_manifest_initial_values_reject_non_scalar_elements(ascii_tmp_path, bad):
+    envelope, _source, manifest = _write_manifest(ascii_tmp_path)
+    raw = json.loads(manifest.read_bytes())
+    raw["initial_values"] = [bad, 800.0]
+    payload = json.dumps(raw, sort_keys=True, separators=(",", ":")).encode()
+    manifest.write_bytes(payload)
+    envelope["submission_manifest_sha256"] = hashlib.sha256(payload).hexdigest()
+    with pytest.raises(ValueError, match="initial_values"):
+        expand_robust_shape_manifest(envelope)
+
+
 def test_manifest_rejects_source_or_manifest_mutation(ascii_tmp_path):
     envelope, source, manifest = _write_manifest(ascii_tmp_path)
     source.write_bytes(b"changed")

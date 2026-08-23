@@ -58,6 +58,17 @@ def _wavelength_readback_matches(observed: float, requested: float) -> bool:
     )
 
 
+def _displacement_readback_matches(observed: float, recorded: float) -> bool:
+    # A save/reload cycle re-derives the field solution; bit-identical floats
+    # are not guaranteed, so compare with a tight engineering tolerance.
+    return math.isclose(
+        observed,
+        recorded,
+        rel_tol=_WAVELENGTH_READBACK_RELATIVE_TOLERANCE * 1.0e3,
+        abs_tol=0.0,
+    )
+
+
 class ThermoOptomechanicalComsolExecutor:
     """Execute only the fixed thermo-optomechanical tags, studies, and expressions."""
 
@@ -437,7 +448,7 @@ class ThermoOptomechanicalComsolExecutor:
             "material_frame_semantics": "spatial_deformation_preserves_material",
             "source_geometry_sha256": source_geometry,
             "deformed_geometry_sha256": deformed_geometry,
-            "readback_exact": displacement_readback == displacement,
+            "readback_exact": _displacement_readback_matches(displacement_readback, displacement),
             "rollback_verified": _sha256_file(self.checkpoint_path) == checkpoint_sha,
         }
 

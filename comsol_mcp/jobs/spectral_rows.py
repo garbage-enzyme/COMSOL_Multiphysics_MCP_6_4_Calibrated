@@ -35,14 +35,6 @@ def _fingerprint(value: object) -> str:
     return hashlib.sha256(_canonical_bytes(value)).hexdigest()
 
 
-def _sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for block in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
-
-
 def _mapping(value: object, name: str) -> dict[str, Any]:
     if not isinstance(value, Mapping) or not all(isinstance(key, str) for key in value):
         raise ValueError(f"{name} must be an object with string keys")
@@ -175,6 +167,8 @@ def _verify_artifact_bytes(
     point_fingerprint: str,
 ) -> None:
     resolved_root = root.resolve()
+    expected_source = _hex_digest(spec.get("source_model_sha256"), "spec source_model_sha256")
+    payloads: dict[str, bytes] = {}
     for prefix in ("wrapper", "inner"):
         path = (resolved_root / artifact[f"{prefix}_relative_path"]).resolve()
         try:
@@ -183,14 +177,17 @@ def _verify_artifact_bytes(
             raise ValueError(f"audit {prefix} artifact escapes the durable job directory") from exc
         if not path.is_file():
             raise ValueError(f"audit {prefix} artifact is missing")
-        if path.stat().st_size != artifact[f"{prefix}_size_bytes"]:
+        # Read once and hash the exact bytes that will be parsed so a swap
+        # between verification and use cannot pass the integrity gate.
+        data = path.read_bytes()
+        if len(data) != artifact[f"{prefix}_size_bytes"]:
             raise ValueError(f"audit {prefix} artifact size does not match")
-        if _sha256_file(path) != artifact[f"{prefix}_sha256"]:
+        if hashlib.sha256(data).hexdigest() != artifact[f"{prefix}_sha256"]:
             raise ValueError(f"audit {prefix} artifact hash does not match")
-    inner_path = resolved_root / artifact["inner_relative_path"]
+        payloads[prefix] = data
     try:
-        inner = json.loads(inner_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        inner = json.loads(payloads["inner"].decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValueError("audit inner artifact is not valid JSON") from exc
     inner = _mapping(inner, "audit inner artifact")
     physical = validate_physical_evidence(inner.get("physical_evidence"))
@@ -200,7 +197,7 @@ def _verify_artifact_bytes(
         raise ValueError("audit status differs from the durable row")
     if physical["producer"]["tool"] != "wave_optics_point_audit":
         raise ValueError("physical evidence producer is not the declared point audit")
-    if physical["identity"]["source_sha256"] != spec.get("source_model_sha256"):
+    if physical["identity"]["source_sha256"] != expected_source:
         raise ValueError("physical evidence source hash differs from the immutable job")
     if physical["identity"]["config_id"] != point_fingerprint:
         raise ValueError("physical evidence point identity differs from the durable row")

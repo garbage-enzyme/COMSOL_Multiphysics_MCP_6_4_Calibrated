@@ -95,6 +95,8 @@ def write_spectral_summary(
         },
     )
     atomic_write_json(paths["spectral_progress"], values["spectral_progress"])
+    if read_json(paths["spectral_progress"]) != values["spectral_progress"]:
+        raise RuntimeError("spectral_progress did not replay after atomic write")
     descriptors = {name: _artifact_descriptor(path, root) for name, path in paths.items()}
     body = {
         "schema_name": SPECTRAL_SUMMARY_SCHEMA_NAME,
@@ -311,6 +313,23 @@ def run_spectral_characterization(
             current_plans = read_spectral_stage_plans(root, spec)
             current_rows = read_spectral_rows(rows_path, spec, artifact_root=root)
             current_progress = build_spectral_progress(spec, current_plans, current_rows)
+            if current_progress.get("action") == "complete":
+                # The appended row finished the spectrum; the hook stop must
+                # not strand a fully reconstructable job without its summary.
+                receipt = write_spectral_summary(
+                    root,
+                    spec,
+                    current_progress,
+                    fault_hook=fault_hook,
+                )
+                return {
+                    "completed": True,
+                    "stop_reason": f"after_durable_row_{after['action']}",
+                    "solved_this_attempt": solved_this_attempt,
+                    "skipped_complete": skipped_complete,
+                    "progress": current_progress,
+                    **receipt,
+                }
             return {
                 "completed": False,
                 "stop_reason": f"after_durable_row_{after['action']}",

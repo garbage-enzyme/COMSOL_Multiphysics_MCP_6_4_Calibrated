@@ -415,6 +415,17 @@ def test_submission_manifest_hash_and_parse_share_one_snapshot(ascii_tmp_path, m
     assert spec["declared_optical_point_count"] == 2
 
 
+def test_source_hash_race_surfaces_as_the_validation_error_boundary(ascii_tmp_path, monkeypatch):
+    raw = _raw_spec(ascii_tmp_path / "source-race")
+
+    def racing_hash(_path):
+        raise FileNotFoundError("removed between is_file and hash")
+
+    monkeypatch.setattr(replay_module, "_sha256_file", racing_hash)
+    with pytest.raises(ValueError, match="existing MPH file"):
+        normalize_thermo_optomechanical_replay_spec(raw)
+
+
 @pytest.mark.parametrize(
     "mutation,match",
     [
@@ -737,6 +748,17 @@ def test_deformation_transfer_readback_is_observed_twice_not_tautological(ascii_
     executor._save = save
 
     assert executor._deformation_transfer()["readback_exact"] is False
+
+
+def test_displacement_readback_tolerates_last_ulp_but_not_material_drift():
+    value = 1.2345678901234e-6
+    assert replay_execution_module._displacement_readback_matches(
+        math.nextafter(value, float("inf")), value
+    )
+    assert (
+        replay_execution_module._displacement_readback_matches(value * (1.0 + 1.0e-6), value)
+        is False
+    )
 
 
 def test_executor_uses_normal_save_for_current_model_and_save_copy_for_checkpoint(

@@ -98,7 +98,9 @@ def _payload(value: object, kind: str) -> dict[str, Any]:
         observation = _optional_digest(raw["observation_fingerprint"], "observation_fingerprint")
         contribution = _optional_finite(raw["objective_contribution"], "objective_contribution")
         if status in {"completed", "skipped"} and (observation is None or contribution is None):
-            raise ValueError("completed condition rows require durable observation evidence")
+            raise ValueError(
+                "completed or skipped condition rows require durable observation evidence"
+            )
         if status in {"failed", "cancelled"} and (
             observation is not None or contribution is not None
         ):
@@ -292,18 +294,19 @@ def _normalize_row(
         or raw["attempt"] < 1
     ):
         raise ValueError("robust shape row attempt must be positive")
-    if raw["job_fingerprint"] != job_fingerprint:
+    if _digest(raw["job_fingerprint"], "job_fingerprint") != job_fingerprint:
         raise ValueError("robust shape row job identity changed")
     kind = raw["kind"]
     if kind not in _KINDS:
         raise ValueError("robust shape row kind is unsupported")
-    if raw["previous_row_sha256"] != previous:
+    stored_previous = _optional_digest(raw["previous_row_sha256"], "previous_row_sha256")
+    if stored_previous != previous:
         raise ValueError("robust shape row hash chain is discontinuous")
     expected = domain_sha256_v2(
         ROBUST_SHAPE_ROW_SCHEMA_NAME,
         {key: raw[key] for key in fields if key != "row_sha256"},
     )
-    if raw["row_sha256"] != expected:
+    if _digest(raw["row_sha256"], "row_sha256") != expected:
         raise ValueError("robust shape row hash is invalid")
     payload = raw["payload"]
     if schema_version == "1.0.0" and raw["kind"] == "iteration":

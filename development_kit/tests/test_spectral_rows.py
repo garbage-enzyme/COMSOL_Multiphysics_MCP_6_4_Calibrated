@@ -233,6 +233,55 @@ def test_exact_complete_wavelength_cannot_be_appended_twice(tmp_path):
         _append(journal, root, spec, 4e-6, 0.1)
 
 
+def test_uppercase_source_hash_in_spec_passes_artifact_verification(tmp_path):
+    spec = _spec(tmp_path)
+    upper_spec = {**spec, "source_model_sha256": spec["source_model_sha256"].upper()}
+    root = tmp_path / "job"
+    journal = root / "spectral_rows.jsonl"
+    appended = _append(journal, root, spec, 4e-6, 0.1)
+
+    # Reading through a non-lowercased spec must not spuriously fail the
+    # artifact source-hash comparison.
+    rows = read_spectral_rows(journal, upper_spec, artifact_root=root)
+
+    assert [row["row_sha256"] for row in rows] == [appended["row_sha256"]]
+    assert rows[0]["source_model_sha256"] == spec["source_model_sha256"]
+
+
+def test_inner_artifact_is_parsed_from_the_verified_bytes(tmp_path, monkeypatch):
+    spec = _spec(tmp_path)
+    root = tmp_path / "job"
+    journal = root / "spectral_rows.jsonl"
+    _append(journal, root, spec, 4e-6, 0.1)
+    inner = next(
+        path for path in root.rglob("manifest.json") if path.parent.name.startswith("point-")
+    )
+    verified_bytes = inner.read_bytes()
+    swapped = json.dumps({"audit_status": "measurement_complete"}).encode("utf-8")
+    original_read_bytes = Path.read_bytes
+    reads = {"inner": 0}
+
+    def swap_after_first_read(self):
+        data = original_read_bytes(self)
+        if self == inner:
+            reads["inner"] += 1
+            if reads["inner"] == 1:
+                # Simulate a swap between the hash gate and the JSON parse of
+                # a separate second read; the fix parses the hashed buffer.
+                inner.write_bytes(swapped)
+        return data
+
+    monkeypatch.setattr(Path, "read_bytes", swap_after_first_read)
+    try:
+        rows = read_spectral_rows(journal, spec, artifact_root=root)
+    finally:
+        monkeypatch.undo()
+        inner.write_bytes(verified_bytes)
+
+    assert len(rows) == 1
+    assert reads["inner"] == 1
+
+
 @pytest.mark.parametrize(
     "absorption",
     [float("inf"), pytest.param(10**10_000, id="huge-integer")],

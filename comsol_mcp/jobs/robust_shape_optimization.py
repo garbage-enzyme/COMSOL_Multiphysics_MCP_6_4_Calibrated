@@ -271,7 +271,15 @@ def expand_robust_shape_manifest(submission: object) -> dict[str, Any]:
     values = raw["initial_values"]
     if not isinstance(values, list) or len(values) != len(support["variables"]):
         raise ValueError("initial_values must match the robust support variable count")
-    normalized_values = [float(item) for item in values]
+    normalized_values = []
+    for index, item in enumerate(values):
+        if isinstance(item, bool) or not isinstance(item, (int, float)):
+            raise ValueError(f"initial_values[{index}] must be a finite number")
+        try:
+            normalized = float(item)
+        except (OverflowError, TypeError, ValueError) as exc:
+            raise ValueError(f"initial_values[{index}] must be a finite number") from exc
+        normalized_values.append(normalized)
     for item, variable in zip(normalized_values, support["variables"], strict=True):
         if not variable["lower"] <= item <= variable["upper"]:
             raise ValueError("initial_values must remain within robust support bounds")

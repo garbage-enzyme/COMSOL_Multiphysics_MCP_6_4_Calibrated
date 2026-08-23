@@ -1293,6 +1293,9 @@ def _run_licensed(root: str, job_id: str) -> int:
                     },
                     event="robust_finalist_completion_rejected",
                 )
+                # A pending successful return must not mask the durably failed
+                # state; supervisors key on the process exit code.
+                raise
         if not source_unchanged:
             print(
                 "licensed robust worker detected immutable source drift",

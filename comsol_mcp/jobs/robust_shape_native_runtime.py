@@ -685,24 +685,28 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
         self.study.run()
         tag = f"robust_eval_{self._counter:04d}"
         evaluator = self.numerical.create(tag, "EvalGlobal")
-        evaluator.set("data", self.controls["dataset_tag"])
-        expressions = [
-            self.controls["observable_expression"],
-            self.controls["reflectance_expression"],
-            self.controls["transmittance_expression"],
-            self.controls["absorption_expression"],
-            self.controls["evaluated_wavelength_expression"],
-            self.controls["solved_wavelength_expression"],
-        ]
-        evaluator.set("expr", JArray(JString)(expressions))
-        values = _flatten_real(evaluator.computeResult())
-        if len(values) < len(expressions):
-            raise ValueError("COMSOL condition evaluator returned too few values")
-        mesh = _get(self.model.java.component(), self.controls["component_tag"]).mesh(
-            self.controls["mesh_tag"]
-        )
-        statistics = mesh.stat()
-        self.numerical.remove(tag)
+        try:
+            evaluator.set("data", self.controls["dataset_tag"])
+            expressions = [
+                self.controls["observable_expression"],
+                self.controls["reflectance_expression"],
+                self.controls["transmittance_expression"],
+                self.controls["absorption_expression"],
+                self.controls["evaluated_wavelength_expression"],
+                self.controls["solved_wavelength_expression"],
+            ]
+            evaluator.set("expr", JArray(JString)(expressions))
+            values = _flatten_real(evaluator.computeResult())
+            if len(values) < len(expressions):
+                raise ValueError("COMSOL condition evaluator returned too few values")
+            mesh = _get(self.model.java.component(), self.controls["component_tag"]).mesh(
+                self.controls["mesh_tag"]
+            )
+            statistics = mesh.stat()
+        finally:
+            # A failed evaluation must not leak the temporary EvalGlobal node
+            # into the derived model's numerical feature list.
+            self.numerical.remove(tag)
         return {
             "condition_id": condition["condition_id"],
             "observable_id": condition["observable_id"],
