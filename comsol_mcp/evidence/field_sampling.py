@@ -37,14 +37,21 @@ def select_field_slice_samples(
             declared_count = None
         if declared_count is not None and declared_count > point_limit:
             raise ValueError("raw field samples exceed the caller-declared point limit")
-        values = np.asarray(raw_values)
-        if values.ndim != 1 or values.dtype.kind not in "fiu":
+        raw_array = np.asarray(raw_values)
+        if raw_array.ndim != 1 or raw_array.dtype.kind not in "fiu":
             raise ValueError(f"coordinates.{axis} must be a one-dimensional numeric array")
-        if values.size > point_limit:
+        if raw_array.size > point_limit:
             raise ValueError("raw field samples exceed the caller-declared point limit")
-        if raw_count is not None and values.size != raw_count:
+        if raw_count is not None and raw_array.size != raw_count:
             raise ValueError("all coordinate arrays must have the same length")
-        values = values.astype(np.float64, copy=False)
+        values = raw_array.astype(np.float64, copy=False)
+        if raw_array.dtype.kind in "iu" and (
+            np.any(raw_array > 2**53)
+            or (raw_array.dtype.kind == "i" and np.any(raw_array < -(2**53)))
+        ):
+            raise ValueError(
+                f"coordinates.{axis} integer values must be exactly representable as float64"
+            )
         if not np.all(np.isfinite(values)):
             raise ValueError(f"coordinates.{axis} must contain only finite values")
         if raw_count is None:
@@ -84,13 +91,11 @@ def select_field_slice_samples(
     mask = np.ones(raw_count, dtype=bool)
     for axis in ("x", "y", "z"):
         lower, upper = request_value["coordinate_bounds"][axis]
-        inclusive_lower = np.nextafter(float(lower), -np.inf)
-        inclusive_upper = np.nextafter(float(upper), np.inf)
-        mask &= coordinate_arrays[axis] >= inclusive_lower
-        mask &= coordinate_arrays[axis] <= inclusive_upper
+        mask &= coordinate_arrays[axis] >= lower
+        mask &= coordinate_arrays[axis] <= upper
     slice_spec = request_value["slice"]
-    slice_lower = np.nextafter(float(slice_spec["value"] - slice_spec["tolerance"]), -np.inf)
-    slice_upper = np.nextafter(float(slice_spec["value"] + slice_spec["tolerance"]), np.inf)
+    slice_lower = slice_spec["value"] - slice_spec["tolerance"]
+    slice_upper = slice_spec["value"] + slice_spec["tolerance"]
     slice_coordinates = coordinate_arrays[slice_spec["axis"]]
     mask &= slice_coordinates >= slice_lower
     mask &= slice_coordinates <= slice_upper

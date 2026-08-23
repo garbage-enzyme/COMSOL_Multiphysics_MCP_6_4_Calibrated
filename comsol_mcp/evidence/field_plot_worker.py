@@ -35,6 +35,12 @@ def _expand_constant_limits(value, *, logarithmic: bool, np):
 
 def main() -> int:
     request = json.loads(sys.stdin.read())
+    if (
+        not isinstance(request, dict)
+        or not isinstance(request.get("views"), list)
+        or not request["views"]
+    ):
+        raise ValueError("views must contain at least one entry")
     import matplotlib
 
     matplotlib.use("Agg")
@@ -63,8 +69,8 @@ def main() -> int:
         if (
             first.ndim != 1
             or second.ndim != 1
-            or first.size == 0
-            or second.size == 0
+            or first.size < 2
+            or second.size < 2
             or not np.all(np.isfinite(first))
             or not np.all(np.isfinite(second))
             or np.any(np.diff(first) <= 0.0)

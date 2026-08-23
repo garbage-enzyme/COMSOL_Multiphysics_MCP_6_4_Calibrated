@@ -49,7 +49,10 @@ def _finite_float(value: object) -> float | None:
 
 
 def _validate_worker_response(
-    value: object, *, expected_view_ids: list[str]
+    value: object,
+    *,
+    expected_view_ids: list[str],
+    shared_color_limits: bool = False,
 ) -> dict[str, list[float]]:
     if not isinstance(value, Mapping) or set(value) != {"success", "views"}:
         raise RuntimeError("field plot worker response is invalid")
@@ -77,6 +80,8 @@ def _validate_worker_response(
         limits_by_view[view_id] = normalized_limits
     if list(limits_by_view) != expected_view_ids:
         raise RuntimeError("field plot worker response view identities do not match")
+    if shared_color_limits and len({tuple(limits) for limits in limits_by_view.values()}) != 1:
+        raise RuntimeError("field plot worker shared color limits are inconsistent")
     return limits_by_view
 
 
@@ -201,7 +206,9 @@ def render_field_png_bundle(
         except (json.JSONDecodeError, RecursionError) as exc:
             raise RuntimeError("field plot worker response is not valid JSON") from exc
         limits_by_view = _validate_worker_response(
-            response, expected_view_ids=[item["view_id"] for item in normalized]
+            response,
+            expected_view_ids=[item["view_id"] for item in normalized],
+            shared_color_limits=shared_color_limits,
         )
         descriptors = []
         for view in normalized:

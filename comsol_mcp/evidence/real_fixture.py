@@ -10,7 +10,6 @@ from typing import Any, Mapping
 
 from comsol_mcp.utils.validation import strict_json_number
 
-
 MODEL_ENV = "COMSOL_REAL_TEST_MODEL"
 WAVELENGTH_ENV = "COMSOL_REAL_TEST_WAVELENGTH_UM"
 DOMAINS_ENV = "COMSOL_REAL_TEST_TOP_AIR_DOMAIN_IDS"
@@ -130,13 +129,21 @@ def controlled_fixture_environment_from_reference_power_spec(
         raise ValueError("licensed regression requires a reference-power wavelength declared in um")
     if not isinstance(reference, dict):
         raise ValueError("licensed regression requires reference-power reference_air metadata")
+    source_value = raw.get("source_model_path")
+    if not isinstance(source_value, str) or not source_value.strip():
+        raise ValueError("reference-power spec source_model_path must be a non-empty absolute path")
+    source_candidate = Path(source_value).expanduser()
+    if not source_candidate.is_absolute():
+        raise ValueError("reference-power spec source_model_path must be an absolute path")
     environment = dict(base_environment if base_environment is not None else os.environ)
     environment.update(
         {
-            MODEL_ENV: str(Path(str(raw.get("source_model_path", ""))).expanduser().resolve()),
+            MODEL_ENV: str(source_candidate.resolve()),
             SOURCE_SHA256_ENV: _source_sha256(raw.get("expected_source_sha256")),
             WAVELENGTH_ENV: format(_positive_wavelength(wavelength.get("value")), ".17g"),
-            DOMAINS_ENV: json.dumps(_domains(reference.get("top_air_domain_ids")), separators=(",", ":")),
+            DOMAINS_ENV: json.dumps(
+                _domains(reference.get("top_air_domain_ids")), separators=(",", ":")
+            ),
             RANGE_ENV: json.dumps(
                 _coordinate_range(reference.get("top_air_coordinate_range")),
                 sort_keys=True,

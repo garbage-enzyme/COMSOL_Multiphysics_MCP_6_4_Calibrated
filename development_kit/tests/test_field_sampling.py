@@ -191,3 +191,74 @@ def test_coordinate_and_quantity_keys_are_exact_and_view_is_bound():
             select_field_slice_samples(**malformed)
     with pytest.raises(ValueError, match="exactly one requested view"):
         select_field_slice_samples(**bad_view)
+
+
+def test_selection_rejects_samples_outside_declared_bounds_by_one_ulp():
+    _, kwargs = _samples(interpolation="nearest")
+    kwargs["coordinates"] = {
+        "x": np.array([0.0, 0.5, 1.0, np.nextafter(1.0, np.inf)]),
+        "y": np.array([0.0, 0.0, 0.0, 0.0]),
+        "z": np.array([0.5, 0.5, 0.5, 0.5]),
+    }
+    kwargs["quantities"] = {
+        "electric_norm": np.arange(4.0),
+        "magnetic_norm": np.arange(4.0) + 10.0,
+    }
+
+    result = select_field_slice_samples(**kwargs)
+
+    assert result["selected_point_count"] == 3
+    assert result["rejected_point_count"] == 1
+    np.testing.assert_array_equal(result["coordinates"]["x"], [0.0, 0.5, 1.0])
+
+
+def test_large_integer_coordinates_fail_closed_instead_of_rounding():
+    _, kwargs = _samples(interpolation="nearest")
+    kwargs["coordinates"] = {
+        "x": np.array([0, 2**53 + 1], dtype=np.int64),
+        "y": np.array([0, 0], dtype=np.int64),
+        "z": np.array([0, 0], dtype=np.int64),
+    }
+    kwargs["quantities"] = {
+        "electric_norm": np.arange(2.0),
+        "magnetic_norm": np.arange(2.0) + 10.0,
+    }
+
+    with pytest.raises(ValueError, match="exactly representable as float64"):
+        select_field_slice_samples(**kwargs)
+
+
+def test_small_integer_coordinates_remain_supported():
+    _, kwargs = _samples(interpolation="nearest")
+    kwargs["coordinates"] = {
+        "x": np.array([-1, 0, 1], dtype=np.int64),
+        "y": np.array([0, 0, 0], dtype=np.int64),
+        "z": np.array([0, 0, 0], dtype=np.float64) + 0.5,
+    }
+    kwargs["quantities"] = {
+        "electric_norm": np.arange(3.0),
+        "magnetic_norm": np.arange(3.0) + 10.0,
+    }
+
+    result = select_field_slice_samples(**kwargs)
+
+    assert result["selected_point_count"] == 3
+    np.testing.assert_array_equal(result["coordinates"]["x"], [-1, 0, 1])
+
+
+def test_unsigned_integer_coordinates_remain_supported_without_wrapping():
+    _, kwargs = _samples(interpolation="nearest")
+    kwargs["coordinates"] = {
+        "x": np.array([0, 1], dtype=np.uint64),
+        "y": np.array([0, 0], dtype=np.uint64),
+        "z": np.array([0, 0], dtype=np.float64) + 0.5,
+    }
+    kwargs["quantities"] = {
+        "electric_norm": np.arange(2.0),
+        "magnetic_norm": np.arange(2.0) + 10.0,
+    }
+
+    result = select_field_slice_samples(**kwargs)
+
+    assert result["selected_point_count"] == 2
+    np.testing.assert_array_equal(result["coordinates"]["x"], [0, 1])

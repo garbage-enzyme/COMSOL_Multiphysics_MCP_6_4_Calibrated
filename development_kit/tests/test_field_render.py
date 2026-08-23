@@ -508,3 +508,97 @@ def test_renderer_converts_invalid_worker_encoding_to_a_stable_error(tmp_path, m
             shared_color_limits=False,
             output_root=tmp_path / "encoding-output",
         )
+
+
+def test_worker_rejects_empty_view_requests_fail_closed(monkeypatch):
+    import io
+    import sys
+
+    from src.evidence import field_plot_worker as worker_module
+
+    request = {
+        "quantity_name": "abs_ex",
+        "quantity_unit": "V/m",
+        "coordinate_unit": "um",
+        "color_scale": "linear",
+        "shared_color_limits": True,
+        "views": [],
+    }
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(request)))
+
+    with pytest.raises(ValueError, match="at least one entry"):
+        worker_module.main()
+
+
+def test_worker_rejects_single_point_coordinate_axes(tmp_path, monkeypatch):
+    import io
+    import sys
+
+    from src.evidence import field_plot_worker as worker_module
+
+    array = tmp_path / "single-axis.npz"
+    x = np.array([1.0])
+    y = np.linspace(-1.0, 1.0, 4)
+    np.savez_compressed(
+        array,
+        coordinate_x=x,
+        coordinate_y=y,
+        quantity_abs_ex=np.zeros((y.size, x.size)),
+    )
+    request = {
+        "quantity_name": "abs_ex",
+        "quantity_unit": "V/m",
+        "coordinate_unit": "um",
+        "color_scale": "linear",
+        "shared_color_limits": False,
+        "views": [
+            {
+                "view_id": "target",
+                "array_path": str(array),
+                "array_sha256": hashlib.sha256(array.read_bytes()).hexdigest(),
+                "png_artifact_id": "target-png",
+                "png_path": str(tmp_path / "out.png"),
+            }
+        ],
+    }
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(request)))
+
+    with pytest.raises(ValueError, match="field coordinates"):
+        worker_module.main()
+
+    assert not (tmp_path / "out.png").exists()
+
+
+def test_render_rejects_divergent_shared_color_limits(tmp_path, monkeypatch):
+    off = tmp_path / "off.npz"
+    target = tmp_path / "target.npz"
+    off_hash = _array(off, 1.0)
+    target_hash = _array(target, 10.0)
+
+    class FakeProcess:
+        returncode = 0
+
+        def __init__(self, _command, **kwargs):
+            self.stdout = kwargs["stdout"]
+
+        def communicate(self, *, input, timeout):
+            assert input and timeout > 0
+            payload = json.loads(input)
+            views = [
+                {"view_id": item["view_id"], "color_limits": [1.0, 5.0 + index]}
+                for index, item in enumerate(payload["views"])
+            ]
+            self.stdout.write(json.dumps({"success": True, "views": views}).encode("utf-8"))
+
+    monkeypatch.setattr(field_render_module.subprocess, "Popen", FakeProcess)
+
+    with pytest.raises(RuntimeError, match="shared color limits"):
+        render_field_png_bundle(
+            views=[_view("off", off, off_hash), _view("target", target, target_hash)],
+            quantity_name="abs_ex",
+            quantity_unit="V/m",
+            coordinate_unit="um",
+            color_scale="linear",
+            shared_color_limits=True,
+            output_root=tmp_path / "divergent-output",
+        )
