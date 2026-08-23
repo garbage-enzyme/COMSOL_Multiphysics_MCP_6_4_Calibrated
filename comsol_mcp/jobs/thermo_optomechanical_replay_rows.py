@@ -312,6 +312,8 @@ def _validate_stage_payload(stage_id: str, value: object, spec: Mapping[str, Any
             or frame["topology_change_allowed"] is not False
         ):
             raise ValueError("frame evidence is invalid")
+        _hex_digest(mesh["identity_sha256"], "mesh identity_sha256")
+        _hex_digest(frame["identity_sha256"], "frame identity_sha256")
         _finite(payload["deformation_scale"], "deformation scale")
         _finite(payload["displacement_to_length"], "displacement ratio")
         return
@@ -336,6 +338,8 @@ def _validate_stage_payload(stage_id: str, value: object, spec: Mapping[str, Any
             or payload["source_geometry_sha256"] == payload["deformed_geometry_sha256"]
         ):
             raise ValueError("deformation transfer evidence is invalid")
+        _hex_digest(payload["source_geometry_sha256"], "source_geometry_sha256")
+        _hex_digest(payload["deformed_geometry_sha256"], "deformed_geometry_sha256")
         return
     if stage_id == "optical_replay":
         payload = _exact(
@@ -444,7 +448,12 @@ def _artifact_descriptor(path: Path, root: Path) -> dict[str, Any]:
 
 
 def _load_stage_evidence(root: Path, stage_id: str, spec: Mapping[str, Any]) -> dict[str, Any]:
-    path = root / stage_id / "evidence.json"
+    resolved_root = root.resolve()
+    path = (resolved_root / stage_id / "evidence.json").resolve()
+    try:
+        path.relative_to(resolved_root)
+    except ValueError as exc:
+        raise ValueError("thermo-optomechanical evidence escapes the job directory") from exc
     if not path.is_file() or path.stat().st_size > MAX_STAGE_EVIDENCE_BYTES:
         raise ValueError("completed thermo-optomechanical stage evidence is missing or oversized")
     return _validate_common_evidence(read_json(path), spec, stage_id)

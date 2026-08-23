@@ -1,10 +1,10 @@
 """Asynchronous solver handler for COMSOL simulations."""
 
 import threading
-from typing import Optional, Callable
 from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import Enum
+from typing import Callable, Optional
 
 
 class SolverStatus(Enum):
@@ -18,6 +18,7 @@ class SolverStatus(Enum):
 @dataclass
 class SolverProgress:
     """Progress information for a solving operation."""
+
     status: SolverStatus = SolverStatus.IDLE
     progress: float = 0.0
     message: str = ""
@@ -26,7 +27,7 @@ class SolverProgress:
     error: Optional[str] = None
     study_name: Optional[str] = None
     model_name: Optional[str] = None
-    
+
     def to_dict(self) -> dict:
         return {
             "status": self.status.value,
@@ -37,15 +38,15 @@ class SolverProgress:
             "error": self.error,
             "study_name": self.study_name,
             "model_name": self.model_name,
-            "elapsed_seconds": (
-                (self.end_time or datetime.now()) - self.start_time
-            ).total_seconds() if self.start_time else 0,
+            "elapsed_seconds": ((self.end_time or datetime.now()) - self.start_time).total_seconds()
+            if self.start_time
+            else 0,
         }
 
 
 class AsyncSolver:
     """Manages asynchronous solving operations for COMSOL models."""
-    
+
     def __init__(self):
         self._thread: Optional[threading.Thread] = None
         self._progress: SolverProgress = SolverProgress()
@@ -54,12 +55,12 @@ class AsyncSolver:
         self._lock: threading.Lock = threading.Lock()
         self._launch_gate: Optional[threading.Event] = None
         self._launch_owner_ident: Optional[int] = None
-    
+
     @property
     def progress(self) -> SolverProgress:
         with self._lock:
             return replace(self._progress)
-    
+
     @property
     def is_running(self) -> bool:
         with self._lock:
@@ -68,21 +69,23 @@ class AsyncSolver:
     def _cancel_requested(self) -> bool:
         with self._lock:
             return self._cancel_flag
-    
+
     def start_solve(
         self,
         model,
         study_name: Optional[str] = None,
-        progress_callback: Optional[Callable[[float, str], None]] = None
+        progress_callback: Optional[Callable[[float, str], None]] = None,
     ) -> bool:
         """
         Start solving a study in a background thread.
-        
+
         Args:
             model: The COMSOL model to solve
             study_name: Name of the study to solve (None for all studies)
-            progress_callback: Optional callback for progress updates
-        
+            progress_callback: Optional callback for progress updates. The
+                callback may be invoked from the worker thread and from the
+                thread calling :meth:`cancel`, so it must be thread-safe.
+
         Returns:
             True if solving started, False if already running
         """
@@ -139,6 +142,10 @@ class AsyncSolver:
                 with self._lock:
                     self._progress.status = SolverStatus.COMPLETED
                     self._progress.progress = 1.0
+                    # Publish the terminal state before the final callback so a
+                    # caller chaining a new solve from that callback is not
+                    # rejected by the still-alive worker thread reference.
+                    self._thread = None
                     if self._cancel_flag:
                         self._progress.message = (
                             "Solving completed; the cancellation request could not "
@@ -158,6 +165,7 @@ class AsyncSolver:
                     self._progress.error = error_msg
                     self._progress.message = f"Solving failed: {error_msg}"
                     self._progress.end_time = datetime.now()
+                    self._thread = None
 
                 self._notify_progress(
                     progress_callback,
@@ -181,7 +189,7 @@ class AsyncSolver:
                 message="Starting solver...",
                 start_time=datetime.now(),
                 study_name=study_name,
-                model_name=model.name() if hasattr(model, 'name') else None,
+                model_name=model.name() if hasattr(model, "name") else None,
             )
             self._thread = threading.Thread(target=solve_thread, daemon=True)
             self._launch_gate = launch_gate
@@ -221,24 +229,25 @@ class AsyncSolver:
             callback(progress, message)
         except Exception:
             pass
-    
+
     def _set_cancelled(self):
         """Set status to cancelled."""
         with self._lock:
             self._progress.status = SolverStatus.CANCELLED
             self._progress.message = "Solving was cancelled by user."
             self._progress.end_time = datetime.now()
+            self._thread = None
             progress = self._progress.progress
             callback = self._progress_callback
         self._notify_progress(callback, progress, "Cancelled")
-    
+
     def cancel(self) -> bool:
         """
         Request cancellation of the current solving operation.
-        
+
         This sets a cooperative Python flag. It can prevent a solve before
         ``study.run()`` begins, but it cannot interrupt a blocking COMSOL solve.
-        
+
         Returns:
             True if cancellation was requested, False if not running
         """
@@ -254,14 +263,14 @@ class AsyncSolver:
             callback = self._progress_callback
         self._notify_progress(callback, progress, "Cancellation requested")
         return True
-    
+
     def wait(self, timeout: Optional[float] = None) -> bool:
         """
         Wait for the solving operation to complete.
-        
+
         Args:
             timeout: Maximum time to wait in seconds (None for indefinite)
-        
+
         Returns:
             True if solving completed, False if timeout reached
         """
@@ -282,12 +291,12 @@ class AsyncSolver:
 
         thread.join(timeout=timeout)
         return not thread.is_alive()
-    
+
     def get_progress(self) -> dict:
         """Get current solving progress as a dictionary."""
         with self._lock:
             return self._progress.to_dict()
-    
+
     def reset(self) -> bool:
         """Reset the solver state."""
         with self._lock:

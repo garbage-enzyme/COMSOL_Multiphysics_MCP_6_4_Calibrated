@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 import src.jobs.thermo_optomechanical_replay as replay_module
 import src.jobs.thermo_optomechanical_replay_execution as replay_execution_module
+import src.jobs.thermo_optomechanical_replay_rows as thermo_rows_module
 from pydantic import ValidationError
 from src.jobs.manager import JobManager, _worker_module
 from src.jobs.store import JobStore, process_identity
@@ -538,6 +539,24 @@ def test_invalid_stage_attempt_is_rejected_before_journal_append(ascii_tmp_path)
     assert not journal.exists() or journal.read_bytes() == b""
 
 
+def test_stage_evidence_symlink_escape_is_refused_before_parsing(ascii_tmp_path):
+    outside = ascii_tmp_path / "outside"
+    outside.mkdir()
+    (outside / "evidence.json").write_text("x" * 32, encoding="utf-8")
+    spec = normalize_thermo_optomechanical_replay_spec(_raw_spec(ascii_tmp_path / "link-root"))
+    root = ascii_tmp_path / "link-root" / "stages"
+    stage_dir = root / "preflight"
+    stage_dir.mkdir(parents=True)
+    link = stage_dir / "evidence.json"
+    try:
+        link.symlink_to(outside / "evidence.json")
+    except OSError:
+        pytest.skip("this host cannot create file symlinks without privilege")
+
+    with pytest.raises(ValueError, match="escapes the job directory"):
+        thermo_rows_module._load_stage_evidence(root, "preflight", spec)
+
+
 def test_optical_evidence_preserves_tiny_negative_absorption_but_rejects_active_values(
     ascii_tmp_path,
 ):
@@ -582,6 +601,21 @@ def test_optical_evidence_preserves_tiny_negative_absorption_but_rejects_active_
             "optical_replay",
             lambda payload: payload["rows"][0]["baseline_rta"].__setitem__("closure_residual", 0.5),
             "non-passive R/T/A",
+        ),
+        (
+            "state_evidence",
+            lambda payload: payload["mesh"].__setitem__("identity_sha256", "not-hex"),
+            "mesh identity_sha256",
+        ),
+        (
+            "state_evidence",
+            lambda payload: payload["frame"].__setitem__("identity_sha256", None),
+            "frame identity_sha256",
+        ),
+        (
+            "deformation_transfer",
+            lambda payload: payload.__setitem__("source_geometry_sha256", "abc"),
+            "source_geometry_sha256 must contain exactly 64 hexadecimal",
         ),
     ],
 )
@@ -898,6 +932,60 @@ def test_native_cancel_monitor_failure_becomes_durable_worker_error(ascii_tmp_pa
     assert code == 1
     assert state["status"] == "cancel_requested"
     assert "native cancel monitor failed" in state["cancel"]["worker_error"]["message"]
+
+
+def test_stuck_native_monitor_still_releases_the_ownership_lease(ascii_tmp_path, monkeypatch):
+    spec = normalize_thermo_optomechanical_replay_spec(
+        _raw_spec(ascii_tmp_path / "native-monitor-stuck")
+    )
+    store = JobStore(ascii_tmp_path / "native-monitor-runtime" / "jobs")
+    job_id = store.create(
+        spec,
+        {
+            "schema_version": "2",
+            "status": "submitted",
+            "attempt": 1,
+            "worker_pid": None,
+            "worker_process_create_time": None,
+            "worker_command_signature": None,
+            "progress": {"completed": 0, "total": 5},
+            "last_error": None,
+        },
+    )
+
+    def blocked_probe():
+        time.sleep(1.6)
+        return {"requested": False}
+
+    monkeypatch.setattr("src.jobs.native_cancel_probe.request_native_cancel_once", blocked_probe)
+    requested = False
+
+    def factory(_client, current_spec, _root):
+        def execute(stage, _directory, _spec):
+            nonlocal requested
+            if not requested:
+                requested = True
+                store.request_cancel(job_id, requester_identity=process_identity(os.getpid()))
+                time.sleep(0.1)
+            return _payload(stage, current_spec)
+
+        return execute
+
+    ownership = _Ownership()
+    code = run_worker(
+        str(store.root),
+        job_id,
+        ownership_factory=lambda *_args: ownership,
+        client_factory=lambda _spec: _Client(),
+        stage_executor_factory=factory,
+        native_cancel_enabled=True,
+    )
+    state = store.read_state(job_id)
+
+    assert code == 1
+    assert ownership.released is True
+    recorded = state["cancel"]["worker_error"]["cleanup_errors"]
+    assert any("native_cancel_thread:still_active_after_join_timeout" in item for item in recorded)
 
 
 def test_worker_rejects_changed_submission_manifest_before_client_start(ascii_tmp_path):
