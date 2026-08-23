@@ -61,6 +61,15 @@ def _table() -> dict:
     }
 
 
+def test_condition_table_rejects_unhashable_objective_role_as_a_value_error():
+    # A JSON array is valid JSON but unhashable; the validator must reject it
+    # with its structured ValueError, never leak a TypeError.
+    value = _table()
+    value["conditions"][0]["objective_role"] = ["objective"]
+    with pytest.raises(ValueError, match="objective_role"):
+        normalize_optimization_condition_table(value)
+
+
 def test_configurable_24_condition_ox_mr_table_is_canonical_and_immutable():
     first = normalize_optimization_condition_table(_table())
     assert len(first["conditions"]) == 24

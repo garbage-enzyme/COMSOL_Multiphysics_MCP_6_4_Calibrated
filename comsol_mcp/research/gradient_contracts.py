@@ -143,7 +143,7 @@ def normalize_gradient_record(value: object, support: object) -> dict[str, Any]:
         key: _sha256(item, f"identities.{key}") for key, item in identities.items()
     }
     evidence_state = raw["evidence_state"]
-    if evidence_state not in _EVIDENCE_STATES:
+    if not isinstance(evidence_state, str) or evidence_state not in _EVIDENCE_STATES:
         raise ValueError("evidence_state is unsupported")
     body = {
         "schema_name": GRADIENT_RECORD_SCHEMA_NAME,
@@ -207,10 +207,16 @@ def normalize_native_optimizer_configuration(value: object) -> dict[str, Any]:
         fields,
         "native optimizer configuration",
     )
-    if raw["schema_name"] != NATIVE_OPTIMIZER_SCHEMA_NAME or raw["schema_version"] not in {
-        NATIVE_OPTIMIZER_LEGACY_SCHEMA_VERSION,
-        NATIVE_OPTIMIZER_SCHEMA_VERSION,
-    }:
+    if (
+        not isinstance(raw["schema_name"], str)
+        or raw["schema_name"] != NATIVE_OPTIMIZER_SCHEMA_NAME
+        or not isinstance(raw["schema_version"], str)
+        or raw["schema_version"]
+        not in {
+            NATIVE_OPTIMIZER_LEGACY_SCHEMA_VERSION,
+            NATIVE_OPTIMIZER_SCHEMA_VERSION,
+        }
+    ):
         raise ValueError("native optimizer schema identity is unsupported")
     if schema_version == NATIVE_OPTIMIZER_LEGACY_SCHEMA_VERSION:
         if raw["backend"] != "comsol_native":
@@ -264,7 +270,7 @@ def normalize_native_optimizer_configuration(value: object) -> dict[str, Any]:
             "objective_direction": "maximize",
             "max_inner_iterations": inner,
         }
-    if raw["method"] not in _OPTIMIZER_METHODS:
+    if not isinstance(raw["method"], str) or raw["method"] not in _OPTIMIZER_METHODS:
         raise ValueError("native optimizer method is unsupported")
     budget = _object(
         raw["budget"],

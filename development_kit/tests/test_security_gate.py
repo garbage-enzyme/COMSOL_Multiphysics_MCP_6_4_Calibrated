@@ -191,6 +191,54 @@ def test_unused_allowlist_matching_uses_the_same_casefolded_identity():
     assert receipt["unused_allowlist_entries"] == []
 
 
+def test_allowlist_lookup_matches_the_casefolded_finding_dependency():
+    # A direct caller may bypass the loading validator and supply a
+    # non-canonical dependency spelling; the finding lookup must still match.
+    receipt = evaluate_security_report(
+        _report(["CVE-2099-0001"]),
+        [
+            {
+                "dependency": "Example",
+                "vulnerability_id": "cve-2099-0001",
+                "expires_on": date(2027, 1, 1),
+                "reason": "Reviewed.",
+            }
+        ],
+        as_of=date(2026, 7, 18),
+    )
+
+    assert receipt["status"] == "passed"
+    assert receipt["allowlisted_count"] == 1
+    assert receipt["unused_allowlist_entries"] == []
+
+
+def test_expired_but_matched_allowlist_entry_is_not_reported_unused():
+    # An expired entry that matched a real finding was used: it changed the
+    # classification to allowlist_expired, so it must not also be listed unused.
+    receipt = evaluate_security_report(
+        _report(["CVE-2099-0001"]),
+        [
+            {
+                "dependency": "example",
+                "vulnerability_id": "CVE-2099-0001",
+                "expires_on": date(2026, 7, 16),
+                "reason": "Expired review.",
+            },
+            {
+                "dependency": "unused",
+                "vulnerability_id": "CVE-2099-0002",
+                "expires_on": date(2026, 8, 1),
+                "reason": "Pending removal.",
+            },
+        ],
+        as_of=date(2026, 7, 17),
+    )
+
+    assert receipt["status"] == "failed"
+    assert receipt["blocked"][0]["reason_code"] == "allowlist_expired"
+    assert receipt["unused_allowlist_entries"] == ["unused:CVE-2099-0002"]
+
+
 def test_security_receipt_hashes_each_input_snapshot_once(tmp_path, monkeypatch):
     report = tmp_path / "report.json"
     report.write_text(json.dumps(_report()), encoding="utf-8")

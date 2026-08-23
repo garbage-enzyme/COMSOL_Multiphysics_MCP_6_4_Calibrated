@@ -109,7 +109,7 @@ def _condition_row(value: object, *, index: int, state_ids: set[str]) -> dict[st
     if state_id not in state_ids:
         raise ValueError(f"{name}.material_state_id is not declared by the table")
     role = raw["objective_role"]
-    if role not in _OBJECTIVE_ROLES:
+    if not isinstance(role, str) or role not in _OBJECTIVE_ROLES:
         raise ValueError(f"{name}.objective_role is unsupported")
     if not isinstance(raw["active"], bool):
         raise ValueError(f"{name}.active must be boolean")

@@ -114,10 +114,10 @@ msgid "The Desktop item is not owned by this application and was preserved."
 msgstr "該桌面項目不是由本應用程式建立的，已予保留。"
 
 msgid "Repositories and acknowledgements"
-msgstr "程式庫與致謝"
+msgstr "儲存庫與致謝"
 
 msgid "This repository"
-msgstr "目前程式庫"
+msgstr "本儲存庫"
 
 msgid "Thanks: upstream project"
 msgstr "感謝上游專案"
@@ -168,7 +168,7 @@ msgid "For old workflows that need nearly every tool. It keeps older broad path 
 msgstr "適合需要幾乎全部工具的舊流程。它保留較寬鬆的舊路徑行為，檔案範圍保護較弱；新使用者不應選擇。"
 
 msgid "Folder for working files and locks. Use an ASCII-only path. \nExample: %PROGRAMDATA%\\comsol_mcp\\runtime"
-msgstr "存放執行檔案和鎖定資料的資料夾。路徑只能含 ASCII 字元。\n範例：%PROGRAMDATA%\\comsol_mcp\\runtime"
+msgstr "存放工作檔案和鎖定資料的資料夾。路徑只能含 ASCII 字元。\n範例：%PROGRAMDATA%\\comsol_mcp\\runtime"
 
 msgid "Optional separate folder for resumable jobs. Leave it empty to use the runtime folder. \nExample: %PROGRAMDATA%\\comsol_mcp\\runtime\\jobs"
 msgstr "可選的可恢復工作資料夾。留空時使用執行目錄。\n範例：%PROGRAMDATA%\\comsol_mcp\\runtime\\jobs"

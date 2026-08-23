@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import os
@@ -272,25 +273,23 @@ class _FailAfterPrepare:
         raise ValueError("injected post-prepare failure")
 
 
-def _run(spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
-    git = _git_identity()
-    if not git["clean"]:
-        raise RuntimeError("robust shape adapter licensed gate requires a clean source tree")
-    import mph
+def _snapshot_copy(backend: Any) -> dict[str, Any]:
+    """Deep-copy one backend snapshot so rollback comparisons cannot alias."""
+    return copy.deepcopy(dict(backend.snapshot()))
 
-    source_before = _sha(spec["source"])
-    support = _support(spec)
-    policy = _shape_policy(spec)
+
+def _run(spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
     client = None
     ownership = SolverOwnership()
     lease_acquired = False
+    source_before: str | None = None
     receipt: dict[str, Any] = {
         "schema_name": SCHEMA_NAME,
         "schema_version": SCHEMA_VERSION,
         "success": False,
         "dry_run": False,
-        "source_revision": git["revision"],
-        "source_sha256": source_before,
+        "source_revision": None,
+        "source_sha256": None,
         "manifest_sha256": spec["manifest_sha256"],
         "tree_audit_sha256": spec["tree_audit_sha256"],
         "requested_cores": spec["cores"],
@@ -302,6 +301,18 @@ def _run(spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
         key: str(spec[key]) for key in ("source", "base_copy", "configured_copy", "rollback_copy")
     }
     try:
+        # Every pre-try failure (git identity, mph import, source hashing) must
+        # flow through the same terminal receipt path as runtime failures.
+        git = _git_identity()
+        if not git["clean"]:
+            raise RuntimeError("robust shape adapter licensed gate requires a clean source tree")
+        import mph
+
+        source_before = _sha(spec["source"])
+        receipt["source_revision"] = git["revision"]
+        receipt["source_sha256"] = source_before
+        support = _support(spec)
+        policy = _shape_policy(spec)
         lease = ownership.acquire(mode="alpha7.2_s3_licensed_gate", model_path=str(spec["source"]))
         if not lease.get("success") or not lease.get("acquired"):
             raise RuntimeError("exclusive solver ownership could not be acquired")
@@ -333,7 +344,7 @@ def _run(spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
 
         rollback_model = client.load(str(spec["base_copy"]))
         rollback_backend = ClientapiAdjointStudyBackend(rollback_model)
-        rollback_before = dict(rollback_backend.snapshot())
+        rollback_before = _snapshot_copy(rollback_backend)
         try:
             prepare_robust_shape_controls(
                 _FailAfterPrepare(rollback_backend),
@@ -372,10 +383,20 @@ def _run(spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
         receipt["error"] = {"code": "robust_shape_adapter_failed", "type": type(exc).__name__}
         private["error"] = f"{type(exc).__name__}: {exc}"
     finally:
+
+        def _source_unchanged() -> bool:
+            if source_before is None:
+                return False
+            try:
+                return _sha(spec["source"]) == source_before
+            except Exception as exc:
+                private["cleanup_source_hash_error"] = f"{type(exc).__name__}: {exc}"
+                return False
+
         cleanup = {
             "client_clear": False,
             "lease_released": not lease_acquired,
-            "source_unchanged": _sha(spec["source"]) == source_before,
+            "source_unchanged": _source_unchanged(),
         }
         if client is not None:
             try:
@@ -384,9 +405,15 @@ def _run(spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
             except Exception as exc:
                 private["cleanup_error"] = f"{type(exc).__name__}: {exc}"
         if lease_acquired:
-            released = ownership.release()
+            # A raising release must never escape the finally block and mask
+            # the original failure; record it as failed lease cleanup instead.
+            try:
+                released = ownership.release()
+            except Exception as exc:
+                released = {"success": False, "released": False}
+                private["lease_cleanup_error"] = f"{type(exc).__name__}: {exc}"
             cleanup["lease_released"] = bool(released.get("success") and released.get("released"))
-            if not cleanup["lease_released"]:
+            if not cleanup["lease_released"] and "lease_cleanup_error" not in private:
                 private["lease_cleanup_error"] = released
         receipt["cleanup"] = cleanup
         receipt["success"] = receipt.get("success") is True and all(cleanup.values())

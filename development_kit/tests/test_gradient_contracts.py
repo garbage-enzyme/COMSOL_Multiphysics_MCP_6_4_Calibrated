@@ -178,6 +178,25 @@ def test_optimizer_rejects_unreviewed_backend_or_unbounded_commit_fraction():
         normalize_native_optimizer_configuration(value)
 
 
+def test_untrusted_json_leaves_reject_unhashable_values_as_value_errors():
+    # Set-membership checks on untrusted leaves must never leak TypeError for
+    # valid-JSON arrays or objects.
+    row = _gradient()
+    row["evidence_state"] = ["native_unchecked"]
+    with pytest.raises(ValueError, match="evidence_state"):
+        normalize_gradient_record(row, normalize_gradient_support())
+
+    value = copy.deepcopy(_optimizer())
+    value["method"] = {"gcmma": True}
+    with pytest.raises(ValueError, match="method is unsupported"):
+        normalize_native_optimizer_configuration(value)
+
+    value = copy.deepcopy(_optimizer())
+    value["schema_version"] = ["1.0.0"]
+    with pytest.raises(ValueError, match="schema identity"):
+        normalize_native_optimizer_configuration(value)
+
+
 def test_outer_gcmma_binds_reviewed_dependency_and_native_condition_solver():
     first = normalize_native_optimizer_configuration(_outer_optimizer())
     assert first["backend"] == "mmapy_outer_comsol_conditions"

@@ -15,6 +15,7 @@ LANGUAGES = ("en", "zh_CN", "zh_TW")
 ICON_MEMBER = "settings_gui/assets/comsol_mcp.ico"
 ROOT_LAUNCHER_MEMBER = "Open_Settings_GUI.ps1"
 SHORTCUT_MEMBER = "settings_gui/desktop_shortcut.py"
+ENTRY_POINT_MODULE_MEMBER = "settings_gui/__main__.py"
 
 
 def _wheel_members(path: Path) -> tuple[set[str], str]:
@@ -103,6 +104,10 @@ def inspect_settings_gui_distributions(dist: Path) -> dict:
         != "settings_gui.__main__:main"
     ):
         raise ValueError("wheel is missing the Settings GUI GUI entry point")
+    # The declared entry-point target is only meaningful when the target module
+    # actually ships in both distributions.
+    if ENTRY_POINT_MODULE_MEMBER not in wheel_names or ENTRY_POINT_MODULE_MEMBER not in sdist_names:
+        raise ValueError("distribution is missing the Settings GUI entry-point module")
     return {
         "schema_name": "comsol_mcp.settings_gui_package_receipt",
         "schema_version": "1.0.0",

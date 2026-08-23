@@ -19,7 +19,11 @@ foreach ($Name in $KnownArtifacts) {
 $Stdout = Join-Path $TestRoot 'host.stdout.log'
 $Stderr = Join-Path $TestRoot 'host.stderr.log'
 $Ready = Join-Path $TestRoot 'monitor.ready'
+# The banner is a full frame line; an unanchored match could accept unrelated
+# text such as "NOT COMPLETED SUCCESSFULLY" copied into the output.
+$SuccessBannerPattern = '(?m)^ +COMPLETED SUCCESSFULLY +\r?$'
 $Process = $null
+$ForcedExitTimedOut = $false
 try {
     $Process = Start-Process -FilePath $PowerShellPath -ArgumentList @(
         '-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
@@ -34,7 +38,7 @@ try {
     try { if (Test-Path -LiteralPath $Stdout) { $Output = Get-Content -LiteralPath $Stdout -Raw -ErrorAction Stop } }
     catch [System.IO.IOException] { }
     catch [System.UnauthorizedAccessException] { }
-        if ($ReadyPublished -and $Output -match 'COMPLETED SUCCESSFULLY') { break }
+        if ($ReadyPublished -and $Output -match $SuccessBannerPattern) { break }
         Start-Sleep -Milliseconds 250
     }
     $Process.Refresh()
@@ -44,7 +48,7 @@ try {
     try { if (Test-Path -LiteralPath $Stderr) { $ErrorOutput = Get-Content -LiteralPath $Stderr -Raw -ErrorAction Stop } }
     catch { }
     if ($Process.HasExited) { throw 'Successful terminal monitor did not remain latched.' }
-    if (-not (Test-Path -LiteralPath $Ready -PathType Leaf) -or $Output -notmatch 'COMPLETED SUCCESSFULLY') {
+    if (-not (Test-Path -LiteralPath $Ready -PathType Leaf) -or $Output -notmatch $SuccessBannerPattern) {
         throw "Successful terminal readiness and banner did not render: $Output"
     }
     if (-not [string]::IsNullOrWhiteSpace($ErrorOutput)) {
@@ -56,11 +60,20 @@ finally {
         try { $Process.Refresh() } catch { }
         if (-not $Process.HasExited) {
             Stop-Process -Id $Process.Id -Force -ErrorAction SilentlyContinue
-            try { $Process.WaitForExit() } catch { }
+            # A force-killed child can still linger briefly; an unbounded wait
+            # would hang the suite, so bound the wait and surface the timeout.
+            try {
+                if (-not $Process.WaitForExit(5000)) {
+                    $ForcedExitTimedOut = $true
+                }
+            } catch { }
         }
     }
 }
 Import-Module (Join-Path (Split-Path -Parent $PSScriptRoot) 'powershell\DurableLauncher.psm1') -Force
+if ($ForcedExitTimedOut) {
+    throw 'Forced terminal monitor process did not exit within 5 seconds.'
+}
 $Driver = Join-Path $PSScriptRoot 'fake_durable_driver.py'
 if (@(Get-DurableDriverProcesses -DriverPath $Driver).Count -ne 0) {
     throw 'Terminal hold left a durable driver process behind.'

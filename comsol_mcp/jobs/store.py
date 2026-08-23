@@ -733,7 +733,7 @@ class JobStore:
                 if new_status not in TRANSITIONS.get(current, set()):
                     raise ValueError(f"Invalid job state transition: {current} -> {new_status}")
                 state["status"] = new_status
-            if current == "completed" and patch:
+            if current == "completed" and patch is not None:
                 raise ValueError("Completed job state is immutable")
             state.update(patch or {})
             state["updated_at_epoch"] = time.time()

@@ -14,6 +14,7 @@ import pytest
 
 from development_kit.scripts import settings_gui_visual_capture
 from development_kit.scripts.settings_gui_package_probe import (
+    ENTRY_POINT_MODULE_MEMBER,
     ICON_MEMBER,
     LANGUAGES,
     ROOT_LAUNCHER_MEMBER,
@@ -34,6 +35,7 @@ def _archives(
     include_test: bool = False,
     include_shortcut_adapter: bool = True,
     include_gui_entry: bool = True,
+    include_entry_point_module: bool = True,
     entry_points_text: str | None = None,
 ) -> Path:
     dist = root / "dist"
@@ -41,6 +43,8 @@ def _archives(
     wheel = dist / "comsol_mcp-0.6.0-py3-none-any.whl"
     with zipfile.ZipFile(wheel, "w") as archive:
         archive.writestr("settings_gui/__init__.py", "")
+        if include_entry_point_module:
+            archive.writestr(ENTRY_POINT_MODULE_MEMBER, "")
         for language in LANGUAGES:
             archive.writestr(
                 f"settings_gui/locales/{language}/LC_MESSAGES/settings_gui.mo",
@@ -63,6 +67,8 @@ def _archives(
     sdist = dist / "comsol_mcp-0.6.0.tar.gz"
     with tarfile.open(sdist, "w:gz") as archive:
         members = {"settings_gui/locales/settings_gui.pot": b"pot"}
+        if include_entry_point_module:
+            members[ENTRY_POINT_MODULE_MEMBER] = b"main"
         if include_shortcut_adapter:
             members[SHORTCUT_MEMBER] = b"adapter"
         for language in LANGUAGES:
@@ -123,6 +129,13 @@ def test_distribution_probe_rejects_missing_shortcut_adapter(tmp_path: Path) -> 
 def test_distribution_probe_rejects_missing_gui_subsystem_entry(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="GUI entry point"):
         inspect_settings_gui_distributions(_archives(tmp_path, include_gui_entry=False))
+
+
+def test_distribution_probe_rejects_missing_entry_point_module(tmp_path: Path) -> None:
+    # A declared entry point whose target module is absent from either
+    # distribution would produce a broken console script.
+    with pytest.raises(ValueError, match="entry-point module"):
+        inspect_settings_gui_distributions(_archives(tmp_path, include_entry_point_module=False))
 
 
 @pytest.mark.parametrize(

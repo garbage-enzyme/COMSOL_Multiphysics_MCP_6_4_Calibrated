@@ -480,6 +480,21 @@ def _run_child(spec: dict[str, Any], stage: str) -> dict[str, Any]:
     }
 
 
+def _truthful_mma_terminal(result: dict[str, Any], receipt: dict[str, Any]) -> bool:
+    """Admit a failed MMA comparison only with a truthful terminal child receipt."""
+    error = receipt.get("error")
+    cleanup = receipt.get("cleanup")
+    return (
+        result["returncode"] != 0
+        and isinstance(error, dict)
+        and isinstance(error.get("code"), str)
+        and 0 < len(error["code"]) <= 128
+        and isinstance(cleanup, dict)
+        and cleanup.get("client_clear") is True
+        and cleanup.get("source_unchanged") is True
+    )
+
+
 def _verify_stage(
     stage: str,
     result: dict[str, Any],
@@ -515,7 +530,7 @@ def _verify_stage(
             or (receipt.get("success") is True and not isinstance(solver, dict))
         ):
             raise ValueError(f"{stage} receipt reports different optimizer execution settings")
-    if stage != "mma" and (result["returncode"] != 0 or receipt.get("success") is not True):
+    if result["returncode"] != 0 or receipt.get("success") is not True:
         if (
             stage == "gcmma"
             and isinstance(receipt.get("error"), dict)
@@ -524,6 +539,11 @@ def _verify_stage(
             raise DeformationFeasibilityStageError(
                 "GCMMA crossed the caller-declared deformation feasibility boundary"
             )
+        # The MMA comparison attempt may end in a truthful terminal failure that
+        # is dispositioned downstream; a crash, missing error identity, or an
+        # inconsistent exit code must never be silently accepted.
+        if stage == "mma" and _truthful_mma_terminal(result, receipt):
+            return
         raise ValueError(f"{stage} licensed stage failed")
 
 

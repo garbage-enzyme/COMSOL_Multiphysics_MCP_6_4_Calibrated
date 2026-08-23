@@ -330,6 +330,7 @@ def _result(stage: str, revision: str, source_sha256: str, spec: dict | None = N
             {
                 "success": False,
                 "optimizer_method": "mma",
+                "error": {"code": "native_optimizer_failed", "type": "RuntimeError"},
                 "requested_optimizer_iterations": spec["mma_optimizer_iterations"],
                 "requested_move_limit": spec["mma_move_limit"],
                 "solver_move_limit": {
@@ -435,6 +436,78 @@ def test_ladder_accepts_gcmma_and_records_failed_mma_without_fallback(
     assert len(receipt["mma"]["receipt_fingerprint"]) == 64
     assert events[0][0] == "status"
     assert events[-1][0] == "release"
+
+
+@pytest.mark.parametrize(
+    ("mutation", "returncode"),
+    [
+        ("missing_error_receipt", 1),
+        ("empty_error_code", 1),
+        ("zero_returncode_failure", 0),
+        ("failed_cleanup_evidence", 1),
+    ],
+)
+def test_ladder_rejects_mma_stage_failures_without_a_truthful_terminal_receipt(
+    tmp_path, gate_root, monkeypatch, mutation, returncode
+):
+    monkeypatch.setattr(gate.os, "cpu_count", lambda: 4)
+    monkeypatch.setattr(
+        gate.psutil, "virtual_memory", lambda: type("M", (), {"available": 2**40})()
+    )
+    monkeypatch.setattr(gate.shutil, "disk_usage", lambda _path: type("D", (), {"free": 2**40})())
+    spec = gate._spec(_args(gate_root, tmp_path, run_mma=True))
+    revision = "b" * 40
+
+    class Ownership:
+        acquired = False
+
+        def status(self, **_kwargs):
+            return {
+                "process_inventory": {"complete": True},
+                "lease": (
+                    {
+                        "state": "active",
+                        "owned_by_current_process": True,
+                        "lease": {"comsol_server_processes": []},
+                    }
+                    if self.acquired
+                    else {"state": "absent"}
+                ),
+                "external_solver_processes": [],
+                "durable_jobs": {"available": True, "active_count": 0},
+            }
+
+        def acquire(self, **_kwargs):
+            self.acquired = True
+            return {"success": True, "acquired": True}
+
+        def heartbeat(self, **_kwargs):
+            return True
+
+        def release(self):
+            return {"success": True, "released": True}
+
+    def runner(current, stage):
+        result = _result(stage, revision, current["source_sha256"], current)
+        if stage == "mma":
+            if mutation == "missing_error_receipt":
+                result["receipt"].pop("error")
+            elif mutation == "empty_error_code":
+                result["receipt"]["error"] = {"code": "", "type": "RuntimeError"}
+            elif mutation == "failed_cleanup_evidence":
+                result["receipt"]["cleanup"] = {
+                    "client_clear": False,
+                    "source_unchanged": True,
+                }
+            result["returncode"] = returncode
+        return result
+
+    monkeypatch.setattr(gate, "_git_identity", lambda: {"revision": revision, "clean": True})
+    receipt, private = gate._run(spec, child_runner=runner, ownership_factory=Ownership)
+    assert receipt["success"] is False
+    assert receipt["error"]["type"] == "ValueError"
+    assert "mma licensed stage failed" in private["error"]
+    assert "mma" not in receipt["stage_receipts"]
 
 
 def test_gradient_threshold_failure_prevents_ladder_success(tmp_path, gate_root, monkeypatch):
