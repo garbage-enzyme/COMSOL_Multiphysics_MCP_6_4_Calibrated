@@ -344,7 +344,12 @@ def run(args: argparse.Namespace) -> dict:
         )
         variables = [item["variable_id"] for item in support["variables"]]
         evaluated = model.evaluate(
-            [receipt["objective_expression"], *variables], dataset=optimizer_dataset
+            [receipt["objective_expression"], *variables],
+            dataset=optimizer_dataset,
+            # Every other evaluation in this gate pins one sweep point; without
+            # it _numeric_series could flatten a different evaluation scope
+            # and read the wrong final scalar.
+            outer=1,
         )
         optimizer_series = _numeric_series(evaluated[0])
         final = optimizer_series[-1]

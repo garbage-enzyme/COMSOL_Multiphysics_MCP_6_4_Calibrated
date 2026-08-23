@@ -50,6 +50,14 @@ IMPOSSIBLE_TARGET = {"peak_wavelength_m": 5.0e-6, "quality_factor": 50.0}
 HIDDEN_CANDIDATE = {"patch_length_x": 9.0e-7, "patch_length_y": 8.0e-7}
 
 
+def _impossible_mode_passed(
+    *, stop_reason: str, completed: int, successful: int, budget: int
+) -> bool:
+    """Impossible mode only proves acceptance when the whole budget produced
+    real measurements; failed evaluations must not count as evidence."""
+    return stop_reason == "budget_exhausted" and completed == budget and successful == completed
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--test-root", type=Path, required=True)
@@ -518,7 +526,11 @@ async def _run(spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
                             stop_reason = "target_met"
                             break
                     completed = len(private["evaluations"])
+                    successful = sum(
+                        1 for row in private["evaluations"] if row.get("measurement") is not None
+                    )
                     receipt["completed_candidate_evaluations"] = completed
+                    receipt["successful_candidate_evaluations"] = successful
                     receipt["started_wavelength_solves"] = completed * len(WAVELENGTHS_M) + (
                         len(WAVELENGTHS_M) if spec["mode"] == "feasible" else 0
                     )
@@ -532,7 +544,12 @@ async def _run(spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
                     receipt["success"] = (
                         stop_reason == "target_met"
                         if spec["mode"] == "feasible"
-                        else stop_reason == "budget_exhausted" and completed == spec["budget"]
+                        else _impossible_mode_passed(
+                            stop_reason=stop_reason,
+                            completed=completed,
+                            successful=successful,
+                            budget=spec["budget"],
+                        )
                     )
                 except Exception as exc:
                     receipt["error"] = {"type": type(exc).__name__, "message": str(exc)[:512]}

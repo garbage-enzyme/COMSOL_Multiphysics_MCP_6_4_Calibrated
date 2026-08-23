@@ -106,7 +106,11 @@ def test_python_compatibility_parent_cleans_worker_path_after_output_collision(
 
     monkeypatch.setattr(compatibility_gate, "_git_identity", lambda: {"dirty_entry_count": 0})
     monkeypatch.setattr(compatibility_gate, "_wait_clean", wait_clean)
-    monkeypatch.setattr(compatibility_gate, "_descendant_identities", lambda _pid: [])
+    monkeypatch.setattr(
+        compatibility_gate,
+        "_descendant_identities",
+        lambda _pid: {"complete": True, "error": None, "identities": []},
+    )
     monkeypatch.setattr(compatibility_gate, "SolverOwnership", Owner)
 
     with pytest.raises(FileExistsError):
@@ -203,7 +207,11 @@ def test_compatibility_cleanup_preserves_primary_error_and_continues_after_relea
         raise OSError("injected launch failure")
 
     monkeypatch.setattr(compatibility_gate.subprocess, "Popen", fail_launch)
-    monkeypatch.setattr(compatibility_gate, "_descendant_identities", lambda _pid: [])
+    monkeypatch.setattr(
+        compatibility_gate,
+        "_descendant_identities",
+        lambda _pid: {"complete": True, "error": None, "identities": []},
+    )
     monkeypatch.setattr(
         compatibility_gate,
         "_listener_inventory",
@@ -256,7 +264,9 @@ def test_compatibility_final_descendant_snapshot_is_recorded_once(tmp_path, monk
     monkeypatch.setattr(
         compatibility_gate,
         "_descendant_identities",
-        lambda _pid: snapshots.append(True) or [descendant],
+        lambda _pid: (
+            snapshots.append(True) or {"complete": True, "error": None, "identities": [descendant]}
+        ),
     )
     monkeypatch.setattr(
         compatibility_gate,
@@ -289,7 +299,152 @@ def test_compatibility_listener_evidence_is_explicitly_sampled_not_exhaustive():
     assert evidence["owned_listeners"] == []
     assert evidence["listener_inventory_samples_complete"] is True
     assert evidence["listener_sampling_exhaustive"] is False
+    assert evidence["listener_evidence_scope"] is not None
     assert evidence["listener_evidence_scope"] == "observed_samples_only"
+
+
+def test_distribution_private_path_scan_is_case_insensitive():
+    # Windows paths are case-insensitive: a lowercase c:\users\ literal must
+    # be rejected exactly like the canonical spelling.
+    with pytest.raises(RuntimeError, match="private user path"):
+        release_gate_module._reject_private_user_text("m/x.py", "see c:\\users\\bob\\file")
+    with pytest.raises(RuntimeError, match="private user path"):
+        release_gate_module._reject_private_user_text("m/x.py", "prefix C:\\Users\\bob")
+    with pytest.raises(RuntimeError, match="private user path"):
+        release_gate_module._reject_private_user_text("m/x.py", "url http://host/c:/users/bob")
+
+
+def test_compatibility_git_gate_fails_closed_without_determinable_state():
+    for git in (
+        {"commit": None, "dirty_entry_count": None, "error_type": "CalledProcessError"},
+        {"commit": "a" * 40, "dirty_entry_count": 2},
+        {"commit": None, "dirty_entry_count": None},
+    ):
+        with pytest.raises(RuntimeError, match="determinable clean git"):
+            compatibility_gate._require_determinable_clean_git(git)
+    compatibility_gate._require_determinable_clean_git({"commit": "a" * 40, "dirty_entry_count": 0})
+
+
+def test_worker_client_clear_failure_fails_the_worker_result():
+    class FailingClient:
+        def clear(self):
+            raise RuntimeError("clear refused")
+
+    result = {"success": True}
+    compatibility_gate._apply_client_clear(result, FailingClient())
+
+    assert result["success"] is False
+    assert "clear refused" in result["client_clear_error"]
+
+    clean_result = {"success": True}
+    compatibility_gate._apply_client_clear(clean_result, None)
+    assert clean_result == {"success": True}
+
+
+def test_descendant_inventory_distinguishes_unreadable_children_from_exit(monkeypatch):
+    denied = type("AccessDenied", (Exception,), {})
+    no_such = type("NoSuchProcess", (Exception,), {})
+
+    class Child:
+        pid = 777
+
+    class ParentProcess:
+        def children(self, recursive=True):
+            return [Child()]
+
+    monkeypatch.setattr(compatibility_gate.psutil, "AccessDenied", denied)
+    monkeypatch.setattr(compatibility_gate.psutil, "NoSuchProcess", no_such)
+    monkeypatch.setattr(compatibility_gate.psutil, "Process", lambda _pid: ParentProcess())
+
+    monkeypatch.setattr(
+        compatibility_gate,
+        "_process_identity",
+        lambda _pid: (_ for _ in ()).throw(denied("denied")),
+    )
+    unreadable = compatibility_gate._descendant_identities(1)
+    assert unreadable["complete"] is False
+    assert unreadable["identities"] == []
+    assert "denied" in unreadable["error"]
+
+    monkeypatch.setattr(
+        compatibility_gate,
+        "_process_identity",
+        lambda _pid: (_ for _ in ()).throw(no_such("gone")),
+    )
+    exited = compatibility_gate._descendant_identities(1)
+    # A child that exited between listing and the read is verified gone;
+    # only an unreadable child may mark the inventory incomplete.
+    assert exited == {"complete": True, "error": None, "identities": []}
+
+
+def test_compatibility_cleanup_fails_closed_on_incomplete_descendant_inventory(
+    tmp_path, monkeypatch
+):
+    output = tmp_path / "receipt.json"
+    clean = {
+        "process_inventory": {"complete": True, "fresh": True},
+        "collision": False,
+        "lease": {"state": "absent"},
+        "durable_jobs": {"available": True, "active_count": 0, "active": []},
+    }
+
+    class Owner:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def preflight(self, **_kwargs):
+            return {"ready": True}
+
+        def acquire(self, **_kwargs):
+            return {"success": True}
+
+        def heartbeat(self, **_kwargs):
+            return True
+
+        def release(self):
+            return {"success": True, "released": True}
+
+    monkeypatch.setattr(compatibility_gate, "_git_identity", lambda: {"dirty_entry_count": 0})
+    monkeypatch.setattr(compatibility_gate, "_wait_clean", lambda *_a, **_k: clean)
+    monkeypatch.setattr(compatibility_gate, "SolverOwnership", Owner)
+
+    def fail_launch(*_args, **kwargs):
+        kwargs["stdout"].close()
+        kwargs["stderr"].close()
+        raise OSError("injected launch failure")
+
+    monkeypatch.setattr(compatibility_gate.subprocess, "Popen", fail_launch)
+    monkeypatch.setattr(
+        compatibility_gate,
+        "_descendant_identities",
+        lambda _pid: {
+            "complete": False,
+            "error": "AccessDenied: elevated child",
+            "identities": [],
+        },
+    )
+    monkeypatch.setattr(
+        compatibility_gate,
+        "_listener_inventory",
+        lambda _pids: {"complete": True, "error": None, "listeners": []},
+    )
+
+    returncode = compatibility_gate._run_parent(
+        SimpleNamespace(
+            output=output,
+            runtime_root=tmp_path / "runtime",
+            minimum_free_gb=0.0,
+            cores=1,
+            timeout_seconds=1.0,
+        )
+    )
+    receipt = json.loads(output.read_text(encoding="utf-8"))
+
+    assert returncode == 1
+    cleanup = receipt["cleanup"]
+    assert cleanup["owned_descendants_inventory_complete"] is False
+    assert cleanup["owned_descendants_absent"] is False
+    assert cleanup["passed"] is False
 
 
 def test_production_runtime_guards_survive_python_optimization():
@@ -831,9 +986,7 @@ def test_hosted_ci_is_dependency_only_and_real_gate_is_explicit():
     assert security_job["name"] == "locked runtime vulnerability policy"
     assert gui_job["name"] == "Settings GUI, package, and installed entry"
     gui_setup = next(
-        step
-        for step in gui_job["steps"]
-        if "actions/setup-python" in str(step.get("uses", ""))
+        step for step in gui_job["steps"] if "actions/setup-python" in str(step.get("uses", ""))
     )
     assert gui_setup["with"]["python-version"] == "3.14.7"
     assert "root = tk.Tk()" in gui_commands

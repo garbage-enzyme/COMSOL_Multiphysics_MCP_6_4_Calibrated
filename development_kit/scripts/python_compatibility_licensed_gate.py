@@ -62,6 +62,12 @@ def _git_identity() -> dict:
     return {"commit": commit, "dirty_entry_count": len(dirty)}
 
 
+def _require_determinable_clean_git(git: dict) -> None:
+    """Fail closed when a clean tree cannot be proven, not just when dirt is seen."""
+    if git.get("error_type") is not None or git.get("dirty_entry_count") != 0:
+        raise RuntimeError("licensed gate requires a determinable clean git tree")
+
+
 def _process_identity(pid: int) -> dict:
     process = psutil.Process(pid)
     with process.oneshot():
@@ -81,18 +87,37 @@ def _process_identity(pid: int) -> dict:
         }
 
 
-def _descendant_identities(pid: int) -> list[dict]:
+def _descendant_identities(pid: int) -> dict:
+    """Enumerate the owned descendant tree with an authoritative completeness flag.
+
+    An unreadable child (AccessDenied) must never be indistinguishable from a
+    verified-empty tree, so callers receive ``complete`` explicitly and the
+    cleanup contract fails closed when it is False.
+    """
     try:
         children = psutil.Process(pid).children(recursive=True)
-    except psutil.NoSuchProcess, psutil.AccessDenied:
-        return []
+    except (psutil.NoSuchProcess, psutil.AccessDenied) as exc:
+        return {"complete": False, "error": f"{type(exc).__name__}: {exc}", "identities": []}
     identities = []
+    incomplete = False
+    unreadable_detail = None
     for child in children:
         try:
             identities.append(_process_identity(child.pid))
-        except psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess:
-            continue
-    return sorted(identities, key=lambda item: (item["process_create_time"], item["pid"]))
+        except psutil.NoSuchProcess:
+            continue  # exited between listing and the identity read
+        except (psutil.AccessDenied, psutil.ZombieProcess) as exc:
+            incomplete = True
+            unreadable_detail = f"{type(exc).__name__}: {exc}"
+    return {
+        "complete": not incomplete,
+        "error": None
+        if not incomplete
+        else (unreadable_detail or "child identities could not be read"),
+        "identities": sorted(
+            identities, key=lambda item: (item["process_create_time"], item["pid"])
+        ),
+    }
 
 
 def _listener_inventory(pids: set[int]) -> dict:
@@ -261,6 +286,21 @@ def _select_expected_backend(backends: list[dict]) -> dict:
     return _backend_identity(matching[0])
 
 
+def _apply_client_clear(result: dict, client: Any) -> None:
+    """Clear the worker client inside the acceptance contract.
+
+    A failed teardown must fail the worker result instead of leaving
+    ``success`` True beside a ``client_clear_error`` detail.
+    """
+    if client is None:
+        return
+    try:
+        client.clear()
+    except Exception as exc:
+        result["client_clear_error"] = f"{type(exc).__name__}: {exc}"
+        result["success"] = False
+
+
 def _run_worker(output: Path, cores: int) -> int:
     result = {
         "schema_name": "comsol_mcp.python_compatibility_capacitor_probe",
@@ -398,11 +438,7 @@ def _run_worker(output: Path, cores: int) -> int:
     except Exception as exc:
         result["error"] = f"{type(exc).__name__}: {exc}"
     finally:
-        if client is not None:
-            try:
-                client.clear()
-            except Exception as exc:
-                result["client_clear_error"] = f"{type(exc).__name__}: {exc}"
+        _apply_client_clear(result, client)
         result["duration_seconds"] = round(time.monotonic() - started, 3)
         _write_receipt(output, result)
     return 0 if result["success"] else 1
@@ -413,8 +449,7 @@ def _run_parent(args) -> int:
     if output.exists():
         raise ValueError("licensed gate output must use a new path")
     git = _git_identity()
-    if git["dirty_entry_count"]:
-        raise RuntimeError("licensed gate requires a clean git tree")
+    _require_determinable_clean_git(git)
 
     output.parent.mkdir(parents=True, exist_ok=True)
     worker_output = output.with_name(f".{output.stem}.worker.{uuid.uuid4().hex}.json")
@@ -443,6 +478,15 @@ def _run_parent(args) -> int:
     listeners: dict[tuple[int, int], dict] = {}
     started = time.monotonic()
     returncode = 1
+
+    def observe_descendants() -> list[dict]:
+        inventory = _descendant_identities(os.getpid())
+        if not inventory["complete"]:
+            raise RuntimeError(f"owned descendant inventory failed: {inventory['error']}")
+        for identity in inventory["identities"]:
+            child_identities[(identity["pid"], identity["process_create_time"])] = identity
+        return inventory["identities"]
+
     try:
         before = _wait_clean(owner, timeout_seconds=1.0)
         receipt["ownership_before"] = _status_evidence(before)
@@ -482,6 +526,14 @@ def _run_parent(args) -> int:
                 creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
             )
             receipt["worker_process"] = _process_identity(process.pid)
+            # Snapshot immediately: a worker that exits before the first poll
+            # iteration can already have spawned solver processes.
+            descendants = observe_descendants()
+            ports = _listener_inventory({item["pid"] for item in descendants})
+            if not ports["complete"]:
+                raise RuntimeError(f"owned listener inventory failed: {ports['error']}")
+            for listener in ports["listeners"]:
+                listeners[(listener["pid"], listener["port"])] = listener
             deadline = time.monotonic() + args.timeout_seconds
             timed_out = False
             while process.poll() is None:
@@ -491,9 +543,7 @@ def _run_parent(args) -> int:
                     break
                 if not owner.heartbeat(refresh_server_processes=True):
                     raise RuntimeError("solver lease heartbeat failed")
-                descendants = _descendant_identities(os.getpid())
-                for identity in descendants:
-                    child_identities[(identity["pid"], identity["process_create_time"])] = identity
+                descendants = observe_descendants()
                 ports = _listener_inventory({item["pid"] for item in descendants})
                 if not ports["complete"]:
                     raise RuntimeError(f"owned listener inventory failed: {ports['error']}")
@@ -506,9 +556,7 @@ def _run_parent(args) -> int:
                     break
                 if not owner.heartbeat(refresh_server_processes=True):
                     raise RuntimeError("solver lease heartbeat failed")
-                descendants = _descendant_identities(os.getpid())
-                for identity in descendants:
-                    child_identities[(identity["pid"], identity["process_create_time"])] = identity
+                descendants = observe_descendants()
                 ports = _listener_inventory({item["pid"] for item in descendants})
                 if not ports["complete"]:
                     raise RuntimeError(f"owned listener inventory failed: {ports['error']}")
@@ -518,8 +566,7 @@ def _run_parent(args) -> int:
             # A worker can exit before the first poll loop iteration; observe
             # once more so its orphaned grandchildren stay attributable to
             # this gate's owned process tree.
-            for identity in _descendant_identities(os.getpid()):
-                child_identities[(identity["pid"], identity["process_create_time"])] = identity
+            observe_descendants()
             process.wait(timeout=15)
         stdout = worker_stdout.read_bytes().decode("utf-8", errors="replace")
         stderr = worker_stderr.read_bytes().decode("utf-8", errors="replace")
@@ -583,11 +630,12 @@ def _run_parent(args) -> int:
         except Exception as exc:
             cleanup_errors.append({"stage": "ownership_after", "type": type(exc).__name__})
             receipt["ownership_after"] = None
-        remaining_descendants = []
+        remaining_inventory = {"complete": False, "error": "not_collected", "identities": []}
         try:
-            remaining_descendants = _descendant_identities(os.getpid())
+            remaining_inventory = _descendant_identities(os.getpid())
         except Exception as exc:
             cleanup_errors.append({"stage": "descendants_after", "type": type(exc).__name__})
+        remaining_descendants = remaining_inventory["identities"]
         final_listener_snapshot = {"complete": False, "error": "not_collected", "listeners": []}
         try:
             final_listener_snapshot = _listener_inventory(
@@ -599,6 +647,7 @@ def _run_parent(args) -> int:
             not cleanup_errors
             and isinstance(after, dict)
             and _status_is_clean(after)
+            and remaining_inventory["complete"] is True
             and not remaining_descendants
             and final_listener_snapshot.get("complete") is True
             and final_listener_snapshot.get("listeners") == []
@@ -615,7 +664,11 @@ def _run_parent(args) -> int:
             ),
             "process_cleanup": process_cleanup,
             "owned_descendants": remaining_descendants,
-            "owned_descendants_absent": not remaining_descendants,
+            "owned_descendants_inventory_complete": remaining_inventory["complete"],
+            "owned_descendants_inventory_error": remaining_inventory.get("error"),
+            "owned_descendants_absent": (
+                remaining_inventory["complete"] is True and not remaining_descendants
+            ),
             "final_listener_snapshot": final_listener_snapshot,
             "errors": cleanup_errors,
             "passed": cleanup_passed,

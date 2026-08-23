@@ -208,3 +208,23 @@ def test_finalist_parameter_writes_require_declared_meter_units():
     support["variables"][1]["unit"] = "1"
     with pytest.raises(ValueError, match="meter units.*patch_length_y"):
         gate._assert_meter_variables(support, ["patch_length_x", "patch_length_y"])
+
+
+def test_every_model_evaluation_pins_one_sweep_point():
+    """Every evaluate call must pass outer=1 so series flattening reads the
+    intended sweep point instead of an unpinned evaluation scope."""
+    import ast
+    from pathlib import Path
+
+    tree = ast.parse(Path(gate.__file__).read_text(encoding="utf-8"))
+    offenders = []
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "evaluate"
+            and not any(keyword.arg == "outer" for keyword in node.keywords)
+        ):
+            offenders.append(node.lineno)
+
+    assert offenders == []

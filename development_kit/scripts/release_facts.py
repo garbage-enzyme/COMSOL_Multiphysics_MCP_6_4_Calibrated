@@ -76,7 +76,14 @@ def check_release_facts(path: Path = FACTS_PATH) -> None:
         actual = json.loads(path.read_text(encoding="utf-8"))
     except (FileNotFoundError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise SystemExit("committed release facts are missing or corrupt") from exc
-    if actual != expected:
+
+    def canonical(value: Any) -> str:
+        # Compare serializations, not parsed values: == treats True == 1 and
+        # 1.0 == 1, so a type-drifted committed file would pass a plain
+        # comparison even though the generator emits different JSON types.
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+    if canonical(actual) != canonical(expected):
         raise SystemExit(f"release facts differ from live implementation: {path}")
 
 

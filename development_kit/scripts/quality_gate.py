@@ -256,6 +256,23 @@ def _main_pytest_command(pytest_root: Path, *, hosted_ci: bool) -> list[str]:
     return command
 
 
+def _serial_pytest_command(pytest_root: Path) -> list[str]:
+    """Serial startup/process-inventory tail whose coverage joins the same
+    measurement as the parallel suite."""
+    return [
+        sys.executable,
+        "-m",
+        "pytest",
+        "-q",
+        *SERIAL_TEST_TARGETS,
+        "--basetemp",
+        str(pytest_root),
+        "--cov=comsol_mcp",
+        "--cov-branch",
+        "--cov-report=",
+    ]
+
+
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes(), usedforsecurity=False).hexdigest()
 
@@ -570,23 +587,47 @@ def run_quality_gate(artifact_root: Path, *, as_of: date) -> dict[str, Any]:
             stage="parallel_tests",
             environment=environment,
         )
+        serial_coverage_data = run_root / ".coverage-serial"
+        serial_environment = dict(environment)
+        serial_environment["COVERAGE_FILE"] = str(serial_coverage_data)
         _run(
-            [
-                sys.executable,
-                "-m",
-                "pytest",
-                "-q",
-                *SERIAL_TEST_TARGETS,
-                "--basetemp",
-                str(serial_pytest_root),
-            ],
+            _serial_pytest_command(serial_pytest_root),
             stage="serial_tests",
-            environment=environment,
+            environment=serial_environment,
         )
+        # Merge the serial tail into the same measurement instead of letting
+        # the coverage policy silently evaluate only the parallel suite.
+        # Combine both suites into one fresh measurement file. coverage
+        # combine rebuilds its output from the listed inputs, so the target
+        # must be distinct from the parallel-suite data being merged in.
+        combined_coverage_data = run_root / ".coverage-combined"
+        combine_inputs = [str(coverage_data)]
+        if serial_coverage_data.exists():
+            combine_inputs.append(str(serial_coverage_data))
+        combine_environment = dict(environment)
+        combine_environment["COVERAGE_FILE"] = str(combined_coverage_data)
+        if len(combine_inputs) == 2:
+            _run(
+                [
+                    sys.executable,
+                    "-m",
+                    "coverage",
+                    "combine",
+                    "--keep",
+                    *combine_inputs,
+                ],
+                stage="coverage_combine",
+                environment=combine_environment,
+            )
+            report_environment = combine_environment
+        else:
+            # The serial tail collected nothing measurable; report the
+            # parallel-suite data directly instead of failing the gate.
+            report_environment = environment
         _run(
             [sys.executable, "-m", "coverage", "json", "-o", str(coverage_json)],
             stage="coverage_report",
-            environment=environment,
+            environment=report_environment,
         )
     except QualityCommandError as exc:
         receipt = {
@@ -607,17 +648,59 @@ def run_quality_gate(artifact_root: Path, *, as_of: date) -> dict[str, Any]:
         }
         _write_quality_receipt(run_root, receipt)
         return receipt
+    except (ValueError, OSError, RuntimeError) as exc:
+        # Configuration drift (classification ratchet, coverage policy,
+        # license review) must produce the same structured failed receipt as
+        # command failures instead of escaping with a raw traceback.
+        receipt = {
+            "schema_name": "comsol_mcp.quality_gate_receipt",
+            "schema_version": "1.0.0",
+            "as_of": as_of.isoformat(),
+            "run_id": run_id,
+            "status": "failed",
+            "failures": ["configuration"],
+            "configuration_failure": {
+                "type": type(exc).__name__,
+                "error": str(exc)[:512],
+            },
+            "coverage": None,
+            "dependency_licenses": None,
+            "coverage_policy_sha256": _sha256(POLICY_PATH),
+            "solver_started": False,
+        }
+        _write_quality_receipt(run_root, receipt)
+        return receipt
 
-    policy = load_coverage_policy(POLICY_PATH)
-    coverage_receipt = evaluate_coverage(
-        json.loads(coverage_json.read_text(encoding="utf-8")),
-        policy,
-    )
-    license_receipt = build_license_receipt(
-        ROOT / "pyproject.toml",
-        LICENSE_REVIEW_PATH,
-        as_of=as_of,
-    )
+    try:
+        policy = load_coverage_policy(POLICY_PATH)
+        coverage_receipt = evaluate_coverage(
+            json.loads(coverage_json.read_text(encoding="utf-8")),
+            policy,
+        )
+        license_receipt = build_license_receipt(
+            ROOT / "pyproject.toml",
+            LICENSE_REVIEW_PATH,
+            as_of=as_of,
+        )
+    except (ValueError, OSError, RuntimeError) as exc:
+        receipt = {
+            "schema_name": "comsol_mcp.quality_gate_receipt",
+            "schema_version": "1.0.0",
+            "as_of": as_of.isoformat(),
+            "run_id": run_id,
+            "status": "failed",
+            "failures": ["configuration"],
+            "configuration_failure": {
+                "type": type(exc).__name__,
+                "error": str(exc)[:512],
+            },
+            "coverage": None,
+            "dependency_licenses": None,
+            "coverage_policy_sha256": _sha256(POLICY_PATH),
+            "solver_started": False,
+        }
+        _write_quality_receipt(run_root, receipt)
+        return receipt
     failures = []
     if coverage_receipt["status"] != "passed":
         failures.append("coverage")

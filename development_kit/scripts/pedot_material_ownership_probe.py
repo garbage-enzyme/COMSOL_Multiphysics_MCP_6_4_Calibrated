@@ -151,7 +151,9 @@ def _material(collection: Any, tag: str, *, scope: str) -> dict[str, Any]:
         "tag": tag,
         "label": label[:256],
         "selection_state": selection_state,
-        "domains": entities[:4096],
+        # Unbounded: ownership is decided here; _inventory bounds only the
+        # published copy and records domains_truncated for the receipt.
+        "domains": entities,
         "property_groups": groups,
     }
 
@@ -160,23 +162,44 @@ def _inventory(model: Any, *, component_tag: str, patch_domain: int) -> dict[str
     jm = model.java
     materials = []
     global_collection = jm.material()
-    for tag in _tags(global_collection)[:128]:
+    for tag in _tags(global_collection):
         materials.append(_material(global_collection, tag, scope="global"))
     component_collection = jm.component(component_tag).material()
-    for tag in _tags(component_collection)[:128]:
+    for tag in _tags(component_collection):
         materials.append(_material(component_collection, tag, scope="component"))
+    # Ownership is decided on the unbounded selection; display truncation
+    # below must never silently turn a real owner into a non-owner.
     owners = [
         {"scope": item["scope"], "tag": item["tag"], "label": item["label"]}
         for item in materials
         if patch_domain in item["domains"]
     ]
+    for item in materials:
+        total = len(item["domains"])
+        if total > 4096:
+            item["domains"] = item["domains"][:4096]
+        item["domains_total"] = total
+        item["domains_truncated"] = total > 4096
+    unresolved = [
+        {"scope": item["scope"], "tag": item["tag"]}
+        for item in materials
+        if item["selection_state"] != "measured" or item["domains_truncated"]
+    ]
+    if unresolved:
+        # A material whose selection could not be read, or whose domain list
+        # was too large to publish whole, can be neither confirmed owner nor
+        # confirmed non-owner.
+        disposition = "incomplete_evidence"
+    else:
+        disposition = "unique" if len(owners) == 1 else "ambiguous_or_missing"
     return {
         "component_tag": component_tag,
         "patch_domain": patch_domain,
         "materials": materials,
+        "unresolved_materials": unresolved,
         "patch_domain_owners": owners,
         "owner_count": len(owners),
-        "ownership_disposition": "unique" if len(owners) == 1 else "ambiguous_or_missing",
+        "ownership_disposition": disposition,
     }
 
 
@@ -272,8 +295,11 @@ def _run(spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
             try:
                 released = ownership.release()
             except Exception as exc:
-                released = {"success": False, "released": False,
-                            "error": f"{type(exc).__name__}: {exc}"}
+                released = {
+                    "success": False,
+                    "released": False,
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
             cleanup["lease_released"] = bool(released.get("success") and released.get("released"))
             if not cleanup["lease_released"]:
                 private["lease_cleanup_error"] = released
