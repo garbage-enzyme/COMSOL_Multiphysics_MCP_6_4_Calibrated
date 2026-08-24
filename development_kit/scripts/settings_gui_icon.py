@@ -14,11 +14,17 @@ DEFAULT_PADDING_FRACTION = 0.06
 BACKGROUND_TOLERANCE = 24
 
 
+def _pixel_data(image: Image.Image):
+    """Read RGBA pixels across Pillow versions without triggering new deprecations."""
+    flattened = getattr(image, "get_flattened_data", None)
+    return flattened() if callable(flattened) else image.getdata()
+
+
 def _key_background(image: Image.Image, background: tuple[int, int, int, int]) -> Image.Image:
     keyed = Image.new("RGBA", image.size)
     output = []
     has_source_transparency = background[3] < 255
-    for red, green, blue, alpha in image.getdata():
+    for red, green, blue, alpha in _pixel_data(image):
         if has_source_transparency:
             output.append((0, 0, 0, 0) if alpha == 0 else (red, green, blue, alpha))
             continue
@@ -50,7 +56,7 @@ def _prepared_square(source: Path, *, padding_fraction: float) -> Image.Image:
         (0, image.height - patch),
         (image.width - patch, image.height - patch),
     ):
-        samples.extend(image.crop((left, top, left + patch, top + patch)).getdata())
+        samples.extend(_pixel_data(image.crop((left, top, left + patch, top + patch))))
     background = tuple(
         round(statistics.median(pixel[index] for pixel in samples)) for index in range(4)
     )
