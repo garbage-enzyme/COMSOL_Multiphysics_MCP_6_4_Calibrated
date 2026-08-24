@@ -1,47 +1,50 @@
 {
-  "schema_name": "comsol_mcp.release_facts",
-  "schema_version": "1.0.0",
-  "package_version": "0.7.2",
-  "tool_count": 170,
-  "profiles": {
-    "core": {
-      "tool_count": 45
+    "schema_name": "comsol_mcp.release_facts",
+    "schema_version": "1.0.0",
+    "package_version": "0.7.2",
+    "tool_count": 171,
+    "profiles": {
+        "core": {
+            "tool_count": 46
+        },
+        "basic_fem": {
+            "tool_count": 108
+        },
+        "wave_optics": {
+            "tool_count": 75
+        },
+        "experimental": {
+            "tool_count": 100
+        },
+        "full": {
+            "tool_count": 156
+        },
+        "comsolless_read_only": {
+            "tool_count": 1
+        }
     },
-    "basic_fem": {
-      "tool_count": 107
+    "features": {
+        "lexical_docs": {
+            "tool_count": 2,
+            "default_enabled": false
+        },
+        "semantic_docs": {
+            "tool_count": 3,
+            "default_enabled": false
+        },
+        "shared_server": {
+            "tool_count": 10,
+            "default_enabled": false
+        }
     },
-    "wave_optics": {
-      "tool_count": 74
+    "schema_registry": {
+        "entry_count": 152,
+        "registry_sha256": "266ea76741ef394d93df3ee0f7313489d248e705294c294af25b23bac2a6918f"
     },
-    "experimental": {
-      "tool_count": 99
-    },
-    "full": {
-      "tool_count": 155
+    "identities": {
+        "catalog_sha256": "0337ab7bbe9dd79c2b3c0daf3df1b0ed6af4462ea7a55ebbc268fb1d65ffd7a1",
+        "profile_tools_sha256": "a0e62e340289aca9a1dbe99f05ebd878943d653057931f7e64d9099aaca29de7",
+        "feature_tools_sha256": "e37721d24bcd1ee6a949a156eaba90936bc5812b8b2f7a0f5fddc04fa928439a",
+        "runtime_compatibility_sha256": "16e932bbead0e8c0f86a573b3ffba5013ebc9cecada1615d58aac6ccc492f332"
     }
-  },
-  "features": {
-    "lexical_docs": {
-      "tool_count": 2,
-      "default_enabled": false
-    },
-    "semantic_docs": {
-      "tool_count": 3,
-      "default_enabled": false
-    },
-    "shared_server": {
-      "tool_count": 10,
-      "default_enabled": false
-    }
-  },
-  "schema_registry": {
-    "entry_count": 151,
-    "registry_sha256": "00bb02bf3e29c441503c44dbd446dfbbb8c8893cfb8f69ee5340c8e2d4cb293b"
-  },
-  "identities": {
-    "catalog_sha256": "e42eb34495ae10a21ea095e2f25f6eba9d898416491c26aa6c9658ef4588e952",
-    "profile_tools_sha256": "335fd6b5721c592b8cefb0a17aefa914ed30252cb02bbc27ecd7032f2b9fe596",
-    "feature_tools_sha256": "e37721d24bcd1ee6a949a156eaba90936bc5812b8b2f7a0f5fddc04fa928439a",
-    "runtime_compatibility_sha256": "16e932bbead0e8c0f86a573b3ffba5013ebc9cecada1615d58aac6ccc492f332"
-  }
 }

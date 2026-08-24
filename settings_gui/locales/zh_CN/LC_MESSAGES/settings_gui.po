@@ -167,6 +167,9 @@ msgstr "适合测试范围更广或尚未成熟的额外工具。只有在较安
 msgid "For old workflows that need nearly every tool. It keeps older broad path behavior and has weaker file containment. New users should not choose it."
 msgstr "适合需要几乎全部工具的旧流程。它保留较宽松的旧路径行为，文件范围保护较弱；新用户不应选择。"
 
+msgid "Offline model inspection for computers without COMSOL. Only solver-free read-only inspection tools are available; nothing here can start COMSOL or Java."
+msgstr "面向未安装 COMSOL 的计算机的离线模型检查。仅提供求解器无关的只读检查工具；此处任何功能都不会启动 COMSOL 或 Java。"
+
 msgid "Folder for working files and locks. Use an ASCII-only path. \nExample: %PROGRAMDATA%\\comsol_mcp\\runtime"
 msgstr "存放运行文件和锁的文件夹。路径只能含 ASCII 字符。\n示例：%PROGRAMDATA%\\comsol_mcp\\runtime"
 

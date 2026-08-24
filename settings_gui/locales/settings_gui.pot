@@ -167,6 +167,9 @@ msgstr ""
 msgid "For old workflows that need nearly every tool. It keeps older broad path behavior and has weaker file containment. New users should not choose it."
 msgstr ""
 
+msgid "Offline model inspection for computers without COMSOL. Only solver-free read-only inspection tools are available; nothing here can start COMSOL or Java."
+msgstr ""
+
 msgid "Folder for working files and locks. Use an ASCII-only path. \nExample: %PROGRAMDATA%\\comsol_mcp\\runtime"
 msgstr ""
 

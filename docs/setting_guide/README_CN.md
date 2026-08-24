@@ -163,7 +163,7 @@ English (en)
 
 | 设置项 | 默认值 | 作用和可填写内容 |
 | --- | --- | --- |
-| `profile.name` | `"core"` | 可选 `core`、`basic_fem`、`wave_optics`、`experimental` 或 `full`；保存为小写。不支持的值会回落到 `core` 并报告来源。 |
+| `profile.name` | `"core"` | 可选 `core`、`basic_fem`、`wave_optics`、`experimental`、`full` 或 `comsolless_read_only`；保存为小写。不支持的值会回落到 `core` 并报告来源。 |
 
 新手在重视安全、希望减少可用操作时，可以从 `core` 开始。大多数进行常规仿真的用户应
 选择 `basic_fem`。Profile 只控制 COMSOL 自动化仿真及未来自主探索工具的可见性；手册
@@ -176,6 +176,7 @@ English (en)
 | `wave_optics` | 光学与超表面、场结果查看、Wave Optics 检查、单点审计和分阶段参数流程。 |
 | `experimental` | 范围更广或尚未成熟、需要仔细检查输出的额外工具。 |
 | `full` | 需要几乎全部非 feature 工具且接受较弱文件范围保护的旧流程迁移；不建议新用户使用。 |
+| `comsolless_read_only` | 未安装 COMSOL 的电脑：仅提供离线模型/证据探查工具，无法启动 COMSOL 或 Java。 |
 
 ### 运行与文件范围
 

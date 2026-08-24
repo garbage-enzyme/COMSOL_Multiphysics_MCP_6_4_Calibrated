@@ -45,6 +45,7 @@ _PROFILE_NAMES = frozenset(
         "wave_optics",
         "experimental",
         "full",
+        "comsolless_read_only",
     }
 )
 _EVIDENCE_CHECKS = (

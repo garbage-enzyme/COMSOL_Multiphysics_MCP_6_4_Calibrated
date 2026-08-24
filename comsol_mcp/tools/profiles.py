@@ -39,6 +39,10 @@ PROFILE_DESCRIPTIONS = {
         "Backward-compatible discovery surface with legacy broad-path behavior and "
         "weaker containment guarantees."
     ),
+    "comsolless_read_only": (
+        "Offline model inspection for computers without COMSOL: only the solver-free "
+        "read-only inspection tools; nothing here can start COMSOL or Java."
+    ),
 }
 
 PROFILE_MATURITY = {
@@ -47,6 +51,7 @@ PROFILE_MATURITY = {
     "wave_optics": "experimental",
     "experimental": "experimental",
     "full": "compatibility",
+    "comsolless_read_only": "verified",
 }
 
 

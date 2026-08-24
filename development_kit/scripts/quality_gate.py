@@ -36,6 +36,7 @@ LINT_TARGETS = (
     "comsol_mcp/evidence/thermal_radiation.py",
     "comsol_mcp/evidence/thermal_material.py",
     "comsol_mcp/evidence/spectral_model_comparison.py",
+    "comsol_mcp/evidence/inspection",
     "comsol_mcp/native_runtime.py",
     "comsol_mcp/schema_registry.py",
     "comsol_mcp/settings_gui_handshake.py",
@@ -60,6 +61,7 @@ LINT_TARGETS = (
     "comsol_mcp/tools/acoustics_pde.py",
     "comsol_mcp/tools/catalog.py",
     "comsol_mcp/tools/configuration.py",
+    "comsol_mcp/tools/mph_inspection.py",
     "comsol_mcp/tools/thermal_radiation.py",
     "comsol_mcp/tools/thermal_material.py",
     "comsol_mcp/tools/geometry_selections.py",
@@ -123,6 +125,7 @@ LINT_TARGETS = (
 MYPY_GROUPS = (
     (
         "comsol_mcp/contracts/job_submission.py",
+        "comsol_mcp/contracts/mph_inspection.py",
         "comsol_mcp/contracts/simulation_configuration.py",
         "comsol_mcp/contracts/thermal_radiation.py",
         "comsol_mcp/contracts/thermal_material.py",
@@ -139,6 +142,8 @@ MYPY_GROUPS = (
         "comsol_mcp/evidence/simulation_configuration.py",
         "comsol_mcp/evidence/thermal_radiation.py",
         "comsol_mcp/evidence/thermal_material.py",
+        "comsol_mcp/evidence/inspection",
+        "comsol_mcp/tools/mph_inspection.py",
         "comsol_mcp/jobs/thermo_optomechanical_replay.py",
         "comsol_mcp/jobs/thermo_optomechanical_replay_execution.py",
         "comsol_mcp/jobs/thermo_optomechanical_replay_rows.py",

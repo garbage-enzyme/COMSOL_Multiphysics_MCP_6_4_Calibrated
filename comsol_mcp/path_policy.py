@@ -548,6 +548,7 @@ class PathPolicy:
 
 _MODEL_READ_ARGUMENTS = {
     "model_load": (("file_path", (".mph",)),),
+    "mph_inspect": (("file_path", (".mph",)),),
     "geometry_import": (("file_path", None),),
     "solver_preflight": (("model_path", (".mph",)),),
     "wave_optics_preflight": (("expected_source_path", (".mph",)),),

@@ -188,7 +188,7 @@ the GUI before save and by backend validation when JSON is edited directly.
 
 | Key | Default | Meaning and accepted values |
 | --- | --- | --- |
-| `profile.name` | `"core"` | `core`, `basic_fem`, `wave_optics`, `experimental`, or `full`. The stored value is lower-case. Unsupported values fall back to `core` with reported provenance. |
+| `profile.name` | `"core"` | `core`, `basic_fem`, `wave_optics`, `experimental`, `full`, or `comsolless_read_only`. The stored value is lower-case. Unsupported values fall back to `core` with reported provenance. |
 
 New users can begin with the smaller `core` surface when safety is the priority.
 Most users doing ordinary simulation should choose `basic_fem`. Profiles only
@@ -203,6 +203,7 @@ independent Boolean feature gates and may be enabled together for any profile.
 | `wave_optics` | Optical and metasurface work, field review, Wave Optics checks, point audits, and staged parameters. |
 | `experimental` | Extra helpers that are broader or less mature and require careful review. |
 | `full` | Legacy migration that needs nearly every non-feature tool and accepts weaker file containment; not recommended for new users. |
+| `comsolless_read_only` | Computers without a COMSOL installation: offline model/evidence inspection tools only; nothing can start COMSOL or Java. |
 
 ### Runtime and Containment
 

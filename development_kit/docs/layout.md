@@ -280,6 +280,7 @@ models are intentionally absent.
 - `development_kit/tests/test_mesh.py` — This module tests mesh helpers without a COMSOL client.
 - `development_kit/tests/test_mim_patch.py` — This module tests patch-metasurface helper behavior without a COMSOL client.
 - `development_kit/tests/test_mim_recipe_contracts.py` — This module tests solver-free safety contracts shared by the standalone MIM recipes.
+- `development_kit/tests/test_mph_inspection.py` — This module solver-free tests bounded offline `.mph` archive inspection, summaries, and refusals.
 - `development_kit/tests/test_model.py` — This module tests model management helpers without a COMSOL client.
 - `development_kit/tests/test_outcome_contract.py` — This module tests orthogonal execution, evidence, and scientific outcome contracts.
 - `development_kit/tests/test_operation_arbiter.py` — This module tests durable serialization and responsive control-plane operation classes.
@@ -485,6 +486,7 @@ models are intentionally absent.
 - `comsol_mcp/compatibility.py` — This module loads and validates the packaged runtime compatibility declaration.
 - `comsol_mcp/contracts/__init__.py` — This module exports lightweight public input contracts without solver imports.
 - `comsol_mcp/contracts/job_submission.py` — This module defines bounded discriminated durable-job submission inputs.
+- `comsol_mcp/contracts/mph_inspection.py` — This module defines bounded offline `.mph` inspection input contracts.
 - `comsol_mcp/contracts/simulation_configuration.py` — This module defines closed typed simulation-configuration and diff-policy inputs.
 - `comsol_mcp/contracts/thermal_radiation.py` — This module defines closed Kirchhoff-assessment and thermal-radiation request inputs.
 - `comsol_mcp/contracts/thermal_material.py` — This module defines closed temperature/state material ledger and evaluation inputs.
@@ -523,6 +525,9 @@ models are intentionally absent.
 - `comsol_mcp/evidence/contracts.py` — This module implements strict physical evidence, policy, and migration contracts.
 - `comsol_mcp/evidence/branch_continuation.py` — This module validates and plans ordered branch-continuation states without a solver.
 - `comsol_mcp/evidence/convergence_evaluation.py` — This module validates ordered spectral convergence ladders and caller policies.
+- `comsol_mcp/evidence/inspection/__init__.py` — This package exports solver-free offline `.mph` archive inspection contracts.
+- `comsol_mcp/evidence/inspection/archive.py` — This module implements the bounded stdlib-only safety reader for offline `.mph` ZIP archives.
+- `comsol_mcp/evidence/inspection/summary.py` — This module builds versioned offline inspection summaries from declared archive markers.
 - `comsol_mcp/evidence/integrity_controls.py` — This module loads default-on evidence-integrity settings and defines warning propagation.
 - `comsol_mcp/evidence/integrity_verifier.py` — This module composes settings-aware outcome, artifact, summary, and resume verification.
 - `comsol_mcp/evidence/field_artifacts.py` — This module serializes bounded gridded scalar field artifacts.
@@ -647,6 +652,7 @@ models are intentionally absent.
 - `comsol_mcp/tools/mesh.py` — This module exposes COMSOL mesh tools.
 - `comsol_mcp/tools/mim_patch.py` — This module exposes patch-metasurface construction helpers.
 - `comsol_mcp/tools/model.py` — This module exposes model creation, loading, cloning, saving, and listing tools.
+- `comsol_mcp/tools/mph_inspection.py` — This module exposes the bounded offline `.mph` archive inspection tool.
 - `comsol_mcp/tools/ownership.py` — This module enforces cross-process solver ownership and collision preflight.
 - `comsol_mcp/tools/parameters.py` — This module exposes COMSOL parameter tools.
 - `comsol_mcp/tools/periodic_mesh_audit.py` — This module exposes periodic geometry and mesh evidence tools.

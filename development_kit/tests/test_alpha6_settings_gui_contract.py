@@ -9,7 +9,7 @@ from pathlib import Path
 import comsol_mcp.settings as settings_module
 from comsol_mcp import __version__
 from comsol_mcp.server import create_server
-from comsol_mcp.tools.catalog import PROFILE_NAMES, TOOL_SPECS
+from comsol_mcp.tools.catalog import TOOL_SPECS
 
 RELEASED_SETTINGS_VERSION = "1.3.0"
 RELEASED_SETTINGS_READABLE_VERSIONS = (
@@ -103,13 +103,28 @@ def test_alpha6_installed_location_uses_localappdata_before_bundled_template(tmp
 def test_settings_start_is_profile_independent_and_solver_free(monkeypatch):
     monkeypatch.setenv("COMSOL_MCP_ENABLE_SHARED_SERVER", "true")
     spec = TOOL_SPECS["settings.start"]
-    assert set(spec.intended_profiles) == set(PROFILE_NAMES)
+    # settings.start is a control-plane core tool. The offline-only
+    # comsolless_read_only profile intentionally exposes none of it, so its
+    # intended surface is exactly the five solver-bound profiles.
+    assert set(spec.intended_profiles) == {
+        "core",
+        "basic_fem",
+        "wave_optics",
+        "experimental",
+        "full",
+    }
     assert spec.side_effect_class == "process_lifecycle"
     assert spec.concurrency_class == "control_plane"
     assert spec.starts_solver is False
     assert spec.requires_model_revision is False
 
-    for profile in PROFILE_NAMES:
+    for profile in (
+        "core",
+        "basic_fem",
+        "wave_optics",
+        "experimental",
+        "full",
+    ):
         server = create_server(f"alpha6-{profile}", profile=profile)
         tools = {tool.name: tool for tool in asyncio.run(server.list_tools())}
         assert "settings.start" in tools
