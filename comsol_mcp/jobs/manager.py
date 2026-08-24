@@ -26,6 +26,7 @@ from .spectral_characterization import normalize_spectral_characterization_job_s
 from .store import (
     ACTIVE_STATES,
     JOB_SCHEMA_VERSION,
+    TERMINAL_STATES,
     TRANSITIONS,
     JobLock,
     JobStore,
@@ -1223,6 +1224,12 @@ class JobManager:
                     "last_row_sha256": rows[-1]["row_sha256"] if rows else None,
                     "cleanup_recorded": any(row["kind"] == "cleanup" for row in rows),
                 }
+            if state.get("status") in TERMINAL_STATES:
+                # Warning-only post-run probe: a failed `.mph` parse is
+                # recorded here and never changes the job disposition.
+                from ..evidence.inspection.probe import probe_mph_artifacts
+
+                state["mph_artifact_probe"] = probe_mph_artifacts(self.store.job_dir(job_id))
             return {"success": True, "job_id": job_id, **state}
 
     def tail(self, job_id: str, n: int = 20) -> dict[str, Any]:

@@ -11,6 +11,11 @@ from comsol_mcp.evidence.inspection.archive import (
     read_bounded_member,
     size_breakdown,
 )
+from comsol_mcp.evidence.inspection.diff import (
+    MPH_DIFF_SCHEMA_NAME,
+    MPH_DIFF_SCHEMA_VERSION,
+    build_mph_diff,
+)
 from comsol_mcp.evidence.inspection.summary import (
     MPH_INSPECTION_SUMMARY_SCHEMA_NAME,
     MPH_INSPECTION_SUMMARY_SCHEMA_VERSION,
@@ -18,11 +23,14 @@ from comsol_mcp.evidence.inspection.summary import (
 )
 
 __all__ = [
+    "MPH_DIFF_SCHEMA_NAME",
+    "MPH_DIFF_SCHEMA_VERSION",
     "MPH_INSPECTION_SUMMARY_SCHEMA_NAME",
     "MPH_INSPECTION_SUMMARY_SCHEMA_VERSION",
     "ArchiveEntry",
     "ArchiveInventory",
     "MphInspectionError",
+    "build_mph_diff",
     "build_mph_inspection_summary",
     "entry_map",
     "inspect_archive_inventory",

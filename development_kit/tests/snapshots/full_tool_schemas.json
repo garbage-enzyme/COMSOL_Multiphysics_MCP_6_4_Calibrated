@@ -4783,6 +4783,99 @@
         "maxProperties": 256,
         "additionalProperties": false
     },
+    "mph_diff": {
+        "$defs": {
+            "MphInspectionLimits": {
+                "additionalProperties": false,
+                "description": "Caller-overridable bounded reader limits within fixed hard caps.",
+                "properties": {
+                    "max_archive_bytes": {
+                        "default": 4294967296,
+                        "maximum": 68719476736,
+                        "minimum": 1,
+                        "title": "Max Archive Bytes",
+                        "type": "integer"
+                    },
+                    "max_entries": {
+                        "default": 4096,
+                        "maximum": 65536,
+                        "minimum": 1,
+                        "title": "Max Entries",
+                        "type": "integer"
+                    },
+                    "max_entry_uncompressed_bytes": {
+                        "default": 536870912,
+                        "maximum": 8589934592,
+                        "minimum": 1,
+                        "title": "Max Entry Uncompressed Bytes",
+                        "type": "integer"
+                    },
+                    "max_total_uncompressed_bytes": {
+                        "default": 2147483648,
+                        "maximum": 17179869184,
+                        "minimum": 1,
+                        "title": "Max Total Uncompressed Bytes",
+                        "type": "integer"
+                    },
+                    "max_compression_ratio": {
+                        "default": 500,
+                        "maximum": 10000,
+                        "minimum": 1,
+                        "title": "Max Compression Ratio",
+                        "type": "integer"
+                    },
+                    "max_parameters": {
+                        "default": 512,
+                        "maximum": 2048,
+                        "minimum": 1,
+                        "title": "Max Parameters",
+                        "type": "integer"
+                    },
+                    "max_tag_entries": {
+                        "default": 256,
+                        "maximum": 1024,
+                        "minimum": 1,
+                        "title": "Max Tag Entries",
+                        "type": "integer"
+                    }
+                },
+                "title": "MphInspectionLimits",
+                "type": "object",
+                "maxProperties": 256
+            }
+        },
+        "properties": {
+            "left_path": {
+                "title": "Left Path",
+                "type": "string",
+                "maxLength": 16384
+            },
+            "right_path": {
+                "title": "Right Path",
+                "type": "string",
+                "maxLength": 16384
+            },
+            "limits": {
+                "anyOf": [
+                    {
+                        "$ref": "#/$defs/MphInspectionLimits"
+                    },
+                    {
+                        "type": "null"
+                    }
+                ],
+                "default": null
+            }
+        },
+        "required": [
+            "left_path",
+            "right_path"
+        ],
+        "title": "mph_diffArguments",
+        "type": "object",
+        "maxProperties": 256,
+        "additionalProperties": false
+    },
     "mph_inspect": {
         "$defs": {
             "MphInspectionLimits": {

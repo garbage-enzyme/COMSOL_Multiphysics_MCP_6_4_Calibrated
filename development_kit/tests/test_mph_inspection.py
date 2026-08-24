@@ -119,9 +119,7 @@ def test_compact_metadata_archive_produces_a_complete_summary(tmp_path):
     assert first["preview_state"] == "savepoint_present"
     assert first["title"] == "fixture"
     assert first["model_tags"] == ["Model"]
-    assert first["parameter_summary"]["parameters"] == [
-        {"name": "wl", "expression": "1.0[um]"}
-    ]
+    assert first["parameter_summary"]["parameters"] == [{"name": "wl", "expression": "1.0[um]"}]
     assert [row["tag"] for row in first["physics_tags"]] == ["ewfd"]
     assert [row["tag"] for row in first["study_tags"]] == ["std1"]
     assert [row["tag"] for row in first["material_tags"]] == ["m1"]
@@ -139,9 +137,7 @@ def test_compact_metadata_archive_produces_a_complete_summary(tmp_path):
 
 def test_fingerprint_changes_when_declared_content_changes(tmp_path):
     baseline = _write_valid_mph(tmp_path / "base.mph")
-    changed = _write_valid_mph(
-        tmp_path / "changed.mph", params=(("wl", "1.55[um]"),)
-    )
+    changed = _write_valid_mph(tmp_path / "changed.mph", params=(("wl", "1.55[um]"),))
     first = build_mph_inspection_summary(baseline)
     second = build_mph_inspection_summary(changed)
     assert first["inspection_fingerprint"] != second["inspection_fingerprint"]
@@ -292,8 +288,8 @@ def test_malformed_marker_xml_is_refused(tmp_path):
 @pytest.mark.parametrize(
     ("member", "payload"),
     [
-        ("modelinfo.xml", b"<!DOCTYPE modelInfo [<!ENTITY a \"b\">]><modelInfo>&a;</modelInfo>"),
-        ("dmodel.xml", b"<?xml version=\"1.0\"?><!ENTITY x SYSTEM \"file.xml\"><Model/>"),
+        ("modelinfo.xml", b'<!DOCTYPE modelInfo [<!ENTITY a "b">]><modelInfo>&a;</modelInfo>'),
+        ("dmodel.xml", b'<?xml version="1.0"?><!ENTITY x SYSTEM "file.xml"><Model/>'),
     ],
 )
 def test_dtd_or_entity_markers_are_refused(tmp_path, member, payload):
@@ -341,9 +337,7 @@ def test_size_breakdown_totals_match_inventory(tmp_path):
     assert breakdown["totals"]["entry_count"] == len(inventory.entries)
     assert breakdown["totals"]["uncompressed_bytes"] == inventory.total_uncompressed_bytes
     declared = sum(
-        bucket["uncompressed_bytes"]
-        for key, bucket in breakdown.items()
-        if key != "totals"
+        bucket["uncompressed_bytes"] for key, bucket in breakdown.items() if key != "totals"
     )
     assert declared <= breakdown["totals"]["uncompressed_bytes"]
     assert breakdown["binary_resource"]["entry_count"] >= 1
@@ -373,6 +367,8 @@ def test_inspection_modules_never_import_solver_or_process_dependencies():
         Path("comsol_mcp") / "contracts" / "mph_inspection.py",
         Path("comsol_mcp") / "evidence" / "inspection" / "archive.py",
         Path("comsol_mcp") / "evidence" / "inspection" / "summary.py",
+        Path("comsol_mcp") / "evidence" / "inspection" / "diff.py",
+        Path("comsol_mcp") / "evidence" / "inspection" / "probe.py",
         Path("comsol_mcp") / "evidence" / "inspection" / "__init__.py",
         Path("comsol_mcp") / "tools" / "mph_inspection.py",
     ]
@@ -390,3 +386,161 @@ def test_inspection_modules_never_import_solver_or_process_dependencies():
             stripped = line.strip()
             assert not stripped.startswith(forbidden_prefixes), (relative, stripped)
             assert "comsol_start(" not in stripped, (relative, stripped)
+
+
+# ---------------------------------------------------------------------------
+# D2: two-file diff and warning-only post-run artifact probe
+# ---------------------------------------------------------------------------
+
+
+def test_identical_archives_diff_as_clean_and_deterministic(tmp_path):
+    from comsol_mcp.evidence.inspection.diff import build_mph_diff
+
+    left = _write_valid_mph(tmp_path / "left.mph")
+    right = _write_valid_mph(tmp_path / "right.mph")
+    forward = build_mph_diff(left, right)
+    reverse = build_mph_diff(right, left)
+
+    assert forward["identical"] is True
+    assert forward["inputs_unmodified"] is True
+    assert forward["not_a_scientific_equivalence_proof"] is True
+    assert forward["metadata_changes"] == []
+    assert forward["parameter_changes"] == {
+        "added": [],
+        "removed": [],
+        "changed": [],
+    }
+    assert forward["entry_changes"]["added_count"] == 0
+    assert forward["size_deltas"]["archive_bytes"] == 0
+    assert forward["diff_fingerprint"]
+    # A diff is directional: reruns of the same direction are deterministic,
+    # while the swapped direction is also clean but carries its own identity.
+    repeat = build_mph_diff(left, right)
+    assert repeat["diff_fingerprint"] == forward["diff_fingerprint"]
+    assert reverse["identical"] is True
+    assert reverse["diff_fingerprint"] != forward["diff_fingerprint"]
+
+
+def test_parameter_and_metadata_changes_are_reported_with_identities(tmp_path):
+    from comsol_mcp.evidence.inspection.diff import build_mph_diff
+
+    left = _write_valid_mph(tmp_path / "base.mph")
+    right = _write_valid_mph(
+        tmp_path / "changed.mph",
+        title="renamed",
+        params=(("wl", "1.0[um]"), ("gap", "0.5[mm]")),
+    )
+    diff = build_mph_diff(left, right)
+
+    metadata_fields = {row["field"]: row for row in diff["metadata_changes"]}
+    assert set(metadata_fields) == {"title"}
+    assert metadata_fields["title"]["left"] == "fixture"
+    assert metadata_fields["title"]["right"] == "renamed"
+
+    parameters = diff["parameter_changes"]
+    assert [row["name"] for row in parameters["added"]] == ["gap"]
+    assert parameters["removed"] == []
+    assert parameters["changed"] == []
+
+    assert diff["left"]["sha256"] != diff["right"]["sha256"]
+    assert diff["left"]["sha256"] == build_mph_inspection_summary(left)["sha256"]
+    assert diff["right"]["sha256"] == build_mph_inspection_summary(right)["sha256"]
+
+
+def test_archive_entry_addition_changes_entries_and_sizes(tmp_path):
+    from comsol_mcp.evidence.inspection.diff import build_mph_diff
+
+    left = _write_valid_mph(tmp_path / "smaller.mph", with_savepoint=False)
+    right = _write_valid_mph(tmp_path / "larger.mph", with_savepoint=True)
+    diff = build_mph_diff(left, right)
+
+    entries = diff["entry_changes"]
+    assert entries["added_count"] == 1
+    assert entries["added_names"] == ["savepoint1/savepoint.xml"]
+    assert entries["removed_count"] == 0
+    assert diff["size_deltas"]["entry_count"] == 1
+    assert diff["size_deltas"]["archive_bytes"] > 0
+    assert diff["savepoint_changes"]["present_changed"] is True
+
+
+def test_diff_fails_closed_on_invalid_left_archive(tmp_path):
+    from comsol_mcp.evidence.inspection.diff import build_mph_diff
+
+    left = tmp_path / "broken.mph"
+    left.write_bytes(b"not a zip at all")
+    right = _write_valid_mph(tmp_path / "valid.mph")
+    with pytest.raises(MphInspectionError) as excinfo:
+        build_mph_diff(left, right)
+    assert excinfo.value.reason_code == "mph_invalid_zip"
+
+
+def test_diff_proves_input_mutation_and_fails_closed(tmp_path, monkeypatch):
+    import comsol_mcp.evidence.inspection.diff as diff_module
+
+    left = _write_valid_mph(tmp_path / "stable.mph")
+    right = _write_valid_mph(tmp_path / "shifting.mph")
+    real_inventory = diff_module.inspect_archive_inventory
+    calls = {"count": 0}
+
+    def mutating_inventory(path, limits=None):
+        calls["count"] += 1
+        result = real_inventory(path, limits)
+        if calls["count"] == 3:
+            # Mutate the right-hand archive after its summary was built but
+            # before the post-comparison re-hash proves immutability.
+            with zipfile.ZipFile(right, "a") as archive:
+                archive.writestr("late.txt", b"mutated")
+        return result
+
+    monkeypatch.setattr(diff_module, "inspect_archive_inventory", mutating_inventory)
+    with pytest.raises(MphInspectionError) as excinfo:
+        diff_module.build_mph_diff(left, right)
+    assert excinfo.value.reason_code == "mph_input_mutated"
+
+
+def test_public_dispatch_compares_two_archives_and_refuses_cleanly(tmp_path):
+    tools = _tools()
+    left = _write_valid_mph(tmp_path / "one.mph")
+    right = _write_valid_mph(tmp_path / "two.mph", title="other")
+
+    result = tools["mph_diff"].fn(str(left), str(right))
+    assert result["success"] is True
+    assert result["solver_started"] is False
+    assert result["filesystem_modified"] is False
+    assert result["schema_name"] == "comsol_mcp.mph_diff"
+    assert result["diff"]["metadata_changes"][0]["field"] == "title"
+
+    absent = tools["mph_diff"].fn(str(left), str(tmp_path / "absent.mph"))
+    assert absent["success"] is False
+    assert absent["reason_code"] == "mph_source_unavailable"
+    assert absent["solver_started"] is False
+
+
+def test_probe_reports_valid_invalid_and_missing_artifacts_without_raising(tmp_path):
+    from comsol_mcp.evidence.inspection.probe import probe_mph_artifacts
+
+    valid = _write_valid_mph(tmp_path / "good.mph")
+    broken = tmp_path / "bad.mph"
+    broken.write_bytes(b"truncated")
+    (tmp_path / "ignored.txt").write_text("not an archive")
+
+    report = probe_mph_artifacts(tmp_path)
+    assert report["available"] is True
+    assert report["truncated"] is False
+    by_name = {row["file_name"]: row for row in report["probes"]}
+    assert set(by_name) == {"bad.mph", "good.mph"}
+    assert by_name["good.mph"]["available"] is True
+    assert (
+        by_name["good.mph"]["summary"]["sha256"] == (build_mph_inspection_summary(valid)["sha256"])
+    )
+    assert by_name["bad.mph"]["available"] is False
+    assert by_name["bad.mph"]["reason_code"] == "mph_invalid_zip"
+
+    empty_dir = tmp_path / "empty-directory"
+    empty_dir.mkdir()
+    empty = probe_mph_artifacts(empty_dir)
+    assert empty["available"] is True and empty["probes"] == []
+
+    missing = probe_mph_artifacts(tmp_path / "absent")
+    assert missing["available"] is False
+    assert missing["reason_code"] == "mph_probe_directory_unavailable"

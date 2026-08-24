@@ -2,7 +2,7 @@
     "schema_name": "comsol_mcp.deployment_identity",
     "schema_version": "1.2.0",
     "package_name": "comsol-mcp",
-    "full_tool_schemas_sha256": "3db2ece0feeda6bf65c9580e58aaffd4a79524489c8827b689897d6ce4637bd9",
-    "profile_tool_names_sha256": "cc751dc1141f8511d6a66b2b23ed5e04541edece3170ecd1a3b35541d6131965",
+    "full_tool_schemas_sha256": "09a5328ba8eef279890695215f03b5aabfc663b07c26c00af142820586419dd5",
+    "profile_tool_names_sha256": "bf007b4e21a163ed6e21655ac30d96827bcc33daa640add96eb403b77c98c038",
     "feature_tool_names_sha256": "7f3e610c7cd5ee5f14fe89893c6c723b4e4caaf252c5e812b1ede707414ef6fe"
 }

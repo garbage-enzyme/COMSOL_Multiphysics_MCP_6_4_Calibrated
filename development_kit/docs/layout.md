@@ -527,6 +527,8 @@ models are intentionally absent.
 - `comsol_mcp/evidence/convergence_evaluation.py` — This module validates ordered spectral convergence ladders and caller policies.
 - `comsol_mcp/evidence/inspection/__init__.py` — This package exports solver-free offline `.mph` archive inspection contracts.
 - `comsol_mcp/evidence/inspection/archive.py` — This module implements the bounded stdlib-only safety reader for offline `.mph` ZIP archives.
+- `comsol_mcp/evidence/inspection/diff.py` — This module builds versioned offline two-archive `.mph` diffs with input-immutability proof.
+- `comsol_mcp/evidence/inspection/probe.py` — This module provides warning-only post-run `.mph` artifact probes for job pipelines.
 - `comsol_mcp/evidence/inspection/summary.py` — This module builds versioned offline inspection summaries from declared archive markers.
 - `comsol_mcp/evidence/integrity_controls.py` — This module loads default-on evidence-integrity settings and defines warning propagation.
 - `comsol_mcp/evidence/integrity_verifier.py` — This module composes settings-aware outcome, artifact, summary, and resume verification.

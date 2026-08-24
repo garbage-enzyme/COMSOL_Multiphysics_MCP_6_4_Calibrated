@@ -30,4 +30,12 @@ class MphInspectionInput(_ClosedModel):
     limits: MphInspectionLimits | None = None
 
 
-__all__ = ["MphInspectionInput", "MphInspectionLimits"]
+class MphDiffInput(_ClosedModel):
+    """One bounded offline two-archive `.mph` diff request."""
+
+    left_path: Annotated[str, Field(min_length=1, max_length=4096)]
+    right_path: Annotated[str, Field(min_length=1, max_length=4096)]
+    limits: MphInspectionLimits | None = None
+
+
+__all__ = ["MphDiffInput", "MphInspectionInput", "MphInspectionLimits"]

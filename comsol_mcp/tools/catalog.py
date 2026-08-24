@@ -243,7 +243,11 @@ _TOOLS_BY_REGISTRAR = {
         "spectral_characterize",
         "spectral_model_compare",
     ),
-    "comsol_mcp.tools.mph_inspection.register_mph_inspection_tools": ("mph_inspect",),
+    "comsol_mcp.tools.mph_inspection.register_mph_inspection_tools": (
+        "mph_diff",
+        "mph_diff",
+        "mph_inspect",
+    ),
     "comsol_mcp.tools.configuration.register_configuration_tools": (
         "simulation_configuration_validate",
         "simulation_configuration_diff",
@@ -536,6 +540,7 @@ _EXPLICIT_READ_ONLY_TOOLS = frozenset(
         "model_list",
         "model_list_components",
         "modeling_best_practices",
+        "mph_diff",
         "mph_inspect",
         "param_get",
         "param_list",
@@ -629,6 +634,7 @@ _SOLVER_FREE_TOOLS = frozenset(
         "physics_get_pde_boundary_conditions",
         "troubleshoot",
         "modeling_best_practices",
+        "mph_diff",
         "mph_inspect",
         "wave_optics_material_expression_preview",
         "visual_review_capability_normalize",
@@ -740,6 +746,7 @@ _CORE_TOOLS = frozenset(
         "model_set_current",
         "model_remove",
         "model_inspect",
+        "mph_diff",
         "mph_inspect",
         "param_get",
         "param_set",
@@ -983,7 +990,7 @@ def _build_registry() -> dict[str, ToolMetadata]:
         "wave_optics": _CORE_TOOLS | _WAVE_OPTICS_ADDITIONS,
         "experimental": _CORE_TOOLS | _EXPERIMENTAL_ADDITIONS,
         "full": base_names,
-        "comsolless_read_only": {"mph_inspect"},
+        "comsolless_read_only": {"mph_inspect", "mph_diff"},
     }
     registry: dict[str, ToolMetadata] = {}
     for registrar, names in _TOOLS_BY_REGISTRAR.items():

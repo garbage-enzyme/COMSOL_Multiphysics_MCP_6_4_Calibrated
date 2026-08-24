@@ -28,6 +28,7 @@
         "model_remove",
         "model_save",
         "model_set_current",
+        "mph_diff",
         "mph_inspect",
         "param_get",
         "param_list",
@@ -99,6 +100,7 @@
         "model_save",
         "model_save_version",
         "model_set_current",
+        "mph_diff",
         "mph_inspect",
         "param_description",
         "param_get",
@@ -192,6 +194,7 @@
         "model_remove",
         "model_save",
         "model_set_current",
+        "mph_diff",
         "mph_inspect",
         "param_get",
         "param_list",
@@ -275,6 +278,7 @@
         "model_save",
         "model_set_current",
         "modeling_best_practices",
+        "mph_diff",
         "mph_inspect",
         "multiphysics_add",
         "param_get",
@@ -398,6 +402,7 @@
         "model_save_version",
         "model_set_current",
         "modeling_best_practices",
+        "mph_diff",
         "mph_inspect",
         "multiphysics_add",
         "param_description",
@@ -495,6 +500,7 @@
         "wave_optics_reference_audit"
     ],
     "comsolless_read_only": [
+        "mph_diff",
         "mph_inspect"
     ]
 }
