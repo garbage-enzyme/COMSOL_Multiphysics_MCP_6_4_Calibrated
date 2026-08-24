@@ -287,6 +287,7 @@ models are intentionally absent.
 - `development_kit/tests/test_model.py` — This module tests model management helpers without a COMSOL client.
 - `development_kit/tests/test_outcome_contract.py` — This module tests orthogonal execution, evidence, and scientific outcome contracts.
 - `development_kit/tests/test_offline_export.py` — This module solver-free tests offline export-manifest construction, tamper rejection, and dispatch.
+- `development_kit/tests/test_observation.py` — This module solver-free tests observation outcomes, PID reuse detection, and exact-owner cleanup decisions.
 - `development_kit/tests/test_operation_arbiter.py` — This module tests durable serialization and responsive control-plane operation classes.
 - `development_kit/tests/test_native_cancel_probe.py` — This module tests native cancellation discovery and allowlisting without COMSOL.
 - `development_kit/tests/test_namespace_compatibility.py` — This module tests canonical package identity and the bounded legacy import interval.
@@ -586,6 +587,7 @@ models are intentionally absent.
 - `comsol_mcp/jobs/manager.py` — This module handles durable job submission, status, cancellation, resume, and reconciliation.
 - `comsol_mcp/jobs/native_cancel_probe.py` — This module inspects allowlisted native cancellation support.
 - `comsol_mcp/jobs/native_cancel_profiles.json` — This file stores exact native cancellation compatibility profiles.
+- `comsol_mcp/jobs/observation.py` — This module records exact long-task observation receipts with ownership verification and resume dispositions.
 - `comsol_mcp/jobs/process_control.py` — This module performs exact-identity process inspection and containment.
 - `comsol_mcp/jobs/resource_admission.py` — This module validates resource policy, telemetry, journals, and admission.
 - `comsol_mcp/jobs/sequence_worker.py` — This module provides an injected process-only durability worker.

@@ -1248,6 +1248,19 @@ class JobManager:
                         "available": False,
                         "reason_code": "bounded_steps_unreadable",
                     }
+            if (self.store.job_dir(job_id) / "observation.json").is_file():
+                # Warning-only observation surface: a failed receipt read is
+                # recorded here and never changes the job disposition.
+                try:
+                    from .observation import summarize_observation
+
+                    state["observation"] = summarize_observation(self.store.job_dir(job_id))
+                except Exception:
+                    logger.warning("observation receipt was unreadable", exc_info=True)
+                    state["observation"] = {
+                        "available": False,
+                        "reason_code": "observation_unreadable",
+                    }
             return {"success": True, "job_id": job_id, **state}
 
     def tail(self, job_id: str, n: int = 20) -> dict[str, Any]:
