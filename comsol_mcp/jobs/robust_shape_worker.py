@@ -767,6 +767,13 @@ def _run_synthetic(root: str, job_id: str) -> int:
     return 0
 
 
+def _requests_full_condition_gradients(
+    execution_limit: int | None, declared_conditions: int
+) -> bool:
+    """A limit covering every declared condition is a complete gradient run."""
+    return execution_limit is None or execution_limit >= declared_conditions
+
+
 def run(root: str, job_id: str) -> int:
     store = JobStore(Path(root))
     spec = store.read_spec(job_id)
@@ -858,15 +865,6 @@ def _run_licensed(root: str, job_id: str) -> int:
 
         native_runtime_entered = True
         execution_limit = spec.get("condition_execution_limit")
-        result = execute_lin2025_conditions(
-            spec,
-            directory,
-            attempt=attempt,
-            client_factory=shared_client_factory,
-            java_environment_reader=java_environment_reader,
-            cancel_requested=lambda: _cancel_requested(store, job_id, attempt),
-            include_gradients=execution_limit is None,
-        )
         declared_conditions = len(
             [
                 row
@@ -874,7 +872,21 @@ def _run_licensed(root: str, job_id: str) -> int:
                 if row["active"] and row["objective_role"] == "objective"
             ]
         )
-        if execution_limit is not None and execution_limit < declared_conditions:
+        # A limit that covers every declared condition is a complete run and
+        # must request gradients; only a strictly partial limit is smoke-only.
+        full_condition_run = _requests_full_condition_gradients(
+            execution_limit, declared_conditions
+        )
+        result = execute_lin2025_conditions(
+            spec,
+            directory,
+            attempt=attempt,
+            client_factory=shared_client_factory,
+            java_environment_reader=java_environment_reader,
+            cancel_requested=lambda: _cancel_requested(store, job_id, attempt),
+            include_gradients=full_condition_run,
+        )
+        if not full_condition_run:
             rows_path = directory / "robust_shape_rows.jsonl"
             smoke_fingerprint = domain_sha256_v2(
                 "comsol_mcp.robust_condition_smoke", result["observations"]

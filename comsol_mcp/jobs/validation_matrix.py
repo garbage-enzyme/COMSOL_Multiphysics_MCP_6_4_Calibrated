@@ -22,6 +22,7 @@ MAX_COLLECTORS_PER_POINT = 4
 MAX_EXPECTED_ARTIFACTS_PER_POINT = 16
 MAX_COLLECTOR_INPUT_BYTES = 64 * 1024
 MAX_SPEC_BYTES = 512 * 1024
+MAX_VALIDATION_MATRIX_CORES = 1024
 
 SUPPORTED_VALIDATION_COLLECTORS = frozenset(
     {
@@ -121,8 +122,22 @@ def _normalize_incidence(value: object, point_name: str) -> dict[str, Any]:
     }
 
 
+def _require_string_keys(value: object, name: str) -> None:
+    # json.dumps silently coerces non-string mapping keys to strings, so the
+    # strict string-key contract must be checked before the round-trip.
+    if isinstance(value, Mapping):
+        if not all(isinstance(key, str) for key in value):
+            raise ValueError(f"{name} keys must be strings")
+        for key, item in value.items():
+            _require_string_keys(item, f"{name}.{key}")
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            _require_string_keys(item, f"{name}[{index}]")
+
+
 def _normalize_json_object(value: object, name: str) -> dict[str, Any]:
     raw = _mapping(value, name)
+    _require_string_keys(raw, name)
     try:
         payload = json.dumps(
             raw,
@@ -203,7 +218,8 @@ def _normalize_point(value: object, index: int, source_sha256: str) -> dict[str,
         raise ValueError(f"{name}.expected_artifact_ids must be a nonempty list")
     if len(artifacts) > MAX_EXPECTED_ARTIFACTS_PER_POINT:
         raise ValueError(
-            f"{name}.expected_artifact_ids must not exceed {MAX_EXPECTED_ARTIFACTS_PER_POINT} entries"
+            f"{name}.expected_artifact_ids must not exceed "
+            f"{MAX_EXPECTED_ARTIFACTS_PER_POINT} entries"
         )
     artifact_ids = [
         _identifier(item, f"{name}.expected_artifact_ids[{artifact_index}]")
@@ -319,7 +335,7 @@ def normalize_validation_matrix_spec(raw_spec: object) -> dict[str, Any]:
     if minimum_matrix_seconds > rules["wall_time_budget_seconds"]:
         raise ValueError("points exceed the caller-declared wall-time budget")
 
-    cores = _positive_integer(raw.get("cores"), "cores")
+    cores = _positive_integer(raw.get("cores"), "cores", maximum=MAX_VALIDATION_MATRIX_CORES)
     max_retries = raw.get("max_retries", 0)
     if (
         isinstance(max_retries, bool)
@@ -363,6 +379,7 @@ def normalize_validation_matrix_spec(raw_spec: object) -> dict[str, Any]:
 
 
 __all__ = [
+    "MAX_VALIDATION_MATRIX_CORES",
     "MAX_VALIDATION_MATRIX_POINTS",
     "SUPPORTED_VALIDATION_COLLECTORS",
     "normalize_validation_matrix_spec",

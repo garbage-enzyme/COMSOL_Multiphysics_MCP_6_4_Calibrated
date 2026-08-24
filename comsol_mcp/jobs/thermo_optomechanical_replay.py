@@ -219,9 +219,11 @@ def normalize_thermo_optomechanical_replay_spec(value: object) -> dict[str, Any]
         "schema_version": JOB_SCHEMA_VERSION,
         "driver_identity": current_thermo_optomechanical_driver_identity(),
     }
+    # Insert the fingerprint before the size check so the stored record that
+    # actually ships is the one measured against the declared bound.
+    normalized["spec_fingerprint"] = _fingerprint(normalized)
     if len(_canonical_bytes(normalized)) > MAX_THERMO_OPTOMECHANICAL_SPEC_BYTES:
         raise ValueError("thermo-optomechanical replay specification exceeds its bound")
-    normalized["spec_fingerprint"] = _fingerprint(normalized)
     return normalized
 
 

@@ -2263,3 +2263,20 @@ def test_rejected_finalist_is_durable_and_cleans_before_terminal_failure(
     state = manager.store.read_state(job_id)
     assert state["status"] == "failed"
     assert state["solver_started"] is False
+
+
+@pytest.mark.parametrize(
+    ("execution_limit", "declared", "expected"),
+    [
+        (None, 24, True),
+        (1, 24, False),
+        (23, 24, False),
+        (24, 24, True),
+        (30, 24, True),
+    ],
+)
+def test_full_gradient_request_covers_declared_conditions(execution_limit, declared, expected):
+    assert (
+        robust_shape_worker._requests_full_condition_gradients(execution_limit, declared)
+        is expected
+    )

@@ -390,3 +390,21 @@ def test_capabilities_report_exact_runtime_compatibility_without_future_inferenc
     assert "6.4+" not in json.dumps(capabilities, sort_keys=True)
     summary = startup_capability_summary(_selection("core"))
     assert "COMSOL 6.4.0.293 exact licensed / MPh 1.3.1" in summary
+
+
+def test_resolved_package_root_revalidated_without_false_positive(tmp_path):
+    import comsol_mcp.build_identity as build_identity_module
+
+    package = tmp_path / "package"
+    package.mkdir()
+    (package / "module.py").write_text("value = 1\n", encoding="utf-8")
+    resolved = package.resolve()
+    build_identity_module._reject_linked_components(resolved)
+
+    linked = tmp_path / "linked"
+    _winapi.CreateJunction(str(package), str(linked))
+    try:
+        with pytest.raises(ValueError, match="symlink or junction"):
+            build_identity_module._reject_linked_components(linked)
+    finally:
+        linked.rmdir()

@@ -478,3 +478,53 @@ def test_complete_newline_free_tail_is_retained_before_next_append(tmp_path):
 
     assert read_spectral_rows(journal, spec, artifact_root=root) == [first, second]
     assert journal.read_bytes().endswith(b"\n")
+
+
+def test_untrusted_stage_kind_and_audit_status_are_type_checked(tmp_path):
+    spec = _spec(tmp_path)
+    root = tmp_path / "job"
+    journal = root / "spectral_rows.jsonl"
+
+    with pytest.raises(ValueError, match="stage_kind is unsupported"):
+        append_spectral_row(
+            journal,
+            spec,
+            attempt=1,
+            stage_index=0,
+            stage_kind=["initial_locator"],
+            requested_wavelength_m=4e-6,
+            evaluated_wavelength_m=4e-6,
+            frequency_wavelength_m=4e-6,
+            R=0.85,
+            T=0.05,
+            A=0.1,
+            mesh_element_count=12,
+            mesh_vertex_count=8,
+            solve_seconds=0.2,
+            audit_artifact=_artifact(root, spec, 4e-6),
+            artifact_root=root,
+            created_at_epoch=1000.0,
+        )
+
+    artifact = _artifact(root, spec, 5e-6)
+    artifact["audit_status"] = ["measurement_complete"]
+    with pytest.raises(ValueError, match="audit_status is not complete"):
+        append_spectral_row(
+            journal,
+            spec,
+            attempt=1,
+            stage_index=0,
+            stage_kind="initial_locator",
+            requested_wavelength_m=5e-6,
+            evaluated_wavelength_m=5e-6,
+            frequency_wavelength_m=5e-6,
+            R=0.15,
+            T=0.05,
+            A=0.8,
+            mesh_element_count=12,
+            mesh_vertex_count=8,
+            solve_seconds=0.2,
+            audit_artifact=artifact,
+            artifact_root=root,
+            created_at_epoch=1001.0,
+        )

@@ -405,3 +405,69 @@ def test_native_adjoint_worker_fails_closed_without_armed_watchdog(ascii_tmp_pat
     terminal = manager.store.read_state(job_id)
     assert terminal["status"] == "failed"
     assert "was not armed" in terminal["last_error"]["message"]
+
+
+def _minimal_adjoint_runtime_spec(tmp_path):
+    source = tmp_path / "source.mph"
+    source.write_bytes(b"adjoint runtime fixture")
+    return {
+        "source_model_path": str(source),
+        "source_model_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+        "support": {"support_fingerprint": "a" * 64},
+        "optimizer": {
+            "method": "gcmma",
+            "optimizer_fingerprint": "b" * 64,
+            "budget": {"cores": 1, "max_solves": 5, "max_wall_time_seconds": 60},
+        },
+        "cores": 1,
+        "version": "6.4",
+    }
+
+
+def test_cleanup_failure_records_errors_and_preserves_original_error(ascii_tmp_path):
+    class FailingClearClient:
+        def load(self, _path):
+            raise RuntimeError("boom")
+
+        def clear(self):
+            raise OSError("clear failed")
+
+    spec = _minimal_adjoint_runtime_spec(ascii_tmp_path)
+    workdir = ascii_tmp_path / "runtime-work"
+
+    with pytest.raises(RuntimeError, match="boom"):
+        native_adjoint_runtime.execute_native_adjoint_optimization(
+            spec,
+            workdir,
+            client_factory=lambda **_kwargs: FailingClearClient(),
+        )
+
+    receipt = json.loads((workdir / "native-optimizer-receipt.json").read_text(encoding="utf-8"))
+    assert receipt["success"] is False
+    assert receipt["cleanup"]["client_clear"] is False
+    assert receipt["cleanup"]["source_unchanged"] is True
+    assert receipt["cleanup"]["cleanup_errors"] == ["client_clear:OSError:clear failed"]
+
+
+def test_clean_failure_receipt_omits_empty_cleanup_errors(ascii_tmp_path):
+    class CleanClient:
+        def load(self, _path):
+            raise RuntimeError("boom")
+
+        def clear(self):
+            return None
+
+    spec = _minimal_adjoint_runtime_spec(ascii_tmp_path)
+    workdir = ascii_tmp_path / "runtime-clean"
+
+    with pytest.raises(RuntimeError, match="boom"):
+        native_adjoint_runtime.execute_native_adjoint_optimization(
+            spec,
+            workdir,
+            client_factory=lambda **_kwargs: CleanClient(),
+        )
+
+    receipt = json.loads((workdir / "native-optimizer-receipt.json").read_text(encoding="utf-8"))
+    assert receipt["success"] is False
+    assert receipt["cleanup"] == {"client_clear": True, "source_unchanged": True}
+    assert "cleanup_errors" not in receipt["cleanup"]

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 
 import pytest
 
@@ -233,5 +234,44 @@ def test_native_condition_gradient_rejects_baseline_objective_drift(ascii_tmp_pa
             ascii_tmp_path,
             backend=_Backend(_observations(spec)),
             observations=observations,
+            cancel_requested=lambda: False,
+        )
+
+
+class _UlpBackend(_Backend):
+    """Backend whose accepted real part is one ulp above the raw value."""
+
+    def evaluate_condition_gradient(self, condition, tensor_expressions, variable_ids):
+        result = super().evaluate_condition_gradient(condition, tensor_expressions, variable_ids)
+        result["accepted_real_gradients"] = [
+            math.nextafter(item, math.inf) for item in result["accepted_real_gradients"]
+        ]
+        return result
+
+
+def test_accepted_real_gradient_tolerates_last_ulp_rounding(ascii_tmp_path):
+    spec = _spec(ascii_tmp_path)
+    observations = _observations(spec)
+    receipt = execute_native_condition_gradients(
+        spec,
+        ascii_tmp_path,
+        backend=_UlpBackend(observations),
+        observations=observations,
+        cancel_requested=lambda: False,
+    )
+    assert receipt["complete"] is True
+    assert len(list(ascii_tmp_path.glob("condition-gradient-*.json"))) == 24
+
+
+def test_native_condition_gradient_rejects_duplicate_baseline_observations(ascii_tmp_path):
+    spec = _spec(ascii_tmp_path)
+    observations = _observations(spec)
+    duplicated = [*observations, dict(observations[0])]
+    with pytest.raises(ValueError, match="unique baseline observations"):
+        execute_native_condition_gradients(
+            spec,
+            ascii_tmp_path,
+            backend=_Backend(_observations(spec)),
+            observations=duplicated,
             cancel_requested=lambda: False,
         )

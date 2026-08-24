@@ -341,3 +341,24 @@ def test_each_collector_requires_one_unique_expected_artifact_id(tmp_path):
 
     with pytest.raises(ValueError, match="exactly one expected artifact ID per collector"):
         normalize_validation_matrix_spec(_spec(source, points=[point]))
+
+
+def test_cores_share_the_explicit_product_bound(tmp_path):
+    source = tmp_path / "cores-fixture.mph"
+    source.write_bytes(b"model")
+
+    with pytest.raises(ValueError, match="cores must not exceed 1024"):
+        normalize_validation_matrix_spec(_spec(source, cores=2000))
+
+
+def test_nested_collector_inputs_require_string_keys(tmp_path):
+    source = tmp_path / "keys-fixture.mph"
+    source.write_bytes(b"model")
+    point = _point()
+    point["collectors"][0]["inputs"] = {
+        "component_tag": "comp1",
+        "nested": {1: "json-roundtrip-would-coerce-this"},
+    }
+
+    with pytest.raises(ValueError, match="keys must be strings"):
+        normalize_validation_matrix_spec(_spec(source, points=[point]))

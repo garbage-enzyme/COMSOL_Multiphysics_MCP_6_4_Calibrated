@@ -287,3 +287,23 @@ def test_progress_callback_cannot_join_its_worker_thread():
     )
     assert solver.wait(timeout=2) is True
     assert observations == [False]
+
+
+def test_thread_start_failure_notifies_callback_and_clears_it(monkeypatch):
+    solver = AsyncSolver()
+    observations = []
+    monkeypatch.setattr(
+        threading.Thread, "start", lambda _thread: (_ for _ in ()).throw(RuntimeError("limit"))
+    )
+
+    with pytest.raises(RuntimeError, match="limit"):
+        solver.start_solve(
+            FakeModel(FakeStudy()),
+            "std1",
+            progress_callback=lambda progress, message: observations.append((progress, message)),
+        )
+
+    assert observations == [(-1.0, "Error: limit")]
+    assert solver.progress.status is SolverStatus.FAILED
+    with solver._lock:
+        assert solver._progress_callback is None

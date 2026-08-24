@@ -113,7 +113,10 @@ def _normalize_backend_result(
         real = _finite(native["real"], f"raw_gradients[{index}].real")
         imaginary = _finite(native["imaginary"], f"raw_gradients[{index}].imaginary")
         real_accepted = _finite(accepted_value, f"accepted_real_gradients[{index}]")
-        if real_accepted != real:
+        # The accepted value may be recomputed through a different arithmetic
+        # path; compare within the module's evidence tolerance instead of
+        # requiring exact bit equality.
+        if not math.isclose(real_accepted, real, rel_tol=1e-12, abs_tol=1e-12):
             raise ValueError("accepted native gradient component differs from the raw real part")
         normalized_raw.append({"real": real, "imaginary": imaginary})
         normalized_accepted.append(real_accepted)
@@ -310,6 +313,8 @@ def execute_native_condition_gradients(
     if spec.get("condition_execution_limit") is not None:
         raise ValueError("native aggregate gradients require the complete condition table")
     observation_by_id = {item["condition_id"]: item for item in observations}
+    if len(observation_by_id) != len(observations):
+        raise ValueError("native aggregate gradients require unique baseline observations")
     if set(observation_by_id) != {item["condition_id"] for item in conditions}:
         raise ValueError("native aggregate gradients require complete baseline observations")
     variable_ids = [item["variable_id"] for item in spec["support"]["variables"]]

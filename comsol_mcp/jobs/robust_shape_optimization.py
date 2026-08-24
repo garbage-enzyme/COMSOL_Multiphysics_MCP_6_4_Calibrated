@@ -41,6 +41,15 @@ ROBUST_SHAPE_SUBMISSION_SCHEMA_VERSION = "1.0.0"
 MAX_MANIFEST_BYTES = 2 * 1024 * 1024
 
 
+def _require_ascii_without_whitespace(path: Path, message: str) -> None:
+    # expanduser() can turn a contract-clean "~" into a home directory that
+    # contains spaces or non-ASCII characters; the declared path contract is
+    # therefore re-checked on the expanded text.
+    text = str(path)
+    if not text.isascii() or any(character.isspace() for character in text):
+        raise ValueError(message)
+
+
 def normalize_robust_shape_submission(value: object) -> dict[str, Any]:
     """Normalize the compact public envelope without reading the manifest."""
     if not isinstance(value, dict):
@@ -96,6 +105,10 @@ def normalize_robust_shape_submission(value: object) -> dict[str, Any]:
         ):
             raise ValueError("COMSOL temporary directory must be an ASCII path without whitespace")
         temporary_directory = Path(temporary_text).expanduser()
+        _require_ascii_without_whitespace(
+            temporary_directory,
+            "COMSOL temporary directory must be an ASCII path without whitespace",
+        )
         if (
             not temporary_directory.is_absolute()
             or temporary_directory.is_symlink()
@@ -151,6 +164,9 @@ def expand_robust_shape_manifest(submission: object) -> dict[str, Any]:
     if not isinstance(source_text, str) or not source_text.isascii():
         raise ValueError("robust shape source path must be ASCII")
     source = Path(source_text).expanduser()
+    _require_ascii_without_whitespace(
+        source, "robust shape source path must be an ASCII path without whitespace"
+    )
     if (
         not source.is_absolute()
         or source.suffix.casefold() != ".mph"

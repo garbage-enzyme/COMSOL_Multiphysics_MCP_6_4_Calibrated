@@ -223,9 +223,7 @@ def test_level_directory_stays_inside_the_windows_legacy_path_budget():
     assert len(str(directory / suffix)) <= 259
 
 
-def test_transient_append_failure_quarantines_level_and_notifies_fault_hook(
-    tmp_path, monkeypatch
-):
+def test_transient_append_failure_quarantines_level_and_notifies_fault_hook(tmp_path, monkeypatch):
     import src.jobs.convergence_campaign_runner as runner_module
 
     spec = _spec(tmp_path, early=False, tolerance=20e-9)
@@ -257,9 +255,7 @@ def test_transient_append_failure_quarantines_level_and_notifies_fault_hook(
             raise OSError("transient windows file lock")
         return real_append(*_args, **_kwargs)
 
-    monkeypatch.setattr(
-        runner_module, "append_convergence_campaign_level", transient_oserror
-    )
+    monkeypatch.setattr(runner_module, "append_convergence_campaign_level", transient_oserror)
     result = run_convergence_campaign(
         spec, root, attempt=2, level_executor=execute, fault_hook=fault
     )
@@ -274,3 +270,25 @@ def test_transient_append_failure_quarantines_level_and_notifies_fault_hook(
     resumed = run_convergence_campaign(spec, root, attempt=3, level_executor=execute)
     assert resumed["completed"] is True
     assert calls.count("mesh-0") == 2
+
+
+def test_truthy_non_true_level_completion_is_accepted(tmp_path):
+    spec = _spec(tmp_path, early=False, tolerance=20e-9)
+    inner = _executor([5.0e-6, 5.001e-6, 5.002e-6])
+
+    def execute_level(level, directory):
+        result = inner(level, directory)
+        # Truthy but not the True singleton: equivalent completion evidence
+        # (for example numpy.bool_) must not be misread as an incomplete level.
+        result["completed"] = 1
+        return result
+
+    result = run_convergence_campaign(
+        spec,
+        tmp_path / "campaign",
+        attempt=1,
+        level_executor=execute_level,
+    )
+
+    assert result["completed"] is True
+    assert result["summary"]["completed_level_count"] == 3

@@ -194,9 +194,11 @@ class AsyncSolver:
             self._thread = threading.Thread(target=solve_thread, daemon=True)
             self._launch_gate = launch_gate
             self._launch_owner_ident = threading.get_ident()
+            start_failure: Optional[Exception] = None
             try:
                 self._thread.start()
             except Exception as exc:
+                start_failure = exc
                 self._progress.status = SolverStatus.FAILED
                 self._progress.error = str(exc)
                 self._progress.message = f"Solver thread failed to start: {exc}"
@@ -205,7 +207,15 @@ class AsyncSolver:
                 self._launch_gate = None
                 self._launch_owner_ident = None
                 launch_gate.set()
-                raise
+        if start_failure is not None:
+            # A failed start is terminal: report it through the registered
+            # callback, drop the stored callback, and preserve the exception.
+            try:
+                self._notify_progress(progress_callback, -1.0, f"Error: {start_failure}")
+            finally:
+                with self._lock:
+                    self._progress_callback = None
+            raise start_failure
         try:
             self._notify_progress(progress_callback, 0.0, "Starting solver...")
         finally:
@@ -227,7 +237,7 @@ class AsyncSolver:
             return
         try:
             callback(progress, message)
-        except Exception:
+        except Exception:  # noqa: S110 - callback failures must not break solve progress
             pass
 
     def _set_cancelled(self):

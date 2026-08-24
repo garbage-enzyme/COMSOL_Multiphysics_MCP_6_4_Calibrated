@@ -232,3 +232,21 @@ def test_runtime_structural_rejection_precedes_the_wrapped_operation():
     with pytest.raises(ValueError, match="public string limit"):
         operation("x" * 16_385)
     assert called is False
+
+
+def test_job_submission_dict_deep_copies_plain_dicts():
+    submitted = {
+        "job_type": "staged_sweep",
+        "parameter_values": [8e-7],
+        "physical_bounds": {"wl": {"min": 1}},
+    }
+
+    snapshot = job_submission_dict(submitted)
+
+    snapshot["physical_bounds"]["wl"]["min"] = 999
+    snapshot["parameter_values"].append(2)
+    assert submitted["physical_bounds"]["wl"]["min"] == 1
+    assert submitted["parameter_values"] == [8e-7]
+
+    submitted["physical_bounds"]["wl"]["min"] = -5
+    assert snapshot["physical_bounds"]["wl"]["min"] == 999

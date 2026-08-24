@@ -374,6 +374,11 @@ def _validate_stage_payload(stage_id: str, value: object, spec: Mapping[str, Any
             solved = _finite(row["solved_wavelength_m"], "solved wavelength")
             if requested != solved:
                 raise ValueError("optical replay wavelength readback is not exact")
+            # Validate against the declared grid before hashing so a malformed
+            # array/object branch yields the intended ValueError, never a
+            # TypeError from an unhashable set member.
+            if row["branch"] not in spec["optical_replay"]["branches"]:
+                raise ValueError("optical replay coordinates differ from the declared grid")
             observed.add((requested, row["branch"]))
             for name in ("baseline_rta", "deformed_rta"):
                 rta = _exact(row[name], {"R", "T", "A", "closure_residual", "passive"}, name)
@@ -396,7 +401,11 @@ def _validate_stage_payload(stage_id: str, value: object, spec: Mapping[str, Any
         if (
             not isinstance(controls, list)
             or len(controls) != len(spec["validation_controls"])
-            or {item.get("control_id") for item in controls if isinstance(item, Mapping)}
+            or {
+                item.get("control_id")
+                for item in controls
+                if isinstance(item, Mapping) and isinstance(item.get("control_id"), str)
+            }
             != set(spec["validation_controls"])
             or any(
                 not isinstance(item, Mapping)

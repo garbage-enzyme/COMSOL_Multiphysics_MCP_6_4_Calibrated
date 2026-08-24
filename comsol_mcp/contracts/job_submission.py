@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from typing import Annotated, Any, Literal, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
@@ -147,7 +148,10 @@ def job_submission_dict(value: JobSubmissionSpec | dict[str, Any]) -> dict[str, 
     if isinstance(value, BaseModel):
         return value.model_dump(mode="python", exclude_unset=True)
     if isinstance(value, dict):
-        return dict(value)
+        # Deep-copy like the BaseModel branch: nested dicts and lists must not
+        # alias the caller's object, or later mutation on either side would
+        # silently change the fingerprinted snapshot.
+        return copy.deepcopy(value)
     raise ValueError("Job specification must be an object")
 
 

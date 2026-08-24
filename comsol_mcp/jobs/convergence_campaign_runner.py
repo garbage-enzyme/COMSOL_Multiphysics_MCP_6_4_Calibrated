@@ -283,9 +283,7 @@ def run_convergence_campaign(
                     artifact_root=root,
                 )
             except (OSError, ValueError) as err:
-                quarantine = level_dir.with_name(
-                    f".{level_dir.name}.invalid-{uuid.uuid4().hex}"
-                )
+                quarantine = level_dir.with_name(f".{level_dir.name}.invalid-{uuid.uuid4().hex}")
                 level_dir.replace(quarantine)
                 if fault_hook is not None:
                     fault_hook(
@@ -306,7 +304,9 @@ def run_convergence_campaign(
         result = level_executor(level, level_dir)
         if not isinstance(result, Mapping):
             raise RuntimeError("spectral level executor returned an invalid result")
-        if result.get("completed") is not True:
+        # Completion is contractual True; accept equivalent truthy values
+        # (e.g. numpy.bool_) instead of identity-comparing the singleton.
+        if result.get("completed") not in (True,):
             return {
                 "completed": False,
                 "stop_reason": str(result.get("stop_reason") or "spectral_level_incomplete"),

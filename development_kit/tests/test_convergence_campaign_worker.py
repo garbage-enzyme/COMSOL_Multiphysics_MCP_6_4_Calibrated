@@ -568,3 +568,50 @@ def test_lagging_status_still_records_the_observed_cancel(tmp_path, ascii_tmp_pa
     assert state["cancel"]["cooperative_observation"]["message"] == (
         "Stopped before campaign startup"
     )
+
+
+def test_final_source_mismatch_after_worker_error_is_cleanup_only(
+    tmp_path, ascii_tmp_path, monkeypatch
+):
+    store, spec, job_id = _created_job(tmp_path, ascii_tmp_path)
+    first_configuration = spec["levels"][0]["spectral_job"]["configuration_sha256"]
+    second_source = Path(spec["levels"][1]["spectral_job"]["source_model_path"])
+
+    # Source pins make real byte mutation impossible mid-run; simulate drift
+    # behind the same hash seam the pre-startup and final verifications share.
+    real_sha256_file = worker_module._sha256_file
+    level_failed = threading.Event()
+
+    def drifted_after_failure(path):
+        digest = real_sha256_file(path)
+        if level_failed.is_set() and Path(path) == second_source:
+            return "0" * 64
+        return digest
+
+    monkeypatch.setattr(worker_module, "_sha256_file", drifted_after_failure)
+
+    def collector(point, collector_client, artifact_dir):
+        if point["configuration_sha256"] == first_configuration:
+            level_failed.set()
+            raise RuntimeError("injected level solve failure")
+        return _collector_for(spec)(point, collector_client, artifact_dir)
+
+    code = _run(
+        str(store.root),
+        job_id,
+        ownership_factory=lambda *_args: _Ownership(),
+        client_factory=lambda _spec: _Client(),
+        collector_executor=collector,
+        telemetry_provider=_telemetry,
+        native_cancel_enabled=False,
+    )
+
+    assert code == 1
+    state = store.read_state(job_id)
+    assert state["status"] == "failed"
+    # The injected level failure stays the worker error; the later source
+    # mismatch is downgraded to cleanup evidence instead of replacing it.
+    assert "injected level solve failure" in state["last_error"]["message"]
+    assert state["cleanup_errors"] == [
+        "final_source_verification:Immutable convergence source changed after execution"
+    ]

@@ -134,7 +134,10 @@ def _normalize_artifact(value: object) -> dict[str, Any]:
     }
     if set(raw) != fields:
         raise ValueError("audit_artifact has missing or unsupported fields")
-    if raw["audit_status"] not in {"measurement_complete", "policy_evaluated"}:
+    if not isinstance(raw["audit_status"], str) or raw["audit_status"] not in {
+        "measurement_complete",
+        "policy_evaluated",
+    }:
         raise ValueError("audit_artifact.audit_status is not complete")
     normalized = {
         "wrapper_relative_path": _portable_relative_path(
@@ -269,7 +272,7 @@ def _normalize_row_body(
         raise ValueError("spectral row attempt must be positive")
     if isinstance(stage_index, bool) or not isinstance(stage_index, int) or stage_index < 0:
         raise ValueError("spectral row stage_index must be nonnegative")
-    if raw["stage_kind"] not in SPECTRAL_STAGE_KINDS:
+    if not isinstance(raw["stage_kind"], str) or raw["stage_kind"] not in SPECTRAL_STAGE_KINDS:
         raise ValueError("spectral row stage_kind is unsupported")
     created = _finite(raw["created_at_epoch"], "created_at_epoch")
     spec_fingerprint = _hex_digest(raw["spec_fingerprint"], "spec_fingerprint")

@@ -261,10 +261,10 @@ def _run(
                 if isinstance(level_result, Mapping) and level_result.get("stop_reason")
                 else None
             )
-            resource_refusal = (
-                top_reason == "before_level_stop"
-                or nested_reason in {"before_solve_stop", "after_durable_row_stop"}
-            )
+            resource_refusal = top_reason == "before_level_stop" or nested_reason in {
+                "before_solve_stop",
+                "after_durable_row_stop",
+            }
             if resource_refusal:
                 pending_terminal = {
                     "status": "interrupted",
@@ -285,9 +285,7 @@ def _run(
                         "last_error": {
                             "type": "SpectralLevelIncomplete",
                             "message": (
-                                f"{top_reason}: {nested_reason}"
-                                if nested_reason
-                                else top_reason
+                                f"{top_reason}: {nested_reason}" if nested_reason else top_reason
                             ),
                         },
                         "level_result": dict(level_result) if level_result else {},
@@ -348,13 +346,12 @@ def _run(
                 cleanup_errors.append(f"lease_release:{type(exc).__name__}:{exc}")
         try:
             for source, level in zip(sources, spec["levels"]):
-                if (
-                    _sha256_file(source) != level["spectral_job"]["source_model_sha256"]
-                    and worker_error is None
-                ):
-                    worker_error = RuntimeError(
-                        "Immutable convergence source changed after execution"
-                    )
+                if _sha256_file(source) != level["spectral_job"]["source_model_sha256"]:
+                    mismatch = RuntimeError("Immutable convergence source changed after execution")
+                    if worker_error is None:
+                        worker_error = mismatch
+                    else:
+                        cleanup_errors.append(f"final_source_verification:{mismatch}")
         except Exception as exc:
             if worker_error is None:
                 worker_error = exc

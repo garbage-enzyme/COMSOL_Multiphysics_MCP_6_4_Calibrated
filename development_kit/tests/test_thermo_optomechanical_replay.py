@@ -1064,3 +1064,45 @@ def test_worker_reconciles_cancellation_racing_the_starting_transition(ascii_tmp
     assert code == 0
     assert state["status"] == "cancel_requested"
     assert state["cancel"]["cooperative_observation"]["target_attempt"] == 1
+
+
+def test_optical_branch_is_validated_against_grid_before_hashing(ascii_tmp_path):
+    from comsol_mcp.jobs.thermo_optomechanical_replay import (
+        normalize_thermo_optomechanical_replay_spec,
+    )
+
+    spec = normalize_thermo_optomechanical_replay_spec(_raw_spec(ascii_tmp_path / "branch"))
+    payload = _payload("optical_replay", spec)
+    payload["rows"][0]["branch"] = ["x"]
+
+    with pytest.raises(ValueError, match="coordinates differ"):
+        build_stage_evidence(spec, "optical_replay", payload)
+
+
+def test_control_id_type_drift_fails_closed(ascii_tmp_path):
+    from comsol_mcp.jobs.thermo_optomechanical_replay import (
+        normalize_thermo_optomechanical_replay_spec,
+    )
+
+    spec = normalize_thermo_optomechanical_replay_spec(_raw_spec(ascii_tmp_path / "control"))
+    payload = _payload("optical_replay", spec)
+    payload["control_results"][0]["control_id"] = ["thermal"]
+
+    with pytest.raises(ValueError, match="control matrix is incomplete"):
+        build_stage_evidence(spec, "optical_replay", payload)
+
+
+def test_spec_size_bound_includes_the_persisted_fingerprint(ascii_tmp_path, monkeypatch):
+    import comsol_mcp.jobs.thermo_optomechanical_replay as replay_spec_module
+
+    raw = _raw_spec(ascii_tmp_path / "cap")
+    spec = replay_spec_module.normalize_thermo_optomechanical_replay_spec(raw)
+    bound_with_fingerprint = len(replay_spec_module._canonical_bytes(spec))
+    monkeypatch.setattr(
+        replay_spec_module,
+        "MAX_THERMO_OPTOMECHANICAL_SPEC_BYTES",
+        bound_with_fingerprint - 1,
+    )
+
+    with pytest.raises(ValueError, match="exceeds its bound"):
+        replay_spec_module.normalize_thermo_optomechanical_replay_spec(raw)

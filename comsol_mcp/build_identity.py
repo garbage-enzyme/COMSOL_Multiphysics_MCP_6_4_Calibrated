@@ -82,6 +82,10 @@ def package_content_sha256(package_root: str | Path | None = None) -> str:
     candidate = Path(package_root) if package_root is not None else Path(__file__).parent
     _reject_linked_components(candidate.absolute())
     root = candidate.resolve()
+    # Lexical normalization can traverse a link before resolution, so the
+    # resolved components are validated as well: every component of the
+    # located root must itself be link-free.
+    _reject_linked_components(root)
     if not root.is_dir():
         raise ValueError("package_root must be a directory")
 

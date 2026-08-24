@@ -484,3 +484,47 @@ def test_parent_rejects_unsuccessful_owned_tree_cleanup(monkeypatch, tmp_path):
 
     with pytest.raises(AssertionError, match="process cleanup failed"):
         acceptance_test.test_progress_context_cancel_stops_real_study_in_three_fresh_processes()
+
+
+def test_request_native_cancel_once_records_unbound_instance_binding(monkeypatch):
+    profile = _profile()
+    environment = _matching_environment(profile)
+    monkeypatch.setattr(probe, "discover_environment", lambda: environment)
+    monkeypatch.setattr(probe, "select_progress_context_profile", lambda _environment: profile)
+    monkeypatch.setattr(probe.jpype, "isJVMStarted", lambda: True)
+    monkeypatch.setattr(probe, "_running_jvm_profile_status", lambda _p, _e: (True, "verified"))
+    cancels = []
+
+    class FakeCandidate:
+        def cancel(self):
+            cancels.append("cancel")
+
+    monkeypatch.setattr(probe.jpype, "JClass", lambda _name: FakeCandidate)
+
+    result = probe.request_native_cancel_once()
+
+    assert result["attempted"] is True
+    assert result["outcome"] == "returned"
+    assert result["binding"] == "fresh_instance_not_bound_to_running_solve"
+    assert cancels == ["cancel"]
+
+
+def test_request_native_cancel_once_keeps_binding_on_candidate_failure(monkeypatch):
+    profile = _profile()
+    environment = _matching_environment(profile)
+    monkeypatch.setattr(probe, "discover_environment", lambda: environment)
+    monkeypatch.setattr(probe, "select_progress_context_profile", lambda _environment: profile)
+    monkeypatch.setattr(probe.jpype, "isJVMStarted", lambda: True)
+    monkeypatch.setattr(probe, "_running_jvm_profile_status", lambda _p, _e: (True, "verified"))
+
+    class FailingCandidate:
+        def cancel(self):
+            raise RuntimeError("candidate refused")
+
+    monkeypatch.setattr(probe.jpype, "JClass", lambda _name: FailingCandidate)
+
+    result = probe.request_native_cancel_once()
+
+    assert result["attempted"] is True
+    assert result["outcome"] == "RuntimeError: candidate refused"
+    assert result["binding"] == "fresh_instance_not_bound_to_running_solve"
