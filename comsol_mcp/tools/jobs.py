@@ -306,6 +306,13 @@ def _job_call(operation: str, callback, **error_fields: Any) -> dict[str, Any]:
     return measured_call(operation, run)
 
 
+def _clamp_tail_n(n: int) -> int:
+    """Enforce the documented 1..200 tail window at the tool boundary."""
+    if isinstance(n, bool) or not isinstance(n, int):
+        raise ValueError("n must be an integer between 1 and 200")
+    return min(max(n, 1), 200)
+
+
 def register_job_tools(mcp: MCPServer) -> None:
     """Register durable submit/status/tail/cooperative-cancel/resume tools."""
     selection = getattr(mcp, "profile_selection", None)
@@ -341,9 +348,10 @@ def register_job_tools(mcp: MCPServer) -> None:
     @mcp.tool()
     def job_tail(job_id: str, n: int = 20) -> dict[str, Any]:
         """Return at most 200 trailing event and worker-log lines without solver side effects."""
+        clamped_n = _clamp_tail_n(n)
         return _job_call(
             "job_tail",
-            lambda: job_manager.tail(job_id, n),
+            lambda: job_manager.tail(job_id, clamped_n),
             job_id=job_id,
         )
 

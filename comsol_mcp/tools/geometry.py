@@ -285,9 +285,14 @@ def add_difference_feature(
     feature_name: Optional[str] = None,
 ) -> dict:
     """Validate referenced objects and roll back incomplete Difference creation."""
-    subtract = (
-        list(objects_to_subtract) if not isinstance(objects_to_subtract, (str, bytes)) else []
-    )
+    try:
+        subtract = (
+            list(objects_to_subtract) if not isinstance(objects_to_subtract, (str, bytes)) else []
+        )
+    except TypeError:
+        # Mirror add_union_feature: a non-iterable input is caller error,
+        # never an internal TypeError escaping through the tool wrapper.
+        return {"success": False, "error": "difference inputs must be nonempty tags"}
     if not isinstance(input_object, str) or not input_object or not subtract:
         return {"success": False, "error": "difference inputs must be nonempty tags"}
     if not all(isinstance(item, str) and item for item in subtract):

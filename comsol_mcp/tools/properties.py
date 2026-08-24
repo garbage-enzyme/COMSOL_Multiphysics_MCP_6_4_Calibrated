@@ -101,8 +101,10 @@ def _resolve_existing_target(
 def _read_property(target, property_name: str) -> tuple[JSONValue, str]:
     try:
         value_type = str(target.getValueType(property_name))
-    except Exception:
-        value_type = "String"
+    except Exception as exc:
+        # Guessing "String" here would either mask the real failure or return
+        # a stringified value under a wrong declared type; surface the cause.
+        raise RuntimeError("clientapi property type read failed") from exc
     normalized_type = value_type.lower().replace("[]", "array")
 
     if "matrix" in normalized_type:

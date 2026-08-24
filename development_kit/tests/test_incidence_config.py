@@ -629,3 +629,31 @@ def test_preview_validation_requires_the_declared_structure_after_the_hash():
     bad_shape["preview_sha256"] = _preview_hash(bad_shape)
     with pytest.raises(ValueError, match="structure is invalid"):
         _validate_preview(bad_shape)
+
+
+def test_apply_rolls_back_when_success_event_append_fails(monkeypatch):
+    model, record = fixture()
+    request = preview(model, record, polarization="lhcp")
+
+    real_append = incidence_config._append_event
+
+    def flaky_append(record_, event):
+        if event.get("success") is True:
+            raise RuntimeError("journal write exploded")
+        return real_append(record_, event)
+
+    monkeypatch.setattr(incidence_config, "_append_event", flaky_append)
+
+    result = apply_incidence(
+        model,
+        record,
+        request,
+        expected_state_sha256=request["pre_state_sha256"],
+    )
+
+    # The post-mutation journal failure must roll the mutation back instead of
+    # leaving the model changed behind an unhandled error.
+    assert result["success"] is False
+    assert "journal write exploded" in result["error"]
+    assert result["rollback_proved"] is True
+    assert record.dirty is False

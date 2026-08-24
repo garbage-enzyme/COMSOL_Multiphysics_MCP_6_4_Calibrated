@@ -148,7 +148,10 @@ def build_standalone_executable(
         "/optimize+",
         f"/out:{executable}",
         "/reference:System.Web.Extensions.dll",
-        f"/resource:{driver_path},CapacitorPointTemplate.java",
+        # The compiler runs with cwd=source_root, so a bare filename avoids
+        # csc's comma-delimited /resource parsing: absolute Windows paths may
+        # legally contain commas in the output directory.
+        "/resource:CapacitorPointTemplate.java,CapacitorPointTemplate.java",
         str(launcher_path),
     ]
     try:

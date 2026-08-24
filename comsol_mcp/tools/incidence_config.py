@@ -451,6 +451,19 @@ def _apply_incidence_unlocked(
         readback_mismatches = _planned_readback_mismatches(after, planned)
         if readback_mismatches:
             raise ValueError("incidence readback mismatch: " + "; ".join(readback_mismatches))
+        # Post-mutation bookkeeping stays inside the rollback-protected region:
+        # a failure here must roll the mutation back instead of leaving the
+        # model changed while the caller sees an unhandled error.
+        post_hash = _incidence_state_hash(record, after)
+        _append_event(
+            record,
+            {
+                "operation": "periodic_structure_incidence",
+                "success": True,
+                "pre_state_sha256": current_hash,
+                "post_state_sha256": post_hash,
+            },
+        )
     except Exception as exc:
         rollback_write_errors: list[str] = []
         try:
@@ -500,16 +513,6 @@ def _apply_incidence_unlocked(
             "derived_model_dirty": record.dirty,
             "solver_started": False,
         }
-    post_hash = _incidence_state_hash(record, after)
-    _append_event(
-        record,
-        {
-            "operation": "periodic_structure_incidence",
-            "success": True,
-            "pre_state_sha256": current_hash,
-            "post_state_sha256": post_hash,
-        },
-    )
     return {
         "success": True,
         "derived_model_id": record.derived_model_id,

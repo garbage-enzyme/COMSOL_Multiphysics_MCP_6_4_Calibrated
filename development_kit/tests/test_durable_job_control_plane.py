@@ -2060,3 +2060,17 @@ def test_standalone_submit_surfaces_durable_job_launch_error():
     assert result["state"] == "durable_job_requires_reconciliation"
     assert result["job_id"] == "job-launch-failure"
     assert result["action"] == "inspect_job_status_before_retrying"
+
+
+def test_job_tail_window_is_clamped_to_the_documented_bound():
+    from comsol_mcp.tools.jobs import _clamp_tail_n
+
+    assert _clamp_tail_n(-5) == 1
+    assert _clamp_tail_n(0) == 1
+    assert _clamp_tail_n(20) == 20
+    assert _clamp_tail_n(200) == 200
+    assert _clamp_tail_n(10_000) == 200
+
+    for bad in (True, "20", 2.5, None):
+        with pytest.raises(ValueError, match="n must be an integer between 1 and 200"):
+            _clamp_tail_n(bad)

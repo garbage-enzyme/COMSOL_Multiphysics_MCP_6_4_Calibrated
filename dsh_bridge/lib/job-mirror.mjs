@@ -70,6 +70,7 @@ export function createJobMirror({ jobs, core, jobId, jobType, agent, opts = {}, 
 			let outputBuffer = "";
 			let lastTail = "";
 			let cancelDeadline = null;
+			let cancelTimer = null;
 			// The callTool timeout exceeds the poll interval, so each loop
 			// must skip ticks while its previous call is still in flight;
 			// otherwise overlapping tails duplicate progress deltas.
@@ -81,8 +82,16 @@ export function createJobMirror({ jobs, core, jobId, jobType, agent, opts = {}, 
 				settled = true;
 				if (pollTimer) clearInterval(pollTimer);
 				if (tailTimer) clearInterval(tailTimer);
-				onTerminal();
-				resolveDone({ status, detail });
+				if (cancelTimer) clearTimeout(cancelTimer);
+				const payload = { status, detail };
+				// Resolve before invoking the hook: a throwing user hook must
+				// never leave the terminal notification pending forever.
+				resolveDone(payload);
+				try {
+					onTerminal(status, detail);
+				} catch (error) {
+					log("warn", `onTerminal hook failed for ${jobId}: ${error?.message ?? error}`);
+				}
 			};
 
 			const poll = async () => {
@@ -90,6 +99,13 @@ export function createJobMirror({ jobs, core, jobId, jobType, agent, opts = {}, 
 				pollInFlight = true;
 				try {
 					if (isDisposed()) { finish("failed", "bridge disposed"); return; }
+					// Enforce the cancel deadline before issuing another call:
+					// a hanging request must not delay settlement past the
+					// configured confirmation window.
+					if (cancelDeadline !== null && Date.now() > cancelDeadline) {
+						finish("killed", "cancel requested; outcome unconfirmed (server unreachable or slow)");
+						return;
+					}
 					try {
 						const res = await core.callTool("job_status", { job_id: jobId }, { timeoutMs: 30000 });
 						const state = extractState(parseJson(res.text));
@@ -104,9 +120,6 @@ export function createJobMirror({ jobs, core, jobId, jobType, agent, opts = {}, 
 							return;
 						}
 						log("warn", `job_status poll failed for ${jobId}: ${e.message}`);
-					}
-					if (cancelDeadline !== null && Date.now() > cancelDeadline) {
-						finish("killed", "cancel requested; outcome unconfirmed (server unreachable or slow)");
 					}
 				} finally {
 					pollInFlight = false;
@@ -140,6 +153,14 @@ export function createJobMirror({ jobs, core, jobId, jobType, agent, opts = {}, 
 			return {
 				cancel: () => {
 					cancelDeadline = Date.now() + cfg.cancelConfirmTimeoutMs;
+					// Dedicated deadline timer: settlement must not depend on a
+					// poll tick surviving a slow or unreachable server.
+					if (cancelTimer) clearTimeout(cancelTimer);
+					cancelTimer = setTimeout(() => {
+						if (!settled && cancelDeadline !== null && Date.now() >= cancelDeadline) {
+							finish("killed", "cancel requested; outcome unconfirmed (server unreachable or slow)");
+						}
+					}, Math.max(0, cfg.cancelConfirmTimeoutMs + 5));
 					void core.callTool("job_cancel", { job_id: jobId }, { timeoutMs: 30000 }).catch(() => {});
 				},
 				done,

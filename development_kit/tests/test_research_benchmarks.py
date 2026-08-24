@@ -201,3 +201,24 @@ def test_uncertainty_backend_review_reuses_only_declared_licensed_dependencies()
     assert set(selected["dependencies"]) <= declared & licensed
     assert review["rejected_expansion"]["decision"] == "no_new_optimizer_package"
     assert len(review["isolation_gates"]) == 5
+
+
+def test_baseline_benchmark_reports_failure_when_no_proposals_remain():
+    from development_kit.benchmarks.research_campaign import _evaluate_baseline
+
+    class ExhaustedOptimizer:
+        backend_identity = "stub-baseline"
+
+        def state(self):
+            return {"remaining_proposals": False}
+
+    result = _evaluate_baseline(
+        "exhausted_stub",
+        ExhaustedOptimizer(),
+        {"evaluation_budget": 5},
+        seed=1,
+    )
+
+    assert result["evaluation_count"] == 0
+    assert result["best_proposal"] is None
+    assert result["failure_reason_code"] == "no_proposals_available"

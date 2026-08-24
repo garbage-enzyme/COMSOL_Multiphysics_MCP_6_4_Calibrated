@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any, Optional
 
@@ -11,6 +12,8 @@ from comsol_mcp.utils.validation import strict_json_integer
 
 from .physics import _first_component, _resolve_geometry_tag
 from .session import session_manager
+
+logger = logging.getLogger(__name__)
 
 _TAG = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,63}$")
 _MAX_EXPRESSION_BYTES = 4096
@@ -51,14 +54,21 @@ def _selection_tags(component: Any) -> set[str]:
     return {str(tag) for tag in list(component.selection().tags())}
 
 
-def _remove_selections(selection_list: Any, tags: list[str]) -> bool:
-    complete = True
+def _remove_selections(selection_list: Any, tags: list[str]) -> list[str]:
+    """Remove tags in reverse creation order and return the ones that failed.
+
+    A rollback that cannot complete is a data-integrity hazard: the caller
+    must be able to report exactly which selections remain, so every failure
+    is logged with its cause instead of being collapsed into a boolean.
+    """
+    failed: list[str] = []
     for tag in reversed(tags):
         try:
             selection_list.remove(tag)
-        except Exception:
-            complete = False
-    return complete
+        except Exception as exc:
+            logger.warning("selection rollback failed for %s: %s", tag, exc)
+            failed.append(tag)
+    return failed
 
 
 def _normalized_box_request(
@@ -135,7 +145,7 @@ def create_box_selection(
             raise ValueError("z bounds are not valid for a 2D geometry")
         if request["tag"] in _selection_tags(component):
             raise ValueError(f"Selection tag already exists: {request['tag']}")
-    except Exception as exc:
+    except ValueError as exc:
         return {"success": False, "error": str(exc)}
 
     selections = component.selection()
@@ -148,7 +158,8 @@ def create_box_selection(
             selection.set(name, value)
         selection.set("condition", request["condition"])
     except Exception:
-        rolled_back = not created or _remove_selections(selections, [request["tag"]])
+        failed_rollback = _remove_selections(selections, [request["tag"]]) if created else []
+        rolled_back = not failed_rollback
         return {
             "success": False,
             "error": "Box selection setup failed.",
@@ -212,7 +223,7 @@ def create_side_selections(
         collisions = sorted(set(tags) & _selection_tags(component))
         if collisions:
             raise ValueError(f"Selection tags already exist: {collisions}")
-    except Exception as exc:
+    except ValueError as exc:
         return {"success": False, "error": str(exc)}
 
     expanded_x_min = f"({limits['x_min']})-({tolerance_value})"
@@ -250,20 +261,27 @@ def create_side_selections(
     outcomes: dict[str, Any] = {}
     for side, bounds in definitions.items():
         tag = f"{selection_prefix}_{side}"
-        result = create_box_selection(
-            model,
-            selection_name=tag,
-            x_min=bounds[0],
-            x_max=bounds[1],
-            y_min=bounds[2],
-            y_max=bounds[3],
-            entity_dimension=dimension,
-            condition="inside",
-            geometry_name=geometry_name,
-            component_name=component_name,
-        )
+        try:
+            result = create_box_selection(
+                model,
+                selection_name=tag,
+                x_min=bounds[0],
+                x_max=bounds[1],
+                y_min=bounds[2],
+                y_max=bounds[3],
+                entity_dimension=dimension,
+                condition="inside",
+                geometry_name=geometry_name,
+                component_name=component_name,
+            )
+        except Exception:
+            # A genuine backend failure must surface as itself, but never
+            # leave previously created sibling selections behind.
+            _remove_selections(component.selection(), created)
+            raise
         if not result.get("success"):
-            prior_rolled_back = _remove_selections(component.selection(), created)
+            prior_failed = _remove_selections(component.selection(), created)
+            prior_rolled_back = not prior_failed
             failed_side_rolled_back = result.get("rolled_back") is not False
             return {
                 "success": False,

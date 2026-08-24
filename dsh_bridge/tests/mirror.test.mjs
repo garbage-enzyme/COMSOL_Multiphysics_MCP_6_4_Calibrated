@@ -221,3 +221,61 @@ test("mirror skips tail ticks while the previous tail is still in flight", { tim
 	await Promise.race([jobs.started[0].done, sleep(2000)]);
 	assert.equal(maxActiveTail, 1);
 });
+
+// ---- regression: OCR-0022 terminal notification must survive hook throws ----
+
+test("throwing onTerminal still resolves done with the terminal status", async () => {
+	const jobs = createFakeJobs();
+	let calls = 0;
+	createJobMirror({
+		jobs,
+		core: {
+			callTool: async (name) => {
+				calls += 1;
+				if (name === "job_status") {
+					return { text: JSON.stringify({ state: "completed" }) };
+				}
+				return { text: "[]" };
+			},
+		},
+		jobId: "job-hook",
+		jobType: "staged_sweep",
+		opts: MIRROR_OPTS,
+		logger: quietLogger(),
+		onTerminal: () => {
+			throw new Error("hook exploded");
+		},
+	});
+	const rec = jobs.started[0];
+	const outcome = await Promise.race([
+		rec.done,
+		sleep(2000).then(() => { throw new Error("done never resolved"); }),
+	]);
+	assert.equal(outcome.status, "completed");
+	assert.ok(calls >= 1);
+});
+
+// ---- regression: OCR-0020 cancel deadline enforced without a poll tick ----
+
+test("cancel confirmation window fires even when job_status hangs", async () => {
+	const jobs = createFakeJobs();
+	createJobMirror({
+		jobs,
+		core: {
+			callTool: (_name, _args) => new Promise(() => {}), // never settles
+		},
+		jobId: "job-hang",
+		jobType: "staged_sweep",
+		opts: { ...MIRROR_OPTS, pollIntervalMs: 60_000, cancelConfirmTimeoutMs: 80 },
+		logger: quietLogger(),
+	});
+	const rec = jobs.started[0];
+	rec.hooks.cancel();
+	const started = Date.now();
+	const outcome = await Promise.race([
+		rec.done,
+		sleep(3000).then(() => { throw new Error("cancel deadline never fired"); }),
+	]);
+	assert.equal(outcome.status, "killed");
+	assert.ok(Date.now() - started < 2500, "deadline overrun");
+});

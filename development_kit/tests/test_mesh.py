@@ -319,3 +319,20 @@ def test_create_mesh_sequence_preserves_built_mesh_when_statistics_fail():
     assert result["statistics_complete"] is False
     assert result["statistics_error_type"] == "RuntimeError"
     assert "mesh2" in mesh_list.meshes
+
+
+def test_create_failure_before_creation_reports_no_rollback():
+    mesh_list = MutableMeshList(existing=())
+
+    def explode(_tag):
+        raise RuntimeError("backend create refused")
+
+    mesh_list.create = explode
+    model = FakeModel({})
+    model.java = FakeJava(MutableMeshComponent(mesh_list))
+
+    result = create_mesh_sequence(model, mesh_name="meshX")
+
+    assert result["success"] is False
+    # Nothing was created, so claiming a rollback would misrepresent state.
+    assert result["rolled_back"] is False

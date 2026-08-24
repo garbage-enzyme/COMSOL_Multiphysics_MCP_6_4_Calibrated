@@ -64,6 +64,14 @@ def _restore_parameter(
     model.parameter(name, value)
     if description is not None:
         model.description(name, description)
+    else:
+        # The three-argument java setter was unavailable, so a stale
+        # description from the failed transaction must be cleared through the
+        # wrapper API; otherwise the readback check reports a false mismatch.
+        try:
+            model.description(name, None)
+        except AttributeError, TypeError:
+            pass
 
 
 def set_parameter(
@@ -172,25 +180,32 @@ def setup_parametric_sweep(
         while sweep_tag in existing:
             index += 1
             sweep_tag = f"param{index}"
-        sweep = study.create(sweep_tag, "Parametric")
         before = None
+        sweep = None
 
-    value_list = " ".join(str(value) for value in values)
-    planned = {
-        "pname": [parameter_name],
-        "plistarr": [value_list],
-        "punit": [parameter_unit.strip() if parameter_unit else ""],
-        "sweeptype": "sparse",
-        "active": True,
-    }
     try:
+        # Feature creation AND the planned-state construction both stay inside
+        # the guarded region: a non-string parameter_unit or malformed values
+        # must not leave a freshly created sweep behind in the model.
+        sweep_created = False
+        if created:
+            sweep = study.create(sweep_tag, "Parametric")
+            sweep_created = True
+        value_list = " ".join(str(value) for value in values)
+        planned = {
+            "pname": [parameter_name],
+            "plistarr": [value_list],
+            "punit": [parameter_unit.strip() if parameter_unit else ""],
+            "sweeptype": "sparse",
+            "active": True,
+        }
         _set_sweep_state(sweep, planned)
         if _sweep_state(sweep) != planned:
             raise ValueError("Parametric sweep readback mismatch")
     except Exception as exc:
         rollback_errors = []
         try:
-            if created:
+            if created and sweep_created:
                 _remove_sweep(feature_list, sweep_tag)
                 if sweep_tag in {str(tag) for tag in feature_list.tags()}:
                     raise ValueError("created Parametric sweep survived rollback")

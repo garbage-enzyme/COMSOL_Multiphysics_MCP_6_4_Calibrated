@@ -780,3 +780,29 @@ def test_builder_cleanup_covers_manifest_write_failure(
 
     assert receipt["status"] == "passed"
     assert (output / EXECUTABLE_NAME).is_file()
+
+
+def test_resource_spec_uses_cwd_relative_bare_filename(ascii_tmp_path, monkeypatch):
+    compiler = ascii_tmp_path / "csc.exe"
+    compiler.write_bytes(b"fake-compiler")
+    output = ascii_tmp_path / "resource-spec-build"
+    monkeypatch.setattr(builder_module, "_validate_build_host", lambda _path: None)
+    captured = {}
+
+    def succeed(command, **kwargs):
+        captured["command"] = list(command)
+        executable = Path(next(item[5:] for item in command if item.startswith("/out:")))
+        executable.write_bytes(b"fixture-executable")
+        return subprocess.CompletedProcess(command, 0, b"spec-out", b"")
+
+    receipt = build_standalone_executable(output, csc_path=compiler, run_command=succeed)
+
+    assert receipt["status"] == "passed"
+    # The bare filename avoids csc's comma-delimited /resource parsing: an
+    # absolute output directory may legally contain commas on Windows.
+    assert (
+        "/resource:CapacitorPointTemplate.java,CapacitorPointTemplate.java" in (captured["command"])
+    )
+    assert not any(
+        item.startswith("/resource:") and str(output) in item for item in captured["command"]
+    )

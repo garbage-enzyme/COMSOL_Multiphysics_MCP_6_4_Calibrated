@@ -219,6 +219,16 @@ def _evaluate_baseline(name: str, optimizer: Any, spec: Mapping[str, Any], seed:
     while optimizer.state()["remaining_proposals"] and len(rows) < spec["evaluation_budget"]:
         proposal = optimizer.ask()
         rows.append({"proposal": proposal, "score": _baseline_score(proposal["values"], spec)})
+    if not rows:
+        return {
+            "backend": name,
+            "seed": seed,
+            "backend_identity": optimizer.backend_identity,
+            "evaluation_count": 0,
+            "best_proposal": None,
+            "best_score": None,
+            "failure_reason_code": "no_proposals_available",
+        }
     best = min(
         rows,
         key=lambda item: (item["score"]["total_loss"], item["proposal"]["proposal_fingerprint"]),

@@ -51,12 +51,15 @@ def create_mesh_sequence(
         if build:
             mesh_seq.run()
             result["built"] = True
+            collected_statistics = False
             try:
                 if hasattr(mesh_seq, "getNumElem"):
                     result["num_elements"] = int(mesh_seq.getNumElem())
+                    collected_statistics = True
                 if hasattr(mesh_seq, "getNumVertex"):
                     result["num_vertices"] = int(mesh_seq.getNumVertex())
-                result["statistics_complete"] = True
+                    collected_statistics = True
+                result["statistics_complete"] = collected_statistics
             except Exception as exc:
                 result["statistics_complete"] = False
                 result["statistics_error_type"] = type(exc).__name__
@@ -71,7 +74,10 @@ def create_mesh_sequence(
                     "error": "Mesh setup failed and rollback was incomplete.",
                     "rolled_back": False,
                 }
-        return {"success": False, "error": "Mesh setup failed.", "rolled_back": True}
+            return {"success": False, "error": "Mesh setup failed.", "rolled_back": True}
+        # Nothing was created, so nothing was rolled back; reporting a rollback
+        # here would misrepresent the model state to the caller.
+        return {"success": False, "error": "Mesh setup failed.", "rolled_back": False}
 
 
 def get_mesh_info(
