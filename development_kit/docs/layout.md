@@ -241,6 +241,7 @@ models are intentionally absent.
 - `development_kit/tests/test_convergence_campaign_worker.py` — This module tests convergence worker ownership, later-level recovery, and cleanup failure.
 - `development_kit/tests/test_convergence_acceptance_runner.py` — This module tests the licensed convergence runner contract without starting COMSOL.
 - `development_kit/tests/test_convergence_evaluation.py` — This module tests ordered solver-free convergence evidence and policy evaluation.
+- `development_kit/tests/test_compatibility_registry.py` — This module solver-free tests the compatibility/skill registry matrix, hashes, and cold discovery.
 - `development_kit/tests/test_deployment_identity.py` — This module tests package version, build identity, and fresh-process deployment consistency.
 - `development_kit/tests/test_derived_geometry.py` — This module tests typed derived-geometry edits without COMSOL.
 - `development_kit/tests/test_durable_job_control_plane.py` — This module tests durable submission, reconciliation, status, cancellation, and resume behavior.
@@ -527,6 +528,7 @@ models are intentionally absent.
 - `comsol_mcp/evidence/__init__.py` — This file exports versioned solver-free evidence contracts.
 - `comsol_mcp/evidence/contracts.py` — This module implements strict physical evidence, policy, and migration contracts.
 - `comsol_mcp/evidence/branch_continuation.py` — This module validates and plans ordered branch-continuation states without a solver.
+- `comsol_mcp/evidence/compatibility_registry.py` — This module builds the versioned compatibility and skill-layer registry without a solver.
 - `comsol_mcp/evidence/convergence_evaluation.py` — This module validates ordered spectral convergence ladders and caller policies.
 - `comsol_mcp/evidence/inspection/__init__.py` — This package exports solver-free offline `.mph` archive inspection contracts.
 - `comsol_mcp/evidence/inspection/archive.py` — This module implements the bounded stdlib-only safety reader for offline `.mph` ZIP archives.
@@ -676,6 +678,7 @@ models are intentionally absent.
 - `comsol_mcp/tools/semantic_docs.py` — This module exposes bounded opt-in semantic documentation tools.
 - `comsol_mcp/tools/spectral_characterization.py` — This module exposes bounded solver-free spectral characterization.
 - `comsol_mcp/tools/configuration.py` — This module exposes solver-free simulation configuration validation and comparison.
+- `comsol_mcp/tools/compatibility_registry.py` — This module exposes the read-only runtime compatibility status tool.
 - `comsol_mcp/tools/thermal_radiation.py` — This module exposes solver-free Kirchhoff and thermal-radiation evidence tools.
 - `comsol_mcp/tools/thermal_material.py` — This module exposes solver-free thermal material ledger validation and evaluation.
 - `comsol_mcp/tools/session.py` — This module manages COMSOL client startup, status, models, and shutdown.

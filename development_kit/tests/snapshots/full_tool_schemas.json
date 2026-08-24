@@ -8326,6 +8326,19 @@
     "maxProperties": 256,
     "additionalProperties": false
   },
+  "runtime_compatibility_status": {
+    "properties": {
+      "request_comsol_identity": {
+        "default": false,
+        "title": "Request Comsol Identity",
+        "type": "boolean"
+      }
+    },
+    "title": "runtime_compatibility_statusArguments",
+    "type": "object",
+    "maxProperties": 256,
+    "additionalProperties": false
+  },
   "semantic_search": {
     "properties": {
       "query": {

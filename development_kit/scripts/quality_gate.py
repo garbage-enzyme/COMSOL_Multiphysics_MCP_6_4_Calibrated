@@ -63,6 +63,7 @@ LINT_TARGETS = (
     "comsol_mcp/tools/acoustics_pde.py",
     "comsol_mcp/tools/catalog.py",
     "comsol_mcp/tools/configuration.py",
+    "comsol_mcp/tools/compatibility_registry.py",
     "comsol_mcp/tools/mph_inspection.py",
     "comsol_mcp/tools/model_identity.py",
     "comsol_mcp/tools/thermal_radiation.py",
@@ -82,6 +83,7 @@ LINT_TARGETS = (
     "development_kit/benchmarks/research_campaign.py",
     "development_kit/tests/conftest.py",
     "development_kit/tests/test_bounded_steps.py",
+    "development_kit/tests/test_compatibility_registry.py",
     "development_kit/tests/test_control_plane_startup.py",
     "development_kit/tests/test_dependency_license_gate.py",
     "development_kit/tests/test_durable_primitives.py",
@@ -151,6 +153,8 @@ MYPY_GROUPS = (
         "comsol_mcp/evidence/model_identity.py",
         "comsol_mcp/tools/mph_inspection.py",
         "comsol_mcp/tools/model_identity.py",
+        "comsol_mcp/evidence/compatibility_registry.py",
+        "comsol_mcp/tools/compatibility_registry.py",
         "comsol_mcp/jobs/bounded_steps.py",
         "comsol_mcp/jobs/thermo_optomechanical_replay.py",
         "comsol_mcp/jobs/thermo_optomechanical_replay_execution.py",
@@ -188,7 +192,7 @@ MYPY_GROUPS = (
     ),
 )
 PRODUCTION_ROOTS = ("comsol_mcp", "src")
-LINT_EXCLUSIONS_SHA256 = "8befcb97a04013eef06db5f6d337dd0addca20ac626261ec4eefa2b9700c62c8"
+LINT_EXCLUSIONS_SHA256 = "c24ac0b5fc598314755dd5ccd412097eb13f5cca8a9ed5bd09df6ce2def0f875"
 MYPY_EXCLUSIONS_SHA256 = "0ee71edbf253ed405fd397ce377ae5b2202e4913d6e8c5863ee01485ae64a402"
 PARALLEL_TEST_WORKERS = 4
 SERIAL_TEST_TARGETS = ("development_kit/tests/test_control_plane_startup.py",)

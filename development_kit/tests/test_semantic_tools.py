@@ -260,7 +260,7 @@ from development_kit.tests.mcp_test_support import decode_tool_result as decode
 server = create_server('semantic-feature-subprocess', profile='core')
 tools = asyncio.run(server.list_tools())
 names = sorted(tool.name for tool in tools)
-assert len(names) == 51
+assert len(names) == 52
 assert {'semantic_search','semantic_status','semantic_worker_reset'} <= set(names)
 for name in ('chromadb','torch','sentence_transformers'):
     assert name not in sys.modules, name
@@ -278,7 +278,7 @@ print(json.dumps({'count': len(names), 'configured': status['configured']}))
     )
 
     assert completed.returncode == 0, completed.stderr
-    assert json.loads(completed.stdout)["count"] == 51
+    assert json.loads(completed.stdout)["count"] == 52
 
 
 def test_semantic_and_other_profile_counts_match_declared_discovery(monkeypatch):
@@ -297,12 +297,12 @@ def test_semantic_and_other_profile_counts_match_declared_discovery(monkeypatch)
         counts[profile] = len(asyncio.run(server.list_tools()))
 
     assert counts == {
-        "core": 48,
-        "basic_fem": 110,
-        "wave_optics": 77,
-        "experimental": 102,
-        "full": 158,
-        "comsolless_read_only": 3,
+        "core": 49,
+        "basic_fem": 111,
+        "wave_optics": 78,
+        "experimental": 103,
+        "full": 159,
+        "comsolless_read_only": 4,
     }
 
 

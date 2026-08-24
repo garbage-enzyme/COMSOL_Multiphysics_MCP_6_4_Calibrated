@@ -206,6 +206,16 @@ def _profile_inventory(selection: ProfileSelection) -> dict:
     }
 
 
+def _compatibility_registry_summary(selection: ProfileSelection) -> dict[str, Any]:
+    """Build the bounded compatibility/skill registry view for capabilities."""
+    from comsol_mcp.evidence.compatibility_registry import build_compatibility_registry
+
+    return build_compatibility_registry(
+        profile_name=selection.name,
+        enabled_features=selection.enabled_features,
+    )
+
+
 def get_capabilities(selection: ProfileSelection | None = None) -> dict:
     """Describe supported, experimental, and disabled behavior without startup."""
     from comsol_mcp.evidence.integrity_controls import evidence_integrity_capability
@@ -245,6 +255,7 @@ def get_capabilities(selection: ProfileSelection | None = None) -> dict:
             "acceptance": "exact_licensed_acceptance",
         },
         "runtime_compatibility": compatibility,
+        "compatibility_registry": _compatibility_registry_summary(active_selection),
         "environment_identity": get_environment_identity(),
         "schema_registry": get_schema_registry(),
         "artifact_chain_verification": {

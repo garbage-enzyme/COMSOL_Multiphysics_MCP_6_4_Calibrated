@@ -37,6 +37,7 @@
     "physics_list",
     "physics_list_features",
     "results_global_evaluate",
+    "runtime_compatibility_status",
     "session_reset",
     "settings.start",
     "simulation_configuration_validate",
@@ -136,6 +137,7 @@
     "results_inner_values",
     "results_outer_values",
     "results_plots_list",
+    "runtime_compatibility_status",
     "session_reset",
     "settings.start",
     "simulation_configuration_diff",
@@ -209,6 +211,7 @@
     "results_global_evaluate",
     "results_inner_values",
     "results_outer_values",
+    "runtime_compatibility_status",
     "session_reset",
     "settings.start",
     "simulation_configuration_diff",
@@ -313,6 +316,7 @@
     "robust_shape_evidence_verify",
     "robust_shape_job_submit",
     "robust_shape_plan_preview",
+    "runtime_compatibility_status",
     "session_clear_models",
     "session_reset",
     "settings.start",
@@ -458,6 +462,7 @@
     "robust_shape_evidence_verify",
     "robust_shape_job_submit",
     "robust_shape_plan_preview",
+    "runtime_compatibility_status",
     "session_clear_models",
     "session_reset",
     "settings.start",
@@ -507,6 +512,7 @@
   "comsolless_read_only": [
     "model_identity",
     "mph_diff",
-    "mph_inspect"
+    "mph_inspect",
+    "runtime_compatibility_status"
   ]
 }

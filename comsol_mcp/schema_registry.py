@@ -569,6 +569,12 @@ def _entries() -> list[dict[str, Any]]:
             "comsol_mcp.jobs.bounded_steps",
         ),
         _entry(
+            "comsol_mcp.compatibility_registry",
+            "1.0.0",
+            "comsol_mcp.evidence.compatibility_registry",
+            artifact_kind="public_response",
+        ),
+        _entry(
             "comsol_mcp.mph_artifact_probe",
             "1.0.0",
             "comsol_mcp.evidence.inspection.probe",

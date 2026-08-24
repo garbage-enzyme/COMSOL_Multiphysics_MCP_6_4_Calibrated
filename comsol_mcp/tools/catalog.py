@@ -248,6 +248,9 @@ _TOOLS_BY_REGISTRAR = {
         "mph_inspect",
     ),
     "comsol_mcp.tools.model_identity.register_model_identity_tools": ("model_identity",),
+    "comsol_mcp.tools.compatibility_registry.register_compatibility_registry_tools": (
+        "runtime_compatibility_status",
+    ),
     "comsol_mcp.tools.configuration.register_configuration_tools": (
         "simulation_configuration_validate",
         "simulation_configuration_diff",
@@ -335,6 +338,7 @@ _GROUP_BY_REGISTRAR = {
     "register_configuration_tools": "configuration_evidence",
     "register_mph_inspection_tools": "mph_inspection",
     "register_model_identity_tools": "model_identity",
+    "register_compatibility_registry_tools": "compatibility_registry",
     "register_thermal_radiation_tools": "thermal_radiation_evidence",
     "register_thermal_material_tools": "thermal_material_evidence",
     "register_convergence_evaluation_tools": "convergence_evidence",
@@ -558,6 +562,7 @@ _EXPLICIT_READ_ONLY_TOOLS = frozenset(
         "results_inner_values",
         "results_outer_values",
         "results_plots_list",
+        "runtime_compatibility_status",
         "shared_model_verify",
         "shared_server_models",
         "shared_server_preflight",
@@ -639,6 +644,7 @@ _SOLVER_FREE_TOOLS = frozenset(
         "mph_diff",
         "mph_inspect",
         "model_identity",
+        "runtime_compatibility_status",
         "wave_optics_material_expression_preview",
         "visual_review_capability_normalize",
         "visual_review_request_create",
@@ -750,6 +756,7 @@ _CORE_TOOLS = frozenset(
         "model_remove",
         "model_inspect",
         "model_identity",
+        "runtime_compatibility_status",
         "mph_diff",
         "mph_inspect",
         "param_get",
@@ -994,7 +1001,12 @@ def _build_registry() -> dict[str, ToolMetadata]:
         "wave_optics": _CORE_TOOLS | _WAVE_OPTICS_ADDITIONS,
         "experimental": _CORE_TOOLS | _EXPERIMENTAL_ADDITIONS,
         "full": base_names,
-        "comsolless_read_only": {"mph_inspect", "mph_diff", "model_identity"},
+        "comsolless_read_only": {
+            "mph_inspect",
+            "mph_diff",
+            "model_identity",
+            "runtime_compatibility_status",
+        },
     }
     registry: dict[str, ToolMetadata] = {}
     for registrar, names in _TOOLS_BY_REGISTRAR.items():
