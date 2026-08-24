@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import math
 import os
 import subprocess
@@ -43,6 +44,8 @@ from .validation_matrix import normalize_validation_matrix_spec
 class _PollableProcess(Protocol):
     def poll(self) -> int | None: ...
 
+
+logger = logging.getLogger(__name__)
 
 _DETACHED_PROCESS_LOCK = threading.Lock()
 _DETACHED_PROCESS_WAKE = threading.Event()
@@ -1230,6 +1233,21 @@ class JobManager:
                 from ..evidence.inspection.probe import probe_mph_artifacts
 
                 state["mph_artifact_probe"] = probe_mph_artifacts(self.store.job_dir(job_id))
+            if (self.store.job_dir(job_id) / "bounded_steps.jsonl").is_file():
+                # Warning-only bounded-step review surface: a failed journal
+                # parse is recorded here and never changes the disposition.
+                try:
+                    from .bounded_steps import summarize_bounded_steps
+
+                    state["bounded_steps"] = summarize_bounded_steps(
+                        self.store.job_dir(job_id)
+                    )
+                except Exception:
+                    logger.warning("bounded step summary was unreadable", exc_info=True)
+                    state["bounded_steps"] = {
+                        "available": False,
+                        "reason_code": "bounded_steps_unreadable",
+                    }
             return {"success": True, "job_id": job_id, **state}
 
     def tail(self, job_id: str, n: int = 20) -> dict[str, Any]:

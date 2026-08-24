@@ -221,6 +221,7 @@ models are intentionally absent.
 - `development_kit/tests/test_attached_job_backend.py` — This module tests immutable attached-job targets, handoff, worker execution, resume, cancellation, and preservation.
 - `development_kit/tests/test_async_solver.py` — This module tests asynchronous solver thread state with fake studies.
 - `development_kit/tests/test_basic.py` — This module tests basic server helpers and registration assumptions.
+- `development_kit/tests/test_bounded_steps.py` — This module solver-free tests bounded-step receipts, checkpoint usability, crash/cancel/replay decisions, and job-status surfacing.
 - `development_kit/tests/test_branch_continuation.py` — This module tests ordered solver-free branch-continuation state binding and planning.
 - `development_kit/tests/test_branch_continuation_acceptance_runner.py` — This module tests the explicit licensed continuation runner without starting COMSOL.
 - `development_kit/tests/test_branch_continuation_campaign_job.py` — This module tests immutable bounded durable branch-continuation campaign specifications.
@@ -565,6 +566,7 @@ models are intentionally absent.
 - `comsol_mcp/jobs/__init__.py` — This file exports durable background-job primitives.
 - `comsol_mcp/jobs/attached_backend.py` — This module normalizes immutable automation-exclusive attached-server execution specifications.
 - `comsol_mcp/jobs/attached_runtime.py` — This module verifies attached server, model, revision, and preservation identities for durable workers.
+- `comsol_mcp/jobs/bounded_steps.py` — This module persists hash-chained bounded-step review receipts with checkpoint usability and resume decisions.
 - `comsol_mcp/jobs/cancel_worker.py` — This module coordinates detached durable cancellation and cleanup.
 - `comsol_mcp/jobs/convergence_campaign.py` — This module normalizes immutable bounded durable convergence campaign specifications.
 - `comsol_mcp/jobs/branch_continuation_campaign.py` — This module normalizes immutable bounded durable branch-continuation campaign specifications.
